@@ -1,13 +1,17 @@
-import type { SessionManager } from "../services/session.manager.js";
-import type { BoardEvents } from "../services/board-events.js";
+import type { SessionLauncher } from "../services/session.manager.js";
+import type { BoardEventSink } from "../services/board-events.js";
+import { listPluginRows } from "../repositories/plugins.repository.js";
+import { parsePluginManifest } from "@agentic-kanban/shared/lib/plugin-manifest";
 import type { Database } from "../db/index.js";
-import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
+import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS, GLOBAL_BUTLER_PROJECT_ID, GLOBAL_BUTLER_PROJECT_NAME } from "@agentic-kanban/shared";
+import { homedir } from "node:os";
 import { streamSSE } from "hono/streaming";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
-import { getPreference, setPreference } from "../repositories/preferences.repository.js";
+import { setPreference } from "../repositories/preferences.repository.js";
 import { deleteRuntimeState, getRuntimeState, setRuntimeState } from "../repositories/runtime-state.repository.js";
 import { getProjectById } from "../repositories/project.repository.js";
+import { getProjectsBasePath } from "../repositories/project-service.repository.js";
 import {
   getButlerPrompt,
   getButlerOverride,
@@ -15,9 +19,10 @@ import {
   upsertButlerOverride,
   deleteButlerOverride,
 } from "../repositories/agent-skill.repository.js";
-import { preferenceService } from "../services/preference.service.js";
+import { createPreferenceService } from "../services/preference.service.js";
 import { scanLocalSkills } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { ensureBoardGuideFile } from "../butler/board-guide.js";
+import { getPluginService } from "../services/plugin.service.js";
 import {
   ensureButlerSession,
   sendButlerTurn,
@@ -29,24 +34,21 @@ import {
   setButlerModel,
   interruptButler,
   listProjectButlerStates,
+  answerButlerQuestion,
+  type ButlerQuestionAnswer,
 } from "../services/butler-sdk.service.js";
 import {
   listButlerDefinitions,
   getButlerDefinition,
   updateButlerDefinition,
+  resolveButlerLaunchConfig,
+  butlerProfilePrefKey,
 } from "../services/butler-definitions.service.js";
 import { listButlerSessions, getButlerSessionMessages } from "../services/butler-transcripts.service.js";
-import { loadAgentSettings, isMockProfile } from "../services/agent-settings.service.js";
 import type { ProviderName } from "../services/agent-provider.js";
-import {
-  parseStrategyBullseyeConfig,
-  selectProviderFromStrategy,
-  applyProviderSelectionToPrefMap,
-} from "../services/strategy-objective.service.js";
-import { resolveEffectiveProviderProfile } from "../services/effective-config.service.js";
-import { getAllPreferences } from "../repositories/preferences.repository.js";
-import { loadCodexLicenseRing, resolveCodexHomeForProfile } from "../services/codex-license-ring.js";
+import { resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
 
+import { queryInt } from "../middleware/query-params.js";
 /** Suffix per-butler pref keys for named butlers; the "default" butler keeps the
  *  legacy unsuffixed keys so existing resume ids / history carry over unchanged. */
 function butlerSuffix(butlerId: string): string {
@@ -83,12 +85,6 @@ async function appendToSessionHistory(projectId: string, butlerId: string, sessi
   } catch (err) {
     console.warn(`[butler] failed to append session history: project=${projectId} butler=${butlerId}`, err);
   }
-}
-
-/** Per-project Claude profile override for the butler (empty = global claude_profile).
- *  Profile is auth/endpoint, shared by ALL of a project's butlers — not per-butler. */
-function butlerProfilePrefKey(projectId: string): string {
-  return `butler_profile_${projectId}`;
 }
 
 /** The butler runs via the Claude Agent SDK (claude) or a CLI-spawn codex session.
@@ -195,13 +191,80 @@ const DEFAULT_BUTLER_PROMPT = [
  */
 export function createButlerRoute(
   database: Database,
-  _getSessionManager: () => SessionManager,
-  _options?: { boardEvents?: BoardEvents },
+  _getSessionManager: () => SessionLauncher,
+  _options?: { boardEvents?: BoardEventSink },
 ) {
   const router = createRouter();
 
+  /** cwd for the global (project-less) butler: the projects base dir, else the home dir. */
+  async function getGlobalButlerCwd(): Promise<string> {
+    const rows = await getProjectsBasePath(database);
+    return rows[0]?.value?.trim() || homedir();
+  }
+
+  /**
+   * Resolve the project row for a butler request. For the reserved GLOBAL id there is no DB
+   * row — return a synthetic project rooted at the projects base dir, so the butler is usable
+   * with no project registered (e.g. to ask it to import/create one). All downstream code only
+   * reads `.id`/`.name`/`.repoPath`, so the synthetic object is a full substitute.
+   */
   async function resolveProject(projectId: string) {
+    if (projectId === GLOBAL_BUTLER_PROJECT_ID) {
+      return { id: GLOBAL_BUTLER_PROJECT_ID, name: GLOBAL_BUTLER_PROJECT_NAME, repoPath: await getGlobalButlerCwd() };
+    }
     return getProjectById(projectId, database);
+  }
+
+  /** System prompt for the GLOBAL (project-less) butler. No project is registered/active,
+   *  so its job is to help the user import or create their first project. */
+  /**
+   * What the board-level butler can say about PLUGINS (#390 gap 1).
+   *
+   * `getButlerFragments` is project-scoped by construction — it resolves `{{repoPath}}` and
+   * friends against a real project — so the global butler could never use it, and was blind to
+   * plugins entirely. What it actually needs is different anyway: not a plugin's project-specific
+   * fragment, but the fact that a plugin EXISTS and can be enabled for the project it is about to
+   * help create. Best-effort: a plugin listing must never keep the butler from starting.
+   */
+  async function describeInstalledPlugins(): Promise<string> {
+    try {
+      const rows = await listPluginRows(database);
+      if (rows.length === 0) return "";
+      const lines = rows.map((row) => {
+        let summary = "";
+        try {
+          const manifest = parsePluginManifest(row.manifestJson);
+          summary = manifest.description ? ` — ${manifest.description}` : "";
+        } catch { /* a broken manifest still gets named */ }
+        return `  - ${row.name} (id ${row.id}, slug ${row.pluginId})${summary}`;
+      });
+      return [
+        "Installed plugins you can offer to enable once a project exists:",
+        ...lines,
+        "Use enable_plugin({ pluginId, projectId, location }) — enabling SCAFFOLDS the plugin, so pass"
+        + " location: \"sidecar\" AT THAT POINT if its output belongs in a separate repo; setting it"
+        + " afterwards leaves the scaffold in the wrong repo (#318). Then get_plugin_scaffold to read the"
+        + " interview questions, ask the USER, and fill_plugin_scaffold to submit the answers.",
+      ].join("\n");
+    } catch (err) {
+      console.warn("[butler] plugin listing failed (ignored):", err instanceof Error ? err.message : err);
+      return "";
+    }
+  }
+
+  function buildGlobalButlerPrompt(baseDir: string): string {
+    const serverPort = String(resolveBoardServerPort());
+    const boardGuidePath = ensureBoardGuideFile();
+    return [
+      `You are the agentic-kanban butler, running WITHOUT an active project — no project is registered or selected yet.`,
+      `Your primary job right now is to help the user get their first project onto the board: IMPORT an existing git repository, or CREATE a new one.`,
+      `Board API: http://localhost:${serverPort}/api`,
+      `Use the "agentic-kanban" MCP tools: register_project (existing repo — pass its absolute repoPath), create_project (scaffold a new repo by name), or init_project. For a MULTI-REPO project, register/create the leading repo first, then add_project_repo({ projectId, path | cloneUrl | createName }) once per additional repo.`,
+      `Default parent directory for new projects: ${baseDir}. If the user gives a name but no path, a folder is created under that base dir.`,
+      `After you register/create a project, tell the user it is now on the board and to SELECT it (top-left project switcher) — selecting it makes it active and its own per-project butler takes over. You cannot start board work (issues/workspaces) until a project exists and is selected.`,
+      `A UI how-to is bundled at ${boardGuidePath}; READ it for "how do I…" questions and answer with simple UI steps. Never claim an action succeeded unless a tool result confirms it; if unsure, say so.`,
+      `Be concise and helpful. You have read access to the local filesystem and standard tools for inspecting a repo the user points you at before importing it.`,
+    ].join("\n");
   }
 
   /** Resolve the butler's system prompt from the editable `butler` agent skill
@@ -209,165 +272,58 @@ export function createButlerRoute(
    *  substitute the {{projectName}}/{{repoPath}}/{{serverPort}} placeholders. */
   async function resolveButlerPrompt(projectId: string, projectName: string, repoPath: string): Promise<string> {
     const prompt = await getButlerPrompt(projectId, database);
-    const serverPort = process.env.KANBAN_SERVER_PORT || process.env.PORT || "3001";
+    const serverPort = String(resolveBoardServerPort());
     const appPort = process.env.KANBAN_CLIENT_PORT || serverPort;
     const appBaseUrl = `http://localhost:${appPort}`;
     const boardGuidePath = ensureBoardGuideFile();
-    return (prompt ?? DEFAULT_BUTLER_PROMPT)
+    const resolved = (prompt ?? DEFAULT_BUTLER_PROMPT)
       .replace(/\{\{projectName}}/g, projectName)
       .replace(/\{\{repoPath}}/g, repoPath)
       .replace(/\{\{serverPort}}/g, serverPort)
       .replace(/\{\{appBaseUrl}}/g, appBaseUrl)
       .replace(/\{\{boardGuidePath}}/g, boardGuidePath);
+    // Append the butler prompt fragments of the plugins enabled for this project,
+    // each as a clearly delimited "## Plugin: <name>" section. Best-effort: a
+    // broken plugin must never keep the butler from starting.
+    try {
+      const fragments = await getPluginService(database).getButlerFragments(projectId);
+      if (fragments.length > 0) return `${resolved}\n\n${fragments.join("\n\n")}`;
+    } catch (err) {
+      console.warn("[butler] plugin fragment resolution failed (ignored):", err instanceof Error ? err.message : err);
+    }
+    return resolved;
   }
 
-  /** Resolve the Butler's backend/profile.
-   *
-   * Provider resolution funnels through the SHARED resolver
-   * (`resolveEffectiveProviderProfile`) — the single source of truth used by the
-   * workspace builder too. This route no longer hand-rolls its own
-   * butler>Bullseye>settings cascade or hard-narrows to claude|codex, so copilot/pi
-   * are first-class here as well. We layer the butler-specific overrides onto a
-   * prefMap *copy* and let the resolver read a consistent view:
-   *
-   *  1. Per-butler provider override from the butler definition (`butlerProvider`) —
-   *     written onto prefMap as `provider`.
-   *  2. Project's Strategy Bullseye (`board_strategy_<projectId>`) — same source the
-   *     workspace builder uses, mirrored onto prefMap via
-   *     `applyProviderSelectionToPrefMap` (so the butler matches the builder).
-   *  3. Global settings prefs (`provider` / `*_profile`) — the prefMap's own values,
-   *     used by the resolver when neither override above is present.
-   *
-   * The per-project butler profile override (`butler_profile_<projectId>`) always wins
-   * over the profile the resolver derives (it's an explicit user override for the
-   * butler's auth endpoint, independent of which provider is primary).
-   */
-  async function resolveButlerBackend(projectId: string, butlerProvider?: ProviderName): Promise<{
-    provider: ProviderName;
-    selectedProfile: string | undefined;
-    globalProfile: string;
-    claudeProfile?: string;
-    profile?: { provider: ProviderName; name: string };
-    agentCommand?: string;
-    agentArgs?: string;
-    /** When a codex OAuth-license profile resolves to a separate CODEX_HOME dir,
-     *  the launcher must set CODEX_HOME and drop `--profile` (mirrors the builder). */
-    codexHome?: string;
-  }> {
-    const prefRows = await getAllPreferences(database);
-    const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
-
-    const settings = await loadAgentSettings(database);
-    const perProject = await getPreference(butlerProfilePrefKey(projectId), database);
-
-    // Layer the butler-def override / Strategy Bullseye selection onto the prefMap so
-    // the shared resolver reads a consistent view. Precedence: butler-def provider >
-    // Bullseye selection > prefMap's own `provider`/`*_profile` (global settings).
-    if (butlerProvider) {
-      prefMap.set("provider", butlerProvider);
-    } else {
-      const strategyRaw = prefMap.get(`board_strategy_${projectId}`);
-      if (strategyRaw) {
-        try {
-          const strategyConfig = parseStrategyBullseyeConfig(strategyRaw);
-          const selected = selectProviderFromStrategy(strategyConfig);
-          if (selected) {
-            applyProviderSelectionToPrefMap(prefMap, selected);
-          }
-        } catch {
-          // non-fatal: fall through to global default already on prefMap
-        }
-      }
-    }
-
-    const { provider, profileName: resolverProfile } = resolveEffectiveProviderProfile(prefMap);
-
-    const availableProfiles = await preferenceService.listProfilesForProvider(provider);
-    const profileOverride = perProject && availableProfiles.includes(perProject) ? perProject : undefined;
-
-    const globalProfile = settings.profile?.provider === provider ? settings.profile.name : "";
-    // Per-project butler override > resolver-derived profile (Bullseye/global) > global profile.
-    const selectedProfile = profileOverride || resolverProfile || globalProfile || undefined;
-
-    // `settings.agentCommand`/`agentArgs` are derived under the GLOBAL provider
-    // (e.g. Claude's `--dangerously-skip-permissions`). Forwarding them to a butler
-    // whose per-butler provider differs from the global one injects the wrong
-    // provider's command/flags — codex rejects `--dangerously-skip-permissions` and
-    // exits with code 2. Only forward when the providers match; otherwise let the
-    // butler's provider use its own defaults.
-    const matchesGlobalProvider = provider === settings.provider;
-
-    // Codex OAuth licenses: a ChatGPT-plan license is a separate CODEX_HOME directory
-    // with its own auth.json (an auto-discovered `~/.codex-<name>` dir or a ring entry).
-    // Point CODEX_HOME at it and DROP the profile name from the launch — a separate home
-    // has no `[profiles.<name>]`, so `--profile` makes codex exit code 2. This mirrors the
-    // builder path in session-lifecycle.ts so the butler authenticates under the right
-    // account and its rollouts land in the right home (fixes 'no rollout found' resumes).
-    let codexHome: string | undefined;
-    let launchProfileName = selectedProfile;
-    if (provider === "codex" && selectedProfile && selectedProfile !== "default") {
-      try {
-        const ring = await loadCodexLicenseRing(database);
-        const resolved = resolveCodexHomeForProfile(selectedProfile, ring);
-        if (resolved) {
-          codexHome = resolved;
-          launchProfileName = "default";
-        }
-      } catch {
-        // non-fatal: fall back to passing --profile under the default home
-      }
-    }
-
-    return {
-      provider,
-      // selectedProfile drives the UI dropdown — keep the real license name there.
-      selectedProfile,
-      globalProfile,
-      claudeProfile: provider === "claude" ? selectedProfile : undefined,
-      // profile drives the spawn args — "default" suppresses `--profile` when CODEX_HOME is set.
-      profile: launchProfileName ? { provider, name: launchProfileName } : undefined,
-      agentCommand: matchesGlobalProvider ? settings.agentCommand : undefined,
-      agentArgs: matchesGlobalProvider ? settings.agentArgs : undefined,
-      codexHome,
-    };
+  /** Resolve the Butler's backend/profile/model/resume — delegates to the shared
+   *  `resolveButlerLaunchConfig` (butler-definitions.service.ts), the single source of
+   *  truth for this route AND the headless warm-up paths (recommendation.ts,
+   *  plugin-gate-butler.service.ts). */
+  async function resolveButlerBackend(projectId: string, butlerId: string = "default") {
+    return resolveButlerLaunchConfig(projectId, butlerId, database);
   }
 
   async function startSession(projectId: string, butlerId: string = "default") {
     const project = await resolveProject(projectId);
     if (!project) return null;
-    const def = await getButlerDefinition(database, butlerId);
-    const backend = await resolveButlerBackend(projectId, def?.provider);
-    const sdkBackend = butlerSdkBackend(backend.provider);
-    // Model is a property of the (global) butler definition, not a per-project pref.
-    const model = normalizeModelForBackend(def?.model, sdkBackend) || undefined;
-    const resumeSessionId = (await getRuntimeState(butlerSessionStateKey(projectId, butlerId), database)) || undefined;
-    const systemPromptAppend = await resolveButlerPrompt(projectId, project.name, project.repoPath);
+    const launch = await resolveButlerLaunchConfig(projectId, butlerId, database);
+    const pluginNote = projectId === GLOBAL_BUTLER_PROJECT_ID ? await describeInstalledPlugins() : "";
+    const systemPromptAppend = projectId === GLOBAL_BUTLER_PROJECT_ID
+      ? [buildGlobalButlerPrompt(project.repoPath), pluginNote].filter(Boolean).join("\n\n")
+      : await resolveButlerPrompt(projectId, project.name, project.repoPath);
     const wasActive = getButlerSession(projectId, butlerId).active;
-    // When the resolved profile is "mock", use the in-process mock backend instead
-    // of the Claude SDK (which would fail without real API credentials).
-    // NOTE: loadAgentSettings (used inside resolveButlerBackend) strips "mock" from
-    // claudeProfile so it is never forwarded to spawn args. We must check the raw pref
-    // directly — per-project butler override wins, then the global claude_profile.
-    const rawProfile =
-      (await getPreference(butlerProfilePrefKey(projectId), database)) ||
-      (await getPreference("claude_profile", database)) ||
-      undefined;
-    const effectiveBackend: "claude" | "codex" | "mock" = isMockProfile(rawProfile)
-      ? "mock"
-      : sdkBackend;
     const session = ensureButlerSession({
       projectId,
       butlerId,
       repoPath: project.repoPath,
       projectName: project.name,
-      backend: effectiveBackend,
-      claudeProfile: backend.claudeProfile,
-      profile: backend.profile,
-      agentCommand: backend.agentCommand,
-      agentArgs: backend.agentArgs,
-      codexHome: backend.codexHome,
-      model,
-      resumeSessionId,
+      backend: launch.backend,
+      claudeProfile: launch.claudeProfile,
+      profile: launch.profile,
+      agentCommand: launch.agentCommand,
+      agentArgs: launch.agentArgs,
+      codexHome: launch.codexHome,
+      model: launch.model,
+      resumeSessionId: launch.resumeSessionId,
       systemPromptAppend,
     });
     // Persist the SDK session id (for resume across restarts) once, on first creation.
@@ -417,7 +373,7 @@ export function createButlerRoute(
     const state = getButlerSession(projectId, butlerId);
     const persisted = (await getRuntimeState(butlerSessionStateKey(projectId, butlerId), database)) || null;
     const def = await getButlerDefinition(database, butlerId);
-    const backend = await resolveButlerBackend(projectId, def?.provider);
+    const backend = await resolveButlerBackend(projectId, butlerId);
     const effectiveBackend = state.active ? state.backend : butlerSdkBackend(backend.provider);
     // Model is sourced from the butler definition (global), profile from the project pref.
     const selectedModel = normalizeModelForBackend(def?.model, effectiveBackend);
@@ -466,9 +422,11 @@ export function createButlerRoute(
   router.get("/:id/butler/profiles", async (c) => {
     const projectId = c.req.param("id");
     const butlerId = resolveButlerId(c);
-    const def = await getButlerDefinition(database, butlerId);
-    const backend = await resolveButlerBackend(projectId, def?.provider);
-    const profiles = await preferenceService.listProfilesForProvider(backend.provider);
+    const backend = await resolveButlerBackend(projectId, butlerId);
+    // #604: build the service from the route's own `database` rather than reaching for the
+    // module singleton. This was the one service wired BOTH ways — config-export-import
+    // already did it this way, so the singleton's only consumer was here.
+    const profiles = await createPreferenceService({ database }).listProfilesForProvider(backend.provider);
     return c.json({ provider: backend.provider, profiles, selected: backend.selectedProfile ?? "", globalDefault: backend.globalProfile });
   });
 
@@ -480,8 +438,7 @@ export function createButlerRoute(
     const projectId = c.req.param("id");
     const butlerId = resolveButlerId(c);
     const body = await parseJsonBody<{ model?: string }>(c);
-    const def = await getButlerDefinition(database, butlerId);
-    const backend = await resolveButlerBackend(projectId, def?.provider);
+    const backend = await resolveButlerBackend(projectId, butlerId);
     const state = getButlerSession(projectId, butlerId);
     const model = normalizeModelForBackend(body.model, state.active ? state.backend : butlerSdkBackend(backend.provider));
     try {
@@ -571,6 +528,34 @@ export function createButlerRoute(
     return c.json({ ok });
   });
 
+  // POST /api/projects/:id/butler/answer — answer a parked AskUserQuestion (#460).
+  // The butler's canUseTool handler suspended the SDK turn on this askId; resolving
+  // it hands the model the user's choices and the turn continues.
+  router.post("/:id/butler/answer", async (c) => {
+    const projectId = c.req.param("id");
+    const butlerId = resolveButlerId(c);
+    const body = await parseJsonBody<{ askId?: string; answers?: ButlerQuestionAnswer[] }>(c);
+    const askId = body.askId?.trim();
+    if (!askId) return c.json({ error: "askId is required" }, 400);
+    if (!Array.isArray(body.answers) || body.answers.length === 0) {
+      return c.json({ error: "answers is required" }, 400);
+    }
+    const answers: ButlerQuestionAnswer[] = body.answers
+      .filter((a) => typeof a?.question === "string" && Array.isArray(a?.answers))
+      .map((a) => ({
+        question: a.question,
+        header: typeof a.header === "string" && a.header ? a.header : a.question.slice(0, 12),
+        answers: a.answers.filter((x): x is string => typeof x === "string" && x.trim().length > 0),
+      }))
+      .filter((a) => a.answers.length > 0);
+    if (answers.length === 0) return c.json({ error: "answers is required" }, 400);
+    const ok = answerButlerQuestion(projectId, askId, answers, butlerId);
+    // 409, not 404: the question existed but is no longer answerable (timed out,
+    // already answered, or the session was restarted).
+    if (!ok) return c.json({ error: "No question is waiting for this answer", ok: false }, 409);
+    return c.json({ ok: true });
+  });
+
   // POST /api/projects/:id/butler/ask — synchronous: send a turn, wait for the full
   // answer, and return it in one response. This is the primitive used by the CLI and
   // MCP tool (separate processes that cannot read the server's in-memory SSE stream).
@@ -623,9 +608,12 @@ export function createButlerRoute(
     const projectId = c.req.param("id");
     const butlerId = resolveButlerId(c);
     return streamSSE(c, async (stream) => {
+      // The ONE interactive subscriber: a human has the Butler chat open, so a parked
+      // AskUserQuestion can actually be answered here (#461). Every other subscriber
+      // (the /ask collector, the session-id persister) is deliberately not.
       const unsubscribe = subscribeButler(projectId, (e) => {
         void stream.writeSSE({ data: JSON.stringify(e) });
-      }, butlerId);
+      }, butlerId, { interactive: true });
       stream.onAbort(() => unsubscribe());
       // Hold the connection open with periodic heartbeats until the client disconnects.
       while (!c.req.raw.signal.aborted) {
@@ -644,7 +632,7 @@ export function createButlerRoute(
   router.get("/:id/butler/sessions", async (c) => {
     const projectId = c.req.param("id");
     const butlerId = resolveButlerId(c);
-    const limit = Math.min(parseInt(c.req.query("limit") ?? "5", 10) || 5, 20);
+    const limit = queryInt(c, "limit", { def: 5, min: 1, max: 20 });
     const project = await resolveProject(projectId);
     if (!project) return c.json({ error: "Project not found" }, 404);
 

@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { SERVER_URL } from "../helpers/port.js";
 import { getE2EProjectId } from "../helpers/e2e-project.js";
 
-test.describe("Board API", () => {
+test.describe("@smoke: Board API", () => {
   let projectId: string;
   let todoStatusId: string;
   let doneStatusId: string;

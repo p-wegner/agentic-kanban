@@ -1,5 +1,8 @@
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export interface DepCheck {
   name: string;
@@ -12,13 +15,44 @@ export interface HealthDepsResult {
   checks: DepCheck[];
 }
 
+// This file is inlined into dist/server.js (__dirname = <app>/dist) and
+// dist/cli/index.js (__dirname = <app>/dist/cli) by the esbuild bundle; in a dev
+// checkout it runs from src/services. Running from dist/ is the bundle signal.
+const BUNDLED_APP_ROOT = /[\\/]dist$/.test(__dirname)
+  ? resolve(__dirname, "..")
+  : /[\\/]dist[\\/]cli$/.test(__dirname)
+    ? resolve(__dirname, "../..")
+    : null;
+
 export function checkHealthDeps(repoRoot: string): HealthDepsResult {
+  // Bundled install (npm package, Docker image): there is no workspace layout —
+  // the equivalent liveness facts are the migration journal copied into
+  // dist/migrations and the external runtime deps installed next to dist/.
+  if (BUNDLED_APP_ROOT) {
+    return checkBundledDeps(BUNDLED_APP_ROOT);
+  }
   const serverRoot = resolve(repoRoot, "packages/server");
   const checks: DepCheck[] = [
     checkDrizzleJournal(repoRoot),
     checkNodeModule(serverRoot, "drizzle-orm"),
     checkNodeModule(serverRoot, "hono"),
     checkSharedDist(repoRoot),
+  ];
+  return { ok: checks.every((c) => c.ok), checks };
+}
+
+/** Health checks for a bundled runtime (appRoot = the directory containing dist/). */
+function checkBundledDeps(appRoot: string): HealthDepsResult {
+  const journalPath = resolve(appRoot, "dist", "migrations", "meta", "_journal.json");
+  const journalOk = existsSync(journalPath);
+  const checks: DepCheck[] = [
+    {
+      name: "migrations-journal",
+      ok: journalOk,
+      detail: journalOk ? journalPath : `Missing: ${journalPath} — reinstall the package`,
+    },
+    checkNodeModule(appRoot, "drizzle-orm"),
+    checkNodeModule(appRoot, "hono"),
   ];
   return { ok: checks.every((c) => c.ok), checks };
 }

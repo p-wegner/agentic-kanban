@@ -1,13 +1,18 @@
 import React, { useState } from "react";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import { apiPost } from "../lib/api.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
+import { priorityLabel, priorityTraits, type IssuePriority } from "../lib/priorityTraits.js";
 
 interface ChildProposal {
   tempId: string;
   title: string;
   description: string;
-  priority: "low" | "medium" | "high" | "urgent";
+  // The server folds the legacy `urgent` alias to `critical` before it is stored
+  // (#516), so a proposal carries a real priority, never the phantom fifth value.
+  priority: IssuePriority;
+  /** Repo-aware fan-out (#94): the repo this child targets, editable pre-confirm. */
+  targetRepo?: string | null;
 }
 
 interface DependencyProposal {
@@ -20,6 +25,12 @@ interface DecomposeProposal {
   children: ChildProposal[];
   dependencies: DependencyProposal[];
   alreadyDecomposed: boolean;
+  /** Repos this project spans; empty for single-repo projects (dropdown hidden). */
+  repos: string[];
+  /** #116: the epic is already single-session-sized and shouldn't be split. */
+  tooSmallToDecompose?: boolean;
+  /** #116: tempIds of test-only children folded back into their implementation sibling. */
+  coalescedTestOnly?: string[];
 }
 
 interface EpicDecomposerModalProps {
@@ -33,6 +44,7 @@ export function EpicDecomposerModal({ issue, onClose, onConfirmed }: EpicDecompo
   const [proposal, setProposal] = useState<DecomposeProposal | null>(null);
   const [children, setChildren] = useState<ChildProposal[]>([]);
   const [dependencies, setDependencies] = useState<DependencyProposal[]>([]);
+  const [repos, setRepos] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [regenerating, setRegenerating] = useState(false);
 
@@ -44,6 +56,7 @@ export function EpicDecomposerModal({ issue, onClose, onConfirmed }: EpicDecompo
       setProposal(result);
       setChildren(result.children);
       setDependencies(result.dependencies);
+      setRepos(result.repos ?? []);
       setStage("preview");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to generate decomposition");
@@ -60,6 +73,7 @@ export function EpicDecomposerModal({ issue, onClose, onConfirmed }: EpicDecompo
       setProposal(result);
       setChildren(result.children);
       setDependencies(result.dependencies);
+      setRepos(result.repos ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to regenerate decomposition");
     } finally {
@@ -92,6 +106,10 @@ export function EpicDecomposerModal({ issue, onClose, onConfirmed }: EpicDecompo
 
   function handleTitleChange(tempId: string, newTitle: string) {
     setChildren(prev => prev.map(c => c.tempId === tempId ? { ...c, title: newTitle } : c));
+  }
+
+  function handleRepoChange(tempId: string, repo: string) {
+    setChildren(prev => prev.map(c => c.tempId === tempId ? { ...c, targetRepo: repo || null } : c));
   }
 
   const tempIdToTitle = new Map(children.map(c => [c.tempId, c.title]));
@@ -162,6 +180,18 @@ export function EpicDecomposerModal({ issue, onClose, onConfirmed }: EpicDecompo
 
           {(stage === "preview" || stage === "confirming") && (
             <>
+              {proposal?.tooSmallToDecompose && (
+                <div className="bg-sky-50 border border-sky-200 rounded-md px-3 py-2 text-xs text-sky-800">
+                  ✓ This ticket already looks right-sized for a single agent session — splitting it would add
+                  worktree/orientation overhead for little benefit. You can proceed if you disagree, but consider leaving it as one ticket.
+                </div>
+              )}
+              {proposal?.coalescedTestOnly && proposal.coalescedTestOnly.length > 0 && (
+                <div className="bg-sky-50 border border-sky-200 rounded-md px-3 py-2 text-xs text-sky-800">
+                  Merged {proposal.coalescedTestOnly.length} test-only sub-task{proposal.coalescedTestOnly.length > 1 ? "s" : ""} back
+                  into the implementation ticket{proposal.coalescedTestOnly.length > 1 ? "s" : ""} — tests ship in the same vertical slice as their code.
+                </div>
+              )}
               {proposal?.alreadyDecomposed && (
                 <div className="bg-amber-50 border border-amber-200 rounded-md px-3 py-2 text-xs text-amber-800">
                   ⚠ This epic was previously decomposed. These will be additional children.
@@ -222,14 +252,28 @@ export function EpicDecomposerModal({ issue, onClose, onConfirmed }: EpicDecompo
                             {child.description}
                           </p>
                         )}
+                        {repos.length > 0 && (
+                          <div className="mt-1.5 flex items-center gap-1.5">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-sky-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                            </svg>
+                            <select
+                              value={child.targetRepo ?? ""}
+                              onChange={(e) => handleRepoChange(child.tempId, e.target.value)}
+                              disabled={stage === "confirming"}
+                              className="text-[11px] border border-gray-200 dark:border-gray-700 rounded px-1 py-0.5 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-1 focus:ring-sky-500 disabled:opacity-60"
+                              title="Target repo for this child ticket"
+                            >
+                              <option value="">No repo</option>
+                              {repos.map((r) => (
+                                <option key={r} value={r}>repo:{r}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
                       </div>
-                      <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${
-                        child.priority === "urgent" ? "bg-red-100 text-red-700" :
-                        child.priority === "high" ? "bg-orange-100 text-orange-700" :
-                        child.priority === "low" ? "bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400" :
-                        "bg-blue-100 text-blue-700"
-                      }`}>
-                        {child.priority}
+                      <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${priorityTraits(child.priority).badgeClass}`}>
+                        {priorityLabel(child.priority)}
                       </span>
                       <button
                         onClick={() => handleRemoveChild(child.tempId)}

@@ -1,5 +1,5 @@
 import { isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
-import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
+import { DEFAULT_SETTINGS, getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { Field, Toggle } from "./SettingsPrimitives.js";
 import { SlowRequestsPanel } from "./SlowRequestsPanel.js";
 import type { Settings, MonitorTunables } from "../lib/settings-shared.js";
@@ -523,7 +523,7 @@ export function WorkflowBoardMonitorSection({
               type="number"
               min="1"
               max="60"
-              value={settings.auto_monitor_interval || "4"}
+              value={settings.auto_monitor_interval || DEFAULT_SETTINGS.auto_monitor_interval}
               onChange={(e) => set("auto_monitor_interval")(e.target.value)}
               className="w-16 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
             />
@@ -536,7 +536,7 @@ export function WorkflowBoardMonitorSection({
             <input
               type="number"
               min="1"
-              value={settings.backlog_stale_days || "14"}
+              value={settings.backlog_stale_days || DEFAULT_SETTINGS.backlog_stale_days}
               onChange={(e) => set("backlog_stale_days")(e.target.value)}
               className="w-16 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
             />
@@ -552,7 +552,7 @@ export function WorkflowBoardMonitorSection({
             <input
               type="number"
               min="1"
-              value={settings.inprogress_stale_days || "3"}
+              value={settings.inprogress_stale_days || DEFAULT_SETTINGS.inprogress_stale_days}
               onChange={(e) => set("inprogress_stale_days")(e.target.value)}
               className="w-16 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
             />
@@ -560,6 +560,22 @@ export function WorkflowBoardMonitorSection({
           </div>
           <p className="mt-1 text-[11px] text-gray-400 dark:text-gray-500 leading-snug">
             In Progress cards older than this threshold get a warning badge. Age badges appear on all cards.
+          </p>
+        </div>
+        <div className="mt-3 pl-5">
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-gray-600 dark:text-gray-400">Stalled agent threshold</label>
+            <input
+              type="number"
+              min="30"
+              value={settings.agent_stall_threshold_sec || "240"}
+              onChange={(e) => set("agent_stall_threshold_sec")(e.target.value)}
+              className="w-16 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded focus:outline-none focus:ring-1 focus:ring-brand-500"
+            />
+            <span className="text-xs text-gray-500 dark:text-gray-400">sec</span>
+          </div>
+          <p className="mt-1 text-[11px] text-gray-400 dark:text-gray-500 leading-snug">
+            A running agent with no activity for this long is flagged with a "stalled" badge on the agent views. Repeated identical tool calls show a "looping" badge.
           </p>
         </div>
         {getBool(settings, "auto_monitor") && (

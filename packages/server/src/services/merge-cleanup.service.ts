@@ -1,5 +1,5 @@
 import type { Database } from "../db/index.js";
-import type { BoardEvents } from "./board-events.js";
+import type { BoardEventSink } from "./board-events.js";
 import { closeWorkspace, stopWorkspaceSessions } from "./workspace-lifecycle-reconcile.service.js";
 import {
   getIssueStatusAndProject,
@@ -7,10 +7,12 @@ import {
   getProjectStatusOptions,
   setIssueStatus,
 } from "../repositories/merge-cleanup.repository.js";
+import { listMemberIssueIds } from "../repositories/workspace-issue-members.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export interface FinalizeMergeCleanupInput {
   database: Database;
-  boardEvents?: BoardEvents;
+  boardEvents?: BoardEventSink;
   workspaceId: string;
   issueId: string;
   now?: string;
@@ -41,6 +43,19 @@ export interface ReconcileMergedIssueInput {
   projectId?: string | null;
   /** When no "Done" status exists, fall back to "AI Reviewed" (used by the merge path). */
   fallbackToAiReviewed?: boolean;
+  /**
+   * When the work actually landed (the merged workspace's `mergedAt`). Supplying it turns
+   * the reconcile into a CATCH-UP: it converges the issue only when its current status
+   * predates the merge. Without it the reconcile is unconditional, which is only correct
+   * on the merge path itself (where the merge IS the latest event).
+   *
+   * Why it matters: the monitor's already-merged sweep runs every cycle, forever. Force-
+   * setting Done with no recency check meant a human who deliberately REOPENED a merged
+   * ticket (Done → Todo, because the work was wrong or incomplete) had it silently
+   * flipped back to Done on the next cycle — repeatedly, with no audit trail, so the
+   * board looked like it was fighting the operator.
+   */
+  mergedAt?: string | null;
 }
 
 export interface ReconcileMergedIssueResult {
@@ -49,6 +64,12 @@ export interface ReconcileMergedIssueResult {
   issueTransitioned: boolean;
   /** The status the issue was (or already is) reconciled to, when resolvable. */
   targetStatusId: string | null;
+  /**
+   * Set when the issue was left alone because its status was changed AFTER the merge —
+   * i.e. someone reopened it on purpose. Callers surface this instead of silently
+   * treating the no-op as "already Done".
+   */
+  reopenedAfterMerge?: boolean;
 }
 
 /**
@@ -61,6 +82,19 @@ export interface ReconcileMergedIssueResult {
  * safe — once the issue already sits on the target status, every later call is a no-op
  * (issueTransitioned=false) and never rewrites statusChangedAt.
  */
+/**
+ * True when the issue's status transition is strictly newer than the merge. Unparseable or
+ * missing timestamps return false — the guard must never *block* reconciliation on bad data,
+ * only on a demonstrably later status change.
+ */
+function isStatusNewerThanMerge(statusChangedAt: string | null | undefined, mergedAt: string): boolean {
+  if (!statusChangedAt) return false;
+  const statusTime = Date.parse(statusChangedAt);
+  const mergeTime = Date.parse(mergedAt);
+  if (Number.isNaN(statusTime) || Number.isNaN(mergeTime)) return false;
+  return statusTime > mergeTime;
+}
+
 export async function reconcileMergedIssue(
   input: ReconcileMergedIssueInput,
 ): Promise<ReconcileMergedIssueResult> {
@@ -92,9 +126,67 @@ export async function reconcileMergedIssue(
     return { projectId, issueTransitioned: false, targetStatusId: targetStatus.id };
   }
 
+  // Recency guard (only for catch-up callers that pass `mergedAt`): the merge is old news
+  // once the issue's status was changed AFTER it. That is a deliberate reopen, not a status
+  // that failed to catch up — converging it to Done would overwrite the operator's decision
+  // on every single cycle. `>` (not `>=`) so the merge path's own call, which stamps the
+  // transition and the merge at the same instant, still converges.
+  if (input.mergedAt && isStatusNewerThanMerge(issue.statusChangedAt, input.mergedAt)) {
+    return { projectId, issueTransitioned: false, targetStatusId: targetStatus.id, reopenedAfterMerge: true };
+  }
+
   await setIssueStatus(input.issueId, targetStatus.id, now, input.database);
 
   return { projectId, issueTransitioned: true, targetStatusId: targetStatus.id };
+}
+
+/**
+ * Ticket group (#661): converge every MEMBER issue of a merged group workspace to Done,
+ * via the same idempotent, recency-guarded {@link reconcileMergedIssue} the lead uses.
+ * One member failing must not strand the rest, so each is reconciled independently and
+ * failures are logged (the silently-merged reconciler converges stragglers on next boot,
+ * because it re-enters {@link finalizeMergeCleanup}, which calls this again).
+ *
+ * Returns the number of member issues that actually transitioned. Callers with a
+ * workspace id in hand should call this beside every terminal issue-status write —
+ * {@link finalizeMergeCleanup} does it internally, so only the Done writers that bypass
+ * it (exit-workflow autoMerge, the monitor's direct-workspace close) need their own call.
+ */
+export async function reconcileGroupMemberIssues(input: {
+  database: Database;
+  workspaceId: string;
+  now?: string;
+  projectId?: string | null;
+  mergedAt?: string | null;
+  fallbackToAiReviewed?: boolean;
+}): Promise<number> {
+  let memberIds: string[] = [];
+  try {
+    memberIds = await listMemberIssueIds(input.workspaceId, input.database);
+  } catch (err) {
+    console.warn(`[merge-cleanup] failed to list ticket-group members for workspace ${input.workspaceId}:`, errorMessage(err));
+    return 0;
+  }
+  let transitioned = 0;
+  for (const issueId of memberIds) {
+    try {
+      const res = await reconcileMergedIssue({
+        database: input.database,
+        issueId,
+        now: input.now,
+        projectId: input.projectId,
+        mergedAt: input.mergedAt,
+        fallbackToAiReviewed: input.fallbackToAiReviewed,
+      });
+      if (res.issueTransitioned) transitioned++;
+    } catch (err) {
+      console.warn(`[merge-cleanup] ticket-group member ${issueId} failed to converge after merge of workspace ${input.workspaceId}:`, errorMessage(err));
+    }
+  }
+  if (transitioned > 0) {
+    console.log(`[merge-cleanup] ticket group: converged ${transitioned}/${memberIds.length} member issue(s) of workspace ${input.workspaceId}`);
+  }
+  return transitioned;
 }
 
 /**
@@ -127,6 +219,16 @@ export async function finalizeMergeCleanup(
     fallbackToAiReviewed: input.fallbackToAiReviewed,
   });
 
+  // Ticket group (#661): a merged group workspace lands ALL its tickets, so the member
+  // issues converge to Done alongside the lead. No-op for single-ticket workspaces.
+  const membersTransitioned = await reconcileGroupMemberIssues({
+    database: input.database,
+    workspaceId: input.workspaceId,
+    now,
+    projectId,
+    fallbackToAiReviewed: input.fallbackToAiReviewed,
+  });
+
   let workspaceUpdated = false;
   let closedAt = input.closedAt ?? now;
   let mergedAt: string | null = shouldMarkMerged ? input.mergedAt ?? now : null;
@@ -154,19 +256,19 @@ export async function finalizeMergeCleanup(
     console.warn(
       `[merge-cleanup] workspace close failed after issue transitioned to Done (workspaceId=${input.workspaceId}). ` +
         "Issue will remain Done — the workspace can be reconciled on next startup.",
-      err instanceof Error ? err.message : String(err),
+      errorMessage(err),
     );
   }
 
   const sessionsStopped = await stopWorkspaceSessions(input.database, input.workspaceId, now).catch((err) => {
     console.warn(
       `[merge-cleanup] failed to stop running sessions after merge finalization (workspaceId=${input.workspaceId}).`,
-      err instanceof Error ? err.message : String(err),
+      errorMessage(err),
     );
     return false;
   });
 
-  const broadcasted = Boolean(input.boardEvents && projectId && (workspaceUpdated || issueTransitioned || sessionsStopped));
+  const broadcasted = Boolean(input.boardEvents && projectId && (workspaceUpdated || issueTransitioned || membersTransitioned > 0 || sessionsStopped));
   if (broadcasted) {
     input.boardEvents?.broadcast(projectId, "workspace_merged");
   }

@@ -21,6 +21,14 @@ export const sessions = sqliteTable("sessions", {
   // name snapshotted at launch (the skill row may be renamed/deleted later).
   skillId: text("skill_id"),
   skillName: text("skill_name"),
+  // The devcontainer this session's agent runs inside (#154), persisted at
+  // provision time so stop/hang-kill/killAll and a post-restart reattach can
+  // reach the in-container process — not just the host docker-exec client.
+  containerId: text("container_id"),
+  // The fleet worker this session's agent runs on (epic #1), when the session
+  // was dispatched remotely instead of spawned on the board host. Mirrors
+  // containerId's role: "the pid isn't the whole story" for stop/reattach.
+  workerId: text("worker_id"),
 }, (table) => ({
   workspaceIdIdx: index("idx_sessions_workspace_id").on(table.workspaceId),
   statusIdx: index("idx_sessions_status").on(table.status),

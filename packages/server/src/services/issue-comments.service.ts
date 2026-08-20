@@ -1,6 +1,8 @@
 import type { Database } from "../db/index.js";
-import type { BoardEvents } from "./board-events.js";
+import type { BoardEventSink } from "./board-events.js";
 import { getIssueProjectId } from "../repositories/issue.repository.js";
+import type { IssueComment } from "@agentic-kanban/shared/types";
+import { isIssueCommentKind } from "@agentic-kanban/shared/lib/issue-comment-kind";
 import {
   insertIssueComment,
   getIssueComments,
@@ -9,17 +11,9 @@ import {
   type IssueCommentRow,
 } from "../repositories/issue-comments.repository.js";
 
-export interface IssueComment {
-  id: string;
-  issueId: string;
-  workspaceId: string | null;
-  kind: string;
-  author: string;
-  body: string;
-  /** Parsed structured payload (null when none / unparseable). */
-  payload: unknown;
-  createdAt: string;
-}
+// Shape lives in shared (#569). `kind` is the six-member union, not a bare string —
+// both copies had widened it even though the repository has always had the union.
+export type { IssueComment };
 
 function toApiComment(row: IssueCommentRow): IssueComment {
   let payload: unknown = null;
@@ -30,7 +24,10 @@ function toApiComment(row: IssueCommentRow): IssueComment {
     id: row.id,
     issueId: row.issueId,
     workspaceId: row.workspaceId,
-    kind: row.kind,
+    // The column is plain text, so an older or hand-written row can hold anything;
+    // narrow with the shared guard rather than casting (#569). Unknown reads as "note",
+    // which is exactly how the UI renders an unlabelled comment anyway.
+    kind: isIssueCommentKind(row.kind) ? row.kind : "note",
     author: row.author,
     body: row.body,
     payload,
@@ -40,7 +37,7 @@ function toApiComment(row: IssueCommentRow): IssueComment {
 
 export function createIssueCommentsService(deps: {
   database: Database;
-  boardEvents?: BoardEvents;
+  boardEvents?: BoardEventSink;
 }) {
   const { database, boardEvents } = deps;
 

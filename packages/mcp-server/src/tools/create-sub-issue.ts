@@ -3,7 +3,8 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { isIssueNumberUniqueConstraintError, nextIssueNumber, resolveStatusByName } from "../db-utils.js";
+import { isIssueNumberUniqueConstraintError, mcpError, mcpText, nextIssueNumber, resolveStatusByName } from "../db-utils.js";
+import { ISSUE_TYPES } from "@agentic-kanban/shared";
 
 const ISSUE_NUMBER_INSERT_ATTEMPTS = 3;
 
@@ -18,15 +19,14 @@ export function registerCreateSubIssue(server: McpServer, deps: ToolDeps = prodD
       title: z.string().describe("Child issue title"),
       description: z.string().optional().describe("Child issue description"),
       priority: z.enum(["low", "medium", "high", "critical"]).optional().describe("Priority (default: medium)"),
-      issueType: z.string().optional().describe("Issue type (default: task)"),
+      issueType: z.enum(ISSUE_TYPES).optional().describe("Issue type (default: task)"),
       estimate: z.string().nullable().optional().describe("Optional estimate"),
       sortOrder: z.number().optional().describe("Sort order within the status column"),
       statusName: z.string().optional().describe("Status column name (default: first status in parent project)"),
     },
     async ({ parentIssueId, title, description, priority, issueType, estimate, sortOrder, statusName }) => {
-      const text = (value: string) => ({ content: [{ type: "text" as const, text: value }] });
 
-      if (!title.trim()) return text("Error: title is required");
+      if (!title.trim()) return mcpError("Error: title is required");
 
       const parents = await db
         .select({ projectId: schema.issues.projectId, issueNumber: schema.issues.issueNumber, title: schema.issues.title })
@@ -34,7 +34,7 @@ export function registerCreateSubIssue(server: McpServer, deps: ToolDeps = prodD
         .where(eq(schema.issues.id, parentIssueId))
         .limit(1);
       const parent = parents[0];
-      if (!parent) return text(`Error: parent issue not found: ${parentIssueId}`);
+      if (!parent) return mcpError(`Error: parent issue not found: ${parentIssueId}`);
 
       let statusId: string;
       if (statusName) {
@@ -48,7 +48,7 @@ export function registerCreateSubIssue(server: McpServer, deps: ToolDeps = prodD
           .where(eq(schema.projectStatuses.projectId, parent.projectId))
           .orderBy(schema.projectStatuses.sortOrder)
           .limit(1);
-        if (statuses.length === 0) return text("Error: no statuses configured for parent project");
+        if (statuses.length === 0) return mcpError("Error: no statuses configured for parent project");
         statusId = statuses[0].id;
       }
 
@@ -98,13 +98,13 @@ export function registerCreateSubIssue(server: McpServer, deps: ToolDeps = prodD
       }
 
       if (id === null || dependencyId === null || issueNumber === null) {
-        return text("Error: could not allocate a unique issue number");
+        return mcpError("Error: could not allocate a unique issue number");
       }
 
       notifyBoard(parent.projectId, "mcp_create_sub_issue");
       notifyBoard(parent.projectId, "mcp_dependency_added");
 
-      return text(JSON.stringify({
+      return mcpText(JSON.stringify({
         id,
         issueNumber,
         title,

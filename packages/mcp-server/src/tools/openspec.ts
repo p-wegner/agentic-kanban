@@ -7,7 +7,8 @@ import {
   validateOpenSpecChange,
 } from "@agentic-kanban/shared/lib/openspec";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { requireEntity } from "../db-utils.js";
+import { mcpJson, mcpText, requireEntity } from "../db-utils.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 async function resolveRepoPath(projectId: string, deps: ToolDeps): Promise<string | null> {
   const rows = await deps.db.select({
@@ -31,9 +32,9 @@ export function registerOpenSpecListSpecs(server: McpServer, deps: ToolDeps = pr
     },
     async ({ projectId }) => {
       const repoPath = await resolveRepoPath(projectId, deps);
-      if (!repoPath) return { content: [{ type: "text" as const, text: "Project not found" }] };
+      if (!repoPath) return mcpText("Project not found");
       const specs = await listOpenSpecs(repoPath);
-      return { content: [{ type: "text" as const, text: JSON.stringify({ specs }, null, 2) }] };
+      return mcpJson({ specs });
     },
   );
 }
@@ -48,12 +49,12 @@ export function registerShowSpec(server: McpServer, deps: ToolDeps = prodDeps) {
     },
     async ({ projectId, domain }) => {
       const repoPath = await resolveRepoPath(projectId, deps);
-      if (!repoPath) return { content: [{ type: "text" as const, text: "Project not found" }] };
+      if (!repoPath) return mcpText("Project not found");
       try {
         const spec = await showOpenSpec(repoPath, domain);
-        return { content: [{ type: "text" as const, text: JSON.stringify(spec, null, 2) }] };
+        return mcpJson(spec);
       } catch (err) {
-        return { content: [{ type: "text" as const, text: err instanceof Error ? err.message : String(err) }] };
+        return mcpText(errorMessage(err));
       }
     },
   );
@@ -69,9 +70,9 @@ export function registerValidateChange(server: McpServer, deps: ToolDeps = prodD
     },
     async ({ projectId, changeId }) => {
       const repoPath = await resolveRepoPath(projectId, deps);
-      if (!repoPath) return { content: [{ type: "text" as const, text: "Project not found" }] };
+      if (!repoPath) return mcpText("Project not found");
       const result = await validateOpenSpecChange(repoPath, changeId);
-      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+      return mcpJson(result);
     },
   );
 }

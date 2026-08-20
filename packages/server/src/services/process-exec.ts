@@ -1,5 +1,7 @@
 import { execFile, spawn, type ChildProcess, type SpawnOptions, type StdioOptions } from "node:child_process";
 import { promisify } from "node:util";
+import { recordOperation } from "@agentic-kanban/shared/lib/operation-metrics";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 const execFileAsync = promisify(execFile);
 
@@ -47,6 +49,33 @@ export function shellCommandSpec(command: string): { command: string; args: stri
 }
 
 export async function execCommand(
+  command: string,
+  args: string[],
+  options: ExecCommandOptions = {},
+): Promise<{ stdout: string; stderr: string }> {
+  // Counted (#359). This is the OTHER spawn adapter besides git-exec, and on Windows the calls it
+  // makes are the expensive ones the monitor's `resource-sweep` depends on: a full
+  // `Get-CimInstance Win32_Process` enumeration (documented as timing out at 225+ processes), a
+  // `netstat -ano`, and one `taskkill /T /F` per reaped tree. Attributing seconds to `exec:*`
+  // rather than to a phase name is the point of the instrumentation.
+  const startedMs = Date.now();
+  try {
+    return await execCommandInner(command, args, options);
+  } finally {
+    recordOperation(`exec:${execOperationLabel(command)}`, Date.now() - startedMs);
+  }
+}
+
+/**
+ * Low-cardinality label: the executable's base name, lowercased, with no path and no arguments.
+ * `operation-metrics` never evicts, so an unbounded label set would be a slow leak.
+ */
+function execOperationLabel(command: string): string {
+  const base = command.replace(/\\/g, "/").split("/").pop() ?? command;
+  return base.toLowerCase();
+}
+
+async function execCommandInner(
   command: string,
   args: string[],
   options: ExecCommandOptions = {},
@@ -185,12 +214,35 @@ export function parsePsProcessList(stdout: string): OsProcessRecord[] {
 export async function listOsProcesses(): Promise<OsProcessRecord[]> {
   if (process.platform === "win32") {
     const script = "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress";
-    const { stdout } = await execCommand("powershell.exe", ["-NoProfile", "-Command", script], { timeout: 10000 });
-    return parsePowerShellProcessList(stdout);
+    try {
+      const { stdout } = await execCommand("powershell.exe", ["-NoProfile", "-Command", script], { timeout: 10000 });
+      return parsePowerShellProcessList(stdout);
+    } catch (err) {
+      // Same best-effort rule as the POSIX branch below — but this is the branch that
+      // actually bites, because the board runs on Windows. Enumerating every process with
+      // its full CommandLine through CIM + ConvertTo-Json is expensive: on a loaded box
+      // (measured: 225+ processes) it exceeded the 10s timeout and threw, which aborted the
+      // WHOLE monitor cycle at the resource-sweep phase — before auto-start ever ran. The
+      // observable effect was a board that silently stopped starting tickets: freshly
+      // planned work parked for tens of minutes until some cycle happened to win the race,
+      // and every cycle logged only "[monitor] Cycle error: Command failed: powershell.exe".
+      // Hygiene must never be able to stop the monitor from doing its actual job.
+      console.warn(`[resource-sweep] process enumeration failed, skipping stale-process hygiene this cycle: ${errorMessage(err)}`);
+      return [];
+    }
   }
 
-  const { stdout } = await execCommand("ps", ["-eo", "pid=,ppid=,comm=,args="], { timeout: 10000 });
-  return parsePsProcessList(stdout);
+  try {
+    const { stdout } = await execCommand("ps", ["-eo", "pid=,ppid=,comm=,args="], { timeout: 10000 });
+    return parsePsProcessList(stdout);
+  } catch (err) {
+    // procps ("ps") is not installed in every runtime image (e.g. node:*-slim Docker
+    // images). Resource-sweep hygiene is best-effort, not load-bearing, so degrade to
+    // "no processes found" instead of throwing and spamming [resource-sweep] warnings
+    // every monitor cycle.
+    if ((err as NodeJS.ErrnoException)?.code === "ENOENT") return [];
+    throw err;
+  }
 }
 
 export async function listOsPortListeners(): Promise<OsPortListener[]> {

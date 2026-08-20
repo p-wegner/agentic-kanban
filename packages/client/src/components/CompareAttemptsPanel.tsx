@@ -3,6 +3,7 @@ import { apiFetch } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import type { DiffResponse } from "@agentic-kanban/shared";
 import { DiffViewer } from "./DiffViewer.js";
+import { workspaceStatusToneClass } from "../lib/badgeTones.js";
 
 interface WorkspaceAttempt {
   id: string;
@@ -26,16 +27,6 @@ interface CompareAttemptsPanelProps {
   onClose: () => void;
   onOpenWorkspace: (workspaceId: string) => void;
 }
-
-const STATUS_COLORS: Record<string, string> = {
-  active: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
-  reviewing: "bg-accent-50 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300",
-  fixing: "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300",
-  idle: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
-  "awaiting-plan-approval": "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
-  error: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
-  closed: "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400",
-};
 
 const SESSION_STATUS_LABELS: Record<string, string> = {
   running: "Running",
@@ -167,7 +158,7 @@ export function CompareAttemptsPanel({ issueId, onClose, onOpenWorkspace }: Comp
                           <span className="font-mono text-sm text-gray-800 dark:text-gray-200 truncate max-w-[300px]" title={attempt.branch}>
                             {attempt.branch}
                           </span>
-                          <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded shrink-0 ${STATUS_COLORS[attempt.status] ?? STATUS_COLORS.closed}`}>
+                          <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded shrink-0 ${workspaceStatusToneClass(attempt.status)}`}>
                             {attempt.status}
                           </span>
                           {isMerged && (

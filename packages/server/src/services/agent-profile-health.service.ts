@@ -3,25 +3,34 @@ import { homedir } from "node:os";
 import { basename, delimiter, join } from "node:path";
 import type { Database } from "../db/index.js";
 import { getAllPreferences } from "../repositories/agent-profile-health.repository.js";
-import { getRuntimeStateByPrefix, setRuntimeState } from "../repositories/runtime-state.repository.js";
+import { getRuntimeStateByPrefix } from "../repositories/runtime-state.repository.js";
+import {
+  FAILURE_PREFIX,
+  nextFailureRecord,
+  profileFailureKey,
+  readProfileFailure,
+  writeProfileFailure,
+  type AgentProfileFailureSummary,
+} from "./agent-profile-failure-record.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+
+export {
+  isProfileBreakerOpen,
+  readProfileFailure,
+  recordAgentProfileLaunchSuccess,
+  PROFILE_BREAKER_THRESHOLD,
+  type AgentProfileFailureSummary,
+} from "./agent-profile-failure-record.js";
 import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import { buildAgentLaunchConfig, getProfilePrefKey, narrowProviderName, type ProviderName } from "./agent-provider.js";
 import { resolvePiExecutable, splitArgs } from "./agent-provider/helpers.js";
 import { parseCodexLicenseRing, codexHomeHasAuth, resolveCodexHomeForProfile } from "./codex-license-ring.js";
 import { parseClaudeSubscriptionRing, claudeConfigDirHasAuth, resolveClaudeConfigDirForProfile } from "./claude-subscription-ring.js";
 import { detectCliVersion, type CliVersionResult, type VersionRunner } from "./agent-cli-version.service.js";
+import { isMockAgentCommand } from "./agent-provider/helpers.js";
 
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 export type ProfileHealthStatus = "ok" | "warning" | "error" | "unknown";
-
-export interface AgentProfileFailureSummary {
-  at: string;
-  provider: ProviderName;
-  profileName: string;
-  summary: string;
-  exitCode?: number | null;
-  sessionId?: string;
-  workspaceId?: string;
-}
 
 export interface AgentProfilePreflightResult {
   ok: boolean;
@@ -48,7 +57,6 @@ export interface AgentProfileHealthRow {
 }
 
 const DEFAULT_PROFILE = "default";
-const FAILURE_PREFIX = "agent_profile_launch_failure.";
 const SECRET_FLAG_PATTERN = /(?:key|token|secret|password|credential)/i;
 const PI_API_KEY_ENV_KEYS = [
   "ANTHROPIC_API_KEY",
@@ -73,9 +81,7 @@ function profileKey(provider: ProviderName, profileName?: string | null): string
   return `${provider}:${name}`;
 }
 
-function failurePreferenceKey(provider: ProviderName, profileName?: string | null): string {
-  return `${FAILURE_PREFIX}${profileKey(provider, profileName)}`;
-}
+
 
 function applyProfileSelection(prefMap: Map<string, string>, provider: ProviderName, profileName: string): Map<string, string> {
   const next = new Map(prefMap);
@@ -112,7 +118,7 @@ function sanitizeCommand(command: string | undefined): string {
   if (!command) return "";
   const trimmed = command.trim();
   if (!trimmed) return "";
-  if (trimmed.includes("mock-agent")) return "mock-agent";
+  if (isMockAgentCommand(trimmed)) return "mock-agent";
   if (/[\\/]/.test(trimmed)) return basename(trimmed.replace(/^"|"$/g, ""));
   return trimmed.split(/\s+/)[0];
 }
@@ -261,7 +267,11 @@ export function preflightAgentProfile(
     const launchConfig = buildAgentLaunchConfig({
       agentCommand: settings.agentCommand,
       agentArgs: settings.agentArgs,
-      claudeProfile: settings.claudeProfile,
+      // #528: the board-wide `settings.claudeProfile` used to ride along here, and for
+      // profileName === "default" (where `profile` is deliberately undefined) it was what
+      // the launch config actually used — so the probe for "default" ran under whichever
+      // profile the board had configured, not under none. Probing a profile now means
+      // probing that profile only.
       profile: profileName === DEFAULT_PROFILE ? undefined : { provider, name: profileName },
       provider: toExecutorProvider(provider),
       permissionPromptTool: settings.permissionPromptTool,
@@ -270,7 +280,7 @@ export function preflightAgentProfile(
     command = sanitizeCommand(launchConfig.command) || command;
     flags = [...new Set([...flags, ...sanitizeFlags(launchConfig.args)])];
   } catch (err) {
-    errors.push(sanitizeErrorMessage(err instanceof Error ? err.message : String(err)));
+    errors.push(sanitizeErrorMessage(errorMessage(err)));
   }
 
   return {
@@ -347,7 +357,7 @@ export async function augmentPreflightWithVersion(
       raw: null,
       version: null,
       status: "unavailable",
-      message: `Version probe error: ${err instanceof Error ? err.message : String(err)}`,
+      message: `Version probe error: ${errorMessage(err)}`,
     };
   }
 
@@ -364,7 +374,7 @@ export async function listAgentProfileHealth(
   },
 ): Promise<AgentProfileHealthRow[]> {
   const prefRows = await getAllPreferences(database);
-  const prefMap = new Map(prefRows.map((row) => [row.key, row.value]));
+  const prefMap = toPrefMap(prefRows);
   // Launch-failure payloads are RUNTIME STATE (in `runtime_state`, #975), not config.
   const failureRows = new Map(
     (await getRuntimeStateByPrefix(FAILURE_PREFIX, database)).map((row) => [row.key, row.value]),
@@ -421,7 +431,7 @@ export async function listAgentProfileHealth(
     const cmdKey = `${basePreflight.provider}:${basePreflight.command}`;
     const version = versionByCmdKey.get(cmdKey) ?? null;
     const preflight = foldVersionIntoPreflight(basePreflight, version);
-    const failureRaw = failureRows.get(failurePreferenceKey(candidate.provider, candidate.profileName));
+    const failureRaw = failureRows.get(profileFailureKey(candidate.provider, candidate.profileName));
     let latestFailure: AgentProfileFailureSummary | null = null;
     if (failureRaw) {
       try {
@@ -456,14 +466,15 @@ export async function recordAgentProfileLaunchFailure(
   },
 ): Promise<void> {
   const profileName = input.profileName?.trim() || DEFAULT_PROFILE;
-  const payload: AgentProfileFailureSummary = {
-    at: input.at ?? new Date().toISOString(),
+  const previous = await readProfileFailure(database, input.provider, profileName);
+  await writeProfileFailure(database, nextFailureRecord(previous, {
     provider: input.provider,
     profileName,
-    summary: sanitizeErrorMessage(input.summary),
+    summary: input.summary,
     exitCode: input.exitCode,
     sessionId: input.sessionId,
     workspaceId: input.workspaceId,
-  };
-  await setRuntimeState(failurePreferenceKey(input.provider, profileName), JSON.stringify(payload), database);
+    at: input.at ?? new Date().toISOString(),
+  }));
 }
+

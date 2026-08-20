@@ -5,7 +5,7 @@ import { existsSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
-import type { BoardEvents } from "./board-events.js";
+import type { BoardEventSink } from "./board-events.js";
 import type { SessionManager } from "./session.manager.js";
 import { WorkspaceError } from "./workspace-internals.js";
 import {
@@ -17,6 +17,7 @@ import {
   setSessionTerminal,
 } from "../repositories/bisect.repository.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export type BisectScope = "related" | "full";
 
@@ -198,7 +199,7 @@ function formatResult(result: BisectResult): string {
 export function createBisectService(deps: {
   database: Database;
   getSessionManager?: () => SessionManager;
-  boardEvents?: BoardEvents;
+  boardEvents?: BoardEventSink;
 }) {
   const { database, getSessionManager, boardEvents } = deps;
 
@@ -397,7 +398,7 @@ export function createBisectService(deps: {
         if (projectId) boardEvents?.broadcast(projectId, "session_stopped");
         return;
       }
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       await emit(sessionId, { type: "stderr", sessionId, data: `${message}\n` });
       if (resetNeeded) {
         try {

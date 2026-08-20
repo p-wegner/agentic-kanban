@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { apiFetch, apiPost } from "../lib/api.js";
+import { apiPost } from "../lib/api.js";
 import { getSettings, setSettings } from "../lib/settingsStore.js";
 import type { StatusWithIssues, IssueWithStatus } from "@agentic-kanban/shared";
+import { useApiResource } from "../hooks/useApiResource.js";
 
 interface StaleWorkDashboardProps {
   projectId: string;
@@ -16,9 +17,16 @@ const PREF_KEY = "stale_column_threshold_days";
 const DEFAULT_THRESHOLD = 2;
 
 export function StaleWorkDashboard({ projectId, onIssueClick }: StaleWorkDashboardProps) {
-  const [columns, setColumns] = useState<StatusWithIssues[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // #513: this panel's fetch had NO cancelled guard, so switching project mid-flight
+  // could land the previous project's board in state and unmounting set state on a dead
+  // component. The hook owns that guard now.
+  const { data: columnsData, loading, error, reload: fetchBoard } = useApiResource<StatusWithIssues[]>(
+    projectId ? `/api/projects/${projectId}/board` : null,
+    { fallbackError: "Failed to load board data" },
+  );
+  // Stable identity: `?? []` would mint a new array every render and re-run the useMemo
+  // below on each one.
+  const columns = useMemo(() => columnsData ?? [], [columnsData]);
   const [threshold, setThreshold] = useState(DEFAULT_THRESHOLD);
   const [thresholdInput, setThresholdInput] = useState(String(DEFAULT_THRESHOLD));
   const [nudgeState, setNudgeState] = useState<NudgeState>({});
@@ -35,24 +43,7 @@ export function StaleWorkDashboard({ projectId, onIssueClick }: StaleWorkDashboa
       .catch(() => {});
   }, []);
 
-  const fetchBoard = useCallback(() => {
-    if (!projectId) return;
-    setLoading(true);
-    setError(null);
-    apiFetch<StatusWithIssues[]>(`/api/projects/${projectId}/board`)
-      .then((data) => {
-        setColumns(data);
-        setLoading(false);
-      })
-      .catch((err) => {
-        setError(err instanceof Error ? err.message : "Failed to load board data");
-        setLoading(false);
-      });
-  }, [projectId]);
 
-  useEffect(() => {
-    fetchBoard();
-  }, [fetchBoard]);
 
   const staleIssues = useMemo(() => {
     const result: IssueWithStatus[] = [];

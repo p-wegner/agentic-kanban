@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { triggerBadgeLabel } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import type { WorkspaceTimelineResponse, WorkspaceTimelineEvent } from "@agentic-kanban/shared";
@@ -39,20 +40,11 @@ const SEVERITY_BADGE_CLASSES: Record<string, string> = {
   success: "bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300",
 };
 
-const TRIGGER_LABELS: Record<string, string> = {
-  agent: "Agent",
-  chat: "Chat",
-  review: "AI Review",
-  merge: "AI Merge",
-  "fix-conflicts": "Fix Conflicts",
-  bisect: "Auto-bisect",
-  learning: "Learning",
-  "auto-start": "Auto-start",
-};
-
 function TriggerBadge({ triggerType }: { triggerType: string | null | undefined }) {
   if (!triggerType) return null;
-  const label = TRIGGER_LABELS[triggerType] ?? triggerType;
+  // Labels come from the shared traits table (#495); this map used to live here and
+  // had silently fallen behind — `fix-and-merge` rendered as its raw slug.
+  const label = triggerBadgeLabel(triggerType) ?? triggerType;
   return (
     <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent-50 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300 font-medium">
       {label}

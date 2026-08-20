@@ -3,6 +3,7 @@ import { apiFetch } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import { CollapsibleSection } from "./CollapsibleSection.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 type RiskLevel = "high" | "medium" | "low" | "none";
 
@@ -92,7 +93,7 @@ export function WorkspaceRiskHeatmap({ projectId, onIssueClick }: WorkspaceRiskH
     setError(null);
     apiFetch<WorkspaceRiskResponse>(`/api/projects/${projectId}/workspace-risk`)
       .then((d) => setData(d))
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .catch((e) => setError(errorMessage(e)))
       .finally(() => setLoading(false));
   }, [projectId]);
 

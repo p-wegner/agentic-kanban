@@ -1,36 +1,44 @@
-import { db as realDb } from "../../db/index.js";
+import { db as realDb, type Database } from "../../db/index.js";
 import { parseBoolSetting } from "@agentic-kanban/shared/lib/settings-registry";
-import type { Database } from "../../db/index.js";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import * as lifecycleRepo from "../../repositories/session-lifecycle.repository.js";
+import * as agentSkillRepo from "../../repositories/agent-skill.repository.js";
 import * as realAgentService from "../agent.service.js";
-import { extractPlanFromMessages, writePlanFile, buildImplementPrompt } from "../plan-mode.service.js";
-import { getHarnessBoolSetting } from "../harness-settings.js";
+import { createAgentDispatch, type AgentExecutionService } from "../agent-dispatch.service.js";
+import { getWorkerFleet, resolveWorkerPlacement, WorkerDispatchUnavailableError } from "../worker-fleet.service.js";
+import { extractPlanFromMessages } from "../plan-mode.service.js";
 import { computeScorecard } from "../workspace-scorecard.service.js";
 import { computeWorkspaceCodeMetrics } from "../workspace-code-metrics.service.js";
 import { recordAgentProfileLaunchFailure } from "../agent-profile-health.service.js";
 import { emitButlerSystemEvent } from "../butler-event-feed.js";
-import type { ProviderName } from "../agent-provider.js";
-import { narrowProviderName } from "../agent-provider.js";
+import { narrowProviderName, type ProviderName } from "../agent-provider.js";
 import { getProviderExitBehavior } from "../agent-provider/provider-exit-behavior.js";
-import type { RotationRings } from "../agent-provider/provider-exit-behavior.js";
-import type { AgentOutputMessage } from "@agentic-kanban/shared";
-import { modelBelongsToProvider } from "@agentic-kanban/shared";
+import { type AgentOutputMessage, modelBelongsToProvider } from "@agentic-kanban/shared";
+import { teardownSessionState } from "./types.js";
 import type { SessionManagerOptions, SessionState, StartSessionOptions } from "./types.js";
 import { workspaceLaunchPreflight } from "../preflight-check.js";
+import { resolveContainerProvision, surfaceIsolationDowngrade } from "./devcontainer-launch.js";
 import { WorkspaceError } from "../workspace-internals.js";
 import { DEFAULT_BUILDER_GUARDRAILS, PREF_BUILDER_GUARDRAILS } from "../../constants/preference-keys.js";
 import { parseSymlinkDirs } from "@agentic-kanban/shared/lib/worktree-symlink-bootstrap";
 import { loadCodexLicenseRing } from "../codex-license-ring.js";
 import { loadClaudeSubscriptionRing } from "../claude-subscription-ring.js";
-import {
-  classifySessionExit as classifySessionExitRoute,
-  extractCapturedStderr,
-  ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS as EXIT_WINDOW_MS,
-} from "./session-exit-state-machine.js";
+import { classifySessionExit as classifySessionExitRoute, extractCapturedStderr, ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS as EXIT_WINDOW_MS } from "./session-exit-state-machine.js";
+import { buildIndeterminateExitStats } from "./session-exit-stats.js";
+import { CODEX_SPARK_MODEL, CODEX_SAFE_DEFAULT_MODEL, isBuilderSession, buildStaleResumeHandoffPrompt, instructionFingerprint, mergeExistingSessionStats, lifecycleProviderName, resolveProviderRotation } from "./session-launch-helpers.js";
+import { finalizePlanModeExit } from "./plan-mode-exit.js";
+import { finalizeUsageLimitRoute, finalizeLaunchFailureRoute, finalizeCompletedRoute, type ExitFinalizeContext } from "./exit-finalize.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
-/** Subset of agent.service that the lifecycle depends on. Injectable for tests. */
-export type AgentService = typeof realAgentService;
+/** Bounds the missing-transcript fallback (#26) to one automatic retry per workspace. */
+const MAX_STALE_RESUME_RECOVERIES = 1;
+
+/**
+ * The execution surface the lifecycle depends on. The default is the dispatch
+ * proxy over the real host agent.service; tests inject mocks, and the worker
+ * fleet (epic #1) injects a proxy with a remote implementation registered.
+ */
+export type AgentService = AgentExecutionService;
 
 /** Injectable dependencies for the session lifecycle (default to the real singletons). */
 export interface SessionLifecycleDeps {
@@ -41,125 +49,6 @@ export interface SessionLifecycleDeps {
 
 /** Re-exported from the exit state machine, which now owns the canonical value. */
 export const ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS = EXIT_WINDOW_MS;
-const CODEX_SPARK_MODEL = "gpt-5.3-codex-spark";
-const CODEX_SAFE_DEFAULT_MODEL = "gpt-5.5";
-
-function isBuilderSession(triggerType: string | undefined, planMode: boolean | undefined): boolean {
-  if (planMode) return false;
-  if (!triggerType) return true;
-  return triggerType === "agent" || triggerType === "auto-start" || triggerType === "plan-implement" || triggerType.startsWith("skill:");
-}
-
-function instructionFingerprint(value: string | undefined): string | null {
-  const text = (value ?? "").trim();
-  if (!text) return null;
-  return createHash("sha256").update(text).digest("hex").slice(0, 16);
-}
-
-async function mergeExistingSessionStats(database: Database, sessionId: string, statsToSave: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const stats = await lifecycleRepo.getSessionStats(sessionId, database);
-  if (!stats) return statsToSave;
-  try {
-    const existing = JSON.parse(stats) as Record<string, unknown>;
-    return { ...existing, ...statsToSave };
-  } catch {
-    return statsToSave;
-  }
-}
-
-function buildZeroOutputLaunchFailureStats(executor: string, durationMs: number, exitCode: number | null, stderrText?: string) {
-  // Surface the provider's captured stderr (#779). A detached claude.exe that dies on launch
-  // writes its reason to stderr, not stdout; including it here turns an opaque "zero output"
-  // crash into a diagnosable failure (e.g. a mid-rebase worktree, bad cwd, auth error).
-  const stderrSnippet = stderrText?.trim()
-    ? `\nProvider stderr:\n${stderrText.trim().length > 500 ? stderrText.trim().slice(0, 500) + "…" : stderrText.trim()}`
-    : "";
-  const reason =
-    `Agent launch failed: provider process exited within ${Math.round(ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS / 1000)}s ` +
-    "without assistant output, tool activity, or usage stats." +
-    stderrSnippet;
-  return {
-    durationMs,
-    totalCostUsd: 0,
-    inputTokens: 0,
-    outputTokens: 0,
-    numTurns: 0,
-    model: executor,
-    success: false,
-    launchFailure: true,
-    failureReason: reason,
-    providerExitCode: exitCode,
-    agentSummary: reason,
-  };
-}
-
-/** Build launch failure stats when the agent produced an error message but is still a failed launch (e.g. model/auth error). */
-function buildModelErrorLaunchFailureStats(executor: string, durationMs: number, exitCode: number | null, errorText: string) {
-  const truncated = errorText.length > 500 ? errorText.slice(0, 500) + "…" : errorText;
-  const reason =
-    `Agent launch failed: provider process exited within ${Math.round(ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS / 1000)}s ` +
-    `with non-zero exit code ${exitCode ?? "unknown"} and error output:\n${truncated}`;
-  return {
-    durationMs,
-    totalCostUsd: 0,
-    inputTokens: 0,
-    outputTokens: 0,
-    numTurns: 0,
-    model: executor,
-    success: false,
-    launchFailure: true,
-    failureReason: reason,
-    providerExitCode: exitCode,
-    agentSummary: truncated,
-  };
-}
-
-function buildCodexUsageLimitStats(executor: string, durationMs: number, exitCode: number | null, message: string, retryAfter: string | null) {
-  return {
-    durationMs,
-    totalCostUsd: 0,
-    inputTokens: 0,
-    outputTokens: 0,
-    numTurns: 0,
-    model: executor,
-    success: false,
-    launchFailure: true,
-    rateLimited: true,
-    rateLimitKind: "codex-usage-limit",
-    retryAfter,
-    failureReason: message,
-    providerExitCode: exitCode,
-    agentSummary: message,
-  };
-}
-
-function buildClaudeUsageLimitStats(executor: string, durationMs: number, exitCode: number | null, message: string, resetsAt: string | null) {
-  return {
-    durationMs,
-    totalCostUsd: 0,
-    inputTokens: 0,
-    outputTokens: 0,
-    numTurns: 0,
-    model: executor,
-    success: false,
-    launchFailure: true,
-    rateLimited: true,
-    rateLimitKind: "claude-usage-limit",
-    // Persisted so the exit-workflow rotation can stamp the right cooldown window.
-    retryAfter: resetsAt,
-    failureReason: message,
-    providerExitCode: exitCode,
-    agentSummary: message,
-  };
-}
-
-function lifecycleProviderName(provider: string | undefined, profile?: { provider?: string; name?: string }): ProviderName {
-  // A recorded profile.provider (a valid ProviderName) wins; otherwise narrow the
-  // launch provider string (handles the legacy "claude-code" id, defaults to claude).
-  const fromProfile = profile?.provider;
-  if (fromProfile === "codex" || fromProfile === "copilot" || fromProfile === "claude" || fromProfile === "pi") return fromProfile;
-  return narrowProviderName(provider);
-}
 
 export function createSessionLifecycle(
   state: SessionState,
@@ -168,36 +57,26 @@ export function createSessionLifecycle(
   deps: SessionLifecycleDeps = {},
 ) {
   const db = deps.db ?? realDb;
-  const agentService = deps.agentService ?? realAgentService;
+  const agentService = deps.agentService
+    ?? createAgentDispatch({ host: realAgentService, remote: getWorkerFleet().remoteAgentService });
   const launchPreflight = deps.preflight ?? workspaceLaunchPreflight;
   /** Create a session DB row and launch the agent process. */
   async function startSession(opts: StartSessionOptions): Promise<string> {
     const {
-      workspaceId,
-      prompt,
-      agentCommand,
-      agentArgs,
-      resumeFromId,
-      claudeProfile,
-      multiTurn,
-      permissionPromptTool,
-      planMode,
-      resumeWithNewModel,
-      provider,
-      triggerType,
-      profile,
-      model,
-      contextFiles,
-      extraEnv,
-      workingDirOverride,
-      skipLaunchPreflight,
-      skipPermissions: skipPermissionsOpt,
-      systemInstructions,
+      workspaceId, prompt, agentCommand, agentArgs, resumeFromId, multiTurn,
+      permissionPromptTool, planMode, resumeWithNewModel, provider, triggerType, profile,
+      model, contextFiles, extraEnv, workingDirOverride, skipLaunchPreflight,
+      skipPermissions: skipPermissionsOpt, systemInstructions, placement,
     } = opts;
 
     // Look up workspace to get workingDir
     const workspace = await lifecycleRepo.getWorkspaceById(workspaceId, db);
     if (!workspace) throw new Error("Workspace not found");
+    // #502: bind the narrowed row for the async exit closures below. The canonical
+    // `getWorkspaceById` is typed `Workspace | null` (this file's old repository copy was
+    // untyped), and TS does not carry the guard's narrowing into a deferred closure — so
+    // two long-standing unguarded reads only became visible once the type was honest.
+    const workspaceRow = workspace;
     // Per-call model wins; otherwise inherit the model stored on the workspace so resume/
     // review/follow-up sessions stay on the same model the workspace was created with.
     // Guard: if workspace.model is a cross-provider id (e.g. gpt-5.5 baked into a claude
@@ -300,7 +179,8 @@ export function createSessionLifecycle(
     const sessionSkillId: string | null = workspace.skillId ?? null;
     let sessionSkillName: string | null = null;
     if (sessionSkillId) {
-      sessionSkillName = await lifecycleRepo.getAgentSkillName(sessionSkillId, db);
+      const skillRow = await agentSkillRepo.getAgentSkillById(sessionSkillId, db);
+      sessionSkillName = skillRow?.name ?? null;
     }
 
     // Cache session context for activity broadcasting
@@ -322,7 +202,7 @@ export function createSessionLifecycle(
     const launchDiagnostics = {
       launch: {
         provider: executor,
-        profile: profile?.name ?? claudeProfile ?? null,
+        profile: profile?.name ?? null,
         resolvedModel: effectiveModel ?? null,
         requestedModel: model ?? null,
         workspaceModel: workspace.model ?? null,
@@ -379,47 +259,17 @@ export function createSessionLifecycle(
       } catch { /* handoff not available — proceed without it */ }
     }
 
-    // Codex OAuth licenses: a ChatGPT-plan license is a separate CODEX_HOME directory
-    // with its own auth.json — selected by an auto-discovered `~/.codex-<name>` dir or
-    // a rotation-ring entry. Point CODEX_HOME at it and DROP the profile name from the
-    // launch (a separate home has no `[profiles.<name>]`, so `--profile` would make
-    // codex exit code 2). Plain toml / API-key (configToml) profiles resolve to no
-    // home and keep `--profile`.
-    let effectiveExtraEnv = extraEnv;
-    let launchProfile = profile;
-    if (profile?.provider === "codex" && profile.name && profile.name !== "default") {
-      try {
-        const rings: RotationRings = { codex: await loadCodexLicenseRing(db) };
-        const rotation = getProviderExitBehavior("codex").resolveConfigDir(profile.name, rings);
-        if (rotation) {
-          effectiveExtraEnv = { ...effectiveExtraEnv, [rotation.envVar]: rotation.dir };
-          launchProfile = { provider: "codex", name: "default" };
-          console.log(`[session] codex license '${profile.name}' -> ${rotation.envVar}=${rotation.dir} (--profile suppressed)`);
-        }
-      } catch (err) {
-        console.warn("[session] codex license ring resolution failed (non-fatal):", err instanceof Error ? err.message : String(err));
-      }
-    }
-    // Claude OAuth subscriptions: a Max/Pro-plan login is a separate CLAUDE_CONFIG_DIR
-    // directory with its own `.credentials.json` — selected by an auto-discovered
-    // `~/.claude-<name>` dir or a rotation-ring entry. Point CLAUDE_CONFIG_DIR at it and
-    // DROP the settings-profile name from the launch (a separate config dir has no
-    // `settings_<name>.json`, and it authenticates via its own login). Plain
-    // settings-file / API-key (settingsProfile) profiles resolve to no dir and keep
-    // `--settings`. Mirrors the codex CODEX_HOME path above.
-    if (profile?.provider === "claude" && profile.name && profile.name !== "default" && profile.name !== "mock") {
-      try {
-        const rings: RotationRings = { claude: await loadClaudeSubscriptionRing(db) };
-        const rotation = getProviderExitBehavior("claude").resolveConfigDir(profile.name, rings);
-        if (rotation) {
-          effectiveExtraEnv = { ...effectiveExtraEnv, [rotation.envVar]: rotation.dir };
-          launchProfile = { provider: "claude", name: "default" };
-          console.log(`[session] claude subscription '${profile.name}' -> ${rotation.envVar}=${rotation.dir} (--settings suppressed)`);
-        }
-      } catch (err) {
-        console.warn("[session] claude subscription ring resolution failed (non-fatal):", err instanceof Error ? err.message : String(err));
-      }
-    }
+    // Provider rotation rings (codex license / claude subscription): when the
+    // profile resolves to a separate CODEX_HOME / CLAUDE_CONFIG_DIR, point the env
+    // var at it and drop the profile name from the launch. Best-effort — see
+    // resolveProviderRotation for why a failure must never block a launch.
+    const rotation = await resolveProviderRotation(db, profile, extraEnv, {
+      loadCodexLicenseRing,
+      loadClaudeSubscriptionRing,
+      getProviderExitBehavior,
+    });
+    const effectiveExtraEnv = rotation.extraEnv;
+    const launchProfile = rotation.profile;
 
     // ── Exit state-machine terminal handlers ──────────────────────────────────
     // The drain → classify → finalize → continue machine. `drain` (output-to-EOF,
@@ -429,6 +279,22 @@ export function createSessionLifecycle(
     // writes, HANDOFF.md, relaunch) for each route. Provider-specific knowledge
     // (which usage limit was hit) comes from the provider's exit behavior.
 
+    /**
+     * The context every terminal route shares. #543: built once here and once in
+     * `notifyExternalExit`, so the two paths finalize through the SAME code — the drift
+     * list (auth recovery, the success streak clear, the profile name on a failure record)
+     * stops being a list.
+     */
+    function exitFinalizeContext(endNow: string, durationMs: number, exitCode: number | null, capturedStderr: string): ExitFinalizeContext {
+      return {
+        db, sessionId, workspaceId, projectId, executor,
+        healthProviderName: lifecycleProviderName(provider, profile),
+        authProviderName: narrowProviderName(executor),
+        profileName: profile?.name,
+        durationMs, exitCode, capturedStderr, now: endNow,
+      };
+    }
+
     /** usage-limit route: persist rate-limit stats and block the workspace for rotation. */
     function finalizeUsageLimitExit(
       route: Extract<ReturnType<typeof classifySessionExitRoute>, { phase: "usage-limit" }>,
@@ -436,33 +302,26 @@ export function createSessionLifecycle(
       durationMs: number,
       exitCode: number | null,
     ): void {
-      const { usageLimit, effectiveExitCode } = route;
-      const stats = usageLimit.kind === "codex"
-        ? buildCodexUsageLimitStats(executor, durationMs, exitCode, usageLimit.message, usageLimit.retryAfter)
-        : buildClaudeUsageLimitStats(executor, durationMs, exitCode, usageLimit.message, usageLimit.retryAfter);
-      void (async () => {
-        await recordAgentProfileLaunchFailure(db, {
-          provider: lifecycleProviderName(provider, profile),
-          profileName: profile?.name,
-          summary: stats.failureReason,
-          exitCode: effectiveExitCode,
-          sessionId,
-          workspaceId,
-          at: endNow,
-        });
-        const mergedStats = await mergeExistingSessionStats(db, sessionId, stats);
-        await lifecycleRepo.updateSessionStoppedWithStats(sessionId, endNow, String(effectiveExitCode), JSON.stringify(mergedStats), db);
-        await lifecycleRepo.updateWorkspaceStatus(workspaceId, "blocked", endNow, db);
-        console.warn(
-          `[agent] ${usageLimit.kind}-rate-limited: sessionId=${sessionId} workspace=${workspaceId}` +
-          `${usageLimit.retryAfter ? ` retryAfter=${usageLimit.retryAfter}` : ""}`,
-        );
-      })()
-        .catch((err) => console.error(`Failed to record ${usageLimit.kind} usage-limit launch failure:`, err))
-        .finally(() => options?.onSessionExit?.(workspaceId, sessionId, effectiveExitCode, planMode));
+      void finalizeUsageLimitRoute(route, exitFinalizeContext(endNow, durationMs, exitCode, ""))
+        .catch((err) => {
+          console.error(`Failed to record ${route.usageLimit.kind} usage-limit launch failure:`, err);
+        })
+        .finally(() => options?.onSessionExit?.(workspaceId, sessionId, route.effectiveExitCode, planMode));
     }
 
-    /** launch-failure route: a fast zero-output crash or a non-zero exit with error text. */
+    /**
+     * launch-failure route: a fast zero-output crash or a non-zero exit with error text.
+     *
+     * Special-cased sub-route: a resumed launch whose error text names a missing provider
+     * transcript ("No conversation found with session ID: <uuid>" for Claude — volume
+     * deleted, ~/.claude pruned, image rebuild without the state volume). The butler SDK
+     * path already recovers from this (`isStaleResumeError` in butler-sdk.service.ts);
+     * workspace agents did not, so a stale `--resume` used to be reported as a plain
+     * launch failure and left the workspace idle awaiting a manual relaunch. Instead: clear
+     * the dead provider session id so it can't be forwarded again, and relaunch fresh with
+     * a handoff note — bounded to one automatic retry per workspace so a launch failure for
+     * an unrelated reason can't loop.
+     */
     function finalizeLaunchFailureExit(
       route: Extract<ReturnType<typeof classifySessionExitRoute>, { phase: "launch-failure" }>,
       endNow: string,
@@ -470,42 +329,50 @@ export function createSessionLifecycle(
       exitCode: number | null,
       capturedStderr: string,
     ): void {
-      const { isZeroOutput, isNonZeroExit, effectiveExitCode, errorText } = route;
-      const stats = isZeroOutput
-        ? buildZeroOutputLaunchFailureStats(executor, durationMs, exitCode, capturedStderr)
-        : buildModelErrorLaunchFailureStats(executor, durationMs, exitCode, errorText);
-      void (async () => {
-        await recordAgentProfileLaunchFailure(db, {
-          provider: lifecycleProviderName(provider, profile),
-          profileName: profile?.name,
-          summary: stats.failureReason,
-          exitCode: effectiveExitCode,
-          sessionId,
+      const { effectiveExitCode, errorText } = route;
+      const usedProviderSessionId = resumeWithNewModel ? undefined : providerSessionId;
+      const staleResumeRecoveryCount = state.workspaceStaleResumeRecoveryCount.get(workspaceId) ?? 0;
+      const isStaleResume =
+        Boolean(usedProviderSessionId) &&
+        staleResumeRecoveryCount < MAX_STALE_RESUME_RECOVERIES &&
+        getProviderExitBehavior(narrowProviderName(executor)).isStaleResumeError(errorText || capturedStderr);
+
+      const sessionFinalized = finalizeLaunchFailureRoute(
+        route,
+        exitFinalizeContext(endNow, durationMs, exitCode, capturedStderr),
+        { isStaleResume },
+      )
+        .then(async () => {
+          // Only the live path can clear the dead provider session id, because only it knows
+          // which session was resumed FROM.
+          if (isStaleResume && resumeFromId) await lifecycleRepo.clearProviderSessionId(resumeFromId, db);
+        })
+        .catch((err) => console.error("Failed to record launch failure:", err));
+
+      void sessionFinalized.finally(() => options?.onSessionExit?.(workspaceId, sessionId, effectiveExitCode, planMode));
+
+      if (isStaleResume) {
+        state.workspaceStaleResumeRecoveryCount.set(workspaceId, staleResumeRecoveryCount + 1);
+        sessionFinalized.finally(() => startSession({
           workspaceId,
-          at: endNow,
-        });
-        const mergedStats = await mergeExistingSessionStats(db, sessionId, stats);
-        await lifecycleRepo.updateSessionStoppedWithStats(sessionId, endNow, String(effectiveExitCode), JSON.stringify(mergedStats), db);
-        await lifecycleRepo.insertSessionMessage({
-          sessionId,
-          type: "stderr",
-          data: stats.failureReason,
-          exitCode: null,
-        }, db);
-        await lifecycleRepo.updateWorkspaceStatus(workspaceId, "idle", endNow, db);
-        if (projectId) {
-          emitButlerSystemEvent({
-            projectId,
-            kind: "session_failed",
-            workspaceId,
-            text: isNonZeroExit
-              ? `Agent launch failed for workspace ${workspaceId}: exited with code ${effectiveExitCode} in ${Math.round(durationMs / 1000)}s${errorText ? ` — ${errorText.slice(0, 200)}` : ""}.`
-              : `Agent launch failed for workspace ${workspaceId}: zero output within ${Math.round(durationMs / 1000)}s.`,
-          });
-        }
-      })()
-        .catch((err) => console.error("Failed to record launch failure:", err))
-        .finally(() => options?.onSessionExit?.(workspaceId, sessionId, effectiveExitCode, planMode));
+          prompt: buildStaleResumeHandoffPrompt(prompt),
+          agentCommand,
+          agentArgs: effectiveAgentArgs,
+          resumeFromId: sessionId,
+          multiTurn,
+          permissionPromptTool,
+          planMode,
+          provider,
+          triggerType: triggerType ?? "agent",
+          profile,
+          model,
+          systemInstructions,
+          contextFiles,
+          extraEnv,
+          workingDirOverride,
+          skipPermissions: skipPermissionsOpt,
+        })).catch((err) => console.error(`[session] stale-resume relaunch failed: workspaceId=${workspaceId}`, err));
+      }
     }
 
     /**
@@ -519,13 +386,16 @@ export function createSessionLifecycle(
       planText: string | null,
     ): void {
       const sessionFinalized = (async () => {
-        await lifecycleRepo.updateSessionCompleted(sessionId, endNow, String(exitCode ?? 0), db);
+        // #543: session-completed + the #430 failure-streak clear are the shared half; the
+        // rest of this route (HANDOFF.md, the scorecard, plan mode, the auto-resume below)
+        // needs the launch options and stays here.
+        await finalizeCompletedRoute(exitFinalizeContext(endNow, 0, exitCode, ""), exitCode);
 
         // Write HANDOFF.md before workflow callbacks can launch the next session.
         if (effectiveWorkingDir) {
           try {
             const { writeHandoffFile } = await import("../handoff.service.js");
-            await writeHandoffFile(effectiveWorkingDir, sessionId, db, workspace.baseBranch);
+            await writeHandoffFile(effectiveWorkingDir, sessionId, db, workspaceRow.baseBranch, workspaceId);
             console.log(`[session] HANDOFF.md written: workspaceId=${workspaceId} sessionId=${sessionId}`);
           } catch (err) {
             console.warn(`[session] HANDOFF.md write failed: sessionId=${sessionId}`, err);
@@ -552,7 +422,6 @@ export function createSessionLifecycle(
             agentCommand,
             agentArgs: effectiveAgentArgs,
             resumeFromId: sessionId,
-            claudeProfile,
             multiTurn: undefined,
             permissionPromptTool,
             planMode: false,
@@ -576,92 +445,20 @@ export function createSessionLifecycle(
       //   2. no plan / non-zero exit → mark the workspace blocked (needs-attention).
       if (planMode) {
         void sessionFinalized.then(() =>
-          finalizePlanModeExit(workspaceId, exitCode, planText, {
-            agentCommand,
-            agentArgs: effectiveAgentArgs,
-            claudeProfile,
-            permissionPromptTool,
-            provider,
-            profile,
-          }),
-        );
-      }
-    }
-
-    /**
-     * Plan-mode completion (#924). Always clears planMode and lands the workspace in a
-     * VISIBLE state — never a silent idle In Progress with planMode stuck true. Extracted
-     * so the "no plan captured / non-zero exit" recovery path is explicit and testable.
-     */
-    async function finalizePlanModeExit(
-      workspaceId: string,
-      exitCode: number | null,
-      planText: string | null,
-      relaunch: {
-        agentCommand: string | undefined;
-        agentArgs: string | undefined;
-        claudeProfile: string | undefined;
-        permissionPromptTool: string | undefined;
-        provider: import("../agent-provider.js").ProviderId | undefined;
-        profile: { provider: ProviderName; name: string } | undefined;
-      },
-    ): Promise<void> {
-      try {
-        // `planText` is already the strict marker-block (or null) from the raw-buffer scan;
-        // a non-zero exit invalidates it (a crashed run can't have produced a real plan).
-        const plan = exitCode === 0 ? planText : null;
-        const nowIso = () => new Date().toISOString();
-
-        // No usable plan (empty text, extract failed, or non-zero exit): clear plan mode
-        // and surface a needs-attention state instead of stranding the workspace. A normal
-        // follow-up turn then implements (never re-runs read-only — planMode is now false).
-        if (!plan || !workspace.workingDir) {
-          await lifecycleRepo.updateWorkspacePlanMode(workspaceId, false, nowIso(), db);
-          await lifecycleRepo.updateWorkspaceStatusOnly(workspaceId, "blocked", nowIso(), db);
-          const reason = exitCode !== 0
-            ? `plan run exited with code ${exitCode}`
-            : "plan run produced no plan text";
-          console.warn(`[session] plan-mode run produced no usable plan (${reason}): workspaceId=${workspaceId} — cleared planMode, marked blocked`);
-          if (projectId) {
-            emitButlerSystemEvent({
-              projectId,
-              kind: "session_failed",
-              workspaceId,
-              text: `Plan-mode run for workspace ${workspaceId} produced no usable plan (${reason}). Cleared plan mode and marked the workspace blocked — a normal turn will now implement.`,
-            });
-          }
-          return;
-        }
-
-        const planPath = writePlanFile(workspace.workingDir, plan);
-        await lifecycleRepo.updateWorkspacePlanMode(workspaceId, false, nowIso(), db);
-
-        const harness = relaunch.provider === "codex" ? "codex" : relaunch.provider === "copilot" ? "copilot" : "claude";
-        const prefRows = await lifecycleRepo.getAllPreferences(db);
-        const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
-        const autoContinue = getHarnessBoolSetting(prefMap, harness, "plan_auto_continue");
-
-        if (autoContinue) {
-          console.log(`[session] plan ready (${planPath}) — auto-continuing to implementation: workspaceId=${workspaceId}`);
-          await lifecycleRepo.updateWorkspaceStatusOnly(workspaceId, "active", nowIso(), db);
-          await startSession({
+          finalizePlanModeExit(
             workspaceId,
-            prompt: buildImplementPrompt(),
-            agentCommand: relaunch.agentCommand,
-            agentArgs: relaunch.agentArgs,
-            claudeProfile: relaunch.claudeProfile,
-            permissionPromptTool: relaunch.permissionPromptTool,
-            planMode: false,
-            provider: relaunch.provider,
-            triggerType: "plan-implement",
-            profile: relaunch.profile,
-          });
-        } else {
-          console.log(`[session] plan ready (${planPath}) — awaiting human approval: workspaceId=${workspaceId}`);
-          await lifecycleRepo.updateWorkspacePendingPlan(workspaceId, planPath, "awaiting-plan-approval", nowIso(), db);
-        }
-      } catch (err) {
-        console.error(`[session] plan completion handling failed: workspaceId=${workspaceId}`, err);
+            exitCode,
+            planText,
+            {
+              agentCommand,
+              agentArgs: effectiveAgentArgs,
+              permissionPromptTool,
+              provider,
+              profile,
+            },
+            { db, workspaceWorkingDir: workspaceRow.workingDir, projectId, startSession },
+          ),
+        );
       }
     }
 
@@ -671,12 +468,18 @@ export function createSessionLifecycle(
      * handler. The provider exit behavior supplies the usage-limit detection so
      * this stays free of `executor === ...` provider branches.
      */
-    function handleExitEvent(exitCode: number | null): void {
+    /**
+     * @param hadExitPlanModeDenied captured by the CALLER before `broadcast()` runs.
+     *   #580: broadcast's exit teardown deletes `sessionExitPlanModeDenied`, and it runs
+     *   first — so reading the flag here always returned false and the auto-resume below
+     *   was dead from the day it was written.
+     */
+    function handleExitEvent(exitCode: number | null, hadExitPlanModeDenied: boolean): void {
       // teardown: always clean up in-memory state regardless of DB result
       state.sessionContexts.delete(sessionId);
       state.turnStates.delete(sessionId);
       state.sessionProviders.delete(sessionId);
-      const hadExitPlanModeDenied = state.sessionExitPlanModeDenied.delete(sessionId);
+      state.sessionExitPlanModeDenied.delete(sessionId);
 
       const stoppedByUser = state.stoppedByUser.has(sessionId);
       const messages = state.messageBuffer.get(sessionId) ?? [];
@@ -732,24 +535,81 @@ export function createSessionLifecycle(
       }
     }
 
+    // Provision the builder's devcontainer BEFORE the (synchronous) spawn, and surface
+    // any isolation downgrade instead of leaving it in a console.warn only (#160) — see
+    // devcontainer-launch.ts for the best-effort/strict-mode contract.
+    const { containerProvision, isolationDowngradeReason } = await resolveContainerProvision({
+      db, state, sessionId, workspaceId, projectId, effectiveWorkingDir, profile, launchProfile, effectiveExtraEnv,
+    });
+
+    // Persist the container id (#154) so stop/hang-kill/killAll — and a post-restart
+    // reattach — can reach the in-container process, not just the host docker-exec
+    // client. Best-effort: a write failure degrades to the host-only kill leg, same
+    // contract as the rest of provisioning.
+    if (containerProvision) {
+      lifecycleRepo.updateSessionContainerId(sessionId, containerProvision.handle.containerId, db)
+        .catch((err) => console.error(`Failed to store session containerId: sessionId=${sessionId}`, err));
+    }
+
+    surfaceIsolationDowngrade({
+      db, workspaceId, isolationDowngradeReason,
+      wasAlreadyDowngraded: workspace.isolationDowngraded,
+    });
+
+    // Worker-fleet placement (epic #1): an explicit placement wins; otherwise a
+    // project opted into worker dispatch gets an eligible remote worker, else
+    // host. Containerized launches keep the container path untouched.
+    // Strict worker dispatch (epic #184) refuses the host fallback: surface it as
+    // a CONFLICT the caller can act on, the same shape devcontainer strict mode
+    // uses for ISOLATION_REFUSED, rather than silently running on the board.
+    let effectivePlacement = placement;
+    if (!effectivePlacement && !containerProvision && projectId) {
+      effectivePlacement = await resolveWorkerPlacement({
+        database: db,
+        projectId,
+        providerName,
+        branch: workspace.isDirect ? undefined : workspace.branch,
+        baseBranch: workspace.baseBranch ?? undefined,
+      }).catch((err) => {
+        if (err instanceof WorkerDispatchUnavailableError) {
+          throw new WorkspaceError(err.message, "CONFLICT", { code: "NO_AVAILABLE_WORKER" });
+        }
+        throw err;
+      });
+    }
+
     try {
-      const proc = agentService.launch(effectiveWorkingDir, sessionId, effectivePrompt, effectiveAgentArgs, (event) => {
-        if (event.type === "exit") {
-          if (state.sessionExitHandled.has(sessionId)) {
-            console.warn(`[session] duplicate exit ignored: sessionId=${sessionId}`);
-            return;
+      const proc = agentService.launch({
+        worktreePath: effectiveWorkingDir,
+        sessionId,
+        prompt: effectivePrompt,
+        agentArgs: effectiveAgentArgs,
+        // resumeWithNewModel omits --resume so the new profile/provider is used instead.
+        providerSessionId: resumeWithNewModel ? undefined : providerSessionId,
+        agentCommand, keepAlive: multiTurn, permissionPromptTool, planMode,
+        provider, profile: launchProfile, extraEnv: effectiveExtraEnv, skipPermissions,
+        model: effectiveModel, contextFiles,
+        systemInstructions: (effectiveSystemInstructions ?? "").trim() || undefined,
+        containerProvision, placement: effectivePlacement,
+        onOutput: (event) => {
+          if (event.type === "exit") {
+            if (state.sessionExitHandled.has(sessionId)) {
+              console.warn(`[session] duplicate exit ignored: sessionId=${sessionId}`);
+              return;
+            }
+            state.sessionExitHandled.add(sessionId);
           }
-          state.sessionExitHandled.add(sessionId);
-        }
 
-        const message: AgentOutputMessage = event;
-        broadcast(sessionId, message);
+          const message: AgentOutputMessage = event;
+          // #580: broadcast()'s exit teardown clears this flag, so read it FIRST.
+          const hadExitPlanModeDenied = event.type === "exit" && state.sessionExitPlanModeDenied.delete(sessionId);
+          broadcast(sessionId, message);
 
-        if (event.type === "exit") {
-          handleExitEvent(event.exitCode ?? null);
-        }
-      // When resumeWithNewModel is true, omit --resume so the new profile/provider is used instead
-      }, resumeWithNewModel ? undefined : providerSessionId, agentCommand, claudeProfile, multiTurn, permissionPromptTool, planMode, provider, launchProfile, effectiveExtraEnv, skipPermissions, effectiveModel, contextFiles, (effectiveSystemInstructions ?? "").trim() || undefined);
+          if (event.type === "exit") {
+            handleExitEvent(event.exitCode ?? null, hadExitPlanModeDenied);
+          }
+        },
+      });
 
       // Persist PID so hot-reload can detect surviving processes
       if (proc.pid) {
@@ -760,7 +620,7 @@ export function createSessionLifecycle(
       await recordAgentProfileLaunchFailure(db, {
         provider: lifecycleProviderName(provider, profile),
         profileName: profile?.name,
-        summary: err instanceof Error ? err.message : String(err),
+        summary: errorMessage(err),
         exitCode: 1,
         sessionId,
         workspaceId,
@@ -773,6 +633,13 @@ export function createSessionLifecycle(
       state.sessionExitHandled.delete(sessionId);
       await lifecycleRepo.updateSessionStoppedNoStats(sessionId, new Date().toISOString(), db)
         .catch(() => {});
+      // A strict-dispatch refusal can also surface at LAUNCH time (#245): the
+      // worker vanished between placement and assign and the dispatch proxy
+      // refused the host fallback. Same CONFLICT shape as the placement-time
+      // refusal above so callers see one contract.
+      if (err instanceof WorkerDispatchUnavailableError) {
+        throw new WorkspaceError(err.message, "CONFLICT", { code: "NO_AVAILABLE_WORKER" });
+      }
       throw err;
     }
 
@@ -854,24 +721,10 @@ export function createSessionLifecycle(
   /** Clean up stale in-memory state for a session whose process is gone. */
   async function cleanupStaleSession(sessionId: string): Promise<void> {
     console.log(`[session] cleaning up stale session: sessionId=${sessionId}`);
-    state.sessionContexts.delete(sessionId);
-    state.turnStates.delete(sessionId);
-    state.sessionSubagents.delete(sessionId);
-    state.sessionTasks.delete(sessionId);
-    state.sessionHasTodoWrite.delete(sessionId);
-    state.sessionToolUses.delete(sessionId);
-    state.sessionModels.delete(sessionId);
-    state.sessionContextTokens.delete(sessionId);
-    state.sessionLastTool.delete(sessionId);
-    state.sessionAgentToolUseIds.delete(sessionId);
-    state.sessionProviders.delete(sessionId);
-    state.sessionSubstantiveOutput.delete(sessionId);
-    const pendingTimer = state.dbWriteTimers.get(sessionId);
-    if (pendingTimer !== undefined) {
-      clearTimeout(pendingTimer);
-      state.dbWriteTimers.delete(sessionId);
-    }
-    state.dbWriteBuffer.delete(sessionId);
+    // #543: this listed 14 of the 19 session-keyed members by hand, so a stale session
+    // leaked its messageBuffer, sessionTextParts, sessionFinalText, stoppedByUser and
+    // sessionExitPlanModeDenied for the lifetime of the process.
+    teardownSessionState(state, sessionId);
     const now = new Date().toISOString();
     await lifecycleRepo.updateSessionStoppedNoStats(sessionId, now, db);
     // Also reset workspace status to idle
@@ -909,29 +762,20 @@ export function createSessionLifecycle(
     }
     state.sessionExitHandled.add(sessionId);
 
+    // Capture the in-memory exit signals BEFORE teardown so this exit can still be classified.
+    // A reattached agent may have streamed a usage-limit / crash message after the restart; if we
+    // dropped these we'd lose the only observable signal and misfile every external exit (review §3.2).
+    const bufferedMessages = state.messageBuffer.get(sessionId) ?? [];
+    const capturedFinalText = state.sessionFinalText.get(sessionId) ?? null;
+    const hadSubstantiveOutput =
+      state.sessionSubstantiveOutput.has(sessionId) || Boolean(capturedFinalText?.trim().length);
+    const stoppedByUser = state.stoppedByUser.has(sessionId);
+    const providerFromState = state.sessionProviders.get(sessionId);
+
     const ctx = state.sessionContexts.get(sessionId);
-    // Clear in-memory state
-    state.sessionContexts.delete(sessionId);
-    state.turnStates.delete(sessionId);
-    state.sessionProviders.delete(sessionId);
-    state.sessionSubagents.delete(sessionId);
-    state.sessionTasks.delete(sessionId);
-    state.sessionHasTodoWrite.delete(sessionId);
-    state.sessionToolUses.delete(sessionId);
-    state.sessionModels.delete(sessionId);
-    state.sessionContextTokens.delete(sessionId);
-    state.sessionLastTool.delete(sessionId);
-    state.sessionAgentToolUseIds.delete(sessionId);
-    state.sessionTextParts.delete(sessionId);
-    state.sessionFinalText.delete(sessionId);
-    state.sessionSubstantiveOutput.delete(sessionId);
-    state.sessionExitPlanModeDenied.delete(sessionId);
-    const externalExitTimer = state.dbWriteTimers.get(sessionId);
-    if (externalExitTimer !== undefined) {
-      clearTimeout(externalExitTimer);
-      state.dbWriteTimers.delete(sessionId);
-    }
-    state.dbWriteBuffer.delete(sessionId);
+    // #543: read `ctx` FIRST — teardown clears sessionContexts, and the activity/todo
+    // clears below need the project/issue ids off it.
+    teardownSessionState(state, sessionId);
 
     const existing = await lifecycleRepo.getSessionStatus(sessionId, db);
     if (!existing || existing.status !== "running") {
@@ -945,14 +789,87 @@ export function createSessionLifecycle(
       options?.onTodos?.(ctx.projectId, ctx.issueId, []);
     }
 
-    // Update DB
     const now = new Date().toISOString();
-    await lifecycleRepo.updateSessionCompleted(sessionId, now, String(exitCode ?? 0), db);
-
-    // Fire workflow callback
     const wsId = ctx?.workspaceId;
-    if (wsId) {
-      options?.onSessionExit?.(wsId, sessionId, exitCode, false);
+    const executor = providerFromState ?? existing.executor ?? "claude-code";
+    const providerName = lifecycleProviderName(executor);
+    // A reattached session started before the restart, so its duration is large — outside the
+    // launch-failure window, exactly as a genuine long-running agent should be.
+    const startedAtMs = existing.startedAt ? new Date(existing.startedAt).getTime() : Date.now();
+    const durationMs = Math.max(0, new Date(now).getTime() - startedAtMs);
+    const capturedStderr = extractCapturedStderr(bufferedMessages);
+    const usageLimit = getProviderExitBehavior(providerName).detectUsageLimit(bufferedMessages);
+
+    // Route the external exit through the SAME classifier the live exit path uses, instead of the
+    // old raw `String(exitCode ?? 0)` shortcut that recorded every external exit as completed/"0".
+    // `exitCodeKnown: false` when the PID poll never observed a code (the reattach default).
+    const route = classifySessionExitRoute({
+      exitCode,
+      durationMs,
+      hadSubstantiveOutput,
+      stoppedByUser,
+      usageLimit,
+      planText: capturedFinalText,
+      capturedStderr,
+      exitCodeKnown: exitCode !== null,
+    });
+
+    // #543: the live path gets the profile from StartSessionOptions; a reattached session
+    // has none, so read it off the workspace row. The shared finalize needs it to name the
+    // profile whose health it is recording — omitting it filed every external failure under
+    // the profile-less `<provider>:default` key while the breaker reads `<provider>:<profile>`.
+    const externalWorkspace = wsId ? await lifecycleRepo.getWorkspaceById(wsId, db).catch(() => null) : null;
+    const finalizeCtx: ExitFinalizeContext = {
+      db, sessionId, workspaceId: wsId, projectId: ctx?.projectId, executor,
+      // A reattached session has no StartSessionOptions provider, so both keys narrow from
+      // the executor — unlike the live path, where they can legitimately differ.
+      healthProviderName: providerName,
+      authProviderName: providerName,
+      profileName: externalWorkspace?.claudeProfile ?? undefined,
+      durationMs, exitCode, capturedStderr, now,
+    };
+
+    const fireExit = (code: number | null) => {
+      if (wsId) options?.onSessionExit?.(wsId, sessionId, code, false);
+    };
+
+    switch (route.phase) {
+      case "stopped":
+        // The user stopped it; stopSession already wrote "stopped". Just fire the callback.
+        fireExit(exitCode);
+        return;
+      case "usage-limit":
+        fireExit(await finalizeUsageLimitRoute(route, finalizeCtx));
+        return;
+      case "launch-failure": {
+        const { effectiveExitCode } = await finalizeLaunchFailureRoute(route, finalizeCtx);
+        fireExit(effectiveExitCode);
+        return;
+      }
+      case "unknown-exit": {
+        // The exit code was never observed (reattached PID vanished after a restart). Record a
+        // distinct indeterminate terminal — status "stopped", exitCode NULL, stats flagged
+        // indeterminate — so a post-restart crash/quota-exhaustion is never logged as a clean "0".
+        const stats = buildIndeterminateExitStats(executor, durationMs, route.hadSubstantiveOutput, route.capturedStderr);
+        const mergedStats = await mergeExistingSessionStats(db, sessionId, stats);
+        await lifecycleRepo.updateSessionStoppedWithStats(sessionId, now, null, JSON.stringify(mergedStats), db);
+        if (ctx?.projectId && wsId) {
+          emitButlerSystemEvent({
+            projectId: ctx.projectId,
+            kind: "session_failed",
+            workspaceId: wsId,
+            text: `Agent session for workspace ${wsId} ended with an indeterminate exit after a server restart — its real exit code could not be observed. Recorded as indeterminate (not a verified success).`,
+          });
+        }
+        console.warn(`[agent] external exit indeterminate (exit code unobserved): sessionId=${sessionId} workspace=${wsId ?? "?"}`);
+        fireExit(exitCode); // exitCode is null — the workflow callback must NOT see a fabricated 0
+        return;
+      }
+      case "completed":
+        // A genuine, OBSERVED exit code (someone passed a real code, e.g. 0). Preserve it.
+        await finalizeCompletedRoute(finalizeCtx, route.exitCode);
+        fireExit(exitCode);
+        return;
     }
   }
 

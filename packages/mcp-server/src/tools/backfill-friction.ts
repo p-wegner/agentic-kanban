@@ -3,6 +3,7 @@ import { z } from "zod";
 import { eq, isNotNull, gte, and } from "drizzle-orm";
 import { parseSessionSummary, computeFrictionStats } from "@agentic-kanban/shared";
 import { prodDeps, type ToolDeps } from "./deps.js";
+import { mcpJson } from "../db-utils.js";
 
 /**
  * Mirrors `pnpm cli -- session backfill-friction`.
@@ -71,12 +72,7 @@ export function registerBackfillFriction(server: McpServer, deps: ToolDeps = pro
         updated++;
       }
 
-      return {
-        content: [{
-          type: "text" as const,
-          text: JSON.stringify({ scanned, updated, skipped, empty }, null, 2),
-        }],
-      };
+      return mcpJson({ scanned, updated, skipped, empty });
     },
   );
 }

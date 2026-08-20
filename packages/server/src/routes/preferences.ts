@@ -20,7 +20,9 @@ import { createTagService } from "../services/tag.service.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import type { ProviderName } from "../services/agent-provider.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 export function createPreferencesRoute(database: Database) {
   const router = createRouter();
   const preferenceService = createPreferenceService({ database });
@@ -157,7 +159,7 @@ export function createPreferencesRoute(database: Database) {
       const { command } = spawnCodexLogin(codexHome);
       return c.json({ ok: true, codexHome, command });
     } catch (err) {
-      return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 500);
+      return c.json({ ok: false, error: errorMessage(err) }, 500);
     }
   });
 
@@ -182,7 +184,7 @@ export function createPreferencesRoute(database: Database) {
       const { command } = spawnClaudeLogin(configDir);
       return c.json({ ok: true, configDir, command });
     } catch (err) {
-      return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 500);
+      return c.json({ ok: false, error: errorMessage(err) }, 500);
     }
   });
 
@@ -205,7 +207,7 @@ export function createPreferencesRoute(database: Database) {
     }
     const profileName = body.profileName?.trim() || "default";
     const prefRows = await getAllPreferences(database);
-    const prefMap = new Map(prefRows.map((row) => [row.key, row.value]));
+    const prefMap = toPrefMap(prefRows);
     const result: AgentProfilePreflightResult = preflightAgentProfile(prefMap, provider, profileName);
     return c.json(result);
   });
@@ -237,7 +239,7 @@ export function createPreferencesRoute(database: Database) {
       return c.json(data);
     } catch (err) {
       return c.json(
-        { error: err instanceof Error ? err.message : String(err), providers: [], scrapedAt: new Date().toISOString() },
+        { error: errorMessage(err), providers: [], scrapedAt: new Date().toISOString() },
         503,
       );
     }

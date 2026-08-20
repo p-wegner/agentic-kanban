@@ -1,11 +1,13 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
-import { requireEntity } from "../db-utils.js";
+import { prodDeps, type ToolDeps } from "./deps.js";
+import { mcpJson, requireEntity } from "../db-utils.js";
 
-export function registerCreateDiffComment(server: McpServer) {
+export function registerCreateDiffComment(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema } = deps;
+
   server.tool(
     "create_diff_comment",
     "Add a review comment on a file in a workspace's diff",
@@ -40,9 +42,7 @@ export function registerCreateDiffComment(server: McpServer) {
 
       await db.insert(schema.diffComments).values(comment);
 
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify(comment, null, 2) }],
-      };
+      return mcpJson(comment);
     },
   );
 }

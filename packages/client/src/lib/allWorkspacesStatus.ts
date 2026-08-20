@@ -4,17 +4,17 @@
 // rather than reusing the sibling — see behaviorsToPreserve in the decomposition spec.
 
 import type { IssueWithStatus } from "@agentic-kanban/shared";
+import { WORKSPACE_STATUS_TONE, workspaceStatusToneClass } from "./badgeTones.js";
 
 /** The per-issue "main" workspace summary (non-null; rows render it only when present). */
 type WorkspaceMain = NonNullable<NonNullable<IssueWithStatus["workspaceSummary"]>["main"]>;
 
-export const WS_STATUS_COLORS: Record<string, string> = {
-  active: "bg-green-100 text-green-700",
-  reviewing: "bg-accent-50 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300",
-  fixing: "bg-orange-100 text-orange-700",
-  idle: "bg-yellow-100 text-yellow-700",
-  closed: "bg-gray-100 text-gray-500 dark:bg-gray-400",
-};
+// #517: derived from the status tones. The hand-written map had `closed` as
+// `bg-gray-100 text-gray-500 dark:bg-gray-400` — a LIGHT dark-mode background with no
+// dark text, i.e. grey-on-light-grey — and three other rows were light-only.
+export const WS_STATUS_COLORS: Record<string, string> = Object.fromEntries(
+  Object.keys(WORKSPACE_STATUS_TONE).map((status) => [status, workspaceStatusToneClass(status)]),
+);
 
 /** Tailwind classes for the workspace-row status pill (branch order matters). */
 export function workspaceRowStatusBadgeClass(main: WorkspaceMain): string {

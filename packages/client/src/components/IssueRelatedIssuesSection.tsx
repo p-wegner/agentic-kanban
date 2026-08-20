@@ -1,36 +1,20 @@
-import { useEffect, useState } from "react";
-import { apiFetch } from "../lib/api.js";
+import type { RelatedIssue } from "../lib/issueDetailTypes.js";
+import { useState } from "react";
 
-interface RelatedIssue {
-  id: string;
-  issueNumber: number | null;
-  title: string;
-  sharedFileCount: number;
-}
 
 interface IssueRelatedIssuesSectionProps {
-  issueId: string;
+  /** Related issues from the detail-bundle (#418) — no self-fetch anymore. */
+  related: RelatedIssue[] | null;
+  loading: boolean;
   onNavigateToIssue?: (issueId: string) => void;
 }
 
 /**
- * Related-issues section. Self-contained (extracted from IssueDetailPanel): owns
- * its own best-effort fetch — moving it out of the panel's loadData mega-effect —
- * loading state, and collapse toggle.
+ * Related-issues section. Data arrives via the detail-bundle; this component
+ * keeps only the collapse toggle.
  */
-export function IssueRelatedIssuesSection({ issueId, onNavigateToIssue }: IssueRelatedIssuesSectionProps) {
-  const [related, setRelated] = useState<RelatedIssue[] | null>(null);
-  const [loading, setLoading] = useState(false);
+export function IssueRelatedIssuesSection({ related, loading, onNavigateToIssue }: IssueRelatedIssuesSectionProps) {
   const [show, setShow] = useState(false);
-
-  useEffect(() => {
-    setRelated(null);
-    setLoading(true);
-    apiFetch<{ related: RelatedIssue[] }>(`/api/issues/${issueId}/related-issues`)
-      .then((ri) => setRelated(ri.related))
-      .catch(() => setRelated([]))
-      .finally(() => setLoading(false));
-  }, [issueId]);
 
   return (
     <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
@@ -81,3 +65,6 @@ export function IssueRelatedIssuesSection({ issueId, onNavigateToIssue }: IssueR
     </div>
   );
 }
+
+/** #610 — re-exported so this component's existing importers are unchanged. */
+export type { RelatedIssue } from "../lib/issueDetailTypes.js";

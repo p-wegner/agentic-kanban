@@ -10,9 +10,12 @@ export const boardQueryKeys = {
   board: (projectId: string) => ["projects", projectId, "board"] as const,
   issueDetail: (projectId: string, issueId?: string) => ["projects", projectId, "issue-detail", issueId ?? "all"] as const,
   milestones: (projectId: string) => ["projects", projectId, "milestones"] as const,
+  projectRepos: (projectId: string) => ["projects", projectId, "repos"] as const,
   projects: ["projects", "active"] as const,
   settings: ["preferences", "settings"] as const,
   sprintCapacity: (projectId: string) => ["projects", projectId, "sprint-capacity"] as const,
   tags: ["tags"] as const,
   workspaceIssue: (projectId: string, issueId?: string) => ["projects", projectId, "workspaces", issueId ?? "all"] as const,
+  workspaceRepoStatus: (projectId: string, include: string) => ["projects", projectId, "workspace-repo-status", include] as const,
+  workspacesList: (projectId: string, status: string) => ["projects", projectId, "workspaces-list", status] as const,
 };

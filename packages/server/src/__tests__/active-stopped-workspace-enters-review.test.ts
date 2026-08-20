@@ -21,34 +21,47 @@
 vi.mock("../db/index.js", () => ({ db: {} }));
 vi.mock("../services/git.service.js", () => ({
   prepareForReview: vi.fn(async () => ({ success: true, diffRef: "master", conflictingFiles: [], uncommittedChanges: [] })),
+  // #377: runPreMergeGate reads the diff to decide docs-only/package-scoped skips.
+  getChangedFileNames: vi.fn(async () => [] as string[]),
 }));
-vi.mock("../services/butler-event-feed.js", () => ({ emitButlerSystemEvent: vi.fn() }));
 vi.mock("../services/agent-settings.service.js", () => ({
+  // #541: exit-workflow / merge-workflow now resolve their launch settings here instead
+  // of hand-rolling the ladder, so these two must exist on the mock.
+  applyWorkspaceProfileToPrefs: vi.fn((m: Map<string, string>) => m),
+  resolveWorkspaceLaunchSettings: vi.fn(() => ({
+    agentCommand: undefined, agentArgs: undefined, profile: undefined,
+    provider: "claude", resumeWithNewModel: false, permissionPromptTool: undefined,
+  })),
   isMockProfile: vi.fn(() => false),
   toExecutorProvider: vi.fn((p: string) => p),
   MOCK_AGENT_COMMAND: "mock",
 }));
-vi.mock("../startup/review-helpers.js", () => ({
-  applyWorkspaceProfileToPrefs: vi.fn((m: Map<string, string>) => m),
-  buildReviewArgs: vi.fn(() => undefined),
+// #557: the `startup/review-helpers.js` shim is gone — the engine calls the service helper
+// with its own db. Partial mock so the rest of review.service stays real.
+vi.mock("../services/review.service.js", async (importOriginal) => ({
+  ...(await importOriginal() as Record<string, unknown>),
   buildReviewPrompt: vi.fn(async () => ({ prompt: "review", model: undefined })),
-  getEffectiveProfile: vi.fn(() => undefined),
-  parseProviderPref: vi.fn(() => "claude"),
 }));
 vi.mock("../startup/merge-strategy.js", () => ({
   // Keep auto-merge OFF so the workspace is left ready-for-merge / In Review for the
   // review session to land — and so repeated calls can be observed deterministically.
   isAutomaticMergeEnabled: vi.fn(() => false),
 }));
-// hasCommittedChanges() uses execFile("git", ["diff", "--quiet", base]); a NON-zero
-// exit (callback receives an Error) means the branch HAS committed changes.
+// hasCommittedChanges() counts commits with `git rev-list --count <base>..HEAD` (#365 — it
+// used to ask `git diff --quiet <base>`, which answered "changed" for a workspace that had
+// made no commits and was merely behind its base). Report ONE commit ahead, so this
+// workspace genuinely has committed work.
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
   return {
     ...actual,
     execFile: vi.fn(
-      (_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null) => void) =>
-        cb(new Error("git diff --quiet: differences present")),
+      (_cmd: string, args: string[], _opts: unknown, cb: (err: Error | null, stdout: string, stderr: string) => void) =>
+        args[0] === "rev-list"
+          ? cb(null, "1\n", "")
+          // Every other git call keeps the pre-#365 blanket behaviour so this test stays
+          // like-for-like; only the commits-ahead probe is answered meaningfully.
+          : cb(new Error("git: mocked failure"), "", ""),
     ),
   };
 });

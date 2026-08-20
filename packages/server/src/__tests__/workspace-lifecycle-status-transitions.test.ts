@@ -13,13 +13,15 @@
 vi.mock("../db/index.js", () => ({ db: {} }));
 vi.mock("../services/git.service.js", () => ({
   prepareForReview: vi.fn(async () => ({ success: true, diffRef: "master", conflictingFiles: [], uncommittedChanges: [] })),
+  // Reached by the merge path's diff-derived cost decisions. Absent from this factory until
+  // #273 un-hung this suite, at which point every test here failed on the mock rather than
+  // on its assertion — the merge had never previously got this far.
+  getChangedFileNames: vi.fn(async () => [] as string[]),
 }));
-vi.mock("../services/butler-event-feed.js", () => ({ emitButlerSystemEvent: vi.fn() }));
 vi.mock("../services/agent-settings.service.js", () => {
   const stubAgentSettings = () => ({
     agentCommand: undefined,
     agentArgs: undefined,
-    claudeProfile: undefined,
     profile: undefined,
     provider: "claude",
     resumeWithNewModel: false,
@@ -31,14 +33,16 @@ vi.mock("../services/agent-settings.service.js", () => {
     MOCK_AGENT_COMMAND: "mock",
     loadAgentSettings: vi.fn(async () => stubAgentSettings()),
     resolveAgentSettings: vi.fn(() => stubAgentSettings()),
+    // #541: exit-workflow resolves its launch settings here now.
+    applyWorkspaceProfileToPrefs: vi.fn((m: Map<string, string>) => m),
+    resolveWorkspaceLaunchSettings: vi.fn(() => stubAgentSettings()),
   };
 });
-vi.mock("../startup/review-helpers.js", () => ({
-  applyWorkspaceProfileToPrefs: vi.fn((m: Map<string, string>) => m),
-  buildReviewArgs: vi.fn(() => undefined),
+// #557: the `startup/review-helpers.js` shim is gone — the engine calls the service helper
+// with its own db. Partial mock so the rest of review.service stays real.
+vi.mock("../services/review.service.js", async (importOriginal) => ({
+  ...(await importOriginal() as Record<string, unknown>),
   buildReviewPrompt: vi.fn(async () => ({ prompt: "review", model: undefined })),
-  getEffectiveProfile: vi.fn(() => undefined),
-  parseProviderPref: vi.fn(() => "claude"),
 }));
 vi.mock("../startup/merge-strategy.js", () => ({
   isAutomaticMergeEnabled: vi.fn(() => false),
@@ -53,15 +57,20 @@ vi.mock("../services/workspace-code-metrics.service.js", () => ({
 vi.mock("../services/bisect.service.js", () => ({
   stopBisectSession: vi.fn(() => false),
 }));
-// hasCommittedChanges() uses execFile("git", ["diff", "--quiet", base]).
-// A non-zero exit (Error callback) means the branch HAS committed changes.
+// hasCommittedChanges() counts commits with `git rev-list --count <base>..HEAD` (#365 — it
+// used to ask `git diff --quiet <base>`, a working-tree diff that answered "changed" for a
+// workspace merely BEHIND its base). Report ONE commit ahead: the branch HAS committed work.
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
   return {
     ...actual,
     execFile: vi.fn(
-      (_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null) => void) =>
-        cb(new Error("git diff --quiet: differences present")),
+      (_cmd: string, args: string[], _opts: unknown, cb: (err: Error | null, stdout: string, stderr: string) => void) =>
+        args[0] === "rev-list"
+          ? cb(null, "1\n", "")
+          // Every other git call keeps the pre-#365 blanket behaviour so this test stays
+          // like-for-like; only the commits-ahead probe is answered meaningfully.
+          : cb(new Error("git: mocked failure"), "", ""),
     ),
   };
 });
@@ -84,6 +93,14 @@ import { createWorkflowEngine } from "../startup/exit-workflow.js";
 import { createWorkspaceSessionService } from "../services/workspace-session.service.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
 import { activeMerges } from "../services/workspace-internals.js";
+import { makeTempRepo } from "./helpers/temp-repo.js";
+
+/**
+ * A REAL repo path (#273). This suite drives the actual merge path, whose repo lock
+ * refuses a repoPath with no `.git` and then POLLS — so the old `"/repo"` literal made
+ * every test here burn its full timeout instead of running.
+ */
+const REPO_PATH = makeTempRepo();
 
 // Test isolation: the per-repoPath merge lock (activeMerges) is a module-level Map
 // (see workspace-merge-service.test.ts ~line 22). Clearing it before each test
@@ -167,7 +184,7 @@ async function seedLifecycleScenario(
   const inReviewNodeId = randomUUID();
 
   await db.insert(projects).values({
-    id: projectId, name: "Test", repoPath: "/repo", repoName: "repo",
+    id: projectId, name: "Test", repoPath: REPO_PATH, repoName: "repo",
     defaultBranch: "master", createdAt: now, updatedAt: now,
   });
   await db.insert(projectStatuses).values([
@@ -202,7 +219,7 @@ async function seedLifecycleScenario(
   await db.insert(workspaces).values({
     id: workspaceId, issueId,
     branch: "feature/ak-707-test",
-    workingDir: "/repo/.worktrees/ak-707-test",
+    workingDir: `${REPO_PATH}/.worktrees/ak-707-test`,
     baseBranch: "master",
     isDirect: false,
     status: wsStatus,

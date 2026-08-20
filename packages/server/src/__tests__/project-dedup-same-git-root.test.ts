@@ -68,32 +68,60 @@ type TestDb = ReturnType<typeof drizzle<typeof schema>>;
 //     resolves to IT. deduplicateProjects and the project-registration repository both read
 //     the singleton `db` from ../db/index.js; mocking that module routes every read/write and
 //     the db.transaction() call onto this connection-stable file DB.
+//
+// The vi.mock(...) factory below runs ONCE, on first import of "../db/index.js" — NOT once per
+// test. Recreating h.client/h.db in beforeEach (see per-describe setup) is therefore not enough
+// on its own: a static `export { db }` would keep pointing at the FIRST client forever, so by the
+// 3rd test (after the 2nd afterEach closes it) every DB call would throw CLIENT_CLOSED. Instead
+// the factory exports live-binding proxies that always resolve to the CURRENT h.client/h.db, so
+// swapping the underlying client each test is enough — no vi.resetModules()/re-import required.
 const h = vi.hoisted(() => {
-  // No imports usable here (hoisted above import init) — build the temp path from globals.
-  const dir = process.env.TEMP || process.env.TMP || process.cwd();
-  const file = `${dir}/dedup-same-root-${Math.random().toString(36).slice(2)}.db`;
-  return { file, client: undefined as Client | undefined, db: undefined as TestDb | undefined };
+  return { file: undefined as string | undefined, client: undefined as Client | undefined, db: undefined as TestDb | undefined };
 });
 
+function liveProxy<T extends object>(getCurrent: () => T): T {
+  return new Proxy({} as T, {
+    get(_target, prop, _receiver) {
+      const current = getCurrent() as Record<PropertyKey, unknown>;
+      const value = current[prop];
+      return typeof value === "function" ? value.bind(current) : value;
+    },
+  });
+}
+
 vi.mock("../db/index.js", () => {
-  const c = createClient({ url: `file:${h.file}` });
-  applyMigrationsToClient(c);
-  c.execute("PRAGMA foreign_keys=ON");
-  const d = drizzle(c, { schema });
-  h.client = c;
-  h.db = d;
+  const db = liveProxy<TestDb>(() => h.db!);
+  const client = liveProxy<Client>(() => h.client!);
   return {
-    db: d,
-    writeDb: d,
-    rawClient: c,
-    rawWriteClient: c,
+    db,
+    writeDb: db,
+    rawClient: client,
+    rawWriteClient: client,
     schema,
     withDbRetry: <T>(fn: () => Promise<T>) => fn(),
     withTransaction: <T>(database: TestDb, fn: (tx: unknown) => Promise<T>) => database.transaction(fn),
   };
 });
 
-// Populated by the mock factory above (which runs on first import of the mocked module).
+/** Creates a fresh file-backed, migrated client and points h.client/h.db at it. */
+function openTestDb(): void {
+  const dir = process.env.TEMP || process.env.TMP || process.cwd();
+  const file = `${dir}/dedup-same-root-${randomUUID()}.db`;
+  const c = createClient({ url: `file:${file}` });
+  applyMigrationsToClient(c);
+  c.execute("PRAGMA foreign_keys=ON");
+  h.file = file;
+  h.client = c;
+  h.db = drizzle(c, { schema });
+}
+
+function closeTestDb(): void {
+  try { h.client?.close(); } catch { /* ignore */ }
+  for (const suffix of ["", "-wal", "-shm"]) {
+    try { rmSync(`${h.file}${suffix}`, { force: true }); } catch { /* best-effort */ }
+  }
+}
+
 const client = (): Client => h.client!;
 const db = (): TestDb => h.db!;
 
@@ -178,15 +206,12 @@ describe("deduplicateProjects — two rows on one git root collapse to a single 
 
   beforeEach(() => {
     repo = makeGitRepo();
+    openTestDb();
   });
 
   afterEach(() => {
-    try { h.client?.close(); } catch { /* ignore */ }
-    for (const suffix of ["", "-wal", "-shm"]) {
-      try { rmSync(`${h.file}${suffix}`, { force: true }); } catch { /* best-effort */ }
-    }
+    closeTestDb();
     repo.dispose();
-    vi.resetModules();
   });
 
   it("keeps the root-path project, moves the duplicate's children, remaps statuses, redirects active pointer", async () => {
@@ -248,15 +273,12 @@ describe("deduplicateProjects — lossless across the FULL project-child FK grap
 
   beforeEach(() => {
     repo = makeGitRepo();
+    openTestDb();
   });
 
   afterEach(() => {
-    try { h.client?.close(); } catch { /* ignore */ }
-    for (const suffix of ["", "-wal", "-shm"]) {
-      try { rmSync(`${h.file}${suffix}`, { force: true }); } catch { /* best-effort */ }
-    }
+    closeTestDb();
     repo.dispose();
-    vi.resetModules();
   });
 
   /**
@@ -273,6 +295,8 @@ describe("deduplicateProjects — lossless across the FULL project-child FK grap
       runHistoryId: randomUUID(), milestoneId: randomUUID(), driveId: randomUUID(),
       obstacleId: randomUUID(), templateId: randomUUID(), healthId: randomUUID(),
       flakyId: randomUUID(), shortcutId: randomUUID(), metricId: randomUUID(),
+      viewProcessId: randomUUID(), baseBranchHealthId: randomUUID(),
+      provisioningId: randomUUID(),
     };
     const earlier = new Date(Date.now() - 60_000).toISOString();
     const later = new Date().toISOString();
@@ -305,6 +329,21 @@ describe("deduplicateProjects — lossless across the FULL project-child FK grap
     await d.insert(schema.flakyTests).values({ id: ids.flakyId, projectId: ids.dupId, testName: "sometimes fails", createdAt: earlier });
     await d.insert(schema.projectScriptShortcuts).values({ id: ids.shortcutId, projectId: ids.dupId, name: "build", command: "pnpm build", cwdMode: "project", sortOrder: 0, createdAt: earlier, updatedAt: earlier });
     await d.insert(schema.qualityMetrics).values({ id: ids.metricId, projectId: ids.dupId, metricKey: "coverage", value: 0.9, collectedAt: earlier });
+    // #485 — plugin_view_processes joined the project-child FK graph when project_id gained
+    // its cascading FK (migration 0120), so dedup must rehome it like every other child.
+    // reassignProjectChildren derives its edges from the schema, so this needs no product
+    // change; seeding it here is what proves that derivation actually covered the new table.
+    await d.insert(schema.pluginViewProcesses).values({ id: ids.viewProcessId, pluginRowId: randomUUID(), viewId: "dashboard", projectId: ids.dupId, pid: 4242, port: 51234, command: "npm run serve", createdAt: earlier });
+    // #491 — base_branch_health joined the project-child FK graph.
+    await d.insert(schema.baseBranchHealth).values({ id: ids.baseBranchHealthId, projectId: ids.dupId, sha: "deadbeef", branch: "master", outcome: "green", createdAt: earlier });
+    // #666 — workspace_provisioning joined the project-child FK graph and was never seeded
+    // here, so the reassignment path was unexercised for it. Its FKs declare no `onDelete`
+    // action, which is what made the omission matter rather than merely be untidy.
+    await d.insert(schema.workspaceProvisioning).values({
+      id: ids.provisioningId, issueId: ids.dupIssueId, projectId: ids.dupId,
+      branch: "feature/provisioning", worktreePath: null, serverPid: 1234,
+      phase: "worktree", startedAt: earlier,
+    });
     await d.insert(schema.preferences).values({ key: "activeProjectId", value: ids.dupId, updatedAt: later });
     return ids;
   }
@@ -320,6 +359,12 @@ describe("deduplicateProjects — lossless across the FULL project-child FK grap
       "issues", "agent_skills", "repos", "scheduled_runs", "scheduled_run_history",
       "milestones", "drives", "drive_obstacles", "workflow_templates",
       "board_health_events", "flaky_tests", "project_script_shortcuts", "quality_metrics",
+      // #485 — joined the FK graph with migration 0120's cascading project_id.
+      "plugin_view_processes",
+      // #491 — base branch health results, cascading on project_id (migration 0121).
+      "base_branch_health",
+      // #666 — in the FK graph all along; seeding it is what makes the reassignment tested.
+      "workspace_provisioning",
     ]);
     expect(exercised).toEqual(schemaChildren);
   });

@@ -3,10 +3,10 @@
 // have their own home + tests; stack-profile.service re-exports detectStackProfile so its
 // ~21 importers compile unchanged. readJson / nodeInstallCommand / readFileSafe / NodePkgJson
 // are exported because the service's setup-script derivation also uses them.
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { StackProfile } from "@agentic-kanban/shared";
-import { detectProjectMarkers } from "./project-setup.service.js";
+import { detectProjectMarkers, isUvProject } from "./stack-markers.js";
 import {
   gradleWrapper,
   isKotlinGradle,
@@ -83,6 +83,51 @@ function readPnpmWorkspaces(repoPath: string): string[] {
   }
 }
 
+/**
+ * Read the `package.json` of every workspace package a glob list resolves to (#644).
+ *
+ * In a pnpm/npm monorepo the ROOT `package.json` is a thin orchestrator: it carries the
+ * `dev`/`build` scripts but almost none of the framework dependencies, which live in the
+ * sub-packages. Deriving anything from root deps alone therefore misreads every monorepo —
+ * concretely, `isWeb` was FALSE for this very board (react + vite sit in
+ * `packages/client/package.json`), so `buildSmokeCheck` returned null and no boot/render
+ * check ever ran on its own UI.
+ *
+ * Deliberately a one-level `*` expansion rather than a glob dependency: `packages/*` and
+ * `apps/*` are the shapes that matter, and a detector must never be the thing that throws.
+ * Anything unreadable is skipped.
+ */
+function readWorkspacePkgs(repoPath: string, workspaces: readonly string[]): NodePkgJson[] {
+  const out: NodePkgJson[] = [];
+  const seen = new Set<string>();
+  for (const glob of workspaces) {
+    const clean = glob.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "");
+    if (!clean || clean.startsWith("!")) continue; // pnpm negations exclude, never add
+    const star = clean.indexOf("*");
+    const dirs: string[] = [];
+    if (star === -1) {
+      dirs.push(clean);
+    } else {
+      // Only the trailing `pkgs/*` form is expanded; `**` and mid-path stars are treated as
+      // their literal parent directory, which is a safe under-approximation.
+      const parent = clean.slice(0, star).replace(/\/+$/, "");
+      const abs = join(repoPath, parent);
+      try {
+        for (const entry of readdirSync(abs, { withFileTypes: true })) {
+          if (entry.isDirectory()) dirs.push(`${parent}/${entry.name}`);
+        }
+      } catch { /* unreadable workspace root — skip */ }
+    }
+    for (const dir of dirs) {
+      if (seen.has(dir)) continue;
+      seen.add(dir);
+      const pkg = readJson<NodePkgJson>(join(repoPath, dir, "package.json"));
+      if (pkg) out.push(pkg);
+    }
+  }
+  return out;
+}
+
 function detectTestRunner(pkg: NodePkgJson | null): string | null {
   if (!pkg) return null;
   const deps = { ...(pkg.devDependencies ?? {}), ...(pkg.dependencies ?? {}) };
@@ -143,10 +188,21 @@ function detectNodeProfile(repoPath: string, markers: Set<string>): Partial<Stac
   const devScript = ["dev", "start", "serve"].find(has);
   const devCommand = devScript ? run(devScript) : null;
 
-  const deps = { ...(pkg?.devDependencies ?? {}), ...(pkg?.dependencies ?? {}) };
+  // #644: union the ROOT deps with every workspace package's. A monorepo root declares the
+  // `dev` script but not the framework, so a root-only read reported `isWeb: false` for every
+  // monorepo with a client sub-package — this board included — which made the boot/render
+  // smoke gate a permanent no-op on exactly the projects it exists for.
+  const workspacePkgs = isMonorepo ? readWorkspacePkgs(repoPath, workspaces) : [];
+  const deps = Object.assign(
+    {},
+    ...workspacePkgs.map((w) => ({ ...(w.devDependencies ?? {}), ...(w.dependencies ?? {}) })),
+    { ...(pkg?.devDependencies ?? {}), ...(pkg?.dependencies ?? {}) },
+  ) as Record<string, string>;
   const webMarkers = ["react", "vue", "svelte", "next", "vite", "@angular/core", "express", "hono", "fastify", "koa", "@nestjs/core"];
   const isWeb = Boolean(devCommand) && webMarkers.some((m) => m in deps);
-  const devPort = detectDevPort(pkg);
+  // Same reasoning for the port: `pnpm dev` at the root delegates to a sub-package whose own
+  // dev script is where a `--port` literal lives.
+  const devPort = detectDevPort(pkg) ?? workspacePkgs.reduce<number | null>((found, w) => found ?? detectDevPort(w), null);
 
   return {
     stack: "node",
@@ -168,6 +224,50 @@ function detectNodeProfile(repoPath: string, markers: Set<string>): Partial<Stac
   };
 }
 
+interface ComposerJson {
+  "require-dev"?: Record<string, string>;
+  require?: Record<string, string>;
+  config?: { "bin-dir"?: string };
+}
+
+/**
+ * Build a PHP/composer stack profile. On Windows, cmd cannot exec the extensionless
+ * Composer bin shim (`vendor/bin/phpunit` would need `vendor\bin\phpunit.bat`); running it
+ * through the interpreter (`php vendor/bin/phpunit`) works on every platform, since the
+ * shim is itself a valid PHP script (#177).
+ */
+function detectPhpProfile(repoPath: string): Partial<StackProfile> {
+  const composer = readJson<ComposerJson>(join(repoPath, "composer.json"));
+  const binDir = composer?.config?.["bin-dir"] || "vendor/bin";
+  const deps = { ...(composer?.["require-dev"] ?? {}), ...(composer?.require ?? {}) };
+  const runTool = (bin: string, args = "") => `php ${binDir}/${bin}${args ? ` ${args}` : ""}`;
+
+  const hasPhpunit = "phpunit/phpunit" in deps;
+  const testCommand = hasPhpunit ? runTool("phpunit") : null;
+
+  const hasPhpstan = "phpstan/phpstan" in deps;
+  const hasPsalm = "vimeo/psalm" in deps;
+  const typecheckCommand = hasPhpstan ? runTool("phpstan", "analyse") : hasPsalm ? runTool("psalm") : null;
+
+  const hasCsFixer = "friendsofphp/php-cs-fixer" in deps;
+  const hasPhpcs = "squizlabs/php_codesniffer" in deps;
+  const lintCommand = hasCsFixer
+    ? runTool("php-cs-fixer", "fix --dry-run --diff")
+    : hasPhpcs
+      ? runTool("phpcs")
+      : null;
+
+  return {
+    stack: "php", packageManager: "composer", isMonorepo: false, workspaces: [],
+    installCommand: "composer install", buildCommand: null,
+    testCommand, quickTestCommand: testCommand,
+    lintCommand, typecheckCommand, devCommand: null, isWeb: false,
+    devHealthUrl: null, devPort: null,
+    testDir: firstExistingDir(repoPath, ["tests", "test"]),
+    testRunner: hasPhpunit ? "phpunit" : null,
+  };
+}
+
 /**
  * Rule-based stack detection for the non-Node ecosystems the acceptance criteria call out
  * ({cargo, go, python, java/gradle}). Each returns as much as the marker files reveal.
@@ -175,7 +275,7 @@ function detectNodeProfile(repoPath: string, markers: Set<string>): Partial<Stac
 function detectOtherProfile(repoPath: string, markers: Set<string>): Partial<StackProfile> | null {
   if (markers.has("Cargo.toml")) {
     return {
-      stack: "rust", packageManager: "cargo", isMonorepo: existsSync(join(repoPath, "Cargo.lock")) && /\[workspace\]/.test(readFileSync(join(repoPath, "Cargo.toml"), "utf8").slice(0, 4000)),
+      stack: "rust", packageManager: "cargo", isMonorepo: existsSync(join(repoPath, "Cargo.lock")) && /\[workspace\]/.test(readFileSafe(join(repoPath, "Cargo.toml")).slice(0, 4000)),
       workspaces: [], installCommand: "cargo fetch", buildCommand: "cargo build",
       testCommand: "cargo test", quickTestCommand: "cargo test", lintCommand: "cargo clippy",
       typecheckCommand: "cargo check", devCommand: "cargo run", isWeb: false,
@@ -234,23 +334,40 @@ function detectOtherProfile(repoPath: string, markers: Set<string>): Partial<Sta
   }
   if (markers.has("pom.xml")) {
     return {
-      stack: "java", packageManager: "maven", isMonorepo: /<modules>/.test(readFileSync(join(repoPath, "pom.xml"), "utf8").slice(0, 8000)),
+      stack: "java", packageManager: "maven", isMonorepo: /<modules>/.test(readFileSafe(join(repoPath, "pom.xml")).slice(0, 8000)),
       workspaces: [], installCommand: "mvn install -DskipTests", buildCommand: "mvn package",
       testCommand: "mvn test", quickTestCommand: "mvn test", lintCommand: "mvn verify",
       typecheckCommand: "mvn compile", devCommand: "mvn spring-boot:run", isWeb: false,
       devHealthUrl: null, devPort: null, testDir: firstExistingDir(repoPath, ["src/test/java", "src/test"]), testRunner: "maven",
     };
   }
+  if (markers.has("composer.json")) {
+    return detectPhpProfile(repoPath);
+  }
   if (markers.has("pyproject.toml") || markers.has("Pipfile") || markers.has("requirements.txt")) {
-    const poetry = markers.has("pyproject.toml") && /\[tool\.poetry\]/.test(readFileSafe(join(repoPath, "pyproject.toml")));
-    const pm = poetry ? "poetry" : markers.has("Pipfile") ? "pipenv" : "pip";
-    const install = poetry ? "poetry install" : markers.has("Pipfile") ? "pipenv install --dev" : "pip install -r requirements.txt";
+    // uv first: a uv project installs into a project-local .venv, so the global interpreter
+    // has no pytest and a bare `python -m pytest` merge gate always fails (#120). Its
+    // pyproject.toml may also carry a [tool.poetry] block, so uv must win the tie.
+    const uv = isUvProject(repoPath, markers);
+    const poetry = !uv && markers.has("pyproject.toml") && /\[tool\.poetry\]/.test(readFileSafe(join(repoPath, "pyproject.toml")));
+    const pm = uv ? "uv" : poetry ? "poetry" : markers.has("Pipfile") ? "pipenv" : "pip";
+    // The bare-pip case splits on which file actually exists (#521). A PEP-621
+    // pyproject-only project has no requirements.txt, so `pip install -r requirements.txt`
+    // fails outright — install the project itself instead. requirements.txt wins when both
+    // are present: it is the explicit pinned set.
+    const pipInstall = markers.has("requirements.txt") ? "pip install -r requirements.txt" : "pip install -e .";
+    const install = uv
+      ? "uv sync"
+      : poetry ? "poetry install" : markers.has("Pipfile") ? "pipenv install --dev" : pipInstall;
+    // uv's runner invokes the tool directly (`uv run pytest`), not via `python -m`.
     const run = (cmd: string) => (poetry ? `poetry run ${cmd}` : markers.has("Pipfile") ? `pipenv run ${cmd}` : cmd);
+    const runTool = (tool: string) => (uv ? `uv run ${tool}` : run(tool));
     return {
       stack: "python", packageManager: pm, isMonorepo: false, workspaces: [],
       installCommand: install, buildCommand: null,
-      testCommand: run("python -m pytest"), quickTestCommand: run("python -m pytest -x"),
-      lintCommand: run("ruff check ."), typecheckCommand: run("mypy ."), devCommand: null, isWeb: false,
+      testCommand: uv ? "uv run pytest" : run("python -m pytest"),
+      quickTestCommand: uv ? "uv run pytest -x" : run("python -m pytest -x"),
+      lintCommand: runTool("ruff check ."), typecheckCommand: runTool("mypy ."), devCommand: null, isWeb: false,
       devHealthUrl: null, devPort: null, testDir: firstExistingDir(repoPath, ["tests", "test"]), testRunner: "pytest",
     };
   }
@@ -278,8 +395,11 @@ const EMPTY_PROFILE: Omit<StackProfile, "source" | "detectedMarkers" | "updatedA
  * a fact can't be derived). `source` is "detected" even when sparse; the LLM fallback
  * (see populateStackProfile) fills gaps and flips source to "llm".
  */
-export function detectStackProfile(repoPath: string): StackProfile {
-  const markers = detectProjectMarkers(repoPath);
+export function detectStackProfile(repoPath: string, detectedMarkers?: string[]): StackProfile {
+  // `detectedMarkers` lets a caller that already scanned the directory decide from the
+  // SAME marker set instead of re-reading it (#521) — the fallback verify derivation and
+  // its tests both do. Absent, the scan happens here as before.
+  const markers = detectedMarkers ?? detectProjectMarkers(repoPath);
   const markerSet = new Set(markers);
 
   let partial: Partial<StackProfile> | null = null;

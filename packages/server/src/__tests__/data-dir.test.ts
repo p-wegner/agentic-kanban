@@ -34,10 +34,30 @@ vi.mock("node:fs", async (importOriginal) => {
     // else (e.g. real path checks) to the real implementation.
     existsSync: (p: import("node:fs").PathLike) =>
       String(p).endsWith("kanban.db") ? fsState.localDbExists : actual.existsSync(p),
+    // #165: resolveDbLocation also size-checks a present candidate before
+    // adopting it. Report a plausible real-DB size when the fixture says the
+    // local db "exists", so these existence-driven cases still exercise the
+    // local-checkout branch (there is no real file on disk to stat here).
+    statSync: (p: import("node:fs").PathLike) =>
+      String(p).endsWith("kanban.db") && fsState.localDbExists
+        ? ({ size: 1_000_000 } as ReturnType<typeof actual.statSync>)
+        : actual.statSync(p),
   };
 });
 
-const ENV_KEYS = ["DB_URL", "AGENTIC_KANBAN_DIR"] as const;
+// VITEST/NODE_ENV are cleared alongside the real overrides because #231
+// (`4964268fe8`) added a test-runner short-circuit to `resolveDbLocation`: under a test
+// runner with no explicit override it returns a per-process throwaway DB, so a stray
+// module-load can never open the live board DB. That guard is correct and is covered by
+// `packages/shared/__tests__/db-path.test.ts` (which injects `env` directly).
+//
+// But it sits ABOVE the local-checkout/home-fallback branch that THIS suite exists to
+// pin, and `data-dir.ts` resolves through the real `process.env` at module load — so
+// under vitest every case here silently resolved to the throwaway and the precedence
+// assertions became unreachable. The suite was red from 2026-08-06 and nobody saw it,
+// because `test:mine` is file-scoped and no merge in that window touched server/shared.
+// Clearing the markers restores the branch under test; afterEach puts them back.
+const ENV_KEYS = ["DB_URL", "AGENTIC_KANBAN_DIR", "VITEST", "NODE_ENV"] as const;
 
 async function loadDataDir() {
   vi.resetModules();

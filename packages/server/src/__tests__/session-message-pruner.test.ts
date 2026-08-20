@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { randomUUID } from "node:crypto";
 import { projects, projectStatuses, issues, workspaces, sessions, sessionMessages } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
-import { pruneOldSessionMessages, capSessionMessages } from "../services/session-message-pruner.service.js";
+import { pruneOldSessionMessages, capSessionMessages, capSessionMessagesForSession } from "../services/session-message-pruner.service.js";
 
 async function seedBase(db: ReturnType<typeof createTestDb>["db"]) {
   const now = new Date().toISOString();
@@ -45,15 +45,24 @@ async function insertSession(db: ReturnType<typeof createTestDb>["db"], workspac
   return id;
 }
 
+// Insert in multi-row batches, not one statement per row. The cap test needs 2010 rows;
+// as 2010 separate awaited INSERTs that is 2010 round-trips, which is slow enough that the
+// test measured machine load rather than the cap (#49 — it was the server package's
+// last load flake). Rows still land in ascending-id order, which capSessionMessages'
+// "delete the oldest" threshold depends on.
+// CHUNK * 4 bound params per statement stays well under SQLite's 999-variable limit.
+const INSERT_CHUNK = 200;
+
 async function insertMessages(db: ReturnType<typeof createTestDb>["db"], sessionId: string, count: number) {
   const now = new Date().toISOString();
-  for (let i = 0; i < count; i++) {
-    await db.insert(sessionMessages).values({
-      sessionId,
-      type: "stdout",
-      data: `line ${i}`,
-      createdAt: now,
-    });
+  const rows = Array.from({ length: count }, (_, i) => ({
+    sessionId,
+    type: "stdout",
+    data: `line ${i}`,
+    createdAt: now,
+  }));
+  for (let i = 0; i < rows.length; i += INSERT_CHUNK) {
+    await db.insert(sessionMessages).values(rows.slice(i, i + INSERT_CHUNK));
   }
 }
 
@@ -151,5 +160,48 @@ describe("capSessionMessages", () => {
 
     const capped = await capSessionMessages(db as any);
     expect(capped).toBe(0);
+  });
+});
+
+describe("capSessionMessagesForSession", () => {
+  it("trims only the given session to the newest 2000 rows, keeping the newest", async () => {
+    const { db } = createTestDb();
+    const { issueId } = await seedBase(db as any);
+
+    const now = new Date().toISOString();
+    const wsId = await insertWorkspace(db as any, issueId, "active", now);
+    const sessId = await insertSession(db as any, wsId, now);
+    const otherSessId = await insertSession(db as any, wsId, now);
+
+    await insertMessages(db as any, sessId, 2010);
+    await insertMessages(db as any, otherSessId, 5);
+
+    const deleted = await capSessionMessagesForSession(sessId, db as any);
+    expect(deleted).toBe(10);
+
+    const { eq } = await import("drizzle-orm");
+    const remaining = await (db as any).select().from(sessionMessages).where(eq(sessionMessages.sessionId, sessId));
+    expect(remaining.length).toBe(2000);
+    // The OLDEST rows were dropped: line 0..9 gone, newest line survives
+    const datas = remaining.map((r: { data: string }) => r.data);
+    expect(datas).not.toContain("line 0");
+    expect(datas).toContain("line 2009");
+
+    // The other session is untouched
+    const other = await (db as any).select().from(sessionMessages).where(eq(sessionMessages.sessionId, otherSessId));
+    expect(other.length).toBe(5);
+  });
+
+  it("returns 0 for a session within the cap", async () => {
+    const { db } = createTestDb();
+    const { issueId } = await seedBase(db as any);
+
+    const now = new Date().toISOString();
+    const wsId = await insertWorkspace(db as any, issueId, "active", now);
+    const sessId = await insertSession(db as any, wsId, now);
+    await insertMessages(db as any, sessId, 3);
+
+    const deleted = await capSessionMessagesForSession(sessId, db as any);
+    expect(deleted).toBe(0);
   });
 });

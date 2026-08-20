@@ -7,26 +7,29 @@
  * Blocking edge types: `depends_on` and `blocked_by` (treated identically:
  * `issueId` is blocked by `dependsOnId`).
  *
- * Uses the same resolved-status logic as `isResolvedDependencyStatusView`
- * from `@agentic-kanban/shared` (inlined to avoid shared-package build dep).
+ * Resolved-status logic comes from `@agentic-kanban/shared/lib/status-view` (#520).
+ * It used to be inlined here "to avoid a shared-package build dep" — that rationale
+ * was stale: the client already imports dozens of runtime values from shared, and
+ * `vite.config.ts` resolves it to `src/`.
  */
+
+import { isResolvedDependencyStatusName } from "@agentic-kanban/shared/lib/status-view";
 
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
 
-/** Statuses that mean a dependency is resolved / no longer blocking. */
-const RESOLVED_STATUS_NAMES = new Set(["Done", "AI Reviewed", "Cancelled"]);
-
-/** Mirrors `isResolvedDependencyStatusView` from @agentic-kanban/shared. */
+/**
+ * Resolved / no longer blocking. Delegates to the shared predicate (#520) rather
+ * than keeping a local copy of the status set: the definition of "resolved" is
+ * shared with the server's `isBlocked` and changed once already (#537), so a
+ * private copy here silently drifts the critical path away from the board.
+ */
 function isResolvedStatus(issue: IssueLike): boolean {
-  if (issue.currentNodeId != null) {
-    // Workflow-driven issues: resolved if the node type is "end".
-    // We don't have nodeType directly on IssueLike in the client graph data,
-    // so fall back to status name.
-    return RESOLVED_STATUS_NAMES.has(issue.statusName ?? "");
-  }
-  return RESOLVED_STATUS_NAMES.has(issue.statusName ?? "");
+  // The client graph payload carries no `currentNodeType`, so a workflow-driven
+  // issue can only be judged by its status name here — which is exactly what the
+  // name-only helper expresses.
+  return isResolvedDependencyStatusName(issue.statusName);
 }
 
 export interface Dependency {

@@ -1,15 +1,16 @@
+import type { TouchedFile } from "../lib/issueDetailTypes.js";
 import { useEffect, useState } from "react";
-import { apiFetch, apiPost } from "../lib/api.js";
-import { showToast } from "./Toast.js";
+import { apiPost } from "../lib/api.js";
+import { showToast } from "../lib/toast.js";
 
-export interface TouchedFile {
-  path: string;
-  reason: string;
-  confidence: "high" | "medium" | "low";
-}
 
 interface IssueTouchedFilesSectionProps {
   issueId: string;
+  /**
+   * Cached prediction from the detail-bundle (#418) — replaces the section's own
+   * GET. Null/empty = no cached prediction (the section shows "Predict Files").
+   */
+  initialFiles: TouchedFile[] | null;
   /**
    * Append the predicted file list to the issue description. Lives in the parent
    * because it mutates the edit-form draft (description + edit mode).
@@ -18,22 +19,22 @@ interface IssueTouchedFilesSectionProps {
 }
 
 /**
- * Touched-files prediction section. Self-contained (extracted from
- * IssueDetailPanel): owns the cached-prediction GET — moved out of the panel's
- * loadData mega-effect — plus the analyze/refresh POST and its busy state.
+ * Touched-files prediction section. The cached prediction now arrives via the
+ * detail-bundle (initialFiles); this component keeps the analyze/refresh POST
+ * and its busy state, updating local state from the POST result.
  */
-export function IssueTouchedFilesSection({ issueId, onAppendToDescription }: IssueTouchedFilesSectionProps) {
-  const [touchedFiles, setTouchedFiles] = useState<TouchedFile[] | null>(null);
+export function IssueTouchedFilesSection({ issueId, initialFiles, onAppendToDescription }: IssueTouchedFilesSectionProps) {
+  const [touchedFiles, setTouchedFiles] = useState<TouchedFile[] | null>(
+    initialFiles && initialFiles.length > 0 ? initialFiles : null,
+  );
   const [analyzing, setAnalyzing] = useState(false);
 
-  // Best-effort: surface a cached prediction if one exists. Leave state null when
-  // there's none so the section shows "Predict Files" rather than an empty list.
+  // Re-seed when the bundle (re)loads or the panel switches issue. Leave state
+  // null for an empty prediction so the section shows "Predict Files" rather
+  // than an empty list.
   useEffect(() => {
-    setTouchedFiles(null);
-    apiFetch<{ files: TouchedFile[]; cached: boolean }>(`/api/issues/${issueId}/touched-files`)
-      .then((tf) => { if (tf.files.length > 0) setTouchedFiles(tf.files); })
-      .catch(() => { /* No cached prediction yet — that's fine */ });
-  }, [issueId]);
+    setTouchedFiles(initialFiles && initialFiles.length > 0 ? initialFiles : null);
+  }, [issueId, initialFiles]);
 
   async function analyze(refresh = false) {
     if (analyzing) return;
@@ -113,3 +114,6 @@ export function IssueTouchedFilesSection({ issueId, onAppendToDescription }: Iss
     </div>
   );
 }
+
+/** #610 — re-exported so this component's existing importers are unchanged. */
+export type { TouchedFile } from "../lib/issueDetailTypes.js";

@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { parseAgentProviderStreamLine, parseAgentProviderStreamLineObserved } from "@agentic-kanban/shared/lib/agent-stream-parser";
 import type { AgentLaunchConfig, AgentProvider, FileSystem, ParsedStreamEvent, ProviderLaunchOptions } from "./types.js";
-import { getMcpConfigPath, buildSpawnEnv, splitArgs, nodeFileSystem, profileDefinesCustomEndpoint } from "./helpers.js";
+import { getMcpConfigPath, buildSpawnEnv, spliceAgentArgs, nodeFileSystem, profileDefinesCustomEndpoint, resolveMockLaunch } from "./helpers.js";
 
 export class ClaudeProvider implements AgentProvider {
   readonly name = "claude";
@@ -19,7 +19,6 @@ export class ClaudeProvider implements AgentProvider {
       agentArgs,
       providerSessionId,
       agentCommand,
-      claudeProfile,
       profile,
       model,
       keepAlive,
@@ -29,15 +28,23 @@ export class ClaudeProvider implements AgentProvider {
       oneShotText,
     } = options;
 
-    const effectiveProfileName = profile?.name ?? claudeProfile;
+    // #528: was `profile?.name ?? claudeProfile`. The fallback was dead for claude —
+    // producers set claudeProfile to the same name they put in `profile` — and live only
+    // for a non-claude provider, whose name has no business selecting a claude settings file.
+    const effectiveProfileName = profile?.name;
 
-    const isMockAgent = !!process.env.AGENT_COMMAND || (agentCommand?.includes("mock-agent") ?? false);
-    let command = process.env.AGENT_COMMAND || agentCommand || "claude";
+    const { isMockAgent, command: resolvedCommand, mockArgs } = resolveMockLaunch(
+      { agentCommand, providerSessionId, keepAlive },
+      "claude",
+    );
+    let command = resolvedCommand;
     const isWindows = process.platform === "win32";
 
     if (isWindows && !isMockAgent && !agentCommand) {
       try {
-        const resolved = execSync("where claude.exe 2>nul", { encoding: "utf8" }).trim().split("\n")[0]?.trim();
+        // windowsHide: this runs on EVERY claude launch, and a console flash here steals
+        // focus and (per the CLAUDE.md hard constraint) can disrupt other agents' sessions.
+        const resolved = execSync("where claude.exe 2>nul", { encoding: "utf8", windowsHide: true }).trim().split("\n")[0]?.trim();
         if (resolved) command = resolved;
       } catch {}
     }
@@ -72,14 +79,9 @@ export class ClaudeProvider implements AgentProvider {
     let keepStdinOpen = false;
 
     if (isMockAgent) {
-      args = [];
-      if (providerSessionId) {
-        args.push("--resume", providerSessionId);
-      }
-      if (keepAlive) {
-        args.push("--profile", "multi-turn");
-        keepStdinOpen = true;
-      }
+      args = [...mockArgs];
+      // The mock's multi-turn profile expects stdin to stay open, same as the real CLI.
+      if (keepAlive) keepStdinOpen = true;
     } else {
       args = ["--output-format", "stream-json", "--verbose"];
       try {
@@ -87,9 +89,9 @@ export class ClaudeProvider implements AgentProvider {
       } catch (err) {
         console.warn(`[agent] Failed to generate MCP config: ${String(err)}`);
       }
-      if (agentArgs) {
-        args.push(...splitArgs(agentArgs));
-      }
+      // Denied-flag stripping is applied centrally (see DENIED_ARGS); claude has no
+      // denied flags today, but routing through spliceAgentArgs keeps the guard uniform.
+      args.push(...spliceAgentArgs(this.name, agentArgs));
       if (effectiveProfileName) {
         const settingsPath = join(homedir(), ".claude", `settings_${effectiveProfileName}.json`);
         if (this.fs.existsSync(settingsPath)) {

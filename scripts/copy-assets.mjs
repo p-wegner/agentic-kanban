@@ -50,3 +50,4 @@ for (const src of scaffoldHookSources) {
   copyFileSync(src, resolve(scaffoldHooksDist, basename(src)));
 }
 console.log(`Copied: ${scaffoldHookSources.length} scaffold hook sources → server/dist/scaffold/hooks/`);
+

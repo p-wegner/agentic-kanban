@@ -3,22 +3,23 @@ import ReactMarkdown from "react-markdown";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { normalizeMarkdown } from "../lib/artifact-utils.js";
+import type { IssueComment, IssueCommentKind } from "@agentic-kanban/shared";
 
-export interface IssueComment {
-  id: string;
-  issueId: string;
-  workspaceId: string | null;
-  kind: string;
-  author: string;
-  body: string;
-  payload: unknown;
-  createdAt: string;
-}
+// Declared once, in shared (#569). `kind` is the six-member union now, so the label
+// map below fails typecheck if a kind is missing instead of rendering a raw slug.
+export type { IssueComment } from "@agentic-kanban/shared";
 
-const COMMENT_KIND_LABELS: Record<string, string> = {
+/**
+ * #569: was `Record<string, string>` with four of the six kinds, so `preflight-verdict`
+ * and `gate-decision` — both written by the server — rendered as their raw slug. Typed
+ * against the union, a missing kind is now a compile error.
+ */
+const COMMENT_KIND_LABELS: Record<IssueCommentKind, string> = {
+  "preflight-verdict": "Preflight verdict",
   "preflight-clarification": "Preflight clarification",
   "agent-question": "Agent question",
   "merge-attempt": "Merge attempt",
+  "gate-decision": "Gate decision",
   note: "Note",
 };
 

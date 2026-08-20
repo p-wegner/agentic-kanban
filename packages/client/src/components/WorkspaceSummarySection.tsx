@@ -1,16 +1,15 @@
-import { useEffect, useState } from "react";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import type { LiveSessionStats } from "../lib/useBoardEvents.js";
 import { formatRelativeTime, formatAbsoluteTime } from "../lib/formatRelativeTime.js";
 import { getLastSessionBadge } from "../lib/sessionBadgeHelpers.js";
 import { CodeMetricsBadges, WorkflowMiniIndicator } from "./IssueBadges.js";
+import { groupConflictsByRepo, formatConflictSummary } from "../lib/groupConflictsByRepo.js";
+import { MultirepoHealthPill } from "./MultirepoHealthPill.js";
+import { useNow } from "../hooks/usePoll.js";
+import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-liveness";
 
 function RelativeTime({ timestamp, prefix = "" }: { timestamp: string; prefix?: string }) {
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const t = setInterval(() => setTick(n => n + 1), 30_000);
-    return () => clearInterval(t);
-  }, []);
+  useNow(30_000);
   return <span title={formatAbsoluteTime(timestamp)}>{prefix}{formatRelativeTime(timestamp)}</span>;
 }
 
@@ -121,11 +120,34 @@ export function WorkspaceSummarySection(props: {
               </span>
             )}
           </span>
-          {ws.main.conflicts?.hasConflicts && ws.main.status !== "fixing" && (
-            <span className="order-last inline-flex items-center px-1.5 py-0.5 rounded bg-red-100 text-red-700 text-[10px] font-medium shrink-0">
-              {ws.main.conflicts.conflictingFiles.length} file{ws.main.conflicts.conflictingFiles.length !== 1 ? "s" : ""}
-            </span>
-          )}
+          {ws.main.conflicts?.hasConflicts && ws.main.status !== "fixing" && (() => {
+            const grouped = groupConflictsByRepo(ws.main.conflicts.conflictingFiles);
+            const summary = formatConflictSummary(grouped);
+            // Multi-repo (#81): when the conflict spans more than the leading repo, surface
+            // the per-repo breakdown ("auth-svc 2, leading 1") inline; a single-repo conflict
+            // keeps the compact "N files" label. Full breakdown is always in the tooltip.
+            const multiRepo = grouped.groups.length > 1;
+            return (
+              <span
+                className="order-last inline-flex items-center px-1.5 py-0.5 rounded bg-red-100 text-red-700 text-[10px] font-medium shrink-0 max-w-full truncate"
+                title={`Conflicts: ${summary}`}
+              >
+                {multiRepo
+                  ? summary
+                  : `${grouped.total} file${grouped.total !== 1 ? "s" : ""}`}
+              </span>
+            );
+          })()}
+          {/* Multi-repo health pill (#83): lazy — only fetches repo-merge-status when
+              expanded; the collapsed teaser shows only when board-loaded data already
+              hints multi-repo (a sibling-namespaced conflict). */}
+          <span className="order-last shrink-0" onClick={(e) => e.stopPropagation()}>
+            <MultirepoHealthPill
+              workspaceId={ws.main.id}
+              hasConflicts={ws.main.conflicts?.hasConflicts}
+              conflictingFiles={ws.main.conflicts?.conflictingFiles}
+            />
+          </span>
           {ws.main.planMode && (
             <span className="order-last inline-flex items-center px-1.5 py-0.5 rounded bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300 text-[10px] font-medium shrink-0">
               Plan Mode
@@ -157,13 +179,13 @@ export function WorkspaceSummarySection(props: {
           </svg>
         </div>
       )}
-      {!compact && (ws?.main?.status === "active" || ws?.main?.status === "fixing") && liveActivity && liveActivity !== "Delegating to agent" && (
+      {!compact && isAgentRunningStatus(ws?.main?.status) && liveActivity && liveActivity !== "Delegating to agent" && (
         <div className="flex items-center gap-1.5 mt-1 text-xs text-gray-400 dark:text-gray-500 px-1">
-          <span className={`inline-block w-1.5 h-1.5 rounded-full animate-pulse shrink-0 ${ws.main.status === "fixing" ? "bg-orange-400" : "bg-green-400"}`} />
+          <span className={`inline-block w-1.5 h-1.5 rounded-full animate-pulse shrink-0 ${ws?.main?.status === "fixing" ? "bg-orange-400" : "bg-green-400"}`} />
           <span className="truncate">{liveActivity}</span>
         </div>
       )}
-      {!compact && (ws?.main?.status === "active" || ws?.main?.status === "fixing") && liveActivity && liveStats && (
+      {!compact && isAgentRunningStatus(ws?.main?.status) && liveActivity && liveStats && (
         <div className="flex items-center gap-2 mt-0.5 text-[10px] text-gray-400 dark:text-gray-500 px-1">
           {liveStats.model && <span className="font-mono">{liveStats.model}</span>}
           {liveStats.contextTokens > 0 && (
@@ -182,7 +204,7 @@ export function WorkspaceSummarySection(props: {
           )}
         </div>
       )}
-      {!compact && !(ws?.main?.status === "active" || ws?.main?.status === "fixing") && ws?.main && (ws.main.contextTokens || ws.main.lastTool) && (
+      {!compact && !isAgentRunningStatus(ws?.main?.status) && ws?.main && (ws.main.contextTokens || ws.main.lastTool) && (
         <div className="flex items-center gap-2 mt-0.5 text-[10px] text-gray-400 dark:text-gray-500 px-1">
           {ws.main.contextTokens != null && ws.main.contextTokens > 0 && (
             <span>{Math.round(ws.main.contextTokens / 1000)}k ctx</span>

@@ -3,7 +3,15 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
-import { getProjectGitStats, getProjectGitStatsAsync, hotspotLogArgs, HOTSPOT_FALLBACK_COMMIT_LIMIT_FOR_TEST } from "../services/git-info.service.js";
+import {
+  collectCurrentCodeMetricsAsyncForTest,
+  getProjectGitStatsAsync,
+  hotspotLogArgs,
+  HOTSPOT_FALLBACK_COMMIT_LIMIT_FOR_TEST,
+  STALE_METRICS_BOUNDS_FOR_TEST,
+  WALK_QUEUE_FLUSH_AT_FOR_TEST,
+  __seedMetricsCacheForTests,
+} from "../services/git-info.service.js";
 
 function exec(cmd: string, args: string[], cwd: string, env?: NodeJS.ProcessEnv): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -17,8 +25,6 @@ function exec(cmd: string, args: string[], cwd: string, env?: NodeJS.ProcessEnv)
 async function initRepoWithSources(prefix: string): Promise<{ repoDir: string; branch: string }> {
   const repoDir = await mkdtemp(join(tmpdir(), prefix));
   await exec("git", ["init"], repoDir);
-  await exec("git", ["config", "user.email", "test@test.com"], repoDir);
-  await exec("git", ["config", "user.name", "Test"], repoDir);
 
   await mkdir(join(repoDir, "src", "__tests__"), { recursive: true });
   // 3 non-empty production lines, 2 non-empty test lines
@@ -76,22 +82,6 @@ describe("getProjectGitStatsAsync", () => {
     expect(hotspotPaths).toContain("src/__tests__/app.test.ts");
   });
 
-  it("matches the sync implementation field-for-field", async () => {
-    const asyncStats = await getProjectGitStatsAsync(repoDir, branchName);
-    const syncStats = getProjectGitStats(repoDir, branchName);
-
-    expect(asyncStats.commitCount).toBe(syncStats.commitCount);
-    expect(asyncStats.detectedBranch).toBe(syncStats.detectedBranch);
-    expect(asyncStats.recentCommits.map((c) => c.hash)).toEqual(syncStats.recentCommits.map((c) => c.hash));
-    expect(asyncStats.recentCommits.map((c) => c.message)).toEqual(syncStats.recentCommits.map((c) => c.message));
-    // generatedAt is a timestamp; compare the numeric metrics only
-    const { generatedAt: _a, ...asyncMetrics } = asyncStats.codeMetrics;
-    const { generatedAt: _s, ...syncMetrics } = syncStats.codeMetrics;
-    expect(asyncMetrics).toEqual(syncMetrics);
-    expect(asyncStats.history).toEqual(syncStats.history);
-    expect(asyncStats.hotspots).toEqual(syncStats.hotspots);
-  });
-
   it("auto-detects branch when defaultBranch is null", async () => {
     const stats = await getProjectGitStatsAsync(repoDir, null);
     expect(stats.commitCount).toBe(2);
@@ -111,8 +101,6 @@ describe("getProjectGitStatsAsync", () => {
     const customDir = await mkdtemp(join(tmpdir(), "kanban-stats-async-custom-"));
     try {
       await exec("git", ["init", "-b", "develop"], customDir);
-      await exec("git", ["config", "user.email", "test@test.com"], customDir);
-      await exec("git", ["config", "user.name", "Test"], customDir);
       await exec("git", ["commit", "--allow-empty", "-m", "init"], customDir);
 
       const stats = await getProjectGitStatsAsync(customDir, null);
@@ -150,8 +138,6 @@ describe("getProjectGitStatsAsync", () => {
     const oldDir = await mkdtemp(join(tmpdir(), "kanban-stats-async-old-"));
     try {
       await exec("git", ["init"], oldDir);
-      await exec("git", ["config", "user.email", "test@test.com"], oldDir);
-      await exec("git", ["config", "user.name", "Test"], oldDir);
       await mkdir(join(oldDir, "src"), { recursive: true });
       await writeFile(join(oldDir, "src", "legacy.ts"), "const a = 1;\nconst b = 2;\nexport { a, b };\n", "utf8");
       await exec("git", ["add", "."], oldDir);
@@ -169,10 +155,6 @@ describe("getProjectGitStatsAsync", () => {
       expect(stats.history.weeks.reduce((sum, w) => sum + w.commits, 0)).toBe(0);
       // ...but hotspots are still populated via the full-history fallback.
       expect(stats.hotspots.map((h) => h.path)).toContain("src/legacy.ts");
-
-      // Sync path matches.
-      const syncStats = getProjectGitStats(oldDir, branch);
-      expect(syncStats.hotspots.map((h) => h.path)).toContain("src/legacy.ts");
     } finally {
       await rm(oldDir, { recursive: true, force: true });
     }
@@ -188,12 +170,180 @@ describe("getProjectGitStatsAsync", () => {
     expect(HOTSPOT_FALLBACK_COMMIT_LIMIT_FOR_TEST).toBeGreaterThan(0);
   });
 
-  it("serves warm requests from the shared HEAD-keyed cache (sync and async share it)", async () => {
-    const syncStats = getProjectGitStats(repoDir, branchName);
-    const asyncStats = await getProjectGitStatsAsync(repoDir, branchName);
-    // Same cache entry => identical object references for the cached metrics portion
-    expect(asyncStats.codeMetrics).toBe(syncStats.codeMetrics);
-    expect(asyncStats.history).toBe(syncStats.history);
-    expect(asyncStats.hotspots).toBe(syncStats.hotspots);
+  it("serves warm requests from the shared HEAD-keyed cache", async () => {
+    // Fresh repo: the shared repoDir's cache entry can be older than the 60s TTL by
+    // the time this test runs (each earlier test can take tens of seconds on a loaded
+    // machine), and an EXPIRED entry is served stale-while-revalidate — a background
+    // refresh would legitimately replace the objects and break the identity checks.
+    // A cold compute here guarantees a fresh entry that the follow-up calls must hit.
+    const { repoDir: warmDir, branch } = await initRepoWithSources("kanban-stats-async-warm-");
+    try {
+      const firstStats = await getProjectGitStatsAsync(warmDir, branch);
+      const asyncStats = await getProjectGitStatsAsync(warmDir, branch);
+      // Same cache entry => identical object references for the cached metrics portion
+      expect(asyncStats.codeMetrics).toBe(firstStats.codeMetrics);
+      expect(asyncStats.history).toBe(firstStats.history);
+      expect(asyncStats.hotspots).toBe(firstStats.hotspots);
+
+      // Regression: a THIRD call (async again) must still be served from cache — its
+      // generatedAt must not move. An equal-but-freshly-recomputed object would pass an
+      // `.toEqual()` check but must fail this: `generatedAt` would advance to "now".
+      const generatedAtBefore = asyncStats.codeMetrics.generatedAt;
+      const rewarmedStats = await getProjectGitStatsAsync(warmDir, branch);
+      expect(rewarmedStats.codeMetrics.generatedAt).toBe(generatedAtBefore);
+      expect(rewarmedStats.codeMetrics).toBe(asyncStats.codeMetrics);
+    } finally {
+      await rm(warmDir, { recursive: true, force: true });
+    }
+  }, 180_000); // repo init + cold compute exceed the default 60s under heavy machine load
+
+  // #340: the 60s cache and the in-flight dedupe used to key on `git rev-parse <branch>`
+  // and give up (cacheKey = null) when it failed — i.e. they switched themselves OFF
+  // exactly under the load that makes rev-parse time out, so every concurrent stats
+  // request started its own full source walk (the measured 132-509s, 4-deep pile-up).
+  // An unresolvable head must now fall back to a deterministic repo+branch key.
+  describe("unresolvable HEAD (#340)", () => {
+    it("still caches the metrics blob under a repo+branch fallback key", async () => {
+      const { repoDir: dir } = await initRepoWithSources("kanban-stats-async-nohead-");
+      try {
+        // A branch that does not exist: `git rev-parse <branch>` fails, so head is null.
+        const first = await getProjectGitStatsAsync(dir, "no-such-branch");
+        const second = await getProjectGitStatsAsync(dir, "no-such-branch");
+        // Identical object reference => served from cache, not recomputed.
+        expect(second.codeMetrics).toBe(first.codeMetrics);
+        expect(second.codeMetrics.generatedAt).toBe(first.codeMetrics.generatedAt);
+        expect(first.codeMetrics.sourceFilesScanned).toBe(2);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("still coalesces concurrent cold computes into one in-flight promise", async () => {
+      const { repoDir: dir } = await initRepoWithSources("kanban-stats-async-nohead-dedupe-");
+      try {
+        const [a, b, c] = await Promise.all([
+          getProjectGitStatsAsync(dir, "no-such-branch"),
+          getProjectGitStatsAsync(dir, "no-such-branch"),
+          getProjectGitStatsAsync(dir, "no-such-branch"),
+        ]);
+        expect(b.codeMetrics).toBe(a.codeMetrics);
+        expect(c.codeMetrics).toBe(a.codeMetrics);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  // #398 follow-up (G16): stale-while-revalidate used to have NO bound — the success
+  // path was the only cache write, so when refresh failed forever the last-known-good
+  // blob was served forever, with no error ever surfacing. The bound: after
+  // MAX_CONSECUTIVE_REFRESH_FAILURES failed refreshes, or once the entry exceeds
+  // MAX_STALE_SERVE_MS, the caller waits on the refresh instead of taking the stale blob.
+  describe("bounded stale-while-revalidate (G16)", () => {
+    /** Wait for a pending background refresh to land (fresh objects served), so `rm` can't race the walk on Windows. */
+    async function drainBackgroundRefresh(dir: string, branch: string, staleBlob: { generatedAt: string }) {
+      for (let i = 0; i < 100; i++) {
+        const s = await getProjectGitStatsAsync(dir, branch);
+        if (s.codeMetrics.generatedAt !== staleBlob.generatedAt) return;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    }
+
+    /** Cold-compute once to get a real metrics blob, then re-seed it as an EXPIRED entry. */
+    async function seedStaleEntry(dir: string, branch: string, ageMs: number, failures: number) {
+      const cold = await getProjectGitStatsAsync(dir, branch);
+      const metrics = { codeMetrics: cold.codeMetrics, history: cold.history, hotspots: cold.hotspots };
+      // Bogus head + old timestamp => entry is expired/not-usable, forcing the
+      // stale-vs-wait decision on the next call.
+      __seedMetricsCacheForTests(dir, branch, { timestamp: Date.now() - ageMs, head: "0000000000000000000000000000000000000000", metrics }, failures);
+      return metrics;
+    }
+
+    it("within bounds, an expired entry is still served stale while the refresh runs", async () => {
+      const { repoDir: dir, branch } = await initRepoWithSources("kanban-stats-async-stale-ok-");
+      try {
+        const seeded = await seedStaleEntry(dir, branch, 120_000, 0); // 2min old, no failures
+        const stats = await getProjectGitStatsAsync(dir, branch);
+        // Identity: the seeded stale blob was served, not a fresh compute.
+        expect(stats.codeMetrics).toBe(seeded.codeMetrics);
+        await drainBackgroundRefresh(dir, branch, seeded.codeMetrics);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("after too many consecutive refresh failures, the caller waits for a real refresh instead of the stale blob", async () => {
+      const { repoDir: dir, branch } = await initRepoWithSources("kanban-stats-async-stale-fail-");
+      try {
+        const seeded = await seedStaleEntry(dir, branch, 120_000, STALE_METRICS_BOUNDS_FOR_TEST.MAX_CONSECUTIVE_REFRESH_FAILURES);
+        const stats = await getProjectGitStatsAsync(dir, branch);
+        // NOT the stale blob: a fresh compute was awaited (and here it succeeds,
+        // which also resets the failure counter — a failing one would have thrown).
+        expect(stats.codeMetrics).not.toBe(seeded.codeMetrics);
+        expect(stats.codeMetrics.sourceFilesScanned).toBe(2);
+        // Counter reset by the successful refresh: the next expired entry serves stale again.
+        const reseeded = await seedStaleEntry(dir, branch, 120_000, 0);
+        expect((await getProjectGitStatsAsync(dir, branch)).codeMetrics).toBe(reseeded.codeMetrics);
+        await drainBackgroundRefresh(dir, branch, reseeded.codeMetrics);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    }, 120_000);
+
+    it("an entry older than the age cap is never served stale, even with zero failures", async () => {
+      const { repoDir: dir, branch } = await initRepoWithSources("kanban-stats-async-stale-old-");
+      try {
+        const seeded = await seedStaleEntry(dir, branch, STALE_METRICS_BOUNDS_FOR_TEST.MAX_STALE_SERVE_MS + 1_000, 0);
+        const stats = await getProjectGitStatsAsync(dir, branch);
+        expect(stats.codeMetrics).not.toBe(seeded.codeMetrics);
+        expect(stats.codeMetrics.sourceFilesScanned).toBe(2);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  // #340: the walk had no wall-clock budget — only the individual git calls were capped
+  // — so a contended libuv pool let it run for minutes, monopolising the single thread.
+  describe("bounded source walk (#340)", () => {
+    it("stops at the wall-clock budget and reports only what it actually scanned", async () => {
+      const { repoDir: dir } = await initRepoWithSources("kanban-stats-async-budget-");
+      try {
+        const exhausted = await collectCurrentCodeMetricsAsyncForTest(dir, 0);
+        // Partial, and visibly partial: the counters reflect reality rather than
+        // silently claiming a complete scan.
+        expect(exhausted.sourceFilesScanned).toBe(0);
+        expect(exhausted.totalLoc).toBe(0);
+        expect(exhausted.testRatio).toBe(0);
+
+        // With a real budget the same repo is scanned in full.
+        const complete = await collectCurrentCodeMetricsAsyncForTest(dir, 30_000);
+        expect(complete.sourceFilesScanned).toBe(2);
+        expect(complete.totalLoc).toBe(5);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("tallies every file across mid-walk queue flushes (bounded parallelism, not per-directory batches)", async () => {
+      // More files than WALK_QUEUE_FLUSH_AT, spread over several directories, so the
+      // queue is flushed mid-walk and refilled — the path a small fixture never reaches.
+      const dir = await mkdtemp(join(tmpdir(), "kanban-stats-async-parallel-"));
+      const fileCount = WALK_QUEUE_FLUSH_AT_FOR_TEST * 2 + 7;
+      try {
+        for (let i = 0; i < fileCount; i++) {
+          const sub = join(dir, `pkg${i % 5}`);
+          await mkdir(sub, { recursive: true });
+          await writeFile(join(sub, `mod${i}.ts`), "const x = 1;\nexport { x };\n", "utf8");
+        }
+
+        const metrics = await collectCurrentCodeMetricsAsyncForTest(dir, 60_000);
+        expect(metrics.sourceFilesScanned).toBe(fileCount);
+        expect(metrics.productionFiles).toBe(fileCount);
+        expect(metrics.totalLoc).toBe(fileCount * 2);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
   });
 });

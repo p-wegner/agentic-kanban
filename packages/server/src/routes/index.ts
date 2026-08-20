@@ -1,4 +1,7 @@
 import { createProjectsRoute } from "./projects.js";
+import { createProjectAnalyticsRoute } from "./project-analytics.js";
+import { createProjectHealthRoute } from "./project-health.js";
+import { createProjectStackProfileRoute } from "./project-stack-profile.js";
 import { createProjectScriptsRoute } from "./project-scripts.js";
 import { createDriveRoute } from "./drive.js";
 import { createIssuesRoute } from "./issues.js";
@@ -8,6 +11,7 @@ import { createTagsRoute } from "./tags.js";
 import { createPreferencesRoute } from "./preferences.js";
 import { createAgentSkillsRoute } from "./agent-skills.js";
 import { createApprovalsRoute } from "./approvals.js";
+import { createInboxRoute } from "./inbox.js";
 import { createScheduledRunsRoute } from "./scheduled-runs.js";
 import { createButlerRoute } from "./butler.js";
 import { createButlerDefinitionsRoute } from "./butler-definitions.js";
@@ -26,8 +30,12 @@ import { createCodemodsRoute } from "./codemods.js";
 import { createBoardMonitorRoute } from "./board-monitor.js";
 import { createRunbooksRoute } from "./runbooks.js";
 import { createIssueExportImportRoute } from "./issue-export-import.js";
+import { createBacklogSnapshotRoute } from "./backlog-snapshot.js";
+import { createBacklogMarkdownRoute } from "./backlog-markdown.js";
 import { createConfigExportImportRoute } from "./config-export-import.js";
 import { createMetricsRoute } from "./metrics.js";
+import { createWorkersRoute } from "./workers.js";
+import { createPluginsRoute, createPluginProjectViewsRoute } from "./plugins.js";
 import { createHealthRoute } from "./health.js";
 import { createMilestonesRoute } from "./milestones.js";
 import { createDrivesRoute } from "./drives.js";
@@ -36,7 +44,8 @@ import { createTimeReportRoute } from "./time-report.js";
 import { createWorkflowForkService } from "../services/workflow-fork.service.js";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "../services/session.manager.js";
-import type { BoardEvents, BoardEventType } from "../services/board-events.js";
+import type { BoardEvents } from "../services/board-events.js";
+import { isBoardEventReason } from "@agentic-kanban/shared/lib/board-events-contract";
 import { createRouter } from "../middleware/create-router.js";
 import { parseOptionalJsonBody } from "../middleware/parse-body.js";
 
@@ -68,6 +77,11 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   };
 
   routes.route("/projects", createProjectsRoute(database, { ...options, getSessionManager }));
+  // Non-CRUD project feature groups, extracted from the projects.ts grab-bag
+  // (arch-review §1.5). Mounted at the SAME `/projects` prefix so paths are unchanged.
+  routes.route("/projects", createProjectAnalyticsRoute(database, { ...options, getSessionManager }));
+  routes.route("/projects", createProjectHealthRoute(database));
+  routes.route("/projects", createProjectStackProfileRoute(database));
   routes.route("/projects", createProjectScriptsRoute(database));
   routes.route("/projects", createDriveRoute(database));
   routes.route("/projects", createButlerRoute(database, getSessionManager, options));
@@ -89,6 +103,8 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   routes.route("/projects", createBoardMonitorRoute(database));
   routes.route("/projects", createRunbooksRoute(database));
   routes.route("/projects", createIssueExportImportRoute(database, options));
+  routes.route("/projects", createBacklogSnapshotRoute(database, { boardEvents: options?.boardEvents }));
+  routes.route("/projects", createBacklogMarkdownRoute(database, { boardEvents: options?.boardEvents }));
   routes.route("/projects", createConfigExportImportRoute(database));
   routes.route("/projects", createMilestonesRoute(database));
   routes.route("/projects", createDrivesRoute(database));
@@ -100,7 +116,11 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
   routes.route("/merge-queue", createMergeQueueRoute(database, getSessionManager, options));
   routes.route("/showdowns", createShowdownsRoute(database, getSessionManager, options));
   routes.route("/metrics", createMetricsRoute());
+  routes.route("/workers", createWorkersRoute(database));
+  routes.route("/plugins", createPluginsRoute(database, { ...options, getSessionManager }));
+  routes.route("/projects", createPluginProjectViewsRoute(database));
   routes.route("/health", createHealthRoute());
+  routes.route("/inbox", createInboxRoute(database));
   if (options?.boardEvents) {
     routes.route("/approvals", createApprovalsRoute(options.boardEvents));
   }
@@ -112,7 +132,14 @@ export function createRoutes(database: Database, getSessionManager: () => Sessio
     }
     const body = await parseOptionalJsonBody<{ projectId?: string; reason?: string }>(c);
     if (body.projectId) {
-      options.boardEvents.broadcast(body.projectId, (body.reason ?? "internal_notify") as BoardEventType);
+      // Validated, not cast (#566): the reason vocabulary now includes the mcp_*/drive_*
+      // reasons that only ever arrive here, so an unknown one is a caller bug worth
+      // seeing rather than a string smuggled into a union it was never a member of.
+      const raw = body.reason ?? "internal_notify";
+      if (!isBoardEventReason(raw)) {
+        console.warn(`[routes] board-notify: unknown reason "${raw}" — broadcasting as internal_notify`);
+      }
+      options.boardEvents.broadcast(body.projectId, isBoardEventReason(raw) ? raw : "internal_notify");
     }
     return c.json({ ok: true });
   });

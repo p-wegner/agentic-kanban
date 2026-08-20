@@ -1,9 +1,11 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { and, eq, inArray, ne } from "drizzle-orm";
-import { planContraction, resolveCoupledComponent } from "@agentic-kanban/shared/lib/dependency-graph.js";
+import { planContraction, resolveCoupledComponent } from "@agentic-kanban/shared/lib/dependency-graph";
+import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { applyUpdateDependenciesBatch } from "./update-dependencies-batch.js";
+import { mcpError, mcpJson } from "../db-utils.js";
 
 type ContractIssueRow = {
   id: string;
@@ -55,7 +57,7 @@ export function registerContractCoupledIssues(server: McpServer, deps: ToolDeps 
       const uniqueIssueIds = [...new Set(issueIds)];
       const leadId = leadIssueId ?? uniqueIssueIds[0];
       if (!leadId || !uniqueIssueIds.includes(leadId)) {
-        return { content: [{ type: "text" as const, text: "Error: leadIssueId must be included in issueIds" }] };
+        return mcpError("Error: leadIssueId must be included in issueIds");
       }
 
       const issueRows = await db
@@ -70,12 +72,12 @@ export function registerContractCoupledIssues(server: McpServer, deps: ToolDeps 
         .from(schema.issues)
         .where(inArray(schema.issues.id, uniqueIssueIds));
       if (issueRows.length !== uniqueIssueIds.length) {
-        return { content: [{ type: "text" as const, text: "Error: one or more issues were not found" }] };
+        return mcpError("Error: one or more issues were not found");
       }
 
       const projectIds = new Set(issueRows.map((row) => row.projectId));
       if (projectIds.size !== 1) {
-        return { content: [{ type: "text" as const, text: "Error: cannot contract issues across projects" }] };
+        return mcpError("Error: cannot contract issues across projects");
       }
 
       const projectId = issueRows[0].projectId;
@@ -96,14 +98,14 @@ export function registerContractCoupledIssues(server: McpServer, deps: ToolDeps 
       }));
       const component = resolveCoupledComponent(leadId, edges);
       if (component.size < 2) {
-        return { content: [{ type: "text" as const, text: "Error: selected issues are not a coupled component" }] };
+        return mcpError("Error: selected issues are not a coupled component");
       }
 
       const selected = new Set(uniqueIssueIds);
       const missing = [...component].filter((id) => !selected.has(id));
       const extra = uniqueIssueIds.filter((id) => !component.has(id));
       if (missing.length > 0 || extra.length > 0) {
-        return { content: [{ type: "text" as const, text: "Error: issueIds must exactly match the lead issue's coupled component" }] };
+        return mcpError("Error: issueIds must exactly match the lead issue's coupled component");
       }
 
       const openWorkspaces = await db
@@ -111,12 +113,12 @@ export function registerContractCoupledIssues(server: McpServer, deps: ToolDeps 
         .from(schema.workspaces)
         .where(and(inArray(schema.workspaces.issueId, [...component]), ne(schema.workspaces.status, "closed")));
       if (openWorkspaces.length > 0) {
-        return { content: [{ type: "text" as const, text: "Error: cannot contract a component with open workspaces" }] };
+        return mcpError("Error: cannot contract a component with open workspaces");
       }
 
       const leadIssue = issueRows.find((row) => row.id === leadId);
       if (!leadIssue) {
-        return { content: [{ type: "text" as const, text: "Error: leadIssueId must be included in issueIds" }] };
+        return mcpError("Error: leadIssueId must be included in issueIds");
       }
       const absorbedIssueIds = issueRows
         .filter((row) => row.id !== leadId)
@@ -134,7 +136,7 @@ export function registerContractCoupledIssues(server: McpServer, deps: ToolDeps 
         terminalStatuses.find((status) => status.name === "Cancelled")?.id ??
         terminalStatuses.find((status) => status.name === "Done")?.id;
       if (!terminalStatusId) {
-        return { content: [{ type: "text" as const, text: "Error: project must have a Cancelled or Done status to absorb issues" }] };
+        return mcpError("Error: project must have a Cancelled or Done status to absorb issues");
       }
 
       const mutations = [
@@ -148,7 +150,7 @@ export function registerContractCoupledIssues(server: McpServer, deps: ToolDeps 
       ];
       const result = await applyUpdateDependenciesBatch(deps, mutations);
       if (!result.ok) {
-        return { content: [{ type: "text" as const, text: `Error: ${result.message}` }] };
+        return mcpError(`Error: ${result.message}`);
       }
 
       const now = new Date().toISOString();
@@ -161,16 +163,18 @@ export function registerContractCoupledIssues(server: McpServer, deps: ToolDeps 
           absorbed?.description?.trim() || "",
           contractPointer(leadIssue.issueNumber),
         ].filter(Boolean).join("\n\n");
+        // #501: the description is a plain column write, but the terminal status must go
+        // through the transition authority so the workflow current-node is synced with it
+        // — absorbing an issue is exactly the case where a stale currentNodeId would make
+        // dependency resolution treat a closed issue as still open (#537).
         await db.update(schema.issues)
-          .set({ statusId: terminalStatusId, description: nextDescription, updatedAt: now })
+          .set({ description: nextDescription, updatedAt: now })
           .where(eq(schema.issues.id, id));
+        await transitionIssueStatus(db, id, terminalStatusId, { now });
       }
       deps.notifyBoard(projectId, "mcp_issue_updated");
 
-      return {
-        content: [{
-          type: "text" as const,
-          text: JSON.stringify({
+      return mcpJson({
             leadIssueId: leadId,
             memberIssueIds: [...component],
             mutations,
@@ -178,9 +182,7 @@ export function registerContractCoupledIssues(server: McpServer, deps: ToolDeps 
             removed: result.removed,
             absorbedIssueIds,
             skipped: result.skipped,
-          }, null, 2),
-        }],
-      };
+          });
     },
   );
 }

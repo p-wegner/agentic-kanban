@@ -1,11 +1,14 @@
 import { computeBlockerReadiness, isResolvedDependencyStatusView, isTerminalStatusView, type BlockerWorkspaceLanding, type DependencyWavePlan, type DependencyWaveStartResult } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
-import type { BoardEvents } from "./board-events.js";
-import type { SessionManager } from "./session.manager.js";
+import type { BoardEventSink } from "./board-events.js";
+import type { SessionLauncher } from "./session.manager.js";
 import type { GitService } from "./workspace-internals.js";
 import { createWorkspaceCrudService } from "./workspace-crud.service.js";
+import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
+import { claimIssueForAutoStart, isAutoStartClaimed } from "./auto-start-claim.js";
+import { completeCreateJob, failCreateJob } from "./create-job.service.js";
 import {
-  getWipLimitPref,
+  getWipLimitPrefMap,
   getInProgressStatusIds,
   getActiveWipCount,
   getProjectIssuesForWave,
@@ -13,8 +16,11 @@ import {
   getWaveDependencyRows,
   getUpstreamWorkspaceLandingRows,
 } from "../repositories/dependency-wave.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { BLOCKING_DEPENDENCY_TYPES } from "@agentic-kanban/shared/lib/dependency-type-traits";
+import { findCycleNodes } from "@agentic-kanban/shared/lib/dependency-graph";
+import { resolveMonitorTunables } from "@agentic-kanban/shared/lib/strategy-objective-file";
 
-const BLOCKING_DEPENDENCY_TYPES = ["depends_on", "blocked_by"] as const;
 const STARTABLE_STATUS_NAMES = new Set(["Backlog", "Todo"]);
 
 type BlockingDependencyType = typeof BLOCKING_DEPENDENCY_TYPES[number];
@@ -38,22 +44,13 @@ type DependencyRow = {
 };
 
 export interface DependencyWaveStartDeps {
-  getSessionManager?: () => SessionManager;
-  boardEvents?: BoardEvents;
+  getSessionManager?: () => SessionLauncher;
+  boardEvents?: BoardEventSink;
   gitService?: GitService;
   createWorkspace?: (
     issue: { id: string; issueNumber: number | null; title: string },
     options: { planMode: boolean },
   ) => Promise<{ id?: string; error?: string }>;
-}
-
-function slugifyTitle(title: string): string {
-  return title
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, "")
-    .replace(/\s+/g, "-")
-    .slice(0, 40)
-    .replace(/^-+|-+$/g, "") || "issue";
 }
 
 function toPlanIssue(issue: IssueRow, extras: {
@@ -72,48 +69,50 @@ function toPlanIssue(issue: IssueRow, extras: {
   };
 }
 
+/** #523: the traversal is shared now; only the edge filter was ever local. */
 function findCycleIssueIds(issueIds: string[], deps: DependencyRow[]): Set<string> {
-  const openIds = new Set(issueIds);
-  const adjacency = new Map<string, string[]>();
-  for (const id of issueIds) adjacency.set(id, []);
-  for (const dep of deps) {
-    if (!isBlockingType(dep.type) || !openIds.has(dep.issueId) || !openIds.has(dep.dependsOnId)) continue;
-    adjacency.get(dep.issueId)?.push(dep.dependsOnId);
-  }
-
-  const cycleIds = new Set<string>();
-  const state = new Map<string, "visiting" | "visited">();
-  const stack: string[] = [];
-
-  function dfs(id: string) {
-    state.set(id, "visiting");
-    stack.push(id);
-    for (const next of adjacency.get(id) ?? []) {
-      if (state.get(next) === "visiting") {
-        const start = stack.indexOf(next);
-        for (const cycleId of stack.slice(start)) cycleIds.add(cycleId);
-      } else if (!state.has(next)) {
-        dfs(next);
-      }
-    }
-    stack.pop();
-    state.set(id, "visited");
-  }
-
-  for (const id of issueIds) {
-    if (!state.has(id)) dfs(id);
-  }
-  return cycleIds;
+  return findCycleNodes(
+    issueIds,
+    deps.map((dep) => ({ from: dep.issueId, to: dep.dependsOnId, type: dep.type })),
+    (edge) => isBlockingType(edge.type),
+  );
 }
 
 function isBlockingType(type: string): type is BlockingDependencyType {
   return (BLOCKING_DEPENDENCY_TYPES as readonly string[]).includes(type);
 }
 
+/**
+ * The WIP limit this project actually runs under (#654).
+ *
+ * Precedence, most specific first:
+ *  1. an explicit caller override (the API's `wipLimit` query param),
+ *  2. `wip_limit_<projectId>` — the per-project pref the onboarding wizard writes,
+ *  3. `resolveMonitorTunables` — the Strategy Bullseye if there is one, else the legacy global
+ *     `nudge_wip_limit`, else its own default.
+ *
+ * Step 3 is the important one: it is the SAME function the Board Monitor popover reads, so the
+ * two surfaces can no longer disagree. Before this, `getWipInfo` read only `nudge_wip_limit`,
+ * which is unset in most installs — so it fell through to a hardcoded 5 and offered
+ * "Start Next Wave (5)" on a project configured for 2.
+ */
+async function resolveWaveWipLimit(
+  database: Database,
+  projectId: string,
+  wipLimitOverride?: number,
+): Promise<number> {
+  if (wipLimitOverride !== undefined && Number.isFinite(wipLimitOverride) && wipLimitOverride > 0) {
+    return wipLimitOverride;
+  }
+  const prefMap = await getWipLimitPrefMap(projectId, database);
+  const perProject = Number.parseInt(prefMap.get(`wip_limit_${projectId}`) ?? "", 10);
+  if (Number.isFinite(perProject) && perProject > 0) return perProject;
+  const { tunables } = resolveMonitorTunables(prefMap, projectId);
+  return tunables.activeAgentsTarget > 0 ? tunables.activeAgentsTarget : 5;
+}
+
 async function getWipInfo(database: Database, projectId: string, wipLimitOverride?: number) {
-  const prefValue = await getWipLimitPref(database);
-  const parsedLimit = wipLimitOverride ?? Number.parseInt(prefValue ?? "5", 10);
-  const wipLimit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 5;
+  const wipLimit = await resolveWaveWipLimit(database, projectId, wipLimitOverride);
 
   const inProgressStatusIds = await getInProgressStatusIds(projectId, database);
   if (inProgressStatusIds.length === 0) {
@@ -136,7 +135,13 @@ export async function buildDependencyWavePlan(
   const openIssueIds = openIssues.map((issue) => issue.id);
 
   const openWorkspaceRows = await getOpenWorkspaceIssueIds(openIssueIds, database);
-  const issueIdsWithOpenWorkspace = new Set(openWorkspaceRows.map((row) => row.issueId));
+  // #366: a workspace ROW appears only at the END of provisioning (80s to 8+ min), so the
+  // rows alone are blind to a start another path already began — and the wave would launch a
+  // second workspace for the same issue. An in-flight create counts as having one.
+  const issueIdsWithOpenWorkspace = new Set([
+    ...openWorkspaceRows.map((row) => row.issueId),
+    ...openIssueIds.filter((issueId) => isAutoStartClaimed(issueId)),
+  ]);
 
   const dependencyRows = await getWaveDependencyRows(projectId, projectIssues.length > 0, database);
 
@@ -245,6 +250,14 @@ export async function startNextDependencyWave(
     });
 
   for (const issue of candidates) {
+    // #366: claim the issue in the create-job registry before provisioning. The plan above was
+    // built over several awaits, so re-assert atomically here; a claim that appeared in
+    // between means another starter is already provisioning this issue.
+    const claim = claimIssueForAutoStart(issue.id);
+    if (!claim) {
+      failed.push({ issueId: issue.id, issueNumber: issue.issueNumber, error: "a workspace creation for this issue is already in flight (#366)" });
+      continue;
+    }
     let result: { id?: string; error?: string };
     try {
       // Wave-launched builders go straight to implementing — match the normal
@@ -253,13 +266,19 @@ export async function startNextDependencyWave(
       // first, which is indistinguishable from a stalled session (see #767).
       result = deps.createWorkspace
         ? await deps.createWorkspace(issue, { planMode: false })
+        // #366: `suggestBranchName` is the ONE branch-naming function. The private
+        // `slugifyTitle` this used to call stripped non-alphanumerics instead of turning them
+        // into separators, so the same issue got a different branch name depending on which
+        // starter won — which is exactly how the duplicate pair was fingerprinted.
         : await workspaceService!.createWorkspace({
           issueId: issue.id,
-          branch: `feature/ak-${issue.issueNumber ?? "next"}-${slugifyTitle(issue.title)}`,
+          branch: suggestBranchName(issue),
           planMode: false,
         });
+      completeCreateJob(claim.jobId, result);
     } catch (err) {
-      result = { error: err instanceof Error ? err.message : String(err) };
+      result = { error: errorMessage(err) };
+      failCreateJob(claim.jobId, err);
     }
 
     if (result.error) {

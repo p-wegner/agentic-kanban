@@ -12,6 +12,8 @@ interface TicketMentionInputProps {
   onPaste?: (e: ClipboardEvent<HTMLTextAreaElement>) => void;
   onKeyDown?: (e: KeyboardEvent<HTMLTextAreaElement>) => void;
   inputRef?: React.Ref<HTMLTextAreaElement>;
+  /** Forwarded to the underlying textarea so callers can give it a stable test hook. */
+  "data-testid"?: string;
 }
 
 const MENTION_REGEX = /(?:^|[\s([{,;])#(\d*)$/;
@@ -27,6 +29,7 @@ export default function TicketMentionInput({
   onPaste,
   onKeyDown,
   inputRef,
+  "data-testid": dataTestId,
 }: TicketMentionInputProps) {
   const { issues } = useMentionContext();
   const internalRef = useRef<HTMLTextAreaElement>(null);
@@ -141,6 +144,7 @@ export default function TicketMentionInput({
     <div ref={wrapperRef} className="relative">
       <textarea
         ref={textareaRef}
+        data-testid={dataTestId}
         value={value}
         onChange={handleChange}
         onKeyDown={handleKeyDown}

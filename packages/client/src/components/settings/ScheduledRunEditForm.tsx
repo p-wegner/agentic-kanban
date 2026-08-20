@@ -2,7 +2,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { apiPut } from "../../lib/api.js";
 import { buildUpdateRunPayload, isUpdateRunDisabled, runEditPatch, type ScheduleMode } from "../../lib/scheduled-run-form.js";
 import type { ScheduledRun } from "../SettingsPanel.shared.js";
-import { showToast } from "../Toast.js";
+import { showToast } from "../../lib/toast.js";
 import { ScheduleModeFields } from "./ScheduleModeFields.js";
 
 type ScheduledRunEditFormProps = {

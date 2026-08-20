@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
+import { priorityTraits } from "../lib/priorityTraits.js";
 
 interface SprintCapacityPolicy {
   activeAgentsTarget: number;
@@ -61,15 +62,8 @@ function CapacityBar({ current, target, label }: { current: number; target: numb
 
 function PriorityBadge({ priority }: { priority: string | null }) {
   if (!priority) return null;
-  const colors: Record<string, string> = {
-    critical: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
-    urgent: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
-    high: "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300",
-    medium: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300",
-    low: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
-  };
   return (
-    <span className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-medium ${colors[priority] ?? colors.low}`}>
+    <span className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-medium ${priorityTraits(priority).badgeClass}`}>
       {priority}
     </span>
   );

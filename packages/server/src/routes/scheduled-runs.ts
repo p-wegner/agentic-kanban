@@ -3,13 +3,13 @@ import { createScheduledRunService } from "../services/scheduled-run.service.js"
 import { createWorkspaceService } from "../services/workspace.service.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
-import type { BoardEvents } from "../services/board-events.js";
+import type { BoardEventSink } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
 
 export function createScheduledRunsRoute(
   database: Database,
   getSessionManager?: () => SessionManager,
-  boardEvents?: BoardEvents,
+  boardEvents?: BoardEventSink,
 ) {
   const router = createRouter();
   const workspaceService = createWorkspaceService({ database, getSessionManager, boardEvents });

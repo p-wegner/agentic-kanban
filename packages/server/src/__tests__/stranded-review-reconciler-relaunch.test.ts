@@ -32,19 +32,25 @@ import type { SessionManager } from "../services/session.manager.js";
 // Mock the agent/session boundary so no real review agent spawns. The reconciler
 // imports startManualReview directly; we assert it is (or is not) invoked.
 const startManualReviewMock = vi.fn(async () => ({ sessionId: randomUUID() }));
+const isReviewLaunchPendingMock = vi.fn(() => false);
 vi.mock("../services/review.service.js", () => ({
   startManualReview: (...args: unknown[]) => startManualReviewMock(...args),
+  isReviewLaunchPending: (...args: unknown[]) => isReviewLaunchPendingMock(...args),
 }));
 
 // Mock the git boundary so "has commits ahead of base" is deterministic without a
 // real worktree on disk (the working dirs below never exist).
 const getCommitCountAheadMock = vi.fn(async () => 1);
+const revParseMock = vi.fn(async (_dir: string, ref: string) => `sha-${ref}`);
 vi.mock("../services/git.service.js", () => ({
   getCommitCountAhead: (...args: unknown[]) => getCommitCountAheadMock(...args),
+  revParse: (...args: [string, string]) => revParseMock(...args),
 }));
 
 // Import AFTER the mocks are registered (vi.mock is hoisted, but keep it explicit).
 const { reconcileStrandedReviews } = await import("../startup/stranded-review-reconciler.js");
+// Real module (not mocked) — the reconciler consults the in-memory merge-job registry (#270).
+const { startMergeJob, resetMergeJobs } = await import("../services/merge-job.service.js");
 
 type Db = ReturnType<typeof createTestDb>["db"];
 
@@ -56,6 +62,10 @@ function makeDeps(db: Db, overrides: Partial<{ enabled: boolean }> = {}) {
     getSessionManager: () => sessionManager,
     boardEvents,
     reviewSessionIds: new Set<string>(),
+    // #539: the commits-ahead probe is now the leading-OR-sibling helper, which reaches the
+    // git-service SSOT in @agentic-kanban/shared — out of reach of the git.service mock
+    // above. The reconciler exposes it as a dep, so the same mock still drives it.
+    hasCommittedWork: async () => (await getCommitCountAheadMock()) > 0,
     ...overrides,
   };
 }
@@ -103,6 +113,9 @@ describe("reconcileStrandedReviews — relaunch path (recovers stranded reviews,
     startManualReviewMock.mockClear();
     getCommitCountAheadMock.mockClear();
     getCommitCountAheadMock.mockResolvedValue(1);
+    isReviewLaunchPendingMock.mockClear();
+    isReviewLaunchPendingMock.mockReturnValue(false);
+    resetMergeJobs();
   });
 
   it("relaunches review for a genuinely stranded In-Review workspace", async () => {
@@ -161,6 +174,31 @@ describe("reconcileStrandedReviews — relaunch path (recovers stranded reviews,
     const [forkRow] = await db.select({ readyForMerge: workspaces.readyForMerge })
       .from(workspaces).where(eq(workspaces.id, forkChild.workspaceId));
     expect(forkRow.readyForMerge).toBe(false);
+  });
+
+  it("skips a workspace whose merge is in flight — the merge owns it (#270)", async () => {
+    const { db } = createTestDb();
+    const { projectId, inReviewStatusId } = await seedProject(db);
+    const { workspaceId } = await seedInReviewWorkspace(db, { projectId, statusId: inReviewStatusId, issueNumber: 270 });
+
+    // Without the merge job this candidate WOULD be recovered (proven by the first test).
+    startMergeJob(workspaceId);
+    const recovered = await reconcileStrandedReviews(makeDeps(db));
+
+    expect(recovered).toBe(0);
+    expect(startManualReviewMock).not.toHaveBeenCalled();
+  });
+
+  it("skips a workspace whose review launch is already mid-flight on another path (#270)", async () => {
+    const { db } = createTestDb();
+    const { projectId, inReviewStatusId } = await seedProject(db);
+    await seedInReviewWorkspace(db, { projectId, statusId: inReviewStatusId, issueNumber: 271 });
+
+    isReviewLaunchPendingMock.mockReturnValue(true);
+    const recovered = await reconcileStrandedReviews(makeDeps(db));
+
+    expect(recovered).toBe(0);
+    expect(startManualReviewMock).not.toHaveBeenCalled();
   });
 
   it("marks the stranded workspace ready-for-merge (no relaunch) when auto_review is off", async () => {

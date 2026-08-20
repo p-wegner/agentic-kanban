@@ -1,8 +1,8 @@
 import type { Command } from "commander";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { parseSessionSummary, isTerminalStatusName } from "@agentic-kanban/shared";
-import { runMigrations, getActiveProjectId } from "../shared.js";
+import { parseSessionSummary, isTerminalStatusName, type SessionSummary } from "@agentic-kanban/shared";
+import { resolveProjectIdArg, describeIssueNumberMiss, resolveIssueArg, cliAction } from "../shared.js";
 import { isAnalyticsNoise } from "../../services/session-filter.js";
 import { getWorkspaceDiffStats, type WorkspaceDiffStats } from "../../services/workspace-diff-stats.js";
 import {
@@ -14,6 +14,7 @@ import {
   moveIssueToStatus,
   createSubIssueWithParentLink,
   getIssuesTouchedFilesByNumbers,
+  getIssueSummary,
 } from "../../repositories/issue.repository.js";
 import {
   updateIssueById,
@@ -25,14 +26,14 @@ import { isIssueNumberUniqueConstraintError, nextIssueNumber } from "../../repos
 import { getProjectStatuses, getProjectById } from "../../repositories/project.repository.js";
 import { getWorkspacesByIssueId, findOpenUnmergedWorkspace } from "../../repositories/workspace.repository.js";
 import { getSessionsForWorkspacesDesc } from "../../repositories/workspace-launch-failures.repository.js";
-import { getSessionMessagesByIdDesc, getSessionMessagesByIdAsc } from "../../repositories/session.repository.js";
+import { getSessionMessagesByIdDesc } from "../../repositories/session.repository.js";
 import { getWorkspaceArtifactTarget } from "../../repositories/phase-artifacts.repository.js";
-import { buildIssueSummaryLines, buildIssueStatusLines, validateAttachArtifactOptions, formatAttachArtifactOutput, selectSummarySession, buildIssueSummaryJson, buildIssueStatusJson } from "../../lib/issue-cli-format.js";
-import { computeSessionDuration } from "../../lib/issue-summary-projection.js";
+import { buildIssueSummaryLines, buildIssueStatusLines, validateAttachArtifactOptions, formatAttachArtifactOutput, buildIssueSummaryJson, buildIssueStatusJson, formatResolvedProjectLine } from "../../lib/issue-cli-format.js";
 import { extractLastAgentMessageFromRows } from "../../lib/session-message-extraction.js";
 import { openWorkspaceBlockMessage } from "../../lib/terminal-move-guard.js";
 import { registerIssueDependencyCommands } from "./issue-dependency.js";
 import { normalizeBatchInput, validateBatchIssueInputs, formatBatchCreateResult } from "../../lib/batch-create-issues.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 const ISSUE_NUMBER_INSERT_ATTEMPTS = 3;
 
@@ -53,37 +54,32 @@ Examples:
   $ agentic-kanban issue list -s "In Progress" -p high
   $ agentic-kanban issue list --json                 # machine-readable output
 `)
-    .action(async (options: { status?: string; priority?: string; json?: boolean }) => {
-      try {
-        await runMigrations();
-        const projectId = await getActiveProjectId();
+    .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
+    .action(cliAction(async (options: { project?: string; status?: string; priority?: string; json?: boolean }) => {
+      const projectId = await resolveProjectIdArg(options.project);
 
-        let rows = await getIssueListForProject(projectId);
+      let rows = await getIssueListForProject(projectId);
 
-        if (options.status) rows = rows.filter((r) => r.statusName === options.status);
-        if (options.priority) rows = rows.filter((r) => r.priority === options.priority);
+      if (options.status) rows = rows.filter((r) => r.statusName === options.status);
+      if (options.priority) rows = rows.filter((r) => r.priority === options.priority);
 
-        if (options.json) {
-          console.log(JSON.stringify(rows, null, 2));
-          process.exit(0);
-        }
-
-        if (rows.length === 0) {
-          console.log("No issues found.");
-          process.exit(0);
-        }
-
-        for (const r of rows) {
-          const num = r.issueNumber != null ? `#${r.issueNumber}` : "(no number)";
-          console.log(`  ${num.padEnd(6)} [${(r.issueType ?? "task").padEnd(8)}] [${r.statusName}] ${r.title}`);
-          console.log(`         id: ${r.id}`);
-        }
+      if (options.json) {
+        console.log(JSON.stringify(rows, null, 2));
         process.exit(0);
-      } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
-        process.exit(1);
       }
-    });
+
+      if (rows.length === 0) {
+        console.log("No issues found.");
+        process.exit(0);
+      }
+
+      for (const r of rows) {
+        const num = r.issueNumber != null ? `#${r.issueNumber}` : "(no number)";
+        console.log(`  ${num.padEnd(6)} [${(r.issueType ?? "task").padEnd(8)}] [${r.statusName}] ${r.title}`);
+        console.log(`         id: ${r.id}`);
+      }
+      process.exit(0);
+    }));
 
   issueCmd
     .command("get <issue-number>")
@@ -94,54 +90,50 @@ Examples:
   $ agentic-kanban issue get 42
   $ agentic-kanban issue get 42 --json
 `)
-    .action(async (issueNumberArg: string, options: { json?: boolean }) => {
-      try {
-        await runMigrations();
-        const projectId = await getActiveProjectId();
+    .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
+    .action(cliAction(async (issueNumberArg: string, options: { project?: string; json?: boolean }) => {
+      const projectId = await resolveProjectIdArg(options.project);
 
-        const num = Number(issueNumberArg);
-        if (!Number.isInteger(num) || num <= 0) {
-          console.error(`Invalid issue number: ${issueNumberArg}`);
-          process.exit(1);
-        }
-
-        const issue = await getIssueHeaderByNumber(projectId, num);
-
-        if (!issue) {
-          console.error(`Issue #${num} not found in active project.`);
-          process.exit(1);
-        }
-
-        if (options.json) {
-          console.log(JSON.stringify(issue, null, 2));
-          process.exit(0);
-        }
-
-        console.log(`\n  #${issue.issueNumber} ${issue.title}`);
-        console.log(`  Status:   ${issue.statusName}`);
-        console.log(`  Type:     ${issue.issueType ?? "task"}`);
-        console.log(`  Priority: ${issue.priority}`);
-        console.log(`  ID:       ${issue.id}`);
-        if (issue.description) {
-          console.log(`\n  Description:`);
-          for (const line of issue.description.split("\n")) {
-            console.log(`    ${line}`);
-          }
-        } else {
-          console.log(`\n  Description: (none)`);
-        }
-        console.log("");
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+      const num = Number(issueNumberArg);
+      if (!Number.isInteger(num) || num <= 0) {
+        console.error(`Invalid issue number: ${issueNumberArg}`);
         process.exit(1);
       }
-    });
+
+      const issue = await getIssueHeaderByNumber(projectId, num);
+
+      if (!issue) {
+        console.error(await describeIssueNumberMiss(num, projectId));
+        process.exit(1);
+      }
+
+      if (options.json) {
+        console.log(JSON.stringify(issue, null, 2));
+        process.exit(0);
+      }
+
+      console.log(`\n  #${issue.issueNumber} ${issue.title}`);
+      console.log(`  Status:   ${issue.statusName}`);
+      console.log(`  Type:     ${issue.issueType ?? "task"}`);
+      console.log(`  Priority: ${issue.priority}`);
+      console.log(`  ID:       ${issue.id}`);
+      if (issue.description) {
+        console.log(`\n  Description:`);
+        for (const line of issue.description.split("\n")) {
+          console.log(`    ${line}`);
+        }
+      } else {
+        console.log(`\n  Description: (none)`);
+      }
+      console.log("");
+      process.exit(0);
+    }));
 
   issueCmd
     .command("create <title>")
-    .description("Create a new issue in the active project.\n\nIssue numbers are auto-incrementing per project. The issue is placed in the first project status (typically Todo) unless overridden with -s.")
+    .description("Create a new issue in the active project.\n\nIssue numbers are auto-incrementing per project. The issue is placed in the first project status (typically Todo) unless overridden with -s. Use --description-file for a multi-line / markdown body — this avoids the shell quoting and newline mangling that can truncate an inline -d value.")
     .option("-d, --description <description>", "Issue description (markdown supported)")
+    .option("--description-file <path>", "Read the description from a UTF-8 file (overrides -d)")
     .option("-p, --priority <priority>", "Priority: low, medium, high, critical (default: medium)")
     .option("-t, --type <type>", "Issue type: task, bug, feature, chore (default: task)")
     .option("-s, --status <status>", "Initial status name (default: first project status, typically Todo)")
@@ -150,43 +142,57 @@ Examples:
   $ agentic-kanban issue create "Fix login bug" -t bug
   $ agentic-kanban issue create "Add dark mode" -d "Support theme switching" -t feature
   $ agentic-kanban issue create "Hotfix" -t bug -s "In Progress"
+  $ agentic-kanban issue create "Long writeup" --description-file ./body.md
 `)
-    .action(async (title: string, options: { description?: string; priority?: string; type?: string; status?: string }) => {
-      try {
-        await runMigrations();
-        const projectId = await getActiveProjectId();
+    .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
+    .action(cliAction(async (title: string, options: { project?: string; description?: string; descriptionFile?: string; priority?: string; type?: string; status?: string }) => {
+      const projectId = await resolveProjectIdArg(options.project);
 
-        const statuses = await getProjectStatuses(projectId);
+      const statuses = await getProjectStatuses(projectId);
 
-        if (statuses.length === 0) throw new Error("No statuses found for project.");
+      if (statuses.length === 0) throw new Error("No statuses found for project.");
 
-        let statusId = statuses[0].id;
-        if (options.status) {
-          const found = statuses.find((s) => s.name === options.status);
-          if (!found) {
-            console.error(`Status '${options.status}' not found. Available: ${statuses.map((s) => s.name).join(", ")}`);
-            process.exit(1);
-          }
-          statusId = found.id;
+      let statusId = statuses[0].id;
+      if (options.status) {
+        const found = statuses.find((s) => s.name === options.status);
+        if (!found) {
+          console.error(`Status '${options.status}' not found. Available: ${statuses.map((s) => s.name).join(", ")}`);
+          process.exit(1);
         }
-
-        const { id, issueNumber } = await createIssueWithNextNumber({
-          projectId,
-          statusId,
-          title,
-          description: options.description,
-          priority: options.priority,
-          issueType: options.type,
-        });
-
-        console.log(`Created issue #${issueNumber}: ${title}`);
-        console.log(`  id: ${id}`);
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
-        process.exit(1);
+        statusId = found.id;
       }
-    });
+
+      // #667 — `issue update` has had --description-file (and a help note about truncation)
+      // while `create` did not, so a multi-line body passed inline died at the first
+      // newline. #659 and #660 were both created that way and lost everything after their
+      // first line; nothing failed, so nobody noticed until the bodies were needed.
+      let description = options.description;
+      if (options.descriptionFile !== undefined) {
+        try {
+          description = readFileSync(options.descriptionFile, "utf8");
+        } catch (err) {
+          console.error(`Could not read description file '${options.descriptionFile}': ${errorMessage(err)}`);
+          process.exit(1);
+        }
+      }
+
+      const { id, issueNumber } = await createIssueWithNextNumber({
+        projectId,
+        statusId,
+        title,
+        description,
+        priority: options.priority,
+        issueType: options.type,
+      });
+
+      console.log(`Created issue #${issueNumber}: ${title}`);
+      console.log(`  id: ${id}`);
+      // Name the project the issue actually landed in (#335) — there is no
+      // --project flag, so this is the only feedback that the implicit
+      // active-project fallback filed it where the caller meant.
+      console.log(formatResolvedProjectLine(projectId, (await getProjectById(projectId))?.name));
+      process.exit(0);
+    }));
 
   issueCmd
     .command("update <issue>")
@@ -205,78 +211,71 @@ Examples:
 
 Tip: to change an issue's STATUS, use 'issue move' instead.
 `)
-    .action(async (issueArg: string, options: { title?: string; description?: string; descriptionFile?: string; priority?: string; type?: string }) => {
-      try {
-        await runMigrations();
+    .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
+    .action(cliAction(async (issueArg: string, options: { project?: string; title?: string; description?: string; descriptionFile?: string; priority?: string; type?: string }) => {
 
-        // Resolve by issue number (active project) or by full ID, like 'issue move'.
-        const isNumeric = /^\d+$/.test(issueArg);
-        const projectId = isNumeric ? await getActiveProjectId() : undefined;
-
-        const issue = await getIssueByNumberOrId(issueArg, projectId);
-        if (!issue) {
-          console.error(`Issue '${issueArg}' not found.`);
-          process.exit(1);
-        }
-
-        // Build the update set from provided flags only — untouched flags stay as-is.
-        const updates: Record<string, unknown> = {};
-
-        if (options.title !== undefined) {
-          const title = options.title.trim();
-          if (!title) {
-            console.error("Title cannot be empty.");
-            process.exit(1);
-          }
-          updates.title = title;
-        }
-
-        let description = options.description;
-        if (options.descriptionFile !== undefined) {
-          try {
-            description = readFileSync(options.descriptionFile, "utf8");
-          } catch (err) {
-            console.error(`Could not read description file '${options.descriptionFile}': ${err instanceof Error ? err.message : String(err)}`);
-            process.exit(1);
-          }
-        }
-        if (description !== undefined) updates.description = description;
-
-        if (options.priority !== undefined) {
-          const validPriorities = ["low", "medium", "high", "critical"];
-          if (!validPriorities.includes(options.priority)) {
-            console.error(`Invalid priority '${options.priority}'. Valid: ${validPriorities.join(", ")}`);
-            process.exit(1);
-          }
-          updates.priority = options.priority;
-        }
-
-        if (options.type !== undefined) {
-          const validTypes = ["task", "bug", "feature", "chore"];
-          if (!validTypes.includes(options.type)) {
-            console.error(`Invalid type '${options.type}'. Valid: ${validTypes.join(", ")}`);
-            process.exit(1);
-          }
-          updates.issueType = options.type;
-        }
-
-        if (Object.keys(updates).length === 0) {
-          console.error("Nothing to update. Pass at least one of --title, -d/--description, --description-file, -p/--priority, -t/--type.");
-          process.exit(1);
-        }
-
-        updates.updatedAt = new Date().toISOString();
-        await updateIssueById(issue.id, updates);
-
-        const changed = Object.keys(updates).filter((k) => k !== "updatedAt");
-        const num = issue.issueNumber != null ? `#${issue.issueNumber}` : issue.id;
-        console.log(`Updated issue ${num} (${changed.join(", ")}).`);
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+      // Resolve by issue number (scoped project) or by full ID, like 'issue move' (#509).
+      const resolved = await resolveIssueArg(issueArg, options);
+      if (!resolved.ok) {
+        console.error(resolved.message);
         process.exit(1);
       }
-    });
+      const issue = resolved.issue;
+
+      // Build the update set from provided flags only — untouched flags stay as-is.
+      const updates: Record<string, unknown> = {};
+
+      if (options.title !== undefined) {
+        const title = options.title.trim();
+        if (!title) {
+          console.error("Title cannot be empty.");
+          process.exit(1);
+        }
+        updates.title = title;
+      }
+
+      let description = options.description;
+      if (options.descriptionFile !== undefined) {
+        try {
+          description = readFileSync(options.descriptionFile, "utf8");
+        } catch (err) {
+          console.error(`Could not read description file '${options.descriptionFile}': ${errorMessage(err)}`);
+          process.exit(1);
+        }
+      }
+      if (description !== undefined) updates.description = description;
+
+      if (options.priority !== undefined) {
+        const validPriorities = ["low", "medium", "high", "critical"];
+        if (!validPriorities.includes(options.priority)) {
+          console.error(`Invalid priority '${options.priority}'. Valid: ${validPriorities.join(", ")}`);
+          process.exit(1);
+        }
+        updates.priority = options.priority;
+      }
+
+      if (options.type !== undefined) {
+        const validTypes = ["task", "bug", "feature", "chore"];
+        if (!validTypes.includes(options.type)) {
+          console.error(`Invalid type '${options.type}'. Valid: ${validTypes.join(", ")}`);
+          process.exit(1);
+        }
+        updates.issueType = options.type;
+      }
+
+      if (Object.keys(updates).length === 0) {
+        console.error("Nothing to update. Pass at least one of --title, -d/--description, --description-file, -p/--priority, -t/--type.");
+        process.exit(1);
+      }
+
+      updates.updatedAt = new Date().toISOString();
+      await updateIssueById(issue.id, updates);
+
+      const changed = Object.keys(updates).filter((k) => k !== "updatedAt");
+      const num = issue.issueNumber != null ? `#${issue.issueNumber}` : issue.id;
+      console.log(`Updated issue ${num} (${changed.join(", ")}).`);
+      process.exit(0);
+    }));
 
   issueCmd
     .command("move <issue-id> <status>")
@@ -288,45 +287,38 @@ Examples:
 
 Tip: Use 'issue list' to find the issue ID and see available status names.
 `)
-    .action(async (issueId: string, statusName: string) => {
-      try {
-        await runMigrations();
+    .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
+    .action(cliAction(async (issueId: string, statusName: string, options: { project?: string }) => {
 
-        const isNumeric = /^\d+$/.test(issueId);
-        const projectId = isNumeric ? await getActiveProjectId() : undefined;
-
-        const issue = await getIssueByNumberOrId(issueId, projectId);
-        if (!issue) {
-          console.error(`Issue '${issueId}' not found.`);
-          process.exit(1);
-        }
-
-        const statuses = await getProjectStatuses(issue.projectId);
-        const target = statuses.find((s) => s.name === statusName);
-        if (!target) {
-          console.error(`Status '${statusName}' not found. Available: ${statuses.map((s) => s.name).join(", ")}`);
-          process.exit(1);
-        }
-
-        // AK-535 guard: don't strand an open, non-direct, unmerged branch by moving
-        // the issue to a terminal status. Same guard as the server PATCH route and MCP.
-        if (isTerminalStatusName(statusName)) {
-          const openWs = await findOpenUnmergedWorkspace(issue.id);
-          if (openWs) {
-            console.error(openWorkspaceBlockMessage(statusName, openWs.branch));
-            process.exit(1);
-          }
-        }
-
-        await moveIssueToStatus(issue.id, target.id);
-
-        console.log(`Moved issue to '${statusName}'`);
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+      const resolved = await resolveIssueArg(issueId, options);
+      if (!resolved.ok) {
+        console.error(resolved.message);
         process.exit(1);
       }
-    });
+      const issue = resolved.issue;
+
+      const statuses = await getProjectStatuses(issue.projectId);
+      const target = statuses.find((s) => s.name === statusName);
+      if (!target) {
+        console.error(`Status '${statusName}' not found. Available: ${statuses.map((s) => s.name).join(", ")}`);
+        process.exit(1);
+      }
+
+      // AK-535 guard: don't strand an open, non-direct, unmerged branch by moving
+      // the issue to a terminal status. Same guard as the server PATCH route and MCP.
+      if (isTerminalStatusName(statusName)) {
+        const openWs = await findOpenUnmergedWorkspace(issue.id);
+        if (openWs) {
+          console.error(openWorkspaceBlockMessage(statusName, openWs.branch));
+          process.exit(1);
+        }
+      }
+
+      await moveIssueToStatus(issue.id, target.id);
+
+      console.log(`Moved issue to '${statusName}'`);
+      process.exit(0);
+    }));
 
   issueCmd
     .command("status <issue-number>")
@@ -337,94 +329,89 @@ Examples:
   $ agentic-kanban issue status 17
   $ agentic-kanban issue status 17 --json
 `)
-    .action(async (issueNumberArg: string, options: { json?: boolean }) => {
-      try {
-        await runMigrations();
-        const projectId = await getActiveProjectId();
+    .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
+    .action(cliAction(async (issueNumberArg: string, options: { project?: string; json?: boolean }) => {
+      const projectId = await resolveProjectIdArg(options.project);
 
-        const num = Number(issueNumberArg);
-        if (!Number.isInteger(num) || num <= 0) {
-          console.error(`Invalid issue number: ${issueNumberArg}`);
-          process.exit(1);
-        }
-
-        const issue = await getIssueHeaderByNumber(projectId, num);
-
-        if (!issue) {
-          console.error(`Issue #${num} not found.`);
-          process.exit(1);
-        }
-
-        const project = await getProjectById(projectId);
-        const projectDefaultBranch = project?.defaultBranch ?? null;
-
-        const wsRows = await getWorkspacesByIssueId(issue.id);
-
-        if (wsRows.length === 0) {
-          console.log(`#${num} ${issue.title}`);
-          console.log(`  Status: ${issue.statusName} · Type: ${issue.issueType ?? "task"}`);
-          console.log("  No workspace.");
-          process.exit(0);
-        }
-
-        const wsIds = wsRows.map(w => w.id);
-        const sessionRows = await getSessionsForWorkspacesDesc(wsIds);
-
-        const latestSession = sessionRows.find(s => !isAnalyticsNoise(s)) ?? sessionRows[0] ?? null;
-        const matchingWs = latestSession ? wsRows.find(w => w.id === latestSession.workspaceId) : wsRows[0];
-
-        let lastAgentMsg: string | null = null;
-        let fileChanges: { read: number; edited: number; written: number } | null = null;
-        let diffStats: WorkspaceDiffStats | null = null;
-
-        if (matchingWs) {
-          diffStats = await getWorkspaceDiffStats(matchingWs, projectDefaultBranch);
-        }
-
-        if (latestSession) {
-          const msgRows = await getSessionMessagesByIdDesc(latestSession.id);
-
-          lastAgentMsg = extractLastAgentMessageFromRows(msgRows);
-
-          const summary = parseSessionSummary(msgRows);
-          fileChanges = { read: summary.filesRead.length, edited: summary.filesEdited.length, written: summary.filesWritten.length };
-        }
-
-        if (options.json) {
-          console.log(JSON.stringify(buildIssueStatusJson({
-            issueNumber: issue.issueNumber,
-            title: issue.title,
-            statusName: issue.statusName,
-            priority: issue.priority,
-            workspace: matchingWs ?? null,
-            session: latestSession,
-            lastAgentMessage: lastAgentMsg,
-            fileChanges,
-            diffStats,
-          }), null, 2));
-          process.exit(0);
-        }
-
-        for (const line of buildIssueStatusLines({
-          num,
-          title: issue.title,
-          statusName: issue.statusName,
-          issueType: issue.issueType,
-          workspace: matchingWs ?? null,
-          session: latestSession,
-          diffStats,
-          fileChanges,
-          lastAgentMessage: lastAgentMsg,
-          nowMs: Date.now(),
-        })) {
-          console.log(line);
-        }
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+      const num = Number(issueNumberArg);
+      if (!Number.isInteger(num) || num <= 0) {
+        console.error(`Invalid issue number: ${issueNumberArg}`);
         process.exit(1);
       }
-    });
+
+      const issue = await getIssueHeaderByNumber(projectId, num);
+
+      if (!issue) {
+        console.error(await describeIssueNumberMiss(num, projectId));
+        process.exit(1);
+      }
+
+      const project = await getProjectById(projectId);
+      const projectDefaultBranch = project?.defaultBranch ?? null;
+
+      const wsRows = await getWorkspacesByIssueId(issue.id);
+
+      if (wsRows.length === 0) {
+        console.log(`#${num} ${issue.title}`);
+        console.log(`  Status: ${issue.statusName} · Type: ${issue.issueType ?? "task"}`);
+        console.log("  No workspace.");
+        process.exit(0);
+      }
+
+      const wsIds = wsRows.map(w => w.id);
+      const sessionRows = await getSessionsForWorkspacesDesc(wsIds);
+
+      const latestSession = sessionRows.find(s => !isAnalyticsNoise(s)) ?? sessionRows[0] ?? null;
+      const matchingWs = latestSession ? wsRows.find(w => w.id === latestSession.workspaceId) : wsRows[0];
+
+      let lastAgentMsg: string | null = null;
+      let fileChanges: { read: number; edited: number; written: number } | null = null;
+      let diffStats: WorkspaceDiffStats | null = null;
+
+      if (matchingWs) {
+        diffStats = await getWorkspaceDiffStats(matchingWs, projectDefaultBranch);
+      }
+
+      if (latestSession) {
+        const msgRows = await getSessionMessagesByIdDesc(latestSession.id);
+
+        lastAgentMsg = extractLastAgentMessageFromRows(msgRows);
+
+        const summary = parseSessionSummary(msgRows);
+        fileChanges = { read: summary.filesRead.length, edited: summary.filesEdited.length, written: summary.filesWritten.length };
+      }
+
+      if (options.json) {
+        console.log(JSON.stringify(buildIssueStatusJson({
+          issueNumber: issue.issueNumber,
+          title: issue.title,
+          statusName: issue.statusName,
+          priority: issue.priority,
+          workspace: matchingWs ?? null,
+          session: latestSession,
+          lastAgentMessage: lastAgentMsg,
+          fileChanges,
+          diffStats,
+        }), null, 2));
+        process.exit(0);
+      }
+
+      for (const line of buildIssueStatusLines({
+        num,
+        title: issue.title,
+        statusName: issue.statusName,
+        issueType: issue.issueType,
+        workspace: matchingWs ?? null,
+        session: latestSession,
+        diffStats,
+        fileChanges,
+        lastAgentMessage: lastAgentMsg,
+        nowMs: Date.now(),
+      })) {
+        console.log(line);
+      }
+      process.exit(0);
+    }));
 
   issueCmd
     .command("summary <issue-number>")
@@ -435,90 +422,69 @@ Examples:
   $ agentic-kanban issue summary 1          # formatted summary
   $ agentic-kanban issue summary 5 --json   # machine-readable JSON
 `)
-    .action(async (issueNumber: string, options: { json?: boolean }) => {
-      try {
-        await runMigrations();
-        const projectId = await getActiveProjectId();
+    .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
+    .action(cliAction(async (issueNumber: string, options: { project?: string; json?: boolean }) => {
+      const projectId = await resolveProjectIdArg(options.project);
 
-        const num = Number(issueNumber);
-        if (!Number.isInteger(num) || num <= 0) {
-          console.error(`Invalid issue number: ${issueNumber}`);
-          process.exit(1);
-        }
-
-        const issue = await getIssueByNumberOrId(String(num), projectId);
-
-        if (!issue) {
-          console.error(`Issue #${num} not found.`);
-          process.exit(1);
-        }
-
-        const wsRows = await getWorkspacesByIssueId(issue.id);
-
-        if (wsRows.length === 0) {
-          console.log(`#${num} ${issue.title}`);
-          console.log("  No workspace found for this issue.");
-          process.exit(0);
-        }
-
-        const wsIds = wsRows.map(w => w.id);
-        const sessionRows = await getSessionsForWorkspacesDesc(wsIds);
-
-        const completedSession = selectSummarySession(sessionRows, isAnalyticsNoise);
-
-        if (!completedSession) {
-          console.log(`#${num} ${issue.title}`);
-          console.log("  No session found for this issue.");
-          process.exit(0);
-        }
-
-        const msgRows = await getSessionMessagesByIdAsc(completedSession.id);
-
-        let stats: Record<string, unknown> | null = null;
-        if (completedSession.stats) {
-          try { stats = JSON.parse(completedSession.stats) as Record<string, unknown>; } catch { /* ignore */ }
-        }
-
-        const duration = computeSessionDuration(completedSession.startedAt, completedSession.endedAt);
-
-        const summary = parseSessionSummary(msgRows);
-        if (!summary.agentSummary && stats && typeof stats.agentSummary === "string") {
-          summary.agentSummary = stats.agentSummary;
-        }
-
-        const matchingWorkspace = wsRows.find(w => w.id === completedSession.workspaceId);
-
-        if (options.json) {
-          console.log(JSON.stringify(buildIssueSummaryJson({
-            issueId: issue.id,
-            issueNumber: issue.issueNumber,
-            title: issue.title,
-            workspace: matchingWorkspace ?? null,
-            session: completedSession,
-            duration,
-            stats,
-            summary,
-          }), null, 2));
-          process.exit(0);
-        }
-
-        for (const line of buildIssueSummaryLines({
-          num,
-          title: issue.title,
-          workspace: matchingWorkspace ?? null,
-          sessionStatus: completedSession.status,
-          duration,
-          stats,
-          summary,
-        })) {
-          console.log(line);
-        }
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+      const num = Number(issueNumber);
+      if (!Number.isInteger(num) || num <= 0) {
+        console.error(`Invalid issue number: ${issueNumber}`);
         process.exit(1);
       }
-    });
+
+      // The six-step chain (issue -> workspaces -> representative session -> parsed
+      // summary) lives in the shared `loadIssueSummary` now (#506); the CLI keeps only
+      // its own rendering, and reaches the loader through the repository seam rather
+      // than the db handle (the `cli-not-down-to-persistence` depcruise rule). It
+      // returns null ONLY when the issue does not exist -- "no workspace" / "no session"
+      // come back as a result carrying `status`.
+      const result = await getIssueSummary(String(num), undefined, projectId);
+
+      if (!result) {
+        console.error(await describeIssueNumberMiss(num, projectId));
+        process.exit(1);
+      }
+
+      if (result.status === "no workspace" || result.status === "no session") {
+        console.log(`#${num} ${result.title}`);
+        console.log(result.status === "no workspace"
+          ? "  No workspace found for this issue."
+          : "  No session found for this issue.");
+        process.exit(0);
+      }
+
+      // Non-degenerate results always carry a session; narrow for the renderers.
+      const session = result.session!;
+      const stats = result.stats as unknown as Record<string, unknown> | null;
+      const summary = result as unknown as SessionSummary;
+
+      if (options.json) {
+        console.log(JSON.stringify(buildIssueSummaryJson({
+          issueId: result.issueId,
+          issueNumber: result.issueNumber,
+          title: result.title,
+          workspace: result.workspace,
+          session: { ...session, startedAt: session.startedAt ?? "" },
+          duration: session.duration,
+          stats,
+          summary,
+        }), null, 2));
+        process.exit(0);
+      }
+
+      for (const line of buildIssueSummaryLines({
+        num,
+        title: result.title,
+        workspace: result.workspace,
+        sessionStatus: session.status,
+        duration: session.duration,
+        stats,
+        summary,
+      })) {
+        console.log(line);
+      }
+      process.exit(0);
+    }));
 
   registerIssueDependencyCommands(issueCmd);
 
@@ -536,82 +502,80 @@ Examples:
   $ agentic-kanban issue create-sub 10 "Fix edge case" -t bug -p high
   $ agentic-kanban issue create-sub 10 "Design UI" --status "In Progress" --json
 `)
-    .action(async (parentNumberArg: string, title: string, options: { description?: string; priority?: string; type?: string; status?: string; json?: boolean }) => {
-      try {
-        await runMigrations();
-        const projectId = await getActiveProjectId();
+    .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
+    .action(cliAction(async (parentNumberArg: string, title: string, options: { project?: string; description?: string; priority?: string; type?: string; status?: string; json?: boolean }) => {
+      const projectId = await resolveProjectIdArg(options.project);
 
-        if (!title.trim()) {
-          console.error("Title cannot be empty.");
-          process.exit(1);
-        }
-
-        const parentNum = Number(parentNumberArg);
-        if (!Number.isInteger(parentNum) || parentNum <= 0) {
-          console.error(`Invalid parent issue number: ${parentNumberArg}`);
-          process.exit(1);
-        }
-
-        const parent = await getIssueByNumberOrId(String(parentNum), projectId);
-
-        if (!parent) {
-          console.error(`Parent issue #${parentNum} not found in active project.`);
-          process.exit(1);
-        }
-
-        const statuses = await getProjectStatuses(parent.projectId);
-
-        if (statuses.length === 0) {
-          console.error("No statuses configured for project.");
-          process.exit(1);
-        }
-
-        let statusId = statuses[0].id;
-        if (options.status) {
-          const found = statuses.find((s) => s.name === options.status);
-          if (!found) {
-            console.error(`Status '${options.status}' not found. Available: ${statuses.map((s) => s.name).join(", ")}`);
-            process.exit(1);
-          }
-          statusId = found.id;
-        }
-
-        const { id, issueNumber, dependencyId } = await createSubIssueWithParentLink({
-          projectId: parent.projectId,
-          parentId: parent.id,
-          title,
-          description: options.description,
-          priority: options.priority,
-          issueType: options.type,
-          statusId,
-        });
-
-        const result = {
-          id,
-          issueNumber,
-          title,
-          parentIssueId: parent.id,
-          parentIssueNumber: parent.issueNumber,
-          dependencyId,
-          dependencyType: "child_of",
-          statusId,
-          priority: options.priority ?? "medium",
-        };
-
-        if (options.json) {
-          console.log(JSON.stringify(result, null, 2));
-        } else {
-          console.log(`Created child issue #${issueNumber}: ${title}`);
-          console.log(`  id: ${id}`);
-          console.log(`  parent: #${parent.issueNumber} (${parent.title})`);
-          console.log(`  dependency: ${dependencyId} (child_of)`);
-        }
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+      if (!title.trim()) {
+        console.error("Title cannot be empty.");
         process.exit(1);
       }
-    });
+
+      const parentNum = Number(parentNumberArg);
+      if (!Number.isInteger(parentNum) || parentNum <= 0) {
+        console.error(`Invalid parent issue number: ${parentNumberArg}`);
+        process.exit(1);
+      }
+
+      const parent = await getIssueByNumberOrId(String(parentNum), projectId);
+
+      if (!parent) {
+        console.error(await describeIssueNumberMiss(parentNum, projectId));
+        process.exit(1);
+      }
+
+      const statuses = await getProjectStatuses(parent.projectId);
+
+      if (statuses.length === 0) {
+        console.error("No statuses configured for project.");
+        process.exit(1);
+      }
+
+      let statusId = statuses[0].id;
+      if (options.status) {
+        const found = statuses.find((s) => s.name === options.status);
+        if (!found) {
+          console.error(`Status '${options.status}' not found. Available: ${statuses.map((s) => s.name).join(", ")}`);
+          process.exit(1);
+        }
+        statusId = found.id;
+      }
+
+      const { id, issueNumber, dependencyId } = await createSubIssueWithParentLink({
+        projectId: parent.projectId,
+        parentId: parent.id,
+        title,
+        description: options.description,
+        priority: options.priority,
+        issueType: options.type,
+        statusId,
+      });
+
+      const result = {
+        id,
+        issueNumber,
+        title,
+        parentIssueId: parent.id,
+        parentIssueNumber: parent.issueNumber,
+        dependencyId,
+        dependencyType: "child_of",
+        statusId,
+        priority: options.priority ?? "medium",
+      };
+
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.log(`Created child issue #${issueNumber}: ${title}`);
+        console.log(`  id: ${id}`);
+        console.log(`  parent: #${parent.issueNumber} (${parent.title})`);
+        console.log(`  dependency: ${dependencyId} (child_of)`);
+        // The child lands in the PARENT's project, itself resolved from the
+        // implicit active project — name it (#335).
+        console.log(formatResolvedProjectLine(parent.projectId, (await getProjectById(parent.projectId))?.name));
+      }
+      process.exit(0);
+    }));
 
   issueCmd
     .command("delete <issue-number>")
@@ -626,43 +590,47 @@ Examples:
 
 Note: deletion is permanent. There is no undo. The issue number will not be reused.
 `)
-    .action(async (issueNumberArg: string, options: { force?: boolean; json?: boolean }) => {
-      try {
-        await runMigrations();
-        const projectId = await getActiveProjectId();
+    .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
+    .action(cliAction(async (issueNumberArg: string, options: { project?: string; force?: boolean; json?: boolean }) => {
+      const projectId = await resolveProjectIdArg(options.project);
 
-        const num = Number(issueNumberArg);
-        if (!Number.isInteger(num) || num <= 0) {
-          console.error(`Invalid issue number: ${issueNumberArg}`);
-          process.exit(1);
-        }
-
-        const issue = await getIssueByNumberOrId(String(num), projectId);
-
-        if (!issue) {
-          console.error(`Issue #${num} not found in active project.`);
-          process.exit(1);
-        }
-
-        if (!options.force) {
-          console.log(`Warning: This will permanently delete issue #${num} "${issue.title}" and ALL associated workspaces, sessions, and messages. Use --force to suppress this message.`);
-        }
-
-        // Cascade workspaces (+ their sessions/messages/comments/artifacts) → tags → issue.
-        await deleteIssueCascade(issue.id);
-
-        const result = { id: issue.id, issueNumber: num, title: issue.title, deleted: true };
-        if (options.json) {
-          console.log(JSON.stringify(result, null, 2));
-        } else {
-          console.log(`Deleted issue #${num}: ${issue.title}`);
-        }
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+      const num = Number(issueNumberArg);
+      if (!Number.isInteger(num) || num <= 0) {
+        console.error(`Invalid issue number: ${issueNumberArg}`);
         process.exit(1);
       }
-    });
+
+      const issue = await getIssueByNumberOrId(String(num), projectId);
+
+      if (!issue) {
+        console.error(await describeIssueNumberMiss(num, projectId));
+        process.exit(1);
+      }
+
+      // The project was resolved IMPLICITLY from the global active-project
+      // preference — `issue delete` takes no project argument, so "#42" means #42 of
+      // whatever board a human last clicked. Name it on the destructive path (#335):
+      // the warning says which board is about to be cascaded, and the result names it
+      // even under --force, so a scripted delete still leaves a record.
+      const project = await getProjectById(projectId);
+      const projectLine = formatResolvedProjectLine(projectId, project?.name);
+
+      if (!options.force) {
+        console.log(`Warning: This will permanently delete issue #${num} "${issue.title}" from project ${project?.name ?? "<unknown>"} (${projectId}) and ALL associated workspaces, sessions, and messages. Use --force to suppress this message.`);
+      }
+
+      // Cascade workspaces (+ their sessions/messages/comments/artifacts) → tags → issue.
+      await deleteIssueCascade(issue.id);
+
+      const result = { id: issue.id, issueNumber: num, title: issue.title, deleted: true, projectId, projectName: project?.name ?? null };
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.log(`Deleted issue #${num}: ${issue.title}`);
+        console.log(projectLine);
+      }
+      process.exit(0);
+    }));
 
   issueCmd
     .command("attach-artifact <issue-number>")
@@ -681,62 +649,57 @@ Examples:
 
 Valid types: text, link, image
 `)
-    .action(async (issueNumberArg: string, options: { type?: string; content?: string; mimeType?: string; caption?: string; workspace?: string; json?: boolean }) => {
-      try {
-        await runMigrations();
-        const projectId = await getActiveProjectId();
+    .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
+    .action(cliAction(async (issueNumberArg: string, options: { project?: string; type?: string; content?: string; mimeType?: string; caption?: string; workspace?: string; json?: boolean }) => {
+      const projectId = await resolveProjectIdArg(options.project);
 
-        const validated = validateAttachArtifactOptions(issueNumberArg, options);
-        if (!validated.ok) {
-          console.error(validated.error);
-          process.exit(1);
-        }
-        const { num, type, content } = validated;
-
-        const issueId = await getIssueIdByNumberInProject(num, projectId);
-
-        if (!issueId) {
-          console.error(`Issue #${num} not found in active project.`);
-          process.exit(1);
-        }
-
-        if (options.workspace) {
-          const target = await getWorkspaceArtifactTarget(options.workspace, issueId);
-          if (!target) {
-            console.error(`Workspace '${options.workspace}' not found or does not belong to issue #${num}.`);
-            process.exit(1);
-          }
-        }
-
-        const id = randomUUID();
-        await insertIssueArtifact({
-          id,
-          issueId,
-          workspaceId: options.workspace ?? null,
-          type,
-          mimeType: options.mimeType ?? null,
-          content,
-          caption: options.caption ?? null,
-        });
-
-        const result = {
-          id,
-          issueId,
-          workspaceId: options.workspace ?? null,
-          type,
-          mimeType: options.mimeType ?? null,
-          caption: options.caption ?? null,
-        };
-
-        for (const line of formatAttachArtifactOutput(result, num, options.json ?? false)) {
-          console.log(line);
-        }
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+      const validated = validateAttachArtifactOptions(issueNumberArg, options);
+      if (!validated.ok) {
+        console.error(validated.error);
         process.exit(1);
       }
-    });
+      const { num, type, content } = validated;
+
+      const issueId = await getIssueIdByNumberInProject(num, projectId);
+
+      if (!issueId) {
+        console.error(await describeIssueNumberMiss(num, projectId));
+        process.exit(1);
+      }
+
+      if (options.workspace) {
+        const target = await getWorkspaceArtifactTarget(options.workspace, issueId);
+        if (!target) {
+          console.error(`Workspace '${options.workspace}' not found or does not belong to issue #${num}.`);
+          process.exit(1);
+        }
+      }
+
+      const id = randomUUID();
+      await insertIssueArtifact({
+        id,
+        issueId,
+        workspaceId: options.workspace ?? null,
+        type,
+        mimeType: options.mimeType ?? null,
+        content,
+        caption: options.caption ?? null,
+      });
+
+      const result = {
+        id,
+        issueId,
+        workspaceId: options.workspace ?? null,
+        type,
+        mimeType: options.mimeType ?? null,
+        caption: options.caption ?? null,
+      };
+
+      for (const line of formatAttachArtifactOutput(result, num, options.json ?? false)) {
+        console.log(line);
+      }
+      process.exit(0);
+    }));
 
   issueCmd
     .command("create-batch <jsonFile>")
@@ -763,99 +726,96 @@ JSON file format:
 Each issue: title (required), description, priority, issueType, estimate, sortOrder, statusName, tags
 Each dependency: issueIndex, dependsOnIndex (0-based indices), type (optional, default: depends_on)
 `)
-    .action(async (jsonFile: string, options: { parent?: string; json?: boolean }) => {
+    .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
+    .action(cliAction(async (jsonFile: string, options: { project?: string; parent?: string; json?: boolean }) => {
+      const projectId = await resolveProjectIdArg(options.project);
+
+      let fileContent: string;
       try {
-        await runMigrations();
-        const projectId = await getActiveProjectId();
-
-        let fileContent: string;
-        try {
-          fileContent = readFileSync(jsonFile, "utf8");
-        } catch (err) {
-          console.error(`Could not read file '${jsonFile}': ${err instanceof Error ? err.message : String(err)}`);
-          process.exit(1);
-        }
-
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(fileContent);
-        } catch {
-          console.error("Invalid JSON in file.");
-          process.exit(1);
-        }
-
-        const normalized = normalizeBatchInput(parsed);
-        if (!normalized.ok) {
-          console.error(normalized.error);
-          process.exit(1);
-        }
-        const { issueInputs, dependencyInputs } = normalized;
-
-        const statuses = await getProjectStatuses(projectId);
-
-        if (statuses.length === 0) {
-          console.error("No statuses configured for project.");
-          process.exit(1);
-        }
-
-        const validationError = validateBatchIssueInputs(issueInputs, statuses.map((s) => s.name));
-        if (validationError) {
-          console.error(validationError);
-          process.exit(1);
-        }
-
-        let parentIssueId: string | undefined;
-        if (options.parent) {
-          const parentNum = Number(options.parent);
-          if (!Number.isInteger(parentNum) || parentNum <= 0) {
-            console.error(`Invalid parent issue number: ${options.parent}`);
-            process.exit(1);
-          }
-          const resolvedParentId = await getIssueIdByNumberInProject(parentNum, projectId);
-          if (!resolvedParentId) {
-            console.error(`Parent issue #${parentNum} not found in active project.`);
-            process.exit(1);
-          }
-          parentIssueId = resolvedParentId;
-        }
-
-        const now = new Date().toISOString();
-
-        let created: Array<{ id: string; issueNumber: number; title: string }> | null = null;
-        for (let attempt = 1; attempt <= ISSUE_NUMBER_INSERT_ATTEMPTS; attempt++) {
-          const nextNumber = await nextIssueNumber(projectId);
-          try {
-            ({ created } = await createIssuesBatchWithDepsAndTags({
-              projectId,
-              startNumber: nextNumber,
-              now,
-              issueInputs,
-              dependencyInputs,
-              statuses,
-              parentIssueId,
-            }));
-            break;
-          } catch (err: unknown) {
-            if (attempt < ISSUE_NUMBER_INSERT_ATTEMPTS && isIssueNumberUniqueConstraintError(err)) {
-              continue;
-            }
-            throw err;
-          }
-        }
-
-        if (created === null) {
-          throw new Error("Could not allocate unique issue numbers");
-        }
-
-        for (const line of formatBatchCreateResult(created, dependencyInputs.length, options.json ?? false)) {
-          console.log(line);
-        }
-        process.exit(0);
+        fileContent = readFileSync(jsonFile, "utf8");
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error(`Could not read file '${jsonFile}': ${errorMessage(err)}`);
         process.exit(1);
       }
-    });
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(fileContent);
+      } catch {
+        console.error("Invalid JSON in file.");
+        process.exit(1);
+      }
+
+      const normalized = normalizeBatchInput(parsed);
+      if (!normalized.ok) {
+        console.error(normalized.error);
+        process.exit(1);
+      }
+      const { issueInputs, dependencyInputs } = normalized;
+
+      const statuses = await getProjectStatuses(projectId);
+
+      if (statuses.length === 0) {
+        console.error("No statuses configured for project.");
+        process.exit(1);
+      }
+
+      const validationError = validateBatchIssueInputs(issueInputs, statuses.map((s) => s.name));
+      if (validationError) {
+        console.error(validationError);
+        process.exit(1);
+      }
+
+      let parentIssueId: string | undefined;
+      if (options.parent) {
+        const parentNum = Number(options.parent);
+        if (!Number.isInteger(parentNum) || parentNum <= 0) {
+          console.error(`Invalid parent issue number: ${options.parent}`);
+          process.exit(1);
+        }
+        const resolvedParentId = await getIssueIdByNumberInProject(parentNum, projectId);
+        if (!resolvedParentId) {
+          console.error(await describeIssueNumberMiss(parentNum, projectId));
+          process.exit(1);
+        }
+        parentIssueId = resolvedParentId;
+      }
+
+      const now = new Date().toISOString();
+
+      let created: Array<{ id: string; issueNumber: number; title: string }> | null = null;
+      for (let attempt = 1; attempt <= ISSUE_NUMBER_INSERT_ATTEMPTS; attempt++) {
+        const nextNumber = await nextIssueNumber(projectId);
+        try {
+          ({ created } = await createIssuesBatchWithDepsAndTags({
+            projectId,
+            startNumber: nextNumber,
+            now,
+            issueInputs,
+            dependencyInputs,
+            statuses,
+            parentIssueId,
+          }));
+          break;
+        } catch (err: unknown) {
+          if (attempt < ISSUE_NUMBER_INSERT_ATTEMPTS && isIssueNumberUniqueConstraintError(err)) {
+            continue;
+          }
+          throw err;
+        }
+      }
+
+      if (created === null) {
+        throw new Error("Could not allocate unique issue numbers");
+      }
+
+      // Name the project the batch landed in (#335) — resolved implicitly, no flag.
+      const batchProject = await getProjectById(projectId);
+      for (const line of formatBatchCreateResult(created, dependencyInputs.length, options.json ?? false, { id: projectId, name: batchProject?.name ?? null })) {
+        console.log(line);
+      }
+      process.exit(0);
+    }));
 
   issueCmd
     .command("check-overlap <issueNumbers...>")
@@ -869,77 +829,72 @@ Examples:
 Note: run 'analyze_touched_files' (via MCP) on each issue first to populate the prediction cache.
 At least 2 issue numbers are required.
 `)
-    .action(async (issueNumberArgs: string[], options: { json?: boolean }) => {
-      try {
-        await runMigrations();
-        const projectId = await getActiveProjectId();
+    .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
+    .action(cliAction(async (issueNumberArgs: string[], options: { project?: string; json?: boolean }) => {
+      const projectId = await resolveProjectIdArg(options.project);
 
-        if (issueNumberArgs.length < 2) {
-          console.error("At least 2 issue numbers are required.");
-          process.exit(1);
-        }
-
-        const nums = issueNumberArgs.map((a) => Number(a));
-        for (const n of nums) {
-          if (!Number.isInteger(n) || n <= 0) {
-            console.error(`Invalid issue number: ${n}`);
-            process.exit(1);
-          }
-        }
-
-        const issueRows = await getIssuesTouchedFilesByNumbers(projectId, nums);
-
-        const foundNums = new Set(issueRows.map((r) => r.issueNumber));
-        for (const n of nums) {
-          if (!foundNums.has(n)) {
-            console.error(`Issue #${n} not found in active project.`);
-            process.exit(1);
-          }
-        }
-
-        const overlap: Record<string, number[]> = {};
-        for (const row of issueRows) {
-          if (!row.touchedFilesJson) continue;
-          let files: { path: string }[];
-          try { files = JSON.parse(row.touchedFilesJson) as { path: string }[]; } catch { continue; }
-          for (const f of files) {
-            if (!f.path) continue;
-            if (!overlap[f.path]) overlap[f.path] = [];
-            if (row.issueNumber != null && !overlap[f.path].includes(row.issueNumber)) overlap[f.path].push(row.issueNumber);
-          }
-        }
-        for (const path of Object.keys(overlap)) {
-          if (overlap[path].length < 2) delete overlap[path];
-        }
-
-        const issuesWithoutCache = issueRows.filter((r) => !r.touchedFilesJson).map((r) => r.issueNumber);
-
-        const result: { overlap: Record<string, number[]>; warning?: string } = { overlap };
-        if (issuesWithoutCache.length > 0) {
-          result.warning = `${issuesWithoutCache.length} issue(s) have no cached prediction yet: #${issuesWithoutCache.join(", #")}`;
-        }
-
-        if (options.json) {
-          console.log(JSON.stringify(result, null, 2));
-        } else {
-          const paths = Object.keys(overlap);
-          if (paths.length === 0) {
-            console.log("No file overlaps detected.");
-          } else {
-            console.log(`File overlaps (${paths.length} file(s)):`);
-            for (const p of paths) {
-              console.log(`  ${p}: issues #${overlap[p].join(", #")}`);
-            }
-          }
-          if (result.warning) {
-            console.log(`Warning: ${result.warning}`);
-          }
-        }
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+      if (issueNumberArgs.length < 2) {
+        console.error("At least 2 issue numbers are required.");
         process.exit(1);
       }
-    });
+
+      const nums = issueNumberArgs.map((a) => Number(a));
+      for (const n of nums) {
+        if (!Number.isInteger(n) || n <= 0) {
+          console.error(`Invalid issue number: ${n}`);
+          process.exit(1);
+        }
+      }
+
+      const issueRows = await getIssuesTouchedFilesByNumbers(projectId, nums);
+
+      const foundNums = new Set(issueRows.map((r) => r.issueNumber));
+      for (const n of nums) {
+        if (!foundNums.has(n)) {
+          console.error(await describeIssueNumberMiss(n, projectId));
+          process.exit(1);
+        }
+      }
+
+      const overlap: Record<string, number[]> = {};
+      for (const row of issueRows) {
+        if (!row.touchedFilesJson) continue;
+        let files: { path: string }[];
+        try { files = JSON.parse(row.touchedFilesJson) as { path: string }[]; } catch { continue; }
+        for (const f of files) {
+          if (!f.path) continue;
+          if (!overlap[f.path]) overlap[f.path] = [];
+          if (row.issueNumber != null && !overlap[f.path].includes(row.issueNumber)) overlap[f.path].push(row.issueNumber);
+        }
+      }
+      for (const path of Object.keys(overlap)) {
+        if (overlap[path].length < 2) delete overlap[path];
+      }
+
+      const issuesWithoutCache = issueRows.filter((r) => !r.touchedFilesJson).map((r) => r.issueNumber);
+
+      const result: { overlap: Record<string, number[]>; warning?: string } = { overlap };
+      if (issuesWithoutCache.length > 0) {
+        result.warning = `${issuesWithoutCache.length} issue(s) have no cached prediction yet: #${issuesWithoutCache.join(", #")}`;
+      }
+
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        const paths = Object.keys(overlap);
+        if (paths.length === 0) {
+          console.log("No file overlaps detected.");
+        } else {
+          console.log(`File overlaps (${paths.length} file(s)):`);
+          for (const p of paths) {
+            console.log(`  ${p}: issues #${overlap[p].join(", #")}`);
+          }
+        }
+        if (result.warning) {
+          console.log(`Warning: ${result.warning}`);
+        }
+      }
+      process.exit(0);
+    }));
 }
 

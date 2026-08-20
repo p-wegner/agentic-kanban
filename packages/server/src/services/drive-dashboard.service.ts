@@ -32,8 +32,8 @@ import { getPreference } from "../repositories/preferences.repository.js";
 import { coldCloneCheckPrefKey } from "./cold-clone-build-check.service.js";
 import { verifyScriptPrefKey } from "./stack-profile.service.js";
 import { DriveError } from "./drive.service.js";
+import { isBlockingDependencyType } from "@agentic-kanban/shared/lib/dependency-type-traits";
 
-const BLOCKING_DEPENDENCY_TYPES = new Set(["depends_on", "blocked_by"]);
 
 type ScopedIssue = {
   id: string;
@@ -129,7 +129,7 @@ export async function buildDriveDashboard(
   if (scoped.length > 0) {
     const deps = await getScopedDependencyEdges(scoped.map((i) => i.id), database);
     for (const dep of deps) {
-      if (!BLOCKING_DEPENDENCY_TYPES.has(dep.type)) continue;
+      if (!isBlockingDependencyType(dep.type)) continue;
       const list = blockingDepsByIssue.get(dep.issueId) ?? [];
       list.push(dep.dependsOnId);
       blockingDepsByIssue.set(dep.issueId, list);
@@ -221,6 +221,8 @@ export async function buildDriveDashboard(
 
   // --- cold-build-clean status ---
   const coldCloneRaw = await getPreference(coldCloneCheckPrefKey(projectId), database);
+  // #551: deliberately the RAW pref, not `resolveEffectiveVerify` — this asks whether a gate is
+  // CONFIGURED (what preflight/onboarding repair), not what the gate would run.
   const verifyRaw = await getPreference(verifyScriptPrefKey(projectId), database);
   // Surface the most recent build/verify-related event from the error/server/launch
   // streams (a failed cold-clone build emits a session_failed/error event).

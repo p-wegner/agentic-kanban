@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { projects, projectStatuses, issues, workspaces, sessions } from "@agentic-kanban/shared/schema";
-import { createTestDb, type TestDb } from "./helpers/test-db.js";
+import { createTestDb, type TestDb, ensureTestStatus } from "./helpers/test-db.js";
 import { createWorkspacesRoute } from "../routes/workspaces.js";
 
 interface SeedOpts {
@@ -29,14 +29,12 @@ const COST_STATS = (cost: number) => ({
 async function seedSession(db: TestDb, projectId: string, opts: SeedOpts = {}) {
   const now = new Date().toISOString();
   const startedAt = opts.startedAt ?? now;
-  const statusId = randomUUID();
   const issueId = randomUUID();
   const workspaceId = randomUUID();
   const sessionId = randomUUID();
 
-  await db.insert(projectStatuses).values({
-    id: statusId, projectId, name: "In Progress", sortOrder: 0, isDefault: true, createdAt: now,
-  });
+  // #668: one status per project — this seeder runs once per SESSION.
+  const statusId = await ensureTestStatus(db, projectId, "In Progress", { isDefault: true });
   await db.insert(issues).values({
     id: issueId, issueNumber: Math.floor(Math.random() * 1e9), title: "T", priority: "medium",
     sortOrder: 0, statusId, projectId, issueType: "feature", createdAt: now, updatedAt: now,

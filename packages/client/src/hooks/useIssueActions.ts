@@ -2,18 +2,17 @@
 // artifact copy/open/delete, notes, status-change, delete). Behaviour-preserving:
 // handler bodies are a verbatim move; the panel destructures them with the same
 // names so its render + child props are unchanged.
+/** #610 — was a byte-identical local copy; the board DTO module owns it. */
+import type { Tag } from "../lib/boardTypes.js";
+import type { DependencyImpactPending, MoveToDonePending, TouchedFile } from "../lib/issueDetailTypes.js";
 import { apiFetch, apiPost, apiDelete } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
 import { issueArtifactKind } from "../lib/artifact-classifiers.js";
 import { invalidateAvailableIssuesCache } from "./useIssueDetailData.js";
 import type { Dispatch, SetStateAction } from "react";
-import type { IssueArtifact, IssueWithStatus, DependencyInfo, UpdateIssueRequest } from "@agentic-kanban/shared";
-import type { IssueComment } from "../components/IssueDetailComments.js";
-import type { TouchedFile } from "../components/IssueTouchedFilesSection.js";
-import type { MoveToDonePending, DependencyImpactPending } from "../components/IssueDetailDialogs.js";
+import type { IssueArtifact, IssueWithStatus, DependencyInfo, UpdateIssueRequest, IssueComment} from "@agentic-kanban/shared";
 
 type Setter<T> = Dispatch<SetStateAction<T>>;
-type Tag = { id: string; name: string; color: string | null };
 
 interface IssueActionsDeps {
   issue: IssueWithStatus;

@@ -198,3 +198,72 @@ describe("reduceButlerEvent — immutability", () => {
     expect(buf).toEqual(emptyAssistantBuf());
   });
 });
+
+// ── AskUserQuestion (#459/#460) ──────────────────────────────────────────────
+// The butler's structured question arrives as its own `question` event and is
+// rendered as a card, not as a tool call. Three things must hold: the card appears
+// once, it flips to read-only when the server resolves it, and the generic tool card
+// for AskUserQuestion never appears alongside it.
+
+const QUESTIONS = [{
+  question: "Which colour do you prefer?",
+  header: "Colour",
+  multiSelect: false,
+  options: [{ label: "Blue", description: "The colour blue." }, { label: "Green" }],
+}];
+
+describe("reduceButlerEvent — AskUserQuestion", () => {
+  it("appends an answerable question card", () => {
+    const { state: s } = reduceButlerEvent(state(), emptyAssistantBuf(), { type: "question", askId: "a1", questions: QUESTIONS }, deps());
+    expect(s.chatMessages).toHaveLength(1);
+    expect(s.chatMessages[0].role).toBe("question");
+    expect(s.chatMessages[0].question).toEqual({ askId: "a1", questions: QUESTIONS });
+    expect(s.chatMessages[0].question?.resolved).toBeUndefined();
+  });
+
+  it("is idempotent — a replayed question event does not duplicate the card", () => {
+    const d = deps();
+    const first = reduceButlerEvent(state(), emptyAssistantBuf(), { type: "question", askId: "a1", questions: QUESTIONS }, d);
+    const second = reduceButlerEvent(first.state, first.buf, { type: "question", askId: "a1", questions: QUESTIONS }, d);
+    expect(second.state.chatMessages).toHaveLength(1);
+  });
+
+  it("question-resolved flips the card to read-only with the answers", () => {
+    const d = deps();
+    const asked = reduceButlerEvent(state(), emptyAssistantBuf(), { type: "question", askId: "a1", questions: QUESTIONS }, d);
+    const answers = [{ question: "Which colour do you prefer?", header: "Colour", answers: ["Green"] }];
+    const { state: s } = reduceButlerEvent(asked.state, asked.buf, { type: "question-resolved", askId: "a1", answers }, d);
+    expect(s.chatMessages[0].question?.resolved).toEqual({ answers, reason: undefined });
+  });
+
+  it("question-resolved carries the denial reason when nobody answered", () => {
+    const d = deps();
+    const asked = reduceButlerEvent(state(), emptyAssistantBuf(), { type: "question", askId: "a1", questions: QUESTIONS }, d);
+    const { state: s } = reduceButlerEvent(asked.state, asked.buf, { type: "question-resolved", askId: "a1", reason: "timeout" }, d);
+    expect(s.chatMessages[0].question?.resolved).toEqual({ answers: undefined, reason: "timeout" });
+  });
+
+  it("ignores a resolution for an unknown askId and never re-resolves", () => {
+    const d = deps();
+    const asked = reduceButlerEvent(state(), emptyAssistantBuf(), { type: "question", askId: "a1", questions: QUESTIONS }, d);
+    const orphan = reduceButlerEvent(asked.state, asked.buf, { type: "question-resolved", askId: "other", reason: "timeout" }, d);
+    expect(orphan.state).toBe(asked.state);
+    const answers = [{ question: "Which colour do you prefer?", header: "Colour", answers: ["Green"] }];
+    const once = reduceButlerEvent(asked.state, asked.buf, { type: "question-resolved", askId: "a1", answers }, d);
+    const twice = reduceButlerEvent(once.state, once.buf, { type: "question-resolved", askId: "a1", reason: "timeout" }, d);
+    expect(twice.state).toBe(once.state);
+  });
+
+  it("renders no generic tool card for AskUserQuestion and keeps the text run intact", () => {
+    // The SDK dispatches the assistant message carrying this tool_use only AFTER
+    // canUseTool resolved — i.e. mid-way through the reply that follows the answer.
+    // Resetting the buffer there used to split that reply into two bubbles.
+    const d = deps();
+    const streaming = reduceButlerEvent(state(), emptyAssistantBuf(), { type: "text", text: "P" }, d);
+    const withTool = reduceButlerEvent(streaming.state, streaming.buf, { type: "tool", name: "AskUserQuestion", toolId: "t1" }, d);
+    const done = reduceButlerEvent(withTool.state, withTool.buf, { type: "text", text: "ICKED=Green" }, d);
+    expect(done.state.chatMessages).toHaveLength(1);
+    expect(done.state.chatMessages[0].text).toBe("PICKED=Green");
+    expect(done.state.chatMessages.some((m) => m.role === "tool")).toBe(false);
+  });
+});

@@ -1,25 +1,41 @@
-import { issueTags, preferences, projects, sessions, tags, workspaces } from "@agentic-kanban/shared/schema";
+import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
+import { issueTags, preferences, projects, repos, sessions, tags, workspaces } from "@agentic-kanban/shared/schema";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
-import { runDoneUnmergedScannerNow } from "./done-unmerged-invariant-scanner.js";
+import { runDoneUnmergedSweepNow } from "./done-unmerged-invariant-sweep.js";
+import { reconcileGroupMemberIssues } from "../services/merge-cleanup.service.js";
 import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
-import { eq } from "drizzle-orm";
+import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
-import { db } from "../db/index.js";
-import { MOCK_AGENT_COMMAND, isMockProfile, toExecutorProvider } from "../services/agent-settings.service.js";
+import { db, type Database } from "../db/index.js";
+import { toExecutorProvider } from "../services/agent-settings.service.js";
 import { createBoardEvents } from "../services/board-events.js";
 import { emitButlerSystemEvent } from "../services/butler-event-feed.js";
 import * as gitService from "../services/git.service.js";
-import { acquireRepoMergeLock } from "../services/workspace-internals.js";
+import {
+  acquireRepoMergeLock,
+  listPendingSiblingMerges,
+  checkPendingSiblingMergeGuards,
+} from "../services/workspace-internals.js";
 import { cleanupMergedWorktreeAndBranch, runMergeCore } from "../services/merge-executor.service.js";
+import { cleanupSiblingWorktrees, prevalidateSiblingMerges, executeSiblingMerges } from "../services/workspace-repos.service.js";
+import { releaseWorkspaceResources } from "../services/workspace-resource-release.js";
 import { createBackup } from "../db/backup.js";
 import { killProcessesInDir } from "../services/process-cleanup.js";
 import { runScript } from "../services/script-runner.js";
 import { createSessionManager } from "../services/session.manager.js";
-import { getEffectiveProfile, parseProviderPref } from "./review-helpers.js";
+import { resolveAgentSettings } from "../services/agent-settings.service.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { buildLearningStepPrompt } from "../services/merge-helpers.service.js";
+import { resolveMergeGate, type MergeGateToken } from "../services/pre-merge-gate.service.js";
+import { advanceLoopAfterMergedIssue } from "../services/plugin-loop-hooks.service.js";
+import { clearWorkspaceWorkingDir } from "../repositories/workspace-crud.repository.js";
+import { stampWorkspaceMergedAt } from "../repositories/workspace-merge-execution.repository.js";
+import { getWorkspaceById } from "../repositories/workspace-reads.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
 
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 export type MergeWorkspace = Pick<typeof workspaces.$inferSelect, "id" | "isDirect" | "branch" | "workingDir" | "baseBranch" | "issueId">;
 
 export interface MergeDeps {
@@ -48,8 +64,8 @@ export function hasVisuallyVerifiableChanges(changedFiles: string[], isWebProjec
 /** Tag the issue with "needs-visual-verification" when in after_merge mode and client files changed. */
 export async function tagIfNeedsVisualVerification(repoPath: string, branch: string, baseBranch: string | null, issueId: string, now: string, projectId?: string): Promise<void> {
   try {
-    const prefRows = await db.select({ key: preferences.key, value: preferences.value }).from(preferences);
-    const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
+    const prefRows = await getAllPreferencesCached(db);
+    const prefMap = toPrefMap(prefRows);
     if (prefMap.get("visual_verification_mode") !== "after_merge") return;
 
     // Is this a web/service project? Read it from the persisted stack profile (already in prefMap).
@@ -84,6 +100,119 @@ export async function tagIfNeedsVisualVerification(repoPath: string, branch: str
   }
 }
 
+/**
+ * Startup reconciler for the multi-repo crash gap: `executeWorkspaceMerge` stamps
+ * mergedAt and closes the workspace BEFORE the sibling merges run, so a crash /
+ * hot-reload in that seconds-wide window strands sibling repos unmerged while the
+ * issue reads Done — and no other startup reconciler sees them (they all key off the
+ * LEADING branch or non-closed workspaces). The persisted progress state is the
+ * workspace-scoped `repos` rows themselves: a row WITHOUT a stamped mergedHeadSha on a
+ * mergedAt-stamped workspace is a potential strand.
+ *
+ * Each candidate is git-verified (`listPendingSiblingMerges`: branch still exists AND
+ * is ahead of its base — rows with no commits or already-cleaned branches are not
+ * strands). Verified strands are landed through the same guarded pipeline the merge
+ * path uses (guards → `executeSiblingMerges`, each under its own repo merge lock);
+ * anything that cannot land cleanly is recorded LOUDLY on the issue and its branch is
+ * preserved. Best-effort and non-fatal throughout — safe to call on every boot.
+ */
+export async function reconcileStrandedSiblingMerges(database: Database = db): Promise<{ landed: number; preserved: number }> {
+  const result = { landed: 0, preserved: 0 };
+  try {
+    const candidateRows = await database
+      .select({
+        workspaceId: workspaces.id,
+        issueId: workspaces.issueId,
+        branch: workspaces.branch,
+        mergedAt: workspaces.mergedAt,
+      })
+      .from(repos)
+      .innerJoin(workspaces, eq(repos.workspaceId, workspaces.id))
+      // is_leading excluded (#222 stage 1): a stranded-SIBLING scan must not treat the
+      // backfilled leading-repo row as a sibling with unmerged commits.
+      .where(and(isNotNull(workspaces.mergedAt), isNull(repos.mergedHeadSha), eq(repos.isLeading, false)));
+
+    const byWorkspace = new Map<string, (typeof candidateRows)[number]>();
+    for (const row of candidateRows) byWorkspace.set(row.workspaceId, row);
+    if (byWorkspace.size === 0) return result;
+
+    for (const ws of byWorkspace.values()) {
+      try {
+        const pending = await listPendingSiblingMerges(gitService, database, ws.workspaceId);
+        if (pending.length === 0) continue; // no-commit rows / already-cleaned branches — not strands
+        const now = new Date().toISOString();
+        console.warn(
+          `[stranded-siblings] workspace ${ws.workspaceId} (branch ${ws.branch}) is marked merged at ${ws.mergedAt} ` +
+            `but ${pending.length} sibling repo(s) still have unmerged commits — reconciling`,
+        );
+
+        const guardFailures = await checkPendingSiblingMergeGuards(gitService, pending);
+        if (guardFailures.length > 0) {
+          result.preserved += pending.length;
+          console.warn(`[stranded-siblings] cannot land stranded sibling merge(s) for workspace ${ws.workspaceId}:\n- ${guardFailures.join("\n- ")}`);
+          await recordStrandedSiblingComment(database, ws, "conflict",
+            `Multi-repo merge INCOMPLETE: this workspace is marked merged, but ${pending.length} sibling repo(s) still have ` +
+              `unmerged commits (likely a crash between the leading and sibling merges) and they cannot be landed automatically: ` +
+              guardFailures.join("; ") +
+              ". The sibling branches were preserved — fix the blockers and retry the workspace merge, or merge them manually.",
+            { mergeReason: "sibling_merge_pending", failures: guardFailures, detectedAt: now });
+          continue;
+        }
+
+        const siblingResults = await executeSiblingMerges({ gitService, database, createBackup, workspaceId: ws.workspaceId, plans: pending });
+        const landed = siblingResults.filter((r) => r.merged);
+        const failed = siblingResults.filter((r) => !r.merged);
+        result.landed += landed.length;
+        result.preserved += failed.length;
+
+        if (landed.length > 0) {
+          console.log(`[stranded-siblings] landed ${landed.length} stranded sibling merge(s) for workspace ${ws.workspaceId}`);
+          await recordStrandedSiblingComment(database, ws, "merged",
+            `Startup reconciliation: landed ${landed.length} sibling repo merge(s) stranded by an interrupted multi-repo merge: ` +
+              landed.map((r) => r.name ?? r.path).join(", ") + ".",
+            { siblingResults, reconciledAt: now });
+          // Merged siblings' worktrees + branches can now be dropped; anything that
+          // still failed stays preserved (preserveUnmerged re-verifies per repo).
+          await cleanupSiblingWorktrees(gitService, ws.workspaceId, database, { preserveUnmerged: true });
+        }
+        if (failed.length > 0) {
+          console.warn(`[stranded-siblings] ${failed.length} stranded sibling merge(s) still failed for workspace ${ws.workspaceId}`);
+          await recordStrandedSiblingComment(database, ws, "conflict",
+            `Multi-repo merge INCOMPLETE: ${failed.length} stranded sibling repo merge(s) still failed at startup reconciliation: ` +
+              failed.map((f) => `${f.name ?? f.path}: ${f.error}`).join("; ") +
+              ". The unmerged sibling branches were preserved — merge them manually.",
+            { mergeReason: "sibling_merge_failed", siblingResults, detectedAt: now });
+        }
+      } catch (err) {
+        console.warn(`[stranded-siblings] reconciliation failed for workspace ${ws.workspaceId} (non-fatal):`, errorMessage(err));
+      }
+    }
+  } catch (err) {
+    console.warn("[stranded-siblings] reconcileStrandedSiblingMerges failed (non-fatal):", errorMessage(err));
+  }
+  return result;
+}
+
+async function recordStrandedSiblingComment(
+  database: Database,
+  ws: { workspaceId: string; issueId: string; branch: string },
+  eventType: "merged" | "conflict",
+  body: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  await insertIssueComment({
+    issueId: ws.issueId,
+    workspaceId: ws.workspaceId,
+    kind: "merge-attempt",
+    author: "system",
+    body,
+    payload: { eventType, workspaceId: ws.workspaceId, branch: ws.branch, ...payload },
+    createdAt: new Date().toISOString(),
+  }, database).catch((err) => {
+    console.warn("[stranded-siblings] failed to record issue comment:", errorMessage(err));
+  });
+}
+
 export function createAutoMerge({ sessionManager, boardEvents, learningSessionIds }: MergeDeps) {
   async function recordMergeAttempt(
     workspace: MergeWorkspace,
@@ -101,25 +230,37 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
       payload: { eventType, workspaceId: workspace.id, branch: workspace.branch, ...payload },
       createdAt,
     }, db).catch((err) => {
-      console.warn("[workflow] failed to record merge timeline event:", err instanceof Error ? err.message : String(err));
+      console.warn("[workflow] failed to record merge timeline event:", errorMessage(err));
     });
   }
 
-  return async function autoMerge(workspace: MergeWorkspace, projectId: string, issueId: string, doneStatusId: string | null, now: string) {
+  return async function autoMerge(workspace: MergeWorkspace, projectId: string, issueId: string, doneStatusId: string | null, now: string, gate: MergeGateToken) {
+    /**
+     * #356: set the instant this invocation actually LANDS the branch. This path used to close
+     * the workspace with `{ readyForMerge: false }` and nothing else — no `mergedAt`, no
+     * `mergedHeadSha`, no `closedAt` — even though it had just advanced the base ref. Measured on
+     * a live pm-pipeline run: 2 of 4 workspaces were `closed` with `mergedAt: null` while their
+     * merge commits sat on master. That silent gap is what makes #353 possible
+     * (`listPluginLoopUnmergedWorkspaces` keys on `mergedAt IS NULL`) and what corrupts every
+     * analytics/reconciler read of the merge record. `doMerge` has stamped it all along; this
+     * path is the one that did not.
+     */
+    // Holder object, not a bare `let`: the assignment happens inside the merge-lock callback, and
+    // TypeScript's control-flow analysis would otherwise narrow the outer variable to `null`.
+    const merge: { landed: { mergedAt: string; mergedHeadSha: string | null } | null } = { landed: null };
     try {
-      const prefRowsLearning = await db.select().from(preferences);
-      const prefMapLearning = new Map(prefRowsLearning.map((r) => [r.key, r.value]));
+      const prefRowsLearning = await getAllPreferencesCached(db);
+      const prefMapLearning = toPrefMap(prefRowsLearning);
       if (getBool(prefMapLearning, "learning_step_before_merge") && workspace.workingDir) {
         try {
           const learningPrompt = buildLearningStepPrompt(true);
-          const learningProfile = prefMapLearning.get("claude_profile") || undefined;
-          const agentCmd = isMockProfile(learningProfile) ? MOCK_AGENT_COMMAND : (prefMapLearning.get("agent_command") || undefined);
-          const agentArgs = prefMapLearning.get("agent_args") || undefined;
-          const claudeProfile = isMockProfile(learningProfile) ? undefined : learningProfile;
-          const providerLearnMerge = parseProviderPref(prefMapLearning);
-          const effectiveProfileLearnMerge = getEffectiveProfile(prefMapLearning, providerLearnMerge, claudeProfile);
-          const profileSelectionLearnMerge = effectiveProfileLearnMerge ? { provider: providerLearnMerge, name: effectiveProfileLearnMerge } : undefined;
-          const learningSessId = await sessionManager.startSession({ workspaceId: workspace.id, prompt: learningPrompt, agentCommand: agentCmd, agentArgs, claudeProfile, profile: profileSelectionLearnMerge, provider: toExecutorProvider(providerLearnMerge), triggerType: "learning" });
+          // #541: resolveAgentSettings, not resolveWorkspaceLaunchSettings — MergeWorkspace
+          // carries no provider/claudeProfile, so this step has never been able to pin the
+          // workspace's own profile the way the exit-workflow learning step does. Widening
+          // that type is a separate change; this only removes the copy.
+          const { agentCommand: agentCmd, agentArgs, provider: providerLearnMerge, profile: profileSelectionLearnMerge } =
+            resolveAgentSettings(prefMapLearning);
+          const learningSessId = await sessionManager.startSession({ workspaceId: workspace.id, prompt: learningPrompt, agentCommand: agentCmd, agentArgs, profile: profileSelectionLearnMerge, provider: toExecutorProvider(providerLearnMerge), triggerType: "learning" });
           learningSessionIds.add(learningSessId);
           console.log(`[workflow] learning step started: session=${learningSessId}`);
           await new Promise<void>((resolve) => {
@@ -143,6 +284,23 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
       }
 
       if (!workspace.isDirect) {
+        // Merge-gate DECISION (arch-review §1.2): this path used to land branches with NO gate at
+        // all. It now resolves the explicit token the caller passed. The review-exit foundational
+        // merge hands over `already-passed` PROOF (the gate ran seconds earlier at review-exit), so
+        // resolveMergeGate does not re-run an expensive build; a fix-and-merge retry passes a
+        // documented `skip-explicit`. Stale/absent proof re-runs the gate; a failure aborts the
+        // merge (surfaced via the outer catch's conflict recording).
+        const gateResult = await resolveMergeGate({
+          token: gate,
+          // `baseBranch` lets the gate read the diff, which is what makes the docs-only skip
+          // and test-package scoping reachable from this path too (see runPreLockGate).
+          workspace: { id: workspace.id, workingDir: workspace.workingDir, baseBranch: workspace.baseBranch },
+          projectId,
+          database: db,
+        });
+        if (!gateResult.passed) {
+          throw new Error(`Pre-merge gate failed (${gateResult.stage}) — merge withheld for workspace ${workspace.id} (branch ${workspace.branch}). ${gateResult.message}`);
+        }
         const projectRows = await db.select({ repoPath: projects.repoPath, teardownScript: projects.teardownScript, defaultBranch: projects.defaultBranch }).from(projects).where(eq(projects.id, projectId)).limit(1);
         if (projectRows.length === 0) {
           // Guard: project not found — refuse to set Done without a verified merge.
@@ -168,12 +326,18 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
               }
               await tagIfNeedsVisualVerification(repoPath, workspace.branch, workspace.baseBranch, issueId, now, projectId);
 
+              // Multi-repo: all-or-nothing sibling prevalidation BEFORE the leading
+              // merge lands (throws → auto-merge fails cleanly, nothing merged).
+              const siblingPlans = workspace.isDirect
+                ? []
+                : await prevalidateSiblingMerges({ gitService, database: db, workspaceId: workspace.id });
+
               const targetBranch = workspace.baseBranch || defaultBranch || "main";
               // The git-touching pipeline (dirty-main guard → pre-merge backup →
               // merge with append-conflict auto-resolution (#763) → post-merge
               // ancestry verification) lives in the shared merge executor core (#945)
               // — the same core the manual/monitor doMerge path runs.
-              const { mergeOutput, mergeCommitSha } = await runMergeCore({
+              const { mergeOutput, mergeCommitSha, mergedHeadSha } = await runMergeCore({
                 repoPath,
                 branch: workspace.branch,
                 targetBranch,
@@ -194,26 +358,73 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
                   ),
               });
 
+              // #356: record the merge on the ROW, not only in a comment payload, and do it here
+              // — immediately after the core reports the ref advanced — so no later branch of this
+              // long tail can skip it. Timestamped fresh: `now` was captured before the learning
+              // step and the pre-merge gate, which can add 20-40 minutes, and backdating it is why
+              // `updatedAt` looked untouched while the status demonstrably moved twice.
+              const mergedNow = new Date().toISOString();
+              merge.landed = { mergedAt: mergedNow, mergedHeadSha: mergedHeadSha || null };
+              await stampWorkspaceMergedAt(workspace.id, mergedNow, mergedHeadSha || null, db);
+
               await recordMergeAttempt(
                 workspace,
                 "merged",
                 `Merged ${workspace.branch} into ${targetBranch}${mergeCommitSha ? ` at ${mergeCommitSha}` : ""}.`,
-                { targetBranch, commitSha: mergeCommitSha || null, mergedAt: now, mergeOutput },
-                now,
+                { targetBranch, commitSha: mergeCommitSha || null, mergedAt: mergedNow, mergeOutput },
+                mergedNow,
               );
+
+              // Multi-repo: land the prevalidated sibling merges. Post-prevalidation
+              // failures are recorded per-repo, not thrown — the leading merge landed.
+              if (siblingPlans.length > 0) {
+                const siblingResults = await executeSiblingMerges({ gitService, database: db, createBackup, workspaceId: workspace.id, plans: siblingPlans });
+                const failedSiblings = siblingResults.filter((r) => !r.merged);
+                if (failedSiblings.length > 0) {
+                  await recordMergeAttempt(
+                    workspace,
+                    "conflict",
+                    `Multi-repo auto-merge PARTIAL: ${failedSiblings.length} sibling repo merge(s) failed after prevalidation: ` +
+                      failedSiblings.map((f) => `${f.name ?? f.path}: ${f.error}`).join("; ") +
+                      ". The unmerged sibling branches were preserved — merge them manually.",
+                    { mergeReason: "sibling_merge_failed", siblingResults, targetBranch },
+                    now,
+                  );
+                }
+              }
+
+              // Per-workspace Docker service stack down (only when one was provisioned)
+              // before the worktree is removed. Uses the STORED compose project name
+              // (#F1). Best-effort — the engine never throws.
+              if (workspace.workingDir) {
+                const svcRows = await db.select({ serviceState: workspaces.serviceState }).from(workspaces).where(eq(workspaces.id, workspace.id)).limit(1);
+                await releaseWorkspaceResources(
+                  { id: workspace.id, workingDir: workspace.workingDir, serviceState: svcRows[0]?.serviceState },
+                  { phase: "merge-workflow" },
+                );
+              }
+
               await cleanupMergedWorktreeAndBranch({
                 repoPath,
                 workingDir: workspace.workingDir,
                 branch: workspace.branch,
                 gitService,
               });
+              // Multi-repo: drop sibling worktrees + branches (no-op single-repo);
+              // an unmerged sibling (failed post-prevalidation) is preserved.
+              await cleanupSiblingWorktrees(gitService, workspace.id, db, { preserveUnmerged: true });
+
+              // #298 — merge-to-advance for plugin-loop tickets landing through THIS tail
+              // (the #297 autoLand path merges via autoMerge, not the workspace service, so
+              // the cleanup-service hook never sees it). Best-effort by contract.
+              await advanceLoopAfterMergedIssue(issueId, db);
 
               const verifyAgent = prefMapLearning.get("after_merge_verify_agent") || "none";
               const issueTagged = await db.select({ tagId: issueTags.tagId }).from(issueTags).where(eq(issueTags.issueId, issueId)).limit(100).then((rows) => rows.some((r) => r.tagId !== null));
               if (verifyAgent === "dedicated" && issueTagged) {
                 try {
                   const clientPort = process.env.KANBAN_CLIENT_PORT || process.env.VITE_PORT || "5173";
-                  const serverPort = process.env.KANBAN_SERVER_PORT || process.env.PORT || "3001";
+                  const serverPort = resolveBoardServerPort();
                   const verifyPrompt = `You are a visual verification agent. The branch '${workspace.branch}' was just merged into master.
 
 Your task: visually verify that the UI changes look correct in the browser.
@@ -233,13 +444,9 @@ If the dev server is not responding, wait 10 seconds and retry once.
 Issue ID: ${issueId}
 Workspace ID: ${workspace.id}
 Server: http://localhost:${serverPort}`;
-                  const verifyProfile = prefMapLearning.get("claude_profile") || undefined;
-                  const verifyCmd = isMockProfile(verifyProfile) ? MOCK_AGENT_COMMAND : (prefMapLearning.get("agent_command") || undefined);
-                  const verifyArgs = prefMapLearning.get("agent_args") || undefined;
-                  const verifyProvider = parseProviderPref(prefMapLearning);
-                  const effectiveVerifyProfile = getEffectiveProfile(prefMapLearning, verifyProvider, isMockProfile(verifyProfile) ? undefined : verifyProfile);
-                  const verifyProfileSelection = effectiveVerifyProfile ? { provider: verifyProvider, name: effectiveVerifyProfile } : undefined;
-                  const verifySessId = await sessionManager.startSession({ workspaceId: workspace.id, prompt: verifyPrompt, agentCommand: verifyCmd, agentArgs: verifyArgs, claudeProfile: effectiveVerifyProfile, provider: toExecutorProvider(verifyProvider), triggerType: "verify", profile: verifyProfileSelection, workingDirOverride: repoPath, extraEnv: { KANBAN_SESSION_TYPE: "verify" } });
+                  const { agentCommand: verifyCmd, agentArgs: verifyArgs, provider: verifyProvider, profile: verifyProfileSelection } =
+                    resolveAgentSettings(prefMapLearning);
+                  const verifySessId = await sessionManager.startSession({ workspaceId: workspace.id, prompt: verifyPrompt, agentCommand: verifyCmd, agentArgs: verifyArgs, provider: toExecutorProvider(verifyProvider), triggerType: "verify", profile: verifyProfileSelection, workingDirOverride: repoPath, extraEnv: { KANBAN_SESSION_TYPE: "verify" } });
                   console.log(`[workflow] dedicated verification session started: session=${verifySessId}`);
                 } catch (err) {
                   console.warn("[workflow] dedicated verification session failed (non-fatal):", err);
@@ -254,22 +461,51 @@ Server: http://localhost:${serverPort}`;
         }
       }
 
-      await setWorkspaceStatus(db, workspace.id, "closed", { now, set: { workingDir: null, readyForMerge: false } });
+      // #356: close with the merge record intact. `mergedHeadSha` is a leading-repo mirror column
+      // and cannot be written through `setWorkspaceStatus`'s `set` escape hatch, which is exactly
+      // why it went through `stampWorkspaceMergedAt` above; here we only add `mergedAt`/`closedAt`.
+      const closedAt = new Date().toISOString();
+      await setWorkspaceStatus(db, workspace.id, "closed", {
+        now: closedAt,
+        set: { readyForMerge: false, closedAt, ...(merge.landed ? { mergedAt: merge.landed.mergedAt } : {}) },
+      });
+      // Verify the bookkeeping rather than assume it (#356's own suggested direction): a merge
+      // that landed but left `mergedAt` null must not be reported as a success, because nothing
+      // downstream can tell that state apart from "never merged".
+      if (merge.landed) {
+        const closedRow = await getWorkspaceById(workspace.id, db);
+        if (closedRow && !closedRow.mergedAt) {
+          throw new Error(
+            `Merge bookkeeping invariant violated (#356): workspace ${workspace.id} (branch ${workspace.branch}) `
+            + `landed on ${workspace.baseBranch ?? "the base branch"} but its row still has mergedAt=null. `
+            + `Anything keyed on the merge record — the plugin-loop awaitingMerge query, cost rollups, `
+            + `the ancestor/done-unmerged scanners — will treat this as unmerged work.`,
+          );
+        }
+      }
+      // #226 — mirror column: goes through the repository helper so the leading `repos` row
+      // stops pointing at the worktree this close just tore down.
+      // `closedAt`, not `now` (#356): this write also stamps `updatedAt`, so passing the
+      // pre-gate `now` here rolled the row's `updatedAt` BACK to before the merge — which is
+      // exactly the "updatedAt stuck at 16:40 while status changed twice afterwards" observation.
+      await clearWorkspaceWorkingDir(workspace.id, closedAt, db);
       if (doneStatusId) {
         // transitionIssueStatus also advances the workflow node to the `end` node
         // matching Done status, so blocked_by/depends_on dependents can resolve
         // via the node type check (#537).
         await transitionIssueStatus(db, issueId, doneStatusId, { now });
+        // Ticket group (#661): the auto-merged group closes every member ticket too.
+        await reconcileGroupMemberIssues({ database: db, workspaceId: workspace.id, now, projectId });
       }
       boardEvents.broadcast(projectId, "workspace_merged");
       console.log(`[workflow] auto-merged workspace ${workspace.id}`);
       // Run the done-unmerged invariant scan immediately after merge so silent-merge-loss
       // is caught without waiting for the next periodic tick (#589).
-      runDoneUnmergedScannerNow();
+      runDoneUnmergedSweepNow();
     } catch (err) {
       console.error("[workflow] auto-merge failed:", err);
       boardEvents.broadcast(projectId, "workflow_error");
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorMessage(err);
       await recordMergeAttempt(
         workspace,
         "conflict",

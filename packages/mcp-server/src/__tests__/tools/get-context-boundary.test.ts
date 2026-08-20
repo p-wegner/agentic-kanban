@@ -1,6 +1,6 @@
 // @covers mcp-server.orient.context [boundary]
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess } from "node:child_process";
 import { resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";
@@ -8,12 +8,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { migrationFilesInOrder } from "../helpers/test-db.js";
+import { startMcpServer, stopMcpServer } from "../helpers/server-process.js";
 
 // This file lives one level deeper (__tests__/tools) than mcp-tools.test.ts, so the
 // hop count to the monorepo root is +1 ( tools -> __tests__ -> src -> mcp-server ->
 // packages -> root ).
 const MONOREPO_ROOT = resolve(import.meta.dirname, "../../../../..");
 const SHARED_DRIZZLE = resolve(MONOREPO_ROOT, "packages/shared/drizzle");
+
+// These suites launch a REAL server process. vitest's 10s default hook budget mostly
+// measures machine load, not correctness — a cold node+tsx start plus the migration
+// replay legitimately exceeds it on Windows. Scoped to the spawn-based suites so the
+// pure-unit suites keep their tight (genuinely meaningful) defaults (#46).
+const SPAWN_HOOK_TIMEOUT_MS = 60_000;
+const SPAWN_TEST_TIMEOUT_MS = 20_000;
 
 function createTestDb(dbPath: string): void {
   const db = new DatabaseSync(dbPath);
@@ -87,21 +95,11 @@ function sendAndReceive(proc: ChildProcess, request: string): Promise<any> {
   });
 }
 
+// Spawn + reap is centralised in helpers/server-process.ts (#46): the old inline
+// `spawn("pnpm", …, "dev")` here left a tsx/node grandchild alive after every run,
+// starving later runs into false 5s timeouts.
 function startServer(dbPath: string): Promise<ChildProcess> {
-  const proc = spawn("pnpm", ["--filter", "@agentic-kanban/mcp-server", "dev"], {
-    cwd: MONOREPO_ROOT,
-    stdio: ["pipe", "pipe", "pipe"],
-    env: { ...process.env, DB_URL: `file:${dbPath}` },
-  });
-  return new Promise<ChildProcess>((resolveP, reject) => {
-    const timeout = setTimeout(() => reject(new Error("MCP server didn't start")), 10000);
-    proc.stderr!.on("data", (data: Buffer) => {
-      if (data.toString().includes("running on stdio")) {
-        clearTimeout(timeout);
-        resolveP(proc);
-      }
-    });
-  });
+  return startMcpServer(dbPath);
 }
 
 async function handshake(proc: ChildProcess): Promise<void> {
@@ -135,11 +133,15 @@ describe("get_context boundary — empty board", () => {
 
     proc = await startServer(dbPath);
     await handshake(proc);
-  });
+    // Budget covers a real node+tsx launch and the migration replay, not just the
+    // assertion. vitest's 10s default is a load measurement, not a contract (#46).
+  }, SPAWN_HOOK_TIMEOUT_MS);
 
-  afterAll(() => {
-    if (proc) proc.kill();
-    try { rmSync(tmpDir, { recursive: true }); } catch { /* ignore */ }
+  afterAll(async () => {
+    // Await the tree-kill before rmSync: the server holds DB_URL open, so removing the
+    // temp dir while it lives fails on Windows.
+    await stopMcpServer(proc);
+    try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
   });
 
   it("returns a well-formed degraded context (zeroed counts) instead of crashing on an empty board", async () => {
@@ -163,7 +165,7 @@ describe("get_context boundary — empty board", () => {
     expect(data.totalIssues).toBe(0);
     expect(data.activeWorkspaces).toBe(0);
     expect(data.issueCounts).toEqual({});
-  });
+  }, SPAWN_TEST_TIMEOUT_MS);
 });
 
 describe("get_context boundary — stale active project pref", () => {
@@ -183,11 +185,13 @@ describe("get_context boundary — stale active project pref", () => {
 
     proc = await startServer(dbPath);
     await handshake(proc);
-  });
+  }, SPAWN_HOOK_TIMEOUT_MS);
 
-  afterAll(() => {
-    if (proc) proc.kill();
-    try { rmSync(tmpDir, { recursive: true }); } catch { /* ignore */ }
+  afterAll(async () => {
+    // Await the tree-kill before rmSync: the server holds DB_URL open, so removing the
+    // temp dir while it lives fails on Windows.
+    await stopMcpServer(proc);
+    try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
   });
 
   it("returns a graceful 'not found' error (no crash) when the active project no longer exists", async () => {
@@ -205,5 +209,5 @@ describe("get_context boundary — stale active project pref", () => {
     expect(text).toContain(danglingId);
     // Distinguish from the already-covered "no active project pref" boundary.
     expect(text).not.toContain("No active project");
-  });
+  }, SPAWN_TEST_TIMEOUT_MS);
 });

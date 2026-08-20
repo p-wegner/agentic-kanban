@@ -1,8 +1,7 @@
 import { db } from "../db/index.js";
-import { projects, scheduledRunHistory, scheduledRuns } from "@agentic-kanban/shared/schema";
+import { projects, scheduledRuns } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import { getNextCronRun } from "@agentic-kanban/shared/lib/cron-utils";
-import { randomUUID } from "node:crypto";
 import { getPreference, setPreference } from "../repositories/preferences.repository.js";
 import { conductorAvailable, runConductorCycleOnce } from "../services/conductor-control.service.js";
 import { readOrchestratorStatus } from "../services/orchestrator-monitor.service.js";
@@ -11,6 +10,23 @@ import { conductorCronPrefKey, runDueConductorCrons } from "../services/conducto
 export interface ScheduledTaskTimers {
   timer: ReturnType<typeof setTimeout>;
   interval: ReturnType<typeof setInterval>;
+}
+
+/**
+ * Dependency-injected trigger for a due scheduled run (#402). This used to be a
+ * self-HTTP `fetch` to `POST /api/scheduled-runs/:id/run` on the server's own
+ * port — the documented anti-pattern (packages/server/CLAUDE.md): a runtime
+ * dependency on port availability, types erased by the JSON round trip, and
+ * untestable without a listening server. The wiring in
+ * `startup/background-services.ts` passes the SAME service function the route
+ * handler calls (`createScheduledRunService(...).run`), so behaviour is
+ * identical minus the loopback hop.
+ */
+export interface ScheduledTasksDeps {
+  runScheduledRun: (
+    id: string,
+    triggeredBy: string,
+  ) => Promise<{ workspaceId?: string; skipped?: boolean; reason?: string }>;
 }
 
 let activeScheduledTaskTimers: ScheduledTaskTimers | null = null;
@@ -23,7 +39,7 @@ export function stopScheduledTasks(): void {
   }
 }
 
-export function setupScheduledTasks(serverPort: number): ScheduledTaskTimers {
+export function setupScheduledTasks(deps: ScheduledTasksDeps): ScheduledTaskTimers {
   stopScheduledTasks();
 
   async function runScheduledRunsCycle() {
@@ -46,15 +62,15 @@ export function setupScheduledTasks(serverPort: number): ScheduledTaskTimers {
         if (now >= nextRun) {
           console.log(`[scheduler] triggering scheduled run "${run.name}" (${run.id})`);
           try {
-            const res = await fetch(`http://127.0.0.1:${serverPort}/api/scheduled-runs/${run.id}/run?triggeredBy=scheduler`, { method: "POST" });
-            if (!res.ok) {
-              const body = await res.text();
-              const reason = `Launch error: ${res.status} ${body}`;
-              console.warn(`[scheduler] run "${run.name}" failed: ${reason}`);
+            const result = await deps.runScheduledRun(run.id, "scheduler");
+            if (result?.skipped) {
+              console.log(`[scheduler] run "${run.name}" skipped: ${result.reason ?? "unknown"}`);
             }
           } catch (err) {
-            console.warn(`[scheduler] run "${run.name}" error:`, err);
-            await recordSchedulerFailure(run, `Launch error: ${err instanceof Error ? err.message : String(err)}`);
+            // The scheduled-run service records its own failure history/lastRun state
+            // on launch and config errors (fail()/catch paths in scheduled-run.service),
+            // so recording again here would double-book — just log.
+            console.warn(`[scheduler] run "${run.name}" failed:`, err instanceof Error ? err.message : err);
           }
         }
       }
@@ -104,31 +120,4 @@ export function setupScheduledTasks(serverPort: number): ScheduledTaskTimers {
   const handles: ScheduledTaskTimers = { timer, interval };
   activeScheduledTaskTimers = handles;
   return handles;
-}
-
-async function recordSchedulerFailure(run: typeof scheduledRuns.$inferSelect, reason: string) {
-  const now = new Date().toISOString();
-  try {
-    await db.insert(scheduledRunHistory).values({
-      id: randomUUID(),
-      scheduledRunId: run.id,
-      projectId: run.projectId,
-      status: "error",
-      reason,
-      triggeredBy: "scheduler",
-      issueId: run.systemIssueId,
-      workspaceId: null,
-      startedAt: now,
-      completedAt: now,
-      createdAt: now,
-    });
-    await db.update(scheduledRuns).set({
-      lastRunAt: now,
-      lastRunStatus: "error",
-      lastRunWorkspaceId: null,
-      updatedAt: now,
-    }).where(eq(scheduledRuns.id, run.id));
-  } catch (err) {
-    console.warn("[scheduler] failed to record scheduled run failure:", err);
-  }
 }

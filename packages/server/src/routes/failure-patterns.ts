@@ -1,6 +1,7 @@
 import type { Database } from "../db/index.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
+import { queryInt } from "../middleware/query-params.js";
 import {
   findSimilarFailures,
   listPatterns,
@@ -20,7 +21,7 @@ export function createFailurePatternsRoute(database: Database) {
   // GET /api/failure-patterns/search?q=<text>&limit=<n> — find similar failures
   router.get("/search", async (c) => {
     const q = c.req.query("q") ?? "";
-    const limit = Math.min(parseInt(c.req.query("limit") ?? "3", 10) || 3, 10);
+    const limit = queryInt(c, "limit", { def: 3, min: 1, max: 10 });
     if (!q.trim()) return c.json([]);
     const matches = await findSimilarFailures(q, limit, database);
     return c.json(matches.map(m => ({

@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { DRIVE_STATUSES } from "@agentic-kanban/shared";
 import { generateDriveRetro } from "@agentic-kanban/shared/lib/drive-retro";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { requireEntity } from "../db-utils.js";
+import { mcpError, mcpJson, requireEntity } from "../db-utils.js";
 
 /**
  * MCP surface for the first-class Drive entity (#799): a Drive records an
@@ -26,7 +26,7 @@ export function registerStartDrive(server: McpServer, deps: ToolDeps = prodDeps)
     },
     async ({ projectId, target, metaIssueId, completionContract }) => {
       if (!target.trim()) {
-        return { content: [{ type: "text" as const, text: "Error: target is required" }] };
+        return mcpError("Error: target is required");
       }
       const projectRows = await db.select({ id: schema.projects.id })
         .from(schema.projects).where(eq(schema.projects.id, projectId)).limit(1);
@@ -46,7 +46,7 @@ export function registerStartDrive(server: McpServer, deps: ToolDeps = prodDeps)
       await db.insert(schema.drives).values(row);
       notifyBoard(projectId, "drive_started");
 
-      return { content: [{ type: "text" as const, text: JSON.stringify(row, null, 2) }] };
+      return mcpJson(row);
     },
   );
 }
@@ -65,7 +65,7 @@ export function registerListDrives(server: McpServer, deps: ToolDeps = prodDeps)
         .where(eq(schema.drives.projectId, projectId))
         .orderBy(desc(schema.drives.startedAt));
       const filtered = status ? rows.filter((r) => r.status === status) : rows;
-      return { content: [{ type: "text" as const, text: JSON.stringify(filtered, null, 2) }] };
+      return mcpJson(filtered);
     },
   );
 }
@@ -82,7 +82,7 @@ export function registerGetDrive(server: McpServer, deps: ToolDeps = prodDeps) {
       const rows = await db.select().from(schema.drives).where(eq(schema.drives.id, driveId)).limit(1);
       const r = requireEntity(rows, driveId, "Drive");
       if (!r.ok) return r.error;
-      return { content: [{ type: "text" as const, text: JSON.stringify(r.value, null, 2) }] };
+      return mcpJson(r.value);
     },
   );
 }
@@ -120,7 +120,7 @@ export function registerFinishDrive(server: McpServer, deps: ToolDeps = prodDeps
         }
       }
 
-      return { content: [{ type: "text" as const, text: JSON.stringify({ ...r.value, status: finalStatus, finishedAt, retroPath }, null, 2) }] };
+      return mcpJson({ ...r.value, status: finalStatus, finishedAt, retroPath });
     },
   );
 }

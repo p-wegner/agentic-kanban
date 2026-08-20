@@ -49,8 +49,6 @@ function makeGitRepo(initialBranch: string): string {
     execFileSync("git", args, { cwd: dir, stdio: "pipe" });
   // -b sets the initial branch name without relying on global init.defaultBranch.
   git("init", "-b", initialBranch);
-  git("config", "user.email", "test@example.com");
-  git("config", "user.name", "Registration Test");
   git("config", "commit.gpgsign", "false");
   writeFileSync(join(dir, "README.md"), "# fixture\n");
   git("add", "README.md");

@@ -25,6 +25,10 @@ export const ACCENT = "#547446";
 /** Status -> chart color. Drives donut segments, legend dots, graph nodes,
  *  swimlane headers. Backlog/Todo/Cancelled stay neutral; the workflow states
  *  carry warm identity; Done is the sage "good" state. */
+// #517: not folded into the status tones. Charts need raw hex (SVG fills, donut segments,
+// graph nodes) which tailwind classes cannot supply, and these values are chosen for
+// contrast AGAINST EACH OTHER in one figure rather than for legibility as a pill. A tone
+// table entry would have to carry a hex purely for this one consumer.
 export const STATUS_COLORS: Record<string, string> = {
   Backlog:       "#a8a195", // warm gray (ink-faint family)
   Todo:          "#8a8175", // --color-ink-faint

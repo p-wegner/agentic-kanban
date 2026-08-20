@@ -1,5 +1,6 @@
+import type { ActivityEvent, CycleTimeData, RelatedIssue, TimeEntriesData, TouchedFile } from "../lib/issueDetailTypes.js";
 import { useEffect, useState } from "react";
-import type { IssueArtifact, IssueWithStatus, DependencyInfo, MilestoneResponse } from "@agentic-kanban/shared";
+import type { IssueArtifact, IssueWithStatus, DependencyInfo, MilestoneResponse, MergedCommitsResponse, IssueComment} from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import { getCachedBundle, revalidateBundle } from "../lib/issueDetailBundleCache.js";
 import {
@@ -10,8 +11,6 @@ import {
 } from "../lib/clientInvalidation.js";
 // Type-only imports (erased at compile time, so they don't violate the
 // hooks-can't-import-components arch rule).
-import type { ActivityEvent } from "../components/IssueActivitySection.js";
-import type { IssueComment } from "../components/IssueDetailComments.js";
 
 // Module-level cache for the project-wide issue list feeding the dependency
 // picker (it only needs id/issueNumber/title). The list is project-scoped, not
@@ -43,6 +42,13 @@ interface IssueDetailBundle {
   artifacts: IssueArtifact[];
   comments: IssueComment[];
   activity: { events: ActivityEvent[] };
+  // #418: the previously-separate per-issue fetches, folded into the bundle.
+  // Each is null when that server-side sub-fetch failed (best-effort).
+  cycleTime: CycleTimeData | null;
+  timeEntries: TimeEntriesData | null;
+  touchedFiles: { files: TouchedFile[]; cached: boolean } | null;
+  relatedIssues: { related: RelatedIssue[] } | null;
+  mergedCommits: MergedCommitsResponse | null;
 }
 
 /**
@@ -70,6 +76,13 @@ export function useIssueDetailData(issue: IssueWithStatus, onIssueUpdate: (issue
   const [milestones, setMilestones] = useState<MilestoneResponse[]>([]);
   const [activeShowdownId, setActiveShowdownId] = useState<string | null>(null);
   const [descriptionFetching, setDescriptionFetching] = useState(false);
+  // #418: bundle-folded per-issue extras (previously 5 separate section fetches).
+  const [cycleTime, setCycleTime] = useState<CycleTimeData | null>(null);
+  const [timeEntries, setTimeEntries] = useState<TimeEntriesData | null>(null);
+  const [touchedFiles, setTouchedFiles] = useState<TouchedFile[] | null>(null);
+  const [relatedIssues, setRelatedIssues] = useState<RelatedIssue[] | null>(null);
+  const [mergedCommits, setMergedCommits] = useState<MergedCommitsResponse | null>(null);
+  const [extrasLoading, setExtrasLoading] = useState(true);
 
   useEffect(() => {
     async function loadData() {
@@ -77,6 +90,7 @@ export function useIssueDetailData(issue: IssueWithStatus, onIssueUpdate: (issue
       setActivityLoading(true);
       setArtifacts([]);
       setExpandedArtifactId(null);
+      setExtrasLoading(true);
       // Description is stripped from the board payload; the bundle re-supplies it.
       if (issue.description === undefined) setDescriptionFetching(true);
       try {
@@ -91,6 +105,12 @@ export function useIssueDetailData(issue: IssueWithStatus, onIssueUpdate: (issue
           setComments(bundle.comments);
           setArtifacts(bundle.artifacts);
           setActivityEvents(bundle.activity.events);
+          setCycleTime(bundle.cycleTime ?? null);
+          setTimeEntries(bundle.timeEntries ?? null);
+          setTouchedFiles(bundle.touchedFiles?.files ?? null);
+          setRelatedIssues(bundle.relatedIssues?.related ?? null);
+          setMergedCommits(bundle.mergedCommits ?? null);
+          setExtrasLoading(false);
           setArtifactsLoading(false);
           setActivityLoading(false);
           // Feed the lazy-loaded description up to the shared issue object so the
@@ -129,10 +149,9 @@ export function useIssueDetailData(issue: IssueWithStatus, onIssueUpdate: (issue
         setArtifactsLoading(false);
         setActivityLoading(false);
         setDescriptionFetching(false);
+        setExtrasLoading(false);
         // Ignore — non-critical
       }
-      // Touched-files, related-issues, and merged-commits are owned by their own
-      // self-fetching section components — they no longer ride along here.
     }
     void loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -155,5 +174,12 @@ export function useIssueDetailData(issue: IssueWithStatus, onIssueUpdate: (issue
     milestones, setMilestones,
     activeShowdownId, setActiveShowdownId,
     descriptionFetching, setDescriptionFetching,
+    // #418: bundle-folded extras for the (now fetch-free) section components.
+    cycleTime,
+    timeEntries,
+    touchedFiles,
+    relatedIssues,
+    mergedCommits,
+    extrasLoading,
   };
 }

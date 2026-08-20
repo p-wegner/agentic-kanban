@@ -364,6 +364,58 @@ describe("listPendingQuestionsForProject — dismiss + staleness integration", (
     const afterAnswer = await listPendingQuestionsForProject(projectId, db);
     expect(afterAnswer.find((p) => p.toolUseId === "mcp-clarify-1")).toBeUndefined();
   });
+
+  // A clarify_or_propose ask outlives the session that made it. The agent exits,
+  // its direct workspace is closed seconds later with workingDir null, and the card used
+  // to stay "fresh" forever — every answer attempt dying in sendTurn with "Workspace has
+  // no working directory; run setup first", with no route back except the ✕.
+  it("drops an MCP clarifying question whose workspace has since been closed", async () => {
+    const { db } = createTestDb();
+    const { projectId, workspaceId, issueId } = await seed(db, {
+      toolUseId: "tu-closed-synthetic",
+      workspaceStatus: "closed",
+      workspaceClosedAt: ts(-60 * 1000),
+    });
+    await db.insert(issueComments).values({
+      id: "comment-mcp-closed",
+      issueId,
+      workspaceId,
+      kind: "agent-question",
+      author: "agent",
+      body: "Need clarification.",
+      payload: JSON.stringify({
+        source: "mcp_clarify_or_propose",
+        toolUseId: "mcp-clarify-closed",
+        questions: [{ question: "What should happen with it?", options: [{ label: "Close as noise" }] }],
+      }),
+      createdAt: ts(-70 * 1000),
+    });
+
+    const pending = await listPendingQuestionsForProject(projectId, db);
+    expect(pending.find((p) => p.toolUseId === "mcp-clarify-closed")).toBeUndefined();
+  });
+
+  it("keeps an MCP clarifying question while its workspace is still open", async () => {
+    const { db } = createTestDb();
+    const { projectId, workspaceId, issueId } = await seed(db, { toolUseId: "tu-open-synthetic" });
+    await db.insert(issueComments).values({
+      id: "comment-mcp-open",
+      issueId,
+      workspaceId,
+      kind: "agent-question",
+      author: "agent",
+      body: "Need clarification.",
+      payload: JSON.stringify({
+        source: "mcp_clarify_or_propose",
+        toolUseId: "mcp-clarify-open",
+        questions: [{ question: "Approve?", options: [{ label: "Yes" }] }],
+      }),
+      createdAt: ts(-60 * 1000),
+    });
+
+    const pending = await listPendingQuestionsForProject(projectId, db);
+    expect(pending.find((p) => p.toolUseId === "mcp-clarify-open")?.staleness).toBe(null);
+  });
 });
 
 describe("tryAutoAnswer", () => {
@@ -428,5 +480,69 @@ describe("tryAutoAnswer", () => {
     await setPreference("butler_auto_answer", "true", db);
     await tryAutoAnswer("tu-aa6", "ws-6", questions, goodRecs, async () => { throw new Error("network error"); }, db);
     expect(await isAnswered("tu-aa6", db)).toBe(false);
+  });
+});
+
+// #418 G17: the synthetic-question comment scan is bounded — created_at floor
+// (mirrors the 30-day answered-marker TTL), row cap, and no unused body column.
+describe("getSyntheticQuestionComments bounds (#418)", () => {
+  async function seedProjectWithIssue(db: ReturnType<typeof createTestDb>["db"]) {
+    const now = new Date().toISOString();
+    const projectId = `proj-synth-${Math.random().toString(36).slice(2, 8)}`;
+    const statusId = `${projectId}-status`;
+    const issueId = `${projectId}-issue`;
+    const workspaceId = `${projectId}-ws`;
+    await db.insert(projects).values({ id: projectId, name: "p", repoPath: "/tmp/p", createdAt: now, updatedAt: now });
+    await db.insert(projectStatuses).values({ id: statusId, projectId, name: "In Progress", sortOrder: 0, createdAt: now });
+    await db.insert(issues).values({ id: issueId, issueNumber: 1, title: "t", statusId, projectId, createdAt: now, updatedAt: now });
+    await db.insert(workspaces).values({ id: workspaceId, issueId, branch: "feature/s", status: "active", createdAt: now, updatedAt: now });
+    return { projectId, issueId, workspaceId };
+  }
+
+  function syntheticPayload(toolUseId: string): string {
+    return JSON.stringify({
+      source: "mcp_clarify_or_propose",
+      toolUseId,
+      questions: [{ question: "Q?", options: [{ label: "A" }, { label: "B" }] }],
+    });
+  }
+
+  it("applies the created_at floor, respects the row cap, and selects no body column", async () => {
+    const { getSyntheticQuestionComments, SYNTHETIC_QUESTION_COMMENT_WINDOW_MS, SYNTHETIC_QUESTION_COMMENT_LIMIT } =
+      await import("../repositories/agent-questions.repository.js");
+    const { db } = createTestDb();
+    const { projectId, issueId, workspaceId } = await seedProjectWithIssue(db);
+    const now = new Date().toISOString();
+    const beyondFloor = new Date(Date.now() - SYNTHETIC_QUESTION_COMMENT_WINDOW_MS - 60_000).toISOString();
+
+    await db.insert(issueComments).values({
+      id: "synth-recent", issueId, workspaceId, kind: "agent-question", author: "agent",
+      body: "recent", payload: syntheticPayload("tu-recent"), createdAt: now,
+    });
+    await db.insert(issueComments).values({
+      id: "synth-ancient", issueId, workspaceId, kind: "agent-question", author: "agent",
+      body: "ancient", payload: syntheticPayload("tu-ancient"), createdAt: beyondFloor,
+    });
+
+    const rows = await getSyntheticQuestionComments(projectId, db, { now });
+    expect(rows.map((r) => r.id)).toEqual(["synth-recent"]);
+    // The unused body column is not selected.
+    expect(Object.keys(rows[0])).not.toContain("body");
+    expect(SYNTHETIC_QUESTION_COMMENT_LIMIT).toBeGreaterThan(0);
+  });
+
+  it("the listing no longer surfaces a synthetic question older than the marker TTL", async () => {
+    const { SYNTHETIC_QUESTION_COMMENT_WINDOW_MS } = await import("../repositories/agent-questions.repository.js");
+    const { db } = createTestDb();
+    const { projectId, issueId, workspaceId } = await seedProjectWithIssue(db);
+    const beyondFloor = new Date(Date.now() - SYNTHETIC_QUESTION_COMMENT_WINDOW_MS - 60_000).toISOString();
+    await db.insert(issueComments).values({
+      id: "synth-old-listing", issueId, workspaceId, kind: "agent-question", author: "agent",
+      body: "old", payload: syntheticPayload("tu-old-listing"), createdAt: beyondFloor,
+    });
+
+    // nowOverride bypasses the response cache for a deterministic recompute.
+    const pending = await listPendingQuestionsForProject(projectId, db, undefined, new Date().toISOString());
+    expect(pending.find((p) => p.toolUseId === "tu-old-listing")).toBeUndefined();
   });
 });

@@ -1,4 +1,5 @@
 import { isTerminalStatusName, isTerminalStatusView } from "@agentic-kanban/shared";
+
 import type { WebhookIssueStatusPayload } from "@agentic-kanban/shared/lib";
 import { buildIssueStatusPayload } from "@agentic-kanban/shared/lib";
 import { syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
@@ -18,7 +19,10 @@ import {
     setIssueStatus,
     updateIssueTitleDescription,
 } from "../repositories/issue-ai.repository.js";
+import { getProjectRepoNames } from "../repositories/repo.repository.js";
+import { resolveRepoName } from "@agentic-kanban/shared/lib/repo-tags";
 import { isIssueNumberUniqueConstraintError, nextIssueNumber } from "../repositories/issue-number.repository.js";
+import { applyRepoTags } from "./repo-tags.service.js";
 import {
     archiveIssuesByIds,
     closeOpenWorkspacesForIssue,
@@ -49,6 +53,7 @@ import {
     getIssueDescription,
     getIssueProjectId,
     getIssuesByProject,
+    countIssuesByProject,
     getIssueSummary as getIssueSummaryRepo,
     getIssueTags,
     getIssueWorkspaces,
@@ -57,10 +62,11 @@ import {
 } from "../repositories/issue.repository.js";
 import { findOpenUnmergedWorkspace } from "../repositories/workspace.repository.js";
 import { enrichWorkspacesWithSessionData } from "./board-aggregation.service.js";
-import type { BoardEvents } from "./board-events.js";
+import type { BoardEventSink } from "./board-events.js";
 import { createIssueDependencyService, validateBatchDependencies } from "./issue-dependency.service.js";
 import { IssueError } from "./issue-error.js";
 import { materializePhaseArtifactToWorktree } from "./phase-artifacts.service.js";
+import { parseServiceStackState } from "@agentic-kanban/shared/lib/service-stack-codec";
 
 // IssueError lives in its own module to avoid an import cycle with the dependency
 // sub-service; re-exported here so existing consumers' imports are unchanged.
@@ -70,6 +76,14 @@ export { IssueError } from "./issue-error.js";
 export { validateBatchDependencies } from "./issue-dependency.service.js";
 
 const ISSUE_NUMBER_INSERT_ATTEMPTS = 3;
+
+/**
+ * Parse a persisted `workspaces.service_state` JSON blob into the wire shape,
+ * mirroring the details projection's mapServiceState (workspace-details-projection.ts)
+ * exactly — the issue-workspaces LIST rows must match the details DTO so the client's
+ * per-workspace serviceState hydration can self-retire.
+ */
+const parseServiceStateJson = parseServiceStackState;
 
 type ContractIssueRow = {
   id: string;
@@ -146,6 +160,9 @@ export interface CreateIssueInput {
   workflowTemplateId?: string | null;
   externalKey?: string | null;
   externalUrl?: string | null;
+  /** Repos this issue touches (#94). Applied as `repo:<name>` tags after insert (multi-repo
+   *  authoring); omitted/empty for single-repo projects. */
+  reposTouched?: string[];
 }
 
 export type CreateIssueResult = NonNullable<Awaited<ReturnType<typeof getIssueDescription>>>;
@@ -195,7 +212,7 @@ export function buildSharedIssueUpdate(
 
 export function createIssueService(deps: {
   database: Database;
-  boardEvents?: BoardEvents;
+  boardEvents?: BoardEventSink;
   sendWebhook?: WebhookSender;
 }) {
   const { database, boardEvents, sendWebhook } = deps;
@@ -268,6 +285,19 @@ export function createIssueService(deps: {
       await syncCurrentNodeToStatus(database, createdId).catch(() => {});
     }
 
+    // Repo-aware authoring (#94): mark the repos this issue touches as repo:<name> tags.
+    // Validate against the project's real repo set (canonicalizing + dropping unknowns) so
+    // a stale client can't mint junk tags. Best-effort — a tag failure must not fail create.
+    if (input.reposTouched && input.reposTouched.length > 0) {
+      try {
+        const knownRepos = await getProjectRepoNames(input.projectId, database);
+        const valid = input.reposTouched
+          .map((r) => resolveRepoName(r, knownRepos))
+          .filter((r): r is string => r !== null);
+        if (valid.length > 0) await applyRepoTags(createdId, valid, database);
+      } catch { /* tagging is best-effort */ }
+    }
+
     if (input.projectId) boardEvents?.broadcast(input.projectId, "issue_created");
 
     return (await getIssueDescription(createdId, database));
@@ -313,9 +343,7 @@ export function createIssueService(deps: {
 
     for (let i = 0; i < inputs.length; i++) {
       if (!inputs[i].title || !inputs[i].title.trim()) {
-        const err = new IssueError(`issues[${i}].title is required`, "BAD_REQUEST") as IssueError & { index?: number };
-        err.index = i;
-        throw err;
+        throw new IssueError(`issues[${i}].title is required`, "BAD_REQUEST", i);
       }
     }
 
@@ -352,6 +380,8 @@ export function createIssueService(deps: {
               projectId,
               createdAt: now,
               updatedAt: now,
+              externalKey: normalizeExternalKey(input.externalKey),
+              externalUrl: validateExternalUrl(input.externalUrl),
             }, tx);
             if (opts?.parentIssueId) {
               await insertDependency({
@@ -763,6 +793,7 @@ export function createIssueService(deps: {
         diffStatCacheInsertions,
         diffStatCacheDeletions,
         scorecardScore,
+        serviceState: serviceStateRaw,
         ...workspace
       } = w;
       const conflicts = conflictCacheHasConflicts !== null && conflictCacheHasConflicts !== undefined
@@ -807,6 +838,7 @@ export function createIssueService(deps: {
           endedAt: latestSymlinkEndedAt,
           error: latestSymlinkError,
         } : null,
+        serviceState: parseServiceStateJson(serviceStateRaw),
         contextTokens: contextTokensMap.get(w.id) ?? null,
         lastTool: lastToolMap.get(w.id) ?? null,
       };
@@ -817,13 +849,19 @@ export function createIssueService(deps: {
     projectId: string,
     issueNumber?: number,
     statusName?: string,
-    opts?: { excludeDescription?: boolean },
+    opts?: { excludeDescription?: boolean; limit?: number; offset?: number },
   ) {
     return getIssuesByProject(projectId, issueNumber, database, statusName, opts);
   }
 
-  async function getIssueSummary(idParam: string) {
-    return getIssueSummaryRepo(idParam, database);
+  /** Total matching the same filters, ignoring limit/offset — the paginator's denominator (#424). */
+  async function countIssues(projectId: string, statusName?: string) {
+    return countIssuesByProject(projectId, database, statusName);
+  }
+
+  async function getIssueSummary(idParam: string, projectId?: string) {
+    // #506: projectId scopes a NUMERIC ref; issue numbers are per-project.
+    return getIssueSummaryRepo(idParam, database, projectId);
   }
 
   async function getTags(issueId: string) {
@@ -931,6 +969,7 @@ export function createIssueService(deps: {
     archiveDoneIssues,
     getEnrichedWorkspaces,
     listIssues,
+    countIssues,
     getIssueSummary,
     getTags,
     assignTag,

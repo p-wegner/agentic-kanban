@@ -128,6 +128,26 @@ const SUBTREE_SEEDERS: Record<string, (c: SeedCtx) => Promise<void>> = {
       status: "active", createdAt: c.now, updatedAt: c.now,
     });
   },
+  // #666 — both were absent from this map, which is what the completeness assertion exists
+  // to catch: the schema declared them as deletion-subtree children of issues while nothing
+  // seeded them, so neither path was ever exercised. Seeded AFTER `workspaces`, since both
+  // reference it.
+  workspace_issue_members: async (c) => {
+    // Ticket groups (#661). Both FKs carry `onDelete: cascade`, so SQLite removes these rows
+    // itself — seeding it proves the DB-level cascade actually fires.
+    await c.db.insert(schema.workspaceIssueMembers).values({
+      workspaceId: c.workspaceId, issueId: c.issueId, createdAt: c.now,
+    });
+  },
+  workspace_provisioning: async (c) => {
+    // The one that was a real bug: its FKs to issues and projects declare NO `onDelete`
+    // action, so SQLite defaults to RESTRICT and deleting the issue FAILED outright.
+    await c.db.insert(schema.workspaceProvisioning).values({
+      id: randomUUID(), issueId: c.issueId, projectId: c.projectId,
+      branch: "feature/provisioning", worktreePath: null, serverPid: 1234,
+      phase: "worktree", startedAt: c.now,
+    });
+  },
   sessions: async (c) => {
     await c.db.insert(schema.sessions).values({
       id: c.sessionId, workspaceId: c.workspaceId, status: "running", startedAt: c.now,
@@ -274,7 +294,25 @@ describe("deleteIssueCascade — completeness vs the schema FK graph", () => {
     //
     // Allowlist: scheduled_run_history.{issue_id,workspace_id} are HISTORICAL log
     // references, intentionally FK-less so run history survives issue/workspace deletion.
-    const ALLOWED_FKLESS = new Set(["scheduled_run_history.issue_id", "scheduled_run_history.workspace_id"]);
+    //
+    // plugin_loop_events.project_id is BLESSED FK-less as of #485 (the quarantine #483 opened
+    // is now a decision). It is a TRACE table, and one of the things it must record is the
+    // case where the project cannot be resolved — `gate-recommendation-skipped` for an
+    // unresolvable project is a real, tested scenario. Its writes are also deliberately
+    // wrapped in a swallowing try/catch so a diagnostic can never break the gate flow, so an
+    // FK rejection would surface not as an error but as SILENCE: zero events, which is
+    // exactly the silent bail-out the trace exists to expose. Orphans are handled in
+    // `deleteProjectCascade` instead, which deletes its rows and asserts none survive.
+    // See `gate-recommendation-skip-trace.test.ts` for the case that decided it.
+    //
+    // plugin_view_processes.project_id went the OTHER way and now carries a real cascading FK
+    // (migration 0120) — it is an ephemeral pid/port registry, so a row outliving its project
+    // is a stale process record nobody will reap, not history worth keeping.
+    const ALLOWED_FKLESS = new Set([
+      "scheduled_run_history.issue_id",
+      "scheduled_run_history.workspace_id",
+      "plugin_loop_events.project_id",
+    ]);
     const offenders: string[] = [];
     for (const value of Object.values(schema)) {
       if (!is(value, SQLiteTable)) continue;

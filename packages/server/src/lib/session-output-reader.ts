@@ -4,4 +4,4 @@
 // read per-session .out files through the same code instead of forked copies.
 // Kept as a server-local module so existing importers stay unchanged, and so the
 // repositories-are-infra-pure lint:arch rule keeps fs I/O out of repositories/.
-export { readSessionStdoutFile, readSessionStdoutFileTail } from "@agentic-kanban/shared/lib/session-files";
+export { readSessionStdoutFile, readSessionStdoutFileTail, readSessionStdoutFileTailAsync } from "@agentic-kanban/shared/lib/session-files";

@@ -1,11 +1,13 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
+import { prodDeps, type ToolDeps } from "./deps.js";
 import { notifyBoard } from "../notify.js";
-import { requireEntity, mcpStructuredError } from "../db-utils.js";
+import { mcpJson, mcpStructuredError, requireEntity } from "../db-utils.js";
 
-export function registerMarkReadyForMerge(server: McpServer) {
+export function registerMarkReadyForMerge(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema } = deps;
+
   server.tool(
     "mark_ready_for_merge",
     "Mark a workspace as reviewed and ready to merge. Call this after a successful code review with no critical or major issues. This flag allows future agents to merge the workspace without requiring another review. NOT for fork-child workspaces (a workspace with a parent) — their verdicts flow through join consolidation via propose_transition, never through this tool.",
@@ -43,9 +45,7 @@ export function registerMarkReadyForMerge(server: McpServer) {
 
       if (projectId) notifyBoard(projectId, "workspace_ready_for_merge");
 
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify({ id: workspaceId, readyForMerge: true }, null, 2) }],
-      };
+      return mcpJson({ id: workspaceId, readyForMerge: true });
     },
   );
 }

@@ -1,6 +1,8 @@
+// @gate:always-run — ratchets raw preference-polarity reads across the tree; imports nothing it checks (#538).
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
+import { walkPackageSources } from "../../../shared/__tests__/helpers/guard-scan.js";
 
 /**
  * #947 — ratchet gate against raw preference polarity reads.
@@ -54,17 +56,24 @@ const BASELINE: Record<string, number> = {
   "server/src/services/auth-rotation-ring.ts::cfg.rotationDisabledPrefKey": 1,
   "server/src/services/autodrive-stall-warning.service.ts::<row-value>": 1,
   "server/src/services/autodrive-stall-warning.service.ts::auto_merge_disabled_${row.projectId}": 1,
-  "server/src/services/preference.service.ts::<row-value>": 1,
   "server/src/services/project.service.ts::export_skills_on_registration": 1,
   "server/src/services/start-policy.service.ts::board_autodrive_${projectId}": 1,
   "server/src/startup/ancestor-branch-reconciler.ts::<row-value>": 1,
   "server/src/startup/auto-merge-orchestrator.ts::<row-value>": 1,
-  "server/src/startup/done-unmerged-invariant-scanner.ts::<row-value>": 1,
+  // The canonical plugin-enablement accessor (isPluginEnabledForProject). Baselined for the
+  // same reason isAutoReviewEnabled/isAutoMergeEnabled are: a canonical accessor is the ONE
+  // sanctioned home for a key's polarity. This entry must stay at 1 — a second raw read of
+  // plugin_enabled_* anywhere is the violation this ratchet exists to catch.
+  "server/src/repositories/plugins.repository.ts::<row-value>": 1,
+  "server/src/startup/done-unmerged-invariant-sweep.ts::<row-value>": 1,
   "server/src/startup/exit-workflow.ts::<row-value>": 1,
   "server/src/startup/monitor-setup.ts::<row-value>": 2,
-  "server/src/startup/plan-mode-reconciler.ts::<row-value>": 1,
+  // Both reconcilers now read their toggle through a NAMED constant rather than an inline
+  // row value, so the ratchet id moved from `<row-value>` to the constant. Same single read
+  // in each (a tri-state default-on check: absent pref means enabled), not a new violation.
+  "server/src/startup/plan-mode-reconciler.ts::PREF_RECONCILER_STRANDED_PLAN_ENABLED": 1,
   "server/src/startup/project-completion-reconciler.ts::markerKey": 1,
-  "server/src/startup/stranded-review-reconciler.ts::<row-value>": 1,
+  "server/src/startup/stranded-review-reconciler.ts::PREF_RECONCILER_STRANDED_REVIEW_ENABLED": 1,
   "server/src/startup/zombie-fix-session-reconciler.ts::<row-value>": 1,
 };
 
@@ -74,19 +83,8 @@ const IGNORED_KEYS = new Set(["output_parser"]);
 const LINE_SKIP = /c\.req\.query\(|localStorage|searchParams/;
 const POLARITY = /(?:===|!==)\s*["'](?:true|false)["']/;
 
-function listTsFiles(dir: string): string[] {
-  const out: string[] = [];
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (entry.name === "__tests__" || entry.name === "node_modules") continue;
-      out.push(...listTsFiles(full));
-    } else if (/\.tsx?$/.test(entry.name) && !entry.name.endsWith(".d.ts")) {
-      out.push(full);
-    }
-  }
-  return out;
-}
+/** #583 — the tree walk every guard suite needs, from the one shared helper. */
+const listTsFiles = (dir: string): string[] => walkPackageSources(dir);
 
 function normalizeKey(raw: string): string {
   return raw.trim().replace(/^["'`]|["'`]$/g, "");

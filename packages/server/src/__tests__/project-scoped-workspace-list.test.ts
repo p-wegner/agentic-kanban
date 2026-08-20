@@ -146,6 +146,32 @@ describe("GET /api/workspaces?projectId= (project-scoped workspace list)", () =>
     expect(ids).not.toContain(closedId);
   });
 
+  // Regression: `workingDir` was omitted from the slim projection. Anything driving workspaces over
+  // the API (seeding config into a worktree before launching an agent) reads it off a list row, got
+  // `undefined`, and skipped its seed WITHOUT erroring — so agents ran against worktrees missing
+  // their project config and still looked plausible. It is a plain column, no join, no cost.
+  it("includes workingDir so callers can locate the worktree without a per-workspace GET", async () => {
+    const { app, db } = createTestApp();
+    const projectId = await seedProject(db, "project-workingdir");
+    const issueId = await seedIssue(db, projectId);
+
+    const workspaceId = randomUUID();
+    await db.insert(schema.workspaces).values({
+      id: workspaceId,
+      issueId,
+      branch: "feature/wd",
+      status: "idle",
+      workingDir: "/repo/.worktrees/ak-42",
+    });
+
+    const res = await app.request(`/api/workspaces?projectId=${projectId}`);
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as any[];
+    expect(body.length).toBe(1);
+    expect(body[0].workingDir).toBe("/repo/.worktrees/ak-42");
+  });
+
   it("?limit=1 returns at most one workspace", async () => {
     const { app, db } = createTestApp();
     const projectId = await seedProject(db, "project-limit");

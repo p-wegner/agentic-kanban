@@ -1,6 +1,6 @@
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
-import type { BoardEvents } from "./board-events.js";
+import type { BoardEventSink } from "./board-events.js";
 import { createWorkspaceCrudService } from "./workspace-crud.service.js";
 import { createWorkspaceDiffService } from "./workspace-diff.service.js";
 import { createWorkspaceMergeService } from "./workspace-merge.service.js";
@@ -23,7 +23,7 @@ export type { StaleWorktreeEntry, CleanupWarningEntry } from "./workspace-crud.s
 export function createWorkspaceService(deps: {
   database: Database;
   getSessionManager?: () => SessionManager;
-  boardEvents?: BoardEvents;
+  boardEvents?: BoardEventSink;
   /** Injectable git service (defaults to the real module). Tests pass a fake. */
   gitService?: GitService;
   /** Injectable pre-merge backup hook (defaults to the real VACUUM-INTO backup). Tests pass a no-op. */
@@ -51,19 +51,24 @@ export function createWorkspaceService(deps: {
     setupWorkspace: crud.setupWorkspace,
     updateWorkspace: crud.updateWorkspace,
     getWorkspace: crud.getWorkspace,
+    getWorkspaceDevServerPlan: crud.getWorkspaceDevServerPlan,
     // diff
     getWorkspaceDiff: diff.getWorkspaceDiff,
+    getWorkspaceDiffStats: diff.getWorkspaceDiffStats,
     getConflicts: diff.getConflicts,
     getLatestCommit: diff.getLatestCommit,
+    getHandoff: diff.getHandoff,
     // merge
     mergeWorkspace: merge.mergeWorkspace,
     mergeWorkspaceDeduped: merge.mergeWorkspaceDeduped,
     updateBase: merge.updateBase,
     abortRebase: merge.abortRebase,
+    rebaseRepo: merge.rebaseRepo,
     resolveConflicts: merge.resolveConflicts,
     fixAndMerge: merge.fixAndMerge,
     checkAlreadyMerged: merge.checkAlreadyMerged,
     reconcileAlreadyMerged: merge.reconcileAlreadyMerged,
+    getRepoMergeStatus: merge.getRepoMergeStatus,
     // session
     launchSession: session.launchSession,
     sendTurn: session.sendTurn,

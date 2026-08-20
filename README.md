@@ -24,10 +24,15 @@ Each task card on the board is backed by a git worktree and a live Claude Code s
 - **MCP server** — 35 tools for AI agent integration (board status, issues, workspaces, review/merge, dependencies, skills, etc.)
 - **Real-time board updates** — WebSocket push + polling fallback for cross-tab and MCP-driven changes
 - **Command palette** — Ctrl+K action search with keyboard navigation
-- **Multi-project** — register multiple git repos and switch between them
+- **Multi-project** — register multiple independent projects and switch between them
+- **Multi-repo projects** — a single project can span multiple git repos (a leading repo plus siblings). Each workspace fans out a matching worktree across every repo on the same branch, with per-repo diffs, per-repo merge status (merged / ahead / stranded), sibling-aware conflict detection, an all-or-nothing coordinated merge, a cross-repo `HANDOFF.md` bundle, and file-contention detection
+- **Service stacks (Docker Compose)** — bring up a per-workspace dependency stack (databases, queues, sibling services) from a Compose file, with automatic per-workspace port allocation and health checks, so agents build and test against real dependencies. Runs under **Docker-in-Docker (DinD)** so a containerized agent can drive its own Compose stack
+- **Multi-repo monitoring** — a live repo × workspace merge-state matrix, per-workspace health pill, cross-repo activity feed, fleet token/cost meter, stalled/looping-agent detection, and a full turn-by-turn agent transcript viewer
 - **Session history** — browse past agent sessions per workspace without leaving context
 - **Worktree overview** — see all git worktrees across workspaces with diff stats and status badges
 - **Butler assistant** — a warm, persistent Claude (Agent SDK) per project (press `i`): chat for board/codebase guidance, per-project model & profile pickers, slash-command autocomplete, a Stop button, and it can orchestrate board work for you
+- **Plugins** — install a repo with a `kanban-plugin.json` and it contributes agent skills, one-shot scripts, framed dashboards, and **board-owned converging loops**: the plugin prints the outstanding work units, the board turns each into a ticket and runs it under the project's WIP limit, provider selection and quota rotation, so an open-ended analysis is resumable and visible instead of hidden in a private run-log. Each enabled plugin gets **its own view** under the toolbar's Plugins dropdown tab. See [docs/plugin-development.md](docs/plugin-development.md)
+- **Plugin marketplace** — the Plugins tab's Marketplace surface: install a plugin from a git URL or local path in one click, enable/disable it per project, and browse a per-machine catalog of installable plugins (`~/.agentic-kanban/plugins/marketplace.json` — a user-maintained JSON list of `{ name, description, gitUrl }` entries; no remote registry, nothing phones home)
 
 ## Tech Stack
 
@@ -35,8 +40,9 @@ Each task card on the board is backed by a git worktree and a live Claude Code s
 |-------|-----------|
 | Backend | Hono (Node.js), Drizzle ORM, SQLite |
 | Frontend | React, TypeScript, Tailwind CSS, Vite |
-| Agent | Claude Code — per-task CLI subprocess, plus a warm in-process Butler (Agent SDK) |
+| Agent | Claude Code, Codex, Copilot, and Pi — per-task CLI subprocess, plus a warm in-process Butler (Agent SDK) |
 | Integration | MCP SDK (stdio JSON-RPC) |
+| Service stacks | Docker Compose (per-workspace), Docker-in-Docker supported |
 | Testing | Vitest (unit), Playwright (E2E) |
 | Monorepo | pnpm workspaces |
 
@@ -50,6 +56,8 @@ pnpm dev             # start server (port 3001) + client (port 5173)
 
 Open http://localhost:5173 — the board loads with 3 active columns for the registered project.
 
+Prefer not to build from source? Run the published image instead — `docker pull pwegner3141/agentic-kanban:latest`, or `npx agentic-kanban dev`. See [docs/deployment.md](docs/deployment.md) for the Docker Compose setup (volumes, agent auth, DinD/DooD service stacks).
+
 For prerequisites, troubleshooting, and clean-clone gotchas see [docs/install.md](docs/install.md).
 
 ## CLI
@@ -59,7 +67,11 @@ pnpm cli -- register <path>     # register a git repo as a project
 pnpm cli -- list                # list registered projects
 pnpm cli -- unregister <name>   # remove a project by name or ID
 pnpm cli -- cleanup             # show stale worktrees for closed workspaces
+pnpm cli -- worker pair         # mint a pairing token for a compute worker
+pnpm cli -- worker list         # show connected workers and their capacity
 ```
+
+Agent skills ship with the CLI and can be installed into any project — `npx agentic-kanban install-skill --list` to see them, `npx agentic-kanban install-skill <path> -n <name>` to write them as `.claude/skills/<name>/SKILL.md`.
 
 ## Core Workflow
 
@@ -68,6 +80,63 @@ pnpm cli -- cleanup             # show stale worktrees for closed workspaces
 3. **Start workspace** — click "New Workspace" on an issue card (creates branch + worktree + launches Claude Code with the issue as prompt)
 4. **Review changes** — view the diff in the workspace panel, add inline comments
 5. **Merge** — merge the branch into the project's default branch and close the workspace
+
+> For a **multi-repo** project, steps 3–5 apply across every registered repo at once: one workspace creates a worktree on the same branch in each repo, the diff and merge status are shown per repo, and the merge is coordinated all-or-nothing.
+
+## Multi-Repo Projects & Service Stacks
+
+**Multi-repo.** A project isn't limited to one repository. Register additional repos (by local path or clone-from-URL) alongside the leading repo, and every workspace you create gets a matching git worktree on the same branch in *each* repo. The board then treats the change set as one coordinated unit:
+
+- **Per-repo diffs** — the diff panel groups changes by repo, with jump-nav and per-repo stats.
+- **Per-repo merge status** — each repo shows merged / N-ahead (stranded) / no-changes against its base.
+- **Sibling-aware conflict detection** — read-only `git merge-tree` per repo; conflicts (namespaced `repo::file`) are surfaced on the board card *before* you merge.
+- **Coordinated merge** — sibling merges are pre-validated and executed all-or-nothing, so you never land half a cross-repo change.
+- **Cross-repo `HANDOFF.md`** — a generated bundle folds every repo's diff into one hand-off artifact for the next agent.
+- **Multi-Repo Monitor** — a live repo × workspace merge-state matrix, per-workspace health pill, file-contention heatmap, and a cross-repo activity feed.
+
+Add and manage repos under **Settings → Repos** (or `POST /api/projects/:id/repos`).
+
+**Service stacks (Docker Compose).** A workspace can bring up a real dependency stack from a Docker Compose file — databases, queues, sibling services — so agents build and test against the real thing instead of mocks. Ports are allocated per workspace (no collisions between parallel worktrees) and the board health-checks the stack before handing off to the agent. It runs under **Docker-in-Docker (DinD)** too, so a containerized agent can drive its own Compose stack. Configure it per project under **Settings → Service stack**. See [docs/decisions/011-per-workspace-service-stacks.md](docs/decisions/011-per-workspace-service-stacks.md).
+
+## Worker Fleet (remote compute)
+
+Agent sessions don't have to run on the board's machine. Pair other machines as **workers** and the board schedules ticket work onto them — capacity becomes "the machines you've paired" instead of "this laptop". Workers dial the board (like CI runners), so a worker behind NAT needs no inbound access; only the board does.
+
+**Connect a machine** — the CLI prints the full runbook with your board URL filled in, so you can follow it (or hand it to an agent) without prior context:
+
+```bash
+agentic-kanban worker instructions --board http://<board-host>:3001
+agentic-kanban worker instructions --board http://<board-host>:3001 --json   # machine-readable
+```
+
+The short version:
+
+```bash
+# On the BOARD machine — single-use, expires in 10 minutes
+agentic-kanban worker pair
+
+# On the WORKER machine — no board checkout, no board database, HTTP/WS only
+agentic-kanban-worker start --board http://<board-host>:3001 --token <pairing-token> \
+  --labels docker,linux --providers claude --max-concurrency 2
+
+agentic-kanban-worker list --board http://<board-host>:3001   # should read "online"
+```
+
+`agentic-kanban-worker` is a **standalone binary** for worker machines: it loads only the daemon (a ~36 KB bundle) instead of the board's command tree, so it starts in ~0.25s instead of ~1.5s and never opens or creates a database. The same commands are also available as `agentic-kanban worker <cmd>` on a machine that already runs the board.
+
+Registration alone routes nothing — opt a project in with `worker_dispatch_<projectId>=true`. Optionally require capabilities with `worker_labels_<projectId>=docker,linux`, and set `worker_dispatch_strict_<projectId>=true` to forbid the silent fallback to running on the board host (the monitor then reports a `no_available_worker` skip instead of quietly running it locally). Manage the fleet in the UI via the command palette → **Worker Fleet** (pair, revoke, status, capacity, labels).
+
+**How work travels.** The board serves each project's repo over token-authed git-over-HTTP. A worker clones it, runs the agent in its own checkout, and pushes to a staging namespace (`refs/kanban/incoming/<branch>`); the board then **fast-forwards** the real branch from there, after which the normal diff / review / merge flow applies unchanged. Divergence is held and reported, never force-landed. A worker on the *same* machine as the board can skip all of that with `--shares-filesystem`.
+
+**Credentials never travel.** A worker authenticates its agent with its own local provider login — the board sends a launch spec, never an API key or profile.
+
+**Networking.** The board API has no authentication — its defense is that it listens only on 127.0.0.1, and it stays there. A cross-machine fleet instead opens two purpose-built listeners, each serving one narrow, bearer-token-authenticated surface:
+
+```bash
+KANBAN_FLEET_PORT=3003 KANBAN_GIT_HTTP_PORT=3002 pnpm dev
+```
+
+`KANBAN_FLEET_PORT` serves only worker register/heartbeat/WebSocket; `KANBAN_GIT_HTTP_PORT` serves only the git transport (pin it, or it moves every boot and no firewall rule can match). Both are opt-in: unset means nothing is exposed. A remote worker points `--board` at the **fleet** port. Because the board API is never mounted on either listener, it is unreachable from the network by construction rather than by convention — though a fleet still belongs on a trusted network (LAN/VPN/Tailscale), not the open internet. Design rationale: [docs/decisions/012-worker-fleet-compute-model.md](docs/decisions/012-worker-fleet-compute-model.md).
 
 ## MCP Server
 
@@ -115,6 +184,11 @@ Key patterns:
 - **Board events** — dual-path: WebSocket push for instant updates + 30s polling fallback
 - **One-step workspace creation** — single POST creates DB record, git worktree, and launches agent
 - **Session resume chains** — Claude's internal session ID captured for `--resume` on relaunch
+- **Plugins contribute commands, never agents** — a plugin's whole interface to the board is
+  deterministic: a `plan` command that prints outstanding work. Everything that spawns an agent
+  is a board ticket, so it is governed and resumable by construction. Contract:
+  `packages/shared/src/lib/plugin-manifest.ts`; guide:
+  [docs/plugin-development.md](docs/plugin-development.md)
 
 ## License
 

@@ -20,6 +20,14 @@ import { eq } from "drizzle-orm";
 import { issues, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
+import { makeTempRepo } from "./helpers/temp-repo.js";
+
+/**
+ * A REAL repo path (#273). This suite drives the actual merge path, whose repo lock
+ * refuses a repoPath with no `.git` and then POLLS — so the old `"/repo"` literal made
+ * every test here burn its full timeout instead of running.
+ */
+const REPO_PATH = makeTempRepo();
 
 function makeGit(overrides: Partial<Record<string, (...a: unknown[]) => unknown>> = {}) {
   return {
@@ -66,7 +74,7 @@ async function seedWorkspace(
   await db.insert(projects).values({
     id: projectId,
     name: "Flap Test Project",
-    repoPath: "/repo",
+    repoPath: REPO_PATH,
     repoName: "repo",
     defaultBranch: "master",
     createdAt: now,
@@ -91,7 +99,7 @@ async function seedWorkspace(
     id: workspaceId,
     issueId,
     branch: "feature/ak-701-flap",
-    workingDir: "/repo/.worktrees/feature_ak-701-flap",
+    workingDir: `${REPO_PATH}/.worktrees/feature_ak-701-flap`,
     baseBranch: "master",
     isDirect: false,
     status: opts.status ?? (opts.mergedAt ? "closed" : "idle"),

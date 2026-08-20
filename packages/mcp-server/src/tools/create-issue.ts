@@ -3,7 +3,7 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { isIssueNumberUniqueConstraintError, resolveStatusByName, nextIssueNumber, resolveActiveProjectId } from "../db-utils.js";
+import { isIssueNumberUniqueConstraintError, mcpError, mcpJson, nextIssueNumber, resolveActiveProjectId, resolveProjectName, resolveStatusByName } from "../db-utils.js";
 
 const ISSUE_NUMBER_INSERT_ATTEMPTS = 3;
 
@@ -71,14 +71,17 @@ export function registerCreateIssue(server: McpServer, deps: ToolDeps = prodDeps
       }
 
       if (id === null || issueNumber === null) {
-        return { content: [{ type: "text" as const, text: "Error: could not allocate a unique issue number" }] };
+        return mcpError("Error: could not allocate a unique issue number");
       }
 
       notifyBoard(pid, "mcp_create_issue");
 
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify({ id, issueNumber, title, status: statusName || "Todo", priority: priority || "medium" }, null, 2) }],
-      };
+      // Echo the RESOLVED project (#335): `projectId` is optional and falls back to
+      // the global mutable activeProjectId, so a caller that omitted it must be able
+      // to see which board it actually wrote to.
+      const projectName = await resolveProjectName(db, schema, pid);
+
+      return mcpJson({ id, issueNumber, title, status: statusName || "Todo", priority: priority || "medium", projectId: pid, projectName });
     },
   );
 }

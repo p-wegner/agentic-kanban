@@ -1,13 +1,16 @@
 import type { IssueWithStatus } from "@agentic-kanban/shared";
+import { ISSUE_PRIORITIES, PRIORITY_TRAITS, normalizeIssuePriority } from "./priorityTraits.js";
 
 export const ESTIMATE_POINTS: Record<string, number> = { XS: 1, S: 2, M: 3, L: 5, XL: 8 };
 
-export const PRIORITY_LANE_ORDER = ["critical", "high", "medium", "low", "ungrouped"];
+/**
+ * Lane keys = the four priorities plus `ungrouped`, which is a LANE, not a priority —
+ * it holds issues with no priority set. Derived from the traits table (#516) so a lane
+ * can no longer exist without styling, or be styled without existing.
+ */
+export const PRIORITY_LANE_ORDER = [...ISSUE_PRIORITIES, "ungrouped"];
 export const PRIORITY_LANE_STYLES: Record<string, { label: string; headerBg: string; headerBorder: string; headerText: string; dot: string }> = {
-  critical: { label: "Critical", headerBg: "bg-red-50 dark:bg-red-950/40", headerBorder: "border-red-200 dark:border-red-800", headerText: "text-red-700 dark:text-red-400", dot: "bg-red-500" },
-  high: { label: "High", headerBg: "bg-orange-50 dark:bg-orange-950/40", headerBorder: "border-orange-200 dark:border-orange-800", headerText: "text-orange-700 dark:text-orange-400", dot: "bg-orange-500" },
-  medium: { label: "Medium", headerBg: "bg-yellow-50 dark:bg-yellow-950/40", headerBorder: "border-yellow-200 dark:border-yellow-800", headerText: "text-yellow-700 dark:text-yellow-400", dot: "bg-yellow-400" },
-  low: { label: "Low", headerBg: "bg-slate-50 dark:bg-slate-800/40", headerBorder: "border-slate-200 dark:border-slate-700", headerText: "text-slate-600 dark:text-slate-400", dot: "bg-slate-400" },
+  ...Object.fromEntries(ISSUE_PRIORITIES.map((p) => [p, { label: PRIORITY_TRAITS[p].label, ...PRIORITY_TRAITS[p].lane }])),
   ungrouped: { label: "Ungrouped", headerBg: "bg-gray-50 dark:bg-gray-800/40", headerBorder: "border-gray-200 dark:border-gray-700", headerText: "text-gray-500 dark:text-gray-400", dot: "bg-gray-400" },
 };
 
@@ -15,7 +18,9 @@ export function groupByPriority(issues: IssueWithStatus[]): { key: string; issue
   const groups: Record<string, IssueWithStatus[]> = {};
   for (const key of PRIORITY_LANE_ORDER) groups[key] = [];
   for (const issue of issues) {
-    const p = issue.priority && PRIORITY_LANE_ORDER.includes(issue.priority) ? issue.priority : "ungrouped";
+    // A legacy `urgent` value used to fail the membership test and land in "ungrouped",
+    // rendering unstyled at the bottom rather than as the critical issue it is (#516).
+    const p = issue.priority ? normalizeIssuePriority(issue.priority) : "ungrouped";
     groups[p].push(issue);
   }
   return PRIORITY_LANE_ORDER.map((key) => ({ key, issues: groups[key] })).filter((g) => g.issues.length > 0);

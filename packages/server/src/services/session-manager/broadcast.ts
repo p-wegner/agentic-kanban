@@ -4,8 +4,10 @@ import {
   insertSessionMessages,
   updateProviderSessionId,
 } from "../../repositories/broadcast.repository.js";
+import { writeDb } from "../../db/index.js";
+import { capSessionMessagesForSession } from "../session-message-pruner.service.js";
 import * as agentService from "../agent.service.js";
-import { getProvider } from "../agent-provider.js";
+import { getProvider, narrowProviderName } from "../agent-provider.js";
 import type { ParsedStreamEvent } from "../agent-provider.js";
 import { parseSessionSummary, computeFrictionStats } from "@agentic-kanban/shared";
 import type { AgentOutputMessage, SessionFrictionStats } from "@agentic-kanban/shared";
@@ -13,6 +15,8 @@ import type { SessionContext, SessionManagerOptions, SessionState } from "./type
 import { formatToolActivity, tasksToTodoItems } from "./utils.js";
 import type { TodoItem } from "../board-events.js";
 import { detectCodexUsageLimitMessages } from "../codex-rate-limit.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { mergeSessionStats } from "@agentic-kanban/shared/lib/session-stats-blob";
 
 /**
  * Compute compact friction metrics (tool failures, repeated commands, errors)
@@ -66,18 +70,91 @@ async function persistFrictionFallback(sessionId: string, messages: AgentOutputM
 }
 
 async function mergeExistingStats(sessionId: string, statsToSave: Record<string, unknown>): Promise<Record<string, unknown>> {
+  // #522: the parse+merge is shared (`mergeSessionStats`); only the fetch differs from
+  // the twin in session-launch-helpers, which reads through a passed `database`.
   const rows = await selectSessionStats(sessionId);
-  if (rows.length === 0 || !rows[0].stats) return statsToSave;
-  try {
-    const existing = JSON.parse(rows[0].stats) as Record<string, unknown>;
-    return { ...existing, ...statsToSave };
-  } catch {
-    return statsToSave;
-  }
+  return mergeSessionStats(rows[0]?.stats, statsToSave);
 }
 
 const DB_FLUSH_INTERVAL_MS = 250;
 const DB_FLUSH_BATCH_SIZE = 50;
+
+// ---------------------------------------------------------------------------
+// Per-session activity-broadcast throttle (perf G4): every agent tool call
+// used to fire an unthrottled session_activity WS broadcast, and each one
+// triggers client refetch bursts of /output + /summary. Coalesce to at most
+// one emit per THROTTLE window per session — leading edge fires immediately
+// (snappy UI), later calls within the window collapse into ONE trailing emit
+// carrying the newest activity. Keyed per SessionState (WeakMap) so parallel
+// test states never share throttle windows. Exit/terminal events bypass via
+// clearActivityThrottle (the exit path emits its clearing broadcast directly).
+// ---------------------------------------------------------------------------
+export const ACTIVITY_BROADCAST_THROTTLE_MS = 500;
+
+interface ActivityThrottle {
+  timer: ReturnType<typeof setTimeout> | null;
+  lastEmit: number;
+  pending: (() => void) | null;
+}
+
+const activityThrottlesByState = new WeakMap<SessionState, Map<string, ActivityThrottle>>();
+
+function emitActivityThrottled(state: SessionState, sessionId: string, emit: () => void): void {
+  let throttles = activityThrottlesByState.get(state);
+  if (!throttles) {
+    throttles = new Map();
+    activityThrottlesByState.set(state, throttles);
+  }
+  let t = throttles.get(sessionId);
+  if (!t) {
+    t = { timer: null, lastEmit: 0, pending: null };
+    throttles.set(sessionId, t);
+  }
+
+  const now = Date.now();
+  if (t.timer === null && now - t.lastEmit >= ACTIVITY_BROADCAST_THROTTLE_MS) {
+    t.lastEmit = now;
+    emit();
+    return;
+  }
+
+  // Within the window: remember only the NEWEST emit and schedule one trailing fire.
+  t.pending = emit;
+  if (t.timer === null) {
+    const delay = Math.max(0, ACTIVITY_BROADCAST_THROTTLE_MS - (now - t.lastEmit));
+    const throttle = t;
+    t.timer = setTimeout(() => {
+      throttle.timer = null;
+      const pending = throttle.pending;
+      throttle.pending = null;
+      if (pending) {
+        throttle.lastEmit = Date.now();
+        pending();
+      }
+    }, delay);
+    t.timer.unref?.();
+  }
+}
+
+/** Drop any pending trailing emit for a session (exit path — its clearing broadcast bypasses the throttle). */
+function clearActivityThrottle(state: SessionState, sessionId: string): void {
+  const throttles = activityThrottlesByState.get(state);
+  const t = throttles?.get(sessionId);
+  if (!t) return;
+  if (t.timer !== null) clearTimeout(t.timer);
+  throttles!.delete(sessionId);
+}
+
+// Insert-time ring-buffer cap (#404): the periodic pruner sweep only runs every
+// few hours, so without this a chatty session could sit at tens of thousands of
+// session_messages rows in between. Every Nth flush for a session we trim it
+// back to the newest MAX_MESSAGES_PER_ACTIVE_SESSION rows (cheap: one indexed
+// OFFSET lookup + one ranged delete on the (session_id, id) index, see
+// capSessionMessagesForSession). Worst-case slack between trims is
+// CAP_EVERY_N_FLUSHES * DB_FLUSH_BATCH_SIZE = 400 rows past the cap.
+const CAP_EVERY_N_FLUSHES = 8;
+// Per-session flush counter; entries are removed on the session's exit message.
+const sessionFlushCounts = new Map<string, number>();
 
 function flushDbBuffer(state: SessionState, sessionId: string) {
   const timer = state.dbWriteTimers.get(sessionId);
@@ -88,13 +165,34 @@ function flushDbBuffer(state: SessionState, sessionId: string) {
   const rows = state.dbWriteBuffer.get(sessionId);
   if (!rows || rows.length === 0) return;
   state.dbWriteBuffer.delete(sessionId);
-  insertSessionMessages(sessionId, rows).catch((err: unknown) => {
+  // Record the session's provider on each row (arch-review §2.4) so offline
+  // summary parsing routes to the right per-provider parser instead of sniffing.
+  // narrowProviderName maps the legacy "claude-code" id → "claude"; unknown/
+  // absent falls back to "claude" (the default provider).
+  const provider = state.sessionProviders.has(sessionId)
+    ? narrowProviderName(state.sessionProviders.get(sessionId))
+    : null;
+  const insertResult = insertSessionMessages(sessionId, rows, provider);
+  insertResult.catch((err: unknown) => {
     // FK constraint failure means the session was already deleted (race with workspace cleanup) — ignore
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errorMessage(err);
     if (!msg.includes("SQLITE_CONSTRAINT_FOREIGNKEY") && !msg.includes("FOREIGN KEY")) {
       console.error("Failed to persist session messages (batch):", err);
     }
   });
+
+  const flushCount = (sessionFlushCounts.get(sessionId) ?? 0) + 1;
+  sessionFlushCounts.set(sessionId, flushCount);
+  if (flushCount % CAP_EVERY_N_FLUSHES === 0) {
+    // Chain after the insert so the trim sees the rows it just wrote.
+    // Promise.resolve() assimilates the real query promise (and tolerates test
+    // doubles); insert failures are already logged by the catch above.
+    Promise.resolve(insertResult)
+      .then(() => capSessionMessagesForSession(sessionId, writeDb))
+      .catch((err: unknown) => {
+        console.error("Failed to cap session messages (insert-time):", err);
+      });
+  }
 }
 
 /**
@@ -229,7 +327,9 @@ function applyToolActivity(
   state.sessionLastTool.set(sessionId, toolActivity.name);
   const activity = formatToolActivity(toolActivity.name, toolActivity.input);
   if (activity) {
-    options?.onActivity?.(ctx.projectId, ctx.issueId, sessionId, activity);
+    emitActivityThrottled(state, sessionId, () =>
+      options?.onActivity?.(ctx.projectId, ctx.issueId, sessionId, activity),
+    );
   }
 
   // Track Agent tool_use IDs for subagent count decrement
@@ -351,6 +451,10 @@ export function createBroadcaster(
     // On exit, clear activity, todos, and transient per-session stats state
     if (message.type === "exit") {
       const ctx = state.sessionContexts.get(sessionId);
+      // Terminal events bypass the activity throttle: drop any pending trailing
+      // emit (it would resurrect stale activity after the clear) and send the
+      // clearing broadcast immediately.
+      clearActivityThrottle(state, sessionId);
       if (ctx) {
         options?.onActivity?.(ctx.projectId, ctx.issueId, sessionId, "");
         options?.onTodos?.(ctx.projectId, ctx.issueId, []);
@@ -369,6 +473,7 @@ export function createBroadcaster(
 
       // Flush any buffered DB writes immediately so no messages are lost on exit
       flushDbBuffer(state, sessionId);
+      sessionFlushCounts.delete(sessionId);
 
       // Fallback for sessions that never emitted a result/stats event (e.g.
       // codex/copilot). Safe: only sets `friction` when absent, so it can't

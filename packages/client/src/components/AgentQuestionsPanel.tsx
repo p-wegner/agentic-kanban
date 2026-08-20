@@ -8,58 +8,23 @@
  * Rendered inline above the Butler chat so the user gets one place to clear
  * agent-blocking questions.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { apiPost, apiDelete } from "../lib/api.js";
 import { getAgentQuestions, invalidateAgentQuestions } from "../lib/agentQuestionsStore.js";
 import { startStaggeredPoll } from "../lib/pollScheduler.js";
-import { BOARD_WS_EVENT, type BoardWsEventDetail } from "../lib/useBoardEvents.js";
+import { useBoardWsRefresh } from "../hooks/useBoardWsRefresh.js";
+import type { AgentQuestion, Staleness, PendingQuestionSet } from "@agentic-kanban/shared";
 
-export interface AgentQuestionOption {
-  label: string;
-  description?: string;
-}
-
-export interface AgentQuestionRecommendation {
-  recommendedOptionIndexes: number[];
-  freeText?: string;
-  rationale: string;
-}
-
-export interface AgentQuestion {
-  question: string;
-  header?: string;
-  multiSelect?: boolean;
-  options: AgentQuestionOption[];
-  /** Butler-recommended answer. undefined = not yet computed; null = failed (graceful degrade). */
-  recommendation?: AgentQuestionRecommendation | null;
-}
-
-export type StalenessReason =
-  | "workspace-merged"
-  | "issue-done"
-  | "superseded"
-  | "older-than-24h";
-
-export interface Staleness {
-  reason: StalenessReason;
-  /** Human-readable label, e.g. "stale — workspace merged". */
-  label: string;
-  /** Relevant timestamp for the tooltip. */
-  at: string | null;
-}
-
-export interface PendingQuestionSet {
-  toolUseId: string;
-  workspaceId: string;
-  sessionId: string;
-  issueId: string;
-  issueNumber: number | null;
-  issueTitle: string;
-  questions: AgentQuestion[];
-  askedAt: string | null;
-  /** Set when the question is likely no longer actionable; null/undefined when fresh. */
-  staleness?: Staleness | null;
-}
+// Declared once, in shared (#569). This component used to own the wire contract —
+// `lib/agentQuestionsStore.ts` imported the types FROM here.
+export type {
+  AgentQuestionOption,
+  AgentQuestionRecommendation,
+  AgentQuestion,
+  StalenessReason,
+  Staleness,
+  PendingQuestionSet,
+} from "@agentic-kanban/shared";
 
 interface Props {
   projectId: string;
@@ -161,6 +126,10 @@ function QuestionCard({
 }) {
   const [answers, setAnswers] = useState<AnswerState[]>(() => emptyAnswers(set.questions));
   const [submitting, setSubmitting] = useState(false);
+  /** Last submit failure, shown inside the card. The panel-level banner sits above a
+   *  scrollable list, so on an expanded card it is usually off-screen — and the
+   *  one error the user must be able to act on is "this agent is gone, dismiss it". */
+  const [submitError, setSubmitError] = useState<{ message: string; canDismiss: boolean } | null>(null);
   /** Tracks whether the user has manually edited any answer for a given question — once true,
    *  we never overwrite that answer with a late-arriving butler recommendation. */
   const userEdited = useRef<boolean[]>(set.questions.map(() => false));
@@ -218,6 +187,7 @@ function QuestionCard({
   async function submit() {
     if (!canSubmit || submitting) return;
     setSubmitting(true);
+    setSubmitError(null);
     try {
       await apiPost(`/api/projects/${encodeURIComponent(projectIdFromHash())}/agent-questions/${encodeURIComponent(set.toolUseId)}/answer`, {
           workspaceId: set.workspaceId,
@@ -227,7 +197,10 @@ function QuestionCard({
       invalidateAgentQuestions(projectIdFromHash());
       onAnswered();
     } catch (err) {
-      onError(err instanceof Error ? err.message : "Failed to submit answer");
+      const message = err instanceof Error ? err.message : "Failed to submit answer";
+      const body = (err as { body?: { canDismiss?: boolean } } | undefined)?.body;
+      setSubmitError({ message, canDismiss: body?.canDismiss === true });
+      onError(message);
       setSubmitting(false);
     }
   }
@@ -360,7 +333,27 @@ function QuestionCard({
         })}
         </div>
 
+        {submitError && (
+          <div
+            className="mt-3 rounded-lg border border-red-200 dark:border-red-800/60 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-xs text-red-700 dark:text-red-300"
+            data-testid={`agent-question-submit-error-${set.toolUseId}`}
+          >
+            {submitError.message}
+          </div>
+        )}
+
         <div className="flex items-center justify-end gap-2 mt-3">
+          {submitError?.canDismiss && (
+            <button
+              type="button"
+              onClick={onDismiss}
+              disabled={submitting}
+              className="px-3 py-1.5 text-xs rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40"
+              data-testid={`agent-question-dismiss-inline-${set.toolUseId}`}
+            >
+              Dismiss this question
+            </button>
+          )}
           <button
             type="button"
             onClick={submit}
@@ -570,47 +563,46 @@ const QUESTION_EVENT_REASONS = new Set(["session_completed", "session_stopped", 
  *  while polling 3x less. */
 export function useAgentQuestionsCount(projectId: string | null): number {
   const [count, setCount] = useState(0);
+  // A generation counter rather than the old effect-local `cancelled` flag: `load` now
+  // outlives any single effect run, so "is this response still wanted?" has to be keyed
+  // to the project it was issued for, not to a closure that has since been torn down.
+  const generationRef = useRef(0);
+
+  const load = useCallback(async () => {
+    if (!projectId) return;
+    const generation = ++generationRef.current;
+    try {
+      const questions = await getAgentQuestions(projectId);
+      if (generationRef.current === generation) setCount(questions.length);
+    } catch {
+      if (generationRef.current === generation) setCount(0);
+    }
+  }, [projectId]);
+
   useEffect(() => {
     if (!projectId) {
+      generationRef.current++;
       setCount(0);
       return;
     }
-    const pid = projectId;
-    let cancelled = false;
-    async function load() {
-      try {
-        const questions = await getAgentQuestions(pid);
-        if (!cancelled) setCount(questions.length);
-      } catch {
-        if (!cancelled) setCount(0);
-      }
-    }
     void load();
     const poll = startStaggeredPoll(() => void load(), 60_000);
+    return () => poll.stop();
+  }, [projectId, load]);
 
-    // Event-driven refresh: a session just ended, so questions may have
-    // appeared. Trailing debounce collapses event cascades (3-6 board events
-    // within 1-2s observed on merge/exit) into a single fresh fetch.
-    let debounce: ReturnType<typeof setTimeout> | null = null;
-    const onWsEvent = (event: Event) => {
-      const detail = (event as CustomEvent<BoardWsEventDetail>).detail;
-      if (!detail || detail.projectId !== pid) return;
-      if (!QUESTION_EVENT_REASONS.has(detail.reason)) return;
-      if (debounce !== null) clearTimeout(debounce);
-      debounce = setTimeout(() => {
-        debounce = null;
-        invalidateAgentQuestions(pid);
-        void load();
-      }, 3_000);
-    };
-    window.addEventListener(BOARD_WS_EVENT, onWsEvent);
+  // Event-driven refresh (#514): a session just ended, so questions may have appeared.
+  // The 3s window is this badge's own — the endpoint costs the server ~500ms per call
+  // and a merge/exit emits 3-6 board events within 1-2s — so it is passed explicitly
+  // rather than taking the 250ms default.
+  useBoardWsRefresh({
+    projectId,
+    shouldRefetch: (reason) => QUESTION_EVENT_REASONS.has(reason),
+    refresh: () => {
+      if (projectId) invalidateAgentQuestions(projectId);
+      return load();
+    },
+    debounceMs: 3_000,
+  });
 
-    return () => {
-      cancelled = true;
-      poll.stop();
-      if (debounce !== null) clearTimeout(debounce);
-      window.removeEventListener(BOARD_WS_EVENT, onWsEvent);
-    };
-  }, [projectId]);
   return count;
 }

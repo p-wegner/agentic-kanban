@@ -1,6 +1,6 @@
+import type { DependencyImpactPending, MoveToDonePending } from "../lib/issueDetailTypes.js";
 import { useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import type { MoveToDonePending, DependencyImpactPending } from "../components/IssueDetailDialogs.js";
 
 /** Panel-local UI/action/dialog state for IssueDetailPanel — the transient flags
  *  that coordinate the header actions (delete confirm, visual-verify toggle,

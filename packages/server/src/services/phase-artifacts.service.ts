@@ -8,6 +8,7 @@ import {
   getWorkspaceArtifactTarget,
   getWorkspaceIssueId,
 } from "../repositories/phase-artifacts.repository.js";
+import { slugify } from "@agentic-kanban/shared/lib/slugify";
 
 const PHASE_FILES: Record<string, string> = {
   specify: "spec.md",
@@ -30,19 +31,15 @@ function phaseFileNameFromCaption(caption: string | null | undefined): string | 
   return key ? PHASE_FILES[key] : null;
 }
 
-function slugify(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 60) || "issue";
+function issueSlug(value: string): string {
+  return slugify(value, { maxLength: 60, fallback: "issue" });
 }
 
 function artifactRelativePath(issueNumber: number | null, title: string, caption: string): string | null {
   const fileName = phaseFileNameFromCaption(caption);
   if (!fileName) return null;
   const issuePart = issueNumber == null ? "issue" : String(issueNumber);
-  return `specs/${issuePart}-${slugify(title)}/${fileName}`;
+  return `specs/${issuePart}-${issueSlug(title)}/${fileName}`;
 }
 
 async function writeArtifactFile(workingDir: string, relativePath: string, content: string): Promise<void> {

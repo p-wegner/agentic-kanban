@@ -8,6 +8,8 @@ import {
   type ButlerEvent,
   type AssistantBuf,
   type ButlerChatMessage as ChatMessage,
+  type ButlerQuestionAnswer,
+  type ButlerQuestionPrompt,
 } from "../lib/butler-event-reducer.js";
 import type { ButlerState, ButlerCommand, ButlerSessionSummary, ButlerSessionMessage, ButlerListItem, TabState } from "../lib/butler-types.js";
 import { formatWindow, formatRelativeTs, backendLabel, modelOptionsForBackend } from "../lib/butler-format.js";
@@ -16,6 +18,7 @@ import { parseSlashCommand, filterCommands, applyCommandToInput, nextCycleIndex 
 import { sanitizeSpeechText } from "../lib/butler-speech.js";
 import { type ButlerDef } from "./ButlerManageModal.js";
 import { ButlerViewBody } from "./ButlerViewBody.js";
+import { useDismissable } from "../hooks/useDismissable.js";
 
 interface ButlerViewProps {
   projectId: string;
@@ -33,6 +36,14 @@ interface ButlerViewProps {
   initialPrompt?: string;
   /** Called after `initialPrompt` has been prefilled, so the parent can clear it. */
   onInitialPromptConsumed?: () => void;
+}
+
+/** One entry of GET /:id/butler/messages (server: ButlerTurn). */
+interface ButlerHistoryTurn {
+  role: "user" | "assistant" | "question";
+  text: string;
+  ts: number;
+  question?: { askId: string; questions: ButlerQuestionPrompt["questions"]; answers: ButlerQuestionAnswer[] };
 }
 
 function makeTabState(butlerId: string, butlerName: string): TabState {
@@ -243,7 +254,11 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
       });
       if (state.active) {
         try {
-          const { messages } = await apiFetch<{ messages: { role: "user" | "assistant"; text: string; ts: number }[] }>(butlerUrl(butlerId, "/messages"));
+          // A replayed "question" turn is ALWAYS an answered one — the server only
+          // records those — so it comes back read-only (#460). An unanswered question
+          // parked when the tab closed belongs to a turn that has since been denied
+          // and is never resurrected as answerable.
+          const { messages } = await apiFetch<{ messages: ButlerHistoryTurn[] }>(butlerUrl(butlerId, "/messages"));
           if (messages.length) {
             setTabStates((prev) => {
               const cur = prev[butlerId];
@@ -252,7 +267,15 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
                 ...prev,
                 [butlerId]: {
                   ...cur,
-                  chatMessages: messages.map((m, i) => ({ id: `hist-${i}-${m.ts}`, role: m.role, text: m.text, ts: m.ts })),
+                  chatMessages: messages.map((m, i) => ({
+                    id: m.question ? `ask-${m.question.askId}` : `hist-${i}-${m.ts}`,
+                    role: m.role,
+                    text: m.text,
+                    ts: m.ts,
+                    ...(m.question
+                      ? { question: { askId: m.question.askId, questions: m.question.questions, resolved: { answers: m.question.answers } } satisfies ButlerQuestionPrompt }
+                      : {}),
+                  })),
                 },
               };
             });
@@ -396,19 +419,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
   }, [tab?.chatMessages]);
 
   // Close the add-tab dropdown on outside click / Escape (#842).
-  useEffect(() => {
-    if (!addTabOpen) return;
-    const onPointerDown = (e: MouseEvent) => {
-      if (addTabRef.current && !addTabRef.current.contains(e.target as Node)) setAddTabOpen(false);
-    };
-    const onKeyDown = (e: KeyboardEvent) => { if (e.key === "Escape") setAddTabOpen(false); };
-    document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [addTabOpen]);
+  useDismissable(addTabRef, addTabOpen, () => setAddTabOpen(false));
 
   // Prefill the active tab with an external prompt (e.g. "Chat about this ticket",
   // #838). Apply each distinct prompt once: start the butler if it's cold, drop the
@@ -594,6 +605,34 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
               ts: Date.now(),
             }],
             sending: false,
+          },
+        };
+      });
+    }
+  }
+
+  // Answer a parked AskUserQuestion (#460). The server resolves the suspended SDK
+  // turn and broadcasts `question-resolved`, which flips the card to read-only; we
+  // do NOT mark it locally so the rendered state always reflects what the server
+  // actually accepted (a 409 leaves the card answerable and surfaces the reason).
+  async function handleAnswerQuestion(askId: string, answers: ButlerQuestionAnswer[]) {
+    if (!activeTabId) return;
+    try {
+      await apiPost(butlerUrl(activeTabId, "/answer"), { askId, answers });
+    } catch (err) {
+      setTabStates((prev) => {
+        const cur = prev[activeTabId];
+        if (!cur) return prev;
+        return {
+          ...prev,
+          [activeTabId]: {
+            ...cur,
+            chatMessages: [...cur.chatMessages, {
+              id: `err-${Date.now()}`,
+              role: "activity",
+              text: `Error: ${err instanceof Error ? err.message : "Failed to send answer"}`,
+              ts: Date.now(),
+            }],
           },
         };
       });
@@ -814,6 +853,7 @@ export function ButlerView({ projectId, columns, liveActivity, liveStats, onIssu
         filteredCommands,
         formatRelativeTs,
         formatWindow,
+        handleAnswerQuestion,
         handleClearContext,
         handleKeyDown,
         handleModelChange,

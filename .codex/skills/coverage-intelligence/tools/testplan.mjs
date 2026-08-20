@@ -33,7 +33,7 @@ out += `Legend: \`[x]\` ✅ covered (outcome asserted) · \`[~]\` ⚠️ partial
 
 // per-capability gap priority lookup (from coverage summary.by_capability top_gaps)
 const gapPrio = {};
-for (const [slug, s] of Object.entries(cov.summary.by_capability || {}))
+for (const s of Object.values(cov.summary.by_capability || {}))
   for (const tg of s.top_gaps || []) gapPrio[tg.ref] = tg;
 
 // index

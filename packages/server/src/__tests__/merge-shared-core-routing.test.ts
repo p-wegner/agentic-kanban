@@ -32,8 +32,8 @@ vi.mock("../db/index.js", async () => {
 });
 
 // The invariant scanner kicked off after an auto-merge polls the real board — stub it.
-vi.mock("../startup/done-unmerged-invariant-scanner.js", () => ({
-  runDoneUnmergedScannerNow: vi.fn(),
+vi.mock("../startup/done-unmerged-invariant-sweep.js", () => ({
+  runDoneUnmergedSweepNow: vi.fn(),
 }));
 
 // Spy on the shared merge executor core. getDirtyMainFiles keeps its benign shape
@@ -51,9 +51,18 @@ vi.mock("../services/merge-executor.service.js", () => ({
 import { db } from "../db/index.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
 import { createAutoMerge } from "../startup/merge-workflow.js";
+import { gateSkipExplicit } from "../services/pre-merge-gate.service.js";
 import { activeMerges } from "../services/workspace-internals.js";
 import type { createBoardEvents } from "../services/board-events.js";
 import type { createSessionManager } from "../services/session.manager.js";
+import { makeTempRepo } from "./helpers/temp-repo.js";
+
+/**
+ * A REAL repo path (#273). This suite drives the actual merge path, whose repo lock
+ * refuses a repoPath with no `.git` and then POLLS — so the old `"/repo"` literal made
+ * every test here burn its full timeout instead of running.
+ */
+const REPO_PATH = makeTempRepo();
 
 async function seedMergeScenario() {
   const now = new Date().toISOString();
@@ -64,7 +73,7 @@ async function seedMergeScenario() {
   const workspaceId = randomUUID();
 
   await db.insert(projects).values({
-    id: projectId, name: "Test", repoPath: "/repo", repoName: "repo",
+    id: projectId, name: "Test", repoPath: REPO_PATH, repoName: "repo",
     defaultBranch: "master", createdAt: now, updatedAt: now,
   });
   await db.insert(projectStatuses).values([
@@ -100,7 +109,7 @@ beforeEach(() => {
 });
 
 describe("#945: both merge entry paths route through the shared merge executor core", () => {
-  it("doMerge (manual/monitor/merge-queue path) calls runMergeCore with deferWorkingTreeSync", async () => {
+  it("doMerge syncs the main checkout INLINE by default, and defers only when the caller asks (#350)", async () => {
     const { workspaceId, issueId, doneStatusId } = await seedMergeScenario();
 
     const gitService = {
@@ -129,14 +138,32 @@ describe("#945: both merge entry paths route through the shared merge executor c
     expect(result.merged).toBe(true);
     expect(runMergeCore).toHaveBeenCalledTimes(1);
     expect(runMergeCore).toHaveBeenCalledWith(expect.objectContaining({
-      repoPath: "/repo",
+      repoPath: REPO_PATH,
       branch: "feature/ak-945-test",
       targetBranch: "master",
-      deferWorkingTreeSync: true,
+      // #350: the default flipped. Deferring the main checkout's `git reset --hard` is what left
+      // the just-merged files staged for DELETION for ~32s, which silently stalled a pm-pipeline
+      // planner reading artifacts from that checkout. Only the interactive HTTP route defers now
+      // (it has a response to protect from a tsx hot-reload, #686) — see the case below.
+      deferWorkingTreeSync: false,
     }));
 
     const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
     expect(issue.statusId).toBe(doneStatusId);
+
+    // Drain the deferred post-merge cleanup (setImmediate, #970): it calls the mocked
+    // cleanupMergedWorktreeAndBranch AFTER this test's assertions, and without draining
+    // it races the next test's mockReset — landing in the autoMerge test's call tally
+    // (observed as a deterministic "called 2 times" failure). NOTE: the repo merge lock
+    // now releases as soon as the main checkout is settled (phase 1), BEFORE the long
+    // tail reaches cleanupMergedWorktreeAndBranch — so wait for the call itself, not
+    // for the lock entry to disappear.
+    await vi.waitFor(() => {
+      expect(cleanupMergedWorktreeAndBranch).toHaveBeenCalledTimes(1);
+    });
+    // And the lock must already be gone by then (phase-1 release — the fix for the
+    // "A merge is already in progress" starvation class).
+    expect(activeMerges.size).toBe(0);
   });
 
   it("autoMerge (review-exit / fix-and-merge retry path) calls the same runMergeCore", async () => {
@@ -152,11 +179,12 @@ describe("#945: both merge entry paths route through the shared merge executor c
       learningSessionIds: new Set(),
     });
 
-    await autoMerge(ws, projectId, issueId, doneStatusId, new Date().toISOString());
+    await autoMerge(ws, projectId, issueId, doneStatusId, new Date().toISOString(),
+      gateSkipExplicit("test: routing check — gate decision is exercised separately"));
 
     expect(runMergeCore).toHaveBeenCalledTimes(1);
     expect(runMergeCore).toHaveBeenCalledWith(expect.objectContaining({
-      repoPath: "/repo",
+      repoPath: REPO_PATH,
       branch: "feature/ak-945-test",
       targetBranch: "master",
       deferWorkingTreeSync: false,

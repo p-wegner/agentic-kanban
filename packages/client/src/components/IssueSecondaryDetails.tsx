@@ -1,12 +1,14 @@
-import type { IssueWithStatus, DependencyInfo, IssueArtifact, MergedCommit } from "@agentic-kanban/shared";
-import { apiPost, apiDelete } from "../lib/api.js";
-import { showToast } from "./Toast.js";
+/** #610 — was a byte-identical local copy; the board DTO module owns it. */
+import type { Tag } from "../lib/boardTypes.js";
+import type { IssueWithStatus, DependencyInfo, IssueArtifact, MergedCommit, MergedCommitsResponse } from "@agentic-kanban/shared";
+import { apiPost, apiDelete, apiPut } from "../lib/api.js";
+import { showToast } from "../lib/toast.js";
 import { formatRelativeTime, formatAbsoluteTime } from "../lib/formatRelativeTime.js";
 import { invalidateAvailableIssuesCache } from "../hooks/useIssueDetailData.js";
 import { IssueChecklistSection } from "./IssueChecklistSection.js";
 import { DependencyDisplay } from "./DependencyDisplay.js";
 import { IssueTouchedFilesSection, type TouchedFile } from "./IssueTouchedFilesSection.js";
-import { IssueRelatedIssuesSection } from "./IssueRelatedIssuesSection.js";
+import { IssueRelatedIssuesSection, type RelatedIssue } from "./IssueRelatedIssuesSection.js";
 import { IssueFollowUpSection } from "./IssueFollowUpSection.js";
 import { IssueArtifactsSection } from "./IssueArtifactsSection.js";
 import { StatusTransitionTimeline } from "./StatusTransitionTimeline.js";
@@ -14,8 +16,10 @@ import { IssueActivitySection, type ActivityEvent } from "./IssueActivitySection
 import { IssueMergedCommitsSection } from "./IssueMergedCommitsSection.js";
 import { WorkspaceArtifactsBrowser } from "./WorkspaceArtifactsBrowser.js";
 import { IssueDetailComments, type IssueComment } from "./IssueDetailComments.js";
+import { ReposTouchedField } from "./ReposTouchedField.js";
+import { useProjectRepos } from "../hooks/useProjectRepos.js";
+import { repoNameFromTag, repoTagName, REPO_TAG_COLOR } from "@agentic-kanban/shared/lib/repo-tags";
 
-type Tag = { id: string; name: string; color: string | null };
 
 interface IssueSecondaryDetailsProps {
   issue: IssueWithStatus;
@@ -47,6 +51,11 @@ interface IssueSecondaryDetailsProps {
   onDeleteComment: (commentId: string) => void;
   onAddNote: () => void;
   onNewNoteBodyChange: (body: string) => void;
+  // #418: bundle-folded section data (the sections no longer self-fetch).
+  touchedFiles: TouchedFile[] | null;
+  relatedIssues: RelatedIssue[] | null;
+  mergedCommits: MergedCommitsResponse | null;
+  extrasLoading: boolean;
 }
 
 /**
@@ -86,9 +95,46 @@ export function IssueSecondaryDetails({
   onDeleteComment,
   onAddNote,
   onNewNoteBodyChange,
+  touchedFiles,
+  relatedIssues,
+  mergedCommits,
+  extrasLoading,
 }: IssueSecondaryDetailsProps) {
+  // #633: "Repos touched" was rendered in exactly ONE place, CreateIssuePanel. Any issue
+  // filed another way — a plugin loop, the API, an import — could never get a repo scope,
+  // and there was no UI to add one short of knowing the tags are spelled `repo:<name>` and
+  // hand-typing them into the Tags dropdown below. Since #629 that scope also decides which
+  // repos a launch provisions, so an unsettable field is now a cost, not just a gap.
+  const { repos: projectRepos, isMultiRepo } = useProjectRepos(issue.projectId);
+  const reposTouched = issueTags.map((t) => repoNameFromTag(t.name)).filter((r): r is string => Boolean(r));
+
+  async function saveReposTouched(next: string[]) {
+    // Optimistic: the chips are the control, so waiting on a round-trip to redraw them
+    // reads as an unresponsive toggle.
+    const previous = issueTags;
+    setIssueTags([
+      ...issueTags.filter((t) => !repoNameFromTag(t.name)),
+      ...next.map((r) => ({ id: `pending:${r}`, name: repoTagName(r), color: REPO_TAG_COLOR })),
+    ]);
+    try {
+      await apiPut<{ reposTouched: string[] }>(`/api/issues/${issue.id}/repos-touched`, { reposTouched: next });
+    } catch (err) {
+      setIssueTags(previous);
+      showToast(`Failed to update repos touched: ${err instanceof Error ? err.message : String(err)}`, "error");
+    }
+  }
+
   return (
     <>
+      {isMultiRepo && (
+        <div className="border-t border-gray-100 dark:border-gray-800 pt-3">
+          <ReposTouchedField repos={projectRepos} selected={reposTouched} onChange={saveReposTouched} />
+          <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+            Decides which repos a new workspace provisions — each one is a worktree and a dependency install.
+          </p>
+        </div>
+      )}
+
       {/* Tags section - visible in both view and edit mode */}
       <div className="border-t border-gray-100 dark:border-gray-800 pt-3">
         <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">
@@ -161,11 +207,12 @@ export function IssueSecondaryDetails({
       {/* Touched Files section */}
       <IssueTouchedFilesSection
         issueId={issue.id}
+        initialFiles={touchedFiles}
         onAppendToDescription={onAppendTouchedFiles}
       />
 
       {/* Related Issues section */}
-      <IssueRelatedIssuesSection issueId={issue.id} onNavigateToIssue={onNavigateToIssue} />
+      <IssueRelatedIssuesSection related={relatedIssues} loading={extrasLoading} onNavigateToIssue={onNavigateToIssue} />
 
       {/* Follow-up task creation */}
       <IssueFollowUpSection
@@ -209,7 +256,8 @@ export function IssueSecondaryDetails({
       {/* Merged commits that landed on the default branch for this issue */}
       {!editing && (
         <IssueMergedCommitsSection
-          issueId={issue.id}
+          data={mergedCommits}
+          loading={extrasLoading}
           onOpenDiff={(commit: MergedCommit) => onManageWorkspaces(issue, commit.workspaceId)}
         />
       )}

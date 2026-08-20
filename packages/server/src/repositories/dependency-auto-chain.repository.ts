@@ -3,8 +3,11 @@ import { issueComments, issueDependencies, issues, issueTags, projectStatuses, t
 import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import type { DependencyType } from "@agentic-kanban/shared/schema";
 
-type DependencyType = "depends_on" | "blocked_by" | "related_to" | "duplicates" | "parent_of" | "child_of";
+// #523: this file used to re-declare DependencyType locally, and the copy had already
+// DRIFTED — it was missing "coupled_with", so the union here disagreed with the schema's.
+// Import the real one.
 
 export async function getProjectStatusesForAutoChain(
   projectId: string,

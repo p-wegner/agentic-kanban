@@ -1,14 +1,31 @@
 import { execGit, isGitWorkingTree } from "./internal.js";
 import { revParse, isAncestor } from "./branch.js";
 
-/** Get the number of commits on HEAD that are not reachable from baseBranch. */
+/**
+ * How many commits `headRef` has that `baseBranch` lacks — the ONLY correct predicate for
+ * "did this workspace produce work?".
+ *
+ * #365: callers used to ask `git diff --quiet <base>` instead. With a single ref that is a
+ * WORKING-TREE diff against the base branch TIP, so it exits non-zero — "has changes" —
+ * whenever the base has merely moved ahead of the worktree. A workspace with ZERO commits
+ * of its own that is simply BEHIND master therefore reported "has commits", got parked at
+ * ready_for_merge, and stalled its pipeline unit (#363). Measured on the `ak-6` worktree:
+ * 0 commits ahead, 8 behind master, `git diff --quiet master` exit 1. `rev-list --count
+ * <base>..<head>` asks the actual question and is immune to the base moving.
+ *
+ * Returns `null` when git could not answer (spawn failure, unknown ref, not a worktree).
+ * Callers decide what an unknown means; they must NOT read it as zero — see
+ * `hasCommitsAhead` for why. (#539 gave this the `headRef` parameter that the server-side
+ * duplicate had and this one lacked, which is what kept the duplicate alive.)
+ */
 export async function getCommitCountAhead(
   worktreePath: string,
   baseBranch: string,
+  headRef = "HEAD",
 ): Promise<number | null> {
   if (!isGitWorkingTree(worktreePath)) return null;
   try {
-    const output = await execGit(["rev-list", "--count", `${baseBranch}..HEAD`], worktreePath);
+    const output = await execGit(["rev-list", "--count", `${baseBranch}..${headRef}`], worktreePath);
     const trimmed = output.trim();
     if (!trimmed) return null;
     const count = Number.parseInt(trimmed, 10);
@@ -16,6 +33,32 @@ export async function getCommitCountAhead(
   } catch {
     return null;
   }
+}
+
+/**
+ * True when `headRef` has at least one commit its base lacks. An UNKNOWN answer reads as
+ * `true`, and that polarity is the whole point of having this next to
+ * `getCommitCountAhead`: the downstream of "no commits" can close a workspace and force
+ * its issue to Done, so a transient git failure must never take that path.
+ *
+ * #539: three implementations of this question existed with three different unknown
+ * policies — `null`, `true`, and `false`. The `false` one (a private copy in
+ * completion-state-reconciler) meant a transient git failure read as "no work" and the
+ * workspace was closed, which is exactly the outcome this policy exists to prevent.
+ * Anything that must NOT act on an unknown should call `getCommitCountAhead` and handle
+ * `null` explicitly instead of reaching for this.
+ */
+export async function hasCommitsAhead(
+  worktreePath: string,
+  baseBranch: string,
+  headRef = "HEAD",
+): Promise<boolean> {
+  const ahead = await getCommitCountAhead(worktreePath, baseBranch, headRef);
+  if (ahead === null) {
+    console.warn(`[git] could not count commits of ${headRef} ahead of ${baseBranch} in ${worktreePath} — assuming it has commits`);
+    return true;
+  }
+  return ahead > 0;
 }
 
 /** Get the latest commit SHA (short) and message on the current branch. Returns null when no commits exist. */
@@ -48,6 +91,52 @@ export async function getUncommittedTrackedChanges(repoPath: string): Promise<st
   }
 }
 
+/**
+ * Everything a commit would still have to capture in `repoPath` — tracked modifications AND
+ * untracked new files (#469).
+ *
+ * Distinct from {@link getUncommittedTrackedChanges}, which excludes untracked files because
+ * they do not block `git merge`. Here they are the point: the failure this detects is an agent
+ * session that ended having WRITTEN its work but never committed it, and that work is very often
+ * mostly new files (a decomposition that extracts 14 modules shows up almost entirely as `??`).
+ * Excluding untracked would report a clean tree for the exact case worth catching.
+ */
+export async function getWorkingTreeChanges(repoPath: string): Promise<string[]> {
+  try {
+    const output = await execGit(["status", "--porcelain", "--untracked-files=all"], repoPath);
+    return output.trim().split("\n").filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Paths that are DELETED relative to HEAD in `repoPath` — in the index, in the working
+ * tree, or both. This is the exact signature of the #350 corruption: a merge advances
+ * `refs/heads/<base>` via `update-ref` while that branch is checked out here, and until
+ * the working tree is hard-synced every file the merge brought in reads as `D  path`,
+ * present in HEAD but absent from index and disk.
+ *
+ * Deliberately narrower than `getUncommittedTrackedChanges`: an operator's own edits are
+ * not this bug, and asserting on them would make the merge path refuse legitimate merges.
+ * Only *deletions vs HEAD* mean "this checkout undoes what HEAD says landed".
+ */
+export async function getDeletedPathsVsHead(repoPath: string): Promise<string[]> {
+  try {
+    const output = await execGit(["status", "--porcelain", "--untracked-files=no"], repoPath);
+    const deleted: string[] = [];
+    for (const line of output.split(/\r?\n/)) {
+      if (line.length < 4) continue;
+      // Porcelain v1: XY<space>path — X = index status, Y = working-tree status.
+      if (line[0] !== "D" && line[1] !== "D") continue;
+      deleted.push(line.slice(3).trim());
+    }
+    return deleted;
+  } catch {
+    return [];
+  }
+}
+
 /** List commit summaries between two refs, newest first. */
 export async function getCommitSummariesBetween(
   repoPath: string,
@@ -67,6 +156,75 @@ export async function getCommitSummariesBetween(
           ? { sha: line, message: "" }
           : { sha: line.slice(0, tabIdx), message: line.slice(tabIdx + 1) };
       });
+  } catch {
+    return [];
+  }
+}
+
+/** A single MERGE commit's subject and author date (ISO-8601), newest first. */
+export interface MergeCommitSubject {
+  subject: string;
+  /** Author date, ISO-8601 (`%aI`). */
+  date: string;
+}
+
+/**
+ * List each MERGE commit reachable from `ref` (subject + author date), newest first
+ * (`git log --merges --format=%s%x1f%aI`). Used by the hand-merged-branch reconciler
+ * (#113) to recover which `feature/ak-<N>` branches were landed by a manual `--no-ff`
+ * merge (no board workspace), so the linked issue can be auto-transitioned to Done.
+ *
+ * `sinceIso`, when given, bounds the scan to commits at or after that date
+ * (`--since`) — e.g. the earliest candidate issue's `createdAt`, so the scan doesn't
+ * walk all history looking for a branch name that could only postdate the issue.
+ * Also bounded by `maxCount` (default 1000) as a hard ceiling regardless of `sinceIso`.
+ * Returns [] on any git error (unknown ref, not a repo) so callers degrade gracefully.
+ */
+export async function getMergeCommits(
+  repoPath: string,
+  ref: string,
+  sinceIso?: string,
+  maxCount = 1000,
+): Promise<MergeCommitSubject[]> {
+  try {
+    const args = ["log", "--merges", "--format=%s%x1f%aI", `--max-count=${maxCount}`];
+    if (sinceIso) args.push(`--since=${sinceIso}`);
+    args.push(ref);
+    const output = await execGit(args, repoPath);
+    return output
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const idx = line.indexOf("\x1f");
+        return idx === -1 ? { subject: line, date: "" } : { subject: line.slice(0, idx), date: line.slice(idx + 1) };
+      });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * List the subject line of each commit reachable from `ref` whose subject looks like
+ * a revert of a merge (`Revert "Merge ...`), newest first. Used by the hand-merged-branch
+ * reconciler to skip a `feature/ak-<N>` branch whose merge was later reverted — the
+ * merge subject itself stays in history, so without this check a reverted branch would
+ * still read as "merged".
+ */
+export async function getRevertedMergeCommitSubjects(
+  repoPath: string,
+  ref: string,
+  maxCount = 1000,
+): Promise<string[]> {
+  try {
+    const output = await execGit(
+      ["log", "--format=%s", `--max-count=${maxCount}`, `--grep=^Revert "Merge`, ref],
+      repoPath,
+    );
+    return output
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
   } catch {
     return [];
   }
@@ -212,4 +370,4 @@ export async function countUniqueCommits(repoPath: string, baseSha: string, bran
 export async function countBehindCommits(repoPath: string, featureBranch: string, baseBranch: string): Promise<number> {
   const out = await execGit(["rev-list", "--count", `${featureBranch}..${baseBranch}`], repoPath);
   return parseInt(out.trim(), 10) || 0;
-}
+}

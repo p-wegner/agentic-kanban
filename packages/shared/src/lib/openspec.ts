@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join, normalize, relative, sep } from "node:path";
+import { errorMessage } from "./error-message.js";
 
 export const OPENSPEC_DIR = "openspec";
 export const OPENSPEC_SPECS_DIR = "openspec/specs";
@@ -225,7 +226,7 @@ export async function validateOpenSpecChange(repoPath: string, changeId?: string
     try {
       assertSafeDomain(delta.domain);
     } catch (err) {
-      errors.push(err instanceof Error ? err.message : String(err));
+      errors.push(errorMessage(err));
     }
     if (!delta.added && !delta.modified && !delta.removed) {
       errors.push(`${delta.path} must contain at least one non-empty ## ADDED, ## MODIFIED, or ## REMOVED section.`);

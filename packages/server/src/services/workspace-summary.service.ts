@@ -1,11 +1,13 @@
+import { existsSync } from "node:fs";
 import type { Database } from "../db/index.js";
-import { detectConflicts, getCommitCountAhead, getDiffShortstat, getLatestCommit } from "./git.service.js";
+import { detectConflicts, getDiffShortstat } from "./git.service.js";
+import { isGitProjectionFresh, refreshWorkspaceGitProjection } from "./workspace-summary-projection.service.js";
 import type { ProviderName } from "./agent-provider.js";
 import { isAnalyticsNoise } from "./session-filter.js";
 import { computeWorkspaceCodeMetrics, parseStoredWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
 import type { WorkspaceCodeMetrics, WorkspaceSummary } from "@agentic-kanban/shared";
 import { ACTIVE_WORKSPACE_STATUSES, workspaceStatusPriority } from "@agentic-kanban/shared";
-import { readSessionStdoutFile } from "../lib/session-output-reader.js";
+import { readSessionStdoutFileTailAsync } from "../lib/session-output-reader.js";
 import { extractAssistantMessage, extractToolName, safeParseStringArray } from "../lib/session-message-extraction.js";
 import { selectLatestSessionsByWorkspace, parseContextTokensFromStats } from "../lib/workspace-summary-session.js";
 import { selectCachedDiffStats, isPlanOnlySession, isDiffCacheStale } from "../lib/workspace-diff-cache.js";
@@ -19,46 +21,61 @@ import {
   getOutgoingWorkflowEdges,
   getWorkflowNodeNamesByIds,
   getSessionsForWorkspaces,
+  getSessionStatsByIds,
   getSessionMessagesForSessions,
 } from "../repositories/workspace-summary.repository.js";
+import { listLiveGroupWorkspacesForIssues } from "../repositories/workspace-issue-members.repository.js";
+import { notifySummaryWriteThrough } from "./summary-write-through-notifier.js";
+import { resolveDiffRef } from "@agentic-kanban/shared/lib/git-service";
 
-// Limit concurrent background git operations to avoid hammering the filesystem
+// Bounded fan-out for background git-backed refresh tasks. The REAL git concurrency
+// control is the process-wide semaphore inside the git-exec adapter (#398) — this
+// limit only caps how many refresh TASKS are in flight at once so a huge board does
+// not build thousands of pending promises.
+//
+// #398: this used to be drop-over-cap (`if (running >= cap) return;`) — the 6th+
+// workspace's refresh was SILENTLY discarded, so the summary cache never warmed past
+// the 5th workspace and every later board rebuild re-paid those git calls inline.
+// Over-cap work now QUEUES and always runs; dropping only happens past a queue bound
+// that steady-state never reaches, and is logged when it does.
 let _bgGitRunning = 0;
 const BG_GIT_CONCURRENCY = 5;
+const BG_GIT_MAX_QUEUE = 1000;
+const _bgGitQueue: Array<() => Promise<void>> = [];
 
-function runBgGit(fn: () => Promise<void>): void {
-  if (_bgGitRunning >= BG_GIT_CONCURRENCY) return;
+/** Exported for tests only — callers inside this module schedule via the helpers below. */
+export function runBgGit(fn: () => Promise<void>): void {
+  if (_bgGitRunning >= BG_GIT_CONCURRENCY) {
+    if (_bgGitQueue.length >= BG_GIT_MAX_QUEUE) {
+      // The exception, not the norm: only a pathological backlog is dropped, loudly.
+      console.warn(`[workspace-summary] bg git queue full (${BG_GIT_MAX_QUEUE}); dropping a refresh task`);
+      return;
+    }
+    _bgGitQueue.push(fn);
+    return;
+  }
   _bgGitRunning++;
-  void fn().finally(() => { _bgGitRunning--; });
+  void runBgGitTask(fn);
+}
+
+async function runBgGitTask(fn: () => Promise<void>): Promise<void> {
+  try {
+    await fn();
+  } catch {
+    // Refresh tasks are best-effort; failures must never wedge the lane.
+  } finally {
+    const next = _bgGitQueue.shift();
+    if (next) {
+      void runBgGitTask(next);
+    } else {
+      _bgGitRunning--;
+    }
+  }
 }
 
 const CONFLICT_CACHE_TTL_MS = 5 * 60 * 1000;
 const DIFF_STAT_CACHE_TTL_MS = 30 * 1000;
 const CODE_METRICS_CACHE_TTL_MS = 5 * 60 * 1000;
-const GIT_OPS_CACHE_TTL_MS = 30 * 1000;
-
-// Short-lived per-branch cache for git commit ops. Keyed by workingDir or
-// workingDir:baseBranch. Stale-while-revalidate: a fresh entry is served as-is;
-// an expired entry is served immediately (last-known value) while a background
-// refresh updates it — so steady-state board rebuilds never block on these git
-// subprocesses (same SWR philosophy as diffStats/conflicts; values may be one
-// refresh cycle behind). Only a true first sighting (no entry at all) pays the
-// git call inline, so a fresh boot still shows commit info on the first build.
-const gitOpsCache = new Map<string, { value: unknown; expiresAt: number }>();
-function cachedGitOp<T>(key: string, fn: () => Promise<T>): Promise<T> {
-  const entry = gitOpsCache.get(key);
-  const refresh = () => fn().then(v => {
-    gitOpsCache.set(key, { value: v, expiresAt: Date.now() + GIT_OPS_CACHE_TTL_MS });
-    return v;
-  });
-  if (entry) {
-    if (entry.expiresAt <= Date.now()) {
-      runBgGit(() => refresh().then(() => {}).catch(() => {}));
-    }
-    return Promise.resolve(entry.value as T);
-  }
-  return refresh();
-}
 
 export type { WorkspaceSummary } from "@agentic-kanban/shared";
 
@@ -75,6 +92,18 @@ export async function buildWorkspaceSummaryMap(
 ): Promise<Map<string, WorkspaceSummary>> {
   if (issueIds.length === 0) return new Map<string, WorkspaceSummary>();
 
+  // G14b: existsSync used to run TWICE per main workspace per rebuild (phase 4 +
+  // phase 5). One rebuild pass shares a single stat per distinct workingDir.
+  const dirExistsCache = new Map<string, boolean>();
+  const dirExists = (path: string): boolean => {
+    let known = dirExistsCache.get(path);
+    if (known === undefined) {
+      known = existsSync(path);
+      dirExistsCache.set(path, known);
+    }
+    return known;
+  };
+
   // Phase 1: aggregate workspace counts per issue+status
   const workspaceSummaryMap = await aggregateWorkspaceCounts(issueIds, database);
 
@@ -87,8 +116,9 @@ export async function buildWorkspaceSummaryMap(
   // Phase 3: pick main workspace per issue
   const mainWorkspaceMap = selectMainWorkspaces(wsDetailRows, archivedIssueIds);
 
-  // Phase 4: pre-fetch commit counts and latest commits in parallel
-  const { commitCountByIssue, latestCommitByIssue } = await prefetchGitData(mainWorkspaceMap, defaultBranch, archivedIssueIds);
+  // Phase 4: read commit counts / latest commits from the persisted git projection
+  // (#399, decision 014) — zero git spawns on this path; stale rows get a bg refresh.
+  const { commitCountByIssue, latestCommitByIssue } = readGitProjection(mainWorkspaceMap, defaultBranch, database, dirExists, archivedIssueIds);
 
   // Phase 5: attach main workspace summary and schedule stale-while-revalidate cache refreshes
   for (const [issueId, summary] of workspaceSummaryMap) {
@@ -119,9 +149,12 @@ export async function buildWorkspaceSummaryMap(
       mergedAt: mainWs.mergedAt,
     };
 
-    // Skip background git/metrics refreshes for archived issues — CompletedCard shows none of these fields
-    if (!isArchivedIssue && mainWs.workingDir && mainWs.status !== "closed") {
-      const diffRef = mainWs.isDirect ? "HEAD" : (mainWs.baseBranch || defaultBranch);
+    // Skip background git/metrics refreshes for archived issues — CompletedCard shows none of these fields.
+    // The existsSync is the same point as in prefetchGitData: a set-but-vanished
+    // workingDir would otherwise schedule diff-stat + conflict-detection git spawns
+    // that can only fail, on every board build (#277).
+    if (!isArchivedIssue && mainWs.workingDir && mainWs.status !== "closed" && dirExists(mainWs.workingDir)) {
+      const diffRef = resolveDiffRef(mainWs, defaultBranch);
       if (!diffRef) continue;
       const mainRef = summary.main;
       const currentHeadSha = latestCommitByIssue.get(issueId)?.sha ?? null;
@@ -137,6 +170,21 @@ export async function buildWorkspaceSummaryMap(
 
   // Phase 7+8: fetch latest sessions and attach last tool / assistant message
   await attachSessionData(mainWorkspaceMap, workspaceSummaryMap, database, archivedIssueIds);
+
+  // Ticket group (#661): a MEMBER issue has no workspace row of its own (the group
+  // workspace is keyed by the lead), so its card would read as idle and invite a
+  // duplicate manual start. Alias the lead's summary onto each live member — the card
+  // then shows the shared branch/agent exactly as the lead's does.
+  try {
+    const memberLinks = await listLiveGroupWorkspacesForIssues(issueIds, database);
+    for (const link of memberLinks) {
+      if (workspaceSummaryMap.has(link.issueId)) continue;
+      const leadSummary = workspaceSummaryMap.get(link.leadIssueId);
+      if (leadSummary) workspaceSummaryMap.set(link.issueId, leadSummary);
+    }
+  } catch {
+    // Projection enrichment only — a failure here must never break the board build.
+  }
 
   return workspaceSummaryMap;
 }
@@ -178,8 +226,15 @@ async function populateShowdownSummaries(
   database: Database,
 ): Promise<void> {
   const showdownIdsByIssue = new Map<string, string>();
+  // G14d: group rows by showdown once (O(W)) instead of re-filtering all detail
+  // rows per issue inside the loop below (O(W²) on showdown-heavy boards).
+  const rowsByShowdown = new Map<string, WorkspaceDetailRow[]>();
   for (const row of wsDetailRows) {
-    if (row.showdownId) showdownIdsByIssue.set(row.issueId, row.showdownId);
+    if (!row.showdownId) continue;
+    showdownIdsByIssue.set(row.issueId, row.showdownId);
+    const group = rowsByShowdown.get(row.showdownId);
+    if (group) group.push(row);
+    else rowsByShowdown.set(row.showdownId, [row]);
   }
   if (showdownIdsByIssue.size === 0) return;
 
@@ -191,7 +246,7 @@ async function populateShowdownSummaries(
     const summary = workspaceSummaryMap.get(issueId);
     if (!summary) continue;
     const sdStatus = showdownStatusMap.get(showdownId) ?? "active";
-    const sdWorkspaces = wsDetailRows.filter(w => w.showdownId === showdownId);
+    const sdWorkspaces = rowsByShowdown.get(showdownId) ?? [];
     const doneCount = sdWorkspaces.filter(w => w.status === "idle" || w.status === "closed").length;
     summary.showdown = { id: showdownId, status: sdStatus, total: sdWorkspaces.length, doneCount };
   }
@@ -226,32 +281,47 @@ function selectMainWorkspaces(
   return mainWorkspaceMap;
 }
 
-// Phase 4: pre-fetch commit counts and latest commit for all non-direct, non-closed main
-// workspaces in parallel to avoid an N+1 pattern (one sequential git call per issue).
-async function prefetchGitData(
+// Phase 4 (#399, decision 014): serve commit counts and latest commits from the PERSISTED
+// git projection on the workspace row — a pure map over rows already fetched, so the hot
+// path spawns no git and awaits nothing. This replaced the in-memory gitOpsCache SWR map
+// (which died on every tsx-watch restart, re-paying 2 spawns × N workspaces per boot, and
+// paid first sightings INLINE). A row whose projection is stale or dirty is still served
+// as-is (last-known values, SWR) while a deduped background refresh writes new facts
+// through to the row — see workspace-summary-projection.service.ts, which also chains the
+// HEAD-advance → diff-stat refresh the inline prefetch used to provide.
+function readGitProjection(
   mainWorkspaceMap: Map<string, WorkspaceDetailRow>,
   defaultBranch: string | null,
+  database: Database,
+  dirExists: (path: string) => boolean,
   archivedIssueIds?: Set<string>,
-): Promise<{
+): {
   commitCountByIssue: Map<string, number | null>;
   latestCommitByIssue: Map<string, { sha: string; message: string } | null>;
-}> {
+} {
   const commitCountByIssue = new Map<string, number | null>();
   const latestCommitByIssue = new Map<string, { sha: string; message: string } | null>();
-  await Promise.all(
-    [...mainWorkspaceMap.entries()]
-      .filter(([issueId, ws]) => !archivedIssueIds?.has(issueId) && ws.workingDir && ws.status !== "closed")
-      .map(async ([issueId, ws]) => {
-        const [latestCommit] = await Promise.all([
-          cachedGitOp(`latestCommit:${ws.workingDir}`, () => getLatestCommit(ws.workingDir!)),
-          (!ws.isDirect && !!(ws.baseBranch || defaultBranch))
-            ? cachedGitOp(`commitCount:${ws.workingDir}:${ws.baseBranch || defaultBranch}`, () => getCommitCountAhead(ws.workingDir!, (ws.baseBranch || defaultBranch) as string))
-                .then(count => { commitCountByIssue.set(issueId, count); })
-            : Promise.resolve(),
-        ]);
-        latestCommitByIssue.set(issueId, latestCommit);
-      })
-  );
+  const nowMs = Date.now();
+  for (const [issueId, ws] of mainWorkspaceMap) {
+    // `workingDir` being SET is not the same as it EXISTING. A worktree that was
+    // removed (or lived in a since-deleted fixture repo) still has its path on the
+    // row, and each such workspace would otherwise schedule 2 doomed git spawns on
+    // every board build (#277). A stat gets the same answer for free.
+    if (archivedIssueIds?.has(issueId)) continue;
+    if (!ws.workingDir || ws.status === "closed" || !dirExists(ws.workingDir)) continue;
+
+    latestCommitByIssue.set(
+      issueId,
+      ws.summaryHeadSha ? { sha: ws.summaryHeadSha, message: ws.summaryHeadMessage ?? "" } : null,
+    );
+    if (!ws.isDirect && !!(ws.baseBranch || defaultBranch) && ws.summaryCommitCount !== null) {
+      commitCountByIssue.set(issueId, ws.summaryCommitCount);
+    }
+
+    if (!isGitProjectionFresh(ws, nowMs)) {
+      runBgGit(() => refreshWorkspaceGitProjection(ws, defaultBranch, database));
+    }
+  }
   return { commitCountByIssue, latestCommitByIssue };
 }
 
@@ -276,16 +346,25 @@ function applyDiffStats(
     const wsId = mainWs.id;
     const workingDir = mainWs.workingDir!;
     const headShaAtRefresh = currentHeadSha;
+    // G13: only a write that CHANGED the board-visible numbers invalidates the
+    // board ETag generation — a steady-state refresh rewriting identical stats
+    // must not thrash the memo.
     runBgGit(() =>
       getDiffShortstat(workingDir, diffRef)
         .then(stats => {
+          const changed =
+            stats.filesChanged !== mainWs.diffStatCacheFilesChanged ||
+            stats.insertions !== mainWs.diffStatCacheInsertions ||
+            stats.deletions !== mainWs.diffStatCacheDeletions;
           updateWorkspaceDiffStatCache(wsId, {
             diffStatCacheCheckedAt: new Date().toISOString(),
             diffStatCacheHeadSha: headShaAtRefresh,
             diffStatCacheFilesChanged: stats.filesChanged,
             diffStatCacheInsertions: stats.insertions,
             diffStatCacheDeletions: stats.deletions,
-          }, database).catch(() => {});
+          }, database)
+            .then(() => { if (changed) notifySummaryWriteThrough(wsId); })
+            .catch(() => {});
         })
         .catch(() => {})
     );
@@ -303,13 +382,33 @@ function scheduleCodeMetricsRefresh(
     : Infinity;
   if (codeMetricsCacheAge < CODE_METRICS_CACHE_TTL_MS) return;
   const wsId = mainWs.id;
+  const previousMetricsJson = mainWs.codeMetricsJson;
   runBgGit(() =>
     computeWorkspaceCodeMetrics(wsId, database)
       .then((metrics: WorkspaceCodeMetrics | null) => {
         if (metrics && summary.main?.id === wsId) summary.main.codeMetrics = metrics;
+        // G13: computeWorkspaceCodeMetrics wrote the row through — invalidate the
+        // board ETag generation only when the metric VALUES moved (computedAt
+        // always changes, so compare the payload fields, not the whole blob).
+        if (metrics && codeMetricsValuesChanged(previousMetricsJson, metrics)) {
+          notifySummaryWriteThrough(wsId);
+        }
       })
       .catch(() => {})
   );
+}
+
+/** Whether freshly computed code metrics differ from the previously stored blob,
+ * ignoring the always-moving `computedAt` stamp (G13 change gate). */
+function codeMetricsValuesChanged(previousJson: string | null, metrics: WorkspaceCodeMetrics): boolean {
+  if (!previousJson) return true;
+  try {
+    const prev = JSON.parse(previousJson) as WorkspaceCodeMetrics;
+    return JSON.stringify({ coverage: prev.coverage ?? null, lint: prev.lint ?? null, complexity: prev.complexity ?? null })
+      !== JSON.stringify({ coverage: metrics.coverage ?? null, lint: metrics.lint ?? null, complexity: metrics.complexity ?? null });
+  } catch {
+    return true;
+  }
 }
 
 // Phase 5c: conflict detection for non-direct idle/fixing workspaces — stale-while-revalidate.
@@ -348,11 +447,18 @@ function applyConflicts(
       runBgGit(() =>
         detectConflicts(workingDir, baseBranch)
           .then(result => {
+            // G13 change gate — see applyDiffStats.
+            const files = JSON.stringify(result.conflictingFiles);
+            const changed =
+              result.hasConflicts !== mainWs.conflictCacheHasConflicts ||
+              files !== mainWs.conflictCacheFiles;
             updateWorkspaceConflictCache(wsId, {
               conflictCacheCheckedAt: new Date().toISOString(),
               conflictCacheHasConflicts: result.hasConflicts,
-              conflictCacheFiles: JSON.stringify(result.conflictingFiles),
-            }, database).catch(() => {});
+              conflictCacheFiles: files,
+            }, database)
+              .then(() => { if (changed) notifySummaryWriteThrough(wsId); })
+              .catch(() => {});
           })
           .catch(() => {})
       );
@@ -429,6 +535,12 @@ async function attachSessionData(
   const sessionRows = await getSessionsForWorkspaces(mainWsIds, database);
   const latestByWs = selectLatestSessionsByWorkspace(sessionRows, isAnalyticsNoise);
 
+  // G9: the session list query no longer ships every historical session's stats
+  // blob — fetch stats for just the ~1-per-workspace winner rows in one small
+  // IN query (contextTokens is attached for every main, closed included).
+  const statsRows = await getSessionStatsByIds([...latestByWs.values()].map((s) => s.id), database);
+  const statsBySession = new Map(statsRows.map((r) => [r.id, r.stats]));
+
   // lastTool / lastAssistantMessage are only consumed for non-closed, non-archived
   // workspaces (AgentGrid hides closed; MonitorPopover only shows active/reviewing/
   // fixing; board cards never render lastAssistantMessage; archived issues render via
@@ -456,7 +568,8 @@ async function attachSessionData(
     summary.main.lastSessionAt = sess.status === "running" ? sess.startedAt : sess.endedAt;
     summary.main.sessionStatus = sess.status;
     summary.main.lastSessionTriggerType = sess.triggerType;
-    if (sess.stats) summary.main.contextTokens = parseContextTokensFromStats(sess.stats);
+    const stats = statsBySession.get(sess.id) ?? null;
+    if (stats) summary.main.contextTokens = parseContextTokensFromStats(stats);
     summary.main.lastTool = lastToolBySession.get(sess.id) ?? null;
     summary.main.lastAssistantMessage = lastAssistantMsgBySession.get(sess.id) ?? null;
   }
@@ -465,6 +578,10 @@ async function attachSessionData(
 // Phase 8 I/O: for each candidate session, derive its last tool name and last
 // assistant message — preferring the live .out stdout file and falling back to the
 // persisted session_messages rows for historical sessions with no file.
+
+/** Bounded fan-out for the per-session .out tail reads (#401). */
+const TAIL_READ_CONCURRENCY = 5;
+
 async function collectLastToolAndMessages(
   latestSessionIds: string[],
   database: Database,
@@ -473,19 +590,46 @@ async function collectLastToolAndMessages(
   const lastAssistantMsgBySession = new Map<string, string>();
   if (latestSessionIds.length === 0) return { lastToolBySession, lastAssistantMsgBySession };
 
-  // Prefer .out file for stdout; fall back to DB for historical sessions
+  // Prefer .out file for stdout; fall back to DB for historical sessions.
+  //
+  // BOUNDED read (#341): this used to be a full readFileSync of every candidate
+  // session's transcript on the event loop. %TEMP% holds multi-MB .out files
+  // (5.5 MB measured), and a board/graph rebuild does this for every non-closed
+  // main workspace — tens of MB of synchronous I/O per cold rebuild, which
+  // blocks the single Node thread for every other request. The last tool /
+  // assistant message lives in the final JSONL lines by construction, so a
+  // 256 KB tail is sufficient; readSessionStdoutFileTail drops the partial
+  // first line so callers only ever see complete lines.
+  //
+  // Side effect, deliberate: extractToolName/extractAssistantMessage return the
+  // FIRST match in the window they are given, so with a whole-file read
+  // `lastTool` was really the session's FIRST tool. Over a tail window it now
+  // reflects recent activity, which is what the field name promises.
+  //
+  // ASYNC + bounded fan-out (#401): the tail reads used to be synchronous
+  // (openSync/readSync, 256 KB each) in a sequential for-loop — one event-loop
+  // block per non-closed workspace per board rebuild. They now run through
+  // fs.promises with a small worker pool so at most TAIL_READ_CONCURRENCY file
+  // handles are open at once and the loop stays free between reads.
   const needsDb: string[] = [];
-  for (const sid of latestSessionIds) {
-    const fileContent = readSessionStdoutFile(sid);
-    if (fileContent === null) {
-      needsDb.push(sid);
-      continue;
+  let nextIdx = 0;
+  const tailWorker = async (): Promise<void> => {
+    while (nextIdx < latestSessionIds.length) {
+      const sid = latestSessionIds[nextIdx++];
+      const fileContent = await readSessionStdoutFileTailAsync(sid);
+      if (fileContent === null) {
+        needsDb.push(sid);
+        continue;
+      }
+      const toolName = extractToolName(fileContent);
+      if (toolName) lastToolBySession.set(sid, toolName);
+      const assistantMessage = extractAssistantMessage(fileContent);
+      if (assistantMessage) lastAssistantMsgBySession.set(sid, assistantMessage);
     }
-    const toolName = extractToolName(fileContent);
-    if (toolName) lastToolBySession.set(sid, toolName);
-    const assistantMessage = extractAssistantMessage(fileContent);
-    if (assistantMessage) lastAssistantMsgBySession.set(sid, assistantMessage);
-  }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(TAIL_READ_CONCURRENCY, latestSessionIds.length) }, tailWorker),
+  );
 
   if (needsDb.length > 0) {
     const msgRows = await getSessionMessagesForSessions(needsDb, database);

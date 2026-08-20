@@ -1,5 +1,5 @@
 import type { SessionManager } from "../services/session.manager.js";
-import type { BoardEvents } from "../services/board-events.js";
+import type { BoardEventSink } from "../services/board-events.js";
 import type { Database } from "../db/index.js";
 import { createWorkspaceService } from "../services/workspace.service.js";
 import type { CreateWorkspaceInput } from "../services/workspace.service.js";
@@ -17,11 +17,14 @@ import {
   bucketScorecardScores,
 } from "../lib/workspace-stats.js";
 import { clampDays, cutoffDayFor, subDays, buildDateAxis } from "../lib/analytics-window.js";
+import { startCreateJob, completeCreateJob, failCreateJob, getCreateJob } from "../services/create-job.service.js";
+import { conditionalJsonResponse } from "../services/board-etag-cache.service.js";
+import { claimIssueForAutoStart } from "../services/auto-start-claim.js";
 
 export function createWorkspacesRoute(
   database: Database,
   getSessionManager?: () => SessionManager,
-  options?: { boardEvents?: BoardEvents },
+  options?: { boardEvents?: BoardEventSink },
 ) {
   const router = createRouter();
 
@@ -114,6 +117,7 @@ export function createWorkspacesRoute(
       tddMode?: boolean;
       includeVisualProof?: boolean;
       skipSetup?: boolean;
+      installMode?: "sequential" | "parallel" | "background";
       customPrompt?: string;
       clarifications?: string;
       skillId?: string;
@@ -122,6 +126,7 @@ export function createWorkspacesRoute(
       claudeProfile?: string;
       model?: string;
       skipContextPacker?: boolean;
+      repoScope?: string[];
     }>(c);
     if (!body.issueId) {
       return c.json({ error: "issueId is required" }, 400);
@@ -138,6 +143,7 @@ export function createWorkspacesRoute(
       tddMode: body.tddMode === true,
       includeVisualProof: body.includeVisualProof === true,
       skipSetup: body.skipSetup === true,
+      installMode: body.installMode,
       customPrompt: body.customPrompt,
       clarifications: body.clarifications,
       skillId: body.skillId,
@@ -146,6 +152,7 @@ export function createWorkspacesRoute(
       claudeProfile: body.claudeProfile,
       model: body.model,
       skipContextPacker: body.skipContextPacker === true,
+      repoScope: Array.isArray(body.repoScope) ? body.repoScope : undefined,
     } satisfies CreateWorkspaceInput);
     return c.json(result);
   });
@@ -168,6 +175,10 @@ export function createWorkspacesRoute(
 
     const limitParam = c.req.query("limit");
     const offsetParam = c.req.query("offset");
+    // #511 deliberately does NOT use queryInt here: absent limit/offset must stay
+    // `undefined` (meaning "no pagination"), which is a third state queryInt cannot
+    // express — it always returns a number. Converting these would silently impose a
+    // default page size on every unpaginated caller.
     const limitParsed = limitParam ? parseInt(limitParam, 10) : NaN;
     const offsetParsed = offsetParam ? parseInt(offsetParam, 10) : NaN;
     const limit = !isNaN(limitParsed) ? Math.max(1, limitParsed) : undefined;
@@ -181,10 +192,31 @@ export function createWorkspacesRoute(
       { issueId: issueId ?? undefined, projectId: projectId ?? undefined, statusFilter, limit, offset },
       database,
     );
-    return c.json(rows);
+    // Conditional GET: content-hash ETag over the serialized list, 304 with no
+    // body when the client's If-None-Match still matches (frequent polls).
+    return conditionalJsonResponse(JSON.stringify(rows), c.req.header("if-none-match"));
   });
 
-  // POST /api/workspaces — create workspace with worktree + auto-launch agent
+  // GET /api/workspaces/create-jobs/:jobId — the tracked state of an async workspace
+  // creation started with `POST /api/workspaces?async=1`. `null` means this process has
+  // no record (unknown id, evicted, or the server restarted mid-create).
+  // Must be registered BEFORE /:id to avoid `create-jobs` being matched as an ID param.
+  router.get("/create-jobs/:jobId", (c) => {
+    const jobId = c.req.param("jobId");
+    const job = getCreateJob(jobId);
+    if (!job) return c.json({ job: null, message: "no create job with this id in the current server process" });
+    return c.json({ job });
+  });
+
+  // POST /api/workspaces — create workspace with worktree + auto-launch agent.
+  //
+  // Provisioning (worktree + branch, per-worktree dependency install, sibling-repo
+  // worktrees, context packer) is minutes-long on real projects (#269: measured 514s
+  // total, worktree-setup alone 294s), so `?async=1` records the creation as a job
+  // (create-job.service.ts) and returns `202 + jobId` immediately; poll
+  // GET /api/workspaces/create-jobs/:jobId for the verdict. The default stays
+  // SYNCHRONOUS for back-compat — the UI, CLI, and MCP all read branch/workingDir
+  // from this response body today.
   router.post("/", async (c) => {
     const body = await parseJsonBody<{
       issueId?: string;
@@ -197,6 +229,7 @@ export function createWorkspacesRoute(
       tddMode?: boolean;
       includeVisualProof?: boolean;
       skipSetup?: boolean;
+      installMode?: "sequential" | "parallel" | "background";
       customPrompt?: string;
       clarifications?: string;
       skillId?: string;
@@ -205,13 +238,19 @@ export function createWorkspacesRoute(
       claudeProfile?: string;
       model?: string;
       skipContextPacker?: boolean;
+      repoScope?: string[];
+      memberIssueIds?: string[];
     }>(c);
     const isDirect = body.isDirect === true;
     if (!body.issueId) {
       return c.json({ error: "issueId is required" }, 400);
     }
+    // Ticket group (#661): additional issues served by this one workspace.
+    const memberIssueIds = Array.isArray(body.memberIssueIds)
+      ? body.memberIssueIds.filter((v): v is string => typeof v === "string" && v.length > 0)
+      : undefined;
 
-    const result = await workspaceService.createWorkspace({
+    const input = {
       issueId: body.issueId,
       branch: body.branch,
       isDirect,
@@ -222,6 +261,7 @@ export function createWorkspacesRoute(
       tddMode: body.tddMode === true,
       includeVisualProof: body.includeVisualProof === true,
       skipSetup: body.skipSetup === true,
+      installMode: body.installMode,
       customPrompt: body.customPrompt,
       clarifications: body.clarifications,
       skillId: body.skillId,
@@ -230,7 +270,72 @@ export function createWorkspacesRoute(
       claudeProfile: body.claudeProfile,
       model: body.model,
       skipContextPacker: body.skipContextPacker === true,
-    } satisfies CreateWorkspaceInput);
+      repoScope: Array.isArray(body.repoScope) ? body.repoScope : undefined,
+      memberIssueIds,
+    } satisfies CreateWorkspaceInput;
+
+    const wantsAsync = ["1", "true", "yes"].includes((c.req.query("async") || "").toLowerCase());
+    if (wantsAsync) {
+      // #366 — `?autoStart=1` marks the caller as an AUTOMATIC starter (today: the monitor's
+      // auto-start passes). Automatic starters must be mutually exclusive per issue: the
+      // workspace row lands only at the END of provisioning, so the table-based
+      // "does this issue already have a workspace?" check every starter used is blind for
+      // minutes, and two starters both read "no workspace" and both provisioned. Measured
+      // live: one issue with two workspaces sharing a worktree, another with three rows
+      // across two branch slugs, two agent runs stranded on an unmerged branch.
+      //
+      // The claim is taken HERE rather than in the caller so the check and the registration
+      // stay in one synchronous pair (atomic on a single-threaded loop) — a caller that
+      // checked and then did an `await fetch` would race again. Deliberate multi-workspace
+      // creation (human New Workspace, provider showdown, scheduled runs) does NOT pass the
+      // flag and is unaffected.
+      const isAutoStarter = ["1", "true", "yes"].includes((c.req.query("autoStart") || "").toLowerCase());
+      const job = isAutoStarter ? claimIssueForAutoStart(input.issueId) : startCreateJob(input.issueId);
+      if (!job) {
+        return c.json(
+          { accepted: false, issueId: input.issueId, reason: "create_in_flight", error: "A workspace creation is already in flight for this issue" },
+          409,
+        );
+      }
+      // Ticket group (#661): an automatic starter claims every MEMBER too — a member is
+      // otherwise invisible to the table-based checks for the whole provisioning window,
+      // exactly the #366 blindness the lead's claim closes. A member whose claim fails
+      // (another starter is provisioning it) is DROPPED from the group rather than
+      // failing the whole create.
+      const memberJobs: Array<{ jobId: string }> = [];
+      if (isAutoStarter && input.memberIssueIds && input.memberIssueIds.length > 0) {
+        const claimed: string[] = [];
+        for (const memberId of input.memberIssueIds) {
+          const memberJob = claimIssueForAutoStart(memberId);
+          if (memberJob) {
+            memberJobs.push(memberJob);
+            claimed.push(memberId);
+          } else {
+            console.log(`[workspaces] ticket-group member ${memberId} dropped — a workspace creation is already in flight for it (#366)`);
+          }
+        }
+        input.memberIssueIds = claimed;
+      }
+      // Nothing awaits this promise; the job record IS the report. createWorkspace
+      // resolves with status:"error" for most failures (completeCreateJob maps that to
+      // a failed job) and only throws WorkspaceErrors (failCreateJob path).
+      void workspaceService
+        .createWorkspace(input)
+        .then((result) => {
+          completeCreateJob(job.jobId, result);
+          for (const memberJob of memberJobs) completeCreateJob(memberJob.jobId, result);
+        })
+        .catch((err: unknown) => {
+          failCreateJob(job.jobId, err);
+          for (const memberJob of memberJobs) failCreateJob(memberJob.jobId, err);
+        });
+      return c.json(
+        { accepted: true, jobId: job.jobId, issueId: input.issueId, statusUrl: `/api/workspaces/create-jobs/${job.jobId}` },
+        202,
+      );
+    }
+
+    const result = await workspaceService.createWorkspace(input);
     return c.json(result, 201);
   });
 
@@ -242,6 +347,19 @@ export function createWorkspacesRoute(
       return c.json({ error: "Workspace not found" }, 404);
     }
     return c.json(details);
+  });
+
+  // GET /api/workspaces/:id/dev-server-plan — the honest dev-server plan (command / health
+  // URL / port + provenance) the board would boot for this workspace's project. The
+  // diagnostics tab renders this instead of assuming the app's own 3001/5173 worktree
+  // ports, which are wrong for any other project (docker-compose / multi-repo, #100).
+  router.get("/:id/dev-server-plan", async (c) => {
+    const id = c.req.param("id");
+    const result = await workspaceService.getWorkspaceDevServerPlan(id);
+    if (!result) {
+      return c.json({ error: "Workspace not found" }, 404);
+    }
+    return c.json(result);
   });
 
   // PATCH /api/workspaces/:id

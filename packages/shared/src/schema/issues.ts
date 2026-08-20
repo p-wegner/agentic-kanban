@@ -21,6 +21,12 @@ export const issues = sqliteTable("issues", {
   dueDate: text("due_date"),
   // Optional link to an issue in an external tracker (Jira, Linear, GitHub, ...).
   // externalKey is the human-readable identifier (e.g. "PROJ-123"); externalUrl is the http/https deep link.
+  // KNOWN DEBT (#201): plugin loops (plugin-loop.service.ts) also stash their own
+  // machine-generated dedupe identity here as a `plugin-loop:<slug>:<loop>:<unit>` prefixed
+  // string, via pluginLoopUnitKey(). It works but overloads a column documented (and rendered
+  // in the UI) as a genuine external-tracker link. If a second board feature ever needs the
+  // same "created by a machine, dedupe on re-run" identity, split it into a dedicated nullable
+  // `source_key` column (or typed origin JSON) instead of growing this overload further.
   externalKey: text("external_key"),
   externalUrl: text("external_url"),
   // Configurable workflow graph this issue flows through (null = legacy status-only flow).
@@ -41,6 +47,12 @@ export const issues = sqliteTable("issues", {
   statusIdStatusChangedAtIdx: index("idx_issues_status_id_status_changed_at").on(table.statusId, table.statusChangedAt),
   projectIdStatusIdStatusChangedAtIdx: index("idx_issues_project_id_status_id_status_changed_at").on(table.projectId, table.statusId, table.statusChangedAt),
   projectIdIssueNumberIdx: uniqueIndex("idx_issues_project_id_issue_number").on(table.projectId, table.issueNumber),
+  // Plugin-loop unit lookups: three prefix-LIKE queries on external_key per loop per
+  // poll, always project-scoped (migration 0115, 2026-08-11 perf audit).
+  projectIdExternalKeyIdx: index("idx_issues_project_external_key").on(table.projectId, table.externalKey),
+  // Board/graph list shape "WHERE project_id = ? ORDER BY sort_order" — served
+  // index-ordered, no temp B-tree sort (migration 0116, 2026-08-11 perf audit G14e).
+  projectIdSortOrderIdx: index("idx_issues_project_sort_order").on(table.projectId, table.sortOrder),
 }));
 
 export const issuesRelations = relations(issues, ({ one, many }) => ({

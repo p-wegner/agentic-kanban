@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
+import { sortProjectHealth } from "../lib/projectHealthOrder.js";
 
 interface ProjectHealth {
   id: string;
@@ -10,6 +11,8 @@ interface ProjectHealth {
   issueCounts: Record<string, number>;
   totalIssues: number;
   warnings: string[];
+  /** #632 — how many of the project's repos were actually checked. */
+  reposChecked?: number;
 }
 
 interface ProjectHealthData {
@@ -102,7 +105,7 @@ export function ProjectHealthOverview({ activeProjectId, onProjectChange, onClos
               {data.projects.length === 0 && (
                 <p className="text-center py-8 text-gray-400 text-sm">No projects registered.</p>
               )}
-              {data.projects.map((project) => {
+              {sortProjectHealth(data.projects, activeProjectId).map((project) => {
                 const isActive = project.id === activeProjectId;
                 const hasWarnings = project.warnings.length > 0;
                 return (
@@ -137,6 +140,14 @@ export function ProjectHealthOverview({ activeProjectId, onProjectChange, onClos
                           {project.defaultBranch && (
                             <span className="ml-2 text-gray-500 dark:text-gray-400">
                               on <span className="font-mono">{project.defaultBranch}</span>
+                            </span>
+                          )}
+                          {/* #632: on a multi-repo project, say how many repos this verdict
+                              covers. Without it, "no warnings" for 1 of 17 checked repos
+                              renders identically to a genuinely clean project. */}
+                          {(project.reposChecked ?? 1) > 1 && (
+                            <span className="ml-2 text-gray-500 dark:text-gray-400">
+                              · {project.reposChecked} repos checked
                             </span>
                           )}
                         </div>

@@ -2,6 +2,14 @@
 
 ## Current Stage: Post-Stage 13 — Feature Extensions (DONE)
 
+## v0.1.9 (2026-07-21)
+- Multi-repo: manage-repositories panel on the `++` button (list leading + siblings, add/remove, count badge) + Settings "Create new" parity; **Make leading** to change which repo leads a project.
+- CLI `--json` output fixed (the `[db] opening` diagnostic moved off stdout); MCP catalog parity for the project-repo tools; #139 stale merge test.
+- Repaired the 3 chronically-red server suites (cli migration-tracking, git.service worktree collision, merge-response real-`netstat` teardown) at root cause.
+- Security: patched prod-dependency vulns (hono/ws/fast-uri/brace-expansion/ip-address/qs) → 0 high.
+- Internal: decomposed `project.service.ts` under the god-module ceiling; dropped the committed `smart-hooks-rules.json`.
+- Full details in `CHANGELOG.md`.
+
 ### Recent Features (2026-05-16)
 - [x] AI enhancement for ticket creation — "Enhance with AI" button spawns claude CLI to improve title/description (inline + expanded forms)
 - [x] Subagent visibility in terminal — proper ID-based tracking, visual indentation, styled headers, parsed results, todo-list task rendering

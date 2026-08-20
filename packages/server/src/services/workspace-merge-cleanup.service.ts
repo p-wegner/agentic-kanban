@@ -1,21 +1,25 @@
 import { applyOpenSpecDeltas, OPENSPEC_CHANGES_DIR, OPENSPEC_SPECS_DIR } from "@agentic-kanban/shared/lib/openspec";
-import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import type { Database } from "../db/index.js";
 import { persistWorkspaceCleanupWarning, getWorkspaceById } from "../repositories/workspace-merge-cleanup.repository.js";
-import type { SessionManager } from "./session.manager.js";
-import type { BoardEvents } from "./board-events.js";
+import type { SessionLauncher } from "./session.manager.js";
+import type { BoardEventSink } from "./board-events.js";
 import type { GitService } from "./workspace-internals.js";
 import { teardownWorktree } from "./workspace-teardown.service.js";
 import { computeWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
 import { generateAndPersistGithubHandoffDraft } from "./github-handoff-draft.service.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
-import { PREF_AUTO_START_FOLLOWUP } from "../constants/preference-keys.js";
 import { autoStartFollowups } from "./followup-workspace.service.js";
+import { resolveStartPolicy } from "./start-policy.service.js";
 import { autoStartUnblockedDependencyIssue } from "./dependency-auto-chain.service.js";
+import { listMemberIssueIds } from "../repositories/workspace-issue-members.repository.js";
 import { rebuildSharedIfChanged, runLearningStep } from "./merge-helpers.service.js";
 import { cleanupMergedWorktreeAndBranch } from "./merge-executor.service.js";
+import { cleanupSiblingWorktrees } from "./workspace-repos.service.js";
 import type { MergeWarning } from "./workspace-merge-prevalidation.service.js";
 import { applyDeferredWorkingTreeSync } from "@agentic-kanban/shared/lib/git-service";
+import { advanceLoopAfterMergedIssue } from "./plugin-loop-hooks.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { releaseWorkspaceResources } from "./workspace-resource-release.js";
 
 export type WorkspacePostMergeCleanupArgs = {
   workspaceId: string;
@@ -32,6 +36,8 @@ export type WorkspacePostMergeCleanupArgs = {
   isDirect: boolean;
   /** SHA returned by mergeBranch({ deferWorkingTreeSync: true }) — apply before any other cleanup. */
   pendingWorkingTreeSyncSha?: string | null;
+  /** Persisted ServiceStackState JSON (workspaces.service_state); non-null → tear the stack down. */
+  serviceState?: string | null;
 };
 
 export async function runWorkspacePostMergeCleanup(
@@ -40,28 +46,95 @@ export async function runWorkspacePostMergeCleanup(
     database: Database;
     gitService: GitService;
     killProcesses: (dir: string) => Promise<number>;
-    getSessionManager?: () => SessionManager;
-    boardEvents?: BoardEvents;
+    killPorts?: (ports: number[]) => Promise<number>;
+    killSupervisor?: (ports: number[]) => Promise<number>;
+    getSessionManager?: () => SessionLauncher;
+    boardEvents?: BoardEventSink;
   },
+  hooks: {
+    /**
+     * Fired as soon as the MAIN checkout's git state is consistent again — i.e.
+     * the deferred `git reset --hard` sync (the reason #970 extended the repo
+     * merge lock into this chain) has been applied. This is the point where the
+     * caller may release the per-repo merge lock: everything after it is
+     * worktree-/DB-/orchestration-scoped and a concurrent merge can no longer
+     * trip its dirty-main guard on the stale tree.
+     *
+     * Holding the lock through the WHOLE chain instead starved concurrent
+     * merges for many seconds ("A merge is already in progress", ages 1–20s) —
+     * and up to 3 MINUTES when the learning-step pref is on, because
+     * runLearningStep polls the learning session to completion in this chain.
+     */
+    onMainCheckoutSettled?: () => void;
+  } = {},
 ): Promise<void> {
   const warnings: MergeWarning[] = [];
   let mergeResult = args.mergeResult;
 
-  // Apply the deferred working-tree sync FIRST — before teardown frees the worktree —
-  // so git reset --hard runs after the HTTP response is already flushed and tsx
-  // hot-reload can no longer drop the in-flight connection.
-  if (args.pendingWorkingTreeSyncSha) {
-    try {
-      await applyDeferredWorkingTreeSync(args.repoPath, args.pendingWorkingTreeSyncSha);
-    } catch (err) {
-      console.warn("[workspace-merge] deferred working-tree sync failed (non-fatal):", err instanceof Error ? err.message : String(err));
+  // ── Locked prologue (when the caller extended the merge-lock hold): apply the
+  // deferred working-tree sync FIRST — before teardown frees the worktree — so
+  // git reset --hard runs after the HTTP response is already flushed and tsx
+  // hot-reload can no longer drop the in-flight connection (#686).
+  //
+  // #296 — RETRIED, because a one-shot failure here is what left the main checkout with
+  // the just-merged files STAGED FOR DELETION (HEAD advanced by update-ref, index/tree
+  // still at the old commit): the usual cause is a transient `.git/index.lock` held by a
+  // concurrent git writer (a plugin gate-resolve commit, another agent). Reproduced 4×
+  // on the pm-pipeline live run. On final failure the warning is PERSISTED as an issue
+  // comment (via recordCleanupWarnings below) instead of only a console line.
+  try {
+    if (args.pendingWorkingTreeSyncSha) {
+      let syncError: unknown = null;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          if (attempt > 0) await new Promise((r) => setTimeout(r, 1500 * attempt));
+          await applyDeferredWorkingTreeSync(args.repoPath, args.pendingWorkingTreeSyncSha);
+          syncError = null;
+          break;
+        } catch (err) {
+          syncError = err;
+          console.warn(`[workspace-merge] deferred working-tree sync attempt ${attempt + 1}/5 failed:`, errorMessage(err));
+        }
+      }
+      if (syncError) {
+        addRecoverableWarning(
+          warnings,
+          "deferred-working-tree-sync",
+          new Error(
+            `main checkout at ${args.repoPath} could not be synced to ${args.pendingWorkingTreeSyncSha} after 5 attempts — `
+            + `it may show the merged files as staged deletions until 'git reset --hard ${args.pendingWorkingTreeSyncSha}' is run (#296): `
+            + `${errorMessage(syncError)}`,
+          ),
+        );
+      }
     }
+  } finally {
+    hooks.onMainCheckoutSettled?.();
   }
 
+  // #298 — merge-to-advance: if this issue is a plugin-loop ticket, advance its loop now
+  // that the main checkout reflects the landed artifacts. Best-effort; non-loop issues
+  // return after one indexed select.
+  await advanceLoopAfterMergedIssue(args.issueId, deps.database);
+
+  // ── Lock-free long tail: worktree/DB/orchestration cleanup ──
+  // Every step is best-effort with its own guards; a failure here strands at most
+  // resources the startup reconcilers already recover (pruneStaleWorktrees for the
+  // worktree/branch, the stranded-sibling reconciler for sibling repos, the
+  // orphan-stack reaper for per-workspace service stacks).
+  //
+  // OpenSpec apply+commit below briefly dirties the main checkout outside the lock
+  // (rare — only when the merged branch shipped openspec deltas). At worst a
+  // concurrent merge in that ~subsecond window is refused with a transient
+  // dirty-main CONFLICT the monitor retries — strictly better than the pre-fix
+  // behavior of refusing EVERY merge for the whole chain's duration.
   await teardownMergedWorktree(args, deps, warnings);
   await collectCodeMetrics(args, deps.database, warnings);
   mergeResult = await applyOpenSpecPostMerge(args, deps, warnings, mergeResult);
   await removeWorktreeAndBranch(args, deps, warnings);
+  // Multi-repo: drop the sibling worktrees + branches too (no-op for single-repo);
+  // an unmerged sibling (failed post-prevalidation) is preserved for fix-up.
+  await cleanupSiblingWorktrees(deps.gitService, args.workspaceId, deps.database, { preserveUnmerged: true });
   await recordCleanupWarnings(args, deps.database, warnings);
 
   const postMergeChangedFiles = await getPostMergeChangedFiles(args, deps.gitService);
@@ -75,10 +148,21 @@ export async function runWorkspacePostMergeCleanup(
 
 async function teardownMergedWorktree(
   args: WorkspacePostMergeCleanupArgs,
-  deps: { killProcesses: (dir: string) => Promise<number> },
+  deps: {
+    killProcesses: (dir: string) => Promise<number>;
+    killPorts?: (ports: number[]) => Promise<number>;
+    killSupervisor?: (ports: number[]) => Promise<number>;
+  },
   warnings: MergeWarning[],
 ): Promise<void> {
   if (!args.workingDir || args.isDirect) return;
+  // Per-workspace Docker service stack down (only when one was provisioned) BEFORE the
+  // worktree is removed. Uses the STORED compose project name (#F1). Best-effort — the
+  // engine never throws.
+  await releaseWorkspaceResources(
+    { id: args.workspaceId, workingDir: args.workingDir, isDirect: args.isDirect, serviceState: args.serviceState },
+    { phase: "post-merge" },
+  );
   try {
     await teardownWorktree(
       {
@@ -89,7 +173,7 @@ async function teardownMergedWorktree(
         setupEnabled: args.setupEnabled,
         label: "merge",
       },
-      { killDir: deps.killProcesses },
+      { killDir: deps.killProcesses, killPorts: deps.killPorts, killSupervisor: deps.killSupervisor },
     );
   } catch (err) {
     addRecoverableWarning(warnings, "teardown-worktree", err);
@@ -136,6 +220,12 @@ async function removeWorktreeAndBranch(
   deps: { database: Database; gitService: GitService },
   warnings: MergeWarning[],
 ): Promise<void> {
+  // The devcontainer reap that used to sit here moved into
+  // `releaseWorkspaceResources` (#549), which runs a few lines earlier in
+  // `teardownMergedWorktree` — the container holds this directory's bind mount and
+  // dependency volumes, so it goes before ANYTHING touches the worktree, which is
+  // what the other seven terminal paths already did.
+
   await cleanupMergedWorktreeAndBranch({
     repoPath: args.repoPath,
     workingDir: args.workingDir,
@@ -143,11 +233,11 @@ async function removeWorktreeAndBranch(
     gitService: deps.gitService,
     onRemoveWorktreeError: async (err) => {
       addRecoverableWarning(warnings, "remove-worktree", err);
-      const warningMsg = err instanceof Error ? err.message : String(err);
+      const warningMsg = errorMessage(err);
       try {
         await persistWorkspaceCleanupWarning(args.workspaceId, warningMsg, args.workingDir ?? "", deps.database);
       } catch (dbErr) {
-        console.warn("[workspace-merge] failed to persist cleanup warning:", dbErr instanceof Error ? dbErr.message : String(dbErr));
+        console.warn("[workspace-merge] failed to persist cleanup warning:", errorMessage(dbErr));
       }
     },
     onBranchDeleted: () => console.log(`[workspace-service] deleted branch ${args.branch}`),
@@ -174,7 +264,7 @@ async function recordCleanupWarnings(
       createdAt: new Date().toISOString(),
     }, database);
   } catch (err) {
-    console.warn("[workspace-merge] failed to record post-merge cleanup warnings:", err instanceof Error ? err.message : String(err));
+    console.warn("[workspace-merge] failed to record post-merge cleanup warnings:", errorMessage(err));
   }
 }
 
@@ -186,7 +276,7 @@ async function getPostMergeChangedFiles(
   try {
     return await gitService.getChangedFilesBetween(args.repoPath, args.preMergeHead, "HEAD");
   } catch (err) {
-    console.warn("[workspace-merge] getChangedFilesBetween failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[workspace-merge] getChangedFilesBetween failed (non-fatal):", errorMessage(err));
     return [];
   }
 }
@@ -213,7 +303,7 @@ async function createGithubHandoffDraft(
       gitService: deps.gitService,
     });
   } catch (err) {
-    console.warn("[workspace-merge] post-merge handoff draft failed:", err instanceof Error ? err.message : String(err));
+    console.warn("[workspace-merge] post-merge handoff draft failed:", errorMessage(err));
   }
 }
 
@@ -221,13 +311,13 @@ async function rebuildSharedDist(repoPath: string, postMergeChangedFiles: string
   try {
     await rebuildSharedIfChanged(repoPath, postMergeChangedFiles);
   } catch (err) {
-    console.warn("[workspace-merge] shared dist rebuild failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[workspace-merge] shared dist rebuild failed (non-fatal):", errorMessage(err));
   }
 }
 
 async function runPostMergeLearningStep(
   args: WorkspacePostMergeCleanupArgs,
-  deps: { database: Database; getSessionManager?: () => SessionManager },
+  deps: { database: Database; getSessionManager?: () => SessionLauncher },
 ): Promise<void> {
   try {
     if (deps.getSessionManager) {
@@ -240,12 +330,18 @@ async function runPostMergeLearningStep(
 
 async function maybeAutoStartFollowups(
   args: WorkspacePostMergeCleanupArgs,
-  deps: { database: Database; getSessionManager?: () => SessionManager; boardEvents?: BoardEvents },
+  deps: { database: Database; getSessionManager?: () => SessionLauncher; boardEvents?: BoardEventSink },
 ): Promise<void> {
   try {
-    if (getBool(args.prefMap, PREF_AUTO_START_FOLLOWUP) && args.projectId && deps.getSessionManager) {
-      await autoStartFollowups(args.issueId, args.projectId, deps.database, deps.getSessionManager, args.prefMap, { boardEvents: deps.boardEvents });
-    }
+    if (!args.projectId || !deps.getSessionManager) return;
+    // Start Mode is the single source of truth for auto-start (decision 008), so the
+    // `auto_start_followup` pref alone is NOT enough: gated on the pref only, this path
+    // kept launching agents on a project whose Start Mode is `manual` — the one switch
+    // that is supposed to be a true kill-switch — and double-drove `conductor` projects.
+    // `postMergeFollowups` ANDs the mode with that same pref, mirroring how the sibling
+    // dependency cascade in dependency-auto-chain.service.ts is gated.
+    if (!resolveStartPolicy(args.prefMap, args.projectId).postMergeFollowups) return;
+    await autoStartFollowups(args.issueId, args.projectId, deps.database, deps.getSessionManager, args.prefMap, { boardEvents: deps.boardEvents });
   } catch (err) {
     console.warn("[workspace-merge] auto_start_followup check failed:", err);
   }
@@ -256,20 +352,25 @@ async function maybeAutoStartUnblockedDependency(
   deps: {
     database: Database;
     gitService: GitService;
-    getSessionManager?: () => SessionManager;
-    boardEvents?: BoardEvents;
+    getSessionManager?: () => SessionLauncher;
+    boardEvents?: BoardEventSink;
   },
 ): Promise<void> {
   try {
-    await autoStartUnblockedDependencyIssue({
-      database: deps.database,
-      projectId: args.projectId,
-      completedIssueId: args.issueId,
-      prefMap: args.prefMap,
-      getSessionManager: deps.getSessionManager,
-      boardEvents: deps.boardEvents,
-      gitService: deps.gitService,
-    });
+    // Ticket group (#661): a merged group completes N issues, so dependents of ANY
+    // member may have just unblocked — run the cascade once per completed issue.
+    const completedIssueIds = [args.issueId, ...await listMemberIssueIds(args.workspaceId, deps.database)];
+    for (const completedIssueId of completedIssueIds) {
+      await autoStartUnblockedDependencyIssue({
+        database: deps.database,
+        projectId: args.projectId,
+        completedIssueId,
+        prefMap: args.prefMap,
+        getSessionManager: deps.getSessionManager,
+        boardEvents: deps.boardEvents,
+        gitService: deps.gitService,
+      });
+    }
   } catch (err) {
     console.warn("[workspace-merge] dependency auto-chain check failed:", err);
   }
@@ -314,7 +415,7 @@ async function recordOpenSpecNote(
       createdAt: new Date().toISOString(),
     }, database);
   } catch (dbErr) {
-    console.warn("[workspace-merge] failed to record openspec note:", dbErr instanceof Error ? dbErr.message : String(dbErr));
+    console.warn("[workspace-merge] failed to record openspec note:", errorMessage(dbErr));
   }
 }
 
@@ -338,7 +439,7 @@ async function commitOpenSpecPaths(repoPath: string, branch: string, gitService:
 }
 
 function addRecoverableWarning(warnings: MergeWarning[], step: string, err: unknown): void {
-  const message = err instanceof Error ? err.message : String(err);
+  const message = errorMessage(err);
   warnings.push({ step, message, recoverable: true });
   console.warn(`[workspace-merge] ${step} failed after git merge landed (recoverable):`, message);
 }

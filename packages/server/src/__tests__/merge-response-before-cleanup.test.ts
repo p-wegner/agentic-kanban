@@ -3,6 +3,15 @@ import { randomUUID } from "node:crypto";
 import { issues, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
+import { activeMerges } from "../services/workspace-internals.js";
+import { makeTempRepo } from "./helpers/temp-repo.js";
+
+/**
+ * A REAL repo path (#273). This suite drives the actual merge path, whose repo lock
+ * refuses a repoPath with no `.git` and then POLLS — so the old `"/repo"` literal made
+ * every test here burn its full timeout instead of running.
+ */
+const REPO_PATH = makeTempRepo();
 
 /**
  * Regression test: POST /workspaces/:id/merge must return its JSON response
@@ -39,6 +48,13 @@ function makeGitService(overrides: Partial<Record<string, (...args: unknown[]) =
   };
 }
 
+// The post-merge worktree teardown frees the worktree's derived dev ports via real
+// `netstat`/`taskkill` (killProcessesOnPorts / killDevServerSupervisorOnPorts). In a unit
+// test that is slow AND could kill a genuine dev server on those ports (an `ak-99` worktree
+// resolves to 3100/5272), so every service here injects no-op port/supervisor killers — the
+// same hermeticity the existing `processKiller` stub already provides for the in-dir kill.
+const noopKill = async (_ports: number[]): Promise<number> => 0;
+
 async function seedWorkspace(db: ReturnType<typeof createTestDb>["db"]) {
   const now = new Date().toISOString();
   const projectId = randomUUID();
@@ -49,7 +65,7 @@ async function seedWorkspace(db: ReturnType<typeof createTestDb>["db"]) {
   await db.insert(projects).values({
     id: projectId,
     name: "Test",
-    repoPath: "/repo",
+    repoPath: REPO_PATH,
     repoName: "repo",
     defaultBranch: "master",
     createdAt: now,
@@ -78,7 +94,7 @@ async function seedWorkspace(db: ReturnType<typeof createTestDb>["db"]) {
     id: workspaceId,
     issueId,
     branch: "feature/ak-99-test",
-    workingDir: "/repo/.worktrees/feature_ak-99-test",
+    workingDir: `${REPO_PATH}/.worktrees/feature_ak-99-test`,
     baseBranch: "master",
     isDirect: false,
     status: "idle",
@@ -107,6 +123,8 @@ describe("merge endpoint response before cleanup", () => {
 
     const svc = createWorkspaceMergeService({
       database: db,
+      portKiller: noopKill,
+      supervisorKiller: noopKill,
       gitService: git as never,
       createBackup: async () => {},
     });
@@ -130,6 +148,8 @@ describe("merge endpoint response before cleanup", () => {
 
     const svc = createWorkspaceMergeService({
       database: db,
+      portKiller: noopKill,
+      supervisorKiller: noopKill,
       gitService: git as never,
       createBackup: async () => {},
     });
@@ -151,6 +171,8 @@ describe("merge endpoint response before cleanup", () => {
 
     const svc = createWorkspaceMergeService({
       database: db,
+      portKiller: noopKill,
+      supervisorKiller: noopKill,
       gitService: git as never,
       createBackup: async () => {},
       processKiller,
@@ -178,6 +200,8 @@ describe("merge endpoint response before cleanup", () => {
 
     const svc = createWorkspaceMergeService({
       database: db,
+      portKiller: noopKill,
+      supervisorKiller: noopKill,
       gitService: git as never,
       createBackup: async () => {},
     });
@@ -214,6 +238,8 @@ describe("merge endpoint response before cleanup", () => {
 
     const svc = createWorkspaceMergeService({
       database: db,
+      portKiller: noopKill,
+      supervisorKiller: noopKill,
       gitService: git as never,
       createBackup: async () => {},
       processKiller,
@@ -257,6 +283,8 @@ describe("merge endpoint response before cleanup", () => {
     const git = makeGitService();
     const svc = createWorkspaceMergeService({
       database: db,
+      portKiller: noopKill,
+      supervisorKiller: noopKill,
       gitService: git as never,
       createBackup: async () => {},
     });
@@ -281,13 +309,19 @@ describe("merge endpoint response before cleanup", () => {
     // — the important thing is mergedAt is set so it CAN be reconciled
   });
 
-  it("mergeBranch is called with deferWorkingTreeSync:true so git reset --hard runs after the response (#686)", async () => {
+  it("deferWorkingTreeSync is now OPT-IN per caller: on by request (#686), off by default (#350)", async () => {
     // Regression for #686: git reset --hard (syncWorkingTreeHard) was called synchronously
     // inside mergeBranch() during the HTTP request. On every merge tsx hot-reload detected
     // the new .ts files and restarted the server before the response was flushed, dropping
     // the connection mid-request (~10s outage). The fix: deferWorkingTreeSync:true skips
     // the reset inside mergeBranch and embeds a [pending-wt-sync:<sha>] tag in the output;
     // runWorkspacePostMergeCleanup calls applyDeferredWorkingTreeSync after setImmediate.
+    //
+    // #350 narrowed it: that deferral is also what left the main checkout showing the merged
+    // files as staged DELETIONS for ~32s, which silently stalled a pm-pipeline planner reading
+    // artifacts from that checkout. Only a caller with a live HTTP response to protect gets the
+    // deferral now, and it must ASK — hence `deferMainCheckoutSync: true` below, which is what
+    // the `POST /:id/merge` route passes. Everything else syncs inline.
     const { workspaceId } = await seedWorkspace(db);
 
     let mergeBranchOptions: Record<string, unknown> | undefined;
@@ -300,14 +334,17 @@ describe("merge endpoint response before cleanup", () => {
 
     const svc = createWorkspaceMergeService({
       database: db,
+      portKiller: noopKill,
+      supervisorKiller: noopKill,
       gitService: git as never,
       createBackup: async () => {},
     });
 
-    await svc.mergeWorkspace(workspaceId);
-
-    // mergeBranch must have been called with deferWorkingTreeSync:true
+    await svc.mergeWorkspace(workspaceId, { deferMainCheckoutSync: true });
     expect(mergeBranchOptions).toMatchObject({ deferWorkingTreeSync: true });
+    // The default-OFF half of the contract is asserted in merge-shared-core-routing.test.ts
+    // ("doMerge syncs the main checkout INLINE by default"), where the merge core is stubbed and
+    // a second merge in one test does not have to re-satisfy the whole git pre-flight.
   });
 
   it("working-tree sync is deferred: applyDeferredWorkingTreeSync runs after mergeWorkspace resolves (#686)", async () => {
@@ -336,12 +373,15 @@ describe("merge endpoint response before cleanup", () => {
     const git = makeGitService({ mergeBranch });
     const svc = createWorkspaceMergeService({
       database: db,
+      portKiller: noopKill,
+      supervisorKiller: noopKill,
       gitService: git as never,
       createBackup: async () => {},
       processKiller,
     });
 
-    const result = await svc.mergeWorkspace(workspaceId);
+    // Opts into the deferral explicitly (#350): this test is ABOUT the deferred ordering.
+    const result = await svc.mergeWorkspace(workspaceId, { deferMainCheckoutSync: true });
     mergeResolved = true;
     void syncCalledAt; // suppress lint
 
@@ -375,6 +415,8 @@ describe("merge endpoint response before cleanup", () => {
 
     const svc = createWorkspaceMergeService({
       database: db,
+      portKiller: noopKill,
+      supervisorKiller: noopKill,
       gitService: git as never,
       createBackup: async () => {},
       processKiller,
@@ -390,5 +432,68 @@ describe("merge endpoint response before cleanup", () => {
     expect(result).toMatchObject({ id: workspaceId, mergeOutput: expect.any(String) });
     // The processKiller must never have run while mergeResolved was still false.
     expect(killerCalledBeforeResolve).toBe(false);
+  });
+
+  it("repo merge lock releases at main-checkout-settled — a second merge is not refused while the cleanup long tail still runs", async () => {
+    // Regression for the merge-lock starvation class: the lock hold (#970) used to
+    // cover the ENTIRE post-merge cleanup chain (process kills, worktree/branch
+    // removal, metrics, handoff, learning step, auto-starts). A slow step there —
+    // subprocess hops, a failing DB write, or the up-to-3-minute learning poll —
+    // kept `activeMerges` populated, so every other merge on the repo was refused
+    // with "A merge is already in progress" for the whole duration. The lock must
+    // release as soon as the MAIN checkout is consistent (deferred reset --hard +
+    // OpenSpec commit), with the long tail running lock-free.
+    const first = await seedWorkspace(db);
+    const second = await seedWorkspace(db);
+
+    // Gate the phase-2 long tail: processKiller (teardown step) blocks until released.
+    let releaseTeardown!: () => void;
+    const teardownGate = new Promise<void>((resolve) => { releaseTeardown = resolve; });
+    const processKiller = vi.fn(async () => {
+      await teardownGate;
+      return 0;
+    });
+
+    // Per-call ancestry: odd calls = pre-merge (not an ancestor → real merge),
+    // even calls = post-merge verification (merge landed). Works for BOTH merges,
+    // unlike the shared default counter (which would route merge 2 down the
+    // already-merged reconcile path).
+    let ancestorCalls = 0;
+    const git = makeGitService({
+      checkBranchTipIsAncestor: vi.fn(async () => {
+        ancestorCalls++;
+        if (ancestorCalls % 2 === 1) return { isAncestor: false as const, branchSha: "branch-sha-456", baseSha: "base-sha-789" };
+        return { isAncestor: true as const, branchSha: "branch-sha-456", baseSha: "merge-sha-123" };
+      }),
+    });
+
+    const svc = createWorkspaceMergeService({
+      database: db,
+      portKiller: noopKill,
+      supervisorKiller: noopKill,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller,
+    });
+
+    const result1 = await svc.mergeWorkspace(first.workspaceId);
+    expect(result1).toMatchObject({ id: first.workspaceId, merged: true });
+
+    // Phase 2 is parked inside processKiller, yet the lock must already be gone.
+    await vi.waitFor(() => {
+      expect(processKiller).toHaveBeenCalled();
+      expect(activeMerges.size).toBe(0);
+    });
+
+    // Second merge on the SAME repo proceeds instead of throwing
+    // "A merge is already in progress".
+    const result2 = await svc.mergeWorkspace(second.workspaceId);
+    expect(result2).toMatchObject({ id: second.workspaceId, merged: true });
+
+    // Unblock both cleanups and drain them so they cannot race later tests.
+    releaseTeardown();
+    await vi.waitFor(() => {
+      expect(git.deleteBranch).toHaveBeenCalledTimes(2);
+    });
   });
 });

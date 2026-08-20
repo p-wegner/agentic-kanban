@@ -63,8 +63,6 @@ function makeNodeRepo(branch: string): string {
   const dir = mkdtempSync(join(tmpdir(), "kanban-repair-"));
   const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, stdio: "pipe" });
   git("init", "-b", branch);
-  git("config", "user.email", "test@example.com");
-  git("config", "user.name", "Repair Test");
   git("config", "commit.gpgsign", "false");
   writeFileSync(
     join(dir, "package.json"),

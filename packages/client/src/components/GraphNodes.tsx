@@ -1,4 +1,5 @@
 import type { MouseEvent as ReactMouseEvent, MutableRefObject } from "react";
+import { graphNodeMatches } from "../hooks/useGraphSearch.js";
 import { BRAND, STATUS_COLORS, TYPE_COLORS } from "../lib/chartColors";
 import type { CriticalPathResult } from "../lib/criticalPath.js";
 import {
@@ -16,6 +17,8 @@ interface GraphNodesProps {
   selectedNode: string | null;
   focusIssueId?: string;
   searchQuery?: string;
+  /** Issue ids the SERVER matched for the current query (#370); null while unresolved. */
+  searchMatches?: Set<string> | null;
   isCriticalPathMode: boolean;
   criticalPathResult: CriticalPathResult | null;
   rootBlockerIds: Set<string>;
@@ -33,6 +36,7 @@ export function GraphNodes({
   selectedNode,
   focusIssueId,
   searchQuery,
+  searchMatches,
   isCriticalPathMode,
   criticalPathResult,
   rootBlockerIds,
@@ -49,9 +53,11 @@ export function GraphNodes({
         const color = STATUS_COLORS[node.issue.statusName] ?? "#6b7280";
         const isSelected = selectedNode === node.id;
         const isFocused = focusIssueId === node.id;
+        // #370 — `node.issue.description` has been undefined since the payload diet, so this
+        // second clause silently never matched. Highlighting now uses the same matcher the filter
+        // uses, so a node that is IN the filtered set is highlighted for the same reason.
         const isHighlighted = searchQuery
-          ? node.issue.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            (node.issue.description?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false)
+          ? graphNodeMatches(searchQuery, node.id, node.issue.title, searchMatches ?? null)
           : true;
         const title = node.issue.title;
         const displayTitle = title.length > 28 ? title.slice(0, 28) + "…" : title;

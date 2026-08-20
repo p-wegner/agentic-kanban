@@ -28,6 +28,13 @@ describe("CLI preferences set — provider-key divergence guard (#973)", () => {
   let projectId: string;
 
   beforeEach(async () => {
+    // The suite shares one DB across tests. Since #335 the guard considers EVERY
+    // project holding a Strategy Bullseye (not just whatever `activeProjectId`
+    // points at), so a previous test's leftover project + `board_strategy_*` pref
+    // would silently gate the next test's write. Reset both so each test's premise
+    // is the only state in play.
+    await database.delete(schema.preferences);
+    await database.delete(schema.projects);
     projectId = randomUUID();
     await database.insert(schema.projects).values({
       id: projectId,

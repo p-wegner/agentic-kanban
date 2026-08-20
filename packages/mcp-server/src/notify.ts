@@ -1,11 +1,12 @@
 import { boardApiUrl } from "./server-url.js";
+import type { BoardEventReason } from "@agentic-kanban/shared/lib/board-events-contract";
 
 /**
  * Fire-and-forget notification to the main server to broadcast a board_changed event.
  * Used by MCP tools after mutations so connected browsers refresh immediately
  * instead of waiting for the next polling cycle.
  */
-export function notifyBoard(projectId: string, reason: string) {
+export function notifyBoard(projectId: string, reason: BoardEventReason) {
   fetch(boardApiUrl("/api/internal/board-notify"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },

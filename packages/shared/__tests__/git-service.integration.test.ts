@@ -15,14 +15,40 @@ import {
   getWorkingTreeDiff,
   isAncestor,
   mergeBranch,
-  revParse,
   syncBranchToHead,
 } from "../src/lib/git-service.js";
+
+/**
+ * Per-test budget for this suite (#206). Every test here drives a REAL git repo through many
+ * `git` spawns, so its cost tracks process-spawn latency, not the code under test. Under load
+ * (several agent sessions on one machine, Defender scanning a fresh temp repo) the file was
+ * observed taking 304s wall while every assertion still passed — at the previous 30s budget the
+ * merge gate went red for diffs that touch no git code at all. A hang still never completes, so
+ * this only removes the false red, it does not hide a stuck test.
+ */
+const GIT_IO_TIMEOUT_MS = Number(process.env.VITEST_GIT_IO_TIMEOUT) || 120_000;
 
 interface TempRepo {
   root: string;
   origin: string;
   repo: string;
+}
+
+/**
+ * Ground-truth `rev-parse`, run OUT-OF-BAND via the raw helper below (#621).
+ *
+ * This used to be git-service's own `revParse`, which goes through the adapter's read-dedupe
+ * memo. Every mutation in this suite is made with the raw `git()` helper — deliberately, so
+ * the fixture is independent of the code under test — and the adapter cannot see those, so a
+ * memoized read within the ~1.5s TTL returns a PRE-mutation sha.
+ *
+ * That produced a genuinely confusing failure: the suite recorded `detachedHead` as the
+ * pre-commit sha, `syncBranchToHead` then correctly moved the branch to the REAL head, and the
+ * assertion compared a correct value against a stale expectation. A test that verifies
+ * out-of-band commit recovery has to read ground truth out-of-band too.
+ */
+async function revParse(repo: string, ref: string): Promise<string> {
+  return (await git(repo, ["rev-parse", ref])).trim();
 }
 
 function git(cwd: string, args: string[]): Promise<string> {
@@ -61,9 +87,7 @@ async function createRepo(): Promise<TempRepo> {
   return { root, origin, repo };
 }
 
-async function configureUser(repo: string): Promise<void> {
-  await git(repo, ["config", "user.email", "test@example.local"]);
-  await git(repo, ["config", "user.name", "Git Service Test"]);
+async function configureUser(_repo: string): Promise<void> {
 }
 
 async function writeRepoFile(repo: string, relativePath: string, content: string): Promise<void> {
@@ -113,7 +137,7 @@ describe("git-service integration", () => {
 
   beforeEach(async () => {
     temp = await createRepo();
-  }, 30000);
+  }, GIT_IO_TIMEOUT_MS);
 
   afterEach(async () => {
     await rm(temp.root, { recursive: true, force: true });
@@ -135,7 +159,7 @@ describe("git-service integration", () => {
     expect((await fileContent(temp.repo, "clean.txt")).trim()).toBe("clean branch");
     expect((await git(temp.repo, ["show", "main:clean.txt"])).trim()).toBe("clean branch");
     expect((await git(temp.repo, ["status", "--porcelain"])).trim()).toBe("");
-  }, 30000);
+  }, GIT_IO_TIMEOUT_MS);
 
   it("mergeBranch rejects conflicts without committing conflict markers", async () => {
     await seedCommittedFile(
@@ -189,7 +213,7 @@ describe("git-service integration", () => {
       expect(historicalContent).not.toContain("=======");
       expect(historicalContent).not.toContain(">>>>>>>");
     }
-  }, 30000);
+  }, GIT_IO_TIMEOUT_MS);
 
   it("mergeBranch self-heals a desynced checkout, never leaving tracked files deleted (#692)", async () => {
     // Regression for #692: a failed/interrupted merge attempt left the main checkout
@@ -244,7 +268,7 @@ describe("git-service integration", () => {
       expect(existsSync(join(temp.repo, ...path.split("/")))).toBe(true);
       expect(trimmedContent(await fileContent(temp.repo, path))).toBe(trimmedContent(content));
     }
-  }, 30000);
+  }, GIT_IO_TIMEOUT_MS);
 
   it("a stale deferred working-tree sync never deletes files a concurrent merge added (#771)", async () => {
     // #771: the board defers the working-tree sync past the HTTP response, so two
@@ -307,7 +331,7 @@ describe("git-service integration", () => {
     const deleted = (await git(temp.repo, ["diff", "--name-only", "--diff-filter=D", "HEAD"])).trim();
     expect(deleted).toBe("");
     expect((await git(temp.repo, ["status", "--porcelain"])).trim()).toBe("");
-  }, 30000);
+  }, GIT_IO_TIMEOUT_MS);
 
   it("detectConflicts reports conflicts without touching HEAD, index, or working tree", async () => {
     await seedCommittedFile(
@@ -347,7 +371,7 @@ describe("git-service integration", () => {
     expect(trimmedContent(beforeContent)).toBe("line 1\nfeature edit\nline 3");
     expect(beforeContent).not.toContain("<<<<<<<");
     expect(existsSync(join(temp.repo, ".git", "MERGE_HEAD"))).toBe(false);
-  }, 30000);
+  }, GIT_IO_TIMEOUT_MS);
 
   it("getWorkingTreeDiff includes untracked files", async () => {
     await writeRepoFile(temp.repo, "scratch/untracked.txt", "untracked content\nsecond line\n");
@@ -358,7 +382,7 @@ describe("git-service integration", () => {
     expect(diff).toContain("new file mode 100644");
     expect(diff).toContain("+untracked content");
     expect(diff).toContain("+second line");
-  }, 30000);
+  }, GIT_IO_TIMEOUT_MS);
 
   it("detectConflictsByBranch detects conflicts between two named branches without a worktree", async () => {
     await seedCommittedFile(
@@ -394,7 +418,7 @@ describe("git-service integration", () => {
     expect(result.hasConflicts).toBe(true);
     expect(result.conflictingFiles).toContain("branch-conflict.txt");
     expect((await git(temp.repo, ["status", "--porcelain"])).trim()).toBe("");
-  }, 30000);
+  }, GIT_IO_TIMEOUT_MS);
 
   it("detectConflictsByBranch returns no conflicts for non-overlapping branches", async () => {
     const branchBase = await revParse(temp.repo, "main");
@@ -423,7 +447,7 @@ describe("git-service integration", () => {
 
     expect(result.hasConflicts).toBe(false);
     expect(result.conflictingFiles).toHaveLength(0);
-  }, 30000);
+  }, GIT_IO_TIMEOUT_MS);
 
   it("getCommitCountAhead returns correct ahead count for feature branch", async () => {
     const baseCommit = await revParse(temp.repo, "main");
@@ -443,7 +467,7 @@ describe("git-service integration", () => {
     const count = await getCommitCountAhead(temp.repo, "main");
 
     expect(count).toBe(2);
-  }, 30000);
+  }, GIT_IO_TIMEOUT_MS);
 
   it("getCommitCountAhead returns 0 for a branch at the same commit as base", async () => {
     await git(temp.repo, ["checkout", "main"]);
@@ -451,7 +475,7 @@ describe("git-service integration", () => {
     const count = await getCommitCountAhead(temp.repo, "main");
 
     expect(count).toBe(0);
-  }, 30000);
+  }, GIT_IO_TIMEOUT_MS);
 
   it("isAncestor correctly identifies ancestor/non-ancestor relationships", async () => {
     const mainSha = await revParse(temp.repo, "main");
@@ -468,7 +492,7 @@ describe("git-service integration", () => {
     expect(await isAncestor(temp.repo, mainSha, featureSha)).toBe(true);
     expect(await isAncestor(temp.repo, featureSha, mainSha)).toBe(false);
     expect(await isAncestor(temp.repo, mainSha, mainSha)).toBe(true);
-  }, 30000);
+  }, GIT_IO_TIMEOUT_MS);
 
   it("syncBranchToHead and ensureOnBranch recover commits made from detached HEAD", async () => {
     await commitFiles(
@@ -494,5 +518,5 @@ describe("git-service integration", () => {
     expect(await getCurrentBranch(temp.repo)).toBe("feature/detached-guard");
     expect(await revParse(temp.repo, "HEAD")).toBe(detachedHead);
     expect((await fileContent(temp.repo, "detached.txt")).trim()).toBe("detached head commit");
-  }, 30000);
+  }, GIT_IO_TIMEOUT_MS);
 });

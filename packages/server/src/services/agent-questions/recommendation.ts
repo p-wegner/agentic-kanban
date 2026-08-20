@@ -3,11 +3,11 @@
  * and coerce the JSON reply into per-question {@link AgentQuestionRecommendation}s.
  */
 import type { Database } from "../../db/index.js";
-import { getPreference } from "../../repositories/preferences.repository.js";
-import { getRuntimeState } from "../../repositories/runtime-state.repository.js";
 import { getProjectRow } from "../../repositories/agent-questions.repository.js";
 import { ensureButlerSession, sendButlerTurn, subscribeButler, getButlerSession } from "../butler-sdk.service.js";
+import { resolveButlerLaunchConfig } from "../butler-definitions.service.js";
 import type { AgentQuestionRecommendation, RecommendInput } from "./types.js";
+import { extractModelJson } from "@agentic-kanban/shared/lib/model-json";
 
 function buildRecommendationPrompt(input: RecommendInput): string {
   const issueRef = input.issueNumber !== null ? `#${input.issueNumber}: ${input.issueTitle}` : input.issueTitle;
@@ -44,18 +44,9 @@ function buildRecommendationPrompt(input: RecommendInput): string {
   return lines.join("\n");
 }
 
-/** Strip code fences / leading prose and extract the first JSON array in the text. */
+/** Strip code fences / surrounding prose and extract the first JSON array in the text. */
 export function extractJsonArray(text: string): unknown {
-  if (!text) throw new Error("empty butler response");
-  let s = text.trim();
-  // Strip ```json ... ``` or ``` ... ```
-  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fence) s = fence[1].trim();
-  // Find first '[' and last ']' to tolerate leading/trailing prose.
-  const start = s.indexOf("[");
-  const end = s.lastIndexOf("]");
-  if (start === -1 || end === -1 || end <= start) throw new Error("no JSON array found in butler response");
-  return JSON.parse(s.slice(start, end + 1));
+  return extractModelJson(text, { shape: "array" });
 }
 
 export function coerceRecommendation(raw: unknown, optionCount: number, multi: boolean): AgentQuestionRecommendation | null {
@@ -89,18 +80,19 @@ export async function recommendQuestionsForSet(
   if (!getButlerSession(projectId).active) {
     const project = await getProjectRow(projectId, db);
     if (!project) throw new Error(`project not found: ${projectId}`);
-    const claudeProfile = (await getPreference(`butler_profile_${projectId}`, db))
-      || (await getPreference("claude_profile", db))
-      || undefined;
-    const model = (await getPreference(`butler_model_${projectId}`, db)) || undefined;
-    const resumeSessionId = (await getRuntimeState(`butler_session_${projectId}`, db)) || undefined;
+    const launch = await resolveButlerLaunchConfig(projectId, "default", db);
     ensureButlerSession({
       projectId,
       repoPath: project.repoPath,
       projectName: project.name,
-      claudeProfile,
-      model,
-      resumeSessionId,
+      backend: launch.backend,
+      claudeProfile: launch.claudeProfile,
+      profile: launch.profile,
+      agentCommand: launch.agentCommand,
+      agentArgs: launch.agentArgs,
+      codexHome: launch.codexHome,
+      model: launch.model,
+      resumeSessionId: launch.resumeSessionId,
     });
   }
 

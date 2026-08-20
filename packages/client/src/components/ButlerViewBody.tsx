@@ -11,6 +11,7 @@ import { AgentQuestionsPanel } from "./AgentQuestionsPanel.js";
 import { ButlerVoiceButton } from "./ButlerVoiceButton.js";
 import { ButlerManageModal } from "./ButlerManageModal.js";
 import { ChatBubble } from "./ButlerChatParts.js";
+import type { ButlerQuestionAnswer } from "../lib/butler-event-reducer.js";
 import { ActivityStrip } from "./ButlerChrome.js";
 import { ButlerTabBar } from "./ButlerTabBar.js";
 
@@ -31,12 +32,13 @@ interface ButlerViewBodyProps {
   commandMenuOpen: boolean;
   fetchButlers: () => Promise<ButlerListItem[]>;
   filteredCommands: ButlerCommand[];
-  formatRelativeTs: (ts: number, now?: number) => string;
+  formatRelativeTs: (ts: number, nowMs?: number) => string;
   formatWindow: (n: number) => string;
   handleClearContext: () => Promise<void>;
   handleKeyDown: (e: ReactKeyboardEvent<HTMLTextAreaElement>) => void;
   handleModelChange: (value: string) => Promise<void>;
   handleProfileChange: (value: string) => Promise<void>;
+  handleAnswerQuestion: (askId: string, answers: ButlerQuestionAnswer[]) => Promise<void>;
   handleSend: (explicitContent?: string) => Promise<void>;
   handleStart: () => Promise<void>;
   handleStop: () => Promise<void>;
@@ -83,7 +85,7 @@ export function ButlerViewBody({
   applyCommand,   availableToOpen,   backendLabel,   canOpenMore,   closeTab,   columns,   
   commandIndex,   commandIndexRef,   commandMenuOpen,   fetchButlers,   filteredCommands,   
   formatRelativeTs,   formatWindow,   handleClearContext,   handleKeyDown,   handleModelChange,   
-  handleProfileChange,   handleSend,   handleStart,   handleStop,   hasButler,   hasDictatedRef,   
+  handleAnswerQuestion,   handleProfileChange,   handleSend,   handleStart,   handleStop,   hasButler,   hasDictatedRef,   
   inputRef,   inputValuesRef,   interimVoiceText,   isDictating,   liveActivity,   liveStats,   
   manageOpen,   messagesEndRef,   modelSelectRef,   onIssueClick,   openCustomize,   openHistory,   
   openHistoryTranscript,   openTab,   openTabs,   profileSelectRef,   projectId,   renameButler,   
@@ -395,7 +397,7 @@ export function ButlerViewBody({
             )}
             <div className="max-w-3xl mx-auto">
               {tab.chatMessages.map((msg) => (
-                <ChatBubble key={msg.id} msg={msg} />
+                <ChatBubble key={msg.id} msg={msg} onAnswerQuestion={handleAnswerQuestion} />
               ))}
               {tab.sending && (
                 <div className="flex justify-start mb-3">

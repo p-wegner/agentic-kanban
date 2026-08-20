@@ -1,0 +1,179 @@
+/**
+ * Process-wide per-OPERATION counters (#359).
+ *
+ * ── Why per-operation, and why per-phase timing was not enough ──
+ *
+ * `lastCyclePhaseTimings` (#347) answered "which phase was slow" and, asked three times on a quiet
+ * machine, gave three different confident answers about "the" blocker:
+ *
+ * | phase | window A | window B | round 5 (3 consecutive cycles) |
+ * |---|---|---|---|
+ * | `processing-candidates` | 126.3s (92%) | 69.5s (51%) | 89s / 157s / 194s (85-88%) |
+ * | `compounding-setup` | **1 ms** | **54.7s (40%)** | — |
+ * | `resource-sweep` | 9.0s | 4.3s | 3.1s / 19.2s / 26.5s |
+ * | total | 137.6s | 136.5s | 105s / 180s / 222s |
+ *
+ * Optimising whichever phase happened to look worst is how a round gets spent moving cost around.
+ * What no phase timer can say is WHICH OPERATION the seconds went into — a git spawn, a libsql
+ * round trip, a synchronous multi-MB file read — and that is the thing that actually recurs across
+ * phases. #349's fix came from exactly this kind of attribution (82 synchronous libsql round trips
+ * in one scan), and the same class of defect is the prior here.
+ *
+ * ── What it deliberately is not ──
+ *
+ * Not a histogram, not a tracing library, not sampled. A `Map` lookup plus four number adds per
+ * operation, so it can sit on the git adapter and the preference read without becoming the thing it
+ * measures. There is no timer, no async context and no per-call allocation beyond the label string
+ * the caller already has.
+ *
+ * Counters are cumulative for the process lifetime; callers take a `snapshot()` before and after a
+ * window and `diffOperations` them. That makes the same registry usable by the monitor (per phase),
+ * a route (per request) and a test, without any of them owning reset semantics — a shared reset
+ * would let two readers silently zero each other's baseline.
+ */
+
+import { feedOperationWindows } from "./operation-windows.js";
+
+export interface OperationStat {
+  /** How many times the operation ran in this window. */
+  calls: number;
+  /** Summed wall-clock duration in ms. For SYNC operations this is also event-loop block time. */
+  totalMs: number;
+  /** Worst single call in ms — a p50 hides the multi-second block that makes /api/health bimodal. */
+  maxMs: number;
+  /**
+   * Calls that blocked the event loop (a synchronous spawn or a synchronous file read). Split out
+   * because 60s of awaited git and 60s of `execFileSync` cost the same wall clock and have
+   * completely different consequences for every other request on the server.
+   */
+  blockingCalls: number;
+  /** Summed duration of the blocking calls only. */
+  blockingMs: number;
+  /**
+   * Summed lifetime of the CHILD PROCESS itself, for the calls that can measure it (#359).
+   *
+   * `totalMs` for an ASYNC spawn is call-to-callback, which includes the event-loop wait before
+   * Node delivers the callback — so on a saturated loop a 90ms git process is recorded as a
+   * multi-second git call. That inflation is what made `rev-parse` read as a 9.2s average with
+   * `blockingMs: 0`, while an out-of-process harness measures `git --version` at 88-138ms on the
+   * same machine. Keep both numbers: `childMs` is what the command cost, `totalMs - childMs` is
+   * what it WAITED, and only the split is actionable.
+   */
+  childMs: number;
+  /** Worst single measured child lifetime. */
+  maxChildMs: number;
+  /** Calls that reported a child lifetime — the denominator for `childMs`. */
+  childMeasuredCalls: number;
+}
+
+export type OperationSnapshot = Record<string, OperationStat>;
+
+const EMPTY_STAT: OperationStat = {
+  calls: 0, totalMs: 0, maxMs: 0, blockingCalls: 0, blockingMs: 0,
+  childMs: 0, maxChildMs: 0, childMeasuredCalls: 0,
+};
+
+/**
+ * `maxMs` and duplicate-call counts cannot be derived from cumulative counters (a max is not
+ * differenceable, and a repeat is a property of a window, not of a running total). Both live in
+ * `operation-windows`, which every `recordOperation` also feeds — see that module's header.
+ */
+
+const counters = new Map<string, OperationStat>();
+
+function statFor(label: string): OperationStat {
+  let stat = counters.get(label);
+  if (!stat) {
+    stat = { ...EMPTY_STAT };
+    counters.set(label, stat);
+  }
+  return stat;
+}
+
+/**
+ * Record one operation.
+ *
+ * @param label      Stable, LOW-CARDINALITY identifier — `"git:rev-list"`, `"db:getPreference"`.
+ *                   Never interpolate an id, a path or a project into it: the registry is a live
+ *                   map with no eviction, so unbounded labels would be a slow leak.
+ * @param durationMs Wall clock for the call.
+ * @param blocking   True when the call ran synchronously on the event loop.
+ * @param dedupeKey  Identity of this exact call (for git: the cwd plus the argv). Only ever used
+ *                   by an open measurement window, to count how many calls in that window were an
+ *                   exact repeat of an earlier one — i.e. the ceiling on what a window-scoped memo
+ *                   could remove. Never stored in the cumulative registry: that map has no
+ *                   eviction and a key carries paths, refs and sometimes SHAs.
+ */
+export function recordOperation(
+  label: string,
+  durationMs: number,
+  blocking = false,
+  dedupeKey?: string,
+  childMs?: number,
+): void {
+  feedOperationWindows(label, durationMs, blocking, dedupeKey, childMs);
+  const stat = statFor(label);
+  stat.calls += 1;
+  stat.totalMs += durationMs;
+  if (durationMs > stat.maxMs) stat.maxMs = durationMs;
+  if (blocking) {
+    stat.blockingCalls += 1;
+    stat.blockingMs += durationMs;
+  }
+  if (childMs !== undefined) {
+    stat.childMeasuredCalls += 1;
+    stat.childMs += childMs;
+    if (childMs > stat.maxChildMs) stat.maxChildMs = childMs;
+  }
+}
+
+/** A copy of the current cumulative counters. Safe to hold — never mutated afterwards. */
+export function snapshotOperations(): OperationSnapshot {
+  const out: OperationSnapshot = {};
+  for (const [label, stat] of counters) out[label] = { ...stat };
+  return out;
+}
+
+/**
+ * What happened between two snapshots. Labels with no calls in the window are omitted, so a phase
+ * that did nothing reports `{}` rather than a wall of zeros.
+ *
+ * `maxMs` is the LATER snapshot's high-water mark when it grew in this window, and 0 otherwise —
+ * a cumulative max cannot be differenced, and reporting the all-time max against a quiet window
+ * would attribute an earlier phase's worst call to this one.
+ */
+export function diffOperations(before: OperationSnapshot, after: OperationSnapshot): OperationSnapshot {
+  const out: OperationSnapshot = {};
+  for (const [label, now] of Object.entries(after)) {
+    const then = before[label] ?? EMPTY_STAT;
+    const calls = now.calls - then.calls;
+    if (calls <= 0) continue;
+    out[label] = {
+      calls,
+      totalMs: now.totalMs - then.totalMs,
+      maxMs: now.maxMs > then.maxMs ? now.maxMs : 0,
+      blockingCalls: now.blockingCalls - then.blockingCalls,
+      blockingMs: now.blockingMs - then.blockingMs,
+      childMs: now.childMs - then.childMs,
+      maxChildMs: now.maxChildMs > then.maxChildMs ? now.maxChildMs : 0,
+      childMeasuredCalls: now.childMeasuredCalls - then.childMeasuredCalls,
+    };
+  }
+  return out;
+}
+
+/**
+ * The operations that cost the most time in a window, worst first — what a reader actually wants
+ * out of a diff. `limit` keeps a phase's report to a readable size in the monitor-status payload.
+ */
+export function topOperations(diff: OperationSnapshot, limit = 8): Array<OperationStat & { label: string }> {
+  return Object.entries(diff)
+    .map(([label, stat]) => ({ label, ...stat }))
+    .sort((a, b) => b.totalMs - a.totalMs)
+    .slice(0, limit);
+}
+
+/** Test seam only. Production never resets — see the module header on why callers diff instead. */
+export function resetOperationsForTest(): void {
+  counters.clear();
+}

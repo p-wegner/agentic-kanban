@@ -18,9 +18,15 @@ import { registerDriveCommand } from "./commands/drive.js";
 import { registerButlerCommand } from "./commands/butler.js";
 import { registerSystemCommands } from "./commands/system.js";
 import { registerTagCommand } from "./commands/tag.js";
+import { registerBacklogCommand } from "./commands/backlog.js";
 import { registerOpenspecCommand } from "./commands/openspec.js";
 import { registerBoardCommand } from "./commands/board.js";
+import { registerServicesCommand } from "./commands/services.js";
+import { registerWorkerCommand } from "./commands/worker.js";
 import { runMigrations, logDefaultBranch } from "./shared.js";
+import { homeFallbackDbWarning } from "./db-warning.js";
+import { checkAndRecordDbResolution } from "./last-resolved-db.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 const program = new Command();
 
@@ -55,8 +61,42 @@ registerDriveCommand(program);
 registerButlerCommand(program);
 registerSystemCommands(program);
 registerTagCommand(program);
+registerBacklogCommand(program);
 registerOpenspecCommand(program);
 registerBoardCommand(program);
+registerServicesCommand(program);
+registerWorkerCommand(program);
+
+// ── Split-brain guards (#112, #165): warn loudly whenever a CLI subcommand's
+// resolved DB might not be the one the user expects.
+// - #112: resolved to the home-fallback DB while a dev server started from a
+//   checkout would use the in-checkout packages/server/kanban.db instead.
+// - #165: resolved to a DIFFERENT database than the immediately preceding CLI
+//   invocation — the exact symptom that let an empty shadow DB go unnoticed
+//   across several calls in one session before this fix. db/index.ts already
+//   logs the resolved path/source on every invocation (stderr, unconditionally —
+//   kept off stdout so it never corrupts `--json` output, see its own comment).
+// preAction only fires for action subcommands — never for --help/--version —
+// and both checks are non-fatal.
+program.hook("preAction", async (_thisCommand, actionCommand) => {
+  // `worker` commands are pure HTTP/WebSocket clients — a worker machine has no
+  // board checkout and no board database. Probing DB resolution there would
+  // print the split-brain warning ("this CLI may be reading/writing a DIFFERENT
+  // database") on a machine where no database is involved at all, which reads
+  // as a real problem during the documented worker-connect flow. Skip it.
+  for (let cmd: typeof actionCommand | null = actionCommand; cmd; cmd = cmd.parent) {
+    if (cmd.name() === "worker") return;
+  }
+  try {
+    const { DB_LOCATION } = await import("../db/data-dir.js");
+    const homeFallback = homeFallbackDbWarning(DB_LOCATION);
+    if (homeFallback) console.warn(homeFallback);
+    const flip = checkAndRecordDbResolution(DB_LOCATION);
+    if (flip) console.warn(flip);
+  } catch {
+    // Non-fatal: never let the DB-source probe block a command.
+  }
+});
 
 // ── `pnpm cli -- <args>` forwards a literal "--" as the first script argument.
 // Commander treats a leading "--" as "end of options", so every token after it
@@ -146,7 +186,7 @@ if (!hasArgs) {
         if (err) console.warn("  Could not open browser:", err.message);
       });
     } catch (err) {
-      console.error("Error:", err instanceof Error ? err.message : String(err));
+      console.error("Error:", errorMessage(err));
       process.exit(1);
     }
   })();

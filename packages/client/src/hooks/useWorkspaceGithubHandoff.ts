@@ -5,7 +5,10 @@ import { showToast } from "../lib/toast.js";
 interface UseWorkspaceGithubHandoffDeps {
   setActionLoading: (v: boolean) => void;
   setError: (msg: string | null) => void;
-  onWorkspaceChange?: () => void;
+  /** The board-surface invalidation, which is async. Typing it `() => void` hid that from
+   *  every caller, so a rejection could only surface as an unhandled rejection
+   *  (no-misused-promises). */
+  onWorkspaceChange?: () => void | Promise<void>;
 }
 
 /**
@@ -29,7 +32,7 @@ export function useWorkspaceGithubHandoff({ setActionLoading, setError, onWorksp
       } catch {
         showToast("GitHub draft generated", "success");
       }
-      onWorkspaceChange?.();
+      void onWorkspaceChange?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to generate GitHub draft");
     } finally {
@@ -52,6 +55,8 @@ export function useWorkspaceGithubHandoff({ setActionLoading, setError, onWorksp
     setError(null);
     try {
       const url = `/api/workspaces/${wsId}/handoff-bundle?format=markdown`;
+      // eslint-disable-next-line no-restricted-syntax -- text/markdown download: the body is
+      // read as text and turned into a Blob, not a JSON read for the query layer.
       const res = await fetch(url);
       if (!res.ok) {
         const data = await res.json() as { error?: string };

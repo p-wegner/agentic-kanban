@@ -1,20 +1,10 @@
-import { PREF_MERGE_STRATEGY } from "../constants/preference-keys.js";
-import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
-import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
-
-export type MergeStrategy = "direct" | "monitor" | "merge_queue";
-
-export function resolveMergeStrategy(prefMap: Map<string, string>): MergeStrategy {
-  const configured = prefMap.get(PREF_MERGE_STRATEGY);
-  if (configured === "direct" || configured === "monitor" || configured === "merge_queue") {
-    return configured;
-  }
-
-  // Preserve legacy behavior: the in-process monitor owned merges when enabled;
-  // otherwise the lightweight queue orchestrator owned reviewed workspaces.
-  return getBool(prefMap, "auto_monitor") ? "monitor" : "merge_queue";
-}
-
-export function isAutomaticMergeEnabled(prefMap: Map<string, string>): boolean {
-  return isAutoMergeEnabled(prefMap) && resolveMergeStrategy(prefMap) !== "direct";
-}
+// The merge-policy resolver moved to `shared/lib/merge-policy` (#546) so a SERVICE can read
+// it without importing `startup/`. This facade keeps the import path every consumer — and
+// every suite that mocks it — already uses.
+export {
+  resolveMergeStrategy,
+  resolveMergePolicy,
+  isAutomaticMergeEnabled,
+  MERGE_STRATEGY_PREF_KEY,
+} from "@agentic-kanban/shared/lib/merge-policy";
+export type { MergeStrategy, MergePolicy } from "@agentic-kanban/shared/lib/merge-policy";

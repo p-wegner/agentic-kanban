@@ -1,3 +1,4 @@
+import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { projectStatuses } from "@agentic-kanban/shared/schema";
 import { sql } from "drizzle-orm";
 import { db } from "../db/index.js";
@@ -39,16 +40,16 @@ export function resolveContractMode(value: string | undefined): ContractMode {
   }
 }
 
-const CONTRACT_KEY_RE = /^auto_contract_coupled_([0-9a-f-]+)$/;
+const contractPref = projectPref("auto_contract_coupled");
 
 /** Project ids whose `auto_contract_coupled_<id>` pref resolves to a non-off mode. */
 export function contractModeByProject(prefMap: Map<string, string>): Map<string, ContractMode> {
   const out = new Map<string, ContractMode>();
   for (const [key, value] of prefMap) {
-    const m = CONTRACT_KEY_RE.exec(key);
-    if (!m) continue;
+    const projectId = contractPref.projectIdOf(key);
+    if (!projectId) continue;
     const mode = resolveContractMode(value);
-    if (mode !== "off") out.set(m[1], mode);
+    if (mode !== "off") out.set(projectId, mode);
   }
   return out;
 }

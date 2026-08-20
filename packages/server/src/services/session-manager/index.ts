@@ -28,3 +28,10 @@ function createSessionManager(
 
 export { createSessionManager };
 export type SessionManager = ReturnType<typeof createSessionManager>;
+
+/**
+ * The narrow port for consumers that only start and stop agent sessions (#560) —
+ * which is nearly all of them: `startSession` + `stopSession` are 79 of the 90
+ * non-wiring uses. See the `BoardEventSink` note in `board-events.ts` for why.
+ */
+export type SessionLauncher = Pick<SessionManager, "startSession" | "stopSession">;

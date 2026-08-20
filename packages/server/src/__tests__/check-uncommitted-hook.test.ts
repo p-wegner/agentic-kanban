@@ -82,8 +82,6 @@ describe("check-uncommitted hook — trackedSourceChanges porcelain parsing", ()
   beforeEach(async () => {
     repo = await mkdtemp(join(tmpdir(), "ak-uncommitted-hook-"));
     await git(repo, ["init", "-q", "-b", "main"]);
-    await git(repo, ["config", "user.email", "t@t"]);
-    await git(repo, ["config", "user.name", "t"]);
     for (let i = 0; i < 5; i++) {
       await writeFileIn(repo, `packages/shared/src/f${i}.ts`, `export const f${i} = ${i};\n`);
     }

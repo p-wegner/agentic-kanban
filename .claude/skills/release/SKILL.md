@@ -26,7 +26,7 @@ curl -s http://127.0.0.1:3001/api/projects/d28f01c9-3fd3-488b-9eb4-d66268c4f7d4/
 
 **1.4 Typecheck** — `pnpm -r exec tsc -b --noEmit` across all packages. Any error → ABORT.
 
-**1.5 Tests** — `pnpm --filter agentic-kanban test:mine` (excludes documented-flaky #89). If `test:mine` absent (pre-#89), fall back to `pnpm --filter agentic-kanban test` and tolerate ONLY the CLAUDE.md "Known Flaky Test Suites". Any new failure → ABORT.
+**1.5 Tests** — `pnpm test:mine` from the repo ROOT (#640: the old command here, `pnpm --filter agentic-kanban test:mine`, named a script that does not exist in `packages/server/package.json` — `test:mine` is a root script). For a release, prefer `pnpm test:full`, which is the only command that runs the suites `test:mine` excludes; the exclusion list and its reasons are documented at the top of `scripts/test-mine.mjs`. Any new failure → ABORT.
 
 **1.6 Build** — `pnpm build`, then the [[skill-publish]] step-2 checks: `grep -c "agentic-kanban/shared" packages/server/dist/cli.js` must be 0; `cd packages/server && npm pack --dry-run` → expected files, ~400KB, no invalid bin warnings. Any deviation → ABORT.
 
@@ -113,19 +113,31 @@ gh release create vX.Y.Z --title "vX.Y.Z" --notes-file /tmp/release-notes-vX.Y.Z
 ```
 The trailing path attaches the SBOM; if 1.9 was skipped, omit it.
 
+`git push origin vX.Y.Z` triggers the `docker-publish` GitHub Actions workflow (`.github/workflows/docker-publish.yml`), which builds the root `Dockerfile` and pushes `pwegner3141/agentic-kanban:X.Y.Z` + `:X.Y` + `:latest` to Docker Hub.
+
+> **⚠️ CI Docker publish currently FAILS — publish the image manually.** The workflow needs repo secrets `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` that are **not set** (verify: `gh secret list` is empty), so the tag-triggered run dies at `docker/login-action`. Until they're added, build + push locally as part of the release:
+> ```bash
+> for tag in X.Y.Z X.Y latest; do docker build -t pwegner3141/agentic-kanban:$tag . && docker push pwegner3141/agentic-kanban:$tag; done
+> docker manifest inspect pwegner3141/agentic-kanban:latest >/dev/null && echo "latest present"
+> ```
+> To wire CI up permanently (then this manual step goes away): `gh secret set DOCKERHUB_USERNAME --body "pwegner3141"` and `gh secret set DOCKERHUB_TOKEN --body "<Docker Hub access token>"`. See `docs/deployment.md` → "Docker Hub Image".
+
 ## Stage 7 — Verify
 ```bash
 npm view agentic-kanban version       # should match
 gh release view vX.Y.Z                # should exist
 git ls-remote origin refs/tags/vX.Y.Z # should resolve
+gh run list --workflow=docker-publish.yml --branch vX.Y.Z --limit 1  # FAILS until DOCKERHUB_* secrets are set (see Stage 6)
+docker manifest inspect pwegner3141/agentic-kanban:X.Y.Z >/dev/null && echo "image present"  # ground-truth check
 ```
-Print the three ✓ lines (npm published, GitHub release URL, git tag pushed).
+Print the four ✓ lines (npm published, GitHub release URL, git tag pushed, Docker Hub image published — via CI once secrets exist, else the manual build+push).
 
 ## Recovery / abort
 - **Stage 1 / 2 / 3 abort** — nothing changed; fix and re-run.
 - **Stage 4 done, Stage 5 aborts** — local commit + tag remain: `git tag -d vX.Y.Z && git reset --hard HEAD^`.
 - **npm published, git push fails** — `npm deprecate agentic-kanban@X.Y.Z "release aborted, see vX.Y.Z+1"`, then bump and re-run from Stage 1.
 - **npm + git push done, gh release fails** — re-run just `gh release create` (idempotent on `--clobber`).
+- **Everything else done, Docker Hub image not published** — no need to re-cut the release. If the `DOCKERHUB_*` secrets exist, re-run just the image build: `gh workflow run docker-publish.yml --ref vX.Y.Z` (uses the existing tag). If they don't (the current state), publish manually: the `for tag in X.Y.Z X.Y latest; do docker build … && docker push …; done` loop from Stage 6.
 
 ## Recurring traps
 - `npm publish` from the wrong cwd publishes the wrong package — always `cd packages/server`.

@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { issues, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
@@ -78,14 +81,35 @@ async function seedWorkspace(
   return { issueId, workspaceId };
 }
 
-async function seedProject(db: TestDb) {
+/**
+ * A REAL repo directory (#264). This suite used a bare `"/repo"` literal, and
+ * `tryAcquireRepoLock` refuses a repoPath with no `.git` — so `executeQueue` polled for its
+ * FULL 90-minute budget instead of running. It only ever passed because an earlier run had
+ * leaked an actual `C:\repo\.git` onto the developer machine; on a clean checkout or in CI
+ * the suite hung. Same pattern as merge-queue-lock-leak.test.ts: a temp dir with a `.git`,
+ * removed afterwards, so nothing is written outside tmp and nothing depends on machine state.
+ */
+const tempRepos: string[] = [];
+function makeRepoPath(): string {
+  const dir = mkdtempSync(join(tmpdir(), "merge-queue-"));
+  mkdirSync(join(dir, ".git"), { recursive: true });
+  tempRepos.push(dir);
+  return dir;
+}
+
+/** Worktree path INSIDE the temp repo, replacing the old `/repo/.worktrees/<name>` literals. */
+function wt(repoPath: string, name: string): string {
+  return join(repoPath, ".worktrees", name);
+}
+
+async function seedProject(db: TestDb, repoPath: string) {
   const now = new Date().toISOString();
   const projectId = randomUUID();
   const statusId = randomUUID();
   await db.insert(projects).values({
     id: projectId,
     name: "Test Project",
-    repoPath: "/repo",
+    repoPath,
     repoName: "repo",
     defaultBranch: "main",
     createdAt: now,
@@ -114,15 +138,22 @@ describe("merge queue service", () => {
     mocks.detectConflicts.mockReset().mockResolvedValue({ hasConflicts: false, conflictingFiles: [] });
   });
 
+  afterEach(() => {
+    while (tempRepos.length) {
+      try { rmSync(tempRepos.pop()!, { recursive: true, force: true }); } catch { /* best effort */ }
+    }
+  });
+
   it("reports migration-number collisions across queued workspaces", async () => {
     const { db } = createTestDb();
-    const { projectId, statusId } = await seedProject(db);
+    const repoPath = makeRepoPath();
+    const { projectId, statusId } = await seedProject(db, repoPath);
     const a = await seedWorkspace(db, {
       projectId,
       statusId,
       issueNumber: 11,
       issueTitle: "First migration",
-      workingDir: "/repo/.worktrees/a",
+      workingDir: wt(repoPath, "a"),
       branch: "feature/a",
     });
     const b = await seedWorkspace(db, {
@@ -130,15 +161,15 @@ describe("merge queue service", () => {
       statusId,
       issueNumber: 12,
       issueTitle: "Second migration",
-      workingDir: "/repo/.worktrees/b",
+      workingDir: wt(repoPath, "b"),
       branch: "feature/b",
     });
 
-    mocks.changedFilesByDir.set("/repo/.worktrees/a", [
+    mocks.changedFilesByDir.set(wt(repoPath, "a"), [
       "packages/shared/drizzle/0062_first.sql",
       "packages/shared/drizzle/meta/_journal.json",
     ]);
-    mocks.changedFilesByDir.set("/repo/.worktrees/b", [
+    mocks.changedFilesByDir.set(wt(repoPath, "b"), [
       "packages/shared/drizzle/0062_second.sql",
       "packages/shared/drizzle/meta/_journal.json",
     ]);
@@ -159,13 +190,14 @@ describe("merge queue service", () => {
 
   it("emits an error when merge returns but the feature commit is not on the target branch", async () => {
     const { db } = createTestDb();
-    const { projectId, statusId } = await seedProject(db);
+    const repoPath = makeRepoPath();
+    const { projectId, statusId } = await seedProject(db, repoPath);
     const { workspaceId } = await seedWorkspace(db, {
       projectId,
       statusId,
       issueNumber: 21,
       issueTitle: "Verify merge",
-      workingDir: "/repo/.worktrees/verify",
+      workingDir: wt(repoPath, "verify"),
       branch: "feature/verify",
     });
 
@@ -196,13 +228,14 @@ describe("merge queue service", () => {
 
   it("renumbers migrations before the queue rebases the workspace", async () => {
     const { db } = createTestDb();
-    const { projectId, statusId } = await seedProject(db);
+    const repoPath = makeRepoPath();
+    const { projectId, statusId } = await seedProject(db, repoPath);
     const { workspaceId } = await seedWorkspace(db, {
       projectId,
       statusId,
       issueNumber: 31,
       issueTitle: "Queued migration",
-      workingDir: "/repo/.worktrees/migration",
+      workingDir: wt(repoPath, "migration"),
       branch: "feature/migration",
     });
 
@@ -221,7 +254,7 @@ describe("merge queue service", () => {
       // drain queue
     }
 
-    expect(mocks.autoRenumberMigrations).toHaveBeenCalledWith("/repo/.worktrees/migration", "/repo", "main");
+    expect(mocks.autoRenumberMigrations).toHaveBeenCalledWith(wt(repoPath, "migration"), repoPath, "main");
     expect(mocks.autoRenumberMigrations.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.rebaseOntoBase.mock.invocationCallOrder[0],
     );
@@ -229,13 +262,14 @@ describe("merge queue service", () => {
 
   it("computePlan includes conflict preview for each workspace", async () => {
     const { db } = createTestDb();
-    const { projectId, statusId } = await seedProject(db);
+    const repoPath = makeRepoPath();
+    const { projectId, statusId } = await seedProject(db, repoPath);
     const a = await seedWorkspace(db, {
       projectId,
       statusId,
       issueNumber: 51,
       issueTitle: "Workspace with conflicts",
-      workingDir: "/repo/.worktrees/conflict-a",
+      workingDir: wt(repoPath, "conflict-a"),
       branch: "feature/conflict-a",
     });
     const b = await seedWorkspace(db, {
@@ -243,7 +277,7 @@ describe("merge queue service", () => {
       statusId,
       issueNumber: 52,
       issueTitle: "Clean workspace",
-      workingDir: "/repo/.worktrees/clean-b",
+      workingDir: wt(repoPath, "clean-b"),
       branch: "feature/clean-b",
     });
 
@@ -269,13 +303,14 @@ describe("merge queue service", () => {
 
   it("computePlan marks workspace as stale when baseBranch is not ancestor of HEAD", async () => {
     const { db } = createTestDb();
-    const { projectId, statusId } = await seedProject(db);
+    const repoPath = makeRepoPath();
+    const { projectId, statusId } = await seedProject(db, repoPath);
     const { workspaceId } = await seedWorkspace(db, {
       projectId,
       statusId,
       issueNumber: 53,
       issueTitle: "Stale workspace",
-      workingDir: "/repo/.worktrees/stale",
+      workingDir: wt(repoPath, "stale"),
       branch: "feature/stale",
     });
 
@@ -293,13 +328,14 @@ describe("merge queue service", () => {
 
   it("computePlan surfaces error in conflict preview when detectConflicts throws", async () => {
     const { db } = createTestDb();
-    const { projectId, statusId } = await seedProject(db);
+    const repoPath = makeRepoPath();
+    const { projectId, statusId } = await seedProject(db, repoPath);
     const { workspaceId } = await seedWorkspace(db, {
       projectId,
       statusId,
       issueNumber: 54,
       issueTitle: "Error workspace",
-      workingDir: "/repo/.worktrees/error",
+      workingDir: wt(repoPath, "error"),
       branch: "feature/error",
     });
 
@@ -317,13 +353,14 @@ describe("merge queue service", () => {
 
   it("aborts a skipped rebase conflict so the worktree is not left mid-rebase", async () => {
     const { db } = createTestDb();
-    const { projectId, statusId } = await seedProject(db);
+    const repoPath = makeRepoPath();
+    const { projectId, statusId } = await seedProject(db, repoPath);
     const first = await seedWorkspace(db, {
       projectId,
       statusId,
       issueNumber: 41,
       issueTitle: "Conflicting workspace",
-      workingDir: "/repo/.worktrees/conflict",
+      workingDir: wt(repoPath, "conflict"),
       branch: "feature/conflict",
     });
     const second = await seedWorkspace(db, {
@@ -331,7 +368,7 @@ describe("merge queue service", () => {
       statusId,
       issueNumber: 42,
       issueTitle: "Clean workspace",
-      workingDir: "/repo/.worktrees/clean",
+      workingDir: wt(repoPath, "clean"),
       branch: "feature/clean",
     });
 
@@ -350,7 +387,7 @@ describe("merge queue service", () => {
       events.push(event);
     }
 
-    expect(mocks.abortRebase).toHaveBeenCalledWith("/repo/.worktrees/conflict");
+    expect(mocks.abortRebase).toHaveBeenCalledWith(wt(repoPath, "conflict"));
     expect(events).toContainEqual(expect.objectContaining({
       type: "skipped",
       workspaceId: first.workspaceId,
@@ -360,5 +397,46 @@ describe("merge queue service", () => {
       type: "merged",
       workspaceId: second.workspaceId,
     }));
+  });
+
+  // #170: a pre-merge-gate withhold (verify_script/smoke failed) carries the WorkspaceError
+  // "CONFLICT" code (for HTTP purposes) but is tagged with data.mergeReason "pre_merge_gate_failed".
+  // It must NOT be classified as a merge conflict — a batch reconciler agent can't fix a red verify
+  // script, and routing a gate failure there wastes attempts. The orchestrator's strandedIds check
+  // only matches reasons starting with "rebase conflict"/"merge conflict", so the "verify_failed:"
+  // prefix here keeps it out of that escalation path.
+  it("classifies a pre-merge-gate withhold as verify_failed, never as a merge conflict", async () => {
+    const { db } = createTestDb();
+    const repoPath = makeRepoPath();
+    const { projectId, statusId } = await seedProject(db, repoPath);
+    const { workspaceId } = await seedWorkspace(db, {
+      projectId,
+      statusId,
+      issueNumber: 61,
+      issueTitle: "Gate-failed workspace",
+      workingDir: wt(repoPath, "gate"),
+      branch: "feature/gate",
+    });
+
+    const gateError = Object.assign(
+      new Error("Pre-merge gate failed (verify) — merge withheld. verify_script failed (exit 1): boom"),
+      { code: "CONFLICT", data: { mergeReason: "pre_merge_gate_failed", gateStage: "verify" } },
+    );
+    mocks.mergeWorkspace.mockRejectedValue(gateError);
+
+    const service = createMergeQueueService({ database: db });
+    const events = [];
+    for await (const event of service.executeQueue([workspaceId], { skipOnConflict: true })) {
+      events.push(event);
+    }
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "skipped",
+      workspaceId,
+      reason: expect.stringContaining("verify_failed:"),
+    }));
+    expect(events.some((e) => e.type === "conflict")).toBe(false);
+    const done = events.find((e) => e.type === "done");
+    expect(done).toMatchObject({ merged: [], failed: [], skipped: [workspaceId] });
   });
 });

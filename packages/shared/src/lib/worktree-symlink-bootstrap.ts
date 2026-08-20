@@ -1,6 +1,7 @@
 import { lstat, mkdir, readdir, symlink, unlink } from "node:fs/promises";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve, relative, sep } from "node:path";
+import { errorMessage } from "./error-message.js";
 
 export type SymlinkBootstrapResult = {
   /** Directory names that were successfully linked. */
@@ -149,7 +150,7 @@ async function linkOne(
     await symlink(linkTarget, targetPath, type);
     result.linked.push(relPath);
   } catch (err) {
-    result.failed.push({ dir: relPath, error: err instanceof Error ? err.message : String(err) });
+    result.failed.push({ dir: relPath, error: errorMessage(err) });
   }
 }
 

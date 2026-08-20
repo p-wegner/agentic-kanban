@@ -1,11 +1,16 @@
 import type { IssueWithStatus } from "@agentic-kanban/shared";
+import { ISSUE_PRIORITIES, PRIORITY_TRAITS } from "./priorityTraits.js";
 
 export type SortKey = "number" | "title" | "status" | "priority" | "type" | "estimate" | "updated" | "dueDate";
 export type SortDir = "asc" | "desc";
 
 export const ISSUE_TYPE_ORDER: Record<string, number> = { bug: 0, feature: 1, task: 2, chore: 3 };
 export const ESTIMATE_ORDER: Record<string, number> = { XS: 0, S: 1, M: 2, L: 3, XL: 4 };
-export const PRIORITY_ORDER: Record<string, number> = { critical: 0, urgent: 0, high: 1, medium: 2, low: 3 };
+// #516: derived. This map used to list `urgent: 0` — a value no colour/lane map knew —
+// so an urgent issue sorted top and rendered unstyled.
+export const PRIORITY_ORDER: Record<string, number> = Object.fromEntries(
+  ISSUE_PRIORITIES.map((p) => [p, PRIORITY_TRAITS[p].order]),
+);
 
 /** Pure comparator for one sort column. Returns a negative/zero/positive number like Array.prototype.sort expects. */
 export function compareSortKey(a: IssueWithStatus, b: IssueWithStatus, key: SortKey): number {

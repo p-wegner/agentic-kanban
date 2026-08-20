@@ -7,13 +7,14 @@ import { useBoardFilterStore } from "../stores/boardFilterStore.js";
 import {
   GraphView, TableView, AgentGrid, TimelineView, MetricsView, CrimeSceneCityView,
   QualityMetricsView, MilestonesOverview, ButlerView, WorkflowsView,
-  WorkflowAnalyticsDashboard, InsightsPanel, DigestView, ActivityFeedView, FocusView,
-  StrategyTargetsView, SwimlaneView, FlakyTestsPanel, MonitorCycleHistoryPanel,
-  BoardHealthNotificationCenter, RunbooksView, SprintCapacityPlanner, ConstellationView,
-  MomentumView, FireworksView, StaleWorkDashboard, ThroughputChart, ProviderMixChart,
-  LeadTimeTrendChart, ScorecardDistributionChart, ProviderCostOverTimeChart, CalendarView,
-  AgentThroughputLeaderboard, BurndownChart, DriveDashboard,
+  WorkflowAnalyticsDashboard, InsightsPanel, BoardFeedView, RuntimeFeedView, FocusView,
+  StrategyTargetsView, SwimlaneView, FlakyTestsPanel,
+  RunbooksView, SprintCapacityPlanner,
+  StaleWorkDashboard, AnalyticsView, CalendarView,
+  DriveDashboard, PluginViewsPanel,
+  PluginMarketplacePanel, PluginGuidePanel,
 } from "./boardLazyViews.js";
+import { usePluginViewStore } from "../stores/pluginViewStore.js";
 
 interface BoardSecondaryViewsProps {
   viewMode: string;
@@ -71,6 +72,8 @@ export function BoardSecondaryViews({
   const searchQuery = useBoardFilterStore((s) => s.searchQuery);
   const createdDateFilter = useBoardFilterStore((s) => s.createdDateFilter);
   const setCreatedDateFilter = useBoardFilterStore((s) => s.setCreatedDateFilter);
+  // Plugins tab: which plugin (or the marketplace) the plugin-views mode shows.
+  const pluginSelection = usePluginViewStore((s) => s.selection);
   return (
     <>
       {viewMode === "graph" && activeProjectId ? (
@@ -190,17 +193,6 @@ export function BoardSecondaryViews({
           />
         </BoardErrorBoundary>
       )}
-      {viewMode === "digest" && activeProjectId && (
-        <BoardErrorBoundary columnName="Digest View">
-          <DigestView
-            projectId={activeProjectId}
-            onIssueClick={(issueId) => {
-              const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId);
-              if (issue) onIssueClick(issue);
-            }}
-          />
-        </BoardErrorBoundary>
-      )}
       {viewMode === "focus" && activeProjectId && (
         <BoardErrorBoundary columnName="Focus View">
           <FocusView
@@ -214,11 +206,37 @@ export function BoardSecondaryViews({
       )}
       {viewMode === "activity" && activeProjectId && (
         <BoardErrorBoundary columnName="Activity Feed">
-          <ActivityFeedView
+          <BoardFeedView
             projectId={activeProjectId}
+            resolveIssue={(issueId) => {
+              const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId);
+              return issue ? { issueNumber: issue.issueNumber ?? null } : undefined;
+            }}
             onIssueClick={(issueId) => {
               const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId);
               if (issue) onIssueClick(issue);
+            }}
+          />
+        </BoardErrorBoundary>
+      )}
+      {viewMode === "runtime" && activeProjectId && (
+        <BoardErrorBoundary columnName="Runtime Feed">
+          <RuntimeFeedView
+            projectId={activeProjectId}
+            resolveIssue={(issueId) => {
+              const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId);
+              return issue ? { issueNumber: issue.issueNumber ?? null, title: issue.title } : undefined;
+            }}
+            onJumpToTranscript={(target) => {
+              const issue = columns.flatMap(c => c.issues).find(i => i.id === target.issueId);
+              if (issue) onManageWorkspaces(issue, target.workspaceId, target.sessionId ?? undefined);
+            }}
+            onOpenIssue={(issueNumber) => {
+              const issue = columns.flatMap(c => c.issues).find(i => i.issueNumber === issueNumber);
+              if (issue) {
+                onViewModeChange("kanban");
+                onIssueClick(issue);
+              }
             }}
           />
         </BoardErrorBoundary>
@@ -231,39 +249,9 @@ export function BoardSecondaryViews({
           />
         </BoardErrorBoundary>
       )}
-      {viewMode === "throughput" && activeProjectId && (
-        <BoardErrorBoundary columnName="Throughput">
-          <ThroughputChart projectId={activeProjectId} />
-        </BoardErrorBoundary>
-      )}
-      {viewMode === "provider-mix" && activeProjectId && (
-        <BoardErrorBoundary columnName="Provider Mix">
-          <ProviderMixChart projectId={activeProjectId} />
-        </BoardErrorBoundary>
-      )}
-      {viewMode === "lead-time" && activeProjectId && (
-        <BoardErrorBoundary columnName="Lead Time Trend">
-          <LeadTimeTrendChart projectId={activeProjectId} />
-        </BoardErrorBoundary>
-      )}
-      {viewMode === "scorecard-distribution" && activeProjectId && (
-        <BoardErrorBoundary columnName="Score Distribution">
-          <ScorecardDistributionChart projectId={activeProjectId} />
-        </BoardErrorBoundary>
-      )}
-      {viewMode === "provider-cost" && activeProjectId && (
-        <BoardErrorBoundary columnName="Provider Cost Over Time">
-          <ProviderCostOverTimeChart projectId={activeProjectId} />
-        </BoardErrorBoundary>
-      )}
-      {viewMode === "agent-throughput" && activeProjectId && (
-        <BoardErrorBoundary columnName="Agent Throughput Leaderboard">
-          <AgentThroughputLeaderboard projectId={activeProjectId} />
-        </BoardErrorBoundary>
-      )}
-      {viewMode === "burndown" && activeProjectId && (
-        <BoardErrorBoundary columnName="Burndown">
-          <BurndownChart projectId={activeProjectId} />
+      {viewMode === "analytics" && activeProjectId && (
+        <BoardErrorBoundary columnName="Analytics">
+          <AnalyticsView projectId={activeProjectId} />
         </BoardErrorBoundary>
       )}
       {viewMode === "calendar" && (
@@ -304,25 +292,6 @@ export function BoardSecondaryViews({
           <RunbooksView projectId={activeProjectId} />
         </BoardErrorBoundary>
       )}
-      {viewMode === "monitor-history" && activeProjectId && (
-        <BoardErrorBoundary columnName="Monitor History">
-          <MonitorCycleHistoryPanel projectId={activeProjectId} />
-        </BoardErrorBoundary>
-      )}
-      {viewMode === "health-events" && activeProjectId && (
-        <BoardErrorBoundary columnName="Board Health Events">
-          <BoardHealthNotificationCenter
-            projectId={activeProjectId}
-            onOpenIssue={(issueNumber) => {
-              const issue = columns.flatMap(c => c.issues).find(i => i.issueNumber === issueNumber);
-              if (issue) {
-                onViewModeChange("kanban");
-                onIssueClick(issue);
-              }
-            }}
-          />
-        </BoardErrorBoundary>
-      )}
       {viewMode === "drive" && activeProjectId && (
         <BoardErrorBoundary columnName="Drive Dashboard">
           <DriveDashboard
@@ -342,31 +311,18 @@ export function BoardSecondaryViews({
           <SprintCapacityPlanner projectId={activeProjectId} />
         </BoardErrorBoundary>
       )}
-      {viewMode === "constellation" && (
-        <BoardErrorBoundary columnName="Constellation View">
-          <ConstellationView
-            columns={columns}
-            onIssueClick={onIssueClick}
-            searchQuery={searchQuery}
-          />
-        </BoardErrorBoundary>
-      )}
-      {viewMode === "momentum" && (
-        <BoardErrorBoundary columnName="Momentum View">
-          <MomentumView
-            columns={columns}
-            onIssueClick={onIssueClick}
-            searchQuery={searchQuery}
-          />
-        </BoardErrorBoundary>
-      )}
-      {viewMode === "fireworks" && (
-        <BoardErrorBoundary columnName="Fireworks View">
-          <FireworksView
-            columns={columns}
-            onIssueClick={onIssueClick}
-            searchQuery={searchQuery}
-          />
+      {viewMode === "plugin-views" && activeProjectId && (
+        <BoardErrorBoundary columnName="Plugins">
+          {pluginSelection?.kind === "marketplace" ? (
+            <PluginMarketplacePanel projectId={activeProjectId} />
+          ) : pluginSelection?.kind === "guide" ? (
+            <PluginGuidePanel pluginId={pluginSelection.pluginId} file={pluginSelection.file} title={pluginSelection.title} />
+          ) : (
+            <PluginViewsPanel
+              projectId={activeProjectId}
+              pluginSlug={pluginSelection?.kind === "plugin" ? pluginSelection.slug : null}
+            />
+          )}
         </BoardErrorBoundary>
       )}
     </>

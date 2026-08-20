@@ -14,7 +14,7 @@ import {
   markDismissed,
   setCachedRecommendations,
 } from "../services/agent-questions.service.js";
-import { readSessionStdoutFileTail } from "../lib/session-output-reader.js";
+import { readSessionStdoutFileTail, readSessionStdoutFileTailAsync } from "../lib/session-output-reader.js";
 import { sessionOutputPath } from "../lib/session-paths.js";
 import { createTestDb } from "./helpers/test-db.js";
 import { setRuntimeState } from "../repositories/runtime-state.repository.js";
@@ -154,6 +154,39 @@ describe("readSessionStdoutFileTail", () => {
   });
 });
 
+describe("readSessionStdoutFileTailAsync (#401)", () => {
+  const cleanupIds: string[] = [];
+  afterEach(() => {
+    for (const id of cleanupIds.splice(0)) {
+      rmSync(sessionOutputPath(id), { force: true });
+    }
+  });
+
+  it("returns null for a missing file", async () => {
+    expect(await readSessionStdoutFileTailAsync(`atail-missing-${Date.now()}`)).toBe(null);
+  });
+
+  it("returns null for an empty file", async () => {
+    const id = `atail-empty-${Date.now()}`;
+    cleanupIds.push(id);
+    writeFileSync(sessionOutputPath(id), "", "utf-8");
+    expect(await readSessionStdoutFileTailAsync(id)).toBe(null);
+  });
+
+  it("matches the sync tail reader byte-for-byte on whole-file and truncated reads", async () => {
+    const id = `atail-parity-${Date.now()}`;
+    cleanupIds.push(id);
+    const content = `${"x".repeat(100)}\n${"y".repeat(20)}\nFINAL\n`;
+    writeFileSync(sessionOutputPath(id), content, "utf-8");
+    // Whole file fits.
+    expect(await readSessionStdoutFileTailAsync(id, 1024)).toBe(readSessionStdoutFileTail(id, 1024));
+    expect(await readSessionStdoutFileTailAsync(id, 1024)).toBe(content);
+    // Truncated: the partial first line of the window is dropped.
+    expect(await readSessionStdoutFileTailAsync(id, 30)).toBe(readSessionStdoutFileTail(id, 30));
+    expect(await readSessionStdoutFileTailAsync(id, 30)).toBe(`${"y".repeat(20)}\nFINAL\n`);
+  });
+});
+
 describe("JSONL .out file extraction", () => {
   const cleanupIds: string[] = [];
   afterEach(() => {
@@ -230,6 +263,28 @@ describe("response cache + invalidation", () => {
     await markDismissed("tu-inv-b", ts(0), db);
     pending = await listPendingQuestionsForProject(PROJECT_ID, db);
     expect(pending.map((p) => p.toolUseId)).not.toContain("tu-inv-b");
+  });
+
+  it("project-scoped invalidation leaves the OTHER project's cache warm (2026-08-11 audit)", async () => {
+    const { db } = createTestDb();
+    const PROJECT_B = "proj-perf-b";
+    await seed(db, { key: "scope-a", toolUseId: "tu-scope-a" });
+    await db.insert(projects).values({ id: PROJECT_B, name: "pb", repoPath: "/tmp/pb" });
+
+    // Warm both projects' caches.
+    const aWarm = await listPendingQuestionsForProject(PROJECT_ID, db);
+    expect(aWarm.map((p) => p.toolUseId)).toContain("tu-scope-a");
+    const bWarm = await listPendingQuestionsForProject(PROJECT_B, db);
+
+    // Scoped invalidation (markAnswered now carries the projectId): A recomputes...
+    await markAnswered("tu-scope-a", db, PROJECT_ID);
+    const aAfter = await listPendingQuestionsForProject(PROJECT_ID, db);
+    expect(aAfter).not.toBe(aWarm);
+    expect(aAfter.map((p) => p.toolUseId)).not.toContain("tu-scope-a");
+
+    // ...while B still serves its cached array instance (cache never dropped).
+    const bAfter = await listPendingQuestionsForProject(PROJECT_B, db);
+    expect(bAfter).toBe(bWarm);
   });
 
   it("does not serve a cache entry computed against a different Database instance", async () => {

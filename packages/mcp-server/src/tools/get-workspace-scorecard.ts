@@ -1,10 +1,12 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
-import { requireEntity } from "../db-utils.js";
+import { prodDeps, type ToolDeps } from "./deps.js";
+import { mcpText, requireEntity } from "../db-utils.js";
 
-export function registerGetWorkspaceScorecard(server: McpServer) {
+export function registerGetWorkspaceScorecard(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema } = deps;
+
   server.tool(
     "get_workspace_scorecard",
     "Get the PR quality scorecard for a workspace. Returns a 0-100 score with per-dimension breakdown (Tests, Types, Scope, Diff size, Conflicts, Docs, Skill output).",
@@ -26,12 +28,7 @@ export function registerGetWorkspaceScorecard(server: McpServer) {
       const ws = r.value;
 
       if (ws.scorecardScore === null || !ws.scorecardJson) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: "Scorecard not yet computed for this workspace. It will be computed after the next session ends, or you can call POST /api/workspaces/:id/scorecard/refresh.",
-          }],
-        };
+        return mcpText("Scorecard not yet computed for this workspace. It will be computed after the next session ends, or you can call POST /api/workspaces/:id/scorecard/refresh.");
       }
 
       let dimensions: unknown[] = [];
@@ -53,7 +50,7 @@ export function registerGetWorkspaceScorecard(server: McpServer) {
         ),
       ];
 
-      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+      return mcpText(lines.join("\n"));
     },
   );
 }

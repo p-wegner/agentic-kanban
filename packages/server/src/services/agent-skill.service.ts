@@ -12,6 +12,7 @@ import {
   getActiveProjectRepoPath,
 } from "../repositories/agent-skill.repository.js";
 import { getProjectRepoPath } from "../repositories/project.repository.js";
+import { extractModelJson } from "@agentic-kanban/shared/lib/model-json";
 
 export class AgentSkillError extends Error {
   constructor(
@@ -25,9 +26,13 @@ export class AgentSkillError extends Error {
 const INVALID_NAME_PATTERN = /[/\\]|\.\./;
 
 export function createAgentSkillService({ database }: { database: Database }) {
-  async function listSkills(projectId?: string, globalOnly?: boolean) {
-    const dbSkills = await listAgentSkills(projectId, globalOnly ?? false, database);
+  async function listSkills(projectId?: string, globalOnly?: boolean, initOnly?: boolean) {
+    const dbSkills = await listAgentSkills(projectId, globalOnly ?? false, database, initOnly ?? false);
     const dbResult = dbSkills.map(s => ({ ...s, source: "db" as const }));
+
+    // Init skills are always DB rows (built-ins or user-created) — disk skills scanned
+    // from .claude/skills/ carry no isInit flag, so never merge them into an init=true list.
+    if (initOnly) return dbResult;
 
     // Only merge disk skills when scoped to a project (and not filtering global-only)
     if (!projectId || globalOnly) return dbResult;
@@ -48,6 +53,7 @@ export function createAgentSkillService({ database }: { database: Database }) {
         prompt: d.prompt,
         projectId: projectId,
         isBuiltin: false,
+        isInit: false,
         createdAt: null,
         updatedAt: null,
         source: "disk" as const,
@@ -68,6 +74,7 @@ export function createAgentSkillService({ database }: { database: Database }) {
     prompt: string;
     model?: string;
     projectId?: string | null;
+    isInit?: boolean;
   }) {
     if (!input.name || !input.description || !input.prompt) {
       throw new AgentSkillError("name, description, and prompt are required", "BAD_REQUEST");
@@ -86,6 +93,7 @@ export function createAgentSkillService({ database }: { database: Database }) {
       prompt: input.prompt,
       model: input.model,
       projectId,
+      isInit: input.isInit ?? false,
     }, database);
   }
 
@@ -95,6 +103,7 @@ export function createAgentSkillService({ database }: { database: Database }) {
     prompt?: string;
     model?: string;
     projectId?: string | null;
+    isInit?: boolean;
   }) {
     const skill = await getAgentSkillById(id, database);
     if (!skill) throw new AgentSkillError("Skill not found", "NOT_FOUND");
@@ -118,6 +127,7 @@ export function createAgentSkillService({ database }: { database: Database }) {
     if (body.prompt !== undefined) updates.prompt = body.prompt;
     if (body.model !== undefined) updates.model = body.model || null;
     if (body.projectId !== undefined) updates.projectId = body.projectId || null;
+    if (body.isInit !== undefined) updates.isInit = body.isInit;
 
     return updateAgentSkill(id, updates, database);
   }
@@ -142,9 +152,7 @@ Current description: ${description?.trim() || "(none)"}
 Current prompt: ${prompt?.trim() || "(none)"}`;
 
     const stdout = await invokeClaudePrompt(aiPrompt, { database });
-    const output = stdout.trim();
-    const cleaned = output.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-    const enhanced = JSON.parse(cleaned) as { name?: string; description?: string; prompt?: string };
+    const enhanced = extractModelJson(stdout, { shape: "object" }) as { name?: string; description?: string; prompt?: string };
     return {
       name: enhanced.name?.trim() || name,
       description: enhanced.description?.trim() ?? description ?? "",
@@ -174,13 +182,32 @@ Current prompt: ${prompt?.trim() || "(none)"}`;
     return Object.fromEntries(entries);
   }
 
-  async function installSkill(id: string) {
+  /**
+   * Write a skill's SKILL.md into a project's checkout.
+   *
+   * `projectId` is optional and the active project stays the fallback (#389), so no existing
+   * caller changes behaviour. It exists because the implicit active project is the same trap the
+   * CLI had: on 2026-08-08 two board bugs were filed against a fixture project and sat there
+   * unactionable, purely because the write path had no way to be explicit. A skill installed into
+   * the wrong repo is the same mistake with a file instead of a ticket.
+   *
+   * The resolved `repoPath` comes back in the response for the same reason — the caller should be
+   * able to SEE where the file went rather than infer it.
+   */
+  async function installSkill(id: string, projectId?: string | null) {
     const skill = await getAgentSkillById(id, database);
     if (!skill) throw new AgentSkillError("Skill not found", "NOT_FOUND");
-    const repoPath = await getActiveProjectRepoPath(database);
-    if (!repoPath) throw new AgentSkillError("No active project found", "BAD_REQUEST");
+    const repoPath = projectId
+      ? await getProjectRepoPath(projectId, database)
+      : await getActiveProjectRepoPath(database);
+    if (!repoPath) {
+      throw new AgentSkillError(
+        projectId ? `Project ${projectId} not found, or it has no repo path` : "No active project found",
+        "BAD_REQUEST",
+      );
+    }
     await writeAgentSkillFile(repoPath, skill);
-    return { installed: true, repoPath };
+    return { installed: true, repoPath, projectId: projectId ?? null };
   }
 
   return { listSkills, getSkill, createSkill, updateSkill, deleteSkill, enhanceSkill, getInstallStatus, getAllInstallStatuses, installSkill };

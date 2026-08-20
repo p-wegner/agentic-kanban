@@ -1,6 +1,7 @@
-import { getIssueIdByNumberInProject } from "../../repositories/issue.repository.js";
 import { getLatestWorkspaceForIssue, getWorkspaceById } from "../../repositories/workspace.repository.js";
-import { runMigrations, getActiveProjectId } from "../shared.js";
+import { runMigrations, resolveIssueNumberArg } from "../shared.js";
+import { resolveCliPort } from "./workspace-api-url.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * Workspace statuses that mean the agent has finished its turn successfully and
@@ -30,6 +31,8 @@ export function classifyStatus(status: string): number | null {
 interface WaitOptions {
   port?: string;
   timeout?: string;
+  /** #509: this command had no `--project`, so a number in another project read as missing. */
+  project?: string;
 }
 
 /**
@@ -49,19 +52,16 @@ interface BoardFrame {
  */
 export async function runWorkspaceWait(issueNumberArg: string, options: WaitOptions): Promise<number> {
   await runMigrations();
-  const projectId = await getActiveProjectId();
 
-  const num = Number(issueNumberArg);
-  if (!Number.isInteger(num) || num <= 0) {
-    console.error(`Invalid issue number: ${issueNumberArg}`);
+  // #509: was the active project only, with a bare "Issue #N not found." — the #467 miss
+  // this board keeps re-learning. The shared prelude gives this command the cross-project
+  // explanation (and `--project`) that the other handlers already had.
+  const ref = await resolveIssueNumberArg(issueNumberArg, { project: options.project });
+  if (!ref.ok) {
+    console.error(ref.message);
     return 1;
   }
-
-  const issueId = await getIssueIdByNumberInProject(num, projectId);
-  if (issueId === null) {
-    console.error(`Issue #${num} not found.`);
-    return 1;
-  }
+  const { projectId, issueNumber: num, issueId } = ref;
 
   const ws = await getLatestWorkspaceForIssue(issueId);
   if (!ws) {
@@ -89,7 +89,7 @@ export async function runWorkspaceWait(issueNumberArg: string, options: WaitOpti
     return ws?.status ?? null;
   };
 
-  const port = options.port ?? process.env.KANBAN_SERVER_PORT ?? "3001";
+  const port = resolveCliPort(options.port);
   const url = `ws://127.0.0.1:${port}/ws/board/${projectId}`;
 
   const timeoutSec = options.timeout !== undefined ? Number(options.timeout) : undefined;
@@ -122,7 +122,7 @@ export async function runWorkspaceWait(issueNumberArg: string, options: WaitOpti
       try {
         status = await readStatus();
       } catch (err) {
-        console.error("Error reading workspace status:", err instanceof Error ? err.message : String(err));
+        console.error("Error reading workspace status:", errorMessage(err));
         finish(1);
         return;
       }

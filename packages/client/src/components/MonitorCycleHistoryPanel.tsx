@@ -1,19 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api.js";
+import type { BoardHealthEventDto } from "@agentic-kanban/shared";
 import { MonitorActionReplayDrawer, type ReplayTarget } from "./MonitorActionReplayDrawer.js";
 import { MonitorCycleTimeline } from "./MonitorCycleTimeline.js";
 
-/** Shape returned by GET /api/projects/:id/board-health-events */
-interface BoardHealthEvent {
-  id: string;
-  timestamp: string;
-  level: "info" | "error";
-  type: "cycle_start" | "cycle_end" | "observation" | "action" | "error";
-  category: string | null;
-  issueNumber: number | null;
-  summary: string;
-  details: string | null;
-}
+// Shape returned by GET /api/projects/:id/board-health-events, from shared (#568).
+// The local copy had lost `category` to a bare `string`.
+type BoardHealthEvent = BoardHealthEventDto;
 
 type EventTypeFilter = "all" | "action" | "error" | "observation" | "cycle_start" | "cycle_end";
 type SortKey = "timestamp" | "type";

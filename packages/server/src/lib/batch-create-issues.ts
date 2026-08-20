@@ -4,6 +4,8 @@
 // (file read, the create transaction) and maps these results to
 // console.error/console.log + process.exit.
 
+import { formatResolvedProjectLine } from "./issue-cli-format.js";
+
 export interface BatchIssueInput {
   title: string;
   description?: string;
@@ -56,13 +58,22 @@ export function validateBatchIssueInputs(issueInputs: BatchIssueInput[], statusN
   return null;
 }
 
-/** Build the `create-batch` output lines (JSON blob, or the Created summary + per-issue lines). */
+/**
+ * Build the `create-batch` output lines (JSON blob, or the Created summary + per-issue lines).
+ *
+ * `project` is optional only for back-compat with the pure formatter tests; the CLI
+ * always passes it, because the project was resolved from the implicit global active
+ * project and a bulk write is the most expensive thing to mis-file (#335).
+ */
 export function formatBatchCreateResult(
   created: Array<{ id: string; issueNumber: number; title: string }>,
   dependenciesCreated: number,
   json: boolean,
+  project?: { id: string; name: string | null },
 ): string[] {
-  const result = { issues: created, dependenciesCreated };
+  const result = project
+    ? { issues: created, dependenciesCreated, projectId: project.id, projectName: project.name }
+    : { issues: created, dependenciesCreated };
   if (json) return [JSON.stringify(result, null, 2)];
   const lines = [
     `Created ${created.length} issue(s)${dependenciesCreated > 0 ? ` with ${dependenciesCreated} dependency edge(s)` : ""}.`,
@@ -70,5 +81,6 @@ export function formatBatchCreateResult(
   for (const c of created) {
     lines.push(`  #${c.issueNumber} ${c.title} (${c.id})`);
   }
+  if (project) lines.push(formatResolvedProjectLine(project.id, project.name));
   return lines;
 }

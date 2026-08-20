@@ -55,6 +55,12 @@ export function isCopilotUnmatchedFallback(event: ParsedStreamEvent): boolean {
  * silently misparsed as tool activity. All known copilot tool type names either
  * live in the shared sets or start with `tool` — require that.
  */
+/** A copilot `status` field that means the tool call failed. */
+function isErrorStatus(status: string | undefined): boolean {
+  const s = status?.toLowerCase();
+  return s === "error" || s === "failed";
+}
+
 function isCopilotToolishType(type: string): boolean {
   return COPILOT_TOOL_USE_TYPES.has(type) || COPILOT_TOOL_RESULT_TYPES.has(type) || type.startsWith("tool");
 }
@@ -259,7 +265,13 @@ export function parseCopilotEvent(obj: Record<string, unknown>, rawLine: string,
         toolName: name,
         toolUseId: id,
         output,
-        isError: payload.success === false || Boolean(payload.is_error || payload.isError || payload.error) || String(payload.status ?? "").toLowerCase() === "error" || String(payload.status ?? "").toLowerCase() === "failed",
+        // `stringValue`, not `String(...)`: `status` is untyped stream JSON, and
+        // `String({...})` yields "[object Object]", which matches neither "error" nor
+        // "failed" — so an object-shaped status would render a FAILED tool result as a
+        // successful one. Narrowing to an actual string makes the miss explicit.
+        isError: payload.success === false
+          || Boolean(payload.is_error || payload.isError || payload.error)
+          || isErrorStatus(stringValue(payload.status)),
       });
     }
   } else if (item.type === "command_execution" && item.id && type.includes("completed")) {

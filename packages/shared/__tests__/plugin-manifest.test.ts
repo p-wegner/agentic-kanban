@@ -1,0 +1,539 @@
+import { describe, expect, it } from "vitest";
+import {
+  parsePluginManifest,
+  PluginManifestError,
+  substitutePluginPlaceholders,
+  substitutePluginEnv,
+  pluginEnabledPreferenceKey,
+  parsePluginLoopPlan,
+  pluginLoopUnitKey,
+  parsePluginLoopUnitKey,
+  pluginLoopPausedPreferenceKey,
+  pluginSkillName,
+  countScaffoldPlaceholders,
+  DEFAULT_PLUGIN_AUDIENCE,
+} from "../src/lib/plugin-manifest.js";
+import {
+  isPluginEnabledPreferenceKey,
+  isPluginLoopPausedPreferenceKey,
+  isProjectScopedDynamicKey,
+} from "../src/lib/dynamic-preference-keys.js";
+
+const FULL_MANIFEST = {
+  id: "refactor-safety-net",
+  name: "Refactor Safety Net",
+  version: "0.1.0",
+  skills: [{ dir: ".claude/skills/requirement-extraction" }],
+  views: [
+    {
+      id: "coverage",
+      label: "Coverage",
+      kind: "iframe",
+      serve: {
+        command: "node tools/coverage/serve.mjs",
+        portEnv: "PORT",
+        env: { COVERAGE_ROOT: "{{repoPath}}" },
+      },
+    },
+  ],
+  scripts: [
+    { name: "coverage", command: "npm run coverage", cwd: "plugin", env: { COVERAGE_ROOT: "{{repoPath}}" } },
+  ],
+  butler: { promptFragment: "butler-fragment.md" },
+  scaffold: { profileTemplate: "profile-template.md", targetPath: "docs/analysis/_project-profile.md" },
+};
+
+describe("parsePluginManifest", () => {
+  it("parses a full valid manifest from JSON text", () => {
+    const m = parsePluginManifest(JSON.stringify(FULL_MANIFEST));
+    expect(m.id).toBe("refactor-safety-net");
+    expect(m.name).toBe("Refactor Safety Net");
+    expect(m.version).toBe("0.1.0");
+    expect(m.skills).toEqual([{ dir: ".claude/skills/requirement-extraction" }]);
+    expect(m.views?.[0]).toMatchObject({ id: "coverage", kind: "iframe" });
+    expect(m.views?.[0].serve.portEnv).toBe("PORT");
+    expect(m.scripts?.[0]).toMatchObject({ name: "coverage", cwd: "plugin" });
+    expect(m.butler?.promptFragment).toBe("butler-fragment.md");
+    expect(m.scaffold?.targetPath).toBe("docs/analysis/_project-profile.md");
+  });
+
+  it("parses a minimal manifest (id + name only)", () => {
+    const m = parsePluginManifest({ id: "x1", name: "X" });
+    expect(m).toMatchObject({ id: "x1", name: "X" });
+    expect(m.skills).toBeUndefined();
+    expect(m.views).toBeUndefined();
+  });
+
+  it("rejects invalid JSON text with a clear error", () => {
+    expect(() => parsePluginManifest("{nope")).toThrow(PluginManifestError);
+    expect(() => parsePluginManifest("{nope")).toThrow(/not valid JSON/);
+  });
+
+  it("rejects a missing or malformed id", () => {
+    expect(() => parsePluginManifest({ name: "X" })).toThrow(/"id" must be a non-empty string/);
+    expect(() => parsePluginManifest({ id: "Bad_Slug!", name: "X" })).toThrow(/"id" must match/);
+  });
+
+  it("rejects a view without serve.command and a non-iframe kind", () => {
+    expect(() =>
+      parsePluginManifest({ id: "p", name: "P", views: [{ id: "v", label: "V", kind: "iframe", serve: {} }] }),
+    ).toThrow(/views\[0]\.serve\.command/);
+    expect(() =>
+      parsePluginManifest({ id: "p", name: "P", views: [{ id: "v", label: "V", kind: "panel", serve: { command: "x" } }] }),
+    ).toThrow(/kind must be "iframe"/);
+  });
+
+  it("rejects duplicate view ids and script names", () => {
+    const view = { id: "v", label: "V", kind: "iframe", serve: { command: "x" } };
+    expect(() => parsePluginManifest({ id: "p", name: "P", views: [view, view] })).toThrow(/duplicate view id/);
+    const script = { name: "s", command: "x" };
+    expect(() => parsePluginManifest({ id: "p", name: "P", scripts: [script, script] })).toThrow(/duplicate script name/);
+  });
+
+  it("rejects a bad script cwd", () => {
+    expect(() =>
+      parsePluginManifest({ id: "p", name: "P", scripts: [{ name: "s", command: "x", cwd: "elsewhere" }] }),
+    ).toThrow(/cwd" must be "plugin" or "repo"/);
+  });
+
+  it("rejects a trailing slash on a path field — it breaks the basename a skill's name comes from", () => {
+    expect(() => parsePluginManifest({ id: "p", name: "P", skills: [{ dir: ".claude/skills/x/" }] }))
+      .toThrow(/must not end with a slash/);
+    // And the one derivation every consumer uses agrees on the name either way.
+    expect(pluginSkillName(".claude/skills/x")).toBe("x");
+    expect(pluginSkillName(".claude/skills/x/")).toBe("x");
+    expect(pluginSkillName(".claude\\skills\\x")).toBe("x");
+  });
+
+  it("refuses a scaffold target inside .git", () => {
+    const withTarget = (targetPath: string) => ({
+      id: "p",
+      name: "P",
+      scaffold: { profileTemplate: "t.md", targetPath },
+    });
+    expect(() => parsePluginManifest(withTarget(".git/hooks/pre-commit"))).toThrow(/must not write inside "\.git"/);
+    expect(parsePluginManifest(withTarget("docs/_profile.md")).scaffold?.targetPath).toBe("docs/_profile.md");
+  });
+
+  it("strips a UTF-8 BOM-bearing manifest only via the reader, but parses clean text as-is", () => {
+    // The BOM strip lives in the FILE reader (plugin-fs); the parser sees text. Guard the
+    // contract that a leading BOM is not silently tolerated here, so the reader stays the fix.
+    expect(() => parsePluginManifest('﻿{"id":"p","name":"P"}')).toThrow(/not valid JSON/);
+  });
+
+  it("rejects absolute and parent-escaping manifest paths", () => {
+    expect(() => parsePluginManifest({ id: "p", name: "P", skills: [{ dir: "/etc" }] })).toThrow(/relative path/);
+    expect(() => parsePluginManifest({ id: "p", name: "P", skills: [{ dir: "C:/x" }] })).toThrow(/relative path/);
+    expect(() =>
+      parsePluginManifest({ id: "p", name: "P", scaffold: { profileTemplate: "t.md", targetPath: "../outside.md" } }),
+    ).toThrow(/must not contain ".."/);
+  });
+
+  // #456 — `audience` marks an entry as diagnostics so the board's capability rail can
+  // collapse it instead of listing a plugin selftest at the same weight as the workflow.
+  it("parses audience on views, scripts and skills", () => {
+    const m = parsePluginManifest({
+      id: "p",
+      name: "P",
+      skills: [{ dir: "skills/runner", audience: "developer" }],
+      scripts: [{ name: "selftest", command: "node selftest.mjs", audience: "developer" }],
+      views: [
+        {
+          id: "debug",
+          label: "Debug",
+          kind: "iframe",
+          audience: "developer",
+          serve: { command: "node serve.mjs" },
+        },
+      ],
+    });
+    expect(m.skills?.[0].audience).toBe("developer");
+    expect(m.scripts?.[0].audience).toBe("developer");
+    expect(m.views?.[0].audience).toBe("developer");
+  });
+
+  it("leaves audience undefined when the manifest omits it (backward compatible)", () => {
+    const m = parsePluginManifest(JSON.stringify(FULL_MANIFEST));
+    expect(m.skills?.[0].audience).toBeUndefined();
+    expect(m.scripts?.[0].audience).toBeUndefined();
+    expect(m.views?.[0].audience).toBeUndefined();
+    expect(DEFAULT_PLUGIN_AUDIENCE).toBe("operator");
+  });
+
+  it("rejects an unknown audience value", () => {
+    expect(() =>
+      parsePluginManifest({ id: "p", name: "P", scripts: [{ name: "s", command: "x", audience: "admin" }] }),
+    ).toThrow(/must be one of operator, developer/);
+  });
+
+  // #462 — a plugin author marks its entry skill for a codebase that has never used the
+  // plugin before; the board cannot infer this.
+  it("parses skills[].init when present", () => {
+    const m = parsePluginManifest({
+      id: "p",
+      name: "P",
+      skills: [{ dir: ".claude/skills/onboarding", init: true }],
+    });
+    expect(m.skills?.[0].init).toBe(true);
+  });
+
+  it("leaves skills[].init undefined when the manifest omits it (backward compatible)", () => {
+    const m = parsePluginManifest(JSON.stringify(FULL_MANIFEST));
+    expect(m.skills?.[0].init).toBeUndefined();
+  });
+
+  it("rejects a non-boolean skills[].init", () => {
+    expect(() =>
+      parsePluginManifest({ id: "p", name: "P", skills: [{ dir: "skills/x", init: "yes" }] }),
+    ).toThrow(/"skills\[0]\.init" must be a boolean/);
+  });
+});
+
+describe("substitutePluginPlaceholders", () => {
+  it("substitutes all supported placeholders", () => {
+    const text = "{{repoPath}}|{{projectName}}|{{pluginPath}}|{{port}}|{{boardUrl}}|{{projectId}}";
+    expect(
+      substitutePluginPlaceholders(text, {
+        repoPath: "C:/r",
+        projectName: "proj",
+        pluginPath: "C:/p",
+        port: 4321,
+        boardUrl: "http://localhost:3001",
+        projectId: "0b6f38e1-2f14-4a5c-9d3e-77aa00bb11cc",
+      }),
+    ).toBe("C:/r|proj|C:/p|4321|http://localhost:3001|0b6f38e1-2f14-4a5c-9d3e-77aa00bb11cc");
+  });
+
+  it("leaves unknown and unprovided placeholders untouched", () => {
+    expect(substitutePluginPlaceholders("{{port}} {{mystery}}", { repoPath: "r" })).toBe("{{port}} {{mystery}}");
+    // boardUrl/projectId behave like {{port}}: unprovided means left as-is for a later pass.
+    expect(substitutePluginPlaceholders("{{boardUrl}} {{projectId}}", { repoPath: "r" })).toBe(
+      "{{boardUrl}} {{projectId}}",
+    );
+  });
+
+  it("substitutes {{boardUrl}} and {{projectId}} in env maps", () => {
+    expect(
+      substitutePluginEnv(
+        { BOARD_API: "{{boardUrl}}/api", PROJECT: "{{projectId}}" },
+        { boardUrl: "http://localhost:3007", projectId: "p-1" },
+      ),
+    ).toEqual({ BOARD_API: "http://localhost:3007/api", PROJECT: "p-1" });
+  });
+
+  it("substitutes {{leadingRepoPath}} independently of {{repoPath}} — reads source, writes output elsewhere", () => {
+    expect(
+      substitutePluginPlaceholders("{{leadingRepoPath}} -> {{repoPath}}", {
+        repoPath: "C:/sidecar",
+        leadingRepoPath: "C:/product",
+      }),
+    ).toBe("C:/product -> C:/sidecar");
+  });
+
+  it("substitutes env maps value-wise", () => {
+    expect(substitutePluginEnv({ A: "{{repoPath}}/x", B: "static" }, { repoPath: "C:/r" })).toEqual({
+      A: "C:/r/x",
+      B: "static",
+    });
+    expect(substitutePluginEnv(undefined, { repoPath: "r" })).toEqual({});
+  });
+});
+
+describe("plugin enable preference key", () => {
+  const projectId = "0b6f38e1-2f14-4a5c-9d3e-77aa00bb11cc";
+
+  it("builds and recognizes the key, including dash-bearing slugs", () => {
+    const key = pluginEnabledPreferenceKey("refactor-safety-net", projectId);
+    expect(key).toBe(`plugin_enabled_refactor-safety-net_${projectId}`);
+    expect(isPluginEnabledPreferenceKey(key)).toBe(true);
+    expect(isProjectScopedDynamicKey(key)).toBe(true);
+  });
+
+  it("rejects malformed keys", () => {
+    expect(isPluginEnabledPreferenceKey(`plugin_enabled_Bad!_${projectId}`)).toBe(false);
+    expect(isPluginEnabledPreferenceKey("plugin_enabled_slug_not-a-uuid")).toBe(false);
+    expect(isPluginEnabledPreferenceKey(`plugin_enabled_${projectId}`)).toBe(false);
+  });
+});
+
+describe("plugin loop pause preference key", () => {
+  const projectId = "0b6f38e1-2f14-4a5c-9d3e-77aa00bb11cc";
+
+  it("builds and recognizes the key, including dash-bearing slug and loop names", () => {
+    const key = pluginLoopPausedPreferenceKey("refactor-safety-net", "requirement-extraction", projectId);
+    expect(key).toBe(`plugin_loop_paused_refactor-safety-net_requirement-extraction_${projectId}`);
+    expect(isPluginLoopPausedPreferenceKey(key)).toBe(true);
+    expect(isProjectScopedDynamicKey(key)).toBe(true);
+  });
+
+  it("rejects malformed keys", () => {
+    expect(isPluginLoopPausedPreferenceKey(`plugin_loop_paused_slug_loop_not-a-uuid`)).toBe(false);
+    expect(isPluginLoopPausedPreferenceKey(`plugin_loop_paused_${projectId}`)).toBe(false);
+  });
+});
+
+describe("plugin manifest — converging loops", () => {
+  const LOOP_MANIFEST = {
+    id: "refactor-safety-net",
+    name: "Refactor Safety Net",
+    skills: [{ dir: ".claude/skills/requirement-extraction" }],
+    loops: [
+      {
+        name: "requirement-extraction",
+        label: "Requirement extraction",
+        skill: "requirement-extraction",
+        plan: { command: "node tools/loop-plan.mjs --json", cwd: "plugin", env: { ROOT: "{{repoPath}}" } },
+      },
+    ],
+  };
+
+  it("parses a loop with its plan command, cwd and env", () => {
+    const manifest = parsePluginManifest(LOOP_MANIFEST);
+    expect(manifest.loops).toHaveLength(1);
+    expect(manifest.loops?.[0]).toMatchObject({
+      name: "requirement-extraction",
+      skill: "requirement-extraction",
+      plan: { command: "node tools/loop-plan.mjs --json", cwd: "plugin" },
+    });
+  });
+
+  it("rejects a loop whose skill the manifest never declares", () => {
+    const broken = { ...LOOP_MANIFEST, loops: [{ ...LOOP_MANIFEST.loops[0], skill: "nope" }] };
+    expect(() => parsePluginManifest(broken)).toThrow(PluginManifestError);
+    expect(() => parsePluginManifest(broken)).toThrow(/not one of the manifest's skills/);
+  });
+
+  it("rejects duplicate loop names and a non-positive unit cap", () => {
+    expect(() => parsePluginManifest({ ...LOOP_MANIFEST, loops: [LOOP_MANIFEST.loops[0], LOOP_MANIFEST.loops[0]] }))
+      .toThrow(/duplicate loop name/);
+    expect(() => parsePluginManifest({
+      ...LOOP_MANIFEST,
+      loops: [{ ...LOOP_MANIFEST.loops[0], maxUnitsPerAdvance: 0 }],
+    })).toThrow(/positive integer/);
+  });
+
+  // #250 — the loop name is a SEGMENT of the `:`-joined dedupe key, so a colon in it makes the
+  // key ambiguous with a unit id that also contains one. Table-driven over the exact collision
+  // the reviewer traced: loop `a` + unit `b:c` vs loop `a:b` + unit `c`.
+  it.each([
+    { name: "a:b", valid: false, why: "a colon collides with a unit id's own colons" },
+    { name: "extract v2", valid: false, why: "whitespace" },
+    { name: "extract%", valid: false, why: "a LIKE wildcard in the key prefix" },
+    { name: "extract_v2", valid: true, why: "underscores are fine — the LIKE prefix is escaped" },
+    { name: "extract.v2", valid: true, why: "dots are fine" },
+    { name: "requirement-extraction", valid: true, why: "the shape every real plugin uses" },
+  ])("loop name $name is ${valid} ($why)", ({ name, valid }) => {
+    const manifest = { ...LOOP_MANIFEST, loops: [{ ...LOOP_MANIFEST.loops[0], name }] };
+    if (valid) {
+      expect(parsePluginManifest(manifest).loops?.[0].name).toBe(name);
+    } else {
+      expect(() => parsePluginManifest(manifest)).toThrow(/loops\[0\]\.name/);
+    }
+  });
+
+  it("keeps the ambiguous key pair unreachable: loop 'a' + unit 'b:c' vs loop 'a:b' + unit 'c'", () => {
+    // The two keys ARE identical — which is exactly why the loop name may not contain a colon.
+    expect(pluginLoopUnitKey("p", "a", "b:c")).toBe(pluginLoopUnitKey("p", "a:b", "c"));
+    // …and a manifest can only ever produce the first of them.
+    expect(() => parsePluginManifest({ ...LOOP_MANIFEST, loops: [{ ...LOOP_MANIFEST.loops[0], name: "a:b" }] }))
+      .toThrow(PluginManifestError);
+  });
+
+  it("rejects an unknown cwd on a script, a view serve, and a loop plan alike", () => {
+    expect(() => parsePluginManifest({
+      ...LOOP_MANIFEST,
+      loops: [{ ...LOOP_MANIFEST.loops[0], plan: { command: "x", cwd: "elsewhere" } }],
+    })).toThrow(/must be "plugin" or "repo"/);
+  });
+
+  // #297 — auto-land is per-loop and opt-in; anything but a boolean is a manifest error.
+  it("parses autoLand as an opt-in boolean and rejects non-boolean values", () => {
+    expect(parsePluginManifest(LOOP_MANIFEST).loops?.[0].autoLand).toBeUndefined();
+    expect(parsePluginManifest({
+      ...LOOP_MANIFEST,
+      loops: [{ ...LOOP_MANIFEST.loops[0], autoLand: true }],
+    }).loops?.[0].autoLand).toBe(true);
+    expect(() => parsePluginManifest({
+      ...LOOP_MANIFEST,
+      loops: [{ ...LOOP_MANIFEST.loops[0], autoLand: "yes" }],
+    })).toThrow(/autoLand.*boolean/);
+  });
+});
+
+describe("parsePluginLoopPlan", () => {
+  it("reads the last JSON value, so a shell banner ahead of the plan is tolerated", () => {
+    const plan = parsePluginLoopPlan(
+      'npm notice something\n{"units":[{"id":"billing:r1","title":"Mine billing"}],"note":"1/4 converged"}\n',
+    );
+    expect(plan.units).toEqual([{ id: "billing:r1", title: "Mine billing", description: undefined }]);
+    expect(plan.note).toBe("1/4 converged");
+    expect(plan.converged).toBe(false);
+  });
+
+  it("accepts a bare array and treats an empty plan as converged", () => {
+    expect(parsePluginLoopPlan("[]")).toMatchObject({ units: [], converged: true });
+    expect(parsePluginLoopPlan('[{"id":"a","title":"A"}]').units).toHaveLength(1);
+  });
+
+  it("lets a planner report 'not converged, but nothing to do' explicitly", () => {
+    expect(parsePluginLoopPlan('{"units":[],"converged":false}')).toMatchObject({ units: [], converged: false });
+  });
+
+  it("refuses a payload the producer flagged as truncated, without reading it (#662)", () => {
+    // A plan is a WORK LIST. A clipped one that parses is worse than one that throws: the
+    // loop drops units and reports progress it did not make.
+    expect(() => parsePluginLoopPlan('{"units":[],"converged":true}', { truncated: true }))
+      .toThrow(/truncated/);
+  });
+
+  it("refuses an object that is not a plan, so a recovered fragment cannot end a loop (#662)", () => {
+    // Since the tolerant extractor (#550), front-clipped stdout yields the LAST balanced
+    // object in the stream — typically one unit. Without this guard `obj.units ?? []` made
+    // that an empty plan, and an empty plan defaults to converged: the loop silently ended.
+    expect(() => parsePluginLoopPlan('{"id":"billing:r1","title":"Mine billing"}'))
+      .toThrow(/not a plan/);
+    // A plan that declares only `converged` is still a plan.
+    expect(parsePluginLoopPlan('{"converged":true}')).toMatchObject({ units: [], converged: true });
+  });
+
+  it("rejects empty output, non-JSON output, and repeated unit ids", () => {
+    expect(() => parsePluginLoopPlan("   ")).toThrow(/printed no output/);
+    expect(() => parsePluginLoopPlan("boom: command not found")).toThrow(/not JSON/);
+    expect(() => parsePluginLoopPlan('{"units":[{"id":"a","title":"A"},{"id":"a","title":"B"}]}'))
+      .toThrow(/repeats unit id/);
+  });
+});
+
+describe("pluginLoopUnitKey", () => {
+  it("namespaces by plugin and loop so one project can run several loops", () => {
+    expect(pluginLoopUnitKey("refactor-safety-net", "requirement-extraction", "billing:r1"))
+      .toBe("plugin-loop:refactor-safety-net:requirement-extraction:billing:r1");
+    // The empty-unit form is the prefix the loop engine dedupes on.
+    expect(pluginLoopUnitKey("a", "b", "").endsWith(":")).toBe(true);
+  });
+
+  // #297/#298 — the merge/exit hooks recognise loop tickets by inverting the key.
+  it("parsePluginLoopUnitKey round-trips, keeps colons in the unit-id tail, and rejects non-loop keys", () => {
+    expect(parsePluginLoopUnitKey(pluginLoopUnitKey("pm-pipeline", "pipeline", "step-3:v1")))
+      .toEqual({ pluginSlug: "pm-pipeline", loopName: "pipeline", unitId: "step-3:v1" });
+    expect(parsePluginLoopUnitKey("JIRA-123")).toBeNull();
+    expect(parsePluginLoopUnitKey(null)).toBeNull();
+    expect(parsePluginLoopUnitKey("plugin-loop:slug-only")).toBeNull();
+    // The empty-unit PREFIX form is not a ticket key.
+    expect(parsePluginLoopUnitKey(pluginLoopUnitKey("a", "b", ""))).toBeNull();
+  });
+});
+
+describe("countScaffoldPlaceholders", () => {
+  it("counts unfilled TODO: values", () => {
+    expect(countScaffoldPlaceholders('{"language": "TODO: ts|py", "dir": "TODO: src"}')).toBe(2);
+    expect(countScaffoldPlaceholders('{"language": "ts"}')).toBe(0);
+  });
+
+  it("does NOT count a TODO: shown as inline code in the template's own instructions", () => {
+    // Regression: a scaffold explains itself, and counting that sentence made a
+    // fully filled-in profile report a leftover placeholder forever, so the loop
+    // gate refused to run against a CORRECT scaffold.
+    const filledIn = [
+      "Fill in every `TODO:` marker for this target before running the pipeline.",
+      "```json",
+      '{ "language": "ts", "source_roots": ["src"] }',
+      "```",
+    ].join("\n");
+    expect(countScaffoldPlaceholders(filledIn)).toBe(0);
+  });
+
+  it("still counts real placeholders in a template that also documents the marker", () => {
+    const template = [
+      "Fill in every `TODO:` marker for this target.",
+      '{ "language": "TODO: ts|py" }',
+    ].join("\n");
+    expect(countScaffoldPlaceholders(template)).toBe(1);
+  });
+});
+
+describe("parsePluginLoopPlan — gate / progress / checks / artifacts (#286/#288/#289/#290)", () => {
+  const gate = {
+    id: "step-2:v1",
+    question: "Approve the PRD?",
+    artifacts: ["docs/pm/steps/step-2/prd.md"],
+    actions: [
+      { id: "approve", label: "Approve" },
+      { id: "revise", label: "Needs revision", input: "text" },
+    ],
+    resolve: { command: "node tools/gate-resolve.mjs", cwd: "plugin", env: { PM_ROOT: "{{repoPath}}" } },
+  };
+
+  it("parses a gate with actions, artifacts and resolve command", () => {
+    const plan = parsePluginLoopPlan(JSON.stringify({ units: [], converged: false, gate }));
+    expect(plan.gate).toMatchObject({
+      id: "step-2:v1",
+      question: "Approve the PRD?",
+      artifacts: ["docs/pm/steps/step-2/prd.md"],
+    });
+    expect(plan.gate?.actions).toHaveLength(2);
+    expect(plan.gate?.actions[1]).toMatchObject({ id: "revise", input: "text" });
+    expect(plan.gate?.resolve).toMatchObject({ command: "node tools/gate-resolve.mjs", cwd: "plugin" });
+  });
+
+  it("rejects a gate with no actions, a bad action id, or a missing resolve command", () => {
+    expect(() => parsePluginLoopPlan(JSON.stringify({ units: [], gate: { ...gate, actions: [] } })))
+      .toThrow(/gate\.actions/);
+    expect(() => parsePluginLoopPlan(JSON.stringify({
+      units: [], gate: { ...gate, actions: [{ id: "Bad Id!", label: "x" }] },
+    }))).toThrow(/actions\[0\]\.id/);
+    expect(() => parsePluginLoopPlan(JSON.stringify({ units: [], gate: { ...gate, resolve: {} } })))
+      .toThrow(/gate\.resolve\.command/);
+  });
+
+  it("parses progress steps and rejects an unknown state", () => {
+    const plan = parsePluginLoopPlan(JSON.stringify({
+      units: [],
+      progress: { steps: [
+        { id: "step-1", label: "Market analysis", state: "done", version: "v2" },
+        { id: "step-2", label: "PRD", state: "awaiting-approval", artifacts: ["docs/prd.md"] },
+      ] },
+    }));
+    expect(plan.progress?.steps).toHaveLength(2);
+    expect(plan.progress?.steps[1]).toMatchObject({ state: "awaiting-approval", artifacts: ["docs/prd.md"] });
+    expect(() => parsePluginLoopPlan(JSON.stringify({
+      units: [], progress: { steps: [{ id: "x", label: "x", state: "half-done" }] },
+    }))).toThrow(/state/);
+  });
+
+  it("parses checks and rejects an unknown verdict", () => {
+    const plan = parsePluginLoopPlan(JSON.stringify({
+      units: [],
+      checks: [
+        { name: "Completeness", verdict: "pass" },
+        { name: "Consistency", verdict: "warn", detail: "employee bounds differ" },
+      ],
+    }));
+    expect(plan.checks).toHaveLength(2);
+    expect(plan.checks?.[1]).toMatchObject({ verdict: "warn", detail: "employee bounds differ" });
+    expect(() => parsePluginLoopPlan(JSON.stringify({
+      units: [], checks: [{ name: "x", verdict: "maybe" }],
+    }))).toThrow(/verdict/);
+  });
+
+  it("parses unit artifacts and rejects escaping paths", () => {
+    const plan = parsePluginLoopPlan(JSON.stringify({
+      units: [{ id: "u1", title: "T", artifacts: ["docs/a.md", "docs/b.sql"] }],
+    }));
+    expect(plan.units[0].artifacts).toEqual(["docs/a.md", "docs/b.sql"]);
+    expect(() => parsePluginLoopPlan(JSON.stringify({
+      units: [{ id: "u1", title: "T", artifacts: ["../outside.md"] }],
+    }))).toThrow(/must not contain/);
+    expect(() => parsePluginLoopPlan(JSON.stringify({
+      units: [{ id: "u1", title: "T", artifacts: ["C:/abs.md"] }],
+    }))).toThrow(/relative/);
+  });
+
+  it("a plan with none of the new fields parses exactly as before", () => {
+    const plan = parsePluginLoopPlan(JSON.stringify({ units: [{ id: "a", title: "A" }], converged: false }));
+    expect(plan.gate).toBeUndefined();
+    expect(plan.progress).toBeUndefined();
+    expect(plan.checks).toBeUndefined();
+    expect(plan.units[0].artifacts).toBeUndefined();
+  });
+});

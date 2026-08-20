@@ -1,11 +1,13 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
+import { prodDeps, type ToolDeps } from "./deps.js";
 import { notifyBoard } from "../notify.js";
-import { requireEntity } from "../db-utils.js";
+import { mcpJson, mcpText, requireEntity } from "../db-utils.js";
 
-export function registerDeleteStatus(server: McpServer) {
+export function registerDeleteStatus(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema } = deps;
+
   server.tool(
     "delete_status",
     "Delete a project status. Fails if any issues are linked to it.",
@@ -27,15 +29,13 @@ export function registerDeleteStatus(server: McpServer) {
         .where(eq(schema.issues.statusId, statusId))
         .limit(1);
       if (linkedIssues.length > 0) {
-        return { content: [{ type: "text" as const, text: `Cannot delete status "${r.value.name}" — it has linked issues. Move or delete those issues first.` }] };
+        return mcpText(`Cannot delete status "${r.value.name}" — it has linked issues. Move or delete those issues first.`);
       }
 
       await db.delete(schema.projectStatuses).where(eq(schema.projectStatuses.id, statusId));
       notifyBoard(projectId, "mcp_delete_status");
 
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify({ id: statusId, name: r.value.name, deleted: true }, null, 2) }],
-      };
+      return mcpJson({ id: statusId, name: r.value.name, deleted: true });
     },
   );
 }

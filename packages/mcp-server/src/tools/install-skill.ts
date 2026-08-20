@@ -3,10 +3,14 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { access } from "node:fs/promises";
 import { resolve as resolvePath } from "node:path";
-import { db, schema } from "../db.js";
 import { writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { prodDeps, type ToolDeps } from "./deps.js";
+import { mcpError, mcpText } from "../db-utils.js";
 
-export function registerInstallSkill(server: McpServer) {
+export function registerInstallSkill(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema } = deps;
+
   server.tool(
     "install_skill",
     "Install built-in agent skills as SKILL.md files into a project's .claude/skills/ directory and link .codex/skills to the same location. Mirrors CLI `install-skill [target-path]`. Reads built-in global skills from the DB (requires db:seed to have run). Each skill is written as <targetPath>/.claude/skills/<name>/SKILL.md.",
@@ -27,27 +31,18 @@ export function registerInstallSkill(server: McpServer) {
       const globalBuiltins = allBuiltins.filter(s => s.projectId === null);
 
       if (listOnly) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(
+        return mcpText(JSON.stringify(
                 { availableSkills: globalBuiltins.map(s => ({ name: s.name, description: s.description })) },
                 null,
                 2,
-              ),
-            },
-          ],
-        };
+              ));
       }
 
       const resolvedPath = resolvePath(targetPath);
       try {
         await access(resolvedPath);
       } catch {
-        return {
-          content: [{ type: "text" as const, text: `Error: Target path does not exist: ${resolvedPath}` }],
-        };
+        return mcpError(`Error: Target path does not exist: ${resolvedPath}`);
       }
 
       let skills = [...globalBuiltins];
@@ -55,14 +50,7 @@ export function registerInstallSkill(server: McpServer) {
         const nameSet = new Set(names);
         skills = skills.filter(s => nameSet.has(s.name));
         if (skills.length === 0) {
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: `No matching skills found. Available: ${globalBuiltins.map(s => s.name).join(", ")}`,
-              },
-            ],
-          };
+          return mcpText(`No matching skills found. Available: ${globalBuiltins.map(s => s.name).join(", ")}`);
         }
       }
 
@@ -82,15 +70,11 @@ export function registerInstallSkill(server: McpServer) {
           });
           installed.push(skill.name);
         } catch (err) {
-          errors.push({ name: skill.name, error: err instanceof Error ? err.message : String(err) });
+          errors.push({ name: skill.name, error: errorMessage(err) });
         }
       }
 
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify(
+      return mcpText(JSON.stringify(
               {
                 targetPath: resolvedPath,
                 installed,
@@ -99,10 +83,7 @@ export function registerInstallSkill(server: McpServer) {
               },
               null,
               2,
-            ),
-          },
-        ],
-      };
+            ));
     },
   );
 }

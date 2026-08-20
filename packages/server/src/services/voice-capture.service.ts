@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Database } from "../db/index.js";
 import { invokeClaudePrompt } from "./claude-cli.service.js";
-import type { BoardEvents } from "./board-events.js";
+import type { BoardEventSink } from "./board-events.js";
 import { getOutgoingTransitions, syncCurrentNodeToStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import {
   ensureVoiceCaptureTag as ensureVoiceCaptureTagRepo,
@@ -13,6 +13,8 @@ import {
   attachVoiceCaptureTag,
 } from "../repositories/voice-capture.repository.js";
 import { isIssueNumberUniqueConstraintError, nextIssueNumber } from "../repositories/issue-number.repository.js";
+import { normalizeIssuePriority } from "@agentic-kanban/shared/lib/issue-priority";
+import { extractModelJson } from "@agentic-kanban/shared/lib/model-json";
 
 const ISSUE_NUMBER_INSERT_ATTEMPTS = 3;
 
@@ -154,7 +156,7 @@ async function moveIssueFromVoiceCommand(
   projectId: string,
   intent: Extract<VoiceCommandIntent, { type: "move_issue" }>,
   database: Database,
-  boardEvents?: BoardEvents,
+  boardEvents?: BoardEventSink,
 ): Promise<VoiceCaptureActionResult> {
   const issue = await getIssueByNumberForVoiceCapture(projectId, intent.issueNumber, database);
   if (!issue) throw new VoiceCaptureCommandError(`Issue #${intent.issueNumber} not found`);
@@ -237,22 +239,17 @@ Respond ONLY with valid JSON (no markdown, no explanation):
     console.warn("[voice-capture] AI structuring failed; creating issue from raw transcript:", err);
     return fallbackStructuredTranscript(transcript);
   }
-  const cleaned = stdout.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-
   let parsed: { title?: string; description?: string; priority?: string };
   try {
-    parsed = JSON.parse(cleaned) as { title?: string; description?: string; priority?: string };
+    parsed = extractModelJson(stdout, { shape: "object" }) as { title?: string; description?: string; priority?: string };
   } catch {
     // Claude returned non-JSON (e.g. explanation text). Fall back to raw transcript.
     return fallbackStructuredTranscript(transcript);
   }
 
-  const parsedPriority = parsed.priority?.trim().toLowerCase();
-  const priority = parsedPriority === "urgent"
-    ? "critical"
-    : ["low", "medium", "high", "critical"].includes(parsedPriority ?? "")
-    ? parsedPriority!
-    : "medium";
+  // #516: this was the ONLY place that folded "urgent" -> "critical"; the shared helper
+  // now owns that alias so the decompose path gets it too.
+  const priority = normalizeIssuePriority(parsed.priority);
 
   return {
     title: parsed.title?.trim() || transcript.slice(0, 80),
@@ -264,7 +261,7 @@ Respond ONLY with valid JSON (no markdown, no explanation):
 export async function createVoiceCaptureIssue(
   input: VoiceCaptureInput,
   database: Database,
-  boardEvents?: BoardEvents,
+  boardEvents?: BoardEventSink,
 ): Promise<VoiceCaptureResult> {
   const { projectId, transcript, speechLanguage, speechLanguageLabel } = input;
   const intent = parseVoiceCommandIntent(transcript);

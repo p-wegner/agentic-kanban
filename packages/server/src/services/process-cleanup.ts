@@ -1,5 +1,6 @@
 import { auditProcessEvent, guardProcessKill } from "./process-guard.js";
-import { execCommand, listOsProcesses, listenerPidsForPort, parseLsofPids, parseWmicProcessList, taskkillTree } from "./process-exec.js";
+import { execCommand, listOsProcesses, listenerPidsForPort, parseLsofPids, taskkillTree } from "./process-exec.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * Kill the process (tree) listening on each of the given ports. Used to free the
@@ -35,7 +36,7 @@ export async function killProcessesOnPorts(ports: number[]): Promise<number> {
         auditProcessEvent({ action: "process-cleanup-killed", pid, port });
         killed++;
       } catch (err) {
-        auditProcessEvent({ action: "process-cleanup-kill-failed", pid, port, error: err instanceof Error ? err.message : String(err) });
+        auditProcessEvent({ action: "process-cleanup-kill-failed", pid, port, error: errorMessage(err) });
         // Process may have already exited.
       }
     }
@@ -102,7 +103,7 @@ export async function killDevServerSupervisorOnPorts(ports: number[]): Promise<n
       auditProcessEvent({ action: "dev-server-supervisor-killed", pid });
       killed++;
     } catch (err) {
-      auditProcessEvent({ action: "dev-server-supervisor-kill-failed", pid, error: err instanceof Error ? err.message : String(err) });
+      auditProcessEvent({ action: "dev-server-supervisor-kill-failed", pid, error: errorMessage(err) });
       // Process may have already exited.
     }
   }
@@ -114,14 +115,11 @@ export async function killProcessesInDir(dir: string): Promise<number> {
   auditProcessEvent({ action: "process-cleanup-start", dir });
   try {
     if (process.platform === "win32") {
-      const { stdout } = await execCommand("wmic", [
-        "process", "where",
-        `ExecutablePath is not null and CommandLine is not null`,
-        "get", "ProcessId,ParentProcessId,CommandLine", "/format:list",
-      ], { timeout: 10000 });
-
+      // wmic was removed from Windows 11 24H2+ — listOsProcesses uses the
+      // Get-CimInstance PowerShell equivalent, which works on every supported version.
+      const osProcs = await listOsProcesses();
       const dirNormalized = dir.replace(/\\/g, "/");
-      const procs = parseWmicProcessList(stdout).map((proc) => ({ pid: proc.pid, ppid: proc.ppid, cmd: proc.commandLine }));
+      const procs = osProcs.map((proc) => ({ pid: proc.pid, ppid: proc.ppid, cmd: proc.commandLine }));
 
       // Build ancestor set for the current process so we never kill our own server.
       const ppidMap = new Map(procs.map(p => [p.pid, p.ppid]));
@@ -146,7 +144,7 @@ export async function killProcessesInDir(dir: string): Promise<number> {
             auditProcessEvent({ action: "process-cleanup-killed", pid: proc.pid, dir });
             killed++;
           } catch (err) {
-            auditProcessEvent({ action: "process-cleanup-kill-failed", pid: proc.pid, dir, error: err instanceof Error ? err.message : String(err) });
+            auditProcessEvent({ action: "process-cleanup-kill-failed", pid: proc.pid, dir, error: errorMessage(err) });
             // Process may have already exited
           }
         }
@@ -164,7 +162,7 @@ export async function killProcessesInDir(dir: string): Promise<number> {
             auditProcessEvent({ action: "process-cleanup-killed", pid: numericPid, dir });
             killed++;
           } catch (err) {
-            auditProcessEvent({ action: "process-cleanup-kill-failed", pid: numericPid, dir, error: err instanceof Error ? err.message : String(err) });
+            auditProcessEvent({ action: "process-cleanup-kill-failed", pid: numericPid, dir, error: errorMessage(err) });
             // Already gone
           }
         }
@@ -173,8 +171,8 @@ export async function killProcessesInDir(dir: string): Promise<number> {
       }
     }
   } catch (err) {
-    auditProcessEvent({ action: "process-cleanup-error", dir, error: err instanceof Error ? err.message : String(err) });
-    console.warn(`[process-cleanup] error killing processes in ${dir}:`, err instanceof Error ? err.message : String(err));
+    auditProcessEvent({ action: "process-cleanup-error", dir, error: errorMessage(err) });
+    console.warn(`[process-cleanup] error killing processes in ${dir}:`, errorMessage(err));
   }
   auditProcessEvent({ action: "process-cleanup-finished", dir, killed });
   return killed;

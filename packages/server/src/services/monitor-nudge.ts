@@ -1,15 +1,10 @@
 import type { BoardEventType } from "./board-events.js";
 
-export type MonitorActionName =
-  | "relaunch"
-  | "merge"
-  | "nudge"
-  | "mark_idle"
-  | "mark_dead"
-  | "auto_start"
-  | "generate_tickets"
-  | "auto_contract"
-  | "auto_contract_suggest";
+// #578: the union moved to shared so the CLIENT's ACTION_LABELS Record fails typecheck
+// when a new action is added, instead of crashing the popover at runtime. Imported AND
+// re-exported: `export type { X } from` alone does not bind X in this module's scope.
+import type { MonitorActionName } from "@agentic-kanban/shared/lib/monitor-action";
+export type { MonitorActionName };
 
 export function sendMonitorNudge({
   sessionManager,

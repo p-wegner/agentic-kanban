@@ -6,7 +6,9 @@ import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engin
 
 export async function getIssueStatusAndProject(issueId: string, database: Database = db) {
   const rows = await database
-    .select({ statusId: issues.statusId, projectId: issues.projectId })
+    // statusChangedAt lets reconcileMergedIssue tell "the status never caught up with the
+    // merge" apart from "a human deliberately moved this issue AFTER the merge".
+    .select({ statusId: issues.statusId, projectId: issues.projectId, statusChangedAt: issues.statusChangedAt })
     .from(issues)
     .where(eq(issues.id, issueId))
     .limit(1);

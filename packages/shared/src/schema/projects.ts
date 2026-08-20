@@ -25,6 +25,8 @@ export const projects = sqliteTable("projects", {
   defaultSkillId: text("default_skill_id"),
   /** ISO timestamp when the project was archived; null = active. Archived projects are hidden from the default project list. */
   archivedAt: text("archived_at"),
+  /** JSON `ServiceStackConfig` — declared per-workspace Docker Compose service stack (nullable = none). */
+  servicesConfig: text("services_config"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
 });

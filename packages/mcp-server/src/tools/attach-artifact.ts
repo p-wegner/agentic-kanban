@@ -3,6 +3,7 @@ import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { prodDeps, type ToolDeps } from "./deps.js";
+import { mcpError, mcpText } from "../db-utils.js";
 
 const ARTIFACT_TYPES = ["text", "link", "image", "video"] as const;
 
@@ -21,10 +22,9 @@ export function registerAttachArtifact(server: McpServer, deps: ToolDeps = prodD
       caption: z.string().optional().describe("Optional short caption. Phase artifacts should use phase-artifact:<phase>."),
     },
     async ({ issueId, workspaceId, type, content, mimeType, caption }) => {
-      const text = (value: string) => ({ content: [{ type: "text" as const, text: value }] });
 
-      if (!issueId && !workspaceId) return text("Error: issueId or workspaceId is required");
-      if (!content.trim()) return text("Error: content is required");
+      if (!issueId && !workspaceId) return mcpError("Error: issueId or workspaceId is required");
+      if (!content.trim()) return mcpError("Error: content is required");
 
       let resolvedIssueId = issueId;
       let projectId: string | null = null;
@@ -37,15 +37,15 @@ export function registerAttachArtifact(server: McpServer, deps: ToolDeps = prodD
           .where(eq(schema.workspaces.id, workspaceId))
           .limit(1);
         const ws = rows[0];
-        if (!ws) return text(`Error: workspace not found: ${workspaceId}`);
+        if (!ws) return mcpError(`Error: workspace not found: ${workspaceId}`);
         if (resolvedIssueId && resolvedIssueId !== ws.issueId) {
-          return text("Error: workspaceId does not belong to issueId");
+          return mcpError("Error: workspaceId does not belong to issueId");
         }
         resolvedIssueId = ws.issueId;
         projectId = ws.projectId;
       }
 
-      if (!resolvedIssueId) return text("Error: issueId could not be resolved");
+      if (!resolvedIssueId) return mcpError("Error: issueId could not be resolved");
 
       if (!projectId) {
         const rows = await db
@@ -53,7 +53,7 @@ export function registerAttachArtifact(server: McpServer, deps: ToolDeps = prodD
           .from(schema.issues)
           .where(eq(schema.issues.id, resolvedIssueId))
           .limit(1);
-        if (!rows[0]) return text(`Error: issue not found: ${resolvedIssueId}`);
+        if (!rows[0]) return mcpError(`Error: issue not found: ${resolvedIssueId}`);
         projectId = rows[0].projectId;
       }
 
@@ -63,7 +63,7 @@ export function registerAttachArtifact(server: McpServer, deps: ToolDeps = prodD
           .from(schema.workspaces)
           .where(and(eq(schema.workspaces.id, workspaceId), eq(schema.workspaces.issueId, resolvedIssueId)))
           .limit(1);
-        if (!rows[0]) return text("Error: workspaceId does not belong to issueId");
+        if (!rows[0]) return mcpError("Error: workspaceId does not belong to issueId");
       }
 
       const id = randomUUID();
@@ -79,7 +79,7 @@ export function registerAttachArtifact(server: McpServer, deps: ToolDeps = prodD
 
       notifyBoard(projectId, "mcp_attach_artifact");
 
-      return text(JSON.stringify({
+      return mcpText(JSON.stringify({
         id,
         issueId: resolvedIssueId,
         workspaceId: workspaceId ?? null,

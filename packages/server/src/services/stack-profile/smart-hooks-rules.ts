@@ -89,12 +89,24 @@ export function buildSmartHooksRules(profile: StackProfile): SmartHooksRulesFile
   // slow JVM family (see above) — too slow to run on every edit.
   const testCommand = profile.quickTestCommand ?? profile.testCommand;
   if (testCommand && !isSlowJvm) {
+    // #487 — "quick" is an assumption about the project's own script, not a fact this
+    // generator can check. On a large monorepo the configured quick command can BE the whole
+    // suite (measured: `pnpm test:mine` = 10+ min on this repo) under a 180s budget, so the
+    // rule could only ever be killed. It was blocking, so it then failed on every single edit
+    // regardless of what changed — a gate that is always red carries no signal at all, and it
+    // reprinted its own truncated output each time.
+    //
+    // Two layers now stop that. The runner treats a TIMEOUT as inconclusive for non-safety
+    // checks rather than a block (see smart-hooks-runner.js), and the fallback FULL test
+    // command — the case we know is not scoped to the edit — is emitted as advisory only.
+    // A genuine `quickTestCommand` keeps the blocking per-edit loop it was designed for.
+    const isFullSuiteFallback = !profile.quickTestCommand;
     rules.push({
       name: profile.quickTestCommand ? "Quick tests" : "Tests",
       command: testCommand,
       filePatterns: patterns,
-      blocking: true,
-      timeout: 180,
+      blocking: !isFullSuiteFallback,
+      timeout: isFullSuiteFallback ? 600 : 180,
     });
   }
 

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Database } from "../db/index.js";
 import { withTransaction } from "../db/index.js";
-import type { BoardEvents } from "./board-events.js";
+import type { BoardEventSink } from "./board-events.js";
 import { DEPENDENCY_TYPES, type DependencyType } from "@agentic-kanban/shared/schema";
 import { IssueError } from "./issue-error.js";
 import type { BatchDependencyInput } from "./issue.service.js";
@@ -20,9 +20,9 @@ import {
 } from "../repositories/issue-service.repository.js";
 import { wouldCreateCycle } from "./board-aggregation.service.js";
 import { hasPath } from "../lib/dependency-graph.js";
+import { isDirectionalDependencyType, DIRECTIONAL_DEPENDENCY_TYPES } from "@agentic-kanban/shared/lib/dependency-type-traits";
 
 /** Edge types that can form a meaningful cycle (the symmetric peers cannot). */
-const DIRECTIONAL_DEPENDENCY_TYPES = new Set<DependencyType>(["depends_on", "blocked_by", "parent_of", "child_of"]);
 
 /**
  * Validate index-based batch dependency edges and normalise each `type` (default
@@ -39,9 +39,7 @@ export function validateBatchDependencies(
   const adj = new Map<number, Set<number>>();
   const seen = new Set<string>();
   const fail = (msg: string, index: number): never => {
-    const err = new IssueError(msg, "BAD_REQUEST") as IssueError & { index?: number };
-    err.index = index;
-    throw err;
+    throw new IssueError(msg, "BAD_REQUEST", index);
   };
   for (let i = 0; i < edges.length; i++) {
     const e = edges[i];
@@ -63,7 +61,7 @@ export function validateBatchDependencies(
       fail(`dependencies[${i}]: duplicate edge (issue ${e.issueIndex} -> ${e.dependsOnIndex}, type ${type})`, i);
     }
     seen.add(key);
-    if (DIRECTIONAL_DEPENDENCY_TYPES.has(type)) {
+    if (isDirectionalDependencyType(type)) {
       let set = adj.get(e.issueIndex);
       if (!set) { set = new Set(); adj.set(e.issueIndex, set); }
       set.add(e.dependsOnIndex);
@@ -84,7 +82,7 @@ export function validateBatchDependencies(
   };
   for (let i = 0; i < normalized.length; i++) {
     const e = normalized[i];
-    if (DIRECTIONAL_DEPENDENCY_TYPES.has(e.type) && reaches(e.dependsOnIndex, e.issueIndex)) {
+    if (isDirectionalDependencyType(e.type) && reaches(e.dependsOnIndex, e.issueIndex)) {
       fail(`dependencies[${i}]: would create a cycle (issue ${e.issueIndex} -> ${e.dependsOnIndex})`, i);
     }
   }
@@ -101,7 +99,7 @@ export function validateBatchDependencies(
  */
 export function createIssueDependencyService(deps: {
   database: Database;
-  boardEvents?: BoardEvents;
+  boardEvents?: BoardEventSink;
 }) {
   const { database, boardEvents } = deps;
 
@@ -182,29 +180,22 @@ export function createIssueDependencyService(deps: {
     projectIds: string[];
   }> {
     const VALID_TYPES = ["depends_on", "blocked_by", "related_to", "duplicates", "parent_of", "child_of", "coupled_with"];
-    const DIRECTIONAL = new Set(["depends_on", "blocked_by", "parent_of", "child_of"]);
+    // #523: the second copy in this same file — now derived from the traits table.
+    const DIRECTIONAL = new Set<string>(DIRECTIONAL_DEPENDENCY_TYPES);
 
     for (let i = 0; i < edges.length; i++) {
       const e = edges[i];
       if (!e.issueId || !e.dependsOnId) {
-        const err = new IssueError(`edges[${i}]: issueId and dependsOnId are required`, "BAD_REQUEST") as IssueError & { index?: number };
-        err.index = i;
-        throw err;
+        throw new IssueError(`edges[${i}]: issueId and dependsOnId are required`, "BAD_REQUEST", i);
       }
       if (e.action !== "add" && e.action !== "remove") {
-        const err = new IssueError(`edges[${i}]: action must be 'add' or 'remove'`, "BAD_REQUEST") as IssueError & { index?: number };
-        err.index = i;
-        throw err;
+        throw new IssueError(`edges[${i}]: action must be 'add' or 'remove'`, "BAD_REQUEST", i);
       }
       if (e.action === "add" && e.issueId === e.dependsOnId) {
-        const err = new IssueError(`edges[${i}]: an issue cannot depend on itself`, "BAD_REQUEST") as IssueError & { index?: number };
-        err.index = i;
-        throw err;
+        throw new IssueError(`edges[${i}]: an issue cannot depend on itself`, "BAD_REQUEST", i);
       }
       if (e.type && !VALID_TYPES.includes(e.type)) {
-        const err = new IssueError(`edges[${i}]: invalid type`, "BAD_REQUEST") as IssueError & { index?: number };
-        err.index = i;
-        throw err;
+        throw new IssueError(`edges[${i}]: invalid type`, "BAD_REQUEST", i);
       }
     }
 
@@ -255,12 +246,11 @@ export function createIssueDependencyService(deps: {
             if (!adj) { adj = new Map(); adjByProject.set(srcProj, adj); }
             // Would adding issueId -> dependsOnId create a cycle? Cycle iff path dependsOnId -> issueId already.
             if (hasPath(adj, e.dependsOnId, e.issueId)) {
-              const err = new IssueError(
+              throw new IssueError(
                 `edges[${i}]: adding dependency ${e.issueId} -> ${e.dependsOnId} would create a cycle`,
                 "CONFLICT",
-              ) as IssueError & { index?: number };
-              err.index = i;
-              throw err;
+                i,
+              );
             }
             let set = adj.get(e.issueId);
             if (!set) { set = new Set(); adj.set(e.issueId, set); }

@@ -1,3 +1,4 @@
+// @gate:always-run — compares .claude/skills vs .codex/skills in the git index; imports nothing it checks (#538).
 import { describe, it, expect } from "vitest";
 import { join } from "node:path";
 import { gitExecSync } from "@agentic-kanban/shared/lib/git-exec";

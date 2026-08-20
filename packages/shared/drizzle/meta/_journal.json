@@ -687,6 +687,202 @@
       "when": 1780906855000,
       "tag": "0097_runtime_state",
       "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "6",
+      "when": 1780906856000,
+      "tag": "0098_agent_skill_content_hash",
+      "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "6",
+      "when": 1780906857000,
+      "tag": "0099_session_messages_provider",
+      "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "6",
+      "when": 1780906858000,
+      "tag": "0100_multi_repo",
+      "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "6",
+      "when": 1780906859000,
+      "tag": "0101_service_stacks",
+      "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "6",
+      "when": 1780906860000,
+      "tag": "0102_repo_setup_and_compose",
+      "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "6",
+      "when": 1780906861000,
+      "tag": "0103_session_container_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 104,
+      "version": "6",
+      "when": 1780906862000,
+      "tag": "0104_isolation_downgrade",
+      "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "6",
+      "when": 1780906863000,
+      "tag": "0105_merge_gate_evidence",
+      "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "6",
+      "when": 1780906864000,
+      "tag": "0106_workers",
+      "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "6",
+      "when": 1780906865000,
+      "tag": "0107_plugins",
+      "breakpoints": true
+    },
+    {
+      "idx": 108,
+      "version": "6",
+      "when": 1780906866000,
+      "tag": "0108_merge_gate_shas",
+      "breakpoints": true
+    },
+    {
+      "idx": 109,
+      "version": "6",
+      "when": 1786017361976,
+      "tag": "0109_plugin_view_processes",
+      "breakpoints": true
+    },
+    {
+      "idx": 110,
+      "version": "6",
+      "when": 1786026000000,
+      "tag": "0110_leading_repo_rows",
+      "breakpoints": true
+    },
+    {
+      "idx": 111,
+      "version": "6",
+      "when": 1786112400000,
+      "tag": "0111_review_preflight_block",
+      "breakpoints": true
+    },
+    {
+      "idx": 112,
+      "version": "6",
+      "when": 1786198800000,
+      "tag": "0112_plugin_loop_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 113,
+      "version": "6",
+      "when": 1786780800000,
+      "tag": "0113_perf_hot_path_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 114,
+      "version": "6",
+      "when": 1786867200000,
+      "tag": "0114_workspace_summary_projection",
+      "breakpoints": true
+    },
+    {
+      "idx": 115,
+      "version": "6",
+      "when": 1786953600000,
+      "tag": "0115_issues_project_external_key",
+      "breakpoints": true
+    },
+    {
+      "idx": 116,
+      "version": "6",
+      "when": 1787040000000,
+      "tag": "0116_issues_project_sort_order",
+      "breakpoints": true
+    },
+    {
+      "idx": 117,
+      "version": "6",
+      "when": 1787126400000,
+      "tag": "0117_merge_backoff",
+      "breakpoints": true
+    },
+    {
+      "idx": 118,
+      "version": "6",
+      "when": 1787212800000,
+      "tag": "0118_repo_summary_projection",
+      "breakpoints": true
+    },
+    {
+      "idx": 119,
+      "version": "6",
+      "when": 1787299200000,
+      "tag": "0119_agent_skill_is_init",
+      "breakpoints": true
+    },
+    {
+      "idx": 120,
+      "version": "6",
+      "when": 1787385600000,
+      "tag": "0120_plugin_project_fk",
+      "breakpoints": true
+    },
+    {
+      "idx": 121,
+      "version": "6",
+      "when": 1787472000000,
+      "tag": "0121_base_branch_health",
+      "breakpoints": true
+    },
+    {
+      "idx": 122,
+      "version": "6",
+      "when": 1787472001000,
+      "tag": "0122_workspace_provisioning",
+      "breakpoints": true
+    },
+    {
+      "idx": 123,
+      "version": "6",
+      "when": 1787472002000,
+      "tag": "0123_workspace_issue_members",
+      "breakpoints": true
+    },
+    {
+      "idx": 124,
+      "version": "6",
+      "when": 1787472003000,
+      "tag": "0124_repo_install_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 125,
+      "version": "6",
+      "when": 1787472004000,
+      "tag": "0125_project_statuses_unique_name",
+      "breakpoints": true
     }
   ]
 }

@@ -36,8 +36,10 @@ import { registerAddDependency } from "./tools/add-dependency.js";
 import { registerAnalyzeDependencies } from "./tools/analyze-dependencies.js";
 import { registerRemoveDependency } from "./tools/remove-dependency.js";
 import { registerCreateIssuesBatch } from "./tools/create-issues-batch.js";
+import { registerExportBacklogMarkdown, registerImportBacklogMarkdown } from "./tools/backlog-markdown.js";
 import { registerUpdateDependenciesBatch } from "./tools/update-dependencies-batch.js";
 import { registerContractCoupledIssues } from "./tools/contract-coupled-issues.js";
+import { registerProposeTicketGroups } from "./tools/propose-ticket-groups.js";
 import { registerGetBoardStatus } from "./tools/get-board-status.js";
 import { registerGetIssueSummary } from "./tools/get-issue-summary.js";
 import { registerListAgentSkills } from "./tools/list-agent-skills.js";
@@ -48,6 +50,8 @@ import { registerApproveToolUse } from "./tools/approve-tool-use.js";
 import { registerRelaunchWorkspace } from "./tools/relaunch-workspace.js";
 import { registerReviewWorkspace } from "./tools/review-workspace.js";
 import { registerAskButler } from "./tools/ask-butler.js";
+import { registerListPluginGates, registerGetPluginGate, registerResolvePluginGate, registerAdvancePluginLoop, registerListInbox } from "./tools/plugin-gates.js";
+import { registerEnablePlugin, registerSetPluginOutputLocation, registerGetPluginScaffold, registerFillPluginScaffold } from "./tools/plugin-onboarding.js";
 import { registerButlerInterrupt } from "./tools/butler-interrupt.js";
 import { registerButlerSetModel } from "./tools/butler-set-model.js";
 import { registerButlerSetProfile } from "./tools/butler-set-profile.js";
@@ -82,6 +86,9 @@ import { registerRegisterProject } from "./tools/register-project.js";
 import { registerCreateProject } from "./tools/create-project.js";
 import { registerListProjects } from "./tools/list-projects.js";
 import { registerUnregisterProject } from "./tools/unregister-project.js";
+import { registerAddProjectRepo } from "./tools/add-project-repo.js";
+import { registerListProjectRepos } from "./tools/list-project-repos.js";
+import { registerRemoveProjectRepo } from "./tools/remove-project-repo.js";
 import { registerCleanupProject } from "./tools/cleanup-project.js";
 import { registerGetPreference } from "./tools/get-preference.js";
 import { registerSetPreference } from "./tools/set-preference.js";
@@ -136,6 +143,7 @@ const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   create_issues_batch: registerCreateIssuesBatch,
   update_dependencies_batch: registerUpdateDependenciesBatch,
   contract_coupled_issues: registerContractCoupledIssues,
+  propose_ticket_groups: registerProposeTicketGroups,
   get_board_status: registerGetBoardStatus,
   get_issue_summary: registerGetIssueSummary,
   list_agent_skills: registerListAgentSkills,
@@ -146,6 +154,16 @@ const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   relaunch_workspace: registerRelaunchWorkspace,
   review_workspace: registerReviewWorkspace,
   ask_butler: registerAskButler,
+  list_plugin_gates: registerListPluginGates,
+  get_plugin_gate: registerGetPluginGate,
+  resolve_plugin_gate: registerResolvePluginGate,
+  advance_plugin_loop: registerAdvancePluginLoop,
+  // #390 — plugin onboarding as tools instead of hand-rolled curl against a drifting port.
+  enable_plugin: registerEnablePlugin,
+  set_plugin_output_location: registerSetPluginOutputLocation,
+  get_plugin_scaffold: registerGetPluginScaffold,
+  fill_plugin_scaffold: registerFillPluginScaffold,
+  list_inbox: registerListInbox,
   butler_interrupt: registerButlerInterrupt,
   butler_set_model: registerButlerSetModel,
   butler_set_profile: registerButlerSetProfile,
@@ -166,6 +184,8 @@ const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   validate_change: registerValidateChange,
   get_board_risk_digest: registerGetBoardRiskDigest,
   export_handoff_bundle: registerExportHandoffBundle,
+  export_backlog_markdown: registerExportBacklogMarkdown,
+  import_backlog_markdown: registerImportBacklogMarkdown,
   start_drive: registerStartDrive,
   list_drives: registerListDrives,
   get_drive: registerGetDrive,
@@ -175,6 +195,9 @@ const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   create_project: registerCreateProject,
   list_projects: registerListProjects,
   unregister_project: registerUnregisterProject,
+  add_project_repo: registerAddProjectRepo,
+  list_project_repos: registerListProjectRepos,
+  remove_project_repo: registerRemoveProjectRepo,
   cleanup_project: registerCleanupProject,
   get_preference: registerGetPreference,
   set_preference: registerSetPreference,
@@ -224,14 +247,20 @@ async function getDisabledTools(): Promise<Set<string>> {
   return new Set();
 }
 
-const server = new McpServer({
-  name: "agentic-kanban",
-  version: "0.0.1",
-});
-
-async function main() {
-  const disabledTools = await getDisabledTools();
-
+/**
+ * Build a fully-registered MCP server.
+ *
+ * A FACTORY rather than a module-level singleton because `McpServer` and a
+ * transport are 1:1 — the HTTP transport (#136) needs a fresh pair per request in
+ * stateless mode, so it cannot share one instance the way stdio does. Registration
+ * is just closure creation, so calling this per request is cheap.
+ */
+export function createConfiguredServer(disabledTools: Set<string>): {
+  server: McpServer;
+  registered: number;
+  skipped: number;
+} {
+  const server = new McpServer({ name: "agentic-kanban", version: "0.0.1" });
   let registered = 0;
   let skipped = 0;
   for (const [name, register] of Object.entries(TOOL_REGISTRARS)) {
@@ -242,9 +271,46 @@ async function main() {
       registered++;
     }
   }
+  return { server, registered, skipped };
+}
+
+async function main() {
+  const disabledTools = await getDisabledTools();
+  const { server, registered, skipped } = createConfiguredServer(disabledTools);
 
   if (skipped > 0) {
     console.error(`Skipped ${skipped} disabled tool(s): ${[...disabledTools].filter(t => TOOL_REGISTRARS[t]).join(", ")}`);
+  }
+
+  // HTTP mode (#136): serve over the network so a CONTAINERIZED builder can reach
+  // the board. Stdio remains the default and the host path — a stdio config
+  // describes a command the container cannot run, and the DB binding is a
+  // native-Windows better-sqlite3, so path translation is a dead end.
+  //
+  // The token comes from the environment, never a flag: argv is world-readable in
+  // the process list on both Windows and Linux.
+  if (process.argv.includes("--http")) {
+    const token = process.env.KANBAN_MCP_TOKEN;
+    if (!token) {
+      console.error(
+        "Refusing to start MCP over HTTP without KANBAN_MCP_TOKEN — this endpoint " +
+          "exposes the full board tool surface off-loopback.",
+      );
+      process.exit(1);
+    }
+    const portArg = process.argv[process.argv.indexOf("--http") + 1];
+    const port = portArg && /^\d+$/.test(portArg) ? Number(portArg) : 0;
+
+    const { startMcpHttpServer } = await import("./http-transport.js");
+    const handle = await startMcpHttpServer({
+      createServer: () => createConfiguredServer(disabledTools).server,
+      token,
+      port,
+    });
+    // The board parses this line to learn the OS-assigned port. Keep the format.
+    console.error(`MCP_HTTP_PORT=${handle.port}`);
+    console.error(`Agentic Kanban MCP server running on http (${registered} tools registered)`);
+    return;
   }
 
   const transport = new StdioServerTransport();

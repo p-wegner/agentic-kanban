@@ -1,9 +1,9 @@
 import type { Command } from "commander";
 import { getPreference, setPreference } from "../../repositories/preferences.repository.js";
 import type { Database } from "../../db/index.js";
-import { PROVIDER_DIVERGENCE_KEYS, createPreferenceService, preferenceService } from "../../services/preference.service.js";
+import { PROVIDER_DIVERGENCE_KEYS, createPreferenceService } from "../../services/preference.service.js";
 import type { ProviderDivergenceRejection } from "../../services/preference.service.js";
-import { runMigrations } from "../shared.js";
+import { cliAction } from "../shared.js";
 
 function formatDivergence(key: string, value: string, d: ProviderDivergenceRejection): string {
   const bullseye = `${d.bullseyeProvider ?? "?"}:${d.bullseyeProfile ?? ""}`;
@@ -37,7 +37,8 @@ export async function setPreferenceGuarded(
     await setPreference(key, value, database);
     return { ok: true };
   }
-  const service = database ? createPreferenceService({ database }) : preferenceService;
+  // #604: the service defaults its own database — the CLI must not import db/index.
+  const service = createPreferenceService({ database });
   const { applied, divergence } = await service.updateSettings({ [key]: value });
   if (divergence) return { ok: false, error: formatDivergence(key, value, divergence) };
   if (!applied.includes(key)) {
@@ -59,34 +60,22 @@ Examples:
   prefCmd
     .command("set <key> <value>")
     .description("Set a preference value. Provider/profile keys are checked against the active project's Strategy Bullseye (#903).")
-    .action(async (key: string, value: string) => {
-      try {
-        await runMigrations();
-        const result = await setPreferenceGuarded(key, value);
-        if (!result.ok) {
-          console.error("Error:", result.error);
-          process.exit(1);
-        }
-        console.log(`Set ${key} = ${value}`);
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+    .action(cliAction(async (key: string, value: string) => {
+      const result = await setPreferenceGuarded(key, value);
+      if (!result.ok) {
+        console.error("Error:", result.error);
         process.exit(1);
       }
-    });
+      console.log(`Set ${key} = ${value}`);
+      process.exit(0);
+    }));
 
   prefCmd
     .command("get <key>")
     .description("Get a preference value.")
-    .action(async (key: string) => {
-      try {
-        await runMigrations();
-        const value = await getPreference(key);
-        console.log(value === null ? `(not set)` : value);
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
-        process.exit(1);
-      }
-    });
+    .action(cliAction(async (key: string) => {
+      const value = await getPreference(key);
+      console.log(value === null ? `(not set)` : value);
+      process.exit(0);
+    }));
 }

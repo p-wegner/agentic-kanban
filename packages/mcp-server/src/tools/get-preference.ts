@@ -1,9 +1,12 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
+import { prodDeps, type ToolDeps } from "./deps.js";
+import { mcpText } from "../db-utils.js";
 
-export function registerGetPreference(server: McpServer) {
+export function registerGetPreference(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema } = deps;
+
   server.tool(
     "get_preference",
     "Get a preference value by key. Mirrors CLI `preferences get <key>`. Returns the stored value string, or a message indicating it is not set.",
@@ -18,19 +21,10 @@ export function registerGetPreference(server: McpServer) {
         .limit(1);
 
       if (rows.length === 0) {
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify({ key, value: null, set: false }) }],
-        };
+        return mcpText(JSON.stringify({ key, value: null, set: false }));
       }
 
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify({ key, value: rows[0].value, set: true, updatedAt: rows[0].updatedAt }),
-          },
-        ],
-      };
+      return mcpText(JSON.stringify({ key, value: rows[0].value, set: true, updatedAt: rows[0].updatedAt }));
     },
   );
 }

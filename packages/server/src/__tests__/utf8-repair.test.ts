@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createClient, type Client } from "@libsql/client";
 import { mkdtempSync, rmSync, readFileSync, readdirSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -55,18 +56,48 @@ afterEach(() => {
   rmSync(quarantineDir, { recursive: true, force: true });
 });
 
-describe("reproduction: invalid UTF-8 in a TEXT column", () => {
-  it("a plain SELECT on the corrupt row fails instead of returning data", async () => {
-    const client = await makeDb();
-    // 0x18 is a valid ASCII control byte, 0xFF is never valid as a UTF-8 lead/continuation byte.
-    const bad = new Uint8Array([0x68, 0x65, 0x6c, 0x6c, 0x6f, 0xff, 0x77, 0x6f, 0x72, 0x6c, 0x64]);
-    await insertInvalidUtf8Row(client, "s1", bad);
+/**
+ * The dangerous SELECT, run OUT OF PROCESS.
+ *
+ * It cannot be run in-process: libsql does not throw a catchable JS error here, it
+ * PANICS the Rust thread, which aborts the whole process. Asserting `.rejects` on it
+ * in-process was unreachable code that killed the vitest worker instead — taking the
+ * other nine tests in this file down with it (so the repair machinery this file exists
+ * to pin was never actually verified) and erroring the whole server suite, which
+ * withheld every merge on the board.
+ *
+ * Running it in a child keeps the proof — a plain SELECT must never hand back the
+ * corrupt text — while letting the rest of this file run.
+ */
+const PLAIN_SELECT_PROBE = `
+import { createClient } from "@libsql/client";
+const client = createClient({ url: ":memory:" });
+await client.execute("CREATE TABLE t (id integer primary key, data text)");
+// 0xFF is never valid as a UTF-8 lead or continuation byte.
+await client.execute({ sql: "INSERT INTO t (data) VALUES (CAST(unhex(?) AS TEXT))", args: ["68656c6c6fff776f726c64"] });
+try {
+  const rows = await client.execute("SELECT data FROM t");
+  console.log("RETURNED:" + JSON.stringify(rows.rows[0].data));
+} catch (err) {
+  console.log("THREW:" + String(err && err.message));
+  process.exit(3);
+}
+`;
 
-    // The native binding either throws a Utf8Error (Node/napi surface) or — in the
-    // reported production case — panics the whole process. Either way, a plain
-    // SELECT must not successfully return the corrupt text.
-    await expect(client.execute("SELECT data FROM session_messages WHERE session_id = 's1'"))
-      .rejects.toThrow();
+describe("reproduction: invalid UTF-8 in a TEXT column", () => {
+  it("a plain SELECT on the corrupt row never returns the data (it kills the process)", () => {
+    // cwd is packages/server, so the child resolves @libsql/client the same way we do.
+    const probe = spawnSync(process.execPath, ["--input-type=module", "-e", PLAIN_SELECT_PROBE], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      timeout: 60_000,
+    });
+
+    // The whole point: the corrupt text is never successfully handed back.
+    expect(probe.stdout).not.toContain("RETURNED:");
+    // Either outcome is acceptable — a thrown Utf8Error (exit 3) or the native panic
+    // observed in production (abnormal exit). What is not acceptable is exit 0.
+    expect(probe.status).not.toBe(0);
   });
 });
 

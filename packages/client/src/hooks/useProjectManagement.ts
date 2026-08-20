@@ -2,6 +2,8 @@ import type { StatusWithIssues } from "@agentic-kanban/shared";
 import { apiPost, apiPut, apiDelete } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
 import { boardSelectionActions } from "../stores/boardSelectionStore.js";
+import { onboardingActions } from "../stores/onboardingStore.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 type ProjectRef = { id: string; name: string };
 
@@ -53,12 +55,36 @@ export function useProjectManagement(deps: UseProjectManagementDeps) {
     }
   }
 
-  async function handleRegisterProject({ repoPath, gitignoreTemplate, generateReadme }: { repoPath: string; gitignoreTemplate: string; generateReadme: boolean }) {
-    const result = await apiPost<{ id: string; name: string; error?: string }>("/api/projects", { repoPath, gitignoreTemplate: gitignoreTemplate || undefined, generateReadme: generateReadme || undefined });
+  async function handleRegisterProject({ repoPath, cloneUrl, gitignoreTemplate, generateReadme, additionalRepos, progressId }: { repoPath?: string; cloneUrl?: string; gitignoreTemplate: string; generateReadme: boolean; additionalRepos?: string[]; progressId?: string }) {
+    // `progressId` (#388) is minted by the caller so it can poll phases while this POST blocks.
+    const result = await apiPost<{ id: string; name: string; error?: string }>("/api/projects", { repoPath, cloneUrl, gitignoreTemplate: gitignoreTemplate || undefined, generateReadme: generateReadme || undefined, progressId });
     if (result.error) throw new Error(result.error);
+    // Multi-repo setup: the registered repo is the leading repo; attach the rest as siblings.
+    // Each is a separate POST so one bad path is reported without discarding the good ones.
+    const siblings = (additionalRepos ?? []).map((s) => s.trim()).filter(Boolean);
+    const failed: string[] = [];
+    for (const entry of siblings) {
+      const body = /^(https?:|git@|ssh:\/\/)/i.test(entry) ? { cloneUrl: entry } : { path: entry };
+      try {
+        const r = await apiPost<{ error?: string }>(`/api/projects/${result.id}/repos`, body);
+        if (r.error) failed.push(`${entry}: ${r.error}`);
+      } catch (err) {
+        failed.push(`${entry}: ${errorMessage(err)}`);
+      }
+    }
     await loadProjects();
     await handleProjectChange(result.id);
-    showToast(`Registered "${result.name}"`, "success");
+    if (failed.length > 0) {
+      showToast(`Registered "${result.name}", but ${failed.length} repo(s) failed: ${failed.join("; ")}`, "error");
+    } else if (siblings.length > 0) {
+      showToast(`Registered "${result.name}" with ${siblings.length + 1} repos`, "success");
+    } else {
+      showToast(`Registered "${result.name}"`, "success");
+    }
+    // #464: a registered project is only half board-ready — Start Mode is `manual`, there are no
+    // plugins and the backlog is empty. Open the wizard AFTER the import completes, never as a
+    // gate in front of it: a user who wants a bare project must still reach the board in one click.
+    onboardingActions.openOnboarding(result.id, result.name, { justImported: true });
   }
 
   async function handleCreateProject(name: string, path: string, gitignoreTemplate: string, generateReadme: boolean) {
@@ -71,6 +97,7 @@ export function useProjectManagement(deps: UseProjectManagementDeps) {
     await loadProjects();
     await handleProjectChange(result.id);
     showToast(`Created "${result.name}"`, "success");
+    onboardingActions.openOnboarding(result.id, result.name, { justImported: true });
   }
 
   async function handleUnregisterProject(id: string) {

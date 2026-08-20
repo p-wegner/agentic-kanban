@@ -1,4 +1,4 @@
-import { execGit } from "./internal.js";
+import { execGit, execGitFresh } from "./internal.js";
 
 /**
  * Ensure a worktree's HEAD is attached to the expected branch.
@@ -10,12 +10,13 @@ export async function ensureOnBranch(
   worktreePath: string,
   branch: string,
 ): Promise<void> {
-  const current = await execGit(["rev-parse", "--abbrev-ref", "HEAD"], worktreePath);
+  // #621: fresh — the whole point is to observe commits made by the AGENT process.
+  const current = await execGitFresh(["rev-parse", "--abbrev-ref", "HEAD"], worktreePath);
   const currentBranch = current.trim();
 
   if (currentBranch !== branch) {
     // Worktree is detached or on wrong branch — get current HEAD commit
-    const headCommit = (await execGit(["rev-parse", "HEAD"], worktreePath)).trim();
+    const headCommit = (await execGitFresh(["rev-parse", "HEAD"], worktreePath)).trim();
 
     // Force-update the branch ref to point at current HEAD (captures dangling commits)
     await execGit(["branch", "-f", branch, headCommit], worktreePath);
@@ -35,8 +36,11 @@ export async function syncBranchToHead(
   branch: string,
 ): Promise<boolean> {
   try {
-    const headCommit = (await execGit(["rev-parse", "HEAD"], worktreePath)).trim();
-    const branchCommit = (await execGit(["rev-parse", branch], worktreePath)).trim();
+    // #621: both reads bypass the dedupe memo. This function exists to capture commits the
+    // AGENT made out-of-band; a memoized `rev-parse HEAD` within the ~1.5s TTL reports the
+    // pre-commit sha, the two look equal, and the dangling commit is silently not captured.
+    const headCommit = (await execGitFresh(["rev-parse", "HEAD"], worktreePath)).trim();
+    const branchCommit = (await execGitFresh(["rev-parse", branch], worktreePath)).trim();
 
     if (headCommit !== branchCommit) {
       // HEAD is ahead of the branch (or detached) — update branch to match
@@ -47,4 +51,5 @@ export async function syncBranchToHead(
   } catch {
     return false;
   }
-}
+}
+

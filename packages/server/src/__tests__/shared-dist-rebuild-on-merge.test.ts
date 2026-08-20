@@ -30,6 +30,14 @@ import { createTestDb } from "./helpers/test-db.js";
 import * as handoffDraftModule from "../services/github-handoff-draft.service.js";
 import * as mergeHelpersModule from "../services/merge-helpers.service.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
+import { makeTempRepo } from "./helpers/temp-repo.js";
+
+/**
+ * A REAL repo path (#273). This suite drives the actual merge path, whose repo lock
+ * refuses a repoPath with no `.git` and then POLLS — so the old `"/repo"` literal made
+ * every test here burn its full timeout instead of running.
+ */
+const REPO_PATH = makeTempRepo();
 
 function makeGit(changedFiles: string[] = []) {
   // Stateful ancestry: the branch is NOT yet an ancestor of base until mergeBranch
@@ -76,7 +84,7 @@ async function seedWorkspace(db: ReturnType<typeof createTestDb>["db"]) {
   await db.insert(projects).values({
     id: projectId,
     name: "Test",
-    repoPath: "/repo",
+    repoPath: REPO_PATH,
     repoName: "repo",
     defaultBranch: "master",
     createdAt: now,
@@ -141,7 +149,7 @@ describe("shared dist rebuild on merge (#617)", () => {
     await svc.mergeWorkspace(workspaceId);
     await vi.waitFor(() => {
       expect(mergeHelpersModule.rebuildSharedIfChanged).toHaveBeenCalledWith(
-        "/repo",
+        REPO_PATH,
         expect.arrayContaining(["packages/shared/src/lib/git-service.ts"]),
       );
     }, { timeout: 3000 });
@@ -167,7 +175,7 @@ describe("shared dist rebuild on merge (#617)", () => {
     await svc.mergeWorkspace(workspaceId);
     await vi.waitFor(() => {
       expect(mergeHelpersModule.rebuildSharedIfChanged).toHaveBeenCalledWith(
-        "/repo",
+        REPO_PATH,
         expect.arrayContaining(["packages/shared/src/lib/git-service.ts"]),
       );
     }, { timeout: 3000 });

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { setSettings } from "../lib/settingsStore.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { BUILTIN_PRESETS, deriveRefillFocus, presetMatchesConfig, presetsKey } from "../lib/strategy-targets.js";
 import type { MonitorPolicyPreset, StrategyConfig } from "../lib/strategy-targets.js";
 

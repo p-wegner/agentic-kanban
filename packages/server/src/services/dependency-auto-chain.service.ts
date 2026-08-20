@@ -1,10 +1,13 @@
 import { isResolvedDependencyStatusView } from "@agentic-kanban/shared";
 import type { Database } from "../db/index.js";
-import type { BoardEvents } from "./board-events.js";
-import type { SessionManager } from "./session.manager.js";
+import type { BoardEventSink } from "./board-events.js";
+import type { SessionLauncher } from "./session.manager.js";
 import type { GitService } from "./workspace-internals.js";
 import { createWorkspaceCrudService } from "./workspace-crud.service.js";
 import { resolveStartPolicy } from "./start-policy.service.js";
+import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
+import { claimIssueForAutoStart, isAutoStartClaimed } from "./auto-start-claim.js";
+import { completeCreateJob, failCreateJob } from "./create-job.service.js";
 import {
   getProjectStatusesForAutoChain,
   getActiveWipCount,
@@ -16,8 +19,10 @@ import {
   getBlockerStatuses,
   insertAutoChainAuditComment,
 } from "../repositories/dependency-auto-chain.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { BLOCKING_DEPENDENCY_TYPES } from "@agentic-kanban/shared/lib/dependency-type-traits";
+import { findCycleNodes } from "@agentic-kanban/shared/lib/dependency-graph";
 
-const BLOCKING_DEPENDENCY_TYPES = ["depends_on", "blocked_by"] as const;
 const AUTO_CHAIN_TRIGGER_TYPES = ["depends_on", "blocked_by", "child_of"] as const;
 const SKIP_AUTO_START_TAG = "no-auto-start";
 
@@ -43,48 +48,13 @@ type DependencyRow = {
   type: string;
 };
 
-function slugifyTitle(title: string): string {
-  return title
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, "")
-    .replace(/\s+/g, "-")
-    .slice(0, 40)
-    .replace(/^-+|-+$/g, "") || "issue";
-}
-
+/** #523: the traversal is shared now; only the edge filter was ever local. */
 function findCycleIssueIds(issueIds: string[], deps: DependencyRow[]): Set<string> {
-  const scopedIds = new Set(issueIds);
-  const adjacency = new Map<string, string[]>();
-  for (const id of issueIds) adjacency.set(id, []);
-  for (const dep of deps) {
-    if (!AUTO_CHAIN_TRIGGER_TYPES.includes(dep.type as typeof AUTO_CHAIN_TRIGGER_TYPES[number])) continue;
-    if (!scopedIds.has(dep.issueId) || !scopedIds.has(dep.dependsOnId)) continue;
-    adjacency.get(dep.issueId)?.push(dep.dependsOnId);
-  }
-
-  const cycleIds = new Set<string>();
-  const state = new Map<string, "visiting" | "visited">();
-  const stack: string[] = [];
-
-  function visit(id: string) {
-    state.set(id, "visiting");
-    stack.push(id);
-    for (const next of adjacency.get(id) ?? []) {
-      if (state.get(next) === "visiting") {
-        const start = stack.indexOf(next);
-        for (const cycleId of stack.slice(start)) cycleIds.add(cycleId);
-      } else if (!state.has(next)) {
-        visit(next);
-      }
-    }
-    stack.pop();
-    state.set(id, "visited");
-  }
-
-  for (const id of issueIds) {
-    if (!state.has(id)) visit(id);
-  }
-  return cycleIds;
+  return findCycleNodes(
+    issueIds,
+    deps.map((dep) => ({ from: dep.issueId, to: dep.dependsOnId, type: dep.type })),
+    (edge) => AUTO_CHAIN_TRIGGER_TYPES.includes(edge.type as typeof AUTO_CHAIN_TRIGGER_TYPES[number]),
+  );
 }
 
 export async function findAutoStartableDependencyIssue(args: {
@@ -140,6 +110,11 @@ export async function findAutoStartableDependencyIssue(args: {
     }
 
     if (await hasExistingOpenWorkspace(candidate.id, database)) continue;
+    // #366: the workspace ROW does not exist for the whole 80s-to-8min provisioning window,
+    // so the table check above is blind to a start another path already began. Without this
+    // the cascade picked an issue the plugin-loop starter was already provisioning and
+    // provisioned a SECOND workspace + worktree for it.
+    if (isAutoStartClaimed(candidate.id)) continue;
 
     const blockerIds = await getBlockingDependencyIds(candidate.id, BLOCKING_DEPENDENCY_TYPES, database);
     if (blockerIds.length === 0) {
@@ -203,8 +178,8 @@ export async function autoStartUnblockedDependencyIssue(args: {
   projectId: string | null;
   completedIssueId: string;
   prefMap: Map<string, string>;
-  getSessionManager?: () => SessionManager;
-  boardEvents?: BoardEvents;
+  getSessionManager?: () => SessionLauncher;
+  boardEvents?: BoardEventSink;
   gitService?: GitService;
   createWorkspace?: (candidate: AutoStartCandidate, branch: string) => Promise<{ id?: string; error?: string }>;
 }): Promise<void> {
@@ -239,14 +214,29 @@ export async function autoStartUnblockedDependencyIssue(args: {
   }
 
   const candidate = decision.candidate;
-  const branch = `feature/ak-${candidate.issueNumber ?? "next"}-${slugifyTitle(candidate.title)}`;
+  // #366: ONE naming function for the whole board. This used to be a private `slugifyTitle`
+  // that stripped non-alphanumerics ("PM pipeline 8/9: CI/CD" -> `pm-pipeline-89-cicd`) while
+  // `suggestBranchName` turned them into separators (`pm-pipeline-8-9-ci-cd`). Two producers
+  // meant two different branch names for the same issue, which is why the create service's
+  // branch-collision check could never notice the cascade racing another starter.
+  const branch = suggestBranchName(candidate);
+  // Claim the issue in the create-job registry BEFORE provisioning. `decision` was computed
+  // over several awaits, so re-assert here in the one atomic (await-free) step; a claim that
+  // appeared in between means another starter got there first and we must not duplicate it.
+  const claim = claimIssueForAutoStart(candidate.id);
+  if (!claim) {
+    console.log(`[dependency-auto-chain] NOT starting issue #${candidate.issueNumber ?? "?"} — a workspace creation for it is already in flight (#366)`);
+    return;
+  }
   let workspace: { id?: string; error?: string };
   try {
     workspace = args.createWorkspace
       ? await args.createWorkspace(candidate, branch)
       : await createWorkspaceCrudService({ database, getSessionManager, boardEvents, gitService }).createWorkspace({ issueId: candidate.id, branch });
+    completeCreateJob(claim.jobId, workspace);
   } catch (err) {
-    workspace = { error: err instanceof Error ? err.message : String(err) };
+    workspace = { error: errorMessage(err) };
+    failCreateJob(claim.jobId, err);
   }
   if (workspace.error) {
     await addAutoChainAuditComment({

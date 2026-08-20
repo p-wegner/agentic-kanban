@@ -12,8 +12,11 @@ import { tmpdir } from "node:os";
 import { normalize, sep } from "node:path";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { E2E_STATE_FILE } from "./global-setup.js";
+import { E2E_SERVER_PORT } from "./ports.js";
 
-const serverPort = Number(process.env.SERVER_PORT) || 3001;
+// #645: was its own `|| 3001` default — a third copy that would have pointed setup
+// and teardown at the live dev board while the stack ran on the E2E ports.
+const serverPort = E2E_SERVER_PORT;
 
 /** Patterns that identify E2E-generated test artifact issues (fallback only). */
 const TEST_TITLE_PATTERNS: RegExp[] = [

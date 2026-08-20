@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
-import { apiFetch } from "../lib/api.js";
+import { useMemo, useState } from "react";
 import { BRAND } from "../lib/chartColors.js";
+import { useApiResource } from "../hooks/useApiResource.js";
 
 interface BurndownBucket {
   date: string;
@@ -25,21 +25,12 @@ function fmtDate(dateKey: string): string {
 }
 
 export function BurndownChart({ projectId }: { projectId: string }) {
-  const [data, setData] = useState<BurndownData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [days, setDays] = useState<7 | 30 | 90>(30);
-  const [retryKey, setRetryKey] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    apiFetch<BurndownData>(`/api/issues/burndown?projectId=${encodeURIComponent(projectId)}&days=${days}`)
-      .then((d) => { if (!cancelled) { setData(d); setLoading(false); } })
-      .catch((err) => { if (!cancelled) { setError(err instanceof Error ? err.message : "Failed to load burndown data"); setLoading(false); } });
-    return () => { cancelled = true; };
-  }, [projectId, days, retryKey]);
+  // #513: the cancelled flag, the error ternary and the retryKey counter live in the hook.
+  const { data, loading, error, reload } = useApiResource<BurndownData>(
+    `/api/issues/burndown?projectId=${encodeURIComponent(projectId)}&days=${days}`,
+    { fallbackError: "Failed to load burndown data" },
+  );
 
   const stats = useMemo(() => {
     if (!data || data.buckets.length === 0) return null;
@@ -105,7 +96,7 @@ export function BurndownChart({ projectId }: { projectId: string }) {
           <div className="flex h-64 flex-col items-center justify-center gap-2 text-sm text-red-600 dark:text-red-400">
             <span>{error}</span>
             <button
-              onClick={() => { setError(null); setRetryKey((k) => k + 1); }}
+              onClick={() => reload()}
               className="rounded bg-red-100 px-3 py-1 text-xs text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-300 dark:hover:bg-red-900/50"
             >
               Retry

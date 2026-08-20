@@ -14,6 +14,8 @@ import {
 } from "./MonitorSections.js";
 export { MonitorButlerSection, OrchestratorSection, RecentBoardHealthEventsSection } from "./MonitorSections.js";
 import type { StartMode, ResolvedTunables, MonitorStatus, BoardHealthEvent } from "../lib/monitor-popover.js";
+import { useNow } from "../hooks/usePoll.js";
+import { occupiesWipSlot } from "@agentic-kanban/shared/lib/workspace-liveness";
 
 interface MonitorPopoverProps {
   status: MonitorStatus | null;
@@ -60,7 +62,7 @@ export function MonitorPopover({
   monitorButlerInterval = 15,
   onViewAllHealthEvents,
 }: MonitorPopoverProps) {
-  const [now, setNow] = useState(Date.now());
+  const now = useNow(1000);
   const [running, setRunning] = useState(false);
   const [healthEvents, setHealthEvents] = useState<BoardHealthEvent[]>([]);
   const [healthEventsLoading, setHealthEventsLoading] = useState(false);
@@ -99,10 +101,6 @@ export function MonitorPopover({
     }
   }
 
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, []);
 
   useEffect(() => {
     void loadHealthEvents();
@@ -172,7 +170,7 @@ export function MonitorPopover({
 
   const activeWs = columns.flatMap(c => c.issues).filter(iss =>
     iss.workspaceSummary?.main &&
-    (iss.workspaceSummary.main.status === "active" || iss.workspaceSummary.main.status === "reviewing" || iss.workspaceSummary.main.status === "fixing") &&
+    occupiesWipSlot(iss.workspaceSummary.main.status) &&
     iss.workspaceSummary.main.lastAssistantMessage
   );
   const warnings = status?.warnings ?? [];

@@ -2,6 +2,7 @@ import type { Database } from "../db/index.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import { createProjectScriptsService } from "../services/project-scripts.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 function encodeEvent(event: unknown): string {
   return `data: ${JSON.stringify(event)}\n\n`;
@@ -42,7 +43,7 @@ export function createProjectScriptsRoute(database: Database) {
             status: "error",
             exitCode: null,
             endedAt: new Date().toISOString(),
-            error: err instanceof Error ? err.message : String(err),
+            error: errorMessage(err),
           })));
           controller.close();
         });

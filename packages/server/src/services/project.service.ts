@@ -1,33 +1,39 @@
 import { randomUUID } from "node:crypto";
+import {
+  startRegistrationProgress,
+  beginRegistrationPhase,
+  endRegistrationPhase,
+  finishRegistrationProgress,
+} from "./registration-progress.service.js";
+import { exportBuiltinSkillsToProject } from "./project-skill-export.js";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { resolve, sep, join } from "node:path";
-import { ensureAgentGitignore, ensureStarterClaudeMd, ensureStarterAgentsMd, ensureHookScaffold, ensureVerifyGateRunner, getDefaultSkillId, commitProjectScaffoldArtifacts } from "./project-scaffold.js";
-import { isSkillsDirAbsentOrEmpty, writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
-import { listAgentSkills } from "../repositories/agent-skill.repository.js";
-import { getPreference } from "../repositories/preferences.repository.js";
+import { getDefaultSkillId } from "./project-scaffold.js";
+import { scaffoldAndPopulateProject } from "./project-registration.js";
+import { getNumber } from "@agentic-kanban/shared/lib/settings-registry";
+import { getPreference, getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import type { Database } from "../db/index.js";
 import { branchExists, detectRepoInfo, getProjectGitStatsAsync } from "./git-info.service.js";
 import { gitExecSync } from "@agentic-kanban/shared/lib/git-exec";
-import { listBranches, listWorktrees, getDiffShortstat, removeWorktree } from "./git.service.js";
+import { listBranches } from "./git.service.js";
 import { buildWorkspaceSummaryMap, buildBlockedMap, buildTagMap, buildGraphEdges } from "./board-aggregation.service.js";
 import { getProjectById, getProjectByRepoPath, getAllProjects, insertProject, deleteProjectCascade, setProjectArchived, getProjectStats, getProjectStatuses, createProjectStatus, deleteProjectStatus, updateProjectStatusSortOrder } from "../repositories/project.repository.js";
-import { getProjectsBasePath, updateProjectFields, clearActiveProjectPreference, getProjectWorkspacesWithIssue, getWorkspaceWorkingDirById, getProjectStatusIdsAndNames, getBoardIssueRows, getProjectStatusesOrdered, getBoardIssues, getPreferenceValue, getGraphIssues, getCrossProjectIssues, getActiveWorkspaceCounts, getBoardSummaryRows } from "../repositories/project-service.repository.js";
+import { getProjectsBasePath, updateProjectFields, clearActiveProjectPreference, getProjectStatusIdsAndNames, getBoardIssueRows, getProjectStatusesOrdered, getBoardIssues, getGraphIssues, getCrossProjectIssues, getActiveWorkspaceCounts, getBoardSummaryRows } from "../repositories/project-service.repository.js";
+import { deriveSetupScriptFromProfile, deriveVerifyScriptFromProfile, getStackProfile } from "./stack-profile.service.js";
 import { generateSetupScript as generateSetupScriptAI, generateTeardownScript as generateTeardownScriptAI, generateVerifyScript as generateVerifyScriptAI } from "./project-setup.service.js";
-import { populateStackProfile, populateVerifyScript, detectStackProfile } from "./stack-profile.service.js";
-import { deleteWorkspaceCascade } from "../repositories/workspace.repository.js";
+import { cloneRepo } from "./repo-clone.service.js";
 import type { WorkspaceSummaryCache } from "./workspace-summary-cache.service.js";
 import type { WorkspaceSummary } from "./workspace-summary.service.js";
 import { buildBoardColumns } from "../lib/board-view.js";
 
-export class ProjectError extends Error {
-  constructor(
-    message: string,
-    public readonly code: "NOT_FOUND" | "BAD_REQUEST" | "CONFLICT",
-  ) {
-    super(message);
-  }
-}
+import { ProjectError } from "./project-error.js";
+import { createInitialCommit, createSiblingRepoDir, promoteRepoToLeading } from "./project-repos.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { createProjectWorktreesService } from "./project-worktrees.service.js";
+
+// Re-export so existing importers (routes, tests) keep `import { ProjectError } from "./project.service.js"`.
+export { ProjectError };
 
 const GITIGNORE_TEMPLATES: Record<string, string> = {
   node: `node_modules/
@@ -58,6 +64,7 @@ venv/
 *.war
 *.ear
 .gradle/
+.kotlin/
 build/
 .env
 *.log
@@ -108,7 +115,26 @@ const ARCHIVE_STATUS_NAMES = new Set(["done", "cancelled"]);
 
 // Debounce for invalidation-triggered warm-ahead board rebuilds: one session exit
 // emits several broadcast reasons back-to-back; collapse the burst into one rebuild.
-const BOARD_WARMUP_DEBOUNCE_MS = 75;
+// G14f: raised from 75ms — a monitor cycle's event burst spans several hundred ms,
+// and 75ms let one burst trigger multiple full rebuilds.
+const BOARD_WARMUP_DEBOUNCE_MS = 300;
+
+/** Registration input, shared by the public entry point and its progress-tracked body (#388). */
+interface RegisterProjectInput {
+  repoPath?: string;
+  cloneUrl?: string;
+  name?: string;
+  description?: string;
+  color?: string;
+  gitignoreTemplate?: string;
+  generateReadme?: boolean;
+  exportSkillsOnRegistration?: boolean;
+  /**
+   * Client-minted id for polling per-phase progress while this call is in flight (#388).
+   * Optional: a caller that does not want progress omits it and nothing is recorded.
+   */
+  progressId?: string;
+}
 
 export function createProjectService(deps: { database: Database; workspaceSummaryCache?: WorkspaceSummaryCache }) {
   const { database, workspaceSummaryCache } = deps;
@@ -124,24 +150,40 @@ export function createProjectService(deps: { database: Database; workspaceSummar
   // Pending warm-ahead debounce timers keyed by projectId.
   const boardWarmupTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-  async function registerProject(body: {
-    repoPath: string;
-    name?: string;
-    description?: string;
-    color?: string;
-    gitignoreTemplate?: string;
-    generateReadme?: boolean;
-    exportSkillsOnRegistration?: boolean;
-  }) {
-    if (!body.repoPath) {
-      throw new ProjectError("repoPath is required", "BAD_REQUEST");
+  async function registerProject(body: RegisterProjectInput) {
+    const progress = startRegistrationProgress(body.progressId);
+    try {
+      return await registerProjectTracked(body, progress);
+    } catch (err) {
+      finishRegistrationProgress(progress, errorMessage(err));
+      throw err;
+    }
+  }
+
+  async function registerProjectTracked(body: RegisterProjectInput, progress: string | null) {
+    if (!body.repoPath && !body.cloneUrl) {
+      throw new ProjectError("repoPath or cloneUrl is required", "BAD_REQUEST");
+    }
+    if (body.repoPath && body.cloneUrl) {
+      throw new ProjectError("Provide either repoPath or cloneUrl, not both", "BAD_REQUEST");
     }
 
+    let localPath = body.repoPath;
+    if (body.cloneUrl) {
+      beginRegistrationPhase(progress, "clone");
+      try {
+        localPath = await cloneRepo(body.cloneUrl, { name: body.name });
+      } catch (err) {
+        throw new ProjectError(`Clone failed: ${errorMessage(err)}`, "BAD_REQUEST");
+      }
+    }
+
+    beginRegistrationPhase(progress, "inspect-repo");
     let repoInfo;
     try {
-      repoInfo = await detectRepoInfo(body.repoPath);
+      repoInfo = await detectRepoInfo(localPath!);
     } catch (err) {
-      throw new ProjectError(`Invalid repo: ${err instanceof Error ? err.message : String(err)}`, "BAD_REQUEST");
+      throw new ProjectError(`Invalid repo: ${errorMessage(err)}`, "BAD_REQUEST");
     }
 
     const name = body.name || repoInfo.repoName;
@@ -152,6 +194,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     }
 
     // Default onboarding skill so a freshly-registered project's worktrees aren't skill-less (#531).
+    beginRegistrationPhase(progress, "create-project");
     const id = randomUUID();
     const result = await insertProject(id, {
       name,
@@ -164,19 +207,24 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       defaultSkillId: await getDefaultSkillId(database),
     }, database);
 
-    // Scaffold (clobber-safe for imports): ensure the generic agent-artifact ignores are present
-    // (append-if-missing; seeds the chosen language template only when no .gitignore exists), and
-    // drop a starter CLAUDE.md when the repo has none â€” keeps agent scratch out of the project's
-    // history and gives agents a baseline working agreement. The synchronous rule-based stack
-    // detection also feeds per-stack build-output ignores (target/, __pycache__/, *.class, …) so a
-    // non-Node project's build artifacts never make main dirty and block auto-merge (#811).
-    const detectedStack = detectStackProfile(repoInfo.repoPath).stack;
-    ensureAgentGitignore(repoInfo.repoPath, body.gitignoreTemplate ? GITIGNORE_TEMPLATES[body.gitignoreTemplate] : undefined, detectedStack);
-    ensureStarterClaudeMd(repoInfo.repoPath);
-    ensureStarterAgentsMd(repoInfo.repoPath);
-    ensureHookScaffold(repoInfo.repoPath);
-    ensureVerifyGateRunner(repoInfo.repoPath);
-    await commitProjectScaffoldArtifacts(repoInfo.repoPath);
+    // THE shared registration step (#43) — see scaffoldAndPopulateProject in
+    // project-registration.ts: scaffold → populate the derived config → commit what the board
+    // wrote (#41). The fast rule-based pass is AWAITED, closing this path's race: a caller
+    // creating a workspace immediately after POST /api/projects used to beat the old
+    // fire-and-forget population and get `{"command": null, "state": "skipped"}` setup. The
+    // optional ~30s LLM gap-fill stays backgrounded so the request never blocks on it.
+    //
+    // This path also never called populateSetupScript at all, so REST-registered projects had
+    // setup_script = null forever — the #37 bug, fixed by routing through the shared step (#43).
+    // Two nameable steps in one call: the scaffold writes guards/config, the population derives
+    // the stack profile and setup command. Reported as `scaffold` because that is what starts
+    // first; `stack-profile` follows it below so a slow derivation is visibly its own wait.
+    beginRegistrationPhase(progress, "scaffold");
+    await scaffoldAndPopulateProject(id, repoInfo.repoPath, database, {
+      gitignoreTemplate: body.gitignoreTemplate ? GITIGNORE_TEMPLATES[body.gitignoreTemplate] : undefined,
+    });
+    beginRegistrationPhase(progress, "stack-profile");
+    endRegistrationPhase(progress, "done");
 
     if (body.generateReadme) {
       const readmePath = join(repoInfo.repoPath, "README.md");
@@ -185,34 +233,14 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       }
     }
 
+    beginRegistrationPhase(progress, "seed-skills");
     const shouldExport = body.exportSkillsOnRegistration ??
       ((await getPreference("export_skills_on_registration", database)) === "true");
-    if (shouldExport) {
-      const isEmpty = await isSkillsDirAbsentOrEmpty(repoInfo.repoPath);
-      if (isEmpty) {
-        try {
-          const builtinSkills = await listAgentSkills(undefined, false, database);
-          for (const skill of builtinSkills) {
-            if (skill.isBuiltin && !/[/\\]|\.\./.test(skill.name)) {
-              await writeAgentSkillFile(repoInfo.repoPath, skill);
-            }
-          }
-        } catch {
-          // non-fatal â€” export failure should not block registration
-        }
-      }
-    }
+    if (!shouldExport) endRegistrationPhase(progress, "skipped", "skill export is off for this board");
+    if (shouldExport) await exportBuiltinSkillsToProject(repoInfo.repoPath, database);
 
-    // Populate the durable stack profile (#786) — ONE descriptor every harness piece
-    // (hooks/verify/dev-server/build-clean) reads instead of re-deriving stack facts.
-    // The rule-based pass is fast; the optional LLM gap-fill is best-effort and must not
-    // block (or fail) registration, so run it fire-and-forget. Once the profile lands,
-    // auto-populate & activate the verify (merge-gate) command (#788) — the keystone
-    // auto-merge gate must be live from ticket #1, derived from the same profile.
-    void populateStackProfile(id, repoInfo.repoPath, database)
-      .then((profile) => populateVerifyScript(id, repoInfo.repoPath, database, profile))
-      .catch(() => { /* non-fatal */ });
-
+    beginRegistrationPhase(progress, "finalize");
+    finishRegistrationProgress(progress);
     return { ...result, id };
   }
 
@@ -240,7 +268,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       const baseDirRows = await getProjectsBasePath(database);
       const baseDir = baseDirRows[0]?.value?.trim();
       if (!baseDir) {
-        throw new ProjectError("No base directory configured. Set 'Projects base directory' in Settings â€º Project, or provide an explicit path.", "BAD_REQUEST");
+        throw new ProjectError("No base directory configured. Set 'Projects base directory' in Settings › Project, or provide an explicit path.", "BAD_REQUEST");
       }
       targetPath = resolve(join(baseDir, name));
 
@@ -257,7 +285,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     try {
       mkdirSync(targetPath, { recursive: true });
     } catch (err) {
-      throw new ProjectError(`Failed to create directory: ${err instanceof Error ? err.message : String(err)}`, "BAD_REQUEST");
+      throw new ProjectError(`Failed to create directory: ${errorMessage(err)}`, "BAD_REQUEST");
     }
 
     try {
@@ -266,6 +294,28 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       try { rmSync(targetPath, { recursive: true, force: true }); } catch {}
       const stderr = (err as { stderr?: string | Buffer }).stderr;
       throw new ProjectError(`git init failed: ${stderr ? String(stderr).trim() : String(err)}`, "BAD_REQUEST");
+    }
+
+    // `git init` leaves HEAD on an UNBORN branch — a repo with no commits (#47). Everything
+    // downstream assumes a born HEAD: the scaffold commit resolved the current branch and threw
+    // into a non-fatal catch (so the board's own scaffold stayed permanently untracked, and the
+    // first agent's `git add -A` swept it into an unrelated feature commit), and `git worktree
+    // add` cannot branch from a commit that does not exist. Give the repo its first commit here,
+    // BEFORE scaffolding — then registration's shared step behaves exactly as it does for an
+    // imported repo, which always arrives with a commit.
+    //
+    // The README (when requested) is the natural content for it; otherwise commit empty.
+    if (body.generateReadme) {
+      try { writeFileSync(join(targetPath, "README.md"), `# ${name}\n`, "utf8"); } catch { /* non-fatal */ }
+    }
+    try {
+      createInitialCommit(targetPath);
+    } catch (err) {
+      try { rmSync(targetPath, { recursive: true, force: true }); } catch {}
+      throw new ProjectError(
+        `Failed to create the initial commit: ${errorMessage(err)}`,
+        "BAD_REQUEST",
+      );
     }
 
     const existing = await getProjectByRepoPath(targetPath, database);
@@ -277,7 +327,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     try {
       repoInfo = await detectRepoInfo(targetPath);
     } catch (err) {
-      throw new ProjectError(`Failed to read repo info: ${err instanceof Error ? err.message : String(err)}`, "BAD_REQUEST");
+      throw new ProjectError(`Failed to read repo info: ${errorMessage(err)}`, "BAD_REQUEST");
     }
 
     const projectName = body.name?.trim() || repoInfo.repoName;
@@ -292,24 +342,29 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       remoteUrl: repoInfo.remoteUrl,
       defaultSkillId: await getDefaultSkillId(database),
     }, database);
-    // Scaffold the fresh repo with the generic agent-artifact ignores + a starter CLAUDE.md + hooks.
-    // A just-`git init`-ed repo usually has no stack markers yet (stack === null ⇒ no per-stack
-    // block); detect anyway so a pre-seeded directory still gets its build-output ignores (#811).
-    const freshStack = detectStackProfile(repoInfo.repoPath).stack;
-    ensureAgentGitignore(repoInfo.repoPath, body.gitignoreTemplate ? GITIGNORE_TEMPLATES[body.gitignoreTemplate] : undefined, freshStack);
-    ensureStarterClaudeMd(repoInfo.repoPath);
-    ensureStarterAgentsMd(repoInfo.repoPath);
-    ensureHookScaffold(repoInfo.repoPath);
-    ensureVerifyGateRunner(repoInfo.repoPath);
-    await commitProjectScaffoldArtifacts(repoInfo.repoPath);
+    // THE shared registration step (#43/#44) — see scaffoldAndPopulateProject in
+    // project-registration.ts: scaffold → populate the derived config → commit what the board
+    // wrote (#41). This path used to hand-roll the ensure*/commit chain AND never call
+    // populateStackProfile / populateVerifyScript / populateSetupScript at all, so a project
+    // created here had setup_script = null (no dependency install in worktrees — #37/#810) and
+    // verify_script = null (the #788 auto-merge gate never live) forever.
+    //
+    // `skipLlm: true` on purpose (#44). Unlike every other registration entry point, this one
+    // OWNS the directory: it refuses a pre-existing path and `git init`s an empty one, so at
+    // population time the repo provably contains nothing but the board's own scaffold. The LLM
+    // gap-fill would therefore be handed "Detected marker files: none / Repo root entries:
+    // .claude, .gitignore, CLAUDE.md, AGENTS.md" — any non-null answer is invention, not
+    // detection, and an invented setup_script is strictly WORSE than null: it is executed in
+    // every worktree, so a guessed `npm install` fails on what the user then builds as a Python
+    // project, whereas null lets the Builder install correctly. Skipping also costs a ~30s
+    // `claude` subprocess per project creation. As a bonus it makes the #41 hazard unreachable
+    // rather than merely defused: no enrichment is scheduled at all, so nothing can settle after
+    // the scaffold commit and re-dirty the user's checkout.
+    await scaffoldAndPopulateProject(id, repoInfo.repoPath, database, {
+      gitignoreTemplate: body.gitignoreTemplate ? GITIGNORE_TEMPLATES[body.gitignoreTemplate] : undefined,
+      skipLlm: true,
+    });
 
-    if (body.generateReadme) {
-      const readmePath = join(repoInfo.repoPath, "README.md");
-      if (!existsSync(readmePath)) {
-        try { writeFileSync(readmePath, `# ${projectName}
-`, "utf8"); } catch { /* non-fatal */ }
-      }
-    }
     return result;
   }
 
@@ -395,89 +450,10 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     return { id };
   }
 
-  async function getWorktrees(projectId: string) {
-    const project = await getProjectById(projectId, database);
-    if (!project) throw new ProjectError("Project not found", "NOT_FOUND");
-
-    const { repoPath, defaultBranch } = project;
-
-    const gitWorktrees = await listWorktrees(repoPath);
-
-    const projectWorkspaces = await getProjectWorkspacesWithIssue(projectId, database);
-
-    const wsByDir = new Map<string, typeof projectWorkspaces[number]>();
-    for (const ws of projectWorkspaces) {
-      if (ws.workingDir) {
-        wsByDir.set(ws.workingDir.replace(/\//g, sep), ws);
-      }
-    }
-
-    return Promise.all(
-      gitWorktrees.map(async (wt, index) => {
-        const isMain = index === 0;
-        const normalizedWtPath = wt.path.replace(/\//g, sep);
-
-        let ws = wsByDir.get(normalizedWtPath);
-        if (!ws && isMain) {
-          for (const [, candidate] of wsByDir) {
-            if (candidate.isDirect && candidate.workingDir && candidate.workingDir.startsWith(normalizedWtPath)) {
-              ws = candidate;
-              break;
-            }
-          }
-        }
-
-        let diffStats: { filesChanged: number; insertions: number; deletions: number } | undefined;
-        if (!isMain) {
-          const base = ws?.baseBranch || defaultBranch;
-          if (base) {
-            diffStats = await getDiffShortstat(wt.path, base);
-            if (diffStats.filesChanged === 0 && diffStats.insertions === 0 && diffStats.deletions === 0) {
-              diffStats = undefined;
-            }
-          }
-        }
-
-        return {
-          path: wt.path,
-          branch: isMain ? (defaultBranch ?? (wt.branch.replace(/^refs\/heads\//, "") || "(unset)")) : wt.branch.replace(/^refs\/heads\//, ""),
-          isMain,
-          workspace: ws ? {
-            id: ws.id,
-            status: ws.status,
-            isDirect: ws.isDirect,
-            issueId: ws.issueId,
-            issueNumber: ws.issueNumber,
-            issueTitle: ws.issueTitle,
-          } : undefined,
-          diffStats,
-        };
-      }),
-    );
-  }
-
-  async function removeWorktreeById(projectId: string, body: { path?: string; workspaceId?: string }) {
-    const project = await getProjectById(projectId, database);
-    if (!project) throw new ProjectError("Project not found", "NOT_FOUND");
-
-    let removedPath = body.path;
-
-    if (body.workspaceId) {
-      const wsRows = await getWorkspaceWorkingDirById(body.workspaceId, database);
-
-      if (wsRows.length === 0) {
-        throw new ProjectError("Workspace not found", "NOT_FOUND");
-      }
-
-      const ws = wsRows[0];
-      if (ws.workingDir) removedPath = ws.workingDir;
-      await deleteWorkspaceCascade(ws.id, database);
-    }
-
-    if (removedPath) {
-      try { await removeWorktree(project.repoPath, removedPath); } catch { /* best effort */ }
-    }
-  }
+  // #631/#888: the worktree surface lives in its own module (see project-worktrees.service.ts
+  // for why). Instantiated here so the routes' `projectService.getWorktrees(...)` shape is
+  // unchanged for every caller.
+  const { getWorktrees, removeWorktreeById } = createProjectWorktreesService(database);
 
   async function getStats(projectId: string) {
     const project = await getProjectById(projectId, database);
@@ -575,6 +551,53 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     boardWarmupTimers.set(projectId, timer);
   }
 
+  /**
+   * The workspace-summary map for a project, via the shared cache: fresh hit served
+   * directly, stale entry served immediately with a background rebuild (SWR), cold miss
+   * blocking on a single coalesced rebuild.
+   *
+   * Extracted from getBoard so getGraph uses the SAME path (#345). getGraph used to call
+   * buildWorkspaceSummaryMap directly, bypassing the cache entirely, so EVERY graph
+   * request paid a full cold rebuild — per-workspace git spawns plus the synchronous
+   * transcript reads — measured at 13.2s, during which /api/health (pure JS) stalled
+   * 3.6-30s and the dev proxy started refusing connections with 503s. The graph does not
+   * need fresher summaries than the board.
+   */
+  function resolveSummaryMap(
+    projectId: string,
+    issueIds: string[],
+    defaultBranch: string | null,
+    archivedIssueIds: Set<string>,
+  ): Promise<Map<string, WorkspaceSummary>> {
+    const cacheResult = workspaceSummaryCache?.get(projectId) ?? null;
+    if (cacheResult && !cacheResult.stale) {
+      // Fresh cache hit — return immediately, no rebuild needed
+      return Promise.resolve(cacheResult.value);
+    }
+    if (cacheResult && cacheResult.stale) {
+      // Stale-while-revalidate: return stale data immediately, rebuild in background
+      if (workspaceSummaryCache && !workspaceSummaryCache.isRebuilding(projectId)) {
+        workspaceSummaryCache.markRebuilding(projectId);
+        buildWorkspaceSummaryMap(issueIds, defaultBranch, database, archivedIssueIds)
+          .then((m) => {
+            // Only write back if the cache entry still exists (not invalidated during rebuild).
+            // An invalidate() deletes the entry, so isRebuilding() returns false — meaning
+            // a status-change PATCH arrived while we were rebuilding and we must not overwrite
+            // with stale workspace-summary data.
+            if (workspaceSummaryCache.isRebuilding(projectId)) {
+              workspaceSummaryCache.set(projectId, m);
+            }
+          })
+          .catch(() => {})
+          .finally(() => { workspaceSummaryCache.clearRebuilding(projectId); });
+      }
+      return Promise.resolve(cacheResult.value);
+    }
+    // Cold miss — must block on a rebuild (no stale data available), but coalesce:
+    // concurrent cold requests share ONE in-flight rebuild instead of stacking duplicates.
+    return startSummaryRebuild(projectId, issueIds, defaultBranch, archivedIssueIds);
+  }
+
   async function getBoard(projectId: string, nowOverride?: string, opts?: { includeArchived?: boolean }) {
     const project = await getProjectById(projectId, database);
     if (!project) throw new ProjectError("Project not found", "NOT_FOUND");
@@ -600,45 +623,22 @@ export function createProjectService(deps: { database: Database; workspaceSummar
         .map((i) => i.id),
     );
 
-    const cacheResult = workspaceSummaryCache?.get(projectId) ?? null;
-    let summaryMapPromise: Promise<Map<string, WorkspaceSummary>>;
-    if (cacheResult && !cacheResult.stale) {
-      // Fresh cache hit — return immediately, no rebuild needed
-      summaryMapPromise = Promise.resolve(cacheResult.value);
-    } else if (cacheResult && cacheResult.stale) {
-      // Stale-while-revalidate: return stale data immediately, rebuild in background
-      summaryMapPromise = Promise.resolve(cacheResult.value);
-      if (workspaceSummaryCache && !workspaceSummaryCache.isRebuilding(projectId)) {
-        workspaceSummaryCache.markRebuilding(projectId);
-        buildWorkspaceSummaryMap(issueIds, defaultBranch, database, archivedIssueIds)
-          .then((m) => {
-            // Only write back if the cache entry still exists (not invalidated during rebuild).
-            // An invalidate() deletes the entry, so isRebuilding() returns false — meaning
-            // a status-change PATCH arrived while we were rebuilding and we must not overwrite
-            // with stale workspace-summary data.
-            if (workspaceSummaryCache.isRebuilding(projectId)) {
-              workspaceSummaryCache.set(projectId, m);
-            }
-          })
-          .catch(() => {})
-          .finally(() => { workspaceSummaryCache.clearRebuilding(projectId); });
-      }
-    } else {
-      // Cold miss — must block on a rebuild (no stale data available), but coalesce:
-      // concurrent cold requests share ONE in-flight rebuild instead of stacking duplicates.
-      summaryMapPromise = startSummaryRebuild(projectId, issueIds, defaultBranch, archivedIssueIds);
-    }
+    const summaryMapPromise = resolveSummaryMap(projectId, issueIds, defaultBranch, archivedIssueIds);
 
-    const [workspaceSummaryMap, blockedMap, issueTagMap, staleDaysRow, inProgressStaleDaysRow] = await Promise.all([
+    // G14a: the two staleness prefs ride the #402 short-TTL cached full scan
+    // instead of two point-read round trips per board build.
+    const [workspaceSummaryMap, blockedMap, issueTagMap, prefRows] = await Promise.all([
       summaryMapPromise,
       buildBlockedMap(issueIds, database),
       buildTagMap(issueIds, database),
-      getPreferenceValue("backlog_stale_days", database),
-      getPreferenceValue("inprogress_stale_days", database),
+      getAllPreferencesCached(database),
     ]);
 
-    const staleDays = parseInt(staleDaysRow[0]?.value ?? "14", 10) || 14;
-    const inProgressStaleDays = parseInt(inProgressStaleDaysRow[0]?.value ?? "3", 10) || 3;
+    const prefValue = (key: string) => prefRows.find((r) => r.key === key)?.value;
+    // #572: the registry owns these defaults (14 / 3) — `getNumber` reads them from it.
+    const prefMap = new Map(prefRows.map((r) => [r.key, r.value] as const));
+    const staleDays = getNumber(prefMap, "backlog_stale_days");
+    const inProgressStaleDays = getNumber(prefMap, "inprogress_stale_days");
     const now = new Date(nowOverride ?? new Date().toISOString()).getTime();
 
     return buildBoardColumns({
@@ -661,10 +661,30 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     const projectIssues = await getGraphIssues(projectId, database);
 
     const issueIds = projectIssues.map((i) => i.id);
-    const [edges, workspaceSummaryMap] = await Promise.all([
+    const archivedIssueIds = new Set(
+      projectIssues
+        .filter((i) => i.statusName && ARCHIVE_STATUS_NAMES.has(i.statusName.toLowerCase()))
+        .map((i) => i.id),
+    );
+
+    // Same cached SWR path as getBoard (#345) instead of an unconditional cold rebuild.
+    const [edges, cachedSummaryMap] = await Promise.all([
       buildGraphEdges(issueIds, database),
-      buildWorkspaceSummaryMap(issueIds, project.defaultBranch, database),
+      resolveSummaryMap(projectId, issueIds, project.defaultBranch, archivedIssueIds),
     ]);
+
+    // The graph's issue set is a SUPERSET of the board's: getBoardIssues excludes the
+    // "Archived" column, getGraphIssues includes everything. So a map built by a board
+    // request can be missing those ids, and dropping their workspaceSummary would be a
+    // silent regression. Build a supplement for just the gap — normally empty, and never
+    // more than the Archived column, so this is not a second full rebuild.
+    const missingIds = issueIds.filter((id) => !cachedSummaryMap.has(id));
+    const workspaceSummaryMap = missingIds.length === 0
+      ? cachedSummaryMap
+      : new Map([
+        ...cachedSummaryMap,
+        ...await buildWorkspaceSummaryMap(missingIds, project.defaultBranch, database, archivedIssueIds),
+      ]);
 
     const blockedIds = new Set(
       edges
@@ -688,7 +708,16 @@ export function createProjectService(deps: { database: Database; workspaceSummar
         const projectIssues = await getCrossProjectIssues(project.id, database);
 
         const issueIds = projectIssues.map((i) => i.id);
-        const workspaceSummaryMap = await buildWorkspaceSummaryMap(issueIds, project.defaultBranch, database);
+        const archivedIssueIds = new Set(
+          projectIssues
+            .filter((i) => i.statusName && ARCHIVE_STATUS_NAMES.has(i.statusName.toLowerCase()))
+            .map((i) => i.id),
+        );
+        // Same cached SWR path as getBoard/getGraph (#345). This path used to call
+        // buildWorkspaceSummaryMap directly (and without archivedIssueIds), so ONE
+        // /api/projects/all/workspaces request paid an uncached N-projects × M-workspaces
+        // git+FS fan-out that starved the event loop for every other request.
+        const workspaceSummaryMap = await resolveSummaryMap(project.id, issueIds, project.defaultBranch, archivedIssueIds);
 
         const issuesWithWorkspaces = projectIssues
           .map((issue) => {
@@ -726,12 +755,13 @@ export function createProjectService(deps: { database: Database; workspaceSummar
   }
 
   async function listProjects(opts: { includeArchived?: boolean } = {}) {
-    const projectRows = await getAllProjects(database, opts);
-
     // Enrich each project with a count of workspaces whose agent is currently
     // active (running, reviewing, or resolving conflicts), so the project
     // selector can surface where agents are working without a second request.
-    const activeCounts = await getActiveWorkspaceCounts(database);
+    const [projectRows, activeCounts] = await Promise.all([
+      getAllProjects(database, opts),
+      getActiveWorkspaceCounts(database),
+    ]);
 
     const countByProject = new Map<string, number>();
     for (const row of activeCounts) {
@@ -778,6 +808,16 @@ export function createProjectService(deps: { database: Database; workspaceSummar
 
   async function generateSetupScript(projectId: string) {
     try {
+      // #521: the persisted stack profile FIRST. The button used to go straight to the
+      // model, so it could hand back a different install command than registration wrote
+      // from the same repo — and it paid for an LLM call to do it.
+      const project = await getProjectById(projectId, database);
+      if (!project) throw new ProjectError("Project not found", "NOT_FOUND");
+      const derived = deriveSetupScriptFromProfile(
+        await getStackProfile(projectId, database),
+        project.repoPath,
+      ).trim();
+      if (derived) return derived;
       return await generateSetupScriptAI(projectId, database);
     } catch (err: unknown) {
       if ((err as { statusCode?: unknown }).statusCode === 404) throw new ProjectError("Project not found", "NOT_FOUND");
@@ -796,6 +836,15 @@ export function createProjectService(deps: { database: Database; workspaceSummar
 
   async function generateVerifyScript(projectId: string) {
     try {
+      // #521: same as generateSetupScript — the profile is the source of truth, so the
+      // button and `populateVerifyScript` cannot disagree about the same repo.
+      const project = await getProjectById(projectId, database);
+      if (!project) throw new ProjectError("Project not found", "NOT_FOUND");
+      const derived = deriveVerifyScriptFromProfile(
+        await getStackProfile(projectId, database),
+        project.repoPath,
+      ).trim();
+      if (derived) return derived;
       return await generateVerifyScriptAI(projectId, database);
     } catch (err: unknown) {
       if ((err as { statusCode?: unknown }).statusCode === 404) throw new ProjectError("Project not found", "NOT_FOUND");
@@ -815,6 +864,10 @@ export function createProjectService(deps: { database: Database; workspaceSummar
   return {
     registerProject,
     createProject,
+    createSiblingRepoDir: (projectId: string, opts: { name: string; generateReadme?: boolean }) =>
+      createSiblingRepoDir(database, projectId, opts),
+    promoteRepoToLeading: (projectId: string, repoId: string) =>
+      promoteRepoToLeading(database, projectId, repoId),
     updateProject,
     deleteProject,
     archiveProject,

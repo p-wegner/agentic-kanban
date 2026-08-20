@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { ClientRefreshReason } from "@agentic-kanban/shared/lib/board-events-contract";
 
 export type NotificationEventType =
   | "workspace_merged"
@@ -9,6 +10,7 @@ export type NotificationEventType =
   | "workflow_error"
   | "workflow_transition"
   | "approval_requested"
+  | "plugin_gate"
   | "project_completed";
 
 export interface NotificationEvent {
@@ -18,6 +20,10 @@ export interface NotificationEvent {
   issueNumber?: number;
   issueTitle?: string;
   workspaceId?: string;
+  /** plugin_gate events (#301): what a click needs to deep-link to the loop pane. */
+  pluginSlug?: string;
+  loopName?: string;
+  gateId?: string;
   timestamp: string;
 }
 
@@ -61,7 +67,12 @@ function writeLastRead(projectId: string, ts: string) {
   }
 }
 
-const RELEVANT_REASONS = new Set<string>([
+/**
+ * Which reasons raise a user-facing notification (#566): a workspace finished or is
+ * waiting, a session started/ended, a workflow errored or moved, a project completed.
+ * Typed against the shared vocabulary so a retired reason cannot sit here silently.
+ */
+const RELEVANT_REASONS: ReadonlySet<ClientRefreshReason> = new Set<ClientRefreshReason>([
   "workspace_merged",
   "workspace_ready_for_merge",
   "session_completed",
@@ -96,7 +107,7 @@ export function useActivityNotifications(projectId: string | null) {
   }, [projectId]);
 
   const addBoardEvent = useCallback(
-    (reason: string, issueSnapshot?: IssueSnapshot) => {
+    (reason: ClientRefreshReason, issueSnapshot?: IssueSnapshot) => {
       if (!projectId) return;
       if (!RELEVANT_REASONS.has(reason)) return;
 
@@ -166,6 +177,30 @@ export function useActivityNotifications(projectId: string | null) {
     [projectId],
   );
 
+  const addPluginGateEvent = useCallback(
+    (gate: { pluginSlug: string; pluginName: string; loopName: string; loopLabel: string; gateId: string; question: string }) => {
+      if (!projectId) return;
+      const ts = new Date().toISOString();
+      const event: NotificationEvent = {
+        id: `plugin_gate-${gate.gateId}-${ts}`,
+        type: "plugin_gate",
+        timestamp: ts,
+        issueTitle: `${gate.loopLabel}: ${gate.question}`,
+        pluginSlug: gate.pluginSlug,
+        loopName: gate.loopName,
+        gateId: gate.gateId,
+      };
+      setEvents((prev) => {
+        // The server already dedupes per NEW gate id; guard against reconnect replays anyway.
+        if (prev.some((e) => e.type === "plugin_gate" && e.gateId === gate.gateId)) return prev;
+        const next = [event, ...prev].slice(0, MAX_EVENTS);
+        writeStored(projectId, next);
+        return next;
+      });
+    },
+    [projectId],
+  );
+
   const markRead = useCallback(() => {
     if (!projectId) return;
     const now = new Date().toISOString();
@@ -194,5 +229,6 @@ export function useActivityNotifications(projectId: string | null) {
     markRead,
     addBoardEvent,
     addApprovalEvent,
+    addPluginGateEvent,
   };
 }

@@ -2,7 +2,8 @@ import { projects, projectStatuses, issues, workspaces, preferences } from "@age
 import { ACTIVE_WORKSPACE_STATUSES } from "@agentic-kanban/shared/lib/workspace-activity-state";
 import { eq, and, inArray, notInArray, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
-import type { Database } from "../db/index.js";
+import type { Database, TransactionClient } from "../db/index.js";
+import { getPreference as canonicalGetPreference } from "./preferences.repository.js";
 
 export async function getProjectsBasePath(database: Database = db) {
   const rows = await database
@@ -16,7 +17,7 @@ export async function getProjectsBasePath(database: Database = db) {
 export async function updateProjectFields(
   id: string,
   updates: Record<string, unknown>,
-  database: Database = db,
+  database: Database | TransactionClient = db,
 ): Promise<void> {
   await database.update(projects).set(updates).where(eq(projects.id, id));
 }
@@ -45,6 +46,13 @@ export async function getProjectWorkspacesWithIssue(
       status: workspaces.status,
       issueNumber: issues.issueNumber,
       issueTitle: issues.title,
+      // Diff-stat cache columns, maintained by the board summary path. getWorktrees
+      // serves them instead of spawning `git diff --shortstat` per worktree (#342).
+      diffStatCacheCheckedAt: workspaces.diffStatCacheCheckedAt,
+      diffStatCacheFilesChanged: workspaces.diffStatCacheFilesChanged,
+      diffStatCacheInsertions: workspaces.diffStatCacheInsertions,
+      diffStatCacheDeletions: workspaces.diffStatCacheDeletions,
+      diffStatCacheHeadSha: workspaces.diffStatCacheHeadSha,
     })
     .from(workspaces)
     .innerJoin(issues, eq(workspaces.issueId, issues.id))
@@ -56,7 +64,12 @@ export async function getWorkspaceWorkingDirById(
   database: Database = db,
 ) {
   return database
-    .select({ id: workspaces.id, workingDir: workspaces.workingDir })
+    .select({
+      id: workspaces.id,
+      workingDir: workspaces.workingDir,
+      isDirect: workspaces.isDirect,
+      serviceState: workspaces.serviceState,
+    })
     .from(workspaces)
     .where(eq(workspaces.id, workspaceId))
     .limit(1);
@@ -137,23 +150,28 @@ export async function getBoardIssues(
     .orderBy(issues.sortOrder);
 }
 
-export async function getPreferenceValue(
-  key: string,
-  database: Database = db,
-) {
-  return database.select({ value: preferences.value }).from(preferences).where(eq(preferences.key, key)).limit(1);
+/** #613: delegates to the canonical reader (which records the db:getPreference metric). */
+export async function getPreferenceValue(key: string, database: Database = db): Promise<string | undefined> {
+  // `?? undefined` is NOT cosmetic: this clone's callers were typed against
+  // `string | undefined` while the canonical reader returns `string | null`. Three clones
+  // had three different contracts (#613) — each is preserved exactly, so this commit
+  // removes the duplicated QUERY without changing any caller's types.
+  return (await canonicalGetPreference(key, database)) ?? undefined;
 }
 
 export async function getGraphIssues(
   projectId: string,
   database: Database = db,
 ) {
+  // G15a: `description` is deliberately NOT selected — the graph client renders
+  // titles only (the detail panel fetches the full issue itself, same as the
+  // board), and shipping every issue's description body measured 1.15MB of the
+  // /graph payload.
   return database
     .select({
       id: issues.id,
       issueNumber: issues.issueNumber,
       title: issues.title,
-      description: issues.description,
       priority: issues.priority,
       issueType: issues.issueType,
       sortOrder: issues.sortOrder,

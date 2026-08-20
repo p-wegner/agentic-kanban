@@ -2,6 +2,7 @@ import { useState, useCallback } from "react";
 import { apiFetch } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { CollapsibleSection } from "./CollapsibleSection.js";
+import { issueStatusToneClass } from "../lib/badgeTones.js";
 
 interface SearchResult {
   messageId: number;
@@ -45,15 +46,6 @@ const PROVIDER_FILTERS = [
   { label: "Codex", value: "codex" },
   { label: "Copilot", value: "copilot" },
 ];
-
-const ISSUE_STATUS_COLORS: Record<string, string> = {
-  "Todo": "bg-gray-100 text-gray-600",
-  "In Progress": "bg-blue-100 text-blue-700",
-  "In Review": "bg-orange-100 text-orange-700",
-  "AI Reviewed": "bg-accent-50 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300",
-  "Done": "bg-green-100 text-green-700",
-  "Cancelled": "bg-red-100 text-red-500",
-};
 
 function HighlightedSnippet({ text, query }: { text: string; query: string }) {
   if (!query) return <span>{text}</span>;
@@ -258,7 +250,7 @@ export function TranscriptSearchPanel({ projectId, onClose, onNavigateToWorkspac
                 <span className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate flex-1 min-w-0">
                   {group.issue.title}
                 </span>
-                <span className={`text-xs px-1.5 py-0.5 rounded shrink-0 ${ISSUE_STATUS_COLORS[group.issue.statusName] ?? "bg-gray-100 text-gray-600"}`}>
+                <span className={`text-xs px-1.5 py-0.5 rounded shrink-0 ${issueStatusToneClass(group.issue.statusName)}`}>
                   {group.issue.statusName}
                 </span>
               </div>

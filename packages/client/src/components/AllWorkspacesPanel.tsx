@@ -3,8 +3,14 @@ import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { apiFetch, apiDelete } from "../lib/api.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { WorkspaceRiskHeatmap } from "./WorkspaceRiskHeatmap.js";
+import { MultirepoHealthPill } from "./MultirepoHealthPill.js";
 import { CollapsibleSection } from "./CollapsibleSection.js";
+import { openSessionTranscript } from "../lib/sessionTranscriptEvents.js";
+import { AgentStallIndicator, useAgentStallThreshold } from "./AgentStallBadge.js";
 import { useStaleWorkspaceManager } from "../hooks/useStaleWorkspaceManager.js";
+import { useProjectsQuery } from "../hooks/useBoardDataQueries.js";
+import { issueStatusToneClass } from "../lib/badgeTones.js";
+import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-liveness";
 import {
   type CrossProjectGroup,
   type WsStatusFilter,
@@ -21,11 +27,6 @@ import {
   formatContextTokens,
   searchPlaceholder,
 } from "../lib/allWorkspacesStatus.js";
-
-interface Project {
-  id: string;
-  name: string;
-}
 
 interface AllWorkspacesPanelProps {
   columns: StatusWithIssues[];
@@ -49,22 +50,17 @@ const FILTER_CHIPS: { label: string; value: WsStatusFilter }[] = [
   { label: "Stale", value: "stale" },
 ];
 
-const ISSUE_STATUS_COLORS: Record<string, string> = {
-  "Todo": "bg-gray-100 text-gray-600",
-  "In Progress": "bg-blue-100 text-blue-700",
-  "In Review": "bg-orange-100 text-orange-700",
-  "AI Reviewed": "bg-accent-50 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300",
-  "Done": "bg-green-100 text-green-700",
-  "Cancelled": "bg-red-100 text-red-500",
-};
-
 export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueClick, onProjectSwitch, onRefresh }: AllWorkspacesPanelProps) {
+  const stallThresholdSec = useAgentStallThreshold();
   const [viewMode, setViewMode] = useState<ViewMode>("workspaces");
   const [statusFilter, setStatusFilter] = useState<WsStatusFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [closingIdle, setClosingIdle] = useState(false);
   const [projectFilter, setProjectFilter] = useState<string>(activeProjectId ?? "all");
-  const [allProjects, setAllProjects] = useState<Project[]>([]);
+  // Project list for the dropdown — served from the shared projects cache (#403),
+  // so opening this panel does not re-fetch the slow /api/projects endpoint.
+  const { data: allProjectsData } = useProjectsQuery();
+  const allProjects = allProjectsData ?? [];
   const [crossProjectData, setCrossProjectData] = useState<CrossProjectGroup[] | null>(null);
   const [crossProjectLoading, setCrossProjectLoading] = useState(false);
 
@@ -77,13 +73,6 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
     removeStale: handleRemoveStale,
     removeAllStale: handleRemoveAllStale,
   } = useStaleWorkspaceManager({ enabled: statusFilter === "stale", projectFilter });
-
-  // Fetch list of projects for the dropdown
-  useEffect(() => {
-    apiFetch<Project[]>("/api/projects")
-      .then((data) => setAllProjects(data))
-      .catch(() => {});
-  }, []);
 
   // Fetch cross-project data when "All projects" is selected
   useEffect(() => {
@@ -395,7 +384,7 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
                           {issue.title}
                         </span>
                         <span
-                          className={`text-xs px-1.5 py-0.5 rounded shrink-0 ${ISSUE_STATUS_COLORS[issue.statusName] ?? "bg-gray-100 text-gray-600"}`}
+                          className={`text-xs px-1.5 py-0.5 rounded shrink-0 ${issueStatusToneClass(issue.statusName)}`}
                         >
                           {issue.statusName}
                         </span>
@@ -425,6 +414,21 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
                             {workspaceRowStatusLabel(main)}
                           </span>
 
+                          {/* Stalled / looping agent badge (#86). Seed the idle baseline
+                              from the session start only for active-project rows — a
+                              cross-project agent's live stream isn't on this tab, so we
+                              avoid a false "stalled" on a healthy remote agent. */}
+                          <AgentStallIndicator
+                            issueId={issue.id}
+                            status={main.status}
+                            sessionStartMs={
+                              issue.projectId === activeProjectId && main.lastSessionAt
+                                ? new Date(main.lastSessionAt).getTime()
+                                : null
+                            }
+                            thresholdSec={stallThresholdSec}
+                          />
+
                           {/* Ready to merge */}
                           {main.readyForMerge && main.status !== "closed" && (
                             <span className="text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-700">
@@ -450,6 +454,29 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
                             </span>
                           )}
 
+                          {/* Multi-repo health (#83): lazy repo-merge-status fetch on expand */}
+                          <span onClick={(e) => e.stopPropagation()}>
+                            <MultirepoHealthPill
+                              workspaceId={main.id}
+                              hasConflicts={main.conflicts?.hasConflicts}
+                              conflictingFiles={main.conflicts?.conflictingFiles}
+                            />
+                          </span>
+
+                          {/* Full transcript viewer (#87) */}
+                          {main.lastSessionAt && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openSessionTranscript({ workspaceId: main.id, title: `#${issue.issueNumber} ${issue.title}` });
+                              }}
+                              className="text-[10px] px-1.5 py-0.5 rounded text-gray-500 dark:text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950/40 transition-colors"
+                              title="Open full transcript"
+                            >
+                              📜 Transcript
+                            </button>
+                          )}
+
                           {/* Last session trigger */}
                           {main.lastSessionTriggerType && (() => {
                             const map: Record<string, { label: string; className: string }> = {
@@ -473,14 +500,14 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
                           )}
 
                           {/* Context usage */}
-                          {(main.status === "active" || main.status === "fixing") && main.contextTokens ? (
+                          {isAgentRunningStatus(main.status) && main.contextTokens ? (
                             <span className="text-xs text-gray-400 dark:text-gray-500" title={`${main.contextTokens.toLocaleString('en-US')} context tokens`}>
                               {formatContextTokens(main.contextTokens)}
                             </span>
                           ) : null}
 
                           {/* Last tool */}
-                          {(main.status === "active" || main.status === "fixing") && main.lastTool ? (
+                          {isAgentRunningStatus(main.status) && main.lastTool ? (
                             <span className="text-xs text-gray-400 dark:text-gray-500 truncate max-w-[160px]" title={`Last tool: ${main.lastTool}`}>
                               <span className="font-medium text-gray-500 dark:text-gray-400">tool:</span> {main.lastTool}
                             </span>

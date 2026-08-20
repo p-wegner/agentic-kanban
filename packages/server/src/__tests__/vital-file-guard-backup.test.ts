@@ -1,3 +1,4 @@
+// @gate:always-run — spawns the live vital-file-guard hook script outside src/; imports nothing it checks (#538).
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
 import { mkdtemp, rm, writeFile, readdir } from "node:fs/promises";

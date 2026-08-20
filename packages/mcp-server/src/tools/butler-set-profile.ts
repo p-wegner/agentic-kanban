@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { getServerPort } from "../server-url.js";
+import { butlerCall } from "../butler-api.js";
 
 export function registerButlerSetProfile(server: McpServer) {
   server.tool(
@@ -11,22 +11,10 @@ export function registerButlerSetProfile(server: McpServer) {
       profile: z.string().describe("Claude profile name, or empty string to inherit the global claude_profile"),
     },
     async ({ projectId, profile }) => {
-      try {
-        const res = await fetch(`http://127.0.0.1:${getServerPort()}/api/projects/${projectId}/butler/profile`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ profile }),
-        });
-        const data = (await res.json()) as { ok?: boolean; profile?: string; active?: boolean; error?: string };
-        if (!res.ok) {
-          return { content: [{ type: "text" as const, text: `Butler set-profile error: ${data.error ?? res.statusText}` }] };
-        }
-        return { content: [{ type: "text" as const, text: JSON.stringify(data) }] };
-      } catch (err) {
-        return {
-          content: [{ type: "text" as const, text: `Failed to reach the butler (is the server running on port ${getServerPort()}?): ${err instanceof Error ? err.message : String(err)}` }],
-        };
-      }
+      return await butlerCall("Butler set-profile", `/api/projects/${projectId}/butler/profile`, {
+        method: "POST",
+        body: JSON.stringify({ profile }),
+      });
     },
   );
 }

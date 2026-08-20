@@ -1,12 +1,12 @@
-import {
-  issues, projects, preferences, workspaces, sessions, agentSkills, projectStatuses,
-  issueDependencies, workflowNodes,
-} from "@agentic-kanban/shared/schema";
+import { issues, projects, workspaces, sessions, agentSkills, projectStatuses, issueDependencies, workflowNodes } from "@agentic-kanban/shared/schema";
 import { setWorkspaceStatus, type WorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
 import { eq, inArray, and, isNotNull, ne } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database, TransactionClient } from "../db/index.js";
 import { getProjectById } from "./project.repository.js";
+import { mirrorWorkspaceColumnsToLeadingRepo } from "./repo.repository.js";
+import { setWorkspaceWorkingDir as setWorkspaceWorkingDirShared } from "@agentic-kanban/shared/lib/workspace-git-state";
+import { getAllPreferences as canonicalGetAllPreferences } from "./preferences.repository.js";
 
 export async function updateLatestSetupRunFields(
   workspaceId: string,
@@ -43,7 +43,10 @@ export async function getIssueForWorkspaceCreate(
   database: Database = db,
 ) {
   return database
-    .select({ projectId: issues.projectId, issueNumber: issues.issueNumber, title: issues.title, description: issues.description, priority: issues.priority })
+    // `externalKey` rides along because a plugin-loop unit ticket is only RECOGNISABLE by it
+    // (`plugin-loop:<slug>:<loop>:<unit>`, #201 debt) and the skill such a ticket must launch with
+    // comes from the loop's manifest entry, not from the project default (#321).
+    .select({ projectId: issues.projectId, issueNumber: issues.issueNumber, title: issues.title, description: issues.description, priority: issues.priority, externalKey: issues.externalKey })
     .from(issues)
     .where(eq(issues.id, issueId))
     .limit(1);
@@ -64,6 +67,7 @@ export async function getProjectForWorkspaceCreate(
         setupEnabled: project.setupEnabled,
         symlinkEnabled: project.symlinkEnabled,
         symlinkDirs: project.symlinkDirs,
+        servicesConfig: project.servicesConfig ?? null,
       }]
     : [];
 }
@@ -75,8 +79,9 @@ export async function getAgentSkillById(
   return database.select().from(agentSkills).where(eq(agentSkills.id, skillId)).limit(1);
 }
 
+/** #613: delegates to the canonical reader — see preferences.repository. */
 export async function getAllPreferences(database: Database = db) {
-  return database.select().from(preferences);
+  return canonicalGetAllPreferences(database);
 }
 
 export async function insertWorkspaceRecordRow(
@@ -84,6 +89,22 @@ export async function insertWorkspaceRecordRow(
   database: Database | TransactionClient = db,
 ): Promise<void> {
   await database.insert(workspaces).values(values);
+}
+
+/**
+ * Ticket groups (#661): open (non-closed) workspaces LEADING any of the given issues.
+ * Used to validate group members at create time — a member already served by its own
+ * live workspace must not join a group too (two agents on one ticket).
+ */
+export async function findOpenWorkspacesForIssues(
+  issueIds: string[],
+  database: Database = db,
+) {
+  if (issueIds.length === 0) return [];
+  return database
+    .select({ id: workspaces.id, issueId: workspaces.issueId, branch: workspaces.branch, status: workspaces.status })
+    .from(workspaces)
+    .where(and(inArray(workspaces.issueId, issueIds), ne(workspaces.status, "closed")));
 }
 
 export async function findOpenDirectWorkspacesForIssue(
@@ -106,12 +127,9 @@ export async function findOpenDirectWorkspacesForIssue(
     .limit(3);
 }
 
-export async function getIssueProjectId(
-  issueId: string,
-  database: Database = db,
-) {
-  return database.select({ projectId: issues.projectId }).from(issues).where(eq(issues.id, issueId)).limit(1);
-}
+// #502: one definition, in issue.repository. This copy returned the raw ROW ARRAY,
+// so its caller unpacked a list that never had more than one element.
+export { getIssueProjectId } from "./issue.repository.js";
 
 export async function updateWorkspaceLaunchFailure(
   workspaceId: string,
@@ -147,6 +165,7 @@ export async function getWorkspaceDeletionContext(
       projectId: issues.projectId,
       teardownScript: projects.teardownScript,
       setupEnabled: projects.setupEnabled,
+      serviceState: workspaces.serviceState,
     })
     .from(workspaces)
     .leftJoin(issues, eq(workspaces.issueId, issues.id))
@@ -177,13 +196,27 @@ export async function getSessionStatusesForWorkspace(
 
 export async function updateWorkspaceClosed(
   workspaceId: string,
-  values: { status: "closed"; workingDir: string | null; closedAt: string; updatedAt: string },
+  values: {
+    status: "closed";
+    workingDir: string | null;
+    closedAt: string;
+    updatedAt: string;
+    /** Set when the worktree could not be cleanly removed (#268) — surfaces in the Cleanup Queue. */
+    cleanupWarning?: string | null;
+  },
   database: Database = db,
 ): Promise<void> {
   await setWorkspaceStatus(database, workspaceId, "closed", {
     now: values.updatedAt,
-    set: { workingDir: values.workingDir, closedAt: values.closedAt },
+    set: {
+      closedAt: values.closedAt,
+      ...(values.cleanupWarning !== undefined ? { cleanupWarning: values.cleanupWarning } : {}),
+    },
   });
+  // #226 — `workingDir` is a leading-repo MIRROR column, so it must go through the writer that
+  // updates the `repos` row too. `setWorkspaceStatus` lives in packages/shared and cannot reach
+  // the mirror, which is why its `set` no longer accepts these columns at all.
+  await setWorkspaceWorkingDirShared(database, workspaceId, values.workingDir, values.updatedAt);
 }
 
 export async function getWorkspaceIssueId(
@@ -225,6 +258,7 @@ export async function setWorkspaceWorkingDir(
     .update(workspaces)
     .set(values)
     .where(eq(workspaces.id, workspaceId));
+  await mirrorWorkspaceColumnsToLeadingRepo(workspaceId, { workingDir: values.workingDir, baseBranch: values.baseBranch }, database);
 }
 
 /**
@@ -240,14 +274,28 @@ export async function applyWorkspaceUpdates(
   database: Database = db,
 ): Promise<void> {
   const { status, updatedAt, ...rest } = updates;
+  // Dual-write (#222 stage 2): forward any of the five git-state columns in the PATCH bag
+  // onto the leading-repo row. Nested — it exists only for this function's two branches.
+  const mirrorGitColumnsFromPatch = async (patch: Record<string, unknown>) => {
+    const forward: Parameters<typeof mirrorWorkspaceColumnsToLeadingRepo>[1] = {};
+    if ("branch" in patch) forward.branch = patch.branch as string | null;
+    if ("workingDir" in patch) forward.workingDir = patch.workingDir as string | null;
+    if ("baseBranch" in patch) forward.baseBranch = patch.baseBranch as string | null;
+    if ("baseCommitSha" in patch) forward.baseCommitSha = patch.baseCommitSha as string | null;
+    if ("mergedHeadSha" in patch) forward.mergedHeadSha = patch.mergedHeadSha as string | null;
+    if (Object.keys(forward).length === 0) return;
+    await mirrorWorkspaceColumnsToLeadingRepo(workspaceId, forward, database);
+  };
   if (status !== undefined) {
     await setWorkspaceStatus(database, workspaceId, status as WorkspaceStatus, {
       now: updatedAt as string | undefined,
       set: rest,
     });
+    await mirrorGitColumnsFromPatch(rest);
     return;
   }
   await database.update(workspaces).set(updates).where(eq(workspaces.id, workspaceId));
+  await mirrorGitColumnsFromPatch(updates);
 }
 
 export async function listStaleWorktreeRows(
@@ -283,15 +331,20 @@ export async function listStaleWorktreeRows(
     .where(whereClause);
 }
 
+/**
+ * Clear a workspace's `workingDir` on BOTH sides — the column and the leading `repos` row
+ * (#226).
+ *
+ * The only sanctioned way to clear it. `setWorkspaceStatus`'s `set` escape hatch used to be
+ * the other way and could not mirror, so four close paths left the row pointing at a
+ * torn-down worktree; its type now rejects these columns outright, which routes them here.
+ */
 export async function clearWorkspaceWorkingDir(
   workspaceId: string,
   now: string,
   database: Database = db,
 ): Promise<void> {
-  await database
-    .update(workspaces)
-    .set({ workingDir: null, updatedAt: now })
-    .where(eq(workspaces.id, workspaceId));
+  await setWorkspaceWorkingDirShared(database, workspaceId, null, now);
 }
 
 export async function getAgentSkillNameById(

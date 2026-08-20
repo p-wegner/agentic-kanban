@@ -1,7 +1,8 @@
-import { eq, and, inArray } from "drizzle-orm";
-import { issues, projectStatuses, workflowNodes } from "@agentic-kanban/shared/schema";
+import { eq } from "drizzle-orm";
+import { issues, workflowNodes } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { getStatusIdsByName } from "./project-status.repository.js";
 
 export async function getPreflightTargetIssue(
   issueId: string,
@@ -20,21 +21,13 @@ export async function getPreflightTargetIssue(
   return rows[0] ?? null;
 }
 
+/** #502: one query, in project-status.repository. Kept as a named re-export so callers are unchanged. */
 export async function getTerminalStatusIds(
   projectId: string,
   terminalStatusNames: string[],
   database: Database = db,
-) {
-  const rows = await database
-    .select({ id: projectStatuses.id })
-    .from(projectStatuses)
-    .where(
-      and(
-        eq(projectStatuses.projectId, projectId),
-        inArray(projectStatuses.name, terminalStatusNames),
-      ),
-    );
-  return rows.map((s) => s.id);
+): Promise<string[]> {
+  return getStatusIdsByName(projectId, terminalStatusNames, database);
 }
 
 export async function getProjectIssuesWithNodeType(

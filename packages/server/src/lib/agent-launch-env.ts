@@ -5,6 +5,9 @@
 // extraEnv precedence) become directly unit-testable. The actual spawn, fd setup,
 // and watcher wiring stay in agent.service.
 
+import { resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
+import { gradleUserHomeForWorktree } from "@agentic-kanban/shared/lib/gradle-env";
+
 export const DEFAULT_BOARD_SERVER_PORT = "3001";
 export const DEFAULT_BOARD_CLIENT_PORT = "5173";
 
@@ -29,10 +32,21 @@ export interface LaunchPorts {
  * (from the derived worktree ports, falling back to the board's).
  */
 export function resolveLaunchPorts(
-  env: { KANBAN_SERVER_PORT?: string; PORT?: string; KANBAN_CLIENT_PORT?: string; VITE_PORT?: string },
+  env: {
+    KANBAN_BOARD_SERVER_PORT?: string;
+    KANBAN_SERVER_PORT?: string;
+    SERVER_PORT?: string;
+    PORT?: string;
+    KANBAN_CLIENT_PORT?: string;
+    VITE_PORT?: string;
+  },
   worktreePorts: { serverPort: string; clientPort: string } | null,
 ): LaunchPorts {
-  const boardServerPort = env.KANBAN_SERVER_PORT || env.PORT || DEFAULT_BOARD_SERVER_PORT;
+  // #615 — the ONE ladder, with `env` injected so this stays pure. It was a private
+  // two-rung copy (`KANBAN_SERVER_PORT || PORT`), so the two rungs the shared resolver
+  // added later — `KANBAN_BOARD_SERVER_PORT`, which is precisely how a worktree names the
+  // MAIN board, and `SERVER_PORT` — never reached the env an agent is launched with.
+  const boardServerPort = String(resolveBoardServerPort(undefined, env));
   const boardClientPort = env.KANBAN_CLIENT_PORT || env.VITE_PORT || DEFAULT_BOARD_CLIENT_PORT;
   return {
     boardServerPort,
@@ -51,6 +65,17 @@ export interface AgentSpawnEnvParams {
   /** process.env.KANBAN_PROTECTED_PIDS (already-protected pids), if any. */
   protectedPidsEnv: string | undefined;
   sessionId: string;
+  /**
+   * Absolute path of the worktree the agent runs in. Used to derive a per-worktree
+   * `GRADLE_USER_HOME` (#194) so JVM builders in different worktrees never share a
+   * daemon registry — set unconditionally; it is inert for non-Gradle projects.
+   *
+   * Also exported to the child as `KANBAN_WORKTREE_DIR` (#369): the cross-worktree
+   * guard reads it as the AUTHORIZED root instead of deriving one from its own cwd.
+   * Board-supplied, so an agent that has cd-ed into the main checkout can no longer
+   * self-authorize that checkout.
+   */
+  worktreePath: string;
   /** Per-launch overrides; applied LAST so they win. */
   extraEnv: Record<string, string> | undefined;
 }
@@ -58,10 +83,11 @@ export interface AgentSpawnEnvParams {
 /**
  * Build the full child-process env: base provider env, color-off flags, board +
  * worktree port wiring, the protected-pid list (board pid appended), session id
- * markers, then the per-launch extraEnv overrides last.
+ * markers, the per-worktree Gradle isolation default, then the per-launch extraEnv
+ * overrides last.
  */
 export function buildAgentSpawnEnv(params: AgentSpawnEnvParams): Record<string, string | undefined> {
-  const { spawnEnv, ports, serverPid, protectedPidsEnv, sessionId, extraEnv } = params;
+  const { spawnEnv, ports, serverPid, protectedPidsEnv, sessionId, worktreePath, extraEnv } = params;
   return {
     ...spawnEnv,
     FORCE_COLOR: "0",
@@ -79,6 +105,73 @@ export function buildAgentSpawnEnv(params: AgentSpawnEnvParams): Record<string, 
     SERVER_PORT: ports.worktreeServerPort,
     PORT: ports.worktreeServerPort,
     VITE_PORT: ports.worktreeClientPort,
+    GRADLE_USER_HOME: gradleUserHomeForWorktree(worktreePath),
+    // The authorized-worktree declaration the cross-worktree guard trusts (#369). Must come
+    // from the board, never from the agent's own cwd.
+    KANBAN_WORKTREE_DIR: worktreePath,
     ...extraEnv,
+  };
+}
+
+/**
+ * Spawn-layer hang watchdog timeout. If a launched agent produces NO stdout/stderr
+ * activity for this long, the watchdog kills it — a hang at the spawn layer
+ * (provider deadlocked on a prompt, stuck on a network call, waiting on stdin that
+ * was never closed) is otherwise invisible until a monitor cycle notices. Resets on
+ * every output event; only fires on true silence.
+ *
+ * Lives here (not in agent.service) because BOTH execution paths need the same
+ * rule: the host spawn site and the fleet worker's runner. A remote session that
+ * resolved this differently would silently lose the protection its host twin has.
+ * Override with KANBAN_AGENT_HANG_TIMEOUT_MS (0 disables).
+ */
+export const DEFAULT_AGENT_HANG_TIMEOUT_MS = 15 * 60 * 1000;
+
+export function resolveAgentHangTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.KANBAN_AGENT_HANG_TIMEOUT_MS;
+  if (raw === undefined) return DEFAULT_AGENT_HANG_TIMEOUT_MS;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_AGENT_HANG_TIMEOUT_MS;
+  return parsed;
+}
+
+/**
+ * Start an inactivity watchdog: after `timeoutMs` with no reset() call, `onHang`
+ * fires exactly once. timeoutMs <= 0 disables it (inert handles). Shared by the
+ * host spawn site and the worker runner so both behave identically.
+ */
+export function startHangWatchdog(
+  label: string,
+  timeoutMs: number,
+  onHang: () => void,
+): { reset(): void; close(): void } {
+  if (timeoutMs <= 0) return { reset() {}, close() {} };
+  let closed = false;
+  let fired = false;
+  let timer: NodeJS.Timeout | undefined;
+  const arm = () => {
+    if (closed) return;
+    timer = setTimeout(() => {
+      if (closed || fired) return;
+      fired = true;
+      try {
+        onHang();
+      } catch (err) {
+        console.error(`[agent] hang-watchdog callback error: ${label}`, err);
+      }
+    }, timeoutMs);
+    if (timer.unref) timer.unref();
+  };
+  arm();
+  return {
+    reset() {
+      if (closed || fired) return;
+      if (timer) clearTimeout(timer);
+      arm();
+    },
+    close() {
+      closed = true;
+      if (timer) clearTimeout(timer);
+    },
   };
 }

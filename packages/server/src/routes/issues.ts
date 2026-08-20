@@ -1,8 +1,9 @@
 import type { Database } from "../db/index.js";
-import type { BoardEvents } from "../services/board-events.js";
+import type { BoardEventSink } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { ShowdownContestant } from "@agentic-kanban/shared";
 import { analyzeDependencies, enhanceIssue, aiEstimateIssue, decomposeEpic, confirmEpicDecomposition, contractCoupledComponent, confirmContractComponent, analyzeTouchedFiles } from "../services/issue-ai.service.js";
+import { scanForTicketGroups } from "../services/ticket-group-scan.service.js";
 import type { DecomposeChildProposal, DecomposeDependencyProposal } from "../services/issue-ai.service.js";
 import { createIssueService } from "../services/issue.service.js";
 import type { CreateIssueInput, BatchDependencyInput } from "../services/issue.service.js";
@@ -13,6 +14,14 @@ import {
   getProjectIssuesTouchedFiles,
 } from "../repositories/issue.repository.js";
 import { clampDays } from "../lib/analytics-window.js";
+
+/**
+ * Upper bound for `GET /api/issues?limit=` (#424). A caller asking for more gets this
+ * many rather than an error — the point is to bound the response, not to police the
+ * request. Unpaginated calls (no `limit`) are unaffected and still return everything,
+ * which keeps every existing consumer working.
+ */
+const MAX_ISSUE_PAGE_SIZE = 500;
 import {
   getBurndownChart,
   getCfdChart,
@@ -24,28 +33,27 @@ import { createIssueTimeEntriesService } from "../services/issue-time-entries.se
 import type { IssueCommentKind, IssueCommentAuthor } from "../repositories/issue-comments.repository.js";
 import { createShowdownService } from "../services/showdown.service.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
+import {
+  enhanceIssueBody, analyzeDependenciesBody, aiEstimateBody, projectIdBody,
+  decomposeConfirmBody, contractConfirmBody, groupScanBody, batchIssuesBody, dependenciesBatchBody,
+  contractCoupledBody, bulkUpdateBody,
+} from "./issue-body-schemas.js";
 import { createRouter } from "../middleware/create-router.js";
-import { wrapAiOperation } from "../middleware/ai-operation.js";
-import { runTicketPreflight, formatClarificationsBlock, type PreflightClarification } from "../services/ticket-preflight.service.js";
-import { WorkspaceError } from "../services/workspace-internals.js";
+import { wrapAiOperation } from "../lib/ai-operation.js";
+import { runTicketPreflight, formatClarificationsBlock, type PreflightClarification, type PreflightVerdict } from "../services/ticket-preflight.service.js";
+import { getPreference } from "../repositories/preferences.repository.js";
+import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { getIssueActivity } from "../services/issue-activity.service.js";
 import { createIssueMergedCommitsService } from "../services/issue-merged-commits.service.js";
 import { getIssueCycleTime } from "../services/cycle-time.service.js";
 import { createWebhookSender } from "../services/outbound-webhook.service.js";
+import { conditionalJsonResponse } from "../services/board-etag-cache.service.js";
 
-/** Shape of the domain errors thrown by the issue service (see IssueError + the `index`-tagged batch errors). */
-interface IssueRouteError {
-  code?: string;
-  message?: string;
-  index?: number;
-}
-
-/** Narrow an unknown caught value to the issue-service error shape. */
-function asIssueRouteError(err: unknown): IssueRouteError {
-  return (typeof err === "object" && err !== null ? err : {}) as IssueRouteError;
-}
-
-export function createIssuesRoute(database: Database, options?: { boardEvents?: BoardEvents; getSessionManager?: () => SessionManager }) {
+import { queryFlag } from "../middleware/query-params.js";
+import { getActiveProjectIdPref } from "../repositories/board-status.repository.js";
+import { setIssueReposTouched } from "../services/repo-tags.service.js";
+import { getIssueById } from "../repositories/followup-workspace.repository.js";
+export function createIssuesRoute(database: Database, options?: { boardEvents?: BoardEventSink; getSessionManager?: () => SessionManager }) {
   const router = createRouter();
 
   const issueService = createIssueService({ database, boardEvents: options?.boardEvents, sendWebhook: createWebhookSender(database) });
@@ -66,27 +74,51 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     if (!projectId) return c.json({ error: "projectId query parameter required" }, 400);
     const issueNumberParam = c.req.query("issueNumber");
     const statusName = c.req.query("statusName") || undefined;
-    const slim = c.req.query("slim") === "1";
+    const slim = queryFlag(c, "slim");
+    // Pagination (#424): opt-in, so the default response is byte-identical to before.
+    // `limit` is clamped rather than rejected — a caller asking for 10_000 wants "all
+    // of it" and should get a bounded page, not a 400 it has to special-case.
+    const limitParam = Number(c.req.query("limit"));
+    const limit = Number.isFinite(limitParam) && limitParam > 0
+      ? Math.min(Math.floor(limitParam), MAX_ISSUE_PAGE_SIZE)
+      : undefined;
+    const offsetParam = Number(c.req.query("offset"));
+    const offset = Number.isFinite(offsetParam) && offsetParam > 0 ? Math.floor(offsetParam) : undefined;
+
     const result = await issueService.listIssues(
       projectId,
       issueNumberParam ? Number(issueNumberParam) : undefined,
       statusName,
-      slim ? { excludeDescription: true } : undefined,
+      (slim || limit !== undefined)
+        ? { excludeDescription: slim, limit, offset }
+        : undefined,
     );
-    return c.json(result);
+    // Conditional GET (#418, the #400 pattern): the full issue list is the largest payload in the
+    // app (~1MB of descriptions on a big board) and mostly unchanged between polls — hash the
+    // serialized body and answer 304 when If-None-Match matches.
+    //
+    // #426: the extra header goes through `conditionalJsonResponse`'s `extraHeaders`, NOT onto the
+    // returned Response. A header set on a returned raw Response is silently dropped by Hono; only
+    // what goes into the constructor's `init` survives. See that function for the measurement.
+    const body = JSON.stringify(result);
+    const extraHeaders = limit === undefined
+      ? undefined
+      // The denominator, so a paginating caller knows whether another page exists without fetching
+      // one and finding it empty. A header keeps the body an array — turning it into
+      // `{items,total}` would break every existing consumer.
+      : { "X-Total-Count": String(await issueService.countIssues(projectId, statusName)) };
+    return conditionalJsonResponse(body, c.req.header("if-none-match"), extraHeaders);
   });
 
   // POST /api/issues/enhance — AI-enhance a ticket title and description
   router.post("/enhance", async (c) => {
-    const body = await parseJsonBody<{ title: string; description?: string; projectId?: string }>(c);
-    if (!body.title?.trim()) return c.json({ error: "title is required" }, 400);
+    const body = await parseJsonBody(c, enhanceIssueBody);
     return c.json(await wrapAiOperation("enhance", () => enhanceIssue(body.title, body.description, database)));
   });
 
   // POST /api/issues/analyze-dependencies — AI-analyze dependencies for an issue
   router.post("/analyze-dependencies", async (c) => {
-    const body = await parseJsonBody<{ issueId: string; projectId: string }>(c);
-    if (!body.issueId || !body.projectId) return c.json({ error: "issueId and projectId are required" }, 400);
+    const body = await parseJsonBody(c, analyzeDependenciesBody);
     const result = await wrapAiOperation("analyze-deps", () => analyzeDependencies(body.issueId, body.projectId, database));
     if (result.total > 0) options?.boardEvents?.broadcast(body.projectId, "dependency_added");
     return c.json(result);
@@ -94,28 +126,23 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
 
   // POST /api/issues/ai-estimate — AI-suggest a T-shirt size estimate for an issue
   router.post("/ai-estimate", async (c) => {
-    const body = await parseJsonBody<{ issueId: string }>(c);
-    if (!body.issueId) return c.json({ error: "issueId is required" }, 400);
+    const body = await parseJsonBody(c, aiEstimateBody);
     return c.json(await wrapAiOperation("ai-estimate", () => aiEstimateIssue(body.issueId, database)));
   });
 
   // POST /api/issues/:id/decompose — AI-generate epic decomposition proposal
   router.post("/:id/decompose", async (c) => {
     const issueId = c.req.param("id");
-    const body = await parseJsonBody<{ projectId: string }>(c);
-    if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
+    const body = await parseJsonBody(c, projectIdBody);
     return c.json(await wrapAiOperation("decompose", () => decomposeEpic(issueId, body.projectId, database)));
   });
 
   // POST /api/issues/:id/decompose/confirm — confirm epic decomposition and create child issues
   router.post("/:id/decompose/confirm", async (c) => {
     const issueId = c.req.param("id");
-    const body = await parseJsonBody<{ projectId: string; children: DecomposeChildProposal[]; dependencies: DecomposeDependencyProposal[]; driveTarget?: string }>(c);
-    if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
-    if (!Array.isArray(body.children)) return c.json({ error: "children must be an array" }, 400);
-    if (!Array.isArray(body.dependencies)) return c.json({ error: "dependencies must be an array" }, 400);
+    const body = await parseJsonBody(c, decomposeConfirmBody);
     const result = await confirmEpicDecomposition(
-      { issueId, projectId: body.projectId, children: body.children, dependencies: body.dependencies, driveTarget: body.driveTarget },
+      { issueId, projectId: body.projectId, children: body.children as DecomposeChildProposal[], dependencies: body.dependencies as DecomposeDependencyProposal[], driveTarget: body.driveTarget },
       database,
     );
     options?.boardEvents?.broadcast(body.projectId, "issue_created");
@@ -126,103 +153,64 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
   // The documented INVERSE of /decompose: decompose splits one epic into many; contract
   // collapses a coupled component (coupled_with peers) back into one. Propose-only.
   router.post("/contract", async (c) => {
-    const body = await parseJsonBody<{ projectId: string }>(c);
-    if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
+    const body = await parseJsonBody(c, projectIdBody);
     return c.json(await wrapAiOperation("contract", () => contractCoupledComponent(body.projectId, database)));
   });
 
   // POST /api/issues/contract/confirm — apply a contract proposal (keep survivor, absorb the rest).
   router.post("/contract/confirm", async (c) => {
-    const body = await parseJsonBody<{ projectId: string; survivorId: string; memberIds: string[]; mergedTitle: string; mergedDescription: string }>(c);
-    if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
-    if (!body.survivorId) return c.json({ error: "survivorId is required" }, 400);
-    if (!Array.isArray(body.memberIds) || body.memberIds.length < 2) return c.json({ error: "memberIds must be an array of at least 2 ids" }, 400);
-    if (!body.mergedTitle?.trim()) return c.json({ error: "mergedTitle is required" }, 400);
-    try {
-      const result = await confirmContractComponent(
-        { projectId: body.projectId, survivorId: body.survivorId, memberIds: body.memberIds, mergedTitle: body.mergedTitle, mergedDescription: body.mergedDescription ?? "" },
-        database,
-      );
-      options?.boardEvents?.broadcast(body.projectId, "board_changed");
-      return c.json(result);
-    } catch (err: unknown) {
-      const e = asIssueRouteError(err);
-      if (e.code === "NOT_FOUND") return c.json({ error: e.message }, 404);
-      return c.json({ error: err instanceof Error ? err.message : "contract failed" }, 400);
-    }
+    const body = await parseJsonBody(c, contractConfirmBody);
+    const result = await confirmContractComponent(
+      { projectId: body.projectId, survivorId: body.survivorId, memberIds: body.memberIds, mergedTitle: body.mergedTitle, mergedDescription: body.mergedDescription ?? "" },
+      database,
+    );
+    options?.boardEvents?.broadcast(body.projectId, "board_changed");
+    return c.json(result);
+  });
+
+  // POST /api/issues/group-scan — AI-propose ticket GROUPS over the open backlog (#661).
+  // The non-destructive sibling of /contract: applying writes `coupled_with` edges only
+  // (every ticket keeps its identity); the monitor's auto-group start then executes each
+  // group as ONE workspace. Preview by default; `apply: true` creates the edges.
+  router.post("/group-scan", async (c) => {
+    const body = await parseJsonBody(c, groupScanBody);
+    const projectId = body.projectId;
+    const result = await wrapAiOperation("group-scan", () => scanForTicketGroups(projectId, database, { apply: body.apply === true }));
+    if (body.apply === true) options?.boardEvents?.broadcast(projectId, "dependency_added");
+    return c.json(result);
   });
 
   // POST /api/issues/batch — create N issues atomically
   // Optional: parentIssueId wires child_of edges; driveTarget (requires parentIssueId) auto-creates a Drive record.
   router.post("/batch", async (c) => {
-    const body = await parseJsonBody<{ projectId: string; issues: Omit<CreateIssueInput, "projectId">[]; parentIssueId?: string; driveTarget?: string; dependencies?: BatchDependencyInput[] }>(c);
-    if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
-    if (!Array.isArray(body.issues)) return c.json({ error: "issues must be an array" }, 400);
-    if (body.dependencies !== undefined && !Array.isArray(body.dependencies)) return c.json({ error: "dependencies must be an array" }, 400);
-    try {
-      const result = await issueService.createIssuesBatch(body.projectId, body.issues, {
-        parentIssueId: body.parentIssueId,
-        driveTarget: body.driveTarget,
-        dependencies: body.dependencies,
-      });
-      return c.json(result, 201);
-    } catch (err: unknown) {
-      const e = asIssueRouteError(err);
-      if (e.code === "BAD_REQUEST") {
-        const payload: { error: string | undefined; index?: number } = { error: e.message };
-        if (typeof e.index === "number") payload.index = e.index;
-        return c.json(payload, 400);
-      }
-      throw err;
-    }
+    const body = await parseJsonBody(c, batchIssuesBody);
+    const result = await issueService.createIssuesBatch(body.projectId, body.issues as Omit<CreateIssueInput, "projectId">[], {
+      parentIssueId: body.parentIssueId,
+      driveTarget: body.driveTarget,
+      dependencies: body.dependencies as BatchDependencyInput[] | undefined,
+    });
+    return c.json(result, 201);
   });
 
   // POST /api/issues/dependencies/batch — add/remove N dependency edges atomically
   router.post("/dependencies/batch", async (c) => {
-    const body = await parseJsonBody<{ edges: { issueId: string; dependsOnId: string; type?: string; action: "add" | "remove" }[] }>(c);
-    if (!Array.isArray(body.edges)) return c.json({ error: "edges must be an array" }, 400);
-    try {
-      const result = await issueService.updateDependenciesBatch(body.edges);
-      return c.json({ added: result.added, removed: result.removed, skipped: result.skipped });
-    } catch (err: unknown) {
-      const e = asIssueRouteError(err);
-      if (e.code === "BAD_REQUEST") {
-        const payload: { error: string | undefined; index?: number } = { error: e.message };
-        if (typeof e.index === "number") payload.index = e.index;
-        return c.json(payload, 400);
-      }
-      if (e.code === "CONFLICT") {
-        const payload: { error: string | undefined; index?: number } = { error: e.message };
-        if (typeof e.index === "number") payload.index = e.index;
-        return c.json(payload, 400);
-      }
-      throw err;
-    }
+    const body = await parseJsonBody(c, dependenciesBatchBody);
+    const result = await issueService.updateDependenciesBatch(body.edges as { issueId: string; dependsOnId: string; type?: string; action: "add" | "remove" }[]);
+    return c.json({ added: result.added, removed: result.removed, skipped: result.skipped });
   });
 
   // POST /api/issues/contract-coupled — contract a full coupled_with component onto one lead.
   router.post("/contract-coupled", async (c) => {
-    const body = await parseJsonBody<{ issueIds?: string[]; leadIssueId?: string }>(c);
-    if (!Array.isArray(body.issueIds) || body.issueIds.length === 0) {
-      return c.json({ error: "issueIds must be a non-empty array" }, 400);
-    }
-    try {
-      const result = await issueService.contractCoupledIssues(body.issueIds, body.leadIssueId);
-      return c.json({
-        leadIssueId: result.leadIssueId,
-        memberIssueIds: result.memberIssueIds,
-        mutations: result.mutations,
-        added: result.added,
-        removed: result.removed,
-        skipped: result.skipped,
-      });
-    } catch (err: unknown) {
-      const e = asIssueRouteError(err);
-      if (e.code === "BAD_REQUEST") return c.json({ error: e.message }, 400);
-      if (e.code === "NOT_FOUND") return c.json({ error: e.message }, 404);
-      if (e.code === "CONFLICT") return c.json({ error: e.message, index: e.index }, 400);
-      throw err;
-    }
+    const body = await parseJsonBody(c, contractCoupledBody);
+    const result = await issueService.contractCoupledIssues(body.issueIds, body.leadIssueId);
+    return c.json({
+      leadIssueId: result.leadIssueId,
+      memberIssueIds: result.memberIssueIds,
+      mutations: result.mutations,
+      added: result.added,
+      removed: result.removed,
+      skipped: result.skipped,
+    });
   });
 
   // POST /api/issues/archive-done — move Done issues older than N days to Archived
@@ -233,35 +221,15 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     if (!Number.isFinite(days) || days <= 0) {
       return c.json({ error: "olderThanDays must be a positive number" }, 400);
     }
-    try {
-      const result = await issueService.archiveDoneIssues(body.projectId, days, body.nowOverride);
-      return c.json({ archived: result.archived });
-    } catch (err: unknown) {
-      const e = asIssueRouteError(err);
-      if (e.code === "BAD_REQUEST") return c.json({ error: e.message }, 400);
-      if (e.code === "NOT_FOUND") return c.json({ error: e.message }, 404);
-      throw err;
-    }
+    const result = await issueService.archiveDoneIssues(body.projectId, days, body.nowOverride);
+    return c.json({ archived: result.archived });
   });
 
   // PATCH /api/issues/bulk - update N issues in one request
   router.patch("/bulk", async (c) => {
-    const body = await parseJsonBody<{ issueIds?: string[]; updates?: Record<string, unknown> }>(c);
-    if (!Array.isArray(body.issueIds) || body.issueIds.length === 0) {
-      return c.json({ error: "issueIds must be a non-empty array" }, 400);
-    }
-    if (!body.updates || typeof body.updates !== "object") {
-      return c.json({ error: "updates is required" }, 400);
-    }
-    try {
-      const result = await issueService.updateIssuesBulk(body.issueIds, body.updates);
-      return c.json({ updated: result.updated });
-    } catch (err: unknown) {
-      const e = asIssueRouteError(err);
-      if (e.code === "BAD_REQUEST") return c.json({ error: e.message }, 400);
-      if (e.code === "NOT_FOUND") return c.json({ error: e.message }, 404);
-      throw err;
-    }
+    const body = await parseJsonBody(c, bulkUpdateBody);
+    const result = await issueService.updateIssuesBulk(body.issueIds, body.updates);
+    return c.json({ updated: result.updated });
   });
 
   // POST /api/issues
@@ -279,64 +247,55 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
       workflowTemplateId?: string | null;
       externalKey?: string | null;
       externalUrl?: string | null;
+      reposTouched?: string[];
     }>(c);
     if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
     if (!body.title?.trim()) return c.json({ error: "title is required" }, 400);
 
-    try {
-      const result = await issueService.createIssue({
-        projectId: body.projectId,
-        title: body.title,
-        description: body.description,
-        priority: body.priority,
-        issueType: body.issueType,
-        skipAutoReview: body.skipAutoReview,
-        estimate: body.estimate,
-        sortOrder: body.sortOrder,
-        statusId: body.statusId,
-        workflowTemplateId: body.workflowTemplateId,
-        externalKey: body.externalKey,
-        externalUrl: body.externalUrl,
-      });
-      return c.json(result, 201);
-    } catch (err: unknown) {
-      const e = asIssueRouteError(err);
-      if (e.code === "BAD_REQUEST") return c.json({ error: e.message }, 400);
-      throw err;
-    }
+    const result = await issueService.createIssue({
+      projectId: body.projectId,
+      title: body.title,
+      description: body.description,
+      priority: body.priority,
+      issueType: body.issueType,
+      skipAutoReview: body.skipAutoReview,
+      estimate: body.estimate,
+      sortOrder: body.sortOrder,
+      statusId: body.statusId,
+      workflowTemplateId: body.workflowTemplateId,
+      externalKey: body.externalKey,
+      externalUrl: body.externalUrl,
+      reposTouched: Array.isArray(body.reposTouched) ? body.reposTouched : undefined,
+    });
+    return c.json(result, 201);
   });
 
-  // GET /api/issues/:id/touched-files — return cached prediction only (no AI call)
-  router.get("/:id/touched-files", async (c) => {
-    const issueId = c.req.param("id");
+  // Cached touched-files prediction for one issue, or null when the issue doesn't
+  // exist. Shared by the standalone endpoint and the detail-bundle (#418).
+  async function readTouchedFiles(issueId: string): Promise<{ files: unknown[]; cached: boolean } | null> {
     const row = await getIssueTouchedFiles(issueId, database);
-    if (!row) return c.json({ error: "Issue not found" }, 404);
+    if (!row) return null;
     const json = row.touchedFilesJson;
     let files: unknown[] = [];
     if (json) {
       try { files = JSON.parse(json) as unknown[]; } catch { files = []; }
     }
-    return c.json({ files, cached: true });
-  });
+    return { files, cached: true };
+  }
 
-  // POST /api/issues/:id/analyze-touched-files — run (or re-run) AI prediction
-  router.post("/:id/analyze-touched-files", async (c) => {
-    const issueId = c.req.param("id");
-    const body = await parseJsonBody<{ refresh?: boolean }>(c).catch(() => ({ refresh: false }));
-    return c.json(await wrapAiOperation("analyze-touched-files", () => analyzeTouchedFiles(issueId, database, body?.refresh === true)));
-  });
-
-  // GET /api/issues/:id/related-issues — find other issues that share touched files with this one
-  router.get("/:id/related-issues", async (c) => {
-    const issueId = c.req.param("id");
+  // File-overlap scan against the project's other issues, or null when the issue
+  // doesn't exist. Shared by the standalone endpoint and the detail-bundle (#418).
+  async function computeRelatedIssues(
+    issueId: string,
+  ): Promise<{ related: { id: string; issueNumber: number | null; title: string; sharedFileCount: number }[] } | null> {
     const row = await getIssueTouchedFilesWithProject(issueId, database);
-    if (!row) return c.json({ error: "Issue not found" }, 404);
+    if (!row) return null;
     const json = row.touchedFilesJson;
-    if (!json) return c.json({ related: [] });
+    if (!json) return { related: [] };
     let myFiles: { path: string }[] = [];
-    try { myFiles = JSON.parse(json) as { path: string }[]; } catch { return c.json({ related: [] }); }
+    try { myFiles = JSON.parse(json) as { path: string }[]; } catch { return { related: [] }; }
     const myPaths = new Set(myFiles.map((f) => f.path));
-    if (myPaths.size === 0) return c.json({ related: [] });
+    if (myPaths.size === 0) return { related: [] };
 
     const candidates = await getProjectIssuesTouchedFiles(row.projectId, database);
 
@@ -352,7 +311,30 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
       }
     }
     related.sort((a, b) => b.sharedFileCount - a.sharedFileCount);
-    return c.json({ related });
+    return { related };
+  }
+
+  // GET /api/issues/:id/touched-files — return cached prediction only (no AI call)
+  router.get("/:id/touched-files", async (c) => {
+    const issueId = c.req.param("id");
+    const result = await readTouchedFiles(issueId);
+    if (!result) return c.json({ error: "Issue not found" }, 404);
+    return c.json(result);
+  });
+
+  // POST /api/issues/:id/analyze-touched-files — run (or re-run) AI prediction
+  router.post("/:id/analyze-touched-files", async (c) => {
+    const issueId = c.req.param("id");
+    const body = await parseJsonBody<{ refresh?: boolean }>(c).catch(() => ({ refresh: false }));
+    return c.json(await wrapAiOperation("analyze-touched-files", () => analyzeTouchedFiles(issueId, database, body?.refresh === true)));
+  });
+
+  // GET /api/issues/:id/related-issues — find other issues that share touched files with this one
+  router.get("/:id/related-issues", async (c) => {
+    const issueId = c.req.param("id");
+    const result = await computeRelatedIssues(issueId);
+    if (!result) return c.json({ error: "Issue not found" }, 404);
+    return c.json(result);
   });
 
 
@@ -365,6 +347,21 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     const issueId = c.req.param("id");
     const body = await parseJsonBody<{ projectId: string; clarifications?: PreflightClarification[] }>(c);
     if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
+
+    // `skip_preflight` is enforced HERE, not only in the client. The launch form was the
+    // sole gate, so every other caller (CLI, MCP, butler, a second tab) still paid for the
+    // AI check after the operator turned it off. Report the skip in the verdict instead of
+    // faking a "ready" the model never produced.
+    const preflightPrefs = { skip_preflight: (await getPreference("skip_preflight", database)) ?? undefined };
+    if (getBool(preflightPrefs, "skip_preflight")) {
+      return c.json({
+        verdict: "ready" satisfies PreflightVerdict,
+        questions: [],
+        summary: "Preflight is disabled (skip_preflight); no check was run.",
+        looksComplex: false,
+        skipped: true,
+      });
+    }
 
     const answered = (body.clarifications ?? []).filter(
       (cl) => cl && typeof cl.question === "string" && typeof cl.answer === "string" && cl.question.trim() && cl.answer.trim(),
@@ -433,21 +430,31 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
   // dependencies, artifacts, comments, activity) the panel otherwise fires as
   // ~7 separate requests, which queue behind the browser's 6-connection
   // HTTP/1.1 limit (head-of-line blocking — the same problem /settings-bootstrap
-  // solved for the settings panel). Project-scoped data (all tags, skills,
-  // milestones, available issues) and git-heavy best-effort data (touched-files,
-  // related-issues, merged-commits) stay on their own endpoints. Each sub-result
-  // is independent: a failure degrades that field rather than failing the bundle.
+  // solved for the settings panel). #418 folds in the remaining per-issue fetches
+  // the panel used to fire separately (cycle-time, time-entries, touched-files,
+  // related-issues, merged-commits — ~5 more requests per open). Project-scoped
+  // data (all tags, skills, milestones, available issues) stays on its own
+  // cacheable endpoints, and the individual per-issue endpoints stay alive for
+  // other callers (MCP/CLI/mutation refetches). Each sub-result is independent:
+  // a failure degrades that field rather than failing the bundle.
   router.get("/:id/detail-bundle", async (c) => {
     const id = c.req.param("id");
     const issue = await getIssueDescription(id, database);
     if (!issue) return c.json({ error: "Issue not found" }, 404);
-    const [workspaces, tags, dependencies, artifacts, comments, activity] = await Promise.all([
+    const [workspaces, tags, dependencies, artifacts, comments, activity, cycleTime, timeEntries, touchedFiles, relatedIssues, mergedCommits] = await Promise.all([
       Promise.resolve(issueService.getEnrichedWorkspaces(id)).catch(() => []),
       Promise.resolve(issueService.getTags(id)).catch(() => []),
       Promise.resolve(issueService.getDependencies(id)).catch(() => null),
       Promise.resolve(issueService.getArtifacts(id)).catch(() => []),
       Promise.resolve(issueCommentsService.listComments(id)).catch(() => []),
       Promise.resolve(getIssueActivity(id, database)).catch(() => null),
+      Promise.resolve(getIssueCycleTime(id, database)).catch(() => null),
+      Promise.all([timeEntriesService.listEntries(id), timeEntriesService.totalMinutes(id)])
+        .then(([entries, totalMinutes]) => ({ entries, totalMinutes }))
+        .catch(() => null),
+      readTouchedFiles(id).catch(() => null),
+      computeRelatedIssues(id).catch(() => null),
+      Promise.resolve(mergedCommitsService.getMergedCommits(id)).catch(() => null),
     ]);
     return c.json({
       issue,
@@ -457,6 +464,11 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
       artifacts,
       comments,
       activity: activity ?? { events: [] },
+      cycleTime,
+      timeEntries,
+      touchedFiles,
+      relatedIssues,
+      mergedCommits,
     });
   });
 
@@ -518,7 +530,12 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
   // GET /api/issues/:id/summary
   router.get("/:id/summary", async (c) => {
     const idParam = c.req.param("id");
-    const result = await issueService.getIssueSummary(idParam);
+    // #506: a bare issue NUMBER is only unique within a project, so scope it — explicit
+    // ?projectId= wins, otherwise the active project (which is what the CLI already does).
+    // Without this, `/api/issues/5/summary` returned whichever project's #5 the DB yielded
+    // first; verified live on a 25-project board.
+    const projectId = c.req.query("projectId") || (await getActiveProjectIdPref(database)) || undefined;
+    const result = await issueService.getIssueSummary(idParam, projectId);
     if (!result) return c.json({ error: "Issue not found" }, 404);
     return c.json(result);
   });
@@ -527,28 +544,33 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
   router.patch("/:id", async (c) => {
     const id = c.req.param("id");
     const body = await parseJsonBody(c);
-    try {
-      const result = await issueService.updateIssue(id, body);
-      return c.json(result);
-    } catch (err: unknown) {
-      const e = asIssueRouteError(err);
-      if (e.code === "BAD_REQUEST") return c.json({ error: e.message }, 400);
-      if (e.code === "NOT_FOUND") return c.json({ error: e.message }, 404);
-      throw err;
-    }
+    const result = await issueService.updateIssue(id, body);
+    return c.json(result);
+  });
+
+  // PUT /api/issues/:id/repos-touched — set the repos this issue declares it touches (#633).
+  //
+  // The create path could apply these and nothing could ever change them, so an issue filed
+  // by anything other than the create panel (a plugin loop, the API, an import) had no repo
+  // scope and no way to get one. Deliberately a SET, not an append: deselecting has to
+  // remove, or the field is a one-way ratchet. Unknown names are dropped and the applied set
+  // is echoed back, so a client can render what actually stuck.
+  router.put("/:id/repos-touched", async (c) => {
+    const id = c.req.param("id");
+    const body = await parseJsonBody<{ reposTouched?: string[] }>(c);
+    if (!Array.isArray(body.reposTouched)) return c.json({ error: "reposTouched (array) is required" }, 400);
+    const [issue] = await getIssueById(id, database);
+    if (!issue) return c.json({ error: "Issue not found" }, 404);
+    const applied = await setIssueReposTouched(id, issue.projectId, body.reposTouched, database);
+    options?.boardEvents?.broadcast(issue.projectId, "issue_updated");
+    return c.json({ reposTouched: applied });
   });
 
   // POST /api/issues/:id/duplicate
   router.post("/:id/duplicate", async (c) => {
     const id = c.req.param("id");
-    try {
-      const result = await issueService.duplicateIssue(id);
-      return c.json(result, 201);
-    } catch (err: unknown) {
-      const e = asIssueRouteError(err);
-      if (e.code === "NOT_FOUND") return c.json({ error: e.message }, 404);
-      throw err;
-    }
+    const result = await issueService.duplicateIssue(id);
+    return c.json(result, 201);
   });
 
   // DELETE /api/issues/:id
@@ -651,10 +673,17 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
       payload?: unknown;
       workspaceId?: string;
     }>(c);
-    const validKinds: IssueCommentKind[] = ["preflight-clarification", "agent-question", "merge-attempt", "note"];
+    /**
+     * Deliberately NARROWER than ISSUE_COMMENT_KINDS (#569). `preflight-verdict` and
+     * `gate-decision` are written by the server itself (routes/issues.ts:469 and
+     * plugin-loop.service.ts) and are records of a machine decision — a human POSTing
+     * one would be forging it, so they are not accepted here. This is a whitelist by
+     * intent, not a copy of the vocabulary that fell behind.
+     */
+    const userPostableKinds: IssueCommentKind[] = ["preflight-clarification", "agent-question", "merge-attempt", "note"];
     const validAuthors: IssueCommentAuthor[] = ["user", "butler", "agent", "preflight", "system"];
     if (!body.body?.trim()) return c.json({ error: "body is required" }, 400);
-    const kind = body.kind && validKinds.includes(body.kind) ? body.kind : "note";
+    const kind = body.kind && userPostableKinds.includes(body.kind) ? body.kind : "note";
     const author = body.author && validAuthors.includes(body.author) ? body.author : "user";
     const comment = await issueCommentsService.addComment({
       issueId,
@@ -709,15 +738,8 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     if (!Array.isArray(body.contestants) || body.contestants.length < 2) {
       return c.json({ error: "contestants must be an array with at least 2 entries" }, 400);
     }
-    try {
-      const result = await showdownService.createShowdown(issueId, body.contestants);
-      return c.json(result, 201);
-    } catch (err) {
-      if (err instanceof WorkspaceError) {
-        return c.json({ error: err.message }, err.code === "NOT_FOUND" ? 404 : 400);
-      }
-      throw err;
-    }
+    const result = await showdownService.createShowdown(issueId, body.contestants);
+    return c.json(result, 201);
   });
 
   // GET /api/issues/:id/showdown — get active showdown for this issue.

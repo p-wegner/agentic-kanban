@@ -7,9 +7,12 @@ import { TerminalView } from "./TerminalView.js";
 import { WorkspacePreviewPanel } from "./WorkspacePreviewPanel.js";
 import { WorkspaceDiagnosticsPanel } from "./WorkspaceDiagnosticsPanel.js";
 import { WorkspaceTimelinePanel } from "./WorkspaceTimelinePanel.js";
+import { WorkspaceLifecycleTimeline } from "./WorkspaceLifecycleTimeline.js";
 import { FailurePatternHint } from "./FailurePatternHint.js";
 import TicketMentionInput from "./TicketMentionInput.js";
 import { SetupStatusPanel } from "./SetupStatusPanel.js";
+import { ServiceStackStatusPanel } from "./ServiceStackStatusPanel.js";
+import { RepoMergeStatusStrip } from "./RepoMergeStatusStrip.js";
 import { WorkspaceScorecardPanel } from "./WorkspaceScorecardPanel.js";
 import { WorkspaceViewTabs } from "./WorkspaceViewTabs.js";
 import { WorkspaceClosedActions } from "./WorkspaceClosedActions.js";
@@ -43,19 +46,9 @@ import type {
   SessionSummaryResponse,
 } from "@agentic-kanban/shared";
 
-export interface Project {
-  id: string;
-  name: string;
-  repoPath: string;
-  repoName: string;
-  defaultBranch: string | null;
-  remoteUrl: string | null;
-  setupScript?: string | null;
-  setupEnabled?: boolean;
-  setupBlocking?: boolean;
-  symlinkEnabled?: boolean;
-  symlinkDirs?: string | null;
-}
+import type { Project } from "../lib/projectTypes.js";
+import type { ScorecardResult } from "@agentic-kanban/shared";
+export type { Project };
 
 export interface SessionInfo {
   id: string;
@@ -72,18 +65,8 @@ export interface SessionInfo {
   skillName: string | null;
 }
 
-export interface ScorecardDimension {
-  name: string;
-  score: number;
-  maxScore: number;
-  signal: string;
-}
-
-export interface ScorecardResult {
-  total: number;
-  dimensions: ScorecardDimension[];
-  computedAt: string;
-}
+// Declared once, in shared (#569).
+export type { ScorecardDimension, ScorecardResult } from "@agentic-kanban/shared";
 
 export type AvailableSkill = {
   id: string;
@@ -574,6 +557,12 @@ export function WorkspaceCard({
 
       <SetupStatusPanel setup={ws.latestSetup ?? null} />
 
+      <ServiceStackStatusPanel serviceState={ws.serviceState ?? null} workspaceId={ws.id} />
+
+      {!ws.isDirect && (
+        <RepoMergeStatusStrip workspaceId={ws.id} refreshKey={ws.mergedAt ?? ws.status} />
+      )}
+
       {isThisRunning && (ws.contextTokens || ws.lastTool) && (
         <div className="flex items-center gap-2 text-[10px] text-gray-400 dark:text-gray-500">
           {ws.contextTokens ? (
@@ -805,7 +794,10 @@ export function WorkspaceCard({
           )}
 
           {viewMode === "timeline" && (
-            <WorkspaceTimelinePanel workspaceId={ws.id} />
+            <div className="space-y-2">
+              <WorkspaceLifecycleTimeline workspace={ws} sessions={sessions} />
+              <WorkspaceTimelinePanel workspaceId={ws.id} />
+            </div>
           )}
 
           {viewMode === "context" && ws.contextPrimer && (

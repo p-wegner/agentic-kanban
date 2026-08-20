@@ -1,11 +1,19 @@
 import { useEffect, useState, useCallback } from "react";
 import { apiFetch, apiPost, apiDelete } from "../lib/api.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
+import { workspaceStatusToneClass } from "../lib/badgeTones.js";
 
 interface WorktreeInfo {
   path: string;
   branch: string;
   isMain: boolean;
+  /**
+   * #631 — the SIBLING repo this worktree belongs to, absent for the leading repo's own.
+   * Before this the endpoint listed the leading repo only, so a 17-repo project's panel read
+   * "Worktrees (1) — No additional worktrees" while 104 orphaned sibling worktrees existed
+   * across 13 repos: the panel that exists to surface exactly this debris could not see it.
+   */
+  repoName?: string;
   workspace?: {
     id: string;
     status: string;
@@ -27,13 +35,6 @@ interface WorktreeOverviewProps {
   onIssueClick: (issueId: string) => void;
   onWorkspaceChange?: () => void;
 }
-
-const STATUS_COLORS: Record<string, string> = {
-  active: "bg-green-100 text-green-700",
-  idle: "bg-yellow-100 text-yellow-700",
-  error: "bg-red-100 text-red-700",
-  closed: "bg-gray-100 text-gray-500",
-};
 
 function truncatePath(path: string, maxLen = 50): string {
   if (path.length <= maxLen) return path;
@@ -256,7 +257,7 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
                       <span className="text-xs bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300 px-1.5 py-0.5 rounded">direct</span>
                     )}
                     {mainWorktree.workspace && (
-                      <span className={`text-xs px-1.5 py-0.5 rounded ${STATUS_COLORS[mainWorktree.workspace.status] ?? "bg-gray-100 text-gray-600"}`}>
+                      <span className={`text-xs px-1.5 py-0.5 rounded ${workspaceStatusToneClass(mainWorktree.workspace.status)}`}>
                         {mainWorktree.workspace.status}
                       </span>
                     )}
@@ -306,17 +307,30 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
                           onChange={() => toggleSelect(wt.path)}
                           className="h-4 w-4 rounded border-gray-300 text-brand-600 shrink-0"
                         />
+                        {wt.repoName && (
+                          <span
+                            className="text-xs px-1.5 py-0.5 rounded bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300 shrink-0"
+                            title={`Sibling repo: ${wt.repoName}`}
+                          >
+                            {wt.repoName}
+                          </span>
+                        )}
                         <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
                           {wt.branch}
                         </span>
                         {isOrphan && (
-                          <span className="text-xs bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded">orphaned</span>
+                          <span
+                            className="text-xs bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded"
+                            title={wt.repoName ? "No board workspace claims this sibling worktree — most likely an interrupted create (#630)" : "No board workspace claims this worktree"}
+                          >
+                            {wt.repoName ? "no board workspace" : "orphaned"}
+                          </span>
                         )}
                         {wt.workspace?.isDirect && (
                           <span className="text-xs bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300 px-1.5 py-0.5 rounded">direct</span>
                         )}
                         {wt.workspace && (
-                          <span className={`text-xs px-1.5 py-0.5 rounded ${STATUS_COLORS[wt.workspace.status] ?? "bg-gray-100 text-gray-600"}`}>
+                          <span className={`text-xs px-1.5 py-0.5 rounded ${workspaceStatusToneClass(wt.workspace.status)}`}>
                             {wt.workspace.status}
                           </span>
                         )}

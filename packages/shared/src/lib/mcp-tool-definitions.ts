@@ -12,7 +12,8 @@ export type McpToolCategory =
   | "drives"
   | "projects"
   | "settings"
-  | "butler";
+  | "butler"
+  | "plugins";
 
 export interface McpToolDefinition {
   name: string;
@@ -35,6 +36,7 @@ export const MCP_TOOL_CATEGORIES: { id: McpToolCategory; label: string }[] = [
   { id: "projects", label: "Projects" },
   { id: "settings", label: "Settings" },
   { id: "butler", label: "Butler" },
+  { id: "plugins", label: "Plugin Loops & Gates" },
 ];
 
 export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
@@ -45,7 +47,7 @@ export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
   { name: "find_similar_failures", description: "Search the failure-pattern memory for past incidents similar to a given error text. Returns top matches with root-cause and fix information. Use this when an agent session fails or encounters errors to find known solutions.", category: "board" },
   { name: "delete_status", description: "Delete a project status. Fails if any issues are linked to it.", category: "board" },
   // issues
-  { name: "list_issues", description: "List all issues for a project, optionally filtered by status name, priority, tag, blocked status, or issue number", category: "issues" },
+  { name: "list_issues", description: "List issues for a project, optionally filtered by status name, priority, tag, blocked status, or issue number. Descriptions are OMITTED by default — use get_issue for one issue's full text, or pass includeDescription when you genuinely need every description at once.", category: "issues" },
   { name: "get_issue", description: "Get detailed information about a specific issue, including workspaces and dependencies. Accepts either a UUID issue ID or a numeric issue number (e.g. 42). When resolving by number, pass projectId to scope to the correct project.", category: "issues" },
   { name: "get_issue_summary", description: "Get a summary of the latest completed agent session for an issue. Resolves issue number → workspace → latest session → parsed summary in one call. Shows agent summary text, files touched, commands run, duration, cost, and key excerpts. Complements get_board_status (live state) with completed-work history.", category: "issues" },
   { name: "create_issue", description: "Create a new issue on the kanban board", category: "issues" },
@@ -70,6 +72,8 @@ export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
   { name: "mark_ready_for_merge", description: "Mark a workspace as reviewed and ready to merge. Call this after a successful code review with no critical or major issues. This flag allows future agents to merge the workspace without requiring another review. NOT for fork-child workspaces (a workspace with a parent) — their verdicts flow through join consolidation via propose_transition, never through this tool.", category: "workspaces" },
   { name: "stop_workspace", description: "Stop any running agent session for a workspace", category: "workspaces" },
   { name: "delete_workspace", description: "Delete a workspace and all its associated data", category: "workspaces" },
+  { name: "export_backlog_markdown", description: "Export a project's backlog as ONE Backlog Markdown document (kanban-md 1: front matter, a `##` section per status, a `###` per issue with a metadata line, description, checklist) — the human-readable, hand-editable twin of the JSON snapshot. Filters: statuses, tags, priorities, types, milestone, q (free text), since (ISO), numbers, includeDone. Returns the markdown text (write it to a file yourself, e.g. BACKLOG.md). Round-trips through import_backlog_markdown.", category: "issues" },
+  { name: "import_backlog_markdown", description: "Import a markdown backlog into a project — the kanban-md standard OR liberal styles (`## Section` + `- [ ] item` lists, `- **Title** — text`, `#12` in titles, `**Priority:** high`, `depends on #3`, `[x]` = done). ALWAYS run with dryRun=true first: it returns a preview (per-row action create/update/unchanged, matched existing issue, field changes, statuses/tags to create, warnings, confidence). If confidence is low (<0.6) or the preview looks wrong, rewrite the file into the standard yourself (see the backlog-markdown skill) and preview again — do not import junk. mode: update (default; matches existing issues by #number for a same-project file, then external key, then title, and updates only fields present in the file — tags/dependencies are added, never removed) or create (everything new, renumbered on collision).", category: "issues" },
   { name: "export_handoff_bundle", description: "Export a compact handoff bundle for a workspace that is stuck, awaiting review, or being transferred to a human. Returns workspace metadata, issue context, diff stats, agent summary, changed files, errors, and reviewer notes.", category: "workspaces" },
   // sessions
   { name: "list_sessions", description: "List all sessions for a workspace, including status and timing", category: "sessions" },
@@ -98,6 +102,7 @@ export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
   { name: "analyze_dependencies", description: "Analyze one issue against the current board and create inferred dependency edges. Use after creating related child issues so independent tasks remain unblocked and dependent tasks stay blocked.", category: "dependencies" },
   { name: "update_dependencies_batch", description: "Add or remove multiple dependency edges atomically. Idempotent: existing add or missing remove is skipped (not failed). Cycle detection across the batch; rolls back on cycle.", category: "dependencies" },
   { name: "contract_coupled_issues", description: "Contract a full coupled_with connected component onto one lead issue. The selected issueIds must exactly match the component; external sequential dependencies are inherited by the lead and internal coupled_with edges are removed.", category: "dependencies" },
+  { name: "propose_ticket_groups", description: "Scan a project's open Backlog/Todo tickets and propose ticket GROUPS — sets of granular tickets that share a code surface and should be implemented together in ONE workspace (one agent, one review, one merge-gate run). Preview by default; pass apply=true to write the coupled_with edges the monitor's group-start consumes. Non-destructive: every ticket keeps its identity (contrast contract_coupled_issues, which merges and cancels).", category: "dependencies" },
   // workflow
   { name: "propose_transition", description: "Advance the current issue's workflow to the next stage. Call this when the work for the current stage is done. Pass the workspaceId from your workflow instructions (or the issueId), the target stage name (toNodeName), and a short summary of what you completed.", category: "workflow" },
   { name: "clarify_or_propose", description: "For workflow phase skills: either raise a structured clarifying question in the interactive UI, or propose the next workflow gate.", category: "workflow" },
@@ -129,6 +134,9 @@ export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
   { name: "unregister_project", description: "Remove a project registration from the kanban board by name or project ID. Cascade-deletes all associated data: issues, workspaces, sessions, issue tags, and project statuses. This is irreversible — use with care.", category: "projects" },
   { name: "cleanup_project", description: "Report stale git worktrees for closed/merged workspaces in a project. Lists workspace branches and their worktree paths so they can be removed manually with 'git worktree remove --force <path>'. This tool does NOT auto-remove worktrees — it only reports them. Omit projectId to scan all projects.", category: "projects" },
   { name: "init_project", description: "Initialize and register a git repository as a project on the kanban board. Mirrors CLI `init [path]`. The server must already be running (the MCP server itself being active satisfies this). If no path is provided, only confirms the server is reachable and migrations are up to date.", category: "projects" },
+  { name: "list_project_repos", description: "List the ADDITIONAL (sibling) repos attached to a multi-repo project. Returns an array of repo rows ({ id, path, name, defaultBranch, setupScript, composeFile }). Does NOT include the leading repo (that is the project's own repoPath, from list_projects). An empty array means the project is single-repo.", category: "projects" },
+  { name: "add_project_repo", description: "Attach an ADDITIONAL git repository to an existing multi-repo project (the 'full-peers' model). The project's registered repo is the LEADING repo (the agent starts there); every repo added here becomes a sibling that each new workspace also gets a worktree for on the same branch, with merge landing every repo that has commits. To build a multi-repo project: first `register_project` the leading repo, then call this once per sibling with that project's id. Provide exactly one of `path` (absolute path to an existing local repo), `cloneUrl` (clone a remote), or `createName` (scaffold a brand-new git repo in a new folder created inside the project folder, beside the leading repo).", category: "projects" },
+  { name: "remove_project_repo", description: "Detach an ADDITIONAL (sibling) repo from a multi-repo project. Removes only the project↔repo association — the checkout on disk is left untouched and existing workspaces keep their worktrees. Use `list_project_repos` to find the repoId. Cannot remove the leading repo (that is unregister_project territory).", category: "projects" },
   // settings
   { name: "get_preference", description: "Get a preference value by key. Mirrors CLI `preferences get <key>`. Returns the stored value string, or a message indicating it is not set.", category: "settings" },
   { name: "set_preference", description: "Set (upsert) a preference value by key. Mirrors CLI `preferences set <key> <value>`. Validates like the settings route: unknown keys are rejected (allowed: static settings-registry keys, harness.<harness>.plan_auto_continue, per-project dynamic keys like start_mode_<projectId>, and board_strategy_<projectId>), and start_mode_* values must be exactly manual|monitor|conductor. Use get_preference to read it back.", category: "settings" },
@@ -143,4 +151,22 @@ export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
   { name: "butler_set_profile", description: "Switch the butler's Claude profile. This restarts the warm session (different auth/endpoint cannot resume). Pass an empty profile to revert to the global default.", category: "butler" },
   { name: "get_butler_skill", description: "Get the butler's editable system prompt (skill) for a project. Returns the prompt text and whether it is a project-scoped override or the global default. Equivalent to CLI `butler skill get`.", category: "butler" },
   { name: "set_butler_skill", description: "Set (upsert) the butler's system prompt (skill) for a project, creating a project-scoped override. Pass an empty string to reset to the global default. Equivalent to CLI `butler skill set <prompt>`.", category: "butler" },
+
+  // plugins — descriptions are byte-identical to `mcp-server/src/tools/plugin-gates.ts`; the
+  // mcp-catalog-parity test asserts this — copy from there, never paraphrase. That test now runs
+  // as part of `pnpm check:arch`, which is merge-blocking CI (#476), so a runtime tool registered
+  // without a matching entry here fails the PR that introduces it instead of leaving this gate
+  // red for every later branch to inherit.
+  { name: "list_plugin_gates", description: "List plugin-loop approval gates waiting on a HUMAN decision for ONE project (question, verification checks, artifacts, the butler's recommendation if any). Also reports loops whose finished ticket is still waiting for its merge to land. For a question spanning MULTIPLE projects use list_inbox instead — calling this once per project and stitching the results mis-attributes items to the wrong project.", category: "plugins" },
+  { name: "get_plugin_gate", description: "Get the full detail of one pending plugin gate: question, actions, verification checks, artifact paths (read those files for the content), and the butler's recommendation.", category: "plugins" },
+  { name: "resolve_plugin_gate", description: "Apply a HUMAN's decision to a pending plugin gate (approve / request revisions). HARD RULE: only call this after the user has EXPLICITLY stated their decision in the current conversation — never resolve a gate on your own judgment or a recommendation alone. Revision-style actions require the user's feedback text.", category: "plugins" },
+  { name: "advance_plugin_loop", description: "Re-run a plugin loop's planner now (plan → dedupe → create tickets). Safe and idempotent; use after a merge landed or to refresh a loop's gate/progress state.", category: "plugins" },
+  { name: "list_inbox", description: "Everything blocked on a HUMAN across ALL projects at once: plugin-loop gates, finished-but-unlanded loop merges, unanswered agent questions and pending tool approvals — each carrying its own project. USE THIS for any cross-project \"what needs my attention / what is waiting on me\" question instead of calling the per-project tools once per project; fanning out by hand mis-attributes items to the wrong project.", category: "plugins" },
+
+  // plugin onboarding — same rule as above: descriptions are byte-identical to
+  // `mcp-server/src/tools/plugin-onboarding.ts` (the parity test asserts it) — copy, never paraphrase.
+  { name: "enable_plugin", description: "Enable an installed plugin for ONE project. Enabling SCAFFOLDS the plugin's profile into the output repo, so if the plugin should write to a sidecar repo rather than the product repo, pass `location: \"sidecar\"` HERE — setting it afterwards leaves the scaffold stranded in the wrong repo (#318). Use list_plugins to get the plugin row id.", category: "plugins" },
+  { name: "set_plugin_output_location", description: "Set where a plugin writes its output for one project: \"leading\" (the product repo) or \"sidecar\" (a separate <slug>-requirements repo). Prefer passing `location` to enable_plugin instead — enabling scaffolds, so changing the location afterwards does not move what was already written.", category: "plugins" },
+  { name: "get_plugin_scaffold", description: "Read the plugin's scaffolded profile as an INTERVIEW: the unresolved TODO markers, each with its index and the question it asks. Ask the USER these questions — the answers are project facts, not things to invent — then submit them with fill_plugin_scaffold.", category: "plugins" },
+  { name: "fill_plugin_scaffold", description: "Answer the plugin profile's TODO markers by INDEX (from get_plugin_scaffold). Only call this with answers the user actually gave: the profile drives what the plugin's loops generate, so an invented answer silently becomes a wrong requirement register.", category: "plugins" },
 ];

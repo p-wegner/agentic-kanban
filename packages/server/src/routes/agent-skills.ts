@@ -2,8 +2,9 @@ import type { Database } from "../db/index.js";
 import { createAgentSkillService } from "../services/agent-skill.service.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import { createRouter } from "../middleware/create-router.js";
-import { wrapAiOperation } from "../middleware/ai-operation.js";
+import { wrapAiOperation } from "../lib/ai-operation.js";
 
+import { queryFlag } from "../middleware/query-params.js";
 export function createAgentSkillsRoute(database: Database) {
   const router = createRouter();
   const agentSkillService = createAgentSkillService({ database });
@@ -11,8 +12,9 @@ export function createAgentSkillsRoute(database: Database) {
   // GET /api/agent-skills — list skills
   router.get("/", async (c) => {
     const projectId = c.req.query("projectId");
-    const globalOnly = c.req.query("global") === "true";
-    return c.json(await agentSkillService.listSkills(projectId, globalOnly));
+    const globalOnly = queryFlag(c, "global");
+    const initOnly = queryFlag(c, "init");
+    return c.json(await agentSkillService.listSkills(projectId, globalOnly, initOnly));
   });
 
   // POST /api/agent-skills/enhance — AI-enhance a skill name, description, and prompt
@@ -37,7 +39,7 @@ export function createAgentSkillsRoute(database: Database) {
 
   // POST /api/agent-skills — create a skill
   router.post("/", async (c) => {
-    const body = await parseJsonBody<{ name: string; description: string; prompt: string; model?: string; projectId?: string | null }>(c);
+    const body = await parseJsonBody<{ name: string; description: string; prompt: string; model?: string; projectId?: string | null; isInit?: boolean }>(c);
     const skill = await agentSkillService.createSkill(body);
     return c.json(skill, 201);
   });
@@ -45,7 +47,7 @@ export function createAgentSkillsRoute(database: Database) {
   // PUT /api/agent-skills/:id — update a skill
   router.put("/:id", async (c) => {
     const id = c.req.param("id");
-    const body = await parseJsonBody<{ name?: string; description?: string; prompt?: string; model?: string; projectId?: string | null }>(c);
+    const body = await parseJsonBody<{ name?: string; description?: string; prompt?: string; model?: string; projectId?: string | null; isInit?: boolean }>(c);
     const updated = await agentSkillService.updateSkill(id, body);
     return c.json(updated);
   });
@@ -57,7 +59,10 @@ export function createAgentSkillsRoute(database: Database) {
 
   // POST /api/agent-skills/:id/install
   router.post("/:id/install", async (c) => {
-    return c.json(await agentSkillService.installSkill(c.req.param("id")));
+    // #389 — optional explicit target; the active project remains the fallback, so every existing
+    // caller is unaffected. The response names the repoPath the file actually went to.
+    const body = await parseJsonBody<{ projectId?: string }>(c).catch(() => ({} as { projectId?: string }));
+    return c.json(await agentSkillService.installSkill(c.req.param("id"), body?.projectId));
   });
 
   // DELETE /api/agent-skills/:id

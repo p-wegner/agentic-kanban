@@ -67,6 +67,8 @@ import type * as agentServiceType from "../services/agent.service.js";
 import type { AgentOutputCallback } from "../services/agent.service.js";
 import type { workspaceLaunchPreflight } from "../services/preflight-check.js";
 import type { TestDb } from "./helpers/test-db.js";
+import { profileFailureKey } from "../services/agent-profile-failure-record.js";
+import { getRuntimeState, setRuntimeState } from "../repositories/runtime-state.repository.js";
 
 interface Seeded { projectId: string; issueId: string; workspaceId: string; }
 
@@ -97,11 +99,13 @@ async function seedWorkspace(db: TestDb, issueNumber: number): Promise<Seeded> {
 }
 
 /** Insert a persisted "running" session row (the state that survives in the DB across a restart). */
-async function insertRunningSession(db: TestDb, workspaceId: string, pid: number | null): Promise<string> {
+async function insertRunningSession(db: TestDb, workspaceId: string, pid: number | null, startedAt?: string): Promise<string> {
   const sessionId = randomUUID();
   await db.insert(sessions).values({
     id: sessionId, workspaceId, executor: "claude-code", status: "running",
-    startedAt: new Date().toISOString(), pid,
+    // A reattached survivor started BEFORE the restart, so its startedAt is old (well outside
+    // the 10s launch-failure window) — the realistic shape for the external-exit classifier.
+    startedAt: startedAt ?? new Date().toISOString(), pid,
   });
   return sessionId;
 }
@@ -129,7 +133,10 @@ describe("agent-sessions.reattach.recover — boot routine cleanupStaleSessions"
     const nullPid = await seedWorkspace(h.db, 3);
 
     // Persisted "running" rows; a fresh empty SessionState == the post-restart world.
-    const liveSessionId = await insertRunningSession(h.db, live.workspaceId, process.pid); // REAL alive PID
+    // The live survivor started well before the restart (old startedAt), so its later external
+    // exit lands OUTSIDE the launch-failure window — the realistic reattach shape.
+    const oldStartedAt = new Date(Date.now() - 60_000).toISOString();
+    const liveSessionId = await insertRunningSession(h.db, live.workspaceId, process.pid, oldStartedAt); // REAL alive PID
     const deadSessionId = await insertRunningSession(h.db, dead.workspaceId, 999_999);     // REAL dead PID
     const nullSessionId = await insertRunningSession(h.db, nullPid.workspaceId, null);     // no PID -> dead
 
@@ -190,18 +197,25 @@ describe("agent-sessions.reattach.recover — boot routine cleanupStaleSessions"
     reattachCalls[0].onOutput({ type: "stdout", data: "tail" } as never);
     expect(handleOutput).toHaveBeenCalledWith(liveSessionId, { type: "stdout", data: "tail" });
 
-    // --- PID-poll-detected exit mirrors the normal exit path (contract: exitCode null) ---------
+    // --- PID-poll-detected exit routes through the exit state machine (contract: exitCode null) ---
+    // The poll never observed a real exit code, so this must NOT be recorded as a clean "0"
+    // completion (review §3.2). It lands in the explicit INDETERMINATE terminal instead.
     reattachCalls[0].onExit();
     // notifyExternalExit(id, null) is async/fire-and-forget from the poll callback — settle it.
     await vi.waitFor(async () => {
       const [row] = await h.db.select().from(sessions).where(eq(sessions.id, liveSessionId));
-      expect(row.status).toBe("completed");
+      expect(row.endedAt).not.toBeNull();
     });
     const [exitedSess] = await h.db.select().from(sessions).where(eq(sessions.id, liveSessionId));
-    expect(exitedSess.status).toBe("completed");
-    // The poll passes exitCode null; the DB coerces it to "0".
-    expect(exitedSess.exitCode).toBe("0");
-    // The workflow callback receives the raw null exitCode from the restored context.
+    // Indeterminate terminal: recognized-terminal "stopped", NOT the old completed/"0" lie.
+    expect(exitedSess.status).toBe("stopped");
+    expect(exitedSess.status).not.toBe("completed");
+    expect(exitedSess.exitCode).toBeNull();
+    expect(exitedSess.exitCode).not.toBe("0");
+    const indetStats = JSON.parse(exitedSess.stats ?? "{}") as Record<string, unknown>;
+    expect(indetStats.indeterminateExit).toBe(true);
+    expect(indetStats.success).toBe(false);
+    // The workflow callback still receives the raw null exitCode — never a fabricated 0.
     expect(onSessionExit).toHaveBeenCalledTimes(1);
     expect(onSessionExit).toHaveBeenCalledWith(live.workspaceId, liveSessionId, null, false);
 
@@ -209,5 +223,107 @@ describe("agent-sessions.reattach.recover — boot routine cleanupStaleSessions"
     reattachCalls[0].onExit();
     await new Promise((r) => setTimeout(r, 50));
     expect(onSessionExit).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ── External-exit classification (review §3.2) ────────────────────────────────────────────────
+// notifyExternalExit must route through the SAME exit state machine as the live exit path, instead
+// of the old raw `String(exitCode ?? 0)` shortcut that recorded EVERY external exit as completed/"0".
+describe("notifyExternalExit — routes external exits through the exit state machine", () => {
+  /** Build a real lifecycle over the test DB and register the session's context (as reattach does). */
+  function makeLifecycle(seeded: Seeded, sessionId: string) {
+    const state = createSessionState();
+    const onSessionExit = vi.fn();
+    const lifecycle = createSessionLifecycle(
+      state, { onSessionExit }, vi.fn(),
+      { db: h.db, agentService: lifecycleAgentService(), preflight: okPreflight() },
+    );
+    lifecycle.reattachSession({
+      sessionId, workspaceId: seeded.workspaceId, issueId: seeded.issueId,
+      projectId: seeded.projectId, providerName: "claude-code",
+    });
+    return { lifecycle, onSessionExit };
+  }
+
+  it("(a) known non-zero exit code is classified as a FAILURE, not recorded as clean '0'", async () => {
+    const seeded = await seedWorkspace(h.db, 11);
+    // Fresh startedAt (within the launch-failure window) + a real observed non-zero code.
+    const sessionId = await insertRunningSession(h.db, seeded.workspaceId, process.pid, new Date().toISOString());
+    const { lifecycle, onSessionExit } = makeLifecycle(seeded, sessionId);
+
+    await lifecycle.notifyExternalExit(sessionId, 3);
+
+    const [row] = await h.db.select().from(sessions).where(eq(sessions.id, sessionId));
+    expect(row.status).not.toBe("completed");   // NOT a clean success
+    expect(row.exitCode).toBe("3");             // the real code, never coerced to "0"
+    expect(row.exitCode).not.toBe("0");
+    const stats = JSON.parse(row.stats ?? "{}") as Record<string, unknown>;
+    expect(stats.success).toBe(false);
+    expect(stats.launchFailure).toBe(true);
+    expect(onSessionExit).toHaveBeenCalledWith(seeded.workspaceId, sessionId, 3, false);
+  });
+
+  it("(b) unknown exit code (null) is recorded as the explicit indeterminate state, NOT completed '0'", async () => {
+    const seeded = await seedWorkspace(h.db, 12);
+    // Old startedAt = a reattached survivor; its PID vanished so the code is unobservable.
+    const oldStartedAt = new Date(Date.now() - 60_000).toISOString();
+    const sessionId = await insertRunningSession(h.db, seeded.workspaceId, process.pid, oldStartedAt);
+    const { lifecycle, onSessionExit } = makeLifecycle(seeded, sessionId);
+
+    await lifecycle.notifyExternalExit(sessionId, null);
+
+    const [row] = await h.db.select().from(sessions).where(eq(sessions.id, sessionId));
+    expect(row.status).not.toBe("completed");   // the whole point: no fabricated success
+    expect(row.status).toBe("stopped");         // recognized indeterminate terminal
+    expect(row.exitCode).toBeNull();            // undeterminable — never "0"
+    expect(row.exitCode).not.toBe("0");
+    const stats = JSON.parse(row.stats ?? "{}") as Record<string, unknown>;
+    expect(stats.indeterminateExit).toBe(true);
+    expect(stats.success).toBe(false);
+    expect(stats.providerExitCode).toBeNull();
+    // The workflow callback receives null (undeterminable), never a fabricated 0.
+    expect(onSessionExit).toHaveBeenCalledWith(seeded.workspaceId, sessionId, null, false);
+  });
+
+  // ── #543: drift between the live exit path and this one ──────────────────────────────
+  // `classifySessionExit` was already shared, but the FINALIZE side was copied, and the
+  // copies had lost two things. Both are asserted through the runtime-state row the
+  // profile-health breaker actually reads — no mocks, so these fail against the old code.
+
+  it("(c) a completed external exit CLEARS the profile's failure streak (was live-path only)", async () => {
+    const seeded = await seedWorkspace(h.db, 13);
+    // Pin a profile on the workspace: the external path has no StartSessionOptions, so this
+    // row is the only place it can learn which profile's health it is recording.
+    // Distinct profile name per case: `h.db` is one DB shared by every test in this file.
+    await h.db.update(workspaces).set({ claudeProfile: "anth-c" }).where(eq(workspaces.id, seeded.workspaceId));
+    const key = profileFailureKey("claude", "anth-c");
+    await setRuntimeState(key, JSON.stringify({ count: 2, summary: "earlier failures" }), h.db);
+
+    // Old startedAt: exit 0 inside the launch-failure window would classify as ZERO-OUTPUT
+    // launch failure, not `completed` — the route this case is about.
+    const oldStartedAt = new Date(Date.now() - 600_000).toISOString();
+    const sessionId = await insertRunningSession(h.db, seeded.workspaceId, process.pid, oldStartedAt);
+    const { lifecycle } = makeLifecycle(seeded, sessionId);
+    await lifecycle.notifyExternalExit(sessionId, 0);
+
+    // Without this the breaker outlives the problem: a reattached session that ran fine
+    // left the streak intact, so a healthy profile could be marked unusable.
+    expect(await getRuntimeState(key, h.db)).toBeNull();
+  });
+
+  it("(d) an auth-shaped external launch failure RECORDS against the profile (was live-path only)", async () => {
+    const seeded = await seedWorkspace(h.db, 14);
+    await h.db.update(workspaces).set({ claudeProfile: "anth-d" }).where(eq(workspaces.id, seeded.workspaceId));
+    const key = profileFailureKey("claude", "anth-d");
+    expect(await getRuntimeState(key, h.db)).toBeNull();
+
+    const sessionId = await insertRunningSession(h.db, seeded.workspaceId, process.pid, new Date().toISOString());
+    const { lifecycle } = makeLifecycle(seeded, sessionId);
+    await lifecycle.notifyExternalExit(sessionId, 1);
+
+    // The external path skipped `applyAuthFailureRecovery` entirely, so an auth failure seen
+    // after a restart parked the workspace idle and the monitor relaunched it on the same
+    // dead login — the retry loop #430 exists to stop.
+    expect(await getRuntimeState(key, h.db)).not.toBeNull();
   });
 });

@@ -74,6 +74,25 @@ Open the issue's workspace (in its panel) to find these buttons:
 - **Merge** — merges the branch into the project's default branch and closes the
   workspace. (If it conflicts, the board offers a fix-and-retry.)
 
+## Multi-repo projects (several git repos, one board)
+A project can span **more than one git repository** — e.g. a backend, a frontend, and
+a few services worked on together. One repo is the **leading repo** (the one you
+registered; the agent starts its worktree there) and the rest are **additional /
+sibling repos**. When you launch a workspace, the board creates a worktree on the
+same branch in *every* repo; the diff aggregates across all of them and **Merge**
+lands each repo that has commits.
+- **Add a repo to the current project:** click the **++** button in the top bar
+  (just right of the **+** "add project" button). Three ways: a local path, a clone
+  URL, or **Create new** (type a name — a new folder + git repo is created inside the
+  project folder, beside the leading repo).
+- **Set one up from scratch:** click **+** → **Import existing**. The first path is
+  the **leading repo**; use **+ Add another repository** to list the siblings, then
+  **Register**. (You can also add siblings later via **++** or in
+  **Settings › Project › Additional Repositories**.)
+- **Manage them:** **Settings › Project › Additional Repositories** lists every
+  sibling and lets you rename one, set a per-repo setup script / compose file, or
+  remove it.
+
 ## Settings (gear, top-right)
 Agent profile + default model, and workflow automation: auto-review, auto-merge, and
 board monitoring (relaunch/merge/nudge). Toggle these to control how hands-off the
@@ -82,6 +101,37 @@ board runs.
 ## Tips
 - Press \`/\` to search issues; the **Butler** tab is where you can just ask me to do
   things ("start work on #34", "what's the board status") and I'll handle it.
+
+## Onboarding a NEW product through a pipeline plugin (#329 — YOU drive this)
+This section is for YOU, the butler, not for relaying UI steps. When the user says
+something like "use the PM workflow / pm-pipeline to build <product idea>", run the
+whole setup yourself via the board REST API (same server your system prompt names —
+use its port with 127.0.0.1) and keep the user in the conversation only for the
+decisions that are genuinely theirs. The board stays their observability surface.
+
+1. **Project.** Ask where the repo should live (offer a sensible default beside the
+   current project). Create + register in one call:
+   \`POST /api/projects/create {"name":"<slug>","path":"<abs path>"}\` — or register
+   an existing repo: \`POST /api/projects {"repoPath":"<abs path>"}\`. Note the
+   returned project \`id\`.
+2. **Plugin.** \`GET /api/plugins\` → find the pipeline plugin's row \`id\` (e.g. slug
+   \`pm-pipeline\`). If missing, install: \`POST /api/plugins {"source":"<path-or-git-url>"}\`.
+3. **Output location — ask the user:** docs into the product repo ("leading") or a
+   sidecar requirements repo. \`POST /api/plugins/<rowId>/output-location
+   {"projectId":"<id>","location":"leading"|"sidecar"}\`, then enable:
+   \`POST /api/plugins/<rowId>/enable {"projectId":"<id>"}\`.
+4. **Profile interview.** \`GET /api/plugins/<rowId>/scaffold?projectId=<id>\` returns
+   the open TODO fields. Ask the user each question conversationally (bundle related
+   ones, offer defaults they can wave through, respect their language), then save with
+   \`POST /api/plugins/<rowId>/scaffold {"projectId":"<id>","values":[{"index":N,"value":"…"}]}\`.
+   Repeat until \`remaining\` is 0 — the save also commits the profile so step agents
+   see it. Never invent answers to scope questions the user hasn't confirmed.
+5. **Hands-off mode.** \`PUT /api/preferences/settings {"start_mode_<projectId>":"monitor"}\`
+   so the board's monitor starts the loop's tickets itself.
+6. **Start the loop.** \`POST /api/plugins/<rowId>/loops/<loopName>/advance
+   {"projectId":"<id>"}\` — then tell the user what happens next: the board tickets one
+   step at a time, agents run them, and each finished step raises an approval gate
+   (bell + Plugins view) where THEY decide. Offer to summarize artifacts at every gate.
 `;
 
 let cachedPath: string | null = null;

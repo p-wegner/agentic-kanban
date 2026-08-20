@@ -1,0 +1,62 @@
+import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import { basename, join, resolve } from "node:path";
+import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
+import { DATA_DIR } from "../db/data-dir.js";
+
+const CLONE_TIMEOUT_MS = 300_000;
+
+/**
+ * Where clone-from-URL registrations land: KANBAN_REPOS_DIR, else <data dir>/repos.
+ * In the Docker image this is /data/repos (inside the persistent volume).
+ */
+export function getReposRoot(): string {
+  return process.env.KANBAN_REPOS_DIR || join(DATA_DIR, "repos");
+}
+
+/** Reduce to a filesystem-safe directory name (no separators, no leading dots/dashes). */
+function sanitizeDirName(raw: string): string {
+  return raw.replace(/[^a-zA-Z0-9._-]/g, "-").replace(/^[.-]+/, "");
+}
+
+/** Derive a filesystem-safe directory name from a git URL (basename minus .git). */
+export function repoDirNameFromUrl(cloneUrl: string): string {
+  const sanitized = sanitizeDirName(basename(cloneUrl.replace(/\/+$/, "")).replace(/\.git$/i, ""));
+  if (!sanitized) throw new Error(`Cannot derive a repository name from URL "${cloneUrl}"`);
+  return sanitized;
+}
+
+/**
+ * Clone `cloneUrl` into the repos root and return the checkout path.
+ * Credentials are ambient only (SSH key, token-in-URL, git credential store);
+ * GIT_TERMINAL_PROMPT=0 makes a missing credential fail fast instead of hanging.
+ */
+export async function cloneRepo(cloneUrl: string, opts: { name?: string } = {}): Promise<string> {
+  // Same sanitization as the URL path — without the leading-dot strip, a name like
+  // "." or ".." resolves to the repos root itself / its parent instead of a child dir.
+  const dirName = opts.name ? sanitizeDirName(opts.name) : repoDirNameFromUrl(cloneUrl);
+  if (!dirName) throw new Error(`Cannot derive a repository directory name from "${opts.name ?? cloneUrl}"`);
+  const root = getReposRoot();
+  const target = resolve(root, dirName);
+  if (!target.startsWith(resolve(root))) {
+    throw new Error(`Refusing to clone outside the repos root: ${target}`);
+  }
+  if (existsSync(target) && readdirSync(target).length > 0) {
+    throw new Error(`Target directory already exists and is not empty: ${target}`);
+  }
+  // Track whether this attempt is the one creating `target` so a failed/timed-out clone
+  // can clean up after itself without touching a directory that predates this attempt.
+  const createdByThisAttempt = !existsSync(target);
+  mkdirSync(root, { recursive: true });
+  try {
+    await gitExecOrThrow(["clone", cloneUrl, target], {
+      timeout: CLONE_TIMEOUT_MS,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    });
+  } catch (err) {
+    if (createdByThisAttempt) {
+      rmSync(target, { recursive: true, force: true });
+    }
+    throw err;
+  }
+  return target;
+}

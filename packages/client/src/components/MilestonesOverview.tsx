@@ -1,3 +1,4 @@
+import { useApiResource } from "../hooks/useApiResource.js";
 import { useEffect, useMemo, useState } from "react";
 import type { MilestoneResponse } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
@@ -82,31 +83,17 @@ function MiniBurndown({ points }: { points: MilestoneBurndownPoint[] }) {
 }
 
 export function MilestonesOverview({ projectId, onMilestoneClick }: MilestonesOverviewProps) {
-  const [milestones, setMilestones] = useState<MilestoneSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [days, setDays] = useState<7 | 30 | 90>(30);
-  const [retryKey, setRetryKey] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    apiFetch<MilestoneSummary[]>(`/api/projects/${encodeURIComponent(projectId)}/milestones/summary?days=${days}`)
-      .then((data) => {
-        if (!cancelled) {
-          setMilestones(data);
-          setLoading(false);
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to load milestones");
-          setLoading(false);
-        }
-      });
-    return () => { cancelled = true; };
-  }, [projectId, days, retryKey]);
+  // #513 — the five-piece ladder (data/loading/error state, the cancelled flag, the error
+  // ternary, the retryKey counter) is the hook's job now. `days` stays local because it is
+  // an input to the path, not fetch state.
+  const { data, loading, error, reload: setRetryKey } = useApiResource<MilestoneSummary[]>(
+    `/api/projects/${encodeURIComponent(projectId)}/milestones/summary?days=${days}`,
+    { fallbackError: "Failed to load milestones" },
+  );
+  // Stable identity: `?? []` inline would mint a new array each render and re-run the
+  // totals memo below on every one.
+  const milestones = useMemo(() => data ?? [], [data]);
 
   const totals = useMemo(() => {
     return milestones.reduce(
@@ -156,7 +143,7 @@ export function MilestonesOverview({ projectId, onMilestoneClick }: MilestonesOv
           <div className="flex h-64 flex-col items-center justify-center gap-2 text-sm text-red-600 dark:text-red-400">
             <span>{error}</span>
             <button
-              onClick={() => { setError(null); setRetryKey((key) => key + 1); }}
+              onClick={() => setRetryKey()}
               className="rounded bg-red-100 px-3 py-1 text-xs text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-300 dark:hover:bg-red-900/50"
             >
               Retry

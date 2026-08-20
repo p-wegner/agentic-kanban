@@ -1,3 +1,4 @@
+// @gate:always-run — scans the server src tree for global default_model reads; that half has no import edge (#647).
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";

@@ -1,8 +1,10 @@
+import type { ExecFileException } from "node:child_process";
 import { execFile } from "node:child_process";
 import { db } from "../db/index.js";
 import { buildAgentLaunchConfig, narrowProviderName, getProfilePrefKey } from "./agent-provider.js";
 import type { Database } from "../db/index.js";
 import { getClaudeCliPreferences } from "../repositories/claude-cli.repository.js";
+import { toExecutorProvider } from "./agent-settings.service.js";
 
 export interface ClaudeCliOptions {
   timeout?: number;
@@ -42,7 +44,7 @@ export async function invokeClaudePrompt(
   const profileName = profileByKey.get(getProfilePrefKey(providerName));
 
   const { command, args, env, useShell } = buildAgentLaunchConfig({
-    provider: providerName === "claude" ? "claude-code" : providerName,
+    provider: toExecutorProvider(providerName),
     oneShotText: true,
     agentCommand,
     model,
@@ -57,10 +59,46 @@ export async function invokeClaudePrompt(
       windowsHide: true,
       maxBuffer: 1024 * 1024,
       env,
-    }, (err, stdout) => {
-      if (err) reject(err instanceof Error ? err : new Error(err.message));
+    }, (err, stdout, stderr) => {
+      if (err) reject(describeCliFailure(err, stderr, timeout));
       else resolve(stdout ?? "");
     });
     child.stdin?.end(prompt);
   });
 }
+
+/**
+ * Turn an `execFile` failure into an error that says WHAT went wrong (#665).
+ *
+ * The previous form rejected with `err.message` alone, which for a spawned CLI is always the
+ * same sentence: `Command failed: claude.exe --output-format text -p`. A timeout, a missing
+ * login, an exhausted quota and a bad flag all produced that identical line, so diagnosing a
+ * failed AI operation meant reading this file to form a hypothesis — which is exactly what
+ * happened when `group-scan` broke.
+ *
+ * `execFile` already carries the distinguishing facts: `killed` + `signal` for a timeout
+ * kill, `code` for an ordinary non-zero exit, and the child's own stderr. Naming the timeout
+ * explicitly matters most, because it is the one failure whose fix is a config change rather
+ * than an auth problem.
+ */
+export function describeCliFailure(
+  err: ExecFileException,
+  stderr: string | undefined,
+  timeoutMs: number,
+): Error {
+  const parts: string[] = [];
+  if (err.killed && err.signal) {
+    parts.push(`timed out after ${timeoutMs}ms (killed with ${err.signal})`);
+  } else if (typeof err.code === "number") {
+    parts.push(`exited ${err.code}`);
+  } else if (err.code) {
+    parts.push(String(err.code));
+  }
+  const tail = (stderr ?? "").trim().split(/\r?\n/).filter(Boolean).slice(-5).join("\n");
+  if (tail) parts.push(`stderr:\n${tail}`);
+  const detail = parts.length > 0 ? ` — ${parts.join("; ")}` : "";
+  return new Error(`${err.message}${detail}`);
+}
+
+/** Test seam for the error-surface contract (#665). */
+export { describeCliFailure as __describeCliFailureForTests };

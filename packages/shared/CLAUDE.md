@@ -44,12 +44,104 @@ per-provider parsers live in `src/lib/agent-stream/{claude,codex,copilot,pi}.ts`
 in `agent-stream/shared.ts`, all re-exported through the unchanged facade so consumers' imports of
 `@agentic-kanban/shared/lib/agent-stream-parser` don't change.
 
+## `lib/` is SEVEN kinds, and only one may touch the DB (#590)
+
+`packages/shared/src/lib` holds 143 files that are not one thing. Placement and the
+persistence rule follow from which kind a file is:
+
+| Sub-kind | What it is | May reach `shared/schema` |
+|---|---|---|
+| **shared-db-op** | a drizzle operation that is the SINGLE write/cascade authority for a domain fact, needed by server AND mcp (`mcp-no-server-internals` forbids mcp importing server code) — `cascade-delete.ts`, `checked-preference-write.ts`, `workflow-engine/status-transition.ts`, `workspace-status.ts`, `issue-number.ts`, `fk-actions.ts`, … | **yes — only this kind** |
+| **node-adapter** | one external system behind `xExec`/`xAvailable` or an fs port; deep-path import only, never a value export in the client barrel | no |
+| **key-derivation** | pure functions that mint an id/key from parts (`plugin-keys.ts`, `path-key.ts`) | no |
+| **contract-codec** | parse/serialize a wire or file contract (`plugin-manifest.ts`, `service-stack-codec.ts`) | no |
+| **stream-parser** | incremental agent-output parsing (`agent-stream/*`) | no |
+| **pure-policy / projection** | a decision or a derived view over data passed in (`merge-policy.ts`, `profile-allowlist.ts`, `status-view.ts`) | no |
+| **telemetry-singleton** | process-wide counters/metrics | no |
+
+The docs called each db-op an "SSOT" or "single write authority" seven times without ever
+naming the KIND, so nothing said that the other six are pure with respect to persistence —
+and nothing checked it.
+
+**Where it is enforced.** `docs/pattern-language/pattern-language.json` carries `shared-db-op`
+as its own element placed BEFORE `shared-lib` (first match wins), with `shared-lib` no longer
+allowed to reach `shared-schema`. Because that engine matches PATHS and not imports, the
+element's member list is a hand-written enumeration — so
+`packages/shared/__tests__/shared-lib-sub-kinds.test.ts` (`@gate:always-run`) re-derives
+membership from the imports (`drizzle-orm` is what makes a module a db-op; the tables alone
+do not) and fails when the list and the code disagree. Adding a db-op therefore means adding
+it to the spec, which is the point.
+
+**The one standing exception**, frozen in that suite and shrink-only: a pure module may read a
+column VOCABULARY (`as const`) from `shared/schema` — `dependency-type-traits.ts` does, and the
+`shared-schema` element intent explicitly blesses vocabularies living beside their tables. A
+pure module importing a TABLE is always a violation.
+
+## Exec adapters — `lib/<system>-exec.ts`, one result shape (#591)
+
+An exec adapter wraps exactly ONE external CLI: `<system>Exec(args, opts)` + `<system>Available()`,
+centralising `windowsHide`, buffer limits, timeouts and error normalisation so the CLI is a single
+replaceable port. Three exist: `git-exec.ts` (the sanctioned git spawn point, see the root
+CLAUDE.md), `docker-exec.ts`, `devcontainer-exec.ts`.
+
+All three return the shared **`ExecResult`** (`lib/exec-result.ts`) — do not declare a new
+`XExecResult` interface:
+
+```ts
+{ stdout: string; stderr: string; code: number | null; error: Error | null }
+```
+
+`code: null` means the process produced NO exit code — killed by a signal, or never spawned
+(ENOENT/timeout). It is deliberately not `-1`: `-1` is a value a real exit can carry, so the two
+adapters that used it made "did this run at all?" a different question per adapter. Read the
+convention through `execSucceeded` / `execFailedToRun` / `execErrorMessage` rather than
+re-deriving it at each call site; `execErrorMessage` prefers stderr over the wrapper's own
+message, which is the order `gitExecOrThrow` already used, and never returns an empty string.
+
+`exec-result.ts` is pure (no `node:` import) and so is a VALUE export from the lib barrel; the
+adapters themselves are node-only and stay `export type *` + deep-path imports (#791). Guarded by
+`exec-adapter-shape.test.ts`.
+
 ## Client-bundle safety (#791)
 `shared/src/index.ts → lib/index.ts` is reachable by the **client** bundle. Any module re-exported
 there as a VALUE that imports a Node builtin (`node:child_process`, `fs`, …) white-screens the whole
 UI (Vite externalizes node builtins and throws at load; server stays fine). Re-export node-only
 modules as `export type *` and import the runtime value via its deep path server-side. This is now
 enforced by `packages/shared/__tests__/barrel-client-safety.test.ts`, not just convention.
+
+## Where a column's VOCABULARY lives (#608) — client-reachability decides, not the table
+Enum/vocabulary constants for a column live in four places today (`as const` beside the
+`sqliteTable`; `shared/lib`; `shared/types`; or nowhere — `sessions.status` has no shared
+union at all). The obvious rule, "declare it beside its table", is **wrong as an
+unconditional rule**, and the reason is #596:
+
+- **`shared/schema/*` value-imports `drizzle-orm`.** Anything declared beside a table is
+  therefore unreachable from the client without pulling drizzle and the whole schema into
+  the browser bundle. That is not hypothetical — it is exactly the bug #596 fixed, where
+  17 client modules deep-imported `lib/workspace-status` for four pure predicates and got
+  drizzle with them.
+
+So the rule is conditional on who needs it:
+
+| Who reads the vocabulary | Where it goes |
+|---|---|
+| Client (or anything client-reachable) | `shared/lib/<domain>.ts`, **pure** — no drizzle, no schema, no node builtins. Re-export from the schema barrel if the server prefers to read it there. |
+| Server/persistence only | `as const` beside its `sqliteTable` is fine and is the newer style (`DEPENDENCY_TYPES`, `WORKFLOW_NODE_TYPES`, `DRIVE_STATUSES`). |
+
+`ISSUE_PRIORITIES` (`lib/issue-priority.ts`) and the workspace liveness sets
+(`lib/workspace-liveness.ts`) are in `lib/` for exactly this reason — the client renders
+both. `TERMINAL_STATUS_NAMES` (`lib/status-view.ts`) likewise.
+
+**Do NOT re-export a `lib/` vocabulary through the schema barrel.** `schema` is the
+innermost element, so a `shared-schema → shared-lib` edge inverts the layering — and
+`check:arch` does not catch it (#618: it stayed green for hours while exactly that edge
+existed; only the pattern-language element rules saw it). A server file that wants a
+`lib/`-declared vocabulary imports it from `lib/` directly, the same deep path that
+`routes/focus.ts` and the CLI already use.
+
+Guarded by `barrel-client-safety.test.ts`, which since #596 seeds its walk from every
+`@agentic-kanban/shared/lib/*` specifier found under `packages/client/src` and fails on
+drizzle/schema/node-builtins reachable from any of them.
 
 ## Migration journal required
 Every new `packages/shared/drizzle/NNNN_name.sql` file needs a matching entry in `packages/shared/drizzle/meta/_journal.json`. Without it, `drizzle-kit migrate` silently skips the file. See `.llm/workflows.md` for diagnosis workflow.

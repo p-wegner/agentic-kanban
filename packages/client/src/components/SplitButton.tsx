@@ -1,4 +1,5 @@
-import { useRef, useEffect, useState } from "react";
+import { useRef, useState } from "react";
+import { useDismissable } from "../hooks/useDismissable.js";
 
 export interface SplitButtonOption {
   label: string;
@@ -37,16 +38,9 @@ export function SplitButton({
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    function handleClick(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [open]);
+  // Gains Escape here: this copy handled outside-click only, so the dropdown was the
+  // one on the board that a keyboard user could not dismiss (#515).
+  useDismissable(containerRef, open, () => setOpen(false));
 
   const base = `text-sm text-white px-3 py-1.5 disabled:opacity-50 ${colorClasses}`;
 

@@ -54,7 +54,10 @@ interface WorkspaceActionsDeps {
   lastSessionPerWorkspace: Record<string, string>;
   disconnect: () => void;
   fetchWorkspaces: () => Promise<void> | void;
-  onWorkspaceChange?: () => void;
+  /** The board-surface invalidation, which is async. Typing it `() => void` hid that from
+   *  every caller, so a rejection could only surface as an unhandled rejection
+   *  (no-misused-promises). */
+  onWorkspaceChange?: () => void | Promise<void>;
   onWorkspaceCreating?: (issueId: string) => void;
   onWorkspaceCreateSettled?: (issueId: string) => void;
   setActionLoading: Setter<boolean>;
@@ -122,7 +125,7 @@ export function useWorkspaceActions(deps: WorkspaceActionsDeps) {
         setLastPrompt(buildDefaultLaunchPrompt(issue));
       }
       await fetchWorkspaces();
-      onWorkspaceChange?.();
+      void onWorkspaceChange?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create workspace");
     } finally {
@@ -157,7 +160,7 @@ export function useWorkspaceActions(deps: WorkspaceActionsDeps) {
         setLastPrompt(buildDefaultLaunchPrompt(issue));
       }
       await fetchWorkspaces();
-      onWorkspaceChange?.();
+      void onWorkspaceChange?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create workspace");
     } finally {
@@ -210,7 +213,7 @@ export function useWorkspaceActions(deps: WorkspaceActionsDeps) {
     try {
       await apiPatch(`/api/workspaces/${wsId}`, { status: "idle" });
       await fetchWorkspaces();
-      onWorkspaceChange?.();
+      void onWorkspaceChange?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to reset workspace");
     } finally {
@@ -293,7 +296,7 @@ export function useWorkspaceActions(deps: WorkspaceActionsDeps) {
       }
       await apiPost(`/api/workspaces/${wsId}/merge`, {});
       await fetchWorkspaces();
-      onWorkspaceChange?.();
+      void onWorkspaceChange?.();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Merge failed";
       setError(message);
@@ -372,7 +375,7 @@ export function useWorkspaceActions(deps: WorkspaceActionsDeps) {
         setError(result.error || "Update base failed");
       } else {
         await fetchWorkspaces();
-        onWorkspaceChange?.();
+        void onWorkspaceChange?.();
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Update base failed");
@@ -605,7 +608,7 @@ export function useWorkspaceActions(deps: WorkspaceActionsDeps) {
       }
       await apiDelete(`/api/workspaces/${wsId}`);
       await fetchWorkspaces();
-      onWorkspaceChange?.();
+      void onWorkspaceChange?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Delete failed");
     } finally {
@@ -620,7 +623,7 @@ export function useWorkspaceActions(deps: WorkspaceActionsDeps) {
     try {
       await apiPost(`/api/workspaces/${wsId}/close`);
       await fetchWorkspaces();
-      onWorkspaceChange?.();
+      void onWorkspaceChange?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Close failed");
     } finally {

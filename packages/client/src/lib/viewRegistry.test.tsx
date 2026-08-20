@@ -26,18 +26,35 @@ describe("VIEW_REGISTRY", () => {
   });
 
   it("enumerates all board views", () => {
-    expect(VIEW_REGISTRY).toHaveLength(37);
+    // 41 → 35 (#234): the seven single-chart views (throughput, lead-time,
+    // burndown, provider-mix, provider-cost, agent-throughput,
+    // scorecard-distribution) were absorbed into the tabbed "analytics" view.
+    // 35 → 31 (#235): the six event feeds collapsed to two — "activity"
+    // (+ digest & cross-repo tabs) and "runtime" (flight-recorder,
+    // monitor-cycles, health-events tabs).
+    // 31 → 27 (#237): the four decorative views (constellation, momentum,
+    // fireworks, garden) were extracted to the external board-whimsy plugin
+    // (momentum dropped outright — swimlane is a strict superset), freeing
+    // the `v` and `e` single-key shortcuts.
+    expect(VIEW_REGISTRY).toHaveLength(27);
   });
 
   it("preserves the existing view ids", () => {
     const expected: ViewMode[] = [
       "kanban", "backlog", "graph", "table", "agents", "timeline", "metrics",
-      "quality-metrics", "digest", "strategy", "focus", "butler", "workflows", "workflow-analytics", "insights", "swimlane", "flaky-tests",
-      "monitor-history", "health-events", "drive", "runbooks", "capacity", "constellation", "momentum", "activity", "stale-work", "throughput",
-      "provider-mix", "lead-time", "scorecard-distribution", "provider-cost", "agent-throughput", "fireworks", "calendar", "burndown",
-      "crime-scene", "milestones",
+      "quality-metrics", "strategy", "focus", "butler", "workflows", "workflow-analytics", "insights", "swimlane", "flaky-tests",
+      "runtime", "drive", "runbooks", "capacity", "activity", "stale-work",
+      "analytics", "calendar",
+      "crime-scene", "milestones", "plugin-views",
     ];
     expect(VIEW_IDS.slice().sort()).toEqual(expected.slice().sort());
+  });
+
+  it("keeps at most two event-feed registry entries (#235)", () => {
+    const feedIds = VIEW_IDS.filter((id) =>
+      ["activity", "runtime", "digest", "cross-repo-activity", "monitor-history", "health-events", "agent-flight-recorder"].includes(id),
+    );
+    expect(feedIds.sort()).toEqual(["activity", "runtime"]);
   });
 
   it("preserves the existing view shortcuts (b/g/t/f/l/m/i/p/u/h, etc.)", () => {
@@ -54,11 +71,15 @@ describe("VIEW_REGISTRY", () => {
     expect(byId.swimlane).toBe("p");
     expect(byId.insights).toBe("n");
     expect(byId["flaky-tests"]).toBe("k");
-    expect(byId.digest).toBe("d");
     expect(byId.strategy).toBe("z");
     expect(byId.focus).toBe("o");
     expect(byId.workflows).toBe("u");
     expect(byId["workflow-analytics"]).toBe("h");
+  });
+
+  it("keeps the shortcuts freed by the board-whimsy extraction (v, e) unassigned (#237)", () => {
+    expect(SHORTCUT_TO_VIEW["v"]).toBeUndefined();
+    expect(SHORTCUT_TO_VIEW["e"]).toBeUndefined();
   });
 
   it("every view has the fields the three consumers need", () => {
@@ -81,18 +102,27 @@ describe("VIEW_REGISTRY", () => {
     for (const id of secondaryIds) expect(primaryIds.has(id)).toBe(false);
 
     // Primary views (no `group` or group === "primary") stay one click away.
+    // "runtime" (#235) inherited monitor-history's former primary slot.
     expect([...primaryIds].sort()).toEqual(
-      ["agents", "backlog", "butler", "calendar", "drive", "graph", "insights", "kanban", "monitor-history", "strategy", "table", "timeline", "workflows"].sort(),
+      ["agents", "backlog", "butler", "calendar", "drive", "graph", "insights", "kanban", "runtime", "plugin-views", "strategy", "table", "timeline", "workflows"].sort(),
     );
     // Analytics/secondary views live behind the "More" overflow dropdown.
     expect([...secondaryIds].sort()).toEqual(
       [
-        "digest", "flaky-tests", "focus", "metrics", "quality-metrics", "swimlane", "workflow-analytics",
-        "health-events", "runbooks", "capacity", "constellation", "momentum", "activity", "stale-work", "throughput",
-        "provider-mix", "lead-time", "scorecard-distribution", "provider-cost", "agent-throughput", "fireworks", "burndown",
+        "flaky-tests", "focus", "metrics", "quality-metrics", "swimlane", "workflow-analytics",
+        "runbooks", "capacity", "activity", "stale-work",
+        "analytics",
         "crime-scene", "milestones",
       ].sort(),
     );
+  });
+
+  it("places the Plugins tab directly after Graph → Butler → Workflows in the primary tab order", () => {
+    const order = PRIMARY_VIEWS.map((v) => v.id);
+    const idx = (id: ViewMode) => order.indexOf(id);
+    expect(idx("graph")).toBeLessThan(idx("butler"));
+    expect(idx("butler")).toBeLessThan(idx("workflows"));
+    expect(idx("plugin-views")).toBe(idx("workflows") + 1);
   });
 
   it("keeps every view reachable by some keyboard shortcut regardless of group", () => {

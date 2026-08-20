@@ -18,26 +18,24 @@ export const ButlerView = lazy(() => import("./ButlerView.js").then((m) => ({ de
 export const WorkflowsView = lazy(() => import("./WorkflowsView.js").then((m) => ({ default: m.WorkflowsView })));
 export const WorkflowAnalyticsDashboard = lazy(() => import("./WorkflowAnalyticsDashboard.js").then((m) => ({ default: m.WorkflowAnalyticsDashboard })));
 export const InsightsPanel = lazy(() => import("./InsightsPanel.js").then((m) => ({ default: m.InsightsPanel })));
-export const DigestView = lazy(() => import("./DigestView.js").then((m) => ({ default: m.DigestView })));
-export const ActivityFeedView = lazy(() => import("./ActivityFeedView.js").then((m) => ({ default: m.ActivityFeedView })));
+// The two surviving event-feed containers (#235): BoardFeedView bundles
+// activity + digest + cross-repo, RuntimeFeedView bundles flight-recorder +
+// monitor-cycles + health-events — each imports its feed components directly,
+// so each feed is one lazy chunk.
+export const BoardFeedView = lazy(() => import("./BoardFeedView.js").then((m) => ({ default: m.BoardFeedView })));
+export const RuntimeFeedView = lazy(() => import("./RuntimeFeedView.js").then((m) => ({ default: m.RuntimeFeedView })));
 export const FocusView = lazy(() => import("./FocusView.js").then((m) => ({ default: m.FocusView })));
 export const StrategyTargetsView = lazy(() => import("./StrategyTargetsView.js").then((m) => ({ default: m.StrategyTargetsView })));
 export const SwimlaneView = lazy(() => import("./SwimlaneView.js").then((m) => ({ default: m.SwimlaneView })));
 export const FlakyTestsPanel = lazy(() => import("./FlakyTestsPanel.js").then((m) => ({ default: m.FlakyTestsPanel })));
-export const MonitorCycleHistoryPanel = lazy(() => import("./MonitorCycleHistoryPanel.js").then((m) => ({ default: m.MonitorCycleHistoryPanel })));
-export const BoardHealthNotificationCenter = lazy(() => import("./BoardHealthNotificationCenter.js").then((m) => ({ default: m.BoardHealthNotificationCenter })));
 export const RunbooksView = lazy(() => import("./RunbooksView.js").then((m) => ({ default: m.RunbooksView })));
 export const SprintCapacityPlanner = lazy(() => import("./SprintCapacityPlanner.js").then((m) => ({ default: m.SprintCapacityPlanner })));
-export const ConstellationView = lazy(() => import("./ConstellationView.js").then((m) => ({ default: m.ConstellationView })));
-export const MomentumView = lazy(() => import("./MomentumView.js").then((m) => ({ default: m.MomentumView })));
-export const FireworksView = lazy(() => import("./FireworksView.js").then((m) => ({ default: m.FireworksView })));
 export const StaleWorkDashboard = lazy(() => import("./StaleWorkDashboard.js").then((m) => ({ default: m.StaleWorkDashboard })));
-export const ThroughputChart = lazy(() => import("./ThroughputChart.js").then((m) => ({ default: m.ThroughputChart })));
-export const ProviderMixChart = lazy(() => import("./ProviderMixChart.js").then((m) => ({ default: m.ProviderMixChart })));
-export const LeadTimeTrendChart = lazy(() => import("./LeadTimeTrendChart.js").then((m) => ({ default: m.LeadTimeTrendChart })));
-export const ScorecardDistributionChart = lazy(() => import("./ScorecardDistributionChart.js").then((m) => ({ default: m.ScorecardDistributionChart })));
-export const ProviderCostOverTimeChart = lazy(() => import("./ProviderCostOverTimeChart.js").then((m) => ({ default: m.ProviderCostOverTimeChart })));
+// Tabbed Analytics container (#234) — imports the seven chart components directly,
+// so the whole analytics bundle is one lazy chunk.
+export const AnalyticsView = lazy(() => import("./AnalyticsView.js").then((m) => ({ default: m.AnalyticsView })));
 export const CalendarView = lazy(() => import("./CalendarView.js").then((m) => ({ default: m.CalendarView })));
-export const AgentThroughputLeaderboard = lazy(() => import("./AgentThroughputLeaderboard.js").then((m) => ({ default: m.AgentThroughputLeaderboard })));
-export const BurndownChart = lazy(() => import("./BurndownChart.js").then((m) => ({ default: m.BurndownChart })));
 export const DriveDashboard = lazy(() => import("./DriveDashboard.js").then((m) => ({ default: m.DriveDashboard })));
+export const PluginViewsPanel = lazy(() => import("./PluginViewsPanel.js").then((m) => ({ default: m.PluginViewsPanel })));
+export const PluginMarketplacePanel = lazy(() => import("./PluginMarketplacePanel.js").then((m) => ({ default: m.PluginMarketplacePanel })));
+export const PluginGuidePanel = lazy(() => import("./PluginGuidePanel.js").then((m) => ({ default: m.PluginGuidePanel })));

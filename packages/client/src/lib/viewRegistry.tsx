@@ -29,27 +29,17 @@ export type ViewMode =
   | "insights"
   | "swimlane"
   | "flaky-tests"
-  | "monitor-history"
-  | "health-events"
+  | "runtime"
   | "drive"
-  | "digest"
   | "strategy"
   | "focus"
   | "runbooks"
   | "capacity"
-  | "constellation"
-  | "momentum"
-  | "fireworks"
   | "activity"
   | "stale-work"
-  | "throughput"
-  | "provider-mix"
-  | "lead-time"
-  | "scorecard-distribution"
-  | "provider-cost"
-  | "agent-throughput"
+  | "analytics"
   | "calendar"
-  | "burndown";
+  | "plugin-views";
 
 export interface ViewDescriptor {
   /** Stable view id — matches BoardPage's `viewMode` state. */
@@ -152,11 +142,6 @@ const ICON = {
       <path strokeLinecap="round" strokeLinejoin="round" d="M16 4v5l4-2.5L16 4z" />
     </svg>
   ),
-  digest: (
-    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-    </svg>
-  ),
   strategy: (
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <circle cx="12" cy="12" r="8" />
@@ -202,14 +187,9 @@ const ICON = {
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
     </svg>
   ),
-  "monitor-history": (
+  runtime: (
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-    </svg>
-  ),
-  "health-events": (
-    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 12h3l2 5 4-14 2 9 2-3h5" />
     </svg>
   ),
   runbooks: (
@@ -223,34 +203,6 @@ const ICON = {
       <path strokeLinecap="round" strokeLinejoin="round" d="M3 19h18" />
     </svg>
   ),
-  constellation: (
-    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <circle cx="5" cy="5" r="1.5" fill="currentColor" stroke="none" />
-      <circle cx="19" cy="8" r="1.5" fill="currentColor" stroke="none" />
-      <circle cx="12" cy="19" r="1.5" fill="currentColor" stroke="none" />
-      <circle cx="8" cy="14" r="1" fill="currentColor" stroke="none" />
-      <circle cx="17" cy="16" r="1" fill="currentColor" stroke="none" />
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M5 5l7 14M5 5l14 3M19 8l-7 11M8 14l9 2" />
-    </svg>
-  ),
-  momentum: (
-    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 6h4M3 12h8M3 18h14" />
-      <circle cx="9" cy="6" r="1.5" fill="currentColor" stroke="none" />
-      <circle cx="13" cy="12" r="1.5" fill="currentColor" stroke="none" />
-      <circle cx="19" cy="18" r="1.5" fill="currentColor" stroke="none" />
-    </svg>
-  ),
-  fireworks: (
-    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 21V9" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v2M12 4l-2 2M12 4l2 2" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M5 8l1.5 1.5M5 8h2M5 8v2M19 8l-1.5 1.5M19 8h-2M19 8v2" />
-      <circle cx="12" cy="9" r="1.5" fill="currentColor" stroke="none" />
-      <circle cx="6.5" cy="10.5" r="1" fill="currentColor" stroke="none" />
-      <circle cx="17.5" cy="10.5" r="1" fill="currentColor" stroke="none" />
-    </svg>
-  ),
   activity: (
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -262,48 +214,9 @@ const ICON = {
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
     </svg>
   ),
-  throughput: (
+  analytics: (
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M3 12h4v7H3zM10 8h4v11h-4zM17 4h4v15h-4zM3 19h18" />
-    </svg>
-  ),
-  "provider-mix": (
-    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 6h4v13H3zM10 10h4v9h-4zM17 3h4v16h-4zM3 19h18" />
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 6v13M12 10v9M19 3v16" opacity="0.3" />
-    </svg>
-  ),
-  "lead-time": (
-    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 13l4-3 4 2 4-5 4 3" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 19h18" />
-      <circle cx="7" cy="10" r="1.5" fill="currentColor" stroke="none" />
-      <circle cx="11" cy="12" r="1.5" fill="currentColor" stroke="none" />
-      <circle cx="15" cy="7" r="1.5" fill="currentColor" stroke="none" />
-      <circle cx="19" cy="10" r="1.5" fill="currentColor" stroke="none" />
-    </svg>
-  ),
-  "scorecard-distribution": (
-    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 19h18M5 19v-5h3v5M10 19V9h3v10M16 19V4h3v15" />
-    </svg>
-  ),
-  "provider-cost": (
-    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 13l4-3 4 2 4-5 4 3M3 19h18" />
-    </svg>
-  ),
-  "agent-throughput": (
-    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-      <circle cx="18" cy="5" r="1.5" fill="currentColor" stroke="none" />
-    </svg>
-  ),
-  burndown: (
-    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 13l4-3 4 2 4-5 4 3" />
-      <path strokeLinecap="round" strokeLinejoin="round" strokeDasharray="3 3" d="M4 4l16 16" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M3 19h18" />
     </svg>
   ),
   calendar: (
@@ -315,6 +228,12 @@ const ICON = {
   drive: (
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+    </svg>
+  ),
+  "plugin-views": (
+    // Puzzle piece — plugin-provided embedded views.
+    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M14 7h3a1 1 0 011 1v3h-1.5a1.5 1.5 0 000 3H18v3a1 1 0 01-1 1h-3v-1.5a1.5 1.5 0 00-3 0V18H8a1 1 0 01-1-1v-3H5.5a1.5 1.5 0 010-3H7V8a1 1 0 011-1h3V5.5a1.5 1.5 0 013 0V7z" />
     </svg>
   ),
 } as const;
@@ -439,17 +358,6 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     group: "secondary",
   },
   {
-    id: "digest",
-    toolbarLabel: "Digest",
-    label: "Standup Digest",
-    tooltip: "Standup Digest — what changed since you were away",
-    icon: ICON.digest,
-    paletteIcon: "◷",
-    paletteDescription: "What changed since you were away",
-    shortcut: "d",
-    group: "secondary",
-  },
-  {
     id: "strategy",
     toolbarLabel: "Strategy",
     label: "Strategic Targets",
@@ -491,6 +399,18 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     paletteIcon: "⛓",
     paletteDescription: "Design ticket-type pipelines",
     shortcut: "u",
+  },
+  {
+    // Primary tab placed after Graph → Butler → Workflows (its toolbar button is a
+    // per-plugin dropdown, special-cased in BoardToolbar via PluginViewsTab).
+    id: "plugin-views",
+    toolbarLabel: "Plugins",
+    label: "Plugins",
+    tooltip: "Plugins — one view per enabled plugin, plus install & marketplace",
+    icon: ICON["plugin-views"],
+    paletteIcon: "🧩",
+    paletteDescription: "Everything this project's enabled plugins offer: embedded views, converging analysis loops, one-shot scripts, and skills launched as tickets",
+    activeClass: "bg-violet-600 text-white",
   },
   {
     id: "workflow-analytics",
@@ -540,25 +460,19 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     group: "secondary",
   },
   {
-    id: "monitor-history",
-    toolbarLabel: "History",
-    label: "Monitor Cycle History",
-    tooltip: "Monitor Cycle History — recent merges, starts, errors, and actions",
-    icon: ICON["monitor-history"],
-    paletteIcon: "⏱",
-    paletteDescription: "Show recent monitor cycle events with action drill-downs",
+    // Operational event feed (#235): absorbs the former agent-flight-recorder,
+    // monitor-history, and health-events views as tabs (RuntimeFeedView). Keeps
+    // monitor-history's former primary toolbar slot so one operational feed
+    // stays one click away. Each tab is palette-reachable ("Runtime Feed: …")
+    // and deep-linkable; legacy routes redirect here (appRoutes.ts).
+    id: "runtime",
+    toolbarLabel: "Runtime",
+    label: "Runtime Feed",
+    tooltip: "Runtime Feed — agent flight recorder, monitor cycle history, and board health events",
+    icon: ICON.runtime,
+    paletteIcon: "FR",
+    paletteDescription: "Operational feed: live agent runtime events, monitor cycle history, and health notifications as tabs",
     activeClass: "bg-indigo-500 text-white",
-  },
-  {
-    id: "health-events",
-    toolbarLabel: "Health",
-    label: "Board Health Events",
-    tooltip: "Board Health Notification Center — merge, launch, server, refill, smoke-check events",
-    icon: ICON["health-events"],
-    paletteIcon: "🔔",
-    paletteDescription: "Notification center for monitor health events with category filters",
-    activeClass: "bg-indigo-500 text-white",
-    group: "secondary",
   },
   {
     id: "drive",
@@ -593,49 +507,22 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     // useBoardKeyboardShortcuts). Reachable via the More menu and Ctrl+K palette.
     group: "secondary",
   },
+  // The four decorative views — constellation (`e`), momentum (`v`), fireworks,
+  // garden — were extracted to the external `board-whimsy` plugin (#237); momentum
+  // was dropped outright (swimlane is a strict superset). The `v` and `e`
+  // single-key shortcuts are FREE for future views.
   {
-    id: "momentum",
-    toolbarLabel: "Momentum",
-    label: "Momentum",
-    tooltip: "Momentum — priority-lane river view of your board",
-    icon: ICON.momentum,
-    paletteIcon: "≋",
-    paletteDescription: "Priority lanes × flowing issue cards sorted by workflow progress",
-    shortcut: "v",
-    activeClass: "bg-orange-500 text-white",
-    group: "secondary",
-  },
-  {
-    id: "constellation",
-    toolbarLabel: "Stars",
-    label: "Constellation",
-    tooltip: "Constellation — animated starfield view of your board",
-    icon: ICON.constellation,
-    paletteIcon: "✦",
-    paletteDescription: "Immersive radial starfield: issues as glowing nodes orbiting status clusters",
-    shortcut: "e",
-    activeClass: "bg-indigo-700 text-white",
-    group: "secondary",
-  },
-  {
-    id: "fireworks",
-    toolbarLabel: "Fireworks",
-    label: "Fireworks",
-    tooltip: "Fireworks - celebratory launch-sky view of your board",
-    icon: ICON.fireworks,
-    paletteIcon: "FW",
-    paletteDescription: "Fancy launch-sky view: issues as animated fireworks across status rails",
-    activeClass: "bg-rose-600 text-white",
-    group: "secondary",
-  },
-  {
+    // Board-side event feed (#235): absorbs the former digest and
+    // cross-repo-activity views as tabs (BoardFeedView). The Cross-Repo tab is
+    // only offered on multi-repo projects. Digest's former "d" shortcut was
+    // freed, not reassigned — digest stays palette-/deep-link-reachable.
     id: "activity",
     toolbarLabel: "Activity",
     label: "Activity Feed",
-    tooltip: "Activity Feed — recent status changes and merges across all issues",
+    tooltip: "Activity Feed — status changes and merges, standup digest, and cross-repo activity as tabs",
     icon: ICON.activity,
     paletteIcon: "⏱",
-    paletteDescription: "Project-wide activity: status transitions, merges, sessions in reverse-chronological order",
+    paletteDescription: "Board feed: status transitions, merges and sessions, plus standup digest and (multi-repo) cross-repo activity as tabs",
     // No single-key shortcut: "x" is a reserved global board action (see
     // useBoardKeyboardShortcuts). Reachable via the More menu and Ctrl+K palette.
     group: "secondary",
@@ -652,79 +539,19 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     group: "secondary",
   },
   {
-    id: "throughput",
-    toolbarLabel: "Throughput",
-    label: "Throughput",
-    tooltip: "Throughput — daily count of issues completed over the last 14 days",
-    icon: ICON.throughput,
+    // Tabbed Analytics container (#234): absorbs the former single-chart views
+    // throughput, lead-time, burndown (Flow) and provider-mix, provider-cost,
+    // agent-throughput, scorecard-distribution (Agents) as tabs. Each chart is
+    // still reachable individually via the command palette ("Analytics: …"
+    // actions) and via `?tab=` deep links; legacy routes like /burndown
+    // redirect here with the right tab preselected (see appRoutes.ts).
+    id: "analytics",
+    toolbarLabel: "Analytics",
+    label: "Analytics",
+    tooltip: "Analytics — throughput, lead time, burndown, provider mix, cost, leaderboard, scores",
+    icon: ICON.analytics,
     paletteIcon: "▦",
-    paletteDescription: "Bar chart of issues moved to Done per day over the trailing window",
-    activeClass: "bg-emerald-600 text-white",
-    group: "secondary",
-  },
-  {
-    id: "provider-mix",
-    toolbarLabel: "Providers",
-    label: "Provider Mix",
-    tooltip: "Provider Mix — workspaces by agent provider over time",
-    icon: ICON["provider-mix"],
-    paletteIcon: "PM",
-    paletteDescription: "Stacked bar chart of workspaces grouped by agent provider (claude/codex/copilot)",
-    activeClass: "bg-emerald-600 text-white",
-    group: "secondary",
-  },
-  {
-    id: "lead-time",
-    toolbarLabel: "Lead Time",
-    label: "Lead Time Trend",
-    tooltip: "Lead Time Trend — median + p90 time from creation to Done over a selectable window",
-    icon: ICON["lead-time"],
-    paletteIcon: "LT",
-    paletteDescription: "Trend chart of issue lead time (creation → Done) with median and p90 lines",
-    activeClass: "bg-emerald-600 text-white",
-    group: "secondary",
-  },
-  {
-    id: "scorecard-distribution",
-    toolbarLabel: "Scores",
-    label: "Score Distribution",
-    tooltip: "Score Distribution — histogram of workspace scorecard scores",
-    icon: ICON["scorecard-distribution"],
-    paletteIcon: "SD",
-    paletteDescription: "Histogram of workspace scorecard scores across recent workspaces",
-    activeClass: "bg-emerald-600 text-white",
-    group: "secondary",
-  },
-  {
-    id: "provider-cost",
-    toolbarLabel: "Cost",
-    label: "Provider Cost Over Time",
-    tooltip: "Provider Cost Over Time — stacked daily token cost per agent provider",
-    icon: ICON["provider-cost"],
-    paletteIcon: "$",
-    paletteDescription: "Stacked bar chart of estimated token cost per day grouped by agent provider (claude/codex/copilot)",
-    activeClass: "bg-emerald-600 text-white",
-    group: "secondary",
-  },
-  {
-    id: "agent-throughput",
-    toolbarLabel: "Leaderboard",
-    label: "Agent Throughput Leaderboard",
-    tooltip: "Agent Throughput Leaderboard — issues merged per provider with median lead time",
-    icon: ICON["agent-throughput"],
-    paletteIcon: "AT",
-    paletteDescription: "Rank agent providers by issues merged, with median lead time",
-    activeClass: "bg-emerald-600 text-white",
-    group: "secondary",
-  },
-  {
-    id: "burndown",
-    toolbarLabel: "Burn",
-    label: "Burndown",
-    tooltip: "Burndown — remaining open issues per day vs. the ideal trend to zero",
-    icon: ICON.burndown,
-    paletteIcon: "BD",
-    paletteDescription: "Burndown chart of remaining open issues per day with an ideal target trend line",
+    paletteDescription: "Tabbed analytics charts: flow (throughput, lead time, burndown) and agents (provider mix, cost, leaderboard, score distribution)",
     activeClass: "bg-emerald-600 text-white",
     group: "secondary",
   },
@@ -746,3 +573,81 @@ export const SECONDARY_VIEWS: ViewDescriptor[] = VIEW_REGISTRY.filter((v) => v.g
 export const SHORTCUT_TO_VIEW: Record<string, ViewMode> = Object.fromEntries(
   VIEW_REGISTRY.filter((v) => v.shortcut && !v.chord).map((v) => [v.shortcut as string, v.id]),
 );
+
+// ── Per-project view visibility (#233) ───────────────────────────────────────
+
+/**
+ * The one view that can never be hidden.
+ *
+ * Guarded HERE rather than only in the picker UI, because the pref is writable by the CLI, MCP
+ * and any other client: a board whose only remaining view is hidden has no way back.
+ */
+export const UNHIDEABLE_VIEWS: ViewMode[] = ["kanban"];
+
+/**
+ * Parse a `hidden_views_<projectId>` preference value into a set of view ids.
+ *
+ * Tolerant by design and silent about junk: this value is per-project configuration, and a
+ * malformed one must degrade to "hide nothing" rather than blank the toolbar. Unknown ids are
+ * dropped rather than kept — a view removed from the registry in a later release would otherwise
+ * sit in the pref forever, and keeping it would make `hiddenCount` lie.
+ */
+export function parseHiddenViews(raw: string | null | undefined): Set<ViewMode> {
+  if (!raw) return new Set();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return new Set();
+  }
+  if (!Array.isArray(parsed)) return new Set();
+  const valid = new Set<string>(VIEW_IDS);
+  return new Set(
+    parsed.filter((id): id is ViewMode =>
+      typeof id === "string" && valid.has(id) && !UNHIDEABLE_VIEWS.includes(id as ViewMode)),
+  );
+}
+
+/** Serialize a hidden-view selection, dropping anything that may not be hidden. */
+export function serializeHiddenViews(hidden: Iterable<ViewMode>): string {
+  const kept = [...new Set(hidden)].filter((id) => !UNHIDEABLE_VIEWS.includes(id));
+  // Registry order, so the stored value is stable regardless of click order and two equivalent
+  // selections produce the same string (which keeps a no-op save from looking like a change).
+  kept.sort((a, b) => VIEW_IDS.indexOf(a) - VIEW_IDS.indexOf(b));
+  return JSON.stringify(kept);
+}
+
+/**
+ * The registry minus the hidden set, in the shapes the five consumers need.
+ *
+ * All five (toolbar primary tabs, "More" overflow, command palette, shortcut overlay, shortcut
+ * key map) already derived from `VIEW_REGISTRY`; this filters ONCE and hands each the same
+ * answer, rather than adding a second source of truth per consumer.
+ */
+export function visibleViews(hidden: Set<ViewMode>): {
+  all: ViewDescriptor[];
+  primary: ViewDescriptor[];
+  secondary: ViewDescriptor[];
+  shortcutToView: Record<string, ViewMode>;
+} {
+  const all = VIEW_REGISTRY.filter((v) => !hidden.has(v.id));
+  return {
+    all,
+    primary: all.filter((v) => v.group !== "secondary"),
+    secondary: all.filter((v) => v.group === "secondary"),
+    shortcutToView: Object.fromEntries(
+      all.filter((v) => v.shortcut && !v.chord).map((v) => [v.shortcut as string, v.id]),
+    ),
+  };
+}
+
+/**
+ * The view to actually render, given what the user last had open.
+ *
+ * A hidden view that is still the persisted `viewMode` must fall back rather than render a panel
+ * the user can no longer navigate back to — the toolbar would show no active tab and the only
+ * escape would be a URL edit.
+ */
+export function resolveVisibleView(viewMode: ViewMode, hidden: Set<ViewMode>): ViewMode {
+  return hidden.has(viewMode) ? "kanban" : viewMode;
+}

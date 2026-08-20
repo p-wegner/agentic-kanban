@@ -1,8 +1,31 @@
-import { and, eq, inArray, like, or } from "drizzle-orm";
+import { and, eq, inArray, or, sql, type Column, type SQL } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import * as schema from "../schema/index.js";
 
 export type CascadeDb = LibSQLDatabase<typeof schema>;
+
+/**
+ * Escape the LIKE metacharacters (`\`, `%`, `_`) in a literal so it matches
+ * verbatim under a `... ESCAPE '\'` clause.
+ */
+function escapeLikeLiteral(literal: string): string {
+  return literal.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
+
+/**
+ * SQL predicate matching preference/runtime_state keys that end in the LITERAL
+ * suffix `_<projectId>` — the string convention by which those FK-less tables are
+ * project-scoped. Uses a properly-escaped LIKE so the separating underscore is a
+ * literal, NOT a single-char wildcard: the naive `LIKE '%_<id>'` treats `_` as
+ * "any char", so deleting project `276` would also match `..._3276` (project
+ * `3276`'s keys) in a DB carrying legacy NUMERIC project ids. Shared by the delete
+ * and the completeness assertion so they validate the exact same (non-overreaching)
+ * set. See adversarial-arch-review §3.6.
+ */
+function projectScopedKeyFilter(keyColumn: Column, projectId: string): SQL {
+  const pattern = `%${escapeLikeLiteral(`_${projectId}`)}`;
+  return sql`${keyColumn} LIKE ${pattern} ESCAPE '\\'`;
+}
 type CascadeTx = Parameters<Parameters<CascadeDb["transaction"]>[0]>[0];
 type DbOrTx = CascadeDb | CascadeTx;
 
@@ -105,6 +128,14 @@ async function deleteIssueCascadeRows(issueId: string, database: DbOrTx): Promis
   for (const ws of wsRows) {
     await deleteWorkspaceCascadeRows(ws.id, database);
   }
+
+  // #666 — `workspace_provisioning` FKs issues AND projects with NO `onDelete` action, so
+  // SQLite's default RESTRICT applies: with `foreign_keys=ON` (which `db-client.ts` sets
+  // deliberately), deleting an issue that still has a live provisioning marker FAILS with an
+  // FK violation rather than orphaning a row. A crashed or in-flight workspace create is
+  // exactly when a marker exists, which is exactly when someone deletes the issue. Deleted
+  // before the issue row for the same reason every other child is.
+  await database.delete(schema.workspaceProvisioning).where(eq(schema.workspaceProvisioning.issueId, issueId));
 
   await database
     .delete(schema.issueDependencies)
@@ -212,6 +243,10 @@ async function deleteProjectCascadeRows(projectId: string, database: DbOrTx): Pr
   await database.delete(schema.scheduledRunHistory).where(eq(schema.scheduledRunHistory.projectId, projectId));
   await database.delete(schema.scheduledRuns).where(eq(schema.scheduledRuns.projectId, projectId));
   await database.delete(schema.projectScriptShortcuts).where(eq(schema.projectScriptShortcuts.projectId, projectId));
+  // #666 — see the note in deleteIssueCascadeRows. A marker whose ISSUE was already gone
+  // (or which never got one) is still project-scoped, so the project delete must sweep by
+  // projectId too rather than relying on the per-issue pass above.
+  await database.delete(schema.workspaceProvisioning).where(eq(schema.workspaceProvisioning.projectId, projectId));
 
   const templates = await database
     .select({ id: schema.workflowTemplates.id })
@@ -236,15 +271,25 @@ async function deleteProjectCascadeRows(projectId: string, database: DbOrTx): Pr
   await database.delete(schema.repos).where(eq(schema.repos.projectId, projectId));
   await database.delete(schema.projectStatuses).where(eq(schema.projectStatuses.projectId, projectId));
 
+  // #485 — plugin per-project rows. Both tables landed after this walk was written and neither
+  // was added to it, so deleting a project left them behind and the "no project-referencing
+  // table survives" claim below was false. plugin_view_processes now ALSO cascades at the FK
+  // level (migration 0120); the explicit delete stays as belt-and-braces against FK-action
+  // drift in an older live DB, matching how every other child here is handled.
+  // plugin_loop_events is deliberately FK-less (see its schema comment) — for it, this delete
+  // is the ONLY thing keeping orphans out, so do not remove it.
+  await database.delete(schema.pluginViewProcesses).where(eq(schema.pluginViewProcesses.projectId, projectId));
+  await database.delete(schema.pluginLoopEvents).where(eq(schema.pluginLoopEvents.projectId, projectId));
+
   await database
     .delete(schema.preferences)
     .where(and(eq(schema.preferences.key, "activeProjectId"), eq(schema.preferences.value, projectId)));
-  await database.delete(schema.preferences).where(like(schema.preferences.key, `%_${projectId}`));
+  await database.delete(schema.preferences).where(projectScopedKeyFilter(schema.preferences.key, projectId));
 
   // Per-project RUNTIME STATE (#975): butler_session_<id> / butler_session_history_<id>
   // moved out of `preferences` into `runtime_state`, so the same suffix delete must
   // run there too or those rows orphan on project deletion.
-  await database.delete(schema.runtimeState).where(like(schema.runtimeState.key, `%_${projectId}`));
+  await database.delete(schema.runtimeState).where(projectScopedKeyFilter(schema.runtimeState.key, projectId));
 
   await database.delete(schema.projects).where(eq(schema.projects.id, projectId));
 
@@ -271,8 +316,10 @@ async function assertProjectCascadeComplete(projectId: string, database: DbOrTx)
     ["milestone", () => countRows(database.select({ id: schema.milestones.id }).from(schema.milestones).where(eq(schema.milestones.projectId, projectId)))],
     ["project repo", () => countRows(database.select({ id: schema.repos.id }).from(schema.repos).where(eq(schema.repos.projectId, projectId)))],
     ["project status", () => countRows(database.select({ id: schema.projectStatuses.id }).from(schema.projectStatuses).where(eq(schema.projectStatuses.projectId, projectId)))],
-    ["project-scoped preference", () => countRows(database.select({ key: schema.preferences.key }).from(schema.preferences).where(like(schema.preferences.key, `%_${projectId}`)))],
-    ["project-scoped runtime state", () => countRows(database.select({ key: schema.runtimeState.key }).from(schema.runtimeState).where(like(schema.runtimeState.key, `%_${projectId}`)))],
+    ["plugin view process", () => countRows(database.select({ id: schema.pluginViewProcesses.id }).from(schema.pluginViewProcesses).where(eq(schema.pluginViewProcesses.projectId, projectId)))],
+    ["plugin loop event", () => countRows(database.select({ id: schema.pluginLoopEvents.id }).from(schema.pluginLoopEvents).where(eq(schema.pluginLoopEvents.projectId, projectId)))],
+    ["project-scoped preference", () => countRows(database.select({ key: schema.preferences.key }).from(schema.preferences).where(projectScopedKeyFilter(schema.preferences.key, projectId)))],
+    ["project-scoped runtime state", () => countRows(database.select({ key: schema.runtimeState.key }).from(schema.runtimeState).where(projectScopedKeyFilter(schema.runtimeState.key, projectId)))],
   ];
   for (const [label, count] of byProjectId) {
     await assertNoRows(label, count());

@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { and, eq, inArray, ne } from "drizzle-orm";
 import { checkBranchTipIsAncestor, countUniqueCommits, isAncestor, revParse } from "@agentic-kanban/shared/lib/git-service";
 import { issues, projectStatuses, projects, sessions, workspaces } from "@agentic-kanban/shared/schema";
@@ -6,6 +7,11 @@ import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import { logBoardHealthEvent } from "../repositories/board-health-events.repository.js";
 import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.service.js";
+import { listWorkspaceRepos, type RepoRow } from "../repositories/repo.repository.js";
+import { insertIssueComment } from "../repositories/issue-comments.repository.js";
+import { emptyPassReport, recordActed, recordSkipped, type PassReport } from "../lib/pass-report.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 
 const REAPABLE_WORKSPACE_STATUSES = ["idle", "reviewing", "blocked"];
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
@@ -18,10 +24,19 @@ export interface TerminalWorkspaceReaperDeps {
   revParseRef?: typeof revParse;
   maxReapedPerRun?: number;
   onTick?: () => void;
+  /**
+   * On-disk presence probe for sibling repo paths (#277). Defaults to `existsSync`;
+   * suites driving fake git over synthetic paths inject `() => true`.
+   */
+  pathExists?: (path: string) => boolean;
 }
 
-export interface TerminalWorkspaceReapResult {
-  scanned: number;
+/**
+ * #592 — the shared pass core, plus this pass's own counters. `scanned` now comes from
+ * `PassReport`; `reaped`/`skippedAhead`/`skippedRunning` stay because callers and tests
+ * read them by name.
+ */
+export interface TerminalWorkspaceReapResult extends PassReport {
   reaped: number;
   skippedAhead: number;
   skippedRunning: number;
@@ -46,6 +61,59 @@ type Candidate = {
 type Verification =
   | { safe: true; reason: "ancestor" | "zero-ahead"; branchSha: string; baseSha: string; markMerged: boolean }
   | { safe: false; reason: "ahead" | "missing-ref" | "git-error"; aheadCommits?: number; message?: string };
+
+/**
+ * List sibling repos of a multi-repo workspace that still have unmerged commits
+ * (branch ahead of its base, not yet stamped mergedHeadSha) — a no-op ([]) for a
+ * single-repo workspace. `verifyNoAheadWork` only judges the LEADING repo, so a
+ * multi-repo workspace could otherwise be reaped closed while sibling commits sit
+ * orphaned with nothing surfacing that fact (#153). Best-effort: any git error
+ * resolving a row is treated as "nothing to report" here (unlike the fail-closed
+ * `listPendingSiblingMerges` used on the merge path) since the reaper's worst case
+ * on a false negative is a missed comment, not data loss — the workspace row stays
+ * closed either way and the worktree is never removed by this path.
+ */
+async function findUnmergedSiblingBranches(
+  workspaceId: string,
+  database: Database,
+  deps: {
+    countCommits: typeof countUniqueCommits;
+    revParseRef: typeof revParse;
+    /**
+     * On-disk presence probe for a sibling repo (#277). Defaults to `existsSync`;
+     * suites using synthetic repo paths inject `() => true`.
+     */
+    pathExists?: (path: string) => boolean;
+  },
+): Promise<Array<{ label: string; branch: string; ahead: number }>> {
+  const pathExists = deps.pathExists ?? existsSync;
+  let rows: RepoRow[];
+  try {
+    rows = await listWorkspaceRepos(workspaceId, database);
+  } catch {
+    return [];
+  }
+  const unmerged: Array<{ label: string; branch: string; ahead: number }> = [];
+  for (const repo of rows) {
+    if (repo.mergedHeadSha) continue;
+    if (!repo.branch || !repo.baseBranch) continue;
+    // Repo directory gone → both revParse calls below would spawn git only to fail.
+    // Same outcome ("nothing to report"), two fewer ~120ms event-loop stalls per
+    // repo per cycle (#277).
+    if (!pathExists(repo.path)) continue;
+    try {
+      await deps.revParseRef(repo.path, repo.baseBranch);
+      await deps.revParseRef(repo.path, repo.branch);
+    } catch {
+      continue; // ref unresolvable — already cleaned up or repo gone, nothing to report
+    }
+    const ahead = await deps.countCommits(repo.path, repo.baseBranch, repo.branch).catch(() => 0);
+    if (ahead > 0) {
+      unmerged.push({ label: repo.name ?? repo.path, branch: repo.branch, ahead });
+    }
+  }
+  return unmerged;
+}
 
 async function hasRunningSession(database: Database, workspaceId: string): Promise<boolean> {
   const rows = await database
@@ -88,7 +156,7 @@ async function verifyNoAheadWork(
 
     return { safe: false, reason: "missing-ref", message: ancestry.branchSha === null ? ancestry.reason : "branch is not an ancestor" };
   } catch (err) {
-    return { safe: false, reason: "git-error", message: err instanceof Error ? err.message : String(err) };
+    return { safe: false, reason: "git-error", message: errorMessage(err) };
   }
 }
 
@@ -106,6 +174,7 @@ export async function reapTerminalWorkspaces(
     countCommits: deps.countCommits ?? countUniqueCommits,
     isAncestorRef: deps.isAncestorRef ?? isAncestor,
     revParseRef: deps.revParseRef ?? revParse,
+    pathExists: deps.pathExists ?? existsSync,
   };
 
   const candidates = await database
@@ -137,7 +206,7 @@ export async function reapTerminalWorkspaces(
       ),
     );
 
-  const result: TerminalWorkspaceReapResult = { scanned: candidates.length, reaped: 0, skippedAhead: 0, skippedRunning: 0 };
+  const result: TerminalWorkspaceReapResult = { ...emptyPassReport(candidates.length), reaped: 0, skippedAhead: 0, skippedRunning: 0 };
   const now = new Date().toISOString();
 
   for (const c of candidates) {
@@ -145,6 +214,7 @@ export async function reapTerminalWorkspaces(
 
     if (await hasRunningSession(database, c.wsId)) {
       result.skippedRunning++;
+      recordSkipped(result, c.wsId, "session running");
       continue;
     }
 
@@ -152,16 +222,46 @@ export async function reapTerminalWorkspaces(
     if (!verification.safe) {
       if (verification.reason === "ahead") {
         result.skippedAhead++;
+        recordSkipped(result, c.wsId, "ahead of base");
         console.warn(
           `[terminal-workspace-reaper] refusing to close workspace ${c.wsId} for issue #${c.issueNumber ?? "?"}: ` +
             `${verification.aheadCommits ?? "unknown"} commit(s) are ahead of ${c.baseBranch ?? c.defaultBranch ?? "base"}`,
         );
       } else {
+        recordSkipped(result, c.wsId, verification.reason);
         console.warn(
           `[terminal-workspace-reaper] skipping workspace ${c.wsId} for issue #${c.issueNumber ?? "?"}: ${verification.message ?? verification.reason}`,
         );
       }
       continue;
+    }
+
+    // Multi-repo audit (#153): the ancestry verification above only judges the
+    // LEADING repo. A sibling repo can still hold unmerged commits at reap time —
+    // this workspace row is being closed (issue already terminal) without ever
+    // running the sibling merge/cleanup pipeline, so those commits would otherwise
+    // strand invisibly. clearWorkingDir stays false below (worktrees are left
+    // alone), so nothing is destroyed here; at minimum, surface it as a comment.
+    const unmergedSiblings = await findUnmergedSiblingBranches(c.wsId, database, gitDeps);
+    if (unmergedSiblings.length > 0) {
+      console.warn(
+        `[terminal-workspace-reaper] closing workspace ${c.wsId} for terminal issue #${c.issueNumber ?? "?"} with ${unmergedSiblings.length} sibling repo(s) still unmerged: ` +
+          unmergedSiblings.map((s) => `${s.label} (${s.branch}, ${s.ahead} ahead)`).join(", "),
+      );
+      try {
+        await insertIssueComment({
+          issueId: c.issueId,
+          workspaceId: c.wsId,
+          kind: "note",
+          author: "system",
+          body: `Closed stale ${c.wsStatus} workspace for terminal issue #${c.issueNumber ?? "?"}, but ${unmergedSiblings.length} sibling repo(s) still have unmerged commits and were left untouched:\n` +
+            unmergedSiblings.map((s) => `- ${s.label} (${s.branch}): ${s.ahead} unmerged commit(s)`).join("\n"),
+          payload: { unmergedSiblings, reapedAt: now },
+          createdAt: now,
+        }, database);
+      } catch (err) {
+        console.warn(`[terminal-workspace-reaper] failed to record unmerged-sibling comment for ${c.wsId}:`, errorMessage(err));
+      }
     }
 
     try {
@@ -175,6 +275,7 @@ export async function reapTerminalWorkspaces(
         clearWorkingDir: false,
       });
       result.reaped++;
+      recordActed(result, c.wsId, "reaped");
       console.log(
         `[terminal-workspace-reaper] closed stale ${c.wsStatus} workspace ${c.wsId} for terminal issue ` +
           `#${c.issueNumber ?? "?"} (${c.statusName}); reason=${verification.reason} branch=${c.branch}`,
@@ -199,43 +300,32 @@ export async function reapTerminalWorkspaces(
         }, database);
       } catch { /* health event logging is non-fatal */ }
     } catch (err) {
-      console.warn(`[terminal-workspace-reaper] failed to close workspace ${c.wsId}:`, err instanceof Error ? err.message : String(err));
+      console.warn(`[terminal-workspace-reaper] failed to close workspace ${c.wsId}:`, errorMessage(err));
     }
   }
 
   return result;
 }
 
-let activeTerminalReaperTimeout: ReturnType<typeof setTimeout> | null = null;
-let activeTerminalReaperInterval: ReturnType<typeof setInterval> | null = null;
+let activeTerminalReaperSweep: PeriodicSweepHandle | null = null;
 
 export function stopTerminalWorkspaceReaper(): void {
-  if (activeTerminalReaperTimeout !== null) {
-    clearTimeout(activeTerminalReaperTimeout);
-    activeTerminalReaperTimeout = null;
-  }
-  if (activeTerminalReaperInterval !== null) {
-    clearInterval(activeTerminalReaperInterval);
-    activeTerminalReaperInterval = null;
-  }
+  activeTerminalReaperSweep?.stop();
+  activeTerminalReaperSweep = null;
 }
 
 export function startTerminalWorkspaceReaper(
   deps: Omit<TerminalWorkspaceReaperDeps, "maxReapedPerRun"> = {},
   intervalMs = DEFAULT_INTERVAL_MS,
-): { timer: NodeJS.Timeout; interval: NodeJS.Timeout } {
+): PeriodicSweepHandle {
   stopTerminalWorkspaceReaper();
-
-  const tick = deps.onTick ?? (() => {
-    reapTerminalWorkspaces(deps).catch((err) =>
-      console.warn("[terminal-workspace-reaper] periodic tick error:", err instanceof Error ? err.message : err),
-    );
+  activeTerminalReaperSweep = startPeriodicSweep({
+    name: "terminal-workspace-reaper",
+    // `onTick` is the test seam — it replaces the sweep, not just its logging.
+    tick: deps.onTick ?? (() => reapTerminalWorkspaces(deps)),
+    bootDelayMs: 45_000,
+    intervalMs,
   });
-  const timer = setTimeout(tick, 45_000);
-  const interval = setInterval(tick, intervalMs);
-  activeTerminalReaperTimeout = timer;
-  activeTerminalReaperInterval = interval;
-  (timer).unref?.();
-  (interval).unref?.();
-  return { timer, interval };
+  return activeTerminalReaperSweep;
 }
+

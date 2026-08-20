@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { readSessionStdoutFile } from "../lib/session-output-reader.js";
+import { profileNameOf } from "@agentic-kanban/shared/lib/profile-selection";
 import {
   selectAllPreferences,
   selectAgentSkillById,
@@ -39,9 +40,11 @@ import {
   selectForkChildNodeContext,
 } from "../repositories/workflow-fork.repository.js";
 import type { Database } from "../db/index.js";
-import type { SessionManager } from "./session.manager.js";
-import type { BoardEvents } from "./board-events.js";
+import type { SessionLauncher } from "./session.manager.js";
+import type { BoardEventSink } from "./board-events.js";
 import * as realGitService from "./git.service.js";
+// #558: the ONE GitService type (this file carried a byte-identical private copy).
+import type { GitService } from "./workspace-internals.js";
 import { teardownWorktree } from "./workspace-teardown.service.js";
 import {
   getNode,
@@ -66,6 +69,10 @@ import {
   buildJoinConsolidateLine,
   type ForkMergeResult,
 } from "../lib/fork-artifacts.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { slugify } from "@agentic-kanban/shared/lib/slugify";
+
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 
 /**
  * Default concurrency + timeout caps for parallel fork children (#82). The
@@ -80,12 +87,11 @@ const SPEC_PHASE_SKILLS = new Set(["spec-requirements", "spec-design", "spec-tas
 const SPEC_PHASE_SESSION_START_TIMEOUT_MS = 2 * 60 * 1000;
 const SPEC_PHASE_SESSION_POLL_MS = 1000;
 
-type GitService = typeof realGitService;
 
 export function createWorkflowForkService(deps: {
   database: Database;
-  getSessionManager?: () => SessionManager;
-  boardEvents?: BoardEvents;
+  getSessionManager?: () => SessionLauncher;
+  boardEvents?: BoardEventSink;
   gitService?: GitService;
 }) {
   const { database, getSessionManager, boardEvents } = deps;
@@ -100,7 +106,7 @@ export function createWorkflowForkService(deps: {
    */
   async function resolveAgentConfig(node?: WorkflowNodeRow | null) {
     const prefRows = await selectAllPreferences(database);
-    const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
+    const prefMap = toPrefMap(prefRows);
     const override = node ? getNodeAgentOverride(node.config) : null;
     if (override?.provider) prefMap.set("provider", override.provider);
     if (override?.profile) {
@@ -150,7 +156,7 @@ export function createWorkflowForkService(deps: {
   function childBranchName(parentBranch: string, entryName: string, sharedWorktree: boolean) {
     return sharedWorktree
       ? parentBranch
-      : `${parentBranch}__fork-${entryName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+      : `${parentBranch}__fork-${slugify(entryName, { fallback: "fork" })}`;
   }
 
   async function markChildFailed(params: {
@@ -164,7 +170,7 @@ export function createWorkflowForkService(deps: {
   }) {
     const { childWorkspaceId, parent, forkNode, joinNode, entry, sharedWorktree, error } = params;
     const now = new Date().toISOString();
-    const failure = error instanceof Error ? error.message : String(error);
+    const failure = errorMessage(error);
     const insertValues = {
       id: childWorkspaceId,
       issueId: parent.issueId,
@@ -238,7 +244,6 @@ export function createWorkflowForkService(deps: {
       prompt,
       agentCommand: cfg.agentCommand,
       agentArgs: cfg.agentArgs,
-      claudeProfile: cfg.claudeProfile,
       permissionPromptTool: cfg.permissionPromptTool,
       provider: toExecutorProvider(cfg.provider),
       triggerType,
@@ -303,7 +308,7 @@ export function createWorkflowForkService(deps: {
       baseBranch: parent.branch,
       status: "active",
       provider: cfg.provider,
-      claudeProfile: cfg.claudeProfile ?? null,
+      claudeProfile: profileNameOf(cfg.profile),
       agentCommand: cfg.agentCommand ?? null,
       model: cfg.model ?? null,
       skillId: entry.skillId ?? null,
@@ -336,7 +341,6 @@ export function createWorkflowForkService(deps: {
           prompt,
           agentCommand: cfg.agentCommand,
           agentArgs: cfg.agentArgs,
-          claudeProfile: cfg.claudeProfile,
           permissionPromptTool: cfg.permissionPromptTool,
           provider: toExecutorProvider(cfg.provider),
           triggerType: skillName ? `fork:${skillName}` : "fork-child",
@@ -641,14 +645,13 @@ export function createWorkflowForkService(deps: {
           prompt,
           agentCommand: cfg.agentCommand,
           agentArgs: cfg.agentArgs,
-          claudeProfile: cfg.claudeProfile,
           permissionPromptTool: cfg.permissionPromptTool,
           provider: toExecutorProvider(cfg.provider),
           triggerType: skillName ? `join:${skillName}` : "fork-join",
           profile: cfg.profile,
           model: cfg.model,
         })
-        .catch((err) => console.error(`[fork] join session launch failed:`, err instanceof Error ? err.message : String(err)));
+        .catch((err) => console.error(`[fork] join session launch failed:`, errorMessage(err)));
   }
 
   /**
@@ -737,7 +740,7 @@ export function createWorkflowForkService(deps: {
       try {
         await writeFile(artifactsPath, artifacts, "utf-8");
       } catch (err) {
-        console.warn(`[fork] could not write artifacts file: ${err instanceof Error ? err.message : String(err)}`);
+        console.warn(`[fork] could not write artifacts file: ${errorMessage(err)}`);
         artifactsPath = null;
       }
     }
@@ -825,7 +828,7 @@ export function createWorkflowForkService(deps: {
         await launchSpecPhaseSession(ws.id, node);
       }
     } catch (err) {
-      console.error(`[fork] onWorkspaceEnteredNode(${workspaceId}) failed:`, err instanceof Error ? err.message : String(err));
+      console.error(`[fork] onWorkspaceEnteredNode(${workspaceId}) failed:`, errorMessage(err));
     }
   }
 

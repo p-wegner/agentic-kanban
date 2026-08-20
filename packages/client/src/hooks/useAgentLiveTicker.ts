@@ -1,8 +1,13 @@
+import { apiFetch } from "../lib/api.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentOutputMessage, StatusWithIssues } from "@agentic-kanban/shared";
+import { apiFetchConditional } from "../lib/api.js";
+import { usePoll } from "./usePoll.js";
 
 const POLL_INTERVAL_MS = 5000;
 const MAX_TAIL = 60;
+/** The ticker shows only the last 1-2 lines — a small server-side tail read is plenty. */
+const OUTPUT_TAIL_BYTES = 64 * 1024;
 
 export interface TickerEntry {
   issueId: string;
@@ -72,8 +77,9 @@ export function useAgentLiveTicker(
   const fetchSessionId = useCallback(async (workspaceId: string): Promise<string | null> => {
     if (sessionIdCacheRef.current[workspaceId]) return sessionIdCacheRef.current[workspaceId];
     try {
-      const sessions = await fetch(`/api/workspaces/${workspaceId}/sessions`)
-        .then((r) => r.json() as Promise<Array<{ id: string; status: string; startedAt: string }>>);
+      const sessions = await apiFetch<Array<{ id: string; status: string; startedAt: string }>>(
+        `/api/workspaces/${workspaceId}/sessions`,
+      );
       const running = sessions.find((s) => s.status === "running");
       const latest = running ?? sessions.sort((a, b) =>
         new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
@@ -89,16 +95,20 @@ export function useAgentLiveTicker(
   const pollOutputForWorkspace = useCallback(async (
     sessionId: string,
   ): Promise<string[] | null> => {
-    const headers: Record<string, string> = {};
-    const etag = etagsRef.current[sessionId];
-    if (etag) headers["If-None-Match"] = etag;
-    const res = await fetch(`/api/sessions/${sessionId}/output`, { headers });
-    if (res.status === 304) return null;
-    if (!res.ok) return null;
-    const newEtag = res.headers.get("ETag");
-    if (newEtag) etagsRef.current[sessionId] = newEtag;
-    const msgs = await res.json() as AgentOutputMessage[];
-    return extractLines(msgs.slice(-MAX_TAIL));
+    try {
+      const result = await apiFetchConditional<AgentOutputMessage[]>(
+        `/api/sessions/${sessionId}/output?tail=${OUTPUT_TAIL_BYTES}`,
+        etagsRef.current[sessionId],
+      );
+      if (result.kind === "not-modified") return null;
+      if (result.etag) etagsRef.current[sessionId] = result.etag;
+      return extractLines(result.data.slice(-MAX_TAIL));
+    } catch {
+      // A ticker poll is decoration — a failed fetch must not surface as an error.
+      // This swallow was previously implicit (`if (!res.ok) return null`), which made a
+      // server error indistinguishable from a 304; it is now explicit and deliberate.
+      return null;
+    }
   }, []);
 
   const refresh = useCallback(async (cols: StatusWithIssues[], activity: Record<string, string>) => {
@@ -168,12 +178,11 @@ export function useAgentLiveTicker(
       setEntries([]);
       return;
     }
-    const id = setInterval(
-      () => refresh(columnsRef.current, liveActivityRef.current),
-      POLL_INTERVAL_MS,
-    );
-    return () => clearInterval(id);
   }, [enabled, refresh]);
+
+  // #518: through the shared scheduler — a raw setInterval phase-aligns with the other
+  // pollers at mount and keeps ticking in a hidden tab.
+  usePoll(() => void refresh(columnsRef.current, liveActivityRef.current), POLL_INTERVAL_MS, enabled);
 
   // Clear session ID cache for no-longer-active workspaces
   useEffect(() => {

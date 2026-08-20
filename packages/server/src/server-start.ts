@@ -5,6 +5,7 @@ import { createNodeWebSocket } from "@hono/node-ws";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { corsOrigin } from "./lib/cors-origin.js";
+import { runWithGitPriority } from "@agentic-kanban/shared/lib/git-exec";
 import { db } from "./db/index.js";
 import * as agentService from "./services/agent.service.js";
 import { createBoardEvents } from "./services/board-events.js";
@@ -12,33 +13,30 @@ import { createSessionManager } from "./services/session.manager.js";
 import { createWorkflowEngine } from "./startup/exit-workflow.js";
 import { createWorkflowForkService } from "./services/workflow-fork.service.js";
 import { createAutoMerge } from "./startup/merge-workflow.js";
-import { startAutoMergeOrchestrator, stopAutoMergeOrchestrator } from "./startup/auto-merge-orchestrator.js";
-import { startStrandedReviewReconciler, stopStrandedReviewReconciler } from "./startup/stranded-review-reconciler.js";
-import { startStrandedPlanReconciler, stopStrandedPlanReconciler } from "./startup/plan-mode-reconciler.js";
-import { startZombieFixSessionReconciler, stopZombieFixSessionReconciler } from "./startup/zombie-fix-session-reconciler.js";
-import { startAncestorBranchReconciler, stopAncestorBranchReconciler } from "./startup/ancestor-branch-reconciler.js";
-import { startDoneUnmergedScanner, stopDoneUnmergedScanner } from "./startup/done-unmerged-invariant-scanner.js";
-import { startTerminalWorkspaceReaper, stopTerminalWorkspaceReaper } from "./startup/terminal-workspace-reaper.js";
 import { createMonitorSetup } from "./startup/monitor-setup.js";
 import { setupProcessHandlers } from "./startup/process-handlers.js";
+import { resolveFleetHost, resolveFleetPort, startFleetListener } from "./services/fleet-listener.service.js";
+import { createFleetWorkersRoute } from "./routes/workers.js";
 import { setupRoutes } from "./startup/route-setup.js";
-import { setupScheduledTasks, stopScheduledTasks } from "./startup/scheduled-tasks.js";
-import { startMonitorButler, stopMonitorButler } from "./services/monitor-butler.js";
-import { startProjectConductorSupervisor } from "./services/project-conductor.service.js";
-import { runStartupTasks } from "./startup/startup-tasks.js";
+import { BACKGROUND_SERVICES } from "./startup/background-services.js";
+import { runCriticalStartupTasks, runGatedDeferredStartupTasks, runStartupAuditTasks } from "./startup/startup-tasks.js";
+import { createStartupReadinessGate, markStartupComplete } from "./startup/readiness.js";
 import { runSessionRestore } from "./startup/session-restore.js";
-import { startBackupScheduler, stopBackupScheduler } from "./startup/backup-scheduler.js";
-import { startSessionMessagePruner, stopSessionMessagePruner } from "./services/session-message-pruner.service.js";
-import { getPreference } from "./repositories/preferences.repository.js";
 import { cleanupExpiredRuntimeState } from "./repositories/runtime-state.repository.js";
 import { invalidateAgentQuestionsCache } from "./services/agent-questions.service.js";
 import { domainErrorHandler } from "./middleware/error-handler.js";
 import { jsonGzip } from "./middleware/compress.js";
 import { slowRequestLogger } from "./middleware/slow-request-logger.js";
+import { ensureLoopLagMonitor, stopLoopLagMonitor } from "./lib/loop-lag-registry.js";
 import { assertNoCommittedConflictMarkers } from "./startup/conflict-marker-scanner.js";
 import { checkHealthDeps } from "./services/health-deps.service.js";
+import { reapOrphanServiceStacksOnce } from "./startup/service-stack-reaper.js";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { attachButlerEventFeed } from "./services/butler-event-feed.js";
+import { getButlerSession, sendButlerTurn } from "./services/butler-sdk.service.js";
+import { getPreference } from "./repositories/preferences.repository.js";
 
 const serverStartRepoRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "../../../");
 
@@ -64,17 +62,33 @@ export async function startServer(port?: number, hostname?: string) {
   const cleanupCallbacks: Array<() => void> = [];
   replaceStartupTimerCleanup(cleanupCallbacks);
 
+  // Start sampling event-loop delay before anything else runs (#347). The board's
+  // dominant slowness is loop BLOCKING — /api/health, pure JS with no I/O, measured
+  // 3.6-30s while CPU sat at 25% — and until now it was unattributable at runtime:
+  // the slow-request log conflates "this handler was slow" with "this handler sat behind
+  // someone else's block". Exposed on GET /api/metrics/loop-lag; a window whose max lag
+  // crosses the threshold logs a timestamped `[loop-lag]` warning that can be lined up
+  // against the slow-request ring buffer and the monitor's per-phase timings.
+  // Idempotent, so a tsx hot-reload does not stack histograms or timers.
+  ensureLoopLagMonitor();
+  cleanupCallbacks.push(() => { stopLoopLagMonitor(); });
+
   const app = new Hono();
   // Reflect only trusted local UI origins, never `*` — the wildcard let any
   // visited website read this unauthenticated local API (confused-deputy). See
   // lib/cors-origin.ts.
   app.use("/api/*", cors({ origin: corsOrigin }));
   app.use("/api/*", slowRequestLogger);
+  app.use("/api/*", (_c, next) => runWithGitPriority("interactive", next)); // #398 G8 — request-path git jumps the spawn queue's normal lane
   // Gzip for large buffered JSON GET responses (board ~172KB, issues ~1MB,
   // monitor-status ~60KB) — ~85% wire reduction for remote (Tailscale) access.
   // SSE (text/event-stream) is excluded by content-type inside the middleware;
   // WebSocket upgrades live under /ws/* and never enter this mount.
   app.use("/api/*", jsonGzip);
+  // #282 — the deferred startup phase runs BEHIND the listener, so reads answer
+  // immediately while writes still see the state the reconcilers repair. Mounted before
+  // the routes so it covers every /api mutation, including the monitor routes below.
+  app.use("/api/*", createStartupReadinessGate());
   // Dependency-aware health probe. A bare "status: ok" stayed green even when
   // the shared package's dist was missing after a restart (#691), so monitors
   // polling /health never noticed that every DB-backed API route was broken
@@ -97,6 +111,14 @@ export async function startServer(port?: number, hostname?: string) {
   // project (session exit, workspace status change, MCP comment notify, ...)
   // drops that project's cached pending-questions listing.
   boardEvents.addInvalidationListener((projectId) => invalidateAgentQuestionsCache(projectId));
+  // The butler system-event feed (#561): the only place it learns about the DB and
+  // the butler-session registry. Unattached it is inert, which is what keeps it out
+  // of every test that merely runs code emitting an event.
+  attachButlerEventFeed({
+    readPreference: (key) => getPreference(key, db),
+    isButlerActive: (projectId) => getButlerSession(projectId).active,
+    sendTurn: (projectId, text) => sendButlerTurn(projectId, text),
+  });
   let runWorkflowOnExit: ReturnType<typeof createWorkflowEngine>["runWorkflowOnExit"] = async () => {};
   let autoMerge: ReturnType<typeof createAutoMerge> = async () => {};
   const sessionManager = createSessionManager(upgradeWebSocket, {
@@ -123,13 +145,35 @@ export async function startServer(port?: number, hostname?: string) {
   autoMerge = createAutoMerge({ sessionManager, boardEvents, learningSessionIds: workflow.learningSessionIds });
   runWorkflowOnExit = workflow.runWorkflowOnExit;
 
-  await runStartupTasks(sessionManager, { agentService });
+  // #282 — only the work that must precede serving: process cleanup, migrations, FK
+  // assertions, session settling. Every git-spawning reconciler moved to the deferred
+  // phase started after `serve()` below.
+  await runCriticalStartupTasks(sessionManager, { agentService });
+
+  // Reap orphan service stacks after stale-session cleanup (runs inside the critical phase).
+  // Boot pass runs BEFORE setupRoutes so no HTTP create can race it — and it does NOT
+  // shield mid-provision null-state rows (a crash-mid-`up` leaves no state; that IS the
+  // orphan to reclaim). The periodic pass (background-services) shields those instead,
+  // since it runs concurrently with live creates. Both share this one engine (#52).
+  await reapOrphanServiceStacksOnce({ shieldMidProvision: false, logLabel: "startup" });
+
+  // Boot preflight (#55): fail LOUDLY on the silent DooD misconfigs (undialable
+  // KANBAN_SERVICE_HOST, a daemon that can't see the data root). No-op unless a project
+  // declares an enabled stack AND docker is available; never blocks startup.
+  try {
+    const { runServiceStackPreflight } = await import("./startup/service-stack-preflight.js");
+    const { anyProjectHasEnabledServiceStack } = await import("./repositories/workspace-service-state.repository.js");
+    const { DATA_DIR } = await import("./db/data-dir.js");
+    await runServiceStackPreflight({ dataRoot: DATA_DIR, hasEnabledStack: anyProjectHasEnabledServiceStack });
+  } catch (err) {
+    console.warn("[services-preflight] preflight bootstrap failed (non-fatal):", err instanceof Error ? err.message : err);
+  }
 
   // Fail-fast guard: scan committed source files for conflict markers.
   // Logs a [fatal] alert for every affected file+line.  Non-crashing so the
   // server can still start and the developer can reach the board to fix it.
   try {
-    const repoRoot = new URL("../../..", import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1").replace(/\//g, "\\");
+    const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
     assertNoCommittedConflictMarkers(repoRoot);
   } catch (err) {
     console.warn("[conflict-marker-scanner] scan failed (non-fatal):", err instanceof Error ? err.message : err);
@@ -159,7 +203,7 @@ export async function startServer(port?: number, hostname?: string) {
     try {
       tls = { key: readFileSync(tlsKeyPath), cert: readFileSync(tlsCertPath) };
     } catch (err) {
-      console.warn(`[http2] KANBAN_TLS_KEY/CERT set but unreadable — staying on HTTP/1.1: ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`[http2] KANBAN_TLS_KEY/CERT set but unreadable — staying on HTTP/1.1: ${errorMessage(err)}`);
     }
   }
   const onListen = (info: { port: number }) => {
@@ -178,66 +222,107 @@ export async function startServer(port?: number, hostname?: string) {
   (server as { keepAliveTimeout?: number }).keepAliveTimeout = 1000;
   injectWebSocket(server);
 
-  setupScheduledTasks(serverPort);
-  cleanupCallbacks.push(stopScheduledTasks);
-  startAutoMergeOrchestrator({
-    database: db,
-    boardEvents,
-    getSessionManager: () => sessionManager,
-  });
-  cleanupCallbacks.push(stopAutoMergeOrchestrator);
-  // Crash-safe recovery for work stranded in "In Review" because the auto-review
-  // handshake never fired (#529): re-launches the review so the chain can complete.
-  startStrandedReviewReconciler({
-    getSessionManager: () => sessionManager,
-    boardEvents,
-    reviewSessionIds: workflow.reviewSessionIds,
-  });
-  cleanupCallbacks.push(stopStrandedReviewReconciler);
-  // Crash-safe recovery for plan-mode workspaces stranded with planMode stuck true (#924):
-  // recovers the captured plan (or clears planMode + marks blocked) so the workspace never
-  // silently parks idle re-running read-only on every follow-up turn.
-  startStrandedPlanReconciler({
-    getSessionManager: () => sessionManager,
-    boardEvents,
-  });
-  cleanupCallbacks.push(stopStrandedPlanReconciler);
-  // Crash-safe recovery for zombie fix-and-merge/review sessions: sessions that are
-  // marked 'running' but have zero output messages and no live process (#596).
-  startZombieFixSessionReconciler({ boardEvents });
-  cleanupCallbacks.push(stopZombieFixSessionReconciler);
-  startAncestorBranchReconciler();
-  cleanupCallbacks.push(stopAncestorBranchReconciler);
-  // Safe forward-only auto-recovery: merges clean ahead-only Done-but-unmerged branches
-  // directly into base (forward-merging can't lose work). Conflicted / too-far-behind /
-  // 0-ahead candidates remain log-only. Never reopens an issue.
-  startDoneUnmergedScanner();
-  cleanupCallbacks.push(stopDoneUnmergedScanner);
-  // Keeps terminal issue workspace rows from inflating WIP/merge-queue counts after
-  // git proves the branch has no unmerged ahead work.
-  startTerminalWorkspaceReaper();
-  cleanupCallbacks.push(stopTerminalWorkspaceReaper);
-  // Autonomous Monitor Butler — cron-driven board-health agent (gated by the
-  // monitor_butler_enabled preference; off by default). See services/monitor-butler.ts.
-  startMonitorButler();
-  cleanupCallbacks.push(stopMonitorButler);
-  const projectConductorSupervisor = startProjectConductorSupervisor({ database: db, boardRepoRoot: serverStartRepoRoot });
-  cleanupCallbacks.push(() => projectConductorSupervisor.stop());
-  setupProcessHandlers(server, agentService, { cleanupStartupTimers });
+  // #343 — also listen on the IPv6 loopback, so `http://localhost:PORT` stops paying a
+  // flat ~206ms tax on every single request.
+  //
+  // Measured on this box: time_connect via `localhost` is 0.204-0.216s, via `127.0.0.1`
+  // it is 0.0009s. Windows resolves `localhost` to `::1` FIRST; with only 127.0.0.1 bound,
+  // every client attempts the IPv6 connect, waits for it to fail, and falls back to IPv4.
+  // That is a hard floor under `time_total`, not server time.
+  //
+  // It matters because essentially everything the board GENERATES tells agents to use
+  // `localhost:3001` — worktree ticket-context files, CLAUDE.md, the board-navigator
+  // skill, MCP notifyBoard, the docs — so every agent curl and every board-notify pays it,
+  // often many times per task.
+  //
+  // Deliberately `::1` and NOT `::`: the board API has no auth, so the loopback-only
+  // posture is a security invariant (see the fleet-port note in CLAUDE.md). `::1` is
+  // loopback, so the posture is unchanged. Only added when the primary listener is itself
+  // the IPv4 loopback default — an operator who set KANBAN_HOST to something else has
+  // chosen their own binding and we must not widen it. Failure to bind is NON-FATAL: the
+  // IPv4 listener is the one of record and the fallback path still works, just slowly.
+  let ipv6Server: { close: (cb?: () => void) => void } | null = null;
+  if (!tls && (serverHost === "127.0.0.1" || serverHost === "localhost")) {
+    try {
+      const companion = serve({ fetch: app.fetch, port: serverPort, hostname: "::1" }, () => {
+        console.log(`Server also running at http://[::1]:${serverPort} (removes the ~206ms IPv6-fallback tax on \`localhost\`)`);
+      });
+      (companion as { keepAliveTimeout?: number }).keepAliveTimeout = 1000;
+      // Same fetch handler, so WS upgrades must work on this listener too — a browser
+      // resolving `localhost` to ::1 would otherwise get a dead board socket.
+      injectWebSocket(companion);
+      companion.on("error", (err: Error) => {
+        console.warn(`[ipv6] loopback listener error (non-fatal, IPv4 still serving): ${err.message}`);
+      });
+      ipv6Server = companion;
+    } catch (err) {
+      console.warn(`[ipv6] could not bind [::1]:${serverPort} (non-fatal, IPv4 still serving): ${errorMessage(err)}`);
+    }
+  }
+  if (ipv6Server) cleanupCallbacks.push(() => { ipv6Server?.close(); });
 
-  // Periodic database backups (interval from the backup_interval_min preference).
-  try {
-    const raw = await getPreference("backup_interval_min");
-    const intervalMin = raw == null || raw === "" ? 30 : Number(raw);
-    startBackupScheduler(Number.isFinite(intervalMin) ? intervalMin : 30);
-    cleanupCallbacks.push(stopBackupScheduler);
-  } catch (err) {
-    console.warn("[backup] failed to start scheduler (non-fatal):", err instanceof Error ? err.message : err);
+  // #282 — the deferrable half of startup now runs BEHIND the bound listener instead of
+  // in front of it. Reads (the board payload) are served from this moment; mutating /api
+  // requests are held by the readiness gate until this settles, preserving the ordering
+  // the serial prologue used to guarantee. Never awaited here: awaiting it would restore
+  // exactly the 238 s time-to-first-response this change removes. A failure marks
+  // readiness anyway — a broken reconciler must not leave the board permanently unwritable.
+  void runGatedDeferredStartupTasks()
+    .catch((err) => console.warn("[startup] gated deferred startup phase failed (non-fatal):", err instanceof Error ? err.message : err))
+    .finally(() => {
+      markStartupComplete();
+      console.log("[startup] deferred startup phase complete — mutating requests no longer gated");
+    })
+    // The audit tail converges state rather than gating it, and on a checkout with many
+    // worktrees it runs for tens of minutes. Nothing waits on it.
+    .then(() => runStartupAuditTasks())
+    .catch((err) => console.warn("[startup] startup audit tasks failed (non-fatal):", err instanceof Error ? err.message : err));
+
+  // Start every background service (periodic reconcilers, schedulers, supervisors)
+  // from the plugin registry. Each entry's start() returns an optional cleanup that
+  // is collected into cleanupCallbacks in registry order, so shutdown (which reverses
+  // the list) tears them down last-started-first — identical to the previous inline
+  // start-call + cleanup-push list. The append target is background-services.ts, not
+  // this composition root (arch-review §1.5). Start errors propagate as before (only
+  // the backup scheduler swallows its own preference-read failure, internally).
+  const backgroundServiceContext = {
+    db,
+    boardEvents,
+    getSessionManager: () => sessionManager,
+    serverPort,
+    reviewSessionIds: workflow.reviewSessionIds,
+    boardRepoRoot: serverStartRepoRoot,
+  };
+  for (const service of BACKGROUND_SERVICES) {
+    const cleanup = await service.start(backgroundServiceContext);
+    if (cleanup) cleanupCallbacks.push(cleanup);
   }
 
-  // Periodic session_messages pruning — keeps DB size bounded as workspace history grows.
-  startSessionMessagePruner(db);
-  cleanupCallbacks.push(stopSessionMessagePruner);
+  // Fleet listener (epic #184): the ONLY surface exposed off-loopback, and only
+  // when KANBAN_FLEET_PORT says so. It serves the worker-called endpoints, each
+  // of which authenticates for itself; the main app above stays on 127.0.0.1 so
+  // the unauthenticated board API is unreachable from the network by
+  // construction rather than by convention. A failure here is non-fatal — the
+  // board keeps running locally, just without remote workers.
+  const fleetPort = resolveFleetPort();
+  if (fleetPort !== null) {
+    try {
+      const fleetListener = await startFleetListener({
+        database: db,
+        port: fleetPort,
+        createWorkersRoute: createFleetWorkersRoute,
+        host: resolveFleetHost(),
+      });
+      cleanupCallbacks.push(() => { void fleetListener.close(); });
+    } catch (err) {
+      console.error(
+        `[fleet-listener] failed to bind KANBAN_FLEET_PORT=${fleetPort}; remote workers cannot connect:`,
+        errorMessage(err),
+      );
+    }
+  }
+
+  setupProcessHandlers(server, agentService, { cleanupStartupTimers });
 
   // Sweep expired runtime_state rows (TTL'd agent-question markers etc., #975) so the
   // dedicated runtime-state table cannot grow without bound. Best-effort, one-shot.

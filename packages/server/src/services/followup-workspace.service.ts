@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { isTerminalStatusIdView, isTerminalStatusName } from "@agentic-kanban/shared";
+import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import type { Database } from "../db/index.js";
 import * as gitService from "./git.service.js";
-import { resolveAgentSettings } from "./agent-settings.service.js";
-import type { SessionManager } from "./session.manager.js";
-import type { BoardEvents } from "./board-events.js";
+import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
+import type { SessionLauncher } from "./session.manager.js";
+import type { BoardEventSink } from "./board-events.js";
 import { DEFAULT_BUILDER_GUARDRAILS, PREF_BUILDER_GUARDRAILS } from "../constants/preference-keys.js";
+import { hasSkipAutoStartTag } from "../repositories/dependency-auto-chain.repository.js";
 import {
   getDependentsOf,
   getProjectStatusesForFollowup,
@@ -19,6 +21,14 @@ import {
   updateWorkspaceStatus,
 } from "../repositories/followup-workspace.repository.js";
 
+/** Issues carrying this tag are an explicit opt-out of monitor/cascade auto-start. */
+const SKIP_AUTO_START_TAG = "no-auto-start";
+
+/** Statuses a dependent issue must be sitting in for a followup auto-start to be valid.
+ * Anything else — including a Cancelled issue whose deps happen to resolve — is NOT
+ * an implicit "not Done means startable" case; it must be an explicit backlog status. */
+const STARTABLE_STATUS_NAMES = new Set(["Todo", "Backlog"]);
+
 /**
  * After an issue is merged, find issues that depended on it and are now unblocked.
  * An issue is unblocked when all its depends_on/blocked_by dependencies are Done.
@@ -28,9 +38,9 @@ export async function autoStartFollowups(
   mergedIssueId: string,
   projectId: string,
   database: Database,
-  getSessionManager: () => SessionManager,
+  getSessionManager: () => SessionLauncher,
   prefMap: Map<string, string>,
-  options?: { boardEvents?: BoardEvents },
+  options?: { boardEvents?: BoardEventSink },
 ): Promise<void> {
   const dependents = await getDependentsOf(mergedIssueId, database);
 
@@ -38,6 +48,7 @@ export async function autoStartFollowups(
 
   const statuses = await getProjectStatusesForFollowup(projectId, database);
   const doneStatusIds = new Set(statuses.filter(s => isTerminalStatusName(s.name)).map(s => s.id));
+  const startableStatusIds = new Set(statuses.filter(s => STARTABLE_STATUS_NAMES.has(s.name)).map(s => s.id));
   const todoStatus = statuses.find(s => s.name === "Todo") ?? statuses[0];
   const project = await getProjectForFollowup(projectId, database);
   if (!project[0]) return;
@@ -64,13 +75,20 @@ export async function autoStartFollowups(
     const followupIssue = await getIssueById(dep.issueId, database);
     if (!followupIssue[0]) continue;
 
+    // A dependent issue that was moved out of the backlog — most notably Cancelled —
+    // must not be resurrected just because its blockers finished merging (#219). Only an
+    // explicit Todo/Backlog status is a valid launch point; "not Done" is not "startable".
+    if (!startableStatusIds.has(followupIssue[0].statusId)) continue;
+    if (await hasSkipAutoStartTag(dep.issueId, SKIP_AUTO_START_TAG, database)) continue;
+
     try {
-      const sanitized = followupIssue[0].title
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-+|-+$/g, "")
-        .slice(0, 50);
-      const branch = `feature/ak-${followupIssue[0].issueNumber ?? "f"}-${sanitized}`;
+      // #220 ask 2: this was a THIRD private branch-name derivation. It sliced the slug
+      // at 50 chars instead of 40 and skipped the `-+ -> -` collapse, so for the
+      // ticket's own fixture title it produced
+      // `feature/ak-176-176-follow-up-simplify-updatebase-s-leading-seeded` where
+      // `suggestBranchName` produces `...-updatebase-s-lead` — a different branch for the
+      // same issue, which is exactly what defeats a guard keyed on the derived name.
+      const branch = suggestBranchName(followupIssue[0]);
       const wsId = randomUUID();
       const now = new Date().toISOString();
 
@@ -92,7 +110,7 @@ export async function autoStartFollowups(
       const inProgressStatus = statuses.find(s => s.name === "In Progress") ?? todoStatus;
       await updateIssueStatus(dep.issueId, { statusId: inProgressStatus.id, updatedAt: now, statusChangedAt: now }, database);
 
-      const { agentCommand, agentArgs, claudeProfile, profile, provider } = resolveAgentSettings(prefMap);
+      const { agentCommand, agentArgs, profile, provider } = resolveAgentSettings(prefMap);
       const prompt = `${followupIssue[0].title}\n\n${followupIssue[0].description ?? ""}`.trim();
 
       await getSessionManager().startSession({
@@ -100,9 +118,11 @@ export async function autoStartFollowups(
         prompt,
         agentCommand,
         agentArgs,
-        claudeProfile,
         profile,
-        provider: provider === "codex" ? "codex" : "claude-code",
+        // #503: was `provider === "codex" ? "codex" : "claude-code"`, which sent BOTH
+        // copilot and pi follow-ups to Claude. `provider` here is a ProviderName from
+        // resolveAgentSettings, so the mapping is exactly toExecutorProvider's job.
+        provider: toExecutorProvider(provider),
         triggerType: "auto-start",
         systemInstructions: prefMap.get(PREF_BUILDER_GUARDRAILS) ?? DEFAULT_BUILDER_GUARDRAILS,
       });

@@ -2,11 +2,17 @@ import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engin
 import { projectStatuses } from "@agentic-kanban/shared/schema";
 import { sql } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import type { MonitorActionName } from "../services/monitor-nudge.js";
 import type { MonitorAction } from "./monitor-helpers.js";
 import type { WorkspaceCandidate } from "./monitor-cycle.js";
 import type { MonitorWorkspaceActions } from "./monitor-workspace-actions.js";
+import type { MergeGateToken } from "../services/pre-merge-gate.service.js";
+import { clearWorkspaceWorkingDir } from "../repositories/workspace-crud.repository.js";
+import { clearMergeBackoff, recordMergeFailure, type MergeBackoffDeps } from "../services/merge-backoff.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.service.js";
+import { reconcileGroupMemberIssues } from "../services/merge-cleanup.service.js";
+import { isPreMergeGateFailure } from "../services/workspace-merge-gate.js";
 
 export type LogMonitorActionFn = (action: MonitorActionName, workspaceId: string, issueId: string, extra?: Pick<MonitorAction, "endpoint" | "httpStatus" | "responseSummary" | "verificationResult">) => void;
 
@@ -25,15 +31,24 @@ export async function getProjectStatusIdByName(projectId: string, name: string):
  * fallback fires under exactly the same conditions. The caller keeps ownership of
  * `stats.merged++` (a failed merge that fell back still consumes a merge slot, by
  * design) and of broadcasting the board change.
+ *
+ * #417 backoff bookkeeping: a success clears any recorded merge backoff; a failure
+ * records it (identical repeats double the retry window; the >=2-repeat warning
+ * surfaces via a `merge_retry_blocked` drive obstacle). The SKIP decision itself is
+ * made by the caller BEFORE consuming a merge slot — see `shouldSkipMergeForBackoff`
+ * in monitor-cycle.ts — so a blocked workspace cannot starve other merges.
  */
 export async function mergeWorkspaceWithFixFallback(
   ws: WorkspaceCandidate,
   workspaceActions: MonitorWorkspaceActions,
   logAction: LogMonitorActionFn,
   logs: { conflictMsg: string; successMsg: string },
+  gate: MergeGateToken,
+  backoff?: MergeBackoffDeps,
 ): Promise<void> {
   try {
-    await workspaceActions.merge(ws.wsId);
+    await workspaceActions.merge(ws.wsId, gate);
+    await clearMergeBackoff((backoff?.database ?? db), ws.wsId);
     console.log(logs.successMsg);
     logAction("merge", ws.wsId, ws.issueId, {
       endpoint: `POST /api/workspaces/${ws.wsId}/merge`,
@@ -41,6 +56,34 @@ export async function mergeWorkspaceWithFixFallback(
     });
   } catch (err) {
     const mergeError = err instanceof Error ? err.message : "merge failed";
+    // Record the failure BEFORE launching the fix session, so an identical repeat backs
+    // off the NEXT cycle even if the fix session itself dies. Never throws (telemetry).
+    await recordMergeFailure(
+      { wsId: ws.wsId, projectId: ws.projectId, workingDir: ws.workingDir, issueNumber: ws.issueNumber },
+      mergeError,
+      backoff,
+    );
+    // #638: a RED verify gate is not a merge conflict, and routing it here converted every
+    // gate failure into an ungated merge — fix-and-merge's prompt is entirely about
+    // working-tree cleanliness (it never runs verify/build/tests), yet its exit-0 path merges
+    // under `gateSkipExplicit`, a claim the prompt does not support. A gate timeout took the
+    // same road, so a slow suite on a loaded box was enough; no malice required.
+    //
+    // The merge queue already classifies this correctly ("a batch reconciler agent can't fix a
+    // red verify script") — this is the monitor path adopting the same rule. The workspace
+    // stays unmerged with its backoff recorded, which is the honest outcome: someone has to
+    // make the tests pass.
+    if (isPreMergeGateFailure(err)) {
+      console.warn(
+        `[monitor] merge withheld for workspace ${ws.wsId} by the pre-merge gate — NOT routing to fix-and-merge (#638): ${mergeError}`,
+      );
+      logAction("merge", ws.wsId, ws.issueId, {
+        endpoint: `POST /api/workspaces/${ws.wsId}/merge`,
+        responseSummary: `verify_failed (no fix-and-merge fallback): ${mergeError.slice(0, 160)}`,
+        verificationResult: "failed",
+      });
+      return;
+    }
     let fixOk = true;
     try {
       await workspaceActions.fixAndMerge(ws.wsId, mergeError);
@@ -62,8 +105,17 @@ export async function mergeWorkspaceWithFixFallback(
  */
 export async function closeDirectWorkspaceAsDone(ws: WorkspaceCandidate, logAction: LogMonitorActionFn): Promise<void> {
   const now = new Date().toISOString();
-  await setWorkspaceStatus(db, ws.wsId, "closed", { now, set: { workingDir: null } });
+  // #547: the documented close transition, so this stamps `closedAt` like every other close.
+  // `markMerged: false` — a direct workspace lands on the branch it is already on; there is
+  // no merge to record.
+  await closeWorkspace({ database: db, workspaceId: ws.wsId, now, markMerged: false });
+  // #226 — mirror column, cleared through the helper that also updates the leading repos row.
+  // NOT `closeWorkspace({ clearWorkingDir: true })`, which nulls the workspace column only
+  // and would leave the repos row pointing at a directory that is about to be removed.
+  await clearWorkspaceWorkingDir(ws.wsId, now, db);
   const doneStatusId = await getProjectStatusIdByName(ws.projectId, "Done");
-  if (doneStatusId) await transitionIssueStatus(db, ws.issueId, doneStatusId, { now }).catch((err) => console.warn(`[monitor] failed to move direct-workspace issue ${ws.issueId} to Done:`, err instanceof Error ? err.message : String(err)));
+  if (doneStatusId) await transitionIssueStatus(db, ws.issueId, doneStatusId, { now }).catch((err) => console.warn(`[monitor] failed to move direct-workspace issue ${ws.issueId} to Done:`, errorMessage(err)));
+  // Ticket group (#661): a closing group workspace lands every member ticket too.
+  await reconcileGroupMemberIssues({ database: db, workspaceId: ws.wsId, now, projectId: ws.projectId });
   logAction("merge", ws.wsId, ws.issueId, { verificationResult: "ok" });
 }

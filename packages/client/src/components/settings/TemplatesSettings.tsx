@@ -1,6 +1,6 @@
 import type { Dispatch, SetStateAction } from "react";
 import type { IssueTemplate } from "../../hooks/useIssueTemplates.js";
-import { showToast } from "../Toast.js";
+import { showToast } from "../../lib/toast.js";
 
 type TemplatesSettingsProps = {
   customTemplates: IssueTemplate[];

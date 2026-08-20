@@ -1,13 +1,16 @@
 import { useEffect, useState } from "react";
 import { isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
+import type { ServiceStackConfig } from "@agentic-kanban/shared";
+import { buildServicesConfig } from "../lib/services-config.js";
 import { apiFetch, apiPost, apiPut, apiPatch } from "../lib/api.js";
 import { setSettings as savePreferences } from "../lib/settingsStore.js";
 import { invalidateClientSurfaceLocal } from "../lib/clientInvalidation.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { useIssueTemplates } from "../hooks/useIssueTemplates.js";
 import { useConfigImportExport } from "../hooks/useConfigImportExport.js";
 import { applyPreflightResult, CODEX_DEFAULT_PROFILE, COPILOT_DEFAULT_PROFILE, DEFAULT_SETTINGS, PI_DEFAULT_PROFILE, TABS, uniqueProfiles, type AgentProfileHealth, type McpHealth, type ProjectSettingsState, type Settings, type SettingsPanelProps, type Tab } from "./SettingsPanel.shared.js";
 import { normalizeConfig, setProviderFillPolicy, clearProviderFillPolicy, settingsKey, type ConcreteProvider } from "../lib/strategy-targets.js";
+import { allowedProfilesPrefKey, parseProfileAllowlist, serializeProfileAllowlist, type AllowedProfile } from "@agentic-kanban/shared/lib/profile-allowlist";
 import { parseDisabledTools, withToolDisabled } from "../lib/mcp-tool-toggle.js";
 import { useTagsEditor } from "../hooks/useTagsEditor.js";
 import { useTemplateEditorState } from "../hooks/useTemplateEditorState.js";
@@ -26,10 +29,12 @@ type ProjectRow = {
   symlinkEnabled?: boolean;
   symlinkDirs?: string | null;
   defaultSkillId?: string | null;
+  servicesConfig?: ServiceStackConfig | null;
 };
 
 /** Map a raw project row + its verify-script pref into the panel's ProjectSettingsState. */
 function buildProjectSettingsState(project: ProjectRow, verifyScript: string): ProjectSettingsState {
+  const svc = project.servicesConfig ?? null;
   return {
     defaultBranch: project.defaultBranch || "",
     setupScript: project.setupScript || "",
@@ -41,13 +46,22 @@ function buildProjectSettingsState(project: ProjectRow, verifyScript: string): P
     symlinkEnabled: project.symlinkEnabled === true,
     symlinkDirs: project.symlinkDirs || "",
     defaultSkillId: project.defaultSkillId || null,
+    servicesEnabled: svc?.enabled === true,
+    servicesComposeFile: svc?.composeFile || "",
+    servicesComposeRepo: svc?.composeRepo || "",
+    servicesPorts: (svc?.ports ?? []).join(", "),
+    // Full fetched config: buildServicesConfig merges the form fields over this so
+    // API-only fields (env, readyTimeoutMs) survive a settings save.
+    servicesConfigBase: svc,
   };
 }
 import { AgentSettings } from "./settings/AgentSettings.js";
 import { WorkflowSettings } from "./settings/WorkflowSettings.js";
 import { SkillsSettings } from "./settings/SkillsSettings.js";
 import { McpSettings } from "./settings/McpSettings.js";
+import { PluginsSettings } from "./settings/PluginsSettings.js";
 import { AppearanceSettings } from "./settings/AppearanceSettings.js";
+import { ViewVisibilitySettings } from "./settings/ViewVisibilitySettings.js";
 import { ProjectSettings } from "./settings/ProjectSettings.js";
 import { TagsSettings } from "./settings/TagsSettings.js";
 import { TemplatesSettings } from "./settings/TemplatesSettings.js";
@@ -80,6 +94,11 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
     symlinkEnabled: false,
     symlinkDirs: "",
     defaultSkillId: null,
+    servicesEnabled: false,
+    servicesComposeFile: "",
+    servicesComposeRepo: "",
+    servicesPorts: "",
+    servicesConfigBase: null,
   });
   const [projectBranches, setProjectBranches] = useState<{ local: string[]; remote: string[] } | null>(null);
   const [generatingScript, setGeneratingScript] = useState(false);
@@ -142,6 +161,7 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
   };
   const [providerDivergence, setProviderDivergence] = useState<ProviderDivergence | null>(null);
   const [savingProjectProvider, setSavingProjectProvider] = useState(false);
+  const [savingAllowedProfiles, setSavingAllowedProfiles] = useState(false);
 
   async function refetchProviderDivergence() {
     if (!activeProjectId) return;
@@ -149,6 +169,37 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
       const div = await apiFetch<ProviderDivergence>(`/api/preferences/provider-divergence?projectId=${activeProjectId}`);
       setProviderDivergence(div);
     } catch { /* non-fatal */ }
+  }
+
+  /**
+   * Per-project profile allowlist — a HARD constraint, unlike the provider control
+   * below it. Written to `allowed_profiles_<projectId>` in the canonical serialization
+   * so the server's `parseProfileAllowlist` and this editor cannot drift.
+   *
+   * An empty selection stores `[]`, which the parser reads as "restriction lifted".
+   * Deleting the row would mean the same thing, but writing `[]` keeps the preference
+   * visible in an exported config, so a project that USED to be restricted doesn't look
+   * like one that never was.
+   */
+  async function handleAllowedProfilesChange(entries: AllowedProfile[]) {
+    if (!activeProjectId || savingAllowedProfiles) return;
+    setSavingAllowedProfiles(true);
+    try {
+      const key = allowedProfilesPrefKey(activeProjectId);
+      const serialized = serializeProfileAllowlist(entries);
+      await savePreferences({ [key]: serialized });
+      setSettings((s) => ({ ...s, [key]: serialized }));
+      showToast(
+        entries.length === 0
+          ? "Project may use any profile"
+          : `Project restricted to ${entries.length} profile${entries.length === 1 ? "" : "s"}`,
+        "success",
+      );
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to update allowed profiles", "error");
+    } finally {
+      setSavingAllowedProfiles(false);
+    }
   }
 
   // First-class per-project provider control (#925): persist the selection as a
@@ -351,6 +402,7 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
               symlinkEnabled: projectSettings.symlinkEnabled,
               symlinkDirs: projectSettings.symlinkDirs.trim() || null,
               defaultSkillId: projectSettings.defaultSkillId || null,
+              servicesConfig: buildServicesConfig(projectSettings),
             }),
         );
       }
@@ -391,12 +443,15 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b border-gray-200 dark:border-gray-700 px-5">
+        {/* 11 tabs (~880px of content) in a ~350px box with no wrap and no scroll meant the
+            right-hand ~7 spilled past the modal edge and were unreachable on a phone (#434). */}
+        <div className="flex overflow-x-auto border-b border-gray-200 dark:border-gray-700 px-5">
           {TABS.map((t) => (
             <button
               key={t.id}
+              data-testid={`settings-tab-${t.id}`}
               onClick={() => setTab(t.id)}
-              className={`px-3 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              className={`shrink-0 whitespace-nowrap px-3 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
                 tab === t.id
                   ? "border-brand-500 text-brand-600"
                   : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
@@ -430,6 +485,9 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
                   providerDivergence={providerDivergence}
                   onProjectProviderChange={handleProjectProviderChange}
                   savingProjectProvider={savingProjectProvider}
+                  allowedProfiles={parseProfileAllowlist(settings[allowedProfilesPrefKey(activeProjectId ?? "") as keyof Settings]).entries}
+                  onAllowedProfilesChange={handleAllowedProfilesChange}
+                  savingAllowedProfiles={savingAllowedProfiles}
                 />
               )}
 
@@ -468,6 +526,11 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
                 />
               )}
 
+              {/* Plugins tab */}
+              {tab === "plugins" && (
+                <PluginsSettings activeProjectId={activeProjectId} />
+              )}
+
               {/* MCP Tools tab */}
               {tab === "mcp" && (
                 <McpSettings
@@ -481,12 +544,20 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
 
               {/* UI tab */}
               {tab === "ui" && (
-                <AppearanceSettings
-                  boardToolsSlot={boardToolsSlot}
-                  settings={settings}
-                  set={set}
-                  setBool={setBool}
-                />
+                <>
+                  <AppearanceSettings
+                    boardToolsSlot={boardToolsSlot}
+                    settings={settings}
+                    set={set}
+                    setBool={setBool}
+                  />
+                  {/* #233 — per-project view visibility. Lives on the UI tab beside the other
+                      toolbar/appearance controls, since that is what it curates. */}
+                  <div className="mt-6 border-t border-gray-200 dark:border-gray-700 pt-4">
+                    <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-1">Views</h3>
+                    <ViewVisibilitySettings activeProjectId={activeProjectId ?? null} />
+                  </div>
+                </>
               )}
 
               {/* Project tab */}

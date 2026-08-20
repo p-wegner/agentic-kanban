@@ -10,7 +10,7 @@ import * as schema from "@agentic-kanban/shared/schema";
 import { issues, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
 import { MIGRATION_FILES, MIGRATIONS_DIR } from "./helpers/migrations.js";
 import type { TestDb } from "./helpers/test-db.js";
-import { finalizeMergeCleanup } from "../services/merge-cleanup.service.js";
+import { finalizeMergeCleanup, reconcileMergedIssue } from "../services/merge-cleanup.service.js";
 import type { BoardEvents } from "../services/board-events.js";
 
 const tempClients: ReturnType<typeof createClient>[] = [];
@@ -214,5 +214,78 @@ describe("finalizeMergeCleanup", () => {
     // Issue is Done — NOT rolled back to In Review
     expect(issue.statusId).toBe(doneStatusId);
     expect(issue.statusChangedAt).toBe("2026-06-06T10:05:00.000Z");
+  });
+});
+
+/**
+ * A merged issue that a human deliberately REOPENED must stay reopened. The monitor's
+ * already-merged sweep (`reconcileStaleMergedIssue`) runs every cycle, so an unconditional
+ * "force it to Done" silently undid the operator over and over. The catch-up reconcile is
+ * therefore recency-aware: it converges only when the status predates the merge.
+ */
+describe("reconcileMergedIssue — reopened after merge", () => {
+  /** Relative timestamps (never hardcoded absolutes that age out) around a single merge. */
+  const mergedAt = new Date(Date.now() - 60_000).toISOString();
+  const beforeMerge = new Date(Date.now() - 120_000).toISOString();
+  const afterMerge = new Date(Date.now() - 30_000).toISOString();
+
+  async function seedWithTodo() {
+    const { db } = await createMergeCleanupTestDb();
+    const seeded = await seedMergeCleanupRows(db);
+    const todoStatusId = randomUUID();
+    await db.insert(projectStatuses).values({
+      id: todoStatusId, projectId: seeded.projectId, name: "Todo", sortOrder: 1, isDefault: true,
+      createdAt: "2026-06-06T10:00:00.000Z",
+    });
+    return { db, todoStatusId, ...seeded };
+  }
+
+  async function statusOf(db: TestDb, issueId: string) {
+    const [row] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
+    return row.statusId;
+  }
+
+  it("leaves a ticket that was moved to Todo AFTER the merge alone", async () => {
+    const { db, issueId, projectId, todoStatusId } = await seedWithTodo();
+    // The merge landed, then a human reopened the ticket.
+    await db.update(issues).set({ statusId: todoStatusId, statusChangedAt: afterMerge }).where(eq(issues.id, issueId));
+
+    const result = await reconcileMergedIssue({ database: db, issueId, projectId, mergedAt });
+
+    expect(result.issueTransitioned).toBe(false);
+    expect(result.reopenedAfterMerge).toBe(true);
+    expect(await statusOf(db, issueId)).toBe(todoStatusId);
+  });
+
+  it("stays put across REPEATED cycles (the sweep runs forever)", async () => {
+    const { db, issueId, projectId, todoStatusId } = await seedWithTodo();
+    await db.update(issues).set({ statusId: todoStatusId, statusChangedAt: afterMerge }).where(eq(issues.id, issueId));
+
+    for (let cycle = 0; cycle < 3; cycle++) {
+      await reconcileMergedIssue({ database: db, issueId, projectId, mergedAt });
+    }
+
+    expect(await statusOf(db, issueId)).toBe(todoStatusId);
+  });
+
+  it("STILL converges a status that never caught up with the merge (#190 behaviour preserved)", async () => {
+    const { db, issueId, projectId, doneStatusId, inReviewStatusId } = await seedWithTodo();
+    await db.update(issues).set({ statusId: inReviewStatusId, statusChangedAt: beforeMerge }).where(eq(issues.id, issueId));
+
+    const result = await reconcileMergedIssue({ database: db, issueId, projectId, mergedAt });
+
+    expect(result.issueTransitioned).toBe(true);
+    expect(result.reopenedAfterMerge).toBeUndefined();
+    expect(await statusOf(db, issueId)).toBe(doneStatusId);
+  });
+
+  it("converges unconditionally when the caller passes NO mergedAt (merge path / hand-merge reconciler)", async () => {
+    const { db, issueId, projectId, doneStatusId, todoStatusId } = await seedWithTodo();
+    await db.update(issues).set({ statusId: todoStatusId, statusChangedAt: afterMerge }).where(eq(issues.id, issueId));
+
+    const result = await reconcileMergedIssue({ database: db, issueId, projectId });
+
+    expect(result.issueTransitioned).toBe(true);
+    expect(await statusOf(db, issueId)).toBe(doneStatusId);
   });
 });

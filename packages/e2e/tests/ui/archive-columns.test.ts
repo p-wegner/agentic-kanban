@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { SERVER_URL } from "../helpers/port.js";
 import { getE2EProjectId } from "../helpers/e2e-project.js";
+import { boardColumn, completedToggle, issueCard, narrowBoardTo } from "../helpers/board-ui.js";
 
 test.describe("Archive Column Group UI", () => {
   let projectId: string;
@@ -57,88 +58,65 @@ test.describe("Archive Column Group UI", () => {
     await page.goto("/");
     await page.waitForSelector("h2");
 
-    // The "Completed" button should be visible in collapsed state
-    const completedBtn = page.locator("button", { hasText: "Completed" }).first();
-    await expect(completedBtn).toBeVisible();
-
-    // It should show "Done" and "Cancelled" column names with counts
-    await expect(completedBtn.locator("text=Done").first()).toBeVisible();
-    await expect(completedBtn.locator("text=Cancelled").first()).toBeVisible();
+    const toggle = completedToggle(page);
+    await expect(toggle).toBeVisible();
+    // The bar summarises the archive rather than listing status columns: a total, then a
+    // done/cancelled breakdown. Both of this suite's fixtures are archived, so both parts
+    // of the breakdown are present.
+    await expect(toggle).toContainText("Completed");
+    await expect(toggle).toContainText("done");
+    await expect(toggle).toContainText("cancelled");
   });
 
-  test("click Completed to expand archive columns", async ({ page }) => {
+  test("expanding Completed reveals the archived cards", async ({ page }) => {
     await page.goto("/");
     await page.waitForSelector("h2");
 
-    // Done and Cancelled columns should NOT be visible initially (they are inside collapsed group)
-    const allH2Before = await page.locator("h2").allTextContents();
-    const namesBefore = allH2Before.map((n) => n.replace(/\s*\d+$/, "").trim());
-    // Active columns should be visible
-    expect(namesBefore).toContain("Todo");
-    expect(namesBefore).toContain("In Progress");
-    expect(namesBefore).toContain("In Review");
-    // Done/Cancelled columns should NOT be in the h2 list (collapsed)
-    expect(namesBefore).not.toContain("Done");
-    expect(namesBefore).not.toContain("Cancelled");
+    // Done and Cancelled are NOT board columns any more — they are folded into the
+    // Completed group. The old version of this spec scraped every <h2> and asserted they
+    // appeared as column headings after expanding, i.e. it described the pre-CompletedGrid
+    // UI; it could only ever fail, and it failed as "expected list to contain Done".
+    await expect(boardColumn(page, "Done")).toHaveCount(0);
+    await expect(boardColumn(page, "Cancelled")).toHaveCount(0);
+    await expect(page.locator("[data-testid='completed-grid']")).toHaveCount(0);
 
-    // Click the "Completed" button to expand
-    await page.locator("button", { hasText: "Completed" }).click();
+    await narrowBoardTo(page, suffix);
+    await completedToggle(page).click();
 
-    // Now Done and Cancelled columns should appear as full columns with h2 headings
-    const allH2After = await page.locator("h2").allTextContents();
-    const namesAfter = allH2After.map((n) => n.replace(/\s*\d+$/, "").trim());
-    expect(namesAfter).toContain("Done");
-    expect(namesAfter).toContain("Cancelled");
-
-    // Archived issue cards should be visible
-    await expect(
-      page.locator("p", { hasText: "ArchiveDoneTest" }).first(),
-    ).toBeVisible({ timeout: 5000 });
-    await expect(
-      page.locator("p", { hasText: "ArchiveCancelledTest" }).first(),
-    ).toBeVisible({ timeout: 5000 });
+    await expect(page.locator("[data-testid='completed-grid']")).toBeVisible();
+    await expect(issueCard(page, `ArchiveDoneTest ${suffix}`)).toBeVisible({ timeout: 5000 });
+    await expect(issueCard(page, `ArchiveCancelledTest ${suffix}`)).toBeVisible({ timeout: 5000 });
   });
 
-  test("click Completed again to collapse archive columns", async ({ page }) => {
+  test("clicking Completed again collapses the grid", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForSelector("h2");
+    await narrowBoardTo(page, suffix);
+
+    const grid = page.locator("[data-testid='completed-grid']");
+    await completedToggle(page).click();
+    await expect(grid).toBeVisible({ timeout: 5000 });
+
+    // The collapse bar stays in flow while the grid is open, so it is still the control.
+    await completedToggle(page).click();
+    await expect(grid).toHaveCount(0);
+  });
+
+  test("the archive is not a set of extra columns", async ({ page }) => {
     await page.goto("/");
     await page.waitForSelector("h2");
 
-    // Expand first
-    await page.locator("button", { hasText: "Completed" }).click();
+    const columns = page.locator("[data-testid='board-column']").filter({ visible: true });
+    const before = await columns.count();
+    expect(before).toBeGreaterThanOrEqual(3);
 
-    // Verify expanded — Done h2 should be visible (use .first() to handle extra test statuses)
-    await expect(
-      page.locator("h2", { hasText: /^Done\d*$/ }).first(),
-    ).toBeVisible({ timeout: 5000 });
+    await narrowBoardTo(page, suffix);
+    await completedToggle(page).click();
+    await expect(page.locator("[data-testid='completed-grid']")).toBeVisible();
 
-    // Now click the toggle button again (it now shows a down arrow + "Completed" text)
-    await page.locator("button", { hasText: "Completed" }).first().click();
-
-    // Should collapse back — Done/Cancelled h2s gone (the ones from the archive group)
-    // Use the default status names exactly — "Done" followed by only a count number
-    await expect(
-      page.locator("h2", { hasText: /^Done\d*$/ }).first(),
-    ).not.toBeVisible({ timeout: 5000 });
-    await expect(
-      page.locator("h2", { hasText: /^Cancelled\d*$/ }).first(),
-    ).not.toBeVisible({ timeout: 5000 });
-  });
-
-  test("archive columns are separate from active columns", async ({ page }) => {
-    await page.goto("/");
-    await page.waitForSelector("h2");
-
-    // Active columns (Todo, In Progress, In Review) are always visible
-    const activeCols = page.locator(".bg-gray-100.rounded-lg");
-    const activeCount = await activeCols.count();
-    expect(activeCount).toBeGreaterThanOrEqual(3);
-
-    // Expand archive
-    await page.locator("button", { hasText: "Completed" }).click();
-
-    // After expanding, there should be MORE columns visible
-    const allColsAfter = page.locator(".bg-gray-100.rounded-lg");
-    const allCountAfter = await allColsAfter.count();
-    expect(allCountAfter).toBeGreaterThan(activeCount);
+    // Expanding the archive opens a card GRID; it does not add columns. The old spec
+    // asserted the opposite ("there should be MORE columns visible"), which is what the
+    // archive used to do.
+    expect(await columns.count()).toBe(before);
   });
 });

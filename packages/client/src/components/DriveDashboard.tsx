@@ -2,8 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { STATUS_COLORS, ACCENT, BRAND } from "../lib/chartColors.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import type { DriveDashboard as DriveDashboardData } from "@agentic-kanban/shared";
+import { startStaggeredPoll } from "../lib/pollScheduler.js";
 
 /**
  * Drive dashboard (#800) — an at-a-glance view of a running drive: N/N progress,
@@ -109,8 +110,10 @@ export function DriveDashboard({ projectId, onIssueClick }: DriveDashboardProps)
     fetchDashboard();
     const isActive = drives.find((d) => d.id === selectedDriveId)?.status === "active";
     if (!isActive) return; // only poll a live drive
-    const t = setInterval(fetchDashboard, POLL_MS);
-    return () => clearInterval(t);
+    // #518: through the shared scheduler — a raw setInterval phase-aligns with the other
+    // pollers at mount, which is what produced the measured 3.3-3.8s contention spikes.
+    const poll = startStaggeredPoll(fetchDashboard, POLL_MS);
+    return () => poll.stop();
   }, [selectedDriveId, fetchDashboard, drives]);
 
   const maxTierWidth = useMemo(() => {

@@ -38,6 +38,9 @@ export function CompletedCard({ issue, onClick, onDragStart, searchQuery, isSele
       onDragStart={(e) => onDragStart(e, issue)}
       onClick={(e) => onClick(issue, e)}
       aria-selected={isSelected ? "true" : undefined}
+      // Same accessible name as IssueCard: a completed card is the same object in a
+      // different container, and as a bare clickable <div> it had no name at all.
+      aria-label={`Open issue ${issue.title}`}
       className={
         `group rounded-md shadow-sm p-2.5 border cursor-pointer ` +
         `hover:shadow-md transition-shadow ` +

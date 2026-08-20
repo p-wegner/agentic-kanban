@@ -1,3 +1,6 @@
+// #496: BOARD_STRATEGY_PREFIX comes from the same module as `strategyPrefKey`, so the
+// key SCAN below and the key BUILDER cannot disagree about the format.
+import { STRATEGY_PREF_PREFIX as BOARD_STRATEGY_PREFIX } from "@agentic-kanban/shared/lib/strategy-policy";
 import { existsSync, readdirSync, type Dirent } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -208,7 +211,6 @@ export function fallbackCooldownIso<E extends BaseRingEntry>(cfg: AuthRingConfig
   return new Date(now.getTime() + cfg.defaultCooldownMs).toISOString();
 }
 
-const BOARD_STRATEGY_PREFIX = "board_strategy_";
 
 /**
  * #973 rotation/Bullseye coherence. Rotation is a LEGITIMATE writer of the global

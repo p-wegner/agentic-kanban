@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { GIT_HEAVY_TEST_TIMEOUT_MS } from "./helpers/timeouts.js";
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -18,8 +19,6 @@ function exec(cmd: string, args: string[], cwd: string): Promise<string> {
 async function createTempRepo(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "kanban-git-test-"));
   await exec("git", ["init"], dir);
-  await exec("git", ["config", "user.email", "test@test.com"], dir);
-  await exec("git", ["config", "user.name", "Test"], dir);
 
   // Create initial commit on main
   const { writeFileSync } = await import("node:fs");
@@ -42,7 +41,7 @@ describe("GitService", () => {
 
   beforeAll(async () => {
     repoPath = await createTempRepo();
-  }, 30000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   afterAll(async () => {
     try {
@@ -67,7 +66,7 @@ describe("GitService", () => {
 
     // Cleanup
     await gitService.removeWorktree(repoPath, worktreePath);
-  }, 30000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("reuses existing worktree for an already-checked-out branch", async () => {
     const worktreePath = await gitService.createWorktree(repoPath, "feature/dup-test");
@@ -78,7 +77,7 @@ describe("GitService", () => {
     } finally {
       await gitService.removeWorktree(repoPath, worktreePath);
     }
-  }, 30000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("gets diff between worktree and base branch", async () => {
     const worktreePath = await gitService.createWorktree(repoPath, "feature/diff-test");
@@ -89,15 +88,13 @@ describe("GitService", () => {
     writeFileSync(join(worktreePath, "new-file.txt"), "Hello\n");
 
     await exec("git", ["add", "."], worktreePath);
-    await exec("git", ["config", "user.email", "test@test.com"], worktreePath);
-    await exec("git", ["config", "user.name", "Test"], worktreePath);
     await exec("git", ["commit", "-m", "Add changes"], worktreePath);
 
     const diff = await gitService.getDiff(worktreePath, "main");
     expect(diff).toContain("New content");
 
     await gitService.removeWorktree(repoPath, worktreePath);
-  }, 30000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("merges a branch via plumbing and syncs the working tree when the target is checked out", async () => {
     const worktreePath = await gitService.createWorktree(repoPath, "feature/merge-test");
@@ -106,8 +103,6 @@ describe("GitService", () => {
     writeFileSync(join(worktreePath, "merge-file.txt"), "Merge me\n");
 
     await exec("git", ["add", "."], worktreePath);
-    await exec("git", ["config", "user.email", "test@test.com"], worktreePath);
-    await exec("git", ["config", "user.name", "Test"], worktreePath);
     await exec("git", ["commit", "-m", "Add merge file"], worktreePath);
 
     await gitService.removeWorktree(repoPath, worktreePath);
@@ -129,7 +124,7 @@ describe("GitService", () => {
     // And the synced working tree must be clean (no phantom uncommitted diff).
     const dirty = await gitService.getUncommittedTrackedChanges(repoPath);
     expect(dirty).toEqual([]);
-  }, 30000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("is idempotent when merging a branch that is already reachable from the target", async () => {
     const worktreePath = await gitService.createWorktree(repoPath, "feature/already-merged");
@@ -138,8 +133,6 @@ describe("GitService", () => {
     writeFileSync(join(worktreePath, "already-merged.txt"), "Merge once\n");
 
     await exec("git", ["add", "."], worktreePath);
-    await exec("git", ["config", "user.email", "test@test.com"], worktreePath);
-    await exec("git", ["config", "user.name", "Test"], worktreePath);
     await exec("git", ["commit", "-m", "Add already merged file"], worktreePath);
     await gitService.removeWorktree(repoPath, worktreePath);
 
@@ -155,7 +148,7 @@ describe("GitService", () => {
     expect(second).toContain("already merged");
     expect(headAfterSecond).toBe(headAfterFirst);
     expect(countAfterSecond).toBe(countAfterFirst);
-  }, 30000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("syncs a clean checked-out target when retrying after the target ref already contains the feature", async () => {
     const worktreePath = await gitService.createWorktree(repoPath, "feature/interrupted-merge-retry");
@@ -164,8 +157,6 @@ describe("GitService", () => {
     writeFileSync(join(worktreePath, "interrupted-retry.txt"), "Recovered on retry\n");
 
     await exec("git", ["add", "."], worktreePath);
-    await exec("git", ["config", "user.email", "test@test.com"], worktreePath);
-    await exec("git", ["config", "user.name", "Test"], worktreePath);
     await exec("git", ["commit", "-m", "Add interrupted retry file"], worktreePath);
     await gitService.removeWorktree(repoPath, worktreePath);
 
@@ -190,7 +181,7 @@ describe("GitService", () => {
     expect(result).toContain("already merged");
     expect((await exec("git", ["rev-parse", "HEAD"], repoPath)).trim()).toBe(newCommit);
     expect(fsExistsSync(join(repoPath, "interrupted-retry.txt"))).toBe(true);
-  }, 30000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("does not reset dirty already-merged targets unless they match an interrupted plumbing merge", async () => {
     const worktreePath = await gitService.createWorktree(repoPath, "feature/already-ancestor-dirty");
@@ -199,8 +190,6 @@ describe("GitService", () => {
     writeFileSync(join(worktreePath, "ancestor-file.txt"), "Ancestor content\n");
 
     await exec("git", ["add", "."], worktreePath);
-    await exec("git", ["config", "user.email", "test@test.com"], worktreePath);
-    await exec("git", ["config", "user.name", "Test"], worktreePath);
     await exec("git", ["commit", "-m", "Add ancestor file"], worktreePath);
     await gitService.removeWorktree(repoPath, worktreePath);
 
@@ -219,7 +208,7 @@ describe("GitService", () => {
     } finally {
       await exec("git", ["reset", "--hard", "HEAD"], repoPath);
     }
-  }, 30000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("refuses to merge into a checked-out branch with uncommitted tracked changes", async () => {
     const { writeFileSync, readFileSync } = await import("node:fs");
@@ -228,8 +217,6 @@ describe("GitService", () => {
     const wt = await gitService.createWorktree(repoPath, "feature/dirty-guard");
     writeFileSync(join(wt, "guard-file.txt"), "from feature\n");
     await exec("git", ["add", "."], wt);
-    await exec("git", ["config", "user.email", "test@test.com"], wt);
-    await exec("git", ["config", "user.name", "Test"], wt);
     await exec("git", ["commit", "-m", "guard feature"], wt);
     await gitService.removeWorktree(repoPath, wt);
 
@@ -245,7 +232,7 @@ describe("GitService", () => {
 
     // Restore a clean checkout for subsequent tests.
     await exec("git", ["checkout", "--", "README.md"], repoPath);
-  }, 30000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("aborts merge on conflict and leaves main checkout clean", async () => {
     const { writeFileSync, readFileSync } = await import("node:fs");
@@ -254,8 +241,6 @@ describe("GitService", () => {
     const worktreeA = await gitService.createWorktree(repoPath, "feature/conflict-a");
     writeFileSync(join(worktreeA, "shared-conflict.txt"), "branch A content\n");
     await exec("git", ["add", "."], worktreeA);
-    await exec("git", ["config", "user.email", "test@test.com"], worktreeA);
-    await exec("git", ["config", "user.name", "Test"], worktreeA);
     await exec("git", ["commit", "-m", "branch A changes"], worktreeA);
     await gitService.removeWorktree(repoPath, worktreeA);
 
@@ -269,8 +254,6 @@ describe("GitService", () => {
     const worktreeB = await gitService.createWorktree(repoPath, "feature/conflict-b");
     writeFileSync(join(worktreeB, "shared-conflict.txt"), "branch B content\n");
     await exec("git", ["add", "."], worktreeB);
-    await exec("git", ["config", "user.email", "test@test.com"], worktreeB);
-    await exec("git", ["config", "user.name", "Test"], worktreeB);
     await exec("git", ["commit", "-m", "branch B changes"], worktreeB);
     await gitService.removeWorktree(repoPath, worktreeB);
 
@@ -289,7 +272,7 @@ describe("GitService", () => {
     expect(shared.trim()).toBe("branch A content");
     expect(shared).not.toContain("<<<<<<<");
     expect(shared).not.toContain("branch B content");
-  }, 30000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("aborts merge on _journal.json conflict and leaves main checkout clean", async () => {
     const { writeFileSync, readFileSync } = await import("node:fs");
@@ -311,8 +294,6 @@ describe("GitService", () => {
     const journalC = JSON.stringify({ version: "6", dialect: "sqlite", entries: [{ idx: 0, version: "6", tag: "0001_branch_c", when: 1000, breakpoints: true }] }, null, 2);
     writeFileSync(join(join(worktreeC, "meta"), "_journal.json"), journalC);
     await exec("git", ["add", "."], worktreeC);
-    await exec("git", ["config", "user.email", "test@test.com"], worktreeC);
-    await exec("git", ["config", "user.name", "Test"], worktreeC);
     await exec("git", ["commit", "-m", "Add migration 0001_branch_c"], worktreeC);
     await gitService.removeWorktree(repoPath, worktreeC);
 
@@ -326,8 +307,6 @@ describe("GitService", () => {
     const journalD = JSON.stringify({ version: "6", dialect: "sqlite", entries: [{ idx: 0, version: "6", tag: "0001_branch_d", when: 1001, breakpoints: true }] }, null, 2);
     writeFileSync(join(join(worktreeD, "meta"), "_journal.json"), journalD);
     await exec("git", ["add", "."], worktreeD);
-    await exec("git", ["config", "user.email", "test@test.com"], worktreeD);
-    await exec("git", ["config", "user.name", "Test"], worktreeD);
     await exec("git", ["commit", "-m", "Add migration 0001_branch_d"], worktreeD);
     await gitService.removeWorktree(repoPath, worktreeD);
 
@@ -343,7 +322,7 @@ describe("GitService", () => {
     expect(journalContent).not.toContain("<<<<<<<");
     expect(journalContent).not.toContain("=======");
     expect(journalContent).not.toContain(">>>>>>>");
-  }, 30000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("rejects a conflicting plumbing merge and never commits conflict markers (regression: #598)", async () => {
     // This is the exact failure mode from commit 4bf8c52c: mergeBranch used git plumbing
@@ -361,8 +340,6 @@ describe("GitService", () => {
     const wtX = await gitService.createWorktree(repoPath, "feature/conflict-regression-x");
     writeFileSync(join(wtX, "conflict-regression.txt"), "line1\nbranch X edit\nline3\n");
     await exec("git", ["add", "."], wtX);
-    await exec("git", ["config", "user.email", "test@test.com"], wtX);
-    await exec("git", ["config", "user.name", "Test"], wtX);
     await exec("git", ["commit", "-m", "branch X edit"], wtX);
     await gitService.removeWorktree(repoPath, wtX);
 
@@ -378,8 +355,6 @@ describe("GitService", () => {
     const wtY = await gitService.createWorktree(repoPath, "feature/conflict-regression-y");
     writeFileSync(join(wtY, "conflict-regression.txt"), "line1\nbranch Y edit\nline3\n");
     await exec("git", ["add", "."], wtY);
-    await exec("git", ["config", "user.email", "test@test.com"], wtY);
-    await exec("git", ["config", "user.name", "Test"], wtY);
     await exec("git", ["commit", "-m", "branch Y edit"], wtY);
     await gitService.removeWorktree(repoPath, wtY);
 
@@ -413,7 +388,7 @@ describe("GitService", () => {
       }
       expect(fileContent).not.toContain("<<<<<<<");
     }
-  }, 30000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("isMergeInProgress returns false when no merge is in progress", async () => {
     const result = await gitService.isMergeInProgress(repoPath);
@@ -442,6 +417,25 @@ describe("GitService", () => {
 });
 
 describe("autoRenumberMigrations", () => {
+  // Self-heal against leftovers from a KILLED prior run: createWorktree derives the worktree
+  // dir from the branch name at the GLOBAL %TEMP%/.worktrees/<leaf> path (not under the
+  // per-test repo), so this block's short fixed branches (feature/A, feature/B, …) collide
+  // with a stale on-disk dir a crashed run left behind → "git worktree add … already exists".
+  // Remove those specific leaves before each test so the block is deterministic.
+  beforeEach(async () => {
+    const { rm, readdir } = await import("node:fs/promises");
+    const wtRoot = join(tmpdir(), ".worktrees");
+    const prefixes = ["feature_A", "feature_B", "feature_no-mig", "feature_dirty-rebase"];
+    try {
+      const entries = await readdir(wtRoot);
+      await Promise.all(
+        entries
+          .filter((e) => prefixes.some((p) => e === p || e.startsWith(`${p}-`)))
+          .map((e) => rm(join(wtRoot, e), { recursive: true, force: true })),
+      );
+    } catch { /* no leftovers to clean */ }
+  });
+
   const DRIZZLE_DIR = "packages/shared/drizzle";
   const JOURNAL_REL = `${DRIZZLE_DIR}/meta/_journal.json`;
 
@@ -452,8 +446,6 @@ describe("autoRenumberMigrations", () => {
     const { writeFileSync, mkdirSync } = await import("node:fs");
     const dir = await mkdtemp(join(tmpdir(), "kanban-renumber-test-"));
     await exec("git", ["init"], dir);
-    await exec("git", ["config", "user.email", "test@test.com"], dir);
-    await exec("git", ["config", "user.name", "Test"], dir);
 
     mkdirSync(join(dir, DRIZZLE_DIR, "meta"), { recursive: true });
     for (const m of baseMigrations) {
@@ -493,8 +485,6 @@ describe("autoRenumberMigrations", () => {
     }
     writeFileSync(journalPath, JSON.stringify(journal, null, 2) + "\n");
     await exec("git", ["add", "."], worktreePath);
-    await exec("git", ["config", "user.email", "test@test.com"], worktreePath);
-    await exec("git", ["config", "user.name", "Test"], worktreePath);
     await exec("git", ["commit", "-m", "feature migrations"], worktreePath);
   }
 
@@ -519,8 +509,6 @@ describe("autoRenumberMigrations", () => {
       const { writeFileSync } = await import("node:fs");
       writeFileSync(join(wt, "README.md"), "# Test\nchange\n");
       await exec("git", ["add", "."], wt);
-      await exec("git", ["config", "user.email", "test@test.com"], wt);
-      await exec("git", ["config", "user.name", "Test"], wt);
       await exec("git", ["commit", "-m", "non-migration change"], wt);
 
       const headBefore = (await exec("git", ["rev-parse", "HEAD"], wt)).trim();
@@ -533,7 +521,7 @@ describe("autoRenumberMigrations", () => {
     } finally {
       await rm(repo, { recursive: true, force: true });
     }
-  }, 30000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("renumbers a single colliding migration and the merge then succeeds cleanly", async () => {
     // Branch A added 0001_a and merged. Branch B (older) also added 0001_b.
@@ -568,7 +556,7 @@ describe("autoRenumberMigrations", () => {
     } finally {
       await rm(repo, { recursive: true, force: true });
     }
-  }, 40000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("renumbers MULTIPLE feature migrations without clobbering (0001+0002 vs base 0001)", async () => {
     const repo = await createMigrationRepo([{ tag: "0000_base", when: 1000 }]);
@@ -605,7 +593,7 @@ describe("autoRenumberMigrations", () => {
     } finally {
       await rm(repo, { recursive: true, force: true });
     }
-  }, 40000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("is idempotent - a second renumber after a successful one is a no-op", async () => {
     const repo = await createMigrationRepo([{ tag: "0000_base", when: 1000 }]);
@@ -632,7 +620,7 @@ describe("autoRenumberMigrations", () => {
     } finally {
       await rm(repo, { recursive: true, force: true });
     }
-  }, 40000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("rebaseOntoBase commits leftover worktree changes instead of failing on a dirty tree", async () => {
     // Agents routinely leave a stray .gitignore/CLAUDE.local.md edit uncommitted; the rebase
@@ -654,5 +642,5 @@ describe("autoRenumberMigrations", () => {
     } finally {
       await rm(repo, { recursive: true, force: true });
     }
-  }, 30000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 });

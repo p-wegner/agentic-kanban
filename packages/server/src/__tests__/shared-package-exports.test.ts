@@ -1,3 +1,4 @@
+// @gate:always-run — statically verifies shared subpath imports resolve; imports nothing it checks (#538).
 import { describe, expect, it } from "vitest";
 import ts from "typescript";
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -20,13 +21,18 @@ function findTypeScriptFiles(dir: string): string[] {
   });
 }
 
+const SHARED_SUBPATH_PREFIX = "@agentic-kanban/shared/";
+
 function collectSharedSubpathImports(filePath: string): string[] {
-  const source = ts.createSourceFile(
-    filePath,
-    readFileSync(filePath, "utf8"),
-    ts.ScriptTarget.Latest,
-    true
-  );
+  const text = readFileSync(filePath, "utf8");
+  // Parsing every server file with the TypeScript compiler is the whole cost of this
+  // scan (~14s), and most files never mention the shared package. A substring check
+  // first skips the AST build for them; any file with a real subpath import must
+  // contain this literal, so the filter cannot hide a violation.
+  if (!text.includes(SHARED_SUBPATH_PREFIX)) {
+    return [];
+  }
+  const source = ts.createSourceFile(filePath, text, ts.ScriptTarget.Latest, true);
   const imports = new Set<string>();
 
   function recordModuleSpecifier(moduleSpecifier: ts.Expression | undefined) {
@@ -34,7 +40,7 @@ function collectSharedSubpathImports(filePath: string): string[] {
       return;
     }
     const specifier = moduleSpecifier.text;
-    if (specifier.startsWith("@agentic-kanban/shared/")) {
+    if (specifier.startsWith(SHARED_SUBPATH_PREFIX)) {
       imports.add(`.${specifier.slice("@agentic-kanban/shared".length)}`);
     }
   }
@@ -55,17 +61,52 @@ function collectSharedSubpathImports(filePath: string): string[] {
   return [...imports];
 }
 
+// This scan walks every server source file and TypeScript-parses the ones that
+// reference the shared package. That is inherently heavy (seconds even when idle) and
+// its cost scales with the repo, so under a full parallel run it blew the suite's 20s
+// default and reported a TIMEOUT rather than its real verdict — a permanently red gate
+// that says nothing. Give it explicit slack, per the vitest.config.ts rationale
+// ("give heavy tests slack under load"). The env override keeps a tighter CI knob.
+const SCAN_TIMEOUT_MS = Number(process.env.VITEST_TEST_TIMEOUT) || 90_000;
+
 describe("shared package exports", () => {
   it("covers every @agentic-kanban/shared subpath imported by the server", () => {
     const sharedPackage = JSON.parse(readFileSync(sharedPackageJson, "utf8")) as {
       exports?: Record<string, unknown>;
     };
-    const exportedSubpaths = new Set(Object.keys(sharedPackage.exports ?? {}));
+    const exportKeys = Object.keys(sharedPackage.exports ?? {});
+    const exportedSubpaths = new Set(exportKeys);
+    const patterns = exportKeys.filter((k) => k.includes("*"));
     const missingExports = new Map<string, Set<string>>();
+
+    /**
+     * #607 replaced 72 hand-listed `./lib/<name>` entries with a `./lib/*` pattern, so an
+     * exact-key check reports every subpath import as missing. Resolving the pattern is
+     * not merely restoring the old check — it is STRONGER: the old one only proved a key
+     * had been added to package.json, this proves the file the key resolves to exists.
+     * A typo'd deep import (`lib/git-servce`) now fails here instead of at runtime.
+     */
+    const isCovered = (subpath: string): boolean => {
+      if (exportedSubpaths.has(subpath)) return true;
+      return patterns.some((pattern) => {
+        const [prefix, suffix] = pattern.split("*");
+        if (!subpath.startsWith(prefix) || !subpath.endsWith(suffix)) return false;
+        const star = subpath.slice(prefix.length, subpath.length - suffix.length);
+        if (!star) return false;
+        const target = (sharedPackage.exports?.[pattern] as Record<string, string> | undefined)?.development;
+        if (!target) return false;
+        const resolved = join(repoRoot, "packages/shared", target.replace("*", star));
+        try {
+          return statSync(resolved).isFile();
+        } catch {
+          return false;
+        }
+      });
+    };
 
     for (const filePath of findTypeScriptFiles(serverSrc)) {
       for (const subpath of collectSharedSubpathImports(filePath)) {
-        if (!exportedSubpaths.has(subpath)) {
+        if (!isCovered(subpath)) {
           const relativePath = relative(repoRoot, filePath).replaceAll("\\", "/");
           const files = missingExports.get(subpath) ?? new Set<string>();
           files.add(relativePath);
@@ -79,7 +120,7 @@ describe("shared package exports", () => {
         ([subpath, files]) => `${subpath} imported by ${[...files].join(", ")}`
       )
     ).toEqual([]);
-  });
+  }, SCAN_TIMEOUT_MS);
 
   it("every export subpath has a 'development' condition pointing to src/ (stale-dist regression)", () => {
     // Regression guard for AK-567: every subpath in shared/package.json exports must

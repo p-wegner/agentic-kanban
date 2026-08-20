@@ -27,13 +27,16 @@ import { createSessionLifecycle, type AgentService } from "../services/session-m
 import { createSessionState } from "../services/session-manager/types.js";
 import { createWorkflowEngine } from "../startup/exit-workflow.js";
 import type { AgentOutputCallback } from "../services/agent.service.js";
+import type { AgentLaunchRequest } from "../services/agent-dispatch.service.js";
 import type { workspaceLaunchPreflight } from "../services/preflight-check.js";
 
 function createFakeAgentService(): { service: AgentService; getOnOutput: () => AgentOutputCallback | undefined } {
   let captured: AgentOutputCallback | undefined;
   const service = {
-    launch: vi.fn((_dir, _sid, _prompt, _args, onOutput: AgentOutputCallback) => {
-      captured = onOutput;
+    // #524: launch() takes one AgentLaunchRequest. See the note in
+    // session-lifecycle.test.ts — a mock IMPLEMENTATION is not a call site.
+    launch: vi.fn((request: AgentLaunchRequest) => {
+      captured = request.onOutput;
       return createMockProc();
     }),
     kill: vi.fn(() => true),

@@ -1,3 +1,4 @@
+import type { Tag, ExpandedCreatePanel } from "../lib/boardTypes.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Layout } from "../components/Layout.js";
@@ -10,7 +11,8 @@ import { useBoardMiscHandlers } from "../hooks/useBoardMiscHandlers.js";
 import { BoardPageView } from "../components/BoardPageView.js";
 import type { CreateIssueFormState } from "../components/CreateIssueForm.js";
 import { SkeletonBoard } from "../components/SkeletonBoard.js";
-import { showToast } from "../components/Toast.js";
+import { showToast } from "../lib/toast.js";
+import { fetchProjectRepos } from "../lib/projectReposQuery.js";
 import { matchesBoardFilters } from "../lib/boardFiltering.js";
 import { reconcileSelectedIssue } from "../lib/selectedIssueSync.js";
 import { createQuickUpdateHandlers } from "../lib/issueQuickUpdates.js";
@@ -18,6 +20,15 @@ import { useColumnResize } from "../lib/columnResizeHandler.js";
 import { useActivityNotifications, type NotificationEvent } from "../hooks/useActivityNotifications.js";
 import { buildRunQueueForecast } from "../components/RunQueueForecastPanel.js";
 import { useBoardPageRoute } from "./useBoardPageRoute.js";
+import { markProgrammaticNavigation, navigationBurst } from "./boardRouteSync.js";
+import type { IssuePanel } from "../lib/appRoutes.js";
+
+/**
+ * How long a FOCUS_ISSUE request whose issue is not on the board YET is held
+ * while the project it belongs to loads. Bounded so a link naming an issue that
+ * never arrives cannot open a panel long after the click.
+ */
+const FOCUS_ISSUE_HOLD_MS = 15_000;
 import { useBoardPreferences } from "../hooks/useBoardPreferences.js";
 import { useBoardPanels } from "../hooks/useBoardPanels.js";
 import { useBoardNavigation } from "../hooks/useBoardNavigation.js";
@@ -35,34 +46,25 @@ import { invalidateClientSurface, subscribeClientInvalidations } from "../lib/cl
 import { useBoardSelectionStore } from "../stores/boardSelectionStore.js";
 import { useBoardFilterStore, boardFilterActions } from "../stores/boardFilterStore.js";
 import { useBoardBulkSelectionStore } from "../stores/boardBulkSelectionStore.js";
+import { usePluginViewStore } from "../stores/pluginViewStore.js";
+import { SELECT_PROJECT_EVENT, type SelectProjectDetail, FOCUS_ISSUE_EVENT, type FocusIssueDetail } from "../lib/navigateView.js";
 import type {
   DependencyInfo,
   IssueWithStatus,
 } from "@agentic-kanban/shared";
+import { GLOBAL_BUTLER_PROJECT_ID } from "@agentic-kanban/shared";
+import { registerAction } from "../lib/actions.js";
+import { ButlerView } from "../components/ButlerView.js";
 import type { SavedViewReference } from "../lib/boardSavedViews.js";
+import { resolveVisibleView } from "../lib/viewRegistry.js";
+import { useHiddenViews } from "../hooks/useHiddenViews.js";
 
 
-export interface Project {
-  id: string;
-  name: string;
-  repoPath: string;
-  repoName: string;
-  defaultBranch: string | null;
-  remoteUrl: string | null;
-  setupScript?: string | null;
-  setupEnabled?: boolean;
-  setupBlocking?: boolean;
-  symlinkEnabled?: boolean;
-  symlinkDirs?: string | null;
-  archivedAt?: string | null;
-  activeWorkspaceCount?: number;
-}
+// #610: the DTO lives in lib/projectTypes.ts; re-exported so existing importers
+// (which reached UP into this route for it) keep working.
+import type { Project } from "../lib/projectTypes.js";
+export type { Project };
 
-export interface Tag {
-  id: string;
-  name: string;
-  color: string | null;
-}
 
 /** Pending "move to Done" confirmation (issue + the deferred mutation). */
 export type MoveToDonePending = { issue: IssueWithStatus; confirm: () => Promise<void> } | null;
@@ -77,10 +79,15 @@ export type DependencyImpactPending = {
 } | null;
 
 /** Inline create-issue panel expanded under a column. */
-export type ExpandedCreatePanel = { statusId: string; statusName: string; state: Partial<CreateIssueFormState> } | null;
 
 /** Workspace panel deep-link target (open a specific workspace/session). */
-export type WorkspaceInitial = { workspaceId: string; sessionId: string } | null;
+/**
+ * #610 — this declared `sessionId: string` while `stores/boardSelectionStore.ts` declared it
+ * OPTIONAL, and the store is right: `BoardOverlayPanels.tsx:302` calls
+ * `setWorkspaceInitial({ workspaceId })` with no session at all. Two copies of one type that
+ * disagreed on a field’s optionality is the drift this ticket exists for — the store owns it now.
+ */
+export type { WorkspaceInitial } from "../stores/boardSelectionStore.js";
 
 const ARCHIVE_STATUS_NAMES = new Set(["Done", "Cancelled"]);
 const BACKLOG_STATUS_NAME = "Backlog";
@@ -111,6 +118,10 @@ export function BoardPage() {
   const selectedIssue = useBoardSelectionStore((s) => s.selectedIssue);
   const setSelectedIssue = useBoardSelectionStore((s) => s.setSelectedIssue);
   const setWorkspaceIssue = useBoardSelectionStore((s) => s.setWorkspaceIssue);
+  // The SECOND issue-bearing panel (#446 follow-up). It was invisible to the
+  // URL: opening a diff/workspace drawer left the address bar on /board, so the
+  // state was unshareable and unreloadable.
+  const workspaceIssue = useBoardSelectionStore((s) => s.workspaceIssue);
   const {
     activeAgentsTarget,
     activeProjectId,
@@ -128,11 +139,13 @@ export function BoardPage() {
     tagsLoaded,
   } = useBoardDataController({ setError });
   const notifications = useActivityNotifications(activeProjectId);
-  const { addBoardEvent: addNotificationBoardEvent, addApprovalEvent: addNotificationApprovalEvent } = notifications;
+  const { addBoardEvent: addNotificationBoardEvent, addApprovalEvent: addNotificationApprovalEvent, addPluginGateEvent: addNotificationPluginGateEvent } = notifications;
   const [mutating, setMutating] = useState(false);
   // A prompt to seed the butler with when entering its view via "Chat about this
   // ticket" (#838). Cleared once ButlerView has consumed it.
   const [butlerInitialPrompt, setButlerInitialPrompt] = useState<string | null>(null);
+  // When no project is registered, the user can still open a GLOBAL butler to import/create one.
+  const [showGlobalButler, setShowGlobalButler] = useState(false);
   // Filter slice (#958) — filter state lives in the board filter store. This
   // container only reads what it needs to compute `filteredColumns` (below)
   // and to run the validation/hydration effects; consumers (toolbar, filter
@@ -157,16 +170,19 @@ export function BoardPage() {
   const loadProjectsRef = useRef<() => Promise<string | undefined>>(() => Promise.resolve(undefined));
   const [expandedCreatePanel, setExpandedCreatePanel] = useState<ExpandedCreatePanel>(null);
 
-  const {
-    viewMode,
-    graphFocusIssueId,
-    setGraphFocusIssueId,
-    handleViewModeChange,
-  } = useBoardPageRoute();
-
   // Extracted hooks
   const prefs = useBoardPreferences(activeProjectId);
   const panels = useBoardPanels();
+  // #390 — one palette entry is what makes the board-level butler reachable at all once a project
+  // exists. Registered here because `setShowGlobalButler` is BoardPage state.
+  useEffect(() => registerAction({
+    id: "board-butler",
+    label: "Board Butler",
+    description: "Ask the board-level butler to set up a new project or plugin (not scoped to the active project)",
+    icon: "\u2617",
+    category: "navigation",
+    handler: () => setShowGlobalButler(true),
+  }), []);
   const agentQuestionsCount = useAgentQuestionsCount(activeProjectId);
   const { columnWidths, handleColumnResizeStart, resetColumnWidth } = useColumnResize();
 
@@ -187,25 +203,52 @@ export function BoardPage() {
     setApprovalRequests,
   } = useBoardRealtimeController({
     activeProjectId,
+    columns,
     columnsRef,
     creatingInColumnId,
     loadProjectsRef,
     addNotificationApprovalEvent,
     addNotificationBoardEvent,
+    addNotificationPluginGateEvent,
     setColumns,
   });
-  useEffect(() => subscribeClientInvalidations((event) => {
-    if (event.surface !== "workspace" && event.surface !== "board" && event.surface !== "issue-detail") return;
-    if (!activeProjectId || event.projectId !== activeProjectId) return;
+  useEffect(() => {
     // Workspace/board live events change which agents are running, which drives the
     // project selector's "active agents" badge (activeWorkspaceCount). That count rides
     // on the projects query, which is otherwise only refreshed on explicit project-mgmt
-    // actions — so without this it stays stale (showing agents after they've stopped).
-    if (event.surface === "workspace" || event.surface === "board") {
-      void queryClient.invalidateQueries({ queryKey: boardQueryKeys.projects });
-    }
-    scheduleRefetch();
-  }), [activeProjectId, scheduleRefetch, queryClient]);
+    // actions — so without a refresh here it stays stale (showing agents after they've
+    // stopped). But /api/projects is one of the slowest endpoints, and an undebounced
+    // invalidation per mutation event cancels and restarts the in-flight fetch on every
+    // merge-cascade event, so it can never settle. Leading + trailing 30s throttle, and
+    // never cancel an in-flight refetch — the badge only needs eventual freshness.
+    let throttleTimer: number | null = null;
+    let trailingPending = false;
+    const invalidateProjects = () =>
+      queryClient.invalidateQueries({ queryKey: boardQueryKeys.projects }, { cancelRefetch: false });
+    const unsubscribe = subscribeClientInvalidations((event) => {
+      if (event.surface !== "workspace" && event.surface !== "board" && event.surface !== "issue-detail") return;
+      if (!activeProjectId || event.projectId !== activeProjectId) return;
+      if (event.surface === "workspace" || event.surface === "board") {
+        if (throttleTimer == null) {
+          void invalidateProjects();
+          throttleTimer = window.setTimeout(() => {
+            throttleTimer = null;
+            if (trailingPending) {
+              trailingPending = false;
+              void invalidateProjects();
+            }
+          }, 30_000);
+        } else {
+          trailingPending = true;
+        }
+      }
+      scheduleRefetch();
+    });
+    return () => {
+      unsubscribe();
+      if (throttleTimer != null) window.clearTimeout(throttleTimer);
+    };
+  }, [activeProjectId, scheduleRefetch, queryClient]);
   const tickerEntries = useAgentLiveTicker(columns, sessionActivity, panels.showLiveActivityTicker);
 
   // Keep selectedIssue in sync with board data (F6 stale data fix). The pure
@@ -240,6 +283,132 @@ export function BoardPage() {
     refetchBoard,
     loadProjects,
   });
+
+  // Issue deep links (#446) resolve against `columnsRef`, not `columns` — same
+  // reason as the FOCUS_ISSUE handler below: a link applied right after a
+  // project switch must read the CURRENT board.
+  // The panel handlers are created below (they need handleViewModeChange, which
+  // the route hook returns), so the route hook reaches them through a ref.
+  const openWorkspacePanelRef = useRef<(issue: IssueWithStatus, workspaceId?: string) => void>(() => {});
+  const openIssueNumber = useCallback((issueNumber: number, panel: IssuePanel = "issue"): boolean => {
+    const issue = columnsRef.current
+      .flatMap((col) => col.issues)
+      .find((i) => i.issueNumber === issueNumber);
+    if (!issue) return false;
+    if (panel === "workspace") {
+      openWorkspacePanelRef.current(issue);
+    } else {
+      setWorkspaceIssue(null);
+      setSelectedIssue(issue);
+    }
+    return true;
+  }, [columnsRef, setSelectedIssue, setWorkspaceIssue]);
+  // Back past an `/issue/<n>` entry closes whichever panel that entry opened.
+  const closeSelectedIssue = useCallback(() => {
+    setSelectedIssue(null);
+    setWorkspaceIssue(null);
+  }, [setSelectedIssue, setWorkspaceIssue]);
+
+  // The URL owns (project, view, open issue) (#446): inbound deep links win over
+  // the stored view preference, every state change is reflected in the address
+  // bar, and back/forward restores all three.
+  const {
+    viewMode: routedViewMode,
+    graphFocusIssueId,
+    setGraphFocusIssueId,
+    handleViewModeChange,
+  } = useBoardPageRoute({
+    projects,
+    activeProjectId,
+    // The workspace drawer wins when both are set (the handlers clear the other,
+    // so this is only a tie-break) — it is the panel actually on top.
+    selectedIssueNumber: workspaceIssue?.issueNumber ?? selectedIssue?.issueNumber ?? null,
+    openPanel: workspaceIssue ? "workspace" : selectedIssue ? "issue" : null,
+    columns,
+    onSelectProject: handleProjectChange,
+    onOpenIssueNumber: openIssueNumber,
+    onCloseIssue: closeSelectedIssue,
+  });
+
+  // #233 — a view hidden for this project must not remain the RENDERED one. It can still be the
+  // routed one (a deep link, or a stored preference from before it was hidden), and rendering it
+  // would leave the toolbar with no active tab and the user with no way back short of editing the
+  // URL. Falls back to the board; the URL is left alone so a link keeps working once the view is
+  // un-hidden again.
+  const { hidden: hiddenViews } = useHiddenViews(activeProjectId);
+  const viewMode = resolveVisibleView(routedViewMode, hiddenViews);
+
+  // #323: cross-project deep links (inbox gate entries, sticky gate toasts,
+  // desktop notifications) dispatch SELECT_PROJECT_EVENT from lib-layer code;
+  // BoardPage owns handleProjectChange, so it performs the actual switch here.
+  const projectChangeRef = useRef(handleProjectChange);
+  projectChangeRef.current = handleProjectChange;
+  const activeProjectIdSelectRef = useRef(activeProjectId);
+  activeProjectIdSelectRef.current = activeProjectId;
+  useEffect(() => {
+    function onSelectProject(e: Event) {
+      const detail = (e as CustomEvent<SelectProjectDetail>).detail;
+      if (!detail?.projectId || detail.projectId === activeProjectIdSelectRef.current) return;
+      // First step of a project -> view -> issue chain (#446): coalesce the
+      // resulting URL writes so the user gets ONE back-step, not three.
+      markProgrammaticNavigation();
+      void projectChangeRef.current(detail.projectId);
+    }
+    window.addEventListener(SELECT_PROJECT_EVENT, onSelectProject);
+    return () => window.removeEventListener(SELECT_PROJECT_EVENT, onSelectProject);
+  }, []);
+
+  // #413: open the issue a deep link names. `columnsRef` (not `columns`) so the listener is
+  // registered once and still reads the CURRENT board — a link fired right after a project
+  // switch would otherwise resolve against the previous project's columns.
+  const applyIssueFocus = useCallback((detail: FocusIssueDetail): boolean => {
+    const issue = columnsRef.current
+      .flatMap((col) => col.issues)
+      .find((i) => (detail.issueId ? i.id === detail.issueId : i.issueNumber === detail.issueNumber));
+    if (!issue) return false;
+    // A link that names a WORKSPACE (an inbox "finished, waiting to land" item)
+    // is about that workspace, so open the drawer, not the detail panel — the
+    // URL then says `/issue/<n>/workspace` and reloads as the drawer.
+    if (detail.panel === "workspace" || detail.workspaceId) {
+      openWorkspacePanelRef.current(issue, detail.workspaceId);
+    } else {
+      setWorkspaceIssue(null);
+      setSelectedIssue(issue);
+    }
+    return true;
+  }, [columnsRef, setSelectedIssue, setWorkspaceIssue]);
+
+  // A cross-project link (inbox item) fires its focus while the project switch
+  // is still in flight, so the issue is not on the CURRENT board yet. Hold it
+  // until that project's columns arrive — bounded, so a link naming an issue
+  // that never shows up cannot pop a panel open minutes later.
+  const pendingFocusRef = useRef<{ detail: FocusIssueDetail; expiresAt: number } | null>(null);
+  useEffect(() => {
+    function onFocusIssue(e: Event) {
+      const detail = (e as CustomEvent<FocusIssueDetail>).detail;
+      if (!detail) return;
+      // Usually the last step of a project -> view -> issue chain (#446).
+      markProgrammaticNavigation();
+      pendingFocusRef.current = applyIssueFocus(detail)
+        ? null
+        : { detail, expiresAt: Date.now() + FOCUS_ISSUE_HOLD_MS };
+    }
+    window.addEventListener(FOCUS_ISSUE_EVENT, onFocusIssue);
+    return () => window.removeEventListener(FOCUS_ISSUE_EVENT, onFocusIssue);
+  }, [applyIssueFocus]);
+
+  useEffect(() => {
+    const held = pendingFocusRef.current;
+    if (!held) return;
+    if (Date.now() > held.expiresAt) {
+      pendingFocusRef.current = null;
+      return;
+    }
+    // Still the SAME click: its history entry already exists, so the URL write
+    // this focus triggers must replace rather than add a second back-step.
+    navigationBurst.markSilent(Date.now());
+    if (applyIssueFocus(held.detail)) pendingFocusRef.current = null;
+  }, [columns, applyIssueFocus]);
 
 
   const { handleQuickPriorityChange, handleQuickAddTag, handleQuickRemoveTag, handleQuickTogglePinned } =
@@ -278,6 +447,9 @@ export function BoardPage() {
     setButlerInitialPrompt,
     handleViewModeChange,
   });
+  // Close the loop for the route hook and the FOCUS_ISSUE listener above, both
+  // of which are declared before this hook exists.
+  openWorkspacePanelRef.current = (issue, workspaceId) => handleManageWorkspaces(issue, workspaceId);
 
   const boardStatusOptions = useMemo(
     () => columns.map((col) => ({ id: col.id, name: col.name })),
@@ -416,6 +588,19 @@ export function BoardPage() {
     handleViewModeChange, refetchBoard, setCollapsedGroups,
   });
 
+  // Multi-repo gate (#82): the Multi-Repo Monitor is only offered when the active
+  // project has >0 additional repos registered.
+  const [hasAdditionalRepos, setHasAdditionalRepos] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    setHasAdditionalRepos(false);
+    if (!activeProjectId) return;
+    fetchProjectRepos(queryClient, activeProjectId)
+      .then((rows) => { if (!cancelled) setHasAdditionalRepos(rows.length > 0); })
+      .catch(() => { /* single-repo behavior on failure */ });
+    return () => { cancelled = true; };
+  }, [activeProjectId, queryClient]);
+
   // Keyboard shortcuts (cursor/search/focus state is read from the board
   // stores inside the hook — no setter wiring from this container).
   useBoardKeyboardShortcuts(
@@ -429,6 +614,7 @@ export function BoardPage() {
       viewMode,
       projects,
       activeProjectId,
+      hasAdditionalRepos,
     },
     {
       handleIssueClick,
@@ -448,17 +634,48 @@ export function BoardPage() {
     );
   }
 
+  // #390 — the board-level butler used to be reachable ONLY on an empty board, so "tell a butler
+  // on a populated board: build me X" simply did not work. It is the same butler either way; the
+  // empty-board case is just where it was first needed. Rendered ahead of the empty-board branch
+  // so one code path serves both, reachable from the command palette ("Board Butler").
+  if (showGlobalButler) {
+    return (
+      <Layout onRegisterProject={handleRegisterProject} onCreateProject={handleCreateProject}>
+        <div className="h-[calc(100vh-3rem)]">
+          <ButlerView
+            projectId={GLOBAL_BUTLER_PROJECT_ID}
+            columns={[]}
+            liveActivity={{}}
+            liveStats={{}}
+            onIssueClick={() => {}}
+            onExit={() => setShowGlobalButler(false)}
+          />
+        </div>
+      </Layout>
+    );
+  }
+
   if (projects.length === 0 || !activeProjectId) {
     return (
       <Layout onRegisterProject={handleRegisterProject} onCreateProject={handleCreateProject}>
+        {/* The Butler branch that used to sit here behind a literal `false` was a stale
+            duplicate of the `showGlobalButler` block ABOVE, which already serves both this
+            empty-board case and the command palette. `no-constant-condition` was pointing at
+            genuinely dead JSX, not at a style nit. */}
         <div className="flex items-center justify-center h-96 text-gray-500 dark:text-gray-400">
-          <div className="text-center">
-            <p className="text-lg font-medium text-gray-700 dark:text-gray-300 mb-2">
-              No projects registered
-            </p>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              Click the <strong>+</strong> button in the header to register a git repo as a project.
-            </p>
+            <div className="text-center">
+              <p className="text-lg font-medium text-gray-700 dark:text-gray-300 mb-2">
+                No projects registered
+              </p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Click the <strong>+</strong> button in the header to register a git repo as a project.
+              </p>
+              <button
+                onClick={() => setShowGlobalButler(true)}
+                className="mt-4 px-4 py-2 text-sm font-medium text-white bg-brand-600 rounded-md hover:bg-brand-700"
+              >
+                Or ask the Butler to set one up
+              </button>
           </div>
         </div>
       </Layout>
@@ -474,6 +691,12 @@ export function BoardPage() {
   const canStartWorkspace = !!activeProject?.repoPath;
 
   function handleNotificationEventClick(event: NotificationEvent) {
+    // Gate entries deep-link to the loop pane (#301) — they carry no issue.
+    if (event.type === "plugin_gate" && event.pluginSlug && event.loopName) {
+      usePluginViewStore.getState().focusLoop(event.pluginSlug, event.loopName);
+      handleViewModeChange("plugin-views");
+      return;
+    }
     if (event.issueId) {
       const found = columns.flatMap((col) => col.issues).find((iss) => iss.id === event.issueId);
       if (found) {
@@ -619,3 +842,6 @@ export function BoardPage() {
     />
   );
 }
+
+/** #610 — re-exported so this route's existing importers are unchanged. */
+export type { Tag, ExpandedCreatePanel } from "../lib/boardTypes.js";

@@ -54,6 +54,19 @@ export const SETTINGS_REGISTRY = {
   mock_agent_profile: { type: "string", default: "" },
   mock_agent_delay_ms: { type: "number", default: "" },
   permission_prompt_tool: { type: "bool", default: "false" },
+  /**
+   * Run builder agents INSIDE the worktree's devcontainer instead of as host
+   * processes. Off by default: it requires Docker + the @devcontainers/cli, and
+   * only takes effect for worktrees that actually declare a devcontainer — any
+   * missing prerequisite falls back to host execution rather than failing.
+   */
+  devcontainer_builders: { type: "bool", default: "false" },
+  /**
+   * When `devcontainer_builders` is on, refuse to launch instead of silently
+   * falling back to host execution on a containerization prerequisite failure.
+   * Off by default (best-effort fallback is the default contract, #160).
+   */
+  devcontainer_strict: { type: "bool", default: "false" },
   auto_review: { type: "bool", default: "true" },
   auto_merge: { type: "bool", default: "true" },
   auto_merge_in_review: { type: "bool", default: "false" },
@@ -77,8 +90,21 @@ export const SETTINGS_REGISTRY = {
   learning_step_before_merge: { type: "bool", default: "false" },
   auto_monitor: { type: "bool", default: "false" },
   auto_monitor_interval: { type: "number", default: "4" },
+  // Merged-workspace count after which the compounding "setup once" pass runs for a
+  // project (#127). The pass scaffolds hooks, lint/test config, the project's agent
+  // skills and a domain map ONCE, between tickets, so later builders inherit an already
+  // set-up environment instead of re-discovering it. 0 disables it board-wide.
+  compounding_setup_min_merges: { type: "number", default: "5" },
+  // Max per-workspace Docker service stacks that may be "up" at once (#56). Empty/0 =
+  // unlimited (default — unchanged behaviour). When >0, provisioning DEFERS rather than
+  // starting an (N+1)th stack, so an over-subscribed host queues instead of thrashing.
+  // In a DinD deployment the KANBAN_STACK_PORT_RANGE size is ALSO a natural cap.
+  max_concurrent_stacks: { type: "number", default: "" },
   nudge_auto_start: { type: "bool", default: "false" },
   nudge_wip_limit: { type: "number", default: "" },
+  // Idle-seconds threshold after which a running/fixing agent that has produced no
+  // activity/stats delta is surfaced with a "stalled" badge on the agent views (#86).
+  agent_stall_threshold_sec: { type: "number", default: "240" },
   projects_base_path: { type: "string", default: "" },
   plan_auto_continue: { type: "bool", default: "true" },
   visual_verification_mode: { type: "string", default: "before_merge" },
@@ -88,6 +114,19 @@ export const SETTINGS_REGISTRY = {
   backup_keep_last: { type: "number", default: "" },
   butler_event_feed: { type: "bool", default: "false" },
   butler_event_feed_min_interval_ms: { type: "number", default: "30000" },
+  /**
+   * #307 — when a plugin loop reaches a human gate, wake the butler (starting it on
+   * demand) and inject a digest turn summarizing the gate so approval can happen as a
+   * conversation. Unlike the general event feed this is ON by default and not rate
+   * limited: a gate is by definition waiting on a person.
+   */
+  butler_gate_digest: { type: "bool", default: "true" },
+  /**
+   * #309 — have the butler pre-read a new gate's artifacts and store a structured
+   * approve/revise recommendation, shown as a chip on the gate card. One extra butler
+   * turn per gate.
+   */
+  butler_gate_recommendation: { type: "bool", default: "true" },
   butler_auto_answer: { type: "bool", default: "false" },
   butler_auto_answer_min_confidence: { type: "number", default: "" },
   monitor_butler_enabled: { type: "bool", default: "false" },
@@ -204,10 +243,24 @@ export function getBool(source: PrefSource, key: string, fallback = false): bool
   return parseBoolSetting(key, readRaw(source, key), fallback);
 }
 
-/** Numeric read: parses the string; returns `fallback` when absent or unparseable. */
+/**
+ * Numeric read. Unset/empty ⇒ the SETTINGS_REGISTRY default for the key, exactly as
+ * `getBool` does (#572) — `fallback` remains for keys outside the registry (a dynamic
+ * per-project key has no registry row to default from).
+ *
+ * The asymmetry this closes is what #947 introduced by fixing the bool half only: with
+ * `getNumber` ignoring the registry, `auto_monitor_interval` (registry default "4") was
+ * re-defaulted inline at seven call sites across server and client, so the registry was the
+ * source of truth for bool defaults and merely a suggestion for number ones. An unparseable
+ * stored value still falls back rather than defaulting — garbage is the caller's problem to
+ * survive, not a reason to silently adopt the registry value.
+ */
 export function getNumber(source: PrefSource, key: string, fallback = 0): number {
+  const def = (SETTINGS_REGISTRY as Record<string, SettingDef | undefined>)[key];
+  const registryDefault = def && def.type === "number" && def.default !== "" ? Number(def.default) : undefined;
+  const unsetValue = registryDefault !== undefined && Number.isFinite(registryDefault) ? registryDefault : fallback;
   const raw = readRaw(source, key);
-  if (raw === undefined || raw === "") return fallback;
+  if (raw === undefined || raw === "") return unsetValue;
   const n = Number(raw);
   return Number.isFinite(n) ? n : fallback;
 }

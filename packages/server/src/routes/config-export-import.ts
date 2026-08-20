@@ -3,6 +3,8 @@ import { createPreferenceService } from "../services/preference.service.js";
 import { createProjectService } from "../services/project.service.js";
 import { createRouter } from "../middleware/create-router.js";
 
+import { queryFlag } from "../middleware/query-params.js";
+import { strategyPrefKey } from "@agentic-kanban/shared/lib/strategy-policy";
 export const CONFIG_EXPORT_VERSION = 1;
 
 /** Workflow preferences safe to export — no secrets, no profiles, no per-ID session data. */
@@ -110,7 +112,7 @@ export function createConfigExportImportRoute(database: Database) {
       preferenceService.getSettings(),
     ]);
 
-    const boardStrategyKey = `board_strategy_${projectId}`;
+    const boardStrategyKey = strategyPrefKey(projectId);
     const boardStrategy = parseBoardStrategy(settings[boardStrategyKey]);
 
     const workflowPreferences: Record<string, string> = {};
@@ -177,7 +179,7 @@ export function createConfigExportImportRoute(database: Database) {
       preferenceService.getSettings(),
     ]);
 
-    const boardStrategyKey = `board_strategy_${projectId}`;
+    const boardStrategyKey = strategyPrefKey(projectId);
     const statusChanges = {
       toAdd: config.statuses.filter(
         (s) => !currentStatuses.some((cs) => cs.name.toLowerCase() === s.name.toLowerCase()),
@@ -199,7 +201,7 @@ export function createConfigExportImportRoute(database: Database) {
       config.boardStrategy !== null &&
       JSON.stringify(config.boardStrategy) !== currentSettings[boardStrategyKey];
 
-    const dryRun = c.req.query("dryRun") === "true";
+    const dryRun = queryFlag(c, "dryRun");
     if (dryRun) {
       return c.json({
         dryRun: true,

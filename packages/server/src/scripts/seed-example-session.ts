@@ -5,7 +5,10 @@
  * Usage: npx tsx src/scripts/seed-example-session.ts <issueId> <workspaceId> <sessionId>
  *   OR: npx tsx src/scripts/seed-example-session.ts (auto-creates workspace + session)
  */
-import { createClient } from "@libsql/client";
+// Use the shared pragma factory (FK ON) instead of a bare createClient — a bare
+// client runs with foreign_keys=OFF and can INSERT FK-violating workspace/session
+// rows into the live DB (the #987 disease; arch-review §2.3).
+import { createClientWithPragmas } from "../db/pragmas.js";
 import { readFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -15,7 +18,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const dbPath = resolve(__dirname, "../../kanban.db");
 const examplePath = resolve(__dirname, "../../../../docs/temp/examplesession.md");
 
-const db = createClient({ url: `file:${dbPath}` });
+const db = await createClientWithPragmas(`file:${dbPath}`);
 
 const ISSUE_ID = process.argv[2];
 const WS_ID = process.argv[3] || randomUUID();

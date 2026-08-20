@@ -1,7 +1,13 @@
 import { and, eq, isNull, ne, or } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
-import { workspaces } from "../schema/index.js";
+import { repos, workspaces } from "../schema/index.js";
 import type * as schema from "../schema/index.js";
+import {
+  checkWorkspaceTransition,
+  getTransitionStrictness,
+  IllegalStatusTransitionError,
+} from "./status-transitions.js";
+import { errorMessage } from "./error-message.js";
 
 /**
  * Both the server (`packages/server/src/db/index.ts`) and mcp-server
@@ -14,26 +20,62 @@ type WorkspaceStatusDb = LibSQLDatabase<typeof schema> | Parameters<Parameters<L
 
 type WorkspaceRow = typeof workspaces.$inferSelect;
 
-/** The stringly workspace lifecycle statuses observed across the codebase. */
-export type WorkspaceStatus =
-  | "active"
-  | "idle"
-  | "blocked"
-  | "reviewing"
-  | "fixing"
-  | "closed"
-  | "ready_for_merge"
-  | "awaiting-plan-approval"
-  | "error";
+// #596: the status VOCABULARY and the pure liveness predicates moved to
+// `workspace-liveness.ts`. This module value-imports drizzle + the schema, and the client
+// needs those predicates — ten-plus client modules deep-importing this file put drizzle
+// and every table definition into the browser bundle. Re-exported here so server-side
+// callers are unchanged and there is still exactly one definition.
+export {
+  TERMINAL_WORKSPACE_STATUSES,
+  AGENT_RUNNING_STATUSES,
+  WIP_OCCUPYING_STATUSES,
+  isTerminalWorkspaceStatus,
+  isAgentRunningStatus,
+  occupiesWipSlot,
+  holdsLiveResources,
+} from "./workspace-liveness.js";
+export type { WorkspaceStatus } from "./workspace-liveness.js";
+
+import type { WorkspaceStatus } from "./workspace-liveness.js";
+
+/**
+ * Columns `setWorkspaceStatus` refuses to write through `opts.set`.
+ *
+ * `id`/`status`/`updatedAt` because the function owns them. The five mirror columns because it
+ * CANNOT own them: each has a counterpart on the workspace's leading `repos` row that only the
+ * server-side repository helpers keep in sync (#226).
+ */
+type WorkspaceStatusImmutableField =
+  | "id"
+  | "status"
+  | "updatedAt"
+  | "branch"
+  | "workingDir"
+  | "baseBranch"
+  | "baseCommitSha"
+  | "mergedHeadSha";
 
 export interface SetWorkspaceStatusOpts {
   /** Timestamp for updatedAt (defaults to now). */
   now?: string;
   /**
    * Extra columns to write atomically with the status
-   * (e.g. `workingDir: null` on close, `readyForMerge: false` on reset).
+   * (e.g. `readyForMerge: false` on reset).
+   *
+   * The five LEADING-REPO MIRROR columns are excluded (#226). They are mirrored into the
+   * workspace's `is_leading` repos row by the repository helpers, and `setWorkspaceStatus`
+   * cannot mirror: it lives in `packages/shared` and the mirror lives in the server's
+   * `repo.repository`, so a write through this escape hatch silently desynchronised the row.
+   * Four call sites were doing exactly that with `{ workingDir: null }` on close, which would
+   * have made `leadingRef` report a worktree that had already been torn down once the row
+   * becomes the source of truth.
+   *
+   * Excluding them at the TYPE level rather than fixing those four is deliberate: `set` is an
+   * open hatch, so a list of known offenders would go stale the moment someone adds a fifth.
+   * Use `clearWorkspaceWorkingDir` / the merge-cleanup repository helpers instead — they write
+   * both sides.
    */
-  set?: Partial<Omit<WorkspaceRow, "id" | "status" | "updatedAt">>;
+  set?: Partial<Omit<WorkspaceRow, WorkspaceStatusImmutableField>>;
   /**
    * Only apply the write when the workspace is currently in this status
    * (compare-and-set; e.g. auto-merge-orchestrator resets fixing → idle only
@@ -45,6 +87,11 @@ export interface SetWorkspaceStatusOpts {
    * Requires a documented reason, which is logged.
    */
   force?: { reason: string };
+  /**
+   * Optional caller label included in transition-legality warnings
+   * (arch-review §1.1) so an illegal transition is attributable to a code path.
+   */
+  caller?: string;
 }
 
 /**
@@ -91,6 +138,29 @@ export async function setWorkspaceStatus(
         .where(eq(workspaces.id, workspaceId))
         .limit(1);
       const current = rows[0];
+      // Transition-legality observability (arch-review §1.1). The pre-read gives
+      // us the current status only on the non-close path; writes INTO "closed"
+      // are always legal (any workspace may be closed) so no read is added there.
+      // Default policy is WARN-AND-ALLOW: a "warn"-severity illegal transition is
+      // logged but still applied; a "forbidden" terminal resurrection falls to the
+      // existing terminal guard below (no-op / returns false). Under STRICT policy
+      // any illegal transition throws (rethrown past the catch below).
+      if (current?.status) {
+        const check = checkWorkspaceTransition(current.status as WorkspaceStatus, status, {
+          mergedAt: current.mergedAt,
+          force: !!opts.force,
+        });
+        if (!check.legal && getTransitionStrictness() === "strict") {
+          throw new IllegalStatusTransitionError(
+            `[workspace-status] illegal transition of workspace ${workspaceId} (caller: ${opts.caller ?? "unknown"}): ${check.message}`,
+          );
+        }
+        if (check.severity === "warn") {
+          console.warn(
+            `[workspace-status] illegal transition of workspace ${workspaceId} "${current.status}" -> "${status}" (caller: ${opts.caller ?? "unknown"}) — warn-and-allow (arch-review §1.1; set strictness=strict to enforce)`,
+          );
+        }
+      }
       if (current && current.status === "closed" && current.mergedAt) {
         if (opts.force) {
           console.warn(
@@ -116,7 +186,12 @@ export async function setWorkspaceStatus(
       : undefined;
     const result = await database
       .update(workspaces)
-      .set({ status, updatedAt: now, ...(opts.set ?? {}) })
+      // summaryDirty (#399, decision 014): every status transition is a board event that
+      // can change the workspace-summary git facts (session start/exit, review, merge
+      // close, ...). Stamping the dirty flag atomically here — the single status-write
+      // authority — is what keeps the persisted summary projection incremental without
+      // hooks in every caller. `opts.set` may deliberately override it.
+      .set({ status, updatedAt: now, summaryDirty: true, ...(opts.set ?? {}) })
       .where(and(eq(workspaces.id, workspaceId), casGuard, terminalGuard));
     const affected = result.rowsAffected ?? (result as { changes?: number }).changes ?? 0;
     if (affected === 0) {
@@ -130,11 +205,24 @@ export async function setWorkspaceStatus(
       }
       return false;
     }
+    // #415 — the per-repo merge-status projection (repos.summary_*, decision 014
+    // extension): a status transition is the same board event that dirties the
+    // workspace projection above, so the workspace's repos rows are dirtied in the
+    // same authority. Best-effort: a failure here only delays a projection refresh.
+    try {
+      await database
+        .update(repos)
+        .set({ summaryDirty: true })
+        .where(eq(repos.workspaceId, workspaceId));
+    } catch { /* projection staleness heals via TTL + the 5-min pass */ }
     return true;
   } catch (err) {
+    // A STRICT-policy transition violation must propagate, not be swallowed into
+    // a `false` return like an incidental DB failure.
+    if (err instanceof IllegalStatusTransitionError) throw err;
     console.warn(
       `[workspace-status] failed to set workspace ${workspaceId} -> "${status}":`,
-      err instanceof Error ? err.message : String(err),
+      errorMessage(err),
     );
     return false;
   }

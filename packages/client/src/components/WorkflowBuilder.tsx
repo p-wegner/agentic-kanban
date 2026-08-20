@@ -16,15 +16,16 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { apiFetch, apiPost, apiPut } from "../lib/api.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { layoutGraph } from "../lib/workflowLayout.js";
+import { ISSUE_TYPES } from "@agentic-kanban/shared";
 import {
   emptyWorkflowHistory,
   pushWorkflowHistory,
   redoWorkflowHistory,
   undoWorkflowHistory,
   type WorkflowHistoryState,
-} from "./workflowHistory.js";
+} from "../lib/workflowHistory.js";
 
 const NODE_TYPES = ["start", "normal", "parallel-fork", "parallel-join", "end"] as const;
 const EDGE_CONDITIONS = ["manual", "auto_on_exit_0", "tests_pass", "tests_fail", "diff_clean", "diff_touches"] as const;
@@ -432,10 +433,9 @@ export function WorkflowBuilder({
         />
         <select value={ticketType} onChange={(e) => setTicketType(e.target.value)} className="text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1 dark:bg-gray-900 dark:text-gray-100" title="Default for ticket type">
           <option value="">No auto-route</option>
-          <option value="task">task</option>
-          <option value="bug">bug</option>
-          <option value="feature">feature</option>
-          <option value="chore">chore</option>
+          {ISSUE_TYPES.map((t) => (
+            <option key={t} value={t}>{t}</option>
+          ))}
         </select>
         {isBuiltin && <span className="text-[11px] text-amber-600">built-in → saving creates an editable copy</span>}
         <div className="ml-auto flex items-center gap-2">

@@ -1,3 +1,4 @@
+import { readSessionStats } from "@agentic-kanban/shared/lib/session-stats-blob";
 import type { Database } from "../db/index.js";
 import { getSessionStatsByWorkspaceIds } from "../repositories/session-stats.repository.js";
 
@@ -23,7 +24,7 @@ export async function enrichWorkspacesWithSessionData(
   for (const [wsId, sess] of latestByWs) {
     if (!sess.stats) continue;
     try {
-      const p = JSON.parse(sess.stats) as Record<string, unknown>;
+      const p = readSessionStats(sess.stats);
       const explicitContextTokens = (p.contextTokens as number) ?? 0;
       const tokens = explicitContextTokens || ((p.inputTokens as number) ?? 0) + ((p.cacheReadTokens as number) ?? 0);
       if (tokens) contextTokensMap.set(wsId, tokens);

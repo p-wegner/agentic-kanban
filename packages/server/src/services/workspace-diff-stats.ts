@@ -1,4 +1,5 @@
 import { getDiffShortstat } from "./git.service.js";
+import { resolveDiffRef } from "@agentic-kanban/shared/lib/git-service";
 
 export interface WorkspaceDiffStatsInput {
   workingDir: string | null;
@@ -19,8 +20,7 @@ export async function getWorkspaceDiffStats(
 ): Promise<WorkspaceDiffStats | null> {
   if (!workspace.workingDir || workspace.status === "closed") return null;
 
-  const baseBranch = workspace.baseBranch || projectDefaultBranch;
-  const diffRef = workspace.isDirect ? "HEAD" : baseBranch;
+  const diffRef = resolveDiffRef(workspace, projectDefaultBranch);
   if (!diffRef) return null;
 
   return getDiffShortstat(workspace.workingDir, diffRef);
