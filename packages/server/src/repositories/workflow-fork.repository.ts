@@ -26,6 +26,23 @@ export async function selectWorkspaceIdById(childWorkspaceId: string, database: 
   return database.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.id, childWorkspaceId)).limit(1);
 }
 
+/**
+ * The branch a child workspace row already NAMES (#682).
+ *
+ * A queued child persists its branch when it is queued and is launched later, possibly after an
+ * upgrade that changed how the name is derived. Re-deriving at launch then produces a worktree on
+ * one branch while the row says another. Reading the persisted value is the only spelling that
+ * cannot drift, so the launch path asks for it rather than recomputing.
+ */
+export async function selectWorkspaceBranchById(childWorkspaceId: string, database: Database = db) {
+  const rows = await database
+    .select({ branch: workspaces.branch })
+    .from(workspaces)
+    .where(eq(workspaces.id, childWorkspaceId))
+    .limit(1);
+  return rows[0]?.branch ?? null;
+}
+
 export async function updateChildWorkspaceFailed(
   childWorkspaceId: string,
   now: string,

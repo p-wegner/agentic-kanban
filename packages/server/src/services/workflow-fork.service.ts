@@ -7,6 +7,7 @@ import {
   selectAllPreferences,
   selectAgentSkillById,
   selectWorkspaceIdById,
+  selectWorkspaceBranchById,
   updateChildWorkspaceFailed,
   insertFailedChildWorkspace,
   selectTemplateBuiltinKey,
@@ -233,7 +234,14 @@ export function createWorkflowForkService(deps: {
 
     // Shared mode reuses the parent worktree + branch; worktree mode forks a new
     // sub-worktree rooted at the parent branch's current HEAD.
-    const childBranch = childBranchName(parent.branch, entry.name, sharedWorktree);
+    //
+    // #682: prefer the branch the ROW already names. A child queued over the concurrency cap
+    // persists its branch at queue time and is launched later — re-deriving here means an upgrade
+    // that changes the derivation (as #565's slug consolidation did) gives the worktree one branch
+    // while the DB row keeps the other, and nothing reconciles them. The derivation stays as the
+    // fallback for a child that has no row yet.
+    const persistedBranch = await selectWorkspaceBranchById(childWorkspaceId, database);
+    const childBranch = persistedBranch ?? childBranchName(parent.branch, entry.name, sharedWorktree);
     const worktreePath = sharedWorktree
       ? (parent.workingDir ?? project.repoPath)
       : await gitService.createWorktree(project.repoPath, childBranch, parent.branch);
