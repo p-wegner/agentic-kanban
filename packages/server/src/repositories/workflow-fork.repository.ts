@@ -22,25 +22,20 @@ export async function selectAgentSkillById(skillId: string, database: Database =
   return database.select().from(agentSkills).where(eq(agentSkills.id, skillId)).limit(1);
 }
 
-export async function selectWorkspaceIdById(childWorkspaceId: string, database: Database = db) {
-  return database.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.id, childWorkspaceId)).limit(1);
-}
-
 /**
- * The branch a child workspace row already NAMES (#682).
+ * A child workspace row's identity fields: does it exist, and what branch does it already NAME?
  *
- * A queued child persists its branch when it is queued and is launched later, possibly after an
- * upgrade that changed how the name is derived. Re-deriving at launch then produces a worktree on
- * one branch while the row says another. Reading the persisted value is the only spelling that
- * cannot drift, so the launch path asks for it rather than recomputing.
+ * `branch` is here rather than in a second accessor (#682, and the #889 cohesion ceiling): a
+ * queued child persists its branch at queue time and is launched later, possibly after an upgrade
+ * that changed how the name is derived — re-deriving at launch then produces a worktree on one
+ * branch while the row says another. The launch path reads this instead of recomputing.
  */
-export async function selectWorkspaceBranchById(childWorkspaceId: string, database: Database = db) {
-  const rows = await database
-    .select({ branch: workspaces.branch })
+export async function selectWorkspaceIdById(childWorkspaceId: string, database: Database = db) {
+  return database
+    .select({ id: workspaces.id, branch: workspaces.branch })
     .from(workspaces)
     .where(eq(workspaces.id, childWorkspaceId))
     .limit(1);
-  return rows[0]?.branch ?? null;
 }
 
 export async function updateChildWorkspaceFailed(
