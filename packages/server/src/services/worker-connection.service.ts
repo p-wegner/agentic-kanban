@@ -54,8 +54,20 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
 
   function handleOpen(workerId: string, ws: WSContext): void {
     // A reconnect replaces the previous socket (stale after e.g. a NAT rebind).
+    //
+    // Say so in the log. This eviction is indistinguishable from a network drop
+    // at the worker end — a daemon sees only a close — so a silent eviction plus
+    // a reconnecting daemon is a self-sustaining flap that reads as "the network
+    // is bad" on both sides. It cost a cross-machine bring-up an afternoon: 6
+    // connects and 13 disconnects, each landing ~1s after a SUCCESSFUL connect,
+    // while HTTP to the same port was 200 throughout. The revoke path already
+    // logs (see closeConnection); this one is the gap.
     const existing = connections.get(workerId);
     if (existing) {
+      console.log(
+        `[worker-connection] evicting previous socket for id=${workerId} — a newer connection arrived. ` +
+          `If this repeats, the worker is opening overlapping sockets (reconnect firing while a connect is in flight), not losing the network.`,
+      );
       try { existing.ws.close(); } catch { /* already gone */ }
     }
     connections.set(workerId, { ws, runningSessionIds: new Set(), pendingSessionIds: new Map() });

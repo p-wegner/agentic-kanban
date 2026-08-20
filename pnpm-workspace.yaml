@@ -32,3 +32,30 @@ supportedArchitectures:
   cpu:
     - current
     - x64
+
+# Moved here from package.json's "pnpm" field, which pnpm no longer reads — it was
+# being silently ignored and warned about on every command.
+onlyBuiltDependencies:
+  - esbuild
+  - "@swc/core"
+
+# Peer conflicts we have checked and are knowingly accepting.
+#
+#   zod — @anthropic-ai/claude-agent-sdk declares `zod: ^4.0.0` as a peer while this
+#   workspace pins 3.25.76 in server/shared/mcp-server. npm reports it as ERESOLVE on
+#   every worker-tarball install, which reads like a broken package and has already
+#   cost one cross-machine setup a round trip.
+#
+#   It is a TYPE-LEVEL peer only. `zod` appears as a bare module specifier in exactly
+#   one file of the shipped SDK — sdk.d.ts, a declaration file. No runtime .mjs/.js in
+#   the SDK imports it; they duck-type schemas by name ("ZodString",
+#   ZodFirstPartyTypeKind), so zod 3 vs 4 cannot change execution. Nothing here passes
+#   a zod schema into the SDK either: no file importing claude-agent-sdk also imports
+#   zod, and tsc is clean.
+#
+#   So this suppresses a verified-false alarm rather than papering over a real one.
+#   Re-check if the SDK starts importing zod at runtime, or if board code begins
+#   handing zod schemas to it — then the honest fix is the zod 4 migration, not this.
+peerDependencyRules:
+  allowedVersions:
+    "@anthropic-ai/claude-agent-sdk>zod": "3.25.76"
