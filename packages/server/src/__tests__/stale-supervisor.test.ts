@@ -1,3 +1,4 @@
+// @gate:always-run — imports scripts/stale-supervisor.mjs, which no package-local diff links to (#687).
 import { describe, expect, it, vi } from "vitest";
 // @ts-ignore - scripts/ is .mjs, not in tsconfig
 import { planStaleSupervisorReap, reapStaleSupervisors } from "../../../../scripts/stale-supervisor.mjs";

@@ -1,3 +1,4 @@
+// @gate:always-run — imports scripts/dev-port-guard.mjs, which no package-local diff links to (#687).
 /**
  * Regression test for the bug where freePort(serverPort) killed the Vite client
  * because netstat returned PIDs for established connections TO the port, not just

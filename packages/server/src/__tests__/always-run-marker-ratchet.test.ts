@@ -88,13 +88,73 @@ const TOUCHES_DISK =
  *  single changed source file imports. */
 const READS_MIGRATIONS_DIR = /\bMIGRATIONS_DIR\b/;
 
+/**
+ * #687 — enumerating a DIRECTORY is invisible to the import graph even without climbing out
+ * of it. `repo-path-literal-ratchet.test.ts` does `readdirSync(join(import.meta.dirname))`:
+ * it reads every sibling test file, so a diff to any of them selects nothing that reaches
+ * this suite — yet `CLIMBS_OUT_OF_OWN_DIR` never matches, so it scored zero signatures.
+ *
+ * That file is the one this suite's own doc comment names as *the* example to copy, which
+ * made the gap self-refuting: deleting its marker left the ratchet green.
+ */
+const ENUMERATES_A_DIRECTORY = /\b(readdirSync|readdir|globSync|glob)\b/;
+
+/**
+ * #687 — imports a repo SCRIPT (`scripts/…`) rather than a module in its own package.
+ * `test-mine-scope-derivation.test.mjs` imports `scanAlwaysRunTests` from
+ * `../../../../scripts/test-mine.mjs`; a change to that script is not a change to any file
+ * the server package's `vitest related` graph is rooted in, so the suite that pins its
+ * behaviour is exactly what gets dropped when the script itself is edited.
+ */
+const IMPORTS_A_REPO_SCRIPT = /from\s+["'][^"']*\/scripts\/[^"']+["']/;
+
 const UNSOUND_SIGNATURES: Array<{ name: string; test: (source: string) => boolean }> = [
   {
     name: "reads-outside-own-dir",
     test: (s) => ANCHORED_AT_OWN_MODULE.test(s) && CLIMBS_OUT_OF_OWN_DIR.test(s) && TOUCHES_DISK.test(s),
   },
   { name: "reads-migrations-dir", test: (s) => READS_MIGRATIONS_DIR.test(s) },
+  {
+    name: "enumerates-a-directory",
+    test: (s) => ANCHORED_AT_OWN_MODULE.test(s) && ENUMERATES_A_DIRECTORY.test(s),
+  },
+  { name: "imports-a-repo-script", test: (s) => IMPORTS_A_REPO_SCRIPT.test(s) },
 ];
+
+/**
+ * The REVERSE direction (#687): suites that carry the marker but match no signature.
+ *
+ * The forward check ("matches a signature but is unmarked") cannot see the rot that actually
+ * happened — a marked suite the heuristic does not recognise is a suite whose marker nothing
+ * defends. Delete it and every assertion here stays green, which is how the doc-cited example
+ * came to be deletable. Measured before this test existed: 7 of 88 marked suites matched
+ * nothing at all.
+ *
+ * Marked suites that legitimately match nothing are the ones marked BY POLICY rather than
+ * because they are import-invisible: cheap cross-package parity/invariant checks that are
+ * genuinely reachable through their own imports but are wanted on every gate run regardless.
+ * Those are named here with a reason. Anything else must match a signature — which is what
+ * makes a new marker either self-defending or a deliberate, reviewed exception.
+ */
+const MARKED_BY_POLICY = new Set<string>([
+  // Cross-package parity invariants: both sides are imported, so `vitest related` does reach
+  // them. Marked because a registry/keys mismatch breaks settings for every project and is
+  // milliseconds to check.
+  "settings-registry.test.ts",
+  "settings-registry-keys.test.ts",
+  // Pins the scheduler every background reconciler depends on (#529). Import-reachable;
+  // marked because a regression here silently stops all sweeps rather than failing loudly.
+  "periodic-sweep.test.ts",
+  // #643 — asserts the tier CONTRACT (a level may only weaken verification visibly) against
+  // the tier module it imports. Marked because the gate's own honesty is what it guards.
+  "gate-tier-scoping.test.ts",
+  // #687 — reaches the tree only through the helper it is testing (`countAlwaysRunGuardSuites`,
+  // imported from pre-merge-gate-tier) and against TEMP fixture roots, never the real tree, so
+  // no signature here applies. Marked because it is the suite that proves the guard COUNT in
+  // every gate message is real; a wrong count is the number an operator checks instead of the
+  // suite list.
+  "guard-suite-count.test.ts",
+]);
 
 /**
  * Files that match an unsound signature but are deliberately NOT marked — each entry
@@ -229,5 +289,47 @@ describe("always-run marker ratchet (#538)", () => {
     expect(serverFiles.some((f) => f.name.endsWith(".test.mjs"))).toBe(true);
     const mcpFiles = collectTestFiles(SCAN_PACKAGES[2].testsDir);
     expect(mcpFiles.some((f) => f.rel.includes("/"))).toBe(true);
+  });
+
+  // #687 — the reverse direction. A marked suite that matches no signature has a marker
+  // nothing defends: deleting it keeps every other assertion in this file green.
+  it("every marked suite either matches a signature or is a declared policy marker", () => {
+    const undefended: string[] = [];
+    for (const { label, testsDir } of SCAN_PACKAGES) {
+      for (const { name, rel, full } of collectTestFiles(testsDir)) {
+        const source = fs.readFileSync(full, "utf8");
+        if (!source.includes(MARKER)) continue;
+        if (MARKED_BY_POLICY.has(name)) continue;
+        if (UNSOUND_SIGNATURES.some((sig) => sig.test(source))) continue;
+        undefended.push(`${label}/${rel}`);
+      }
+    }
+    expect(
+      undefended,
+      `These suites carry the "${MARKER}" marker but match none of the signatures, so nothing ` +
+        `here would notice if the marker were deleted — the marker is undefended. Either the ` +
+        `signature set is missing the shape this suite uses (extend UNSOUND_SIGNATURES, which ` +
+        `protects every future suite of that shape), or the suite is marked by policy rather ` +
+        `than because it is import-invisible (add it to MARKED_BY_POLICY with a reason):\n  ` +
+        undefended.join("\n  "),
+    ).toEqual([]);
+  });
+
+  it("MARKED_BY_POLICY entries are not stale", () => {
+    // An entry that has started matching a signature is defended by the signature now, and
+    // leaving it here would re-hide the next suite that lands in the same shape.
+    const byName = new Map<string, string>();
+    for (const { testsDir } of SCAN_PACKAGES) {
+      for (const f of collectTestFiles(testsDir)) byName.set(f.name, f.full);
+    }
+    const stale: string[] = [];
+    for (const name of MARKED_BY_POLICY) {
+      const full = byName.get(name);
+      if (!full) { stale.push(`${name} (no such test file)`); continue; }
+      const source = fs.readFileSync(full, "utf8");
+      if (!source.includes(MARKER)) { stale.push(`${name} (no longer marked)`); continue; }
+      if (UNSOUND_SIGNATURES.some((sig) => sig.test(source))) stale.push(`${name} (now matches a signature)`);
+    }
+    expect(stale, `remove these from MARKED_BY_POLICY:\n  ${stale.join("\n  ")}`).toEqual([]);
   });
 });
