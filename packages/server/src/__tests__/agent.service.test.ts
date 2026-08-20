@@ -72,14 +72,44 @@ function dirent(name: string, opts: { directory?: boolean; symlink?: boolean } =
 describe("agent.service", () => {
   const originalAgentCommand = process.env.AGENT_COMMAND;
 
+  // #674 — these tests set ONE port var and assert what the child is launched with, so they
+  // only hold in an environment carrying no OTHER KANBAN_* port vars. That is not the
+  // environment the pre-merge gate runs in: the gate runs inside a worktree spawned by the
+  // board, whose env carries KANBAN_BOARD_SERVER_PORT (how a worktree names the MAIN board)
+  // plus the derived KANBAN_WORKTREE_* pair. resolveLaunchPorts reads BOARD_SERVER_PORT first
+  // by design (#615), so `sets KANBAN_SERVER_PORT in spawn environment` got the board's 3001
+  // instead of its own 3005 and failed — deterministically, for EVERY branch, while passing in
+  // any clean shell. That non-hermetic pair was one of the two reasons no merge could land on
+  // this board. The production ladder is right; the test just has to own its environment.
+  const AMBIENT_PORT_VARS = [
+    "KANBAN_BOARD_SERVER_PORT",
+    "KANBAN_BOARD_CLIENT_PORT",
+    "KANBAN_WORKTREE_SERVER_PORT",
+    "KANBAN_WORKTREE_CLIENT_PORT",
+    "KANBAN_SERVER_PORT",
+    "KANBAN_CLIENT_PORT",
+    "SERVER_PORT",
+    "PORT",
+    "VITE_PORT",
+  ] as const;
+  const savedPortVars: Record<string, string | undefined> = {};
+
   beforeEach(() => {
     vi.clearAllMocks();
+    for (const key of AMBIENT_PORT_VARS) {
+      savedPortVars[key] = process.env[key];
+      delete process.env[key];
+    }
     process.env.AGENT_COMMAND = "mock-test-agent";
     agentState.reset();
   });
 
   afterEach(() => {
     agentState.reset();
+    for (const key of AMBIENT_PORT_VARS) {
+      if (savedPortVars[key] === undefined) delete process.env[key];
+      else process.env[key] = savedPortVars[key];
+    }
     if (originalAgentCommand !== undefined) {
       process.env.AGENT_COMMAND = originalAgentCommand;
     } else {
