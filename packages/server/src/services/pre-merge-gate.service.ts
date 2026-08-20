@@ -1,4 +1,4 @@
-import { mergedTreeHash, rememberTreeGatedGreen, wasTreeGatedGreen } from "./merge-gate-tree-memo.js";
+import { gateVerificationKey, mergedTreeHash, rememberTreeGatedGreen, wasTreeGatedGreen } from "./merge-gate-tree-memo.js";
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -25,6 +25,7 @@ import { getProjectRepoPath } from "../repositories/project.repository.js";
 import { runUnderBuildSemaphore } from "./jvm-build-semaphore.js";
 import { runE2ESmokeGateStage } from "./e2e-smoke-lane.js";
 import {
+  resolveGateVerification,
   resolveVerifyGateStrategy,
   countAlwaysRunGuardSuites,
   buildGateTierMessage,
@@ -284,6 +285,19 @@ export interface PreMergeGateWorkspace {
    * before; this never widens what the gate blocks, only what it can additionally skip.
    */
   baseBranch?: string | null;
+  /**
+   * The workspaces whose deferred dependency installs this gate must clear, when that is not
+   * simply `[id]`.
+   *
+   * The merge train gates the TREE that lands, so it calls this gate with a SYNTHETIC id
+   * (`train:<label>`) that matches no `repos` row — which silently turned the #628 install
+   * check into a no-op for every member of the train: `rows = []` → nothing blocking → land.
+   * Two workspaces each individually withheld for a running install could therefore both land
+   * via the train, which is exactly the "merged code built against missing deps" this check
+   * exists to prevent. A caller gating something other than one real workspace must name the
+   * real workspaces here.
+   */
+  memberWorkspaceIds?: string[];
 }
 
 export interface PreMergeGateResult {
@@ -350,10 +364,20 @@ export async function runPreMergeGate(
   // dependencies, and one whose install FAILED never can be. Runs first and cheaply — a single
   // indexed read of this workspace's repo rows — and is a complete no-op for every project on
   // the inline install modes, where the column is NULL.
-  const installBlock = await describeOutstandingRepoInstalls(workspace.id, database);
-  if (installBlock) {
-    return { passed: false, skipped: false, stage: "none", message: installBlock };
+  // `memberWorkspaceIds` (the train) rather than `workspace.id`, because a synthetic gate id
+  // matches no repo row and would pass this check vacuously — see the field's doc comment.
+  for (const installCheckId of workspace.memberWorkspaceIds ?? [workspace.id]) {
+    const installBlock = await describeOutstandingRepoInstalls(installCheckId, database);
+    if (installBlock) {
+      return { passed: false, skipped: false, stage: "none", message: installBlock };
+    }
   }
+
+  // What verification is CURRENTLY configured — resolved BEFORE the tree memo, and in
+  // `pre-merge-gate-tier.ts` because that module owns the tier. See `resolveGateVerification`
+  // for why the ordering is load-bearing.
+  const { strategy: gateStrategy, effectiveVerify, verifyScript, verificationKey } =
+    await resolveGateVerification(projectId, database);
 
   // ---- #492 tree-hash memo -----------------------------------------------------------------
   // A queue of ready branches re-ran the same suite against the same code: five branches, five
@@ -365,7 +389,7 @@ export async function runPreMergeGate(
   // check is about THIS workspace's dependencies, not about the code, so a green tree elsewhere
   // says nothing about it.
   const treeHash = await mergedTreeHash(workspace.workingDir, workspace.baseBranch);
-  if (wasTreeGatedGreen(projectId, treeHash)) {
+  if (wasTreeGatedGreen(projectId, treeHash, verificationKey)) {
     return {
       passed: true,
       skipped: false,
@@ -375,29 +399,7 @@ export async function runPreMergeGate(
   }
 
   // ---- #531 verify_script gate -------------------------------------------------------------
-  // A read error here means we can't tell whether a gate is configured — treat as "no verify gate"
-  // (never block a merge on a gate-DETECTION error; fail-closed applies only to a CONFIGURED gate
-  // that can't RUN). Mirrors projectHasMergeGate's defensive catch.
-  // #551: ONE resolver answers "what will the gate run" — override first, derived second —
-  // and it is the same call `workspace-provision` makes to tell the builder what to run, so
-  // the two can no longer name different commands.
-  //
-  // #377 — `persistDerived` re-derives ONCE at gate time when nothing is configured.
-  // `verify_script` is otherwise only ever derived at REGISTRATION, and a project registered
-  // from an empty repo (every pipeline-scaffolded project: the code arrives in later step
-  // commits) therefore has no gate forever, however many test suites it later grows. The
-  // resolver never clobbers an existing value or writes an empty one, so this can only ADD a
-  // gate.
-  //
-  // Honest limit, MEASURED on the project from #377: detection reads the repo ROOT only, and
-  // that project's `package.json` lives in `src/`, so this recovers nothing there. It closes
-  // the common root-layout case; the `unverified` flag below is what covers the rest.
-  //
-  // A read error means we can't tell whether a gate is configured — treat as "no verify gate"
-  // (never block a merge on a gate-DETECTION error; fail-closed applies only to a CONFIGURED
-  // gate that can't RUN). Mirrors projectHasMergeGate's defensive catch.
-  const effectiveVerify = await resolveEffectiveVerify(projectId, database, { persistDerived: true }).catch(() => null);
-  const verifyScript = effectiveVerify?.command ?? null;
+  // Resolution (and the #551/#377 reasoning behind it) is in `resolveGateVerification` above.
   if (effectiveVerify?.source === "derived") {
     console.log(`[pre-merge-gate] derived a verify_script for project ${projectId} at gate time — the repo has grown one since registration (#377): ${verifyScript}`);
   }
@@ -421,13 +423,7 @@ export async function runPreMergeGate(
   // actually used must be sayable regardless of outcome.
   let gateTierInfo: GateTierInfo | null = null;
 
-  if (verifyConfigured && workspace.workingDir && docsOnly) {
-    // #198 skipped only the SMOKE boot for a docs-only diff while still paying the full
-    // verify suite — on this repo that is a ~40-minute build+test run to prove that editing
-    // a markdown file did not break the build. `isDocsOnlyDiff` is the same predicate the
-    // smoke gate already trusts for the same reason.
-    console.log(`[pre-merge-gate] skipping verify_script for workspace ${workspace.id} — diff touches only docs (${changedFiles.length} file(s))`);
-  } else if (verifyConfigured && workspace.workingDir) {
+  if (verifyConfigured && workspace.workingDir) {
     const workingDir = workspace.workingDir;
     const verifyTimeoutMs = await resolveVerifyTimeoutMs(projectId, database);
     // #194: pin this worktree's backend-spawned gradle to the SAME per-worktree
@@ -495,7 +491,7 @@ export async function runPreMergeGate(
     // implies a base-health backstop once that mechanism exists (tracked separately); until
     // then it behaves identically to `scoped`, which is itself the honest description of what
     // this gate is currently proven to do.
-    const gateStrategy = await resolveVerifyGateStrategy(projectId, database);
+
     // #643: `full` is documented as "no scoping; every package's full suite runs". It only ever
     // disabled FILE-level scoping — `KANBAN_TEST_PACKAGES` was set regardless — so on the
     // DEFAULT setting a diff still skipped whole packages while the knob claimed otherwise. The
@@ -508,20 +504,35 @@ export async function runPreMergeGate(
       fileScopePref: testScope ? await resolveVerifyFileScope(projectId, database) : false,
       changedFileCount: changedFiles.length,
     });
-    const verifyEnv = effectiveTestScope
-      ? {
-          ...isolationEnv,
-          KANBAN_TEST_PACKAGES: effectiveTestScope,
-          ...(fileScope ? { KANBAN_TEST_FILES: changedFiles.join(",") } : {}),
-        }
-      : isolationEnv;
+    // A docs-only diff runs the GUARD suites and nothing else, instead of skipping the verify
+    // script wholesale as #198 did. The skip sat upstream of the `@gate:always-run` mechanism,
+    // so the suites explicitly marked "must run even when the gate scopes" were not run at all
+    // — and ~16 of them take markdown as their assertion INPUT (`CLAUDE.md`, `docs/env-vars.md`,
+    // the `.claude`/`.codex` `SKILL.md` pairs). That is not hypothetical: a `SKILL.md`-only
+    // branch merged green here and left master red on `codex-skills-parity`, the guard that
+    // exists to catch exactly that drift. The premise "a `.md` change cannot break the build"
+    // is false BY CONSTRUCTION in this repo, so the cheap-check motive is honoured by narrowing
+    // to the guards rather than by checking nothing.
+    const verifyEnv = docsOnly
+      ? { ...isolationEnv, KANBAN_TEST_GUARDS_ONLY: "1" }
+      : effectiveTestScope
+        ? {
+            ...isolationEnv,
+            KANBAN_TEST_PACKAGES: effectiveTestScope,
+            ...(fileScope ? { KANBAN_TEST_FILES: changedFiles.join(",") } : {}),
+          }
+        : isolationEnv;
+    if (docsOnly) {
+      console.log(`[pre-merge-gate] docs-only diff for workspace ${workspace.id} (${changedFiles.length} file(s)) — running @gate:always-run guard suites only`);
+    }
     if (fileScope) {
       console.log(`[pre-merge-gate] file-scoping verify tests to ${changedFiles.length} changed file(s) for workspace ${workspace.id}`);
     }
     gateTierInfo = {
       strategy: gateStrategy,
-      packageScoped: Boolean(effectiveTestScope),
-      fileScoped: fileScope,
+      packageScoped: Boolean(effectiveTestScope) && !docsOnly,
+      fileScoped: fileScope && !docsOnly,
+      ...(docsOnly ? { guardsOnly: true } : {}),
       changedFileCount: changedFiles.length,
       guardSuiteCount: countAlwaysRunGuardSuites(workingDir),
       maxWorkers: gateMaxWorkers,
@@ -676,10 +687,13 @@ export async function runPreMergeGate(
     return { passed: false, skipped: false, stage: "verify", message: e2eSmoke.failure };
   }
 
-  // `verifyRan` — not `verifyConfigured` — because a docs-only diff skips the verify script.
-  // Reporting stage "verify" for a run that never happened would write false evidence into
-  // `mergeGateStage`, which is exactly the dishonesty #182 set out to remove.
-  const verifyRan = verifyConfigured && !docsOnly;
+  // `verifyRan` — not `verifyConfigured` — because the verify script only runs when there is a
+  // worktree to run it in. Reporting stage "verify" for a run that never happened would write
+  // false evidence into `mergeGateStage`, which is exactly the dishonesty #182 set out to
+  // remove. A docs-only diff now DOES run it (narrowed to the `@gate:always-run` guard suites,
+  // see the tier note above), so it no longer subtracts here — and `buildGateTierMessage` names
+  // the guards-only tier, so the narrower claim stays visible rather than passing as a full run.
+  const verifyRan = verifyConfigured && Boolean(workspace.workingDir);
   const ranSomething = verifyRan || smokeApplies || e2eSmokeRan;
   // #377 — "nothing is configured" is NOT the same state as "the configured gate was skipped for a
   // docs-only diff", and conflating them is how eight unverified merges went unremarked. A project
@@ -688,7 +702,7 @@ export async function runPreMergeGate(
   // #492 — remember only a run that actually CHECKED something. A skipped or unverified gate
   // proves nothing about the tree, and memoizing it would let "nothing ran" propagate to every
   // later branch that happens to produce the same content.
-  if (ranSomething && !smokeInconclusive && !e2eSmokeInconclusive) rememberTreeGatedGreen(projectId, treeHash);
+  if (ranSomething && !smokeInconclusive && !e2eSmokeInconclusive) rememberTreeGatedGreen(projectId, treeHash, verificationKey);
   return {
     passed: true,
     skipped: !ranSomething,

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   __resetTreeGateMemoForTests,
+  gateVerificationKey,
   mergedTreeHash,
   rememberTreeGatedGreen,
   wasTreeGatedGreen,
@@ -76,23 +77,48 @@ describe("mergedTreeHash", () => {
 describe("tree gate memo", () => {
   beforeEach(__resetTreeGateMemoForTests);
 
+  /** The verification a pass was earned under — see `gateVerificationKey`. */
+  const FULL = gateVerificationKey("full", "pnpm verify");
+  const SCOPED = gateVerificationKey("scoped", "pnpm verify");
+
   it("reports a remembered tree as already green", () => {
-    rememberTreeGatedGreen("p1", "abc123");
-    expect(wasTreeGatedGreen("p1", "abc123")).toBe(true);
+    rememberTreeGatedGreen("p1", "abc123", FULL);
+    expect(wasTreeGatedGreen("p1", "abc123", FULL)).toBe(true);
   });
 
   it("is scoped per project — the same tree is gated by different verify scripts", () => {
-    rememberTreeGatedGreen("p1", "abc123");
-    expect(wasTreeGatedGreen("p2", "abc123")).toBe(false);
+    rememberTreeGatedGreen("p1", "abc123", FULL);
+    expect(wasTreeGatedGreen("p2", "abc123", FULL)).toBe(false);
   });
 
   it("never treats a null hash as green", () => {
     // The failure that would matter: an unknown tree reading as verified.
-    rememberTreeGatedGreen("p1", null);
-    expect(wasTreeGatedGreen("p1", null)).toBe(false);
+    rememberTreeGatedGreen("p1", null, FULL);
+    expect(wasTreeGatedGreen("p1", null, FULL)).toBe(false);
   });
 
   it("an unrecorded tree is not green", () => {
-    expect(wasTreeGatedGreen("p1", "never-seen")).toBe(false);
+    expect(wasTreeGatedGreen("p1", "never-seen", FULL)).toBe(false);
+  });
+
+  // The hole this closes: the memo was keyed on project + tree only, and consulted BEFORE the
+  // tier and the verify command resolved. So a pass banked under `scoped` was replayed for up
+  // to the 2h TTL after an operator switched the project to `full` — a level weakening
+  // verification invisibly, which the tier rules forbid outright.
+  it("does not reuse a pass earned under a WEAKER tier", () => {
+    rememberTreeGatedGreen("p1", "abc123", SCOPED);
+    expect(wasTreeGatedGreen("p1", "abc123", FULL)).toBe(false);
+  });
+
+  it("does not reuse a pass earned under a DIFFERENT verify command", () => {
+    rememberTreeGatedGreen("p1", "abc123", gateVerificationKey("full", "pnpm test"));
+    expect(wasTreeGatedGreen("p1", "abc123", gateVerificationKey("full", "pnpm test && pnpm lint"))).toBe(false);
+  });
+
+  it("a command containing the key separator cannot forge another key", () => {
+    // Hashed rather than concatenated, so a `:` in a verify command cannot shift the key's
+    // field boundaries into another project's or another tier's slot.
+    expect(gateVerificationKey("full", "a:b")).not.toBe(gateVerificationKey("full", "a"));
+    expect(gateVerificationKey("full", "x")).toMatch(/^[0-9a-f]{16}$/);
   });
 });

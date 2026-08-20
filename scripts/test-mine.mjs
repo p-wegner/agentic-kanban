@@ -284,6 +284,25 @@ function buildAlwaysRunTests() {
 const ALWAYS_RUN_TESTS = buildAlwaysRunTests();
 
 /**
+ * Guards-only mode (`KANBAN_TEST_GUARDS_ONLY=1`): run ONLY the marker-derived guard suites,
+ * every package, nothing else.
+ *
+ * Exists because the pre-merge gate's docs-only skip sat UPSTREAM of the always-run
+ * mechanism: a markdown-only diff skipped `verify_script` wholesale, so the suites explicitly
+ * marked "must run even when the gate scopes" were not run at all — and ~16 of them take
+ * markdown as their assertion INPUT (`CLAUDE.md`, `docs/env-vars.md`, the `.claude`/`.codex`
+ * `SKILL.md` pairs). It already fired: a `SKILL.md`-only branch merged green through the gate
+ * and left master red on `codex-skills-parity`, the guard that exists to catch that drift.
+ *
+ * Deliberately NOT expressible as `KANBAN_TEST_FILES=<the .md files>`: markdown at the repo
+ * root is owned by no package, so file scoping resolves to "no own changes" and falls back to
+ * the FULL suite — the opposite of the cheap check a docs diff warrants. The guard set is the
+ * same declared one (`@gate:always-run`), so this mode cannot drift from what the gate forces
+ * to run.
+ */
+const guardsOnly = /^(1|true|yes)$/i.test((process.env.KANBAN_TEST_GUARDS_ONLY || "").trim());
+
+/**
  * File-level test scoping via `KANBAN_TEST_FILES` (comma-separated, repo-relative), the
  * gate's tier 1 (#278).
  *
@@ -474,6 +493,31 @@ if (scopeLabels && toRun !== PACKAGES) {
 // `process.argv[1]` is its own path in that case.
 if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
   let failed = false;
+  if (guardsOnly) {
+    // Every package's guard suites, and only those. A package with no marked suite is skipped
+    // rather than falling through to its full suite.
+    const planned = PACKAGES.map((pkg) => ({
+      pkg,
+      guards: (ALWAYS_RUN_TESTS[pkg.label] ?? []).filter((f) => existsSync(resolve(ROOT, pkg.dir, f))),
+    })).filter((entry) => entry.guards.length > 0);
+    const total = planned.reduce((n, entry) => n + entry.guards.length, 0);
+    console.log(`\n[test:mine] guards-only mode (KANBAN_TEST_GUARDS_ONLY): ${total} @gate:always-run suite(s) across ${planned.length} package(s)`);
+    if (total === 0) {
+      // Fail loudly rather than reporting a green that checked nothing — the whole point of
+      // this mode is that SOMETHING ran.
+      console.error("[test:mine] guards-only mode found no @gate:always-run suites — refusing to report a green that checked nothing.");
+      process.exit(1);
+    }
+    for (const { pkg, guards } of planned) {
+      if ((await runPackage(pkg, { kind: "guards", files: guards })).code !== 0) failed = true;
+    }
+    if (failed) {
+      console.error("\n[test:mine] One or more guard suites failed.");
+      process.exit(1);
+    }
+    console.log("\n[test:mine] All guard suites passed.");
+    process.exit(0);
+  }
   for (const pkg of toRun) {
     const owned = scopedFiles.length > 0 ? ownedChangedFiles(pkg.dir) : [];
     let relatedFiles = owned;

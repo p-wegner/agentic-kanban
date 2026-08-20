@@ -68,3 +68,45 @@ describe("describeOutstandingRepoInstalls (#628)", () => {
     expect(await describeOutstandingRepoInstalls("w1", db)).toBeNull();
   });
 });
+
+/**
+ * The gap the helper's own tests could not see: whether a merge path actually CALLS it with the
+ * real workspaces.
+ *
+ * The merge train gates the tree that lands, so it called `runPreMergeGate` with a synthetic
+ * `train:<label>` id. The install check is keyed by workspace id, and a synthetic id matches no
+ * `repos` row — so `rows = []` → nothing blocking → every member of the train landed without
+ * the check ever applying. Two workspaces each individually withheld for a running install
+ * could therefore both land via the train, which is precisely the "merged code built against
+ * missing dependencies" #628 exists to prevent.
+ */
+describe("runPreMergeGate consults the REAL workspaces, not a synthetic gate id", () => {
+  it("blocks a train when a MEMBER's install is still running", async () => {
+    const { runPreMergeGate } = await import("../services/pre-merge-gate.service.js");
+    listStatesMock.mockImplementation((workspaceId: string) =>
+      Promise.resolve(workspaceId === "ws-2" ? [row("sibling", "running")] : []),
+    );
+
+    const result = await runPreMergeGate(
+      { id: "train:q1", workingDir: null, baseBranch: "main", memberWorkspaceIds: ["ws-1", "ws-2"] },
+      "proj-1",
+      db,
+    );
+
+    expect(result.passed).toBe(false);
+    expect(result.message).toContain("dependency installs still running");
+    // Every member is asked about — not just the first, and never the synthetic id.
+    expect(listStatesMock.mock.calls.map((c) => c[0])).toContain("ws-2");
+    expect(listStatesMock.mock.calls.map((c) => c[0])).not.toContain("train:q1");
+  });
+
+  it("falls back to the workspace's own id when no members are named", async () => {
+    const { runPreMergeGate } = await import("../services/pre-merge-gate.service.js");
+    listStatesMock.mockResolvedValue([row("sibling", "failed", "boom")]);
+
+    const result = await runPreMergeGate({ id: "ws-9", workingDir: null, baseBranch: "main" }, "proj-1", db);
+
+    expect(result.passed).toBe(false);
+    expect(listStatesMock.mock.calls.map((c) => c[0])).toEqual(["ws-9"]);
+  });
+});
