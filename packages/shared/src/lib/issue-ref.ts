@@ -26,11 +26,21 @@ export type IssueRef =
   | { kind: "number"; issueNumber: number }
   | { kind: "id"; issueId: string };
 
-const NUMERIC_REF = /^\d+$/;
+/**
+ * A leading `#` is accepted (#701): CLAUDE.md's own convention is that `#N` MEANS a kanban
+ * issue number, so an agent or human typing `#701` is naming a ticket in the documented
+ * spelling. Rejecting it as an id — which is what a bare `/^\d+$/` did — turned the most
+ * natural reference into a "not found" for a ticket that exists. Surrounding whitespace is
+ * trimmed for the same reason: it comes from copy-paste, not from intent.
+ */
+const NUMERIC_REF = /^#?\d+$/;
 
 export function parseIssueRef(ref: string | number): IssueRef {
   if (typeof ref === "number") return { kind: "number", issueNumber: ref };
-  return NUMERIC_REF.test(ref) ? { kind: "number", issueNumber: Number(ref) } : { kind: "id", issueId: ref };
+  const trimmed = ref.trim();
+  return NUMERIC_REF.test(trimmed)
+    ? { kind: "number", issueNumber: Number(trimmed.replace(/^#/, "")) }
+    : { kind: "id", issueId: ref };
 }
 
 /** Convenience for the many call sites that only branch on which kind it is. */
