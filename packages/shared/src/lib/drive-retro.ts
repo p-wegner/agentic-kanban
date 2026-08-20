@@ -25,6 +25,7 @@ import { and, asc, eq, gte, inArray, lte } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import * as schema from "../schema/index.js";
 import { slugify } from "./slugify.js";
+import { adoptLegacySlugPath, legacySlugify } from "./slug-path-compat.js";
 
 export type DriveRetroDb = LibSQLDatabase<typeof schema>;
 
@@ -72,6 +73,16 @@ export interface DriveRetroTelemetry {
 /** Slugify a project name for the retro filename (`docs/board-runs/<slug>.md`). */
 export function projectSlug(name: string): string {
   return slugify(name, { fallback: "project" });
+}
+
+/**
+ * The same name under the PRE-#565 rule, so an existing retro file written before the slug
+ * consolidation can be found and adopted rather than orphaned (#682). A project named with an
+ * umlaut moved (`Übersicht` → `bersicht` → `ubersicht`), and the retro doc ACCUMULATES — so a
+ * silent move starts a second history and freezes the first.
+ */
+export function legacyProjectSlug(name: string): string {
+  return legacySlugify(name, { fallback: "project" });
 }
 
 function parseCostUsd(stats: string | null): number {
@@ -342,6 +353,17 @@ export async function generateDriveRetro(
 
   const content = renderDriveRetro(telemetry);
   const path = driveRetroPath(telemetry.repoPath, telemetry.projectSlug);
+
+  // #682: adopt a pre-#565 retro file before writing, so a renamed slug continues the existing
+  // history instead of starting a second one beside it. Skipped when the caller injected I/O
+  // (tests own their filesystem), and a no-op whenever the slug did not change.
+  const legacyPath = driveRetroPath(telemetry.repoPath, legacyProjectSlug(telemetry.projectName));
+  if (!deps.writeFile) {
+    const adoption = adoptLegacySlugPath(path, legacyPath);
+    if (adoption.adopted) {
+      console.log(`[drive-retro] adopted pre-#565 retro file ${adoption.from} -> ${path} (slug rule changed in #565)`);
+    }
+  }
 
   const write = deps.writeFile ?? ((p, c) => fsWriteFile(p, c, "utf8"));
   const makeDir = deps.mkdir ?? ((d) => mkdir(d, { recursive: true }).then(() => undefined));

@@ -56,7 +56,10 @@ describe("lint:arch — the merge-blocking layering gate (#602)", () => {
       "err",
     ]);
     expect(code, output).toBe(0);
-  });
+    // Explicit budget (#680): this spawns dependency-cruiser across four package trees, which is
+    // minutes of real work on a loaded box — measured timing out at the 60s config default during
+    // a guards-only sweep. A scan of the whole repo cannot be budgeted like a unit test.
+  }, 4 * 60_000);
 
   it("exits NON-ZERO when a route reaches down into persistence", () => {
     // The exact violation shape #602 found red on master, rebuilt in an isolated tree so
