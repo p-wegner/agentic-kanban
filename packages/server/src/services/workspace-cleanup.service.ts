@@ -234,6 +234,16 @@ export function createWorkspaceCleanupService(deps: {
       return { success: true };
     }
 
+    // Co-residency (#394) is a supported state: another OPEN workspace can share this exact
+    // workingDir. Deleting the directory out from under it would pull the rug on a still-live
+    // agent — `deleteWorkspace` already guards this (workspace-crud.service.ts); stale-worktree
+    // cleanup must too (#673), since it removes the same directory with no such check today.
+    const sharers = (await crudRepo.findWorkspacesByWorkingDir(workspace.workingDir, database))
+      .filter((row) => row.id !== workspaceId);
+    if (sharers.length > 0) {
+      return { success: false, error: `Worktree ${workspace.workingDir} is still referenced by ${sharers.length} other workspace(s) — skipping removal` };
+    }
+
     try {
       await gitService.removeWorktree(repoPath, workspace.workingDir);
     } catch (err) {
