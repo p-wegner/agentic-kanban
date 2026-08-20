@@ -1,9 +1,41 @@
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Command } from "commander";
 import { startWorkerDaemon, defaultWorkerStateFile } from "../../worker/worker-daemon.js";
 import { SHARES_FILESYSTEM_LABEL } from "@agentic-kanban/shared/lib/worker-protocol";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 const DEFAULT_BOARD_URL = "http://127.0.0.1:3001";
+
+/** Directory of shipped Windows service/tray scripts, relative to the package root. */
+const WINDOWS_TOOLS_SUBDIR = join("tools", "worker-windows");
+
+/**
+ * Absolute path of the shipped Windows service/tray scripts, or null if they are
+ * not next to this module.
+ *
+ * Resolved by walking up from THIS module rather than from `npm prefix -g`,
+ * because the same code runs from three different depths — the esbuild bundle at
+ * `dist/worker.js`, the tsc output at `dist/cli/commands/worker.js`, and
+ * `src/cli/commands/worker.ts` under tsx in a dev checkout — and because a global
+ * prefix is exactly the thing that differs per machine (nvm, Scoop, a per-user
+ * prefix), so hardcoding one prints a path that does not exist for the reader.
+ */
+export function resolveWindowsToolsDir(
+  startDir: string = dirname(fileURLToPath(import.meta.url)),
+): string | null {
+  let dir = startDir;
+  for (let i = 0; i < 6; i++) {
+    const candidate = join(dir, WINDOWS_TOOLS_SUBDIR);
+    // Probe a file, not the directory: an empty `tools/` must not count as a hit.
+    if (existsSync(join(candidate, "ak-worker-service.ps1"))) return candidate;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
 
 function splitList(value?: string): string[] | undefined {
   if (!value) return undefined;
@@ -121,6 +153,55 @@ export function buildWorkerConnectSteps(boardUrl: string, pairingToken: string):
   ];
 }
 
+/**
+ * Windows-only: point the reader at the service/tray scripts that ship IN the
+ * package, so an unattended worker is a documented install step rather than
+ * scripts someone hand-copies between machines. Kept out of the numbered steps
+ * because it is optional and platform-specific — the foreground `start` above is
+ * what proves the pairing works, and this survives the shell closing.
+ */
+function renderWindowsServiceSection(): string[] {
+  const toolsDir = resolveWindowsToolsDir();
+  // Not found = running from somewhere the scripts were not shipped to. Say how
+  // to locate them rather than printing a path that is wrong on this machine.
+  const dir = toolsDir ?? "$(Join-Path (npm prefix -g) 'node_modules\\agentic-kanban\\tools\\worker-windows')";
+  const lines: string[] = [];
+  lines.push("## Windows: keep the worker running unattended (optional)");
+  lines.push("");
+  lines.push(
+    "The foreground `start` above dies with its shell. On Windows the package ships scripts that register the " +
+      "worker as the Scheduled Task `AgenticKanbanWorker` — at logon, in YOUR session, so agents keep using this " +
+      "account's provider credentials — under a supervisor that restarts the daemon with backoff, plus a systray " +
+      "dot for its real state. They live inside the installed package here:",
+  );
+  lines.push("");
+  lines.push("```text");
+  lines.push(dir);
+  lines.push("```");
+  lines.push("");
+  lines.push("```powershell");
+  lines.push(`Set-Location "${dir}"`);
+  lines.push("");
+  lines.push("# install + start the background service (-Board is the board's FLEET port)");
+  lines.push(".\\ak-worker-service.ps1 -Install -Board <board-url> -Labels windows -Providers claude -ClaudeConfigDir $env:CLAUDE_CONFIG_DIR");
+  lines.push(".\\ak-worker-service.ps1 -Status");
+  lines.push(".\\ak-worker-service.ps1 -Log -Tail 50");
+  lines.push("");
+  lines.push("# the systray dot (hidden launcher; shortcut it into shell:startup to get it at logon)");
+  lines.push("wscript.exe .\\ak-worker-tray-launch.vbs");
+  lines.push("```");
+  lines.push("");
+  lines.push(
+    "Pair once in the foreground first (the step above): the service reuses the saved per-worker token. No admin " +
+      "rights are needed. Set `-ClaudeConfigDir` explicitly — a Scheduled Task inherits nothing, and an unset " +
+      "`CLAUDE_CONFIG_DIR` silently runs the agents under the default `~/.claude` account. The supervisor also " +
+      "forces `ACP_AUTOCONNECT=0`, without which a headless agent can hang forever with no output. See the " +
+      "README in that directory for the rest.",
+  );
+  lines.push("");
+  return lines;
+}
+
 export function renderWorkerConnectMarkdown(
   boardUrl: string,
   pairingToken: string,
@@ -148,6 +229,7 @@ export function renderWorkerConnectMarkdown(
     }
     lines.push("");
   });
+  lines.push(...renderWindowsServiceSection());
   lines.push("## Board-side networking (cross-machine only)");
   lines.push("");
   lines.push(
