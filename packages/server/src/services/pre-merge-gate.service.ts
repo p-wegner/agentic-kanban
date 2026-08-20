@@ -1,4 +1,5 @@
-import { gateVerificationKey, mergedTreeHash, rememberTreeGatedGreen, wasTreeGatedGreen } from "./merge-gate-tree-memo.js";
+import { gateVerificationKey, combinedMergedTreeHash, rememberTreeGatedGreen, wasTreeGatedGreen } from "./merge-gate-tree-memo.js";
+import { getAllWorkspaceRepos } from "./workspace-all-repos.js";
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -273,7 +274,22 @@ export async function runPreMergeGate(
   // Runs AFTER the install block so a workspace with outstanding installs is still refused: that
   // check is about THIS workspace's dependencies, not about the code, so a green tree elsewhere
   // says nothing about it.
-  const treeHash = await mergedTreeHash(workspace.workingDir, workspace.baseBranch);
+  // #677: a multi-repo workspace lands sibling-repo code alongside the leading repo
+  // (`executeSiblingMerges`), but everything below this point saw the LEADING repo only. Read the
+  // sibling set once, here, and thread it into both the memo key and `changedFiles` — neither may
+  // be blind to code that is actually about to merge.
+  const siblingRepos = (await getAllWorkspaceRepos(workspace.id, database).catch(() => [])).filter(
+    (repo) => repo.kind === "sibling",
+  );
+
+  // #677: folded over every sibling repo — a memo keyed on the leading tree alone would let a
+  // branch with an identical leading diff but a DIFFERENT sibling diff reuse a PASS that never
+  // saw that sibling code. A sibling this cannot fingerprint makes the whole hash null
+  // (do-not-memoize), which is exactly the case the memo must not paper over.
+  const treeHash = await combinedMergedTreeHash([
+    { workingDir: workspace.workingDir, baseBranch: workspace.baseBranch },
+    ...siblingRepos.map((repo) => ({ workingDir: repo.worktreePath, baseBranch: repo.baseBranch || workspace.baseBranch })),
+  ]);
   if (wasTreeGatedGreen(projectId, treeHash, verificationKey)) {
     return {
       passed: true,
@@ -298,9 +314,23 @@ export async function runPreMergeGate(
   // ONCE here instead of the single late read the smoke gate used to do. An unreadable diff
   // or a missing baseBranch yields `[]`, which every consumer must treat as "I cannot see the
   // diff" (run everything) rather than "the diff is empty" (skip everything).
-  const changedFiles = workspace.workingDir && workspace.baseBranch
+  //
+  // #677: folded over the sibling repos read above, so a LEADING diff that is docs-only can no
+  // longer hide sibling SOURCE from `docsOnly` or from the tier's package scoping — both must see
+  // every file this merge is about to land, not just the leading repo's half of it.
+  const leadingChangedFiles = workspace.workingDir && workspace.baseBranch
     ? await getChangedFileNames(workspace.workingDir, workspace.baseBranch).catch(() => [] as string[])
     : ([] as string[]);
+  const siblingChangedFiles = (
+    await Promise.all(
+      siblingRepos.map(async (repo) => {
+        const repoBase = repo.baseBranch || workspace.baseBranch;
+        if (!repo.worktreePath || !repoBase) return [] as string[];
+        return getChangedFileNames(repo.worktreePath, repoBase).catch(() => [] as string[]);
+      }),
+    )
+  ).flat();
+  const changedFiles = [...leadingChangedFiles, ...siblingChangedFiles];
   const docsOnly = changedFiles.length > 0 && isDocsOnlyDiff(changedFiles);
 
   // Populated once verify_script actually runs, so the final message can NAME what ran even on

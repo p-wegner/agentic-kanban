@@ -1,8 +1,11 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import * as schema from "@agentic-kanban/shared/schema";
+import { insertWorkspaceRepo } from "../repositories/repo.repository.js";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { createTestDb } from "./helpers/test-db.js";
+import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createProjectDirectly } from "./helpers/api-test-helpers.js";
 import { getPreference, setPreference } from "../repositories/preferences.repository.js";
 import { saveStackProfile, verifyScriptPrefKey } from "../services/stack-profile.service.js";
@@ -394,5 +397,73 @@ describe("docs-only guards-only run is restricted to this repo's checkout", () =
     expect(runSetupScript).toHaveBeenCalledTimes(1);
     const env = (runSetupScript.mock.calls[0]?.[2] as { env: Record<string, string> }).env;
     expect(env.KANBAN_TEST_GUARDS_ONLY).toBeUndefined();
+  });
+});
+
+/**
+ * #677 â€” the gate must not be blind to sibling repos in a multi-repo workspace. Before the fix,
+ * `changedFiles` came from the leading repo's diff alone, so a leading diff that was docs-only
+ * set `docsOnly=true` and skipped verify+smoke even though `executeSiblingMerges` was about to
+ * land arbitrary sibling-repo code, and the tree-hash memo keyed a PASS on the leading tree only.
+ */
+describe("runPreMergeGate: sibling repo diffs must not be invisible to the gate (#677)", () => {
+  let db: TestDb;
+
+  beforeEach(() => {
+    ({ db } = createTestDb());
+    runSetupScript.mockReset();
+    runSmokeCheck.mockReset();
+    getChangedFileNames.mockReset();
+    runSetupScript.mockResolvedValue({ exitCode: 0, stdout: "ok", stderr: "" });
+    runSmokeCheck.mockResolvedValue({ passed: true, skipped: false, status: 200, message: "ok", bodySnippet: "" });
+  });
+
+  async function seedMultiRepoWorkspace(projectId: string): Promise<string> {
+    const now = new Date().toISOString();
+    const statusId = randomUUID();
+    const issueId = randomUUID();
+    const workspaceId = randomUUID();
+    await db.insert(schema.projectStatuses).values({ id: statusId, projectId, name: "In Progress", sortOrder: 1, isDefault: false, createdAt: now });
+    await db.insert(schema.issues).values({ id: issueId, issueNumber: 1, title: "i", issueType: "bug", priority: "medium", sortOrder: 0, statusId, projectId, createdAt: now, updatedAt: now });
+    await db.insert(schema.workspaces).values({ id: workspaceId, issueId, branch: "feature/ak-677-x", status: "active", workingDir: "/repo/wt", baseBranch: "main", createdAt: now, updatedAt: now });
+    await insertWorkspaceRepo({ workspaceId, projectId, path: "/auth", name: "auth-svc", worktreePath: "/auth/wt", branch: "feature/ak-677-x", baseBranch: "main" }, db);
+    return workspaceId;
+  }
+
+  it("does NOT skip verify/smoke for a docs-only LEADING diff when a sibling repo touches code", async () => {
+    const projectId = await createProjectDirectly(db, { repoPath: "/repo", defaultBranch: "main" });
+    await setPreference(verifyScriptPrefKey(projectId), "gradlew.bat test", db);
+    await saveStackProfile(projectId, webProfile(), db);
+    const workspaceId = await seedMultiRepoWorkspace(projectId);
+
+    getChangedFileNames.mockImplementation(async (dir: string) =>
+      dir === "/repo/wt" ? ["docs/state.md"] : dir === "/auth/wt" ? ["src/server.js"] : [],
+    );
+
+    const res = await runPreMergeGate({ id: workspaceId, workingDir: "/repo/wt", baseBranch: "main" }, projectId, db);
+
+    // Before the fix: leading-only changedFiles == ["docs/state.md"] -> docsOnly=true -> both skipped.
+    expect(runSetupScript).toHaveBeenCalledTimes(1);
+    expect(runSmokeCheck).toHaveBeenCalledTimes(1);
+    expect(res.passed).toBe(true);
+    expect(res.skipped).toBe(false);
+  });
+
+  it("still skips verify/smoke when EVERY repo's diff (leading + sibling) is docs-only", async () => {
+    const projectId = await createProjectDirectly(db, { repoPath: "/repo", defaultBranch: "main" });
+    await setPreference(verifyScriptPrefKey(projectId), "gradlew.bat test", db);
+    await saveStackProfile(projectId, webProfile(), db);
+    const workspaceId = await seedMultiRepoWorkspace(projectId);
+
+    getChangedFileNames.mockImplementation(async (dir: string) =>
+      dir === "/repo/wt" ? ["docs/state.md"] : dir === "/auth/wt" ? ["README.md"] : [],
+    );
+
+    const res = await runPreMergeGate({ id: workspaceId, workingDir: "/repo/wt", baseBranch: "main" }, projectId, db);
+
+    expect(runSetupScript).not.toHaveBeenCalled();
+    expect(runSmokeCheck).not.toHaveBeenCalled();
+    expect(res.passed).toBe(true);
+    expect(res.skipped).toBe(true);
   });
 });
