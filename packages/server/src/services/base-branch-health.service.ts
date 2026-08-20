@@ -17,7 +17,7 @@ import { cloneBranchTo, getMergeBase, revParse } from "@agentic-kanban/shared/li
 import type { Database } from "../db/index.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { getProjectById } from "../repositories/project.repository.js";
-import { resolveEffectiveVerify } from "./stack-profile.service.js";
+import { resolveEffectiveVerify, deriveSetupScriptFromProfile, getStackProfile } from "./stack-profile.service.js";
 import {
   recordBaseBranchHealth,
   getLatestBaseBranchHealth,
@@ -27,6 +27,7 @@ import {
 
 const CLONE_TIMEOUT_MS = 5 * 60 * 1000;
 const VERIFY_TIMEOUT_MS = 20 * 60 * 1000;
+const INSTALL_TIMEOUT_MS = 15 * 60 * 1000;
 
 export interface BaseBranchVerifyResult {
   outcome: BaseBranchHealthOutcome;
@@ -62,10 +63,47 @@ export async function verifyBaseBranchHealth(
   const dest = join(tmpdir(), `kanban-base-health-${projectId}-${slug}`);
   const startedAt = Date.now();
 
+  // #674: the clone must be INSTALLED before verify. "No warm deps" was meant to buy
+  // cold-clone realism, but an UNINSTALLED clone is not a cold clone — it is a broken
+  // tree. This repo's shared package only exists after a build (its `prepare` runs
+  // `tsc` into dist/, which is gitignored), so every suite importing
+  // `@agentic-kanban/shared/lib` failed here for want of an install and master was
+  // recorded RED for 98s runs while it was green in a real checkout. A false red is
+  // worse than no signal: the gate attributes branch failures to the base and withholds
+  // EVERY merge on the project. cold-clone-build-check.service.ts (#792) had this right
+  // all along — clone, then the profile's install, then the command under test.
+  const installCommand = (deriveSetupScriptFromProfile(await getStackProfile(projectId, database), project.repoPath) || "").trim();
+
   let result: BaseBranchVerifyResult;
   try {
     await rm(dest, { recursive: true, force: true });
     await cloneBranchTo(project.repoPath, branch, dest, CLONE_TIMEOUT_MS);
+    if (installCommand) {
+      const install = await runSetupScript(dest, installCommand, { timeoutMs: INSTALL_TIMEOUT_MS }).catch((e) => ({
+        exitCode: 1,
+        stdout: "",
+        stderr: String(e),
+        timedOut: false,
+      }));
+      if (install.timedOut || install.exitCode !== 0) {
+        // UNVERIFIED, not red: we never got far enough to learn anything about the base.
+        const combined = [install.stderr, install.stdout].filter(Boolean).join("\n").trim();
+        result = {
+          outcome: "unverified",
+          sha,
+          branch,
+          durationMs: Date.now() - startedAt,
+          message: `could not prepare the base clone — \`${installCommand}\` ${install.timedOut ? `timed out after ${INSTALL_TIMEOUT_MS}ms` : `failed (exit ${install.exitCode})`}. `
+            + `The base was NOT verified; this says nothing about whether it is green.
+${tail(combined)}`,
+        };
+        await recordBaseBranchHealth(
+          { projectId, sha: result.sha, branch: result.branch, outcome: result.outcome, durationMs: result.durationMs, message: result.message },
+          database,
+        );
+        return result;
+      }
+    }
     const run = await runSetupScript(dest, verifyScript, { timeoutMs: VERIFY_TIMEOUT_MS }).catch((e) => ({
       exitCode: 1,
       stdout: "",
@@ -150,6 +188,13 @@ export async function getBaseBranchHealthAtMergeBase(
 export function describeRedBaseAttribution(info: BaseBranchHealthAtMergeBase): string | null {
   const { health, mergeBaseSha } = info;
   if (!health || health.outcome === "green") return null;
+  // "unverified" means the probe could not even prepare the clone (#674). Saying
+  // "BASE BRANCH ALREADY UNVERIFIED" reads as an accusation against the base; it is
+  // an admission about the probe, and the caller's own failure stands unattributed.
+  if (health.outcome === "unverified") {
+    return `BASE BRANCH HEALTH UNKNOWN (${health.sha.slice(0, 8)}) — the base was never verified, so this failure is NOT attributed to it. `
+      + `Probe result: ${health.message ?? "unverified"}`;
+  }
   const shaNote = mergeBaseSha && mergeBaseSha === health.sha
     ? `at the branch's merge-base (${health.sha.slice(0, 8)})`
     : `as of the last check (${health.sha.slice(0, 8)}${mergeBaseSha ? `, merge-base is ${mergeBaseSha.slice(0, 8)}` : ""})`;
