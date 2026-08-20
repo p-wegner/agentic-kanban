@@ -30,6 +30,7 @@ import {
 } from "../repositories/workspace-provisioning.repository.js";
 import { warnIfBranchHeldByLiveWorkspace } from "./workspace-branch-holders.js";
 import { warnIfWorktreePathNotRegistered } from "./workspace-worktree-reconcile.js";
+import { claimBranchForCreate, releaseBranchForCreate } from "./workspace-branch-create-claim.js";
 import type { ProviderName } from "./agent-provider.js";
 import {
   skippedSetupRun,
@@ -619,6 +620,9 @@ export function createWorkspaceCreateService(deps: {
     let siblingInstallTimeoutMs: number | undefined;
     // #630: whether the in-flight marker exists, so both exits can clear it exactly once.
     let provisioningMarked = false;
+    // #673: the branch a same-issue/same-branch create claim was taken on, so the `finally`
+    // below releases exactly the claim this call took (and only if it took one).
+    let claimedBranch: string | null = null;
 
     const phaseStart = Date.now();
     const timing = (phase: string, startMs: number) =>
@@ -636,7 +640,25 @@ export function createWorkspaceCreateService(deps: {
 
       t = Date.now();
       await assertNoOpenDirectWorkspaceForIssue(input.issueId);
-      if (!isDirect) await warnIfBranchHeldByLiveWorkspace(input.branch || suggestBranchName(issue), database);
+      // #673 item 1: claim (issueId, branch) BEFORE the DB-based live-workspace read below —
+      // that read is blind to a still-provisioning sibling create for 80s–8+ minutes (the
+      // workspace row lands only at the end of provisioning), which is exactly how #670 got
+      // two workspaces on one branch 9s apart. No `await` between resolving the branch and
+      // claiming it is what makes this atomic against another in-process create for the same
+      // (issueId, branch). Scoped to branch, not just issueId, so a deliberate second
+      // workspace for this issue on a DIFFERENT branch (provider showdown, #366) is untouched.
+      if (!isDirect) {
+        const branchForClaim = input.branch || suggestBranchName(issue);
+        if (!claimBranchForCreate(input.issueId, branchForClaim)) {
+          throw new WorkspaceError(
+            `A workspace creation is already in flight for issue ${input.issueId} on branch "${branchForClaim}". Same-issue/same-branch is never a deliberate second workspace — wait for the in-flight create to finish, or pass an explicit different branch to launch one on purpose.`,
+            "CONFLICT",
+            { code: "BRANCH_CREATE_IN_FLIGHT", issueId: input.issueId, branch: branchForClaim },
+          );
+        }
+        claimedBranch = branchForClaim;
+        await warnIfBranchHeldByLiveWorkspace(branchForClaim, database);
+      }
       timing("assert-no-open-direct", t);
 
       // Default plan mode on for high/critical priority when not explicitly set.
@@ -940,6 +962,10 @@ export function createWorkspaceCreateService(deps: {
         baseCommitSha, requiresReview, thoroughReview, planMode, includeVisualProof,
         claudeProfile, agentCommand, resolvedProvider, now,
       });
+    } finally {
+      // #673: release exactly the (issueId, branch) claim this call took, on every exit path
+      // — success, a clean WorkspaceError refusal, or a handled create failure alike.
+      if (claimedBranch) releaseBranchForCreate(input.issueId, claimedBranch);
     }
   }
 
