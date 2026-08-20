@@ -37,6 +37,24 @@ export function buildWorkerConnectSteps(boardUrl: string, pairingToken: string):
       commands: ["git --version", "claude --version   # or: codex --version / copilot --version"],
     },
     {
+      title: "Get the worker binary onto this machine",
+      where: "worker",
+      detail:
+        "Do NOT assume `npm i -g agentic-kanban` provides it. The published package can lag this tree: 0.1.9 on " +
+        "the registry was released BEFORE the worker fleet landed, so its bin map has no `agentic-kanban-worker` " +
+        "key at all — the install succeeds and the binary is simply absent. Check the registry before relying on " +
+        "it (`npm view agentic-kanban bin`); if the worker key is missing, use the tarball fast track instead: on " +
+        "the BOARD machine run `node scripts/pack-worker.mjs`, which builds, refuses to pack a tarball whose bin " +
+        "map lacks the worker, and stamps a `<version>-dev.<sha>` prerelease so npm can never serve a cached " +
+        "same-version copy in its place. Copy the tarball here and install it by path. `--blob` additionally " +
+        "puts it on an ACP relay and prints a ref, for a machine you cannot copy files to directly.",
+      commands: [
+        "npm view agentic-kanban bin   # does the published bin map have agentic-kanban-worker?",
+        "npm i -g <path-to-agentic-kanban-*.tgz>",
+        "agentic-kanban-worker --version",
+      ],
+    },
+    {
       title: "Confirm the board is reachable from here",
       where: "worker",
       detail:

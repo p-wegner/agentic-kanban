@@ -7,6 +7,21 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **`scripts/pack-worker.mjs` — pair a worker machine without publishing a release.** Builds,
+  packs, and prints an installable tarball; `--blob` also puts it on an ACP relay for a machine
+  you cannot copy files to. It refuses to pack a tarball whose bin map lacks
+  `agentic-kanban-worker`, and stamps a `<version>-dev.<sha>` prerelease so npm cannot serve a
+  cached same-version copy from the registry in its place. `agentic-kanban-worker instructions`
+  gained a matching step, because the runbook previously assumed the binary already existed.
+
+### Fixed
+- **The dev client published the unauthenticated board API to the network.** Vite binds `::`
+  (every interface) on 5173 and proxies `/api`, `/health` and `/ws` to the loopback API, so a
+  board brought up for cross-machine fleet work exposed every issue, transcript and merge
+  endpoint on the VPN — the fleet-port split does not defend this, because the leak is the dev
+  client rather than the API bind. Start a cross-machine board with `VITE_HOST=127.0.0.1`
+  alongside `KANBAN_FLEET_HOST`; see decision 012.
+
 - **Plugins — the board is extensible now.** Point Settings → Plugins at a repo containing a
   `kanban-plugin.json` and it contributes agent skills, one-shot scripts, framed dashboard views, a
   butler prompt fragment, and a project scaffold template. Install once, enable per project. The

@@ -166,6 +166,49 @@ Key modules: `services/agent-dispatch.service.ts`, `services/agent-remote.servic
 `worker/worker-{daemon,agent-runner,repo,cli}.ts`, `startup/worker-incoming-sweep.ts`,
 `components/WorkerFleetPanel.tsx`.
 
+## The listener split is not sufficient in dev mode (2026-08-20)
+
+Everything above describes the board API as unreachable from the network because it binds
+loopback. **In `pnpm dev` that guarantee does not hold**, and the fleet-port split is what
+makes it easy to believe otherwise.
+
+The Vite dev server binds `::` — dual-stack, every interface — on 5173, and proxies `/api`,
+`/health` and `/ws` straight to the loopback API. So the moment a board is brought up for
+cross-machine work, the unauthenticated API is published on every interface the machine has,
+including the tailnet. Confirmed by fetching `http://<tailnet-ip>:5173/api/projects` from the
+VPN address and getting the real project list back, repo paths included. `vite.config.ts` even
+carries `allowedHosts: [".ts.net"]`, so Tailscale reachability was anticipated somewhere.
+
+Nothing in the fleet design defends this: the leak is the dev CLIENT, not the API bind, and an
+operator following the cross-machine runbook has no reason to look at the client at all.
+
+**Mitigation today is `VITE_HOST=127.0.0.1`**, which restricts the dev client to loopback. It
+belongs in the same command as `KANBAN_FLEET_HOST` — a cross-machine board should never be
+started without it. The stronger fix (make the dev client refuse a non-loopback bind whenever a
+fleet listener is configured, rather than relying on an operator remembering a third env var)
+is not implemented.
+
+## Getting the worker binary without a release (2026-08-20)
+
+`agentic-kanban-worker` is a bin of the `agentic-kanban` package, so the runbook's install step
+quietly assumed the registry copy matches this tree. It does not: **published 0.1.9 predates the
+fleet epic and its bin map has no `agentic-kanban-worker` key**, so `npm i -g agentic-kanban`
+succeeds and produces no worker binary. Pairing a machine blocked on a release nobody had made.
+
+`scripts/pack-worker.mjs` is the fast track — build, pack, hand over the file, no publish. Two
+details in it are load-bearing rather than cosmetic:
+
+- It **refuses to pack** when the bin map lacks `agentic-kanban-worker`, because a
+  silently worker-less tarball is indistinguishable from a broken install at the far end.
+- It stamps a **`<version>-dev.<sha>` prerelease**. A plain `npm pack` here emits
+  `agentic-kanban-0.1.9.tgz` — the registry's version string with different contents — and npm
+  may resolve a cached 0.1.9 instead of the file it was handed, silently installing the OLD
+  two-bin package. That failure looks exactly like "the binary is missing".
+
+Publishing a real release remains the better fix for every future worker machine; the script is
+what unblocks one today. The trap is worth remembering generally: **the version string is not
+evidence of the contents** — the local tree and the registry both said 0.1.9.
+
 ## Security corrections (2026-08-06, #244-#248)
 
 An adversarial review of the shipped epic found that four of the properties claimed above

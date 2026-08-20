@@ -70,3 +70,6 @@ docker-compose.override.yml
 .codex/skills
 .claude/smart-hooks-rules.json
 packages/e2e/.e2e-data/
+
+# Local worker tarballs from scripts/pack-worker.mjs (never committed)
+dist-worker-pack/
