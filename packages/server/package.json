@@ -27,7 +27,8 @@
     "dist/migrations/",
     "dist/scaffold/",
     "plugins/",
-    "skills/"
+    "skills/",
+    "tools/worker-windows/"
   ],
   "scripts": {
     "dev": "node ../../scripts/server-dev-proxy.mjs",
