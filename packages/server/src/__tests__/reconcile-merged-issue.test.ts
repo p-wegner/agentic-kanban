@@ -39,7 +39,12 @@ async function createTestDb() {
 
 async function seedIssue(
   db: TestDb,
-  opts: { includeDone?: boolean; includeAiReviewed?: boolean; startStatus?: "In Review" | "Done" } = {},
+  opts: {
+    includeDone?: boolean;
+    includeAiReviewed?: boolean;
+    includeCancelled?: boolean;
+    startStatus?: "In Review" | "Done" | "Cancelled";
+  } = {},
 ) {
   const includeDone = opts.includeDone ?? true;
   const now = "2026-06-08T10:00:00.000Z";
@@ -47,6 +52,7 @@ async function seedIssue(
   const inReviewStatusId = randomUUID();
   const doneStatusId = randomUUID();
   const aiReviewedStatusId = randomUUID();
+  const cancelledStatusId = randomUUID();
   const issueId = randomUUID();
 
   await db.insert(projects).values({
@@ -68,9 +74,16 @@ async function seedIssue(
   if (opts.includeAiReviewed) {
     statusRows.push({ id: aiReviewedStatusId, projectId, name: "AI Reviewed", sortOrder: 3, isDefault: false, createdAt: now });
   }
+  if (opts.includeCancelled ?? true) {
+    statusRows.push({ id: cancelledStatusId, projectId, name: "Cancelled", sortOrder: 5, isDefault: false, createdAt: now });
+  }
   await db.insert(projectStatuses).values(statusRows);
 
-  const startStatusId = opts.startStatus === "Done" ? doneStatusId : inReviewStatusId;
+  const startStatusId = opts.startStatus === "Done"
+    ? doneStatusId
+    : opts.startStatus === "Cancelled"
+      ? cancelledStatusId
+      : inReviewStatusId;
   await db.insert(issues).values({
     id: issueId,
     issueNumber: 689,
@@ -83,7 +96,7 @@ async function seedIssue(
     updatedAt: now,
   });
 
-  return { projectId, issueId, inReviewStatusId, doneStatusId, aiReviewedStatusId };
+  return { projectId, issueId, inReviewStatusId, doneStatusId, aiReviewedStatusId, cancelledStatusId };
 }
 
 describe("reconcileMergedIssue", () => {
@@ -214,5 +227,72 @@ describe("reconcileMergedIssue", () => {
     await expect(
       reconcileMergedIssue({ database: db, issueId: randomUUID() }),
     ).rejects.toThrow(/Issue not found/);
+  });
+
+  // #686 — a group merge fanned out to every member and flipped a deliberately Cancelled
+  // one to Done, because it is neither already-on-target nor newer than the merge.
+  it("does not overwrite a deliberate Cancel when a sibling's merge fans out", async () => {
+    const db = await createTestDb();
+    const { projectId, issueId, doneStatusId, cancelledStatusId } = await seedIssue(db, { startStatus: "Cancelled" });
+
+    const result = await reconcileMergedIssue({
+      database: db,
+      issueId,
+      now: "2026-06-08T10:05:00.000Z",
+    });
+
+    expect(result).toEqual({
+      projectId,
+      issueTransitioned: false,
+      targetStatusId: doneStatusId,
+      terminalStatusPreserved: "Cancelled",
+    });
+
+    const [issue] = await db
+      .select({ statusId: issues.statusId })
+      .from(issues)
+      .where(eq(issues.id, issueId));
+    expect(issue.statusId).toBe(cancelledStatusId);
+  });
+
+  // The guard must hold on the MERGE path too, not only for catch-up callers: the group
+  // fan-out happens there, and it passes `mergedAt` stamped at the merge instant.
+  it("preserves a Cancel even on the merge path, where the Cancel predates the merge", async () => {
+    const db = await createTestDb();
+    const { issueId, cancelledStatusId } = await seedIssue(db, { startStatus: "Cancelled" });
+
+    const result = await reconcileMergedIssue({
+      database: db,
+      issueId,
+      now: "2026-06-08T12:00:00.000Z",
+      mergedAt: "2026-06-08T11:00:00.000Z",
+    });
+
+    expect(result.issueTransitioned).toBe(false);
+    expect(result.terminalStatusPreserved).toBe("Cancelled");
+
+    const [issue] = await db
+      .select({ statusId: issues.statusId })
+      .from(issues)
+      .where(eq(issues.id, issueId));
+    expect(issue.statusId).toBe(cancelledStatusId);
+  });
+
+  // The guard refuses only while the ticket is CLOSED — reopening it restores convergence,
+  // so this is not a permanent exclusion from the merge fan-out.
+  it("converges again once a Cancelled issue is reopened", async () => {
+    const db = await createTestDb();
+    const { issueId, inReviewStatusId, doneStatusId } = await seedIssue(db, { startStatus: "Cancelled" });
+
+    await db.update(issues).set({ statusId: inReviewStatusId }).where(eq(issues.id, issueId));
+
+    const result = await reconcileMergedIssue({
+      database: db,
+      issueId,
+      now: "2026-06-08T10:05:00.000Z",
+    });
+
+    expect(result.issueTransitioned).toBe(true);
+    expect(result.targetStatusId).toBe(doneStatusId);
   });
 });
