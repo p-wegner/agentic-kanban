@@ -26,7 +26,11 @@ import {
 } from "../repositories/base-branch-health.repository.js";
 
 const CLONE_TIMEOUT_MS = 5 * 60 * 1000;
-const VERIFY_TIMEOUT_MS = 20 * 60 * 1000;
+// Measured on this repo (#674): the scoped verify alone reported 974s of tests, and the base
+// probe additionally installs the clone first. At 20 minutes the probe timed out instead of
+// answering, which is the same failure mode as the false red it replaced — a probe that never
+// returns a verdict still leaves the gate attributing branch failures to an unknown base.
+const VERIFY_TIMEOUT_MS = 45 * 60 * 1000;
 const INSTALL_TIMEOUT_MS = 15 * 60 * 1000;
 
 export interface BaseBranchVerifyResult {
