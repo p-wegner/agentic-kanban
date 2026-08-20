@@ -67,6 +67,35 @@ export function substituteMcpConfigArg(args: string[], containerMcpConfigPath?: 
   });
 }
 
+/**
+ * Drop the MCP config flag AND its value.
+ *
+ * For a TRUE remote worker (one that does not share this filesystem) the board's
+ * `--mcp-config <path>` is worse than useless twice over: the path names a file in
+ * the BOARD's tmpdir, which does not exist on the worker — Claude refuses to start
+ * at all with "Invalid MCP configuration: MCP config file not found" — and even if
+ * the file were shipped, the MCP server it configures talks to the board API, which
+ * is bound to loopback by design and is unreachable from another machine. So there is
+ * nothing to translate the way a container does; the right move is to remove it.
+ *
+ * Handles both the separated (`--mcp-config <path>`) and joined (`--mcp-config=<path>`)
+ * forms, and Copilot's `@`-prefixed value.
+ */
+export function stripMcpConfigArgs(args: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (MCP_CONFIG_FLAGS.has(arg)) {
+      i++; // also skip the value that follows
+      continue;
+    }
+    const joined = [...MCP_CONFIG_FLAGS].some((flag) => arg.startsWith(`${flag}=`));
+    if (joined) continue;
+    out.push(arg);
+  }
+  return out;
+}
+
 /** Case-insensitive, separator-insensitive comparison key for a Windows-or-POSIX path. */
 function normalizeForCompare(value: string): string {
   return value.replace(/\\/g, "/").toLowerCase();

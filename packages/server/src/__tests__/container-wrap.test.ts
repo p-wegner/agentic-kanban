@@ -4,6 +4,7 @@ import {
   containerCommandFor,
   translateHostPathsInArg,
   substituteMcpConfigArg,
+  stripMcpConfigArgs,
   wrapLaunchConfigForContainer,
 } from "../services/agent-provider/container-wrap.js";
 import type { AgentLaunchConfig } from "../services/agent-provider/types.js";
@@ -307,5 +308,33 @@ describe("container env (#133/#134)", () => {
       { handle: HANDLE, pathMappings: MAPPINGS },
     );
     expect(envOf(wrapped).ANTHROPIC_API_KEY).toBe("sk-ant-abc123");
+  });
+});
+
+describe("stripMcpConfigArgs", () => {
+  // A true remote worker died on "Invalid MCP configuration: MCP config file not
+  // found" because the board shipped its own tmpdir path in the launch args. The
+  // env crossing the machine boundary was projected; the args next to it were not.
+  it("drops the flag and its value in the separated form", () => {
+    expect(stripMcpConfigArgs(["--print", "--mcp-config", "C:\tmp\mcp.json", "--model", "sonnet"]))
+      .toEqual(["--print", "--model", "sonnet"]);
+  });
+
+  it("drops the joined form", () => {
+    expect(stripMcpConfigArgs(["--mcp-config=C:\tmp\mcp.json", "--print"])).toEqual(["--print"]);
+  });
+
+  it("drops Copilot's @-prefixed value", () => {
+    expect(stripMcpConfigArgs(["--additional-mcp-config", "@C:\tmp\mcp.json", "--print"]))
+      .toEqual(["--print"]);
+  });
+
+  it("leaves args without an MCP config untouched", () => {
+    const args = ["--print", "--model", "sonnet"];
+    expect(stripMcpConfigArgs(args)).toEqual(args);
+  });
+
+  it("does not eat a following flag when the config arg is last", () => {
+    expect(stripMcpConfigArgs(["--print", "--mcp-config"])).toEqual(["--print"]);
   });
 });
