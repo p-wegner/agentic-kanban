@@ -33,7 +33,12 @@ import os from "node:os";
 // packages/server/vitest.config.ts. The v3 `poolOptions.forks` form is ignored with a warning.
 const cpuCount = os.cpus().length || 4;
 const maxWorkers = Number(process.env.VITEST_MAX_WORKERS) || Math.max(2, Math.floor(cpuCount / 2));
-const testTimeout = Number(process.env.VITEST_TEST_TIMEOUT) || 60_000;
+// #680: 60s was still measuring load in this package too. `lint-arch-gate` — a `@gate:always-run`
+// suite that spawns dependency-cruiser over FOUR package source trees — timed out at exactly 60s
+// during a guards-only sweep run alongside a merge gate, i.e. a red that said nothing about the
+// tree. 120s matches the server package for the same reason: a hang still never finishes, so the
+// larger budget hides nothing, while a red gate withholds every merge board-wide.
+const testTimeout = Number(process.env.VITEST_TEST_TIMEOUT) || 120_000;
 
 export default defineConfig({
   test: {

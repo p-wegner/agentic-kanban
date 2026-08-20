@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { createSecureServer } from "node:http2";
 import { serve } from "@hono/node-server";
+import { VERIFY_SCRIPT_TIMEOUT_MS } from "./services/verify-budget.js";
 import { createNodeWebSocket } from "@hono/node-ws";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -208,6 +209,22 @@ export async function startServer(port?: number, hostname?: string) {
   // 1 s is short enough to clear idle connections quickly while still amortising
   // the TCP handshake cost across rapid back-to-back requests.
   (server as { keepAliveTimeout?: number }).keepAliveTimeout = 1000;
+  // Node's DEFAULT `requestTimeout` is 5 minutes, and it closed the socket mid-merge (#680).
+  //
+  // Measured twice while trying to land the In-Review queue: `POST /api/workspaces/:id/merge`
+  // returned `HTTP 000` (connection dropped) after ~5 minutes with `curl -m 3300`, while the
+  // gate kept running server-side — so the CALLER could never learn the outcome of an operation
+  // the board itself budgets up to 45 minutes for (see verify-budget.ts). Any long endpoint has
+  // the same shape: merge, review, fix-and-merge, a cold-clone base probe.
+  //
+  // Not 0 (disabled): a genuinely stuck request should still be reaped eventually. The budget is
+  // the verify budget plus slack for the install/clone/smoke phases that surround it, so the
+  // ceiling stays above the longest thing the server legitimately does — the same rule as every
+  // other budget in this repo, and the same failure mode when it is not.
+  const HTTP_REQUEST_TIMEOUT_MS = VERIFY_SCRIPT_TIMEOUT_MS + 15 * 60 * 1000;
+  (server as { requestTimeout?: number }).requestTimeout = HTTP_REQUEST_TIMEOUT_MS;
+  // `headersTimeout` must not sit below `requestTimeout` or it becomes the effective ceiling.
+  (server as { headersTimeout?: number }).headersTimeout = HTTP_REQUEST_TIMEOUT_MS;
   injectWebSocket(server);
 
   // #343 — also listen on the IPv6 loopback, so `http://localhost:PORT` stops paying a

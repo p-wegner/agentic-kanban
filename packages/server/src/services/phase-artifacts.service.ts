@@ -9,6 +9,7 @@ import {
   getWorkspaceIssueId,
 } from "../repositories/phase-artifacts.repository.js";
 import { slugify } from "@agentic-kanban/shared/lib/slugify";
+import { adoptLegacySlugPath, legacySlugify } from "@agentic-kanban/shared/lib/slug-path-compat";
 
 const PHASE_FILES: Record<string, string> = {
   specify: "spec.md",
@@ -35,11 +36,33 @@ function issueSlug(value: string): string {
   return slugify(value, { maxLength: 60, fallback: "issue" });
 }
 
+/**
+ * The same slug under the PRE-#565 rule (#682), so a spec DIRECTORY written before the slug
+ * consolidation is adopted rather than orphaned beside its replacement. Measured moves:
+ * `"Über-Ticket"` → `ber-ticket` → `uber-ticket`; `"Straße"` → `stra-e` → `strasse`; and a title
+ * whose 60-char cap landed mid-run lost its trailing dash, so pure-ASCII titles moved too.
+ */
+function legacyIssueSlug(value: string): string {
+  return legacySlugify(value, { maxLength: 60, fallback: "issue" });
+}
+
 function artifactRelativePath(issueNumber: number | null, title: string, caption: string): string | null {
   const fileName = phaseFileNameFromCaption(caption);
   if (!fileName) return null;
   const issuePart = issueNumber == null ? "issue" : String(issueNumber);
   return `specs/${issuePart}-${issueSlug(title)}/${fileName}`;
+}
+
+/** The directory this issue's artifacts lived in before #565 changed the slug rule (#682). */
+export function legacyArtifactDir(issueNumber: number | null, title: string): string {
+  const issuePart = issueNumber == null ? "issue" : String(issueNumber);
+  return `specs/${issuePart}-${legacyIssueSlug(title)}`;
+}
+
+/** The directory they live in now. */
+export function currentArtifactDir(issueNumber: number | null, title: string): string {
+  const issuePart = issueNumber == null ? "issue" : String(issueNumber);
+  return `specs/${issuePart}-${issueSlug(title)}`;
 }
 
 async function writeArtifactFile(workingDir: string, relativePath: string, content: string): Promise<void> {
@@ -64,6 +87,18 @@ export async function materializePhaseArtifactToWorktree(
 
   const relativePath = artifactRelativePath(row.issueNumber, row.title, input.caption);
   if (!relativePath) return { relativePath: null };
+
+  // #682: the whole spec DIRECTORY moved when #565 changed the slug rule, so earlier phase
+  // artifacts for this same issue (plan.md written before, tasks.md written after) would end up
+  // split across two dirs with nothing saying so. Adopt the old dir before writing; a no-op
+  // whenever the slug is unchanged, which is every ASCII title short of the cap.
+  const adoption = adoptLegacySlugPath(
+    join(row.workingDir, currentArtifactDir(row.issueNumber, row.title)),
+    join(row.workingDir, legacyArtifactDir(row.issueNumber, row.title)),
+  );
+  if (adoption.adopted) {
+    console.log(`[phase-artifacts] adopted pre-#565 spec dir ${adoption.from} for issue #${row.issueNumber ?? "?"} (slug rule changed in #565)`);
+  }
 
   await writeArtifactFile(row.workingDir, relativePath, input.content);
   return { relativePath };
