@@ -162,9 +162,11 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       headers: { authorization: `Bearer ${identity.workerToken}` },
     });
     ws = socket;
+    let openedAt: number | null = null;
 
     socket.on("open", () => {
       reconnectDelay = RECONNECT_MIN_MS;
+      openedAt = Date.now();
       log(`[worker] connected to ${boardUrl}`);
       socket.send(JSON.stringify({
         type: "hello",
@@ -207,18 +209,32 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       }
     });
 
-    const scheduleReconnect = () => {
+    const scheduleReconnect = (cause: string) => {
       if (stopped) return;
       const delay = reconnectDelay;
       reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS);
-      log(`[worker] disconnected; retrying in ${Math.round(delay / 1000)}s`);
+      // Say how long the connection lasted, not just when the next attempt is:
+      // the retry delay resets to RECONNECT_MIN_MS on every successful open, so
+      // a log of bare "retrying in 1s" lines reads like a socket that keeps
+      // dying instantly, whatever its real lifetime was.
+      const lifetime = openedAt === null ? "never opened" : `up ${Math.round((Date.now() - openedAt) / 1000)}s`;
+      log(`[worker] disconnected (${cause}; ${lifetime}); retrying in ${Math.round(delay / 1000)}s`);
       const timer = setTimeout(connect, delay);
       if (timer.unref) timer.unref();
     };
 
-    socket.on("close", () => {
+    socket.on("close", (code: number, reason: Buffer) => {
       if (ws === socket) ws = null;
-      scheduleReconnect();
+      // The close code is the only thing separating a board that dropped us on
+      // purpose from a transport that died, and the two want opposite responses:
+      // 1006 means the socket broke with no close frame (network path gone, board
+      // process killed), while a clean 1000/1005 is the peer closing us - which is
+      // what a board-side eviction of a second connection for this workerId looks
+      // like. Without the code both render identically and a self-sustaining
+      // reconnect/evict loop is indistinguishable from a flaky link.
+      const detail = reason.length > 0 ? `: ${reason.toString("utf8").trim()}` : "";
+      const kind = code === 1006 ? "transport failed, no close frame" : "closed by board";
+      scheduleReconnect(`code ${code}${detail} - ${kind}`);
     });
     socket.on("error", (err) => {
       log(`[worker] socket error: ${err.message}`);
