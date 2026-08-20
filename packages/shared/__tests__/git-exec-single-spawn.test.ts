@@ -120,6 +120,15 @@ const ALLOWLIST = new Map<string, string>([
       "from the package it is repairing is exactly the thing that cannot work here.",
   ],
   [
+    join("packages", "server", "scripts", "generate-bundled-skill.mjs"),
+    "Bundled-skill generator, run as a bare `node <file>` (pnpm skill:generate / skill:check) and " +
+      "from the freshness gate itself. It must work with packages/shared UNBUILT — the tree it " +
+      "stamps is the one where shared may be mid-change — so it cannot import the adapter, whose " +
+      "deep path resolves to TS source that plain node will not load. One read-only " +
+      "`git rev-parse --short HEAD` for the `commit:` stamp, with windowsHide, degrading to " +
+      "\"unknown\" on any failure.",
+  ],
+  [
     join("packages", "e2e", "global-setup.ts"),
     "Playwright global-setup — test-harness bootstrap that resolves the repo root (a single read-only " +
       "`git rev-parse --git-common-dir`) before the app runs. Morally test infrastructure; the " +
