@@ -47,9 +47,16 @@ export interface CliVersionConfig {
  * new release and BUMP `maxKnown` here. Do not silence it by setting null.
  * Last verified: 2026-07-02 (claude 2.1.198, codex 0.142.0, copilot 1.0.56,
  * pi 0.73.1 — the versions installed when #956 landed).
+ *
+ * claude 2.1.237 re-verified 2026-08-20: launch flags and the stream-json contract are
+ * unchanged, and a builder launch plus a butler turn were both driven end-to-end. It DID
+ * change one thing that is not a flag: a headless run no longer returns while any process
+ * in its tree is alive, so a SessionStart/UserPromptSubmit hook that leaves a detached
+ * child behind hangs the launch forever with zero output (see the ACP note on
+ * `OPERATOR_SESSION_ENV_PREFIXES` in agent-provider/helpers.ts).
  */
 export const CLI_VERSION_CONFIG: Record<ProviderName, CliVersionConfig> = {
-  claude: { versionArgs: ["--version"], minSupported: "1.0.0", maxKnown: "2.1.198" },
+  claude: { versionArgs: ["--version"], minSupported: "1.0.0", maxKnown: "2.1.237" },
   codex: { versionArgs: ["--version"], minSupported: "0.20.0", maxKnown: "0.142.0" },
   copilot: { versionArgs: ["--version"], minSupported: "0.1.0", maxKnown: "1.0.56" },
   // Canonical breaking-change symptom lives here: Pi 0.73.1 rejects `--approve`.
