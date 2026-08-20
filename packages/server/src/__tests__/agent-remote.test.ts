@@ -4,6 +4,7 @@ import type { WorkerConnectionManager, WorkerMessageListener } from "../services
 import type { WorkerToBoardMessage, BoardToWorkerMessage } from "@agentic-kanban/shared/lib/worker-protocol";
 import type { AgentOutputEvent } from "../services/agent.service.js";
 import { createTestDb } from "./helpers/test-db.js";
+import { projects, projectStatuses, issues, workspaces, sessions } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 
 function fakeManager(initiallyConnected: string[] = []) {
@@ -160,6 +161,68 @@ describe("agent-remote service (worker fleet phase 1c)", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // A worker reconnecting after a board restart announces sessions this process
+  // has no memory of. Stopping all of them killed an agent that had been working
+  // for 65 seconds, and pre-empted its push, so the work was unrecoverable.
+  describe("a reconnecting worker's unknown sessions", () => {
+    async function seedSession(sessionId: string, status: string, workerId: string | null) {
+      await db.insert(projects).values({ id: "p1", name: "p" }).onConflictDoNothing();
+      await db.insert(projectStatuses).values({ id: "st1", projectId: "p1", name: "Todo", position: 0 }).onConflictDoNothing();
+      await db.insert(issues).values({ id: "i1", title: "t", statusId: "st1", projectId: "p1" }).onConflictDoNothing();
+      await db.insert(workspaces).values({ id: "ws1", issueId: "i1", branch: "feature/x" }).onConflictDoNothing();
+      await db.insert(sessions).values({ id: sessionId, workspaceId: "ws1", status, workerId });
+    }
+
+    const flush = () => new Promise((r) => setTimeout(r, 0));
+
+    it("leaves a session the DB still has running on that worker alone", async () => {
+      await seedSession("live", "running", "w1");
+      const fm = fakeManager(["w1"]);
+      createRemoteAgentService(fm.manager, db);
+
+      fm.fireMessage("w1", { type: "hello", runningSessionIds: ["live"] } as never);
+      await flush();
+
+      expect(fm.sent.filter((m) => m.message.type === "stop")).toHaveLength(0);
+    });
+
+    it("still stops a genuine zombie whose row is finished", async () => {
+      await seedSession("dead", "completed", "w1");
+      const fm = fakeManager(["w1"]);
+      createRemoteAgentService(fm.manager, db);
+
+      fm.fireMessage("w1", { type: "hello", runningSessionIds: ["dead"] } as never);
+      await flush();
+
+      const stops = fm.sent.filter((m) => m.message.type === "stop");
+      expect(stops).toHaveLength(1);
+      expect((stops[0].message as { sessionId: string }).sessionId).toBe("dead");
+    });
+
+    it("stops one the board has no row for at all", async () => {
+      const fm = fakeManager(["w1"]);
+      createRemoteAgentService(fm.manager, db);
+
+      fm.fireMessage("w1", { type: "hello", runningSessionIds: ["ghost"] } as never);
+      await flush();
+
+      expect(fm.sent.filter((m) => m.message.type === "stop")).toHaveLength(1);
+    });
+
+    it("does not kill a running session that belongs to a different worker", async () => {
+      // Reported by w1 but the DB says it runs on w2 — not w1's to keep, and the
+      // stop is addressed to the worker that actually reported it.
+      await seedSession("elsewhere", "running", "w2");
+      const fm = fakeManager(["w1"]);
+      createRemoteAgentService(fm.manager, db);
+
+      fm.fireMessage("w1", { type: "hello", runningSessionIds: ["elsewhere"] } as never);
+      await flush();
+
+      expect(fm.sent.filter((m) => m.message.type === "stop")).toHaveLength(1);
+    });
   });
 
   it("keeps sessions alive when the worker reconnects within grace", () => {

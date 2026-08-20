@@ -31,7 +31,7 @@ import { buildRemoteSpecEnv } from "../lib/remote-spec-env.js";
 import { resolveWorktreeDevPorts } from "./worktree-ports.js";
 import { db as realDb } from "../db/index.js";
 import type { Database } from "../db/index.js";
-import { updateSessionWorkerId } from "../repositories/worker.repository.js";
+import { updateSessionWorkerId, getSessionLiveness } from "../repositories/worker.repository.js";
 import type { AgentExecutionService, AgentHandle } from "./agent-dispatch.service.js";
 import type { AgentOutputCallback } from "./agent.service.js";
 import type { WorkerConnectionManager } from "./worker-connection.service.js";
@@ -130,17 +130,60 @@ export function createRemoteAgentService(
       return;
     }
     if (message.type === "hello") {
-      // Orphan reconciliation (phase 3): a worker that reconnects after a board
-      // restart announces sessions this process knows nothing about. Their
-      // board-side session rows were already finalized by the startup sweep, so
-      // the agents are unreachable zombies still able to write to a checkout —
-      // stop them. Their pushed work, if any, is recovered from the incoming ref
-      // by the startup sweep, not by leaving the agent running.
-      const orphans = message.runningSessionIds.filter((id) => !sessions.has(id));
-      for (const sessionId of orphans) {
-        console.warn(`[agent-remote] worker ${workerId} reports unknown session ${sessionId}; stopping the orphan`);
-        manager.send(workerId, { type: "stop", sessionId });
-      }
+      // A worker that reconnects after a board restart announces sessions this
+      // process has no memory of. The original rule stopped all of them, on the
+      // assumption that the startup sweep had already finalized their rows and the
+      // agents were therefore unreachable zombies.
+      //
+      // That assumption is not always true, and when it is wrong the cost is high.
+      // Observed: a board restart mid-run, the worker reconnected 54s later, and the
+      // board answered its hello by killing an agent that had been working for 65
+      // seconds — silently, from the board's side. The kill also pre-empted the
+      // push, so the work was not recoverable from the incoming ref either.
+      //
+      // So ask the DB instead of assuming. A row that is still `running` on THIS
+      // worker is sanctioned work in progress: leave it alone. It finishes, pushes
+      // to its incoming ref, and the startup sweep lands it — the recovery path
+      // decision 012 already specifies. Only a session the board has genuinely
+      // finished with (terminal row, or no row at all) is the zombie the stop was
+      // written for.
+      //
+      // NOTE: leaving it running is not the same as adopting it. This process still
+      // has no output callback for that session, so its streamed output is dropped
+      // and its exit does not finalize the row here. Full adoption — rebuilding the
+      // callback so the exit lands through the normal path — is the better fix and
+      // is NOT implemented; this only stops the board destroying live work.
+      const unknown = message.runningSessionIds.filter((id) => !sessions.has(id));
+      if (unknown.length === 0) return;
+      void (async () => {
+        for (const sessionId of unknown) {
+          let live: { status: string; workerId: string | null } | null = null;
+          try {
+            live = await getSessionLiveness(sessionId, database);
+          } catch (err) {
+            // Fail SAFE: if we cannot tell, do not kill. A stray agent is cheaper
+            // than destroying work we were unable to ask about.
+            console.error(
+              `[agent-remote] could not check session ${sessionId} reported by worker ${workerId}; leaving it running`,
+              err,
+            );
+            continue;
+          }
+          if (live && live.status === "running" && live.workerId === workerId) {
+            console.warn(
+              `[agent-remote] worker ${workerId} reports session ${sessionId}, which this process does not track ` +
+                `but the DB still has running on that worker — leaving it alone. Its output is not being streamed; ` +
+                `its result will land from the incoming ref on the next startup sweep.`,
+            );
+            continue;
+          }
+          const why = !live ? "no session row" : `row is ${live.status}` + (live.workerId === workerId ? "" : " on another worker");
+          console.warn(
+            `[agent-remote] worker ${workerId} reports unknown session ${sessionId} (${why}); stopping the orphan`,
+          );
+          manager.send(workerId, { type: "stop", sessionId });
+        }
+      })();
       return;
     }
     if (message.type === "assign_failed") {
