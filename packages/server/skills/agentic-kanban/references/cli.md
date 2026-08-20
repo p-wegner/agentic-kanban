@@ -208,7 +208,7 @@ Manage workspaces (git worktrees linked to issues).
 | `workspace resume <issue-number>` | Resume the latest workspace for an issue by launching a new agent session |
 | `workspace wait <issue-number>` | Block until a workspace leaves its active state, then exit |
 | `workspace review <workspace-id>` | Trigger an AI code review for an idle workspace |
-| `workspace start <issue-id>` | One-step create + launch a workspace for an issue |
+| `workspace start <issue>` | One-step create + launch a workspace for an issue |
 | `workspace diff <workspace-id>` | Get the git diff for a workspace |
 | `workspace scorecard <workspace-id>` | Get the PR quality scorecard for a workspace |
 | `workspace merge <workspace-id>` | Merge a workspace branch into the project's default branch |

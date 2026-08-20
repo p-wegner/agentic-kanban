@@ -639,6 +639,20 @@ export function MonitorWarningsSection({
               </div>
             );
           }
+          // #681 added a third member. The old `else` branch assumed the dirty-main shape, so a
+          // new warning rendered as "dirty main checkout" with `undefined` counts — the exact
+          // failure #567 removed the structural narrowing to prevent.
+          if (warning.type === "degenerate_base_health") {
+            return (
+              <div key={`degenerate-base-${warning.projectId}`} className="text-[11px] text-red-800 dark:text-red-200 leading-snug">
+                <div className="font-semibold">{warning.projectName}: base-health probe never green</div>
+                <div>{warning.message}</div>
+                <div className="mt-1 font-mono text-[10px] text-red-600 dark:text-red-300 truncate">
+                  {warning.probeCount} probe(s): {warning.redCount} red, {warning.timeoutCount} timeout, 0 green
+                </div>
+              </div>
+            );
+          }
           return (
             <div key={`dirty-${warning.projectId}`} className="text-[11px] text-red-800 dark:text-red-200 leading-snug">
               <div className="font-semibold">{warning.projectName}: dirty main checkout</div>

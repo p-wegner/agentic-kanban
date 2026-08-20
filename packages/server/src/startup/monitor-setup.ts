@@ -23,6 +23,7 @@ import {
 } from "../services/start-policy.service.js";
 import { advanceDuePluginLoops } from "../services/plugin-loop-monitor.js";
 import { scanDirtyMainCheckouts } from "../services/dirty-main-checkout.js";
+import { scanDegenerateBaseHealth } from "../services/degenerate-base-health.js";
 import { scanAutodriveStallWarnings, buildAutoStartSkipWarnings } from "../services/autodrive-stall-warning.service.js";
 import { resolveMergePolicy } from "./merge-strategy.js";
 import { getAllPreferencesCached, invalidatePreferencesCache } from "../repositories/preferences.repository.js";
@@ -202,16 +203,26 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
     const warnings: MonitorWarning[] = [
       ...await scanDirtyMainCheckouts(db),
       ...await scanAutodriveStallWarnings(db, prefs),
+      // #681: a probe that has never once been green is not measuring anything, and its reds
+      // are consumed as if they were. Nothing asked that question before.
+      ...await scanDegenerateBaseHealth(db).catch(() => []),
     ];
     lastScannedWarnings = warnings;
     composeWarnings();
     monitorState.lastHealthCheckAt = new Date().toISOString();
     const warningFingerprint = warnings
+      // Discriminate on `type` (#567 gave every member one) rather than probing for a field:
+      // a structural `"files" in warning` test silently mis-buckets each new member, and #681
+      // added a third. Each arm names the fields whose CHANGE should re-notify.
       .map((warning) => {
-        if ("files" in warning) {
-          return `dirty_main:${warning.projectId}:${warning.files.join("|")}`;
+        switch (warning.type) {
+          case "dirty_main_checkout":
+            return `dirty_main:${warning.projectId}:${warning.files.join("|")}`;
+          case "degenerate_base_health":
+            return `degenerate_base_health:${warning.projectId}:${warning.probeCount}`;
+          default:
+            return `${warning.type}:${warning.projectId}:${warning.cause}:${warning.lastProgressAt}:${warning.workspaceIds.join("|")}`;
         }
-        return `${warning.type}:${warning.projectId}:${warning.cause}:${warning.lastProgressAt}:${warning.workspaceIds.join("|")}`;
       })
       .join(";");
     if (warningFingerprint && warningFingerprint !== lastWarningFingerprint) {
