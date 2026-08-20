@@ -93,7 +93,32 @@ export interface AutodriveStallWarning {
   message: string;
 }
 
-export type MonitorWarning = DirtyMainCheckoutWarning | AutodriveStallWarning;
+/**
+ * A project's base-branch health probe has a DEGENERATE verdict distribution: many probes, not
+ * one green, ever (#681).
+ *
+ * The gate reads only the latest verdict, where "red again" and "the probe itself is broken"
+ * look identical. Measured on the dev board: 200 probes, 199 red + 1 timeout, 0 green over five
+ * days, with reds that were unmistakable install artifacts — roughly half of all recorded
+ * base-health verdicts were false, and no mechanism said a word. This warning is the mechanism.
+ */
+export interface DegenerateBaseHealthWarning {
+  type: "degenerate_base_health";
+  projectId: string;
+  projectName: string;
+  detectedAt: string;
+  /** Probes recorded for this project, ever. */
+  probeCount: number;
+  greenCount: number;
+  redCount: number;
+  timeoutCount: number;
+  /** ISO timestamps bounding the degenerate window, so the message can name how long it ran. */
+  firstProbeAt: string | null;
+  lastProbeAt: string | null;
+  message: string;
+}
+
+export type MonitorWarning = DirtyMainCheckoutWarning | AutodriveStallWarning | DegenerateBaseHealthWarning;
 
 export interface MonitorAction {
   at: string;
