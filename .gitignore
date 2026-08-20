@@ -73,3 +73,10 @@ packages/e2e/.e2e-data/
 
 # Local worker tarballs from scripts/pack-worker.mjs (never committed)
 dist-worker-pack/
+
+# Server process telemetry written into DATA_DIR (= packages/server in a checkout): the
+# liveness heartbeat and the append-only exit log from lib/exit-record.ts. Machine state,
+# regenerated every boot — a tracked copy would show up as a dirty tree on every run and
+# block auto-merge.
+packages/server/process-alive.json
+packages/server/process-exit-log.jsonl
