@@ -2,6 +2,7 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
 import { SERVER_URL } from "../helpers/port.js";
 import { getE2EProjectId } from "../helpers/e2e-project.js";
+import { issueCard, narrowBoardTo } from "../helpers/board-ui.js";
 
 /**
  * board-ui.move.rollback — a server-REJECTED optimistic move must snap the card
@@ -87,6 +88,10 @@ test.describe("Board move rollback UI", () => {
 
     await page.goto("/");
     await page.waitForSelector("h2");
+    // Narrow the board to this run's issues: BoardColumn virtualizes a column past 15
+    // issues, so a card outside the rendered window is not in the DOM and the spec fails
+    // with "element(s) not found" for a reason unrelated to what it is testing (#659).
+    await narrowBoardTo(page, suffix);
 
     const todoColumn = page.locator(`#column-${todoStatusId}`);
     const inProgressColumn = page.locator(`#column-${inProgressStatusId}`);

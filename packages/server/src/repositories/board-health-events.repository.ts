@@ -3,11 +3,12 @@ import { boardHealthEvents } from "@agentic-kanban/shared/schema";
 import { and, desc, eq, inArray, lt } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import type { BoardHealthEventType, BoardHealthEventCategory } from "@agentic-kanban/shared/lib/board-health-events";
 
-export type BoardHealthEventType = "cycle_start" | "cycle_end" | "observation" | "action" | "error";
-
-/** Business-level grouping shown in the notification center filter bar. */
-export type BoardHealthEventCategory = "merge" | "launch" | "server" | "refill" | "smoke_check";
+// The vocabulary itself lives in shared (#568) so the route whitelists and the client
+// filter maps derive from it instead of re-listing the literals. Re-exported here
+// because the repository is where the rest of the server already imports it from.
+export type { BoardHealthEventType, BoardHealthEventCategory };
 
 /** Maximum events retained per project before old ones are pruned. */
 const RETENTION_LIMIT = 500;

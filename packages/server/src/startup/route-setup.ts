@@ -11,6 +11,8 @@ import { createSessionsRoute } from "../routes/sessions.js";
 import type { createBoardEvents } from "../services/board-events.js";
 import { ReviewError, startManualReview } from "../services/review.service.js";
 import { createSessionManager } from "../services/session.manager.js";
+import { createWorkerWsRoute } from "../services/worker-connection.service.js";
+import { getWorkerFleet } from "../services/worker-fleet.service.js";
 import type { createWorkflowForkService } from "../services/workflow-fork.service.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -60,6 +62,10 @@ export function setupRoutes(app: Hono, { sessionManager, boardEvents, reviewSess
 
   app.get("/ws/sessions/:sessionId", sessionManager.wsRoute());
   app.get("/ws/board/:projectId", createBoardWsRoute(upgradeWebSocket, boardEvents));
+  // Fleet worker sockets (epic #1): token-authed upgrade; the fleet bundle is
+  // shared with /api/workers and the session lifecycle's remote dispatch.
+  const workerFleet = getWorkerFleet(db);
+  app.get("/ws/workers/:id", createWorkerWsRoute(upgradeWebSocket, workerFleet.registry, workerFleet.connections));
   app.route("/api", createRoutes(db, () => sessionManager, { boardEvents, fixAndMergeSessionIds, forkService }));
   app.route("/api/sessions", createSessionsRoute(db));
 

@@ -2,33 +2,29 @@ import type { Command } from "commander";
 import { getProjectStatusById, deleteProjectStatusById } from "../../repositories/project.repository.js";
 import { getFirstIssueIdWithStatus } from "../../repositories/issue.repository.js";
 import { BUILTIN_SKILLS } from "../../builtin-skills.js";
-import { runMigrations, logDefaultBranch, timeSince } from "../shared.js";
+import { runMigrations, logDefaultBranch, timeSince, cliAction } from "../shared.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { parseIssueNumberFromBranch } from "@agentic-kanban/shared/lib/branch";
 
 export function registerSystemCommands(program: Command) {
   program
     .command("delete-status <status-id>")
     .description("Delete a project status (fails if issues are linked to it)")
-    .action(async (statusId: string) => {
-      try {
-        await runMigrations();
-        const status = await getProjectStatusById(statusId);
-        if (!status) {
-          console.error(`Status "${statusId}" not found.`);
-          process.exit(1);
-        }
-        const linkedId = await getFirstIssueIdWithStatus(statusId);
-        if (linkedId) {
-          console.error(`Cannot delete status "${status.name}" -- it has linked issues. Move or delete those issues first.`);
-          process.exit(1);
-        }
-        await deleteProjectStatusById(statusId);
-        console.log(`Deleted status "${status.name}" (${statusId})`);
-        process.exit(0);
-      } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+    .action(cliAction(async (statusId: string) => {
+      const status = await getProjectStatusById(statusId);
+      if (!status) {
+        console.error(`Status "${statusId}" not found.`);
         process.exit(1);
       }
-    });
+      const linkedId = await getFirstIssueIdWithStatus(statusId);
+      if (linkedId) {
+        console.error(`Cannot delete status "${status.name}" -- it has linked issues. Move or delete those issues first.`);
+        process.exit(1);
+      }
+      await deleteProjectStatusById(statusId);
+      console.log(`Deleted status "${status.name}" (${statusId})`);
+      process.exit(0);
+    }));
 
   program
     .command("init")
@@ -73,7 +69,7 @@ Examples:
         }
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -137,7 +133,7 @@ Examples:
         }
         process.exit(0);
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -187,14 +183,14 @@ Network access example (HTTP/2 over TLS):
 
         if (options.open) {
           const { execFile } = await import("node:child_process");
-          const cmd = process.platform === "win32" ? "cmd" : "open";
+          const cmd = process.platform === "win32" ? "cmd" : process.platform === "darwin" ? "open" : "xdg-open";
           const args = process.platform === "win32" ? ["/c", "start", `http://${host}:${port}`] : [`http://${host}:${port}`];
           execFile(cmd, args, (err) => {
             if (err) console.warn("  Could not open browser:", err.message);
           });
         }
       } catch (err) {
-        console.error("Error:", err instanceof Error ? err.message : String(err));
+        console.error("Error:", errorMessage(err));
         process.exit(1);
       }
     });
@@ -237,13 +233,14 @@ Via pnpm (use -- to pass args):
         try {
           const entries = readdirSync(claudeProjects);
           for (const entry of entries) {
-            const m =
-              entry.match(/--worktrees-feature-ak-(\d+)-/i) ||
-              entry.match(/agentic-kanban-packages--worktrees-feature-ak-(\d+)-/i);
-            const issueNum = m ? parseInt(m[1], 10) : null;
-            if (m || entry.includes("worktrees")) {
-              allDirs.push({ name: entry, path: join(claudeProjects, entry), issueNum });
-            }
+            // Claude names a session dir after the working directory with separators replaced
+            // by `-`, so a worktree's dir carries the branch's `ak-<N>` verbatim. #548: the
+            // shared parser instead of two near-identical regexes — still only consulted for
+            // entries that are worktree dirs, so an unrelated project dir cannot contribute a
+            // number.
+            if (!entry.includes("worktrees")) continue;
+            const issueNum = parseIssueNumberFromBranch(entry);
+            allDirs.push({ name: entry, path: join(claudeProjects, entry), issueNum });
           }
         } catch {
           console.error(`Cannot read ${claudeProjects}`);

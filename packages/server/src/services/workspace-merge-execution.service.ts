@@ -1,11 +1,12 @@
 import type { workspaces } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
-import type { BoardEvents } from "./board-events.js";
+import type { BoardEventSink } from "./board-events.js";
 import { WorkspaceError, type GitService } from "./workspace-internals.js";
 import type { RecordMergeAttempt } from "./workspace-merge-prevalidation.service.js";
 import { finalizeMergeCleanup } from "./merge-cleanup.service.js";
 import { runMergeCore } from "./merge-executor.service.js";
 import { stampWorkspaceMergedAt } from "../repositories/workspace-merge-execution.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export type WorkspaceMergeExecutionResult = {
   response: {
@@ -33,10 +34,23 @@ export async function executeWorkspaceMerge(args: {
   repoPath: string;
   targetBranch: string;
   database: Database;
-  boardEvents?: BoardEvents;
+  boardEvents?: BoardEventSink;
   gitService: GitService;
   createBackup: (reason: string) => Promise<unknown>;
   recordMergeAttempt: RecordMergeAttempt;
+  /**
+   * Defer the MAIN checkout's `git reset --hard` to post-response cleanup (#686: the reset
+   * rewrites files, tsx hot-reload restarts the server, and an in-flight HTTP response is
+   * dropped). Only the interactive `POST /api/workspaces/:id/merge` route needs that — it is
+   * the only caller with a connection to protect.
+   *
+   * Every other caller (monitor auto-merge, merge queue, orchestrator) syncs INLINE, because
+   * deferring is what created #350: for ~32s the main checkout showed the just-merged files
+   * as staged deletions, which silently stalled the pm-pipeline planner reading artifacts from
+   * it and would have failed the next merge's dirty-main precondition. Those callers have no
+   * response to lose, so they pay the reset before reporting success.
+   */
+  deferMainCheckoutSync?: boolean;
 }): Promise<WorkspaceMergeExecutionResult> {
   const { id, workspace, repoPath, targetBranch, database, boardEvents, gitService } = args;
   console.log(`[workspace-service] merge: workspaceId=${id} branch=${workspace.branch} targetBranch=${targetBranch} repoPath=${repoPath}`);
@@ -58,16 +72,16 @@ export async function executeWorkspaceMerge(args: {
     targetBranch,
     gitService,
     createBackup: args.createBackup,
-    deferWorkingTreeSync: true,
+    deferWorkingTreeSync: args.deferMainCheckoutSync === true,
     onMergeError: async (err) => {
       await args.recordMergeAttempt(
         workspace,
         "conflict",
-        `Merge failed while merging ${workspace.branch} into ${targetBranch}: ${err instanceof Error ? err.message : String(err)}`,
+        `Merge failed while merging ${workspace.branch} into ${targetBranch}: ${errorMessage(err)}`,
         { step: "git-merge", targetBranch },
       );
       return new WorkspaceError(
-        `Merge failed (git-merge step): ${err instanceof Error ? err.message : String(err)}`,
+        `Merge failed (git-merge step): ${errorMessage(err)}`,
         "CONFLICT",
         { mergeReason: "conflict", step: "git-merge", branch: workspace.branch, targetBranch },
       );
@@ -126,6 +140,6 @@ async function stampMergedAtEarly(id: string, now: string, mergedHeadSha: string
   try {
     await stampWorkspaceMergedAt(id, now, mergedHeadSha, database);
   } catch (err) {
-    console.warn("[workspace-merge] early mergedAt stamp failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[workspace-merge] early mergedAt stamp failed (non-fatal):", errorMessage(err));
   }
 }

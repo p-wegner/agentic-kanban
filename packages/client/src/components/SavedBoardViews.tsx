@@ -12,8 +12,9 @@ import {
   type SavedViewReference,
 } from "../lib/boardSavedViews.js";
 import { getSettings, setSettings } from "../lib/settingsStore.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { useBoardFilterStore } from "../stores/boardFilterStore.js";
+import { useDismissable } from "../hooks/useDismissable.js";
 
 interface SavedBoardViewsProps {
   projectId: string;
@@ -132,21 +133,7 @@ export function SavedBoardViews({
   const hasViews = views.length > 0;
   const selectedView = views.find((view) => view.id === selectedViewId);
 
-  useEffect(() => {
-    if (!open) return;
-    function handleClick(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setOpen(false);
-    }
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
-    }
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleKey);
-    };
-  }, [open]);
+  useDismissable(menuRef, open, () => setOpen(false));
 
   return (
     <div className="relative shrink-0" ref={menuRef}>

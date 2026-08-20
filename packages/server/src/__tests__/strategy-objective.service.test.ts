@@ -89,8 +89,6 @@ describe("writeStrategyObjective + commitObjectiveFile — auto-commit hook", ()
   beforeEach(() => {
     repo = mkdtempSync(join(tmpdir(), "strategy-objective-"));
     git(repo, ["init", "-q"]);
-    git(repo, ["config", "user.email", "test@example.com"]);
-    git(repo, ["config", "user.name", "Test"]);
     git(repo, ["config", "commit.gpgsign", "false"]);
     mkdirSync(join(repo, "scripts", "board-monitor"), { recursive: true });
     writeFileSync(join(repo, OBJECTIVE_REL), BASE_OBJECTIVE, "utf8");

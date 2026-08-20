@@ -1,10 +1,12 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { db, schema } from "../db.js";
 import { eq, and } from "drizzle-orm";
-import { requireEntity } from "../db-utils.js";
+import { prodDeps, type ToolDeps } from "./deps.js";
+import { mcpJson, requireEntity } from "../db-utils.js";
 
-export function registerGetDiffComments(server: McpServer) {
+export function registerGetDiffComments(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema } = deps;
+
   server.tool(
     "get_diff_comments",
     "Get diff review comments for a workspace, optionally filtered by file path",
@@ -27,9 +29,7 @@ export function registerGetDiffComments(server: McpServer) {
       const result = await db.select().from(schema.diffComments)
         .where(and(...conditions));
 
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-      };
+      return mcpJson(result);
     },
   );
 }

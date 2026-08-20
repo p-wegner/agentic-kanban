@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import type { IssueWithStatus, StatusWithIssues, UpdateIssueRequest } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import { formatDateKeyLong } from "../lib/dateKey.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { CollapsibleSection } from "./CollapsibleSection.js";
 import { filterIssues } from "../lib/tableView-filters.js";
 import { applySortDirection, compareSortKey } from "../lib/tableView-sorting.js";
@@ -12,6 +12,7 @@ import type { BulkOpDeps } from "../lib/tableView-bulk-ops.js";
 import { useBulkOperations } from "../hooks/useBulkOperations.js";
 import type { Tag } from "../hooks/useBulkOperations.js";
 import { resolveRowCells, PRIORITY_LABEL, tagClass } from "../lib/tableView-cells.js";
+import { ISSUE_ESTIMATES } from "@agentic-kanban/shared";
 
 interface TableViewProps {
   columns: StatusWithIssues[];
@@ -22,7 +23,7 @@ interface TableViewProps {
   onClearCreatedDateFilter?: () => void;
 }
 
-const ESTIMATE_OPTIONS = ["XS", "S", "M", "L", "XL"] as const;
+const ESTIMATE_OPTIONS = ISSUE_ESTIMATES;
 const PRIORITY_OPTIONS = ["critical", "high", "medium", "low"] as const;
 
 type TableSort = { key: SortKey; dir: SortDir };

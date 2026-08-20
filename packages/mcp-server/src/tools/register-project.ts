@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { boardApiUrl } from "../server-url.js";
+import { boardApi, boardErrorText, mcpJson, mcpUnreachable } from "../board-call.js";
+import { mcpError } from "../db-utils.js";
 
 export function registerRegisterProject(server: McpServer) {
   server.tool(
@@ -25,31 +26,22 @@ export function registerRegisterProject(server: McpServer) {
         if (generateReadme !== undefined) body.generateReadme = generateReadme;
         if (exportSkillsOnRegistration !== undefined) body.exportSkillsOnRegistration = exportSkillsOnRegistration;
 
-        const res = await fetch(boardApiUrl("/api/projects"), {
+        const { ok, status, statusText, data } = await boardApi("/api/projects", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
 
-        const data = await res.json() as Record<string, unknown>;
-
-        if (!res.ok) {
-          const errMsg = (data.error as string) ?? res.statusText;
+        if (!ok) {
           // 409 = already registered — surface the project details rather than erroring
-          if (res.status === 409) {
-            return { content: [{ type: "text" as const, text: JSON.stringify({ alreadyRegistered: true, ...data }, null, 2) }] };
+          if (status === 409) {
+            return mcpJson({ alreadyRegistered: true, ...(data as Record<string, unknown>) });
           }
-          return { content: [{ type: "text" as const, text: `Error registering project: ${errMsg}` }] };
+          return mcpError(`Error registering project: ${boardErrorText(data, statusText)}`);
         }
 
-        return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+        return mcpJson(data);
       } catch (err) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: `Failed to reach the board server (is it running?): ${err instanceof Error ? err.message : String(err)}`,
-          }],
-        };
+        return mcpUnreachable(err);
       }
     },
   );

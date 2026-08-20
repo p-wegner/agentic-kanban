@@ -3,6 +3,11 @@ import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { isTerminalStatusIdView, TERMINAL_STATUS_NAMES } from "@agentic-kanban/shared";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
+import {
+  coalesceTestOnlyChildren,
+  type DecomposeChildProposal,
+  type DecomposeDependencyProposal,
+} from "./decompose-sizing.js";
 import type { IssueEstimate } from "@agentic-kanban/shared";
 import {
   computeCouplingCandidates,
@@ -12,13 +17,19 @@ import {
   type IssueTouchedFiles,
 } from "@agentic-kanban/shared/lib/coupling-overlap";
 import { planContraction } from "@agentic-kanban/shared/lib/dependency-graph";
+import { assignChildRepos } from "@agentic-kanban/shared/lib/repo-tags";
+import { extractModelJson } from "@agentic-kanban/shared/lib/model-json";
+import { applyRepoTags } from "./repo-tags.service.js";
 import type { Database } from "../db/index.js";
 import { invokeClaudePrompt } from "./claude-cli.service.js";
 import { NotFoundError } from "../errors/index.js";
 import { createDrive } from "../repositories/drive.repository.js";
 import * as repo from "../repositories/issue-ai.repository.js";
+import { getProjectRepoNames } from "../repositories/repo.repository.js";
 import { getProjectRepoPath } from "../repositories/project.repository.js";
 import { nextIssueNumber } from "../repositories/issue-number.repository.js";
+import { normalizeIssuePriority } from "@agentic-kanban/shared/lib/issue-priority";
+import { ISSUE_ESTIMATES } from "@agentic-kanban/shared";
 
 export interface EnhanceIssueResult {
   title: string;
@@ -44,9 +55,7 @@ Current title: ${title}
 Current description: ${description?.trim() || "(none)"}`;
 
   const stdout = await invokeClaudePrompt(prompt, { database });
-  const output = stdout.trim();
-  const cleaned = output.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-  const enhanced = JSON.parse(cleaned) as { title?: string; description?: string; openQuestions?: string[] };
+  const enhanced = extractModelJson(stdout, { shape: "object" }) as { title?: string; description?: string; openQuestions?: string[] };
 
   let enhancedDescription = enhanced.description?.trim() ?? description ?? "";
   const questions = Array.isArray(enhanced.openQuestions) ? enhanced.openQuestions.filter(q => typeof q === "string" && q.trim()) : [];
@@ -208,9 +217,7 @@ Only include genuinely useful dependencies, not just topical similarity.`;
 
   const stdout = await invokeClaudePrompt(prompt, { database });
 
-  const output = stdout.trim();
-  const cleaned = output.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-  const parsed = JSON.parse(cleaned) as { dependencies?: Array<{ issueId: string; type: string; reason: string }> };
+  const parsed = extractModelJson(stdout, { shape: "object" }) as { dependencies?: Array<{ issueId: string; type: string; reason: string }> };
   const deps = parsed.dependencies ?? [];
 
   const created: Array<{ id: string; type: string; issueId: string; reason: string }> = [];
@@ -308,18 +315,7 @@ export interface AnalyzeTouchedFilesResult {
  * leading/trailing fences is not enough — we locate the first balanced `{...}`.
  */
 export function extractJsonObject(text: string): unknown {
-  if (!text) throw new Error("empty model response");
-  let s = text.trim();
-  // Strip a ```json ... ``` or ``` ... ``` fence if the JSON lives inside one.
-  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fence) s = fence[1].trim();
-  // Tolerate leading/trailing prose by slicing from the first `{` to the last `}`.
-  const start = s.indexOf("{");
-  const end = s.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) {
-    throw new Error("no JSON object found in model response");
-  }
-  return JSON.parse(s.slice(start, end + 1));
+  return extractModelJson(text, { shape: "object" });
 }
 
 function buildDirTree(rootPath: string, maxDepth = 3): string {
@@ -430,7 +426,7 @@ export interface AiEstimateResult {  estimate: IssueEstimate;
   reasoning: string;
 }
 
-const VALID_ESTIMATES: IssueEstimate[] = ["XS", "S", "M", "L", "XL"];
+const VALID_ESTIMATES: readonly IssueEstimate[] = ISSUE_ESTIMATES;
 
 export async function aiEstimateIssue(
   issueId: string,
@@ -451,8 +447,7 @@ Issue title: ${title}
 ${description ? `Description:\n${description}` : ""}`;
 
   const stdout = await invokeClaudePrompt(prompt, { database, model: "claude-haiku-4-5" });
-  const cleaned = stdout.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-  const parsed = JSON.parse(cleaned) as { estimate?: string; reasoning?: string };
+  const parsed = extractModelJson(stdout, { shape: "object" }) as { estimate?: string; reasoning?: string };
 
   const estimate = parsed.estimate?.trim().toUpperCase() as IssueEstimate;
   if (!VALID_ESTIMATES.includes(estimate)) {
@@ -461,23 +456,31 @@ ${description ? `Description:\n${description}` : ""}`;
   return { estimate, reasoning: parsed.reasoning?.trim() ?? "" };
 }
 
-export interface DecomposeChildProposal {
-  tempId: string;
-  title: string;
-  description: string;
-  priority: "low" | "medium" | "high" | "urgent";
-}
-
-export interface DecomposeDependencyProposal {
-  fromTempId: string;
-  toTempId: string;
-  type: DependencyType;
-}
+// Ticket-sizing types + the pure over-split guard live in decompose-sizing.ts (#116;
+// extracted to keep this file under the god-module ceiling). Re-exported so existing
+// importers (routes/issues.ts, the regression test) keep resolving them from here.
+export { isTestOnlyChild, coalesceTestOnlyChildren } from "./decompose-sizing.js";
+export type { DecomposeChildProposal, DecomposeDependencyProposal } from "./decompose-sizing.js";
 
 export interface DecomposeEpicResult {
   children: DecomposeChildProposal[];
   dependencies: DecomposeDependencyProposal[];
   alreadyDecomposed: boolean;
+  /** The repos this project touches (leading + siblings). Populated for multi-repo
+   *  projects so the modal can offer an editable target-repo dropdown per child; empty
+   *  for single-repo projects (repo routing disabled — no behaviour change). */
+  repos: string[];
+  /** Ticket-sizing floor (#116): true when the epic is already single-session-sized and
+   *  should NOT be split — after coalescing test-only children the proposal collapsed to
+   *  <=1 real child. The board surfaces this so a human is TOLD "already right-sized"
+   *  instead of the splitter silently over-fragmenting a one-line ticket into N workspaces
+   *  (each re-paying the fixed bootstrap/orientation/test/commit cost — measured ~3-5x more
+   *  tokens for the same delivered feature). */
+  tooSmallToDecompose: boolean;
+  /** tempIds of test-only children that `coalesceTestOnlyChildren` folded back into the
+   *  implementation sibling they depended on (a test belongs in the same vertical slice as
+   *  the code it covers, never its own ticket). Empty when nothing was coalesced. */
+  coalescedTestOnly: string[];
 }
 
 export async function decomposeEpic(
@@ -502,9 +505,21 @@ export async function decomposeEpic(
   const projectRow = await repo.getProjectNames(projectId, database);
   const projectName = projectRow?.repoName || projectRow?.name || "unknown project";
 
+  // Repo-aware decomposition (#94): for a multi-repo project, offer the repo list to the
+  // AI and ask it to scope each child to a target repo. Single-repo projects (< 2 repos)
+  // skip this entirely — the prompt and output are unchanged from the pre-#94 behaviour.
+  const projectRepos = await getProjectRepoNames(projectId, database);
+  const isMultiRepo = projectRepos.length >= 2;
+
   const recentContext = recentIssues.length > 0
     ? `\nRecently completed tasks (for context on coding patterns):\n${recentIssues.map(i => `  - ${i.title}`).join("\n")}`
     : "";
+
+  const repoContext = isMultiRepo
+    ? `\nThis is a MULTI-REPO project. It spans these repos:\n${projectRepos.map(r => `  - ${r}`).join("\n")}\nFor EACH child ticket, set "targetRepo" to the single repo (exact name from the list above) where most of that child's work happens. If a child genuinely spans repos or you can't tell, omit "targetRepo".`
+    : "";
+
+  const repoField = isMultiRepo ? `, "targetRepo": "<repo name from the list, or omit>"` : "";
 
   const prompt = `You are a software project planner. You must decompose a large epic ticket into smaller, focused child tickets that can each be completed in a single agent session (typically 1-4 hours of work each).
 
@@ -513,9 +528,15 @@ Epic title: ${targetIssue.title}
 Epic description:
 ${targetIssue.description || "(no description)"}
 ${recentContext}
+${repoContext}
+
+Right-sizing (READ FIRST):
+- If the epic is ALREADY completable in a single agent session — a single function, a single route/endpoint, a single file, or a change under ~50 lines — DO NOT invent sub-tasks. Return an EMPTY "children" array. Over-splitting is expensive: every child ticket re-pays a fixed cost (a fresh worktree, the agent re-orienting in the repo, re-running tests, a separate commit), so fragmenting small work multiplies cost for no benefit.
+- Split ONLY along real seams (a distinct module/layer/repo, or genuinely independent slices). Prefer FEWER, larger children over many tiny ones.
+- Each child MUST be a VERTICAL SLICE that includes its OWN tests. NEVER emit a child whose only job is to add tests for another child's code — a test belongs in the same ticket as the code it covers.
 
 Rules:
-- Generate 3-8 child tickets that together implement the full epic
+- Generate 0 (already right-sized) or 2-8 child tickets that together implement the full epic
 - Each child ticket must be independently workable (no ambiguity)
 - Titles should be actionable and specific (verb phrase, under 80 chars)
 - Descriptions should be 2-4 sentences with clear acceptance criteria
@@ -529,8 +550,8 @@ Rules:
 Respond ONLY with valid JSON, no markdown, no explanation:
 {
   "children": [
-    {"tempId": "c1", "title": "...", "description": "...", "priority": "medium"},
-    {"tempId": "c2", "title": "...", "description": "...", "priority": "medium"}
+    {"tempId": "c1", "title": "...", "description": "...", "priority": "medium"${repoField}},
+    {"tempId": "c2", "title": "...", "description": "...", "priority": "medium"${repoField}}
   ],
   "dependencies": [
     {"fromTempId": "c2", "toTempId": "c1", "type": "depends_on"},
@@ -539,15 +560,25 @@ Respond ONLY with valid JSON, no markdown, no explanation:
 }`;
 
   const stdout = await invokeClaudePrompt(prompt, { database });
-  const cleaned = stdout.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-  const parsed = JSON.parse(cleaned) as {
-    children?: Array<{ tempId: string; title: string; description: string; priority: string }>;
+  const parsed = extractModelJson(stdout, { shape: "object" }) as {
+    children?: Array<{ tempId: string; title: string; description: string; priority: string; targetRepo?: string }>;
     dependencies?: Array<{ fromTempId: string; toTempId: string; type: string }>;
   };
 
-  const validPriorities = ["low", "medium", "high", "urgent"];
+  // #516: the model is asked for "urgent", which is NOT a canonical priority. It used
+  // to be stored verbatim, producing issues that sort at rank 0 but have no colour and
+  // no lane. normalizeIssuePriority folds it to "critical" (matching what
+  // voice-capture.service.ts already did) and anything unrecognised to "medium".
   const validTypes: DependencyType[] = ["depends_on", "blocked_by", "related_to", "parent_of", "child_of", "coupled_with"];
   const tempIds = new Set((parsed.children ?? []).map(c => c.tempId));
+
+  // Validate the AI's per-child repo suggestions against the real repo set (unknown/omitted
+  // → unassigned; single-repo → all unassigned). This is the tested decompose-output → repo
+  // mapping (assignChildRepos), so the modal's editable dropdown starts from valid values.
+  const repoAssignment = assignChildRepos(
+    (parsed.children ?? []).map(c => ({ tempId: c.tempId, targetRepo: c.targetRepo })),
+    projectRepos,
+  );
 
   const children: DecomposeChildProposal[] = (parsed.children ?? [])
     .filter(c => c.tempId && c.title?.trim())
@@ -555,7 +586,8 @@ Respond ONLY with valid JSON, no markdown, no explanation:
       tempId: c.tempId,
       title: c.title.trim(),
       description: c.description?.trim() ?? "",
-      priority: (validPriorities.includes(c.priority) ? c.priority : "medium") as DecomposeChildProposal["priority"],
+      priority: normalizeIssuePriority(c.priority) as DecomposeChildProposal["priority"],
+      targetRepo: repoAssignment.get(c.tempId) ?? null,
     }));
 
   const dependencies: DecomposeDependencyProposal[] = (parsed.dependencies ?? [])
@@ -567,7 +599,19 @@ Respond ONLY with valid JSON, no markdown, no explanation:
       type: d.type as DependencyType,
     }));
 
-  return { children, dependencies, alreadyDecomposed };
+  // Ticket-sizing floor (#116): keep tests with their implementation and detect an
+  // over-split the LLM shouldn't have produced. Deterministic post-process — the prompt
+  // asks for the same behaviour, this guarantees it when the model ignores the ask.
+  const floored = coalesceTestOnlyChildren(children, dependencies);
+
+  return {
+    children: floored.children,
+    dependencies: floored.dependencies,
+    alreadyDecomposed,
+    repos: isMultiRepo ? projectRepos : [],
+    tooSmallToDecompose: floored.tooSmallToDecompose,
+    coalescedTestOnly: floored.coalescedTestOnly,
+  };
 }
 
 export interface ConfirmDecomposeInput {
@@ -619,6 +663,14 @@ export async function confirmEpicDecomposition(
   const defaultStatusId = backlogStatusId ?? (await repo.getDefaultStatusId(projectId, database));
   if (!defaultStatusId) throw new NotFoundError("No statuses found for project");
 
+  // Repo-aware fan-out (#94): validate each child's chosen target repo against the real
+  // repo set (the value is editable client-side, so re-check here) before tagging.
+  const projectRepos = await getProjectRepoNames(projectId, database);
+  const repoAssignment = assignChildRepos(
+    children.map(c => ({ tempId: c.tempId, targetRepo: c.targetRepo })),
+    projectRepos,
+  );
+
   const createdIssues: ConfirmDecomposeResult["createdIssues"] = [];
   const tempIdToIssueId = new Map<string, string>();
 
@@ -642,6 +694,10 @@ export async function confirmEpicDecomposition(
     }, database);
     createdIssues.push({ id: childId, issueNumber, title: child.title, tempId: child.tempId });
     tempIdToIssueId.set(child.tempId, childId);
+
+    // Carry the suggested/edited repo onto the child as a repo:<name> tag.
+    const childRepo = repoAssignment.get(child.tempId);
+    if (childRepo) await applyRepoTags(childId, [childRepo], database);
   }
 
   // Wire dependency edges between children (fromTempId depends_on toTempId)

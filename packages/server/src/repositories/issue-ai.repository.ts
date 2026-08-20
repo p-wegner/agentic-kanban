@@ -1,10 +1,12 @@
 import { eq, and, or, inArray, sql, desc } from "drizzle-orm";
-import { issues, projectStatuses, issueDependencies, agentSkills, tags, issueTags, workflowNodes, preferences, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, projectStatuses, issueDependencies, agentSkills, tags, issueTags, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getProjectById } from "./project.repository.js";
 import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
+import { getStatusIdsByName } from "./project-status.repository.js";
+import { getPreference as canonicalGetPreference } from "./preferences.repository.js";
 
 export async function getIssueBasics(
   issueId: string,
@@ -18,19 +20,13 @@ export async function getIssueBasics(
   return rows[0] ?? null;
 }
 
+/** #502: one query, in project-status.repository. Kept as a named re-export so callers are unchanged. */
 export async function getTerminalStatusIds(
   projectId: string,
   statusNames: string[],
   database: Database = db,
-) {
-  const rows = await database
-    .select({ id: projectStatuses.id })
-    .from(projectStatuses)
-    .where(and(
-      eq(projectStatuses.projectId, projectId),
-      inArray(projectStatuses.name, statusNames),
-    ));
-  return rows.map(s => s.id);
+): Promise<string[]> {
+  return getStatusIdsByName(projectId, statusNames, database);
 }
 
 export async function getOpenIssuesWithNode(
@@ -110,16 +106,9 @@ export async function getDependencyEdgesBetween(
   return rows as Array<{ issueId: string; dependsOnId: string; type: DependencyType }>;
 }
 
-export async function getPreferenceValue(
-  key: string,
-  database: Database = db,
-): Promise<string | null> {
-  const rows = await database
-    .select({ value: preferences.value })
-    .from(preferences)
-    .where(eq(preferences.key, key))
-    .limit(1);
-  return rows[0]?.value ?? null;
+/** #613: delegates to the canonical reader (which records the db:getPreference metric). */
+export async function getPreferenceValue(key: string, database: Database = db): Promise<string | null> {
+  return canonicalGetPreference(key, database);
 }
 
 export async function getIssueForTouchedFiles(
@@ -363,10 +352,13 @@ export async function getIssuesForContract(
   database: Database = db,
 ): Promise<Array<{ id: string; issueNumber: number; title: string; description: string | null; statusId: string; projectId: string }>> {
   if (issueIds.length === 0) return [];
-  return database
+  const rows = await database
     .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, description: issues.description, statusId: issues.statusId, projectId: issues.projectId })
     .from(issues)
     .where(inArray(issues.id, issueIds));
+  // issue_number is nullable in the schema but backfilled for every real issue
+  // (migration 0006); these are existing issues fetched by id, so it is non-null.
+  return rows.map((r) => ({ ...r, issueNumber: r.issueNumber! }));
 }
 
 /** Whether any of `issueIds` has an OPEN (non-closed) workspace — a contract must not absorb in-flight work. */

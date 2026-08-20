@@ -190,6 +190,11 @@ export default tseslint.config(
       "packages/e2e/**/*.ts",
       "**/*.config.{ts,mts,cts}",
       "**/vitest.setup.{ts,tsx}",
+      // Build/dev tooling that is likewise outside the build tsconfigs. Without these
+      // two patterns `pnpm lint` reported a PARSING ERROR for them rather than linting
+      // them — so they were not merely un-type-checked, they were not checked at all.
+      "**/scripts/**/*.{ts,mts,cts}",
+      "test-setup/**/*.{ts,tsx}",
     ],
     extends: [tseslint.configs.disableTypeChecked],
     languageOptions: {

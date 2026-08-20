@@ -1,7 +1,10 @@
 import type { Command } from "commander";
 import { getPreference } from "../../repositories/preferences.repository.js";
+import { resolveCliPort } from "./workspace-api-url.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import type { ButlerAskResponse } from "@agentic-kanban/shared/types";
 
-const SERVER_PORT = Number(process.env.SERVER_PORT) || Number(process.env.KANBAN_SERVER_PORT) || 3001;
+const SERVER_PORT = resolveCliPort();
 
 async function resolveProjectId(explicit?: string): Promise<string | null> {
   if (explicit) return explicit;
@@ -50,7 +53,7 @@ async function callButler(
     return data;
   } catch (err) {
     console.error(`Failed to reach the butler — is the dev server running on port ${SERVER_PORT}?`);
-    console.error(`  ${err instanceof Error ? err.message : String(err)}`);
+    console.error(`  ${errorMessage(err)}`);
     process.exit(1);
   }
 }
@@ -60,12 +63,6 @@ function printJsonOrSummary(data: unknown, summary: string, json?: boolean) {
   else console.log(summary);
 }
 
-interface AskResponse {
-  sessionId: string | null;
-  text: string;
-  isError: boolean;
-  error?: string;
-}
 
 export function registerButlerCommand(program: Command) {
   const butler = program
@@ -91,7 +88,7 @@ export function registerButlerCommand(program: Command) {
           method: "POST",
           body: { content, timeoutMs },
           butler: options.butler,
-        })) as AskResponse;
+        })) as ButlerAskResponse;
         if (options.json) console.log(JSON.stringify(data, null, 2));
         else console.log(data.text);
       });

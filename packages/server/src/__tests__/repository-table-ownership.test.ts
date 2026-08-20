@@ -1,3 +1,4 @@
+// @gate:always-run — ratchets table-ownership across repositories/; imports nothing it checks (#538).
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
@@ -45,6 +46,11 @@ const BASELINE: Record<string, number> = {
   // sessions reads — narrow per-consumer selects that predate #957. Each is a
   // candidate to delegate to session.repository accessors.
   "agent-questions.repository.ts::sessions-read": 1,
+  // #486 resolved the #483 raise: the guard now RECOGNISES a cross-aggregate join-read
+  // (`isCrossAggregateJoinRead`), so those sites are no longer counted at all and their
+  // baselines came back down instead of standing as permanent debt. `plugins`, `worker`,
+  // `review-effectiveness` and `workspace-analytics` dropped to zero and their entries are
+  // gone; `autodrive-stall-warning` went 4 → 3 (three of its four reads are joins).
   "autodrive-stall-warning.repository.ts::sessions-read": 3,
   "bisect.repository.ts::sessions-read": 1,
   "board-status.repository.ts::sessions-read": 1,
@@ -53,9 +59,7 @@ const BASELINE: Record<string, number> = {
   "github-handoff-draft.repository.ts::sessions-read": 1,
   "issue-activity.repository.ts::sessions-read": 1,
   "issue-service.repository.ts::sessions-read": 1,
-  "issue.repository.ts::sessions-read": 1,
   "project-activity.repository.ts::sessions-read": 1,
-  "review-effectiveness.repository.ts::sessions-read": 1,
   "review.repository.ts::sessions-read": 3,
   "session-lifecycle.repository.ts::sessions-read": 2,
   "session-message-pruner.repository.ts::sessions-read": 1,
@@ -69,13 +73,16 @@ const BASELINE: Record<string, number> = {
   "workspace-risk.repository.ts::sessions-read": 1,
   "workspace-scorecard.repository.ts::sessions-read": 1,
   "workspace-session.repository.ts::sessions-read": 1,
-  "workspace-summary.repository.ts::sessions-read": 1,
+  "workspace-summary.repository.ts::sessions-read": 2,
   "workspace-timeline.repository.ts::sessions-read": 1,
-  "workspace.repository.ts::sessions-read": 2,
+  // workspace.repository.ts (2) was decomposed (#913): getCostOverTimeRows moved to
+  // workspace-analytics, getWorkspaceDetails' latest-session read to workspace-reads.
+  "workspace-reads.repository.ts::sessions-read": 1,
   // sessions writes — lifecycle/broadcast own their session mutations for now.
   "bisect.repository.ts::sessions-write": 2,
   "broadcast.repository.ts::sessions-write": 2,
-  "session-lifecycle.repository.ts::sessions-write": 5,
+  // #172 added updateSessionContainerId's write site (still in the correct owning file).
+  "session-lifecycle.repository.ts::sessions-write": 6,
   "workspace-lifecycle-reconcile.repository.ts::sessions-write": 1,
   "workspace-merge.repository.ts::sessions-write": 1,
   // projects writes — registration/dedup + per-project column updates. Reads are
@@ -84,6 +91,30 @@ const BASELINE: Record<string, number> = {
   "project-service.repository.ts::projects-write": 1,
   "stack-profile.repository.ts::projects-write": 1,
 };
+
+/**
+ * #486 — does this `from(<owned table>)` start a CROSS-AGGREGATE JOIN rather than a re-query?
+ *
+ * The rule this guard enforces is "don't re-query another aggregate's table because you didn't
+ * know its accessor existed". It already exempts the join in one direction —
+ * `from(issues).innerJoin(projects, …)` is not counted, because `projects` is not the FROM.
+ * It did not exempt the same query written the other way round, and that asymmetry is not a
+ * real distinction: `from(sessions).innerJoin(workspaces).innerJoin(issues)` projects a value
+ * across the object graph in ONE round trip. Replacing it with a narrow session accessor buys
+ * either an N+1 or a whole cross-aggregate query relocated into `session.repository.ts`,
+ * spreading workspace/issue knowledge into the sessions aggregate — worse than the drift being
+ * guarded. Four such sites had their baselines raised in #483 for exactly this reason; this
+ * makes the guard able to state the difference instead of carrying them as debt.
+ *
+ * Deliberately narrow: only a join appearing in the SAME statement (up to the terminating `;`)
+ * exempts the read. A plain `from(sessions).where(...)` with no join is still counted, so the
+ * drift the rule exists to catch stays red.
+ */
+function isCrossAggregateJoinRead(text: string, fromIndex: number): boolean {
+  const end = text.indexOf(";", fromIndex);
+  const statement = end === -1 ? text.slice(fromIndex) : text.slice(fromIndex, end);
+  return /\.(?:inner|left|right|full)Join\(/.test(statement);
+}
 
 function scanActual(): Map<string, { count: number; sites: string[] }> {
   const actual = new Map<string, { count: number; sites: string[] }>();
@@ -101,6 +132,7 @@ function scanActual(): Map<string, { count: number; sites: string[] }> {
       ];
       for (const [kind, re] of patterns) {
         for (const m of text.matchAll(re)) {
+          if (kind === "read" && isCrossAggregateJoinRead(text, m.index!)) continue;
           const line = text.slice(0, m.index).split(/\r?\n/).length;
           const id = `${file}::${table}-${kind}`;
           const entry = actual.get(id) ?? { count: 0, sites: [] };

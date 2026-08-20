@@ -1,13 +1,25 @@
-import { useEffect, type Dispatch, type RefObject, type SetStateAction } from "react";
-import type { CreateIssueFormState } from "../components/CreateIssueForm.js";
+import { useEffect, useMemo, type Dispatch, type RefObject, type SetStateAction } from "react";
+import type { CreateIssueFormState } from "../lib/boardTypes.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { apiPost } from "../lib/api.js";
 import { registerAction } from "../lib/actions.js";
-import { SHORTCUT_TO_VIEW, VIEW_REGISTRY, type ViewMode } from "../lib/viewRegistry.js";
+import { visibleViews, type ViewMode } from "../lib/viewRegistry.js";
+import { useHiddenViews } from "./useHiddenViews.js";
+import {
+  ACTIVITY_TABS,
+  ACTIVITY_VIEW_ID,
+  ANALYTICS_TABS,
+  ANALYTICS_VIEW_ID,
+  RUNTIME_TABS,
+  RUNTIME_VIEW_ID,
+} from "../lib/viewTabs.js";
+import { viewTabActions } from "../stores/viewTabStore.js";
+import { markProgrammaticNavigation } from "../lib/navigationBurst.js";
 import { computeNavTarget, type NavKey } from "../lib/boardKeyboardNav.js";
 import { showToast } from "../lib/toast.js";
 import type { BoardPanelState } from "./useBoardPanels.js";
 import { useBoardSelectionStore } from "../stores/boardSelectionStore.js";
+import { onboardingActions } from "../stores/onboardingStore.js";
 import { useBoardCursorStore } from "../stores/boardCursorStore.js";
 import { useBoardFilterStore } from "../stores/boardFilterStore.js";
 
@@ -26,6 +38,8 @@ export interface BoardKeyboardShortcutState {
   viewMode: ViewMode;
   projects: BoardKeyboardShortcutProject[];
   activeProjectId: string | null;
+  /** True when the active project has >0 additional repos — gates the Multi-Repo Monitor action (#82). */
+  hasAdditionalRepos: boolean;
 }
 
 export interface BoardKeyboardShortcutActions {
@@ -41,6 +55,13 @@ export function useBoardKeyboardShortcuts(
   state: BoardKeyboardShortcutState,
   actions: BoardKeyboardShortcutActions,
 ) {
+  // #233 — hidden views must not keep their key or their palette entry: a shortcut to a view the
+  // toolbar no longer offers navigates to a panel with no visible way back.
+  const { hidden: hiddenViews } = useHiddenViews(state.activeProjectId);
+  // Memoized: it lands in an effect dependency list, and a fresh object per render would
+  // rebuild the whole keydown handler on every render.
+  const visibleShortcutToView = useMemo(() => visibleViews(hiddenViews).shortcutToView, [hiddenViews]);
+  const visibleRegistryViews = useMemo(() => visibleViews(hiddenViews).all, [hiddenViews]);
   useEffect(() => {
     function isTextEntryTarget(target: EventTarget | null) {
       if (!(target instanceof HTMLElement)) return false;
@@ -64,7 +85,7 @@ export function useBoardKeyboardShortcuts(
     const noMods = (e: KeyboardEvent) => !e.ctrlKey && !e.metaKey && !e.altKey;
     const simpleBindings: { match: (e: KeyboardEvent) => boolean; run: (e: KeyboardEvent) => void }[] = [
       { match: (e) => e.key === "?" && !e.ctrlKey && !e.metaKey, run: () => actions.panels.setShowShortcutHelp((prev) => !prev) },
-      { match: (e) => !!SHORTCUT_TO_VIEW[e.key] && noMods(e), run: (e) => actions.handleViewModeChange(SHORTCUT_TO_VIEW[e.key]) },
+      { match: (e) => !!visibleShortcutToView[e.key] && noMods(e), run: (e) => actions.handleViewModeChange(visibleShortcutToView[e.key]) },
       { match: (e) => e.key === "a" && noMods(e), run: () => actions.panels.setShowAllWorkspaces((prev) => !prev) },
       { match: (e) => e.key === "h" && noMods(e), run: () => actions.panels.setShowFileContention((prev) => !prev) },
       { match: (e) => e.key === "t" && noMods(e), run: () => actions.panels.setShowTranscriptSearch(true) },
@@ -239,6 +260,9 @@ export function useBoardKeyboardShortcuts(
     state.archiveColumns,
     state.archiveExpanded,
     state.viewMode,
+    // #233: the key map changes when the project's hidden set loads or changes, so the handler
+    // must be rebuilt — otherwise a key keeps navigating to a view that is no longer offered.
+    visibleShortcutToView,
   ]);
 
   useEffect(() => {
@@ -296,9 +320,25 @@ export function useBoardKeyboardShortcuts(
     }
 
     unregisters.push(registerAction({ id: "open-settings", label: "Open Settings", description: "Configure agent, preferences, and project settings", icon: "⚙", category: "settings", handler: () => actions.panels.setShowSettings(true) }));
+    // #464 — the wizard opens itself once after an import; this is how you get back to it.
+    if (state.activeProjectId) {
+      const activeProject = state.projects.find((p) => p.id === state.activeProjectId);
+      unregisters.push(registerAction({
+        id: "open-onboarding",
+        label: "Project Setup",
+        description: "Finish onboarding this project: stack, Start Mode, plugins, init skills, first tickets",
+        icon: "◑",
+        category: "settings",
+        handler: () => onboardingActions.openOnboarding(state.activeProjectId!, activeProject?.name ?? "this project"),
+      }));
+    }
     unregisters.push(registerAction({ id: "view-all-workspaces", label: "All Workspaces", description: "View all workspaces with status, diff stats, and session activity", icon: "⊞", category: "navigation", handler: () => actions.panels.setShowAllWorkspaces(true) }));
     unregisters.push(registerAction({ id: "view-cleanup-queue", label: "Cleanup Queue", description: "View closed workspaces with failed worktree cleanup warnings", icon: "🧹", category: "navigation", handler: () => actions.panels.setShowCleanupQueue(true) }));
     unregisters.push(registerAction({ id: "view-file-contention", label: "File Contention Heatmap", description: "Show which active workspaces touch the same files (merge-risk clusters)", icon: "⚡", category: "navigation", handler: () => actions.panels.setShowFileContention(true) }));
+    unregisters.push(registerAction({ id: "view-worker-fleet", label: "Worker Fleet", description: "Connected compute workers: status, capacity, labels; pair or revoke", icon: "⧉", category: "navigation", handler: () => actions.panels.setShowWorkerFleet(true) }));
+    if (state.hasAdditionalRepos) {
+      unregisters.push(registerAction({ id: "view-multi-repo-monitor", label: "Multi-Repo Monitor", description: "Repo × workspace matrix: per-repo merge state of active workspaces", icon: "⊞", category: "navigation", handler: () => actions.panels.setShowMultiRepoMonitor(true) }));
+    }
     unregisters.push(registerAction({ id: "search-transcripts", label: "Search Transcripts", description: "Search agent session transcripts across all workspaces", icon: "⏎", category: "navigation", handler: () => actions.panels.setShowTranscriptSearch(true) }));
     unregisters.push(registerAction({ id: "view-worktrees", label: "View Worktrees", description: "Inspect git worktrees and their diff stats", icon: "⎇", category: "navigation", handler: () => actions.panels.setShowWorktreeOverview(true) }));
     unregisters.push(registerAction({ id: "view-project-health", label: "Project Health Overview", description: "See all registered projects with issue counts and warning states", icon: "◎", shortcut: "p", category: "navigation", handler: () => actions.panels.setShowProjectHealth(true) }));
@@ -309,7 +349,7 @@ export function useBoardKeyboardShortcuts(
     unregisters.push(registerAction({ id: "open-codemod-factory", label: "Codemod Factory", description: "Describe a refactor in plain English — AI generates a ts-morph codemod", icon: "⚙", shortcut: "x", category: "board", handler: () => actions.panels.setShowCodemod(true) }));
     unregisters.push(registerAction({ id: "toggle-live-activity", label: "Live Activity Ticker", description: "Toggle compact stream of running agent output (l)", icon: "▶", shortcut: "l", category: "board", handler: () => actions.panels.setShowLiveActivityTicker((prev) => !prev) }));
 
-    for (const view of VIEW_REGISTRY) {
+    for (const view of visibleRegistryViews) {
       unregisters.push(registerAction({
         id: `view-${view.id}`,
         label: `Switch to ${view.label} View`,
@@ -319,6 +359,37 @@ export function useBoardKeyboardShortcuts(
         category: "navigation",
         handler: () => actions.handleViewModeChange(view.id),
       }));
+    }
+
+    // Absorbed container tabs (#234/#235): each former single view stays one
+    // palette hit away — the action opens its container view at the right tab.
+    // Cross-repo activity is only offered on multi-repo projects (#235).
+    const containerTabActions: { viewId: string; view: ViewMode; prefix: string; tabs: typeof ANALYTICS_TABS }[] = [
+      { viewId: ANALYTICS_VIEW_ID, view: "analytics", prefix: "Analytics", tabs: ANALYTICS_TABS },
+      {
+        viewId: ACTIVITY_VIEW_ID,
+        view: "activity",
+        prefix: "Activity Feed",
+        tabs: state.hasAdditionalRepos ? ACTIVITY_TABS : ACTIVITY_TABS.filter((t) => t.id !== "cross-repo"),
+      },
+      { viewId: RUNTIME_VIEW_ID, view: "runtime", prefix: "Runtime Feed", tabs: RUNTIME_TABS },
+    ];
+    for (const { viewId, view, prefix, tabs } of containerTabActions) {
+      for (const tab of tabs) {
+        unregisters.push(registerAction({
+          id: `view-${viewId}-${tab.id}`,
+          label: `${prefix}: ${tab.paletteLabel}`,
+          description: tab.paletteDescription,
+          icon: tab.paletteIcon,
+          category: "navigation",
+          handler: () => {
+            // View + tab are two URL writes for one palette hit (#446).
+            markProgrammaticNavigation();
+            viewTabActions.request(viewId, tab.id);
+            actions.handleViewModeChange(view);
+          },
+        }));
+      }
     }
 
     for (const col of state.columns) {
@@ -387,6 +458,8 @@ export function useBoardKeyboardShortcuts(
     state.activeProjectId,
     state.columns,
     state.filteredColumns,
+    state.hasAdditionalRepos,
     state.projects,
+    visibleRegistryViews,
   ]);
 }

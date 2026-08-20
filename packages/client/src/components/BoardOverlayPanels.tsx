@@ -1,7 +1,7 @@
 import type { Dispatch, ReactNode, RefObject, SetStateAction } from "react";
 import { apiFetch } from "../lib/api.js";
 import { getSettings } from "../lib/settingsStore.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { SettingsPanel } from "./SettingsPanel.js";
 import { QuickTasksPanel } from "./QuickTasksPanel.js";
 import { CodemodPanel } from "./CodemodPanel.js";
@@ -9,7 +9,10 @@ import { AllWorkspacesPanel } from "./AllWorkspacesPanel.js";
 import { WorkspaceLaunchFailuresPanel } from "./WorkspaceLaunchFailuresPanel.js";
 import { CleanupQueuePanel } from "./CleanupQueuePanel.js";
 import { FileContentionPanel } from "./FileContentionPanel.js";
+import { WorkerFleetPanel } from "./WorkerFleetPanel.js";
+import { MultiRepoMonitorPanel } from "./MultiRepoMonitorPanel.js";
 import { TranscriptSearchPanel } from "./TranscriptSearchPanel.js";
+import { SessionTranscriptPanel } from "./SessionTranscriptPanel.js";
 import { MergeQueuePanel } from "./MergeQueuePanel.js";
 import { RunQueueForecastPanel } from "./RunQueueForecastPanel.js";
 import { AgentStartDryRunModal } from "./AgentStartDryRunModal.js";
@@ -45,6 +48,8 @@ interface Props {
   showLaunchFailures: boolean;
   showCleanupQueue: boolean;
   showFileContention: boolean;
+  showWorkerFleet: boolean;
+  showMultiRepoMonitor: boolean;
   showTranscriptSearch: boolean;
   showMergeQueue: boolean;
   showRunQueueForecast: boolean;
@@ -63,6 +68,8 @@ interface Props {
   onCloseLaunchFailures: () => void;
   onCloseCleanupQueue: () => void;
   onCloseFileContention: () => void;
+  onCloseWorkerFleet: () => void;
+  onCloseMultiRepoMonitor: () => void;
   onCloseTranscriptSearch: () => void;
   onCloseMergeQueue: () => void;
   onCloseRunQueueForecast: () => void;
@@ -76,6 +83,8 @@ interface Props {
 
   // Shared data
   activeProjectId: string | null;
+  /** Leading repo path of the active project — used by the Multi-Repo Monitor (#82). */
+  leadingRepoPath?: string | null;
   columns: StatusWithIssues[];
   nudgeWipLimit: string;
   viewMode: ViewMode;
@@ -124,6 +133,8 @@ export function BoardOverlayPanels({
   showLaunchFailures,
   showCleanupQueue,
   showFileContention,
+  showWorkerFleet,
+  showMultiRepoMonitor,
   showTranscriptSearch,
   showMergeQueue,
   showRunQueueForecast,
@@ -140,6 +151,8 @@ export function BoardOverlayPanels({
   onCloseLaunchFailures,
   onCloseCleanupQueue,
   onCloseFileContention,
+  onCloseWorkerFleet,
+  onCloseMultiRepoMonitor,
   onCloseTranscriptSearch,
   onCloseMergeQueue,
   onCloseRunQueueForecast,
@@ -151,6 +164,7 @@ export function BoardOverlayPanels({
   onWorkspaceStarted,
   onCloseShortcutHelp,
   activeProjectId,
+  leadingRepoPath,
   columns,
   nudgeWipLimit,
   viewMode,
@@ -271,6 +285,27 @@ export function BoardOverlayPanels({
           onClose={onCloseFileContention}
         />
       )}
+      {showWorkerFleet && <WorkerFleetPanel onClose={onCloseWorkerFleet} />}
+      {showMultiRepoMonitor && (
+        <MultiRepoMonitorPanel
+          activeProjectId={activeProjectId ?? null}
+          leadingRepoPath={leadingRepoPath ?? null}
+          columns={columns}
+          onClose={onCloseMultiRepoMonitor}
+          onOpenWorkspace={(workspaceId, issueId) => {
+            const issue = columnsRef.current.flatMap((c) => c.issues).find((i) => i.id === issueId);
+            if (issue) {
+              onCloseMultiRepoMonitor();
+              setSelectedIssue(null);
+              setWorkspaceIssue(issue);
+              setWorkspaceOpenCreate(false);
+              setWorkspaceInitial({ workspaceId });
+            } else {
+              showToast("Issue not found on current board — try refreshing", "error");
+            }
+          }}
+        />
+      )}
       {showTranscriptSearch && activeProjectId && (
         <TranscriptSearchPanel
           projectId={activeProjectId}
@@ -367,8 +402,11 @@ export function BoardOverlayPanels({
         />
       )}
       {showShortcutHelp && (
-        <ShortcutHelp onClose={onCloseShortcutHelp} currentView={viewMode} />
+        <ShortcutHelp onClose={onCloseShortcutHelp} currentView={viewMode} projectId={activeProjectId ?? null} />
       )}
+      {/* Full session transcript viewer — self-mounted; opened via the
+          openSessionTranscript() window event from any launch site (#87). */}
+      <SessionTranscriptPanel />
       {expandedCreatePanel && activeProjectId && (
         <CreateIssuePanel
           projectId={activeProjectId}

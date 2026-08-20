@@ -1,3 +1,4 @@
+// @gate:always-run — reads every package.json in the repo; no import edge to any of them (#647).
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";

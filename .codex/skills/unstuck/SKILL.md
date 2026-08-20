@@ -26,7 +26,7 @@ Read workspace status, session status, last agent message. Then fetch session ou
 
 ```powershell
 $proj = (Invoke-RestMethod "http://127.0.0.1:3001/api/preferences/active-project").projectId
-$issues = Invoke-RestMethod "http://127.0.0.1:3001/api/issues?projectId=$proj"
+$issues = Invoke-RestMethod "http://127.0.0.1:3001/api/issues?projectId=$proj&slim=1"
 $issue = $issues | Where-Object { $_.issueNumber -eq N } | Select-Object -First 1
 $ws = Invoke-RestMethod "http://127.0.0.1:3001/api/issues/$($issue.id)/workspaces"
 $sessions = Invoke-RestMethod "http://127.0.0.1:3001/api/workspaces/$($ws[0].id)/sessions"

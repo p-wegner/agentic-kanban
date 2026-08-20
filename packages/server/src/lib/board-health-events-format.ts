@@ -5,29 +5,33 @@
  * comma-list whitelisting) and the details-summarization are unit-testable without
  * a server, and the route stays a thin adapter.
  */
-import type {
-  BoardHealthEventType,
-  BoardHealthEventCategory,
-} from "../repositories/board-health-events.repository.js";
+import {
+  isBoardHealthEventType,
+  isBoardHealthEventCategory,
+  type BoardHealthEventType,
+  type BoardHealthEventCategory,
+  type BoardHealthEventLevel,
+  type BoardHealthEventDto,
+  type BoardHealthEventDetailDto,
+} from "@agentic-kanban/shared/lib/board-health-events";
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
 const MIN_LIMIT = 1;
 
-const VALID_EVENT_TYPES: Set<string> = new Set([
-  "cycle_start",
-  "cycle_end",
-  "observation",
-  "action",
-  "error",
-]);
-const VALID_CATEGORIES: Set<string> = new Set([
-  "merge",
-  "launch",
-  "server",
-  "refill",
-  "smoke_check",
-]);
+/**
+ * The `eventType`/`category` columns are plain text, so a row can in principle carry a
+ * value outside the vocabulary (an older writer, a hand-edited row). The projections
+ * narrow with the shared guards rather than casting: an unrecognised type becomes
+ * "observation" and an unrecognised category becomes null, which is what the client
+ * filters already do with them — the old code cast and let the bad value through typed.
+ */
+function narrowEventType(raw: string): BoardHealthEventType {
+  return isBoardHealthEventType(raw) ? raw : "observation";
+}
+function narrowCategory(raw: string | null): BoardHealthEventCategory | null {
+  return isBoardHealthEventCategory(raw) ? raw : null;
+}
 
 /** Parse the `limit` query param, clamped to [1, 50]; defaults to 20 on missing/invalid. */
 export function parseBoardHealthEventsLimit(raw: string | undefined): number {
@@ -39,15 +43,15 @@ export function parseBoardHealthEventsLimit(raw: string | undefined): number {
 /** Parse a comma-separated `eventType` filter, keeping only valid types; undefined if none. */
 export function parseBoardHealthEventTypes(raw: string | undefined): BoardHealthEventType[] | undefined {
   if (!raw) return undefined;
-  const types = raw.split(",").map((t) => t.trim()).filter((t) => VALID_EVENT_TYPES.has(t));
-  return types.length > 0 ? (types as BoardHealthEventType[]) : undefined;
+  const types = raw.split(",").map((t) => t.trim()).filter(isBoardHealthEventType);
+  return types.length > 0 ? types : undefined;
 }
 
 /** Parse a comma-separated `category` filter, keeping only valid categories; undefined if none. */
 export function parseBoardHealthCategories(raw: string | undefined): BoardHealthEventCategory[] | undefined {
   if (!raw) return undefined;
-  const cats = raw.split(",").map((t) => t.trim()).filter((t) => VALID_CATEGORIES.has(t));
-  return cats.length > 0 ? (cats as BoardHealthEventCategory[]) : undefined;
+  const cats = raw.split(",").map((t) => t.trim()).filter(isBoardHealthEventCategory);
+  return cats.length > 0 ? cats : undefined;
 }
 
 /**
@@ -66,7 +70,7 @@ export interface BoardHealthEventRecord {
 }
 
 /** UI severity for an event row: errors render distinctly, everything else is info. */
-export function boardHealthEventLevel(eventType: string): "error" | "info" {
+export function boardHealthEventLevel(eventType: string): BoardHealthEventLevel {
   return eventType === "error" ? "error" : "info";
 }
 
@@ -84,13 +88,13 @@ export function parseBoardHealthEventDetails(raw: string | null): unknown {
 }
 
 /** Project a row into the list DTO (compacted one-line `details`). */
-export function toBoardHealthEventSummary(event: BoardHealthEventRecord) {
+export function toBoardHealthEventSummary(event: BoardHealthEventRecord): BoardHealthEventDto {
   return {
     id: event.id,
     timestamp: event.createdAt,
     level: boardHealthEventLevel(event.eventType),
-    type: event.eventType,
-    category: event.category ?? null,
+    type: narrowEventType(event.eventType),
+    category: narrowCategory(event.category),
     issueNumber: event.issueNumber ?? null,
     summary: event.summary,
     details: compactBoardHealthEventDetails(event.details),
@@ -98,14 +102,14 @@ export function toBoardHealthEventSummary(event: BoardHealthEventRecord) {
 }
 
 /** Project a row into the single-event DTO (full parsed `details` + cycleId). */
-export function toBoardHealthEventDetail(event: BoardHealthEventRecord) {
+export function toBoardHealthEventDetail(event: BoardHealthEventRecord): BoardHealthEventDetailDto {
   return {
     id: event.id,
     cycleId: event.cycleId ?? null,
     timestamp: event.createdAt,
     level: boardHealthEventLevel(event.eventType),
-    type: event.eventType,
-    category: event.category ?? null,
+    type: narrowEventType(event.eventType),
+    category: narrowCategory(event.category),
     issueNumber: event.issueNumber ?? null,
     summary: event.summary,
     details: parseBoardHealthEventDetails(event.details),

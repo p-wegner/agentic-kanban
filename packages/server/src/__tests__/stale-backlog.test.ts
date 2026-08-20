@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import * as schema from "@agentic-kanban/shared/schema";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createProjectService } from "../services/project.service.js";
+import { setPreference } from "../repositories/preferences.repository.js";
 
 let db: TestDb;
 let projectId: string;
@@ -45,14 +46,31 @@ beforeAll(async () => {
   });
 });
 
+/**
+ * One fixed reference instant for the whole file (#620).
+ *
+ * These tests used to call `Date.now()` separately for the reference `now` and for each
+ * seeded `daysAgo(n)` timestamp. `now` was captured FIRST, so every seeded timestamp was
+ * anchored a moment LATER, making the real elapsed time `n days - delta`. Since the
+ * service computes `staleDays` with `Math.floor(elapsed / day)`, any delta above zero
+ * floors 20 days down to 19.
+ *
+ * It passed only because both calls normally land in the same millisecond. Under
+ * full-suite parallel load they do not, and the suite failed with
+ * "expected 19 to be greater than or equal to 20" — reproducible 100% by inserting a 5ms
+ * sleep between them. Pinning both to one base makes elapsed exact and load-independent.
+ */
+const NOW_MS = Date.now();
+const NOW_ISO = new Date(NOW_MS).toISOString();
+
 function daysAgo(days: number): string {
-  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  return new Date(NOW_MS - days * 24 * 60 * 60 * 1000).toISOString();
 }
 
 describe("stale backlog flagging", () => {
   it("flags backlog issue as stale when updatedAt is beyond threshold", async () => {
     const issueId = randomUUID();
-    const now = new Date().toISOString();
+    const now = NOW_ISO;
     await db.insert(schema.issues).values({
       id: issueId,
       issueNumber: 1,
@@ -76,7 +94,7 @@ describe("stale backlog flagging", () => {
 
   it("does not flag backlog issue as stale when updatedAt is within threshold", async () => {
     const issueId = randomUUID();
-    const now = new Date().toISOString();
+    const now = NOW_ISO;
     await db.insert(schema.issues).values({
       id: issueId,
       issueNumber: 2,
@@ -99,7 +117,7 @@ describe("stale backlog flagging", () => {
 
   it("prefers statusChangedAt over updatedAt for staleness", async () => {
     const issueId = randomUUID();
-    const now = new Date().toISOString();
+    const now = NOW_ISO;
     await db.insert(schema.issues).values({
       id: issueId,
       issueNumber: 3,
@@ -122,7 +140,7 @@ describe("stale backlog flagging", () => {
 
   it("does not flag non-backlog issues as stale", async () => {
     const issueId = randomUUID();
-    const now = new Date().toISOString();
+    const now = NOW_ISO;
     await db.insert(schema.issues).values({
       id: issueId,
       issueNumber: 4,
@@ -144,14 +162,14 @@ describe("stale backlog flagging", () => {
   });
 
   it("respects backlog_stale_days preference", async () => {
-    await db.insert(schema.preferences).values({
-      key: "backlog_stale_days",
-      value: "30",
-      updatedAt: new Date().toISOString(),
-    }).onConflictDoUpdate({ target: schema.preferences.key, set: { value: "30" } });
+    // Write through the repository (not a raw insert) so the short-TTL prefs cache (#402)
+    // is invalidated on the correct db instance by the same production write path every
+    // reader uses — a hand-rolled invalidatePreferencesCache() call bypasses that per-db
+    // keying and is a global bust with no relation to which db actually changed.
+    await setPreference("backlog_stale_days", "30", db);
 
     const issueId = randomUUID();
-    const now = new Date().toISOString();
+    const now = NOW_ISO;
     await db.insert(schema.issues).values({
       id: issueId,
       issueNumber: 5,
@@ -172,10 +190,6 @@ describe("stale backlog flagging", () => {
     expect(issue?.isStale).toBeUndefined();
 
     // Restore default
-    await db.insert(schema.preferences).values({
-      key: "backlog_stale_days",
-      value: "14",
-      updatedAt: new Date().toISOString(),
-    }).onConflictDoUpdate({ target: schema.preferences.key, set: { value: "14" } });
+    await setPreference("backlog_stale_days", "14", db);
   });
 });

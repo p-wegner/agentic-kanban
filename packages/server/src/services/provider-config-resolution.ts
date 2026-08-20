@@ -27,6 +27,8 @@ import { narrowProviderName, getProfilePrefKey } from "./agent-provider.js";
 import { resolveAgentSettings } from "./agent-settings.service.js";
 import { applyProviderSelectionToPrefMap } from "./strategy-objective.service.js";
 import { resolveEffectiveModel } from "./effective-config.service.js";
+import type { ParsedProfileAllowlist } from "@agentic-kanban/shared/lib/profile-allowlist";
+import { clampProfileToAllowlist } from "@agentic-kanban/shared/lib/profile-allowlist";
 
 export interface ProviderConfigInput {
   prefMap: Map<string, string>;
@@ -36,6 +38,15 @@ export interface ProviderConfigInput {
   strategySelection?: { provider: ProviderName; profileName: string } | null;
   requestedModel?: string | null;
   commandOverride?: string;
+  /**
+   * The project's parsed profile allowlist. A HARD constraint applied AFTER the
+   * precedence chain below, so it outranks every selector including an explicit
+   * per-workspace override. Omit (or pass an unrestricted list) to keep the historic
+   * behaviour. See `@agentic-kanban/shared/lib/profile-allowlist`.
+   */
+  allowlist?: ParsedProfileAllowlist | null;
+  /** Injected clock for the allowlist's cooldown checks (`nowMs` spelling, #614). */
+  nowMs?: number;
 }
 
 export interface ResolvedProviderConfig {
@@ -50,6 +61,15 @@ export interface ResolvedProviderConfig {
   resumeWithNewModel: boolean;
   /** `{provider, name}` selection echoed back for the workspace record. */
   profileSelection: { provider: ProviderName; name: string } | undefined;
+  /**
+   * Set when the project's profile allowlist permits NO launch right now (every allowed
+   * profile cooling, or the allowlist unparseable). Callers MUST refuse to launch and
+   * surface this instead — the other fields still hold the unrestricted resolution, so
+   * ignoring it silently defeats the restriction.
+   */
+  profileHold: string | null;
+  /** True when the allowlist overrode the selection the precedence chain produced. */
+  profileClamped: boolean;
   /** Diagnostics for the caller to log (kept side-effect-free here). */
   notes: string[];
 }
@@ -77,18 +97,49 @@ export function resolveProviderConfig(input: ProviderConfigInput): ResolvedProvi
     );
   }
 
+  let settings = resolveAgentSettings(prefMap, input.commandOverride);
+
+  // The allowlist is a CONSTRAINT, not another selector, so it runs after the precedence
+  // chain above — and its result is fed back through `resolveAgentSettings` rather than
+  // patched onto the outputs, so agentCommand/agentArgs/permissionPromptTool/model all
+  // belong to the profile we actually launch. Patching only the profile name is how a
+  // clamped launch would end up carrying the *other* provider's command line.
+  let profileHold: string | null = null;
+  let profileClamped = false;
+  if (input.allowlist?.restricted) {
+    const clamp = clampProfileToAllowlist({
+      allowlist: input.allowlist,
+      provider: settings.provider,
+      profileName: settings.profile?.name,
+      prefMap,
+      nowMs: input.nowMs ?? Date.now(),
+    });
+    if (clamp.note) notes.push(clamp.note);
+    profileHold = clamp.holdReason;
+    profileClamped = clamp.clamped;
+    if (clamp.selection && clamp.clamped) {
+      applyProviderSelectionToPrefMap(prefMap, {
+        provider: clamp.selection.provider,
+        profileName: clamp.selection.name,
+      });
+      settings = resolveAgentSettings(prefMap, input.commandOverride);
+    }
+  }
+
   const {
     agentCommand,
     agentArgs,
-    claudeProfile: resolvedProfile,
     profile: profileSelection,
     provider,
     resumeWithNewModel,
     permissionPromptTool,
-  } = resolveAgentSettings(prefMap, input.commandOverride);
+  } = settings;
 
+  // #528: the claude branch read a separate `claudeProfile` string here. For claude it
+  // held the same value `profileSelection.name` does, so the two remaining fallbacks are
+  // what the branch is actually for.
   const profileName = provider === "claude"
-    ? (resolvedProfile || legacyProfileOverride || prefMap.get("claude_profile") || undefined)
+    ? (profileSelection?.name || legacyProfileOverride || prefMap.get("claude_profile") || undefined)
     : profileSelection?.name;
 
   const effectiveModel = resolveEffectiveModel({
@@ -107,6 +158,8 @@ export function resolveProviderConfig(input: ProviderConfigInput): ResolvedProvi
     permissionPromptTool,
     resumeWithNewModel,
     profileSelection,
+    profileHold,
+    profileClamped,
     notes,
   };
 }

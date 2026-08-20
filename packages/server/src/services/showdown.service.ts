@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { showdowns } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "./session.manager.js";
-import type { BoardEvents } from "./board-events.js";
+import type { BoardEventSink } from "./board-events.js";
 import { createWorkspaceCrudService } from "./workspace-crud.service.js";
 import { createWorkspaceService } from "./workspace.service.js";
 import type { ShowdownContestant, ShowdownContestantResult, ShowdownResponse } from "@agentic-kanban/shared";
@@ -22,13 +22,14 @@ import {
   getShowdownWorkspaceIds,
   getIssueProjectId,
 } from "../repositories/showdown.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 const LABELS = ["A", "B", "C", "D"] as const;
 
 export function createShowdownService(deps: {
   database: Database;
   getSessionManager?: () => SessionManager;
-  boardEvents?: BoardEvents;
+  boardEvents?: BoardEventSink;
 }) {
   const { database, boardEvents } = deps;
   const crudService = createWorkspaceCrudService(deps);
@@ -200,14 +201,14 @@ export function createShowdownService(deps: {
       try {
         await workspaceService.deleteWorkspace(loser.id);
       } catch (err) {
-        console.warn(`[showdown] Failed to delete loser workspace ${loser.id}:`, err instanceof Error ? err.message : String(err));
+        console.warn(`[showdown] Failed to delete loser workspace ${loser.id}:`, errorMessage(err));
       }
     }
 
     // Broadcast update
-    const issueRow = await getIssueProjectId(showdown.issueId, database);
-    if (issueRow) {
-      boardEvents?.broadcast(issueRow.projectId, "board_changed");
+    const projectId = await getIssueProjectId(showdown.issueId, database);
+    if (projectId) {
+      boardEvents?.broadcast(projectId, "board_changed");
     }
 
     return (await getShowdown(showdownId))!;

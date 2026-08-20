@@ -1,10 +1,24 @@
 import { projects, projectStatuses, issues, workspaces } from "@agentic-kanban/shared/schema";
 import { deleteProjectCascade as deleteProjectCascadeShared } from "@agentic-kanban/shared/lib/cascade-delete";
-import { eq, sql, and, isNull, gte, inArray } from "drizzle-orm";
-import { randomUUID } from "node:crypto";
+import { eq, sql, and, isNull, isNotNull, gte, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { initializeProjectStatuses } from "./issue.repository.js";
+
+/**
+ * Facade barrel (#889 god-module gate). The `project_statuses` lifecycle — list, create,
+ * reorder, delete — is one cohesive responsibility and now lives in its own module; this file
+ * kept growing past the 20-declaration cohesion ceiling otherwise. Re-exported here so every
+ * existing `from "./project.repository.js"` importer is unaffected by the split.
+ */
+export {
+  getProjectStatuses,
+  createProjectStatus,
+  updateProjectStatusSortOrder,
+  deleteProjectStatus,
+  getProjectStatusById,
+  deleteProjectStatusById,
+} from "./project-status.repository.js";
 
 export async function getProjectById(
   projectId: string,
@@ -48,6 +62,20 @@ export async function getProjectByRepoPath(
   return rows[0] ?? null;
 }
 
+/**
+ * Raw `servicesConfig` JSON for every project that has one set (#142 — narrow
+ * accessor so `anyProjectHasEnabledServiceStack` in workspace-service-state.repository.ts
+ * doesn't re-query `projects` directly).
+ */
+export async function getProjectsWithServicesConfig(
+  database: Database = db,
+): Promise<{ servicesConfig: string | null }[]> {
+  return database
+    .select({ servicesConfig: projects.servicesConfig })
+    .from(projects)
+    .where(isNotNull(projects.servicesConfig));
+}
+
 export async function getAllProjects(
   database: Database = db,
   opts: { includeArchived?: boolean } = {},
@@ -56,6 +84,16 @@ export async function getAllProjects(
     return database.select().from(projects);
   }
   return database.select().from(projects).where(isNull(projects.archivedAt));
+}
+
+/** `{id, name}` for every non-archived project — the cross-project inbox scan (#302) only needs these. */
+export async function getActiveProjectSummaries(
+  database: Database = db,
+): Promise<Array<{ id: string; name: string }>> {
+  return database
+    .select({ id: projects.id, name: projects.name })
+    .from(projects)
+    .where(isNull(projects.archivedAt));
 }
 
 export async function setProjectArchived(
@@ -67,17 +105,6 @@ export async function setProjectArchived(
     .update(projects)
     .set({ archivedAt: archived ? new Date().toISOString() : null, updatedAt: new Date().toISOString() })
     .where(eq(projects.id, projectId));
-}
-
-export async function getProjectStatuses(
-  projectId: string,
-  database: Database = db,
-) {
-  return database
-    .select()
-    .from(projectStatuses)
-    .where(eq(projectStatuses.projectId, projectId))
-    .orderBy(projectStatuses.sortOrder);
 }
 
 export async function insertProject(
@@ -109,8 +136,10 @@ export async function insertProject(
     updatedAt: now,
   });
 
-  await initializeProjectStatuses(id, now, database);
-  return { id, name: values.name, repoPath: values.repoPath, defaultBranch: values.defaultBranch };
+  // Hand the freshly-minted status ids back (#563) — the caller otherwise has to
+  // re-query the table it just populated to learn where to put the first issue.
+  const statusIds = await initializeProjectStatuses(id, now, database);
+  return { id, name: values.name, repoPath: values.repoPath, defaultBranch: values.defaultBranch, statusIds };
 }
 
 /**
@@ -124,6 +153,22 @@ export async function deleteProjectCascade(
   database: Database = db,
 ): Promise<void> {
   await deleteProjectCascadeShared(projectId, database);
+}
+
+/**
+ * Persist a project's declared Docker service-stack config (JSON string) or clear it
+ * (null). Kept out of the generic `updateProjectFields` mapper so the route can own
+ * the servicesConfig validation + JSON serialization (mirrors setup-script handling).
+ */
+export async function updateProjectServicesConfig(
+  projectId: string,
+  servicesConfigJson: string | null,
+  database: Database = db,
+): Promise<void> {
+  await database
+    .update(projects)
+    .set({ servicesConfig: servicesConfigJson, updatedAt: new Date().toISOString() })
+    .where(eq(projects.id, projectId));
 }
 
 export async function getProjectStats(
@@ -169,88 +214,47 @@ export async function getDoneIssueProviderAttribution(
     );
 }
 
-export async function createProjectStatus(
-  projectId: string,
-  name: string,
-  sortOrder: number,
-  database: Database = db,
-) {
-  const id = randomUUID();
-  const now = new Date().toISOString();
-  await database.insert(projectStatuses).values({
-    id,
-    projectId,
-    name,
-    sortOrder,
-    createdAt: now,
-  });
-  return { id, projectId, name };
-}
-
-export async function updateProjectStatusSortOrder(
-  projectId: string,
-  statusId: string,
-  sortOrder: number,
-  database: Database = db,
-): Promise<{ success: true } | { error: string; status: number }> {
-  const rows = await database
-    .select()
-    .from(projectStatuses)
-    .where(and(eq(projectStatuses.id, statusId), eq(projectStatuses.projectId, projectId)));
-
-  if (rows.length === 0) {
-    return { error: "Status not found", status: 404 };
-  }
-
-  await database
-    .update(projectStatuses)
-    .set({ sortOrder })
-    .where(and(eq(projectStatuses.id, statusId), eq(projectStatuses.projectId, projectId)));
-
-  return { success: true };
-}
-
-export async function deleteProjectStatus(
-  projectId: string,
-  statusId: string,
-  database: Database = db,
-): Promise<{ success: true } | { error: string; status: number }> {
-  const statusRows = await database
-    .select()
-    .from(projectStatuses)
-    .where(and(eq(projectStatuses.id, statusId), eq(projectStatuses.projectId, projectId)));
-
-  if (statusRows.length === 0) {
-    return { error: "Status not found", status: 404 };
-  }
-
-  const linkedIssues = await database
-    .select({ id: issues.id })
-    .from(issues)
-    .where(eq(issues.statusId, statusId))
-    .limit(1);
-
-  if (linkedIssues.length > 0) {
-    return { error: "Cannot delete status with linked issues", status: 409 };
-  }
-
-  await database.delete(projectStatuses).where(eq(projectStatuses.id, statusId));
-  return { success: true };
-}
-
-/** A single project status by its id (no project scoping), or null. */
-export async function getProjectStatusById(statusId: string, database: Database = db) {
-  const rows = await database.select().from(projectStatuses).where(eq(projectStatuses.id, statusId)).limit(1);
-  return rows[0] ?? null;
-}
-
-/** Delete a project status by id alone (caller has already validated). */
-export async function deleteProjectStatusById(statusId: string, database: Database = db): Promise<void> {
-  await database.delete(projectStatuses).where(eq(projectStatuses.id, statusId));
-}
-
 /** A project by its exact name (first match), or null. */
 export async function getProjectByName(name: string, database: Database = db) {
   const rows = await database.select().from(projects).where(eq(projects.name, name)).limit(1);
   return rows[0] ?? null;
+}
+
+/**
+ * The two project fields the workspace-repo-status batch needs for its leading-repo fallback.
+ *
+ * Lives here, not beside its caller: `repository-table-ownership` (#957) keeps `projects` reads
+ * in this file so the aggregate has one reader. It was previously a direct `select().from(projects)`
+ * in workspace-repo-status-batch.repository.ts, which is the drift that guard exists to catch.
+ */
+export async function getProjectRepoFields(
+  projectId: string,
+  database: Database = db,
+): Promise<{ repoPath: string; defaultBranch: string | null } | undefined> {
+  const [project] = await database
+    .select({ repoPath: projects.repoPath, defaultBranch: projects.defaultBranch })
+    .from(projects)
+    .where(eq(projects.id, projectId))
+    .limit(1);
+  return project;
+}
+
+/**
+ * A project's default branch, or null when the project does not exist (#502).
+ *
+ * Declared three times with three shapes — `{id, defaultBranch} | undefined`
+ * (file-contention), `[{defaultBranch}]` (review), `{defaultBranch} | null` (showdown) —
+ * each a thin adapter over `getProjectById`.
+ *
+ * The wrapper OBJECT is deliberate rather than returning `string | null` directly: two
+ * callers throw NotFoundError when the project is missing but tolerate a project whose
+ * `defaultBranch` is unset. Flattening to `string | null` would merge those two states
+ * and silently turn "no such project" into "no branch configured".
+ */
+export async function getProjectDefaultBranch(
+  projectId: string,
+  database: Database = db,
+): Promise<{ defaultBranch: string | null } | null> {
+  const project = await getProjectById(projectId, database);
+  return project ? { defaultBranch: project.defaultBranch } : null;
 }

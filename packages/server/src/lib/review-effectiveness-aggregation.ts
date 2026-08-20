@@ -12,20 +12,21 @@
  * feature); do not conflate.
  */
 
-export type ReviewKind = "review" | "build" | "rework" | "noise" | "other";
+import { triggerRole, type SessionTriggerRole } from "@agentic-kanban/shared/lib/session-trigger";
 
 /**
- * Classify a session's `triggerType` into a lifecycle role. Legacy initial
- * sessions have a null triggerType and are treated as build runs.
+ * A session's lifecycle role. The vocabulary and the classification now live in
+ * `shared/lib/session-trigger` (#495) — this alias is kept because the aggregation's
+ * public shape names the type, and the two words mean the same thing here.
  */
-export function classifyTrigger(t: string | null): ReviewKind {
-  if (!t) return "build"; // legacy initial sessions have null triggerType
-  if (t === "review" || t.startsWith("skill:code-review")) return "review";
-  if (t.startsWith("skill:board-monitor") || t.startsWith("skill:board-navigator")) return "noise";
-  if (t === "chat" || t === "fix-and-merge" || t === "fix-conflicts" || t === "plan-reject") return "rework";
-  if (t === "verify" || t === "learning" || t === "bisect" || t === "reconcile") return "other";
-  return "build"; // agent, auto-start, manual, plan-implement, skill:<other>
-}
+export type ReviewKind = SessionTriggerRole;
+
+/**
+ * Classify a session's `triggerType` into a lifecycle role. Thin alias over the shared
+ * traits table; four byte-identical copies of this body used to exist (two server libs,
+ * two MCP tools).
+ */
+export const classifyTrigger: (t: string | null) => ReviewKind = triggerRole;
 
 /** Parse a session's persisted `stats` JSON into the cost/duration/turns we aggregate. */
 export function parseSessionStats(raw: string | null): { cost: number; durationMs: number; turns: number } {
@@ -208,7 +209,13 @@ export function bucketScorecardScores(scores: number[]): Record<ScorecardBucket,
 export function classifyReviewVerdictText(text: string): "approve" | "changesRequested" | "unclear" {
   const t = text.toLowerCase();
   const approve = /ready for merge|marking .*ready|approved|no critical or major|lgtm/.test(t);
-  const changes = /request changes|moving .*back to in progress|moved .*to in progress|needs fixes|requires changes|back to the agent|critical issue|major issue/.test(t);
+  // The `code-review` skill's output contract emits findings as a leading
+  // `CRITICAL <path>:<line> — …` / `MAJOR …` line rather than prose like "critical
+  // issue", so match that structured form too — otherwise a terse (and correct)
+  // changes-requested review reads as "unclear".
+  const structuredFinding = /^\s*(critical|major)\b[^\n]*[:\s]/m.test(t);
+  const changes = structuredFinding
+    || /request changes|moving .*back to in progress|moved .*to in progress|needs fixes|requires changes|back to the agent|critical issue|major issue/.test(t);
   if (changes && !approve) return "changesRequested";
   if (approve && !changes) return "approve";
   if (approve && changes) return "approve";

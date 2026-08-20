@@ -77,7 +77,7 @@ export function CleanupQueuePanel({ projectId, onClose }: CleanupQueuePanelProps
   return (
     <div className="fixed inset-0 z-50 flex">
       <div className="flex-1" onClick={onClose} />
-      <div className="w-[600px] h-full bg-zinc-900 border-l border-zinc-700 flex flex-col shadow-2xl animate-slide-in-right">
+      <div className="w-[min(600px,100vw)] h-full bg-zinc-900 border-l border-zinc-700 flex flex-col shadow-2xl animate-slide-in-right">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-700">
           <div>

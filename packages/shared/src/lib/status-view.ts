@@ -60,6 +60,28 @@ export function isResolvedDependencyStatusView(issue: StatusViewIssue): boolean 
 }
 
 /**
+ * Name-only, case-insensitive variant of the resolved-dependency check (#520).
+ *
+ * Some call sites hold only a status NAME and never a full issue — a dependency
+ * row (`issueStatusName`), a status-transition impact dialog. Each had grown its
+ * own lower-cased copy of the set (`["done","cancelled","ai reviewed"]`), so the
+ * definition of "resolved" could drift between the badge, the critical path, the
+ * impact dialog and the server's `isBlocked`. Case-folding here preserves those
+ * sites' existing behaviour while leaving exactly one definition.
+ *
+ * Prefer `isResolvedDependencyStatusView` whenever a full issue is available —
+ * it also honours workflow `end` nodes, which a name alone cannot express.
+ */
+export function isResolvedDependencyStatusName(name: string | null | undefined): boolean {
+  if (!name) return false;
+  const lower = name.toLowerCase();
+  for (const resolved of LEGACY_RESOLVED_DEPENDENCY_STATUS_NAMES) {
+    if (resolved.toLowerCase() === lower) return true;
+  }
+  return false;
+}
+
+/**
  * The landing signal for a single blocker's workspace: did its branch actually
  * reach the base branch? `mergedAt` is stamped ONLY after the git merge succeeds
  * and post-merge ancestry is verified; a `isDirect` workspace commits straight to

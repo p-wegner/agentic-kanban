@@ -1,3 +1,4 @@
+import { useApiResource } from "../hooks/useApiResource.js";
 import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
@@ -113,31 +114,11 @@ const EVENT_ICON_COLORS: Record<ActivityEventType, string> = {
 };
 
 export function ActivityFeedView({ projectId, onIssueClick }: ActivityFeedViewProps) {
-  const [data, setData] = useState<ProjectActivityResult | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-
-    apiFetch<ProjectActivityResult>(`/api/projects/${projectId}/activity?limit=100`)
-      .then((json) => {
-        if (!cancelled) {
-          setData(json);
-          setLoading(false);
-        }
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to load activity");
-          setLoading(false);
-        }
-      });
-
-    return () => { cancelled = true; };
-  }, [projectId]);
+  // #513 — the whole five-piece ladder, replaced.
+  const { data, loading, error } = useApiResource<ProjectActivityResult>(
+    `/api/projects/${projectId}/activity?limit=100`,
+    { fallbackError: "Failed to load activity" },
+  );
 
   return (
     <div className="flex flex-col h-full overflow-hidden p-4">

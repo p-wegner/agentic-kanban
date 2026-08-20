@@ -1,4 +1,5 @@
 import type { IssueWithStatus, MainWorkspaceInfo, StatusWithIssues } from "@agentic-kanban/shared";
+import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-liveness";
 
 export interface RunQueueForecastStart {
   issue: IssueWithStatus;
@@ -47,7 +48,7 @@ function parseActiveTarget(value: string | number): number {
 }
 
 function isRunningStatus(status: MainWorkspaceInfo["status"]): boolean {
-  return status === "active" || status === "fixing";
+  return isAgentRunningStatus(status);
 }
 
 function isReviewStatus(status: MainWorkspaceInfo["status"]): boolean {

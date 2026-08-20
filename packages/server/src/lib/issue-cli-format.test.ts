@@ -8,6 +8,7 @@ import {
   selectSummarySession,
   buildIssueSummaryJson,
   buildIssueStatusJson,
+  formatResolvedProjectLine,
 } from "./issue-cli-format.js";
 
 function summary(over: Partial<SessionSummary> = {}): SessionSummary {
@@ -346,5 +347,16 @@ describe("buildIssueStatusJson", () => {
     expect(json.workspace).toEqual({ id: "w1", branch: "b", status: "active", isDirect: true, provider: "claude" });
     expect(json.session).toEqual({ id: "s1", status: "running", startedAt: "2026-06-20T10:00:00.000Z", endedAt: null });
     expect(json.lastAgentMessage).toBe("hi");
+  });
+});
+
+describe("formatResolvedProjectLine (#335)", () => {
+  it("names the resolved project with its id so an implicit-scope mis-filing is visible", () => {
+    expect(formatResolvedProjectLine("d1c5d9c1-4897-4e1b-acc3-2aa96de04117", "agentic-kanban"))
+      .toBe("  project: agentic-kanban (d1c5d9c1-4897-4e1b-acc3-2aa96de04117)");
+  });
+
+  it("renders an unresolvable project id rather than hiding it", () => {
+    expect(formatResolvedProjectLine("dangling-id", null)).toBe("  project: <unknown> (dangling-id)");
   });
 });

@@ -1,5 +1,6 @@
-import { extractPendingWorkingTreeSync } from "@agentic-kanban/shared/lib/git-service";
+import { applyDeferredWorkingTreeSync, extractPendingWorkingTreeSync, getDeletedPathsVsHead } from "@agentic-kanban/shared/lib/git-service";
 import type { GitService } from "./workspace-internals.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * The ONE merge executor core (#945).
@@ -84,7 +85,7 @@ export async function runMergeCore(args: RunMergeCoreArgs): Promise<MergeCoreRes
   try {
     await args.createBackup("pre-merge");
   } catch (err) {
-    console.warn("[backup] pre-merge backup failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[backup] pre-merge backup failed (non-fatal):", errorMessage(err));
   }
 
   const preMergeHead = await revParseSafe(repoPath, "HEAD", gitService);
@@ -121,7 +122,72 @@ export async function runMergeCore(args: RunMergeCoreArgs): Promise<MergeCoreRes
     throw args.makeAncestryError(branch, targetBranch);
   }
 
+  await assertMainCheckoutReflectsMerge({
+    repoPath,
+    branch,
+    mergeCommitSha,
+    // Nothing to assert while a sync is still owed: the caller explicitly took ownership
+    // of the window. Only a caller that syncs inline can be held to a clean checkout.
+    skip: pendingWorkingTreeSyncSha !== null,
+  });
+
   return { mergeOutput, mergeCommitSha, preMergeHead, mergedHeadSha, pendingWorkingTreeSyncSha };
+}
+
+/**
+ * #350: after a merge reports success, the MAIN checkout must not be left undoing it.
+ *
+ * The observed corruption was exactly the merged paths showing as `D  path` — staged for
+ * deletion, absent from disk, present in HEAD — for ~32 seconds after each pm-pipeline
+ * auto-merge. Two downstream failures followed, both observed: the pm-pipeline planner reads
+ * step artifacts from the main checkout and did not raise a gate because the evidence was
+ * missing, and a dirty index is a hard stop for the board's own merge preconditions, so the
+ * NEXT merge would fail pointing at the wrong ticket.
+ *
+ * The ticket's own hypothesis (a worktree prune running against the main checkout's index)
+ * is WRONG and is retracted here: the window is designed-in. `mergeBranch` advances
+ * `refs/heads/<base>` by `update-ref` while that branch is checked out, and the working-tree
+ * `reset --hard` that reconciles index+disk with the new HEAD is a SEPARATE step. Whoever
+ * defers that step owns a window in which the checkout contradicts HEAD.
+ *
+ * This assertion therefore runs SYNCHRONOUSLY, inside the merge path, before the merge is
+ * reported complete — which is the one placement that can catch it. A check that runs
+ * asynchronously or a moment later finds a clean tree and always passes, which is precisely
+ * why #296's retry hardening looked like it worked while the bug survived.
+ *
+ * On detection it repairs once (the same hard sync the deferred path would have done) and
+ * re-checks. If the checkout still contradicts HEAD, it THROWS: reporting success while the
+ * artifacts are missing from disk is the failure mode, so a loud failure is strictly better.
+ */
+async function assertMainCheckoutReflectsMerge(args: {
+  repoPath: string;
+  branch: string;
+  mergeCommitSha: string;
+  skip: boolean;
+}): Promise<void> {
+  if (args.skip) return;
+  let deleted = await getDeletedPathsVsHead(args.repoPath);
+  if (deleted.length === 0) return;
+  console.warn(
+    `[merge-core] #350: main checkout ${args.repoPath} shows ${deleted.length} path(s) deleted relative to HEAD `
+    + `immediately after merging '${args.branch}' — repairing before reporting success: ${deleted.slice(0, 5).join(", ")}`,
+  );
+  if (args.mergeCommitSha) {
+    try {
+      await applyDeferredWorkingTreeSync(args.repoPath, args.mergeCommitSha);
+    } catch (err) {
+      console.warn("[merge-core] #350 repair sync failed:", errorMessage(err));
+    }
+  }
+  deleted = await getDeletedPathsVsHead(args.repoPath);
+  if (deleted.length === 0) return;
+  throw new Error(
+    `Post-merge checkout invariant violated (#350): after merging '${args.branch}', the main checkout at `
+    + `${args.repoPath} still has ${deleted.length} tracked path(s) deleted relative to HEAD `
+    + `(${deleted.slice(0, 10).join(", ")}${deleted.length > 10 ? ", …" : ""}). The merge commit is correct but the `
+    + `checkout undoes it — anything reading artifacts from this checkout will see them missing. `
+    + `Recover with: git restore --source=HEAD --staged --worktree -- .`,
+  );
 }
 
 /**

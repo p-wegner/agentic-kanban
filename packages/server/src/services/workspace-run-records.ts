@@ -1,5 +1,6 @@
 import type { WorkspaceSymlinkRun } from "@agentic-kanban/shared";
 import type { SetupScriptResult } from "./setup-script.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * Pure builders for the per-workspace "latest run" status records — the setup
@@ -71,7 +72,7 @@ export function buildSetupRunFromError(
     exitCode: null,
     durationMs: durationMs(startedAt, nowIso),
     stdoutTail: null,
-    stderrTail: tailOutput(err instanceof Error ? err.message : String(err)),
+    stderrTail: tailOutput(errorMessage(err)),
   };
 }
 
@@ -141,6 +142,6 @@ export function buildSymlinkErrorRun(
     failed: [],
     startedAt,
     endedAt: nowIso,
-    error: err instanceof Error ? err.message : String(err),
+    error: errorMessage(err),
   };
 }

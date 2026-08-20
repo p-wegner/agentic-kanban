@@ -27,6 +27,7 @@ describe("resolveStartPolicy", () => {
       expect(p.source).toBe("start_mode");
       expect(p.autoStartUnblocked).toBe(false);
       expect(p.postMergeCascade).toBe(false);
+      expect(p.postMergeFollowups).toBe(false);
       expect(p.backlogRefill).toBe(false);
       expect(p.scheduledRuns).toBe(false);
     });
@@ -39,12 +40,14 @@ describe("resolveStartPolicy", () => {
       expect(on.mode).toBe("monitor");
       expect(on.autoStartUnblocked).toBe(true);
       expect(on.postMergeCascade).toBe(true);
+      expect(resolveStartPolicy(prefs({ [startModePrefKey(PID)]: "monitor", auto_start_followup: "true" }), PID).postMergeFollowups).toBe(true);
       expect(on.backlogRefill).toBe(true);
       expect(on.scheduledRuns).toBe(true);
 
       const off = resolveStartPolicy(prefs({ [startModePrefKey(PID)]: "monitor" }), PID);
       expect(off.autoStartUnblocked).toBe(true); // auto-start is the point of monitor mode
       expect(off.postMergeCascade).toBe(false); // opt-in pref absent
+      expect(off.postMergeFollowups).toBe(false); // opt-in pref absent
       expect(off.backlogRefill).toBe(false);
     });
 
@@ -56,6 +59,8 @@ describe("resolveStartPolicy", () => {
       expect(p.mode).toBe("conductor");
       expect(p.autoStartUnblocked).toBe(false);
       expect(p.postMergeCascade).toBe(false);
+      // The external loop owns starts — a merge must not fan out follow-ups in-process.
+      expect(p.postMergeFollowups).toBe(false);
       expect(p.backlogRefill).toBe(false);
       expect(p.scheduledRuns).toBe(true);
     });

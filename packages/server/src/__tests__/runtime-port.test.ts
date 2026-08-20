@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveRuntimeServerPort } from "../runtime-port.js";
+import { resolvePublicBoardUrl, resolveRuntimeServerPort } from "../runtime-port.js";
 
 describe("resolveRuntimeServerPort", () => {
   it("uses SERVER_PORT so worktree smoke launches match the client proxy target", () => {
@@ -44,5 +44,29 @@ describe("resolveRuntimeServerPort", () => {
 
   it("falls back to the default board server port only when no port env is set", () => {
     expect(resolveRuntimeServerPort({})).toBe(3001);
+  });
+});
+
+describe("resolvePublicBoardUrl (#236 — {{boardUrl}} source)", () => {
+  it("uses the PUBLIC proxy port, never the internal dev backend port", () => {
+    // In dev the backend binds 13001 behind the stable proxy on 3001; clients
+    // (plugin views, scripts, planners) must be handed the proxy URL.
+    expect(resolvePublicBoardUrl({
+      KANBAN_INTERNAL_SERVER_PORT: "13001",
+      KANBAN_SERVER_PORT: "3001",
+      SERVER_PORT: "3001",
+      PORT: "3001",
+    })).toBe("http://localhost:3001");
+  });
+
+  it("a worktree server on 3001+N produces its own URL", () => {
+    expect(resolvePublicBoardUrl({
+      KANBAN_WORKTREE_SERVER_PORT: "3237",
+      KANBAN_SERVER_PORT: "3001",
+    })).toBe("http://localhost:3237");
+  });
+
+  it("defaults to http://localhost:3001 with no port env", () => {
+    expect(resolvePublicBoardUrl({})).toBe("http://localhost:3001");
   });
 });

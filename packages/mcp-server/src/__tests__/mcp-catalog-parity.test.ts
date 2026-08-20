@@ -1,4 +1,5 @@
 // @covers mcp-server.govern.catalog-parity [config,api]
+// @gate:always-run — catalog/runtime parity twin; reachable by no single-file diff (#538).
 //
 // Fast, NON-SPAWNING twin of the parity assertion in mcp-tools.test.ts (#982).
 //

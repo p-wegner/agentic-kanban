@@ -1,3 +1,4 @@
+import "./uv-threadpool.js";
 import { startServer } from "./server-start.js";
 import { resolveRuntimeServerPort } from "./runtime-port.js";
 

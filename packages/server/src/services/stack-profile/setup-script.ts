@@ -3,47 +3,27 @@
 // Monorepo-aware install command run once in a fresh worktree before the first build.
 // Re-exported byte-identically through ../stack-profile.service.ts.
 
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import type { StackProfile } from "@agentic-kanban/shared";
 import type { Database } from "../../db/index.js";
 import { getProjectSetupScript, setProjectSetupScript } from "../../repositories/stack-profile.repository.js";
-import { detectProjectMarkers } from "../project-setup.service.js";
-import { gradleWrapper } from "../gradle-detect.service.js";
-import { readJson, nodeInstallCommand, readFileSafe, type NodePkgJson } from "../stack-detector.service.js";
+import { detectStackProfile } from "../stack-detector.service.js";
 import { getStackProfile } from "./persistence.js";
 
-/** Marker-rule fallback install command when no stack profile is available yet. */
+/**
+ * Marker-rule fallback install command when no stack profile is available yet (#521).
+ *
+ * This was a 35-line ladder re-deriving, per marker, what `detectStackProfile` already
+ * decides — the same pnpm/yarn/bun/npm cascade, the same gradle assemble-vs-dependencies
+ * split (with the same explanatory comment), the same uv-before-poetry ordering. The
+ * detector is pure and synchronous, so the fallback is just a call to it.
+ *
+ * The two had actually DIVERGED on one case: a PEP-621 pyproject-only project got
+ * `pip install -e .` here and `pip install -r requirements.txt` from the detector, which
+ * fails when there is no requirements.txt. Fixed in the detector rather than preserved
+ * here, so both paths get the working command.
+ */
 function deriveInstallFromMarkers(repoPath: string): string {
-  const markers = new Set(detectProjectMarkers(repoPath));
-  if (markers.has("package.json")) {
-    const pm = markers.has("pnpm-lock.yaml")
-      ? "pnpm"
-      : markers.has("yarn.lock")
-        ? "yarn"
-        : markers.has("bun.lockb") || markers.has("bun.lock")
-          ? "bun"
-          : "npm";
-    // pnpm-workspace.yaml or a package.json `workspaces` field ⇒ monorepo ⇒ recursive install.
-    // (pnpm-workspace.yaml is not in PROJECT_MARKER_FILES, so check disk directly.)
-    const pkg = readJson<NodePkgJson>(join(repoPath, "package.json"));
-    const isMonorepo = existsSync(join(repoPath, "pnpm-workspace.yaml")) || Boolean(pkg?.workspaces);
-    return nodeInstallCommand(pm, isMonorepo);
-  }
-  if (markers.has("Cargo.toml")) return "cargo fetch";
-  if (markers.has("go.mod")) return "go mod download";
-  if (markers.has("build.gradle") || markers.has("build.gradle.kts")) {
-    const wrapper = gradleWrapper(repoPath);
-    const isMultiModule = existsSync(join(repoPath, "settings.gradle")) || existsSync(join(repoPath, "settings.gradle.kts"));
-    return isMultiModule ? `${wrapper} assemble` : `${wrapper} dependencies`;
-  }
-  if (markers.has("pom.xml")) return "mvn install -DskipTests";
-  if (markers.has("pyproject.toml")) {
-    return /\[tool\.poetry\]/.test(readFileSafe(join(repoPath, "pyproject.toml"))) ? "poetry install" : "pip install -e .";
-  }
-  if (markers.has("Pipfile")) return "pipenv install --dev";
-  if (markers.has("requirements.txt")) return "pip install -r requirements.txt";
-  return "";
+  return detectStackProfile(repoPath).installCommand ?? "";
 }
 
 /**

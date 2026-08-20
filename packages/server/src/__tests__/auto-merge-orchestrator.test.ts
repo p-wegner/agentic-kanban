@@ -4,6 +4,7 @@ import { issues, projectStatuses, projects, workspaces, preferences, sessions } 
 import { eq } from "drizzle-orm";
 import { createTestDb } from "./helpers/test-db.js";
 import { createAutoMergeOrchestrator } from "../startup/auto-merge-orchestrator.js";
+import { invalidatePreferencesCache } from "../repositories/preferences.repository.js";
 
 async function seedProject(db: ReturnType<typeof createTestDb>["db"]) {
   const now = new Date().toISOString();
@@ -97,6 +98,8 @@ describe("auto-merge orchestrator", () => {
     expect(queueOrchestrator.state.lastRunAt).not.toBeNull();
 
     await db.update(preferences).set({ value: "monitor", updatedAt: now }).where(eq(preferences.key, "merge_strategy"));
+    // Raw pref write bypasses the repository — bust the short-TTL prefs cache (#402).
+    invalidatePreferencesCache();
     const monitorOrchestrator = createAutoMergeOrchestrator({ database: db });
     await monitorOrchestrator.runOnce();
     expect(monitorOrchestrator.state.lastRunAt).toBeNull();
@@ -165,6 +168,8 @@ describe("auto-merge orchestrator", () => {
       value: "true",
       updatedAt: new Date().toISOString(),
     });
+    // Raw pref write bypasses the repository — bust the short-TTL prefs cache (#402).
+    invalidatePreferencesCache();
 
     await expect(orchestrator.findCompletedWorkspaceIds()).resolves.toContain(inReview);
   });

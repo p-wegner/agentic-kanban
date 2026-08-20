@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import type { TagSetting } from "../components/SettingsPanel.shared.js";
+import type { TagSetting } from "../lib/settingsTypes.js";
 
 /** Return shape matches `TagsSettingsProps` exactly so the panel can spread it
  *  straight into `<TagsSettings {...} />`. */

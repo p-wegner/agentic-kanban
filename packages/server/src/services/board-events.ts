@@ -1,4 +1,17 @@
 import type { WSContext } from "hono/ws";
+import type {
+  BoardEventReason,
+  ProjectEventReason,
+  BoardChangedMessage,
+  ProjectsChangedMessage,
+  SessionActivityMessage,
+  SessionStatsMessage,
+  SessionTodosMessage,
+  ApprovalRequestMessage,
+  PluginGateMessage,
+  TodoItem,
+  BoardWsMessage,
+} from "@agentic-kanban/shared/lib/board-events-contract";
 
 /**
  * All typed board event reasons.
@@ -35,90 +48,23 @@ import type { WSContext } from "hono/ws";
  * | internal_notify           | routes/index internal endpoint              |
  * | projects_changed          | projects route emits a separate WS message  |
  */
-export type BoardEventType =
-  | "board_changed"
-  | "issue_created"
-  | "issue_updated"
-  | "issue_deleted"
-  | "dependency_added"
-  | "dependency_removed"
-  | "session_completed"
-  | "session_launched"
-  | "session_stopped"
-  | "workspace_created"
-  | "workspace_setup"
-  | "workspace_idle"
-  | "workspace_merged"
-  | "workspace_closed"
-  | "workspace_ready_for_merge"
-  | "workflow_error"
-  | "workflow_fork"
-  | "workflow_join"
-  | "workflow_template_saved"
-  | "workflow_template_deleted"
-  | "workflow_transition"
-  | "drive_obstacle"
-  | "project_completed"
-  | "internal_notify";
-
-export type ProjectEventType =
-  | "project_created"
-  | "project_updated"
-  | "project_deleted";
-
-interface BoardEventMessage {
-  type: "board_changed";
-  projectId: string;
-  reason: BoardEventType;
-}
-
-interface ProjectsChangedMessage {
-  type: "projects_changed";
-  projectId: string;
-  reason: ProjectEventType;
-}
-
-export interface SessionActivityMessage {
-  type: "session_activity";
-  projectId: string;
-  issueId: string;
-  sessionId: string;
-  activity: string;
-}
-
-export interface SessionStatsMessage {
-  type: "session_stats";
-  projectId: string;
-  issueId: string;
-  model: string;
-  contextTokens: number;
-  toolUses: number;
-  subagentCount: number;
-}
-
-export interface TodoItem {
-  id: string;
-  content: string;
-  status: "pending" | "in_progress" | "completed";
-  priority: "high" | "medium" | "low";
-}
-
-export interface SessionTodosMessage {
-  type: "session_todos";
-  projectId: string;
-  issueId: string;
-  todos: TodoItem[];
-}
-
-export interface ApprovalRequestMessage {
-  type: "approval_requested";
-  projectId: string;
-  id: string;
-  sessionId: string;
-  toolName: string;
-  toolInput: unknown;
-  workspaceId?: string;
-}
+/**
+ * The vocabulary and the message union live in shared (#566) so the MCP notifier, the
+ * internal notify route and the client filter on the SAME list instead of three
+ * hand-maintained copies. Re-exported under the historical names because the rest of
+ * the server already imports them from here.
+ */
+export type BoardEventType = BoardEventReason;
+export type ProjectEventType = ProjectEventReason;
+export type {
+  SessionActivityMessage,
+  SessionStatsMessage,
+  SessionTodosMessage,
+  ApprovalRequestMessage,
+  PluginGateMessage,
+  TodoItem,
+  BoardWsMessage,
+};
 
 interface BoardEventSubscriber {
   ws: WSContext;
@@ -156,6 +102,17 @@ function createBoardEvents() {
         subscribers.delete(projectId);
       }
     }
+  }
+
+  /** Whether any LIVE WebSocket is subscribed to this project's board (G14f) —
+   * lets warm-ahead work skip projects nobody is currently watching. */
+  function hasSubscribers(projectId: string): boolean {
+    const subs = subscribers.get(projectId);
+    if (!subs) return false;
+    for (const sub of subs.values()) {
+      if (sub.ws.readyState === 1) return true;
+    }
+    return false;
   }
 
   /** Remove dead WebSocket entries (readyState !== OPEN). */
@@ -196,7 +153,7 @@ function createBoardEvents() {
     }
     const subs = subscribers.get(projectId);
     if (!subs) return;
-    const message: BoardEventMessage = { type: "board_changed", projectId, reason };
+    const message: BoardChangedMessage = { type: "board_changed", projectId, reason };
     const payload = JSON.stringify(message);
     for (const sub of subs.values()) {
       if (sub.ws.readyState === 1) {
@@ -257,6 +214,18 @@ function createBoardEvents() {
     }
   }
 
+  function broadcastPluginGate(projectId: string, data: Omit<PluginGateMessage, "type" | "projectId">) {
+    const subs = subscribers.get(projectId);
+    if (!subs) return;
+    const message: PluginGateMessage = { type: "plugin_gate", projectId, ...data };
+    const payload = JSON.stringify(message);
+    for (const sub of subs.values()) {
+      if (sub.ws.readyState === 1) {
+        sub.ws.send(payload);
+      }
+    }
+  }
+
   function broadcastTodos(projectId: string, issueId: string, todos: TodoItem[]) {
     const subs = subscribers.get(projectId);
     if (!subs) return;
@@ -272,12 +241,14 @@ function createBoardEvents() {
   return {
     subscribe,
     unsubscribe,
+    hasSubscribers,
     broadcast,
     broadcastProjectsChanged,
     broadcastActivity,
     broadcastLiveStats,
     broadcastTodos,
     broadcastApprovalRequest,
+    broadcastPluginGate,
     startCleanup,
     stopCleanup,
     cleanupStaleConnections,
@@ -288,3 +259,15 @@ function createBoardEvents() {
 
 export { createBoardEvents };
 export type BoardEvents = ReturnType<typeof createBoardEvents>;
+
+/**
+ * The narrow port most consumers actually need (#560): emit an event, nothing else.
+ *
+ * `BoardEvents` is the whole 14-method hub — subscribe/unsubscribe, invalidation
+ * listeners, the cleanup timer — and demanding it from a service that only calls
+ * `broadcast` both hides that service's real dependency surface and forces every one
+ * of its tests to fake a hub it never touches (`boardEvents as never`). Wiring code
+ * (`server-start.ts`, `routes/index.ts`, the WS route) keeps the full type; a service
+ * that only emits declares this.
+ */
+export type BoardEventSink = Pick<BoardEvents, "broadcast" | "broadcastActivity">;

@@ -2,7 +2,7 @@ import { extname } from "node:path";
 import { parseAgentProviderStreamLine, parseAgentProviderStreamLineObserved } from "@agentic-kanban/shared/lib/agent-stream-parser";
 import type { AgentLaunchConfig, AgentProvider, FileSystem, ParsedStreamEvent, ProviderLaunchOptions } from "./types.js";
 import { PLAN_BEGIN_MARKER, PLAN_END_MARKER } from "./types.js";
-import { nodeFileSystem, resolvePiExecutable, splitArgs } from "./helpers.js";
+import { nodeFileSystem, resolvePiExecutable, spliceAgentArgs, resolveMockLaunch } from "./helpers.js";
 
 function extractPiProfile(profile: ProviderLaunchOptions["profile"]): { provider?: string; model?: string } {
   if (profile?.provider !== "pi") return {};
@@ -34,8 +34,11 @@ export class PiProvider implements AgentProvider {
   buildLaunchConfig(options: ProviderLaunchOptions): AgentLaunchConfig {
     const { agentArgs, agentCommand, keepAlive, model, piExtensionPaths, piSkillPaths, planMode, profile, providerSessionId, prompt, systemInstructions } = options;
     const isWindows = process.platform === "win32";
-    const isMockAgent = !!process.env.AGENT_COMMAND || (agentCommand?.includes("mock-agent") ?? false);
-    let command = process.env.AGENT_COMMAND || agentCommand || "pi";
+    const { isMockAgent, command: resolvedCommand, mockArgs } = resolveMockLaunch(
+      { agentCommand, providerSessionId, keepAlive },
+      "pi",
+    );
+    let command = resolvedCommand;
     let useShell = isWindows;
 
     const args: string[] = [];
@@ -43,8 +46,7 @@ export class PiProvider implements AgentProvider {
     let suppressStdinPrompt = false;
 
     if (isMockAgent) {
-      if (providerSessionId) args.push("--resume", providerSessionId);
-      if (keepAlive) args.push("--profile", "multi-turn");
+      args.push(...mockArgs);
     } else {
       if (!agentCommand) {
         const resolved = resolvePiExecutable(command, this.fs);
@@ -79,9 +81,10 @@ export class PiProvider implements AgentProvider {
         if (skillPath) args.push("--skill", skillPath);
       }
 
-      if (agentArgs) {
-        args.push(...splitArgs(agentArgs));
-      }
+      // Strip any provider-denied flags (e.g. Pi's `--approve`, which Pi 0.73.1
+      // rejects outright) before they poison the spawn — encoded in DENIED_ARGS,
+      // not prose (arch-review §2.2 / ticket #19).
+      args.push(...spliceAgentArgs(this.name, agentArgs));
 
       if (planMode) {
         promptPrefix = [

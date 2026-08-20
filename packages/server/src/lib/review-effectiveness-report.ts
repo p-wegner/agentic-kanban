@@ -5,21 +5,16 @@
 // git, or the network. The CLI handler keeps the I/O (DB query, `git log`,
 // transcript parsing) and the report formatting.
 
-export type ReviewSessionKind = "review" | "build" | "rework" | "noise" | "other";
+import { triggerRole, type SessionTriggerRole } from "@agentic-kanban/shared/lib/session-trigger";
+
+/** A session's lifecycle role — the shared vocabulary (#495) under this file's name. */
+export type ReviewSessionKind = SessionTriggerRole;
 
 /**
- * Map a session's triggerType to its lifecycle role. Unknown/empty types are
- * treated as build (implementer) work; monitor/navigator skills are noise and
- * dropped from the analysis entirely.
+ * Map a session's triggerType to its lifecycle role. Thin alias over the shared traits
+ * table; monitor/navigator skills classify as `noise` and this analysis drops them.
  */
-export function classifyTriggerType(t: string | null): ReviewSessionKind {
-  if (!t) return "build";
-  if (t === "review" || t.startsWith("skill:code-review")) return "review";
-  if (t.startsWith("skill:board-monitor") || t.startsWith("skill:board-navigator")) return "noise";
-  if (t === "chat" || t === "fix-and-merge" || t === "fix-conflicts" || t === "plan-reject") return "rework";
-  if (t === "verify" || t === "learning" || t === "bisect" || t === "reconcile") return "other";
-  return "build";
-}
+export const classifyTriggerType: (t: string | null) => ReviewSessionKind = triggerRole;
 
 /** A session row joined to its workspace + issue (the CLI's DB projection). */
 export interface ReviewSessionRow {

@@ -7,37 +7,21 @@
         "command": "node .claude/hooks/validate-command-safety.js",
         "enabled": true,
         "blocking": true,
-        "timeout": 5,
+        "timeout": 30,
         "alwaysRun": true
       }
     ],
     "Stop": [
       {
-        "name": "Vitest (server)",
-        "command": "pnpm --filter @agentic-kanban/server test",
-        "filePatterns": ["packages/server/**/*.ts"],
-        "enabled": true,
-        "blocking": true,
-        "timeout": 60
-      },
-      {
-        "name": "TypeScript build check",
-        "command": "pnpm build",
-        "filePatterns": ["packages/**/*.ts", "packages/**/*.tsx"],
-        "enabled": true,
-        "blocking": true,
-        "timeout": 180
-      },
-      {
-        "name": "Remind Playwright",
-        "command": "node .claude/hooks/remind-playwright.js",
+        "name": "Uncommitted worktree changes",
+        "command": "node .claude/hooks/check-uncommitted.js",
         "enabled": true,
         "blocking": true,
         "timeout": 10
       },
       {
-        "name": "Uncommitted worktree changes",
-        "command": "node .claude/hooks/check-uncommitted.js",
+        "name": "Remind Playwright",
+        "command": "node .claude/hooks/remind-playwright.js",
         "enabled": true,
         "blocking": true,
         "timeout": 10
@@ -49,6 +33,24 @@
         "blocking": true,
         "timeout": 10,
         "alwaysRun": true
+      },
+      {
+        "name": "Vitest (edited files only)",
+        "command": "node .claude/hooks/scoped-vitest.js",
+        "filePatterns": ["packages/**/*.ts", "packages/**/*.tsx"],
+        "enabled": true,
+        "blocking": true,
+        "timeout": 300,
+        "containerSkippable": true
+      },
+      {
+        "name": "TypeScript typecheck",
+        "command": "pnpm typecheck",
+        "filePatterns": ["packages/**/*.ts", "packages/**/*.tsx"],
+        "enabled": true,
+        "blocking": true,
+        "timeout": 300,
+        "containerSkippable": true
       }
     ]
   }

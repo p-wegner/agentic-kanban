@@ -2,6 +2,7 @@
 // god-render). These are the boolean/nullable-state–gated overlays that render
 // as siblings after the panel body. Kept as a cohesive, properly-typed unit so
 // each modal's wiring lives in one place and the container only owns the state.
+import type { MoveToDonePending, DependencyImpactPending } from "../lib/issueDetailTypes.js";
 import type { Dispatch, SetStateAction } from "react";
 import type { IssueWithStatus, DependencyInfo, ShowdownResponse } from "@agentic-kanban/shared";
 import { MoveToDoneDialog } from "./MoveToDoneDialog.js";
@@ -11,17 +12,6 @@ import { ShowdownDialog } from "./ShowdownDialog.js";
 import { ShowdownPanel } from "./ShowdownPanel.js";
 import { CompareAttemptsPanel } from "./CompareAttemptsPanel.js";
 
-/** A pending "move to Done" confirmation: just the confirm thunk to run on OK. */
-export interface MoveToDonePending {
-  confirm: () => Promise<void>;
-}
-
-/** A pending status change whose dependency impact must be confirmed first. */
-export interface DependencyImpactPending {
-  toStatusId: string;
-  toStatusName: string;
-  confirm: () => Promise<void>;
-}
 
 interface IssueDetailDialogsProps {
   issue: IssueWithStatus;
@@ -121,3 +111,6 @@ export function IssueDetailDialogs({
     </>
   );
 }
+
+/** #610 — re-exported so this component's existing importers are unchanged. */
+export type { MoveToDonePending, DependencyImpactPending } from "../lib/issueDetailTypes.js";

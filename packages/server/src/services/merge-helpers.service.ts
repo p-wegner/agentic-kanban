@@ -6,10 +6,11 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import type { Database } from "../db/index.js";
-import type { SessionManager } from "./session.manager.js";
+import type { SessionLauncher } from "./session.manager.js";
 import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import { PREF_LEARNING_STEP_BEFORE_MERGE } from "../constants/preference-keys.js";
 import { getSessionStatus } from "../repositories/session.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 const execFileAsync = promisify(execFile);
 const moduleDir = dirname(fileURLToPath(import.meta.url));
@@ -56,7 +57,7 @@ export async function rebuildSharedIfChanged(
     });
     console.log("[merge-helpers] shared/dist rebuild complete");
   } catch (err) {
-    console.warn("[merge-helpers] shared/dist rebuild failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[merge-helpers] shared/dist rebuild failed (non-fatal):", errorMessage(err));
   }
 }
 
@@ -86,11 +87,18 @@ Steps:
 Base branch: ${baseBranch}`;
 }
 
-export function buildConflictResolutionPrompt(conflictingFiles: string[], baseBranch: string): string {
+export function buildConflictResolutionPrompt(
+  conflictingFiles: string[],
+  baseBranch: string,
+  /** Pre-extracted conflict hunks (#128) — saves the reconciler a cold hunt through the tree. */
+  conflictContext?: string | null,
+): string {
+  const contextBlock = conflictContext?.trim() ? `\n${conflictContext.trim()}\n` : "";
   return `Resolve the merge/rebase conflicts in this workspace.
 
 Conflicting files:
 ${conflictingFiles.map(f => `- ${f}`).join("\n")}
+${contextBlock}
 
 For each conflicting file:
 1. Read the file and examine the conflict markers (<<<<<<<, =======, >>>>>>>)
@@ -114,15 +122,15 @@ export async function runLearningStep(
   workspaceId: string,
   prefMap: Map<string, string>,
   database: Database,
-  getSessionManager: () => SessionManager,
+  getSessionManager: () => SessionLauncher,
 ): Promise<void> {
   if (!getBool(prefMap, PREF_LEARNING_STEP_BEFORE_MERGE)) return;
 
   try {
     const learningPrompt = buildLearningStepPrompt(true);
-    const { agentCommand: agentCmd, agentArgs, claudeProfile, profile, provider } = resolveAgentSettings(prefMap);
+    const { agentCommand: agentCmd, agentArgs, profile, provider } = resolveAgentSettings(prefMap);
     const sm = getSessionManager();
-    const learningSessId = await sm.startSession({ workspaceId, prompt: learningPrompt, agentCommand: agentCmd, agentArgs, claudeProfile, profile, provider: toExecutorProvider(provider), triggerType: "learning" });
+    const learningSessId = await sm.startSession({ workspaceId, prompt: learningPrompt, agentCommand: agentCmd, agentArgs, profile, provider: toExecutorProvider(provider), triggerType: "learning" });
     console.log(`[merge-helpers] learning step started: session=${learningSessId}`);
 
     await new Promise<void>((resolve) => {

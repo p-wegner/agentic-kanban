@@ -33,7 +33,8 @@ export const PREF_PROJECTS_BASE_PATH = "projects_base_path";
 export const PREF_BUTLER_AUTO_ANSWER = "butler_auto_answer";
 export const PREF_BUTLER_AUTO_ANSWER_MIN_CONFIDENCE = "butler_auto_answer_min_confidence";
 export const PREF_BUILDER_GUARDRAILS = "builder_guardrails";
-export const PREF_MERGE_STRATEGY = "merge_strategy";
+// Declared with the resolver that reads it (#546) so the key and its parsing cannot drift.
+export { MERGE_STRATEGY_PREF_KEY as PREF_MERGE_STRATEGY } from "@agentic-kanban/shared/lib/merge-policy";
 export const PREF_RECONCILER_ANCESTOR_BRANCH_ENABLED = "reconciler_ancestor_branch_enabled";
 export const PREF_RECONCILER_STRANDED_REVIEW_ENABLED = "reconciler_stranded_review_enabled";
 export const PREF_RECONCILER_ZOMBIE_FIX_ENABLED = "reconciler_zombie_fix_enabled";

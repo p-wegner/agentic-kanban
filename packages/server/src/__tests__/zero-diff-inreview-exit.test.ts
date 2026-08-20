@@ -9,39 +9,65 @@
 vi.mock("../db/index.js", () => ({ db: {} }));
 vi.mock("../services/git.service.js", () => ({
   prepareForReview: vi.fn(async () => ({ success: true, diffRef: "master", conflictingFiles: [], uncommittedChanges: [] })),
+  // #377: runPreMergeGate reads the diff to decide docs-only/package-scoped skips.
+  getChangedFileNames: vi.fn(async () => [] as string[]),
 }));
-vi.mock("../services/butler-event-feed.js", () => ({ emitButlerSystemEvent: vi.fn() }));
 vi.mock("../services/agent-settings.service.js", () => ({
+  // #541: exit-workflow / merge-workflow now resolve their launch settings here instead
+  // of hand-rolling the ladder, so these two must exist on the mock.
+  applyWorkspaceProfileToPrefs: vi.fn((m: Map<string, string>) => m),
+  resolveWorkspaceLaunchSettings: vi.fn(() => ({
+    agentCommand: undefined, agentArgs: undefined, profile: undefined,
+    provider: "claude", resumeWithNewModel: false, permissionPromptTool: undefined,
+  })),
   isMockProfile: vi.fn(() => false),
   toExecutorProvider: vi.fn((p: string) => p),
   MOCK_AGENT_COMMAND: "mock",
 }));
-vi.mock("../startup/review-helpers.js", () => ({
-  buildReviewArgs: vi.fn(() => undefined),
+// #557: the `startup/review-helpers.js` shim is gone — the engine calls the service helper
+// with its own db. Partial mock so the rest of review.service stays real.
+vi.mock("../services/review.service.js", async (importOriginal) => ({
+  ...(await importOriginal() as Record<string, unknown>),
   buildReviewPrompt: vi.fn(async () => ({ prompt: "review", model: undefined })),
-  getEffectiveProfile: vi.fn(() => undefined),
-  parseProviderPref: vi.fn(() => "claude"),
 }));
 vi.mock("../startup/merge-strategy.js", () => ({
   isAutomaticMergeEnabled: vi.fn(() => false),
 }));
-// hasCommittedChanges uses execFile — make it return exit code 0 (no diff)
+// hasCommittedChanges() counts commits with `git rev-list --count <base>..HEAD` (#365 — it
+// used to ask `git diff --quiet <base>`). Report ZERO commits ahead: no committed changes.
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
   return {
     ...actual,
     execFile: vi.fn(
-      (_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null) => void) => cb(null),
+      (_cmd: string, args: string[], _opts: unknown, cb: (err: Error | null, stdout: string, stderr: string) => void) =>
+        args[0] === "rev-list" ? cb(null, "0\n", "") : cb(null, "", ""),
     ),
   };
 });
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { randomUUID } from "node:crypto";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { issues, projectStatuses, projects, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { createWorkflowEngine } from "../startup/exit-workflow.js";
+
+/**
+ * #539: `getCommitCountAhead` guards on `existsSync(<dir>/.git)` before spawning, so a
+ * made-up path now short-circuits to "unknown" (which `hasCommitsAhead` reads as "assume
+ * commits") no matter what the execFile mock returns. Production behaviour is unchanged —
+ * a real missing worktree makes the spawn fail and yields the same "unknown" — but a
+ * fixture that only mocks execFile can no longer stand in for a worktree. So make one.
+ */
+function fakeWorktree(): string {
+  const dir = mkdtempSync(join(tmpdir(), "zero-diff-ws-"));
+  writeFileSync(join(dir, ".git"), "gitdir: /nowhere");
+  return dir;
+}
 
 function makeBoardEvents() {
   return { broadcast: vi.fn(), broadcastActivity: vi.fn() };
@@ -80,7 +106,7 @@ async function seedInReviewWorkspace(db: ReturnType<typeof createTestDb>["db"]) 
   await db.insert(workspaces).values({
     id: workspaceId, issueId,
     branch: "feature/ak-603-test",
-    workingDir: "/repo/.worktrees/ak-603-test",
+    workingDir: fakeWorktree(),
     baseBranch: "master",
     isDirect: false,
     status: "idle",
@@ -160,7 +186,7 @@ describe("exit-workflow: zero-diff In Review → Done (issue #603)", () => {
     await db.insert(workspaces).values({
       id: workspaceId, issueId,
       branch: "feature/ak-604-test",
-      workingDir: "/r/.worktrees/ak-604",
+      workingDir: fakeWorktree(),
       baseBranch: "master",
       isDirect: false,
       status: "idle",

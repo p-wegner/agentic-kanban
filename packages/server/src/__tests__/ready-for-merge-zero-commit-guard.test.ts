@@ -11,28 +11,41 @@ vi.mock("../db/index.js", () => ({ db: {} }));
 vi.mock("../services/git.service.js", () => ({
   prepareForReview: vi.fn(async () => ({ success: true, diffRef: "master", conflictingFiles: [], uncommittedChanges: [] })),
 }));
-vi.mock("../services/butler-event-feed.js", () => ({ emitButlerSystemEvent: vi.fn() }));
 vi.mock("../services/agent-settings.service.js", () => ({
+  // #541: exit-workflow / merge-workflow now resolve their launch settings here instead
+  // of hand-rolling the ladder, so these two must exist on the mock.
+  applyWorkspaceProfileToPrefs: vi.fn((m: Map<string, string>) => m),
+  resolveWorkspaceLaunchSettings: vi.fn(() => ({
+    agentCommand: undefined, agentArgs: undefined, profile: undefined,
+    provider: "claude", resumeWithNewModel: false, permissionPromptTool: undefined,
+  })),
   isMockProfile: vi.fn(() => false),
   toExecutorProvider: vi.fn((p: string) => p),
   MOCK_AGENT_COMMAND: "mock",
 }));
-vi.mock("../startup/review-helpers.js", () => ({
-  buildReviewArgs: vi.fn(() => undefined),
+// #557: the `startup/review-helpers.js` shim is gone — the engine calls the service helper
+// with its own db. Partial mock so the rest of review.service stays real.
+vi.mock("../services/review.service.js", async (importOriginal) => ({
+  ...(await importOriginal() as Record<string, unknown>),
   buildReviewPrompt: vi.fn(async () => ({ prompt: "review", model: undefined })),
-  getEffectiveProfile: vi.fn(() => undefined),
-  parseProviderPref: vi.fn(() => "claude"),
 }));
 vi.mock("../startup/merge-strategy.js", () => ({
   isAutomaticMergeEnabled: vi.fn(() => false),
 }));
-// hasCommittedChanges uses execFile — make it return exit code 0 (no diff = 0 commits)
+// hasCommittedChanges counts commits with `git rev-list --count <base>..HEAD` (#365) — make
+// it report ZERO, the 0-commit branch this guard exists for. Before #365 the predicate was
+// `git diff --quiet <base>`, whose "no diff" answer this mock used to fake with a clean exit;
+// that form could never report zero for a branch BEHIND its base, which is why the guard
+// never fired in production even though this test passed.
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
   return {
     ...actual,
     execFile: vi.fn(
-      (_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null) => void) => cb(null),
+      (_cmd: string, args: string[], _opts: unknown, cb: (err: Error | null, stdout: string, stderr: string) => void) =>
+        // Only the commits-ahead probe is answered meaningfully; every other git call keeps
+        // the pre-#365 blanket clean-exit so this test stays like-for-like.
+        args[0] === "rev-list" ? cb(null, "0\n", "") : cb(null, "", ""),
     ),
   };
 });

@@ -64,6 +64,37 @@ interface LiveRowCounts {
 
 interface CreateBackupOptions {
   verify?: (path: string) => Promise<true>;
+  /**
+   * Skip the backup entirely when a retained backup already exists that is
+   * younger than this many milliseconds (#322).
+   *
+   * A backup is a full-size `VACUUM INTO` of the live DB — at ~103 MB that is
+   * one full read plus (because the snapshot is written to `.tmp`, copied to
+   * `.promote`, then renamed) roughly two full writes. Taking one is worth it
+   * on a cadence; taking one because the process happened to boot is not, and
+   * under `tsx watch` the process boots on every source edit. Callers whose
+   * trigger is "we started up" pass this so a restart storm cannot turn into a
+   * backup storm.
+   */
+  skipIfNewerThanMs?: number;
+}
+
+/**
+ * Age in ms of the newest retained backup, or null if there is none (#322).
+ * Interrupted-write scratch (`.tmp`/`.promote`) is deliberately not counted —
+ * it is not a usable snapshot, so it must never satisfy a freshness check.
+ */
+export function newestBackupAgeMs(now = Date.now()): number | null {
+  try {
+    if (!existsSync(BACKUP_DIR)) return null;
+    const newest = readdirSync(BACKUP_DIR)
+      .filter((f) => /^kanban-.+\.db$/.test(f))
+      .map((f) => statSync(join(BACKUP_DIR, f)).mtimeMs)
+      .sort((a, b) => b - a)[0];
+    return newest === undefined ? null : Math.max(0, now - newest);
+  } catch {
+    return null;
+  }
 }
 
 interface BackupRowCounts {
@@ -312,6 +343,17 @@ export async function createBackup(
   options: CreateBackupOptions = {},
 ): Promise<BackupResult | null> {
   if (!existsSync(DB_PATH) || statSync(DB_PATH).size === 0) return null;
+  // #322: a boot-triggered backup must not fire when a fresh one already exists.
+  if (options.skipIfNewerThanMs !== undefined) {
+    const age = newestBackupAgeMs();
+    if (age !== null && age < options.skipIfNewerThanMs) {
+      console.log(
+        `[backup] skipping ${reason} backup — newest backup is ${Math.round(age / 1000)}s old ` +
+        `(< ${Math.round(options.skipIfNewerThanMs / 1000)}s threshold)`,
+      );
+      return null;
+    }
+  }
   mkdirSync(BACKUP_DIR, { recursive: true });
   // Reap any scratch left by a previously interrupted backup BEFORE writing the
   // next snapshot — otherwise a low-disk failure leaks tmp on every cycle and

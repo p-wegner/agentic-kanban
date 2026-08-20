@@ -1,15 +1,20 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
+import { prodDeps, type ToolDeps } from "./deps.js";
 import { notifyBoard } from "../notify.js";
-import { requireEntity } from "../db-utils.js";
-import { buildAdjacency, wouldCreateCycle as graphWouldCreateCycle } from "@agentic-kanban/shared/lib/dependency-graph.js";
+import { mcpError, mcpJson, requireEntity } from "../db-utils.js";
+import { buildAdjacency, wouldCreateCycle as graphWouldCreateCycle } from "@agentic-kanban/shared/lib/dependency-graph";
 
 const VALID_TYPES = ["depends_on", "blocked_by", "related_to", "duplicates", "parent_of", "child_of", "coupled_with"] as const;
 
-async function wouldCreateCycle(issueId: string, dependsOnId: string, projectId: string): Promise<boolean> {
+async function wouldCreateCycle(
+  { db, schema }: Pick<ToolDeps, "db" | "schema">,
+  issueId: string,
+  dependsOnId: string,
+  projectId: string,
+): Promise<boolean> {
   const allDeps = await db
     .select({
       depIssueId: schema.issueDependencies.issueId,
@@ -23,7 +28,9 @@ async function wouldCreateCycle(issueId: string, dependsOnId: string, projectId:
   return graphWouldCreateCycle(adj, issueId, dependsOnId);
 }
 
-export function registerAddDependency(server: McpServer) {
+export function registerAddDependency(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema } = deps;
+
   server.tool(
     "add_dependency",
     "Add a dependency link between two issues. Types: depends_on (prerequisite), blocked_by (inverse of depends_on), related_to (symmetric link), duplicates (marks as duplicate), parent_of (parent-child), child_of (inverse of parent_of), coupled_with (symmetric peer edge: two issues touch the same code and are best implemented together). Rejects cycles for directional types and self-dependencies.",
@@ -34,7 +41,7 @@ export function registerAddDependency(server: McpServer) {
     },
     async ({ issueId, dependsOnId, type }) => {
       if (dependsOnId === issueId) {
-        return { content: [{ type: "text" as const, text: "Error: An issue cannot depend on itself" }] };
+        return mcpError("Error: An issue cannot depend on itself");
       }
 
       const depType = type || "depends_on";
@@ -49,14 +56,14 @@ export function registerAddDependency(server: McpServer) {
       const r2 = requireEntity(targetIssue, dependsOnId, "Issue");
       if (!r2.ok) return r2.error;
       if (r1.value.projectId !== r2.value.projectId) {
-        return { content: [{ type: "text" as const, text: "Error: Cannot add dependencies across projects" }] };
+        return mcpError("Error: Cannot add dependencies across projects");
       }
 
       // Cycle detection for directional types only
       if (depType === "depends_on" || depType === "blocked_by" || depType === "parent_of" || depType === "child_of") {
-        const wouldCycle = await wouldCreateCycle(issueId, dependsOnId, r1.value.projectId);
+        const wouldCycle = await wouldCreateCycle(deps, issueId, dependsOnId, r1.value.projectId);
         if (wouldCycle) {
-          return { content: [{ type: "text" as const, text: "Error: Adding this dependency would create a cycle" }] };
+          return mcpError("Error: Adding this dependency would create a cycle");
         }
       }
 
@@ -72,14 +79,14 @@ export function registerAddDependency(server: McpServer) {
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : undefined;
         if (message?.includes("UNIQUE constraint")) {
-          return { content: [{ type: "text" as const, text: "Error: This dependency already exists" }] };
+          return mcpError("Error: This dependency already exists");
         }
         throw err;
       }
 
       notifyBoard(r1.value.projectId, "mcp_dependency_added");
 
-      return { content: [{ type: "text" as const, text: JSON.stringify({ id, issueId, dependsOnId, type: depType }, null, 2) }] };
+      return mcpJson({ id, issueId, dependsOnId, type: depType });
     },
   );
 }

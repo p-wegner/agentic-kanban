@@ -1,7 +1,10 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { db, schema } from "../db.js";
+import { prodDeps, type ToolDeps } from "./deps.js";
+import { mcpJson } from "../db-utils.js";
 
-export function registerListTags(server: McpServer) {
+export function registerListTags(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema } = deps;
+
   server.tool(
     "list_tags",
     "List all available tags (labels) for categorizing issues",
@@ -9,9 +12,7 @@ export function registerListTags(server: McpServer) {
     async () => {
       const result = await db.select().from(schema.tags);
 
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-      };
+      return mcpJson(result);
     },
   );
 }

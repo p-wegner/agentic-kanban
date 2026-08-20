@@ -1,0 +1,13 @@
+# Shell scripts copied into the Docker image must stay LF — a CRLF shebang
+# (#!/bin/sh\r) breaks the container entrypoint when built from a Windows checkout.
+docker/*.sh text eol=lf
+
+# Skill bundles are MATERIALIZED into every worktree by the board (agent-skill-files.ts),
+# which writes LF. Without this, git normalizes the checked-out copy to CRLF on Windows and
+# the freshly-materialized file reads as modified with an EMPTY diff — so every worktree the
+# board touches is permanently dirty. That is not cosmetic: `workspaceLaunchPreflight`
+# refuses to relaunch when the worktree "has uncommitted changes", so a workspace that lands
+# in `error` for any unrelated reason can never be recovered through the API, and the error's
+# own advice ("commit the workspace first") would commit pure line-ending churn into the
+# ticket's branch. Pinning LF makes materialization a no-op in git's eyes. (#217)
+.claude/skills/** text eol=lf

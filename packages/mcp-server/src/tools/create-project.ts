@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { boardApiUrl } from "../server-url.js";
+import { boardApi, boardErrorText, mcpJson, mcpUnreachable } from "../board-call.js";
+import { mcpError } from "../db-utils.js";
 
 export function registerCreateProject(server: McpServer) {
   server.tool(
@@ -23,27 +24,14 @@ export function registerCreateProject(server: McpServer) {
         if (gitignoreTemplate !== undefined) body.gitignoreTemplate = gitignoreTemplate;
         if (generateReadme !== undefined) body.generateReadme = generateReadme;
 
-        const res = await fetch(boardApiUrl("/api/projects/create"), {
+        const { ok, statusText, data } = await boardApi("/api/projects/create", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
-
-        const data = await res.json() as Record<string, unknown>;
-
-        if (!res.ok) {
-          const errMsg = (data.error as string) ?? res.statusText;
-          return { content: [{ type: "text" as const, text: `Error creating project: ${errMsg}` }] };
-        }
-
-        return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+        if (!ok) return mcpError(`Error creating project: ${boardErrorText(data, statusText)}`);
+        return mcpJson(data);
       } catch (err) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: `Failed to reach the board server (is it running?): ${err instanceof Error ? err.message : String(err)}`,
-          }],
-        };
+        return mcpUnreachable(err);
       }
     },
   );

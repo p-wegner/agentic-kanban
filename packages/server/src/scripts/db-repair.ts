@@ -17,6 +17,7 @@
  *   pnpm db:repair --force    # additionally recreate an unusable db (backup taken first)
  */
 
+import { readBoardEnv } from "../lib/env-registry.js";
 import type { createClient } from "@libsql/client";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -27,12 +28,13 @@ import { createClientWithPragmas } from "../db/pragmas.js";
 import { quarantineAndDeleteFkViolations } from "../db/fk-violations.js";
 import { repairInvalidUtf8Rows, UTF8_REPAIR_TABLES } from "../db/utf8-repair.js";
 import { alignForeignKeyActions } from "@agentic-kanban/shared/lib/fk-actions-repair";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DB_PATH = resolve(__dirname, "../../kanban.db");
 const SIDECARS = ["", "-wal", "-shm"] as const;
 
-const force = process.argv.includes("--force") || process.env.ALLOW_DB_DESTROY === "1";
+const force = process.argv.includes("--force") || readBoardEnv("KANBAN_ALLOW_DB_DESTROY") === "1";
 
 const LOCK_CODES = new Set(["EBUSY", "EPERM", "EACCES"]);
 
@@ -178,7 +180,7 @@ async function main() {
   } catch (err) {
     // A failing VACUUM INTO often means the db is unusable/locked — keep going so
     // the diagnosis below can report the real problem, but warn loudly.
-    log(`WARNING: pre-repair backup failed: ${err instanceof Error ? err.message : String(err)}`);
+    log(`WARNING: pre-repair backup failed: ${errorMessage(err)}`);
     log(`(backup dir: ${backupDir()})`);
   }
 
@@ -261,7 +263,7 @@ async function main() {
     try {
       await alignFks();
     } catch (err) {
-      log(`WARNING: FK-action alignment failed (schema is still up to date): ${err instanceof Error ? err.message : String(err)}`);
+      log(`WARNING: FK-action alignment failed (schema is still up to date): ${errorMessage(err)}`);
     }
 
     // 6. Quarantine + delete rows that ALREADY violate FKs (#987) — pre-existing
@@ -270,7 +272,7 @@ async function main() {
     try {
       await repairFkViolations();
     } catch (err) {
-      log(`WARNING: FK-violation repair failed (nothing was deleted — the delete is transactional): ${err instanceof Error ? err.message : String(err)}`);
+      log(`WARNING: FK-violation repair failed (nothing was deleted — the delete is transactional): ${errorMessage(err)}`);
     }
 
     // 7. Repair rows with invalid-UTF-8 TEXT columns (#960) — these PANIC the whole
@@ -279,7 +281,7 @@ async function main() {
     try {
       await repairInvalidUtf8();
     } catch (err) {
-      log(`WARNING: invalid-UTF-8 repair failed (nothing was changed — the update is transactional): ${err instanceof Error ? err.message : String(err)}`);
+      log(`WARNING: invalid-UTF-8 repair failed (nothing was changed — the update is transactional): ${errorMessage(err)}`);
     }
   }
 

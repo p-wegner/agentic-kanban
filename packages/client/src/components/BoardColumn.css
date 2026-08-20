@@ -1,6 +1,10 @@
+/* Columns get a narrower, squarer scrollbar than the app-wide one in app.css,
+   but the same warm ink tint — these used to be raw black/white alpha, which
+   read as a cold bar on the paper surface. Only the geometry is local; the
+   colour comes from the theme, so light/dark needs no override here. */
 .column-scroll-container {
   scrollbar-width: thin;
-  scrollbar-color: rgba(0, 0, 0, 0.12) transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
 .column-scroll-container::-webkit-scrollbar {
@@ -12,22 +16,10 @@
 }
 
 .column-scroll-container::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.12);
+  background: var(--scrollbar-thumb);
   border-radius: 2px;
 }
 
 .column-scroll-container::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.25);
-}
-
-.dark .column-scroll-container {
-  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
-}
-
-.dark .column-scroll-container::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
-}
-
-.dark .column-scroll-container::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.25);
+  background: var(--scrollbar-thumb-hover);
 }

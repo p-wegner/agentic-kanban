@@ -2,7 +2,10 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { eq, gte, and, inArray } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { resolveActiveProjectId } from "../db-utils.js";
+import { mcpJson, resolveActiveProjectId } from "../db-utils.js";
+// Session-role classification is the shared traits table (#495) — this file used to
+// carry a byte-identical private copy of it.
+import { triggerRole as classifyTrigger } from "@agentic-kanban/shared/lib/session-trigger";
 
 /**
  * Mirrors `pnpm cli -- session review-effectiveness`.
@@ -17,15 +20,6 @@ import { resolveActiveProjectId } from "../db-utils.js";
  */
 export function registerSessionReviewEffectiveness(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema } = deps;
-
-  function classifyTrigger(t: string | null): "review" | "build" | "rework" | "noise" | "other" {
-    if (!t) return "build";
-    if (t === "review" || t.startsWith("skill:code-review")) return "review";
-    if (t.startsWith("skill:board-monitor") || t.startsWith("skill:board-navigator")) return "noise";
-    if (t === "chat" || t === "fix-and-merge" || t === "fix-conflicts" || t === "plan-reject") return "rework";
-    if (t === "verify" || t === "learning" || t === "bisect" || t === "reconcile") return "other";
-    return "build";
-  }
 
   server.tool(
     "session_review_effectiveness",
@@ -199,12 +193,7 @@ export function registerSessionReviewEffectiveness(server: McpServer, deps: Tool
         perTicket,
       };
 
-      return {
-        content: [{
-          type: "text" as const,
-          text: JSON.stringify(report, null, 2),
-        }],
-      };
+      return mcpJson(report);
     },
   );
 }

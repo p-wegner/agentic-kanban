@@ -5,6 +5,7 @@ import { createRoutes } from "../routes/index.js";
 import { createTestApp as createHarness } from "./helpers/test-app.js";
 import { createMockSessionManager } from "./helpers/mocks.js";
 import type { TestDb } from "./helpers/test-db.js";
+import { ensureTestStatus } from "./helpers/test-db.js";
 
 function createTestApp() {
   return createHarness((app, db) => {
@@ -30,13 +31,11 @@ async function seedProject(db: TestDb, name = "test-project") {
 let issueSeq = 0;
 
 async function seedIssue(db: TestDb, projectId: string, title = "Test issue") {
-  const statusId = randomUUID();
-  await db.insert(schema.projectStatuses).values({
-    id: statusId,
-    projectId,
-    name: "Backlog",
-    sortOrder: 0,
-  }).onConflictDoNothing();
+  // #668: `onConflictDoNothing` used to be a no-op guard against the id PK colliding, which
+  // it never did. Now the conflict is on (project_id, name) and the insert IS skipped on the
+  // second call — leaving `statusId` pointing at a row that was never written, so the issue's
+  // FK dangled. Get-or-create returns the id that actually exists.
+  const statusId = await ensureTestStatus(db, projectId, "Backlog");
 
   const issueId = randomUUID();
   await db.insert(schema.issues).values({

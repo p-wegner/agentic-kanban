@@ -1,0 +1,32 @@
+name: docker-smoke
+
+# Real-docker regression test for the per-workspace compose service-stack lifecycle
+# (#164): up -d --wait health-gating, COMPOSE_PROFILES-via---env-file activation,
+# label-scoped `down -p` teardown, and `--rmi local` image cleanup — previously
+# verified only ad hoc in one-off manual labs, never as a CI regression.
+#
+# ubuntu-latest ships Docker preinstalled, so this is the one CI lane that runs the
+# real `docker compose` CLI instead of a fake ComposeRunner. `pnpm test:docker` runs
+# ONLY that opt-in test (see packages/server/src/__tests__/compose-lifecycle-real-docker.test.ts);
+# it self-skips (not fails) wherever docker is unavailable, so this lane failing here
+# always means a real regression, not a missing daemon.
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+
+jobs:
+  docker-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: real-docker compose lifecycle smoke test
+        run: pnpm test:docker

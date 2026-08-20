@@ -1,4 +1,4 @@
-import type { WorkspaceResponse } from "@agentic-kanban/shared";
+import type { ServiceStackState, WorkspaceResponse } from "@agentic-kanban/shared";
 
 /**
  * Pure orchestration for the WorkspacePanel's secondary per-workspace fetches.
@@ -67,6 +67,25 @@ export function fetchGithubDrafts(
     (ws) => ws.status === "closed",
     async (ws) =>
       (await apiFetch<{ content: string | null }>(`/api/workspaces/${ws.id}/github-handoff-draft`)).content,
+  );
+}
+
+/**
+ * Docker service-stack state per workspace. The issue-workspaces list DTO does
+ * not carry `serviceState` (only GET /api/workspaces/:id maps it — see
+ * workspace-details-projection.ts), so hydrate it from the details endpoint.
+ * Workspaces whose list row already carries the field are skipped, so this
+ * batch disappears automatically if the list endpoint ever includes it.
+ */
+export function fetchServiceStates(
+  workspaces: WorkspaceResponse[],
+  apiFetch: ApiFetch,
+): Promise<ById<ServiceStackState | null>> {
+  return collectById(
+    workspaces,
+    (ws) => ws.serviceState === undefined,
+    async (ws) =>
+      (await apiFetch<{ serviceState?: ServiceStackState | null }>(`/api/workspaces/${ws.id}`)).serviceState ?? null,
   );
 }
 

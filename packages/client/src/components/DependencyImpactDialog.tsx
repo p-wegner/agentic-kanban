@@ -1,4 +1,5 @@
 import type { DependencyItem } from "@agentic-kanban/shared";
+import { isResolvedDependencyStatusName } from "@agentic-kanban/shared/lib/status-view";
 
 interface DependencyImpactDialogProps {
   issueId: string;
@@ -9,10 +10,8 @@ interface DependencyImpactDialogProps {
   onCancel: () => void;
 }
 
-const RESOLVED_STATUSES = ["done", "cancelled", "ai reviewed"];
-
 function isResolved(statusName: string) {
-  return RESOLVED_STATUSES.includes(statusName.toLowerCase());
+  return isResolvedDependencyStatusName(statusName);
 }
 
 function ImpactSection({

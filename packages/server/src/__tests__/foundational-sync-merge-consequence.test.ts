@@ -38,19 +38,26 @@ vi.mock("../db/index.js", () => ({ db: {} }));
 vi.mock("../services/git.service.js", () => ({
   prepareForReview: vi.fn(async () => ({ success: true, diffRef: "master", conflictingFiles: [], uncommittedChanges: [] })),
   commitPaths: vi.fn(async () => false),
+  // #377: runPreMergeGate reads the diff to decide docs-only/package-scoped skips.
+  getChangedFileNames: vi.fn(async () => [] as string[]),
 }));
-vi.mock("../services/butler-event-feed.js", () => ({ emitButlerSystemEvent: vi.fn() }));
 vi.mock("../services/agent-settings.service.js", () => ({
+  // #541: exit-workflow / merge-workflow now resolve their launch settings here instead
+  // of hand-rolling the ladder, so these two must exist on the mock.
+  applyWorkspaceProfileToPrefs: vi.fn((m: Map<string, string>) => m),
+  resolveWorkspaceLaunchSettings: vi.fn(() => ({
+    agentCommand: undefined, agentArgs: undefined, profile: undefined,
+    provider: "claude", resumeWithNewModel: false, permissionPromptTool: undefined,
+  })),
   isMockProfile: vi.fn(() => false),
   toExecutorProvider: vi.fn((p: string) => p),
   MOCK_AGENT_COMMAND: "mock",
 }));
-vi.mock("../startup/review-helpers.js", () => ({
-  buildReviewArgs: vi.fn(() => undefined),
+// #557: the `startup/review-helpers.js` shim is gone — the engine calls the service helper
+// with its own db. Partial mock so the rest of review.service stays real.
+vi.mock("../services/review.service.js", async (importOriginal) => ({
+  ...(await importOriginal() as Record<string, unknown>),
   buildReviewPrompt: vi.fn(async () => ({ prompt: "review", model: undefined })),
-  getEffectiveProfile: vi.fn(() => undefined),
-  parseProviderPref: vi.fn(() => "claude"),
-  applyWorkspaceProfileToPrefs: vi.fn((m: Map<string, string>) => m),
 }));
 // Auto-merge must be ENABLED so the review-exit path reaches the foundational branch.
 vi.mock("../startup/merge-strategy.js", () => ({
@@ -60,6 +67,14 @@ vi.mock("../startup/merge-strategy.js", () => ({
 vi.mock("../services/stack-profile.service.js", () => ({
   getStackProfile: vi.fn(async () => ({})),
   buildSmokeCheck: vi.fn(() => null),
+  // The review-exit path now calls the shared runPreMergeGate, which reads the verify_script pref
+  // via verifyScriptPrefKey — no verify_script is set for this test's project, so the gate is a
+  // clean no-op, but the export must exist on the mock.
+  verifyScriptPrefKey: (projectId: string) => `verify_script_${projectId}`,
+  // #377: runPreMergeGate re-derives a verify_script once at gate time when none is configured.
+  populateVerifyScript: vi.fn(async () => null),
+  // #551: the gate asks ONE resolver what it will run; null = this project has no gate.
+  resolveEffectiveVerify: vi.fn(async () => null),
 }));
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -113,8 +128,6 @@ describe("exit-workflow: foundational blocker merges SYNCHRONOUSLY so a dependen
     // --- Real git repo: an (almost) empty base + a feature branch that adds the scaffold.
     repo = await mkdtemp(join(tmpdir(), "kanban-foundational-repo-"));
     await git(["init"], repo);
-    await git(["config", "user.email", "t@t.com"], repo);
-    await git(["config", "user.name", "Test"], repo);
     // The PRE-merge base is intentionally "empty": it does NOT contain scaffold.ts.
     await commitFile(repo, "README.md", "placeholder base\n", "seed empty base");
     await git(["branch", "-M", "master"], repo).catch(() => {});

@@ -19,9 +19,9 @@ describe("resolveAgentSettings - mock profile wiring", () => {
     expect(agentCommand).toContain("--delay-ms 250");
   });
 
-  it("does not pass the mock profile name through to Claude Code as claudeProfile", () => {
-    const { claudeProfile } = resolveAgentSettings(prefs({ claude_profile: "mock" }));
-    expect(claudeProfile).toBeUndefined();
+  it("does not pass the mock profile name through to Claude Code as a profile", () => {
+    const { profile } = resolveAgentSettings(prefs({ claude_profile: "mock" }));
+    expect(profile).toBeUndefined();
   });
 
   it("ignores mock flags for a real (non-mock) profile", () => {
@@ -49,10 +49,9 @@ describe("resolveAgentSettings - mock profile wiring", () => {
 });
 
 describe("resolveAgentSettings - provider/profile wiring", () => {
-  it("defaults to Claude and keeps legacy claudeProfile", () => {
+  it("defaults to Claude and tags the profile with it", () => {
     const settings = resolveAgentSettings(prefs({ claude_profile: "work" }));
     expect(settings.provider).toBe("claude");
-    expect(settings.claudeProfile).toBe("work");
     expect(settings.profile).toEqual({ provider: "claude", name: "work" });
   });
 
@@ -63,7 +62,6 @@ describe("resolveAgentSettings - provider/profile wiring", () => {
       codex_profile: "fast",
     }));
     expect(settings.provider).toBe("codex");
-    expect(settings.claudeProfile).toBe("work");
     expect(settings.profile).toEqual({ provider: "codex", name: "fast" });
   });
 
@@ -74,7 +72,6 @@ describe("resolveAgentSettings - provider/profile wiring", () => {
       copilot_profile: "gpt-5.2",
     }));
     expect(settings.provider).toBe("copilot");
-    expect(settings.claudeProfile).toBe("work");
     expect(settings.profile).toEqual({ provider: "copilot", name: "gpt-5.2" });
   });
 
@@ -85,7 +82,6 @@ describe("resolveAgentSettings - provider/profile wiring", () => {
       pi_profile: "local",
     }));
     expect(settings.provider).toBe("pi");
-    expect(settings.claudeProfile).toBe("work");
     expect(settings.profile).toEqual({ provider: "pi", name: "local" });
   });
 

@@ -3,7 +3,7 @@ import type { IssueWithStatus } from "@agentic-kanban/shared";
 import { apiPost } from "../lib/api.js";
 import { getSettings } from "../lib/settingsStore.js";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { resolveWorkspaceLaunchDefaults } from "../lib/workspaceLaunchDefaults.js";
 
 interface StartWorkspacePickerProps {

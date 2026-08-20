@@ -5,9 +5,11 @@ import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@agentic-kanban/share
 import type { CreateIssueFormState } from "./CreateIssueForm.js";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { getSettings } from "../lib/settingsStore.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { MarkdownToolbar } from "./MarkdownToolbar.js";
 import { useIssueTemplates } from "../hooks/useIssueTemplates.js";
+import { useProjectRepos } from "../hooks/useProjectRepos.js";
+import { ReposTouchedField } from "./ReposTouchedField.js";
 import { buildCreateIssuePayload } from "../lib/createIssuePayload.js";
 import { handleImagePaste, mergeDescriptionWithImages } from "../lib/pastedImages.js";
 import {
@@ -20,6 +22,7 @@ import {
   providerFromSelection,
 } from "../lib/profileOptionLabels.js";
 import { defaultModelForProvider, type AgentProvider } from "../lib/settings-shared.js";
+import { ISSUE_TYPES, issueTypeLabel } from "@agentic-kanban/shared";
 
 interface Skill {
   id: string;
@@ -60,6 +63,8 @@ export function CreateIssuePanel({
   const [pastedImages, setPastedImages] = useState<string[]>(initialState?.pastedImages ?? []);
   const [issueType, setIssueType] = useState<CreateIssueRequest["issueType"]>(initialState?.issueType ?? "task");
   const [estimate, setEstimate] = useState<IssueEstimate | "">(initialState?.estimate ?? "");
+  const [reposTouched, setReposTouched] = useState<string[]>([]);
+  const { repos: projectRepos, isMultiRepo } = useProjectRepos(projectId);
   const [startWorkspace, setStartWorkspace] = useState(initialState?.startWorkspace ?? false);
   const [planMode, setPlanMode] = useState(initialState?.planMode ?? false);
   const [skipAutoReview, setSkipAutoReview] = useState(initialState?.skipAutoReview ?? false);
@@ -152,6 +157,7 @@ export function CreateIssuePanel({
         selectedProfile, selectedModel, skillId,
         modelApplies: isClaudeSelected || isCodexSelected,
         settings,
+        reposTouched: isMultiRepo ? reposTouched : undefined,
       }));
     } finally {
       setSubmitting(false);
@@ -289,10 +295,9 @@ export function CreateIssuePanel({
                 onChange={(e) => setIssueType(e.target.value as CreateIssueRequest["issueType"])}
                 className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
               >
-                <option value="task">Task</option>
-                <option value="bug">Bug</option>
-                <option value="feature">Feature</option>
-                <option value="chore">Chore</option>
+                {ISSUE_TYPES.map((t) => (
+                  <option key={t} value={t}>{issueTypeLabel(t)}</option>
+                ))}
               </select>
             </div>
             <div className="flex flex-col gap-1.5">
@@ -311,6 +316,10 @@ export function CreateIssuePanel({
               </select>
             </div>
           </div>
+
+          {isMultiRepo && (
+            <ReposTouchedField repos={projectRepos} selected={reposTouched} onChange={setReposTouched} />
+          )}
 
           {availableStatuses && availableStatuses.length > 1 && (
             <div className="flex flex-col gap-1.5">

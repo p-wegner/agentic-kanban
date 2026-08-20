@@ -1,5 +1,6 @@
 import { execGit } from "./internal.js";
 import { ensureOnBranch } from "./branch-attach.js";
+import { errorMessage } from "../error-message.js";
 
 /**
  * Commit any uncommitted changes in a worktree so a rebase/merge can run on a clean tree.
@@ -23,7 +24,7 @@ export async function commitLeftoverChanges(worktreePath: string): Promise<numbe
     console.log(`[git] committed ${changedFiles.length} leftover change(s) in ${worktreePath} before rebase`);
     return changedFiles.length;
   } catch (err) {
-    console.log(`[git] failed to commit leftover changes in ${worktreePath}: ${err instanceof Error ? err.message : String(err)}`);
+    console.log(`[git] failed to commit leftover changes in ${worktreePath}: ${errorMessage(err)}`);
     return 0;
   }
 }
@@ -84,7 +85,7 @@ export async function prepareForReview(
     try {
       await execGit(["rebase", "--abort"], worktreePath);
     } catch { /* best effort */ }
-    return { diffRef: rebaseSource, success: false, conflictingFiles, error: err instanceof Error ? err.message : String(err) };
+    return { diffRef: rebaseSource, success: false, conflictingFiles, error: errorMessage(err) };
   }
 
   return { diffRef: rebaseSource, success: true };
@@ -99,7 +100,33 @@ export async function rebaseOntoBase(
   baseBranch: string,
   branch?: string,
   options: { preferLocalBase?: boolean } = {},
-): Promise<{ success: boolean; conflictingFiles?: string[]; error?: string }> {
+): Promise<{ success: boolean; conflictingFiles?: string[]; error?: string; branchSha?: string; baseSha?: string }> {
+  // #274 — a rebase left IN PROGRESS by an earlier attempt makes this one fail instantly
+  // ("a rebase is already in progress"), and the unmerged index entries `git diff
+  // --diff-filter=U` then reports belong to THAT attempt, against a base that has since
+  // moved. Observed live: the merge queue skipped two unrelated workspaces with the
+  // identical reason `rebase conflict: <three files>` — files neither branch touched, which
+  // were exactly the files another ticket had landed on master earlier that day. One of the
+  // two actually merged clean; the other did conflict, but in a different file entirely. So
+  // the queue refused mergeable work and pointed conflict resolution at the wrong files.
+  //
+  // `prepareForReview` has always aborted first; this path did not. Clear it here, and if
+  // the abort itself fails (an `index.lock` held by another git process is the usual cause)
+  // say THAT, rather than reporting a file list that describes a different rebase.
+  if (await isRebaseInProgress(worktreePath)) {
+    try {
+      await execGit(["rebase", "--abort"], worktreePath);
+      console.log(`[git] aborted a stale in-progress rebase in ${worktreePath} before rebasing onto ${baseBranch}`);
+    } catch (err) {
+      return {
+        success: false,
+        error:
+          `a previous rebase is still in progress in ${worktreePath} and could not be aborted ` +
+          `(${errorMessage(err)}) — resolve or abort it before retrying`,
+      };
+    }
+  }
+
   // A dirty worktree makes `git rebase` fail with an empty conflict list ("rebase conflict: "),
   // which the merge queue then skips forever. Commit any leftover changes first. (#nnn)
   await commitLeftoverChanges(worktreePath);
@@ -116,22 +143,47 @@ export async function rebaseOntoBase(
     } catch { /* use local */ }
   }
 
+  // Pinned BEFORE the rebase so a reported conflict is attributable to a specific pair of
+  // tips (#274, fix direction (c)): a verdict that names its inputs can be checked, and a
+  // stale one is visible instead of merely wrong.
+  const tips = await resolveTips(worktreePath, source);
+
   try {
     await execGit(["rebase", source], worktreePath);
     // Rebase can leave worktree in detached HEAD — reattach
     if (branch) {
       await ensureOnBranch(worktreePath, branch);
     }
-    return { success: true };
+    return { success: true, ...tips };
   } catch (err) {
+    const error = errorMessage(err);
+    // Only attribute unmerged index entries to THIS rebase when this rebase is the one that
+    // stopped. If it never started (it failed for some other reason), whatever is in the
+    // index belongs to something else and naming those files would be a fabrication.
+    if (!(await isRebaseInProgress(worktreePath))) {
+      return { success: false, error, ...tips };
+    }
     try {
       const unmerged = await execGit(["diff", "--name-only", "--diff-filter=U"], worktreePath);
       const conflictingFiles = unmerged.trim().split("\n").filter(Boolean);
-      return { success: false, conflictingFiles, error: err instanceof Error ? err.message : String(err) };
+      return { success: false, conflictingFiles, error, ...tips };
     } catch {
-      return { success: false, error: err instanceof Error ? err.message : String(err) };
+      return { success: false, error, ...tips };
     }
   }
+}
+
+/** Best-effort branch/base tips for conflict attribution — never throws. */
+async function resolveTips(worktreePath: string, baseRef: string): Promise<{ branchSha?: string; baseSha?: string }> {
+  const read = async (ref: string) => {
+    try {
+      return (await execGit(["rev-parse", ref], worktreePath)).trim() || undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const [branchSha, baseSha] = await Promise.all([read("HEAD"), read(baseRef)]);
+  return { branchSha, baseSha };
 }
 
 /** Abort an in-progress rebase. */
@@ -142,11 +194,15 @@ export async function abortRebase(worktreePath: string): Promise<void> {
 /** Check if a rebase is in progress in the worktree. */
 export async function isRebaseInProgress(worktreePath: string): Promise<boolean> {
   try {
-    const dir = (await execGit(["rev-parse", "--git-dir"], worktreePath)).trim();
+    // Must use --absolute-git-dir, not --git-dir: in a linked worktree --git-dir returns an
+    // ABSOLUTE path (e.g. .../.git/worktrees/<name>), and path.join does not reset on an
+    // absolute segment (that's path.resolve), so joining it onto worktreePath produced a
+    // nonexistent path and this always returned false (#147).
+    const dir = (await execGit(["rev-parse", "--absolute-git-dir"], worktreePath)).trim();
     const { existsSync } = await import("node:fs");
     const { join: pathJoin } = await import("node:path");
-    return existsSync(pathJoin(worktreePath, dir, "rebase-merge")) || existsSync(pathJoin(worktreePath, dir, "rebase-apply"));
+    return existsSync(pathJoin(dir, "rebase-merge")) || existsSync(pathJoin(dir, "rebase-apply"));
   } catch {
     return false;
   }
-}
+}

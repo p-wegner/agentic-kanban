@@ -1,8 +1,9 @@
 import { existsSync } from "node:fs";
-import { mkdir, rm, stat, lstat, unlink, readdir } from "node:fs/promises";
-import { join, dirname, sep, resolve, parse, relative } from "node:path";
+import { mkdir, rm, stat, lstat, unlink, readdir, readFile } from "node:fs/promises";
+import { join, dirname, basename, sep, resolve, parse, relative } from "node:path";
 import { gitExec } from "../git-exec.js";
 import { execGit } from "./internal.js";
+import { parseIssueNumberFromBranch } from "../branch.js";
 import { ensureOnBranch } from "./branch-attach.js";
 
 /**
@@ -35,16 +36,90 @@ export async function listWorktrees(
 }
 
 /**
- * Create a git worktree for a branch. The worktree is created in a
- * `.worktrees/<branch>` directory sibling to the repo root.
+ * Worktree directory prefixes eat deeply into the Windows MAX_PATH (260 char) budget:
+ * `.worktrees/<full-branch-slug>` runs ~50 chars longer than the main checkout's own
+ * `<repoName>` leaf, which is enough to tip a JVM/compiled-stack build's generated
+ * paths (deep nested class files, backtick test names) over the limit even though the
+ * identical commit builds green in the main checkout (#193). The branch itself keeps
+ * its full descriptive slug (readability, `git branch -a`) — only the ON-DISK leaf is
+ * shortened, and only when an issue number can be recovered from it, since that alone
+ * identifies the work uniquely and is what every other identifier already anchors on.
+ */
+function shortenWorktreeLeaf(safeName: string): string {
+  // #548: this file's boundary rules ARE the shared parser's — the sanitized-name problem
+  // (`/` becomes `_`, itself a \w character, so a plain \b before "ak" never matches in
+  // "feature_ak-1-…") is exactly why the shared one uses an explicit non-alnum boundary
+  // rather than \b. A pure adoption: the leaf a given branch produces is unchanged, which
+  // matters because worktree directories already exist on disk under these names.
+  const issueNumber = parseIssueNumberFromBranch(safeName);
+  return issueNumber === null ? safeName : `ak-${issueNumber}`;
+}
+
+/**
+ * Sanitize one path segment for use as a directory name under `.worktrees`, or
+ * return null when nothing safe is left (`""`, `.`, `..` would resolve to the
+ * `.worktrees` dir itself or its parent).
+ */
+function safePathSegment(raw: string | undefined): string | null {
+  const safe = (raw ?? "").replace(/[^a-zA-Z0-9._-]/g, "_");
+  if (safe === "" || safe === "." || safe === "..") return null;
+  return safe;
+}
+
+/**
+ * The directory a repo's worktrees live in: `<parent>/.worktrees/<repoDirName>`
+ * (plus an optional extra namespace segment).
+ *
+ * The `<repoDirName>` segment is what makes a worktree path SELF-IDENTIFYING (#385).
+ * `.worktrees` is shared by every repo under one parent directory (the guaranteed
+ * layout for clone-from-URL repos), and the leaf carries only the issue number —
+ * which is allocated PER PROJECT, so five sibling projects all have an issue #6.
+ * Collision handling was correct (the second claimant got a `-2` suffix), but the
+ * resulting path was ambiguous to a human or agent reading it, and it resolved in
+ * the most misleading direction: un-suffixed `ak-6` belonged to whichever project
+ * got there first, not to the project being inspected. That MEASURABLY induced the
+ * same false catastrophic diagnosis ("the board dispatched the wrong project's
+ * work") in three consecutive review rounds. Namespacing by the repo directory
+ * makes collisions impossible instead of suffixed, and makes the path state its
+ * own owner.
+ *
+ * This is the shape multi-repo siblings already used (`.worktrees/<repoDirName>/…`,
+ * `workspace-repos.service.ts`); the single-repo path was the inconsistent one.
+ * Siblings therefore no longer pass a namespace of their own — the default per-repo
+ * segment is exactly what they were asking for.
+ */
+function worktreesDirFor(repoPath: string, extraNamespace?: string): string {
+  const segments = [safePathSegment(basename(repoPath)), safePathSegment(extraNamespace)]
+    .filter((s): s is string => s !== null);
+  return join(dirname(repoPath), ".worktrees", ...segments);
+}
+
+/**
+ * Create a git worktree for a branch, in `<parent>/.worktrees/<repoDirName>/<branch>`
+ * — or `<parent>/.worktrees/<repoDirName>/<namespace>/<branch>` when
+ * `opts.pathNamespace` is given (see {@link worktreesDirFor} for why the repo
+ * directory is always part of the path).
+ *
+ * OLD-LAYOUT worktrees (`.worktrees/<branch>`, created before #385) keep working and
+ * are NOT migrated — they age out as their workspaces merge/close:
+ *  - reads use the DB's `workingDir`, which is authoritative;
+ *  - this function's reuse path resolves through `git worktree list`, so an existing
+ *    worktree on the branch is returned wherever it sits on disk;
+ *  - every containment guard (`removeLeftoverWorktreeDirectory` here,
+ *    `removeStaleWorktree`, `removeDirWithRetry`) tests "inside `.worktrees`", which a
+ *    nested and a flat path both satisfy;
+ *  - dev-port derivation reads only the LEAF, which is unchanged.
+ * Consequence, accepted deliberately: during the transition `.worktrees/` holds a MIX
+ * of both layouts, so the ambiguity survives for leaves that already exist.
+ *
  * If the branch doesn't exist yet, it is created from the given baseBranch
  * (or HEAD if no baseBranch is specified).
- * Throws if a worktree for this branch already exists.
  */
 export async function createWorktree(
   repoPath: string,
   branch: string,
   baseBranch?: string,
+  opts: { pathNamespace?: string } = {},
 ): Promise<string> {
   // Prune stale worktree references (directories deleted but git still tracks them).
   // This is critical on Windows where locked directories can survive removal.
@@ -73,26 +148,50 @@ export async function createWorktree(
     }
   }
 
-  // Sanitize branch name for directory use
+  // Sanitize branch name (and optional per-repo namespace) for directory use
   const safeName = branch.replace(/[^a-zA-Z0-9._-]/g, "_");
-  const worktreesDir = join(dirname(repoPath), ".worktrees");
-  let worktreePath = join(worktreesDir, safeName);
+  if (safeName === "" || safeName === "." || safeName === "..") {
+    // A branch name sanitizing down to '', '.', or '..' would make the worktree
+    // leaf resolve to the .worktrees dir itself or its parent (the repo's parent
+    // directory) — the leftover-cleanup rm -rf above would then recursively
+    // delete that directory before git ever validates the branch name.
+    throw new Error(
+      `Refusing to create worktree for branch "${branch}": sanitized name "${safeName}" is not a safe directory leaf`,
+    );
+  }
+  const worktreesDir = worktreesDirFor(repoPath, opts.pathNamespace);
+  const dirLeaf = shortenWorktreeLeaf(safeName);
+  let worktreePath = join(worktreesDir, dirLeaf);
 
   await mkdir(worktreesDir, { recursive: true });
 
-  // If the target directory exists but isn't a registered worktree (e.g. leftover from a
-  // deleted workspace), remove it so git worktree add doesn't fail with "already exists".
-  // On Windows, directories can be locked by stale process handles — if rm fails, fall back
-  // to an alternative path with a numeric suffix.
+  // If the target directory exists but is only a LEFTOVER (e.g. from a deleted
+  // workspace), remove it so git worktree add doesn't fail with "already exists".
+  // Never blind-delete, though: the directory may be a registered worktree of THIS
+  // repo under a different branch (two branches can sanitize to the same directory
+  // name), or a checkout belonging to ANOTHER repo — repos sharing a parent
+  // directory share the same `.worktrees` root, so deleting it would destroy that
+  // repo's live worktree (the multi-repo sibling collision bug). In those cases —
+  // and when the removal fails (locked on Windows) — fall back to an alternative
+  // path with a numeric suffix instead.
   try {
     await stat(worktreePath);
-    // Directory exists — try to remove it
-    try {
-      await rm(worktreePath, { recursive: true, force: true });
-    } catch {
-      // Locked on Windows — find an alternative path
+    let removed = false;
+    const claimedByThisRepo = isRegisteredWorktreePath(existing, worktreePath);
+    if (!claimedByThisRepo && !(await isForeignCheckout(repoPath, worktreePath))) {
+      // Break junctions first (top-level + nested) so the recursive delete cannot
+      // traverse a Windows junction into a main checkout's shared store (#518/#780).
+      await breakJunctionsRecursively(worktreePath).catch(() => undefined);
+      try {
+        await rm(worktreePath, { recursive: true, force: true });
+        removed = true;
+      } catch {
+        // Locked on Windows — fall through to the alternative path
+      }
+    }
+    if (!removed) {
       for (let suffix = 2; suffix <= 10; suffix++) {
-        const altPath = join(worktreesDir, `${safeName}-${suffix}`);
+        const altPath = join(worktreesDir, `${dirLeaf}-${suffix}`);
         try {
           await stat(altPath);
           // Alt dir also exists — skip
@@ -267,20 +366,86 @@ async function breakJunctionsRecursively(dirPath: string, depth = 0): Promise<vo
   }
 }
 
+/**
+ * True when `dirPath` is one of the repo's registered worktrees. Paths are compared
+ * resolved + case-insensitively — a false positive only means we DON'T delete the
+ * directory (the safe direction), so loose matching is deliberate.
+ */
+function isRegisteredWorktreePath(
+  worktrees: { path: string }[],
+  dirPath: string,
+): boolean {
+  const target = resolve(dirPath).toLowerCase();
+  return worktrees.some((wt) => resolve(wt.path.replace(/\//g, sep)).toLowerCase() === target);
+}
+
+/**
+ * True when the existing directory is some OTHER repo's checkout: a full clone
+ * (`.git` directory) or a worktree whose `.git` file points outside this repo's
+ * own `.git`. Repos sharing a parent directory place worktrees under the same
+ * `.worktrees` root, so a same-named directory here can be another repo's LIVE
+ * worktree — deleting it would destroy that repo's workspace. An unreadable or
+ * unparseable `.git` entry is treated as foreign: never delete a directory we
+ * cannot positively identify as this repo's own leftover.
+ */
+async function isForeignCheckout(repoPath: string, dirPath: string): Promise<boolean> {
+  const gitEntry = join(dirPath, ".git");
+  let entryStat;
+  try {
+    entryStat = await lstat(gitEntry);
+  } catch {
+    return false; // no .git — a plain leftover directory, not any repo's checkout
+  }
+  if (entryStat.isDirectory()) return true; // a full clone parked here — never one of our worktrees
+
+  let gitdirTarget: string;
+  try {
+    const content = await readFile(gitEntry, "utf-8");
+    const match = content.match(/^gitdir:\s*(.+?)\s*$/m);
+    if (!match) return true;
+    gitdirTarget = resolve(dirname(gitEntry), match[1]);
+  } catch {
+    return true;
+  }
+
+  const ownGitDir = resolve(repoPath, ".git");
+  const rel = relative(ownGitDir, gitdirTarget);
+  const isInsideOwnGit = rel === ""
+    || (rel !== ".." && !rel.startsWith(`..${sep}`) && parse(rel).root === "");
+  return !isInsideOwnGit;
+}
+
+/**
+ * The single containment guard for recursive worktree deletion (#525).
+ *
+ * This predicate is the ONLY thing standing between a corrupt `workingDir` and a
+ * recursive delete of a real repository, and it was written three ways — two
+ * equivalent `relative()` implementations plus a much weaker one in the teardown
+ * path that only asked whether the resolved path contained a `.worktrees` SEGMENT
+ * anywhere, with no binding to the repo at all. That weaker form accepts e.g.
+ * `/anything/.worktrees/../../home`-shaped input once resolved, and accepts a
+ * worktree belonging to a DIFFERENT repository.
+ *
+ * `dir` must be strictly inside `<dirname(repoPath)>/.worktrees/`, must not be that
+ * root itself, must not be the repo, and must not be a filesystem root.
+ */
+export function isInsideManagedWorktreesRoot(repoPath: string, dir: string): boolean {
+  const repoResolved = resolve(repoPath);
+  const targetResolved = resolve(dir);
+  const worktreesRoot = resolve(dirname(repoPath), ".worktrees");
+  const rel = relative(worktreesRoot, targetResolved);
+  const strictlyInside = rel !== ""
+    && rel !== ".."
+    && !rel.startsWith(`..${sep}`)
+    && parse(rel).root === "";
+  if (!strictlyInside) return false;
+  return targetResolved !== repoResolved && targetResolved !== parse(targetResolved).root;
+}
+
 async function removeLeftoverWorktreeDirectory(repoPath: string, worktreePath: string): Promise<boolean> {
   if (!existsSync(worktreePath)) return false;
 
-  const repoResolved = resolve(repoPath);
-  const targetResolved = resolve(worktreePath);
-  const worktreesRoot = resolve(dirname(repoPath), ".worktrees");
-  const relativeToWorktreesRoot = relative(worktreesRoot, targetResolved);
-  const root = parse(targetResolved).root;
-  const isInsideWorktreesRoot = relativeToWorktreesRoot !== ""
-    && relativeToWorktreesRoot !== ".."
-    && !relativeToWorktreesRoot.startsWith(`..${sep}`)
-    && parse(relativeToWorktreesRoot).root === "";
-
-  if (targetResolved === repoResolved || targetResolved === root || !isInsideWorktreesRoot) {
+  if (!isInsideManagedWorktreesRoot(repoPath, worktreePath)) {
     throw new Error(`Refusing to recursively remove unsafe worktree path: ${worktreePath}`);
   }
 
@@ -291,4 +456,4 @@ async function removeLeftoverWorktreeDirectory(repoPath: string, worktreePath: s
 
   await rm(worktreePath, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   return !existsSync(worktreePath);
-}
+}

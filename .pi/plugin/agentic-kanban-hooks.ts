@@ -94,6 +94,14 @@ export default function AgenticKanbanHooks(pi: ExtensionAPI) {
         hookInput,
       );
       if (isBlocked(vitalResult)) return { block: true, reason: blockReason(vitalResult) };
+
+      // Cross-worktree SHELL guard (#369) — the incident commit was `cd <main checkout>;
+      // git commit -F`, which the write/edit gate below never sees. Same script, shell input.
+      const worktreeResult = await runHookScript(
+        [join(HOOKS_DIR, "prevent-cross-worktree-writes.js")],
+        hookInput,
+      );
+      if (isBlocked(worktreeResult)) return { block: true, reason: blockReason(worktreeResult) };
     }
 
     if (event.toolName === "write" || event.toolName === "edit") {

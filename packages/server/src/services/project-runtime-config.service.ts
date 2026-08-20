@@ -1,4 +1,5 @@
-import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
+import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
+import { isAutomaticMergeEnabled } from "@agentic-kanban/shared/lib/merge-policy";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import type { Database } from "../db/index.js";
@@ -9,26 +10,44 @@ import { narrowProviderName } from "./agent-provider.js";
 import type { ResolvedProviderConfig } from "./provider-config-resolution.js";
 import { resolveProviderConfig } from "./provider-config-resolution.js";
 import {
-  parseStrategyBullseyeConfig,
-  selectProviderFromStrategy,
   resolveStrategyProviderSelection,
 } from "./strategy-objective.service.js";
-import { providerProfilePrefKey, readSettingsProviderSelection } from "@agentic-kanban/shared/lib/strategy-policy";
+import { providerProfilePrefKey, readSettingsProviderSelection, resolveProviderDivergence as resolveProviderDivergenceShared } from "@agentic-kanban/shared/lib/strategy-policy";
 import { resolveStartPolicy, startModePrefKey, type StartPolicy } from "./start-policy.service.js";
+import type { ParsedProfileAllowlist } from "@agentic-kanban/shared/lib/profile-allowlist";
+import { allowedProfilesPrefKey, parseProfileAllowlist } from "@agentic-kanban/shared/lib/profile-allowlist";
 import { HARNESS_IDS, harnessSettingKey } from "./harness-settings.js";
 
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
+// #496: built from the registry, so an unregistered prefix is a COMPILE error.
+const autodrivePrefDef = projectPref("board_autodrive");
+const autoMergeDisabledPrefDef = projectPref("auto_merge_disabled");
+
 export function autodrivePrefKey(projectId: string): string {
-  return `board_autodrive_${projectId}`;
+  return autodrivePrefDef.key(projectId);
 }
 
+/**
+ * The per-project profile-allowlist key. Absent/empty ⇒ the project is unrestricted.
+ * Re-exported from shared so the Settings editor and this resolver cannot disagree about
+ * the key they write and read — the `verify_script_<id>` family drifted exactly that way.
+ */
+export { allowedProfilesPrefKey } from "@agentic-kanban/shared/lib/profile-allowlist";
+
 export function autoMergeDisabledPrefKey(projectId: string): string {
-  return `auto_merge_disabled_${projectId}`;
+  return autoMergeDisabledPrefDef.key(projectId);
 }
 
 export interface RuntimeProviderConfig extends ResolvedProviderConfig {
   source: "explicit-profile" | "legacy-claude-profile" | "strategy" | "workspace" | "settings";
   strategySelection: { provider: ProviderName; profileName: string; model?: string } | null;
   settingsSelection: { provider: ProviderName; profileName: string | null };
+  /**
+   * The project's profile allowlist as parsed. `restricted: false` for the vast majority
+   * of projects. Exposed so callers can explain a hold, and so the Settings UI can render
+   * the same parse the resolver used.
+   */
+  allowlist: ParsedProfileAllowlist;
 }
 
 export interface RuntimeDriveConfig {
@@ -65,6 +84,8 @@ export interface ProjectRuntimeConfigInput {
   workspaceSelection?: { provider?: string | null; profileName?: string | null } | null;
   requestedModel?: string | null;
   commandOverride?: string;
+  /** Injected clock for the allowlist's cooldown checks (`nowMs` spelling, #614). */
+  nowMs?: number;
 }
 
 function readSettingsSelection(prefMap: Map<string, string>): { provider: ProviderName; profileName: string | null } {
@@ -99,6 +120,10 @@ export function resolveProjectRuntimeConfig(input: ProjectRuntimeConfigInput): P
     applyWorkspaceSelection(providerPrefMap, input.workspaceSelection);
   }
 
+  // Read from the ORIGINAL prefMap: the allowlist is the project's own restriction and
+  // must not be reachable by anything the selectors mirror onto `providerPrefMap`.
+  const allowlist = parseProfileAllowlist(input.prefMap.get(allowedProfilesPrefKey(input.projectId)));
+
   const provider = resolveProviderConfig({
     prefMap: providerPrefMap,
     profileOverride: input.profileOverride,
@@ -106,9 +131,15 @@ export function resolveProjectRuntimeConfig(input: ProjectRuntimeConfigInput): P
     strategySelection: input.strategySelection,
     requestedModel: input.requestedModel ?? input.strategySelection?.model,
     commandOverride: input.commandOverride,
+    allowlist,
+    nowMs: input.nowMs,
   });
   const startPolicy = resolveStartPolicy(input.prefMap, input.projectId);
-  const autoMerge = isAutoMergeEnabled(input.prefMap);
+  // #546: this read `auto_merge` ALONE while every other owner predicate also required a
+  // strategy, so with `merge_strategy: "direct"` the runtime config reported auto-merge ON
+  // for work no automation would ever merge — and drive-preflight, its only consumer,
+  // passed the "prefs coherent" check on that.
+  const autoMerge = isAutomaticMergeEnabled(input.prefMap);
   const autoMergeDisabled = input.prefMap.get(autoMergeDisabledPrefKey(input.projectId)) === "true";
 
   return {
@@ -118,6 +149,7 @@ export function resolveProjectRuntimeConfig(input: ProjectRuntimeConfigInput): P
       source: resolveProviderSource(input),
       strategySelection: input.strategySelection ?? null,
       settingsSelection: readSettingsSelection(input.prefMap),
+      allowlist,
     },
     startPolicy,
     drive: {
@@ -143,7 +175,7 @@ export async function loadProjectRuntimeConfig(
   input: Omit<ProjectRuntimeConfigInput, "prefMap" | "strategySelection">,
 ): Promise<ProjectRuntimeConfig> {
   const rows = await getAllPreferences(database);
-  const prefMap = new Map(rows.map((r) => [r.key, r.value]));
+  const prefMap = toPrefMap(rows);
   const hasOverride = Boolean(input.profileOverride?.name) || Boolean(input.legacyProfileOverride);
   const strategySelection = !hasOverride
     ? await resolveStrategyProviderSelection(database, input.projectId)
@@ -169,6 +201,12 @@ export function buildDriveRuntimePreferencePatch(
   return entries;
 }
 
+/**
+ * Detect drift between the global provider/profile settings prefs and the project's
+ * Strategy Bullseye. Thin re-export of the pure shared implementation
+ * (`@agentic-kanban/shared/lib/strategy-policy`), which is now the SINGLE guard owner
+ * shared by the settings/CLI/MCP write paths (arch-review §3.3).
+ */
 export function resolveProviderDivergence(prefMap: Map<string, string>, projectId: string): {
   hasBullseye: boolean;
   bullseyeProvider: string | null;
@@ -177,34 +215,5 @@ export function resolveProviderDivergence(prefMap: Map<string, string>, projectI
   settingsProfile: string | null;
   diverged: boolean;
 } {
-  const strategyRaw = prefMap.get(`board_strategy_${projectId}`);
-  if (!strategyRaw) {
-    return { hasBullseye: false, bullseyeProvider: null, bullseyeProfile: null, settingsProvider: null, settingsProfile: null, diverged: false };
-  }
-
-  let bullseyeProvider: string | null = null;
-  let bullseyeProfile: string | null = null;
-  try {
-    const selected = selectProviderFromStrategy(parseStrategyBullseyeConfig(strategyRaw));
-    if (selected) {
-      bullseyeProvider = selected.provider;
-      bullseyeProfile = selected.profileName || null;
-    }
-  } catch {
-    return { hasBullseye: true, bullseyeProvider: null, bullseyeProfile: null, settingsProvider: null, settingsProfile: null, diverged: false };
-  }
-
-  const settingsSelection = readSettingsSelection(prefMap);
-  const settingsProvider = settingsSelection.provider;
-  const settingsProfile = settingsSelection.profileName;
-  const providerDiverged = bullseyeProvider !== null && bullseyeProvider !== settingsProvider;
-  const profileDiverged = bullseyeProfile !== null && bullseyeProfile !== "" && bullseyeProfile !== settingsProfile;
-  return {
-    hasBullseye: true,
-    bullseyeProvider,
-    bullseyeProfile,
-    settingsProvider,
-    settingsProfile,
-    diverged: providerDiverged || profileDiverged,
-  };
+  return resolveProviderDivergenceShared(prefMap, projectId);
 }

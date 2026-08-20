@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { LaunchPreviewPanel } from "./LaunchPreviewPanel.js";
+import { Button } from "./Button.js";
 
 interface AgentStartDryRunModalProps {
   issue: IssueWithStatus;
@@ -45,13 +46,15 @@ export function AgentStartDryRunModal({ issue, onClose, onStartWorkspace }: Agen
               Dry Run Preview
             </h2>
           </div>
-          <button
+          <Button
+            variant="ghost"
+            iconOnly
             onClick={onClose}
-            className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 text-lg leading-none shrink-0"
+            className="shrink-0 text-lg leading-none"
             aria-label="Close dry run preview"
           >
             &times;
-          </button>
+          </Button>
         </div>
 
         <div className="overflow-y-auto px-4 py-3 space-y-3 flex-1">
@@ -83,20 +86,15 @@ export function AgentStartDryRunModal({ issue, onClose, onStartWorkspace }: Agen
         </div>
 
         <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 flex items-center justify-end gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 border border-gray-200 dark:border-gray-700 rounded hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-          >
+          <Button variant="secondary" onClick={onClose}>
             Cancel
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="primary"
             onClick={() => { onStartWorkspace(issue); onClose(); }}
-            className="px-3 py-1.5 text-sm font-medium text-white bg-brand-600 hover:bg-brand-700 rounded transition-colors"
           >
             Start Workspace
-          </button>
+          </Button>
         </div>
       </div>
     </div>

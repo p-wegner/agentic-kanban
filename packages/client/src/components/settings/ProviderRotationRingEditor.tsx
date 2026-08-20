@@ -41,9 +41,9 @@ type ParsedEntry = { profile?: unknown } & Record<string, unknown>;
 
 export interface RingEditorConfig {
   /** Settings key holding the serialized ring JSON, e.g. "claude_subscription_ring". */
-  ringSettingKey: keyof Settings & string;
+  ringSettingKey: keyof Settings;
   /** Settings key for the rotation on/off toggle. */
-  rotationSettingKey: keyof Settings & string;
+  rotationSettingKey: keyof Settings;
   /** GET endpoint returning discovered logins. */
   discoverEndpoint: string;
   /** Property on the discover response holding the array, e.g. "subscriptions" / "licenses". */

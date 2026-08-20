@@ -1,3 +1,4 @@
+// @gate:always-run — scans the client-reachable barrel for node-only re-exports; imports nothing it checks (#538).
 import { describe, it, expect } from "vitest";
 import { builtinModules } from "node:module";
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
@@ -208,5 +209,84 @@ describe("shared barrel client-safety (#791 guard)", () => {
       (b) => walkValueGraph(b).nodeImports.length > 0,
     );
     expect(nodeOnlyBarrels.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * #596 — the guard must follow what the CLIENT actually imports, not only the barrel.
+ *
+ * The tests above walk from `shared/src/index.ts`. The client does not import only that:
+ * it DEEP-IMPORTS ~15 `@agentic-kanban/shared/lib/*` modules the barrel walk never
+ * reaches. That gap shipped a real regression — #498 pointed 17 client modules at
+ * `lib/workspace-status`, which value-imports `drizzle-orm` and the whole `../schema`, so
+ * drizzle and every table definition entered the browser bundle. Neither existing guard
+ * saw it: depcruise's `client-no-drizzle-or-schema` checks DIRECT edges only, and this
+ * file walked the wrong entry.
+ *
+ * The seed set is therefore derived FROM THE CLIENT SOURCE, and the forbidden set includes
+ * drizzle/schema, not just node builtins. Their failure differs — bundle weight rather
+ * than an immediate white-screen — but the rule is the same: anything value-reachable from
+ * a client entry must be free of them.
+ */
+const CLIENT_SRC = resolve(dirname(fileURLToPath(import.meta.url)), "../../client/src");
+
+function clientDeepImportedSharedModules(): string[] {
+  const specs = new Set<string>();
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name !== "node_modules" && entry.name !== "dist") walk(full);
+        continue;
+      }
+      if (!entry.name.endsWith(".ts") && !entry.name.endsWith(".tsx")) continue;
+      const text = readFileSync(full, "utf8");
+      const re = /from\s+"@agentic-kanban\/shared\/(lib\/[\w./-]+)"/g;
+      for (const m of text.matchAll(re)) {
+        // `import type` is erased at build time and cannot pull runtime code in.
+        const lineStart = text.lastIndexOf("\n", m.index ?? 0) + 1;
+        if (/import\s+type\b/.test(text.slice(lineStart, m.index ?? 0))) continue;
+        specs.add(m[1].replace(/\.js$/, ""));
+      }
+    }
+  };
+  walk(CLIENT_SRC);
+  return [...specs];
+}
+
+function isPersistenceSpec(spec: string): boolean {
+  if (spec === "drizzle-orm" || spec.startsWith("drizzle-orm/")) return true;
+  return /(^|\/)\.\.?\/schema(\/|$)/.test(spec) || spec.endsWith("/schema/index.js");
+}
+
+describe("client deep-imports of shared/lib are transitively client-safe (#596)", () => {
+  const seeds = clientDeepImportedSharedModules();
+
+  it("finds the client's deep imports, so the scan cannot pass vacuously", () => {
+    expect(seeds.length).toBeGreaterThan(5);
+  });
+
+  it("no client-reachable shared module value-imports a Node builtin, drizzle, or the schema", () => {
+    const offenders = new Set<string>();
+    for (const spec of seeds) {
+      const entry = resolve(sharedSrc, `${spec}.ts`);
+      if (!existsSync(entry)) continue;
+      const { visited, nodeImports } = walkValueGraph(entry);
+      for (const n of nodeImports) offenders.add(`via ${spec}: ${n}`);
+      for (const file of visited) {
+        for (const vs of parseModule(file).valueSpecs) {
+          if (isPersistenceSpec(vs)) {
+            offenders.add(`via ${spec}: ${file.replace(sharedSrc, "shared/src")} value-imports "${vs}"`);
+          }
+        }
+      }
+    }
+    expect(
+      [...offenders],
+      "These shared modules are value-reachable from packages/client and drag persistence into\n" +
+        "the browser bundle (#596). Split the pure part into its own module (see\n" +
+        "workspace-liveness.ts) and point the client at that:\n" +
+        [...offenders].join("\n"),
+    ).toEqual([]);
   });
 });

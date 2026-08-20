@@ -1,7 +1,8 @@
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { ToolDb } from "./tools/deps.js";
 import type * as schemaModule from "@agentic-kanban/shared/schema";
 import { findOpenUnmergedWorkspace } from "@agentic-kanban/shared/lib/issue-status-orchestration";
+import { nextIssueNumber as sharedNextIssueNumber } from "@agentic-kanban/shared/lib/issue-number";
 
 // The per-session .out transcript reader is shared with the server (single source
 // of truth in @agentic-kanban/shared/lib/session-files), not a hand-synced fork.
@@ -10,37 +11,40 @@ import { findOpenUnmergedWorkspace } from "@agentic-kanban/shared/lib/issue-stat
 export { readSessionStdoutFile } from "@agentic-kanban/shared/lib/session-files";
 
 export type McpResponse = { content: Array<{ type: "text"; text: string }> };
-const ISSUE_NUMBER_UNIQUE_INDEX = "idx_issues_project_id_issue_number";
-
-function errorText(err: unknown): string {
-  const record = typeof err === "object" && err !== null ? err as Record<string, unknown> : {};
-  const cause = record.cause;
-  return [
-    err instanceof Error ? err.message : "message" in record ? String(record.message) : String(err),
-    typeof cause === "object" && cause !== null && "message" in cause
-      ? String((cause as { message?: unknown }).message)
-      : "",
-    "code" in record ? String(record.code) : "",
-    typeof cause === "object" && cause !== null && "code" in cause
-      ? String((cause as { code?: unknown }).code)
-      : "",
-  ].join("\n");
-}
-
-export function isIssueNumberUniqueConstraintError(err: unknown): boolean {
-  const text = errorText(err);
-  return (
-    (text.includes("UNIQUE constraint") || text.includes("SQLITE_CONSTRAINT_UNIQUE")) &&
-    (
-      text.includes(ISSUE_NUMBER_UNIQUE_INDEX) ||
-      (text.includes("issues.project_id") && text.includes("issues.issue_number"))
-    )
-  );
-}
+export { isIssueNumberUniqueConstraintError } from "@agentic-kanban/shared/lib/issue-number";
 
 /** Standardized MCP error response factory. */
+/**
+ * The MCP content envelope. Every tool response is this shape (#617).
+ *
+ * Eight tools had a private `const text = (v) => ({content:[{type:"text",text:v}]})`
+ * clone. They could not simply use `mcpError`, because they use the same wrapper for
+ * SUCCESS payloads too (`text(JSON.stringify(result))`) — routing those through a
+ * function named `mcpError` would have misnamed every success path. So the general
+ * wrapper is named for what it is, and `mcpError` is a thin alias that documents intent
+ * at the call site.
+ */
+export function mcpText(value: string): McpResponse {
+  return { content: [{ type: "text" as const, text: value }] };
+}
+
+/** A JSON payload as MCP text content — the `text(JSON.stringify(x, null, 2))` idiom. */
+export function mcpJson(value: unknown): McpResponse {
+  return mcpText(JSON.stringify(value, null, 2));
+}
+
 export function mcpError(message: string): McpResponse {
-  return { content: [{ type: "text" as const, text: message }] };
+  return mcpText(message);
+}
+
+/**
+ * Content for a value that may be either a ready string or a structure to serialise.
+ * `plugin-gates` and `plugin-onboarding` each had this dispatch privately (#617) — the
+ * only clones that were not a plain wrapper, which is why they needed their own helper
+ * rather than `mcpText`.
+ */
+export function mcpContent(value: unknown): McpResponse {
+  return typeof value === "string" ? mcpText(value) : mcpJson(value);
 }
 
 /** Machine-readable MCP error response for tools that agents branch on. */
@@ -112,19 +116,57 @@ export async function resolveActiveProjectId(
   schema: typeof schemaModule,
   providedId?: string,
 ): Promise<{ ok: true; projectId: string } | { ok: false; error: McpResponse }> {
-  if (providedId) return { ok: true, projectId: providedId };
-  const pref = await db
-    .select({ value: schema.preferences.value })
-    .from(schema.preferences)
-    .where(eq(schema.preferences.key, "activeProjectId"))
-    .limit(1);
-  if (pref.length === 0 || !pref[0].value) {
+  const projectId = await resolveActiveProjectIdOrNull(db, schema, providedId);
+  if (!projectId) {
     return {
       ok: false,
       error: mcpError("No active project. Run `pnpm cli -- register <path>` first."),
     };
   }
-  return { ok: true, projectId: pref[0].value };
+  return { ok: true, projectId };
+}
+
+/**
+ * The same resolution WITHOUT the standard MCP error — for the two tools that answer a
+ * missing project in their own shape (`workflow-templates` with a per-tool message,
+ * `wait_workspace` with its `{result:"error"}` contract). They each re-implemented the
+ * preference query, which is how a change to the preference key would have missed them (#508).
+ */
+export async function resolveActiveProjectIdOrNull(
+  db: ToolDb,
+  schema: typeof schemaModule,
+  providedId?: string,
+): Promise<string | null> {
+  if (providedId) return providedId;
+  const pref = await db
+    .select({ value: schema.preferences.value })
+    .from(schema.preferences)
+    .where(eq(schema.preferences.key, "activeProjectId"))
+    .limit(1);
+  return pref[0]?.value || null;
+}
+
+/**
+ * Project name for a resolved project id, or `null` when the id names no row.
+ *
+ * Exists so every scoped WRITE can ECHO the project it actually landed in (#335,
+ * remedy R2's complement). `resolveActiveProjectId` silently falls back to the
+ * global mutable `activeProjectId` preference, so an agent that forgot `projectId`
+ * files into whatever project a human last clicked. Naming the project in the
+ * response does not prevent that mis-filing, but it makes it VISIBLE instead of
+ * silent — the caller sees `projectName` and can move the issue.
+ */
+export async function resolveProjectName(
+  db: ToolDb,
+  schema: typeof schemaModule,
+  projectId: string,
+): Promise<string | null> {
+  const rows = await db
+    .select({ name: schema.projects.name })
+    .from(schema.projects)
+    .where(eq(schema.projects.id, projectId))
+    .limit(1);
+  return rows[0]?.name ?? null;
 }
 
 /**
@@ -192,9 +234,5 @@ export async function nextIssueNumber(
   schema: typeof schemaModule,
   projectId: string,
 ): Promise<number> {
-  const maxResult = await db
-    .select({ maxNum: sql<number | null>`max(${schema.issues.issueNumber})` })
-    .from(schema.issues)
-    .where(eq(schema.issues.projectId, projectId));
-  return (maxResult[0]?.maxNum ?? 0) + 1;
+  return sharedNextIssueNumber(db as never, schema.issues, projectId);
 }

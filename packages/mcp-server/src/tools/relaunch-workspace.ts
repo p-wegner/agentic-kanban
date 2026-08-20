@@ -1,9 +1,10 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { boardApi, boardErrorText, mcpJson, mcpText } from "../board-call.js";
 import { eq } from "drizzle-orm";
 import { mcpStructuredError, workspaceClosedError, workspaceMissingWorkingDirError, workspaceNotFoundError } from "../db-utils.js";
-import { boardApiUrl } from "../server-url.js";
 import { prodDeps, type ToolDeps } from "./deps.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export function registerRelaunchWorkspace(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema, notifyBoard } = deps;
@@ -31,15 +32,14 @@ export function registerRelaunchWorkspace(server: McpServer, deps: ToolDeps = pr
       }
 
       try {
-        const res = await fetch(boardApiUrl(`/api/workspaces/${workspaceId}/launch`), {
+        const { ok, statusText, data: raw } = await boardApi(`/api/workspaces/${workspaceId}/launch`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ prompt }),
         });
-        const data = await res.json() as { error?: string; sessionId?: string };
+        const data = (raw ?? {}) as { sessionId?: string };
 
-        if (!res.ok) {
-          return { content: [{ type: "text" as const, text: `Launch failed: ${data.error ?? res.statusText}` }] };
+        if (!ok) {
+          return mcpText(`Launch failed: ${boardErrorText(raw, statusText)}`);
         }
 
         // Resolve projectId for board notification
@@ -51,16 +51,9 @@ export function registerRelaunchWorkspace(server: McpServer, deps: ToolDeps = pr
           notifyBoard(issueRows[0].projectId, "mcp_relaunch_workspace");
         }
 
-        return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify({ id: workspaceId, sessionId: data.sessionId }, null, 2),
-          }],
-        };
+        return mcpJson({ id: workspaceId, sessionId: data.sessionId });
       } catch (err) {
-        return {
-          content: [{ type: "text" as const, text: `Launch failed: ${err instanceof Error ? err.message : String(err)}` }],
-        };
+        return mcpText(`Launch failed: ${errorMessage(err)}`);
       }
     },
   );

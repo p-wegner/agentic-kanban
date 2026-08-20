@@ -5,12 +5,22 @@ import { getDbUrl, ensureDataDir, DB_LOCATION } from "./data-dir.js";
 // Single pragma implementation shared with script clients (db-repair etc., #987) —
 // a bare createClient without these runs with foreign_keys=OFF for the connection.
 import { applyPragmas } from "./pragmas.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 ensureDataDir();
 const DB_URL = getDbUrl();
 // Log the resolved absolute DB path at startup so a split-brain (server and MCP
-// opening different databases) is visible instead of silent (#962).
-console.log(`[db] opening ${DB_LOCATION.path ?? DB_URL} (source: ${DB_LOCATION.source})`);
+// opening different databases) is visible instead of silent (#962). Emit on STDERR,
+// not stdout: this fires at import for the CLI too, and a stdout line corrupts
+// `--json` output (e.g. `pnpm cli -- issue list --json | jq`). stderr keeps it
+// visible without polluting machine-readable stdout.
+console.error(`[db] opening ${DB_LOCATION.path ?? DB_URL} (source: ${DB_LOCATION.source})`);
+// A checkout candidate that exists but was rejected as a stub is never harmless: it is a
+// schema-only DB some tool minted in the checkout, and it is ONE size-floor bump away from
+// silently shadowing the real database. Name it so the operator can delete it.
+for (const rejected of DB_LOCATION.rejectedLocalCandidates) {
+  console.warn(`[db] IGNORING ${rejected} — it exists but is too small to be a real database (a stray schema-only stub). Delete it; while it is there, any tool that resolves the DB differently will read an EMPTY board.`);
+}
 
 // Read connection — used for board/API queries. With WAL, readers proceed against the
 // last checkpoint while the write connection commits, so board reads no longer queue
@@ -23,7 +33,7 @@ try {
   // module-load crash — but it must NOT be silent: a failed `PRAGMA foreign_keys=ON`
   // leaves every ON DELETE clause inert. `assertForeignKeysEnabled` in startup-tasks
   // re-checks and fails loud; log here so the cause is visible even before that.
-  console.warn("[db] applyPragmas(read) failed:", err instanceof Error ? err.message : String(err));
+  console.warn("[db] applyPragmas(read) failed:", errorMessage(err));
 }
 
 // Write connection — dedicated to the high-volume session-message write stream and
@@ -35,7 +45,7 @@ try {
   await applyPragmas(writeClient);
 } catch (err) {
   // See the read connection above: not a crash, but never silent.
-  console.warn("[db] applyPragmas(write) failed:", err instanceof Error ? err.message : String(err));
+  console.warn("[db] applyPragmas(write) failed:", errorMessage(err));
 }
 
 export const db = drizzle({ client, schema });

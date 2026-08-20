@@ -1,3 +1,4 @@
+// @gate:always-run — reads .claude/skills sources from the repo root; no import edge to a markdown file (#647).
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 

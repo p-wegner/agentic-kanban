@@ -66,6 +66,19 @@ describe("deriveSetupScriptFromProfile", () => {
     }
   });
 
+  // #120: the marker fallback used to emit `pip install -e .` for a uv project, which
+  // never populates the project-local .venv the verify gate's `uv run pytest` needs.
+  it("falls back to uv sync for a uv repo (pyproject.toml + uv.lock)", async () => {
+    const dir = await tmp();
+    try {
+      await writeFile(join(dir, "pyproject.toml"), '[project]\nname = "x"\n');
+      await writeFile(join(dir, "uv.lock"), "version = 1\n");
+      expect(deriveSetupScriptFromProfile(null, dir)).toBe("uv sync");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("returns empty string when nothing can be derived", async () => {
     const dir = await tmp();
     try {

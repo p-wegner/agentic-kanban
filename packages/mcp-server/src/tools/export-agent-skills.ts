@@ -1,12 +1,16 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { db, schema } from "../db.js";
 import { sql } from "drizzle-orm";
 import { access } from "node:fs/promises";
 import { join } from "node:path";
-import { ensureCodexSkillsLink, writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
+import { ensureCodexSkillsLink, skillsDirOf, writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { prodDeps, type ToolDeps } from "./deps.js";
+import { mcpError, mcpText } from "../db-utils.js";
 
-export function registerExportAgentSkills(server: McpServer) {
+export function registerExportAgentSkills(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema } = deps;
+
   server.tool(
     "export_agent_skills",
     "Export agent skills as SKILL.md files for Claude Code and Codex. Writes .claude/skills and links .codex/skills to the same directory.",
@@ -21,7 +25,7 @@ export function registerExportAgentSkills(server: McpServer) {
         try {
           await access(targetPath);
         } catch {
-          return { content: [{ type: "text" as const, text: `Error: Target path does not exist: ${targetPath}` }] };
+          return mcpError(`Error: Target path does not exist: ${targetPath}`);
         }
 
         // Fetch skills
@@ -40,10 +44,10 @@ export function registerExportAgentSkills(server: McpServer) {
         }
 
         if (rows.length === 0) {
-          return { content: [{ type: "text" as const, text: "No skills found to export." }] };
+          return mcpText("No skills found to export.");
         }
 
-        const skillsDir = join(targetPath, ".claude", "skills");
+        const skillsDir = skillsDirOf(targetPath);
         await ensureCodexSkillsLink(targetPath);
 
         // Track existing skill directories we manage (to clean up stale ones)
@@ -58,14 +62,9 @@ export function registerExportAgentSkills(server: McpServer) {
           exportedNames.add(skill.name);
         }
 
-        return {
-          content: [{
-            type: "text" as const,
-            text: `Exported ${rows.length} skill(s) to ${skillsDir} and linked .codex/skills to the same directory:\n${rows.map(s => `  - ${s.name} (${s.isBuiltin ? "builtin" : "custom"}${s.projectId ? ", project-scoped" : ", global"})`).join("\n")}\n\nThese skills are now available in Claude Code and Codex when working in ${targetPath}.`,
-          }],
-        };
+        return mcpText(`Exported ${rows.length} skill(s) to ${skillsDir} and linked .codex/skills to the same directory:\n${rows.map(s => `  - ${s.name} (${s.isBuiltin ? "builtin" : "custom"}${s.projectId ? ", project-scoped" : ", global"})`).join("\n")}\n\nThese skills are now available in Claude Code and Codex when working in ${targetPath}.`);
       } catch (err) {
-        return { content: [{ type: "text" as const, text: `Error exporting skills: ${err instanceof Error ? err.message : String(err)}` }] };
+        return mcpError(`Error exporting skills: ${errorMessage(err)}`);
       }
     },
   );

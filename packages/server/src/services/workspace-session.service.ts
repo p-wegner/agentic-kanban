@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { writeFileSync, readFileSync, existsSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { preferences } from "@agentic-kanban/shared/schema";
+import { profileNameOf } from "@agentic-kanban/shared/lib/profile-selection";
 import type { Database } from "../db/index.js";
 import {
   applyPlanImplementWorkspaceUpdate,
@@ -12,7 +13,7 @@ import {
   insertPlanGateAuditMessage,
 } from "../repositories/workspace-session.repository.js";
 import type { SessionManager } from "./session.manager.js";
-import type { BoardEvents } from "./board-events.js";
+import type { BoardEventSink } from "./board-events.js";
 import { loadAgentSettings, resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import {
   getWorkspaceById,
@@ -26,7 +27,7 @@ import {
   getWorkspaceSessions,
   getWorkspaceSkillName,
 } from "../repositories/session.repository.js";
-import { getPreference } from "../repositories/preferences.repository.js";
+import { getPreference, getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { buildImplementPrompt, buildRejectPrompt, writePlanFile, PLAN_FILE } from "./plan-mode.service.js";
 import { computeWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
 import { buildPhaseArtifactsContext, isImplementWorkflowNode } from "./phase-artifacts.service.js";
@@ -39,11 +40,13 @@ import {
 import { stopBisectSession } from "./bisect.service.js";
 import * as realGitService from "./git.service.js";
 import { resolveEffectiveModel } from "./effective-config.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 export function createWorkspaceSessionService(deps: {
   database: Database;
   getSessionManager?: () => SessionManager;
-  boardEvents?: BoardEvents;
+  boardEvents?: BoardEventSink;
   gitService?: GitService;
   /** Optional override for workspace setup (worktree rebuild). Tests inject a fake. */
   setupWorkspace?: (id: string) => Promise<{ id: string; workingDir: string }>;
@@ -75,7 +78,7 @@ export function createWorkspaceSessionService(deps: {
       } catch (err) {
         if (err instanceof WorkspaceError) throw err;
         throw new WorkspaceError(
-          `Workspace has no working directory and auto-setup failed: ${err instanceof Error ? err.message : String(err)}. ` +
+          `Workspace has no working directory and auto-setup failed: ${errorMessage(err)}. ` +
             `Call POST /api/workspaces/${id}/setup first, then retry launch.`,
           "BAD_REQUEST",
         );
@@ -98,9 +101,9 @@ export function createWorkspaceSessionService(deps: {
       }
     }
 
-    const prefRows = await database.select().from(preferences);
-    const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
-    const { agentCommand, agentArgs, claudeProfile, profile: agentProfile, provider: agentProvider, resumeWithNewModel, permissionPromptTool } =
+    const prefRows = await getAllPreferencesCached(database);
+    const prefMap = toPrefMap(prefRows);
+    const { agentCommand, agentArgs, profile: agentProfile, provider: agentProvider, resumeWithNewModel, permissionPromptTool } =
       applyWorkspaceAgentSelection(resolveAgentSettings(prefMap, body.agentCommand as string | undefined), ws0);
 
     const truncatedPrompt = prompt.length > 80 ? prompt.slice(0, 80) + "..." : prompt;
@@ -112,7 +115,7 @@ export function createWorkspaceSessionService(deps: {
       console.warn(`[workspace-session] ${note}`);
     }
     const resolvedModel = effectiveModel.model;
-    console.log(`[workspace-service] launch: workspaceId=${id} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"} agentArgs=${agentArgs ?? "none"} profile=${claudeProfile ?? "none"} resumeFromId=${(body.resumeFromId as string | undefined) ?? "none"} resumeWithNewModel=${resumeWithNewModel} skipPermissions=${skipPermissions ?? "default"} model=${resolvedModel ?? "workspace-default"}`);
+    console.log(`[workspace-service] launch: workspaceId=${id} prompt="${truncatedPrompt}" agentCommand=${agentCommand ?? "default"} agentArgs=${agentArgs ?? "none"} profile=${agentProfile?.name ?? "none"} resumeFromId=${(body.resumeFromId as string | undefined) ?? "none"} resumeWithNewModel=${resumeWithNewModel} skipPermissions=${skipPermissions ?? "default"} model=${resolvedModel ?? "workspace-default"}`);
 
     // Auto-rebase onto baseBranch on continue (not first launch, not direct workspaces)
     if (!ws0.isDirect && ws0.workingDir) {
@@ -146,14 +149,14 @@ export function createWorkspaceSessionService(deps: {
     const resumeFromId = typeof body.resumeFromId === "string" ? body.resumeFromId : undefined;
 
     const sessionId = await getSessionManager().startSession({
-      workspaceId: id, prompt, agentCommand, agentArgs, resumeFromId, claudeProfile,
+      workspaceId: id, prompt, agentCommand, agentArgs, resumeFromId, 
       provider: toExecutorProvider(agentProvider), multiTurn: false, permissionPromptTool,
       planMode, resumeWithNewModel, triggerType: "chat", profile: agentProfile, skipPermissions,
       model: resolvedModel,
     });
 
     await updateWorkspaceStatus(id, "active", {
-      claudeProfile: claudeProfile ?? null,
+      claudeProfile: profileNameOf(agentProfile),
       agentCommand: agentCommand ?? null,
       provider: agentProvider,
     }, database);
@@ -215,18 +218,18 @@ export function createWorkspaceSessionService(deps: {
         content = `${content}\n\n[Approved spec-driven phase artifacts]\n\n${artifactContext}`;
       }
     }
-    const { agentCommand, agentArgs, claudeProfile, profile, provider, resumeWithNewModel, permissionPromptTool } =
+    const { agentCommand, agentArgs, profile, provider, resumeWithNewModel, permissionPromptTool } =
       applyWorkspaceAgentSelection(await loadAgentSettings(database), ws0);
 
     const sessionId = await getSessionManager().startSession({
       workspaceId: id, prompt: content, agentCommand, agentArgs,
-      resumeFromId: resumable.session.id, claudeProfile, profile,
+      resumeFromId: resumable.session.id, profile,
       provider: toExecutorProvider(provider), multiTurn: false, planMode,
       resumeWithNewModel, permissionPromptTool, triggerType: "chat",
     });
 
     await updateWorkspaceStatus(id, "active", {
-      claudeProfile: claudeProfile ?? null,
+      claudeProfile: profileNameOf(profile),
       agentCommand: agentCommand ?? null,
       provider,
     }, database);
@@ -291,18 +294,18 @@ export function createWorkspaceSessionService(deps: {
       writePlanFile(ws0.workingDir, updatedPlanContent);
     }
 
-    const { agentCommand, agentArgs, claudeProfile, profile: agentProfile, provider: agentProvider, permissionPromptTool } =
+    const { agentCommand, agentArgs, profile: agentProfile, provider: agentProvider, permissionPromptTool } =
       applyWorkspaceAgentSelection(await loadAgentSettings(database, undefined), ws0);
 
     const sessionId = await getSessionManager().startSession({
-      workspaceId: id, prompt: buildImplementPrompt(), agentCommand, agentArgs, claudeProfile,
+      workspaceId: id, prompt: buildImplementPrompt(), agentCommand, agentArgs, 
       provider: toExecutorProvider(agentProvider), multiTurn: false, permissionPromptTool,
       planMode: false, triggerType: "plan-implement", profile: agentProfile,
     });
 
     const now = new Date().toISOString();
     await applyPlanImplementWorkspaceUpdate(id, {
-      claudeProfile: claudeProfile ?? null,
+      claudeProfile: profileNameOf(agentProfile),
       agentCommand: agentCommand ?? null,
       provider: agentProvider,
       now,
@@ -327,18 +330,18 @@ export function createWorkspaceSessionService(deps: {
     if (!ws0.pendingPlanPath) throw new WorkspaceError("No pending plan to reject", "CONFLICT");
     if (!getSessionManager) throw new WorkspaceError("Session manager not available", "BAD_REQUEST");
 
-    const { agentCommand, agentArgs, claudeProfile, profile: agentProfile, provider: agentProvider, permissionPromptTool } =
+    const { agentCommand, agentArgs, profile: agentProfile, provider: agentProvider, permissionPromptTool } =
       applyWorkspaceAgentSelection(await loadAgentSettings(database, undefined), ws0);
 
     const sessionId = await getSessionManager().startSession({
-      workspaceId: id, prompt: buildRejectPrompt(feedback), agentCommand, agentArgs, claudeProfile,
+      workspaceId: id, prompt: buildRejectPrompt(feedback), agentCommand, agentArgs, 
       provider: toExecutorProvider(agentProvider), multiTurn: false, permissionPromptTool,
       planMode: true, triggerType: "plan-reject", profile: agentProfile,
     });
 
     const now = new Date().toISOString();
     await applyPlanRejectWorkspaceUpdate(id, {
-      claudeProfile: claudeProfile ?? null,
+      claudeProfile: profileNameOf(agentProfile),
       agentCommand: agentCommand ?? null,
       provider: agentProvider,
       now,

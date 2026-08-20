@@ -9,16 +9,19 @@
  * The reconciler must stop such sessions and reset the workspace to 'idle'
  * so the next monitor pass can re-trigger fix-and-merge.
  */
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { issues, preferences, projectStatuses, projects, sessionMessages, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { reconcileZombieFixSessions } from "../startup/zombie-fix-session-reconciler.js";
+import { startMergeJob, resetMergeJobs } from "../services/merge-job.service.js";
 import type { BoardEvents } from "../services/board-events.js";
 
-// Grace window matches the implementation constant.
-const GRACE_WINDOW_MS = 60_000;
+// Grace windows match the implementation constants. Sessions with no recorded PID get the
+// LONG window (#270): the PID is written after spawn, so a pid-less session may simply not
+// have finished launching yet.
+const PIDLESS_GRACE_WINDOW_MS = 5 * 60_000;
 
 function makeDeps(db: ReturnType<typeof createTestDb>["db"], overrides: { enabled?: boolean } = {}) {
   const boardEvents = { broadcast: vi.fn(), broadcastActivity: vi.fn() } as unknown as BoardEvents;
@@ -114,7 +117,7 @@ async function insertSession(
 }
 
 function oldEnough(): string {
-  return new Date(Date.now() - GRACE_WINDOW_MS - 5_000).toISOString();
+  return new Date(Date.now() - PIDLESS_GRACE_WINDOW_MS - 5_000).toISOString();
 }
 
 function tooFresh(): string {
@@ -122,6 +125,7 @@ function tooFresh(): string {
 }
 
 describe("reconcileZombieFixSessions", () => {
+  afterEach(() => resetMergeJobs());
 
   it("returns 0 when disabled via deps.enabled=false", async () => {
     const { db } = createTestDb();
@@ -295,6 +299,43 @@ describe("reconcileZombieFixSessions", () => {
 
     const count = await reconcileZombieFixSessions(makeDeps(db));
     expect(count).toBe(0);
+  });
+
+  it("gives a pid-less session the LONG grace — 73s old is NOT a zombie (#270)", async () => {
+    // The incident: a review session was killed at age 73s with pid=none because its own
+    // launch had not finished registering the PID yet — and the reset stranded a merge.
+    const { db } = createTestDb();
+    const data = await seedFixingWorkspace(db, { workspaceStatus: "reviewing" });
+    await insertSession(db, {
+      workspaceId: data.workspaceId,
+      triggerType: "review",
+      startedAt: new Date(Date.now() - 73_000).toISOString(),
+      pid: null,
+    });
+
+    const count = await reconcileZombieFixSessions(makeDeps(db));
+    expect(count).toBe(0);
+
+    const [ws] = await db.select({ status: workspaces.status }).from(workspaces).where(eq(workspaces.id, data.workspaceId));
+    expect(ws.status).toBe("reviewing"); // untouched
+  });
+
+  it("never resets a workspace whose merge is in flight (#270)", async () => {
+    const { db } = createTestDb();
+    const data = await seedFixingWorkspace(db, { workspaceStatus: "reviewing" });
+    await insertSession(db, {
+      workspaceId: data.workspaceId,
+      triggerType: "review",
+      startedAt: oldEnough(),
+      pid: null,
+    });
+    startMergeJob(data.workspaceId);
+
+    const count = await reconcileZombieFixSessions(makeDeps(db));
+    expect(count).toBe(0);
+
+    const [ws] = await db.select({ status: workspaces.status }).from(workspaces).where(eq(workspaces.id, data.workspaceId));
+    expect(ws.status).toBe("reviewing"); // the merge owns it
   });
 
   it("reconciles multiple zombie sessions in a single tick", async () => {

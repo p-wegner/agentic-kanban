@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setupScheduledTasks } from "../startup/scheduled-tasks.js";
 import { startAutoMergeOrchestrator } from "../startup/auto-merge-orchestrator.js";
 import { startAncestorBranchReconciler, stopAncestorBranchReconciler } from "../startup/ancestor-branch-reconciler.js";
-import { startDoneUnmergedScanner, stopDoneUnmergedScanner } from "../startup/done-unmerged-invariant-scanner.js";
+import { startDoneUnmergedSweep, stopDoneUnmergedSweep } from "../startup/done-unmerged-invariant-sweep.js";
 import { startStrandedReviewReconciler } from "../startup/stranded-review-reconciler.js";
 import { startZombieFixSessionReconciler } from "../startup/zombie-fix-session-reconciler.js";
 import { startBackupScheduler } from "../startup/backup-scheduler.js";
@@ -15,6 +15,7 @@ import { getPreference } from "../repositories/preferences.repository.js";
 
 vi.mock("../repositories/preferences.repository.js", () => ({
   getPreference: vi.fn(),
+  getAllPreferencesCached: vi.fn(async () => []),
 }));
 
 vi.mock("../db/index.js", () => ({
@@ -25,7 +26,13 @@ vi.mock("../db/index.js", () => ({
   },
 }));
 
+// Every export the module has, not just the one this test drives: the mock replaces the
+// WHOLE module, so an unmocked export is a hard load error for any importer in the graph
+// (here `workspace-launch-failures.service.ts` → `routes/project-analytics.ts`), which
+// fails the suite before a single test runs.
 vi.mock("../services/dirty-main-checkout.js", () => ({
+  resetMissingRepoScanCounts: vi.fn(),
+  getDirtyTrackedSourceFiles: vi.fn(() => Promise.resolve([])),
   scanDirtyMainCheckouts: vi.fn(() => Promise.resolve([])),
 }));
 
@@ -37,6 +44,15 @@ vi.mock("../services/stale-dev-processes.js", () => ({
     kept: [],
     cleaned: [],
   })),
+}));
+
+// vi.mock factories are hoisted above top-level const declarations, so the mock fn
+// referenced inside must itself be declared via vi.hoisted() to avoid a TDZ error.
+const { reconcileStrandedSiblingMergesMock } = vi.hoisted(() => ({
+  reconcileStrandedSiblingMergesMock: vi.fn(() => Promise.resolve({ landed: 0, preserved: 0 })),
+}));
+vi.mock("../startup/merge-workflow.js", () => ({
+  reconcileStrandedSiblingMerges: reconcileStrandedSiblingMergesMock,
 }));
 
 interface TimerTestState {
@@ -52,6 +68,7 @@ describe("startup timers are restart-safe for HMR-style reloads", () => {
     vi.useFakeTimers();
     clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
     clearIntervalSpy = vi.spyOn(globalThis, "clearInterval");
+    reconcileStrandedSiblingMergesMock.mockClear();
   });
 
   afterEach(() => {
@@ -62,8 +79,9 @@ describe("startup timers are restart-safe for HMR-style reloads", () => {
   });
 
   it("recreates scheduled-tasks timers instead of accumulating handles", () => {
-    const first = setupScheduledTasks(4123);
-    const second = setupScheduledTasks(4123);
+    const runScheduledRun = vi.fn(async () => ({}));
+    const first = setupScheduledTasks({ runScheduledRun });
+    const second = setupScheduledTasks({ runScheduledRun });
 
     expect(clearTimeoutSpy).toHaveBeenCalledOnce();
     expect(clearIntervalSpy).toHaveBeenCalledOnce();
@@ -75,37 +93,51 @@ describe("startup timers are restart-safe for HMR-style reloads", () => {
     const first = startAncestorBranchReconciler({}, 10_000);
     const second = startAncestorBranchReconciler({}, 10_000);
 
+    // #529: these now return a PeriodicSweepHandle. The assertion is unchanged in
+    // INTENT — a restart clears the previous pair and installs a new one — but the
+    // handle no longer exposes the boot `timer`, which was an implementation detail.
     expect(clearTimeoutSpy).toHaveBeenCalledOnce();
     expect(clearIntervalSpy).toHaveBeenCalledOnce();
-    expect(first.timer).not.toBe(second.timer);
+    expect(first).not.toBe(second);
     expect(first.interval).not.toBe(second.interval);
   });
 
   it("recreates done-unmerged scanner timers instead of accumulating handles", () => {
-    const first = startDoneUnmergedScanner({}, 10_000);
-    const second = startDoneUnmergedScanner({}, 10_000);
+    const first = startDoneUnmergedSweep({}, 10_000);
+    const second = startDoneUnmergedSweep({}, 10_000);
 
+    // #529: these now return a PeriodicSweepHandle. The assertion is unchanged in
+    // INTENT — a restart clears the previous pair and installs a new one — but the
+    // handle no longer exposes the boot `timer`, which was an implementation detail.
     expect(clearTimeoutSpy).toHaveBeenCalledOnce();
     expect(clearIntervalSpy).toHaveBeenCalledOnce();
-    expect(first.timer).not.toBe(second.timer);
+    expect(first).not.toBe(second);
     expect(first.interval).not.toBe(second.interval);
   });
 
   it("clears ancestor-branch reconciler interval handles on stop", () => {
-    const { timer, interval } = startAncestorBranchReconciler({}, 10_000);
+    const { interval } = startAncestorBranchReconciler({}, 10_000);
 
     stopAncestorBranchReconciler();
 
-    expect(clearTimeoutSpy).toHaveBeenCalledWith(timer);
+    // The boot timeout is cleared too; its handle is private to the sweep now, so this
+    // asserts it happened rather than which object it was called with. NOT a count
+    // assertion: the previous test leaves a live sweep, which this test's own start()
+    // clears first — the original `toHaveBeenCalledWith(timer)` was count-agnostic too.
+    expect(clearTimeoutSpy).toHaveBeenCalled();
     expect(clearIntervalSpy).toHaveBeenCalledWith(interval);
   });
 
   it("clears done-unmerged scanner interval handles on stop", () => {
-    const { timer, interval } = startDoneUnmergedScanner({}, 10_000);
+    const { interval } = startDoneUnmergedSweep({}, 10_000);
 
-    stopDoneUnmergedScanner();
+    stopDoneUnmergedSweep();
 
-    expect(clearTimeoutSpy).toHaveBeenCalledWith(timer);
+    // The boot timeout is cleared too; its handle is private to the sweep now, so this
+    // asserts it happened rather than which object it was called with. NOT a count
+    // assertion: the previous test leaves a live sweep, which this test's own start()
+    // clears first — the original `toHaveBeenCalledWith(timer)` was count-agnostic too.
+    expect(clearTimeoutSpy).toHaveBeenCalled();
     expect(clearIntervalSpy).toHaveBeenCalledWith(interval);
   });
 
@@ -119,10 +151,32 @@ describe("startup timers are restart-safe for HMR-style reloads", () => {
     expect(tick).not.toHaveBeenCalled();
   });
 
+  it("ancestor-branch reconciler's default tick also runs the stranded-sibling compensator on the same cadence (#151)", async () => {
+    // Long interval (100s) so the initial 35s boot timeout and the recurring interval
+    // fire at clearly separate points instead of overlapping in the assertion window.
+    startAncestorBranchReconciler({ enabled: false }, 100_000);
+
+    await vi.advanceTimersByTimeAsync(35_000); // fires the initial boot timeout only
+    expect(reconcileStrandedSiblingMergesMock).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(100_000); // fires the recurring interval once
+    expect(reconcileStrandedSiblingMergesMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("stranded-sibling compensator does NOT run when a custom onTick is supplied (tick fully overridden)", async () => {
+    const tick = vi.fn();
+    startAncestorBranchReconciler({ onTick: tick }, 100_000);
+
+    await vi.advanceTimersByTimeAsync(35_000);
+
+    expect(tick).toHaveBeenCalledTimes(1);
+    expect(reconcileStrandedSiblingMergesMock).not.toHaveBeenCalled();
+  });
+
   it("done-unmerged scanner stops firing ticks after cleanup", () => {
     const tick = vi.fn();
-    startDoneUnmergedScanner({ onTick: tick }, 5_000);
-    stopDoneUnmergedScanner();
+    startDoneUnmergedSweep({ onTick: tick }, 5_000);
+    stopDoneUnmergedSweep();
 
     vi.advanceTimersByTime(60_000);
 

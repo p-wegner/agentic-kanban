@@ -24,9 +24,10 @@
 //   1  — command failed; session blocked to drive another self-repair attempt
 //   2  — configuration error (bad JSON, etc.)
 
-const { execFileSync } = require("child_process");
+const { execFileSync, spawn } = require("child_process");
 const { readFileSync, writeFileSync, existsSync, unlinkSync } = require("fs");
 const { join, dirname } = require("path");
+const { tmpdir } = require("os");
 
 // Use the directory of the script file itself so the config is always found
 // alongside the runner — whether called directly or via smart-hooks-runner.
@@ -110,10 +111,243 @@ function writeEscalation(payload) {
   }
 }
 
+// --- Post-run zombie sweep (#172) ---
+// Windows does not tear down a process tree when only its root exits: a `pnpm test`
+// run that forks a vitest worker pool can leave those workers alive long after the
+// launching shell has returned control here (vitest's Windows fork pool is the
+// observed repeat offender — 18-20 orphaned node.exe per worktree). Best-effort,
+// self-contained (no board deps, ships to any scaffolded repo): after the verify
+// command finishes, find any process whose command line still references `cwd` and
+// isn't part of this runner's own ancestor chain, and kill it.
+function listProcessesForSweep() {
+  try {
+    if (process.platform === "win32") {
+      const script =
+        "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress";
+      const out = execFileSync("powershell.exe", ["-NoProfile", "-Command", script], {
+        encoding: "utf8",
+        windowsHide: true,
+        timeout: 10000,
+      });
+      const raw = out && out.trim() ? out : "[]";
+      let parsed;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        const controlCharPattern = new RegExp("[\\x00-\\x1f]", "g");
+        parsed = JSON.parse(raw.replace(controlCharPattern, " "));
+      }
+      const rows = Array.isArray(parsed) ? parsed : [parsed];
+      return rows
+        .map((row) => ({
+          pid: Number(row.ProcessId),
+          ppid: Number(row.ParentProcessId) || 0,
+          commandLine: String(row.CommandLine || ""),
+        }))
+        .filter((row) => Number.isInteger(row.pid) && row.pid > 0);
+    }
+    const out = execFileSync("ps", ["-eo", "pid=,ppid=,args="], { encoding: "utf8", timeout: 10000 });
+    return out
+      .split("\n")
+      .map((line) => {
+        const match = line.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/);
+        if (!match) return null;
+        return { pid: Number(match[1]), ppid: Number(match[2]), commandLine: match[3] || "" };
+      })
+      .filter((row) => row && Number.isInteger(row.pid) && row.pid > 0);
+  } catch {
+    return [];
+  }
+}
+
+function killPidTree(pid) {
+  try {
+    if (process.platform === "win32") {
+      execFileSync("taskkill", ["/pid", String(pid), "/T", "/F"], { timeout: 5000, windowsHide: true });
+    } else {
+      try {
+        process.kill(-pid, "SIGKILL");
+      } catch {
+        process.kill(pid, "SIGKILL");
+      }
+    }
+  } catch {
+    /* already gone — best-effort */
+  }
+}
+
+// A leaked test worker never holds a listening TCP socket. A dev server does — and a
+// dev server is routinely started DETACHED (this project's own dev-server workflow
+// spawns it with its launching shell exiting immediately), which makes it look
+// identical to an orphaned zombie worker under the orphan+path heuristic alone. This
+// hook fires on every passing Stop-hook cycle, not just true session end, so without
+// this check a `pnpm dev` left running for visual verification in the same worktree
+// would get torn down by the very next green verify pass. Skip any orphan whose tree
+// owns a listening port.
+function listListeningPids() {
+  try {
+    if (process.platform === "win32") {
+      // Do NOT parse `netstat`'s STATE column text (e.g. "LISTENING") — it is
+      // localized by the OS UI language (observed as "ABHÖREN" on German Windows),
+      // so a plain substring match silently returns zero listeners on any
+      // non-English machine and this whole protection goes dark. `-State Listen`
+      // filters on the .NET enum NAME, which is culture-invariant.
+      const script =
+        "Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | ConvertTo-Json -Compress";
+      const out = execFileSync("powershell.exe", ["-NoProfile", "-Command", script], {
+        encoding: "utf8",
+        windowsHide: true,
+        timeout: 10000,
+      });
+      const raw = out && out.trim() ? out : "[]";
+      const parsed = JSON.parse(raw);
+      const rows = Array.isArray(parsed) ? parsed : [parsed];
+      const pids = new Set();
+      for (const row of rows) {
+        const pid = Number(row);
+        if (Number.isInteger(pid) && pid > 0) pids.add(pid);
+      }
+      return pids;
+    }
+    const out = execFileSync("lsof", ["-iTCP", "-sTCP:LISTEN", "-P", "-n"], {
+      encoding: "utf8",
+      timeout: 10000,
+    });
+    const pids = new Set();
+    for (const line of out.split("\n").slice(1)) {
+      const parts = line.trim().split(/\s+/);
+      const pid = Number(parts[1]);
+      if (Number.isInteger(pid) && pid > 0) pids.add(pid);
+    }
+    return pids;
+  } catch {
+    return new Set();
+  }
+}
+
+function buildChildrenMap(processes) {
+  const children = new Map();
+  for (const proc of processes) {
+    if (!children.has(proc.ppid)) children.set(proc.ppid, []);
+    children.get(proc.ppid).push(proc);
+  }
+  return children;
+}
+
+function collectTreePids(rootPid, childrenMap, seen) {
+  if (seen.has(rootPid)) return seen;
+  seen.add(rootPid);
+  for (const child of childrenMap.get(rootPid) || []) {
+    collectTreePids(child.pid, childrenMap, seen);
+  }
+  return seen;
+}
+
+function killDirDescendants(cwd) {
+  if (!cwd) return;
+  const processes = listProcessesForSweep();
+  if (processes.length === 0) return;
+  const byPid = new Map(processes.map((p) => [p.pid, p]));
+  const childrenMap = buildChildrenMap(processes);
+  const listeningPids = listListeningPids();
+
+  // Never kill this runner or anything in its own ancestor chain (the agent/session
+  // process, the harness, etc.) even if their command line happens to reference cwd.
+  const ancestors = new Set([process.pid]);
+  let cursor = byPid.get(process.pid);
+  for (let i = 0; cursor && i < 15; i++) {
+    const parentPid = cursor.ppid;
+    if (!parentPid || ancestors.has(parentPid)) break;
+    ancestors.add(parentPid);
+    cursor = byPid.get(parentPid);
+  }
+
+  const dirNormalized = cwd.replace(/\\/g, "/").toLowerCase();
+  for (const proc of processes) {
+    if (ancestors.has(proc.pid)) continue;
+    // Path match alone is not enough — that would kill ANY live process anywhere
+    // on the machine that happens to reference this cwd (a manually-started `pnpm
+    // dev` server for this same worktree, another agent's session, etc.), which is
+    // exactly the "kill other agents' worktree servers" hazard this project's hard
+    // constraints forbid. By the time this runs, the verify command's own launching
+    // shell has already exited (execFileSync is synchronous) — so a genuine leaked
+    // worker is always an ORPHAN: its recorded parent PID is no longer alive. A live
+    // dev server or agent session still has a live parent and is skipped.
+    if (byPid.has(proc.ppid)) continue;
+    const cmdNormalized = proc.commandLine.replace(/\\/g, "/").toLowerCase();
+    if (!commandReferencesDir(cmdNormalized, dirNormalized)) continue;
+    const treePids = collectTreePids(proc.pid, childrenMap, new Set());
+    let ownsListener = false;
+    for (const pid of treePids) {
+      if (listeningPids.has(pid)) {
+        ownsListener = true;
+        break;
+      }
+    }
+    if (ownsListener) continue;
+    killPidTree(proc.pid);
+  }
+}
+
+// Plain substring matching would let a worktree dir that is a NAME PREFIX of a
+// sibling worktree (e.g. ".../feature_ak-17" vs ".../feature_ak-172") cross-match
+// and kill the sibling's processes — ticket numbers are sequential so this
+// collision is common. Require the match to end at a path/quote/space boundary.
+function commandReferencesDir(cmdNormalized, dirNormalized) {
+  let searchFrom = 0;
+  for (;;) {
+    const idx = cmdNormalized.indexOf(dirNormalized, searchFrom);
+    if (idx === -1) return false;
+    const next = cmdNormalized[idx + dirNormalized.length];
+    if (next === undefined || next === "/" || next === '"' || next === "'" || next === " ") {
+      return true;
+    }
+    searchFrom = idx + 1;
+  }
+}
+
+// The sweep enumerates every OS process (a multi-second PowerShell/WMI round trip on
+// Windows) — synchronous, that latency lands on every single Stop-hook invocation,
+// not just ones that actually leaked something. Run it as a detached, unref'd child
+// instead: the gate's own pass/fail decision returns immediately, and the sweep
+// re-invokes this same script with --sweep-only in the background.
+function spawnBackgroundSweep(cwd) {
+  if (!cwd) return;
+  try {
+    const child = spawn(process.execPath, [process.argv[1], "--sweep-only", cwd], {
+      // NOT hookDir/cwd — a detached child inheriting the caller's cwd holds an OS
+      // handle on that directory for as long as it runs, which would block that
+      // worktree/hook dir from being removed or reused while the sweep is in flight.
+      cwd: tmpdir(),
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    child.unref();
+  } catch {
+    /* best-effort */
+  }
+}
+
+// Mirrors translatePosixWrapperForWindows in @agentic-kanban/shared/lib/setup-script.ts
+// (#181) — cmd.exe parses `./gradlew` as the command `.` and fails outright, so a
+// `./gradlew`/`./mvnw`-style verify command must be rewritten to the `.bat`/`.cmd` form
+// before it reaches cmd.exe. Duplicated here because this file is a standalone scaffold
+// copy shipped into scaffolded repos, not an importer of the shared package.
+// Keep the separator class in sync with the shared copy: `&&` alone missed the second
+// half of every chained script (`... || ./gradlew clean`, `cd app; ./gradlew build`,
+// multi-line), which then failed on cmd.exe exactly as before the fix.
+function translatePosixWrapperForWindows(command) {
+  return command
+    .replace(/(^|[\r\n;&|(])(\s*)\.\/gradlew\b/g, "$1$2.\\gradlew.bat")
+    .replace(/(^|[\r\n;&|(])(\s*)\.\/mvnw\b/g, "$1$2.\\mvnw.cmd");
+}
+
 function runVerifyCommand(command, cwd) {
   const isWindows = process.platform === "win32";
   const shell = isWindows ? "cmd.exe" : "/bin/sh";
-  const shellArgs = isWindows ? ["/c", command] : ["-c", command];
+  const shellCommand = isWindows ? translatePosixWrapperForWindows(command) : command;
+  const shellArgs = isWindows ? ["/c", shellCommand] : ["-c", command];
 
   let exitCode = 0;
   let cmdOutput = "";
@@ -139,6 +373,13 @@ function runVerifyCommand(command, cwd) {
 }
 
 async function main() {
+  if (process.argv[2] === "--sweep-only") {
+    // Background sweep worker spawned by spawnBackgroundSweep — not a real hook
+    // invocation, just does the dir-scoped kill and exits.
+    killDirDescendants(process.argv[3]);
+    process.exit(0);
+  }
+
   const lines = [];
   for await (const chunk of process.stdin) lines.push(chunk);
   let input = {};
@@ -161,6 +402,14 @@ async function main() {
   if (exitCode === 0) {
     // Passed — clear any in-progress self-repair state so the next failure starts fresh.
     clearState();
+    // Session is actually exiting on this path: safe to reap leftover worker fleets.
+    // Best-effort, non-blocking: never let the sweep (or its cost) affect the gate's
+    // own pass/fail decision or latency.
+    try {
+      spawnBackgroundSweep(cwd);
+    } catch {
+      /* best-effort */
+    }
     process.stderr.write(`[verify-gate] Passed.\n`);
     process.exit(0);
   }
@@ -192,6 +441,13 @@ async function main() {
       `The failure above is attached for human/reviewer follow-up ` +
       `(see ${ESCALATION_PATH}). Stopping the self-repair loop to avoid an endless cycle.`;
     process.stderr.write(reason + "\n");
+    // Session is actually exiting on this path too (no more `block` decisions coming):
+    // safe to reap leftover worker fleets. Best-effort, non-blocking.
+    try {
+      spawnBackgroundSweep(cwd);
+    } catch {
+      /* best-effort */
+    }
     // Do NOT emit a `block` decision: blocking again would re-prompt and loop forever.
     // We surface the escalation (no silent strand) and let the session exit so the
     // board's review / stranded-reconciler can pick it up with the captured error in

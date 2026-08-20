@@ -1,0 +1,66 @@
+# Reference service stack for a COMPLEX multi-repo project: a multi-container sidecar
+# (postgres + redis). This is the shape a real full-stack app needs — a database AND a
+# cache/queue — and it exercises everything the per-workspace stack feature has to get
+# right at once:
+#
+#   - MULTIPLE named host ports allocated collision-free per workspace
+#     (KANBAN_SVC_DB_PORT, KANBAN_SVC_CACHE_PORT),
+#   - MULTI-SERVICE health-gating: `up -d --wait` blocks until BOTH postgres and redis
+#     report healthy, so the agent never races a half-up stack,
+#   - per-workspace isolation of TWO named volumes + a private network,
+#   - the admission cap (#56): each workspace = 2 containers, so an over-subscribed box
+#     is exactly what `max_concurrent_stacks` protects against.
+#
+# The board runs this once PER WORKSPACE with:
+#
+#   docker compose -p $COMPOSE_PROJECT_NAME -f docker-compose.yml \
+#                  --env-file .kanban/services.env up -d --wait
+#
+# Everything unique-per-workspace comes from the generated `.kanban/services.env`:
+#
+#   COMPOSE_PROJECT_NAME=ak-<instanceId8>-ws-<workspaceId12>   # isolates all resources
+#   KANBAN_SVC_DB_PORT=<free host port>                        # postgres
+#   KANBAN_SVC_CACHE_PORT=<free host port>                     # redis
+#   POSTGRES_PASSWORD=kanban                                   # from servicesConfig.env
+#   KANBAN_SERVICE_HOST=localhost | host.docker.internal | dind
+#   KANBAN_STACK=1
+
+services:
+  db:
+    image: postgres:16-alpine
+    ports:
+      - "${KANBAN_SVC_DB_PORT}:5432"
+    environment:
+      POSTGRES_USER: kanban
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kanban}
+      POSTGRES_DB: app
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # `up -d --wait` blocks on this — the board proceeds only once postgres accepts conns.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kanban -d app"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  cache:
+    image: redis:7-alpine
+    ports:
+      - "${KANBAN_SVC_CACHE_PORT}:6379"
+    volumes:
+      - redisdata:/data
+    # The SECOND health gate: `up --wait` waits for redis too, so the whole stack is
+    # proven ready (not just the DB) before the agent is told it is up.
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 3s
+
+# Both volume names are prefixed with COMPOSE_PROJECT_NAME, so each workspace gets fresh
+# data. Torn down with `docker compose down -v` on merge/delete — disposable by design.
+volumes:
+  pgdata:
+  redisdata:

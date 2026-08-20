@@ -1,4 +1,5 @@
 import type { StatusWithIssues } from "@agentic-kanban/shared";
+import { occupiesWipSlot } from "@agentic-kanban/shared/lib/workspace-liveness";
 
 /**
  * Pure board-summary aggregates derived from the active/archive columns.
@@ -48,7 +49,9 @@ export function computeBoardStats(
       sum +
       col.issues.filter((i) => {
         const ws = i.workspaceSummary?.main;
-        return ws?.status === "active" || ws?.status === "reviewing";
+        // #498: this omitted `fixing`, so a workspace resolving conflicts was not
+        // counted as an active workspace. Same undercount as the MCP board-status total.
+        return occupiesWipSlot(ws?.status);
       }).length,
     0,
   );

@@ -1,30 +1,9 @@
+import type { ActivityEventType, ActivityEvent } from "../lib/issueDetailTypes.js";
 import React from "react";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
-import { showToast } from "./Toast.js";
+import { slugify } from "@agentic-kanban/shared/lib/slugify";
+import { showToast } from "../lib/toast.js";
 
-export type ActivityEventType =
-  | "issue_created"
-  | "status_changed"
-  | "workspace_created"
-  | "workspace_launched"
-  | "workspace_merged"
-  | "workspace_closed"
-  | "session_started"
-  | "session_completed"
-  | "session_failed"
-  | "session_stopped"
-  | "comment";
-
-export interface ActivityEvent {
-  id: string;
-  type: ActivityEventType;
-  summary: string;
-  actor: string | null;
-  timestamp: string;
-  workspaceId?: string | null;
-  sessionId?: string | null;
-  commentKind?: string | null;
-}
 
 interface Props {
   events: ActivityEvent[];
@@ -39,12 +18,7 @@ function markdownEscape(value: string): string {
 }
 
 function safeFileSegment(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80);
+  return slugify(value, { maxLength: 80 });
 }
 
 export function issueActivityMarkdownFilename(issueTitle: string, issueNumber?: number | null): string {
@@ -226,3 +200,6 @@ export function IssueActivitySection({ events, loading, issueTitle, issueNumber,
     </div>
   );
 }
+
+/** #610 — re-exported so this component's existing importers are unchanged. */
+export type { ActivityEventType, ActivityEvent } from "../lib/issueDetailTypes.js";

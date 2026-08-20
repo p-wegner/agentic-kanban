@@ -3,13 +3,14 @@ import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import { createMergeQueueService } from "../services/merge-queue.service.js";
 import type { Database } from "../db/index.js";
-import type { BoardEvents } from "../services/board-events.js";
-import type { SessionManager } from "../services/session.manager.js";
+import type { BoardEventSink } from "../services/board-events.js";
+import type { SessionLauncher } from "../services/session.manager.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export function createMergeQueueRoute(
   database: Database,
-  getSessionManager: () => SessionManager,
-  options?: { boardEvents?: BoardEvents },
+  getSessionManager: () => SessionLauncher,
+  options?: { boardEvents?: BoardEventSink },
 ) {
   const router = createRouter();
 
@@ -32,7 +33,7 @@ export function createMergeQueueRoute(
       const preview = plan.conflictPreviews[0] ?? { workspaceId, hasConflicts: false, conflictingFiles: [], isStale: false };
       return c.json({ ok: true, preview });
     } catch (err) {
-      return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 500);
+      return c.json({ ok: false, error: errorMessage(err) }, 500);
     }
   });
 
@@ -78,7 +79,7 @@ export function createMergeQueueRoute(
               workspaceId: "",
               issueNumber: null,
               issueTitle: "",
-              error: err instanceof Error ? err.message : String(err),
+              error: errorMessage(err),
             }),
           });
           await stream.writeSSE({

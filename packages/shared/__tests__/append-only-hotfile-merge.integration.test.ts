@@ -32,6 +32,16 @@ import {
   revParse,
 } from "../src/lib/git-service.js";
 
+/**
+ * Per-test budget (#206). This is the heaviest real-git suite in the repo — each scenario builds
+ * a multi-branch repo and drives real merges, so its cost tracks `git` spawn latency rather than
+ * the code under test. Measured unloaded on Windows: 212s for 5 tests (~42s each); under parallel
+ * load one scenario blew the previous 120s budget and turned `pnpm test:mine` — which doubles as
+ * the merge verify_script — red, withholding every merge board-wide. A hang still never finishes,
+ * so raising this removes the false red without hiding a stuck test.
+ */
+const GIT_MERGE_TIMEOUT_MS = Number(process.env.VITEST_GIT_IO_TIMEOUT) || 240_000;
+
 function git(cwd: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile("git", args, { cwd, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
@@ -81,8 +91,6 @@ describe("#763 append-only hot-file merge auto-resolution", () => {
   beforeEach(async () => {
     repo = await mkdtemp(join(tmpdir(), "ak-763-"));
     await git(repo, ["init"]);
-    await git(repo, ["config", "user.email", "t@t.com"]);
-    await git(repo, ["config", "user.name", "Test"]);
     await writeRepoFile(SMOKE, SEED);
     await writeRepoFile("src/index.js", "export const x = 1;\n");
     await git(repo, ["add", "-A"]);
@@ -141,7 +149,7 @@ describe("#763 append-only hot-file merge auto-resolution", () => {
 
     // No merge was ever left in-progress (no manual recovery needed).
     expect(existsSync(join(repo, ".git", "MERGE_HEAD"))).toBe(false);
-  }, 30000);
+  }, GIT_MERGE_TIMEOUT_MS);
 
   it("detectAppendOnlyResolvableConflicts reports the hot file read-only", async () => {
     await makeAppendBranch("feature/ak-1", "test('a', () => {});\n");
@@ -155,7 +163,7 @@ describe("#763 append-only hot-file merge auto-resolution", () => {
     // read-only: HEAD did not move
     expect((await git(repo, ["rev-parse", "HEAD"])).trim()).toBe(headBefore);
     expect(existsSync(join(repo, ".git", "MERGE_HEAD"))).toBe(false);
-  }, 30000);
+  }, GIT_MERGE_TIMEOUT_MS);
 
   it("without the opt-in flag the same append conflict still throws (gated)", async () => {
     await makeAppendBranch("feature/ak-1", "test('a', () => {});\n");
@@ -164,7 +172,7 @@ describe("#763 append-only hot-file merge auto-resolution", () => {
     await mergeBranch(repo, "feature/ak-1", "main");
 
     await expect(mergeBranch(repo, "feature/ak-2", "main")).rejects.toThrow(/conflict/i);
-  }, 30000);
+  }, GIT_MERGE_TIMEOUT_MS);
 
   it("an overlapping EDIT to the hot file is not an append — it still throws", async () => {
     // Both branches edit the SAME existing seed line → genuine conflict, not a pure append.
@@ -185,7 +193,7 @@ describe("#763 append-only hot-file merge auto-resolution", () => {
     await expect(
       mergeBranch(repo, "feature/edit-b", "main", { autoResolveAppendConflicts: true }),
     ).rejects.toThrow(/conflict/i);
-  }, 30000);
+  }, GIT_MERGE_TIMEOUT_MS);
 
   it("revParse stays usable as a smoke check of the temp repo", async () => {
     expect((await revParse(repo, "HEAD")).length).toBeGreaterThan(0);

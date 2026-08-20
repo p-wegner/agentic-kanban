@@ -185,3 +185,58 @@ describe("buildSpawnEnv — cross-profile credential-bleed strip", () => {
     expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe("profileB-oauth-token");
   });
 });
+
+// An OAuth (Max/Pro) profile is a config DIRECTORY `~/.claude-<name>` holding the login, not a
+// `settings_<name>.json`. Selecting one is only possible via CLAUDE_CONFIG_DIR. buildSpawnEnv used
+// to return early for such a profile, leaving whatever CLAUDE_CONFIG_DIR the SERVER inherited —
+// so the in-process butler SDK (which calls buildSpawnEnv directly, with no launch-path env layered
+// on top) authenticated as the server's ambient account while REPORTING the selected profile.
+// Observed live: every butler feature returned "Not logged in · Please run /login" because the
+// ambient account had been logged out, on a board whose configured profile was valid.
+describe("buildSpawnEnv — OAuth config-dir profiles", () => {
+  /** A profile that exists ONLY as `~/.claude-<name>` with a credentials file. */
+  function oauthDirFs(profileName: string): FileSystem {
+    return {
+      existsSync: (p: string) => {
+        if (p.includes(`settings_${profileName}.json`)) return false; // not a settings profile
+        return p.includes(`.claude-${profileName}`); // the dir and its .credentials.json
+      },
+      readFileSync: (p: string) => { throw new Error(`unexpected read: ${p}`); },
+      writeFileSync: () => {},
+    } as FileSystem;
+  }
+
+  it("points CLAUDE_CONFIG_DIR at the profile's own config dir", () => {
+    process.env.CLAUDE_CONFIG_DIR = "/home/x/.claude-someone-else";
+
+    const env = buildSpawnEnv("team_a", oauthDirFs("team_a"));
+
+    expect(env.CLAUDE_CONFIG_DIR).toContain(".claude-team_a");
+    expect(env.CLAUDE_CONFIG_DIR).not.toContain("someone-else");
+  });
+
+  it("leaves the inherited CLAUDE_CONFIG_DIR alone when the profile is not an OAuth dir", () => {
+    process.env.CLAUDE_CONFIG_DIR = "/home/x/.claude-ambient";
+
+    // A settings-file profile authenticates via --settings, so the config dir must not be rewritten.
+    const env = buildSpawnEnv("apikey1", fakeFsFor("apikey1", { env: { ANTHROPIC_API_KEY: "k" } }));
+
+    expect(env.CLAUDE_CONFIG_DIR).toBe("/home/x/.claude-ambient");
+  });
+
+  it("does not claim a config dir that holds no login", () => {
+    process.env.CLAUDE_CONFIG_DIR = "/home/x/.claude-ambient";
+
+    // Directory absent entirely → nothing to select, keep the ambient value rather than
+    // pointing the agent at a dir with no credentials.
+    const noDirFs: FileSystem = {
+      existsSync: () => false,
+      readFileSync: () => { throw new Error("nope"); },
+      writeFileSync: () => {},
+    } as FileSystem;
+
+    const env = buildSpawnEnv("ghost", noDirFs);
+
+    expect(env.CLAUDE_CONFIG_DIR).toBe("/home/x/.claude-ambient");
+  });
+});

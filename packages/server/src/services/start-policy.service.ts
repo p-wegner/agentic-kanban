@@ -1,4 +1,6 @@
-import { resolveMonitorTunables, type MonitorTunables } from "./strategy-objective.service.js";
+import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
+import type { StartPolicy } from "@agentic-kanban/shared/types";
+import { resolveMonitorTunables } from "./strategy-objective.service.js";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { START_MODE_VALUES } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 
@@ -25,24 +27,18 @@ import { START_MODE_VALUES } from "@agentic-kanban/shared/lib/dynamic-preference
  */
 export type StartMode = (typeof START_MODE_VALUES)[number];
 
-export interface StartPolicy {
-  mode: StartMode;
-  /** The in-process monitor may auto-start unblocked backlog/todo tickets. */
-  autoStartUnblocked: boolean;
-  /** The post-merge dependency cascade may start the next unblocked ticket. */
-  postMergeCascade: boolean;
-  /** The backlog-empty refill skill may run to generate tickets. */
-  backlogRefill: boolean;
-  /** Cron/HTTP scheduled runs are honored. */
-  scheduledRuns: boolean;
-  /** Effective WIP/refill tunables (from the Strategy Bullseye, else legacy prefs). */
-  wip: MonitorTunables;
-  /** Whether the mode came from an explicit per-project `start_mode_<id>` or was derived. */
-  source: "start_mode" | "derived";
-}
+
+// The response shape lives in shared (#567) — the client had its own drifted copy that
+// was missing `postMergeFollowups`. Re-exported here because that is where the server
+// already imports it from.
+export type { StartPolicy };
+
+// #496: built from the registry, so an unregistered prefix is a COMPILE error.
+const startModePrefDef = projectPref("start_mode");
+const autodrivePrefDef = projectPref("board_autodrive");
 
 export function startModePrefKey(projectId: string): string {
-  return `start_mode_${projectId}`;
+  return startModePrefDef.key(projectId);
 }
 
 // Derived from the shared START_MODE_VALUES list so preference writers (settings
@@ -67,6 +63,7 @@ export function resolveStartPolicy(prefMap: Map<string, string>, projectId: stri
 
   const wip = resolveMonitorTunables(prefMap, projectId).tunables;
   const cascadeOptIn = getBool(prefMap, "dependency_auto_chain");
+  const followupOptIn = getBool(prefMap, "auto_start_followup");
   const refillOptIn = prefMap.get("backlog_empty_strategy") === "generate_tickets";
 
   switch (mode) {
@@ -75,6 +72,7 @@ export function resolveStartPolicy(prefMap: Map<string, string>, projectId: stri
         mode, source, wip,
         autoStartUnblocked: true,
         postMergeCascade: cascadeOptIn,
+        postMergeFollowups: followupOptIn,
         backlogRefill: refillOptIn,
         scheduledRuns: true,
       };
@@ -85,6 +83,7 @@ export function resolveStartPolicy(prefMap: Map<string, string>, projectId: stri
         mode, source, wip,
         autoStartUnblocked: false,
         postMergeCascade: false,
+        postMergeFollowups: false,
         backlogRefill: false,
         scheduledRuns: true,
       };
@@ -94,6 +93,7 @@ export function resolveStartPolicy(prefMap: Map<string, string>, projectId: stri
         mode: "manual", source, wip,
         autoStartUnblocked: false,
         postMergeCascade: false,
+        postMergeFollowups: false,
         backlogRefill: false,
         scheduledRuns: false,
       };
@@ -109,4 +109,49 @@ function deriveMode(prefMap: Map<string, string>, projectId: string): StartMode 
   const globalMonitorAutoStart =
     getBool(prefMap, "auto_monitor") && getBool(prefMap, "nudge_auto_start");
   return autodrive || globalMonitorAutoStart ? "monitor" : "manual";
+}
+
+/**
+ * #595 — moved here from `startup/monitor-setup.ts`. Both are pure prefMap resolvers over
+ * `resolveStartPolicy`, so this file already owned the decision they wrap; they only lived
+ * in `startup/` because the monitor was their loudest caller. Keeping them there forced
+ * `routes/internal-monitor.ts` to import a startup module for one function, which is a
+ * `no-circular` violation the moment those routes leave `startup/`'s rule-free zone.
+ */
+/**
+ * Project ids whose *resolved* Start Mode is `monitor` — i.e. the in-process deterministic
+ * monitor is their driver. This routes through `resolveStartPolicy` (the single source of truth,
+ * decision 008) instead of reading `board_autodrive_*` raw, so it honours both an explicit
+ * `start_mode_<id>` AND the legacy-flag derivation, fixing two scheduling bugs:
+ *   (a) `start_mode=monitor` with autodrive unset & `auto_monitor` off (force-disabled every boot)
+ *       — previously never scheduled because the gate was purely `auto_monitor || board_autodrive`.
+ *   (b) `start_mode=manual` with a stale `board_autodrive=true` — no longer counts as driven, so
+ *       `manual` is a real kill-switch (the old regex would still schedule/act on it).
+ * `conductor` is intentionally NOT included: the external loop drives it and the in-process engine
+ * stands down. Candidate ids are gathered from both key families so any project that ever set a
+ * mode or a legacy flag is considered.
+ */
+export function monitorDrivenProjectIds(prefMap: Map<string, string>): Set<string> {
+  const candidates = new Set<string>();
+  for (const key of prefMap.keys()) {
+    const sm = startModePrefDef.projectIdOf(key);
+    if (sm) candidates.add(sm);
+    const ad = autodrivePrefDef.projectIdOf(key);
+    if (ad) candidates.add(ad);
+  }
+  const ids = new Set<string>();
+  for (const projectId of candidates) {
+    if (resolveStartPolicy(prefMap, projectId).mode === "monitor") ids.add(projectId);
+  }
+  return ids;
+}
+
+/**
+ * The monitor cycle should run/reschedule when the global toggle is on OR any project resolves to
+ * `monitor` Start Mode. Start Mode (via `resolveStartPolicy`) — NOT the raw `board_autodrive` flag —
+ * is now the authoritative scheduling input, so a `monitor` project schedules even with autodrive
+ * unset, and a `manual` project with a stale autodrive flag does not.
+ */
+export function monitorShouldRun(prefMap: Map<string, string>): boolean {
+  return getBool(prefMap, "auto_monitor") || monitorDrivenProjectIds(prefMap).size > 0;
 }

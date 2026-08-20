@@ -2,6 +2,8 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { mcpError, mcpJson } from "../db-utils.js";
 
 export function registerListProjects(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema } = deps;
@@ -45,19 +47,9 @@ export function registerListProjects(server: McpServer, deps: ToolDeps = prodDep
           isActive: p.id === activeId,
         }));
 
-        return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify({ activeProjectId: activeId, projects: result }, null, 2),
-          }],
-        };
+        return mcpJson({ activeProjectId: activeId, projects: result });
       } catch (err) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: `Error listing projects: ${err instanceof Error ? err.message : String(err)}`,
-          }],
-        };
+        return mcpError(`Error listing projects: ${errorMessage(err)}`);
       }
     },
   );

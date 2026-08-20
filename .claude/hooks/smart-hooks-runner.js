@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @board-hook-version: 1
 /**
  * Smart Hooks Runner — config-driven hook runner for agentic-kanban.
  *
@@ -18,21 +19,50 @@ const fs = require("fs");
 const path = require("path");
 const { execSync } = require("child_process");
 const readline = require("readline");
+const { cachedTopology } = require("./git-topology-cache.js");
 
 let hookInput = {};
 
+// Set by the container wrap (containerEnv in devcontainer-workspace.service.ts) on every
+// containerized builder launch — the ONLY reliable signal this process has that it's running
+// inside a builder image rather than on the host. Host-shaped checks (stack quick-checks
+// generated from the HOST toolchain profile) assume host binaries/paths that may not exist
+// in the image, so they degrade to a skip-with-visible-log instead of exec'ing and failing
+// closed on every Stop (#158).
+function isContainerized() {
+  return process.env.AGENTIC_KANBAN_CONTAINER === "1";
+}
+
+// See validate-command-safety.js: these are constant per start directory but were
+// re-spawning `git` on every call. Cache on startDir rather than unconditionally,
+// since hookInput.cwd is filled in asynchronously from stdin.
+const gitLookupCache = new Map();
+
+function cachedGitLookup(kind, startDir, resolve) {
+  const cacheKey = `${kind} ${startDir}`;
+  if (gitLookupCache.has(cacheKey)) return gitLookupCache.get(cacheKey);
+  // Constant per start directory, but each hook call is a fresh process, so this
+  // re-spawned git every time — 1.9s/4.0s for toplevel/common-dir while the board's
+  // reconcilers are running. Persist across invocations (#279).
+  const value = cachedTopology(kind, startDir, resolve);
+  gitLookupCache.set(cacheKey, value);
+  return value;
+}
+
 function getProjectDir() {
   const startDir = process.env.CLAUDE_PROJECT_DIR || hookInput.cwd || process.cwd();
-  try {
-    return execSync("git rev-parse --show-toplevel", {
-      cwd: startDir,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-      windowsHide: true,
-    }).trim();
-  } catch {
-    return startDir;
-  }
+  return cachedGitLookup("toplevel", startDir, () => {
+    try {
+      return execSync("git rev-parse --show-toplevel", {
+        cwd: startDir,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        windowsHide: true,
+      }).trim();
+    } catch {
+      return startDir;
+    }
+  });
 }
 
 function getScriptProjectDir() {
@@ -74,6 +104,9 @@ function loadGeneratedRules(projectDir) {
       filePatterns: Array.isArray(r.filePatterns) ? r.filePatterns : [],
       blocking: r.blocking !== false,
       timeout: typeof r.timeout === "number" ? r.timeout : 120,
+      // Generated rules are always derived from the HOST stack profile (host pnpm/tsc/etc
+      // paths) — never safe to trust verbatim inside a builder container (#158).
+      containerSkippable: true,
     }));
 }
 
@@ -136,12 +169,63 @@ function matchesPatterns(filePath, patterns) {
   });
 }
 
+// Local hooks that expose an in-process entry point, keyed by the script basename
+// their configured `command` ends with. Calling these via require() instead of
+// execSync saves a full node cold start per invocation — on Windows under RAM
+// pressure that is 0.5–1.2s EVERY shell tool call, and it was the direct cause of
+// the spurious "timed out after 30s … Blocking anyway" fail-closed blocks on
+// read-only commands (#279). The spawn path below is still the fallback for any
+// hook without an in-process API, and the scripts remain standalone-runnable for
+// Codex/Pi.
+const IN_PROCESS_HOOKS = {
+  "validate-command-safety.js": {
+    module: "./validate-command-safety.js",
+    run: (mod, inputData) => mod.evaluateCommand(inputData || {}),
+  },
+};
+
+function inProcessHookFor(command) {
+  if (typeof command !== "string") return null;
+  for (const [basename, entry] of Object.entries(IN_PROCESS_HOOKS)) {
+    // `node <any path>/<basename>` and nothing else — so a command that merely
+    // passes the script to something else (or appends extra args we'd drop) still
+    // takes the spawn path.
+    const re = new RegExp(
+      `^\\s*node\\s+(["']?)[^"']*${basename.replace(/[.]/g, "\\.")}\\1\\s*$`,
+    );
+    if (re.test(command)) return entry;
+  }
+  return null;
+}
+
 function runCheck(check, inputData, editedFiles) {
   const timeout = (check.timeout || 30) * 1000;
   const env = {
     ...process.env,
     ...(editedFiles ? { SMART_HOOKS_EDITED_FILES: JSON.stringify(editedFiles) } : {}),
   };
+
+  const inProcess = inProcessHookFor(check.command);
+  if (inProcess) {
+    try {
+      const mod = require(inProcess.module);
+      const verdict = inProcess.run(mod, inputData);
+      const stderr = Array.isArray(verdict?.stderr) ? verdict.stderr.join("\n") : "";
+      if (verdict?.decision === "block") {
+        return { success: false, output: verdict.reason || stderr };
+      }
+      if (stderr) console.error(stderr);
+      return { success: true, output: "" };
+    } catch (err) {
+      // A broken in-process hook must not silently allow: fall through to the
+      // spawn path so the guard still gets its say.
+      console.error(
+        `[smart-hooks] in-process ${check.name || check.command} failed (${err && err.message}); ` +
+        `falling back to spawning it.`
+      );
+    }
+  }
+
   try {
     execSync(check.command, {
       cwd: check.cwd || getProjectDir(),
@@ -154,10 +238,42 @@ function runCheck(check, inputData, editedFiles) {
     });
     return { success: true, output: "" };
   } catch (err) {
-    return {
-      success: false,
-      output: [err.stdout || "", err.stderr || ""].join("\n").trim(),
-    };
+    // A killed-on-timeout check still fails closed, but it is NOT a policy
+    // decision — it never got to evaluate the command. Saying so turns an
+    // empty-reason block (which reads as an unexplained veto) into an
+    // actionable infra failure.
+    const timedOut = err.signal === "SIGTERM" || err.code === "ETIMEDOUT";
+    const output = [err.stdout || "", err.stderr || ""].join("\n").trim();
+    if (timedOut) {
+      // #487 — a timeout is INCONCLUSIVE, not evidence the code is broken: the check never
+      // got to evaluate the command. For a SAFETY check (`alwaysRun`, e.g.
+      // validate-command-safety) that ambiguity must still block — refusing to run beats
+      // running something unvetted. For a speculative correctness check (typecheck, tests) it
+      // must NOT: a command that cannot finish inside its budget then blocks unconditionally,
+      // which makes the gate permanently red and therefore signal-free, and floods every
+      // response with its own truncated output. Measured case: a generated rule ran the whole
+      // `test:mine` suite (10+ min here) under a 180s timeout, so it could only ever time out.
+      //
+      // Same reasoning the merge gate already applies to a timed-out verify_script (#192:
+      // "inconclusive/retryable, NOT proof the code is broken"). A REAL failure — the command
+      // ran and exited non-zero — still blocks exactly as before.
+      const isSafetyCheck = check.alwaysRun === true;
+      return {
+        success: !isSafetyCheck,
+        timedOut: true,
+        advisory: !isSafetyCheck,
+        output:
+          `${check.name || check.command} could not evaluate this command: ` +
+          `the check timed out after ${timeout / 1000}s and was killed. ` +
+          (isSafetyCheck
+            ? `Blocking anyway (fail closed) — an unevaluated SAFETY check must not pass.`
+            : `NOT blocking — a timeout is inconclusive, not a failure. If this check ` +
+              `routinely times out, narrow its command (file-scoped instead of whole-suite) ` +
+              `or raise its timeout; a check that can never finish carries no signal.`) +
+          (output ? `\n${output}` : ""),
+      };
+    }
+    return { success: false, output };
   }
 }
 
@@ -202,20 +318,24 @@ function getMainCheckout() {
   // In a worktree, --git-common-dir resolves to the MAIN checkout's .git, whose parent
   // is the main checkout; in the main checkout it resolves to ./.git → the repo root.
   const startDir = process.env.CLAUDE_PROJECT_DIR || hookInput.cwd || process.cwd();
-  try {
-    const commonDir = execSync("git rev-parse --path-format=absolute --git-common-dir", {
-      cwd: startDir,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-      windowsHide: true,
-    }).trim();
-    if (commonDir) return path.dirname(commonDir);
-  } catch {}
-  return getProjectDir();
+  return cachedGitLookup("common-dir", startDir, () => {
+    try {
+      const commonDir = execSync("git rev-parse --path-format=absolute --git-common-dir", {
+        cwd: startDir,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        windowsHide: true,
+      }).trim();
+      if (commonDir) return path.dirname(commonDir);
+    } catch {}
+    return getProjectDir();
+  });
 }
 
 function isWorktreePath(p) {
-  return /[\/\\]\.worktrees[\/\\]/i.test(String(p || "")) || /--\.worktrees--/i.test(String(p || ""));
+  // `/` needs no escape inside a character class; escaping it is what `no-useless-escape`
+  // flagged. Both separators still match — verified against a Windows and a POSIX path.
+  return /[/\\]\.worktrees[/\\]/i.test(String(p || "")) || /--\.worktrees--/i.test(String(p || ""));
 }
 
 function commandRunsVitest(command) {
@@ -345,10 +465,22 @@ function handlePostToolUse(input) {
   for (const check of checks) {
     if (!check.enabled) continue;
     if (!matchesPatterns(rel, check.filePatterns)) continue;
+    if (check.containerSkippable && isContainerized()) {
+      console.error(
+        `[smart-hooks] Skipping host-toolchain check "${check.name}" — containerized builder (#158).`
+      );
+      continue;
+    }
 
     const command = check.command.replace(/\{file\}/g, rel);
     const result = runCheck({ ...check, command }, input, state.editedFiles);
 
+    if (result.advisory) {
+      // #487 — inconclusive (timed out), deliberately not blocking. Say so on stderr so the
+      // timeout is visible rather than silently swallowed.
+      console.error(`[smart-hooks] ${check.name}: SKIPPED (inconclusive)`);
+      if (result.output) console.error(result.output);
+    }
     if (!result.success) {
       console.error(`[smart-hooks] ${check.name}: FAILED`);
       if (result.output) console.error(result.output);
@@ -377,6 +509,7 @@ function handleStop(input) {
   }
 
   const blockReasons = [];
+  const skippedContainerChecks = [];
   const isFirstStop = input.stop_hook_active !== true;
   // On re-prompt (stop_hook_active=true), only run checks marked alwaysRun.
   // File-dependent hooks (tests, tsc, playwright) are skipped on re-prompt.
@@ -394,7 +527,21 @@ function handleStop(input) {
       continue;
     }
 
+    // Host-shaped check (host toolchain paths/binaries) run inside a builder container:
+    // skip with a visible, logged downgrade rather than exec'ing and failing closed on a
+    // host assumption the image doesn't meet (#158) — this is what caused a stop-hook-error
+    // on every turn for containerized builders.
+    if (check.containerSkippable && isContainerized()) {
+      skippedContainerChecks.push(check.name || check.command);
+      continue;
+    }
+
     const result = runCheck(check, input, state.editedFiles);
+
+    if (result.advisory) {
+      console.error(`[smart-hooks] ${check.name || check.command}: SKIPPED (inconclusive)`);
+      if (result.output) console.error(result.output);
+    }
 
     if (!result.success && check.blocking) {
       // If the check itself output a JSON block decision, use it directly
@@ -410,6 +557,13 @@ function handleStop(input) {
   }
 
   clearState();
+
+  if (skippedContainerChecks.length > 0) {
+    console.error(
+      `[smart-hooks] Skipped ${skippedContainerChecks.length} host-toolchain check(s) inside a ` +
+        `containerized builder (safety downgrade, #158): ${skippedContainerChecks.join(", ")}`
+    );
+  }
 
   if (blockReasons.length > 0) {
     process.stdout.write(
@@ -451,4 +605,5 @@ if (require.main === module) {
 
 module.exports = {
   wrongCheckoutVitestReason,
+  isContainerized,
 };

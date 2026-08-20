@@ -2,14 +2,22 @@ import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { workspaces } from "@agentic-kanban/shared/schema";
 import type { WorkspaceSetupRun, WorkspaceSymlinkRun } from "@agentic-kanban/shared";
-import { tryAcquireRepoLock, type RepoLockHandle } from "@agentic-kanban/shared/lib/repo-lock";
+import {
+  inspectRepoLock,
+  waitForRepoLock,
+  RepoLockUnavailableError,
+  type RepoLockHandle,
+  type RepoLockWaitOptions,
+} from "@agentic-kanban/shared/lib/repo-lock";
 import type { Database } from "../db/index.js";
+import { listWorkspaceRepos, type RepoRow } from "../repositories/repo.repository.js";
 import type { ProviderName } from "./agent-provider.js";
 import type { AgentSettings } from "./agent-settings.service.js";
 import { loadProjectRuntimeConfig } from "./project-runtime-config.service.js";
 import * as realGitService from "./git.service.js";
 import { detectWorkspaceMergeConflicts } from "./workspace-merge-conflict.service.js";
 import { getDirtyMainFiles } from "./merge-executor.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export class WorkspaceError extends Error {
   constructor(
@@ -21,6 +29,41 @@ export class WorkspaceError extends Error {
   }
 }
 
+/**
+ * Default per-step bound for {@link withStepTimeout}. Deliberately much shorter than
+ * the git adapter's own 10-minute default (`DEFAULT_GIT_TIMEOUT_MS`, git-exec.ts) — an
+ * interactive close/cleanup request must fail loudly within tens of seconds, not sit on
+ * a request that could legitimately still be "waiting" up to 10 minutes later (#268).
+ */
+export const CLOSE_STEP_TIMEOUT_MS = 30_000;
+
+/**
+ * Race `fn()` against a bound so a single wedged step (an unbounded fs walk, a git call
+ * blocked on a Windows file handle, a hung docker/compose call) can never make the whole
+ * operation hang forever (#268: `POST /workspaces/:id/close` hung with no HTTP response
+ * at all on an idle, empty worktree). On timeout, rejects with an error naming the step
+ * so callers/logs say exactly which step was slow instead of just "it hung".
+ *
+ * Note this does not (cannot, for a plain Promise) cancel the underlying operation — a
+ * still-running fs/git call keeps running in the background — but it unblocks the caller
+ * and lets it fail loudly / fall back instead of waiting indefinitely.
+ */
+export async function withStepTimeout<T>(
+  step: string,
+  fn: () => Promise<T>,
+  ms: number = CLOSE_STEP_TIMEOUT_MS,
+): Promise<T> {
+  let timer: NodeJS.Timeout;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`step "${step}" timed out after ${ms}ms`)), ms);
+  });
+  try {
+    return await Promise.race([fn(), timeoutPromise]);
+  } finally {
+    clearTimeout(timer!);
+  }
+}
+
 export function applyWorkspaceAgentSelection(
   settings: AgentSettings,
   workspace: typeof workspaces.$inferSelect,
@@ -28,7 +71,20 @@ export function applyWorkspaceAgentSelection(
   const provider = workspace.provider;
   if (provider !== "claude" && provider !== "codex" && provider !== "copilot" && provider !== "pi") return settings;
 
-  const profileName = workspace.claudeProfile || undefined;
+  // A profile pinned on the RECORD wins; otherwise inherit the board's current default
+  // (which `resolveAgentSettings` already resolved from `claude_profile`) instead of
+  // dropping it. Overwriting unconditionally meant a workspace row with a null profile —
+  // the normal case, since nothing pins one — silently erased the configured default, so
+  // the launch fell through to whatever CLAUDE_CONFIG_DIR the SERVER process happened to
+  // inherit. Symptom: setting the default profile had no effect on builders at all, and
+  // the resulting agent ran under a different (possibly quota-exhausted) subscription
+  // than the one configured. `profile` is what `resolveProviderRotation` keys off to set
+  // CLAUDE_CONFIG_DIR, so erasing it also disabled OAuth-subscription selection entirely.
+  //
+  // Only inherit a selection tagged for THIS workspace's provider — a claude profile name
+  // must never leak into a codex/copilot/pi launch.
+  const inheritedProfile = settings.profile?.provider === provider ? settings.profile.name : undefined;
+  const profileName = (workspace.claudeProfile || undefined) ?? inheritedProfile;
   const agentArgs = provider === "claude"
     ? settings.agentArgs
     : settings.agentArgs
@@ -39,7 +95,6 @@ export function applyWorkspaceAgentSelection(
     ...settings,
     agentArgs,
     provider,
-    claudeProfile: provider === "claude" ? profileName : undefined,
     profile: profileName ? { provider: provider as ProviderName, name: profileName } : undefined,
   };
 }
@@ -80,11 +135,11 @@ export async function resolveRelaunchAgentSelection(
   return {
     agentCommand: runtime.provider.agentCommand,
     agentArgs: runtime.provider.agentArgs,
-    claudeProfile: runtime.provider.provider === "claude" ? runtime.provider.profileName : undefined,
     profile: runtime.provider.profileSelection,
     provider: runtime.provider.provider,
     resumeWithNewModel: runtime.provider.resumeWithNewModel,
     permissionPromptTool: runtime.provider.permissionPromptTool,
+    model: runtime.provider.model,
   };
 }
 
@@ -113,6 +168,13 @@ export interface CreateWorkspaceInput {
   tddMode?: boolean;
   includeVisualProof?: boolean;
   skipSetup?: boolean;
+  /**
+   * #628 — per-launch override of the project's `sibling_install_mode`. `background` starts
+   * the agent as soon as the worktrees exist and installs dependencies behind it; the merge
+   * gate then refuses to land the branch until every install has finished. Unset = the
+   * project preference.
+   */
+  installMode?: "sequential" | "parallel" | "background";
   customPrompt?: string;
   /** Markdown block of answered preflight clarifications, prepended to the agent's
    *  initial context so it starts with the resolved Q&A. */
@@ -126,6 +188,19 @@ export interface CreateWorkspaceInput {
   model?: string;
   /** Skip the context-packer for lightweight tickets that don't need auto-context. */
   skipContextPacker?: boolean;
+  /**
+   * Multi-repo scope (#91): the repo identifiers (id/name/path) this workspace spans,
+   * including the leading repo. Only in-scope siblings get a worktree provisioned.
+   * Omitted/empty = all repos (zero-regression default).
+   */
+  repoScope?: string[];
+  /**
+   * Ticket group (#661): ADDITIONAL issues this workspace serves beyond `issueId` (the
+   * lead). All must belong to the lead's project and have no live workspace of their
+   * own. They flip to In Progress in the same transaction as the lead, are rendered in
+   * full into the ticket context + prompt, and are all closed when this branch merges.
+   */
+  memberIssueIds?: string[];
 }
 
 export interface CreateWorkspaceResult {
@@ -185,6 +260,20 @@ export type ResolveMergeStateDeps = {
   gitService: GitService;
   /** When true, skip the readyForMerge gate so auto_merge_in_review can land committed In Review work. */
   autoMergeInReview?: boolean;
+  /**
+   * Multi-repo awareness: when provided, the ancestor short-circuits (`reconcile` /
+   * `clean-ancestor`) additionally verify that NO sibling repo still has unmerged
+   * commits. Sibling-only work (the core multi-repo use case) must `proceed` to the
+   * full merge pipeline instead of being skipped — or worse, marked Done — on the
+   * leading repo's evidence alone. Optional so single-repo callers/tests are unchanged.
+   */
+  database?: Database;
+  /**
+   * Seam for the sibling repos' on-disk presence probe, forwarded to
+   * `listPendingSiblingMerges`. Production leaves it unset (real `existsSync`); a
+   * suite driving fake git over synthetic paths passes `() => true`.
+   */
+  pathExists?: (path: string) => boolean;
 };
 
 /**
@@ -278,6 +367,23 @@ export async function resolveMergeState(
     const originalUniqueCommits = uniqueCommits === 0 && branchSha !== baseSha && workspace.baseCommitSha
       ? await gitService.countUniqueCommits(repoPath, workspace.baseCommitSha, branchSha).catch(() => 0)
       : 0;
+    // Multi-repo: the leading repo being clean/landed does NOT mean the workspace is
+    // done — a sibling repo may hold the workspace's actual work (a sibling-only
+    // ticket's leading branch is a fresh 0-commit cut, which used to short-circuit to
+    // clean-ancestor forever, or to reconcile→Done with the sibling work unlanded).
+    // When any sibling still has unmerged commits, proceed with the full merge: the
+    // leading merge is a no-op ("Already up to date") and the sibling pipeline
+    // (prevalidateSiblingMerges → executeSiblingMerges) lands the real work.
+    const pendingSiblings = deps.database
+      ? await listPendingSiblingMerges(gitService, deps.database, workspace.id, { pathExists: deps.pathExists })
+      : [];
+    if (pendingSiblings.length > 0) {
+      console.log(
+        `[workspace-merge] leading branch '${workspace.branch}' is clean on ${baseBranch} but ` +
+          `${pendingSiblings.length} sibling repo(s) still have unmerged commits — proceeding with the multi-repo merge instead of short-circuiting`,
+      );
+      return { kind: "proceed" };
+    }
     if (uniqueCommits > 0 || originalUniqueCommits > 0) {
       return { kind: "reconcile", branchSha, baseSha, uniqueCommits };
     }
@@ -306,6 +412,207 @@ export async function resolveMergeState(
 
   return { kind: "proceed" };
 }
+
+// ─── Multi-repo pending-sibling helpers ──────────────────────────────────────
+
+/**
+ * A sibling repo with unmerged work, OR one whose pendency could not be verified at
+ * all (repo directory deleted/moved, base branch renamed, …). Structurally compatible
+ * with `SiblingMergePlan` (workspace-repos.service.ts) so callers can hand the pending
+ * set straight to `executeSiblingMerges` — an `unverifiable` row will simply fail that
+ * pipeline's own git operations rather than silently landing.
+ */
+export interface PendingSiblingMerge {
+  repo: RepoRow;
+  uniqueCommits: number;
+  /**
+   * True when the repo's refs could not be resolved at all (fail-closed — see the
+   * function doc below). `uniqueCommits` is 0 and not meaningful in this case.
+   */
+  unverifiable?: boolean;
+  /** Human-readable reason, set only when `unverifiable` is true. */
+  unverifiableReason?: string;
+}
+
+/**
+ * List the workspace's sibling repos that still have UNMERGED work — OR whose pendency
+ * cannot be determined at all — so callers can never mistake "couldn't check" for
+ * "nothing pending". A row counts as pending when either:
+ *  - its branch still exists and is ahead of its base branch (genuinely unmerged work), or
+ *  - its refs could not be resolved (`unverifiable: true` — repo directory deleted/moved,
+ *    branch or base branch renamed/gone, or any other git error resolving them).
+ * Rows already landed (mergedHeadSha set) or with nothing to land (0 commits ahead of a
+ * VERIFIED base/branch pair) are not pending.
+ *
+ * This is the shared "is the workspace REALLY fully merged?" probe used by the merge
+ * pre-flight, the already-merged reconciliations, and the stranded-sibling startup
+ * reconciler. FAIL CLOSED is deliberate here: a git error must never read as "not
+ * pending", because callers like `checkAlreadyMerged`/`reconcileAlreadyMerged` treat an
+ * empty pending list as license to close the workspace and abandon the sibling's work.
+ * Deliberately DISTINCT from `prevalidateSiblingMerges`, which fails hard (throws) on
+ * any unresolvable row as part of an active merge — this function instead returns the
+ * unverifiable row so the caller can choose its own failure handling (block reconcile,
+ * surface a comment, etc.) without throwing out of a read-only probe.
+ */
+export async function listPendingSiblingMerges(
+  gitService: GitService,
+  database: Database,
+  workspaceId: string,
+  /**
+   * Seam for the on-disk presence probe. Production uses `existsSync`; suites that
+   * drive a FAKE git over synthetic repo paths (`/sibling-repo`) must be able to say
+   * "assume the repo is there" so they keep exercising the git-level semantics they
+   * are actually about, rather than tripping the missing-repo short-circuit.
+   */
+  deps: { pathExists?: (path: string) => boolean } = {},
+): Promise<PendingSiblingMerge[]> {
+  const pathExists = deps.pathExists ?? existsSync;
+  let rows: RepoRow[];
+  try {
+    rows = await listWorkspaceRepos(workspaceId, database);
+  } catch (err) {
+    console.warn(
+      `[workspace-merge] pending-sibling scan: failed to list repos for ${workspaceId}: ${errorMessage(err)}`,
+    );
+    return [];
+  }
+  const pending: PendingSiblingMerge[] = [];
+  for (const repo of rows) {
+    if (repo.mergedHeadSha) continue; // landed and stamped
+    if (!repo.branch || !repo.baseBranch) continue;
+    // countUniqueCommits NEVER throws (returns 0 on any git error), which would read an
+    // unreachable repo as "nothing pending" — resolve both refs first (revParse throws).
+    // The two refs get DIFFERENT failure semantics:
+    //  - baseBranch unresolvable (repo directory deleted/moved so EVERY ref fails, or the
+    //    base branch itself renamed/gone) is a git-error-reads-as-"not pending" trap — fail
+    //    CLOSED, surfaced as `unverifiable`, never silently skipped.
+    //  - branch unresolvable while baseBranch DOES resolve is the legitimate "already landed
+    //    and cleaned up" case (the sibling merge pipeline force-deletes the branch after
+    //    landing) — genuinely nothing left to land, so it stays "not pending".
+    // A repo whose directory is GONE cannot be verified, and spawning git to
+    // discover that is pure waste: this scan runs for every merged workspace on
+    // every reconciler pass, so a handful of deleted fixture repos re-paid
+    // hundreds of ~120ms `git` spawns per cycle — enough to stall the event loop
+    // for tens of seconds and make the whole API look frozen (#277). A stat is
+    // ~microseconds and yields the SAME fail-closed verdict.
+    const label = repo.name ?? repo.path;
+    if (!pathExists(repo.path)) {
+      const reason = `could not verify sibling repo '${label}' at '${repo.path}' (base branch '${repo.baseBranch}'): repo directory does not exist (deleted or moved?)`;
+      console.warn(`[workspace-merge] pending-sibling scan: ${reason}`);
+      pending.push({ repo, uniqueCommits: 0, unverifiable: true, unverifiableReason: reason });
+      continue;
+    }
+    try {
+      await gitService.revParse(repo.path, repo.baseBranch);
+    } catch (err) {
+      const reason = `could not verify sibling repo '${label}' at '${repo.path}' (base branch '${repo.baseBranch}'): ${errorMessage(err)}`;
+      console.warn(`[workspace-merge] pending-sibling scan: ${reason}`);
+      pending.push({ repo, uniqueCommits: 0, unverifiable: true, unverifiableReason: reason });
+      continue;
+    }
+    try {
+      await gitService.revParse(repo.path, repo.branch);
+    } catch {
+      continue; // branch ref gone → already landed and cleaned up, nothing left to land
+    }
+    const ahead = await gitService.countUniqueCommits(repo.path, repo.baseBranch, repo.branch).catch(() => 0);
+    if (ahead > 0) pending.push({ repo, uniqueCommits: ahead });
+  }
+  return pending;
+}
+
+/** A sibling worktree that carries uncommitted (tracked or untracked) changes. */
+export interface DirtySiblingWorktree {
+  repo: RepoRow;
+  /** Set when the worktree could not be verified (git error) — treated as dirty (fail-closed). */
+  detail?: string;
+}
+
+/**
+ * Detect sibling worktrees carrying UNCOMMITTED changes — tracked or untracked —
+ * that `git worktree remove --force` (`cleanupSiblingWorktrees`/`removeWorktree`)
+ * would silently destroy. This is the dirty-WORKING-TREE counterpart to
+ * `listPendingSiblingMerges`, which only sees COMMITTED-but-unmerged work: an agent
+ * that edited a sibling worktree but never committed is invisible to that check and
+ * would previously be force-deleted the moment the leading branch (and every OTHER
+ * sibling) read as fully merged (#153).
+ *
+ * A worktree whose directory no longer exists is not dirty (nothing left to lose —
+ * the removal below is already a no-op there). Any OTHER failure to read the
+ * worktree's status fails CLOSED (reported as dirty with `detail`): we cannot prove
+ * the worktree is safe to force-remove, so callers must treat it as blocking rather
+ * than silently proceeding.
+ */
+export async function listDirtySiblingWorktrees(
+  gitService: GitService,
+  database: Database,
+  workspaceId: string,
+): Promise<DirtySiblingWorktree[]> {
+  let rows: RepoRow[];
+  try {
+    rows = await listWorkspaceRepos(workspaceId, database);
+  } catch (err) {
+    console.warn(
+      `[workspace-merge] dirty-sibling scan: failed to list repos for ${workspaceId}: ${errorMessage(err)}`,
+    );
+    return [];
+  }
+  const dirty: DirtySiblingWorktree[] = [];
+  for (const repo of rows) {
+    if (!repo.worktreePath) continue;
+    if (!existsSync(repo.worktreePath)) continue; // gone — nothing to destroy
+    try {
+      const diff = await gitService.getWorkingTreeDiff(repo.worktreePath);
+      if (diff.trim() !== "") {
+        dirty.push({ repo });
+      }
+    } catch (err) {
+      dirty.push({ repo, detail: errorMessage(err) });
+    }
+  }
+  return dirty;
+}
+
+/**
+ * The same per-repo guards `prevalidateSiblingMerges` runs (dirty main checkout,
+ * HEAD-on-baseBranch, read-only conflict check), applied to an already-detected
+ * PENDING set. Returns human-readable failures; empty means the pending merges are
+ * safe to land via `executeSiblingMerges`. Conflict detection uses the branch-name
+ * variant so it works even when the sibling worktree was already removed.
+ */
+export async function checkPendingSiblingMergeGuards(
+  gitService: GitService,
+  pending: PendingSiblingMerge[],
+): Promise<string[]> {
+  const failures: string[] = [];
+  for (const { repo, unverifiable, unverifiableReason } of pending) {
+    const label = repo.name ?? repo.path;
+    if (unverifiable) {
+      failures.push(unverifiableReason ?? `${label} (${repo.path}): sibling repo pendency could not be verified`);
+      continue;
+    }
+    const dirty = await gitService.getUncommittedTrackedChanges(repo.path).catch(() => [] as string[]);
+    if (dirty.length > 0) {
+      failures.push(`${label}: main checkout has ${dirty.length} uncommitted tracked change(s)`);
+      continue;
+    }
+    const head = await gitService.getCurrentBranch(repo.path).catch(() => "");
+    if (head !== repo.baseBranch) {
+      failures.push(`${label}: main checkout HEAD is on '${head}' but the workspace targets '${repo.baseBranch}'`);
+      continue;
+    }
+    if (typeof gitService.detectConflictsByBranch === "function") {
+      const conflicts = await gitService.detectConflictsByBranch(repo.path, repo.branch!, repo.baseBranch!).catch(() => null);
+      if (conflicts?.hasConflicts) {
+        failures.push(
+          `${label}: merge conflicts in ${conflicts.conflictingFiles.slice(0, 5).join(", ")}${conflicts.conflictingFiles.length > 5 ? ", …" : ""}`,
+        );
+      }
+    }
+  }
+  return failures;
+}
+
 export const MERGE_LOCK_STALE_MS = 15 * 60 * 1000;
 
 export interface ActiveMergeLock {
@@ -369,7 +676,7 @@ export function tryRecoverStaleMergeLock(repoPath: string, lock: ActiveMergeLock
     }
   } catch (err) {
     console.warn(
-      `[merge-lock] index.lock check failed (proceeding with recovery): ${err instanceof Error ? err.message : String(err)}`,
+      `[merge-lock] index.lock check failed (proceeding with recovery): ${errorMessage(err)}`,
     );
   }
   console.warn(
@@ -382,6 +689,23 @@ export function tryRecoverStaleMergeLock(repoPath: string, lock: ActiveMergeLock
 }
 
 /**
+ * How long to wait for the on-disk repo lock before failing loudly (#230).
+ *
+ * Generous on purpose: a legitimately slow holder is a merge running its own verify gate,
+ * which on a full-suite-plus-build project is 30-45 minutes. This must exceed that, or the
+ * bound would convert "correctly waiting behind a real merge" into a spurious failure — so
+ * it only fires for a holder that is genuinely wedged rather than merely slow.
+ *
+ * EXPORTED, and overridable per call via {@link acquireOnDiskRepoLock}'s options, because a
+ * module-private const with a module-private clock made the bound unfalsifiable: no test
+ * could fail if it were deleted (#230 fix-direction item 2).
+ */
+export const ON_DISK_REPO_LOCK_TIMEOUT_MS = 90 * 60 * 1000;
+
+/** How often a waiter logs that it is still waiting, so a stuck merge is diagnosable. */
+export const ON_DISK_REPO_LOCK_LOG_INTERVAL_MS = 60 * 1000;
+
+/**
  * Poll for the on-disk repo lock (#993) — the cross-process source of truth
  * that guards the shared main checkout against every writer, not just this
  * server process: a Conductor-loop agent's own `git` commands, a human
@@ -390,12 +714,71 @@ export function tryRecoverStaleMergeLock(repoPath: string, lock: ActiveMergeLock
  * stays as the in-process waiter queue (so same-process callers get
  * promise-based waiting instead of polling), but admission is only granted
  * once the on-disk lock is actually held.
+ *
+ * Bounded by {@link ON_DISK_REPO_LOCK_TIMEOUT_MS}: this used to be an unbounded `for(;;)`,
+ * so a wedged holder turned a merge into an HTTP request that hung forever with no error,
+ * no log line, and no way for the caller to tell "waiting" from "dead" (#230). A holder that
+ * is merely SLOW is still waited out — the timeout is well past the staleness window, so the
+ * normal recovery paths (stale heartbeat, dead-pid reclaim in `tryAcquireRepoLock`) get their
+ * chance first and this only fires when something is genuinely stuck.
+ *
+ * CONTENDED vs UNAVAILABLE (#230): waiting is only correct for the first. A repoPath whose
+ * `.git` is missing, unwritable, or holds an unremovable lockfile can NEVER be acquired, and
+ * the old code polled it exactly like a busy lock — so a misconfigured repoPath produced a
+ * merge that hung for the full timeout instead of failing immediately with the real reason.
+ * `waitForRepoLock` now rethrows `RepoLockUnavailableError` on the spot; callers surface it
+ * as a merge failure.
+ *
+ * `opts` exists so the BOUND is testable: with the timeout and the clock module-private,
+ * deleting the deadline check broke no test.
  */
-async function acquireOnDiskRepoLock(repoPath: string, workspaceId: string): Promise<RepoLockHandle> {
-  for (;;) {
-    const handle = tryAcquireRepoLock(repoPath, `workspace:${workspaceId}`);
-    if (handle) return handle;
-    await new Promise((resolve) => setTimeout(resolve, 500));
+export async function acquireOnDiskRepoLock(
+  repoPath: string,
+  workspaceId: string,
+  opts: Partial<RepoLockWaitOptions> = {},
+): Promise<RepoLockHandle> {
+  const timeoutMs = opts.timeoutMs ?? ON_DISK_REPO_LOCK_TIMEOUT_MS;
+  let lastLoggedMs = 0;
+  try {
+    return await waitForRepoLock(repoPath, `workspace:${workspaceId}`, {
+      ...opts,
+      timeoutMs,
+      pollMs: opts.pollMs ?? 500,
+      // Log periodically while waiting so a stuck merge is diagnosable from the server
+      // log instead of being invisible (#230 fix-direction item 2).
+      onContended: (attempt, waitedMs) => {
+        opts.onContended?.(attempt, waitedMs);
+        if (waitedMs - lastLoggedMs < ON_DISK_REPO_LOCK_LOG_INTERVAL_MS) return;
+        lastLoggedMs = waitedMs;
+        console.warn(
+          `[merge-lock] still waiting for the on-disk repo lock on ${repoPath} (workspace:${workspaceId}) ` +
+            `after ${Math.round(waitedMs / 1000)}s of ${Math.round(timeoutMs / 1000)}s — ${attempt.reason}`,
+        );
+      },
+    });
+  } catch (err) {
+    if (err instanceof RepoLockUnavailableError) {
+      // Fail with the REAL reason rather than a timeout that suggests contention. A
+      // WorkspaceError carries `mergeReason` through to the merge attempt record, so the
+      // board shows "repo_lock_unavailable" instead of a merge that never answered.
+      throw new WorkspaceError(
+        `[merge-lock] cannot lock ${repoPath} for workspace:${workspaceId} — ${err.message}. ` +
+          `This is not lock contention (code ${err.code}); waiting would never have succeeded.`,
+        "CONFLICT",
+        { mergeReason: "repo_lock_unavailable", lockErrorCode: err.code, repoPath },
+      );
+    }
+    if (err instanceof Error && err.message.startsWith("[repo-lock] timed out")) {
+      const held = inspectRepoLock(repoPath);
+      throw new Error(
+        `[merge-lock] timed out after ${Math.round(timeoutMs / 1000)}s waiting for the on-disk repo lock on ${repoPath} ` +
+          `(workspace:${workspaceId})` +
+          (held
+            ? ` — held by ${held.contents.holder} pid=${held.contents.pid} host=${held.contents.hostname}, heartbeat age ${Math.round(held.ageMs / 1000)}s`
+            : " — no lockfile present, so acquisition is failing for another reason (check the [repo-lock] warnings)"),
+      );
+    }
+    throw err;
   }
 }
 
@@ -448,6 +831,7 @@ export async function acquireRepoMergeLock<T>(
   }
 
   const diskLock = await acquireOnDiskRepoLock(repoPath, workspaceId);
+  console.log(`[merge-lock] acquired on-disk lock: repoPath=${repoPath} workspaceId=${workspaceId} pid=${diskLock.contents.pid}`);
   const heartbeatTimer = setInterval(() => diskLock.heartbeat(), 15_000);
 
   const holdExtensions: Promise<unknown>[] = [];
@@ -487,6 +871,7 @@ export async function acquireRepoMergeLock<T>(
     }
     clearInterval(heartbeatTimer);
     diskLock.release();
+    console.log(`[merge-lock] released on-disk lock: repoPath=${repoPath} workspaceId=${workspaceId}`);
   })();
   activeMerges.set(repoPath, lock);
   return resultPromise;

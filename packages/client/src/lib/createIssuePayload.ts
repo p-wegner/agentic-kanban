@@ -40,6 +40,8 @@ export interface CreateIssuePayloadInput {
   /** Whether a model override applies (Claude/Codex selected). */
   modelApplies: boolean;
   settings: Record<string, string>;
+  /** Repos this issue touches (#94, multi-repo authoring). Empty for single-repo projects. */
+  reposTouched?: string[];
 }
 
 /** Build the create-issue submit payload (no side effects). Launch fields are
@@ -59,5 +61,6 @@ export function buildCreateIssuePayload(i: CreateIssuePayloadInput): CreateIssue
     model: (i.start && i.modelApplies && i.selectedModel) || undefined,
     isDirect: (i.start && i.isDirect) || undefined,
     skillId: (i.start && i.skillId) || undefined,
+    reposTouched: i.reposTouched && i.reposTouched.length > 0 ? i.reposTouched : undefined,
   };
 }

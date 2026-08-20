@@ -1,6 +1,7 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export type ProcessAuditEvent = Record<string, unknown> & {
   action: string;
@@ -24,7 +25,7 @@ export function auditProcessEvent(event: ProcessAuditEvent): void {
     mkdirSync(dirname(logPath), { recursive: true });
     appendFileSync(logPath, line + "\n", "utf8");
   } catch (err) {
-    console.warn(`[process-audit] failed to write audit log: ${err instanceof Error ? err.message : String(err)}`);
+    console.warn(`[process-audit] failed to write audit log: ${errorMessage(err)}`);
   }
 }
 

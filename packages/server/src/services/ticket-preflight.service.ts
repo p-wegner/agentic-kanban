@@ -7,29 +7,11 @@ import {
   getTerminalStatusIds,
   getProjectIssuesWithNodeType,
 } from "../repositories/ticket-preflight.repository.js";
+import { extractModelJson } from "@agentic-kanban/shared/lib/model-json";
+import type { PreflightVerdict, TicketPreflightResult, PreflightClarification } from "@agentic-kanban/shared/types";
 
-export type PreflightVerdict = "ready" | "needs-clarification" | `duplicate-of-#${number}` | `blocked-by-#${number}`;
-
-export interface TicketPreflightResult {
-  verdict: PreflightVerdict;
-  /** Concrete questions to answer before the agent starts (when verdict = needs-clarification) */
-  questions: string[];
-  /** Human-readable summary of why the verdict was reached */
-  summary: string;
-  /** Issue number this ticket duplicates (when verdict starts with duplicate-of-#) */
-  duplicateOfNumber?: number;
-  /** Issue number that blocks this ticket (when verdict starts with blocked-by-#) */
-  blockedByNumber?: number;
-  /** True when the ticket looks like a non-trivial / multi-file feature (not a tiny quick edit).
-   *  Used to warn against running it in a direct workspace (which edits the main checkout in place). */
-  looksComplex: boolean;
-}
-
-/** A question + the answer the user provided during preflight clarification. */
-export interface PreflightClarification {
-  question: string;
-  answer: string;
-}
+// Shapes live in shared (#569); PreflightModal.tsx had `PreflightVerdict = string`.
+export type { PreflightVerdict, TicketPreflightResult, PreflightClarification };
 
 /** Render answered clarifications as a markdown block — reused for the prompt re-check
  *  and as the comment body / agent-context injection. */
@@ -112,8 +94,7 @@ Other open issues on the board:
 ${issuesSummary}`;
 
   const stdout = await invokeClaudePrompt(prompt, { database, model: "claude-haiku-4-5" });
-  const cleaned = stdout.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-  const parsed = JSON.parse(cleaned) as {
+  const parsed = extractModelJson(stdout, { shape: "object" }) as {
     verdict?: string;
     questions?: unknown[];
     summary?: string;

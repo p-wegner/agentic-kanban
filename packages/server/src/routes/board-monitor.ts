@@ -15,6 +15,8 @@ import {
 } from "../services/conductor-schedule.service.js";
 import { validateCronExpression } from "@agentic-kanban/shared/lib/cron-utils";
 
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
+import { requireProject } from "../services/require-project.js";
 /**
  * Read-only observability for the detached board-monitor orchestrator loop
  * (scripts/board-monitor/). Mounted under /projects.
@@ -41,12 +43,9 @@ export function createBoardMonitorRoute(database: Database) {
 
   router.get("/:id/monitor-tunables", async (c) => {
     const projectId = c.req.param("id");
-    const project = await getProjectById(projectId, database);
-    if (!project) {
-      return c.json({ error: "project not found" }, 404);
-    }
+    await requireProject(projectId, database);
     const rows = await getAllPreferences(database);
-    const prefMap = new Map(rows.map((r) => [r.key, r.value]));
+    const prefMap = toPrefMap(rows);
     const { tunables, source } = resolveMonitorTunables(prefMap, projectId);
     const runtime = resolveProjectRuntimeConfig({ projectId, prefMap });
     return c.json({ tunables, source, startPolicy: runtime.startPolicy });
@@ -56,8 +55,7 @@ export function createBoardMonitorRoute(database: Database) {
   // calls this when the user picks "conductor" (start) vs manual/monitor (stop).
   router.post("/:id/conductor", async (c) => {
     const projectId = c.req.param("id");
-    const project = await getProjectById(projectId, database);
-    if (!project) return c.json({ error: "project not found" }, 404);
+    const project = await requireProject(projectId, database);
     const body = await c.req
       .json<{ action?: "start" | "stop"; agent?: "claude" | "codex" }>()
       .catch((): { action?: "start" | "stop"; agent?: "claude" | "codex" } => ({}));
@@ -78,16 +76,14 @@ export function createBoardMonitorRoute(database: Database) {
   // single per-project JSON preference; the minute scheduler (scheduled-tasks.ts) fires it.
   router.get("/:id/conductor-schedule", async (c) => {
     const projectId = c.req.param("id");
-    const project = await getProjectById(projectId, database);
-    if (!project) return c.json({ error: "project not found" }, 404);
+    const project = await requireProject(projectId, database);
     const raw = await getPreference(conductorCronPrefKey(projectId), database);
     return c.json({ available: conductorAvailable(project.repoPath || ""), schedule: resolveConductorSchedule(raw) });
   });
 
   router.put("/:id/conductor-schedule", async (c) => {
     const projectId = c.req.param("id");
-    const project = await getProjectById(projectId, database);
-    if (!project) return c.json({ error: "project not found" }, 404);
+    const project = await requireProject(projectId, database);
     const body = await c.req
       .json<{ enabled?: boolean; cron?: string; agent?: "claude" | "codex" }>()
       .catch(() => ({} as { enabled?: boolean; cron?: string; agent?: "claude" | "codex" }));

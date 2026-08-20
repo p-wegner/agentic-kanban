@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import { apiPost, apiDelete } from "../lib/api.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 
 interface MoveToDoneDialogProps {
   issue: IssueWithStatus;

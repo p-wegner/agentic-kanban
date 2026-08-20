@@ -1,4 +1,5 @@
-import type { WorkspaceSetupRun, WorkspaceSymlinkRun } from "@agentic-kanban/shared";
+import type { WorkspaceSetupRun, WorkspaceSymlinkRun, ServiceStackState } from "@agentic-kanban/shared";
+import { parseServiceStackState } from "@agentic-kanban/shared/lib/service-stack-codec";
 
 // Pure row -> DTO projection for getWorkspaceDetails. The repository owns the two
 // queries; this module owns turning the joined row + latest session into the
@@ -38,6 +39,11 @@ export interface WorkspaceDetails {
   lastTool: string | null;
   latestSetup: WorkspaceSetupRun | null;
   latestSymlink: WorkspaceSymlinkRun | null;
+  serviceState: ServiceStackState | null;
+  /** Set when containerized isolation was requested but this workspace's builder ran on the host instead (#160). */
+  isolationDowngraded: boolean;
+  /** Reason for the isolation downgrade (CLI missing, provisioning failed, ...); null when not downgraded. */
+  isolationDowngradeReason: string | null;
   createdAt: string;
   updatedAt: string;
   issue: { title: string; priority: string | null };
@@ -88,6 +94,9 @@ export interface WorkspaceDetailsRow {
   latestSymlinkSkipped: string | null;
   latestSymlinkFailed: string | null;
   latestSymlinkError: string | null;
+  serviceState: string | null;
+  isolationDowngraded: boolean;
+  isolationDowngradeReason: string | null;
   createdAt: string;
   updatedAt: string;
   issueTitle: string;
@@ -163,6 +172,11 @@ function mapCachedDiffStats(row: WorkspaceDetailsRow): WorkspaceDetails["diffSta
   return { filesChanged: row.diffStatCacheFilesChanged, insertions: row.diffStatCacheInsertions ?? 0, deletions: row.diffStatCacheDeletions ?? 0 };
 }
 
+/** Parse the persisted ServiceStackState JSON, tolerating null/garbage (#531). */
+function mapServiceState(row: WorkspaceDetailsRow): ServiceStackState | null {
+  return parseServiceStackState(row.serviceState);
+}
+
 function mapLatestSetup(row: WorkspaceDetailsRow): WorkspaceSetupRun | null {
   if (!row.latestSetupState) return null;
   return {
@@ -175,6 +189,28 @@ function mapLatestSetup(row: WorkspaceDetailsRow): WorkspaceSetupRun | null {
     stdoutTail: row.latestSetupStdoutTail,
     stderrTail: row.latestSetupStderrTail,
   };
+}
+
+/**
+ * The workspace's skill NAME for display (#321).
+ *
+ * `row.skillName` comes from joining `workspaces.skillId` against `agent_skills`, which can only
+ * ever name a DB skill. A DISK skill — every plugin skill, including the one a plugin-loop unit
+ * ticket launches with — has no `agent_skills` row by design, so the join yields null and the card's
+ * skill chip vanished for exactly the workspaces whose skill is most worth naming. The session's
+ * `trigger_type` records it as `skill:<name>` (written by `createWorkspace` from the resolved skill),
+ * so that is the fallback. The DB skill still wins when both exist.
+ */
+export function resolveWorkspaceSkillName(
+  rowSkillName: string | null | undefined,
+  sessionTriggerType: string | null | undefined,
+): string | null {
+  if (rowSkillName) return rowSkillName;
+  if (sessionTriggerType && sessionTriggerType.startsWith("skill:")) {
+    const name = sessionTriggerType.slice("skill:".length).trim();
+    if (name) return name;
+  }
+  return null;
 }
 
 /** Assemble the WorkspaceDetails DTO from a joined row and its latest session (or null). */
@@ -199,7 +235,7 @@ export function mapWorkspaceDetailsRow(row: WorkspaceDetailsRow, sess: Workspace
     model: row.model,
     pendingPlanPath: row.pendingPlanPath,
     skillId: row.skillId,
-    skillName: row.skillName ?? null,
+    skillName: resolveWorkspaceSkillName(row.skillName, sess?.triggerType),
     contextPrimer: row.contextPrimer ?? null,
     closedAt: row.closedAt,
     mergedAt: row.mergedAt,
@@ -213,6 +249,9 @@ export function mapWorkspaceDetailsRow(row: WorkspaceDetailsRow, sess: Workspace
     lastTool,
     latestSetup: mapLatestSetup(row),
     latestSymlink: mapSymlinkRun(row),
+    serviceState: mapServiceState(row),
+    isolationDowngraded: row.isolationDowngraded,
+    isolationDowngradeReason: row.isolationDowngradeReason,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     issue: { title: row.issueTitle, priority: row.issuePriority },

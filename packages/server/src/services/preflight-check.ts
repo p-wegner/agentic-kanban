@@ -4,6 +4,7 @@ import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { bootstrapSymlinks } from "@agentic-kanban/shared/lib/worktree-symlink-bootstrap";
 import type { SymlinkBootstrapResult } from "@agentic-kanban/shared/lib/worktree-symlink-bootstrap";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export interface PreflightResult {
   ok: boolean;
@@ -82,11 +83,67 @@ async function findStaleSafetyFiles(opts: Required<Pick<WorkspaceLaunchPreflight
   return stale;
 }
 
+/**
+ * Files the branch's OWN commits modified (relative to baseBranch), via a three-dot diff
+ * from the merge-base. These are intentional changes, not drift — the reconcile step must
+ * never treat them as stale/needing a reset from base, or it will clobber the ticket's own
+ * work (e.g. a ticket whose whole point is changing hook behavior).
+ */
+async function getBranchOwnedFiles(
+  git: (args: string[], cwd: string) => Promise<string>,
+  worktreePath: string,
+  baseBranch: string,
+): Promise<Set<SafetyPolicyFile>> {
+  try {
+    const output = await git(["diff", "--name-only", `${baseBranch}...HEAD`], worktreePath);
+    return new Set(parsePorcelainFiles(output) as SafetyPolicyFile[]);
+  } catch {
+    return new Set();
+  }
+}
+
+/** How many times a [preflight] reconcile commit already touched this file on this branch. */
+async function countPriorReconcileCommits(
+  git: (args: string[], cwd: string) => Promise<string>,
+  worktreePath: string,
+  file: SafetyPolicyFile,
+): Promise<number> {
+  try {
+    const output = await git(
+      ["log", "--oneline", "-E", "--grep=reconcile safety files.*\\[preflight\\]", "--", file],
+      worktreePath,
+    );
+    return parsePorcelainFiles(output).length;
+  } catch {
+    return 0;
+  }
+}
+
 function parsePorcelainFiles(output: string): string[] {
   return output
     .split("\n")
     .map((line) => line.replace(/\r$/, ""))
     .filter(Boolean);
+}
+
+/**
+ * Paths the board itself writes into every worktree (agent skill bundles, ticket context).
+ * A `git status --porcelain` line for one of these is never the agent's own work — at worst
+ * it is LF/CRLF normalization churn from materialization (#217) — so it must never count as
+ * "the worktree has uncommitted changes" for the relaunch guard. Without this, a workspace
+ * that lands in `error` for an unrelated reason can become permanently unrelaunchable.
+ */
+const BOARD_MATERIALIZED_PREFIXES = [".claude/skills/", ".codex/skills/"];
+
+function isBoardMaterializedPorcelainLine(line: string): boolean {
+  // Porcelain lines are "XY path" (rename lines are "XY from -> to"); strip the 2-char
+  // status + space before matching the path against materialized-artifact prefixes.
+  const path = line.slice(3).split(" -> ").pop() ?? "";
+  return BOARD_MATERIALIZED_PREFIXES.some((prefix) => path.startsWith(prefix));
+}
+
+function excludeBoardMaterializedFiles(files: string[]): string[] {
+  return files.filter((line) => !isBoardMaterializedPorcelainLine(line));
 }
 
 async function getCurrentBranch(
@@ -120,8 +177,17 @@ export async function workspaceLaunchPreflight(
   const git = options.execGit ?? execGit;
   const errors: string[] = [];
   const expectedBranch = options.branch.trim();
-  let dirtyFiles = parsePorcelainFiles(await git(["status", "--porcelain"], options.worktreePath));
+  const baseBranch = options.baseBranch?.trim();
+  let dirtyFiles = excludeBoardMaterializedFiles(
+    parsePorcelainFiles(await git(["status", "--porcelain"], options.worktreePath)),
+  );
   let repairedSymlinks: string[] = [];
+
+  // Files the branch's own commits intentionally modified are never "stale drift" —
+  // exclude them from every staleness check below so reconcile never clobbers them.
+  const branchOwnedFiles = baseBranch
+    ? await getBranchOwnedFiles(git, options.worktreePath, baseBranch)
+    : new Set<SafetyPolicyFile>();
 
   if (expectedBranch) {
     const currentBranch = await getCurrentBranch(git, options.worktreePath);
@@ -139,20 +205,22 @@ export async function workspaceLaunchPreflight(
       } catch (err) {
         errors.push(
           `Workspace is not attached to branch ${expectedBranch} and could not be reattached before launch. ` +
-            `${err instanceof Error ? err.message : String(err)}`,
+            `${errorMessage(err)}`,
         );
         return { ok: false, errors, staleFiles: [], refreshed: false, dirtyFiles, repairedSymlinks };
       }
-      dirtyFiles = parsePorcelainFiles(await git(["status", "--porcelain"], options.worktreePath));
+      dirtyFiles = excludeBoardMaterializedFiles(
+        parsePorcelainFiles(await git(["status", "--porcelain"], options.worktreePath)),
+      );
     }
   }
 
-  const staleBefore = await findStaleSafetyFiles({
+  const staleBefore = (await findStaleSafetyFiles({
     repoPath: options.repoPath,
     worktreePath: options.worktreePath,
     readFile: readPolicyFile,
     exists: policyExists,
-  });
+  })).filter((f) => !branchOwnedFiles.has(f));
 
   if (dirtyFiles.length > 0 && staleBefore.length > 0) {
     errors.push(
@@ -177,21 +245,27 @@ export async function workspaceLaunchPreflight(
         console.warn(`[preflight] worktree symlink repair skipped failures: ${symlinkResult.failed.map(f => `${f.dir}: ${f.error}`).join(", ")}`);
       }
     } catch (err) {
-      console.warn(`[preflight] worktree symlink repair error (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`[preflight] worktree symlink repair error (non-fatal): ${errorMessage(err)}`);
     }
   }
 
-  const baseBranch = options.baseBranch?.trim();
   if (dirtyFiles.length === 0 && baseBranch) {
     try {
       await git(["fetch", "origin", baseBranch], options.worktreePath).catch(() => "");
-      await git(["rebase", baseBranch], options.worktreePath);
+      // `--autostash` because `dirtyFiles` is deliberately NOT the whole truth: it excludes
+      // the board's own materialized artifacts (#217, see BOARD_MATERIALIZED_PREFIXES), so
+      // "no dirty files" can still mean "git sees modified .claude/skills/** files". git
+      // then refuses to rebase a dirty tree, this catch turned that refusal into an error,
+      // and the workspace became permanently unrelaunchable — the exclusion bought nothing.
+      // Autostash makes the exclusion real: the excluded churn is set aside and restored
+      // around the rebase. A no-op when the tree is genuinely clean.
+      await git(["rebase", "--autostash", baseBranch], options.worktreePath);
       refreshed = true;
     } catch (err) {
       try { await git(["rebase", "--abort"], options.worktreePath); } catch { /* best effort */ }
       errors.push(
         `Workspace update-base preflight failed before agent launch. ` +
-          `Checkpoint/commit if needed, then resolve the rebase manually. ${err instanceof Error ? err.message : String(err)}`,
+          `Checkpoint/commit if needed, then resolve the rebase manually. ${errorMessage(err)}`,
       );
       return { ok: false, errors, staleFiles: staleBefore, refreshed, dirtyFiles, repairedSymlinks };
     }
@@ -208,19 +282,29 @@ export async function workspaceLaunchPreflight(
     }
   }
 
-  const staleAfter = await findStaleSafetyFiles({
+  const staleAfter = (await findStaleSafetyFiles({
     repoPath: options.repoPath,
     worktreePath: options.worktreePath,
     readFile: readPolicyFile,
     exists: policyExists,
-  });
+  })).filter((f) => !branchOwnedFiles.has(f));
 
   if (staleAfter.length > 0 && dirtyFiles.length === 0 && baseBranch) {
     // Worktree is clean but safety files diverge from main (e.g. branch pre-dates a hooks
     // change). Pull each stale file directly from the base branch so the agent launches safely.
+    // Files the branch's own commits touched were already excluded from staleAfter above.
     const reconciled: SafetyPolicyFile[] = [];
     const failed: SafetyPolicyFile[] = [];
+    const pingPong: SafetyPolicyFile[] = [];
     for (const file of staleAfter) {
+      const priorReconciles = await countPriorReconcileCommits(git, options.worktreePath, file);
+      if (priorReconciles > 0) {
+        // This exact file was already force-reset from base by a prior [preflight] reconcile
+        // commit and has gone stale again — reconciling it again would silently loop
+        // (reconcile/restore ping-pong). Abort loudly instead of repeating the reset.
+        pingPong.push(file);
+        continue;
+      }
       try {
         await git(["checkout", baseBranch, "--", file], options.worktreePath);
         reconciled.push(file);
@@ -243,7 +327,14 @@ export async function workspaceLaunchPreflight(
           "Refresh these files from the main checkout manually before relaunching.",
       );
     }
-    return { ok: errors.length === 0, errors, staleFiles: failed, refreshed: refreshed || reconciled.length > 0, dirtyFiles, repairedSymlinks };
+    if (pingPong.length > 0) {
+      errors.push(
+        `Workspace safety policy for ${pingPong.join(", ")} was already reconciled from ${baseBranch} once before ` +
+          "and has gone stale again (reconcile/restore ping-pong). Refusing to reconcile it again automatically — " +
+          "resolve manually: either keep this branch's change to the file, or drop the prior [preflight] reconcile commit.",
+      );
+    }
+    return { ok: errors.length === 0, errors, staleFiles: [...failed, ...pingPong], refreshed: refreshed || reconciled.length > 0, dirtyFiles, repairedSymlinks };
   }
 
   if (staleAfter.length > 0) {
@@ -288,6 +379,12 @@ export function preflightCheck(
   }
 
   // 3. KANBAN_SERVER_PORT is set (agent needs it to talk back to the board)
+  //
+  // #615: deliberately NOT `resolveBoardServerPort()`. This asks "did the operator SET a
+  // port?" so it can warn; the resolver always returns a number (defaulting to 3001), so
+  // routing this through it would make the check pass unconditionally and silently delete
+  // the warning below. The only site in the drained set that wants the raw env, not a
+  // resolved value.
   const serverPort = process.env.KANBAN_SERVER_PORT || process.env.PORT;
   if (!serverPort) {
     errors.push("KANBAN_SERVER_PORT / PORT environment variable not set — agent won't be able to reach the board API");

@@ -4,6 +4,7 @@
 
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { StaleWorktreeEntry } from "../hooks/useStaleWorkspaceManager.js";
+import { occupiesWipSlot } from "@agentic-kanban/shared/lib/workspace-liveness";
 
 export interface CrossProjectIssue {
   id: string;
@@ -25,8 +26,7 @@ export type WsStatusFilter =
 
 export type IssueWithMaybeProject = CrossProjectIssue & { projectName?: string };
 
-/** The "active" status chip covers these three workspace states. */
-const ACTIVE_STATUSES = ["active", "reviewing", "fixing"];
+
 
 /**
  * Build the unified issue list for the panel. In cross-project ("all") mode this
@@ -50,7 +50,7 @@ export function selectIssuesWithWorkspaces(
 
 /** Count issues whose main workspace is active / reviewing / fixing. */
 export function countActiveWorkspaces(issues: IssueWithMaybeProject[]): number {
-  return issues.filter((i) => ACTIVE_STATUSES.includes(i.workspaceSummary?.main?.status ?? "")).length;
+  return issues.filter((i) => occupiesWipSlot(i.workspaceSummary?.main?.status)).length;
 }
 
 /** The main-workspace ids of issues whose main workspace is idle (for bulk-close). */
@@ -75,7 +75,7 @@ export function matchesWorkspaceFilter(
 
   if (statusFilter !== "all" && statusFilter !== "stale") {
     if (statusFilter === "active") {
-      if (!ACTIVE_STATUSES.includes(mainStatus)) return false;
+      if (!occupiesWipSlot(mainStatus)) return false;
     } else if (mainStatus !== statusFilter) {
       return false;
     }

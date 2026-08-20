@@ -3,7 +3,7 @@ import ReactMarkdown from "react-markdown";
 import type { IssueWithStatus, UpdateIssueRequest } from "@agentic-kanban/shared";
 import { MarkdownToolbar } from "./MarkdownToolbar.js";
 import { IssueWorkspacesSection } from "./IssueWorkspacesSection.js";
-import { IssueDetailDialogs, type MoveToDonePending, type DependencyImpactPending } from "./IssueDetailDialogs.js";
+import { IssueDetailDialogs } from "./IssueDetailDialogs.js";
 import { usePanelLayout } from "../hooks/usePanelLayout.js";
 import { useIssueEditForm } from "../hooks/useIssueEditForm.js";
 import { useIssueDetailData } from "../hooks/useIssueDetailData.js";
@@ -118,6 +118,12 @@ export function IssueDetailPanel({
     milestones,
     activeShowdownId, setActiveShowdownId,
     descriptionFetching,
+    cycleTime,
+    timeEntries,
+    touchedFiles,
+    relatedIssues,
+    mergedCommits,
+    extrasLoading,
   } = useIssueDetailData(issue, onIssueUpdate);
   const {
     mode: panelMode,
@@ -522,7 +528,7 @@ export function IssueDetailPanel({
                 </div>
               </div>
             ) : issue.description ? (
-              <div className="markdown-body">
+              <div className="markdown-body" data-testid="issue-description">
                 <ReactMarkdown>{normalizeMarkdown(issue.description)}</ReactMarkdown>
               </div>
             ) : descriptionFetching ? (
@@ -564,10 +570,10 @@ export function IssueDetailPanel({
           />
 
           {/* Cycle time badge — only shown in view mode */}
-          {!editing && <IssueCycleTimeBadge issueId={issue.id} />}
+          {!editing && <IssueCycleTimeBadge data={cycleTime} loading={extrasLoading} />}
 
           {/* Work log section — only shown in view mode */}
-          {!editing && <IssueWorkLogSection issueId={issue.id} />}
+          {!editing && <IssueWorkLogSection issueId={issue.id} initial={timeEntries} loading={extrasLoading} />}
 
           {/* Workspaces section — placed directly below status/metadata for contextual proximity */}
           {!editing && (
@@ -613,6 +619,10 @@ export function IssueDetailPanel({
             onDeleteComment={handleDeleteComment}
             onAddNote={handleAddNote}
             onNewNoteBodyChange={setNewNoteBody}
+            touchedFiles={touchedFiles}
+            relatedIssues={relatedIssues}
+            mergedCommits={mergedCommits}
+            extrasLoading={extrasLoading}
           />
         </div>
 

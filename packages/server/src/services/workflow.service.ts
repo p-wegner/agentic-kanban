@@ -35,7 +35,7 @@ import {
   getWorkspaceProjectRow,
 } from "../repositories/workflow.repository.js";
 import { randomUUID } from "node:crypto";
-import type { BoardEvents } from "./board-events.js";
+import type { BoardEventSink } from "./board-events.js";
 import { materializeSpecTasksForWorkspace } from "./spec-tasks-materialization.service.js";
 import { materializeLatestPhaseArtifactForWorkspace } from "./phase-artifacts.service.js";
 import { normalizeImportedTemplate, validateImportedTemplate } from "../lib/workflow-template-import.js";
@@ -44,7 +44,7 @@ import { normalizeImportedTemplate, validateImportedTemplate } from "../lib/work
 
 export interface WorkflowServiceDeps {
   database: Database;
-  boardEvents?: BoardEvents;
+  boardEvents?: BoardEventSink;
   onWorkflowAdvanced?: (workspaceId: string) => void;
 }
 

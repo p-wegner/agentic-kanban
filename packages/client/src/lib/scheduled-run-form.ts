@@ -3,7 +3,7 @@
 // unit-testable (repo convention) instead of buried inline in JSX. The create and
 // edit forms shared this logic verbatim before extraction; this is the single source.
 
-import { validateCronExpression, describeCronExpression } from "./cron-utils.js";
+import { validateCronExpression, describeCronExpression } from "@agentic-kanban/shared/lib/cron-utils";
 
 export type ScheduleMode = "interval" | "cron";
 

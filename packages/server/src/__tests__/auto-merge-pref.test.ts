@@ -1,3 +1,4 @@
+// @gate:always-run — scans the packages tree for hand-rolled auto_merge reads; that half has no import edge (#647).
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";

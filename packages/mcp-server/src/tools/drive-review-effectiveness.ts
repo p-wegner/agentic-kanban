@@ -1,8 +1,10 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { boardApi, boardErrorText, mcpJson, mcpText } from "../board-call.js";
 import { eq } from "drizzle-orm";
-import { boardApiUrl } from "../server-url.js";
+import { mcpStructuredError } from "../db-utils.js";
 import { prodDeps, type ToolDeps } from "./deps.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * drive_review_effectiveness — mirror of CLI `drive review-effectiveness <drive-id>`.
@@ -50,14 +52,7 @@ export function registerDriveReviewEffectiveness(server: McpServer, deps: ToolDe
           .where(eq(schema.drives.id, driveId))
           .limit(1);
         if (driveRows.length === 0) {
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: JSON.stringify({ error: { code: "DRIVE_NOT_FOUND", message: `Drive '${driveId}' not found.` } }, null, 2),
-              },
-            ],
-          };
+          return mcpStructuredError("DRIVE_NOT_FOUND", `Drive '${driveId}' not found.`);
         }
         pid = driveRows[0].projectId;
       }
@@ -69,38 +64,17 @@ export function registerDriveReviewEffectiveness(server: McpServer, deps: ToolDe
       const qs = params.toString() ? `?${params.toString()}` : "";
 
       try {
-        const res = await fetch(
-          boardApiUrl(`/api/projects/${encodeURIComponent(pid)}/drives/${encodeURIComponent(driveId)}/review-effectiveness${qs}`),
+        const { ok, status, statusText, data } = await boardApi(
+          `/api/projects/${encodeURIComponent(pid)}/drives/${encodeURIComponent(driveId)}/review-effectiveness${qs}`,
         );
-        const data = (await res.json()) as Record<string, unknown>;
 
-        if (!res.ok) {
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: JSON.stringify(
-                  { error: { code: "REQUEST_FAILED", message: data.error ?? res.statusText, status: res.status } },
-                  null,
-                  2,
-                ),
-              },
-            ],
-          };
+        if (!ok) {
+          return mcpStructuredError("REQUEST_FAILED", boardErrorText(data, statusText), { status });
         }
 
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
-        };
+        return mcpJson(data);
       } catch (err) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `Request failed: ${err instanceof Error ? err.message : String(err)}`,
-            },
-          ],
-        };
+        return mcpText(`Request failed: ${errorMessage(err)}`);
       }
     },
   );

@@ -17,19 +17,26 @@ vi.mock("../db/index.js", () => ({ db: {} }));
 vi.mock("../services/git.service.js", () => ({
   prepareForReview: vi.fn(async () => ({ success: true, diffRef: "master", conflictingFiles: [], uncommittedChanges: [] })),
   checkBranchTipIsAncestor: checkBranchTipIsAncestorMock,
+  // #377: runPreMergeGate reads the diff to decide docs-only/package-scoped skips.
+  getChangedFileNames: vi.fn(async () => [] as string[]),
 }));
-vi.mock("../services/butler-event-feed.js", () => ({ emitButlerSystemEvent: vi.fn() }));
 vi.mock("../services/agent-settings.service.js", () => ({
+  // #541: exit-workflow / merge-workflow now resolve their launch settings here instead
+  // of hand-rolling the ladder, so these two must exist on the mock.
+  applyWorkspaceProfileToPrefs: vi.fn((m: Map<string, string>) => m),
+  resolveWorkspaceLaunchSettings: vi.fn(() => ({
+    agentCommand: undefined, agentArgs: undefined, profile: undefined,
+    provider: "claude", resumeWithNewModel: false, permissionPromptTool: undefined,
+  })),
   isMockProfile: vi.fn(() => false),
   toExecutorProvider: vi.fn((p: string) => p),
   MOCK_AGENT_COMMAND: "mock",
 }));
-vi.mock("../startup/review-helpers.js", () => ({
-  buildReviewArgs: vi.fn(() => undefined),
+// #557: the `startup/review-helpers.js` shim is gone — the engine calls the service helper
+// with its own db. Partial mock so the rest of review.service stays real.
+vi.mock("../services/review.service.js", async (importOriginal) => ({
+  ...(await importOriginal() as Record<string, unknown>),
   buildReviewPrompt: vi.fn(async () => ({ prompt: "review", model: undefined })),
-  getEffectiveProfile: vi.fn(() => undefined),
-  parseProviderPref: vi.fn(() => "claude"),
-  applyWorkspaceProfileToPrefs: vi.fn((m: Map<string, string>) => m),
 }));
 vi.mock("../startup/merge-strategy.js", () => ({
   isAutomaticMergeEnabled: vi.fn(() => false),

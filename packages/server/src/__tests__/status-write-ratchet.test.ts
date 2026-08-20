@@ -1,6 +1,8 @@
+// @gate:always-run — ratchets raw status writes across the tree; imports nothing it checks (#538).
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
+import { walkPackageSources } from "../../../shared/__tests__/helpers/guard-scan.js";
 
 /**
  * #953 — ratchet gate against raw status writes outside the transition authorities.
@@ -52,7 +54,15 @@ const AUTHORITY_FILES = new Set([
  * Only SHRINK this list.
  */
 const BASELINE: Record<string, number> = {
-  "mcp-server/src/tools/contract-coupled-issues.ts::issues-statusId": 1,
+  // #501: `contract-coupled-issues.ts::issues-statusId` is GONE — the absorbed-issue
+  // terminal status now goes through `transitionIssueStatus`, so mcp-server has no literal
+  // raw issue-status write left.
+  //
+  // `update_issue` still does `.set(updates)` with an opaque variable, so the heuristic
+  // still sees it and the entry has to stay — but it is now a PROVABLE non-status write:
+  // #501 removed `statusId`/`statusChangedAt` from that object and routed the status
+  // through `transitionIssueStatus`. Same category of false positive as the
+  // workspace-crud/scorecard entries below, kept for the same reason.
   "mcp-server/src/tools/update-issue.ts::issues-opaque-set": 1,
   "server/src/repositories/issue-service.repository.ts::issues-opaque-set": 2,
   "server/src/repositories/issue-service.repository.ts::issues-statusId": 1,
@@ -75,19 +85,8 @@ const BASELINE: Record<string, number> = {
   "server/src/repositories/workspace-summary.repository.ts::workspaces-opaque-set": 2,
 };
 
-function listTsFiles(dir: string): string[] {
-  const out: string[] = [];
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (entry.name === "__tests__" || entry.name === "node_modules") continue;
-      out.push(...listTsFiles(full));
-    } else if (/\.tsx?$/.test(entry.name) && !entry.name.endsWith(".d.ts")) {
-      out.push(full);
-    }
-  }
-  return out;
-}
+/** #583 — the tree walk every guard suite needs, from the one shared helper. */
+const listTsFiles = (dir: string): string[] => walkPackageSources(dir);
 
 const UPDATE_SET_RE =
   /update\(\s*(?:schema\.)?(issues|workspaces)\s*\)\s*\.\s*set\(\s*(\{[\s\S]*?\}|[A-Za-z_$][\w$.]*)\s*[),]/g;

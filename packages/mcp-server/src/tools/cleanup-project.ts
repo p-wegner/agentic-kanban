@@ -2,6 +2,8 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { eq, and, isNotNull } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { mcpError, mcpJson } from "../db-utils.js";
 
 export function registerCleanupProject(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema } = deps;
@@ -46,15 +48,10 @@ export function registerCleanupProject(server: McpServer, deps: ToolDeps = prodD
         const withWorktrees = closedWorkspaces.filter((ws) => ws.workingDir);
 
         if (withWorktrees.length === 0) {
-          return {
-            content: [{
-              type: "text" as const,
-              text: JSON.stringify({
+          return mcpJson({
                 staleWorktrees: [],
                 message: "No stale worktrees found.",
-              }, null, 2),
-            }],
-          };
+              });
         }
 
         const staleWorktrees = withWorktrees.map((ws) => ({
@@ -66,23 +63,13 @@ export function registerCleanupProject(server: McpServer, deps: ToolDeps = prodD
           removeCommand: `git worktree remove --force "${ws.workingDir}"`,
         }));
 
-        return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify({
+        return mcpJson({
               staleWorktrees,
               count: staleWorktrees.length,
               message: `Found ${staleWorktrees.length} closed workspace(s) with stale worktrees. Remove each manually using the 'removeCommand' shown, or run: git worktree remove --force <path>`,
-            }, null, 2),
-          }],
-        };
+            });
       } catch (err) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: `Error scanning for stale worktrees: ${err instanceof Error ? err.message : String(err)}`,
-          }],
-        };
+        return mcpError(`Error scanning for stale worktrees: ${errorMessage(err)}`);
       }
     },
   );

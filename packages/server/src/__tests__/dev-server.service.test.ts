@@ -92,6 +92,30 @@ describe("resolveDevServerPlan", () => {
     expect(plan!.source.port).toBe("worktree-port");
   });
 
+  it("does NOT apply the worktree convention for a non-self project (#100)", () => {
+    // Same worktree path, but this is another project's worktree — the app's 3001/5173
+    // port math must not fabricate a port it never binds.
+    const plan = resolveDevServerPlan({
+      profile: profile({ devHealthUrl: null, devPort: null, isWeb: true }),
+      workingDir: "C:/andrena/.worktrees/feature_ak-42-foo",
+      isSelfProject: false,
+    });
+    expect(plan!.healthUrl).toBeNull();
+    expect(plan!.port).toBeNull();
+    expect(plan!.source.healthUrl).toBe("none");
+    expect(plan!.source.port).toBe("none");
+  });
+
+  it("still applies the worktree convention for the self project (isSelfProject: true)", () => {
+    const plan = resolveDevServerPlan({
+      profile: profile({ devHealthUrl: null, devPort: null, isWeb: true }),
+      workingDir: "C:/andrena/.worktrees/feature_ak-42-foo",
+      isSelfProject: true,
+    });
+    expect(plan!.port).toBe(3043);
+    expect(plan!.source.port).toBe("worktree-port");
+  });
+
   it("prefers profile health URL over the worktree convention", () => {
     const plan = resolveDevServerPlan({
       profile: profile(),

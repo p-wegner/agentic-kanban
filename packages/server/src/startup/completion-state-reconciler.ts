@@ -2,29 +2,33 @@ import { and, eq, inArray } from "drizzle-orm";
 import { sessions, workspaces, issues, projectStatuses } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
+import { workspaceHasCommittedWork } from "../services/workspace-commits.js";
+import { isPidAlive } from "../lib/pid.js";
 
 /** How long a workspace must be in 'active' with a live PID before we reconcile it (hung agent). */
 const HUNG_AGENT_THRESHOLD_MS = 30 * 60 * 1000;
 
-function isPidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "EPERM") return true;
-    return false;
-  }
-}
-
+/**
+ * #539: was a private third implementation that spawned git raw, outside the git-service
+ * SSOT. Now the shared leading-OR-sibling probe — with `onUnknown: false`, deliberately the
+ * OPPOSITE of exit-workflow's policy, and that difference is the thing to check before
+ * unifying two readers of the same question.
+ *
+ * exit-workflow answers `true` when git cannot tell, because there "no commits" licenses
+ * closing a workspace and forcing its issue Done — acting on an unknown destroys work. Both
+ * call sites HERE do the mirror image: `true` makes the reconciler change status (recover a
+ * blocked workspace, or mark a dead-PID session stopped) and `false` skips. So an unknown
+ * must read as FALSE, or a transient git failure starts reconciling on no evidence at all.
+ *
+ * What DID change: the sibling half. A sibling-only workspace (#69) commits nothing in the
+ * leading worktree, so the old leading-only probe read it as "no work" and this pass never
+ * auto-recovered it.
+ */
 async function workspaceHasCommittedChanges(
-  workingDir: string,
-  baseBranch: string,
+  workspace: { id: string; workingDir: string | null; baseBranch: string | null; isDirect?: boolean | null; baseCommitSha?: string | null },
+  database: Database,
 ): Promise<boolean> {
-  // Count commits on HEAD that are not on baseBranch — non-zero means the agent committed work.
-  const { gitExec } = await import("@agentic-kanban/shared/lib/git-exec");
-  const result = await gitExec(["rev-list", "--count", `${baseBranch}..HEAD`], { cwd: workingDir });
-  if (result.code !== 0 || result.error) return false;
-  return parseInt(result.stdout.trim(), 10) > 0;
+  return workspaceHasCommittedWork(workspace, null, database, { onUnknown: false });
 }
 
 /**
@@ -50,7 +54,10 @@ export async function reconcileCompletionStates(
     /** Injected for testing — defaults to isPidAlive. */
     checkPid?: (pid: number) => boolean;
     /** Injected for testing — defaults to workspaceHasCommittedChanges. */
-    checkCommits?: (workingDir: string, baseBranch: string) => Promise<boolean>;
+    checkCommits?: (
+      workspace: { id: string; workingDir: string | null; baseBranch: string | null; isDirect?: boolean | null; baseCommitSha?: string | null },
+      database: Database,
+    ) => Promise<boolean>;
     /** Current time override for testing. */
     now?: string;
   } = {},
@@ -71,6 +78,7 @@ export async function reconcileCompletionStates(
       workingDir: workspaces.workingDir,
       baseBranch: workspaces.baseBranch,
       isDirect: workspaces.isDirect,
+      baseCommitSha: workspaces.baseCommitSha,
       issueStatusName: projectStatuses.name,
     })
     .from(sessions)
@@ -97,7 +105,10 @@ export async function reconcileCompletionStates(
     // a workspace blocked even though work was done (#712).
     if (c.workspaceStatus === "blocked" && (c.sessionStatus === "completed" || c.sessionStatus === "stopped")) {
       if (!c.workingDir || !c.baseBranch) continue;
-      const hasCommits = await checkCommits(c.workingDir, c.baseBranch).catch(() => false);
+      const hasCommits = await checkCommits(
+        { id: c.workspaceId, workingDir: c.workingDir, baseBranch: c.baseBranch, isDirect: c.isDirect, baseCommitSha: c.baseCommitSha },
+        database,
+      ).catch(() => false);
       if (!hasCommits) continue;
 
       console.log(
@@ -123,7 +134,10 @@ export async function reconcileCompletionStates(
       // EPERM edge cases) from killing sessions that are actually still producing output.
       // If workingDir or baseBranch is missing we can't verify — skip to be safe.
       if (pid && c.workingDir && c.baseBranch) {
-        const hasCommits = await checkCommits(c.workingDir, c.baseBranch).catch(() => false);
+        const hasCommits = await checkCommits(
+          { id: c.workspaceId, workingDir: c.workingDir, baseBranch: c.baseBranch, isDirect: c.isDirect, baseCommitSha: c.baseCommitSha },
+          database,
+        ).catch(() => false);
         if (!hasCommits) continue;
       }
       shouldReconcile = true;

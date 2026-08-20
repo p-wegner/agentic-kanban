@@ -2,9 +2,7 @@
 // IIFE/JSX so they are unit-testable; the panel imports them and renders identically.
 
 import type { DependencyItem } from "@agentic-kanban/shared";
-
-/** Statuses that count a dependency as resolved (compared case-insensitively). */
-export const RESOLVED_STATUS_NAMES = ["done", "cancelled", "ai reviewed"];
+import { isResolvedDependencyStatusName } from "@agentic-kanban/shared/lib/status-view";
 
 /**
  * The OUTGOING, blocking-type dependencies (depends_on / blocked_by) of `issueId`
@@ -18,8 +16,7 @@ export function computeBlockingDependencies(dependencies: DependencyItem[], issu
     const isBlockingType = dep.type === "depends_on" || dep.type === "blocked_by";
     if (!isBlockingType) return false;
     if (isIncoming) return false; // incoming depends_on means I'm blocking them, not the other way
-    const statusLower = (dep.issueStatusName ?? "").toLowerCase();
-    return !RESOLVED_STATUS_NAMES.includes(statusLower);
+    return !isResolvedDependencyStatusName(dep.issueStatusName);
   });
 }
 

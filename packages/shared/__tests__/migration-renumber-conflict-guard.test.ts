@@ -57,8 +57,6 @@ describe("autoRenumberMigrations conflict-marker guard (#971)", () => {
     wt = join(root, "wt");
     await mkdir(repo, { recursive: true });
     await git(repo, ["init", "-b", "main"]);
-    await git(repo, ["config", "user.email", "test@example.local"]);
-    await git(repo, ["config", "user.name", "Migration Renumber Test"]);
 
     // Seed main: one existing migration + journal.
     await writeRepoFile(repo, `${DRIZZLE_DIR}/0001_init.sql`, "CREATE TABLE a (id integer);\n");
@@ -68,8 +66,6 @@ describe("autoRenumberMigrations conflict-marker guard (#971)", () => {
 
     // Feature branch in a worktree.
     await git(repo, ["worktree", "add", wt, "-b", "feature/mig", "main"]);
-    await git(wt, ["config", "user.email", "test@example.local"]);
-    await git(wt, ["config", "user.name", "Migration Renumber Test"]);
   });
 
   afterEach(async () => {

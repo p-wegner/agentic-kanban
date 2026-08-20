@@ -1,3 +1,4 @@
+// @gate:always-run — reads the live kanban-workflow SKILL.md outside src/; imports nothing it checks (#538).
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { writeFileSync } from "node:fs";
@@ -32,17 +33,10 @@ function exec(cmd: string, args: string[], cwd: string): Promise<string> {
 
 async function createTempRepo(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "kanban-checkpoint-test-"));
-  await exec("git", ["init"], dir);
-  await exec("git", ["config", "user.email", "test@test.com"], dir);
-  await exec("git", ["config", "user.name", "Test"], dir);
+  await exec("git", ["init", "-b", "main"], dir);
   writeFileSync(join(dir, "README.md"), "# Test\n");
   await exec("git", ["add", "."], dir);
   await exec("git", ["commit", "-m", "Initial commit"], dir);
-  try {
-    await exec("git", ["branch", "-M", "main"], dir);
-  } catch {
-    // already on main
-  }
   return dir;
 }
 

@@ -7,7 +7,7 @@ You are an agent working on a kanban board. You have access to MCP tools (prefix
 
 ## Available Tools
 - get_context — see active project, issue counts, running workspaces
-- list_issues — list issues (filter by status, priority, tag)
+- list_issues — list issues (filter by status, priority, tag); descriptions omitted, use get_issue for full text
 - get_issue — get full issue details including workspaces and dependencies
 - create_issue / update_issue / delete_issue — issue CRUD
 - move_issue — move issue to a different status column

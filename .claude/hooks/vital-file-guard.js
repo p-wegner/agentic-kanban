@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @board-hook-version: 1
 /**
  * Vital-file destruction guard — generic, project-parameterized.
  *

@@ -242,7 +242,12 @@ describe("POST /api/issues/dependencies/batch", () => {
         ],
       }),
     });
-    expect(res.status).toBe(400);
+    // #510 CONTRACT DECISION: a dependency cycle is coded CONFLICT, and CONFLICT is 409.
+    // These routes used to hand-map CONFLICT -> 400 while the central domainErrorHandler
+    // said 409; the ticket asked for that split to be decided once. 409 wins because it is
+    // what "the request conflicts with the current state" means, and the client does not
+    // branch on the status here (it surfaces body.error either way).
+    expect(res.status).toBe(409);
     const body = await res.json() as any;
     expect(body.error).toContain("cycle");
 
@@ -346,7 +351,12 @@ describe("POST /api/issues/contract-coupled", () => {
       body: JSON.stringify({ issueIds: [lead, member], leadIssueId: lead }),
     });
 
-    expect(res.status).toBe(400);
+    // #510 CONTRACT DECISION: a dependency cycle is coded CONFLICT, and CONFLICT is 409.
+    // These routes used to hand-map CONFLICT -> 400 while the central domainErrorHandler
+    // said 409; the ticket asked for that split to be decided once. 409 wins because it is
+    // what "the request conflicts with the current state" means, and the client does not
+    // branch on the status here (it surfaces body.error either way).
+    expect(res.status).toBe(409);
     const body = await res.json() as any;
     expect(body.error).toContain("cycle");
 

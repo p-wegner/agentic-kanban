@@ -46,6 +46,7 @@ const { createSessionLifecycle } = await import("../services/session-manager/ses
 const { buildAgentLaunchConfig } = await import("../services/agent-provider.js");
 const { createMockProc } = await import("./helpers/mocks.js");
 import type { AgentService } from "../services/session-manager/session-lifecycle.js";
+import type { AgentLaunchRequest } from "../services/agent-dispatch.service.js";
 import type { TestDb } from "./helpers/test-db.js";
 import type { workspaceLaunchPreflight } from "../services/preflight-check.js";
 
@@ -193,12 +194,13 @@ describe("agent-sessions.resume.provider-id — capture + relaunch", () => {
       // reproduces the production spawn-arg construction so we can assert the literal --resume flag.
       const captured: { resumeId?: string; args?: string[] } = {};
       const agentService = {
-        launch: vi.fn((...args: unknown[]) => {
-          const providerSessionId = args[5] as string | undefined;
-          const provider = args[11] as string | undefined;
+        // #524: launch() takes one AgentLaunchRequest; these were positions 5 and 11.
+        launch: vi.fn((request: AgentLaunchRequest) => {
+          const providerSessionId = request.providerSessionId;
+          const provider = request.provider;
           captured.resumeId = providerSessionId;
           const cfg = buildAgentLaunchConfig({
-            provider: (provider as "claude-code" | undefined) ?? "claude-code",
+            provider: provider ?? "claude-code",
             providerSessionId,
             agentCommand: "mock-agent", // mock path: builds --resume without touching fs/child_process
           });
@@ -238,8 +240,8 @@ describe("agent-sessions.resume.provider-id — capture + relaunch", () => {
 
       const captured: { resumeId?: string; args?: string[] } = {};
       const agentService = {
-        launch: vi.fn((...args: unknown[]) => {
-          const providerSessionId = args[5] as string | undefined;
+        launch: vi.fn((request: AgentLaunchRequest) => {
+          const providerSessionId = request.providerSessionId;
           captured.resumeId = providerSessionId;
           const cfg = buildAgentLaunchConfig({ provider: "claude-code", providerSessionId, agentCommand: "mock-agent" });
           captured.args = cfg.args;

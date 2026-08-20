@@ -1,15 +1,17 @@
+import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
+import { isBuilderCycleTrigger } from "@agentic-kanban/shared/lib/session-trigger";
+import { readUsageLimitStats } from "@agentic-kanban/shared/lib/session-stats-blob";
 import type { Database } from "../db/index.js";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { db } from "../db/index.js";
-import { isCodexUsageLimitStats } from "./codex-rate-limit.js";
 import { resolveStartPolicy } from "./start-policy.service.js";
-import { parseSessionStats } from "../startup/monitor-cycle-rules.js";
+import { classifyQuotaBlock, parseSessionStats } from "./monitor-cycle-rules.js";
 import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
+import type { AutodriveStallWarning } from "@agentic-kanban/shared/types";
 import {
   getAllPreferences,
   getActiveAutodriveWorkspaceRows,
-  getLatestSessionForWorkspace,
-  getFixAndMergeSessionCount,
+  getSessionSummariesForWorkspaces,
   getProgressIssueRows,
   getProgressWorkspaceRows,
   getProgressSessionRows,
@@ -20,27 +22,20 @@ const ACTIVE_WORKSPACE_STATUSES = ["active", "reviewing", "fixing", "idle", "blo
 const DEFAULT_STALL_WARNING_MIN = 20;
 const FIX_AND_MERGE_ZOMBIE_SESSION_COUNT = 2;
 
+const autodrivePref = projectPref("board_autodrive");
+const startModePref = projectPref("start_mode");
+
 export type AutodriveStallCause =
   | "hung_zero_token_builder"
   | "provider_usage_limit"
+  | "provider_usage_limit_expired"
   | "fix_and_merge_zombie"
   | "in_review_auto_merge_stalled"
-  | "no_progress";
+  | "no_progress"
+  | "unblocked_backlog_not_started";
 
-export interface AutodriveStallWarning {
-  type: "autodrive_stall";
-  projectId: string;
-  projectName: string;
-  detectedAt: string;
-  thresholdMin: number;
-  stalledForMin: number;
-  lastProgressAt: string;
-  activeIssueCount: number;
-  workspaceIds: string[];
-  issueNumbers: number[];
-  cause: AutodriveStallCause;
-  message: string;
-}
+// Shape lives in shared (#567) — it is one arm of the monitor-status warning union.
+export type { AutodriveStallWarning };
 
 interface ActiveWorkspaceRow {
   projectId: string;
@@ -80,11 +75,11 @@ export function parseStallWarningThresholdMin(prefMap: Map<string, string>): num
 function explicitAutoDrivenProjectIds(prefMap: Map<string, string>): Set<string> {
   const ids = new Set<string>();
   for (const [key, value] of prefMap) {
-    const legacy = /^board_autodrive_([0-9a-f-]+)$/.exec(key);
-    if (legacy && value === "true") ids.add(legacy[1]);
+    const legacyProjectId = autodrivePref.projectIdOf(key);
+    if (legacyProjectId && value === "true") ids.add(legacyProjectId);
 
-    const startMode = /^start_mode_([0-9a-f-]+)$/.exec(key);
-    if (startMode && (value === "monitor" || value === "conductor")) ids.add(startMode[1]);
+    const startModeProjectId = startModePref.projectIdOf(key);
+    if (startModeProjectId && (value === "monitor" || value === "conductor")) ids.add(startModeProjectId);
   }
   return ids;
 }
@@ -122,14 +117,32 @@ function sessionTokenTotal(stats: string | null): number | null {
     + numberValue(parsed.contextTokens);
 }
 
-function classifyCause(rows: ActiveWorkspaceWithSessions[], prefMap: Map<string, string>): AutodriveStallCause {
-  if (rows.some((row) => isCodexUsageLimitStats(row.latestSession?.stats))) return "provider_usage_limit";
+function classifyCause(rows: ActiveWorkspaceWithSessions[], prefMap: Map<string, string>, nowMs: number): AutodriveStallCause {
+  // Both providers, not just Codex. A Claude quota death used to fall through to
+  // "no_progress" — the least actionable bucket — so a stall that self-heals at a known
+  // reset time read identically to a genuinely wedged workspace. Measured: a step agent
+  // died on a Claude session limit and its stall warning said "no recent progress" for
+  // 55 minutes while the real cause (and its reset time) sat in the session stats.
+  //
+  // But the reset time has to be COMPARED TO THE CLOCK (#387). The stats row is immutable,
+  // so a blocked workspace re-supplies the same usage-limit blob on every scan forever, and
+  // the label kept claiming "waiting on quota" for days after the quota had demonstrably
+  // reset — a self-healing condition that was not healing, which is the least actionable
+  // report of all because it tells the reader to wait.
+  const quotaRows = rows.filter((row) => readUsageLimitStats(row.latestSession?.stats) !== null);
+  if (quotaRows.length > 0) {
+    const stillWaiting = quotaRows.some((row) => {
+      const block = classifyQuotaBlock(row.latestSession, nowMs);
+      return block !== null && !block.expired;
+    });
+    return stillWaiting ? "provider_usage_limit" : "provider_usage_limit_expired";
+  }
 
   if (rows.some((row) => {
     const sess = row.latestSession;
     if (!sess || sess.status !== "running") return false;
     const tokenTotal = sessionTokenTotal(sess.stats);
-    const builderLike = !sess.triggerType || sess.triggerType === "agent" || sess.triggerType === "chat" || sess.triggerType === "plan-implement";
+    const builderLike = isBuilderCycleTrigger(sess.triggerType);
     return builderLike && (tokenTotal === null || tokenTotal === 0);
   })) return "hung_zero_token_builder";
 
@@ -150,25 +163,75 @@ function classifyCause(rows: ActiveWorkspaceWithSessions[], prefMap: Map<string,
 function causeLabel(cause: AutodriveStallCause): string {
   switch (cause) {
     case "hung_zero_token_builder": return "latest builder appears hung with no token output";
-    case "provider_usage_limit": return "latest session hit a provider usage limit";
+    case "provider_usage_limit": return "latest session hit a provider usage limit and is still inside its reset window";
+    case "provider_usage_limit_expired": return "latest session hit a provider usage limit whose reset time has already passed — wedged, not waiting";
     case "fix_and_merge_zombie": return "fix-and-merge appears to be looping";
     case "in_review_auto_merge_stalled": return "In-Review work is eligible for auto-merge but has not landed";
     case "no_progress": return "no recent status, workspace, session, or merge progress";
+    case "unblocked_backlog_not_started": return "unblocked Backlog/Todo work is queued but was not auto-started this cycle";
   }
 }
 
-async function attachSessions(database: Database, rows: ActiveWorkspaceRow[]): Promise<ActiveWorkspaceWithSessions[]> {
-  const result: ActiveWorkspaceWithSessions[] = [];
-  for (const row of rows) {
-    const latestSession = await getLatestSessionForWorkspace(row.workspaceId, database);
-    const fixAndMergeSessionCount = await getFixAndMergeSessionCount(row.workspaceId, database);
-    result.push({
-      ...row,
-      latestSession,
-      fixAndMergeSessionCount,
+const SKIP_REASON_LABEL: Record<string, string> = {
+  wip_cap: "WIP cap reached",
+  no_auto_start_tag: "opted out via no-auto-start tag",
+  contention_gate: "deferred by file-contention gate",
+  cycle_start_cap: "hit this cycle's max-new-starts cap",
+  feature_type_excluded: "excluded by feature/enhancement type filter",
+};
+
+/**
+ * Turns the per-project skip tallies `runAutoStart` collects while declining to start
+ * otherwise-unblocked Backlog/Todo issues into `autodrive_stall`-shaped warnings, so a
+ * monitor-mode project that looks idle (#179 — `monitor-status` showed
+ * `merged:0, relaunched:0, nudged:0` with zero explanation) gets a named reason instead
+ * of silence. Reuses the `autodrive_stall` warning type/UI rather than inventing a new
+ * one, per the existing "Monitor warnings" rendering.
+ */
+export function buildAutoStartSkipWarnings(
+  skipByProject: Map<string, { issueNumbers: number[]; reasonCounts: Partial<Record<string, number>> }>,
+  projectNames: Map<string, string>,
+  now: Date,
+): AutodriveStallWarning[] {
+  const warnings: AutodriveStallWarning[] = [];
+  for (const [projectId, info] of skipByProject) {
+    const reasonParts = Object.entries(info.reasonCounts)
+      .filter(([, count]) => (count ?? 0) > 0)
+      .map(([reason, count]) => `${SKIP_REASON_LABEL[reason] ?? reason} (${count})`);
+    if (reasonParts.length === 0) continue;
+    const projectName = projectNames.get(projectId) ?? projectId;
+    const issueNumbers = [...info.issueNumbers].sort((a, b) => a - b);
+    const issuePreview = issueNumbers.length > 0 ? ` issue(s) #${issueNumbers.slice(0, 5).join(", #")}` : "";
+    warnings.push({
+      type: "autodrive_stall",
+      projectId,
+      projectName,
+      detectedAt: now.toISOString(),
+      thresholdMin: 0,
+      stalledForMin: 0,
+      lastProgressAt: now.toISOString(),
+      activeIssueCount: issueNumbers.length,
+      workspaceIds: [],
+      issueNumbers,
+      cause: "unblocked_backlog_not_started",
+      message: `Monitor-mode project "${projectName}" had unblocked work not auto-started this cycle for${issuePreview}: ${reasonParts.join(", ")}.`,
     });
   }
-  return result;
+  return warnings;
+}
+
+async function attachSessions(database: Database, rows: ActiveWorkspaceRow[]): Promise<ActiveWorkspaceWithSessions[]> {
+  // Two round trips for the whole batch, not two per workspace (#349) — see
+  // `getSessionSummariesForWorkspaces`.
+  const summaries = await getSessionSummariesForWorkspaces(rows.map((row) => row.workspaceId), database);
+  return rows.map((row) => {
+    const summary = summaries.get(row.workspaceId);
+    return {
+      ...row,
+      latestSession: summary?.latestSession ?? null,
+      fixAndMergeSessionCount: summary?.fixAndMergeSessionCount ?? 0,
+    };
+  });
 }
 
 async function collectProjectProgress(database: Database, projectIds: string[]): Promise<Map<string, string[]>> {
@@ -245,7 +308,7 @@ export async function scanAutodriveStallWarnings(
     const [first] = projectRows;
     const issueNumbers = [...new Set(projectRows.map((row) => row.issueNumber).filter((n): n is number => n !== null))].sort((a, b) => a - b);
     const workspaceIds = [...new Set(projectRows.map((row) => row.workspaceId))];
-    const cause = classifyCause(projectRows, prefs);
+    const cause = classifyCause(projectRows, prefs, nowMs);
     const stalledForMin = Math.floor(stalledMs / 60_000);
     const issuePreview = issueNumbers.length > 0 ? ` issue(s) #${issueNumbers.slice(0, 5).join(", #")}` : " active issue(s)";
     warnings.push({

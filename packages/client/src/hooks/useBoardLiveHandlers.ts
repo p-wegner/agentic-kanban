@@ -1,8 +1,11 @@
 import { useCallback } from "react";
 import type { StatusWithIssues } from "@agentic-kanban/shared";
-import { useBoardEvents, type LiveSessionStats, type TodoItem, type ApprovalRequest } from "../lib/useBoardEvents.js";
+import { useBoardEvents, type LiveSessionStats, type TodoItem, type ApprovalRequest, type PluginGateEvent } from "../lib/useBoardEvents.js";
 import { sendDesktopNotification } from "../lib/desktop.js";
 import { showToast } from "../lib/toast.js";
+import { agentActivityActions } from "../stores/agentActivityStore.js";
+import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-liveness";
+import type { ClientRefreshReason } from "@agentic-kanban/shared/lib/board-events-contract";
 
 type NotificationIssue = { id: string; issueNumber?: number; title?: string; workspaceId?: string };
 
@@ -19,8 +22,9 @@ interface UseBoardLiveHandlersDeps {
   setLiveStats: React.Dispatch<React.SetStateAction<Record<string, LiveSessionStats>>>;
   setSessionTodos: React.Dispatch<React.SetStateAction<Record<string, TodoItem[]>>>;
   setApprovalRequests: React.Dispatch<React.SetStateAction<ApprovalRequest[]>>;
-  addNotificationBoardEvent: (reason: string, issue?: NotificationIssue) => void;
+  addNotificationBoardEvent: (reason: ClientRefreshReason, issue?: NotificationIssue) => void;
   addNotificationApprovalEvent: (key: string, issue?: NotificationIssue) => void;
+  addNotificationPluginGateEvent?: (gate: { pluginSlug: string; pluginName: string; loopName: string; loopLabel: string; gateId: string; question: string }) => void;
 }
 
 /**
@@ -45,9 +49,10 @@ export function useBoardLiveHandlers(deps: UseBoardLiveHandlersDeps) {
     setApprovalRequests,
     addNotificationBoardEvent,
     addNotificationApprovalEvent,
+    addNotificationPluginGateEvent,
   } = deps;
 
-  const handleBoardChange = useCallback((reason: string) => {
+  const handleBoardChange = useCallback((reason: ClientRefreshReason) => {
     // `project_created/updated/deleted` are project-lifecycle reasons that require a
     // project-list reload. `project_completed` (#848) shares the `project_` prefix but is
     // a board notification, NOT a lifecycle change — let it fall through to the
@@ -118,7 +123,7 @@ export function useBoardLiveHandlers(deps: UseBoardLiveHandlersDeps) {
 
   const handleSessionActivity = useCallback((issueId: string, sessionId: string, activity: string) => {
     const isActive = columnsRef.current.some(col =>
-      col.issues.some(iss => iss.id === issueId && (iss.workspaceSummary?.main?.status === "active" || iss.workspaceSummary?.main?.status === "fixing"))
+      col.issues.some(iss => iss.id === issueId && isAgentRunningStatus(iss.workspaceSummary?.main?.status))
     );
     if (!isActive) {
       setSessionActivityRaw((prev) => {
@@ -135,6 +140,10 @@ export function useBoardLiveHandlers(deps: UseBoardLiveHandlersDeps) {
       });
       return;
     }
+    // Feed the raw (un-deduped) activity stream into the stall/loop tracker BEFORE the
+    // dedup below collapses consecutive identical strings — loop detection needs the
+    // repeats (#86). Empty activity is a clear signal, not a tool call, so skip it.
+    if (activity) agentActivityActions.recordActivity(issueId, activity, Date.now());
     setSessionActivityRaw((prev) => {
       const sessions = { ...(prev[issueId] ?? {}) };
       if (!activity) {
@@ -161,9 +170,11 @@ export function useBoardLiveHandlers(deps: UseBoardLiveHandlersDeps) {
 
   const handleSessionStats = useCallback((issueId: string, stats: LiveSessionStats) => {
     const isActive = columnsRef.current.some(col =>
-      col.issues.some(iss => iss.id === issueId && (iss.workspaceSummary?.main?.status === "active" || iss.workspaceSummary?.main?.status === "fixing"))
+      col.issues.some(iss => iss.id === issueId && isAgentRunningStatus(iss.workspaceSummary?.main?.status))
     );
     if (!isActive) return;
+    // A stats delta (token/tool-use update) also counts as "not idle" (#86).
+    agentActivityActions.recordStats(issueId, Date.now());
     setLiveStats((prev) => {
       if (prev[issueId]?.model === stats.model && prev[issueId]?.contextTokens === stats.contextTokens && prev[issueId]?.toolUses === stats.toolUses && prev[issueId]?.subagentCount === stats.subagentCount) return prev;
       return { ...prev, [issueId]: stats };
@@ -192,5 +203,18 @@ export function useBoardLiveHandlers(deps: UseBoardLiveHandlersDeps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addNotificationApprovalEvent]);
 
-  useBoardEvents(activeProjectId, handleBoardChange, handleSessionActivity, handleSessionStats, handleSessionTodos, handleApprovalRequested);
+  const handlePluginGate = useCallback((event: PluginGateEvent) => {
+    // Durable bell entry (#301) — the toast + desktop notification are fired in
+    // useBoardEvents itself (lib layer); the bell needs the hook-owned store.
+    addNotificationPluginGateEvent?.({
+      pluginSlug: event.pluginSlug,
+      pluginName: event.pluginName,
+      loopName: event.loopName,
+      loopLabel: event.loopLabel,
+      gateId: event.gateId,
+      question: event.question,
+    });
+  }, [addNotificationPluginGateEvent]);
+
+  useBoardEvents(activeProjectId, handleBoardChange, handleSessionActivity, handleSessionStats, handleSessionTodos, handleApprovalRequested, handlePluginGate);
 }

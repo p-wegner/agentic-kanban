@@ -3,27 +3,40 @@ import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import type { StatusWithIssues } from "@agentic-kanban/shared";
 import { useBoardLiveHandlers } from "./useBoardLiveHandlers.js";
 import { useBoardRefetch } from "./useBoardRefetch.js";
+import {
+  deriveInactiveIssueIds,
+  prunePendingWorkspaceIssueIds,
+  pruneRecordKeys,
+} from "../lib/boardDataReconcile.js";
+import { boardBulkSelectionActions } from "../stores/boardBulkSelectionStore.js";
+import { agentActivityActions } from "../stores/agentActivityStore.js";
 import type { ApprovalRequest, LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
+import type { ClientRefreshReason } from "@agentic-kanban/shared/lib/board-events-contract";
 
 type NotificationIssue = { id: string; issueNumber?: number; title?: string; workspaceId?: string };
 
 interface BoardRealtimeControllerParams {
   activeProjectId: string | null;
+  /** Current-render board columns (react-query owned) — drives live-session pruning. */
+  columns: StatusWithIssues[];
   columnsRef: MutableRefObject<StatusWithIssues[]>;
   creatingInColumnId: string | null;
   loadProjectsRef: MutableRefObject<() => Promise<string | undefined>>;
   addNotificationApprovalEvent: (key: string, issue?: NotificationIssue) => void;
-  addNotificationBoardEvent: (reason: string, issue?: NotificationIssue) => void;
+  addNotificationBoardEvent: (reason: ClientRefreshReason, issue?: NotificationIssue) => void;
+  addNotificationPluginGateEvent?: (gate: { pluginSlug: string; pluginName: string; loopName: string; loopLabel: string; gateId: string; question: string }) => void;
   setColumns: Dispatch<SetStateAction<StatusWithIssues[]>>;
 }
 
 export function useBoardRealtimeController({
   activeProjectId,
+  columns,
   columnsRef,
   creatingInColumnId,
   loadProjectsRef,
   addNotificationApprovalEvent,
   addNotificationBoardEvent,
+  addNotificationPluginGateEvent,
   setColumns,
 }: BoardRealtimeControllerParams) {
   const [sessionActivityRaw, setSessionActivityRaw] = useState<Record<string, Record<string, string>>>({});
@@ -41,13 +54,23 @@ export function useBoardRealtimeController({
   const [approvalRequests, setApprovalRequests] = useState<ApprovalRequest[]>([]);
   const pendingBoardRefreshRef = useRef(false);
 
-  const { refetchBoard, scheduleRefetch } = useBoardRefetch({
-    activeProjectId,
-    columnsRef,
-    setColumns,
-    setLiveStats,
-    setSessionActivityRaw,
-  });
+  const { refetchBoard, scheduleRefetch } = useBoardRefetch({ activeProjectId });
+
+  // Prune live-session bookkeeping for now-inactive issues whenever the board
+  // data changes. This used to live inside the refetch engine's apply step;
+  // with react-query as the single owner it derives from the board query data,
+  // so it stays correct no matter which path (fetch, WS invalidation, optimistic
+  // mutation) updated the columns. The prune helpers return the same reference
+  // when nothing changed, so this is a no-op re-render in the common case.
+  useEffect(() => {
+    const inactiveIssueIds = deriveInactiveIssueIds(columns);
+    boardBulkSelectionActions.setPendingWorkspaceIssueIds((prev) => prunePendingWorkspaceIssueIds(prev, columns));
+    if (inactiveIssueIds.size > 0) {
+      setLiveStats((prev) => pruneRecordKeys(prev, inactiveIssueIds));
+      setSessionActivityRaw((prev) => pruneRecordKeys(prev, inactiveIssueIds));
+      agentActivityActions.prune((id) => !inactiveIssueIds.has(id));
+    }
+  }, [columns]);
 
   useBoardLiveHandlers({
     activeProjectId,
@@ -64,6 +87,7 @@ export function useBoardRealtimeController({
     setApprovalRequests,
     addNotificationBoardEvent,
     addNotificationApprovalEvent,
+    addNotificationPluginGateEvent,
   });
 
   useEffect(() => {

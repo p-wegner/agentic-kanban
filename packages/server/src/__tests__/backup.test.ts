@@ -302,4 +302,59 @@ describe("db backup", () => {
     expect(await rowCount(restoredUrl, "projects")).toBe(2);
     expect(await rowCount(restoredUrl, "issues")).toBe(4);
   }, 30000);
+
+  // #322 — a boot-triggered backup must not fire when a fresh snapshot already
+  // exists. Under `tsx watch` the process boots on every source edit, and each
+  // backup is a full-size VACUUM INTO of the live DB, so an unconditional
+  // boot backup turns a restart storm into a whole-database copy loop that
+  // starves the API's write path.
+  describe("skipIfNewerThanMs (#322)", () => {
+    it("skips when a retained backup is younger than the threshold", async () => {
+      await seedDb(process.env.DB_URL!, 2, 5);
+      const { createBackup } = await loadBackupModule();
+
+      const first = await createBackup("periodic");
+      expect(first).not.toBeNull();
+      const after = readdirSync(backupDir).filter((f) => /^kanban-.+\.db$/.test(f));
+      expect(after).toHaveLength(1);
+
+      // Boot-triggered second attempt, one minute of tolerance: must be skipped.
+      expect(await createBackup("periodic", { skipIfNewerThanMs: 60_000 })).toBeNull();
+      expect(readdirSync(backupDir).filter((f) => /^kanban-.+\.db$/.test(f))).toEqual(after);
+    }, 30000);
+
+    it("still takes the backup when the newest one is older than the threshold", async () => {
+      await seedDb(process.env.DB_URL!, 2, 5);
+      const { createBackup } = await loadBackupModule();
+
+      const first = await createBackup("periodic");
+      expect(first).not.toBeNull();
+      // Age the existing snapshot past the threshold.
+      const old = new Date(Date.now() - 10 * 60_000);
+      utimesSync(first!.path, old, old);
+
+      expect(await createBackup("periodic", { skipIfNewerThanMs: 60_000 })).not.toBeNull();
+      expect(readdirSync(backupDir).filter((f) => /^kanban-.+\.db$/.test(f))).toHaveLength(2);
+    }, 30000);
+
+    it("takes the backup when there is no retained backup at all", async () => {
+      await seedDb(process.env.DB_URL!, 2, 5);
+      const { createBackup, newestBackupAgeMs } = await loadBackupModule();
+
+      expect(newestBackupAgeMs()).toBeNull();
+      expect(await createBackup("periodic", { skipIfNewerThanMs: 60_000 })).not.toBeNull();
+    }, 30000);
+
+    it("does not let interrupted-write scratch count as a fresh backup", async () => {
+      await seedDb(process.env.DB_URL!, 2, 5);
+      const { createBackup, newestBackupAgeMs } = await loadBackupModule();
+      mkdirSync(backupDir, { recursive: true });
+      // Scratch left by an interrupted VACUUM INTO is not a usable snapshot.
+      writeFileSync(join(backupDir, "kanban-2026-01-01T00-00-00-000Z-periodic.db.tmp"), "x");
+      writeFileSync(join(backupDir, "kanban-2026-01-01T00-00-00-000Z-periodic.db.promote"), "x");
+
+      expect(newestBackupAgeMs()).toBeNull();
+      expect(await createBackup("periodic", { skipIfNewerThanMs: 60_000 })).not.toBeNull();
+    }, 30000);
+  });
 });

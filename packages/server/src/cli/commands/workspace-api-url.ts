@@ -1,3 +1,5 @@
+import { resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
+
 export function buildWorkspaceApiUrl(
   port: string,
   workspaceId: string,
@@ -14,9 +16,14 @@ export function buildWorkspaceApiUrl(
     | "handoff-bundle"
     | "comments",
 ) {
-  return `http://127.0.0.1:${port}/api/workspaces/${encodeURIComponent(workspaceId)}/${action}`;
+  return buildApiUrl(port, `/api/workspaces/${encodeURIComponent(workspaceId)}/${action}`);
 }
 
 export function buildApiUrl(port: string, path: string) {
-  return `http://127.0.0.1:${port}${path}`;
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  return `http://127.0.0.1:${resolveBoardServerPort(port)}${normalizedPath}`;
+}
+
+export function resolveCliPort(override?: string): string {
+  return String(resolveBoardServerPort(override));
 }

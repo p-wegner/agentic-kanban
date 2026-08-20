@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { isTransientNetworkError } from "../startup/transient-errors.js";
+import { isTransientNetworkError } from "../lib/transient-errors.js";
 import { waitForActiveMergesToSettle } from "../startup/process-handlers.js";
 import { activeMerges } from "../services/workspace-internals.js";
 

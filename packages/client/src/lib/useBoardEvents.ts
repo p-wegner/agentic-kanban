@@ -1,4 +1,8 @@
 import { useEffect, useRef, useCallback } from "react";
+import { SESSION_ACTIVITY_WS_EVENT, type SessionActivityEventDetail } from "./sessionTranscriptEvents.js";
+import { showToast } from "./toast.js";
+import { requestProjectSelection, requestViewNavigation } from "./navigateView.js";
+import { usePluginViewStore } from "../stores/pluginViewStore.js";
 
 /**
  * Low-frequency safety poll backing the board WebSocket. The WS is the single
@@ -18,57 +22,36 @@ const POLL_INTERVAL_MS = 30_000;
  * events without each opening its own WebSocket or threading new props
  * through BoardPage. detail: { projectId: string, reason: string }.
  */
+import type {
+  BoardWsMessage,
+  ClientRefreshReason,
+  TodoItem,
+  PluginGateMessage,
+} from "@agentic-kanban/shared/lib/board-events-contract";
+
 export const BOARD_WS_EVENT = "agentic-kanban:board-ws-event";
 
 export interface BoardWsEventDetail {
   projectId: string;
-  reason: string;
+  /** A wire reason, or one of the client's own synthetic "reconnect"/"poll". */
+  reason: ClientRefreshReason;
 }
 
-interface BoardChangedEvent {
-  type: "board_changed";
-  projectId: string;
-  reason: string;
-}
+/**
+ * Every frame type comes from shared (#566) — this file used to re-declare the whole
+ * union by hand, and it had drifted: `reason: string` instead of the vocabulary, and an
+ * optional `subagentCount` the server always sends.
+ */
+export type { TodoItem, PluginGateMessage as PluginGateEvent };
+type PluginGateEvent = PluginGateMessage;
 
-interface ProjectsChangedEvent {
-  type: "projects_changed";
-  projectId: string;
-  reason: "project_created" | "project_updated" | "project_deleted";
-}
+type BoardWsEvent = BoardWsMessage;
 
-interface SessionActivityEvent {
-  type: "session_activity";
-  projectId: string;
-  issueId: string;
-  sessionId: string;
-  activity: string;
-}
-
-interface SessionStatsEvent {
-  type: "session_stats";
-  projectId: string;
-  issueId: string;
-  model: string;
-  contextTokens: number;
-  toolUses: number;
-  subagentCount?: number;
-}
-
-export interface TodoItem {
-  id: string;
-  content: string;
-  status: "pending" | "in_progress" | "completed";
-  priority: "high" | "medium" | "low";
-}
-
-interface SessionTodosEvent {
-  type: "session_todos";
-  projectId: string;
-  issueId: string;
-  todos: TodoItem[];
-}
-
+/**
+ * The approval payload as the approval UI consumes it. Kept local and NOT replaced by
+ * the wire type: the message declares `toolInput: unknown` (it forwards whatever the
+ * agent sent), while every consumer here indexes into it as an object.
+ */
 export interface ApprovalRequest {
   id: string;
   sessionId: string;
@@ -77,17 +60,6 @@ export interface ApprovalRequest {
   workspaceId?: string;
 }
 
-interface ApprovalRequestedEvent {
-  type: "approval_requested";
-  projectId: string;
-  id: string;
-  sessionId: string;
-  toolName: string;
-  toolInput: Record<string, unknown>;
-  workspaceId?: string;
-}
-
-type BoardWsEvent = BoardChangedEvent | ProjectsChangedEvent | SessionActivityEvent | SessionStatsEvent | SessionTodosEvent | ApprovalRequestedEvent;
 
 export interface LiveSessionStats {
   model: string;
@@ -98,11 +70,12 @@ export interface LiveSessionStats {
 
 export function useBoardEvents(
   projectId: string | null,
-  onBoardChange: (reason: string) => void,
+  onBoardChange: (reason: ClientRefreshReason) => void,
   onSessionActivity?: (issueId: string, sessionId: string, activity: string) => void,
   onSessionStats?: (issueId: string, stats: LiveSessionStats) => void,
   onSessionTodos?: (issueId: string, todos: TodoItem[]) => void,
   onApprovalRequested?: (req: ApprovalRequest) => void,
+  onPluginGate?: (event: PluginGateEvent) => void,
 ) {
   const wsRef = useRef<WebSocket | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -114,6 +87,8 @@ export function useBoardEvents(
   const onSessionStatsRef = useRef(onSessionStats);
   const onSessionTodosRef = useRef(onSessionTodos);
   const onApprovalRequestedRef = useRef(onApprovalRequested);
+  const onPluginGateRef = useRef(onPluginGate);
+  onPluginGateRef.current = onPluginGate;
   onBoardChangeRef.current = onBoardChange;
   onSessionActivityRef.current = onSessionActivity;
   onSessionStatsRef.current = onSessionStats;
@@ -158,12 +133,54 @@ export function useBoardEvents(
           onBoardChangeRef.current(msg.reason);
         } else if (msg.type === "session_activity") {
           onSessionActivityRef.current?.(msg.issueId, msg.sessionId, msg.activity);
+          window.dispatchEvent(
+            new CustomEvent<SessionActivityEventDetail>(SESSION_ACTIVITY_WS_EVENT, {
+              detail: { projectId: msg.projectId, issueId: msg.issueId, sessionId: msg.sessionId, activity: msg.activity },
+            }),
+          );
         } else if (msg.type === "session_stats") {
           onSessionStatsRef.current?.(msg.issueId, { model: msg.model, contextTokens: msg.contextTokens, toolUses: msg.toolUses ?? 0, subagentCount: msg.subagentCount ?? 0 });
         } else if (msg.type === "session_todos") {
           onSessionTodosRef.current?.(msg.issueId, msg.todos);
         } else if (msg.type === "approval_requested") {
-          onApprovalRequestedRef.current?.({ id: msg.id, sessionId: msg.sessionId, toolName: msg.toolName, toolInput: msg.toolInput, workspaceId: msg.workspaceId });
+          onApprovalRequestedRef.current?.({ id: msg.id, sessionId: msg.sessionId, toolName: msg.toolName, toolInput: (msg.toolInput ?? {}) as Record<string, unknown>, workspaceId: msg.workspaceId });
+          // The wire type is `unknown` — the agent decides the shape; the approval UI
+          // indexes into it, so the narrowing happens once, here, at the boundary.
+        } else if (msg.type === "plugin_gate") {
+          // A human gate is the one loop state that goes NOWHERE without a person —
+          // surface it actively (#287/#300). The server already dedupes to one message
+          // per new gate id, so this never spams on the monitor's polling cadence.
+          // Warning tone + sticky + click-to-navigate: a green auto-fading toast
+          // understated a BLOCKING decision and left no way to reach it.
+          const navigateToGate = () => {
+            // #323: the gate may belong to a project that is not active (the
+            // "__projects" meta-subscription, or the user switched away since
+            // the toast appeared) — switch first, then focus the loop pane.
+            requestProjectSelection(msg.projectId);
+            usePluginViewStore.getState().focusLoop(msg.pluginSlug, msg.loopName);
+            requestViewNavigation("plugin-views");
+          };
+          showToast(`✋ ${msg.loopLabel}: ${msg.question}`, "warning", { sticky: true, onClick: navigateToGate });
+          onPluginGateRef.current?.(msg);
+          // Desktop notification only if the user has ALREADY granted permission —
+          // requesting it outside a user gesture is browser-hostile.
+          try {
+            if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+              const notification = new Notification(`${msg.pluginName} — approval needed`, { body: msg.question, tag: `plugin-gate-${msg.gateId}` });
+              notification.onclick = () => {
+                window.focus();
+                navigateToGate();
+                notification.close();
+              };
+            }
+          } catch { /* notifications are best-effort */ }
+          // Let panels (plugin surface) refetch so the approval card appears without a manual reload.
+          onBoardChangeRef.current("plugin_gate");
+          window.dispatchEvent(
+            new CustomEvent<BoardWsEventDetail>(BOARD_WS_EVENT, {
+              detail: { projectId: msg.projectId, reason: "plugin_gate" },
+            }),
+          );
         }
       } catch {
         // Ignore malformed messages

@@ -8,11 +8,13 @@ import { getSettings } from "../lib/settingsStore.js";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import { runCreateIssueFlow, type CreateIssuePayload } from "../lib/createIssueService.js";
-import type { ExpandedCreatePanel } from "../routes/BoardPage.js";
+import type { ExpandedCreatePanel } from "../lib/boardTypes.js";
 import type { IssueWithStatus, UpdateIssueRequest, StatusWithIssues } from "@agentic-kanban/shared";
 import { resolveWorkspaceLaunchDefaults } from "../lib/workspaceLaunchDefaults.js";
 import { boardSelectionActions } from "../stores/boardSelectionStore.js";
 import { boardBulkSelectionActions } from "../stores/boardBulkSelectionStore.js";
+import { isPlanModePriority } from "../lib/priorityTraits.js";
+import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-liveness";
 
 type Setter<T> = Dispatch<SetStateAction<T>>;
 
@@ -97,7 +99,7 @@ export function createBoardIssueActions(deps: BoardIssueActionsDeps) {
       .flatMap((col) => col.issues)
       .filter((i) => {
         const s = i.workspaceSummary?.main?.status;
-        return s === "active" || s === "fixing";
+        return isAgentRunningStatus(s);
       }).length;
     if (activeAgentsTarget !== undefined && activeCount >= activeAgentsTarget) {
       showToast(`Agent capacity reached (${activeAgentsTarget} active). Stop a running workspace first.`, "error");
@@ -114,7 +116,7 @@ export function createBoardIssueActions(deps: BoardIssueActionsDeps) {
         issueId: issue.id,
         branch,
         requiresReview: isAutoReviewEnabled(s.auto_review),
-        planMode: issue.priority === "high" || issue.priority === "critical",
+        planMode: isPlanModePriority(issue.priority),
         isDirect: false,
         profile: { provider, name: profileName },
       };

@@ -1,6 +1,6 @@
 {
   "name": "agentic-kanban",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "type": "module",
   "description": "Kanban board for AI-driven coding tasks — each card is a Claude Code session with built-in diff review and merge. Local-first, MCP-enabled, zero config.",
   "license": "MIT",
@@ -14,19 +14,23 @@
   },
   "bin": {
     "agentic-kanban": "bin/cli.js",
-    "agentic-kanban-mcp": "bin/mcp.js"
+    "agentic-kanban-mcp": "bin/mcp.js",
+    "agentic-kanban-worker": "bin/worker.js"
   },
   "files": [
     "bin/",
     "dist/cli/",
     "dist/server.js",
     "dist/mcp.js",
+    "dist/worker.js",
     "dist/client/",
     "dist/migrations/",
-    "dist/scaffold/"
+    "dist/scaffold/",
+    "plugins/"
   ],
   "scripts": {
     "dev": "node ../../scripts/server-dev-proxy.mjs",
+    "dev:e2e": "tsx --conditions development src/index.ts",
     "build": "tsc",
     "start": "node dist/cli/index.js dev",
     "db:migrate": "tsx src/scripts/db-migrate.ts",
@@ -35,7 +39,8 @@
     "db:repair": "tsx src/scripts/db-repair.ts",
     "db:restore": "tsx src/scripts/db-restore.ts",
     "openapi:generate": "tsx scripts/generate-openapi.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:docker": "vitest run src/__tests__/compose-lifecycle-real-docker.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.152",
@@ -45,17 +50,19 @@
     "@modelcontextprotocol/sdk": "1.29.0",
     "commander": "^14.0.3",
     "drizzle-orm": "0.45.2",
-    "hono": "4.12.16",
+    "hono": "4.12.31",
     "ts-morph": "^24.0.0",
+    "ws": "8.21.1",
     "zod": "3.25.76"
   },
   "devDependencies": {
     "@agentic-kanban/shared": "workspace:*",
+    "@types/ws": "^8.18.1",
     "drizzle-kit": "0.31.10",
     "esbuild": "^0.25.0",
     "tsx": "^4.19.0",
-    "yaml": "^2.6.0",
     "typescript": "^5.8.3",
-    "vitest": "^4.0.0"
+    "vitest": "^4.0.0",
+    "yaml": "^2.6.0"
   }
 }

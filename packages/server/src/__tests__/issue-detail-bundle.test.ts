@@ -84,6 +84,70 @@ describe("GET /api/issues/:id/detail-bundle", () => {
     expect(Array.isArray(body.activity.events)).toBe(true);
   });
 
+  it("folds cycle-time, time-entries, touched-files, related-issues and merged-commits into the bundle, identical to the individual endpoints (#418)", async () => {
+    const { app, db } = createTestApp();
+    const projectId = await seedProject(db);
+    const issueId = await seedIssue(db, projectId, "desc");
+
+    // Touched files on this issue + a second issue sharing a path (drives related-issues).
+    const { eq } = await import("drizzle-orm");
+    await db.update(schema.issues)
+      .set({ touchedFilesJson: JSON.stringify([{ path: "src/a.ts", reason: "r", confidence: "high" }]) })
+      .where(eq(schema.issues.id, issueId));
+    const otherIssueId = randomUUID();
+    const statusId = (await db.select({ id: schema.projectStatuses.id }).from(schema.projectStatuses))[0].id;
+    await db.insert(schema.issues).values({
+      id: otherIssueId,
+      title: "Overlapping issue",
+      statusId,
+      projectId,
+      issueNumber: 2,
+      touchedFilesJson: JSON.stringify([{ path: "src/a.ts", reason: "also", confidence: "low" }]),
+    });
+
+    // A time entry.
+    await db.insert(schema.issueTimeEntries).values({
+      id: randomUUID(),
+      issueId,
+      minutes: 25,
+      note: "spike",
+      createdAt: new Date().toISOString(),
+    });
+
+    const [bundleRes, cycleRes, timeRes, touchedRes, relatedRes, mergedRes] = await Promise.all([
+      app.request(`/api/issues/${issueId}/detail-bundle`),
+      app.request(`/api/issues/${issueId}/cycle-time`),
+      app.request(`/api/issues/${issueId}/time-entries`),
+      app.request(`/api/issues/${issueId}/touched-files`),
+      app.request(`/api/issues/${issueId}/related-issues`),
+      app.request(`/api/issues/${issueId}/merged-commits`),
+    ]);
+    expect(bundleRes.status).toBe(200);
+    const bundle = await bundleRes.json() as any;
+
+    // Each folded field is identical to what the standalone endpoint serves.
+    // (cycle-time's totalAgeMs is clock-derived, so compare the stable fields.)
+    const cycleFromEndpoint = await cycleRes.json() as any;
+    expect(bundle.cycleTime.createdAt).toBe(cycleFromEndpoint.createdAt);
+    expect(bundle.cycleTime.closedAt).toBe(cycleFromEndpoint.closedAt);
+    expect(bundle.cycleTime.isOpen).toBe(cycleFromEndpoint.isOpen);
+    expect(bundle.cycleTime.statusBreakdowns).toEqual(cycleFromEndpoint.statusBreakdowns);
+    expect(typeof bundle.cycleTime.totalAgeMs).toBe("number");
+    expect(bundle.timeEntries).toEqual(await timeRes.json());
+    expect(bundle.touchedFiles).toEqual(await touchedRes.json());
+    expect(bundle.relatedIssues).toEqual(await relatedRes.json());
+    expect(bundle.mergedCommits).toEqual(await mergedRes.json());
+
+    // Sanity: the folded data is real, not five empty objects.
+    expect(bundle.timeEntries.totalMinutes).toBe(25);
+    expect(bundle.touchedFiles.files).toEqual([{ path: "src/a.ts", reason: "r", confidence: "high" }]);
+    expect(bundle.relatedIssues.related).toEqual([
+      { id: otherIssueId, issueNumber: 2, title: "Overlapping issue", sharedFileCount: 1 },
+    ]);
+    expect(bundle.mergedCommits).toEqual({ merged: false, defaultBranch: "main", commits: [] });
+    expect(bundle.cycleTime).toBeTruthy();
+  });
+
   it("handles a null description without failing the bundle", async () => {
     const { app, db } = createTestApp();
     const projectId = await seedProject(db);

@@ -1,18 +1,21 @@
 import { createHash } from "node:crypto";
 import type { SessionManager } from "../services/session.manager.js";
-import type { BoardEvents } from "../services/board-events.js";
+import type { BoardEventSink } from "../services/board-events.js";
 import type { Database } from "../db/index.js";
 import { createWorkspaceService } from "../services/workspace.service.js";
+import { createWorkspaceServicesControlService } from "../services/workspace-services-control.service.js";
 import { createBisectService, type BisectScope } from "../services/bisect.service.js";
 import { createSessionArtifactsService } from "../services/session-artifacts.service.js";
 import { getWorkspaceTimeline } from "../services/workspace-timeline.service.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody, parseOptionalJsonBody } from "../middleware/parse-body.js";
+import { completeMergeJob, failMergeJob, getMergeJob, startMergeJob } from "../services/merge-job.service.js";
 
+import { queryFlag } from "../middleware/query-params.js";
 export function createWorkspaceActionsRoute(
   getSessionManager: () => SessionManager,
   database: Database,
-  options?: { boardEvents?: BoardEvents; fixAndMergeSessionIds?: Set<string> },
+  options?: { boardEvents?: BoardEventSink; fixAndMergeSessionIds?: Set<string> },
 ) {
   const router = createRouter();
 
@@ -27,6 +30,47 @@ export function createWorkspaceActionsRoute(
     boardEvents: options?.boardEvents,
   });
   const artifactsService = createSessionArtifactsService({ database });
+  const servicesControl = createWorkspaceServicesControlService({
+    database,
+    boardEvents: options?.boardEvents,
+  });
+
+  // ── Per-workspace Docker service-stack lifecycle controls (#92) ──────────────
+  // Reuse the existing compose/port engine — the compose project name + allocated
+  // host ports are preserved across start/stop/restart (no reallocation).
+
+  // POST /api/workspaces/:id/services/up — start (or, with ?recreate=true, rebuild) the
+  // stack; (re)provisions a deferred/errored/never-run stack (the "Retry" control).
+  router.post("/:id/services/up", async (c) => {
+    const id = c.req.param("id");
+    const recreate = queryFlag(c, "recreate");
+    const serviceState = await servicesControl.up(id, { recreate });
+    return c.json({ serviceState });
+  });
+
+  // POST /api/workspaces/:id/services/down — stop the stack (containers removed, named
+  // volumes kept so a subsequent start finds its data intact).
+  router.post("/:id/services/down", async (c) => {
+    const id = c.req.param("id");
+    const serviceState = await servicesControl.down(id);
+    return c.json({ serviceState });
+  });
+
+  // POST /api/workspaces/:id/services/restart — bounce the running containers.
+  router.post("/:id/services/restart", async (c) => {
+    const id = c.req.param("id");
+    const serviceState = await servicesControl.restart(id);
+    return c.json({ serviceState });
+  });
+
+  // GET /api/workspaces/:id/services/logs?tail=N — a bounded, non-following log tail.
+  router.get("/:id/services/logs", async (c) => {
+    const id = c.req.param("id");
+    const tailRaw = Number(c.req.query("tail"));
+    const tail = Number.isFinite(tailRaw) && tailRaw > 0 ? Math.min(Math.floor(tailRaw), 2000) : 200;
+    const result = await servicesControl.logs(id, tail);
+    return c.json(result);
+  });
 
   // POST /api/workspaces/:id/setup
   router.post("/:id/setup", async (c) => {
@@ -106,13 +150,38 @@ export function createWorkspaceActionsRoute(
     return c.json(await workspaceService.getLatestCommit(id));
   });
 
-  // GET /api/workspaces/:id/diff
+  // GET /api/workspaces/:id/diff — full diff, or with `?stats=1` only the per-repo
+  // shortstat numbers (#415: one spawn per repo instead of three, tiny payload).
+  //
+  // #415 ETag-before-compute — STATS VARIANT ONLY: a short-lived memo of the last
+  // validator served per workspace. When If-None-Match matches a memo still within its
+  // window, the 304 is answered WITHOUT recomputing — the old pattern always paid the
+  // git fan-out and hashed the body just to say 304. The full-diff variant deliberately
+  // keeps compute-then-compare: its consumers (review, diff panel) must never see a
+  // stale 304 after a commit, and no cheap per-workspace change signal reaches here.
+  // The stats consumers are polling dashboards that tolerate the same ~10s staleness
+  // as the batch endpoint's memo.
+  const DIFF_STATS_ETAG_MEMO_TTL_MS = 10_000;
+  const diffStatsEtagMemo = new Map<string, { etag: string; at: number }>();
   router.get("/:id/diff", async (c) => {
     const id = c.req.param("id");
-    const result = await workspaceService.getWorkspaceDiff(id);
+    const statsOnly = ["1", "true", "yes"].includes((c.req.query("stats") || "").toLowerCase());
+    const ifNoneMatch = c.req.header("if-none-match");
+    if (statsOnly && ifNoneMatch) {
+      const memo = diffStatsEtagMemo.get(id);
+      if (memo && memo.etag === ifNoneMatch && Date.now() - memo.at < DIFF_STATS_ETAG_MEMO_TTL_MS) {
+        return new Response(null, { status: 304, headers: { ETag: memo.etag } });
+      }
+    }
+    const result = statsOnly
+      ? await workspaceService.getWorkspaceDiffStats(id)
+      : await workspaceService.getWorkspaceDiff(id);
     const body = JSON.stringify(result);
     const etag = `"${createHash("sha1").update(body).digest("hex").slice(0, 16)}"`;
-    const ifNoneMatch = c.req.header("if-none-match");
+    if (statsOnly) {
+      if (diffStatsEtagMemo.size > 2000) diffStatsEtagMemo.clear(); // crude cap; entries are tiny
+      diffStatsEtagMemo.set(id, { etag, at: Date.now() });
+    }
     if (ifNoneMatch === etag) {
       return new Response(null, { status: 304, headers: { ETag: etag } });
     }
@@ -123,21 +192,75 @@ export function createWorkspaceActionsRoute(
   });
 
   // POST /api/workspaces/:id/merge
+  // POST /api/workspaces/:id/merge — land the branch. Runs the pre-merge gate inline, which
+  // on a full-suite project is 30-45 MINUTES, so the outcome is always recorded as a job
+  // (see merge-job.service.ts): a caller whose connection dies can still get the verdict from
+  // GET /:id/merge-status instead of being unable to tell a failure from a still-running gate.
+  //
+  // `?async=1` returns 202 + jobId immediately rather than holding the connection at all.
+  // The default stays SYNCHRONOUS for back-compat — the UI and CLI both read the merge result
+  // from this response body today, and silently turning that into a 202 would make them
+  // report success for a merge that had not happened yet.
   router.post("/:id/merge", async (c) => {
     const id = c.req.param("id");
-    return c.json(await workspaceService.mergeWorkspaceDeduped(id));
+    const wantsAsync = ["1", "true", "yes"].includes((c.req.query("async") || "").toLowerCase());
+    const job = startMergeJob(id);
+    const run = workspaceService
+      // Only THIS caller defers the main checkout's `git reset --hard` past the merge result
+      // (#686: the reset rewrites files → tsx hot-reload → the in-flight response is dropped).
+      // Every non-interactive caller syncs inline instead, because that deferral is what left
+      // the main checkout showing the merged files as staged deletions for ~32s (#350).
+      .mergeWorkspaceDeduped(id, { deferMainCheckoutSync: true })
+      .then((result) => {
+        completeMergeJob(job.jobId, id, result);
+        return result;
+      })
+      .catch((err) => {
+        failMergeJob(job.jobId, id, err);
+        throw err;
+      });
+
+    if (wantsAsync) {
+      // Nothing awaits `run` in this branch, so an eventual rejection would be an unhandled
+      // promise rejection (which this server logs as [fatal]). The job record IS the report.
+      void run.catch(() => {});
+      return c.json({ accepted: true, jobId: job.jobId, workspaceId: id, statusUrl: `/api/workspaces/${id}/merge-status` }, 202);
+    }
+    return c.json(await run);
+  });
+
+  // GET /api/workspaces/:id/merge-status — the latest merge job for this workspace, including
+  // a finished one. `null` means this process has no record (never merged here, or restarted).
+  router.get("/:id/merge-status", (c) => {
+    const id = c.req.param("id");
+    const job = getMergeJob(id);
+    if (!job) return c.json({ job: null, message: "no merge job recorded for this workspace in the current server process" });
+    return c.json({ job });
   });
 
   // GET /api/workspaces/:id/already-merged-status — check if branch is already merged without modifying state
+  // ?adoptMainCheckout=true previews the #218 recovery override (work asserted to have
+  // landed on the base branch out-of-band) without acting on it.
   router.get("/:id/already-merged-status", async (c) => {
     const id = c.req.param("id");
-    return c.json(await workspaceService.checkAlreadyMerged(id));
+    const adoptMainCheckout = queryFlag(c, "adoptMainCheckout");
+    return c.json(await workspaceService.checkAlreadyMerged(id, { adoptMainCheckout }));
+  });
+
+  // GET /api/workspaces/:id/repo-merge-status — per-repo (leading + siblings) merge status (#70)
+  router.get("/:id/repo-merge-status", async (c) => {
+    const id = c.req.param("id");
+    return c.json(await workspaceService.getRepoMergeStatus(id));
   });
 
   // POST /api/workspaces/:id/reconcile-as-done — close a workspace whose branch is already on master
+  // Body `{ adoptMainCheckout: true }` (#218) is the explicit "the work landed on the base
+  // branch out-of-band" recovery — it overrides ONLY the "no unique commits" refusal, never
+  // the diff/ancestry/pending-sibling/dirty-sibling checks.
   router.post("/:id/reconcile-as-done", async (c) => {
     const id = c.req.param("id");
-    return c.json(await workspaceService.reconcileAlreadyMerged(id), 200);
+    const body = await parseOptionalJsonBody<{ adoptMainCheckout?: boolean }>(c);
+    return c.json(await workspaceService.reconcileAlreadyMerged(id, { adoptMainCheckout: body.adoptMainCheckout === true }), 200);
   });
 
   // GET /api/workspaces/:id/github-handoff-draft
@@ -158,6 +281,12 @@ export function createWorkspaceActionsRoute(
     return c.json(await workspaceService.getConflicts(id));
   });
 
+  // GET /api/workspaces/:id/handoff — HANDOFF.md metadata (mtime + excerpt) per repo (#89)
+  router.get("/:id/handoff", async (c) => {
+    const id = c.req.param("id");
+    return c.json(await workspaceService.getHandoff(id));
+  });
+
   // POST /api/workspaces/:id/update-base
   router.post("/:id/update-base", async (c) => {
     const id = c.req.param("id");
@@ -170,6 +299,14 @@ export function createWorkspaceActionsRoute(
   router.post("/:id/abort-rebase", async (c) => {
     const id = c.req.param("id");
     return c.json(await workspaceService.abortRebase(id));
+  });
+
+  // POST /api/workspaces/:id/repos/:repoName/rebase — per-repo recovery for a stranded sibling (#93):
+  // rebase ONE repo's worktree branch onto its base (REBASE only — never lands a repo in isolation).
+  router.post("/:id/repos/:repoName/rebase", async (c) => {
+    const id = c.req.param("id");
+    const repoName = decodeURIComponent(c.req.param("repoName"));
+    return c.json(await workspaceService.rebaseRepo(id, repoName));
   });
 
   // POST /api/workspaces/:id/resolve-conflicts

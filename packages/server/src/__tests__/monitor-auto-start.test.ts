@@ -8,6 +8,7 @@ vi.mock("../db/index.js", () => ({
 
 import { db } from "../db/index.js";
 import { runAutoStart, type AutoStartDeps } from "../startup/monitor-auto-start.js";
+import { openFileContentionGate } from "../startup/monitor-file-contention.js";
 
 function makeSelectChain(result: unknown[]) {
   const chain: Record<string, unknown> = {};
@@ -27,6 +28,15 @@ function makeDeps(overrides: Partial<AutoStartDeps> = {}): AutoStartDeps {
     boardEvents: { broadcast: vi.fn() } as unknown as AutoStartDeps["boardEvents"],
     logMonitorAction: vi.fn(),
     allowProject: () => true,
+    // These suites exercise dependency/eligibility/launch logic, not #119 file
+    // contention. Inject an open gate so they don't have to model its queries in
+    // their ordered db.select mock chains; contention has its own suite.
+    buildContentionGate: async () => openFileContentionGate(),
+    // Same reason as the contention gate above: the fleet dispatch check (epic #184)
+    // reads preferences through `db.select`, and these suites model `db.select` as an
+    // ORDERED mockReturnValueOnce chain. Letting the real one run consumes an entry and
+    // shifts every subsequent mock, which silently breaks the launch assertions.
+    canDispatch: async () => ({ available: true }) as const,
     ...overrides,
   };
 }
@@ -78,21 +88,21 @@ describe("runAutoStart dependency resolution (blocker must be MERGED, not just t
     mockUpToDepCheck({ id: "blocker-1", statusId: "done-1", currentNodeId: null, currentNodeType: null }, [{ issueId: "blocker-1", mergedAt: "2026-06-14T10:00:00.000Z", isDirect: false }]);
     vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ id: "ws-new" }) } as Response);
     await runAutoStart(new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "5"]]), makeDeps());
-    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces", expect.any(Object));
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces?async=1&autoStart=1", expect.any(Object));
   });
 
   it("starts a dependent whose blocker committed via a direct workspace (no merge step)", async () => {
     mockUpToDepCheck({ id: "blocker-1", statusId: "done-1", currentNodeId: null, currentNodeType: null }, [{ issueId: "blocker-1", mergedAt: null, isDirect: true }]);
     vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ id: "ws-new" }) } as Response);
     await runAutoStart(new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "5"]]), makeDeps());
-    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces", expect.any(Object));
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces?async=1&autoStart=1", expect.any(Object));
   });
 
   it("starts a dependent whose terminal blocker has no workspace at all (manually resolved)", async () => {
     mockUpToDepCheck({ id: "blocker-1", statusId: "done-1", currentNodeId: null, currentNodeType: null }, []);
     vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ id: "ws-new" }) } as Response);
     await runAutoStart(new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "5"]]), makeDeps());
-    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces", expect.any(Object));
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces?async=1&autoStart=1", expect.any(Object));
   });
 
   // #782/#798 fan-in: a dependent with TWO Done blockers must stay blocked until BOTH
@@ -144,7 +154,7 @@ describe("runAutoStart dependency resolution (blocker must be MERGED, not just t
       ]) as ReturnType<typeof db.select>); // blocker-workspaces: A merged, B direct
     vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ id: "ws-new" }) } as Response);
     await runAutoStart(new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "5"]]), makeDeps());
-    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces", expect.any(Object));
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces?async=1&autoStart=1", expect.any(Object));
   });
 
   it("starts a wide Backlog fan-in dependent once every blocker has landed (#782 integration tier)", async () => {
@@ -179,7 +189,7 @@ describe("runAutoStart dependency resolution (blocker must be MERGED, not just t
       makeDeps({ isAutoDrivenProject: () => true }),
     );
 
-    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces", expect.any(Object));
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces?async=1&autoStart=1", expect.any(Object));
     const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
     expect(body).toMatchObject({ issueId: "issue-1", planMode: false });
   });
@@ -218,7 +228,7 @@ describe("runAutoStart dependency resolution (blocker must be MERGED, not just t
     mockUpToDepCheck({ id: "blocker-1", statusId: "done-1", currentNodeId: "node-review", currentNodeType: "normal" }, [{ issueId: "blocker-1", mergedAt: "2026-06-14T10:00:00.000Z", isDirect: false }]);
     vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ id: "ws-new" }) } as Response);
     await runAutoStart(new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "5"]]), makeDeps());
-    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces", expect.any(Object));
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces?async=1&autoStart=1", expect.any(Object));
   });
 });
 
@@ -230,7 +240,8 @@ describe("runAutoStart URL construction", () => {
       .mockReturnValueOnce(makeSelectChain([{ id: "issue-1", title: "Ready", description: "", issueNumber: 7 }]) as ReturnType<typeof db.select>)
       .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>)
       .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // no-auto-start tag check (none)
-      .mockReturnValueOnce(makeSelectChain([{ count: 1 }]) as ReturnType<typeof db.select>);
+      .mockReturnValueOnce(makeSelectChain([{ count: 1 }]) as ReturnType<typeof db.select>) // loop2 capacity: now at cap (limit 1) after loop1's start
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>); // loop2 wip_cap diagnostic: no Todo status → nothing to tally
     vi.mocked(fetch).mockResolvedValue({ ok: true } as Response);
 
     await runAutoStart(new Map([
@@ -239,7 +250,7 @@ describe("runAutoStart URL construction", () => {
     ]), makeDeps());
 
     expect(vi.mocked(fetch)).toHaveBeenCalledWith(
-      "http://127.0.0.1:3001/api/workspaces",
+      "http://127.0.0.1:3001/api/workspaces?async=1&autoStart=1",
       expect.any(Object),
     );
   });
@@ -267,7 +278,7 @@ describe("runAutoStart Backlog promotion for auto-driven projects", () => {
       makeDeps({ isAutoDrivenProject: () => true }),
     );
 
-    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces", expect.any(Object));
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces?async=1&autoStart=1", expect.any(Object));
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("inactiveStale=19"));
     logSpy.mockRestore();
   });
@@ -292,7 +303,7 @@ describe("runAutoStart Backlog promotion for auto-driven projects", () => {
       makeDeps({ isAutoDrivenProject: () => true }),
     );
 
-    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces", expect.any(Object));
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces?async=1&autoStart=1", expect.any(Object));
   });
 
   it("skips feature and enhancement candidates and starts the next eligible non-feature issue", async () => {
@@ -354,12 +365,15 @@ describe("runAutoStart Backlog promotion for auto-driven projects", () => {
       .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // existingWs (none)
       .mockReturnValueOnce(makeSelectChain([{ id: "tag-1" }]) as ReturnType<typeof db.select>); // no-auto-start tag PRESENT
 
-    await runAutoStart(
+    const skips = await runAutoStart(
       new Map([["nudge_wip_limit", "5"]]),
       makeDeps({ isAutoDrivenProject: () => true }),
     );
 
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+    // #179: a tag-driven skip is tallied so the reason is visible, not silent.
+    expect(skips.get("proj-1")?.reasonCounts.no_auto_start_tag).toBe(1);
+    expect(skips.get("proj-1")?.issueNumbers).toEqual([6]);
   });
 
   it("does NOT start a dep-blocked Backlog issue for an auto-driven project", async () => {
@@ -545,5 +559,69 @@ describe("runAutoStart planMode override for auto-driven projects (#666)", () =>
     const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
     // planMode must NOT be in the body — the route-level default should apply
     expect(body).not.toHaveProperty("planMode");
+  });
+});
+
+// #179: a monitor-mode project whose WIP is full or whose contention gate defers a
+// candidate must not go silent — runAutoStart tallies WHY so a monitor cycle that
+// starts nothing still explains itself instead of `monitor-status` showing zero
+// actions with no warning.
+describe("runAutoStart skip-reason tallies (#179 observability)", () => {
+  it("tallies wip_cap when WIP is full but Todo work is waiting", async () => {
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }]) as ReturnType<typeof db.select>) // inProgressStatuses
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>) // loop1 activeWip
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // loop1 inProgressIssues (none)
+      .mockReturnValueOnce(makeSelectChain([{ count: 1 }]) as ReturnType<typeof db.select>) // loop2 capacity: active=1, at cap (limit 1)
+      .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }]) as ReturnType<typeof db.select>) // todoStatus
+      .mockReturnValueOnce(makeSelectChain([{ count: 3 }]) as ReturnType<typeof db.select>); // waiting-count query
+
+    const skips = await runAutoStart(new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "1"]]), makeDeps());
+
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+    expect(skips.get("proj-1")?.reasonCounts.wip_cap).toBe(3);
+  });
+
+  it("does NOT tally wip_cap when WIP is full but no Todo/Backlog work is waiting", async () => {
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }]) as ReturnType<typeof db.select>) // inProgressStatuses
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>) // loop1 activeWip
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // loop1 inProgressIssues (none)
+      .mockReturnValueOnce(makeSelectChain([{ count: 1 }]) as ReturnType<typeof db.select>) // loop2 capacity: at cap
+      .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }]) as ReturnType<typeof db.select>) // todoStatus
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>); // waiting-count query: nothing queued
+
+    const skips = await runAutoStart(new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "1"]]), makeDeps());
+
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+    expect(skips.size).toBe(0);
+  });
+
+  it("tallies contention_gate when the file-contention gate defers a candidate", async () => {
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }]) as ReturnType<typeof db.select>) // inProgressStatuses
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>) // loop1 activeWip
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // loop1 inProgressIssues (none)
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>) // loop2 inProgressCount
+      .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }]) as ReturnType<typeof db.select>) // todoStatus
+      .mockReturnValueOnce(makeSelectChain([{ id: "issue-1", title: "Contended", projectId: "proj-1", issueNumber: 11 }]) as ReturnType<typeof db.select>) // todoIssues
+      .mockReturnValueOnce(makeSelectChain([{ id: "done-1" }]) as ReturnType<typeof db.select>) // doneStatuses
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // existingWs (none)
+      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>); // no-auto-start tag (none)
+
+    const deferringGate = {
+      mode: "serialize" as const,
+      check: () => ({ hotFiles: ["src/app.ts"], blockingIssueIds: ["other-issue"], serialize: true }),
+      noteStarted: () => {},
+    };
+
+    const skips = await runAutoStart(
+      new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "5"]]),
+      makeDeps({ buildContentionGate: async () => deferringGate }),
+    );
+
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+    expect(skips.get("proj-1")?.reasonCounts.contention_gate).toBe(1);
+    expect(skips.get("proj-1")?.issueNumbers).toEqual([11]);
   });
 });

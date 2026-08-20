@@ -1,11 +1,13 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
+import { prodDeps, type ToolDeps } from "./deps.js";
 import { notifyBoard } from "../notify.js";
-import { mcpError } from "../db-utils.js";
+import { mcpError, mcpJson } from "../db-utils.js";
 
-export function registerRemoveDependency(server: McpServer) {
+export function registerRemoveDependency(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema } = deps;
+
   server.tool(
     "remove_dependency",
     "Remove a dependency link between two issues",
@@ -32,7 +34,7 @@ export function registerRemoveDependency(server: McpServer) {
         notifyBoard(rows[0].projectId, "mcp_dependency_removed");
       }
 
-      return { content: [{ type: "text" as const, text: JSON.stringify({ success: true }, null, 2) }] };
+      return mcpJson({ success: true });
     },
   );
 }

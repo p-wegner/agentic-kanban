@@ -6,12 +6,13 @@
  * stop appearing in the pending list.
  */
 import type { Database } from "../../db/index.js";
-import { getRuntimeState, setRuntimeState } from "../../repositories/runtime-state.repository.js";
+import { getRuntimeState, getRuntimeStateMany, setRuntimeState } from "../../repositories/runtime-state.repository.js";
 import { AGENT_QUESTION_MARKER_TTL_MS } from "../../lib/runtime-state-keys.js";
 import { insertIssueComment } from "../../repositories/issue-comments.repository.js";
 import { getWorkspaceIssueId } from "../../repositories/agent-questions.repository.js";
 import { invalidateAgentQuestionsCache } from "./cache.js";
 import type { AgentQuestion, AgentQuestionRecommendation } from "./types.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /** Runtime-state keys (kept out of the `preferences` config table, #975). The
  *  namespace prefixes are catalogued in `lib/runtime-state-keys.ts`. */
@@ -31,9 +32,40 @@ export async function isAnswered(toolUseId: string, db: Database): Promise<boole
   return (await getRuntimeState(answeredStateKey(toolUseId), db)) !== null;
 }
 
-export async function markAnswered(toolUseId: string, db: Database): Promise<void> {
+/** Batched {@link isAnswered}: the subset of `toolUseIds` that are resolved, in ONE
+ *  query (#418 — the listing checked each candidate individually per poll). */
+export async function getAnsweredToolUseIds(toolUseIds: string[], db: Database): Promise<Set<string>> {
+  const unique = [...new Set(toolUseIds)];
+  const found = await getRuntimeStateMany(unique.map(answeredStateKey), db);
+  return new Set(unique.filter((id) => found.has(answeredStateKey(id))));
+}
+
+/** Batched {@link getCachedRecommendations}: toolUseId → recommendations for every id
+ *  with a cached (parseable) entry, in ONE query. Ids without a usable cache entry are
+ *  absent from the map — same semantics as the single read returning null. */
+export async function getCachedRecommendationsMany(
+  toolUseIds: string[],
+  db: Database,
+): Promise<Map<string, Array<AgentQuestionRecommendation | null>>> {
+  const unique = [...new Set(toolUseIds)];
+  const found = await getRuntimeStateMany(unique.map(recommendationStateKey), db);
+  const out = new Map<string, Array<AgentQuestionRecommendation | null>>();
+  for (const id of unique) {
+    const raw = found.get(recommendationStateKey(id));
+    if (!raw) continue;
+    try {
+      const parsed = JSON.parse(raw) as { recommendations?: Array<AgentQuestionRecommendation | null> };
+      if (Array.isArray(parsed.recommendations)) out.set(id, parsed.recommendations);
+    } catch { /* malformed cache entry — treated as not-yet-computed */ }
+  }
+  return out;
+}
+
+/** `projectId` scopes the listing-cache invalidation to the affected project; omitted
+ *  (legacy callers) it clears all projects' caches. */
+export async function markAnswered(toolUseId: string, db: Database, projectId?: string): Promise<void> {
   await setRuntimeState(answeredStateKey(toolUseId), "1", db, { ttlMs: AGENT_QUESTION_MARKER_TTL_MS });
-  invalidateAgentQuestionsCache();
+  invalidateAgentQuestionsCache(projectId);
 }
 
 /**
@@ -70,7 +102,7 @@ export async function writeAgentQuestionComment(
       db,
     );
   } catch (err) {
-    console.error(`[agent-questions] failed to write agent-question comment: toolUseId=${params.toolUseId} ${err instanceof Error ? err.message : String(err)}`);
+    console.error(`[agent-questions] failed to write agent-question comment: toolUseId=${params.toolUseId} ${errorMessage(err)}`);
   }
 }
 
@@ -78,12 +110,13 @@ export async function writeAgentQuestionComment(
  *  relaunched or notified — the row is kept (not deleted) for audit. Stores
  *  `{ dismissed: true, dismissedAt }` under the same answered pref key so the question
  *  disappears from the pending list. `dismissedAt` is passed in (callers stamp the time)
- *  so the service stays free of `Date.now()`/`new Date()`. */
-export async function markDismissed(toolUseId: string, dismissedAt: string, db: Database): Promise<void> {
+ *  so the service stays free of `Date.now()`/`new Date()`. `projectId` scopes the
+ *  listing-cache invalidation; omitted it clears all projects' caches. */
+export async function markDismissed(toolUseId: string, dismissedAt: string, db: Database, projectId?: string): Promise<void> {
   await setRuntimeState(answeredStateKey(toolUseId), JSON.stringify({ dismissed: true, dismissedAt }), db, {
     ttlMs: AGENT_QUESTION_MARKER_TTL_MS,
   });
-  invalidateAgentQuestionsCache();
+  invalidateAgentQuestionsCache(projectId);
 }
 
 /** Cached recommendation array, one entry per sub-question. A null entry = couldn't recommend
@@ -103,15 +136,18 @@ export async function getCachedRecommendations(
   }
 }
 
+/** `projectId` scopes the listing-cache invalidation to the affected project; omitted
+ *  (legacy callers) it clears all projects' caches. */
 export async function setCachedRecommendations(
   toolUseId: string,
   recommendations: Array<AgentQuestionRecommendation | null>,
   db: Database,
+  projectId?: string,
 ): Promise<void> {
   await setRuntimeState(recommendationStateKey(toolUseId), JSON.stringify({ recommendations }), db, {
     ttlMs: AGENT_QUESTION_MARKER_TTL_MS,
   });
   // A landed recommendation changes the `recommendation` field attached to the
   // cached listing — drop the response cache so the next poll picks it up.
-  invalidateAgentQuestionsCache();
+  invalidateAgentQuestionsCache(projectId);
 }

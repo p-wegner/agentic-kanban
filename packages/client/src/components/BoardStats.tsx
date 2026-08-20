@@ -3,6 +3,7 @@ import type { StatusWithIssues } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import { computeBoardStats } from "../lib/boardStats.js";
 import { useBoardFilterStore } from "../stores/boardFilterStore.js";
+import { useDismissable } from "../hooks/useDismissable.js";
 
 interface BoardStatsProps {
   activeColumns: StatusWithIssues[];
@@ -113,21 +114,7 @@ export function BoardStats({
       });
   }, [showBreakdown, projectId]);
 
-  useEffect(() => {
-    if (!showBreakdown) return;
-    function handleClick(e: MouseEvent) {
-      if (breakdownRef.current && !breakdownRef.current.contains(e.target as Node)) setShowBreakdown(false);
-    }
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setShowBreakdown(false);
-    }
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleKey);
-    };
-  }, [showBreakdown]);
+  useDismissable(breakdownRef, showBreakdown, () => setShowBreakdown(false));
 
   return (
     <div data-testid="board-stats-bar" className="flex items-center gap-2 select-none flex-wrap">
@@ -219,11 +206,16 @@ export function BoardStats({
                 return (
                   <div
                     key={col.id}
+                    // #659 — a STABLE hook. The e2e spec used to select this row by its
+                    // utility classes (`div.flex.items-center.gap-1`), which is styling, not a
+                    // contract: a restyle that changed no behaviour broke the spec, and the
+                    // spec's failure said "element not found" rather than what actually moved.
+                    data-testid={`board-stats-status-${col.name}`}
                     className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium ${cfg.text} ${cfg.bg} border border-gray-200 dark:border-gray-700`}
                   >
                     <span className={`w-1.5 h-1.5 rounded-full ${cfg.bar} shrink-0`} />
                     <span>{col.name}</span>
-                    <span className="font-bold">{col.count}</span>
+                    <span className="font-bold" data-testid={`board-stats-status-count-${col.name}`}>{col.count}</span>
                   </div>
                 );
               })}
@@ -231,7 +223,11 @@ export function BoardStats({
             {/* Commits (active-profile badges live on the always-visible pulse line) */}
             {commitCount !== null && commitCount > 0 && (
               <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-gray-100 dark:border-gray-800">
-                <span className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400" title={commitBranch ? `Commits on ${commitBranch}` : "Commits on default branch"}>
+                <span
+                  data-testid="board-stats-commits"
+                  className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400"
+                  title={commitBranch ? `Commits on ${commitBranch}` : "Commits on default branch"}
+                >
                   <svg className="w-3 h-3 text-gray-400 dark:text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                     <circle cx="12" cy="12" r="3" /><line x1="12" y1="3" x2="12" y2="9" /><line x1="12" y1="15" x2="12" y2="21" />
                   </svg>
@@ -242,6 +238,10 @@ export function BoardStats({
           </div>
         )}
       </div>
+
+      {/* Backlog count moved onto the Backlog view tab in BoardToolbar (#118) so
+          it shares the Board tab's inline activity-summary treatment — one
+          consistent tab-header pattern instead of a standalone pill here. */}
 
       {/* Active agents — live, changing signal stays on the pulse line */}
       {activeWorkspaces > 0 && (

@@ -26,6 +26,18 @@
         ]
       },
       {
+        "matcher": "Bash|PowerShell|shell|shell_command|exec_command|command_execution",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/prevent-cross-worktree-writes.js\"",
+            "commandWindows": "node .claude/hooks/prevent-cross-worktree-writes.js",
+            "timeout": 10,
+            "statusMessage": "Checking worktree scope of the command"
+          }
+        ]
+      },
+      {
         "matcher": "Write|Edit|MultiEdit|NotebookEdit|apply_patch|apply_patch_freeform|functions.apply_patch",
         "hooks": [
           {
@@ -58,6 +70,17 @@
             "commandWindows": "node .claude/hooks/check-conflict-markers.js",
             "timeout": 15,
             "statusMessage": "Checking for committed conflict markers"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/check-skill-frontmatter.js\"",
+            "commandWindows": "node .claude/hooks/check-skill-frontmatter.js",
+            "timeout": 15,
+            "statusMessage": "Checking for duplicated skill frontmatter"
           }
         ]
       }

@@ -1,3 +1,4 @@
+import { readSessionStats } from "@agentic-kanban/shared/lib/session-stats-blob";
 import type { Database } from "../db/index.js";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import {
@@ -13,21 +14,21 @@ import {
   getProjectDefaultBranch,
 } from "../repositories/review.repository.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
-import type { ProviderName } from "./agent-provider.js";
-import { narrowProviderName, getProfilePrefKey } from "./agent-provider.js";
-import type { BoardEvents } from "./board-events.js";
-import type { SessionManager } from "./session.manager.js";
+import type { BoardEventSink } from "./board-events.js";
+import type { SessionLauncher } from "./session.manager.js";
 import * as gitService from "./git.service.js";
-import { MOCK_AGENT_COMMAND, isMockProfile, toExecutorProvider } from "./agent-settings.service.js";
+import { applyWorkspaceProfileToPrefs, resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import { loadProjectRuntimeConfig } from "./project-runtime-config.service.js";
+import { buildReviewContext } from "./phase-context.service.js";
+import { resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
 
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 export const DEFAULT_MONITOR_NUDGE_PROMPT =
   "Please continue with the task. If you are waiting for input or unsure how to proceed, use your best judgment and keep moving forward. Check the issue description and any open questions, then take the next logical step.";
 
 export const DEFAULT_REVIEW_PROMPT = `You are an AI code reviewer. Review the changes on branch '{{branch}}'.
 
-First, run 'git diff --stat {{baseBranch}}' to see an overview of changed files.
-Then review each file individually with 'git diff {{baseBranch}} -- <filepath>' — do NOT dump the entire diff at once.
+{{precomputedContext}}
 
 Review for: correctness bugs, security vulnerabilities, logic errors, and missing error handling.
 Classify each issue as CRITICAL (must fix — bugs, security, data loss), MAJOR (should fix — broken edge cases, poor error handling), or MINOR (nice to have — style, naming).
@@ -39,45 +40,13 @@ Do NOT move the issue to 'AI Reviewed' yourself — the system handles that on m
 Issue ID: {{issueId}}
 Workspace ID: {{workspaceId}}`;
 
-export function buildReviewArgs(prefMap: Map<string, string>, provider: ProviderName): string | undefined {
-  const skipPerms = getBool(prefMap, "skip_permissions") && provider === "claude";
-  const baseArgs = prefMap.get("agent_args") || "";
-  if (skipPerms) {
-    return baseArgs ? baseArgs + " --dangerously-skip-permissions" : "--dangerously-skip-permissions";
-  }
-  return baseArgs || undefined;
-}
-
-export function parseProviderPref(prefMap: Map<string, string>): ProviderName {
-  return narrowProviderName(prefMap.get("provider"));
-}
-
-export function getEffectiveProfile(prefMap: Map<string, string>, provider: ProviderName, claudeProfile: string | undefined): string | undefined {
-  // Claude uses the passed (mock-filtered) profile; others read their own profilePrefKey.
-  return provider === "claude" ? claudeProfile : (prefMap.get(getProfilePrefKey(provider)) || undefined);
-}
-
 /**
- * Return a copy of `prefMap` with the provider + matching profile key overridden
- * from the workspace's recorded selection, so a review/continuation runs on the
- * SAME provider+profile the workspace was built with instead of silently falling
- * back to the global default. This is what keeps a per-workspace Codex OAuth license
- * (or any chosen profile) sticky across review — without it, getEffectiveProfile
- * reads the global `codex_profile`, which may differ (or have rotated). Leaves the
- * global default in place when the workspace recorded no provider/profile.
+ * What `{{precomputedContext}}` collapses to when the board could NOT pre-compute a
+ * diff (no worktree, git failure, direct workspace with no base). The agent then
+ * discovers the change itself — the pre-#128 behaviour.
  */
-export function applyWorkspaceProfileToPrefs(
-  prefMap: Map<string, string>,
-  workspace: { provider: string | null; claudeProfile: string | null },
-): Map<string, string> {
-  const provider = workspace.provider;
-  if (provider !== "claude" && provider !== "codex" && provider !== "copilot" && provider !== "pi") return prefMap;
-  const next = new Map(prefMap);
-  next.set("provider", provider);
-  const name = workspace.claudeProfile || undefined;
-  if (name) next.set(getProfilePrefKey(provider), name);
-  return next;
-}
+export const REVIEW_CONTEXT_FALLBACK = `First, run 'git diff --stat {{baseBranch}}' to see an overview of changed files.
+Then review each file individually with 'git diff {{baseBranch}} -- <filepath>' — do NOT dump the entire diff at once.`;
 
 export async function buildReviewPrompt(
   database: Database,
@@ -91,6 +60,7 @@ export async function buildReviewPrompt(
   workspaceId?: string,
   skillName = "code-review",
   verifyAgent?: string,
+  precomputedContext?: string | null,
 ): Promise<{ prompt: string; model: string | null }> {
   let template: string | null = null;
   let skillModel: string | null = null;
@@ -105,14 +75,28 @@ export async function buildReviewPrompt(
     skillModel = globalSkill?.model ?? null;
   }
 
-  // When a workspaceId is available, signal approval via mark_ready_for_merge with the
-  // literal id (NOT the {{workspaceId}} placeholder — if the id were ever empty the
-  // placeholder collapses to "workspaceId=" and the agent has no actionable tool call).
-  // When it is missing (e.g. direct/in-place review), fall back to the issue-status path
-  // so the approval branch is always actionable.
+  // Approval signalling (#466).
+  //
+  // For a WORKSPACE review the reviewer must NOT be told to call `mark_ready_for_merge`: the
+  // board sets `readyForMerge` itself in `handleReviewSessionExit`, and only after its own
+  // pre-merge gate (verify + smoke) passes. The tool call was therefore redundant — the board
+  // ignores it and re-decides — but not harmless: when the tool was unreachable the reviewer
+  // ended a CLEAN review with "Blocked: mark_ready_for_merge is not available", which reads as
+  // "the review could not approve this" and sends the reader hunting an MCP fault. The actual
+  // reason such a workspace sits unapproved is almost always that the gate FAILED, which the
+  // board logs and emits a butler event for. One misleading sentence cost a real
+  // misdiagnosis; the reviewer's job is to judge the code and report, not to flip a flag whose
+  // owner is the exit workflow.
+  //
+  // Without a workspaceId (direct/in-place review) there IS no exit-workflow gate to set the
+  // flag, so that branch keeps its issue-status signal — it is the only thing recording approval.
   const approvalInstruction = workspaceId
-    ? `1. Use the mark_ready_for_merge MCP tool with workspaceId=${workspaceId} to signal the workspace is approved
-2. Exit normally (the scheduled merge orchestrator will merge it)`
+    ? `1. State clearly that the review found no CRITICAL or MAJOR issues
+2. Exit normally
+
+Do NOT mark the workspace ready for merge yourself, and do not call a tool to do it. The board
+runs its own pre-merge gate (verify + smoke) when you exit and marks readiness only if that
+passes — so approval is not yours to signal, and a missing tool is never what blocks it.`
     : `1. Use the move_issue MCP tool to move issue ${issueId} to 'AI Reviewed' to signal approval
 2. Exit normally (the scheduled merge orchestrator will merge it)`;
 
@@ -170,13 +154,25 @@ Steps to resolve:
 `;
   }
 
-  const serverPort = process.env.KANBAN_SERVER_PORT || process.env.PORT || "3001";
+  const serverPort = String(resolveBoardServerPort());
   const clientPort = process.env.KANBAN_CLIENT_PORT || process.env.VITE_PORT || "5173";
   const visualProofAttachTarget = workspaceId
     ? `\`workspaceId: "${workspaceId}"\``
     : `\`issueId: "${issueId}"\``;
 
-  let prompt = conflictPreamble + template
+  // A project-scoped skill may not carry the {{precomputedContext}} placeholder. Rather
+  // than force every custom template to be rewritten, prepend the block in that case so
+  // the reviewer still gets the diff instead of cold-rebuilding it (#128).
+  const contextBlock = precomputedContext?.trim() || REVIEW_CONTEXT_FALLBACK;
+  const hasContextPlaceholder = /\{\{precomputedContext}}/.test(template);
+  const contextPrefix = hasContextPlaceholder || !precomputedContext?.trim()
+    ? ""
+    : `${precomputedContext.trim()}\n\n---\n\n`;
+
+  // The context block is substituted LAST and its own text is never re-scanned:
+  // a diff can legitimately contain literal `{{baseBranch}}`-style text (this file
+  // does), and expanding placeholders inside reviewed source would corrupt it.
+  const rendered = template
     .replace(/\{\{branch}}/g, branch)
     .replace(/\{\{baseBranch}}/g, baseBranch ?? "HEAD")
     .replace(/\{\{issueId}}/g, issueId)
@@ -184,6 +180,13 @@ Steps to resolve:
     .replace(/\{\{serverPort}}/g, serverPort)
     .replace(/\{\{clientPort}}/g, clientPort)
     .replace(/\{\{autoFixInstructions}}/g, autoFixInstructions);
+  // Only the fallback text carries a placeholder; a real diff must be passed through verbatim.
+  const renderedContext = precomputedContext?.trim()
+    ? contextBlock
+    : contextBlock.replace(/\{\{baseBranch}}/g, baseBranch ?? "HEAD");
+
+  let prompt = conflictPreamble + contextPrefix + rendered
+    .replace(/\{\{precomputedContext}}/g, () => renderedContext);
 
   if (verifyAgent === "reviewer") {
     prompt += `
@@ -209,7 +212,7 @@ After completing your code review and fixing any CRITICAL/MAJOR issues:
 
 2. **Report** your verification result.
 
-3. **Signal approval** exactly as instructed above (mark_ready_for_merge / move to 'AI Reviewed')
+3. **Signal approval** exactly as instructed above (report the verdict / move to 'AI Reviewed')
    and exit normally. Do NOT call the merge endpoint yourself — the verify_script + smoke gate
    runs on your exit and the system merges once it passes.
 
@@ -248,10 +251,32 @@ export class ReviewError extends Error {
  *  concurrent requests both pass the idle-status check before either updates the DB. */
 const pendingReviewLaunches = new Set<string>();
 
+/**
+ * Cross-path review-launch reservation (#270). The Set above only guarded concurrent
+ * `startManualReview` calls; the exit-workflow's auto-review launches sessions directly and
+ * raced the stranded-review reconciler into TWO review sessions for one workspace within the
+ * same second (the zombie-fixer then killed one and reset the workspace mid-merge). Every
+ * code path that launches a review session must reserve here first and release when done.
+ */
+export function tryReserveReviewLaunch(workspaceId: string): boolean {
+  if (pendingReviewLaunches.has(workspaceId)) return false;
+  pendingReviewLaunches.add(workspaceId);
+  return true;
+}
+
+export function releaseReviewLaunch(workspaceId: string): void {
+  pendingReviewLaunches.delete(workspaceId);
+}
+
+/** True while any path (manual, auto-review, reconciler) is mid-launch for this workspace. */
+export function isReviewLaunchPending(workspaceId: string): boolean {
+  return pendingReviewLaunches.has(workspaceId);
+}
+
 function isUsageLimitLaunchFailureStats(stats: string | null): boolean {
   if (!stats) return false;
   try {
-    const parsed = JSON.parse(stats) as Record<string, unknown>;
+    const parsed = readSessionStats(stats);
     if (parsed.rateLimited === true && (parsed.rateLimitKind === "codex-usage-limit" || parsed.rateLimitKind === "claude-usage-limit")) {
       return true;
     }
@@ -325,15 +350,14 @@ async function classifyBlockedReviewRecovery(
 
 export async function startManualReview(
   database: Database,
-  getSessionManager: () => SessionManager,
-  boardEvents: BoardEvents,
+  getSessionManager: () => SessionLauncher,
+  boardEvents: BoardEventSink,
   reviewSessionIds: Set<string>,
   workspaceId: string,
   thoroughReview: boolean,
 ): Promise<{ sessionId: string }> {
-  const wsRows = await getWorkspaceById(workspaceId, database);
-  if (wsRows.length === 0) throw new ReviewError("Workspace not found", "NOT_FOUND");
-  const workspace = wsRows[0];
+  const workspace = await getWorkspaceById(workspaceId, database);
+  if (!workspace) throw new ReviewError("Workspace not found", "NOT_FOUND");
   let recoverBlockedReview = false;
   if (workspace.status !== "idle") {
     if (workspace.status === "blocked") {
@@ -365,10 +389,9 @@ export async function startManualReview(
 
   // Guard against concurrent requests that both passed the idle check before either
   // updates the DB status to "reviewing".
-  if (pendingReviewLaunches.has(workspaceId)) {
+  if (!tryReserveReviewLaunch(workspaceId)) {
     throw new ReviewError("Review launch already in progress for this workspace", "CONFLICT");
   }
-  pendingReviewLaunches.add(workspaceId);
 
   try {
     const issueRows = await getIssueProjectAndId(workspace.issueId, database);
@@ -380,24 +403,22 @@ export async function startManualReview(
     // Codex OAuth license), not the global default which may have rotated since.
     // Exception: a blocked usage-limit review recovery intentionally uses the current
     // board default so switching providers can recover a stale provider/profile.
-    const defaultPrefMap = new Map(prefRows.map((r) => [r.key, r.value]));
+    const defaultPrefMap = toPrefMap(prefRows);
     const prefMap = recoverBlockedReview ? defaultPrefMap : applyWorkspaceProfileToPrefs(defaultPrefMap, workspace);
     const runtime = recoverBlockedReview
       ? await loadProjectRuntimeConfig(database, { projectId })
       : null;
-    const manualProfile = prefMap.get("claude_profile") || undefined;
-    const provider = runtime?.provider.provider ?? parseProviderPref(prefMap);
-    const agentCommand = runtime?.provider.agentCommand ?? (isMockProfile(manualProfile) ? MOCK_AGENT_COMMAND : (prefMap.get("agent_command") || undefined));
-    const claudeProfile = runtime
-      ? (runtime.provider.provider === "claude" ? runtime.provider.profileName : undefined)
-      : (isMockProfile(manualProfile) ? undefined : manualProfile);
-    const effectiveProfileName = getEffectiveProfile(prefMap, provider, claudeProfile);
-    const manualProfileSelection = runtime?.provider.profileSelection ?? (effectiveProfileName ? { provider, name: effectiveProfileName } : undefined);
-    const reviewArgs = runtime?.provider.agentArgs ?? buildReviewArgs(prefMap, provider);
+    // #541: the fifth copy of the prefs -> {command, args, provider, profile} ladder.
+    // `prefMap` is already workspace-pinned above (except on the recover path, which takes
+    // its values from `runtime` instead), so plain resolveAgentSettings is the right call.
+    const settings = resolveAgentSettings(prefMap);
+    const provider = runtime?.provider.provider ?? settings.provider;
+    const agentCommand = runtime?.provider.agentCommand ?? settings.agentCommand;
+    const manualProfileSelection = runtime?.provider.profileSelection ?? settings.profile;
+    const reviewArgs = runtime?.provider.agentArgs ?? settings.agentArgs;
     const autoFix = getBool(prefMap, "review_auto_fix");
 
-    const projectRows = await getProjectDefaultBranch(projectId, database);
-    const defaultBranch = projectRows.length > 0 ? projectRows[0].defaultBranch : null;
+    const defaultBranch = (await getProjectDefaultBranch(projectId, database))?.defaultBranch ?? null;
     let diffRef = workspace.baseBranch || defaultBranch;
 
     if (!workspace.isDirect && workspace.workingDir) {
@@ -423,9 +444,14 @@ export async function startManualReview(
 
     const manualSkillName = thoroughReview ? "code-review-thorough" : "code-review";
     const verifyAgent = prefMap.get("after_merge_verify_agent") || "none";
+    // Same pre-computed context the auto-review path gets (#128) — a manual review is
+    // just as cold a start. Reaching here means the rebase preflight succeeded.
+    const manualContext = workspace.workingDir && diffRef
+      ? await buildReviewContext({ workingDir: workspace.workingDir, baseRef: diffRef, isDirect: workspace.isDirect })
+      : null;
     const { prompt: reviewPromptText, model: reviewModel } = await buildReviewPrompt(
       database, workspace.branch, diffRef, issueId, autoFix, projectId,
-      undefined, undefined, workspaceId, manualSkillName, verifyAgent,
+      undefined, undefined, workspaceId, manualSkillName, verifyAgent, manualContext,
     );
     const runtimeModel = runtime?.provider.model;
     const reviewArgsWithModel = reviewModel && provider === "claude" ? `${reviewArgs ?? ""} --model ${reviewModel}`.trim() : reviewArgs;
@@ -439,7 +465,7 @@ export async function startManualReview(
       const reviewExtraEnv: Record<string, string> = { KANBAN_SESSION_TYPE: "review", KANBAN_AFTER_MERGE_VERIFY: verifyAgent };
       sessionId = await getSessionManager().startSession({
         workspaceId, prompt: reviewPromptText, agentCommand, agentArgs: reviewArgsWithModel,
-        claudeProfile, profile: manualProfileSelection, provider: toExecutorProvider(provider),
+        profile: manualProfileSelection, provider: toExecutorProvider(provider),
         triggerType: "review", extraEnv: reviewExtraEnv,
         permissionPromptTool: runtime?.provider.permissionPromptTool,
         resumeWithNewModel: runtime?.provider.resumeWithNewModel,
@@ -458,6 +484,6 @@ export async function startManualReview(
     console.log(`[review-service] manual review session ${sessionId} for workspace ${workspaceId}`);
     return { sessionId };
   } finally {
-    pendingReviewLaunches.delete(workspaceId);
+    releaseReviewLaunch(workspaceId);
   }
 }

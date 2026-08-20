@@ -1,4 +1,8 @@
 node_modules/
+# Worktree dependency-isolation rename artifact (symlink-era) + vitest cache — never track (#175)
+*.stale-locked/
+node_modules.stale-locked/
+.vite/
 dist/
 *.db
 *.db-journal
@@ -56,3 +60,13 @@ build/
 
 # npm lockfile — this repo is pnpm-managed (pnpm-lock.yaml is the lockfile of record)
 package-lock.json
+docker-compose.override.yml
+
+# per-project board state written into checkouts/worktrees (services.env holds stack secrets)
+.kanban/
+
+# AI agent artifacts (written during a workspace session; not project source)
+.claude/skills/
+.codex/skills
+.claude/smart-hooks-rules.json
+packages/e2e/.e2e-data/

@@ -10,6 +10,7 @@ import { createMockProc } from "./helpers/mocks.js";
 import { createSessionState } from "../services/session-manager/types.js";
 import { createSessionLifecycle, type AgentService } from "../services/session-manager/session-lifecycle.js";
 import type { AgentOutputCallback } from "../services/agent.service.js";
+import type { AgentLaunchRequest } from "../services/agent-dispatch.service.js";
 import type { workspaceLaunchPreflight } from "../services/preflight-check.js";
 import { WorkspaceError } from "../services/workspace-internals.js";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
@@ -67,8 +68,11 @@ async function seedWorkspace(
 function createFakeAgentService(): { service: AgentService; getOnOutput: () => AgentOutputCallback | undefined } {
   let captured: AgentOutputCallback | undefined;
   const service = {
-    launch: vi.fn((_dir, _sid, _prompt, _args, onOutput: AgentOutputCallback) => {
-      captured = onOutput;
+    // #524 made launch() take ONE AgentLaunchRequest. This fake is a launch
+    // IMPLEMENTATION, not a call site, so the conversion's call-site search missed it and
+    // `onOutput` silently became undefined here — 15 tests failed on the next full run.
+    launch: vi.fn((request: AgentLaunchRequest) => {
+      captured = request.onOutput;
       return createMockProc();
     }),
     kill: vi.fn(() => true),
@@ -85,11 +89,31 @@ function okPreflight(): typeof workspaceLaunchPreflight {
 }
 
 /** Flush pending microtasks so fire-and-forget DB writes (`.catch()`) settle. */
-async function flush(predicate?: () => boolean): Promise<void> {
-  const deadline = Date.now() + 1000;
+/**
+ * Poll until `predicate` holds, or give up at `budgetMs`.
+ *
+ * #620 — `flush(() => false)` was used as "settle the async handler", which is a fixed
+ * 1000ms SLEEP wearing a condition-wait's clothes: the predicate can never become true, so
+ * it always burns the whole budget and then continues regardless of whether the work
+ * finished. On an idle machine 1s was enough and the suite looked deterministic; under
+ * full-suite load it was not, and the assertion afterwards read a stale row. Waiting on the
+ * ACTUAL condition is both faster when idle and correct when loaded — see
+ * `flushUntilAsync` below for the cases where the condition is a DB read.
+ */
+async function flush(predicate?: () => boolean, budgetMs = 1000): Promise<void> {
+  const deadline = Date.now() + budgetMs;
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 20));
     if (!predicate || predicate()) return;
+  }
+}
+
+/** {@link flush} for a predicate that has to await something (typically a DB read). */
+async function flushUntilAsync(predicate: () => Promise<boolean>, budgetMs = 10_000): Promise<void> {
+  const deadline = Date.now() + budgetMs;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 20));
+    if (await predicate()) return;
   }
 }
 
@@ -112,8 +136,8 @@ describe("session-lifecycle", () => {
     expect(sessionId).toBeTruthy();
     expect(agentService.launch).toHaveBeenCalledOnce();
     // The agent runs in the workspace's working directory
-    const launchArgs = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(launchArgs[0]).toBe("/tmp/repo/.worktrees/ak-1");
+    const request = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(request.worktreePath).toBe("/tmp/repo/.worktrees/ak-1");
 
     const rows = await db.select().from(sessions).where(eq(sessions.id, sessionId));
     expect(rows).toHaveLength(1);
@@ -159,10 +183,11 @@ describe("session-lifecycle", () => {
       systemInstructions: "Base guardrails.",
     });
 
-    const launchArgs = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(launchArgs[15]).toBe("gpt-5.5");
-    expect(launchArgs[17]).toContain("Base guardrails.");
-    expect(launchArgs[17]).toContain("MUST run relevant tests and COMMIT");
+    // Read by NAME: these were positions 15 and 17, i.e. `model` and `systemInstructions`.
+    const request = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(request.model).toBe("gpt-5.5");
+    expect(request.systemInstructions).toContain("Base guardrails.");
+    expect(request.systemInstructions).toContain("MUST run relevant tests and COMMIT");
 
     const rows = await db.select().from(sessions).where(eq(sessions.id, sessionId));
     const stats = JSON.parse(rows[0].stats!);
@@ -551,7 +576,11 @@ describe("session-lifecycle", () => {
     onOutput!({ type: "exit", exitCode: 0 } as never);
 
     await flush(() => onSessionExit.mock.calls.length > 0);
-    await flush(() => false); // settle the async plan handler
+    // Wait for the async plan handler's WRITE, not for a fixed slice of wall clock (#620).
+    await flushUntilAsync(async () => {
+      const rows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
+      return rows[0]?.planMode === false;
+    });
 
     const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
     expect(wsRows[0].planMode).toBe(false);
@@ -580,7 +609,11 @@ describe("session-lifecycle", () => {
     onOutput!({ type: "exit", exitCode: 0 } as never);
 
     await flush(() => onSessionExit.mock.calls.length > 0);
-    await flush(() => false); // settle the async plan handler
+    // Wait for the async plan handler's WRITE, not for a fixed slice of wall clock (#620).
+    await flushUntilAsync(async () => {
+      const rows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
+      return rows[0]?.planMode === false;
+    });
 
     const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
     // planMode must NOT be left stuck-true (the #924 strand) — a follow-up turn must not re-run read-only.
@@ -646,9 +679,9 @@ describe("session-lifecycle", () => {
       // Default provider = claude (no provider/model passed on the call).
       const sessionId = await lifecycle.startSession({ workspaceId, prompt: "do it" });
 
-      // The launch must NOT receive the cross-provider model as any launch arg.
-      const launchArgs = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0];
-      expect(launchArgs).not.toContain("gpt-5.5");
+      // The launch must NOT receive the cross-provider model.
+      const request = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(request.model).toBeUndefined();
 
       // Launch diagnostics record the stored model but resolve it to null (dropped) — source of truth.
       const rows = await db.select().from(sessions).where(eq(sessions.id, sessionId));
@@ -666,8 +699,8 @@ describe("session-lifecycle", () => {
       const sessionId = await lifecycle.startSession({ workspaceId, prompt: "do it" });
 
       // A model that belongs to the launch provider is preserved (the guard must not over-strip).
-      const launchArgs = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0];
-      expect(launchArgs).toContain("opus");
+      const request = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(request.model).toBe("opus");
 
       const rows = await db.select().from(sessions).where(eq(sessions.id, sessionId));
       const stats = JSON.parse(rows[0].stats!);
@@ -684,8 +717,8 @@ describe("session-lifecycle", () => {
       // Explicit per-call (claude-valid) model wins; the stored cross-provider id is irrelevant.
       const sessionId = await lifecycle.startSession({ workspaceId, prompt: "do it", model: "sonnet" });
 
-      const launchArgs = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0];
-      expect(launchArgs).toContain("sonnet");
+      const request = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(request.model).toBe("sonnet");
 
       const rows = await db.select().from(sessions).where(eq(sessions.id, sessionId));
       const stats = JSON.parse(rows[0].stats!);
@@ -704,8 +737,8 @@ describe("session-lifecycle", () => {
       const lifecycle = createSessionLifecycle(createSessionState(), undefined, vi.fn(), { db, agentService, preflight: okPreflight() });
       const sessionId = await lifecycle.startSession({ workspaceId, prompt: "do it" });
 
-      const launchArgs = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0];
-      expect(launchArgs).toContain("glm-4.6");
+      const request = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(request.model).toBe("glm-4.6");
 
       const rows = await db.select().from(sessions).where(eq(sessions.id, sessionId));
       const stats = JSON.parse(rows[0].stats!);
@@ -724,13 +757,113 @@ describe("session-lifecycle", () => {
       // triggerType "review" => non-builder, so the no-model codex default (gpt-5.5) is NOT applied.
       const sessionId = await lifecycle.startSession({ workspaceId, prompt: "do it", provider: "codex", triggerType: "review" });
 
-      const launchArgs = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0];
-      expect(launchArgs).not.toContain("opus");
+      const request = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(request.model).toBeUndefined();
 
       const rows = await db.select().from(sessions).where(eq(sessions.id, sessionId));
       const stats = JSON.parse(rows[0].stats!);
       expect(stats.launch.workspaceModel).toBe("opus");
       expect(stats.launch.resolvedModel).toBeNull();
+    });
+  });
+
+  // #26: missing-transcript fallback. A resumed launch dies immediately because the provider
+  // can't find the resumed conversation's transcript (volume deleted, ~/.claude pruned, image
+  // rebuild without the state volume). This used to be reported as a plain launch failure and
+  // left the workspace idle; it must instead clear the dead resume id and relaunch fresh.
+  describe("missing-transcript resume fallback", () => {
+    it("clears the stale provider session id and relaunches fresh when resume finds no transcript", async () => {
+      const workspaceId = await seedWorkspace(db);
+      const { service: agentService, getOnOutput } = createFakeAgentService();
+      const onSessionExit = vi.fn();
+      const state = createSessionState();
+      const broadcast = vi.fn((sid: string, message: AgentOutputMessage) => {
+        if (!state.messageBuffer.has(sid)) state.messageBuffer.set(sid, []);
+        state.messageBuffer.get(sid)!.push(message);
+      });
+
+      const lifecycle = createSessionLifecycle(
+        state,
+        { onSessionExit },
+        broadcast,
+        { db, agentService, preflight: okPreflight() },
+      );
+
+      // A prior session that captured a provider resume token whose transcript has since vanished.
+      const staleToken = "claude-stale-" + randomUUID();
+      const prevSessionId = randomUUID();
+      const startedAt = new Date().toISOString();
+      await db.insert(sessions).values({
+        id: prevSessionId, workspaceId, executor: "claude-code", status: "completed",
+        startedAt, providerSessionId: staleToken,
+      });
+
+      const sessionId = await lifecycle.startSession({ workspaceId, prompt: "continue the work", resumeFromId: prevSessionId });
+      expect(agentService.launch).toHaveBeenCalledOnce();
+      // The first (resumed) launch forwarded the stale token as --resume.
+      const firstRequest = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(firstRequest.providerSessionId).toBe(staleToken);
+
+      const onOutput = getOnOutput();
+      expect(onOutput).toBeDefined();
+      onOutput!({ type: "stderr", data: `No conversation found with session ID: ${staleToken}` } as never);
+      onOutput!({ type: "exit", exitCode: 1 } as never);
+
+      await flush(() => (agentService.launch as ReturnType<typeof vi.fn>).mock.calls.length >= 2);
+
+      // The failed resumed session is recorded (visible in history), flagged as a recovered stale resume.
+      const failedRows = await db.select().from(sessions).where(eq(sessions.id, sessionId));
+      expect(failedRows[0].status).toBe("stopped");
+      const failedStats = JSON.parse(failedRows[0].stats!);
+      expect(failedStats.staleResumeRecovered).toBe(true);
+
+      // The old session's stored resume token was cleared so it can't be forwarded again.
+      const prevRows = await db.select().from(sessions).where(eq(sessions.id, prevSessionId));
+      expect(prevRows[0].providerSessionId).toBeNull();
+
+      // A fresh session was launched automatically, WITHOUT --resume, carrying a handoff note.
+      expect(agentService.launch).toHaveBeenCalledTimes(2);
+      const secondRequest = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[1][0];
+      expect(secondRequest.providerSessionId).toBeUndefined();
+      expect(secondRequest.prompt).toContain("resume recovery");
+      expect(secondRequest.prompt).toContain("continue the work");
+
+      // The workspace is NOT left idle awaiting a manual relaunch.
+      const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
+      expect(wsRows[0].status).not.toBe("idle");
+    });
+
+    it("does not loop: a second consecutive stale-resume failure for the same workspace is reported as a plain launch failure", async () => {
+      const workspaceId = await seedWorkspace(db);
+      const { service: agentService, getOnOutput } = createFakeAgentService();
+      const state = createSessionState();
+      const broadcast = vi.fn((sid: string, message: AgentOutputMessage) => {
+        if (!state.messageBuffer.has(sid)) state.messageBuffer.set(sid, []);
+        state.messageBuffer.get(sid)!.push(message);
+      });
+
+      const lifecycle = createSessionLifecycle(state, undefined, broadcast, { db, agentService, preflight: okPreflight() });
+
+      const staleToken = "claude-stale-" + randomUUID();
+      const prevSessionId = randomUUID();
+      await db.insert(sessions).values({
+        id: prevSessionId, workspaceId, executor: "claude-code", status: "completed",
+        startedAt: new Date().toISOString(), providerSessionId: staleToken,
+      });
+
+      await lifecycle.startSession({ workspaceId, prompt: "continue the work", resumeFromId: prevSessionId });
+      state.workspaceStaleResumeRecoveryCount.set(workspaceId, 1); // already used the one automatic retry
+
+      const onOutput = getOnOutput();
+      onOutput!({ type: "stderr", data: `No conversation found with session ID: ${staleToken}` } as never);
+      onOutput!({ type: "exit", exitCode: 1 } as never);
+
+      await flush();
+
+      // No second relaunch — the failure is reported normally and the workspace goes idle.
+      expect(agentService.launch).toHaveBeenCalledOnce();
+      const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
+      expect(wsRows[0].status).toBe("idle");
     });
   });
 });

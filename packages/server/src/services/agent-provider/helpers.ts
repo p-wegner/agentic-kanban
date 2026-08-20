@@ -1,3 +1,5 @@
+import { readBoardEnv } from "../../lib/env-registry.js";
+import { resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, delimiter, dirname, join, resolve } from "node:path";
@@ -17,6 +19,28 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const MCP_SERVER_PATH = resolve(__dirname, "../../../../mcp-server/src/index.ts");
 const TSX_LOADER = resolve(__dirname, "../../../node_modules/tsx/dist/loader.mjs");
 const TSX_URL = pathToFileURL(TSX_LOADER).href;
+
+/**
+ * How to invoke the agentic-kanban MCP server. In a bundled install (npm package,
+ * Docker image) the compiled `mcp.js` sits next to `dist/server.js` or one level above
+ * `dist/cli/index.js` — helpers.ts is inlined into BOTH bundles, so probe both. Only a
+ * dev checkout falls back to tsx + the TypeScript source.
+ */
+export function resolveMcpServerInvocation(fs: FileSystem = nodeFileSystem): { command: string; args: string[] } {
+  for (const candidate of [resolve(__dirname, "mcp.js"), resolve(__dirname, "../mcp.js")]) {
+    if (fs.existsSync(candidate)) return { command: "node", args: [candidate] };
+  }
+  // Dev-checkout fallback (tsx + TypeScript source) — the pre-bundle-fix behavior.
+  // Returned even when the source path is missing (matching the old unconditional
+  // behavior; providers embed this config without probing), but warn loudly so a
+  // broken install is diagnosable instead of agents silently lacking MCP tools.
+  if (!fs.existsSync(MCP_SERVER_PATH)) {
+    console.warn(
+      `[agent] agentic-kanban MCP server not found — probed bundled paths ${resolve(__dirname, "mcp.js")}, ${resolve(__dirname, "../mcp.js")} and source path ${MCP_SERVER_PATH}. Agents may lack kanban MCP tools.`,
+    );
+  }
+  return { command: "node", args: ["--import", TSX_URL, MCP_SERVER_PATH] };
+}
 
 let claudeMcpConfigPath: string | null = null;
 
@@ -70,12 +94,10 @@ export const COPILOT_DEFAULT_ALLOWED_TOOLS = [
 
 export function getMcpConfigPath(fs: FileSystem = nodeFileSystem): string {
   if (claudeMcpConfigPath && fs.existsSync(claudeMcpConfigPath)) return claudeMcpConfigPath;
+  const invocation = resolveMcpServerInvocation(fs);
   const config = {
     mcpServers: {
-      "agentic-kanban": {
-        command: "node",
-        args: ["--import", TSX_URL, MCP_SERVER_PATH],
-      },
+      "agentic-kanban": invocation,
     },
   };
   const path = resolve(tmpdir(), "agentic-kanban-mcp-config.json");
@@ -92,14 +114,15 @@ export function getMcpConfigPath(fs: FileSystem = nodeFileSystem): string {
  * the MCP server's tools can call back to this server.
  */
 export function getMcpServersConfig(): Record<string, { command: string; args: string[]; env?: Record<string, string> }> {
-  const serverPort = process.env.KANBAN_SERVER_PORT || process.env.SERVER_PORT || process.env.PORT || "3001";
+  const serverPort = String(resolveBoardServerPort()); // #615 — the one ladder
   // Pin the spawned MCP server to the SAME database this server uses. Without this it
   // re-runs data-dir resolution under a different cwd and can fall back to
   // ~/.agentic-kanban (a different DB), so the butler would answer about the wrong board.
+  const invocation = resolveMcpServerInvocation();
   return {
     "agentic-kanban": {
-      command: "node",
-      args: ["--import", TSX_URL, MCP_SERVER_PATH],
+      command: invocation.command,
+      args: invocation.args,
       env: { SERVER_PORT: serverPort, DB_URL: getDbUrl() },
     },
   };
@@ -155,6 +178,23 @@ export function profileDefinesCustomEndpoint(profileName: string | undefined, fs
   }
 }
 
+/**
+ * An OAuth (Max/Pro-plan) profile is a whole config DIRECTORY `~/.claude-<name>`, not a
+ * `settings_<name>.json` — the login lives in its `.credentials.json`, and the only lever to
+ * select it is `CLAUDE_CONFIG_DIR`. Returns that dir when the profile is one, else undefined.
+ *
+ * Deliberately fs-only (no DB, no rotation ring) so `buildSpawnEnv` stays synchronous and
+ * dependency-free; an explicit `configDir` override in the ring is handled by the launch-path
+ * resolver, which layers its env on top of this.
+ */
+function oauthProfileConfigDir(profileName: string, fs: FileSystem): string | undefined {
+  if (fs.existsSync(join(homedir(), ".claude", `settings_${profileName}.json`))) return undefined;
+  const dir = join(homedir(), `.claude-${profileName}`);
+  if (!fs.existsSync(dir)) return undefined;
+  const hasAuth = fs.existsSync(join(dir, ".credentials.json")) || fs.existsSync(join(dir, "settings.json"));
+  return hasAuth ? dir : undefined;
+}
+
 export function buildSpawnEnv(claudeProfile?: string, fs: FileSystem = nodeFileSystem): Record<string, string> {
   const spawnEnv: Record<string, string> = { ...process.env as Record<string, string> };
 
@@ -163,6 +203,19 @@ export function buildSpawnEnv(claudeProfile?: string, fs: FileSystem = nodeFileS
   }
 
   if (!claudeProfile) return spawnEnv;
+
+  // An OAuth profile carries no settings file, so the old code returned here having stripped
+  // nothing back in — leaving whatever CLAUDE_CONFIG_DIR the SERVER process inherited. Callers
+  // that spawn the CLI get the right dir anyway (the launch path layers it on via extraEnv),
+  // but the in-process butler SDK calls this function directly and had no such correction: it
+  // reported the selected profile in its status while actually authenticating as the server's
+  // ambient account. When that account was logged out, every butler feature failed with
+  // "Not logged in · Please run /login" on a board whose configured profile was perfectly valid.
+  const oauthDir = oauthProfileConfigDir(claudeProfile, fs);
+  if (oauthDir) {
+    spawnEnv.CLAUDE_CONFIG_DIR = oauthDir;
+    return spawnEnv;
+  }
 
   const settingsPath = join(homedir(), ".claude", `settings_${claudeProfile}.json`);
   if (!fs.existsSync(settingsPath)) return spawnEnv;
@@ -209,6 +262,82 @@ export function splitArgs(input: string): string[] {
   return args;
 }
 
+/**
+ * A flag that must never reach a provider's CLI, declared as data so adding
+ * another known-bad flag later is a one-line change (see {@link DENIED_ARGS}).
+ */
+export interface DeniedFlag {
+  /** The exact long-flag token to strip, e.g. "--approve". */
+  flag: string;
+  /**
+   * If true, a separate following value token (`--flag value`) is also stripped.
+   * Leave false/undefined for boolean/valueless flags so an unrelated trailing
+   * token is NOT swallowed.
+   */
+  takesValue?: boolean;
+  /** Human-readable reason surfaced in the strip warning. */
+  reason: string;
+}
+
+/**
+ * Per-provider denylist of flags that poison a launch. The knowledge that "Pi
+ * 0.73.1 rejects --approve" lived ONLY in comments/CLAUDE.md prose, so a stray
+ * `--approve` in `agentArgs` (from a pref, stale config, or an agent) silently
+ * broke the spawn. Encoding it here — applied in one place by every provider's
+ * arg assembly via {@link spliceAgentArgs} — turns that prose into an enforced,
+ * extensible invariant. (arch-review §2.2 / ticket #19.)
+ */
+export const DENIED_ARGS: Record<string, DeniedFlag[]> = {
+  pi: [
+    {
+      flag: "--approve",
+      // Pi's approve flag is a valueless boolean; do NOT strip a following token.
+      takesValue: false,
+      reason: "Pi 0.73.1 rejects --approve and the launch fails outright",
+    },
+  ],
+};
+
+/**
+ * Strip any {@link DENIED_ARGS} flags for `providerName` out of an already-split
+ * token list, loudly warning (flag + provider + why) for each removal. Handles
+ * `--flag`, `--flag=value`, and (for `takesValue` flags) `--flag value`.
+ */
+export function stripDeniedArgs(providerName: string, tokens: string[]): string[] {
+  const denied = DENIED_ARGS[providerName];
+  if (!denied || denied.length === 0) return tokens;
+
+  const result: string[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    const match = denied.find((d) => token === d.flag || token.startsWith(`${d.flag}=`));
+    if (!match) {
+      result.push(token);
+      continue;
+    }
+    console.warn(
+      `[agent] Stripped denied flag "${token}" from ${providerName} agentArgs: ${match.reason}`,
+    );
+    // Only skip the following token when the flag genuinely takes a separate
+    // value AND was passed in the `--flag value` (not `--flag=value`) form.
+    if (match.takesValue && token === match.flag && i + 1 < tokens.length) {
+      i++;
+    }
+  }
+  return result;
+}
+
+/**
+ * The single sanctioned entry point for turning a user-supplied `agentArgs`
+ * string into spawn tokens: split, then strip this provider's denied flags.
+ * Every provider adapter routes `agentArgs` through here so a poison flag can't
+ * be spliced in blind on any launch path.
+ */
+export function spliceAgentArgs(providerName: string, agentArgs: string | undefined): string[] {
+  if (!agentArgs) return [];
+  return stripDeniedArgs(providerName, splitArgs(agentArgs));
+}
+
 export function mapCopilotProfile(profileName: string): { flag: "--model" | "--agent"; value: string } | undefined {
   const agentPrefix = "agent:";
   const modelPrefix = "model:";
@@ -222,18 +351,6 @@ export function mapCopilotProfile(profileName: string): { flag: "--model" | "--a
     return { flag: "--model", value: profileName.slice(modelPrefix.length) };
   }
   return { flag: "--model", value: profileName };
-}
-
-export function stringValue(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-export function numberValue(value: unknown): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-
-export function objectValue(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
 // --- Windows resolvers ---
@@ -317,4 +434,53 @@ export function resolvePiExecutable(command: string, fs: FileSystem = nodeFileSy
   }
 
   return candidates.find((candidate) => fs.existsSync(candidate));
+}
+
+// --- Mock-agent launch resolution (#526) -------------------------------------------
+//
+// All four provider adapters open-coded the same two lines plus the same mock branch,
+// and `agent-profile-health.service.ts` sniffed "mock-agent" a fifth way. The risk is
+// not the duplication itself but that `isMockAgent` gates whether REAL provider flags
+// are added: a copy that drifts sends production arguments to the mock binary, or the
+// reverse, and the failure surfaces as an unexplained agent launch failure.
+
+/** Whether a resolved agent command is the mock agent. The single sniff. */
+export function isMockAgentCommand(command: string | null | undefined): boolean {
+  return (command ?? "").includes("mock-agent");
+}
+
+export interface MockLaunchResolution {
+  /** True when this launch must use the mock binary's argument shape. */
+  isMockAgent: boolean;
+  /** The binary to spawn: AGENT_COMMAND override, explicit command, else the default. */
+  command: string;
+  /**
+   * The mock binary's own arguments for this launch. Empty when not mocking, so a
+   * caller can splice unconditionally.
+   */
+  mockArgs: string[];
+}
+
+/**
+ * Resolve the mock-vs-real launch shape shared by every provider adapter.
+ *
+ * `AGENT_COMMAND` forces mock mode regardless of the command's name — that is how the
+ * E2E harness substitutes the agent — which is why the check is an OR and not just a
+ * name sniff.
+ */
+export function resolveMockLaunch(
+  options: { agentCommand?: string | null; providerSessionId?: string | null; keepAlive?: boolean },
+  defaultBinary: string,
+): MockLaunchResolution {
+  const { agentCommand, providerSessionId, keepAlive } = options;
+  const agentCommandOverride = readBoardEnv("KANBAN_AGENT_COMMAND");
+  const isMockAgent = !!agentCommandOverride || isMockAgentCommand(agentCommand);
+  const command = agentCommandOverride || agentCommand || defaultBinary;
+
+  const mockArgs: string[] = [];
+  if (isMockAgent) {
+    if (providerSessionId) mockArgs.push("--resume", providerSessionId);
+    if (keepAlive) mockArgs.push("--profile", "multi-turn");
+  }
+  return { isMockAgent, command, mockArgs };
 }

@@ -12,7 +12,6 @@ import * as schema from "@agentic-kanban/shared/schema";
 import { randomUUID } from "node:crypto";
 import { createTestApp as _createTestApp } from "./helpers/test-app.js";
 import { createMockSessionManager } from "./helpers/mocks.js";
-import { createPreferenceService } from "../services/preference.service.js";
 import { setPreferences, getPreference } from "../repositories/preferences.repository.js";
 
 function createTestApp() {
@@ -33,6 +32,13 @@ describe("PUT /api/preferences/settings — write-time divergence guard", () => 
   let projectId: string;
 
   beforeEach(async () => {
+    // The suite shares one DB. Since #335 the guard is scoped by the WRITE (the
+    // projects it names) or by every live project holding a Bullseye — no longer by
+    // `activeProjectId` alone — so a previous test's leftover project + its
+    // `board_strategy_*` pref would gate the next test's write. Reset both so each
+    // test's premise is the only state in play.
+    await database.delete(schema.preferences);
+    await database.delete(schema.projects);
     projectId = randomUUID();
     await database.insert(schema.projects).values({
       id: projectId,

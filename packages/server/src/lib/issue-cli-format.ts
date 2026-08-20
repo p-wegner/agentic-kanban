@@ -5,21 +5,13 @@
 // assertions and kept out of the giant command handlers.
 
 import { formatDurationStr, type SessionSummary } from "@agentic-kanban/shared";
+import type { SessionStatsBlob } from "@agentic-kanban/shared";
 
 /**
  * Shape of the persisted, JSON-parsed session-stats blob the issue renderers read.
  * All fields optional: it's untyped persisted JSON and every access falls back to
  * a default, so narrowing here types the boundary without asserting absent fields.
  */
-interface ParsedSessionStats {
-  durationMs?: number;
-  totalCostUsd?: number;
-  inputTokens?: number;
-  outputTokens?: number;
-  numTurns?: number;
-  model?: string;
-  success?: boolean;
-}
 
 export interface IssueSummaryRenderInput {
   num: number;
@@ -49,7 +41,7 @@ export function buildIssueSummaryLines(input: IssueSummaryRenderInput): string[]
   lines.push(`  session: ${sessionStatus}  duration: ${duration ?? "?"}`);
 
   if (stats) {
-    const s = stats as ParsedSessionStats;
+    const s = stats as SessionStatsBlob;
     const parts: string[] = [];
     if (s.model ?? summary.model) parts.push(`model: ${s.model ?? summary.model}`);
     if ((s.numTurns ?? 0) > 0) parts.push(`turns: ${s.numTurns}`);
@@ -212,19 +204,10 @@ export function formatAttachArtifactOutput(result: AttachArtifactResult, num: nu
   return lines;
 }
 
-/**
- * Pick the session to summarize: prefer non-noise sessions, then the first
- * completed/stopped one, falling back to the most recent (input is desc by
- * startedAt). Pure given the noise predicate.
- */
-export function selectSummarySession<T extends { status: string }>(
-  sessionRows: T[],
-  isNoise: (s: T) => boolean,
-): T | null {
-  const nonNoise = sessionRows.filter((s) => !isNoise(s));
-  const relevant = nonNoise.length > 0 ? nonNoise : sessionRows;
-  return relevant.find((s) => s.status === "completed" || s.status === "stopped") ?? relevant[0] ?? null;
-}
+// The session-selection policy moved to `shared/lib/session-selection.ts` with #506, so
+// REST and MCP apply it too instead of their own `find(completed|stopped) ?? rows[0]`.
+// Re-exported for the existing importers (cli/commands/issue.ts, issue-cli-format.test.ts).
+export { selectSummarySession } from "@agentic-kanban/shared/lib/session-selection";
 
 export interface IssueSummaryJsonInput {
   issueId: string;
@@ -257,13 +240,13 @@ export function buildIssueSummaryJson(input: IssueSummaryJsonInput): Record<stri
       duration,
     },
     stats: stats ? {
-      durationMs: (stats as ParsedSessionStats).durationMs ?? 0,
-      totalCostUsd: (stats as ParsedSessionStats).totalCostUsd ?? 0,
-      inputTokens: (stats as ParsedSessionStats).inputTokens ?? 0,
-      outputTokens: (stats as ParsedSessionStats).outputTokens ?? 0,
-      numTurns: (stats as ParsedSessionStats).numTurns ?? 1,
-      model: (stats as ParsedSessionStats).model ?? summary.model,
-      success: (stats as ParsedSessionStats).success ?? false,
+      durationMs: (stats as SessionStatsBlob).durationMs ?? 0,
+      totalCostUsd: (stats as SessionStatsBlob).totalCostUsd ?? 0,
+      inputTokens: (stats as SessionStatsBlob).inputTokens ?? 0,
+      outputTokens: (stats as SessionStatsBlob).outputTokens ?? 0,
+      numTurns: (stats as SessionStatsBlob).numTurns ?? 1,
+      model: (stats as SessionStatsBlob).model ?? summary.model,
+      success: (stats as SessionStatsBlob).success ?? false,
     } : null,
     ...summary,
   };
@@ -306,4 +289,25 @@ export function buildIssueStatusJson(input: IssueStatusJsonInput): Record<string
     fileChanges,
     diffStats,
   };
+}
+
+/**
+ * One line naming the project a scoped WRITE actually resolved to (#335).
+ *
+ * No `issue` subcommand accepts a project: they all resolve it implicitly from the
+ * global mutable `activeProjectId` preference, which is whatever a human last
+ * clicked in the UI project switcher. That fallback stays (this is remedy R2, not
+ * R1), but every write now NAMES the board it hit, so a mis-filing is visible in
+ * the output instead of silent.
+ *
+ * `name` is null when the id names no project row — printed as `<unknown>` rather
+ * than omitted, because a write against a dangling id is exactly the case a caller
+ * needs to see.
+ */
+export function formatResolvedProjectLine(
+  projectId: string,
+  name: string | null | undefined,
+  indent = "  ",
+): string {
+  return `${indent}project: ${name ?? "<unknown>"} (${projectId})`;
 }

@@ -9,8 +9,9 @@
  */
 import type { Database } from "../db/index.js";
 import type { SessionManager } from "../services/session.manager.js";
-import type { BoardEvents } from "../services/board-events.js";
+import type { BoardEventSink } from "../services/board-events.js";
 import { getIssueDescription } from "../repositories/issue.repository.js";
+import { getWorkspaceById } from "../repositories/workspace.repository.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
 import { createWorkspaceService } from "../services/workspace.service.js";
@@ -24,11 +25,12 @@ import {
   setCachedRecommendations,
   type AgentQuestion,
 } from "../services/agent-questions.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export function createAgentQuestionsRoute(
   database: Database,
   getSessionManager: () => SessionManager,
-  options?: { boardEvents?: BoardEvents },
+  options?: { boardEvents?: BoardEventSink },
 ) {
   const router = createRouter();
   const workspaceService = createWorkspaceService({
@@ -49,6 +51,7 @@ export function createAgentQuestionsRoute(
   // POST /api/projects/:id/agent-questions/:toolUseId/answer
   // Body: { questions: AgentQuestion[], answers: [{ selectedLabels: string[], freeText?: string }, ...], workspaceId: string }
   router.post("/:id/agent-questions/:toolUseId/answer", async (c) => {
+    const projectId = c.req.param("id");
     const toolUseId = c.req.param("toolUseId");
     const body = await parseJsonBody<{
       questions: AgentQuestion[];
@@ -58,11 +61,30 @@ export function createAgentQuestionsRoute(
     if (!body.workspaceId || !Array.isArray(body.questions) || !Array.isArray(body.answers)) {
       return c.json({ error: "workspaceId, questions[], and answers[] are required" }, 400);
     }
+    // Dead workspace (seen on issue #656): refuse early when the asking workspace can no
+    // longer take a turn. A closed workspace (or one whose worktree is gone) makes
+    // sendTurn fail deep inside the session manager with the bare
+    // "Workspace has no working directory; run setup first" — a
+    // message that reads like a setup step the user could take, when in fact the only
+    // way out is to dismiss the question. `canDismiss` lets the UI say exactly that.
+    const workspace = await getWorkspaceById(body.workspaceId, database);
+    const gone = !workspace ? "deleted" : workspace.status === "closed" ? "closed" : !workspace.workingDir ? "unbuilt" : null;
+    if (gone) {
+      return c.json({
+        error: gone === "unbuilt"
+          ? "The workspace that asked this question has no working directory, so the agent " +
+            "cannot be resumed. Run setup on the workspace, or dismiss the question."
+          : `The workspace that asked this question is ${gone} — the agent is gone and cannot ` +
+            "receive an answer. Dismiss the question instead (and re-ask on a fresh workspace " +
+            "if the decision still matters).",
+        canDismiss: true,
+      }, 409);
+    }
     const content = formatAnswerMessage(body.questions, body.answers);
     try {
       const result = await workspaceService.sendTurn(body.workspaceId, content);
       // Mark answered AFTER the turn is accepted, so a failure leaves it visible for retry.
-      await markAnswered(toolUseId, database);
+      await markAnswered(toolUseId, database, projectId);
       // Persist the Q&A as durable ticket history (best-effort).
       await writeAgentQuestionComment(
         { toolUseId, workspaceId: body.workspaceId, questions: body.questions, answers: body.answers, body: content, author: "user" },
@@ -71,7 +93,7 @@ export function createAgentQuestionsRoute(
       if (result.type === "sent") return c.json({ ok: true, content });
       return c.json({ ok: true, sessionId: result.sessionId, resumed: true, content }, 201);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       console.error(`[agent-questions] failed to send answer: workspace=${body.workspaceId} ${message}`);
       return c.json({ error: message }, 500);
     }
@@ -82,9 +104,10 @@ export function createAgentQuestionsRoute(
   // answered pref key (keeps the row for audit) so it drops out of the pending list.
   // The corresponding workspace is intentionally NOT relaunched or notified.
   router.delete("/:id/agent-questions/:toolUseId", async (c) => {
+    const projectId = c.req.param("id");
     const toolUseId = c.req.param("toolUseId");
     const dismissedAt = new Date().toISOString();
-    await markDismissed(toolUseId, dismissedAt, database);
+    await markDismissed(toolUseId, dismissedAt, database, projectId);
     return c.json({ ok: true, dismissed: true, dismissedAt });
   });
 
@@ -115,10 +138,10 @@ export function createAgentQuestionsRoute(
         },
         database,
       );
-      await setCachedRecommendations(toolUseId, recommendations, database);
+      await setCachedRecommendations(toolUseId, recommendations, database, projectId);
       return c.json({ ok: true, recommendations });
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       console.error(`[agent-questions] recommend failed: toolUseId=${toolUseId} ${message}`);
       return c.json({ error: message }, 500);
     }

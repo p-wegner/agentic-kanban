@@ -1,15 +1,13 @@
 import { parseAgentProviderStreamLine, parseAgentProviderStreamLineObserved } from "@agentic-kanban/shared/lib/agent-stream-parser";
 import type { AgentLaunchConfig, AgentProvider, FileSystem, ParsedStreamEvent, ProviderLaunchOptions } from "./types.js";
-import {
-  COPILOT_PLAN_PROMPT_PREFIX,
+import { COPILOT_PLAN_PROMPT_PREFIX,
   COPILOT_PLAN_DENIED_TOOLS,
   COPILOT_DEFAULT_ALLOWED_TOOLS,
   resolveCopilotNpmLoader,
   getMcpConfigPath,
-  splitArgs,
+  spliceAgentArgs,
   mapCopilotProfile,
-  nodeFileSystem,
-} from "./helpers.js";
+  nodeFileSystem, resolveMockLaunch } from "./helpers.js";
 
 export class CopilotProvider implements AgentProvider {
   readonly name = "copilot";
@@ -24,8 +22,11 @@ export class CopilotProvider implements AgentProvider {
     const { agentArgs, providerSessionId, agentCommand, keepAlive, profile, planMode, prompt, contextFiles, skipPermissions, systemInstructions } = options;
     const isWindows = process.platform === "win32";
 
-    const isMockAgent = !!process.env.AGENT_COMMAND || (agentCommand?.includes("mock-agent") ?? false);
-    let command = process.env.AGENT_COMMAND || agentCommand || "copilot";
+    const { isMockAgent, command: resolvedCommand, mockArgs } = resolveMockLaunch(
+      { agentCommand, providerSessionId, keepAlive },
+      "copilot",
+    );
+    let command = resolvedCommand;
     let useShell = isWindows;
     const argsPrefix: string[] = [];
 
@@ -34,12 +35,7 @@ export class CopilotProvider implements AgentProvider {
     let suppressStdinPrompt = false;
 
     if (isMockAgent) {
-      if (providerSessionId) {
-        args.push("--resume", providerSessionId);
-      }
-      if (keepAlive) {
-        args.push("--profile", "multi-turn");
-      }
+      args.push(...mockArgs);
     } else {
       const loader = resolveCopilotNpmLoader(command, this.fs);
       if (loader) {
@@ -95,9 +91,9 @@ export class CopilotProvider implements AgentProvider {
         }
       }
 
-      if (agentArgs) {
-        args.push(...splitArgs(agentArgs));
-      }
+      // Denied-flag stripping is applied centrally (see DENIED_ARGS); copilot has no
+      // denied flags today, but routing through spliceAgentArgs keeps the guard uniform.
+      args.push(...spliceAgentArgs(this.name, agentArgs));
     }
 
     return {

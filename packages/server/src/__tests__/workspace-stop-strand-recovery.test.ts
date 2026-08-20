@@ -21,8 +21,14 @@ vi.mock("../db/index.js", () => ({ db: {} }));
 vi.mock("../services/git.service.js", () => ({
   prepareForReview: vi.fn(async () => ({ success: true, diffRef: "master", conflictingFiles: [], uncommittedChanges: [] })),
 }));
-vi.mock("../services/butler-event-feed.js", () => ({ emitButlerSystemEvent: vi.fn() }));
 vi.mock("../services/agent-settings.service.js", () => ({
+  // #541: exit-workflow / merge-workflow now resolve their launch settings here instead
+  // of hand-rolling the ladder, so these two must exist on the mock.
+  applyWorkspaceProfileToPrefs: vi.fn((m: Map<string, string>) => m),
+  resolveWorkspaceLaunchSettings: vi.fn(() => ({
+    agentCommand: undefined, agentArgs: undefined, profile: undefined,
+    provider: "claude", resumeWithNewModel: false, permissionPromptTool: undefined,
+  })),
   isMockProfile: vi.fn(() => false),
   toExecutorProvider: vi.fn((p: string) => p),
   MOCK_AGENT_COMMAND: "mock",

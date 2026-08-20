@@ -35,9 +35,13 @@ export interface ProviderLaunchOptions {
   agentArgs?: string;
   providerSessionId?: string;
   agentCommand?: string;
-  /** @deprecated Use profile instead — kept for back-compat during migration */
-  claudeProfile?: string;
-  /** Provider-tagged profile selection (replaces bare claudeProfile string). */
+  /**
+   * Provider-tagged profile selection. #528: this is now the ONLY profile carrier on a
+   * launch — the parallel `claudeProfile` string is gone. It was never independent: every
+   * producer set it to `provider === "claude" ? profile.name : undefined`, so the
+   * `profile?.name ?? claudeProfile` fallback below could only ever fire for a
+   * non-claude provider, in a config object only ClaudeProvider reads.
+   */
   profile?: { provider: ProviderName; name: string };
   /** Model override passed via the provider launch flags (e.g. Claude/Codex/other harness-specific values). */
   model?: string;

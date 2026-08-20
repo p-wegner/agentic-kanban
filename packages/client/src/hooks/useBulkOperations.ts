@@ -1,10 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import type { Tag } from "../lib/boardTypes.js";
+import { useRef, useState } from "react";
+import { useDismissable } from "./useDismissable.js";
 
-export interface Tag {
-  id: string;
-  name: string;
-  color: string | null;
-}
+/** #610 — was a byte-identical second declaration; the board DTO module owns it. */
+export type { Tag } from "../lib/boardTypes.js";
 
 /**
  * Encapsulates the TableView bulk-action UI state: row selection, the six
@@ -30,32 +29,15 @@ export function useBulkOperations() {
   const tagDropdownRef = useRef<HTMLDivElement>(null);
   const removeTagDropdownRef = useRef<HTMLDivElement>(null);
 
-  // Close dropdowns on outside click
-  useEffect(() => {
-    if (!bulkStatusOpen && !bulkPriorityOpen && !bulkEstimateOpen && !bulkDueDateOpen && !bulkTagOpen && !bulkRemoveTagOpen) return;
-    function handle(e: MouseEvent) {
-      if (bulkStatusOpen && statusDropdownRef.current && !statusDropdownRef.current.contains(e.target as Node)) {
-        setBulkStatusOpen(false);
-      }
-      if (bulkPriorityOpen && priorityDropdownRef.current && !priorityDropdownRef.current.contains(e.target as Node)) {
-        setBulkPriorityOpen(false);
-      }
-      if (bulkEstimateOpen && estimateDropdownRef.current && !estimateDropdownRef.current.contains(e.target as Node)) {
-        setBulkEstimateOpen(false);
-      }
-      if (bulkDueDateOpen && dueDateDropdownRef.current && !dueDateDropdownRef.current.contains(e.target as Node)) {
-        setBulkDueDateOpen(false);
-      }
-      if (bulkTagOpen && tagDropdownRef.current && !tagDropdownRef.current.contains(e.target as Node)) {
-        setBulkTagOpen(false);
-      }
-      if (bulkRemoveTagOpen && removeTagDropdownRef.current && !removeTagDropdownRef.current.contains(e.target as Node)) {
-        setBulkRemoveTagOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handle);
-    return () => document.removeEventListener("mousedown", handle);
-  }, [bulkStatusOpen, bulkPriorityOpen, bulkEstimateOpen, bulkDueDateOpen, bulkTagOpen, bulkRemoveTagOpen]);
+  // Six independent dropdowns, one hook call each (#515). The single shared listener
+  // this replaces re-tested all six on every mousedown anywhere in the document and
+  // handled no Escape at all — so none of these six was keyboard-dismissable.
+  useDismissable(statusDropdownRef, bulkStatusOpen, () => setBulkStatusOpen(false));
+  useDismissable(priorityDropdownRef, bulkPriorityOpen, () => setBulkPriorityOpen(false));
+  useDismissable(estimateDropdownRef, bulkEstimateOpen, () => setBulkEstimateOpen(false));
+  useDismissable(dueDateDropdownRef, bulkDueDateOpen, () => setBulkDueDateOpen(false));
+  useDismissable(tagDropdownRef, bulkTagOpen, () => setBulkTagOpen(false));
+  useDismissable(removeTagDropdownRef, bulkRemoveTagOpen, () => setBulkRemoveTagOpen(false));
 
   return {
     selectedIds, setSelectedIds,

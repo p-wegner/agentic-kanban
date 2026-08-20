@@ -1,3 +1,4 @@
+// @gate:always-run — reads .claude/skills/quality-metrics-collector/SKILL.md; no import edge to a markdown file (#647).
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { BUILTIN_SKILLS } from "../builtin-skills.js";

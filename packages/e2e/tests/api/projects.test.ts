@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { SERVER_URL } from "../helpers/port.js";
 import { getE2EProjectId } from "../helpers/e2e-project.js";
 
-test.describe("Projects API", () => {
+test.describe("@smoke: Projects API", () => {
   let projectId: string;
   const createdStatusIds: string[] = [];
 

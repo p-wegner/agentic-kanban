@@ -180,6 +180,70 @@ describe("classifyStaleDevProcessTrees", () => {
     });
   });
 
+  it("reaps a zombie vitest worker fleet rooted in a worktree with no active session (#172)", () => {
+    // Shape observed in #172: `pnpm test` launches vitest, which forks ~20 worker
+    // processes under node_modules/vitest that never held a listener and never matched
+    // isDevTreeProcess, so treeRoots() never even considered the tree.
+    const snapshot = classify([
+      proc(600, 1, "pnpm test:mine", "pnpm.cmd"),
+      proc(601, 600, "node C:/andrena/.worktrees/feature_ak-172-zombie/node_modules/vitest/dist/cli.js run"),
+      proc(602, 601, "node C:/andrena/.worktrees/feature_ak-172-zombie/node_modules/vitest/dist/workers/forks.js"),
+      proc(603, 601, "node C:/andrena/.worktrees/feature_ak-172-zombie/node_modules/vitest/dist/workers/forks.js"),
+    ], []);
+
+    expect(snapshot.kept).toHaveLength(0);
+    expect(snapshot.cleaned).toHaveLength(1);
+    expect(snapshot.cleaned[0]).toMatchObject({
+      rootPid: 600,
+      pids: [600, 601, 602, 603],
+      action: "cleaned",
+      reason: "stale-dev-tree-no-listeners",
+    });
+  });
+
+  it("keeps a vitest worker fleet still owned by a live workspace session", () => {
+    const activeWorkspaces: ActiveWorkspaceResource[] = [{
+      workspaceId: "ws-verify",
+      issueId: "issue-verify",
+      issueNumber: 172,
+      workingDir: "C:/andrena/.worktrees/feature_ak-172-zombie",
+      sessionPid: 900,
+      ports: [3173, 5345],
+    }];
+    const snapshot = classify([
+      proc(650, 1, "vitest run --pool=forks", "node.exe"),
+      proc(651, 650, "node C:/andrena/.worktrees/feature_ak-172-zombie/node_modules/vitest/dist/workers/forks.js"),
+    ], [], activeWorkspaces, new Set([3001, 5173, 3173, 5345]));
+
+    expect(snapshot.cleaned).toHaveLength(0);
+    expect(snapshot.kept[0]).toMatchObject({
+      rootPid: 650,
+      associatedWorkspaceIds: ["ws-verify"],
+      reason: "active-workspace-session",
+    });
+  });
+
+  it("keeps a vitest worker fleet whose root pid is protected (e.g. a merge-lock holder)", () => {
+    const snapshot = classifyStaleDevProcessTrees({
+      processes: [
+        proc(700, 1, "pnpm test", "pnpm.cmd"),
+        proc(701, 700, "node C:/andrena/.worktrees/feature_ak-172-zombie/node_modules/vitest/dist/workers/forks.js"),
+      ],
+      listeners: [],
+      activeWorkspaces: [],
+      cleanupScopePaths: ["C:/andrena/.worktrees"],
+      protectedPorts: new Set([3001, 5173]),
+      protectedPidSet: new Set([700]),
+      now,
+    });
+
+    expect(snapshot.cleaned).toHaveLength(0);
+    expect(snapshot.kept[0]).toMatchObject({
+      rootPid: 700,
+      reason: "protected-pid:700",
+    });
+  });
+
   it("cleans by exact root PID only, leaving descendant traversal to taskkill tree semantics", async () => {
     const snapshot = classify([
       proc(400, 1, "pnpm dev", "pnpm.cmd"),

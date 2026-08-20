@@ -2,9 +2,11 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { requireEntity, resolveStatusByName, checkOpenUnmergedWorkspace } from "../db-utils.js";
+import { mcpJson, mcpStructuredError, requireEntity, resolveStatusByName, checkOpenUnmergedWorkspace } from "../db-utils.js";
 import { fireIssueStatusWebhook } from "@agentic-kanban/shared/lib/issue-status-orchestration";
 import { isTerminalStatusName } from "@agentic-kanban/shared/lib";
+import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
+import { ISSUE_TYPES, ISSUE_ESTIMATES } from "@agentic-kanban/shared";
 
 export function registerUpdateIssue(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema, notifyBoard } = deps;
@@ -17,8 +19,8 @@ export function registerUpdateIssue(server: McpServer, deps: ToolDeps = prodDeps
       description: z.string().optional().describe("New description"),
       statusName: z.string().optional().describe("Move to status column by name (e.g., 'In Progress', 'Done')"),
       priority: z.enum(["low", "medium", "high", "critical"]).optional().describe("New priority"),
-      issueType: z.enum(["task", "bug", "feature", "chore"]).optional().describe("Issue type (task, bug, feature, chore)"),
-      estimate: z.enum(["XS", "S", "M", "L", "XL"]).nullable().optional().describe("Size estimate (XS/S/M/L/XL), or null to clear"),
+      issueType: z.enum(ISSUE_TYPES).optional().describe("Issue type (task, bug, feature, chore)"),
+      estimate: z.enum(ISSUE_ESTIMATES).nullable().optional().describe("Size estimate (XS/S/M/L/XL), or null to clear"),
     },
     async ({ issueId, title, description, statusName, priority, issueType, estimate }) => {
       const existingResult = await db.select().from(schema.issues).where(eq(schema.issues.id, issueId)).limit(1);
@@ -43,27 +45,28 @@ export function registerUpdateIssue(server: McpServer, deps: ToolDeps = prodDeps
         if (isTerminalStatusName(statusName)) {
           const check = await checkOpenUnmergedWorkspace(db, schema, issueId);
           if (check.blocked) {
-            return {
-              content: [{
-                type: "text" as const,
-                text: JSON.stringify({
-                  error: `Cannot set issue status to "${statusName}": it has an open workspace (branch: ${check.branch ?? check.workspaceId}) that has not been merged. Call merge_workspace first — it merges the branch and auto-transitions the issue to Done. To discard without merging, call close_workspace or delete_workspace first.`,
-                  code: "OPEN_WORKSPACE_NOT_MERGED",
-                  workspaceId: check.workspaceId,
-                  branch: check.branch,
-                }),
-              }],
-            };
+            return mcpStructuredError(
+              "OPEN_WORKSPACE_NOT_MERGED",
+              `Cannot set issue status to "${statusName}": it has an open workspace (branch: ${check.branch ?? check.workspaceId}) that has not been merged. Call merge_workspace first — it merges the branch and auto-transitions the issue to Done. To discard without merging, call close_workspace or delete_workspace first.`,
+              { workspaceId: check.workspaceId, branch: check.branch },
+            );
           }
         }
         const r = await resolveStatusByName(db, schema, existing.projectId, statusName);
         if (!r.ok) return r.error;
-        updates.statusId = r.statusId;
-        updates.statusChangedAt = now;
+        // #501: statusId/statusChangedAt deliberately NOT added to `updates` — the status
+        // write goes through transitionIssueStatus below so the workflow current-node is
+        // synced with it. Writing it here as a plain column left `currentNodeId` on a
+        // non-end node and dependency resolution then silently failed (#537).
         resolvedStatusId = r.statusId;
       }
 
+      // Non-status fields first; `updates` always carries at least `updatedAt`.
       await db.update(schema.issues).set(updates).where(eq(schema.issues.id, issueId));
+
+      if (resolvedStatusId) {
+        await transitionIssueStatus(db, issueId, resolvedStatusId, { now });
+      }
 
       notifyBoard(existing.projectId, "mcp_update_issue");
 
@@ -82,9 +85,17 @@ export function registerUpdateIssue(server: McpServer, deps: ToolDeps = prodDeps
         });
       }
 
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify({ id: issueId, updated: Object.keys(updates).filter(k => k !== "updatedAt" && k !== "statusChangedAt") }, null, 2) }],
-      };
+      // #501 moved the status write out of `updates`, so "statusId" is re-added here
+      // explicitly. Deriving the response purely from the object's keys would have
+      // silently dropped it from the reported field list — a response-contract change
+      // that has nothing to do with the invariant being fixed.
+      return mcpJson({
+        id: issueId,
+        updated: [
+          ...Object.keys(updates).filter(k => k !== "updatedAt" && k !== "statusChangedAt"),
+          ...(resolvedStatusId ? ["statusId"] : []),
+        ],
+      });
     },
   );
 }

@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { basename } from "node:path";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { getMcpServersConfig } from "./agent-provider/helpers.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export type McpProbeStatus = "ok" | "error" | "unknown";
 
@@ -187,7 +188,7 @@ function runJsonRpcProbe(
         finish(buildErrorProbe(checkedAt, startedAt, {
           code: "malformed_json_rpc",
           message: "MCP server returned malformed JSON-RPC.",
-          detail: err instanceof Error ? err.message : String(err),
+          detail: errorMessage(err),
         }));
         return;
       }
@@ -322,7 +323,7 @@ function mapSpawnException(err: unknown): McpProbeError {
   return {
     code: "process_error",
     message: "MCP server process failed before responding.",
-    detail: error instanceof Error ? error.message : String(error),
+    detail: errorMessage(error),
   };
 }
 

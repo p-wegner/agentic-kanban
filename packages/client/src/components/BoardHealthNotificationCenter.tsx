@@ -1,18 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
+import type { BoardHealthEventCategory, BoardHealthEventDto } from "@agentic-kanban/shared";
 
-export type BoardHealthEventCategory = "merge" | "launch" | "server" | "refill" | "smoke_check";
-
-export interface BoardHealthEvent {
-  id: string;
-  timestamp: string;
-  level: "info" | "error";
-  type: "cycle_start" | "cycle_end" | "observation" | "action" | "error";
-  category: BoardHealthEventCategory | null;
-  issueNumber: number | null;
-  summary: string;
-  details: string | null;
-}
+// Vocabulary and DTO come from shared (#568) — this file used to declare both.
+type BoardHealthEvent = BoardHealthEventDto;
+export type { BoardHealthEventCategory, BoardHealthEventDto as BoardHealthEvent };
 
 type CategoryFilter = "all" | BoardHealthEventCategory;
 

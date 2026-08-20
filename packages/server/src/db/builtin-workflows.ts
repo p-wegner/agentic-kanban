@@ -226,6 +226,43 @@ export const BUILTIN_WORKFLOWS: BuiltinTemplateDef[] = [
     ],
   },
   {
+    builtinKey: "analysis-task",
+    name: "Analysis Task",
+    description:
+      "Produce or update analysis artifacts, then done. No code-review gate and no human consult — for work that writes documents rather than product code.",
+    ticketType: null,
+    isDefault: false,
+    // Two nodes on purpose. The board's other templates all end in a gate, which is right for a
+    // change to the product and wrong for an analysis round: there is no product diff for a
+    // reviewer to judge, so "Review" can only rubber-stamp, and "Consult User" (Research Task)
+    // parks the ticket until a human appears — fatal for a plugin loop that advances unattended.
+    // The gate that actually protects this work is the plugin's own convergence check plus the
+    // board's ordinary merge preflight, neither of which is a workflow node.
+    nodes: [
+      {
+        key: "analyze",
+        name: "Analyze",
+        nodeType: "start",
+        statusName: "In Progress",
+        guidance:
+          "Do the analysis this ticket describes and write the result into the repo's analysis "
+          + "artifacts (registers, ledgers, docs) — not into the ticket. Verify each claim against "
+          + "the file:line it cites before recording it; an unverified claim is worse than a "
+          + "missing one, because the next round trusts it. Commit when the artifacts are "
+          + "consistent. A clean exit completes the ticket, so leave nothing half-written: if you "
+          + "must stop early, say so explicitly and exit non-zero rather than committing a partial "
+          + "register as if it were finished.",
+      },
+      { key: "done", name: "Done", nodeType: "end", statusName: "Done" },
+    ],
+    // Auto-advance on a clean exit — nobody is waiting to click. A non-zero exit deliberately
+    // has NO edge: the ticket stays In Progress and surfaces as stuck, instead of a failed round
+    // quietly reporting Done.
+    edges: [
+      { from: "analyze", to: "done", condition: "auto_on_exit_0", label: "artifacts committed" },
+    ],
+  },
+  {
     builtinKey: "parallel-review",
     name: "Parallel Review",
     description:

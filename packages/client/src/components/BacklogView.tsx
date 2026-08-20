@@ -6,34 +6,19 @@ import { IssueCard } from "./IssueCard.js";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { getSettings, setSettings } from "../lib/settingsStore.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { useBoardFilterStore } from "../stores/boardFilterStore.js";
 import { useBoardBulkSelectionStore } from "../stores/boardBulkSelectionStore.js";
+import { normalizeIssuePriority, priorityLabel, priorityOrder } from "../lib/priorityTraits.js";
 
 type SortMode = "rank" | "newest" | "oldest" | "priority" | "type" | "due";
 type GroupMode = "none" | "priority" | "type";
-
-const PRIORITY_ORDER: Record<string, number> = {
-  critical: 0,
-  urgent: 0,
-  high: 1,
-  medium: 2,
-  low: 3,
-};
 
 const TYPE_ORDER: Record<string, number> = {
   bug: 0,
   feature: 1,
   task: 2,
   chore: 3,
-};
-
-const PRIORITY_LABEL: Record<string, string> = {
-  critical: "Critical",
-  urgent: "Urgent",
-  high: "High",
-  medium: "Medium",
-  low: "Low",
 };
 
 const TYPE_LABEL: Record<string, string> = {
@@ -179,8 +164,18 @@ export function BacklogView({
   // the always-visible compact toolbar stays a single wrapping row and the issue
   // list keeps the vertical space — critical on small screens where stacked
   // panels used to push the list off-screen.
-  const [showPresets, setShowPresets] = useState(false);
-  const [showWaves, setShowWaves] = useState(false);
+  // #655: these were independent booleans, so opening Presets and then Waves left BOTH open —
+  // the Presets popover rendered on top of the Dependency Waves panel and covered its
+  // Select/Apply/Delete controls, and neither trigger dismissed the other. One `open` slot
+  // makes them mutually exclusive by construction rather than by two coordinated setters that
+  // the next popover would have to remember to join.
+  const [openPopover, setOpenPopover] = useState<"presets" | "waves" | null>(null);
+  const showPresets = openPopover === "presets";
+  const showWaves = openPopover === "waves";
+  const setShowPresets = (next: boolean | ((v: boolean) => boolean)) =>
+    setOpenPopover((prev) => ((typeof next === "function" ? next(prev === "presets") : next) ? "presets" : prev === "presets" ? null : prev));
+  const setShowWaves = (next: boolean | ((v: boolean) => boolean)) =>
+    setOpenPopover((prev) => ((typeof next === "function" ? next(prev === "waves") : next) ? "waves" : prev === "waves" ? null : prev));
 
   const backlogIssues = backlogColumn?.issues ?? [];
   const q = searchQuery.toLowerCase();
@@ -241,7 +236,7 @@ export function BacklogView({
         case "oldest":
           return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
         case "priority":
-          return (PRIORITY_ORDER[a.priority ?? "medium"] ?? 2) - (PRIORITY_ORDER[b.priority ?? "medium"] ?? 2);
+          return priorityOrder(a.priority) - priorityOrder(b.priority);
         case "type":
           return (TYPE_ORDER[a.issueType ?? "task"] ?? 2) - (TYPE_ORDER[b.issueType ?? "task"] ?? 2);
         case "due": {
@@ -260,16 +255,18 @@ export function BacklogView({
     if (groupMode === "none") return [{ key: "all", label: "Backlog", issues: sortedIssues }];
     const grouped = new Map<string, IssueWithStatus[]>();
     for (const issue of sortedIssues) {
-      const key = groupMode === "priority" ? issue.priority ?? "medium" : issue.issueType ?? "task";
+      // Normalise the group key: a legacy `urgent` value would otherwise form its own
+      // group beside "Critical" instead of merging into it (#516).
+      const key = groupMode === "priority" ? normalizeIssuePriority(issue.priority) : issue.issueType ?? "task";
       grouped.set(key, [...(grouped.get(key) ?? []), issue]);
     }
     const entries = [...grouped.entries()].sort(([a], [b]) => {
-      if (groupMode === "priority") return (PRIORITY_ORDER[a] ?? 99) - (PRIORITY_ORDER[b] ?? 99);
+      if (groupMode === "priority") return priorityOrder(a) - priorityOrder(b);
       return (TYPE_ORDER[a] ?? 99) - (TYPE_ORDER[b] ?? 99);
     });
     return entries.map(([key, issues]) => ({
       key,
-      label: groupMode === "priority" ? PRIORITY_LABEL[key] ?? key : TYPE_LABEL[key] ?? key,
+      label: groupMode === "priority" ? priorityLabel(key) : TYPE_LABEL[key] ?? key,
       issues,
     }));
   }, [groupMode, sortedIssues]);

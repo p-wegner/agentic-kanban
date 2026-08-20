@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useGraphSearch, graphNodeMatches } from "../hooks/useGraphSearch.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { apiFetch, apiPost, apiDelete } from "../lib/api.js";
 import { STATUS_COLORS } from "../lib/chartColors";
@@ -103,6 +104,8 @@ function GraphFilterControls({ statusFilters, statusNames, onStatusFiltersChange
 // ---------------------------------------------------------------------------
 
 export function GraphView({ columns, projectId, onIssueClick, searchQuery, focusIssueId }: GraphViewProps) {
+  // Requested on the first keystroke only — a user who never searches never pays for it (#370).
+  const { matches: searchMatches } = useGraphSearch(projectId, searchQuery ?? "");
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const [loading, setLoading] = useState(true);
   const [statusFilters, setStatusFilters] = useState<string[]>(["active"]);
@@ -126,6 +129,18 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery, focus
   const [addEdgeSourceId, setAddEdgeSourceId] = useState<string | null>(null);
 
   const allIssues = columns.flatMap((c) => c.issues);
+  // Latest columns snapshot for the fetch-failure fallback, without making the
+  // load effect depend on the `columns` array identity (new per board refresh).
+  const allIssuesRef = useRef(allIssues);
+  allIssuesRef.current = allIssues;
+  // Graph-relevant digest of the board: issue membership, column, and title.
+  // WS bursts refresh the board every few seconds with a NEW `columns` identity
+  // even when nothing graph-visible changed; depending on this digest instead of
+  // the array keeps the 1MB+ /graph payload from being refetched per burst.
+  const columnsGraphDigest = useMemo(
+    () => columns.map((c) => `${c.id}:${c.issues.map((i) => `${i.id}~${i.title}`).join(",")}`).join("|"),
+    [columns],
+  );
   const statusNames = orderedStatusNames([
     ...columns.map((c) => c.name),
     ...(graphData?.nodes.map((n) => n.statusName) ?? []),
@@ -152,14 +167,17 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery, focus
         );
         setGraphData(result);
       } catch {
-        setGraphData({ nodes: allIssues, edges: [] });
+        setGraphData({ nodes: allIssuesRef.current, edges: [] });
       } finally {
         setLoading(false);
       }
     }
     void load();
+  // Refetch on open, on project change, and when graph-relevant board data
+  // changes — NOT on every board refresh (the digest is stable across WS bursts
+  // that only touch non-graph fields).
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, columns]);
+  }, [projectId, columnsGraphDigest]);
 
   // IDs of nodes that participate in at least one edge (have ≥1 dependency).
   const nodesWithDepsIds = useMemo(() => {
@@ -186,12 +204,14 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery, focus
     const depFiltered = hasAnyEdges
       ? statusFiltered.filter((n) => nodesWithDepsIds.has(n.id))
       : statusFiltered;
+    // #370 — the payload diet took `description` off /graph (309,477 -> ~62,000 gzipped bytes)
+    // and search silently became title-only, which is the semantics-for-bytes trade #345 refused
+    // twice. The descriptions come back through a LAZY index fetched on the first keystroke, so
+    // the unsearched graph load is unchanged and search matches what it used to match. Until the
+    // index arrives, `graphNodeMatches` falls back to the title — i.e. to today's behaviour,
+    // never to an empty graph.
     const filtered = searchQuery
-      ? depFiltered.filter(
-          (n) =>
-            n.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            n.description?.toLowerCase().includes(searchQuery.toLowerCase())
-        )
+      ? depFiltered.filter((n) => graphNodeMatches(searchQuery, n.id, n.title, searchMatches))
       : depFiltered;
     const filteredIds = new Set(filtered.map((n) => n.id));
     const filteredEdges = graphData.edges.filter(
@@ -233,7 +253,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery, focus
       setZoom(z);
       setPan({ x: px, y: py });
     });
-  }, [graphData, searchQuery, statusFilters, nodesWithDepsIds, focusIssueId]);
+  }, [graphData, searchQuery, searchMatches, statusFilters, nodesWithDepsIds, focusIssueId]);
 
   const fitView = useCallback(() => {
     if (nodes.length === 0 || !containerRef.current) return;
@@ -653,6 +673,7 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery, focus
             selectedNode={selectedNode}
             focusIssueId={focusIssueId}
             searchQuery={searchQuery}
+            searchMatches={searchMatches}
             isCriticalPathMode={isCriticalPathMode}
             criticalPathResult={criticalPathResult}
             rootBlockerIds={rootBlockerIds}

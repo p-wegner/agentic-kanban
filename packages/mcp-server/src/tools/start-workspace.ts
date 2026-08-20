@@ -1,16 +1,21 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { db, schema } from "../db.js";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
+import { prodDeps, type ToolDeps } from "./deps.js";
 import * as gitService from "../git-service.js";
 import { notifyBoard } from "../notify.js";
 import { runSetupScript } from "../setup-script.js";
 import { writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { resolveProviderProfileFromPrefs } from "@agentic-kanban/shared/lib/strategy-policy";
-import { requireEntity } from "../db-utils.js";
+import { mcpJson, mcpText, requireEntity } from "../db-utils.js";
+import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
-export function registerStartWorkspace(server: McpServer) {
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
+export function registerStartWorkspace(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema } = deps;
+
   server.tool(
     "start_workspace",
     "Create a worktree-only workspace record for an issue (no agent, no status change). " +
@@ -44,7 +49,7 @@ export function registerStartWorkspace(server: McpServer) {
         .limit(1);
 
       if (projectRows.length === 0 || !projectRows[0].repoPath) {
-        return { content: [{ type: "text" as const, text: `Project has no repo path configured. Provide repoPath explicitly.` }] };
+        return mcpText(`Project has no repo path configured. Provide repoPath explicitly.`);
       }
 
       if (!resolvedRepoPath) {
@@ -54,10 +59,15 @@ export function registerStartWorkspace(server: McpServer) {
         resolvedBaseBranch = projectRows[0].defaultBranch;
       }
       if (!isDirect && !resolvedBaseBranch) {
-        return { content: [{ type: "text" as const, text: "No default branch configured for this project. Set a default branch in project settings or pass baseBranch." }] };
+        return mcpText("No default branch configured for this project. Set a default branch in project settings or pass baseBranch.");
       }
 
-      const branchName = isDirect ? await gitService.getCurrentBranch(resolvedRepoPath) : (branch || `workspace/${issueId.slice(0, 8)}`);
+      // #220 ask 2: `suggestBranchName` is the ONE branch-name producer for the whole
+      // board. This site used to mint `workspace/<id8>` — not a different slug of the
+      // same convention but a different CONVENTION, so an MCP-created workspace was
+      // invisible to every reconciler that recognizes `feature/ak-<n>-…` and to the
+      // monitor's duplicate-start guard.
+      const branchName = isDirect ? await gitService.getCurrentBranch(resolvedRepoPath) : (branch || suggestBranchName(issue));
       const id = randomUUID();
       const now = new Date().toISOString();
 
@@ -81,7 +91,7 @@ export function registerStartWorkspace(server: McpServer) {
               console.warn(`[mcp] setup failed (exit ${result.exitCode}): ${result.stderr || result.stdout}`);
             }
           } catch (err) {
-            console.warn(`[mcp] setup error: ${err instanceof Error ? err.message : String(err)}`);
+            console.warn(`[mcp] setup error: ${errorMessage(err)}`);
           }
         }
 
@@ -100,8 +110,20 @@ export function registerStartWorkspace(server: McpServer) {
         // prefs, and the settings fallback reads each provider's OWN profile key
         // (the old hand-rolled ladder ignored the Bullseye and fell through
         // copilot/pi to claude_profile).
+        //
+        // Single parser (arch-review §3.3): `resolveProviderProfileFromPrefs`
+        // parses the SAME blob through the SAME normalizer (`normalizeProviderPolicies`)
+        // and the SAME priority selection (`selectPolicyByPriority`) the server's
+        // `selectProviderFromStrategy` uses, so this door and the server door pick
+        // the same provider for a given blob. Live-quota gating (`isBlocked`) is
+        // deliberately NOT applied here: `start_workspace` creates a BARE worktree
+        // and launches NO agent, so it consumes no quota. The eventual agent launch
+        // (POST /api/workspaces → `resolveStrategyProviderSelection`) is the
+        // quota-aware door and re-resolves the provider with live usage at launch
+        // time. Quota state lives in the server-only `quota-usage.service` (network
+        // fetch) which the MCP package does not import.
         const prefRows = await db.select().from(schema.preferences);
-        const prefMap = new Map(prefRows.map(r => [r.key, r.value]));
+        const prefMap = toPrefMap(prefRows);
         const { provider, profileName } = resolveProviderProfileFromPrefs(prefMap, issue.projectId);
         const agentCommand = prefMap.get("agent_command") || null;
 
@@ -136,13 +158,9 @@ export function registerStartWorkspace(server: McpServer) {
             : `Workspace created. Working directory: ${worktreePath}`,
         };
 
-        return {
-          content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-        };
+        return mcpJson(result);
       } catch (err) {
-        return {
-          content: [{ type: "text" as const, text: `Failed to create workspace: ${err instanceof Error ? err.message : String(err)}` }],
-        };
+        return mcpText(`Failed to create workspace: ${errorMessage(err)}`);
       }
     },
   );

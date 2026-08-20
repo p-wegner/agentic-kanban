@@ -2,6 +2,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
 import { getBoardDragData } from "../lib/dragData.js";
+import { openSessionTranscript } from "../lib/sessionTranscriptEvents.js";
+import { AgentStallIndicator, useAgentStallThreshold } from "./AgentStallBadge.js";
+import { useNow } from "../hooks/usePoll.js";
 import {
   STARTABLE_STATUS_NAMES,
   MAX_HISTORY,
@@ -21,15 +24,16 @@ import {
 } from "../lib/agentGridView.js";
 
 function ElapsedTimer({ since }: { since: string }) {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, []);
+  const now = useNow(1000);
   return <span>{formatDuration(now - new Date(since).getTime())}</span>;
 }
 
 // --- Featured card (active / fixing) ----------------------------------------
+
+/** Epoch ms of the running session's start (idle-baseline seed), or null. */
+function sessionStartMs(ws: { lastSessionAt?: string | null }): number | null {
+  return ws.lastSessionAt ? new Date(ws.lastSessionAt).getTime() : null;
+}
 
 interface FeaturedCardProps {
   issue: IssueWithStatus;
@@ -37,6 +41,7 @@ interface FeaturedCardProps {
   liveStats?: LiveSessionStats;
   todos?: TodoItem[];
   attention?: AttentionKind;
+  stallThresholdSec: number;
   onIssueClick: (issue: IssueWithStatus) => void;
   onWorkspaceClick: (issue: IssueWithStatus, workspaceId?: string) => void;
 }
@@ -144,7 +149,7 @@ function FeaturedFooterStats({
   );
 }
 
-function FeaturedCard({ issue, activityHistory, liveStats, todos, attention, onIssueClick, onWorkspaceClick }: FeaturedCardProps) {
+function FeaturedCard({ issue, activityHistory, liveStats, todos, attention, stallThresholdSec, onIssueClick, onWorkspaceClick }: FeaturedCardProps) {
   const ws = issue.workspaceSummary?.main;
   const feedRef = useRef<HTMLDivElement>(null);
 
@@ -174,6 +179,12 @@ function FeaturedCard({ issue, activityHistory, liveStats, todos, attention, onI
             {ws.profile?.name && (
               <span className="text-xs text-gray-400 dark:text-gray-500 truncate">{ws.profile.name}</span>
             )}
+            <AgentStallIndicator
+              issueId={issue.id}
+              status={ws.status}
+              sessionStartMs={sessionStartMs(ws)}
+              thresholdSec={stallThresholdSec}
+            />
             {ws.lastSessionAt && (
               <span className="ml-auto text-xs tabular-nums text-gray-400 dark:text-gray-500 shrink-0">
                 <ElapsedTimer since={ws.lastSessionAt} />
@@ -187,6 +198,15 @@ function FeaturedCard({ issue, activityHistory, liveStats, todos, attention, onI
             {issue.title}
           </button>
         </div>
+        <button
+          onClick={() => openSessionTranscript({ workspaceId: ws.id, title: `#${issue.issueNumber} ${issue.title}` })}
+          className="shrink-0 p-1 rounded text-gray-400 dark:text-gray-500 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-950 transition-colors"
+          title="Open full transcript"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path d="M4 6h16M4 12h16M4 18h10" />
+          </svg>
+        </button>
         <button
           onClick={() => onWorkspaceClick(issue, ws.id)}
           className="shrink-0 p-1 rounded text-gray-400 dark:text-gray-500 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-950 transition-colors"
@@ -229,6 +249,7 @@ interface CompactCardProps {
   currentActivity?: string;
   liveStats?: LiveSessionStats;
   todos?: TodoItem[];
+  stallThresholdSec: number;
   onIssueClick: (issue: IssueWithStatus) => void;
   onWorkspaceClick: (issue: IssueWithStatus, workspaceId?: string) => void;
 }
@@ -269,7 +290,7 @@ function CompactFooterStats({
   );
 }
 
-function CompactCard({ issue, currentActivity, liveStats, todos, onIssueClick, onWorkspaceClick }: CompactCardProps) {
+function CompactCard({ issue, currentActivity, liveStats, todos, stallThresholdSec, onIssueClick, onWorkspaceClick }: CompactCardProps) {
   const ws = issue.workspaceSummary?.main;
   if (!ws) return null;
 
@@ -289,6 +310,12 @@ function CompactCard({ issue, currentActivity, liveStats, todos, onIssueClick, o
             <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot} shrink-0`} />
             <span className="text-xs font-mono text-gray-400 dark:text-gray-500">#{issue.issueNumber}</span>
             <span className="text-xs text-gray-500 dark:text-gray-400 font-medium truncate">{cfg.label}</span>
+            <AgentStallIndicator
+              issueId={issue.id}
+              status={ws.status}
+              sessionStartMs={sessionStartMs(ws)}
+              thresholdSec={stallThresholdSec}
+            />
             {ws.lastSessionAt && (
               <span className="ml-auto text-xs tabular-nums text-gray-400 dark:text-gray-500 shrink-0">
                 <ElapsedTimer since={ws.lastSessionAt} />
@@ -297,6 +324,15 @@ function CompactCard({ issue, currentActivity, liveStats, todos, onIssueClick, o
           </div>
           <p className="text-xs font-semibold text-gray-800 dark:text-gray-200 line-clamp-1 leading-snug">{issue.title}</p>
         </div>
+        <button
+          onClick={(e) => { e.stopPropagation(); openSessionTranscript({ workspaceId: ws.id, title: `#${issue.issueNumber} ${issue.title}` }); }}
+          className="shrink-0 p-0.5 rounded text-gray-300 dark:text-gray-600 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-950 transition-colors"
+          title="Open full transcript"
+        >
+          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <path d="M4 6h16M4 12h16M4 18h10" />
+          </svg>
+        </button>
         <button
           onClick={(e) => { e.stopPropagation(); onWorkspaceClick(issue, ws.id); }}
           className="shrink-0 p-0.5 rounded text-gray-300 dark:text-gray-600 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-950 transition-colors"
@@ -478,6 +514,7 @@ function EmptyState({ onGoToBoard }: { onGoToBoard?: () => void }) {
 export function AgentGrid({ columns, liveActivity, liveStats, sessionTodos, onIssueClick, onWorkspaceClick, onGoToBoard, activeAgentsTarget, onDropIssue }: AgentGridProps) {
   const historyRef = useRef<Map<string, string[]>>(new Map());
   const [, setHistoryTick] = useState(0);
+  const stallThresholdSec = useAgentStallThreshold();
 
   useEffect(() => {
     let changed = false;
@@ -528,6 +565,7 @@ export function AgentGrid({ columns, liveActivity, liveStats, sessionTodos, onIs
                   liveStats={liveStats[issue.id]}
                   todos={sessionTodos[issue.id]}
                   attention={issue.workspaceSummary?.main?.conflicts?.hasConflicts ? "conflict" : "merge"}
+                  stallThresholdSec={stallThresholdSec}
                   onIssueClick={onIssueClick}
                   onWorkspaceClick={onWorkspaceClick}
                 />
@@ -553,6 +591,7 @@ export function AgentGrid({ columns, liveActivity, liveStats, sessionTodos, onIs
                   activityHistory={historyRef.current.get(issue.id) ?? []}
                   liveStats={liveStats[issue.id]}
                   todos={sessionTodos[issue.id]}
+                  stallThresholdSec={stallThresholdSec}
                   onIssueClick={onIssueClick}
                   onWorkspaceClick={onWorkspaceClick}
                 />
@@ -581,6 +620,7 @@ export function AgentGrid({ columns, liveActivity, liveStats, sessionTodos, onIs
                   currentActivity={liveActivity[issue.id]}
                   liveStats={liveStats[issue.id]}
                   todos={sessionTodos[issue.id]}
+                  stallThresholdSec={stallThresholdSec}
                   onIssueClick={onIssueClick}
                   onWorkspaceClick={onWorkspaceClick}
                 />

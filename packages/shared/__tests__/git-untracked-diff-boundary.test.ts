@@ -17,6 +17,15 @@ import { execFile } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getWorkingTreeDiff } from "../src/lib/git-service.js";
 
+/**
+ * Per-test budget for this real-git suite (#206 tail). Its cost is `git` spawn latency, not
+ * the code under test: measured standalone on an IDLE machine it needs ~64s of test time, so
+ * the previous hand-set 30s cap failed under any parallel load — and `pnpm test:mine` doubles
+ * as the merge verify_script, so that turned into a withheld merge for unrelated diffs.
+ * A hang still never completes, so this only removes the false red.
+ */
+const GIT_IO_TIMEOUT_MS = Number(process.env.VITEST_GIT_IO_TIMEOUT) || 120_000;
+
 // Repo setup uses the git CLI directly (mirrors the integration exemplar's own
 // `git()` helper). The behaviour under test spawns git via the shared adapter
 // internally; this helper is test scaffolding only, never a production git path.
@@ -64,13 +73,11 @@ describe("getUntrackedDiffEntries boundary cases", () => {
   beforeEach(async () => {
     repo = await mkdtemp(join(tmpdir(), "ak-untracked-boundary-"));
     await git(repo, ["init"]);
-    await git(repo, ["config", "user.email", "test@example.local"]);
-    await git(repo, ["config", "user.name", "Untracked Boundary Test"]);
     // Need at least one commit so `git diff HEAD` (the tracked half) has a HEAD.
     await writeRepoFile(repo, "README.md", "# seed\n");
     await git(repo, ["add", "-A"]);
     await git(repo, ["commit", "-m", "initial commit"]);
-  }, 30000);
+  }, GIT_IO_TIMEOUT_MS);
 
   afterEach(async () => {
     await rm(repo, { recursive: true, force: true });
@@ -103,7 +110,7 @@ describe("getUntrackedDiffEntries boundary cases", () => {
     // git-style binary marker present.
     expect(normalizedSection.toLowerCase()).toContain("binary");
     expect(lf(diff)).not.toContain("<<<<<<<");
-  }, 30000);
+  }, GIT_IO_TIMEOUT_MS);
 
   it("(b) counts lines correctly for a no-trailing-newline untracked file", async () => {
     // Exactly 3 lines, NO trailing newline. The last line is the off-by-one
@@ -125,7 +132,7 @@ describe("getUntrackedDiffEntries boundary cases", () => {
       .split("\n")
       .filter((l) => l.startsWith("+") && !l.startsWith("+++"));
     expect(plusLines).toEqual(["+alpha line", "+beta line", "+gamma-last-no-newline"]);
-  }, 30000);
+  }, GIT_IO_TIMEOUT_MS);
 
   it("(b') counts lines correctly for a trailing-newline untracked file (no phantom line)", async () => {
     // Mirror case: WITH a trailing newline, the guard SHOULD pop the empty tail so
@@ -143,5 +150,5 @@ describe("getUntrackedDiffEntries boundary cases", () => {
       .split("\n")
       .filter((l) => l.startsWith("+") && !l.startsWith("+++"));
     expect(plusLines).toEqual(["+one", "+two", "+three"]);
-  }, 30000);
+  }, GIT_IO_TIMEOUT_MS);
 });

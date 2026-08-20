@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { boardApiUrl } from "../server-url.js";
+import { boardApiText, boardErrorText, mcpText } from "../board-call.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export function registerExportHandoffBundle(server: McpServer) {
   server.tool(
@@ -12,24 +13,21 @@ export function registerExportHandoffBundle(server: McpServer) {
     },
     async ({ workspaceId, format }) => {
       try {
-        const url = boardApiUrl(`/api/workspaces/${workspaceId}/handoff-bundle${format === "markdown" ? "?format=markdown" : ""}`);
-        const res = await fetch(url);
+        const { ok, statusText, text } = await boardApiText(
+          `/api/workspaces/${workspaceId}/handoff-bundle${format === "markdown" ? "?format=markdown" : ""}`,
+        );
 
-        if (!res.ok) {
-          let errorText = res.statusText;
-          try {
-            const data = await res.json() as { error?: string };
-            errorText = String(data.error ?? res.statusText);
-          } catch { /* ignore parse failure */ }
-          return { content: [{ type: "text" as const, text: `Export failed: ${errorText}` }] };
+        if (!ok) {
+          // The body is markdown on success but JSON on failure, so the error text has to be
+          // re-parsed here rather than read off a parsed `data` (#508).
+          let parsed: unknown = null;
+          try { parsed = JSON.parse(text); } catch { /* non-JSON error body */ }
+          return mcpText(`Export failed: ${boardErrorText(parsed, statusText)}`);
         }
 
-        const text = await res.text();
-        return { content: [{ type: "text" as const, text }] };
+        return mcpText(text);
       } catch (err) {
-        return {
-          content: [{ type: "text" as const, text: `Export failed: ${err instanceof Error ? err.message : String(err)}` }],
-        };
+        return mcpText(`Export failed: ${errorMessage(err)}`);
       }
     },
   );

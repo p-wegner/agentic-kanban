@@ -65,6 +65,7 @@ export function CompletedGrid({
 
   const collapsedBar = (
       <button
+        data-testid="completed-toggle"
         onClick={onToggle}
         className="shrink-0 w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-3 flex items-center gap-3 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-left"
       >
@@ -262,8 +263,12 @@ function VirtualizedCompletedGrid({
   const showMinimap = allIssues.length >= MINIMAP_THRESHOLD;
 
   return (
-    <div className="shrink-0 max-h-[50vh] sm:max-h-[40vh] overflow-hidden flex flex-col">
+    <div
+      data-testid="completed-grid"
+      className="shrink-0 max-h-[50vh] sm:max-h-[40vh] overflow-hidden flex flex-col"
+    >
       <button
+        data-testid="completed-toggle"
         onClick={onToggle}
         className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 mb-2 transition-colors shrink-0"
       >

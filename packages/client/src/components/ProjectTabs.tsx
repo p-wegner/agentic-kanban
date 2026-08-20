@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
+import { ActiveAgentsBadge } from "./ProjectSelector.js";
 
 export interface ProjectTabProject {
   id: string;
   name: string;
   color?: string | null;
+  /** Number of workspaces in this project whose agent is currently active. */
+  activeWorkspaceCount?: number;
 }
 
 export interface ProjectTabState {
@@ -161,6 +164,7 @@ export function ProjectTabs({ projects, activeProjectId, onProjectChange }: Proj
                     />
                   )}
                   <span className="truncate">{project.name}</span>
+                  <ActiveAgentsBadge count={project.activeWorkspaceCount ?? 0} compact />
                 </button>
                 <button
                   type="button"
@@ -193,6 +197,7 @@ export function ProjectTabs({ projects, activeProjectId, onProjectChange }: Proj
           {overflowTabs.map((project) => (
             <option key={project.id} value={project.id}>
               {project.name}
+              {project.activeWorkspaceCount ? ` (${project.activeWorkspaceCount} active)` : ""}
             </option>
           ))}
         </select>

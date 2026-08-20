@@ -1,4 +1,5 @@
 import { execShellCommand } from "./process-exec.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 const SCRIPT_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -20,7 +21,7 @@ export async function runScript(
     console.log(`[${label}] completed: ${output.trim().slice(0, 200)}`);
     return { ok: true, output };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errorMessage(err);
     console.error(`[${label}] failed: ${msg}`);
     return { ok: false, output: msg };
   }

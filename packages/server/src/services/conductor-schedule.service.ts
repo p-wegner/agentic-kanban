@@ -14,6 +14,7 @@
 // Pure resolve/parse/due logic is exported for the route + unit tests; the
 // side-effecting orchestration (`runDueConductorCrons`) takes injected deps so it
 // is testable without a DB or a real process spawn.
+import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 
 import { getNextCronRun, validateCronExpression, describeCronExpression } from "@agentic-kanban/shared/lib/cron-utils";
 
@@ -43,8 +44,11 @@ export interface ResolvedConductorSchedule extends ConductorSchedule {
 
 const DEFAULT_SCHEDULE: ConductorSchedule = { enabled: false, cron: "", agent: "claude", lastFiredAt: null };
 
+// #496: built from the registry, so an unregistered prefix is a COMPILE error.
+const conductorCronPrefDef = projectPref("conductor_cron");
+
 export function conductorCronPrefKey(projectId: string): string {
-  return `conductor_cron_${projectId}`;
+  return conductorCronPrefDef.key(projectId);
 }
 
 /** Parse the stored JSON blob into a normalized schedule, tolerant of missing/garbage values. */

@@ -29,7 +29,7 @@ export function createToolHarness(): { server: McpServer; getHandler: () => Tool
 
 /** Build a ToolDeps backed by a fresh in-memory DB plus spy side effects. */
 export function createTestDeps(overrides: Partial<ToolDeps> = {}): { deps: ToolDeps; db: TestDb } {
-  const { db } = createTestDb();
+  const db = overrides.db ?? createTestDb().db;
   const deps: ToolDeps = {
     db,
     schema,

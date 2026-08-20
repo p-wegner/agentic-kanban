@@ -2,24 +2,15 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { parseSessionSummary } from "@agentic-kanban/shared";
+import type { SessionStatsBlob } from "@agentic-kanban/shared";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { requireEntity } from "../db-utils.js";
+import { mcpJson, requireEntity } from "../db-utils.js";
 
 /**
  * Shape of the dynamic `sessions.stats` JSON blob, as read by this tool. All
  * fields are optional because the blob is parsed from untyped JSON and older
  * sessions may omit any of them (the `??` defaults below cover absent fields).
  */
-interface SessionStatsBlob {
-  durationMs?: number;
-  totalCostUsd?: number;
-  inputTokens?: number;
-  outputTokens?: number;
-  numTurns?: number;
-  model?: string;
-  success?: boolean;
-  agentSummary?: string;
-}
 
 /**
  * Mirrors `pnpm cli -- session analyze <session-id>`.
@@ -89,10 +80,7 @@ export function registerAnalyzeSession(server: McpServer, deps: ToolDeps = prodD
         try { stats = JSON.parse(session.stats) as SessionStatsBlob; } catch { /* ignore */ }
       }
 
-      return {
-        content: [{
-          type: "text" as const,
-          text: JSON.stringify({
+      return mcpJson({
             session: {
               id: session.id,
               status: session.status,
@@ -124,9 +112,7 @@ export function registerAnalyzeSession(server: McpServer, deps: ToolDeps = prodD
                   agentSummary: stats.agentSummary,
                 }
               : null,
-          }, null, 2),
-        }],
-      };
+          });
     },
   );
 }

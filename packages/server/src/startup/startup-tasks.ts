@@ -1,24 +1,38 @@
+import { existsSync } from "node:fs";
 import { db, rawClient, rawWriteClient } from "../db/index.js";
-import { workspaces, issues, projects, preferences, sessions } from "@agentic-kanban/shared/schema";
-import { and, eq, isNotNull, ne } from "drizzle-orm";
+import { workspaces, issues, projects, preferences, sessions, pluginViewProcesses, repos as reposTable } from "@agentic-kanban/shared/schema";
+import { and, eq, ne } from "drizzle-orm";
 import { applyMigrations } from "../db/manual-migrate.js";
-import { deduplicateProjects } from "../services/project-registration.js";
+import { listAbandonedProvisioning, finishProvisioning } from "../repositories/workspace-provisioning.repository.js";
+import { deduplicateProjects, unregisterLeakedTempProjects, findProjectsWithMissingRepoPath } from "../services/project-registration.js";
+import { getAllProjects } from "../repositories/project.repository.js";
+import { sweepHookWiring, formatHookWiringReport } from "../services/hook-wiring-audit.service.js";
 import type * as agentServiceType from "../services/agent.service.js";
-import * as agentService from "../services/agent.service.js";import * as gitService from "../services/git.service.js";
+import * as agentService from "../services/agent.service.js";import * as realGitService from "../services/git.service.js";
+import type { GitService } from "../services/workspace-internals.js";
+import { cleanupSiblingWorktrees } from "../services/workspace-repos.service.js";
+import { listProjectRepos } from "../repositories/repo.repository.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { Database } from "../db/index.js";
-import { logBoardHealthEvent } from "../repositories/board-health-events.repository.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
+import { isPidAlive } from "../lib/pid.js";
 import { reconcileAncestorBranchWorkspaces } from "./ancestor-branch-reconciler.js";
-import { scanDoneUnmergedWorkspaces } from "./done-unmerged-invariant-scanner.js";
+import { reconcileHandMergedBranches } from "./hand-merged-branch-reconciler.js";
+import { scanDoneUnmergedWorkspaces } from "./done-unmerged-invariant-sweep.js";
 import { reapTerminalWorkspaces } from "./terminal-workspace-reaper.js";
-import { finalizeMergeCleanup, reconcileMergedIssue } from "../services/merge-cleanup.service.js";
+import { reconcileOrphanedWorktrees } from "./orphaned-worktree-reconciler.js";
 import { assertForeignKeysEnabled, alignForeignKeyActionsOnStartup } from "./fk-alignment.js";
 import { checkForeignKeyViolations, logForeignKeyViolations } from "../db/fk-violations.js";
 import { modelBelongsToProvider } from "@agentic-kanban/shared";
 import { PREF_DEFAULT_MODEL, PREF_PROVIDER } from "../constants/preference-keys.js";
 import { MODEL_PREF_KEYS_BY_PROVIDER } from "../services/effective-config.service.js";
 import { narrowProviderName } from "../services/agent-provider.js";
+import { listOsProcesses, taskkillTree } from "../services/process-exec.js";
+import { refreshContainerMcpConfig } from "../services/devcontainer-workspace.service.js";
+import { insertIssueComment } from "../repositories/issue-comments.repository.js";
+import { clearWorkspaceWorkingDir } from "../repositories/workspace-crud.repository.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { runNonFatal } from "./run-non-fatal.js";
 
 /** Kill orphaned tsx server processes from previous hot-reload cycles (Windows only). */
 export function shouldKillOrphanedServerProcess(input: {
@@ -40,27 +54,35 @@ export function shouldKillOrphanedServerProcess(input: {
   return cmd.includes(checkoutRoot);
 }
 
+/**
+ * `KANBAN_SKIP_ORPHAN_CLEANUP=1` disables the sweep entirely (#645).
+ *
+ * The sweep's scope is the CHECKOUT, not the port: any `tsx … src/index` process whose
+ * command line names this checkout is fair game. A second server booted from the same
+ * checkout on a different port is therefore reaped as an "orphan" — which is exactly what
+ * the E2E stack is. So `pnpm test:e2e` on a dev machine killed the developer's running
+ * dev server as its very first startup act, and the same holds for any deliberate
+ * second instance. Cleanup is a convenience for hot-reload leftovers; a run that knows
+ * it is a co-tenant opts out.
+ */
+export function shouldSkipOrphanCleanup(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.KANBAN_SKIP_ORPHAN_CLEANUP === "1" || env.KANBAN_SKIP_ORPHAN_CLEANUP === "true";
+}
+
 export async function killOrphanedServers(): Promise<void> {
   if (process.platform !== "win32") return;
+  if (shouldSkipOrphanCleanup()) {
+    console.log("[startup] orphan cleanup skipped (KANBAN_SKIP_ORPHAN_CLEANUP)");
+    return;
+  }
   try {
     const { execSync: _execSync } = await import("node:child_process");
-    const wmic = _execSync(
-      `wmic process where "name='node.exe'" get ProcessId,ParentProcessId,CommandLine /format:list`,
-      { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"], windowsHide: true, timeout: 8000 },
-    );
+    // wmic was removed starting with Windows 11 24H2, which silently killed this whole
+    // cleanup (the catch below swallowed the "'wmic' is not recognized" error every boot).
+    // listOsProcesses() uses the Get-CimInstance PowerShell equivalent instead.
+    const osProcs = await listOsProcesses();
     const myPid = process.pid;
-    const lines = wmic.split(/\r?\n/);
-    const procs: { pid: number; ppid: number; cmd: string }[] = [];
-    let curCmd = "";
-    let curPid = 0;
-    let curPpid = 0;
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (trimmed.startsWith("CommandLine=")) curCmd = trimmed.slice("CommandLine=".length);
-      if (trimmed.startsWith("ParentProcessId=")) curPpid = parseInt(trimmed.slice("ParentProcessId=".length), 10);
-      if (trimmed.startsWith("ProcessId=")) curPid = parseInt(trimmed.slice("ProcessId=".length), 10);
-      if (curCmd && curPid) { procs.push({ pid: curPid, ppid: curPpid, cmd: curCmd }); curCmd = ""; curPid = 0; curPpid = 0; }
-    }
+    const procs: { pid: number; ppid: number; cmd: string }[] = osProcs.map((p) => ({ pid: p.pid, ppid: p.ppid, cmd: p.commandLine }));
     // Collect the full ancestor chain of our process to avoid self-kill.
     const ppidMap = new Map(procs.map(p => [p.pid, p.ppid]));
     const ancestors = new Set<number>();
@@ -97,7 +119,7 @@ export async function killOrphanedServers(): Promise<void> {
       await new Promise(r => setTimeout(r, 500));
     }
   } catch (err) {
-    console.warn("[startup] orphan cleanup failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[startup] orphan cleanup failed (non-fatal):", errorMessage(err));
   }
 }
 
@@ -145,18 +167,38 @@ export async function migrateGlobalDefaultModelToProviderScope(database: Databas
 
 /** Run database migrations, seed built-in tags and skills, deduplicate projects, disable auto_monitor, and backfill failure patterns. */
 export async function runMigrations(): Promise<void> {
-  // Cheap insurance: a verified snapshot before any schema change.
+  // Insurance: a verified snapshot before any schema change — but only when there
+  // IS a schema change (#322). This ran unconditionally on every boot, and a
+  // backup is a full-size `VACUUM INTO` of the live DB (~103 MB here: one full
+  // read, ~two full writes). Under `tsx watch` the process boots on every source
+  // edit, so a development session turned into a continuous whole-database
+  // copy loop while the API was serving. Measured on the dev board: five backups
+  // in seven minutes (three `pre-migration`, two post-boot `periodic`) with reads
+  // still fast and WRITES hanging past 25s.
+  //
+  // `pendingMigrationTags` returns null on ANY uncertainty (unreadable journal,
+  // fresh DB with no tracking table), and null takes the backup — the cheap side
+  // of the trade is the one that runs when we don't know.
   try {
     const { createBackup } = await import("../db/backup.js");
-    await createBackup("pre-migration");
+    const { pendingMigrationTags } = await import("../db/manual-migrate.js");
+    const pending = await pendingMigrationTags(rawClient);
+    if (pending === null || pending.length > 0) {
+      console.log(
+        `[backup] pre-migration backup: ${pending === null ? "pending migrations unknown" : `${pending.length} pending (${pending.join(", ")})`}`,
+      );
+      await createBackup("pre-migration");
+    } else {
+      console.log("[backup] skipping pre-migration backup — schema is up to date, nothing to insure");
+    }
   } catch (err) {
-    console.warn("[backup] pre-migration backup failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[backup] pre-migration backup failed (non-fatal):", errorMessage(err));
   }
 
   try {
     await applyMigrations(rawClient);
   } catch (err: unknown) {
-    console.error("[startup] Migration failed:", err instanceof Error ? err.message : String(err));
+    console.error("[startup] Migration failed:", errorMessage(err));
     throw err;
   }
 
@@ -168,13 +210,48 @@ export async function runMigrations(): Promise<void> {
     // Built-in skills must be seeded first — workflow nodes resolve skills by name.
     await ensureBuiltinWorkflows(db);
   } catch (err) {
-    console.warn("[startup] ensureBuiltinTags/Skills/Workflows failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[startup] ensureBuiltinTags/Skills/Workflows failed (non-fatal):", errorMessage(err));
   }
 
   try {
     await deduplicateProjects();
   } catch (err) {
-    console.warn("[startup] project deduplication failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[startup] project deduplication failed (non-fatal):", errorMessage(err));
+  }
+
+  // #166: unregister leaked %TEMP% test/lab fixture projects (safe heuristic — repo path
+  // gone from disk AND under the OS temp dir), then report any OTHER missing-repoPath
+  // project so it stays visible instead of silently accumulating. Never auto-unregisters
+  // a non-temp path — a briefly-unmounted drive must not nuke a real project.
+  try {
+    const removed = await unregisterLeakedTempProjects();
+    if (removed.length > 0) {
+      console.log(`[startup] Unregistered ${removed.length} leaked temp-fixture project(s): ${removed.map((p) => p.name).join(", ")}`);
+    }
+    const stillMissing = await findProjectsWithMissingRepoPath();
+    if (stillMissing.length > 0) {
+      console.warn(`[startup] ${stillMissing.length} registered project(s) have a missing repoPath (not auto-removed — outside the temp dir):`);
+      for (const p of stillMissing) {
+        console.warn(`[startup]   "${p.name}" -> ${p.repoPath}`);
+      }
+    }
+  } catch (err) {
+    console.warn("[startup] leaked temp-project cleanup failed (non-fatal):", errorMessage(err));
+  }
+
+  // #391/#396: every registered project's cross-worktree guard is audited on boot, and repaired
+  // if it ships the script without registering it on both matchers. That state — script on disk,
+  // hook unwired — is what let the #369 incident land 17 writes into another worktree with the
+  // guard sitting right there, and an audit found 9 of 20 projects in it (mostly missing the
+  // SHELL matcher, which is the vector the incident actually used). It is silent by
+  // construction, so it has to be checked rather than assumed. Repair is additive and
+  // idempotent (ensureHookScaffold appends missing entries, never overwrites).
+  try {
+    const projects = await getAllProjects(db);
+    const sweep = sweepHookWiring(projects.map((p) => ({ id: p.id, name: p.name, repoPath: p.repoPath })), { repair: true });
+    for (const line of formatHookWiringReport(sweep)) console.warn(line);
+  } catch (err) {
+    console.warn("[startup] hook-wiring audit failed (non-fatal):", errorMessage(err));
   }
 
   // Disable auto_monitor on every startup — prevents mass agent spawns from idle workspaces
@@ -190,7 +267,7 @@ export async function runMigrations(): Promise<void> {
   try {
     await migrateGlobalDefaultModelToProviderScope(db);
   } catch (err) {
-    console.warn("[startup] default_model provider-scope migration failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[startup] default_model provider-scope migration failed (non-fatal):", errorMessage(err));
   }
 
   // Backfill failure patterns from docs/learnings/ in all registered projects (non-fatal)
@@ -205,7 +282,7 @@ export async function runMigrations(): Promise<void> {
       if (count > 0) console.log(`[startup] failure-pattern backfill: ingested ${count} learning(s) from ${learningsDir}`);
     }
   } catch (err) {
-    console.warn("[startup] failure-pattern backfill failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[startup] failure-pattern backfill failed (non-fatal):", errorMessage(err));
   }
 }
 
@@ -235,7 +312,7 @@ export async function alignLiveDbForeignKeys(): Promise<void> {
   } catch (err) {
     console.warn(
       "[startup] FK-action alignment failed (non-fatal — schema shape is still up to date):",
-      err instanceof Error ? err.message : String(err),
+      errorMessage(err),
     );
   }
 
@@ -251,7 +328,7 @@ export async function alignLiveDbForeignKeys(): Promise<void> {
   } catch (err) {
     console.warn(
       "[startup] PRAGMA foreign_key_check sweep failed (non-fatal):",
-      err instanceof Error ? err.message : String(err),
+      errorMessage(err),
     );
   }
 }
@@ -263,6 +340,7 @@ export async function cleanupStaleSessions(sessionManager: SessionManager, agent
     workspaceId: sessions.workspaceId,
     pid: sessions.pid,
     executor: sessions.executor,
+    containerId: sessions.containerId,
   }).from(sessions).where(eq(sessions.status, "running"));
 
   if (staleSessions.length === 0) return;
@@ -272,16 +350,11 @@ export async function cleanupStaleSessions(sessionManager: SessionManager, agent
   const dead = [];
   const alive = [];
   for (const s of staleSessions) {
-    if (s.pid) {
-      try {
-        process.kill(s.pid, 0);
-        alive.push(s);
-      } catch {
-        dead.push(s);
-      }
-    } else {
-      dead.push(s);
-    }
+    // #574/#545: EPERM means the process EXISTS but we may not signal it. Catching it as
+    // "dead" here marked an EPERM-protected live agent "stopped" on every single restart and
+    // reset its workspace out from under a running process. `isPidAlive` owns that rule now.
+    if (s.pid && isPidAlive(s.pid)) alive.push(s);
+    else dead.push(s);
   }
   for (const s of dead) {
     await db.update(sessions).set({ status: "stopped", endedAt: now }).where(eq(sessions.id, s.id));
@@ -315,9 +388,162 @@ export async function cleanupStaleSessions(sessionManager: SessionManager, agent
             console.error(`[startup] Failed to handle reattached session exit: sessionId=${s.id}`, err);
           });
         },
+        s.containerId ?? undefined,
       );
+
+      // #156: the containerized agent survived the restart, but the board's MCP
+      // HTTP bridge did not — it dies on every shutdown (incl. SIGTERM/hot-reload)
+      // and comes back with a fresh port+token. Rewrite this workspace's mounted
+      // config with the new values so its board tool calls stop 401ing/timing out.
+      if (s.containerId) {
+        try {
+          const configPath = await refreshContainerMcpConfig(s.workspaceId);
+          if (configPath) {
+            console.log(`[startup] refreshed container MCP config on reattach: workspaceId=${s.workspaceId} path=${configPath}`);
+            if (issueId) {
+              await insertIssueComment({
+                issueId,
+                workspaceId: s.workspaceId,
+                kind: "note",
+                author: "system",
+                body: "Server restarted while this containerized agent was running. Its board MCP token/port were refreshed on reattach so board tool calls keep working.",
+                createdAt: now,
+              }).catch((err) => {
+                console.warn(`[startup] failed to record MCP-refresh comment: workspaceId=${s.workspaceId}`, err);
+              });
+            }
+          } else {
+            console.warn(`[startup] could not refresh container MCP config on reattach (bridge unavailable): workspaceId=${s.workspaceId}`);
+          }
+        } catch (err) {
+          console.warn(`[startup] container MCP config refresh failed on reattach: workspaceId=${s.workspaceId}`, err);
+        }
+      }
     }
   }
+}
+
+/**
+ * Reap plugin view child servers (`views[].serve`) left running by the previous
+ * server generation (#228). `tsx watch` restarts the backend on every
+ * server-source edit without killing the children it had spawned; the new
+ * process has no in-memory handle on them, so `plugin_view_processes` — a PID
+ * persisted at spawn time (see `plugin-views.service.ts` via the injected
+ * `persistViewProcess` hook) — is the only record of them. Every row found here
+ * predates this process, so unlike `cleanupStaleSessions` there is no "reattach
+ * the survivor" branch: a live process is unconditionally killed, and the row is
+ * dropped either way.
+ *
+ * A bare `process.kill(pid, 0)` check is NOT enough before killing: PIDs get
+ * recycled, and on this dev machine a fresh unrelated process (another agent's
+ * dev server, a shell) can easily land on a PID a stale row remembers minutes
+ * later. Cross-check the live process's command line against the `command` this
+ * row persisted at spawn time — the same guard `shouldKillOrphanedServerProcess`
+ * above applies for the tsx-server sweep — before killing anything.
+ */
+export async function reapOrphanedPluginViewProcesses(database: Database = db): Promise<void> {
+  const rows = await database.select().from(pluginViewProcesses);
+  if (rows.length === 0) return;
+
+  console.log(`[startup] Checking ${rows.length} plugin view server(s) from the previous server generation`);
+  const osProcs = await listOsProcesses();
+  const commandLineByPid = new Map(osProcs.map((p) => [p.pid, p.commandLine]));
+  let reaped = 0;
+  for (const row of rows) {
+    const liveCommandLine = commandLineByPid.get(row.pid);
+    const stillTheSameProcess = liveCommandLine !== undefined && liveCommandLine.includes(row.command);
+    if (stillTheSameProcess) {
+      try {
+        if (process.platform === "win32") {
+          await taskkillTree(row.pid);
+        } else {
+          process.kill(row.pid, "SIGKILL");
+        }
+        reaped++;
+      } catch (err) {
+        console.warn(`[startup] failed to kill orphaned plugin view server PID ${row.pid} (non-fatal):`, errorMessage(err));
+      }
+    } else if (liveCommandLine !== undefined) {
+      console.warn(`[startup] plugin view server PID ${row.pid} is now a different process (command line no longer matches) — skipping kill, dropping stale row`);
+    }
+    await database.delete(pluginViewProcesses).where(eq(pluginViewProcesses.id, row.id));
+  }
+  if (reaped > 0) {
+    console.log(`[startup] killed ${reaped} orphaned plugin view server process(es)`);
+  }
+}
+
+/**
+ * Command-line markers of board-spawned child web servers that are safe to reap
+ * once their parent is gone. Deliberately narrow: each is a short-lived static
+ * file/preview server the board starts on behalf of a plugin view or a review
+ * artifact, never a long-lived service and never an agent process.
+ *
+ * NOT in this list, on purpose: `scripts/dev.mjs` (a supervisor another agent's
+ * worktree may legitimately own), any `tsx`/backend process, and anything
+ * agent-related. Killing a dev supervisor is the documented never-do.
+ */
+const REAPABLE_CHILD_SERVER_MARKERS = [
+  "serve.mjs",
+  "review-server.mjs",
+  "ui-map-serve.mjs",
+];
+
+/**
+ * Sweep board-spawned child servers whose parent process no longer exists (#281).
+ *
+ * Complements `reapOrphanedPluginViewProcesses`, which can only reap what the DB
+ * remembers. Observed on this dev box: **85** `serve.mjs`-family processes with a
+ * dead parent, the oldest 4 days old — spawned by server generations that predate
+ * PID persistence, or by tests that spawn a `serve.mjs` out of a temp
+ * `plugin-test-plugin-<id>` directory and never reap them. They accumulate
+ * indefinitely because nothing owns them.
+ *
+ * Two conditions must BOTH hold before killing, which is what makes this safe to
+ * run unattended:
+ *  1. the command line matches `REAPABLE_CHILD_SERVER_MARKERS`, and
+ *  2. the parent PID is not among the live processes — i.e. it is a true orphan,
+ *     so no supervisor is going to miss it.
+ *
+ * A process whose parent is alive is left strictly alone: that is someone's
+ * running plugin view, possibly in another worktree.
+ */
+export async function reapParentlessChildServers(): Promise<number> {
+  let osProcs: Awaited<ReturnType<typeof listOsProcesses>>;
+  try {
+    osProcs = await listOsProcesses();
+  } catch (err) {
+    console.warn("[startup] could not enumerate processes for orphan sweep (non-fatal):", errorMessage(err));
+    return 0;
+  }
+
+  const livePids = new Set(osProcs.map((p) => p.pid));
+  const orphans = osProcs.filter((proc) => {
+    if (proc.pid === process.pid) return false;
+    const cmd = proc.commandLine || "";
+    if (!REAPABLE_CHILD_SERVER_MARKERS.some((marker) => cmd.includes(marker))) return false;
+    // ppid 0 means "unknown" from the enumerator, not "orphan" — don't guess.
+    if (!proc.ppid) return false;
+    return !livePids.has(proc.ppid);
+  });
+
+  if (orphans.length === 0) return 0;
+
+  let killed = 0;
+  for (const orphan of orphans) {
+    try {
+      if (process.platform === "win32") {
+        await taskkillTree(orphan.pid);
+      } else {
+        process.kill(orphan.pid, "SIGKILL");
+      }
+      killed++;
+    } catch (err) {
+      console.warn(`[startup] failed to reap parentless child server PID ${orphan.pid} (non-fatal):`, errorMessage(err));
+    }
+  }
+  console.log(`[startup] reaped ${killed}/${orphans.length} parentless child server process(es)`);
+  return killed;
 }
 
 /** Prune closed workspaces that still have a workingDir (stale git worktrees). */
@@ -336,18 +562,173 @@ export async function pruneStaleWorktrees(): Promise<void> {
         const projRows = await db.select({ repoPath: projects.repoPath }).from(projects).where(eq(projects.id, issueRows[0].projectId)).limit(1);
         if (projRows.length > 0) {
           const { repoPath } = projRows[0];
-          try { await gitService.removeWorktree(repoPath, ws.workingDir!); } catch { /* locked — skip */ }
+          try { await realGitService.removeWorktree(repoPath, ws.workingDir!); } catch { /* locked — skip */ }
         }
       }
-      await db.update(workspaces).set({ workingDir: null, updatedAt: new Date().toISOString() }).where(eq(workspaces.id, ws.id));
+      // Multi-repo: sibling worktrees + branches too (no-op single-repo).
+      // preserveUnmerged: this path prunes stale WORKTREES of closed workspaces — it
+      // never deletes the leading branch, so an unmerged sibling branch (unshipped
+      // work) must not be force-deleted either.
+      await cleanupSiblingWorktrees(realGitService, ws.id, db, { preserveUnmerged: true });
+      await clearWorkspaceWorkingDir(ws.id, new Date().toISOString());
     } catch (err) {
       console.warn(`[startup] Failed to prune worktree for workspace ${ws.id}:`, err);
     }
   }
 }
 
+/**
+ * Remove git worktrees that no workspace claims any more (#361).
+ *
+ * Complements `pruneStaleWorktrees`: that one starts from workspace rows and so cannot see a
+ * worktree whose row has `workingDir = null` (which every completed merge produces). This starts
+ * from `git worktree list`, so the nulled column makes the orphan visible rather than invisible.
+ * Anything holding unlanded commits or uncommitted edits is reported and KEPT.
+ */
+export async function pruneOrphanedWorktrees(): Promise<void> {
+  let projectRows: { id: string; repoPath: string; defaultBranch: string | null; name: string }[];
+  try {
+    projectRows = await db.select({ id: projects.id, repoPath: projects.repoPath, defaultBranch: projects.defaultBranch, name: projects.name }).from(projects);
+  } catch (err) {
+    console.warn("[startup] pruneOrphanedWorktrees: could not read projects:", errorMessage(err));
+    return;
+  }
+
+  for (const project of projectRows) {
+    if (!project.repoPath || !existsSync(project.repoPath)) continue;
+    try {
+      // Every workspace row of the project, so a live workspace still holding a branch is
+      // recognised as a claim even when its workingDir was cleared.
+      const claims = await db.select({ workingDir: workspaces.workingDir, branch: workspaces.branch, status: workspaces.status })
+        .from(workspaces)
+        .innerJoin(issues, eq(workspaces.issueId, issues.id))
+        .where(eq(issues.projectId, project.id));
+      const report = await reconcileOrphanedWorktrees({
+        repoPath: project.repoPath,
+        baseBranch: project.defaultBranch || "master",
+        claims,
+        git: realGitService,
+      });
+      if (report.removed.length > 0 || report.keptWithUnshippedWork.length > 0) {
+        console.log(`[startup] orphaned worktrees for project '${project.name}': removed ${report.removed.length}, kept (unshipped work) ${report.keptWithUnshippedWork.length}`);
+      }
+
+      // #630: the sweep above only ever looked at the LEADING repo, so for a multi-repo
+      // project every sibling worktree was invisible to it. That is not a corner case —
+      // it is where the debris actually accumulates: an interrupted create leaves sibling
+      // worktrees on disk with no workspace row at all, and on `comet` (17 repos) that
+      // reached 104 orphaned worktrees across 13 repos against ZERO workspace rows, and
+      // regenerated indefinitely because the monitor restarted the ticket each time.
+      //
+      // The claims for a sibling repo live in `repos` (worktree_path/branch per workspace),
+      // not on the `workspaces` row, so they have to be read per repo path.
+      await pruneOrphanedSiblingWorktrees(project);
+    } catch (err) {
+      console.warn(`[startup] pruneOrphanedWorktrees failed for project '${project.name}' (non-fatal):`, errorMessage(err));
+    }
+  }
+}
+
+/**
+ * The sibling-repo half of {@link pruneOrphanedWorktrees} (#630).
+ *
+ * Same conservative classification as the leading repo — anything carrying unlanded commits
+ * or uncommitted edits is reported and kept — but the "is this claimed?" question is answered
+ * from the per-workspace `repos` rows for that repo path, joined to the owning workspace's
+ * status so a live workspace's sibling worktree is never touched.
+ */
+export async function pruneOrphanedSiblingWorktrees(
+  project: { id: string; name: string },
+  deps: {
+    database?: Database;
+    git?: Parameters<typeof reconcileOrphanedWorktrees>[0]["git"];
+    listRepos?: typeof listProjectRepos;
+  } = {},
+): Promise<void> {
+  const database = deps.database ?? db;
+  const git = deps.git ?? realGitService;
+  const listRepos = deps.listRepos ?? listProjectRepos;
+  const projectRepos = await listRepos(project.id, database).catch(() => [] as Awaited<ReturnType<typeof listProjectRepos>>);
+  for (const repo of projectRepos) {
+    if (!repo.path || !existsSync(repo.path)) continue;
+    try {
+      // Every workspace-scoped `repos` row for THIS repo path, with its workspace's status.
+      // A row whose workspace is gone entirely yields no claim, which is the point.
+      const claims = await database
+        .select({ workingDir: reposTable.worktreePath, branch: reposTable.branch, status: workspaces.status })
+        .from(reposTable)
+        .innerJoin(workspaces, eq(reposTable.workspaceId, workspaces.id))
+        .where(and(eq(reposTable.projectId, project.id), eq(reposTable.path, repo.path)));
+      const report = await reconcileOrphanedWorktrees({
+        repoPath: repo.path,
+        baseBranch: repo.defaultBranch || "master",
+        claims,
+        git,
+      });
+      if (report.removed.length > 0 || report.keptWithUnshippedWork.length > 0) {
+        console.log(
+          `[startup] orphaned SIBLING worktrees in '${repo.name ?? repo.path}' (project '${project.name}'): ` +
+            `removed ${report.removed.length}, kept (unshipped work) ${report.keptWithUnshippedWork.length}`,
+        );
+      }
+    } catch (err) {
+      console.warn(`[startup] sibling worktree sweep failed for '${repo.path}' (non-fatal):`, errorMessage(err));
+    }
+  }
+}
+
+/**
+ * Report and clear workspace-create markers left behind by a dead process (#630).
+ *
+ * A row in `workspace_provisioning` that belongs to another pid means a create died between
+ * "started provisioning" and "workspace row committed" — the window that used to be entirely
+ * invisible, and the reason `comet` accumulated 104 orphaned worktrees against zero workspace
+ * rows. Runs AFTER the worktree sweeps in the same startup phase, so by the time it speaks the
+ * disk half is already reconciled: an abandoned create's branch carries no commits, so
+ * `reconcileOrphanedWorktrees` classifies it as removable, while anything that DID produce work
+ * is kept and reported. What is left for this to do is say that it happened, name the issue and
+ * the phase it died in, and drop the marker.
+ *
+ * Deliberately NOT auto-resuming: a boot that re-dispatches every interrupted create would
+ * start a provisioning storm on exactly the machine that just proved it cannot finish them. The
+ * issue is still in its pre-start state, so the monitor (or a human) starts it again normally —
+ * the difference is that it is now a reported event instead of silent debris.
+ */
+export async function reconcileAbandonedProvisioning(deps: {
+  list?: typeof listAbandonedProvisioning;
+  finish?: typeof finishProvisioning;
+  log?: (msg: string) => void;
+} = {}): Promise<number> {
+  const list = deps.list ?? listAbandonedProvisioning;
+  const finish = deps.finish ?? finishProvisioning;
+  const log = deps.log ?? ((msg: string) => console.log(msg));
+  let records: Awaited<ReturnType<typeof listAbandonedProvisioning>>;
+  try {
+    records = await list();
+  } catch (err) {
+    console.warn("[startup] reconcileAbandonedProvisioning: could not read markers:", errorMessage(err));
+    return 0;
+  }
+  for (const record of records) {
+    const ageMs = Date.now() - Date.parse(record.startedAt);
+    const age = Number.isFinite(ageMs) ? `${Math.round(ageMs / 1000)}s ago` : "unknown age";
+    log(
+      `[startup] abandoned workspace create for issue ${record.issueId} (branch ${record.branch ?? "?"}, ` +
+        `died in phase '${record.phase}', started ${age}, pid ${record.serverPid}) — its worktrees are ` +
+        `handled by the orphan sweep; the ticket was never moved to In Progress, so it can simply be started again`,
+    );
+    try {
+      await finish(record.id);
+    } catch (err) {
+      console.warn(`[startup] could not clear provisioning marker ${record.id}:`, errorMessage(err));
+    }
+  }
+  if (records.length > 0) log(`[startup] cleared ${records.length} abandoned workspace-create marker(s)`);
+  return records.length;
+}
+
 /** Abort any in-progress merges in all registered project repos (self-healing after hot-reload kills a merge mid-operation). */
-export async function abortStaleMerges(): Promise<void> {
+export async function abortStaleMerges(gitService: GitService = realGitService): Promise<void> {
   try {
     const projectRows = await db.select({ repoPath: projects.repoPath }).from(projects);
     for (const { repoPath } of projectRows) {
@@ -359,11 +740,11 @@ export async function abortStaleMerges(): Promise<void> {
           console.log(`[startup] merge --abort succeeded for ${repoPath}`);
         }
       } catch (err) {
-        console.warn(`[startup] abortStaleMerges: failed for ${repoPath}:`, err instanceof Error ? err.message : String(err));
+        console.warn(`[startup] abortStaleMerges: failed for ${repoPath}:`, errorMessage(err));
       }
     }
   } catch (err) {
-    console.warn("[startup] abortStaleMerges failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[startup] abortStaleMerges failed (non-fatal):", errorMessage(err));
   }
 }
 
@@ -373,9 +754,14 @@ export async function abortStaleMerges(): Promise<void> {
  * leaves `.git/rebase-merge` or `.git/rebase-apply` in the worktree, which
  * blocks subsequent operations.
  */
-export async function abortStaleRebases(): Promise<void> {
+export async function abortStaleRebases(gitService: GitService = realGitService): Promise<void> {
   try {
-    const wsRows = await db.select({ workingDir: workspaces.workingDir }).from(workspaces);
+    // Closed workspaces' worktrees are gone (or about to be reaped) — probing them
+    // is a wasted fs/git check per historical row on every startup.
+    const wsRows = await db
+      .select({ workingDir: workspaces.workingDir })
+      .from(workspaces)
+      .where(ne(workspaces.status, "closed"));
     const seen = new Set<string>();
     for (const { workingDir } of wsRows) {
       if (!workingDir || seen.has(workingDir)) continue;
@@ -388,16 +774,16 @@ export async function abortStaleRebases(): Promise<void> {
           console.log(`[startup] rebase --abort succeeded for ${workingDir}`);
         }
       } catch (err) {
-        console.warn(`[startup] abortStaleRebases: failed for ${workingDir}:`, err instanceof Error ? err.message : String(err));
+        console.warn(`[startup] abortStaleRebases: failed for ${workingDir}:`, errorMessage(err));
       }
     }
   } catch (err) {
-    console.warn("[startup] abortStaleRebases failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[startup] abortStaleRebases failed (non-fatal):", errorMessage(err));
   }
 }
 
 /** Check if main checkout HEAD is on defaultBranch for each project; log a warning if drifted. */
-export async function checkMainCheckoutHeads(): Promise<void> {
+export async function checkMainCheckoutHeads(gitService: GitService = realGitService): Promise<void> {
   try {
     const projectRows = await db.select({ repoPath: projects.repoPath, defaultBranch: projects.defaultBranch, name: projects.name }).from(projects);
     for (const { repoPath, defaultBranch, name } of projectRows) {
@@ -410,127 +796,147 @@ export async function checkMainCheckoutHeads(): Promise<void> {
           console.log(`[startup] main checkout HEAD for project '${name}': OK (on '${defaultBranch}')`);
         }
       } catch (err) {
-        console.warn(`[startup] checkMainCheckoutHeads: failed for ${repoPath}:`, err instanceof Error ? err.message : String(err));
+        console.warn(`[startup] checkMainCheckoutHeads: failed for ${repoPath}:`, errorMessage(err));
       }
     }
   } catch (err) {
-    console.warn("[startup] checkMainCheckoutHeads failed (non-fatal):", err instanceof Error ? err.message : String(err));
+    console.warn("[startup] checkMainCheckoutHeads failed (non-fatal):", errorMessage(err));
   }
 }
 
 /**
- * Reconcile workspaces whose branch was merged (mergedAt IS NOT NULL) but whose
- * status was reset to something other than "closed" — e.g. when cleanupStaleSessions()
- * marked a dead session's workspace as "idle" after the server died mid-merge-response.
- *
- * Must run AFTER cleanupStaleSessions() so it can override any incorrect status reset.
+ * Path A of the interrupted-merge recovery pair. Re-exported from its own module (#380) so
+ * the ancestor-branch reconciler can share it onto its periodic tick without closing a
+ * dependency cycle through this file. Existing importers keep working unchanged.
  */
-export async function reconcileSilentlyMergedWorkspaces(database: Database = db): Promise<void> {
-  try {
-  const stale = await database
-      .select({
-        id: workspaces.id,
-        issueId: workspaces.issueId,
-        mergedAt: workspaces.mergedAt,
-        closedAt: workspaces.closedAt,
-        branch: workspaces.branch,
-        isDirect: workspaces.isDirect,
-        repoPath: projects.repoPath,
-        issueNumber: issues.issueNumber,
-        projectId: issues.projectId,
-      })
-      .from(workspaces)
-      .innerJoin(issues, eq(workspaces.issueId, issues.id))
-      .innerJoin(projects, eq(issues.projectId, projects.id))
-      .where(
-        // mergedAt is set (git merge already landed) but workspace is not closed
-        and(isNotNull(workspaces.mergedAt), ne(workspaces.status, "closed")),
-      );
+export { reconcileSilentlyMergedWorkspaces } from "./silently-merged-reconciler.js";
+import { reconcileSilentlyMergedWorkspaces } from "./silently-merged-reconciler.js";
 
-    if (stale.length === 0) return;
-
-    console.log(`[startup] Reconciling ${stale.length} silently-merged workspace(s) left open by a dropped HTTP response`);
-    const now = new Date().toISOString();
-
-    for (const ws of stale) {
-      try {
-        if (!ws.isDirect && ws.repoPath && ws.branch) {
-          try {
-            await gitService.deleteBranch(ws.repoPath, ws.branch);
-          } catch (err) {
-            console.warn(
-              `[startup] reconcileSilentlyMergedWorkspaces: failed to delete branch ${ws.branch} for workspace ${ws.id}:`,
-              err instanceof Error ? err.message : String(err),
-            );
-          }
-        }
-        // Converge the issue to Done first via the shared idempotent helper, so a
-        // dropped merge response still lands the issue even if the later workspace
-        // close throws (mirrors the #668 no-rollback guarantee).
-        await reconcileMergedIssue({
-          database,
-          issueId: ws.issueId,
-          now,
-          projectId: ws.projectId,
-        });
-        await finalizeMergeCleanup({
-          database,
-          workspaceId: ws.id,
-          issueId: ws.issueId,
-          now,
-          closedAt: ws.closedAt ?? now,
-          mergedAt: ws.mergedAt!,
-          workingDir: null,
-          projectId: ws.projectId,
-        });
-
-        console.log(
-          `[startup] auto-Done audit: issue=${ws.issueNumber ?? "?"} ws=${ws.id} mergedAt=${ws.mergedAt} reconciledAt=${now}`,
-        );
-        try {
-          await logBoardHealthEvent({
-            projectId: ws.projectId,
-            cycleId: `startup-reconcile-${ws.id}`,
-            eventType: "action",
-            category: "merge",
-            issueNumber: ws.issueNumber ?? undefined,
-            summary: `Startup reconciliation: workspace ${ws.branch} was already merged at ${ws.mergedAt} but left open by a dropped HTTP response. Closed workspace and moved issue to Done.`,
-            details: { workspaceId: ws.id, mergedAt: ws.mergedAt, reconciledAt: now },
-          }, database);
-        } catch { /* health event logging is non-fatal */ }
-      } catch (err) {
-        console.warn(`[startup] reconcileSilentlyMergedWorkspaces: failed for workspace ${ws.id}:`, err instanceof Error ? err.message : String(err));
-      }
-    }
-  } catch (err) {
-    console.warn("[startup] reconcileSilentlyMergedWorkspaces failed (non-fatal):", err instanceof Error ? err.message : String(err));
-  }
-}
-
-/** Combined startup sequence: kill orphans, migrate, seed, dedup, abort stale merges, clean sessions/worktrees. */
-export async function runStartupTasks(sessionManager: SessionManager, _deps?: { agentService?: typeof agentServiceType }): Promise<void> {
+/**
+ * The startup work that MUST complete before the server may answer anything (#282).
+ *
+ * Deliberately short and git-free: kill a previous generation's process that may still
+ * hold the DB, bring the schema up to date, assert FK enforcement, and settle the session
+ * rows this process inherits. Everything else — every reconciler that spawns git per
+ * worktree — is deferred to {@link runDeferredStartupTasks} and runs AFTER the listener
+ * binds, because none of it is needed to render a board and all of it was being paid as
+ * time-to-first-response (measured 238 s on this checkout, with ~65 worktrees).
+ */
+export async function runCriticalStartupTasks(sessionManager: SessionManager, _deps?: { agentService?: typeof agentServiceType }): Promise<void> {
   await killOrphanedServers();
   await runMigrations();
   await alignLiveDbForeignKeys();
-  await abortStaleMerges();
-  await abortStaleRebases();
   await cleanupStaleSessions(sessionManager);
+}
+
+/**
+ * The deferred work that a MUTATING request must not overtake (#282).
+ *
+ * Everything here repairs state a write would otherwise act on: an unaborted merge or
+ * rebase left by a hot-reload, a remote worker's push that landed while the board was down,
+ * a workspace whose merge landed but whose close never did. Reads never wait for it; the
+ * readiness gate holds writes until it resolves.
+ *
+ * Kept deliberately SHORT. It was originally the whole deferred phase, which on this
+ * checkout runs for well over twenty minutes — long enough that every write spent the
+ * gate's full 120 s ceiling before proceeding anyway, which is worse than the problem being
+ * solved. The audit tail below has no ordering relationship to a write and must not gate one.
+ */
+export async function runGatedDeferredStartupTasks(deps: { gitService?: GitService } = {}): Promise<void> {
+  const gitService = deps.gitService ?? realGitService;
+  await abortStaleMerges(gitService);
+  await abortStaleRebases(gitService);
+  // Worker fleet (epic #184): land any remote-worker pushes that arrived while the board was
+  // down. Must run AFTER cleanupStaleSessions — that sweep finalizes the pid-less remote
+  // session rows, and this recovers their work from the incoming ref so a restart mid-flight
+  // does not lose it.
+  await runNonFatal("sweepIncomingWorkerRefs", async () => {
+    const { sweepIncomingWorkerRefs } = await import("./worker-incoming-sweep.js");
+    await sweepIncomingWorkerRefs();
+  });
   await reconcileSilentlyMergedWorkspaces();
-  try {
-    await reconcileAncestorBranchWorkspaces();
-  } catch (err) {
-    console.warn("[startup] reconcileAncestorBranchWorkspaces failed (non-fatal):", err instanceof Error ? err.message : String(err));
+}
+
+// Re-exported so `startup-tasks` stays the one import site for the startup sequence.
+export { runNonFatal } from "./run-non-fatal.js";
+
+/** One entry of the startup audit tail. */
+export interface StartupAuditTask {
+  /** Reported in the non-fatal warning, so a failed entry is identifiable in the log. */
+  name: string;
+  run: () => Promise<unknown>;
+}
+
+/**
+ * The long audit tail (#282): reconcilers and reaps that CONVERGE state rather than gate
+ * it. Every entry is idempotent and has a periodic counterpart in BACKGROUND_SERVICES, so
+ * a write racing one of them sees the same outcome a minute later either way — which is
+ * why this runs ungated, with no request waiting on it.
+ *
+ * A table rather than eight copies of try/catch-warn (#564): adding a reconciler is a row,
+ * ORDER is readable at a glance (it is load-bearing in two places, noted below), and the
+ * wiring test can assert the list instead of re-deriving it.
+ */
+export const STARTUP_AUDIT_TASKS: StartupAuditTask[] = [
+  { name: "reapOrphanedPluginViewProcesses", run: () => reapOrphanedPluginViewProcesses() },
+  {
+    // Catch the orphans the DB does not know about (#281) — must run AFTER the DB-tracked
+    // reap so a row's process is attributed to its row (and its command line cross-checked)
+    // rather than being swept anonymously here.
+    name: "reapParentlessChildServers",
+    run: () => reapParentlessChildServers(),
+  },
+  {
+    // Multi-repo crash gap: a crash between the leading merge and the sibling merges strands
+    // sibling repos unmerged on a mergedAt-stamped workspace — no other startup reconciler
+    // sees them. Dynamically imported: merge-workflow pulls in the whole merge pipeline,
+    // which other startup-task consumers don't need at module load.
+    name: "reconcileStrandedSiblingMerges",
+    run: async () => {
+      const { reconcileStrandedSiblingMerges } = await import("./merge-workflow.js");
+      await reconcileStrandedSiblingMerges();
+    },
+  },
+  { name: "reconcileAncestorBranchWorkspaces", run: () => reconcileAncestorBranchWorkspaces() },
+  {
+    // #113: hand-merged `feature/ak-<N>` branches (dev fixes landed WITHOUT a board workspace)
+    // have no workspace row to key off, so the linked issue #N never auto-transitions. Scan
+    // each project's default-branch merge history and converge still-open matching issues to
+    // Done. Idempotent; skips Backlog/terminal issues.
+    name: "reconcileHandMergedBranches",
+    run: () => reconcileHandMergedBranches(),
+  },
+  { name: "scanDoneUnmergedWorkspaces", run: () => scanDoneUnmergedWorkspaces({ reopenToInReview: false }) },
+  { name: "reapTerminalWorkspaces", run: () => reapTerminalWorkspaces() },
+  { name: "pruneStaleWorktrees", run: () => pruneStaleWorktrees() },
+  {
+    // #361: pruneStaleWorktrees above is DB-driven and can only see a closed workspace that
+    // still has a workingDir — which a completed merge nulls. This runs the same sweep from
+    // GIT truth so a worktree left behind by a merge (measured: kassenbuch `.worktrees/ak-6`
+    // and `ak-12`) is recovered instead of blocking every later auto-merge on the project.
+    name: "pruneOrphanedWorktrees",
+    run: () => pruneOrphanedWorktrees(),
+  },
+  // #630: after the disk sweeps, so the report can honestly say the debris is handled.
+  { name: "reconcileAbandonedProvisioning", run: () => reconcileAbandonedProvisioning() },
+  { name: "checkMainCheckoutHeads", run: () => checkMainCheckoutHeads() },
+];
+
+export async function runStartupAuditTasks(): Promise<void> {
+  for (const task of STARTUP_AUDIT_TASKS) {
+    await runNonFatal(task.name, task.run);
   }
-  try {
-    await scanDoneUnmergedWorkspaces({ reopenToInReview: false });
-  } catch (err) {
-    console.warn("[startup] scanDoneUnmergedWorkspaces failed (non-fatal):", err instanceof Error ? err.message : String(err));
-  }
-  try {
-    await reapTerminalWorkspaces();
-  } catch (err) {
-    console.warn("[startup] reapTerminalWorkspaces failed (non-fatal):", err instanceof Error ? err.message : String(err));
-  }
-  await pruneStaleWorktrees();
-  await checkMainCheckoutHeads();
+}
+
+/**
+ * The full startup sequence: critical, then gated-deferred, then the audit tail.
+ *
+ * Retained for callers that genuinely want everything done before continuing (tests, and
+ * any embedding that is not serving HTTP). `server-start.ts` does NOT use this — it runs
+ * the phases around `serve()` on purpose.
+ */
+export async function runStartupTasks(sessionManager: SessionManager, deps?: { agentService?: typeof agentServiceType }): Promise<void> {
+  await runCriticalStartupTasks(sessionManager, deps);
+  await runGatedDeferredStartupTasks();
+  await runStartupAuditTasks();
 }

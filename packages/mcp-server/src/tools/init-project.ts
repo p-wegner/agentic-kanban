@@ -1,6 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { boardApi, boardErrorText, mcpJson, mcpText } from "../board-call.js";
+import { mcpError } from "../db-utils.js";
 import { getServerPort } from "../server-url.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * init_project mirrors CLI `init [path]`.
@@ -29,34 +32,17 @@ export function registerInitProject(server: McpServer) {
       if (!repoPath) {
         // Just confirm the server is reachable
         try {
-          const res = await fetch(`http://127.0.0.1:${port}/api/projects`);
-          if (!res.ok) {
-            return {
-              content: [{ type: "text" as const, text: `Server reachable but returned ${res.status}: ${res.statusText}` }],
-            };
+          const { ok, status, statusText, data: projects } = await boardApi("/api/projects");
+          if (!ok) {
+            return mcpText(`Server reachable but returned ${status}: ${statusText}`);
           }
-          const projects = await res.json() as unknown[];
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: JSON.stringify({
-                  ok: true,
-                  message: "Board is initialized and server is running.",
-                  projectCount: Array.isArray(projects) ? projects.length : "unknown",
-                }),
-              },
-            ],
-          };
+          return mcpText(JSON.stringify({
+            ok: true,
+            message: "Board is initialized and server is running.",
+            projectCount: Array.isArray(projects) ? projects.length : "unknown",
+          }));
         } catch (err) {
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: `Cannot reach board server on port ${port}. Is the server running? Error: ${err instanceof Error ? err.message : String(err)}`,
-              },
-            ],
-          };
+          return mcpText(`Cannot reach board server on port ${port}. Is the server running? Error: ${errorMessage(err)}`);
         }
       }
 
@@ -65,42 +51,18 @@ export function registerInitProject(server: McpServer) {
         const body: Record<string, string> = { repoPath };
         if (name) body.name = name;
 
-        const res = await fetch(`http://127.0.0.1:${port}/api/projects`, {
+        const { ok, statusText, data } = await boardApi("/api/projects", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
 
-        const data = await res.json() as Record<string, unknown>;
-
-        if (!res.ok) {
-          return {
-            content: [
-              {
-                type: "text" as const,
-                text: `Error registering project: ${(data.error as string) ?? res.statusText}`,
-              },
-            ],
-          };
+        if (!ok) {
+          return mcpError(`Error registering project: ${boardErrorText(data, statusText)}`);
         }
 
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify({ ok: true, project: data }, null, 2),
-            },
-          ],
-        };
+        return mcpJson({ ok: true, project: data });
       } catch (err) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `Failed to register project (is the server running on port ${port}?): ${err instanceof Error ? err.message : String(err)}`,
-            },
-          ],
-        };
+        return mcpText(`Failed to register project (is the server running on port ${port}?): ${errorMessage(err)}`);
       }
     },
   );

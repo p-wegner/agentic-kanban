@@ -10,11 +10,34 @@ import {
   toolNameFor,
 } from "./shared.js";
 import { recordUnknownFieldDrift } from "./unknown-fields.js";
-import { claudeResultLacksTokenFields, claudeResultUsageSchema } from "./claude-schema.js";
+import {
+  claudeAssistantContentShapeDrifted,
+  claudeAssistantMessageSchema,
+  claudeAssistantUsageLacksTokenFields,
+  claudeResultLacksTokenFields,
+  claudeResultUsageSchema,
+  claudeSystemInitSchema,
+  describeClaudeDrift,
+} from "./claude-schema.js";
 
 function handleClaudeSystemInit(obj: Record<string, unknown>, result: ParsedStreamEvent): void {
   const sessionId = stringValue(obj.session_id) ?? "";
-  if (sessionId) result.providerSessionId = sessionId;
+  if (sessionId) {
+    result.providerSessionId = sessionId;
+  } else {
+    // FAIL LOUD (arch-review §2.2): a system/init event that should carry
+    // session_id but doesn't (a rename/drift) reads identically to "no session
+    // id yet" under stringValue coercion and silently breaks the resume chain.
+    // Surface it via telemetry + a logged warning; still emit the init display
+    // event so the parser degrades observably rather than crashing.
+    const parsed = claudeSystemInitSchema.safeParse(obj);
+    const detail = describeClaudeDrift(parsed, "session_id parsed but was empty");
+    recordUnknownFieldDrift(
+      "claude",
+      "system.init",
+      `missing session_id — resume chain will break (${detail})`,
+    );
+  }
   pushDisplay(result, {
     kind: "init",
     model: stringValue(obj.model) ?? "unknown",
@@ -84,6 +107,26 @@ function handleAssistantEvent(
   const contextTokens = numberValue(usage.cache_read_input_tokens) + numberValue(usage.input_tokens);
   if (!isSubagentMessage && (model || contextTokens > 0)) {
     result.liveStats = { model, contextTokens };
+  }
+
+  // arch-review §2.2: two inner-field drift sites. A PRESENT-but-renamed
+  // `message.usage` reads contextTokens as a silent 0 (claude.ts:84 was the
+  // #976/#994 "0 tokens" class); a `message.content` that is no longer an array
+  // silently drops assistantText (claude.ts:89) → hadSubstantiveOutput false →
+  // completed runs misclassified as launch failures. Report both as field drift
+  // instead of degrading silently. Subagent messages are excluded (they don't
+  // feed the main liveStats/hadSubstantiveOutput signal).
+  if (!isSubagentMessage) {
+    if (claudeAssistantUsageLacksTokenFields(message)) {
+      const parsed = claudeAssistantMessageSchema.safeParse(message);
+      const detail = describeClaudeDrift(parsed, "usage object present but carried no known token fields");
+      recordUnknownFieldDrift("claude", "assistant#usage", detail);
+    }
+    if (claudeAssistantContentShapeDrifted(message)) {
+      const parsed = claudeAssistantMessageSchema.safeParse(message);
+      const detail = describeClaudeDrift(parsed, "content matched the schema but was not the expected block array");
+      recordUnknownFieldDrift("claude", "assistant#content", detail);
+    }
   }
 
   const content = Array.isArray(message.content) ? message.content as Record<string, unknown>[] : [];

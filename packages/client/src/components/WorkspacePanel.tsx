@@ -25,12 +25,14 @@ import { WorkspaceEmptyState } from "./WorkspaceEmptyState.js";
 import { WorkspacePanelHeader } from "./WorkspacePanelHeader.js";
 import { useWorkspaceGithubHandoff } from "../hooks/useWorkspaceGithubHandoff.js";
 import { useWorkspaceActions } from "../hooks/useWorkspaceActions.js";
+import { useProjectRepos } from "../hooks/useProjectRepos.js";
 import { useWorkspacePlanReview } from "../hooks/useWorkspacePlanReview.js";
 import { invalidateClientSurface } from "../lib/clientInvalidation.js";
 import {
   fetchLatestCommits,
   fetchGithubDrafts,
   fetchPlanContents,
+  fetchServiceStates,
   pickInitialWorkspaceId,
 } from "../lib/workspace-secondary-data.js";
 import type { LiveSessionStats } from "../lib/useBoardEvents.js";
@@ -60,6 +62,11 @@ interface WorkspacePanelProps {
 }
 
 export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onWorkspaceCreating, onWorkspaceCreateSettled, initialWorkspaceId, initialSessionId, autoSelectId, initialShowCreate, initialShowDiff, liveStats }: WorkspacePanelProps) {
+  // #636: how many repos a launch from this panel would actually span. Read through the
+  // shared repos cache, so mounting this costs no request while that cache is warm.
+  const { repos: allProjectRepos } = useProjectRepos(issue.projectId);
+  const siblingRepoCount = Math.max(0, allProjectRepos.length - 1);
+
   const queryClient = useQueryClient();
   const [workspaces, setWorkspaces] = useState<WorkspaceResponse[]>([]);
   const [loading, setLoading] = useState(true);
@@ -262,14 +269,18 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
       // per-workspace `/handoff` GET never existed on the server — only
       // `/handoff-bundle` and `/github-handoff-draft` do — so it was dropped to kill
       // the 404 noise; wiring handoff display to a real endpoint is tracked separately.)
-      const [commits, drafts, plans] = await Promise.all([
+      const [commits, drafts, plans, serviceStates] = await Promise.all([
         fetchLatestCommits(data, apiFetch),
         fetchGithubDrafts(data, apiFetch),
         fetchPlanContents(data, apiFetch),
+        fetchServiceStates(data, apiFetch),
       ]);
       setLatestCommits(commits);
       setGithubDrafts(drafts);
       setPlanContent(plans);
+      // The list DTO lacks serviceState (only the details endpoint maps it) — merge
+      // the hydrated stack state into the rows so cards/diagnostics can render it.
+      setWorkspaces((prev) => prev.map((w) => (w.id in serviceStates ? { ...w, serviceState: serviceStates[w.id] } : w)));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load workspaces");
     } finally {
@@ -411,8 +422,33 @@ export function WorkspacePanel({ issue, project, onClose, onWorkspaceChange, onW
 
           {project && (
             <div className="text-xs text-gray-500 dark:text-gray-400 space-y-0.5">
-              <div><span className="font-medium text-gray-600 dark:text-gray-400">Repo:</span> {project.repoPath}</div>
-              <div><span className="font-medium text-gray-600 dark:text-gray-400">Branch:</span> {project.defaultBranch ?? "unset"}</div>
+              {/* #636: this header named ONE repo directly above a `New Workspace` button that
+                  would create worktrees in 17 and run 16 dependency installs. A reader would
+                  reasonably conclude the workspace was scoped to `documentation`. Say the span. */}
+              <div>
+                <span className="font-medium text-gray-600 dark:text-gray-400">
+                  {siblingRepoCount > 0 ? "Leading repo:" : "Repo:"}
+                </span>{" "}
+                {project.repoPath}
+              </div>
+              {siblingRepoCount > 0 && (
+                <div className="text-amber-700 dark:text-amber-400">
+                  <span className="font-medium">Spans:</span> {siblingRepoCount + 1} repos — 1 leading,{" "}
+                  {siblingRepoCount} sibling{siblingRepoCount !== 1 ? "s" : ""}. A worktree and a dependency
+                  install run for each repo a launch includes.
+                </div>
+              )}
+              <div>
+                <span className="font-medium text-gray-600 dark:text-gray-400">
+                  {siblingRepoCount > 0 ? "Leading branch:" : "Branch:"}
+                </span>{" "}
+                {project.defaultBranch ?? "unset"}
+                {siblingRepoCount > 0 && (
+                  <span className="ml-1 text-gray-400 dark:text-gray-500">
+                    (each sibling is provisioned from its own default branch)
+                  </span>
+                )}
+              </div>
               {project.remoteUrl && (
                 <div><span className="font-medium text-gray-600 dark:text-gray-400">Remote:</span> {project.remoteUrl}</div>
               )}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiFetch, apiPost } from "../lib/api.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import type { ShowdownResponse, ShowdownContestantResult, DiffResponse } from "@agentic-kanban/shared";
 import { DiffViewer } from "./DiffViewer.js";
 

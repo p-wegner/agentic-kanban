@@ -1,9 +1,16 @@
+/** #610 — was a narrower local copy (the lib type adds only OPTIONAL fields). */
+import type { Project } from "../lib/projectTypes.js";
 import { useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { apiFetch, apiPost } from "../lib/api.js";
+import { fetchProjectRepos } from "../lib/projectReposQuery.js";
 import { getSettings, setSettings } from "../lib/settingsStore.js";
 import { suggestBranchName, sanitizeBranchName } from "@agentic-kanban/shared/lib/branch";
+import { repoNameFromTag } from "@agentic-kanban/shared/lib/repo-tags";
 import { isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
-import type { IssueWithStatus, ProfileSelection, WorkspaceResponse } from "@agentic-kanban/shared";
+import type { IssueWithStatus, ProfileSelection, ProjectRepoResponse, WorkspaceResponse } from "@agentic-kanban/shared";
+import { defaultProfileToken, profileOptionLabel } from "@agentic-kanban/shared/lib/provider-traits";
+import { uniqueProfiles } from "../lib/profileOptionLabels.js";
 import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
 import { PreflightModal } from "./PreflightModal.js";
 import type { PreflightResult, PreflightClarification } from "./PreflightModal.js";
@@ -16,7 +23,7 @@ import {
   type LaunchTemplate,
   type LaunchTemplateOptions,
 } from "../lib/launchTemplates.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { LaunchPreviewPanel } from "./LaunchPreviewPanel.js";
 import {
   agentPresetsKey,
@@ -26,16 +33,8 @@ import {
 } from "../lib/agentPresets.js";
 import { buildCreateWorkspaceBody } from "../lib/createWorkspaceBody.js";
 import { defaultModelForProvider } from "../lib/settings-shared.js";
+import { isPlanModePriority } from "../lib/priorityTraits.js";
 
-interface Project {
-  id: string;
-  name: string;
-  repoPath: string;
-  repoName: string;
-  defaultBranch: string | null;
-  remoteUrl: string | null;
-  setupScript?: string | null;
-}
 interface CreateWorkspaceFormProps {
   issue: IssueWithStatus;
   project: Project | null;
@@ -53,27 +52,23 @@ const COPILOT_DEFAULT_PROFILE = "default";
 const CODEX_DEFAULT_PROFILE = "default";
 const PI_DEFAULT_PROFILE = "default";
 
-function uniqueProfiles(profiles: string[], fallback?: string): string[] {
-  const all = fallback ? [fallback, ...profiles] : profiles;
-  return [...new Set(all.filter(Boolean))];
-}
-
+/**
+ * #493: these were three PRIVATE copies of helpers this file's sibling
+ * `lib/profileOptionLabels.ts` already exported, and one had a real bug — the local
+ * `profileOptionLabel` omitted `pi` from both its default-name check and its label
+ * ladder, so a `pi` profile rendered in this very dropdown as "Claude: <name>". The
+ * launch form named the wrong agent.
+ *
+ * The displayed claude fallback moves from `claude:default` to `claude:none` to match the
+ * shared helper (display text only — the option's value is ""). Which word is right is a
+ * UX question; having two answers was the defect.
+ */
 function defaultProfileLabel(prefs: Record<string, string>): string {
-  if (prefs.provider === "codex") return `codex:${prefs.codex_profile || CODEX_DEFAULT_PROFILE}`;
-  if (prefs.provider === "copilot") return `copilot:${prefs.copilot_profile || COPILOT_DEFAULT_PROFILE}`;
-  if (prefs.provider === "pi") return `pi:${prefs.pi_profile || PI_DEFAULT_PROFILE}`;
-  return `claude:${prefs.claude_profile || "default"}`;
-}
-
-function profileOptionLabel(provider: AgentProvider, name: string): string {
-  const isDefault = (provider === "copilot" && name === COPILOT_DEFAULT_PROFILE) ||
-    (provider === "codex" && name === CODEX_DEFAULT_PROFILE);
-  const displayName = isDefault ? "Default" : name;
-  const providerLabel = provider === "codex" ? "Codex" : provider === "copilot" ? "Copilot" : "Claude";
-  return `${providerLabel}: ${displayName}`;
+  return defaultProfileToken(prefs, "none");
 }
 
 export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCreated, onCancel, onSubmitting, onSettled }: CreateWorkspaceFormProps) {
+  const queryClient = useQueryClient();
   const suggestion = suggestBranchName(issue);
 
   const [branchName, setBranchName] = useState(suggestion);
@@ -82,14 +77,16 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
   const [requiresReview, setRequiresReview] = useState(isAutoReviewEnabled(prefs.auto_review));
   // Per-launch override for the pre-flight check; defaults to the inherited `skip_preflight` setting.
   const [runPreflight, setRunPreflight] = useState(prefs.skip_preflight !== "true");
-  const [planMode, setPlanMode] = useState(
-    issue.priority === "high" || issue.priority === "critical",
-  );
+  const [planMode, setPlanMode] = useState(isPlanModePriority(issue.priority));
   const [tddMode, setTddMode] = useState(prefs.tdd_mode === "true");
   const [includeVisualProof, setIncludeVisualProof] = useState(false);
   const [skipSetup, setSkipSetup] = useState(false);
   const [skipContextPacker, setSkipContextPacker] = useState(false);
   const [branches, setBranches] = useState<{ local: string[]; remote: string[] } | null>(null);
+  // Multi-repo scope (#91): the project's additional repos + which the workspace spans.
+  // Empty list = single-repo project (selector hidden, behavior unchanged).
+  const [projectRepos, setProjectRepos] = useState<ProjectRepoResponse[]>([]);
+  const [selectedRepoIds, setSelectedRepoIds] = useState<Set<string>>(new Set());
   const [availableSkills, setAvailableSkills] = useState<{ id: string; name: string; description: string }[]>([]);
   const [selectedSkillId, setSelectedSkillId] = useState<string>("");
   const [claudeProfiles, setClaudeProfiles] = useState<string[]>([]);
@@ -122,6 +119,31 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
       apiFetch<{ local: string[]; remote: string[] }>(`/api/projects/${project.id}/branches`)
         .then((data) => setBranches(data))
         .catch(() => setBranches(null));
+      // Additional repos (multi-repo project). Served from the shared repos cache (#403) —
+      // warm opens skip the network.
+      //
+      // #634: the form used to open with EVERY repo checked, so scoping a documentation-only
+      // ticket on a 17-repo project meant unchecking 16 boxes one at a time — and each of
+      // those boxes is a real dependency install (one Maven repo measured 209 s warm). The
+      // default now comes from the ticket's own `repo:` tags when it has any, which is the
+      // same source `resolveEffectiveRepoScope` uses server-side (#629), so the form agrees
+      // with what an unattended launch would do. With no tags it still checks everything —
+      // that remains the safe default until a ticket can be relied on to declare its repos.
+      fetchProjectRepos(queryClient, project.id)
+        .then((rows) => {
+          setProjectRepos(rows);
+          const declared = new Set(
+            (issue.tags ?? [])
+              .map((t) => repoNameFromTag(t.name))
+              .filter((n): n is string => Boolean(n))
+              .map((n) => n.toLowerCase()),
+          );
+          const fromTicket = declared.size > 0
+            ? rows.filter((r) => declared.has((r.name ?? r.path.split(/[/\\]/).filter(Boolean).pop() ?? "").toLowerCase()))
+            : rows;
+          setSelectedRepoIds(new Set(fromTicket.map((r) => r.id)));
+        })
+        .catch(() => {});
     }
     void Promise.all([
       apiFetch<{ profiles: string[] }>("/api/preferences/claude-profiles").catch(() => ({ profiles: [] as string[] })),
@@ -198,6 +220,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
       selectedModel,
       modelApplies: isClaudeSelected || isCodexSelected,
       branchName, baseBranch, prefs,
+      repoScope,
     });
 
     // Skip preflight if opted out for this launch (defaults to the inherited setting)
@@ -328,6 +351,26 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
   const defaultBranchLabel = project?.defaultBranch || "unset";
   const cannotCreateWorktree = !isDirect && !baseBranch.trim() && !project?.defaultBranch;
 
+  // Multi-repo scope (#91): show the selector only for multi-repo projects on a
+  // worktree launch. The leading repo is always spanned; only additional repos are
+  // selectable. `repoScope` carries a `__leading__` sentinel so a deselect-all-siblings
+  // choice arrives as a NON-empty scope (leading-only) instead of the empty="all"
+  // default. Undefined for single-repo/direct → server keeps today's behavior.
+  const isMultiRepo = projectRepos.length > 0;
+  const showRepoSelector = isMultiRepo && !isDirect;
+  const repoScope = showRepoSelector
+    ? ["__leading__", ...projectRepos.filter((r) => selectedRepoIds.has(r.id)).map((r) => r.id)]
+    : undefined;
+
+  function toggleRepo(id: string) {
+    setSelectedRepoIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
   return (
     <>
     <div className="border border-gray-200 dark:border-gray-700 rounded p-3 space-y-2">
@@ -451,6 +494,58 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
             </p>
           )}
         </>
+      )}
+      {showRepoSelector && (
+        <div className="border border-gray-200 dark:border-gray-700 rounded p-2 space-y-1" data-testid="repo-scope-selector">
+          <div className="flex items-center justify-between gap-2">
+            <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
+              Repositories ({selectedRepoIds.size + 1}/{projectRepos.length + 1})
+            </label>
+            {/* #634: without these, narrowing a 17-repo launch meant 16 individual clicks —
+                which is why nobody did it and every ticket provisioned everything. */}
+            <div className="flex items-center gap-1 text-[10px]">
+              <button type="button" onClick={() => setSelectedRepoIds(new Set(projectRepos.map((r) => r.id)))}
+                className="px-1.5 py-0.5 rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-brand-400">
+                all
+              </button>
+              <button type="button" onClick={() => setSelectedRepoIds(new Set())}
+                className="px-1.5 py-0.5 rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-brand-400"
+                title="Leading repo only — it is always included">
+                leading only
+              </button>
+              <button type="button"
+                onClick={() => setSelectedRepoIds(new Set(projectRepos.filter((r) => !selectedRepoIds.has(r.id)).map((r) => r.id)))}
+                className="px-1.5 py-0.5 rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-brand-400">
+                invert
+              </button>
+            </div>
+          </div>
+          <p className="text-[10px] text-gray-400 dark:text-gray-500">
+            Choose which repos this workspace spans. A worktree <strong>and a dependency install</strong> run
+            for every checked repo, so each one costs real time; the leading repo is always included.
+          </p>
+          <label className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+            <input type="checkbox" checked disabled className="rounded border-gray-300 opacity-60" />
+            <span className="font-mono truncate">{project?.repoName || "leading repo"}</span>
+            <span className="text-[9px] uppercase tracking-wide text-brand-600 dark:text-brand-400">lead</span>
+          </label>
+          {projectRepos.map((repo) => (
+            <label key={repo.id} className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
+              <input
+                type="checkbox"
+                checked={selectedRepoIds.has(repo.id)}
+                onChange={() => toggleRepo(repo.id)}
+                className="rounded border-gray-300"
+              />
+              <span className="font-mono truncate">{repo.name ?? repo.path}</span>
+              {repo.composeFile && (
+                <span className="inline-flex items-center px-1 py-0 rounded text-[9px] font-medium bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
+                  stack
+                </span>
+              )}
+            </label>
+          ))}
+        </div>
       )}
       <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
         <input
@@ -632,6 +727,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
         skillId={selectedSkillId}
         selectedProfile={selectedProfile}
         selectedModel={selectedModel}
+        repoScope={repoScope}
         disabled={isLoading || (!isDirect && !branchName.trim()) || cannotCreateWorktree}
       />
       <div className="flex gap-2">

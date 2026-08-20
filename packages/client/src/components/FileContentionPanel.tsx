@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { apiFetch } from "../lib/api.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { issueStatusToneClass, workspaceStatusToneClass } from "../lib/badgeTones.js";
 
 interface ContentionWorkspace {
   workspaceId: string;
@@ -27,23 +29,6 @@ interface FileContentionPanelProps {
   activeProjectId: string | null;
   onClose: () => void;
 }
-
-const WS_STATUS_COLORS: Record<string, string> = {
-  active: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
-  reviewing: "bg-accent-50 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300",
-  fixing: "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300",
-  idle: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300",
-  closed: "bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400",
-};
-
-const ISSUE_STATUS_COLORS: Record<string, string> = {
-  "Todo": "bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300",
-  "In Progress": "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
-  "In Review": "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300",
-  "AI Reviewed": "bg-accent-50 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300",
-  "Done": "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
-  "Cancelled": "bg-red-100 text-red-500 dark:bg-red-900/40 dark:text-red-300",
-};
 
 function FileIcon() {
   return (
@@ -85,7 +70,7 @@ export function FileContentionPanel({ activeProjectId, onClose }: FileContention
         setLoading(false);
       })
       .catch((err) => {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(errorMessage(err));
         setLoading(false);
       });
   }, [activeProjectId]);
@@ -226,12 +211,12 @@ export function FileContentionPanel({ activeProjectId, onClose }: FileContention
                           {ws.issueTitle}
                         </span>
                         <span
-                          className={`text-[10px] font-medium px-1 py-0.5 rounded capitalize ${WS_STATUS_COLORS[ws.status] ?? "bg-gray-100 text-gray-500"}`}
+                          className={`text-[10px] font-medium px-1 py-0.5 rounded capitalize ${workspaceStatusToneClass(ws.status)}`}
                         >
                           {ws.status}
                         </span>
                         <span
-                          className={`text-[10px] font-medium px-1 py-0.5 rounded ${ISSUE_STATUS_COLORS[ws.issueStatus] ?? "bg-gray-100 text-gray-500"}`}
+                          className={`text-[10px] font-medium px-1 py-0.5 rounded ${issueStatusToneClass(ws.issueStatus)}`}
                         >
                           {ws.issueStatus}
                         </span>

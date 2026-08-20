@@ -1,68 +1,72 @@
-import { issues, workspaces, sessions, projectStatuses, workflowNodes, tags, issueTags, issueDependencies, issueArtifacts, agentSkills } from "@agentic-kanban/shared/schema";
-import { parseSessionSummary } from "@agentic-kanban/shared";
-import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
-import { eq, inArray, desc, and, gte } from "drizzle-orm";
+import { issues, workspaces, projectStatuses, workflowNodes, tags, issueTags, issueDependencies, issueArtifacts, agentSkills } from "@agentic-kanban/shared/schema";
+import { loadIssueSummary, type IssueSummaryResult } from "@agentic-kanban/shared/lib/issue-summary";
+import { parseIssueRef } from "@agentic-kanban/shared/lib/issue-ref";
+import { DEFAULT_PROJECT_STATUSES, buildProjectStatusRows, statusIdsByName } from "@agentic-kanban/shared/lib/project-statuses";
+import { eq, inArray, and, gte, count, asc, desc } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { ValidationError } from "../errors/index.js";
-import { getSessionMessageRows } from "./session.repository.js";
-import { isIssueNumberUniqueConstraintError, nextIssueNumber } from "./issue-number.repository.js";
-import { parseStatsBlob, projectSessionStats, computeSessionDuration } from "../lib/issue-summary-projection.js";
+import { nextIssueNumber } from "./issue-number.repository.js";
 
-type Issue = typeof issues.$inferSelect;
-const ISSUE_NUMBER_INSERT_ATTEMPTS = 3;
+// --- CLI-command-specific queries/mutations (#465 decomposition — the blanket
+// /repositories/ cohesion exemption was removed by #957, so this facade ships its
+// own sub-module instead of growing past the flat threshold). Public surface
+// preserved byte-identical for existing importers (cli/commands/*, tests). ---
+export {
+  getIssueListForProject,
+  getIssueHeaderByNumber,
+  getIssueByNumberOrId,
+  getIssueWithStatusById,
+  getIssueTitleDescriptionByNumber,
+  createIssueWithNextNumber,
+  moveIssueToStatus,
+  createSubIssueWithParentLink,
+} from "./issue/cli-commands.repository.js";
 
-export interface IssueSummaryResult {
-  issueId: string;
-  issueNumber: number | null;
-  title: string;
-  workspace: { id: string; branch: string | null; status: string } | null;
-  session: { id: string; status: string; startedAt: string | null; endedAt: string | null; duration: string | null } | null;
-  stats: {
-    durationMs: number;
-    totalCostUsd: number;
-    inputTokens: number;
-    outputTokens: number;
-    numTurns: number;
-    model: string | null;
-    success: boolean;
-  } | null;
-  agentSummary: string | null;
-  filesEdited: string[];
-  filesRead: string[];
-  commandsRun: string[];
-  errors: string[];
-  model: string | null;
-  status?: string;
-  summary?: null;
-}
+// The wire shape moved to `shared/lib/issue-summary.ts` with the loader (#506); re-exported
+// here so the existing importers (issue.service, routes, tests) are unchanged.
+export type { IssueSummaryResult };
 
-export const DEFAULT_STATUSES = [
-  { name: "Backlog", sortOrder: -1, isDefault: false },
-  { name: "Todo", sortOrder: 0, isDefault: true },
-  { name: "In Progress", sortOrder: 1, isDefault: false },
-  { name: "In Review", sortOrder: 2, isDefault: false },
-  { name: "AI Reviewed", sortOrder: 3, isDefault: false },
-  { name: "Done", sortOrder: 4, isDefault: false },
-  { name: "Cancelled", sortOrder: 5, isDefault: false },
-];
+/**
+ * The default status topology now lives in `@agentic-kanban/shared/lib/project-statuses`
+ * so the test helpers can seed exactly what production creates (#563). Re-exported here
+ * because the CLI's `register`/`create` commands print it from this module.
+ */
+export const DEFAULT_STATUSES = DEFAULT_PROJECT_STATUSES;
 
+/**
+ * Seed a new project's status columns and RETURN their ids by name (#563).
+ *
+ * It used to return `void`, which is why no caller could hand ids on and 137 test files
+ * grew their own hand-rolled (and drifted) seeders instead.
+ */
 export async function initializeProjectStatuses(
   projectId: string,
   now: string,
   database: Database = db,
-): Promise<void> {
-  for (const status of DEFAULT_STATUSES) {
-    await database.insert(projectStatuses).values({
-      id: randomUUID(),
-      projectId,
-      name: status.name,
-      sortOrder: status.sortOrder,
-      isDefault: status.isDefault,
-      createdAt: now,
-    });
+): Promise<Record<string, string>> {
+  // #668 — this used to insert the canonical set unconditionally, so calling it twice for one
+  // project produced a SECOND set: two columns named "Todo", one holding every issue and one
+  // permanently empty, with every by-name lookup silently picking whichever came first. It is
+  // the only unguarded seeding path (`project-registration.ts:528` already checks, and
+  // `deduplicateProjects` matches by name), and since 0125 a duplicate is a constraint
+  // violation rather than a quiet second column — so the guard is what keeps a legitimate
+  // double call working instead of throwing.
+  //
+  // Insert only the names the project does not already have, and return ids for ALL of them:
+  // the caller wants the project's status map, not a record of what this call happened to write.
+  const existing = await database
+    .select({ id: projectStatuses.id, name: projectStatuses.name })
+    .from(projectStatuses)
+    .where(eq(projectStatuses.projectId, projectId));
+  const existingNames = new Set(existing.map((row) => row.name));
+
+  const rows = buildProjectStatusRows(projectId, now).filter((row) => !existingNames.has(row.name));
+  for (const row of rows) {
+    await database.insert(projectStatuses).values(row);
   }
+  return { ...statusIdsByName(existing), ...statusIdsByName(rows) };
 }
 
 /**
@@ -82,6 +86,14 @@ export async function resolveNewIssueDefaults(
           .select({ id: projectStatuses.id })
           .from(projectStatuses)
           .where(eq(projectStatuses.projectId, projectId))
+          // ORDER BY, because `limit(1)` without one returns whatever the query plan
+          // happens to yield first — and the plan is not stable. This read had no order at
+          // all, so "the status a new issue lands in" was decided by which index SQLite
+          // chose; adding the #668 unique index on (project_id, name) silently moved it
+          // from insertion order to NAME order, i.e. a new issue started landing in "AI
+          // Reviewed" instead of "Todo". The column is not arbitrary — `is_default` exists
+          // to name it, and `sort_order` breaks the tie leftmost-first.
+          .orderBy(desc(projectStatuses.isDefault), asc(projectStatuses.sortOrder))
           .limit(1),
   ]);
 
@@ -96,61 +108,28 @@ export async function resolveNewIssueDefaults(
   return { issueNumber, statusId: statusRows[0].id };
 }
 
+/**
+ * REST's entry into the shared loader (#506). The six-step chain, the session-selection
+ * policy, and the project scoping all live in `shared/lib/issue-summary.ts` now — this
+ * only decides how the caller's `idParam` string maps onto a `IssueSummaryRef`.
+ */
 export async function getIssueSummary(
   idParam: string,
   database: Database = db,
+  /**
+   * Scope for a NUMERIC `idParam` (#506). Issue numbers are per-project
+   * (`MAX(issue_number) + 1`), so an unscoped `where(issueNumber = N)` matches a row in
+   * every project that has reached N and `.limit(1)` picks an arbitrary one. Verified live
+   * on a 25-project board: `GET /api/issues/5/summary` returned a fixture project's issue,
+   * not the active project's. Ignored for a UUID, which is already unambiguous.
+   */
+  projectId?: string,
 ): Promise<IssueSummaryResult | null> {
-  const isNumeric = /^\d+$/.test(idParam);
-  const issueRows = isNumeric
-    ? await database.select().from(issues).where(eq(issues.issueNumber, Number(idParam))).limit(1)
-    : await database.select().from(issues).where(eq(issues.id, idParam)).limit(1);
-
-  if (issueRows.length === 0) return null;
-
-  const issue = issueRows[0];
-
-  const wsRows = await database.select().from(workspaces).where(eq(workspaces.issueId, issue.id));
-
-  if (wsRows.length === 0) {
-    return { issueId: issue.id, issueNumber: issue.issueNumber, title: issue.title, status: "no workspace", summary: null, workspace: null, session: null, stats: null, agentSummary: null, filesEdited: [], filesRead: [], commandsRun: [], errors: [], model: null };
-  }
-
-  const wsIds = wsRows.map(w => w.id);
-  const sessionRows = await database
-    .select()
-    .from(sessions)
-    .where(inArray(sessions.workspaceId, wsIds))
-    .orderBy(desc(sessions.startedAt));
-
-  const completedSession = sessionRows.find(s => s.status === "completed" || s.status === "stopped")
-    ?? sessionRows[0]
-    ?? null;
-
-  if (!completedSession) {
-    return { issueId: issue.id, issueNumber: issue.issueNumber, title: issue.title, status: "no session", summary: null, workspace: null, session: null, stats: null, agentSummary: null, filesEdited: [], filesRead: [], commandsRun: [], errors: [], model: null };
-  }
-
-  const msgRows = await getSessionMessageRows(completedSession.id, database);
-
-  const parsedStats = parseStatsBlob(completedSession.stats);
-  const duration = computeSessionDuration(completedSession.startedAt, completedSession.endedAt);
-
-  const summary = parseSessionSummary(msgRows);
-  if (!summary.agentSummary && parsedStats && typeof parsedStats.agentSummary === "string") {
-    summary.agentSummary = parsedStats.agentSummary;
-  }
-
-  const matchingWorkspace = wsRows.find(w => w.id === completedSession.workspaceId);
-
-  return {
-    issueId: issue.id,
-    issueNumber: issue.issueNumber,
-    title: issue.title,
-    workspace: matchingWorkspace ? { id: matchingWorkspace.id, branch: matchingWorkspace.branch, status: matchingWorkspace.status } : null,
-    session: { id: completedSession.id, status: completedSession.status, startedAt: completedSession.startedAt, endedAt: completedSession.endedAt, duration },
-    stats: projectSessionStats(parsedStats, summary.model),
-    ...summary,
-  };
+  const parsed = parseIssueRef(idParam);
+  return loadIssueSummary(
+    database,
+    parsed.kind === "number" ? { issueNumber: parsed.issueNumber, projectId } : { issueId: parsed.issueId },
+  );
 }
 
 export async function getIssuesByProject(
@@ -158,12 +137,22 @@ export async function getIssuesByProject(
   issueNumber?: number,
   database: Database = db,
   statusName?: string,
-  opts?: { excludeDescription?: boolean },
+  opts?: { excludeDescription?: boolean; limit?: number; offset?: number },
 ) {
   const conditions = [eq(issues.projectId, projectId)];
   if (issueNumber !== undefined) conditions.push(eq(issues.issueNumber, issueNumber));
   if (statusName !== undefined) conditions.push(eq(projectStatuses.name, statusName));
   const whereClause = conditions.length === 1 ? conditions[0] : and(...conditions);
+
+  // Pagination (#424). The list is unbounded — it grows with every issue a project ever
+  // had (380 done on the dev board at the time of writing) and every consumer paid the
+  // whole thing. `limit` is opt-in so the default response shape is unchanged; `offset`
+  // without `limit` is meaningless in SQLite and is therefore ignored rather than
+  // silently returning an empty page.
+  const hasLimit = typeof opts?.limit === "number" && Number.isFinite(opts.limit) && opts.limit > 0;
+  const offset = typeof opts?.offset === "number" && Number.isFinite(opts.offset) && opts.offset > 0
+    ? Math.floor(opts.offset)
+    : 0;
 
   const fullSelection = {
     id: issues.id,
@@ -193,20 +182,42 @@ export async function getIssuesByProject(
     // description is ~60% of a full-project payload. The key is absent
     // (undefined), not null, in slim rows.
     const { description: _description, ...slimSelection } = fullSelection;
-    return database
+    const q = database
       .select(slimSelection)
       .from(issues)
       .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
       .where(whereClause)
       .orderBy(issues.sortOrder);
+    return hasLimit ? q.limit(Math.floor(opts!.limit!)).offset(offset) : q;
   }
 
-  return database
+  const q = database
     .select(fullSelection)
     .from(issues)
     .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
     .where(whereClause)
     .orderBy(issues.sortOrder);
+  return hasLimit ? q.limit(Math.floor(opts!.limit!)).offset(offset) : q;
+}
+
+/**
+ * Total issues matching the same filters, ignoring limit/offset — so a paginated
+ * caller can report "showing 50 of 380" without fetching all 380 (#424).
+ */
+export async function countIssuesByProject(
+  projectId: string,
+  database: Database = db,
+  statusName?: string,
+) {
+  const conditions = [eq(issues.projectId, projectId)];
+  if (statusName !== undefined) conditions.push(eq(projectStatuses.name, statusName));
+  const whereClause = conditions.length === 1 ? conditions[0] : and(...conditions);
+  const rows = await database
+    .select({ n: count() })
+    .from(issues)
+    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+    .where(whereClause);
+  return Number(rows[0]?.n ?? 0);
 }
 
 export async function getIssueDescription(
@@ -502,6 +513,7 @@ export async function getIssueWorkspaces(
       diffStatCacheInsertions: workspaces.diffStatCacheInsertions,
       diffStatCacheDeletions: workspaces.diffStatCacheDeletions,
       scorecardScore: workspaces.scorecardScore,
+      serviceState: workspaces.serviceState,
     })
     .from(workspaces)
     .leftJoin(agentSkills, eq(workspaces.skillId, agentSkills.id))
@@ -605,222 +617,6 @@ export async function getIssueStatusNameRowsForProject(projectId: string, databa
 export async function getFirstIssueIdWithStatus(statusId: string, database: Database = db): Promise<string | null> {
   const rows = await database.select({ id: issues.id }).from(issues).where(eq(issues.statusId, statusId)).limit(1);
   return rows[0]?.id ?? null;
-}
-
-/** Issue identity + status name by issue id (CLI `session analyze` context), or null. */
-export async function getIssueWithStatusById(issueId: string, database: Database = db) {
-  const rows = await database
-    .select({
-      id: issues.id,
-      issueNumber: issues.issueNumber,
-      title: issues.title,
-      statusName: projectStatuses.name,
-      priority: issues.priority,
-      issueType: issues.issueType,
-    })
-    .from(issues)
-    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-    .where(eq(issues.id, issueId))
-    .limit(1);
-  return rows[0] ?? null;
-}
-
-/**
- * Title + description for the first issue with this issue number (NOT project-
- * scoped — matches the CLI `session find-similar` global lookup), or null.
- */
-export async function getIssueTitleDescriptionByNumber(issueNumber: number, database: Database = db) {
-  const rows = await database
-    .select({ title: issues.title, description: issues.description })
-    .from(issues)
-    .where(eq(issues.issueNumber, issueNumber))
-    .limit(1);
-  return rows[0] ?? null;
-}
-
-/**
- * Lean issue list for a project (CLI `issue list`): the exact 7-field projection
- * the CLI prints/serializes, unordered (the CLI applies status/priority filters
- * in JS). A purpose-built projection — NOT getIssuesByProject — so the `--json`
- * shape and ordering stay byte-identical to the previous inline query.
- */
-export async function getIssueListForProject(projectId: string, database: Database = db) {
-  return database
-    .select({
-      issueNumber: issues.issueNumber,
-      id: issues.id,
-      title: issues.title,
-      priority: issues.priority,
-      issueType: issues.issueType,
-      statusName: projectStatuses.name,
-      createdAt: issues.createdAt,
-    })
-    .from(issues)
-    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-    .where(eq(issues.projectId, projectId));
-}
-
-/**
- * One issue's display header by number within a project (CLI `issue get` /
- * `issue status`), joined to its status name, or null. The 9-field projection
- * matches `issue get --json` exactly.
- */
-export async function getIssueHeaderByNumber(projectId: string, issueNumber: number, database: Database = db) {
-  const rows = await database
-    .select({
-      id: issues.id,
-      issueNumber: issues.issueNumber,
-      title: issues.title,
-      description: issues.description,
-      priority: issues.priority,
-      issueType: issues.issueType,
-      statusName: projectStatuses.name,
-      createdAt: issues.createdAt,
-      updatedAt: issues.updatedAt,
-    })
-    .from(issues)
-    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-    .where(and(eq(issues.issueNumber, issueNumber), eq(issues.projectId, projectId)))
-    .limit(1);
-  return rows[0] ?? null;
-}
-
-/**
- * Resolve an issue by its per-project number (numeric arg + projectId) or by its
- * full id (non-numeric arg), returning the full row or null — the resolution the
- * CLI `issue update`/`move`/`summary`/`create-sub`/`delete` handlers share.
- */
-export async function getIssueByNumberOrId(
-  issueArg: string,
-  projectId: string | undefined,
-  database: Database = db,
-): Promise<Issue | null> {
-  const isNumeric = /^\d+$/.test(issueArg);
-  const whereClause = isNumeric
-    ? and(eq(issues.issueNumber, Number(issueArg)), eq(issues.projectId, projectId!))
-    : eq(issues.id, issueArg);
-  const rows = await database.select().from(issues).where(whereClause).limit(1);
-  return rows[0] ?? null;
-}
-
-/**
- * Create an issue with the next per-project issue number (MAX+1), mirroring the
- * CLI `issue create` minimal value set. The MAX read + insert are two statements
- * on the same handle (NOT a transaction) — preserving the CLI's prior behavior.
- * Deliberately does NOT go through the issue.service create path (which resolves
- * workflow templates / current node the CLI omits).
- */
-export async function createIssueWithNextNumber(
-  input: {
-    projectId: string;
-    statusId: string;
-    title: string;
-    description?: string | null;
-    priority?: string;
-    issueType?: string;
-  },
-  database: Database = db,
-): Promise<{ id: string; issueNumber: number }> {
-  for (let attempt = 1; attempt <= ISSUE_NUMBER_INSERT_ATTEMPTS; attempt++) {
-    const issueNumber = await nextIssueNumber(input.projectId, database);
-
-    const id = randomUUID();
-    const now = new Date().toISOString();
-
-    try {
-      await database.insert(issues).values({
-        id,
-        issueNumber,
-        title: input.title,
-        description: input.description ?? null,
-        priority: (input.priority as "low" | "medium" | "high" | "critical") ?? "medium",
-        issueType: (input.issueType as "task" | "bug" | "feature" | "chore") ?? "task",
-        sortOrder: 0,
-        statusId: input.statusId,
-        projectId: input.projectId,
-        createdAt: now,
-        updatedAt: now,
-      });
-
-      return { id, issueNumber };
-    } catch (err: unknown) {
-      if (attempt < ISSUE_NUMBER_INSERT_ATTEMPTS && isIssueNumberUniqueConstraintError(err)) {
-        continue;
-      }
-      throw err;
-    }
-  }
-
-  throw new Error("Could not allocate a unique issue number");
-}
-
-/**
- * Move an issue to a status by id (CLI `issue move`): sets statusId +
- * statusChangedAt + updatedAt, then best-effort syncs the workflow current-node
- * to the new status. Owns the workflow-engine call so the CLI need not hold db.
- */
-export async function moveIssueToStatus(issueId: string, statusId: string, database: Database = db): Promise<void> {
-  await transitionIssueStatus(database, issueId, statusId);
-}
-
-/**
- * Create a sub-issue and link it to its parent via a `child_of` dependency, in a
- * single transaction (CLI `issue create-sub`). The MAX+1 read precedes the tx as
- * in the CLI. Minimal value set + child_of literal preserved verbatim.
- */
-export async function createSubIssueWithParentLink(
-  input: {
-    projectId: string;
-    parentId: string;
-    title: string;
-    description?: string | null;
-    priority?: string;
-    issueType?: string;
-    statusId: string;
-  },
-  database: Database = db,
-): Promise<{ id: string; issueNumber: number; dependencyId: string }> {
-  for (let attempt = 1; attempt <= ISSUE_NUMBER_INSERT_ATTEMPTS; attempt++) {
-    const issueNumber = await nextIssueNumber(input.projectId, database);
-
-    const id = randomUUID();
-    const dependencyId = randomUUID();
-    const now = new Date().toISOString();
-
-    try {
-      await database.transaction(async (tx) => {
-        await tx.insert(issues).values({
-          id,
-          issueNumber,
-          title: input.title,
-          description: input.description ?? null,
-          priority: (input.priority as "low" | "medium" | "high" | "critical") ?? "medium",
-          issueType: (input.issueType as "task" | "bug" | "feature" | "chore") ?? "task",
-          sortOrder: 0,
-          statusId: input.statusId,
-          projectId: input.projectId,
-          createdAt: now,
-          updatedAt: now,
-        });
-        await tx.insert(issueDependencies).values({
-          id: dependencyId,
-          issueId: id,
-          dependsOnId: input.parentId,
-          type: "child_of",
-          createdAt: now,
-        });
-      });
-
-      return { id, issueNumber, dependencyId };
-    } catch (err: unknown) {
-      if (attempt < ISSUE_NUMBER_INSERT_ATTEMPTS && isIssueNumberUniqueConstraintError(err)) {
-        continue;
-      }
-      throw err;
-    }
-  }
-
-  throw new Error("Could not allocate a unique issue number");
 }
 
 /**

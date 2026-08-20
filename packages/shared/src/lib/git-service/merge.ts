@@ -6,6 +6,7 @@ import { execGit, splitGitLines } from "./internal.js";
 import { getCurrentBranch, isAncestor } from "./branch.js";
 import { getUncommittedTrackedChanges } from "./history.js";
 import { readBlobAtRef, resolveAppendOnlyFile } from "./append-resolve.js";
+import { errorMessage } from "../error-message.js";
 
 /**
  * Scan a git tree object for files whose blob content contains conflict markers.
@@ -538,7 +539,7 @@ async function restoreDeletedTrackedFiles(repoPath: string): Promise<void> {
   } catch (err) {
     console.warn(
       `[git] failed to restore deleted tracked files in ${repoPath}:`,
-      err instanceof Error ? err.message : String(err),
+      errorMessage(err),
     );
   }
 }
@@ -582,9 +583,9 @@ export async function mergeBaseIntoBranch(
     try {
       const unmerged = await execGit(["diff", "--name-only", "--diff-filter=U"], worktreePath);
       const conflictingFiles = unmerged.trim().split("\n").filter(Boolean);
-      return { success: false, conflictingFiles, error: err instanceof Error ? err.message : String(err) };
+      return { success: false, conflictingFiles, error: errorMessage(err) };
     } catch {
-      return { success: false, error: err instanceof Error ? err.message : String(err) };
+      return { success: false, error: errorMessage(err) };
     }
   }
 }

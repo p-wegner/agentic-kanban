@@ -2,20 +2,27 @@ import { describe, it, expect } from "vitest";
 import { buildReviewPrompt } from "../services/review.service.js";
 import { createTestDb } from "./helpers/test-db.js";
 
-// Regression: when buildReviewPrompt was called WITHOUT a workspaceId, the
-// {{workspaceId}} placeholder collapsed to an empty string, leaving the agent with
-// the un-actionable instruction "Use the mark_ready_for_merge MCP tool with
-// workspaceId=" — so a review agent could not signal approval and exited "stopped".
-// The approval branch must always be actionable: a real id when present, an
-// issue-status fallback when absent — and must never emit a dangling "workspaceId=".
+// The approval branch must always be actionable — originally because a missing workspaceId
+// collapsed {{workspaceId}} to "" and left the un-actionable "mark_ready_for_merge with
+// workspaceId=", so the reviewer could not signal approval and exited "stopped".
+//
+// #466 changed WHAT is actionable for a workspace review: the reviewer no longer signals
+// approval at all. `handleReviewSessionExit` sets `readyForMerge` itself, and only after its
+// own pre-merge gate passes — so the tool call was redundant (the board re-decides regardless)
+// and actively misleading when the tool was unreachable: a CLEAN review ended with "Blocked:
+// mark_ready_for_merge is not available", which reads as "the review could not approve this"
+// and sends the reader hunting an MCP fault instead of the failing gate that actually withheld it.
 describe("buildReviewPrompt approval instruction", () => {
-  it("uses the literal workspace id in the approval branch when one is given", async () => {
+  it("tells a workspace reviewer to report and exit, NOT to flip the flag itself (#466)", async () => {
     const { db } = createTestDb();
     const { prompt } = await buildReviewPrompt(
       db, "feature/x", "master", "issue-1", true, undefined, undefined, undefined, "ws-123",
     );
-    expect(prompt).toContain("mark_ready_for_merge");
-    expect(prompt).toContain("workspaceId=ws-123");
+    // The flag's owner is the exit workflow, so the reviewer must not be sent after a tool.
+    expect(prompt).not.toContain("mark_ready_for_merge");
+    expect(prompt).not.toContain("workspaceId=ws-123");
+    expect(prompt).toContain("no CRITICAL or MAJOR issues");
+    expect(prompt).toContain("pre-merge gate");
     // the unsubstituted placeholder must never survive into the prompt
     expect(prompt).not.toContain("{{workspaceId}}");
   });
@@ -37,8 +44,9 @@ describe("buildReviewPrompt approval instruction", () => {
   // exit-workflow then early-returned on `closed && mergedAt`, so the verify_script + smoke
   // gate (the reviewSessionIds handler) never ran — turning ON visual verification
   // paradoxically DISABLED the automatic verify+smoke gate. The reviewer must verify the UI
-  // and signal approval (mark_ready_for_merge) like every other mode, and let the gate run
-  // on exit, NOT self-merge.
+  // and then leave the gate to run on exit, NOT self-merge. (#466: "signal approval" is now
+  // "report the verdict" — the flag itself belongs to the exit workflow either way, which is
+  // exactly why self-merging was wrong.)
   it("reviewer mode verifies + approves but does NOT self-merge (so the exit gate runs) (#822)", async () => {
     const { db } = createTestDb();
     const { prompt } = await buildReviewPrompt(
@@ -52,8 +60,8 @@ describe("buildReviewPrompt approval instruction", () => {
     expect(prompt).toContain('type: "video"');
     expect(prompt).toContain('mimeType: "video/webm"');
     expect(prompt).toContain('workspaceId: "ws-123"');
-    // approves via the normal gated path, NOT a hand-rolled merge
-    expect(prompt).toContain("mark_ready_for_merge");
+    // leaves approval to the gated exit path, NOT a hand-rolled merge
+    expect(prompt).toContain("pre-merge gate");
     expect(prompt).not.toMatch(/curl[^\n]*\/merge/);
     expect(prompt).not.toContain("/api/workspaces/ws-123/merge");
   });

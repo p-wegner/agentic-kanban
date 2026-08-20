@@ -1,0 +1,51 @@
+import type { Database } from "../db/index.js";
+import { createRouter } from "../middleware/create-router.js";
+import { parseJsonBody } from "../middleware/parse-body.js";
+import { getStackProfile, populateStackProfile, saveManualStackProfile } from "../services/stack-profile.service.js";
+import type { StackProfile } from "@agentic-kanban/shared";
+
+import { queryFlag } from "../middleware/query-params.js";
+import { requireProject } from "../services/require-project.js";
+/**
+ * Project stack-profile feature endpoints (#786). Extracted from the 400-commit
+ * routes/projects.ts grab-bag (arch-review §1.5). Mounted at the SAME `/projects`
+ * prefix, so paths/behavior are unchanged — a move, not an API change.
+ */
+export function createProjectStackProfileRoute(database: Database) {
+  const router = createRouter();
+
+  // GET /api/projects/:id/stack-profile — the durable per-project stack descriptor (#786).
+  // Returns the persisted profile; computes+persists one on demand if absent (?refresh=true
+  // forces a recompute). The feedback harness reads this ONE descriptor.
+  router.get("/:id/stack-profile", async (c) => {
+    const projectId = c.req.param("id");
+    const refresh = queryFlag(c, "refresh");
+
+    const project = await requireProject(projectId, database);
+
+    let profile = refresh ? null : await getStackProfile(projectId, database);
+    if (!profile) {
+      // Detect + persist ONLY — never `scaffold: true` here (#41). This is a GET; any client
+      // (the UI polling, a monitor, a curious curl) hits it, and it used to write
+      // `.claude/smart-hooks-rules.json` + a test scaffold into the user's main checkout.
+      profile = await populateStackProfile(projectId, project.repoPath, database);
+    }
+    return c.json({ projectId, profile });
+  });
+
+  // PUT /api/projects/:id/stack-profile — override the stack profile from the UI.
+  // Marks the saved profile source="manual" so a later auto-detect won't silently clobber it.
+  // Persists the profile ONLY — no scaffold writes (#41): `.claude/smart-hooks-rules.json` is
+  // TRACKED after registration committed it, so regenerating it here would leave a modified
+  // tracked file in the user's main checkout and block auto-merge on `dirty_main`.
+  router.put("/:id/stack-profile", async (c) => {
+    const projectId = c.req.param("id");
+    const project = await requireProject(projectId, database);
+
+    const body = await parseJsonBody<Partial<StackProfile>>(c);
+    const merged = await saveManualStackProfile(projectId, body, database, project.repoPath);
+    return c.json({ projectId, profile: merged });
+  });
+
+  return router;
+}

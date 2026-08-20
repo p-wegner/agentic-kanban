@@ -23,7 +23,7 @@ import { create } from "zustand";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 
 /** Workspace panel deep-link target (open a specific workspace/session). */
-export type WorkspaceInitial = { workspaceId: string; sessionId: string } | null;
+export type WorkspaceInitial = { workspaceId: string; sessionId?: string } | null;
 
 export interface BoardSelectionState {
   /** Issue shown in the detail panel (right-hand slide-in). `null` = closed. */

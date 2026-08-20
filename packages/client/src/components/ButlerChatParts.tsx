@@ -1,7 +1,13 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { formatToolLabel, type ButlerChatMessage as ChatMessage, type ButlerToolCall as ToolCall } from "../lib/butler-event-reducer.js";
+import {
+  formatToolLabel,
+  type ButlerChatMessage as ChatMessage,
+  type ButlerToolCall as ToolCall,
+  type ButlerQuestionAnswer,
+  type ButlerQuestionPrompt,
+} from "../lib/butler-event-reducer.js";
 import { toolHint, formatRelativeTs } from "../lib/butler-format.js";
 
 const toolIcon = (status: ToolCall["status"]) => {
@@ -68,8 +74,157 @@ function ToolCallCard({ tool }: { tool: ToolCall }) {
   );
 }
 
-/** Renders one chat message (user / assistant-markdown / tool-call / activity line). */
-export function ChatBubble({ msg }: { msg: ChatMessage }) {
+/**
+ * A parked AskUserQuestion (#460): one block per question (1–4) with a header chip,
+ * option chips carrying their descriptions, multi-select support, and a free-text
+ * "Other" (the tool's contract always offers one implicitly). Once answered — or
+ * denied by the server (timeout/interrupt) — it renders read-only, so the transcript
+ * stays honest across a reload.
+ */
+export function QuestionCard({
+  prompt,
+  onAnswer,
+}: {
+  prompt: ButlerQuestionPrompt;
+  onAnswer?: (askId: string, answers: ButlerQuestionAnswer[]) => Promise<void> | void;
+}) {
+  // Selected option labels per question index; "Other" text kept separately.
+  const [picked, setPicked] = useState<Record<number, string[]>>({});
+  const [other, setOther] = useState<Record<number, string>>({});
+  const [otherOpen, setOtherOpen] = useState<Record<number, boolean>>({});
+  const [submitting, setSubmitting] = useState(false);
+  const resolved = prompt.resolved;
+
+  function answersFor(i: number): string[] {
+    const chosen = picked[i] ?? [];
+    const free = (other[i] ?? "").trim();
+    return free ? [...chosen, free] : chosen;
+  }
+
+  const complete = prompt.questions.every((_, i) => answersFor(i).length > 0);
+
+  function toggle(i: number, label: string, multiSelect: boolean) {
+    setPicked((prev) => {
+      const cur = prev[i] ?? [];
+      if (!multiSelect) return { ...prev, [i]: cur.includes(label) ? [] : [label] };
+      return { ...prev, [i]: cur.includes(label) ? cur.filter((l) => l !== label) : [...cur, label] };
+    });
+  }
+
+  async function submit() {
+    if (!onAnswer || submitting || !complete) return;
+    setSubmitting(true);
+    try {
+      await onAnswer(prompt.askId, prompt.questions.map((q, i) => ({
+        question: q.question,
+        header: q.header,
+        answers: answersFor(i),
+      })));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const answeredBy = new Map((resolved?.answers ?? []).map((a) => [a.question, a.answers]));
+
+  return (
+    <div className="flex justify-start mb-3" data-testid="butler-question-card">
+      <div className="w-full max-w-[80%] rounded-2xl rounded-tl-md border border-amber-300 dark:border-amber-700/60 bg-amber-50 dark:bg-amber-900/20 px-4 py-3 shadow-sm">
+        <div className="flex items-center gap-1.5 mb-2">
+          <svg className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /><path d="M12 17h.01" /></svg>
+          <span className="text-[11px] font-medium uppercase tracking-wide text-amber-700 dark:text-amber-400">
+            {resolved ? (resolved.answers ? "Answered" : "Question closed") : "Butler is asking"}
+          </span>
+        </div>
+
+        {prompt.questions.map((q, i) => {
+          const given = answeredBy.get(q.question);
+          const selected = picked[i] ?? [];
+          return (
+            <div key={`${q.header}-${i}`} className={i > 0 ? "mt-3 pt-3 border-t border-amber-200 dark:border-amber-800/60" : ""}>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-200/70 dark:bg-amber-800/60 text-amber-800 dark:text-amber-200">{q.header}</span>
+                {q.multiSelect && !resolved && <span className="text-[10px] text-amber-700/80 dark:text-amber-400/80">choose any</span>}
+              </div>
+              <p className="text-sm text-gray-800 dark:text-gray-200 mb-2">{q.question}</p>
+
+              {resolved ? (
+                <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {given?.length ? given.join(", ") : <span className="italic text-gray-500 dark:text-gray-400">not answered</span>}
+                </p>
+              ) : (
+                <div className="space-y-1">
+                  {q.options.map((opt) => {
+                    const on = selected.includes(opt.label);
+                    return (
+                      <button
+                        key={opt.label}
+                        type="button"
+                        onClick={() => toggle(i, opt.label, q.multiSelect)}
+                        className={`w-full text-left px-2.5 py-1.5 rounded-lg border text-sm transition-colors ${on
+                          ? "border-amber-500 bg-amber-100 dark:bg-amber-800/50 text-amber-900 dark:text-amber-100"
+                          : "border-amber-200 dark:border-amber-800/60 bg-white/70 dark:bg-gray-900/40 text-gray-700 dark:text-gray-300 hover:bg-amber-100/70 dark:hover:bg-amber-900/40"}`}
+                      >
+                        <span className="font-medium">{opt.label}</span>
+                        {opt.description && <span className="block text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">{opt.description}</span>}
+                      </button>
+                    );
+                  })}
+                  {otherOpen[i] ? (
+                    <input
+                      autoFocus
+                      value={other[i] ?? ""}
+                      onChange={(e) => setOther((prev) => ({ ...prev, [i]: e.target.value }))}
+                      placeholder="Something else…"
+                      aria-label={`Other answer for ${q.header}`}
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-amber-300 dark:border-amber-700/60 bg-white dark:bg-gray-900/60 text-sm text-gray-800 dark:text-gray-200"
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setOtherOpen((prev) => ({ ...prev, [i]: true }))}
+                      className="w-full text-left px-2.5 py-1.5 rounded-lg border border-dashed border-amber-300 dark:border-amber-800/60 text-sm text-gray-500 dark:text-gray-400 hover:bg-amber-100/70 dark:hover:bg-amber-900/40"
+                    >
+                      Other…
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {resolved?.reason && !resolved.answers && (
+          <p className="mt-2 text-[11px] text-gray-500 dark:text-gray-400">Closed: {resolved.reason}</p>
+        )}
+
+        {!resolved && (
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void submit()}
+              disabled={!complete || submitting || !onAnswer}
+              className="px-3 py-1.5 rounded-lg text-sm font-medium bg-amber-600 hover:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed text-white"
+            >
+              {submitting ? "Sending…" : "Send answer"}
+            </button>
+            {!complete && <span className="text-[11px] text-gray-500 dark:text-gray-400">Pick an option for each question.</span>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Renders one chat message (user / assistant-markdown / tool-call / question / activity line). */
+export function ChatBubble({ msg, onAnswerQuestion }: {
+  msg: ChatMessage;
+  onAnswerQuestion?: (askId: string, answers: ButlerQuestionAnswer[]) => Promise<void> | void;
+}) {
+  if (msg.role === "question" && msg.question) {
+    return <QuestionCard prompt={msg.question} onAnswer={onAnswerQuestion} />;
+  }
+
   if (msg.role === "user") {
     return (
       <div className="flex justify-end mb-3">

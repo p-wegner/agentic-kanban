@@ -31,6 +31,9 @@ export const STATUS_BG: Record<string, string> = {
   "Cancelled":   "bg-gray-100/50 dark:bg-gray-800/30",
 };
 
+// #517: not folded into the status tones. These are bare TEXT colours with no background
+// — the timeline draws its own row tint (STATUS_ROW above) and a tone class would paint a
+// second, conflicting pill background over it. Same statuses, different affordance.
 export const STATUS_BADGE: Record<string, string> = {
   "Todo":        "text-gray-600 dark:text-gray-400",
   "In Progress": "text-blue-700 dark:text-blue-300",

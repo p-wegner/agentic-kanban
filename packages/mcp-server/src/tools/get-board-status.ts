@@ -5,7 +5,7 @@ import { eq, inArray, desc } from "drizzle-orm";
 import { extractMeaningfulOutput, isTerminalStatusIdView } from "@agentic-kanban/shared";
 import type { BoardStatusIssue } from "@agentic-kanban/shared";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { requireEntity, readSessionStdoutFile, resolveActiveProjectId } from "../db-utils.js";
+import { mcpError, mcpJson, readSessionStdoutFile, requireEntity, resolveActiveProjectId } from "../db-utils.js";
 // Shared single-source-of-truth classifiers. The previous local copies had drifted
 // behind the server's (emitting only "idle-awaiting", missing "closed-in-review" and
 // "stale-in-review"), so agents over MCP saw a strictly poorer board than humans.
@@ -19,7 +19,11 @@ import {
 // server's; now both build the IDENTICAL entry via these helpers.
 import { buildBoardStatusEntry } from "@agentic-kanban/shared/lib/board-status-entry";
 import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { occupiesWipSlot } from "@agentic-kanban/shared/lib/workspace-status";
+import { resolveDiffRef } from "@agentic-kanban/shared/lib/git-service";
 
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema, getDiffShortstat } = deps;
   server.tool(
@@ -52,7 +56,7 @@ export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodD
           .select({ key: schema.preferences.key, value: schema.preferences.value })
           .from(schema.preferences)
           .where(inArray(schema.preferences.key, ["auto_merge", "auto_merge_in_review"]));
-        const preferenceMap = new Map(preferenceRows.map((pref) => [pref.key, pref.value]));
+        const preferenceMap = toPrefMap(preferenceRows);
         const classificationOptions = {
           autoMergeEnabled: isAutoMergeEnabled(preferenceMap),
           autoMergeInReview: getBool(preferenceMap, "auto_merge_in_review"),
@@ -91,30 +95,52 @@ export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodD
         }
 
         if (projectIssues.length === 0) {
-          return {
-            content: [{
-              type: "text" as const,
-              text: JSON.stringify({
+          return mcpJson({
                 project: { id: project.id, name: project.name, repoPath: project.repoPath, defaultBranch: project.defaultBranch },
                 generatedAt: new Date().toISOString(),
                 totals: { totalIssues: 0, inProgress: 0, activeWorkspaces: 0, runningSessions: 0 },
                 issues: [],
-              }, null, 2),
-            }],
-          };
+              });
         }
 
         const issueIds = projectIssues.map(i => i.id);
 
-        // 4. Get workspaces for these issues
+        // 4. Get workspaces for these issues — slim projection (#418 G17):
+        // `workspaces` is the widest table (conflict_cache_files, code_metrics_json,
+        // prompt/plan columns) and this tool runs for every agent + the monitor;
+        // select only what the assembly below consumes.
         const wsRows = issueIds.length > 0
-          ? await db.select().from(schema.workspaces).where(inArray(schema.workspaces.issueId, issueIds))
+          ? await db
+              .select({
+                id: schema.workspaces.id,
+                issueId: schema.workspaces.issueId,
+                branch: schema.workspaces.branch,
+                status: schema.workspaces.status,
+                workingDir: schema.workspaces.workingDir,
+                baseBranch: schema.workspaces.baseBranch,
+                isDirect: schema.workspaces.isDirect,
+                readyForMerge: schema.workspaces.readyForMerge,
+                updatedAt: schema.workspaces.updatedAt,
+              })
+              .from(schema.workspaces)
+              .where(inArray(schema.workspaces.issueId, issueIds))
           : [];
 
-        // 5. Get sessions for these workspaces
+        // 5. Get sessions for these workspaces — slim for the same reason (the
+        // stats blob is parsed, the rest of the row was dead weight).
         const wsIds = wsRows.map(w => w.id);
         const sessionRows = wsIds.length > 0
-          ? await db.select().from(schema.sessions).where(inArray(schema.sessions.workspaceId, wsIds))
+          ? await db
+              .select({
+                id: schema.sessions.id,
+                workspaceId: schema.sessions.workspaceId,
+                status: schema.sessions.status,
+                startedAt: schema.sessions.startedAt,
+                endedAt: schema.sessions.endedAt,
+                stats: schema.sessions.stats,
+              })
+              .from(schema.sessions)
+              .where(inArray(schema.sessions.workspaceId, wsIds))
           : [];
 
         // Group sessions by workspaceId (most recent first)
@@ -157,14 +183,13 @@ export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodD
 
           // For non-closed workspaces with a workingDir: compute diff stats + last output
           if (mainWs && mainWs.workingDir && mainWs.status !== "closed") {
-            const baseBranch = mainWs.baseBranch || project.defaultBranch;
-            const diffRef = mainWs.isDirect ? "HEAD" : baseBranch;
+            const diffRef = resolveDiffRef(mainWs, project.defaultBranch);
             if (!diffRef) continue;
 
             asyncWork.push(
               getDiffShortstat(mainWs.workingDir, diffRef)
                 .then(stats => { entry.diffStats = stats; })
-                .catch((err) => { console.error(`[board-status] diff failed for ${mainWs.branch}:`, err instanceof Error ? err.message : String(err)); }),
+                .catch((err) => { console.error(`[board-status] diff failed for ${mainWs.branch}:`, errorMessage(err)); }),
             );
 
             if (latestSession) {
@@ -209,15 +234,15 @@ export function registerGetBoardStatus(server: McpServer, deps: ToolDeps = prodD
           totals: {
             totalIssues: projectIssues.length,
             inProgress: projectIssues.filter(i => i.statusName === "In Progress" || i.statusName === "In Review").length,
-            activeWorkspaces: wsRows.filter(w => w.status === "active" || w.status === "reviewing").length,
+            activeWorkspaces: wsRows.filter(w => occupiesWipSlot(w.status)).length,
             runningSessions: sessionRows.filter(s => s.status === "running").length,
           },
           issues: result,
         };
 
-        return { content: [{ type: "text" as const, text: JSON.stringify(response, null, 2) }] };
+        return mcpJson(response);
       } catch (err) {
-        return { content: [{ type: "text" as const, text: `Error: ${err instanceof Error ? err.message : String(err)}` }] };
+        return mcpError(`Error: ${errorMessage(err)}`);
       }
     },
   );

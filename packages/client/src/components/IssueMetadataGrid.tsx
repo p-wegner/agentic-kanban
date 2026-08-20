@@ -1,6 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
 import type { IssueWithStatus, MilestoneResponse } from "@agentic-kanban/shared";
 import { isHttpUrl } from "../lib/url.js";
+import { ISSUE_TYPES, ISSUE_ESTIMATES, issueTypeLabel } from "@agentic-kanban/shared";
 
 type Setter<T> = Dispatch<SetStateAction<T>>;
 
@@ -64,10 +65,9 @@ export function IssueMetadataGrid({
                     onChange={(e) => setIssueType(e.target.value)}
                     className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
                   >
-                    <option value="task">Task</option>
-                    <option value="bug">Bug</option>
-                    <option value="feature">Feature</option>
-                    <option value="chore">Chore</option>
+                    {ISSUE_TYPES.map((t) => (
+                      <option key={t} value={t}>{issueTypeLabel(t)}</option>
+                    ))}
                   </select>
                 </div>
                 <div>
@@ -170,7 +170,7 @@ export function IssueMetadataGrid({
                 <div className="flex items-center gap-1.5">
                   <span className="text-xs text-gray-500 dark:text-gray-400">Size:</span>
                   <div className="flex items-center gap-0.5">
-                    {(["XS", "S", "M", "L", "XL"] as const).map((size) => (
+                    {ISSUE_ESTIMATES.map((size) => (
                       <button
                         key={size}
                         type="button"

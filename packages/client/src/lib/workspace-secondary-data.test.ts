@@ -4,6 +4,7 @@ import {
   fetchLatestCommits,
   fetchGithubDrafts,
   fetchPlanContents,
+  fetchServiceStates,
   pickInitialWorkspaceId,
 } from "./workspace-secondary-data.js";
 
@@ -13,6 +14,7 @@ function ws(partial: Partial<WorkspaceResponse> & { id: string }): WorkspaceResp
     status: partial.status ?? "active",
     workingDir: partial.workingDir ?? null,
     pendingPlanPath: partial.pendingPlanPath,
+    serviceState: partial.serviceState,
   } as WorkspaceResponse;
 }
 
@@ -80,6 +82,43 @@ describe("fetchGithubDrafts", () => {
     );
     expect(result).toEqual({ done: "draft body" });
     expect(apiFetch).toHaveBeenCalledWith("/api/workspaces/done/github-handoff-draft");
+  });
+});
+
+describe("fetchServiceStates", () => {
+  const state = {
+    composeProjectName: "kanban-ws-1",
+    ports: { db: 54321 },
+    envFilePath: "/wt/.env",
+    status: "error" as const,
+    error: "compose up failed",
+    updatedAt: "2026-07-14T00:00:00.000Z",
+  };
+
+  it("hydrates serviceState from the details endpoint for rows lacking it", async () => {
+    const apiFetch = vi.fn(async (path: string) => {
+      if (path === "/api/workspaces/w1") return { serviceState: state };
+      if (path === "/api/workspaces/w2") return { serviceState: null };
+      throw new Error(`unexpected ${path}`);
+    });
+    const result = await fetchServiceStates([ws({ id: "w1" }), ws({ id: "w2" })], apiFetch as never);
+    expect(result).toEqual({ w1: state, w2: null });
+  });
+
+  it("skips workspaces whose list row already carries serviceState", async () => {
+    const apiFetch = vi.fn(async () => ({ serviceState: state }));
+    const result = await fetchServiceStates([ws({ id: "hydrated", serviceState: null })], apiFetch as never);
+    expect(result).toEqual({});
+    expect(apiFetch).not.toHaveBeenCalled();
+  });
+
+  it("isolates a per-workspace failure to null without rejecting the batch", async () => {
+    const apiFetch = vi.fn(async (path: string) => {
+      if (path.includes("/w1")) throw new Error("boom");
+      return { serviceState: state };
+    });
+    const result = await fetchServiceStates([ws({ id: "w1" }), ws({ id: "w2" })], apiFetch as never);
+    expect(result).toEqual({ w1: null, w2: state });
   });
 });
 

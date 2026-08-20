@@ -1,5 +1,54 @@
-import { tryAcquireRepoLock } from "@agentic-kanban/shared/lib/repo-lock";
+import { RepoLockUnavailableError, waitForRepoLock } from "@agentic-kanban/shared/lib/repo-lock";
+import type { RepoLockHandle, RepoLockWaitOptions } from "@agentic-kanban/shared/lib/repo-lock";
 import type { Database } from "../db/index.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+
+/**
+ * How long a queue member waits for the repo lock before failing loudly (#230).
+ * Must exceed a legitimate holder's verify gate — see the matching constant in
+ * `workspace-internals.ts`. Exported so a test can drive the bound (a module-private
+ * const with a module-private clock made it unfalsifiable).
+ */
+export const MERGE_QUEUE_REPO_LOCK_TIMEOUT_MS = 90 * 60 * 1000;
+
+/**
+ * Acquire the repo lock for a queue step: bounded, periodically logged, and failing FAST
+ * when the path cannot be locked at all rather than polling a permanently-unlockable
+ * repoPath as if it were merely busy (#230). Both queue sites go through this one helper
+ * so the classification cannot drift between them.
+ */
+export async function acquireQueueRepoLock(
+  repoPath: string,
+  holder: string,
+  opts: Partial<RepoLockWaitOptions> = {},
+): Promise<RepoLockHandle> {
+  const timeoutMs = opts.timeoutMs ?? MERGE_QUEUE_REPO_LOCK_TIMEOUT_MS;
+  let lastLoggedMs = 0;
+  try {
+    return await waitForRepoLock(repoPath, holder, {
+      ...opts,
+      timeoutMs,
+      pollMs: opts.pollMs ?? 500,
+      onContended: (attempt, waitedMs) => {
+        opts.onContended?.(attempt, waitedMs);
+        if (waitedMs - lastLoggedMs < 60_000) return;
+        lastLoggedMs = waitedMs;
+        console.warn(
+          `[merge-queue] still waiting for the repo lock on ${repoPath} (${holder}) after ` +
+            `${Math.round(waitedMs / 1000)}s of ${Math.round(timeoutMs / 1000)}s — ${attempt.reason}`,
+        );
+      },
+    });
+  } catch (err) {
+    if (err instanceof RepoLockUnavailableError) {
+      throw new Error(
+        `[merge-queue] cannot lock ${repoPath} (${holder}) — ${err.message}. ` +
+          `This is not lock contention (code ${err.code}); waiting would never have succeeded.`,
+      );
+    }
+    throw err;
+  }
+}
 import * as gitService from "./git.service.js";
 import {
   getMergeQueueWorkspaceRows,
@@ -8,9 +57,13 @@ import {
   getWorkspaceMergeState,
 } from "../repositories/merge-queue.repository.js";
 import { getProjectsByIds } from "../repositories/project.repository.js";
+import { listWorkspaceRepos } from "../repositories/repo.repository.js";
 import { createWorkspaceMergeService } from "./workspace-merge.service.js";
-import type { BoardEvents } from "./board-events.js";
-import type { SessionManager } from "./session.manager.js";
+import { runMergeTrain } from "./merge-train.service.js";
+import { runPreMergeGate } from "./pre-merge-gate.service.js";
+import { isPreMergeGateFailure } from "./workspace-merge-gate.js";
+import type { BoardEventSink } from "./board-events.js";
+import type { SessionLauncher } from "./session.manager.js";
 
 export interface WorkspaceConflictPreview {
   workspaceId: string;
@@ -194,6 +247,16 @@ export function classifyReconcileStrategies(
   return { clusters, recommendedStrategy: hardest.strategy, strategyReason: hardest.reason };
 }
 
+/**
+ * Render the branch/base tips a rebase verdict was computed against (#274), e.g.
+ * ` (a1b2c3d onto 9f8e7d6)`. Empty when the tips could not be resolved — a missing
+ * annotation is better than an invented one.
+ */
+export function describeRebaseTips(result: { branchSha?: string; baseSha?: string }): string {
+  if (!result.branchSha || !result.baseSha) return "";
+  return ` (${result.branchSha.slice(0, 7)} onto ${result.baseSha.slice(0, 7)})`;
+}
+
 export type MergeQueueEvent =
   | { type: "planned"; plan: MergeQueuePlan }
   | { type: "rebasing"; workspaceId: string; issueNumber: number | null; issueTitle: string; position: number; total: number }
@@ -207,8 +270,8 @@ export type MergeQueueEvent =
 
 export function createMergeQueueService(deps: {
   database: Database;
-  boardEvents?: BoardEvents;
-  getSessionManager?: () => SessionManager;
+  boardEvents?: BoardEventSink;
+  getSessionManager?: () => SessionLauncher;
 }) {
   const { database, boardEvents, getSessionManager } = deps;
   const mergeService = createWorkspaceMergeService({
@@ -249,6 +312,30 @@ export function createMergeQueueService(deps: {
         }
       } catch {
         // best effort
+      }
+
+      // Multi-repo (#72): include each sibling repo's changed files, namespaced by repo so
+      // overlap only matches within the SAME repo. Without this, two cross-cutting tickets
+      // that both edit `src/server.js` in every sibling look non-overlapping (their leading
+      // repos may not collide) and get landed in parallel — the second then strands with a
+      // conflict in every repo. Namespacing surfaces the collision so they are sequenced.
+      if (!ws.isDirect) {
+        try {
+          const siblings = await listWorkspaceRepos(ws.id, database);
+          for (const repo of siblings) {
+            const repoBase = repo.baseBranch || baseBranch;
+            const ns = repo.name ?? repo.path;
+            let siblingChanged: string[] = [];
+            try {
+              if (repo.worktreePath) {
+                siblingChanged = await gitService.getChangedFileNames(repo.worktreePath, repoBase);
+              } else if (repo.branch) {
+                siblingChanged = await gitService.getChangedFilesBetween(repo.path, repoBase, repo.branch);
+              }
+            } catch { /* best effort per repo */ }
+            for (const f of siblingChanged) changedFiles.push(`${ns}::${f}`);
+          }
+        } catch { /* best effort: leading-only overlap if sibling scan fails */ }
       }
 
       result.push({
@@ -386,7 +473,7 @@ export function createMergeQueueService(deps: {
         hasConflicts: false,
         conflictingFiles: [],
         isStale: false,
-        error: err instanceof Error ? err.message : String(err),
+        error: errorMessage(err),
       };
     }
   }
@@ -431,12 +518,153 @@ export function createMergeQueueService(deps: {
     }
   }
 
+  /**
+   * Are these members eligible for a single release train?
+   *
+   * v1 is deliberately narrow — a train must be provably one repo, one base. Multi-repo
+   * workspaces merge all-or-nothing across siblings (`prevalidateSiblingMerges` /
+   * `executeSiblingMerges`), and coordinating THAT across a batch is a separate problem; a
+   * direct workspace has no branch to put on a train at all. Anything ineligible falls back
+   * to the existing per-ticket path, which is slower but always correct.
+   */
+  function trainEligible(order: MergeQueuePlan["order"]): boolean {
+    if (order.length < 2) return false;
+    const first = order[0];
+    return order.every(
+      (ws) =>
+        !ws.isDirect &&
+        ws.workingDir &&
+        ws.branch &&
+        ws.repoPath === first.repoPath &&
+        ws.baseBranch === first.baseBranch,
+    );
+  }
+
+  /**
+   * Run the whole batch as one release train: assemble → gate ONCE → land → close each member.
+   *
+   * The gate needs a worktree whose tree IS the assembled train (not any member's branch), so
+   * one is created at the train ref, gated, and removed. That worktree is the only reason this
+   * lives here rather than in merge-train.service.ts — the service stays free of worktree and
+   * DB concerns so its logic can be tested without either.
+   *
+   * The whole run holds the repo lock: the train's value depends on its base not moving
+   * between assembly and landing, and `landMergeTrain` refuses (correctly) if it does.
+   */
+  async function* runTrainStrategy(plan: MergeQueuePlan): AsyncGenerator<MergeQueueEvent> {
+    const first = plan.order[0];
+    const repoPath = first.repoPath;
+    const baseBranch = first.baseBranch as string;
+    const label = `q${Date.now().toString(36)}`;
+    const members = plan.order.map((ws) => ({
+      workspaceId: ws.id,
+      branch: ws.branch as string,
+      issueNumber: ws.issueNumber,
+    }));
+
+    // The gate is per-PROJECT (it reads verify_script_<projectId>), and WorkspaceQueueInfo
+    // carries only issueId — resolve the project the same way computePlan does.
+    const issueRows = await getMergeQueueIssueRows([first.issueId], database);
+    const projectId = issueRows[0]?.projectId ?? null;
+    if (!projectId) {
+      // Fail closed rather than gate-less: without a project there is no verify_script to run,
+      // and a train that skips the gate is exactly what this feature must never become.
+      yield { type: "error", workspaceId: first.id, issueNumber: first.issueNumber, issueTitle: first.issueTitle, error: "train aborted: could not resolve the project for the batch, so the gate could not be run" };
+      yield { type: "done", merged: [], failed: members.map((m) => m.workspaceId), skipped: [] };
+      return;
+    }
+
+    const repoLock = await acquireQueueRepoLock(repoPath, `merge-train:${label}`);
+    const heartbeat = setInterval(() => repoLock.heartbeat(), 15_000);
+
+    let result: Awaited<ReturnType<typeof runMergeTrain>> | null = null;
+    try {
+      result = await runMergeTrain({
+        repoPath,
+        baseBranch,
+        members,
+        label,
+        runGate: async ({ trainRef }) => {
+          // Gate the TREE THAT LANDS. A per-member gate never tests the merge commit, which is
+          // how two individually-green branches can produce a red base with no conflict.
+          let gateWorktree: string | null = null;
+          try {
+            gateWorktree = await gitService.createWorktree(repoPath, trainRef, undefined, { pathNamespace: "train" });
+            const gate = await runPreMergeGate({ id: `train:${label}`, workingDir: gateWorktree, baseBranch }, projectId, database);
+            return { passed: gate.passed, message: gate.message };
+          } catch (err) {
+            // Fail CLOSED: a gate we could not run is not a gate that passed.
+            return { passed: false, message: `train gate could not run: ${errorMessage(err)}` };
+          } finally {
+            if (gateWorktree) await gitService.removeWorktree(repoPath, gateWorktree).catch(() => undefined);
+          }
+        },
+        closeMember: async (workspaceId) => {
+          // Reuse the sanctioned already-merged path rather than reimplementing the
+          // mergedAt/status/comment bookkeeping the reconcilers depend on.
+          await mergeService.reconcileAlreadyMerged(workspaceId);
+        },
+      });
+    } finally {
+      clearInterval(heartbeat);
+      repoLock.release();
+    }
+
+    for (const d of result.dropped) {
+      yield { type: "skipped", workspaceId: d.member.workspaceId, issueNumber: d.member.issueNumber ?? null, issueTitle: "", reason: `dropped from train: ${d.reason.slice(0, 200)}` };
+    }
+    // #492 — a member the bisect individually proved red is attributed to ITSELF, not blamed
+    // on the batch. This is the difference between "your branch broke the gate" and "someone
+    // in a batch you were in broke the gate", and only the first is actionable by its author.
+    for (const r of result.gateRejected) {
+      yield { type: "error", workspaceId: r.member.workspaceId, issueNumber: r.member.issueNumber ?? null, issueTitle: "", error: `gate failed for this branch alone (bisected out of the train): ${r.reason.slice(0, 300)}` };
+    }
+    if (result.landed.length === 0) {
+      for (const m of members) {
+        if (result.dropped.some((d) => d.member.workspaceId === m.workspaceId)) continue;
+        if (result.gateRejected.some((r) => r.member.workspaceId === m.workspaceId)) continue;
+        yield { type: "error", workspaceId: m.workspaceId, issueNumber: m.issueNumber ?? null, issueTitle: "", error: `train gate failed — nothing landed: ${(result.gateFailure ?? "").slice(0, 300)}` };
+      }
+      yield { type: "done", merged: [], failed: members.map((m) => m.workspaceId), skipped: [] };
+      return;
+    }
+    console.log(`[merge-train] ${label}: ${result.landed.length}/${members.length} landed in ${result.gateRuns} gate run(s)` +
+      `${result.gateRejected.length > 0 ? `, ${result.gateRejected.length} bisected out` : ""}`);
+    for (const m of result.landed) {
+      const closeFailure = result.closeFailures.find((c) => c.member.workspaceId === m.workspaceId);
+      // A close-out failure is NOT a merge failure — the work IS on the base branch, only the
+      // bookkeeping lags, and the existing reconcilers recover that. Log it rather than
+      // emitting `error`, which callers treat as "this ticket did not land".
+      if (closeFailure) {
+        console.warn(`[merge-train] ${m.branch} landed via train ${result.mergeSha?.slice(0, 8)} but close-out lagged: ${closeFailure.reason.slice(0, 200)}`);
+      }
+      yield { type: "merged", workspaceId: m.workspaceId, issueNumber: m.issueNumber ?? null, issueTitle: "" };
+    }
+    yield {
+      type: "done",
+      merged: result.landed.map((m) => m.workspaceId),
+      // A bisected-out member did NOT land, so reporting it as anything but failed would tell
+      // the queue its work is on the base when it is not.
+      failed: result.gateRejected.map((r) => r.member.workspaceId),
+      skipped: result.dropped.map((d) => d.member.workspaceId),
+    };
+  }
+
   async function* executeQueue(
     workspaceIds: string[],
-    opts: { skipOnConflict?: boolean } = {},
+    opts: { skipOnConflict?: boolean; strategy?: "sequential" | "train" } = {},
   ): AsyncGenerator<MergeQueueEvent> {
     const plan = await computePlan(workspaceIds);
     yield { type: "planned", plan };
+
+    // Release train (#throughput): gate the assembled batch ONCE instead of once per member.
+    // Chosen when the caller asks for it, or when the planner's own classifier already says
+    // `integration-union` — the recommendation it has been computing and nobody dispatched on.
+    const wantsTrain = opts.strategy === "train" || plan.recommendedStrategy === "integration-union";
+    if (wantsTrain && opts.strategy !== "sequential" && trainEligible(plan.order)) {
+      yield* runTrainStrategy(plan);
+      return;
+    }
 
     const merged: string[] = [];
     const failed: string[] = [];
@@ -472,106 +700,121 @@ export function createMergeQueueService(deps: {
         // autoRenumberMigrations's direct reads there and rebaseOntoBase's fetch/rebase —
         // acquire the on-disk repo lock (#993) so this can't race a concurrent merge,
         // a Conductor-loop agent's own git, or human git in the same repo.
-        let repoLock = tryAcquireRepoLock(ws.repoPath, `merge-queue:${ws.id}`);
-        while (!repoLock) {
-          await new Promise((resolve) => setTimeout(resolve, 500));
-          repoLock = tryAcquireRepoLock(ws.repoPath, `merge-queue:${ws.id}`);
-        }
-        const repoLockHeartbeat = setInterval(() => repoLock!.heartbeat(), 15_000);
+        // Bounded (#230): an unbounded wait here wedged the whole queue behind one stuck
+        // holder with no error and no way to tell "waiting" from "dead". The budget must
+        // exceed a legitimate holder's verify gate (30-45 min on a full-suite project), so
+        // this only fires when something is genuinely stuck. A repoPath that cannot be
+        // locked AT ALL (no `.git`, permission denied) fails immediately instead — that
+        // case is not contention and waiting it out could never have succeeded.
+        const repoLock = await acquireQueueRepoLock(ws.repoPath, `merge-queue:${ws.id}`);
+        const repoLockHeartbeat = setInterval(() => repoLock.heartbeat(), 15_000);
 
+        // #242: the locked region below CONTAINS `yield`s. This is an async generator, so an
+        // abandoned consumer (the SSE route `break`s when the stream closes, or `writeSSE`
+        // throws) calls `.return()` at the suspended yield — every statement after that yield
+        // is then skipped. Without this `try/finally` the release and the heartbeat interval
+        // never ran, and because the heartbeat kept firing the lock never went stale and its
+        // pid stayed alive, so NO recovery path in `repo-lock.ts` applied: closing the
+        // merge-queue tab mid-rebase blocked every merge on that repo for the life of the
+        // server. `finally` runs on `.return()`, `throw`, and normal completion alike.
         try {
-          const renumber = await gitService.autoRenumberMigrations(ws.workingDir, ws.repoPath, ws.baseBranch);
-          if (renumber.renumbered) {
-            console.log(
-              `[merge-queue] auto-renumbered migrations for workspace ${ws.id}: ` +
-                renumber.renames.map((r) => `${r.from}->${r.to}`).join(", "),
-            );
-          }
-        } catch (err) {
-          const error = err instanceof Error ? err.message : String(err);
-          if (opts.skipOnConflict) {
-            skipped.push(ws.id);
-            yield {
-              type: "skipped",
-              workspaceId: ws.id,
-              issueNumber: ws.issueNumber,
-              issueTitle: ws.issueTitle,
-              reason: `migration renumber failed: ${error}`,
-            };
-            rebaseOutcome = "continue";
-          } else {
-            failed.push(ws.id);
-            yield {
-              type: "error",
-              workspaceId: ws.id,
-              issueNumber: ws.issueNumber,
-              issueTitle: ws.issueTitle,
-              error,
-            };
-            rebaseOutcome = "break";
-          }
-        }
-
-        if (!rebaseOutcome) {
-          yield {
-            type: "rebasing",
-            workspaceId: ws.id,
-            issueNumber: ws.issueNumber,
-            issueTitle: ws.issueTitle,
-            position,
-            total,
-          };
           try {
-            const rebaseResult = await gitService.rebaseOntoBase(ws.workingDir, ws.baseBranch, ws.branch);
-            if (!rebaseResult.success) {
-              if (opts.skipOnConflict) {
-                await gitService.abortRebase(ws.workingDir).catch(() => {
-                  // Best effort: skip-on-conflict should leave the queue free to continue.
-                });
-                skipped.push(ws.id);
-                yield {
-                  type: "skipped",
-                  workspaceId: ws.id,
-                  issueNumber: ws.issueNumber,
-                  issueTitle: ws.issueTitle,
-                  reason: `rebase conflict: ${rebaseResult.conflictingFiles?.join(", ") ?? rebaseResult.error ?? "unknown"}`,
-                };
-                rebaseOutcome = "continue";
-              } else {
-                failed.push(ws.id);
-                yield {
-                  type: "conflict",
-                  workspaceId: ws.id,
-                  issueNumber: ws.issueNumber,
-                  issueTitle: ws.issueTitle,
-                  conflictingFiles: rebaseResult.conflictingFiles ?? [],
-                  error: rebaseResult.error ?? "Rebase failed",
-                };
-                rebaseOutcome = "break"; // Stop queue — resumable after manual fix
-              }
-            } else {
+            const renumber = await gitService.autoRenumberMigrations(ws.workingDir, ws.repoPath, ws.baseBranch);
+            if (renumber.renumbered) {
+              console.log(
+                `[merge-queue] auto-renumbered migrations for workspace ${ws.id}: ` +
+                  renumber.renames.map((r) => `${r.from}->${r.to}`).join(", "),
+              );
+            }
+          } catch (err) {
+            const error = errorMessage(err);
+            if (opts.skipOnConflict) {
+              skipped.push(ws.id);
               yield {
-                type: "rebase_ok",
+                type: "skipped",
                 workspaceId: ws.id,
                 issueNumber: ws.issueNumber,
                 issueTitle: ws.issueTitle,
+                reason: `migration renumber failed: ${error}`,
               };
+              rebaseOutcome = "continue";
+            } else {
+              failed.push(ws.id);
+              yield {
+                type: "error",
+                workspaceId: ws.id,
+                issueNumber: ws.issueNumber,
+                issueTitle: ws.issueTitle,
+                error,
+              };
+              rebaseOutcome = "break";
             }
-          } catch (err) {
-            failed.push(ws.id);
+          }
+
+          if (!rebaseOutcome) {
             yield {
-              type: "error",
+              type: "rebasing",
               workspaceId: ws.id,
               issueNumber: ws.issueNumber,
               issueTitle: ws.issueTitle,
-              error: err instanceof Error ? err.message : String(err),
+              position,
+              total,
             };
-            rebaseOutcome = "break";
+            try {
+              const rebaseResult = await gitService.rebaseOntoBase(ws.workingDir, ws.baseBranch, ws.branch);
+              if (!rebaseResult.success) {
+                if (opts.skipOnConflict) {
+                  await gitService.abortRebase(ws.workingDir).catch(() => {
+                    // Best effort: skip-on-conflict should leave the queue free to continue.
+                  });
+                  skipped.push(ws.id);
+                  yield {
+                    type: "skipped",
+                    workspaceId: ws.id,
+                    issueNumber: ws.issueNumber,
+                    issueTitle: ws.issueTitle,
+                    // #274 — name the tips the verdict was computed against. A conflict
+                    // report that cannot be checked against a specific branch/base pair is
+                    // exactly how a stale one went unnoticed for a whole driving session.
+                    reason: `rebase conflict${describeRebaseTips(rebaseResult)}: ${rebaseResult.conflictingFiles?.join(", ") ?? rebaseResult.error ?? "unknown"}`,
+                  };
+                  rebaseOutcome = "continue";
+                } else {
+                  failed.push(ws.id);
+                  yield {
+                    type: "conflict",
+                    workspaceId: ws.id,
+                    issueNumber: ws.issueNumber,
+                    issueTitle: ws.issueTitle,
+                    conflictingFiles: rebaseResult.conflictingFiles ?? [],
+                    error: rebaseResult.error ?? "Rebase failed",
+                  };
+                  rebaseOutcome = "break"; // Stop queue — resumable after manual fix
+                }
+              } else {
+                yield {
+                  type: "rebase_ok",
+                  workspaceId: ws.id,
+                  issueNumber: ws.issueNumber,
+                  issueTitle: ws.issueTitle,
+                };
+              }
+            } catch (err) {
+              failed.push(ws.id);
+              yield {
+                type: "error",
+                workspaceId: ws.id,
+                issueNumber: ws.issueNumber,
+                issueTitle: ws.issueTitle,
+                error: errorMessage(err),
+              };
+              rebaseOutcome = "break";
+            }
           }
+        } finally {
+          clearInterval(repoLockHeartbeat);
+          repoLock.release();
         }
-
-        clearInterval(repoLockHeartbeat);
-        repoLock.release();
       }
       if (rebaseOutcome === "continue") continue;
       if (rebaseOutcome === "break") break;
@@ -599,7 +842,26 @@ export function createMergeQueueService(deps: {
           issueTitle: ws.issueTitle,
         };
       } catch (err) {
-        const error = err instanceof Error ? err.message : String(err);
+        const error = errorMessage(err);
+        // A pre-merge-gate withhold (verify_script/smoke check failed) is NOT a merge conflict —
+        // it carries the same WorkspaceError "CONFLICT" code (for HTTP-status purposes) but is
+        // tagged with `data.mergeReason: "pre_merge_gate_failed"`. Classify it separately so it
+        // never enters the conflict→reconciler escalation path: a batch reconciler agent can't
+        // fix a red verify script, and routing it there just burns attempts/tokens (#170).
+        // #638: the predicate now lives beside the throw, because the monitor needed the same
+        // rule and its absence there was an ungated-merge bypass.
+        if (isPreMergeGateFailure(err)) {
+          skipped.push(ws.id);
+          yield {
+            type: "skipped",
+            workspaceId: ws.id,
+            issueNumber: ws.issueNumber,
+            issueTitle: ws.issueTitle,
+            reason: `verify_failed: ${error}`,
+          };
+          continue;
+        }
+
         const isConflict = error.toLowerCase().includes("conflict") || (err instanceof Error && (err as unknown as { code?: string }).code === "CONFLICT");
 
         if (isConflict) {

@@ -1,3 +1,4 @@
+import { isUsageLimitStatsOf } from "@agentic-kanban/shared/lib/session-stats-blob";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
 import {
   CODEX_USAGE_LIMIT_PATTERN,
@@ -64,12 +65,7 @@ export function detectCodexUsageLimitMessages(messages: AgentOutputMessage[]): C
   return null;
 }
 
+/** Thin alias over the shared discriminated reader (#542) — kept for its many callers. */
 export function isCodexUsageLimitStats(stats: string | null | undefined): boolean {
-  if (!stats) return false;
-  try {
-    const parsed = JSON.parse(stats) as Record<string, unknown>;
-    return parsed.rateLimited === true && parsed.rateLimitKind === "codex-usage-limit";
-  } catch {
-    return false;
-  }
+  return isUsageLimitStatsOf(stats, "codex");
 }

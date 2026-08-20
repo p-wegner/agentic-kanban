@@ -1,5 +1,6 @@
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats, TodoItem } from "./useBoardEvents.js";
+import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-liveness";
 
 // Pure view-model for AgentGrid: status/attention config, per-card derivations, and
 // the grid-level agent partition / sort / sizing. No JSX, no hooks — so the logic
@@ -17,6 +18,12 @@ export interface CardConfig {
   tier: "live" | "background";
 }
 
+// #517 deliberately does NOT derive this from WORKSPACE_STATUS_TONE, though the ticket
+// suggested it. The grid encodes a TIER (live vs background work), not a severity: `idle`
+// is styled calm grey here because an idle card is background, while the badge tone makes
+// it `warning` because an idle workspace in a list needs your attention. Deriving would
+// repaint every idle card amber and destroy the live/background distinction the grid is
+// built around. The ring and header-gradient have no tone equivalent at all.
 export const WS_STATUS_CONFIG: Record<string, CardConfig> = {
   active:    { label: "Active",    dot: "bg-green-500 animate-pulse",  ring: "ring-green-400/40",  header: "from-green-50 dark:from-green-950/50",  tier: "live" },
   fixing:    { label: "Fixing",    dot: "bg-orange-500 animate-pulse", ring: "ring-orange-400/40", header: "from-orange-50 dark:from-orange-950/50", tier: "live" },
@@ -165,7 +172,7 @@ export function computeEmptySlotCount(
 ): number {
   const activeAgentCount = agents.filter((i) => {
     const s = i.workspaceSummary?.main?.status;
-    return s === "active" || s === "fixing";
+    return isAgentRunningStatus(s);
   }).length;
   if (!hasDropHandler || !activeAgentsTarget || activeAgentsTarget <= activeAgentCount) return 0;
   return Math.min(activeAgentsTarget - activeAgentCount, 3);

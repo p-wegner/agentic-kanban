@@ -9,9 +9,46 @@
  * Rate-limited to 1 turn per 30s per project; bursts collapse into one summary
  * line so the butler isn't spammed by every retry.
  */
-import { db } from "../db/index.js";
-import { getPreference } from "../repositories/preferences.repository.js";
-import { sendButlerTurn, getButlerSession } from "./butler-sdk.service.js";
+
+/**
+ * The collaborators the feed needs, injected once at startup (#561).
+ *
+ * This module used to import the global `db` and the butler-session registry
+ * directly, which cost it a `void db;` tree-shaking hack, a `_reset…State()` test
+ * backdoor, and a `vi.mock` in every one of the 15 test files that merely happened
+ * to run code emitting an event. Injection makes an UNATTACHED feed inert, so those
+ * tests need no knowledge of it at all.
+ *
+ * (The ticket sketched routing this through `boardEvents` instead. Rejected: 5 of
+ * the 11 emitting modules — the session-manager trio, `merge-backoff.service`,
+ * `provider-auth-recovery` — hold no `boardEvents`, so that route would have had to
+ * thread a new dependency through them rather than remove one.)
+ */
+export interface ButlerEventFeedRuntime {
+  readPreference: (key: string) => Promise<string | null | undefined>;
+  /** Whether project's DEFAULT butler session is warm. A cold session drops the event. */
+  isButlerActive: (projectId: string) => boolean;
+  sendTurn: (projectId: string, text: string) => void;
+}
+
+let runtime: ButlerEventFeedRuntime | null = null;
+
+/** Wire the feed to its collaborators. Called once from `server-start.ts`. */
+export function attachButlerEventFeed(next: ButlerEventFeedRuntime): void {
+  runtime = next;
+}
+
+/**
+ * Detach and forget all per-project rate-limit state. An unattached feed silently
+ * drops every event, which is what makes it inert in tests and after shutdown.
+ */
+export function detachButlerEventFeed(): void {
+  for (const st of state.values()) {
+    if (st.timer) clearTimeout(st.timer);
+  }
+  state.clear();
+  runtime = null;
+}
 
 export type ButlerSystemEventKind =
   | "merge_failed"
@@ -40,15 +77,15 @@ interface ProjectState {
 
 const state = new Map<string, ProjectState>();
 
-async function isFeedEnabled(projectId: string): Promise<boolean> {
-  const projectOverride = await getPreference(`butler_event_feed_${projectId}`);
+async function isFeedEnabled(rt: ButlerEventFeedRuntime, projectId: string): Promise<boolean> {
+  const projectOverride = await rt.readPreference(`butler_event_feed_${projectId}`);
   if (projectOverride === "true") return true;
   if (projectOverride === "false") return false;
-  const global = await getPreference("butler_event_feed");
+  const global = await rt.readPreference("butler_event_feed");
   return global === "true";
 }
 
-function flushBurst(projectId: string): void {
+function flushBurst(rt: ButlerEventFeedRuntime, projectId: string): void {
   const st = state.get(projectId);
   if (!st || st.pending.length === 0) return;
   const events = st.pending;
@@ -60,13 +97,13 @@ function flushBurst(projectId: string): void {
   const summary = Object.entries(counts).map(([k, n]) => `${n}× ${k}`).join(", ");
   const text = `[system event] ${events.length} board event(s) suppressed in burst window: ${summary}`;
 
-  if (getButlerSession(projectId).active) {
-    sendButlerTurn(projectId, text);
+  if (rt.isButlerActive(projectId)) {
+    rt.sendTurn(projectId, text);
     st.lastSentAt = Date.now();
   }
 }
 
-function deliver(event: ButlerSystemEvent, intervalMs: number): void {
+function deliver(rt: ButlerEventFeedRuntime, event: ButlerSystemEvent, intervalMs: number): void {
   const st = state.get(event.projectId) ?? { lastSentAt: 0, pending: [] };
   state.set(event.projectId, st);
 
@@ -74,8 +111,8 @@ function deliver(event: ButlerSystemEvent, intervalMs: number): void {
   const elapsed = now - st.lastSentAt;
 
   if (elapsed >= intervalMs) {
-    if (getButlerSession(event.projectId).active) {
-      sendButlerTurn(event.projectId, `[system event] ${event.text}`);
+    if (rt.isButlerActive(event.projectId)) {
+      rt.sendTurn(event.projectId, `[system event] ${event.text}`);
       st.lastSentAt = now;
     }
     return;
@@ -84,7 +121,7 @@ function deliver(event: ButlerSystemEvent, intervalMs: number): void {
   st.pending.push(event);
   if (!st.timer) {
     const delay = intervalMs - elapsed;
-    st.timer = setTimeout(() => flushBurst(event.projectId), delay);
+    st.timer = setTimeout(() => flushBurst(rt, event.projectId), delay);
     st.timer.unref?.();
   }
 }
@@ -98,24 +135,16 @@ export function emitButlerSystemEvent(input: Omit<ButlerSystemEvent, "ts"> & { t
   const event: ButlerSystemEvent = { ...input, ts: input.ts ?? Date.now() };
   void (async () => {
     try {
-      if (!(await isFeedEnabled(event.projectId))) return;
-      if (!getButlerSession(event.projectId).active) return;
-      const rawInterval = await getPreference("butler_event_feed_min_interval_ms");
+      const rt = runtime;
+      if (!rt) return;
+      if (!(await isFeedEnabled(rt, event.projectId))) return;
+      if (!rt.isButlerActive(event.projectId)) return;
+      const rawInterval = await rt.readPreference("butler_event_feed_min_interval_ms");
       const intervalMs = rawInterval && /^\d+$/.test(rawInterval) ? Number(rawInterval) : DEFAULT_MIN_INTERVAL_MS;
-      deliver(event, intervalMs);
+      deliver(rt, event, intervalMs);
     } catch (err) {
       console.warn(`[butler-event-feed] emit failed: project=${event.projectId} kind=${event.kind}`, err);
     }
   })();
 }
 
-/** For tests. */
-export function _resetButlerEventFeedState(): void {
-  for (const st of state.values()) {
-    if (st.timer) clearTimeout(st.timer);
-  }
-  state.clear();
-}
-
-// Keep db reference live so tree-shaking doesn't drop the import — getPreference uses the default db.
-void db;

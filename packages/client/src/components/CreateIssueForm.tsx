@@ -1,11 +1,13 @@
+import type { CreateIssueFormState } from "../lib/boardTypes.js";
 import { useRef, useEffect, useState } from "react";
 import type { CreateIssueRequest, IssueEstimate } from "@agentic-kanban/shared";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { isHttpUrl } from "../lib/url.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import TicketMentionInput from "./TicketMentionInput.js";
 import { useIssueTemplates } from "../hooks/useIssueTemplates.js";
 import { handleImagePaste, mergeDescriptionWithImages } from "../lib/pastedImages.js";
+import { ISSUE_TYPES, issueTypeLabel } from "@agentic-kanban/shared";
 
 interface Skill {
   id: string;
@@ -20,17 +22,6 @@ interface WorkflowTemplate {
   isDefault: boolean;
 }
 
-export interface CreateIssueFormState {
-  title: string;
-  description: string;
-  pastedImages: string[];
-  issueType: CreateIssueRequest["issueType"];
-  estimate?: IssueEstimate | "";
-  startWorkspace: boolean;
-  planMode: boolean;
-  skipAutoReview: boolean;
-  skillId?: string;
-}
 
 interface CreateIssueFormProps {
   projectId: string;
@@ -198,6 +189,7 @@ export function CreateIssueForm({
 
   return (
     <form
+      data-testid="create-issue-form"
       onSubmit={handleSubmit}
       onKeyDown={handleKeyDown}
       onBlur={handleBlur}
@@ -205,6 +197,7 @@ export function CreateIssueForm({
     >
       <textarea
         ref={titleRef}
+        data-testid="create-issue-title"
         placeholder="Issue title"
         value={title}
         onChange={(e) => setTitle(e.target.value)}
@@ -215,6 +208,7 @@ export function CreateIssueForm({
       />
       <TicketMentionInput
         inputRef={descRef}
+        data-testid="create-issue-description"
         placeholder="Description (optional) — paste screenshots with Ctrl+V"
         value={description}
         onChange={(val) => setDescription(val)}
@@ -260,10 +254,9 @@ export function CreateIssueForm({
           onChange={(e) => setIssueType(e.target.value as CreateIssueRequest["issueType"])}
           className="flex-1 text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
         >
-          <option value="task">Task</option>
-          <option value="bug">Bug</option>
-          <option value="feature">Feature</option>
-          <option value="chore">Chore</option>
+          {ISSUE_TYPES.map((t) => (
+            <option key={t} value={t}>{issueTypeLabel(t)}</option>
+          ))}
         </select>
         <select
           value={estimate}
@@ -373,6 +366,7 @@ export function CreateIssueForm({
       <div className="flex gap-1.5 items-center flex-wrap">
         <button
           type="submit"
+          data-testid="create-issue-submit"
           disabled={!title.trim() || submitting}
           className="text-xs bg-brand-600 text-white px-3 py-1.5 rounded hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
@@ -435,3 +429,6 @@ export function CreateIssueForm({
     </form>
   );
 }
+
+/** #610 — re-exported so this component's existing importers are unchanged. */
+export type { CreateIssueFormState } from "../lib/boardTypes.js";

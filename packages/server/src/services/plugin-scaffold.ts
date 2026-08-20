@@ -1,0 +1,235 @@
+/**
+ * A plugin's scaffold file — extracted from `plugin.service.ts` to keep it under the 1000-line
+ * god-module ceiling. That ceiling is part of `verify_script`, so when it trips it fails the
+ * pre-merge gate for EVERY workspace on the board, not only the branch that grew the file.
+ *
+ * All three functions already took everything they needed as arguments, so this is a pure lift:
+ * no service closure, no database, no plugin registry.
+ */
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+import {
+  countScaffoldPlaceholders,
+  substitutePluginPlaceholders,
+  type PluginManifest,
+} from "@agentic-kanban/shared/lib/plugin-manifest";
+import type { PluginRow } from "../repositories/plugins.repository.js";
+import { PluginError } from "./plugin-errors.js";
+import { resolveInside, commitPathWithRetry } from "./plugin-fs.js";
+
+/** The subset of EnableReport the scaffold fan-out writes into. */
+export interface ScaffoldReportSink {
+  scaffoldWritten: boolean;
+  scaffoldPlaceholders: number;
+  warnings: string[];
+}
+
+type PluginWithManifest = PluginRow & { manifest: PluginManifest };
+
+/**
+ * Write the plugin's scaffold template into the target repo, substituting placeholders.
+ * No-op when the plugin declares no scaffold or the target already exists (never clobbers a
+ * file the human may have filled in).
+ *
+ * Commits the written file (#477): a worktree only materializes COMMITTED content, so an
+ * uncommitted scaffold is invisible to the very first worktree a loop/script ticket creates —
+ * best-effort, matching the registration scaffold's own `commitProjectScaffoldArtifacts`.
+ */
+export async function fanOutScaffold(
+  plugin: PluginWithManifest,
+  repoPath: string,
+  leadingRepoPath: string,
+  projectName: string,
+  report: ScaffoldReportSink,
+): Promise<void> {
+  const scaffold = plugin.manifest.scaffold;
+  if (!scaffold) return;
+  const target = resolveInside(repoPath, scaffold.targetPath, `scaffold targetPath "${scaffold.targetPath}"`);
+  if (existsSync(target)) return;
+  const templatePath = resolveInside(plugin.localPath, scaffold.profileTemplate, "scaffold profileTemplate");
+  if (!existsSync(templatePath)) {
+    report.warnings.push(`scaffold template not found in plugin: ${scaffold.profileTemplate}`);
+    return;
+  }
+  const content = substitutePluginPlaceholders(readFileSync(templatePath, "utf8"), {
+    repoPath,
+    leadingRepoPath,
+    projectName,
+    pluginPath: plugin.localPath,
+  });
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, content, "utf8");
+  report.scaffoldWritten = true;
+  report.scaffoldPlaceholders = countScaffoldPlaceholders(content);
+  if (report.scaffoldPlaceholders > 0) {
+    report.warnings.push(
+      `scaffold written — ${report.scaffoldPlaceholders} placeholder${report.scaffoldPlaceholders === 1 ? "" : "s"} `
+      + `need filling in ${scaffold.targetPath} before this plugin's scripts/loops will run`,
+    );
+  }
+  await commitPathWithRetry(repoPath, scaffold.targetPath, `plugin: scaffold ${plugin.pluginId} ${scaffold.targetPath}`);
+}
+
+/**
+ * Live readiness of a plugin's scaffold file (not the write-time snapshot in
+ * `EnableReport` — the human may fill it in any time after enable). Returns
+ * `null` when the plugin declares no scaffold, or the file doesn't exist yet
+ * (nothing to gate on until it's written).
+ */
+export function scaffoldPlaceholderStatus(
+  plugin: PluginWithManifest,
+  repoPath: string,
+): { targetPath: string; remaining: number } | null {
+  const scaffold = plugin.manifest.scaffold;
+  if (!scaffold) return null;
+  const target = resolveInside(repoPath, scaffold.targetPath, `scaffold targetPath "${scaffold.targetPath}"`);
+  if (!existsSync(target)) return null;
+  return { targetPath: scaffold.targetPath, remaining: countScaffoldPlaceholders(readFileSync(target, "utf8")) };
+}
+
+/** One unresolved `TODO:` marker, addressable by its occurrence index (#291). */
+export interface ScaffoldField {
+  /** 0-based occurrence index among the file's REAL (non-code-span) `TODO:` markers. */
+  index: number;
+  /** The text after `TODO:` on that line — the field's label/hint for the form. */
+  label: string;
+  /** The full line, for context in the form UI. */
+  line: string;
+}
+
+/**
+ * End offset of a `TODO:` hint that may WRAP onto following lines (#439).
+ *
+ * Templates write these hints as prose, so they wrap naturally:
+ *
+ *   - **Input documents:** TODO: repo-relative path to any source material (market reports,
+ *     requirements, interface docs) the agents must ground on, or "none"
+ *
+ * Replacing only to the first newline left the second line behind in the filled
+ * profile, where every step agent then read template hint text — complete with an
+ * unbalanced `)` — as if it were the human's answer.
+ *
+ * A continuation is a line that is INDENTED, non-blank, and does not begin a new
+ * list item, heading or `TODO:`. Those exclusions are the safety rail: swallowing
+ * the next bullet would silently delete a whole field, which is far worse than the
+ * orphan line this fixes.
+ */
+function hintEnd(masked: string, from: number): number {
+  let end = masked.indexOf("\n", from);
+  if (end === -1) return masked.length;
+  for (;;) {
+    const nextEnd = masked.indexOf("\n", end + 1);
+    const line = masked.slice(end + 1, nextEnd === -1 ? masked.length : nextEnd);
+    if (!/^[ \t]+\S/.test(line)) return end;
+    const body = line.trim();
+    if (/^[-*+]\s/.test(body) || body.startsWith("#") || body.includes("TODO:")) return end;
+    end = nextEnd === -1 ? masked.length : nextEnd;
+    if (nextEnd === -1) return end;
+  }
+}
+
+/**
+ * Strip inline-code spans the same way `countScaffoldPlaceholders` does, so the
+ * form's field count and the gate's placeholder count can never disagree about
+ * which markers are real.
+ */
+function maskCodeSpans(content: string): string {
+  // Replace span CONTENT with spaces of equal length — offsets must survive.
+  return content.replace(/`[^`\n]*`/g, (m) => "`".padEnd(m.length - 1, " ") + "`");
+}
+
+/** Parse the scaffold's unresolved TODO markers into form fields (#291). */
+export function parseScaffoldFields(content: string): ScaffoldField[] {
+  const masked = maskCodeSpans(content);
+  const fields: ScaffoldField[] = [];
+  const re = /TODO:/g;
+  let match: RegExpExecArray | null;
+  let index = 0;
+  while ((match = re.exec(masked)) !== null) {
+    const lineStart = masked.lastIndexOf("\n", match.index) + 1;
+    // Wrapped hints count as one field (#439) — otherwise the form showed a label
+    // truncated mid-sentence at the line break.
+    const lineEnd = hintEnd(masked, match.index);
+    // Read label/line from the ORIGINAL content at the same offsets — the mask
+    // only hides code spans from the scan, it must not leak into the UI.
+    const collapse = (s: string) => s.trim().replace(/\s*\r?\n\s*/g, " ");
+    fields.push({
+      index,
+      label: collapse(content.slice(match.index + "TODO:".length, lineEnd)),
+      line: collapse(content.slice(lineStart, lineEnd)),
+    });
+    index++;
+  }
+  return fields;
+}
+
+/**
+ * Replace TODO markers with human-supplied values, by occurrence index (#291).
+ * Each value replaces `TODO:` and the rest of that line's marker text (the
+ * label is a hint, not content). Unaddressed markers stay. Returns the new
+ * content and how many markers remain.
+ */
+export function applyScaffoldValues(
+  content: string,
+  values: Array<{ index: number; value: string }>,
+): { content: string; remaining: number } {
+  const byIndex = new Map(values.filter((v) => v.value.trim()).map((v) => [v.index, v.value.trim()]));
+  const masked = maskCodeSpans(content);
+  const re = /TODO:/g;
+  let match: RegExpExecArray | null;
+  let index = 0;
+  // Collect replacements as [start, end, text] against the ORIGINAL content, then apply
+  // back-to-front so earlier offsets stay valid.
+  const edits: Array<{ start: number; end: number; text: string }> = [];
+  while ((match = re.exec(masked)) !== null) {
+    const value = byIndex.get(index);
+    if (value !== undefined) {
+      // Consume the hint's wrapped continuation lines too (#439) — leaving them
+      // behind put template prose into the profile as if it were the answer.
+      edits.push({ start: match.index, end: hintEnd(masked, match.index), text: value });
+    }
+    index++;
+  }
+  let out = content;
+  for (const edit of edits.reverse()) {
+    out = out.slice(0, edit.start) + edit.text + out.slice(edit.end);
+  }
+  return { content: out, remaining: countScaffoldPlaceholders(out) };
+}
+
+/**
+ * Throws a clear, actionable error instead of letting a script/loop fail on unfilled scaffold
+ * TODOs. Also the single choke point every scripts/loops launch passes through (#477): once the
+ * scaffold reads as ready, it COMMITS the file before returning, so a ticket this call unblocks
+ * always launches a worktree that can actually see the filled profile — regardless of whether it
+ * got filled via `fillScaffoldForm`, `saveScaffoldContent`, or a human/agent editing the file
+ * directly in the leading repo (neither of the DB-backed writers is the only way this file gets
+ * written, and an edit that skips them would otherwise skip their commit too).
+ */
+export async function requireScaffoldReady(
+  plugin: PluginWithManifest,
+  repoPath: string,
+  action: "scripts" | "loops",
+): Promise<void> {
+  const status = scaffoldPlaceholderStatus(plugin, repoPath);
+  if (!status) return;
+  if (status.remaining > 0) {
+    throw new PluginError(
+      `Scaffold "${status.targetPath}" still has ${status.remaining} unresolved TODO: placeholder${status.remaining === 1 ? "" : "s"} `
+      + `— fill them in before running this plugin's ${action}.`,
+      "CONFLICT",
+    );
+  }
+  const committed = await commitPathWithRetry(
+    repoPath,
+    status.targetPath,
+    `plugin: commit ${plugin.pluginId} scaffold ${status.targetPath}`,
+  );
+  if (!committed) {
+    throw new PluginError(
+      `Scaffold "${status.targetPath}" is filled but could not be committed in ${repoPath} `
+      + `— commit it manually before running this plugin's ${action} (a worktree only sees committed content).`,
+      "CONFLICT",
+    );
+  }
+}

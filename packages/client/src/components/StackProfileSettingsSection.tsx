@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { StackProfile, StackProfileResponse } from "@agentic-kanban/shared";
 import { apiFetch, apiPut } from "../lib/api.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 import { CollapsibleSection } from "./SettingsPanel.shared.js";
 
 interface StackProfileSettingsSectionProps {

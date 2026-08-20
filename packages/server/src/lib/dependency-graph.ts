@@ -6,4 +6,4 @@
  * not drift (mcp's `add_dependency` tool previously hand-rolled its own DFS).
  * Edit the shared module, not this file.
  */
-export * from "@agentic-kanban/shared/lib/dependency-graph.js";
+export * from "@agentic-kanban/shared/lib/dependency-graph";

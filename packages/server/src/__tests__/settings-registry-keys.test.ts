@@ -1,3 +1,4 @@
+// @gate:always-run — cross-checks server SETTINGS_KEYS against the shared registry (#538).
 import { describe, it, expect } from "vitest";
 import { SETTINGS_KEYS } from "../services/preference.service.js";
 import {

@@ -4,55 +4,25 @@ export function createAgentStreamParseContext(): ParseContext {
   return { toolNames: new Map<string, string>() };
 }
 
-export function objectValue(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
-}
+import { objectValue } from "../json-narrow.js";
 
-export function optionalObject(value: unknown): Record<string, unknown> | undefined {
-  const record = objectValue(value);
-  return Object.keys(record).length > 0 ? record : undefined;
-}
-
-export function stringValue(value: unknown): string | undefined {
-  return typeof value === "string" && value ? value : undefined;
-}
-
-export function numberValue(value: unknown): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-
-export function stringifyValue(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (value === undefined) return "";
-  return JSON.stringify(value) ?? "";
-}
-
-export function contentToText(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (!Array.isArray(value)) return "";
-  return value
-    .map((block) => {
-      if (typeof block === "string") return block;
-      const record = objectValue(block);
-      return stringValue(record.text) ?? stringValue(record.content) ?? stringValue(record.message) ?? "";
-    })
-    .filter(Boolean)
-    .join("\n");
-}
-
-export function getString(obj: Record<string, unknown>, keys: string[]): string {
-  for (const key of keys) {
-    const value = obj[key];
-    if (typeof value === "string" && value.trim()) return value;
-  }
-  return "";
-}
-
-export function getStringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
-}
+// The JSON-narrowing helpers moved to ../json-narrow.ts (#534) so non-parser code
+// can import them without reaching into the agent-stream module. Re-exported here so
+// every existing importer of this file is unaffected.
+export {
+  objectValue,
+  optionalObject,
+  stringValue,
+  numberValue,
+  stringifyValue,
+  contentToText,
+  getString,
+  getStringArray,
+  asRecord,
+  isRecord,
+  optionalString,
+  optionalNumber,
+} from "../json-narrow.js";
 
 export function pushDisplay(result: ParsedStreamEvent, event: AgentDisplayEvent): void {
   (result.displayEvents ??= []).push(event);

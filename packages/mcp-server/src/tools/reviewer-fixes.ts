@@ -4,7 +4,10 @@ import { eq, and, gte } from "drizzle-orm";
 import { parseSessionSummary } from "@agentic-kanban/shared";
 import { getCommitsForBranch } from "../git-service.js";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { resolveActiveProjectId } from "../db-utils.js";
+import { mcpJson, mcpText, resolveActiveProjectId } from "../db-utils.js";
+// Session-role classification is the shared traits table (#495) — this file used to
+// carry a byte-identical private copy of it.
+import { triggerRole as classifyTrigger } from "@agentic-kanban/shared/lib/session-trigger";
 
 /**
  * Mirrors `pnpm cli -- session reviewer-fixes`.
@@ -17,15 +20,6 @@ import { resolveActiveProjectId } from "../db-utils.js";
  */
 export function registerReviewerFixes(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema } = deps;
-
-  function classifyTrigger(t: string | null): "review" | "build" | "rework" | "noise" | "other" {
-    if (!t) return "build";
-    if (t === "review" || t.startsWith("skill:code-review")) return "review";
-    if (t.startsWith("skill:board-monitor") || t.startsWith("skill:board-navigator")) return "noise";
-    if (t === "chat" || t === "fix-and-merge" || t === "fix-conflicts" || t === "plan-reject") return "rework";
-    if (t === "verify" || t === "learning" || t === "bisect" || t === "reconcile") return "other";
-    return "build";
-  }
 
   server.tool(
     "reviewer_fixes",
@@ -55,7 +49,7 @@ export function registerReviewerFixes(server: McpServer, deps: ToolDeps = prodDe
         .limit(1);
       const repoPath = projRows[0]?.repoPath;
       if (!repoPath) {
-        return { content: [{ type: "text" as const, text: `Project '${pid}' has no repoPath.` }] };
+        return mcpText(`Project '${pid}' has no repoPath.`);
       }
 
       // Fetch sessions in window
@@ -301,12 +295,7 @@ export function registerReviewerFixes(server: McpServer, deps: ToolDeps = prodDe
         reviewerCommitSubjects: r.reviewerCommitSubjects,
       }));
 
-      return {
-        content: [{
-          type: "text" as const,
-          text: JSON.stringify(report, null, 2),
-        }],
-      };
+      return mcpJson(report);
     },
   );
 }

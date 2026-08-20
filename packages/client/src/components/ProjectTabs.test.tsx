@@ -80,4 +80,40 @@ describe("ProjectTabs", () => {
       });
     }
   });
+
+  it("shows an active-agent badge on a pinned tab and in the overflow list", () => {
+    const originalLocalStorage = globalThis.localStorage;
+    Object.defineProperty(globalThis, "localStorage", {
+      value: {
+        getItem: () => JSON.stringify({
+          pinnedIds: ["project-1", "project-2", "project-3", "project-4", "project-5", "project-6"],
+          recentIds: [],
+        }),
+        setItem: () => undefined,
+      },
+      configurable: true,
+    });
+
+    const projectsWithActivity: ProjectTabProject[] = projects.map((project) =>
+      project.id === "project-1"
+        ? { ...project, activeWorkspaceCount: 2 }
+        : project.id === "project-6"
+          ? { ...project, activeWorkspaceCount: 3 }
+          : project,
+    );
+
+    try {
+      const html = renderToStaticMarkup(
+        <ProjectTabs projects={projectsWithActivity} activeProjectId="project-1" onProjectChange={() => undefined} />,
+      );
+
+      expect(html).toContain("2 active agents");
+      expect(html).toContain("Six (3 active)");
+    } finally {
+      Object.defineProperty(globalThis, "localStorage", {
+        value: originalLocalStorage,
+        configurable: true,
+      });
+    }
+  });
 });

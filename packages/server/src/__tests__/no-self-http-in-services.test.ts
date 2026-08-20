@@ -1,3 +1,4 @@
+// @gate:always-run — scans services/ for self-HTTP calls; imports nothing it checks (#538).
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -24,6 +25,14 @@ import { join } from "node:path";
 // (auto-start, backlog refill, the scheduled-run trigger). They are allow-listed
 // below; remove each from STARTUP_SELF_HTTP_ALLOWLIST as it is migrated to a
 // direct service call, tightening the gate until the allow-list is empty.
+//
+// NARROW EXEMPTION: a probe against a plugin's SUPERVISED CHILD PROCESS (its view
+// server, spawned by spawnShellCommand on a dynamically allocated port) is not the
+// anti-pattern this gate targets — that child is a genuinely separate process with
+// no in-process function to inject, not "this server calling itself". Such a probe
+// may opt out of the scan with a `SELF-HTTP OK:` comment on the line immediately
+// above the call, explaining WHY the target is not this server. This is an explicit,
+// per-call, justified opt-out (grep-visible), not a file/directory allow-list.
 
 const SERVICES_DIR = join(import.meta.dirname, "..", "services");
 const STARTUP_DIR = join(import.meta.dirname, "..", "startup");
@@ -50,10 +59,15 @@ function collectSourceFiles(dir: string): string[] {
   return out;
 }
 
-/** Strip // line and block comments so a comment mentioning localhost is not flagged. */
+/**
+ * Strip // line and block comments so a comment mentioning localhost is not flagged.
+ * Block-comment removal preserves embedded newlines (replaced with the same count of
+ * "\n") so line numbers in the stripped text stay aligned with the original source —
+ * callers rely on that alignment to look up the raw line preceding a match.
+ */
 function stripComments(src: string): string {
   return src
-    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ""))
     .replace(/(^|[^:])\/\/.*$/gm, "$1");
 }
 
@@ -62,14 +76,23 @@ function stripComments(src: string): string {
 const SELF_HTTP_RE =
   /\b(?:fetch|axios|got|request)\s*\(\s*[^)]*?(?:127\.0\.0\.1|localhost|\bgetRuntimePort\b|\bruntimePort\b|\$\{[^}]*[Pp]ort[^}]*\})/;
 
+// Opt-out for a probe against a genuinely separate, board-supervised child process
+// (e.g. a plugin's view server) — must carry a reason, not just the bare marker.
+const SELF_HTTP_ALLOW_RE = /SELF-HTTP OK:\s*\S.+/;
+
 function scanForSelfHttp(files: string[]): string[] {
   const offenders: string[] = [];
   for (const file of files) {
-    const code = stripComments(readFileSync(file, "utf8"));
-    for (const line of code.split("\n")) {
-      if (SELF_HTTP_RE.test(line)) {
-        offenders.push(`${file.replace(/\\/g, "/").replace(/.*packages\//, "packages/")}: ${line.trim()}`);
-      }
+    const raw = readFileSync(file, "utf8");
+    const rawLines = raw.split("\n");
+    const code = stripComments(raw);
+    const codeLines = code.split("\n");
+    for (let i = 0; i < codeLines.length; i++) {
+      const line = codeLines[i]!;
+      if (!SELF_HTTP_RE.test(line)) continue;
+      const precedingComment = rawLines[i - 1] ?? "";
+      if (SELF_HTTP_ALLOW_RE.test(precedingComment)) continue;
+      offenders.push(`${file.replace(/\\/g, "/").replace(/.*packages\//, "packages/")}: ${line.trim()}`);
     }
   }
   return offenders;

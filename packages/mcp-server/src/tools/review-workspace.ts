@@ -1,12 +1,15 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { db, schema } from "../db.js";
+import { prodDeps, type ToolDeps } from "./deps.js";
+import { boardApi, boardErrorText, mcpJson, mcpText } from "../board-call.js";
 import { eq } from "drizzle-orm";
 import { notifyBoard } from "../notify.js";
 import { requireEntity } from "../db-utils.js";
-import { boardApiUrl } from "../server-url.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
-export function registerReviewWorkspace(server: McpServer) {
+export function registerReviewWorkspace(server: McpServer, deps: ToolDeps = prodDeps) {
+  const { db, schema } = deps;
+
   server.tool(
     "review_workspace",
     "Trigger an AI code review for an idle workspace. The workspace must be in 'idle' status.",
@@ -21,15 +24,14 @@ export function registerReviewWorkspace(server: McpServer) {
       if (!r.ok) return r.error;
 
       try {
-        const res = await fetch(boardApiUrl(`/api/workspaces/${workspaceId}/review`), {
+        const { ok, statusText, data: raw } = await boardApi(`/api/workspaces/${workspaceId}/review`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({}),
         });
-        const data = await res.json() as { error?: string; sessionId?: string };
+        const data = (raw ?? {}) as { sessionId?: string };
 
-        if (!res.ok) {
-          return { content: [{ type: "text" as const, text: `Review failed: ${data.error ?? res.statusText}` }] };
+        if (!ok) {
+          return mcpText(`Review failed: ${boardErrorText(raw, statusText)}`);
         }
 
         // Resolve projectId for board notification
@@ -41,16 +43,9 @@ export function registerReviewWorkspace(server: McpServer) {
           notifyBoard(issueRows[0].projectId, "mcp_review_workspace");
         }
 
-        return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify({ id: workspaceId, sessionId: data.sessionId }, null, 2),
-          }],
-        };
+        return mcpJson({ id: workspaceId, sessionId: data.sessionId });
       } catch (err) {
-        return {
-          content: [{ type: "text" as const, text: `Review failed: ${err instanceof Error ? err.message : String(err)}` }],
-        };
+        return mcpText(`Review failed: ${errorMessage(err)}`);
       }
     },
   );

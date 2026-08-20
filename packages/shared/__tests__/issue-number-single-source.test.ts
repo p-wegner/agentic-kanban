@@ -1,3 +1,4 @@
+// @gate:always-run — whole-tree scan for hand-rolled issue-number derivation; imports nothing it checks (#647).
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve, relative, sep } from "node:path";

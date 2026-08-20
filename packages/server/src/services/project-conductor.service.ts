@@ -1,3 +1,5 @@
+import { strategyPrefKey } from "@agentic-kanban/shared/lib/strategy-policy";
+import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -9,6 +11,7 @@ import {
   PROJECT_CONDUCTOR_STATE_RELATIVE_DIR,
   writeStrategyObjective,
 } from "./strategy-objective.service.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export interface ProjectConductorConfig {
   enabled: boolean;
@@ -16,7 +19,7 @@ export interface ProjectConductorConfig {
   cadenceSeconds: number;
 }
 
-const CONDUCTOR_KEY_RE = /^board_conductor_([0-9a-f-]+)$/;
+const conductorPref = projectPref("board_conductor");
 
 export function parseProjectConductorConfig(raw: string | null | undefined): ProjectConductorConfig {
   if (!raw) return { enabled: false, agent: "codex", cadenceSeconds: 1800 };
@@ -37,7 +40,7 @@ export function parseProjectConductorConfig(raw: string | null | undefined): Pro
 }
 
 function projectIdFromConductorKey(key: string): string | null {
-  return CONDUCTOR_KEY_RE.exec(key)?.[1] ?? null;
+  return conductorPref.projectIdOf(key);
 }
 
 async function enabledProjectConductors(database: Database): Promise<Map<string, ProjectConductorConfig>> {
@@ -54,7 +57,7 @@ async function enabledProjectConductors(database: Database): Promise<Map<string,
 
 async function ensureObjective(database: Database, project: typeof projects.$inferSelect): Promise<void> {
   const rows = await database.select().from(preferences);
-  const strategyRaw = rows.find((row) => row.key === `board_strategy_${project.id}`)?.value ?? "{}";
+  const strategyRaw = rows.find((row) => row.key === strategyPrefKey(project.id))?.value ?? "{}";
   writeStrategyObjective(project.repoPath, strategyRaw, {
     objectiveRelativePath: PROJECT_CONDUCTOR_OBJECTIVE_RELATIVE_PATH,
     createIfMissing: true,
@@ -149,18 +152,18 @@ export function startProjectConductorSupervisor(options: { database: Database; b
             launched.delete(projectId);
             noteSpawnFailure(projectId);
             const next = failures.get(projectId);
-            console.warn(`[conductor] failed to launch project ${projectId} (attempt ${next?.count}, backing off ${Math.round((next ? next.until - Date.now() : 0) / 1000)}s):`, err instanceof Error ? err.message : String(err));
+            console.warn(`[conductor] failed to launch project ${projectId} (attempt ${next?.count}, backing off ${Math.round((next ? next.until - Date.now() : 0) / 1000)}s):`, errorMessage(err));
           });
           child.unref();
           launched.set(projectId, project.repoPath);
           console.log(`[conductor] launched project ${projectId} (${project.name}) agent=${config.agent} cadence=${config.cadenceSeconds}s`);
         } catch (err) {
           noteSpawnFailure(projectId);
-          console.warn(`[conductor] spawn threw for project ${projectId}:`, err instanceof Error ? err.message : String(err));
+          console.warn(`[conductor] spawn threw for project ${projectId}:`, errorMessage(err));
         }
       }
     } catch (err) {
-      console.warn("[conductor] supervisor sync failed:", err instanceof Error ? err.message : String(err));
+      console.warn("[conductor] supervisor sync failed:", errorMessage(err));
     } finally {
       syncRunning = false;
     }

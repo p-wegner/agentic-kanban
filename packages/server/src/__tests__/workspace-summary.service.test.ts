@@ -1,7 +1,33 @@
 import { randomUUID } from "node:crypto";
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync, unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it, vi, beforeEach, afterAll } from "vitest";
+import { sessionOutputPath } from "@agentic-kanban/shared/lib/session-files";
 import { issues, projects, projectStatuses, sessions, workflowEdges, workflowNodes, workflowTemplates, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
+
+// The summary service skips git work for a workingDir that does not EXIST on disk
+// (#277 — a set-but-vanished path otherwise costs doomed git spawns on every board
+// build). These two suites assert diff-stat caching behaviour, which requires the
+// workspace to be eligible, so they need a real directory rather than a made-up path.
+const tempWorktrees: string[] = [];
+function makeTempWorktree(label: string): string {
+  const dir = mkdtempSync(join(tmpdir(), `ws-summary-${label}-`));
+  tempWorktrees.push(dir);
+  return dir;
+}
+// Session .out transcript fixtures (#341) written into %TEMP% under the real
+// sessionOutputPath scheme, so the service's bounded reader is exercised for real.
+const tempOutFiles: string[] = [];
+afterAll(() => {
+  while (tempWorktrees.length > 0) {
+    try { rmSync(tempWorktrees.pop()!, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+  while (tempOutFiles.length > 0) {
+    try { unlinkSync(tempOutFiles.pop()!); } catch { /* best effort */ }
+  }
+});
 
 const getDiffShortstat = vi.fn();
 const getLatestCommit = vi.fn();
@@ -245,6 +271,66 @@ describe("workspace-summary.service", () => {
     expect(summaryMap.get(issueId)?.main?.contextTokens).toBe(42_000);
   });
 
+  it("G9: latest-session selection is unchanged for a multi-session workspace with the stats-less list query", async () => {
+    // The session list query no longer ships every row's stats blob; stats are
+    // fetched separately for just the winner. This pins that the winner (and its
+    // stats-derived contextTokens) is IDENTICAL to the old single-query semantics.
+    const { db } = createTestDb();
+    const now = Date.now();
+    const iso = (msAgo: number) => new Date(now - msAgo).toISOString();
+    const projectId = randomUUID();
+    const statusId = randomUUID();
+    const issueId = randomUUID();
+    const workspaceId = randomUUID();
+
+    await db.insert(projects).values({
+      id: projectId, name: "Multi Session", repoPath: "/tmp/multi-session", repoName: "multi-session",
+      defaultBranch: "main", createdAt: iso(0), updatedAt: iso(0),
+    });
+    await db.insert(projectStatuses).values({
+      id: statusId, projectId, name: "In Progress", sortOrder: 0, isDefault: true, createdAt: iso(0),
+    });
+    await db.insert(issues).values({
+      id: issueId, issueNumber: 9, title: "Many sessions", statusId, projectId, createdAt: iso(0), updatedAt: iso(0),
+    });
+    await db.insert(workspaces).values({
+      id: workspaceId, issueId, branch: "feature/many", status: "idle", createdAt: iso(0), updatedAt: iso(0),
+    });
+
+    const latestSessionId = randomUUID();
+    await db.insert(sessions).values([
+      {
+        id: randomUUID(), workspaceId, executor: "claude", status: "completed",
+        startedAt: iso(3 * 3600_000), endedAt: iso(3 * 3600_000 - 60_000),
+        stats: JSON.stringify({ contextTokens: 11_000 }),
+      },
+      {
+        id: latestSessionId, workspaceId, executor: "claude", status: "completed",
+        startedAt: iso(1 * 3600_000), endedAt: iso(1 * 3600_000 - 60_000),
+        stats: JSON.stringify({ contextTokens: 77_000 }),
+      },
+      {
+        // Noise session (analytics trigger) NEWER than the real latest — must not win.
+        id: randomUUID(), workspaceId, executor: "claude", status: "completed",
+        startedAt: iso(10 * 60_000), endedAt: iso(9 * 60_000),
+        triggerType: "skill:board-monitor",
+        stats: JSON.stringify({ contextTokens: 1 }),
+      },
+      {
+        id: randomUUID(), workspaceId, executor: "claude", status: "completed",
+        startedAt: iso(2 * 3600_000), endedAt: iso(2 * 3600_000 - 60_000),
+        stats: JSON.stringify({ contextTokens: 22_000 }),
+      },
+    ]);
+
+    const summaryMap = await buildWorkspaceSummaryMap([issueId], "main", db);
+    const main = summaryMap.get(issueId)?.main;
+    expect(main?.lastSessionAt).toBe(iso(1 * 3600_000 - 60_000));
+    expect(main?.sessionStatus).toBe("completed");
+    expect(main?.contextTokens).toBe(77_000);
+    void latestSessionId;
+  });
+
   it("issues a bounded number of DB queries independent of issue count", async () => {
     // Verifies the N+1 fix: DB round-trips must not grow linearly with issueCount.
     // We seed N issues each with a workspace, count the execute() calls for N=2 vs
@@ -359,7 +445,7 @@ describe("workspace-summary.service", () => {
       id: workspaceId,
       issueId,
       branch: "feature/cached",
-      workingDir: "/tmp/cache-project/.worktrees/cached",
+      workingDir: makeTempWorktree("cached"),
       baseBranch: "main",
       status: "idle",
       // Cache is fresh and HEAD SHA matches
@@ -380,6 +466,7 @@ describe("workspace-summary.service", () => {
   });
 
   it("triggers background diff refresh immediately when HEAD SHA advances", async () => {
+    const headChangedWorktree = makeTempWorktree("head-changed");
     const { db } = createTestDb();
     const now = new Date().toISOString();
     const recentCheckedAt = new Date(Date.now() - 5_000).toISOString(); // 5s ago — within TTL
@@ -423,7 +510,7 @@ describe("workspace-summary.service", () => {
       id: workspaceId,
       issueId,
       branch: "feature/head-changed",
-      workingDir: "/tmp/head-changed/.worktrees/head-changed",
+      workingDir: headChangedWorktree,
       baseBranch: "main",
       status: "idle",
       // Cache is within TTL but HEAD SHA is outdated
@@ -440,7 +527,7 @@ describe("workspace-summary.service", () => {
 
     // Background refresh must be triggered because HEAD advanced
     await vi.waitFor(() => expect(getDiffShortstat).toHaveBeenCalledWith(
-      "/tmp/head-changed/.worktrees/head-changed",
+      headChangedWorktree,
       "main",
     ));
   });
@@ -618,5 +705,91 @@ describe("workspace-summary.service", () => {
     expect(summary!.main).not.toBeNull();
     expect(summary!.main!.id).toBe(activeWorkspaceId);
     expect(summary!.main!.status).toBe("active");
+  });
+
+  // #341: the transcript read is BOUNDED to a tail window. Before the fix this was a
+  // full readFileSync of a multi-MB .out file on the event loop, and — because the
+  // extractors return the FIRST match in whatever window they get — lastTool reported
+  // the session's opening tool forever. Both properties are asserted here: the recent
+  // (tail) activity is what surfaces, and the >256KB head is never consulted.
+  it("derives lastTool/lastAssistantMessage from the tail of a >256KB .out transcript (#341)", async () => {
+    const { db } = createTestDb();
+    const now = new Date().toISOString();
+    const projectId = randomUUID();
+    const statusId = randomUUID();
+    const issueId = randomUUID();
+    const workspaceId = randomUUID();
+    const sessionId = randomUUID();
+
+    await db.insert(projects).values({
+      id: projectId,
+      name: "Tail Project",
+      repoPath: "/tmp/tail-project",
+      repoName: "tail-project",
+      defaultBranch: "main",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(projectStatuses).values({
+      id: statusId,
+      projectId,
+      name: "In Progress",
+      position: 1,
+      createdAt: now,
+    });
+    await db.insert(issues).values({
+      id: issueId,
+      projectId,
+      statusId,
+      issueNumber: 1,
+      title: "Tail read",
+      position: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(workspaces).values({
+      id: workspaceId,
+      issueId,
+      branch: "feature/tail",
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(sessions).values({
+      id: sessionId,
+      workspaceId,
+      executor: "claude",
+      status: "running",
+      startedAt: now,
+    });
+
+    const jsonl = (tool: string, text: string) =>
+      JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "tool_use", name: tool }, { type: "text", text }] },
+      }) + "\n";
+
+    // The session's OPENING activity, then >256KB of unparseable filler (real
+    // transcripts are full of it), then the RECENT activity. The head event is thus
+    // outside the tail window: a full-file read reports "Glob" (what this used to do),
+    // a bounded tail read reports "Bash".
+    const filler = "not-a-json-stream-line padding padding padding\n".repeat(7000);
+    expect(filler.length).toBeGreaterThan(256 * 1024);
+    const outPath = sessionOutputPath(sessionId);
+    writeFileSync(
+      outPath,
+      jsonl("Glob", "Opening move — must not be reported.")
+        + filler
+        + jsonl("Bash", "Recent activity — this is the tail."),
+      "utf-8",
+    );
+    tempOutFiles.push(outPath);
+
+    const summaryMap = await buildWorkspaceSummaryMap([issueId], "main", db);
+    const main = summaryMap.get(issueId)?.main;
+
+    expect(main).toBeTruthy();
+    expect(main!.lastTool).toBe("Bash");
+    expect(main!.lastAssistantMessage).toBe("Recent activity — this is the tail.");
   });
 });

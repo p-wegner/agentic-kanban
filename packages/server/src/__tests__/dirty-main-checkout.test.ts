@@ -18,8 +18,6 @@ async function git(args: string[]) {
 async function initRepo() {
   repoDir = await mkdtemp(join(tmpdir(), "ak-dirty-main-"));
   await git(["init", "-b", "main"]);
-  await git(["config", "user.email", "test@example.com"]);
-  await git(["config", "user.name", "Test User"]);
   await mkdir(join(repoDir, "packages", "server", "src"), { recursive: true });
   await mkdir(join(repoDir, "docs"), { recursive: true });
   await writeFile(join(repoDir, "packages", "server", "src", "index.ts"), "export const value = 1;\n");

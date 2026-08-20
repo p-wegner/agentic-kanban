@@ -18,15 +18,23 @@ const IGNORED_DIRS = new Set([
   "target",
 ]);
 
-export function classifyProcessExit(code, signal) {
+// A child that stayed up this long is considered to have started successfully,
+// so a later exit is a crash under load rather than a startup failure.
+export const HEALTHY_UPTIME_MS = 10_000;
+
+export function classifyProcessExit(code, signal, context = {}) {
   if (signal === "SIGINT" || signal === "SIGTERM") return "clean";
   if (code === 0) return "clean";
 
-  // The server child is `tsx watch src/index.ts`. tsx handles hot reloads inside
-  // that watcher process, so this supervisor should only see an exit when the
-  // watcher itself stopped. Keep code=1 fatal to avoid retry loops on startup
-  // failures such as EADDRINUSE, migration errors, or syntax/load failures.
-  if (code === 1) return "fatal";
+  if (code === 1) {
+    // Startup failures (EADDRINUSE, migration errors, syntax/load failures)
+    // reproduce on every attempt, so retrying them just loops — keep those fatal.
+    // But a child that served healthily and *then* exited 1 crashed under load
+    // (#117: vite's ws-proxy hitting ECONNABORTED during a burst of board
+    // events). That is transient, and refusing to restart it is what turned a
+    // client-side hiccup into a permanently dead half of the dev stack.
+    return context.uptimeMs >= HEALTHY_UPTIME_MS ? "retry" : "fatal";
+  }
 
   return "retry";
 }

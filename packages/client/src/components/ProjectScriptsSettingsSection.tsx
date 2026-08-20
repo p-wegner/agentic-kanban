@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ProjectScriptShortcutResponse } from "@agentic-kanban/shared";
 import { apiFetch, apiPost, apiPatch, apiDelete } from "../lib/api.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 
 interface ProjectScriptsSettingsSectionProps {
   projectId: string;

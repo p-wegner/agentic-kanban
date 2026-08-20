@@ -1,6 +1,5 @@
 import { db } from "../db/index.js";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
-import { workspaces } from "@agentic-kanban/shared/schema";
 import { isTerminalStatusIdView, ACTIVE_WORKSPACE_STATUSES, workspaceStatusPriority } from "@agentic-kanban/shared";
 import type { BoardStatusResponse, BoardStatusIssue } from "@agentic-kanban/shared";
 import { isAnalyticsNoise } from "./session-filter.js";
@@ -13,6 +12,7 @@ import {
   type BoardStatusClassificationOptions,
 } from "./board-status-classifiers.js";
 import { collectBoardStatusEntryWork, type ConflictCacheEntry } from "./board-status-enrichment.js";
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import {
   getActiveProjectIdPref,
   getBoardStatusProject,
@@ -22,6 +22,7 @@ import {
   getWorkspacesForIssues,
   getWorkflowNodeStatuses,
   getSessionsForWorkspaces,
+  type BoardStatusWorkspaceRow,
 } from "../repositories/board-status.repository.js";
 
 export { classifyBoardStatusIssueAttention, classifyBoardStatusIssueMergeState } from "./board-status-classifiers.js";
@@ -30,7 +31,8 @@ export { classifyBoardStatusIssueAttention, classifyBoardStatusIssueMergeState }
 const conflictCache = new Map<string, ConflictCacheEntry>();
 const CONFLICT_CACHE_TTL = 60_000; // 60 seconds
 
-type WorkspaceRow = typeof workspaces.$inferSelect;
+// Slim projection (#418 G17) — only the columns board-status consumes, not SELECT *.
+type WorkspaceRow = BoardStatusWorkspaceRow;
 
 export interface BoardStatusOptions {
   projectId?: string;
@@ -80,7 +82,7 @@ export async function getBoardStatus(
   if (!project) throw new NotFoundError(`Project ${projectId} not found`);
 
   const preferenceRows = await getAutoMergePreferences(database);
-  const preferenceMap = new Map(preferenceRows.map((pref) => [pref.key, pref.value]));
+  const preferenceMap = toPrefMap(preferenceRows);
   const classificationOptions: BoardStatusClassificationOptions = {
     autoMergeEnabled: isAutoMergeEnabled(preferenceMap),
     autoMergeInReview: getBool(preferenceMap, "auto_merge_in_review"),

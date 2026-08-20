@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { execGit, isGitWorkingTree } from "./internal.js";
+import { errorMessage } from "../error-message.js";
 
 /** Generate unified diff entries for untracked files (not yet git-add'd). */
 async function getUntrackedDiffEntries(workdirPath: string): Promise<string> {
@@ -51,11 +52,52 @@ async function getUntrackedDiffEntries(workdirPath: string): Promise<string> {
 }
 
 /** Get a unified diff between the worktree's branch and a base branch, including untracked files. */
+/**
+ * The git range for a workspace diff (#530).
+ *
+ * A DIRECT workspace commits straight to its branch, so there is no base to compare
+ * against — callers pass the sentinel `"HEAD"` meaning "working tree vs HEAD". A
+ * branch workspace uses three-dot, i.e. changes since it diverged.
+ *
+ * This existed inline in `getDiffShortstat` and `getChangedFileNames` but NOT in
+ * `getDiff`, which built `${baseBranch}...HEAD` unconditionally — so for a direct
+ * workspace it ran `git diff HEAD...HEAD`, which is empty by definition. The diff view
+ * for a direct workspace therefore showed untracked files only, silently hiding every
+ * modified tracked file. One helper so the sentinel cannot be honoured in two places
+ * out of three again.
+ */
+export function diffRangeArgs(baseBranch: string): string[] {
+  return baseBranch === "HEAD" ? ["HEAD"] : [`${baseBranch}...HEAD`];
+}
+
+/** The `"HEAD"` sentinel {@link diffRangeArgs} understands: working tree vs HEAD. */
+export const DIRECT_WORKSPACE_DIFF_REF = "HEAD";
+
+/**
+ * Which ref a workspace's diff is taken against (#530).
+ *
+ * `ws.isDirect ? "HEAD" : (ws.baseBranch || defaultBranch)` was re-derived at nine call
+ * sites. They agreed, but only by repetition — and the sentinel they all produce was
+ * then honoured in only two of the three consumers (see {@link diffRangeArgs}), so
+ * "everyone computes the same string" was never the same as "everyone means the same
+ * thing by it". Producing it in one place is what makes the sentinel a contract.
+ */
+export function resolveDiffRef(
+  workspace: { isDirect?: boolean | null; baseBranch?: string | null },
+  defaultBranch: string | null | undefined,
+): string | null {
+  if (workspace.isDirect) return DIRECT_WORKSPACE_DIFF_REF;
+  // Nullable on purpose. A branch workspace whose base is unknown has NO ref, and
+  // several callers already test for that before spawning git; substituting a plausible
+  // default here would silently diff against the wrong branch instead.
+  return workspace.baseBranch || defaultBranch || null;
+}
+
 export async function getDiff(
   worktreePath: string,
   baseBranch: string = "main",
 ): Promise<string> {
-  const tracked = await execGit(["diff", `${baseBranch}...HEAD`], worktreePath);
+  const tracked = await execGit(["diff", ...diffRangeArgs(baseBranch)], worktreePath);
   const untracked = await getUntrackedDiffEntries(worktreePath);
   if (!untracked) return tracked;
   return tracked ? tracked + "\n" + untracked : untracked;
@@ -87,9 +129,7 @@ export async function getDiffShortstat(
   try {
     // For direct workspaces (baseBranch="HEAD"), compare working tree against HEAD
     // For feature branches, use three-dot to show changes since branching
-    const diffArgs = baseBranch === "HEAD"
-      ? ["diff", "--shortstat", "HEAD"]
-      : ["diff", "--shortstat", `${baseBranch}...HEAD`];
+    const diffArgs = ["diff", "--shortstat", ...diffRangeArgs(baseBranch)];
     const output = await execGit(diffArgs, worktreePath);
 
     let filesChanged = 0;
@@ -122,7 +162,7 @@ export async function getDiffShortstat(
 
     return { filesChanged, insertions, deletions };
   } catch (err) {
-    console.error(`[git] diff --shortstat failed in ${worktreePath}:`, err instanceof Error ? err.message : String(err));
+    console.error(`[git] diff --shortstat failed in ${worktreePath}:`, errorMessage(err));
     return { filesChanged: 0, insertions: 0, deletions: 0 };
   }
 }
@@ -138,9 +178,7 @@ export async function getChangedFileNames(
 ): Promise<string[]> {
   if (!isGitWorkingTree(worktreePath)) return [];
   try {
-    const diffArgs = baseBranch === "HEAD"
-      ? ["diff", "--name-only", "HEAD"]
-      : ["diff", "--name-only", `${baseBranch}...HEAD`];
+    const diffArgs = ["diff", "--name-only", ...diffRangeArgs(baseBranch)];
     const tracked = await execGit(diffArgs, worktreePath);
     const untracked = await execGit(["ls-files", "--others", "--exclude-standard"], worktreePath);
     const files = new Set<string>();

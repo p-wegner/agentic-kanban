@@ -25,8 +25,31 @@ vi.mock("../services/git.service.js", () => ({
   removeWorktree: vi.fn(async () => {}),
   isRebaseInProgress: vi.fn(async () => false),
   abortRebase: vi.fn(async () => {}),
+  // Reached by the pre-merge gate's diff-derived cost decisions. Absent from this factory
+  // until #273 un-hung this suite — the merge had never previously got past the repo lock,
+  // so the gate never ran and the gap never showed.
+  getChangedFileNames: vi.fn(async () => [] as string[]),
 }));
 vi.mock("../db/seed.js", () => ({ ensureBuiltinTags: vi.fn(async () => {}), ensureBuiltinSkills: vi.fn(async () => {}) }));
+
+/**
+ * True once the early mergedAt stamp has actually landed. Path A's whole premise is "the
+ * stamp survived, the status write did not", so the interruption is armed by the stamp
+ * COMPLETING rather than by counting `db.update` calls — the merge path has writes before
+ * the stamp, and their number is not this test's business.
+ */
+let mergedAtStamped = false;
+vi.mock("../repositories/workspace-merge-execution.repository.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../repositories/workspace-merge-execution.repository.js")>();
+  return {
+    ...actual,
+    stampWorkspaceMergedAt: async (...args: Parameters<typeof actual.stampWorkspaceMergedAt>) => {
+      const result = await actual.stampWorkspaceMergedAt(...args);
+      mergedAtStamped = true;
+      return result;
+    },
+  };
+});
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { randomUUID } from "node:crypto";
@@ -36,6 +59,14 @@ import { createTestDb } from "./helpers/test-db.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
 import { reconcileAncestorBranchWorkspaces } from "../startup/ancestor-branch-reconciler.js";
 import { reconcileSilentlyMergedWorkspaces } from "../startup/startup-tasks.js";
+import { makeTempRepo } from "./helpers/temp-repo.js";
+
+/**
+ * A REAL repo path (#273). This suite drives the actual merge path, whose repo lock
+ * refuses a repoPath with no `.git` and then POLLS — so the old `"/repo"` literal made
+ * every test here burn its full timeout instead of running.
+ */
+const REPO_PATH = makeTempRepo();
 
 // ─── shared helpers ──────────────────────────────────────────────────────────
 
@@ -79,7 +110,7 @@ async function seedReadyForMergeWorkspace(db: ReturnType<typeof createTestDb>["d
   await db.insert(projects).values({
     id: projectId,
     name: "Test",
-    repoPath: "/repo",
+    repoPath: REPO_PATH,
     repoName: "repo",
     defaultBranch: "master",
     createdAt: now,
@@ -104,7 +135,7 @@ async function seedReadyForMergeWorkspace(db: ReturnType<typeof createTestDb>["d
     id: workspaceId,
     issueId,
     branch: "feature/ak-579-test",
-    workingDir: "/repo/.worktrees/feature_ak-579-test",
+    workingDir: `${REPO_PATH}/.worktrees/feature_ak-579-test`,
     baseBranch: "master",
     isDirect: false,
     status: "idle",
@@ -142,16 +173,22 @@ describe("interrupted merge — Path A: mergedAt stamped, status write dropped",
   });
 
   it("issue ends up Done via mergedAt-based reconciler after interrupted response", async () => {
+    mergedAtStamped = false;
     const { workspaceId, issueId } = await seedReadyForMergeWorkspace(db);
 
-    // Allow the early mergedAt stamp to succeed; crash the combined status write.
-    let updateCallCount = 0;
+    // Allow the early mergedAt stamp to succeed; crash everything after it.
+    //
+    // Armed by the stamp ACTUALLY COMPLETING (see the `stampWorkspaceMergedAt` wrapper at
+    // the top of this file), not by "the first db.update is the stamp". That ordinal
+    // assumption quietly stopped holding as the merge path grew writes before the stamp —
+    // by the time #273 un-hung this suite (it had been burning its timeout against a
+    // repoPath with no `.git`) the killed write WAS the stamp, so the test asserted against
+    // a scenario it had never actually set up. Worse, `stampMergedAtEarly` swallows its own
+    // failure by design, so nothing surfaced.
     const originalUpdate = db.update.bind(db);
     const updateSpy = vi.spyOn(db, "update").mockImplementation((...args: Parameters<typeof db.update>) => {
-      updateCallCount++;
-      // First db.update = early mergedAt stamp — let it through.
-      if (updateCallCount === 1) return originalUpdate(...args);
-      // Subsequent updates (combined status write) simulate a dropped connection.
+      if (!mergedAtStamped) return originalUpdate(...args);
+      // Everything after the stamp — including the combined status write — is the drop.
       throw new Error("Simulated response interrupted");
     });
 
@@ -165,7 +202,7 @@ describe("interrupted merge — Path A: mergedAt stamped, status write dropped",
     try {
       await svc.mergeWorkspace(workspaceId);
     } catch {
-      // Expected — the combined status write throws
+      // Expected — everything after the mergedAt stamp throws
     }
 
     updateSpy.mockRestore();
@@ -280,6 +317,6 @@ describe("interrupted merge — Path B: server crashed before mergedAt was writt
 
     expect(ws.status).toBe("closed");
     // The reconciler must have called checkAncestor with the workspace's branch and baseBranch.
-    expect(checkAncestor).toHaveBeenCalledWith("/repo", ws.branch, ws.baseBranch, expect.anything());
+    expect(checkAncestor).toHaveBeenCalledWith(REPO_PATH, ws.branch, ws.baseBranch, expect.anything());
   });
 });

@@ -192,3 +192,68 @@ export function planContraction(
 
   return mutations;
 }
+
+/**
+ * Every node that lies ON a cycle (not merely reaches one), via an iterative DFS (#523).
+ *
+ * Duplicated verbatim in `dependency-auto-chain.service.ts` and
+ * `dependency-wave.service.ts`, differing only in which edge types they admit — so the
+ * filter is the parameter, and the traversal is shared. This module's header already
+ * said inline cycle detection was the thing it existed to end; these two predate that.
+ *
+ * Only edges whose BOTH ends are in `nodeIds` are traversed: both callers scope the
+ * graph to a working set (open issues / a wave) and must not follow an edge out of it.
+ *
+ * Iterative rather than recursive: the callers pass whole-project issue sets, and the
+ * recursive copies would blow the stack on a long dependency chain.
+ */
+export function findCycleNodes<E extends DirectedEdge>(
+  nodeIds: string[],
+  edges: Iterable<E>,
+  // Generic in the edge so a caller can filter on its OWN fields (the dependency `type`)
+  // without casting at the call site — the cast is what made the copies feel unshareable.
+  includeEdge: (edge: E) => boolean = () => true,
+): Set<string> {
+  const scoped = new Set(nodeIds);
+  const adjacency = new Map<string, string[]>();
+  for (const id of nodeIds) adjacency.set(id, []);
+  for (const edge of edges) {
+    if (!scoped.has(edge.from) || !scoped.has(edge.to)) continue;
+    if (!includeEdge(edge)) continue;
+    adjacency.get(edge.from)?.push(edge.to);
+  }
+
+  const cycleIds = new Set<string>();
+  const state = new Map<string, "visiting" | "visited">();
+  const stack: string[] = [];
+  // Explicit work stack: each frame is a node plus how many of its edges we have taken.
+  const frames: { id: string; edgeIndex: number }[] = [];
+
+  for (const root of nodeIds) {
+    if (state.has(root)) continue;
+    frames.push({ id: root, edgeIndex: 0 });
+    state.set(root, "visiting");
+    stack.push(root);
+
+    while (frames.length > 0) {
+      const frame = frames[frames.length - 1];
+      const neighbours = adjacency.get(frame.id) ?? [];
+      if (frame.edgeIndex < neighbours.length) {
+        const next = neighbours[frame.edgeIndex++];
+        if (state.get(next) === "visiting") {
+          // Back-edge: everything from `next` up the current stack is on the cycle.
+          for (const cycleId of stack.slice(stack.indexOf(next))) cycleIds.add(cycleId);
+        } else if (!state.has(next)) {
+          state.set(next, "visiting");
+          stack.push(next);
+          frames.push({ id: next, edgeIndex: 0 });
+        }
+        continue;
+      }
+      state.set(frame.id, "visited");
+      stack.pop();
+      frames.pop();
+    }
+  }
+  return cycleIds;
+}

@@ -1,26 +1,48 @@
+import { resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
 import { isTerminalStatusView } from "@agentic-kanban/shared";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
-import { issues, preferences, projectStatuses, workspaces, workflowNodes, sessions, sessionMessages } from "@agentic-kanban/shared/schema";
+import { issues, projectStatuses, workspaces, workflowNodes, sessions, sessionMessages } from "@agentic-kanban/shared/schema";
 import { and, count, eq, inArray, ne, or } from "drizzle-orm";
+import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import type { Database } from "../db/index.js";
-import type { BoardEvents } from "../services/board-events.js";
+import type { BoardEventSink } from "../services/board-events.js";
 import { createMergeQueueService } from "../services/merge-queue.service.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
 import { buildStrandedBatch, pickIntegrationWorkspace } from "../services/reconciler.service.js";
-import type { SessionManager } from "../services/session.manager.js";
-import { resolveMergeStrategy } from "./merge-strategy.js";
-import { isAutoMergeEnabled } from "@agentic-kanban/shared/lib/auto-merge-pref";
+import type { SessionLauncher } from "../services/session.manager.js";
+import { resolveMergePolicy } from "./merge-strategy.js";
+import { resolveMergeGateConfig } from "../services/pre-merge-gate.service.js";
+import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
+import type { StackProfile } from "@agentic-kanban/shared";
 import { reconcileCompletionStates } from "./completion-state-reconciler.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { reconcileDriveCompletion } from "./drive-completion-reconciler.js";
 import { reconcileProjectCompletion } from "./project-completion-reconciler.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 const DEFAULT_INTERVAL_MS = 30_000;
+/**
+ * How often the three drift-healing reconcile passes run when there are NO merge
+ * candidates (#402). They used to run every 30s tick unconditionally — three
+ * reconciliation sweeps on an idle board. With candidates present they still run
+ * every tick (they may unblock/complete the very work about to merge); with zero
+ * candidates they fall back to every Nth tick (10 × 30s ≈ 5 min), which keeps
+ * their drift-healer role with a bounded worst-case latency.
+ */
+const RECONCILE_FALLBACK_EVERY_TICKS = 10;
 const MERGEABLE_STATUS_NAMES = ["In Review", "AI Reviewed"] as const;
 /** Cap on how many times the orchestrator launches a batch reconciler for the SAME stranded set before leaving it for a human. */
 const MAX_RECONCILER_ATTEMPTS = 2;
 /** A reconciler session with 0 output messages after this many ms is treated as a zombie and reaped. */
 const ZOMBIE_TIMEOUT_MS = 5 * 60_000;
+
+const autoMergeDisabledPref = projectPref("auto_merge_disabled");
+const verifyScriptPref = projectPref("verify_script");
+const stackProfilePref = projectPref("project_stack_profile");
+const devCommandPref = projectPref("dev_command");
+const healthUrlPref = projectPref("health_url");
 
 export interface AutoMergeOrchestratorState {
   running: boolean;
@@ -35,15 +57,54 @@ export interface AutoMergeOrchestratorState {
   reconcilerAttempts: Map<string, number>;
 }
 
-let activeAutoMergeInterval: ReturnType<typeof setInterval> | null = null;
-let activeAutoMergeTimeout: ReturnType<typeof setTimeout> | null = null;
+let activeAutoMergeSweep: PeriodicSweepHandle | null = null;
+
+/**
+ * The per-project gate inputs, read out of the one prefMap scan this orchestrator already
+ * does, and answered by the gate's own `resolveMergeGateConfig` (#546).
+ */
+function collectGatedProjectIds(prefMap: Map<string, string>): Set<string> {
+  const inputs = new Map<string, { verifyScript: string | null; profile: StackProfile | null; devCommandOverride: string | null; healthUrlOverride: string | null }>();
+  const at = (projectId: string) => {
+    let entry = inputs.get(projectId);
+    if (!entry) {
+      entry = { verifyScript: null, profile: null, devCommandOverride: null, healthUrlOverride: null };
+      inputs.set(projectId, entry);
+    }
+    return entry;
+  };
+  for (const [key, value] of prefMap) {
+    if (!value) continue;
+    const verifyProjectId = verifyScriptPref.projectIdOf(key);
+    if (verifyProjectId) { at(verifyProjectId).verifyScript = value; continue; }
+    const profileProjectId = stackProfilePref.projectIdOf(key);
+    if (profileProjectId) {
+      try { at(profileProjectId).profile = JSON.parse(value) as StackProfile; } catch { /* not JSON */ }
+      continue;
+    }
+    const devCommandProjectId = devCommandPref.projectIdOf(key);
+    if (devCommandProjectId) { at(devCommandProjectId).devCommandOverride = value; continue; }
+    const healthUrlProjectId = healthUrlPref.projectIdOf(key);
+    if (healthUrlProjectId) { at(healthUrlProjectId).healthUrlOverride = value; }
+  }
+  const gated = new Set<string>();
+  for (const [projectId, input] of inputs) {
+    if (resolveMergeGateConfig(input).hasGate) gated.add(projectId);
+  }
+  return gated;
+}
 
 export function createAutoMergeOrchestrator(deps: {
   database: Database;
-  boardEvents?: BoardEvents;
-  getSessionManager?: () => SessionManager;
+  boardEvents?: BoardEventSink;
+  getSessionManager?: () => SessionLauncher;
+  /** Test override for the zero-candidate reconcile fallback cadence (default 10 ticks). */
+  reconcileFallbackEveryTicks?: number;
 }) {
   const { database, boardEvents, getSessionManager } = deps;
+  const reconcileFallbackEveryTicks = deps.reconcileFallbackEveryTicks ?? RECONCILE_FALLBACK_EVERY_TICKS;
+  /** Counts effective runOnce passes; drives the zero-candidate reconcile fallback. */
+  let reconcileTick = 0;
   const state: AutoMergeOrchestratorState = {
     running: false,
     timer: null,
@@ -63,17 +124,16 @@ export function createAutoMergeOrchestrator(deps: {
   const mergeService = createWorkspaceMergeService({ database, boardEvents, getSessionManager });
 
   async function isEnabled() {
-    const prefRows = await database
-      .select({ key: preferences.key, value: preferences.value })
-      .from(preferences)
-      .where(inArray(preferences.key, ["auto_merge", "auto_monitor", "merge_strategy"]));
-    const prefMap = new Map(prefRows.map((row) => [row.key, row.value]));
-    return isAutoMergeEnabled(prefMap) && resolveMergeStrategy(prefMap) === "merge_queue";
+    // Short-TTL cached full scan (#402) — shared with findCompletedWorkspaceIds in
+    // the same tick, so one underlying query serves both.
+    const prefRows = await getAllPreferencesCached(database);
+    const prefMap = toPrefMap(prefRows);
+    return resolveMergePolicy(prefMap).owner === "merge_queue";
   }
 
   async function findCompletedWorkspaceIds(): Promise<string[]> {
-    const prefRows = await database.select().from(preferences);
-    const prefMap = new Map(prefRows.map((row) => [row.key, row.value]));
+    const prefRows = await getAllPreferencesCached(database);
+    const prefMap = toPrefMap(prefRows);
     const autoMergeInReview = getBool(prefMap, "auto_merge_in_review");
 
     // Per-project opt-out: an `auto_merge_disabled_<projectId>` pref set to "true" keeps
@@ -81,25 +141,25 @@ export function createAutoMergeOrchestrator(deps: {
     // still auto-merge. Used for the agentic-kanban dev board itself — its tickets merge
     // deliberately (Conductor / human), not via the in-process queue that's meant for
     // other projects developed with the board.
+    // #496: one parse instead of an anchored regex to TEST and an unanchored
+    // `String.replace` to EXTRACT — two spellings of the same rule that could disagree.
     const autoMergeDisabledProjectIds = new Set(
       [...prefMap]
-        .filter(([key, value]) => /^auto_merge_disabled_[0-9a-f-]+$/.test(key) && value === "true")
-        .map(([key]) => key.replace("auto_merge_disabled_", "")),
+        .map(([key, value]) => (value === "true" ? autoMergeDisabledPref.projectIdOf(key) : null))
+        .filter((id): id is string => id !== null),
     );
 
-    // Projects with an automatic pre-merge gate — a verify_script (build/test) and/or a web smoke
-    // check (isWeb stack profile). For these, `auto_merge_in_review` must NOT bypass `readyForMerge`:
-    // the gate runs on review exit and sets readyForMerge on pass, so merging un-ready In-Review work
-    // here would race/skip the gate (#821). Both signals already live in prefMap.
-    const gatedProjectIds = new Set<string>();
-    for (const [key, value] of prefMap) {
-      const verifyMatch = key.match(/^verify_script_([0-9a-f-]+)$/);
-      if (verifyMatch && value && value.trim()) { gatedProjectIds.add(verifyMatch[1]); continue; }
-      const profileMatch = key.match(/^project_stack_profile_([0-9a-f-]+)$/);
-      if (profileMatch && value) {
-        try { if ((JSON.parse(value) as { isWeb?: boolean } | null)?.isWeb === true) gatedProjectIds.add(profileMatch[1]); } catch { /* not JSON */ }
-      }
-    }
+    // Projects with an automatic pre-merge gate. For these, `auto_merge_in_review` must NOT
+    // bypass `readyForMerge`: the gate runs on review exit and sets readyForMerge on pass, so
+    // merging un-ready In-Review work here would race/skip the gate (#821).
+    //
+    // #546: this used to answer the question itself — `verify_script` OR `profile.isWeb` —
+    // which is WIDER than the gate. An isWeb project with no dev command was treated as gated
+    // and had auto_merge_in_review suppressed for a smoke check `buildSmokeCheck` returns null
+    // for. It now asks `resolveMergeGateConfig`, the gate's own derivation; every input it
+    // needs (verify script, stack profile, dev-command/health-url overrides) is already in
+    // prefMap, so this stays a single scan with no extra query.
+    const gatedProjectIds = collectGatedProjectIds(prefMap);
 
     const statusNames = autoMergeInReview
       ? MERGEABLE_STATUS_NAMES
@@ -188,7 +248,7 @@ export function createAutoMergeOrchestrator(deps: {
       .where(eq(issues.id, integration.issueId)).limit(1);
     const projectId = issueRow?.projectId ?? "";
     const batch = buildStrandedBatch(open, plan, { baseBranch: integration.baseBranch, projectId });
-    const serverPort = process.env.KANBAN_SERVER_PORT || process.env.SERVER_PORT || process.env.PORT || "3001";
+    const serverPort = String(resolveBoardServerPort()); // #615 — the one ladder
 
     try {
       const { sessionId } = await mergeService.reconcileBatch(integration.id, {
@@ -205,7 +265,7 @@ export function createAutoMergeOrchestrator(deps: {
       };
       console.log(`[auto-merge] launched batch reconciler session=${sessionId} integration=${integration.id} over ${open.length} stranded workspaces`);
     } catch (err) {
-      console.warn(`[auto-merge] reconciler launch failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`[auto-merge] reconciler launch failed (non-fatal): ${errorMessage(err)}`);
     }
   }
 
@@ -252,32 +312,48 @@ export function createAutoMergeOrchestrator(deps: {
     state.lastSkipped = 0;
 
     try {
-      const reconciled = await reconcileCompletionStates(database);
-      if (reconciled > 0) {
-        console.log(`[auto-merge] reconcileCompletionStates: unblocked ${reconciled} stuck workspace(s)`);
+      // Gate the three drift-healing reconcile passes (#402): with zero merge
+      // candidates they run only on the slow fallback cadence (every
+      // `reconcileFallbackEveryTicks`th tick, first tick included so startup still
+      // heals immediately) or when forced. With candidates present they always run
+      // first — reconcileCompletionStates may unblock the very work about to merge —
+      // so candidates are re-queried after the passes.
+      reconcileTick++;
+      const fallbackDue = force || reconcileFallbackEveryTicks <= 1 || reconcileTick % reconcileFallbackEveryTicks === 1;
+      let workspaceIds = await findCompletedWorkspaceIds();
+
+      if (workspaceIds.length > 0 || fallbackDue) {
+        const reconciled = await reconcileCompletionStates(database);
+        if (reconciled > 0) {
+          console.log(`[auto-merge] reconcileCompletionStates: unblocked ${reconciled} stuck workspace(s)`);
+        }
+
+        // Enforce the drive completion contract (#801): keep each active drive's meta in
+        // In Progress until all its children are Done, then drive the meta itself to Done.
+        const driveChanges = await reconcileDriveCompletion(database, { boardEvents }).catch((err) => {
+          console.warn("[auto-merge] reconcileDriveCompletion failed (non-fatal):", errorMessage(err));
+          return 0;
+        });
+        if (driveChanges > 0) {
+          console.log(`[auto-merge] reconcileDriveCompletion: applied ${driveChanges} drive completion-contract change(s)`);
+        }
+
+        // Inform the user when a project's backlog is fully implemented (#848). Edge-triggered:
+        // broadcasts `project_completed` once per completion, not every cycle.
+        const completionChanges = await reconcileProjectCompletion(database, { boardEvents }).catch((err) => {
+          console.warn("[auto-merge] reconcileProjectCompletion failed (non-fatal):", errorMessage(err));
+          return 0;
+        });
+        if (completionChanges > 0) {
+          console.log(`[auto-merge] reconcileProjectCompletion: ${completionChanges} project completion state change(s)`);
+        }
+
+        // The passes may have unblocked/reclassified workspaces — re-query so this
+        // tick still merges what they just healed (previous behaviour, where the
+        // passes always ran before the candidate query).
+        workspaceIds = await findCompletedWorkspaceIds();
       }
 
-      // Enforce the drive completion contract (#801): keep each active drive's meta in
-      // In Progress until all its children are Done, then drive the meta itself to Done.
-      const driveChanges = await reconcileDriveCompletion(database, { boardEvents }).catch((err) => {
-        console.warn("[auto-merge] reconcileDriveCompletion failed (non-fatal):", err instanceof Error ? err.message : String(err));
-        return 0;
-      });
-      if (driveChanges > 0) {
-        console.log(`[auto-merge] reconcileDriveCompletion: applied ${driveChanges} drive completion-contract change(s)`);
-      }
-
-      // Inform the user when a project's backlog is fully implemented (#848). Edge-triggered:
-      // broadcasts `project_completed` once per completion, not every cycle.
-      const completionChanges = await reconcileProjectCompletion(database, { boardEvents }).catch((err) => {
-        console.warn("[auto-merge] reconcileProjectCompletion failed (non-fatal):", err instanceof Error ? err.message : String(err));
-        return 0;
-      });
-      if (completionChanges > 0) {
-        console.log(`[auto-merge] reconcileProjectCompletion: ${completionChanges} project completion state change(s)`);
-      }
-
-      const workspaceIds = await findCompletedWorkspaceIds();
       if (workspaceIds.length === 0) return state;
 
       const plan = await queueService.computePlan(workspaceIds);
@@ -332,8 +408,8 @@ export function createAutoMergeOrchestrator(deps: {
 
 export function startAutoMergeOrchestrator(deps: {
   database: Database;
-  boardEvents?: BoardEvents;
-  getSessionManager?: () => SessionManager;
+  boardEvents?: BoardEventSink;
+  getSessionManager?: () => SessionLauncher;
   intervalMs?: number;
 }): AutoMergeOrchestratorState {
   stopAutoMergeOrchestrator();
@@ -347,19 +423,20 @@ export function startAutoMergeOrchestrator(deps: {
     });
   };
 
-  activeAutoMergeTimeout = setTimeout(tick, Math.min(20_000, intervalMs));
-  activeAutoMergeInterval = setInterval(tick, intervalMs);
-  orchestrator.state.timer = activeAutoMergeInterval;
+  activeAutoMergeSweep = startPeriodicSweep({
+    name: "auto-merge",
+    intervalMs,
+    // Boot delay is capped by the interval so a short test interval is not out-waited.
+    bootDelayMs: Math.min(20_000, intervalMs),
+    tick,
+  });
+  // `state.timer` is part of this module's public state object, so the handle exposes the
+  // interval for exactly this.
+  orchestrator.state.timer = activeAutoMergeSweep.interval;
   return orchestrator.state;
 }
 
 export function stopAutoMergeOrchestrator(): void {
-  if (activeAutoMergeTimeout !== null) {
-    clearTimeout(activeAutoMergeTimeout);
-    activeAutoMergeTimeout = null;
-  }
-  if (activeAutoMergeInterval !== null) {
-    clearInterval(activeAutoMergeInterval);
-    activeAutoMergeInterval = null;
-  }
+  activeAutoMergeSweep?.stop();
+  activeAutoMergeSweep = null;
 }

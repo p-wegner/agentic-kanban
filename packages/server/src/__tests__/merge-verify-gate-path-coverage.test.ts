@@ -13,8 +13,11 @@
 // prevalidation, before executeWorkspaceMerge) and WITHHOLDS the merge on failure. The two manual-path
 // tests below — which assert that gated behaviour — were `it.fails(...)` known-gap markers; now that the
 // path gates, they are flipped to `it(...)`.
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { randomUUID } from "node:crypto";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { issues, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
@@ -22,6 +25,7 @@ import { createWorkspaceMergeService } from "../services/workspace-merge.service
 import { activeMerges } from "../services/workspace-internals.js";
 import { setPreference } from "../repositories/preferences.repository.js";
 import { verifyScriptPrefKey } from "../services/stack-profile.service.js";
+import { getIssueComments } from "../repositories/issue-comments.repository.js";
 
 // The gate runs a real build via runSetupScript (and a real dev server via runSmokeCheck). Mock both
 // boundaries so we force the verify outcome deterministically without spawning anything.
@@ -29,12 +33,14 @@ const runSetupScript = vi.fn();
 const runSmokeCheck = vi.fn();
 vi.mock("@agentic-kanban/shared/lib/setup-script", () => ({
   runSetupScript: (...args: unknown[]) => runSetupScript(...args),
+  DEFAULT_SETUP_SCRIPT_TIMEOUT_MS: 5 * 60 * 1000,
 }));
 vi.mock("@agentic-kanban/shared/lib/smoke-check", () => ({
   runSmokeCheck: (...args: unknown[]) => runSmokeCheck(...args),
 }));
 
-const { runPreMergeGate } = await import("../services/pre-merge-gate.service.js");
+const { runPreMergeGate, resolveMergeGate, gateAlreadyPassed, gateSkipExplicit, MERGE_GATE_EVIDENCE_MAX_AGE_MS } =
+  await import("../services/pre-merge-gate.service.js");
 
 // Isolate the module-level per-repoPath merge lock between tests (see workspace-merge-service.test.ts).
 beforeEach(() => {
@@ -77,6 +83,27 @@ function makeGit(overrides: Partial<Record<string, (...a: unknown[]) => unknown>
   };
 }
 
+/**
+ * A REAL repo directory (#264 family): the merge path's `tryAcquireRepoLock` refuses a
+ * repoPath with no `.git` and then POLLS, so every test that drives `mergeWorkspace`
+ * against the old `"/repo"` literal burned its full 60s timeout. The suite only ever
+ * passed because an earlier run had leaked an actual `C:\repo\.git` onto this machine —
+ * the same latent hang merge-queue.service.test.ts had.
+ */
+const tempRepos: string[] = [];
+function makeRepoPath(): string {
+  const dir = mkdtempSync(join(tmpdir(), "gate-path-"));
+  mkdirSync(join(dir, ".git"), { recursive: true });
+  tempRepos.push(dir);
+  return dir;
+}
+
+afterEach(() => {
+  while (tempRepos.length) {
+    try { rmSync(tempRepos.pop()!, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+});
+
 async function seedApprovedWorkspace(db: ReturnType<typeof createTestDb>["db"]) {
   const now = new Date().toISOString();
   const projectId = randomUUID();
@@ -86,7 +113,7 @@ async function seedApprovedWorkspace(db: ReturnType<typeof createTestDb>["db"]) 
   const workspaceId = randomUUID();
 
   await db.insert(projects).values({
-    id: projectId, name: "Test", repoPath: "/repo", repoName: "repo",
+    id: projectId, name: "Test", repoPath: makeRepoPath(), repoName: "repo",
     defaultBranch: "master", createdAt: now, updatedAt: now,
   });
   await db.insert(projectStatuses).values([
@@ -188,11 +215,13 @@ describe("review-merge.gate.verify-smoke — gate decision + which merge path ru
     expect(await issueStatusName(db, issueId)).toBe("Done");
   });
 
-  // #943: the in-process monitor's auto-merge paths already run the gate against the same worktree
-  // state in the same cycle (or rely on the review-exit gate for readyForMerge work). They pass
-  // `skipPreMergeGate` so `doMerge` does NOT re-run it — otherwise an expensive build/boot doubles
-  // per monitor merge. The skip is per-call, so the manual route (no flag) keeps gating.
-  it("skipPreMergeGate suppresses the doMerge gate re-run, so the verify_script is NOT spawned again (#943)", async () => {
+  // #943 / arch-review §1.2: the in-process monitor's auto-merge paths already run the gate against
+  // the same worktree state in the same cycle (or rely on the review-exit gate for readyForMerge
+  // work). They now pass an explicit `already-passed` PROOF token (not the old opaque
+  // `skipPreMergeGate: boolean`) so `resolveMergeGate` does NOT re-run it — otherwise an expensive
+  // build/boot doubles per monitor merge. The token is per-call, so the manual route (no token)
+  // keeps gating.
+  it("an `already-passed` gate token suppresses the doMerge gate re-run, so the verify_script is NOT spawned again (#943)", async () => {
     const { projectId, issueId, workspaceId } = await seedApprovedWorkspace(db);
     await setPreference(verifyScriptPrefKey(projectId), ".\\verify.sh", db);
     runSetupScript.mockResolvedValue({ exitCode: 0, stdout: "ok", stderr: "" });
@@ -204,7 +233,9 @@ describe("review-merge.gate.verify-smoke — gate decision + which merge path ru
       createBackup: async () => {},
       processKiller: async () => 0,
     });
-    const result = await svc.mergeWorkspace(workspaceId, { skipPreMergeGate: true });
+    const result = await svc.mergeWorkspace(workspaceId, {
+      gate: gateAlreadyPassed({ ranAt: new Date().toISOString(), stage: "verify", source: "test:monitor-cycle" }),
+    });
 
     // The gate did NOT run a second build, but the merge still landed.
     expect(runSetupScript).not.toHaveBeenCalled();
@@ -212,11 +243,11 @@ describe("review-merge.gate.verify-smoke — gate decision + which merge path ru
     expect(await issueStatusName(db, issueId)).toBe("Done");
   });
 
-  // The monitor reaches doMerge via mergeWorkspaceDeduped — verify the skip flag threads through it too.
-  it("mergeWorkspaceDeduped threads skipPreMergeGate through to doMerge (#943)", async () => {
+  // The monitor reaches doMerge via mergeWorkspaceDeduped — verify the token threads through it too.
+  it("mergeWorkspaceDeduped threads the `already-passed` token through to doMerge (#943)", async () => {
     const { projectId, workspaceId } = await seedApprovedWorkspace(db);
     await setPreference(verifyScriptPrefKey(projectId), ".\\verify.sh", db);
-    // Even a FAILING verify must not be consulted when the gate is skipped — it never runs.
+    // Even a FAILING verify must not be consulted when valid proof is passed — it never runs.
     runSetupScript.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "would have failed" });
 
     const git = makeGit();
@@ -226,9 +257,266 @@ describe("review-merge.gate.verify-smoke — gate decision + which merge path ru
       createBackup: async () => {},
       processKiller: async () => 0,
     });
-    const result = await svc.mergeWorkspaceDeduped(workspaceId, { skipPreMergeGate: true });
+    const result = await svc.mergeWorkspaceDeduped(workspaceId, {
+      gate: gateAlreadyPassed({ ranAt: new Date().toISOString(), stage: "verify", source: "test:monitor-cycle" }),
+    });
 
     expect(runSetupScript).not.toHaveBeenCalled();
     expect(result.merged).toBe(true);
+  });
+
+  // arch-review §1.2 (b): a STALE `already-passed` token must NOT be trusted — resolveMergeGate
+  // re-runs the gate (closing the TOCTOU-by-boolean window). Here the stale-evidence re-gate runs a
+  // FAILING verify, so the merge is WITHHELD.
+  it("a STALE `already-passed` token forces the gate to re-run, so a now-failing verify withholds the merge (#943 TOCTOU)", async () => {
+    const { projectId, workspaceId } = await seedApprovedWorkspace(db);
+    await setPreference(verifyScriptPrefKey(projectId), ".\\verify.sh", db);
+    runSetupScript.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "stale proof — build now broken" });
+
+    const git = makeGit();
+    const svc = createWorkspaceMergeService({
+      database: db,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+    const staleRanAt = new Date(Date.now() - (MERGE_GATE_EVIDENCE_MAX_AGE_MS + 60_000)).toISOString();
+    let merged: boolean | undefined;
+    try {
+      const result = await svc.mergeWorkspace(workspaceId, {
+        gate: gateAlreadyPassed({ ranAt: staleRanAt, stage: "verify", source: "test:stale" }),
+      });
+      merged = result.merged;
+    } catch {
+      merged = false; // withheld via a thrown CONFLICT
+    }
+
+    expect(runSetupScript).toHaveBeenCalled(); // stale proof forced the gate to re-run
+    expect(merged).toBe(false);
+  });
+
+  // arch-review §1.2 (c): a previously-ungated path can express a DELIBERATE ungated merge via a
+  // documented `skip-explicit` token — the gate is not run, and the merge lands.
+  it("a `skip-explicit` token merges WITHOUT running the verify gate (documented ungated path)", async () => {
+    const { projectId, workspaceId } = await seedApprovedWorkspace(db);
+    await setPreference(verifyScriptPrefKey(projectId), ".\\verify.sh", db);
+    runSetupScript.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "would have failed if gated" });
+
+    const git = makeGit();
+    const svc = createWorkspaceMergeService({
+      database: db,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+    const result = await svc.mergeWorkspace(workspaceId, {
+      gate: gateSkipExplicit("test: deliberate ungated merge with a documented reason"),
+    });
+
+    expect(runSetupScript).not.toHaveBeenCalled();
+    expect(result.merged).toBe(true);
+  });
+
+  // #170: an orchestrator tick retries a stranded readyForMerge workspace every ~30s. Before the
+  // fix, EVERY tick's gate withhold inserted a fresh "merge-attempt" comment, spamming the issue
+  // timeline for an unchanged failure. A repeated IDENTICAL verify failure must dedupe to one note.
+  it("a repeated identical verify failure produces ONE deduped issue note carrying the failure tail (#170)", async () => {
+    const { projectId, issueId, workspaceId } = await seedApprovedWorkspace(db);
+    await setPreference(verifyScriptPrefKey(projectId), ".\\verify.sh", db);
+    runSetupScript.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "boom: assertion failed at line 42" });
+
+    // makeGit()'s default checkBranchTipIsAncestor flips to isAncestor:true after its
+    // first call (simulating "landed on the 2nd check"), which doesn't fit here: both
+    // orchestrator ticks below hit the SAME failing gate, so the branch never actually
+    // lands and every check must keep reporting isAncestor:false.
+    const git = makeGit({ checkBranchTipIsAncestor: vi.fn(async () => ({ isAncestor: false as const, branchSha: "feature-sha", baseSha: "master-sha-before" })) });
+    const svc = createWorkspaceMergeService({
+      database: db,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+
+    // Two orchestrator ticks hitting the SAME failing verify_script.
+    await expect(svc.mergeWorkspace(workspaceId)).rejects.toBeTruthy();
+    await expect(svc.mergeWorkspace(workspaceId)).rejects.toBeTruthy();
+
+    const comments = await getIssueComments(issueId, db);
+    const gateNotes = comments.filter((c) => {
+      if (c.kind !== "merge-attempt" || !c.payload) return false;
+      const payload = JSON.parse(c.payload) as Record<string, unknown>;
+      return payload.mergeReason === "pre_merge_gate_failed";
+    });
+    expect(gateNotes).toHaveLength(1);
+    expect(gateNotes[0].body).toContain("boom: assertion failed at line 42");
+  });
+
+  // A DIFFERENT verify failure (new stderr) after a prior one must still be recorded — dedup only
+  // suppresses an unchanged repeat, not a genuinely new failure signature.
+  it("a CHANGED verify failure after a prior one is recorded as a second note", async () => {
+    const { projectId, issueId, workspaceId } = await seedApprovedWorkspace(db);
+    await setPreference(verifyScriptPrefKey(projectId), ".\\verify.sh", db);
+
+    // See the note in the preceding test: both attempts below fail the gate, so the
+    // branch never lands — pin isAncestor:false on every check.
+    const git = makeGit({ checkBranchTipIsAncestor: vi.fn(async () => ({ isAncestor: false as const, branchSha: "feature-sha", baseSha: "master-sha-before" })) });
+    const svc = createWorkspaceMergeService({
+      database: db,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+
+    runSetupScript.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "first failure" });
+    await expect(svc.mergeWorkspace(workspaceId)).rejects.toBeTruthy();
+
+    runSetupScript.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "second, different failure" });
+    await expect(svc.mergeWorkspace(workspaceId)).rejects.toBeTruthy();
+
+    const comments = await getIssueComments(issueId, db);
+    const gateNotes = comments.filter((c) => {
+      if (c.kind !== "merge-attempt" || !c.payload) return false;
+      const payload = JSON.parse(c.payload) as Record<string, unknown>;
+      return payload.mergeReason === "pre_merge_gate_failed";
+    });
+    expect(gateNotes).toHaveLength(2);
+  });
+});
+
+// arch-review §1.2: the single gate-decision OWNER. Unit-level proof that every trigger path's
+// token resolves to the same decision, so the review-exit path, the manual path, the monitor path
+// and the ungated paths can no longer DIVERGE — they all call resolveMergeGate / runPreMergeGate.
+describe("resolveMergeGate — single owner of the merge-gate decision (arch-review §1.2)", () => {
+  let db: ReturnType<typeof createTestDb>["db"];
+  beforeEach(() => { ({ db } = createTestDb()); });
+
+  it("run-gate runs runPreMergeGate — the SAME gate the manual merge path and review-exit call (no divergence)", async () => {
+    const { projectId, workspaceId } = await seedApprovedWorkspace(db);
+    await setPreference(verifyScriptPrefKey(projectId), ".\\verify.sh", db);
+    runSetupScript.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "compile error" });
+
+    const resolved = await resolveMergeGate({
+      token: { kind: "run-gate" },
+      workspace: { id: workspaceId, workingDir: "/repo/.worktrees/feature_ak-821-test" },
+      projectId,
+      database: db,
+    });
+    expect(runSetupScript).toHaveBeenCalled();
+    expect(resolved.ran).toBe(true);
+    expect(resolved.passed).toBe(false);
+    expect(resolved.stage).toBe("verify");
+    expect(resolved.decision).toBe("run-gate");
+  });
+
+  it("a fresh `already-passed` token passes WITHOUT running the gate", async () => {
+    const { projectId, workspaceId } = await seedApprovedWorkspace(db);
+    await setPreference(verifyScriptPrefKey(projectId), ".\\verify.sh", db);
+    runSetupScript.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "would fail if run" });
+
+    const resolved = await resolveMergeGate({
+      token: gateAlreadyPassed({ ranAt: new Date().toISOString(), stage: "verify", source: "review-exit" }),
+      workspace: { id: workspaceId, workingDir: "/repo/.worktrees/feature_ak-821-test" },
+      projectId,
+      database: db,
+    });
+    expect(runSetupScript).not.toHaveBeenCalled();
+    expect(resolved.passed).toBe(true);
+    expect(resolved.ran).toBe(false);
+    expect(resolved.decision).toBe("already-passed");
+  });
+
+  it("a STALE `already-passed` token is rejected and the gate re-runs (decision=run-gate-stale-evidence)", async () => {
+    const { projectId, workspaceId } = await seedApprovedWorkspace(db);
+    await setPreference(verifyScriptPrefKey(projectId), ".\\verify.sh", db);
+    runSetupScript.mockResolvedValue({ exitCode: 0, stdout: "ok", stderr: "" });
+
+    const staleRanAt = new Date(Date.now() - (MERGE_GATE_EVIDENCE_MAX_AGE_MS + 60_000)).toISOString();
+    const resolved = await resolveMergeGate({
+      token: gateAlreadyPassed({ ranAt: staleRanAt, stage: "verify", source: "stale" }),
+      workspace: { id: workspaceId, workingDir: "/repo/.worktrees/feature_ak-821-test" },
+      projectId,
+      database: db,
+    });
+    expect(runSetupScript).toHaveBeenCalled();
+    expect(resolved.ran).toBe(true);
+    expect(resolved.decision).toBe("run-gate-stale-evidence");
+  });
+
+  it("a `skip-explicit` token passes WITHOUT running the gate and records the reason", async () => {
+    const { projectId, workspaceId } = await seedApprovedWorkspace(db);
+    await setPreference(verifyScriptPrefKey(projectId), ".\\verify.sh", db);
+    runSetupScript.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "would fail if run" });
+
+    const resolved = await resolveMergeGate({
+      token: gateSkipExplicit("done-unmerged recovery: already-approved work"),
+      workspace: { id: workspaceId, workingDir: "/repo/.worktrees/feature_ak-821-test" },
+      projectId,
+      database: db,
+    });
+    expect(runSetupScript).not.toHaveBeenCalled();
+    expect(resolved.passed).toBe(true);
+    expect(resolved.ran).toBe(false);
+    expect(resolved.decision).toBe("skip-explicit");
+    expect(resolved.message).toContain("already-approved work");
+  });
+});
+
+// #169: a worktree whose blocking setup script silently failed reaches the verify gate hours
+// later with node_modules missing, producing an opaque "Could not resolve 'vitest/config'"-style
+// failure. The gate now recognizes that failure signature and retries once after re-running the
+// project's install command before withholding the merge.
+describe("runPreMergeGate — missing-deps signature triggers one install+retry (#169)", () => {
+  let db: ReturnType<typeof createTestDb>["db"];
+  beforeEach(() => { ({ db } = createTestDb()); });
+
+  it("retries once after an install and PASSES when the retry is green", async () => {
+    const { projectId, workspaceId } = await seedApprovedWorkspace(db);
+    await setPreference(verifyScriptPrefKey(projectId), "pnpm test", db);
+    await db.update(projects).set({ setupScript: "pnpm install -r" }).where(eq(projects.id, projectId));
+
+    runSetupScript
+      .mockResolvedValueOnce({ exitCode: 1, stdout: "", stderr: "Error: Could not resolve 'vitest/config'" })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: "installed", stderr: "" }) // the install retry
+      .mockResolvedValueOnce({ exitCode: 0, stdout: "ok", stderr: "" }); // the re-run verify
+
+    const result = await runPreMergeGate({ id: workspaceId, workingDir: "/repo/.worktrees/feature_ak-821-test" }, projectId, db);
+
+    expect(runSetupScript).toHaveBeenCalledTimes(3);
+    expect(runSetupScript).toHaveBeenNthCalledWith(2, "/repo/.worktrees/feature_ak-821-test", "pnpm install -r", expect.objectContaining({ timeoutMs: expect.any(Number) }));
+    expect(runSetupScript).toHaveBeenNthCalledWith(3, "/repo/.worktrees/feature_ak-821-test", "pnpm test", expect.objectContaining({ timeoutMs: expect.any(Number) }));
+    expect(result.passed).toBe(true);
+  });
+
+  it("withholds with a clear retried-once reason when the retry is still red", async () => {
+    const { projectId, workspaceId } = await seedApprovedWorkspace(db);
+    await setPreference(verifyScriptPrefKey(projectId), "pnpm test", db);
+    await db.update(projects).set({ setupScript: "pnpm install -r" }).where(eq(projects.id, projectId));
+
+    runSetupScript
+      .mockResolvedValueOnce({ exitCode: 1, stdout: "", stderr: "Error: Cannot find module 'vitest'" })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: "installed", stderr: "" }) // the install retry
+      .mockResolvedValueOnce({ exitCode: 1, stdout: "", stderr: "still red: real test failure" }); // re-run verify
+
+    const result = await runPreMergeGate({ id: workspaceId, workingDir: "/repo/.worktrees/feature_ak-821-test" }, projectId, db);
+
+    expect(runSetupScript).toHaveBeenCalledTimes(3);
+    expect(result.passed).toBe(false);
+    expect(result.message).toContain("retried once");
+    expect(result.message).toContain("still red: real test failure");
+  });
+
+  it("does NOT retry when the verify failure is a genuine test/build error (no missing-deps signature)", async () => {
+    const { projectId, workspaceId } = await seedApprovedWorkspace(db);
+    await setPreference(verifyScriptPrefKey(projectId), "pnpm test", db);
+    await db.update(projects).set({ setupScript: "pnpm install -r" }).where(eq(projects.id, projectId));
+
+    runSetupScript.mockResolvedValue({ exitCode: 1, stdout: "", stderr: "1 failing: expected 2 to equal 3" });
+
+    const result = await runPreMergeGate({ id: workspaceId, workingDir: "/repo/.worktrees/feature_ak-821-test" }, projectId, db);
+
+    // Only the single verify call — no install attempt for a non-missing-deps failure.
+    expect(runSetupScript).toHaveBeenCalledTimes(1);
+    expect(result.passed).toBe(false);
+    expect(result.message).not.toContain("retried once");
   });
 });

@@ -1,6 +1,7 @@
+import type { SkillSetting, TagSetting } from "../lib/settingsTypes.js";
 import { useState, type ReactNode } from "react";
 import { apiPost } from "../lib/api.js";
-import { showToast } from "./Toast.js";
+import { showToast } from "../lib/toast.js";
 
 export interface SettingsPanelProps {
   onClose: () => void;
@@ -19,6 +20,7 @@ export * from "./SettingsPrimitives.js";
 export * from "./WorkflowSections.js";
 import { CAPABILITY_DEFS, getProviderCapabilities } from "../lib/settings-shared.js";
 import type { Settings, AgentProvider } from "../lib/settings-shared.js";
+import type { ServicesConfigFormFields } from "../lib/services-config.js";
 
 const ARCHIVE_THRESHOLDS = [
   { label: "14 days", value: 14 },
@@ -133,15 +135,16 @@ export function CapabilityMatrixTable({ provider, profileName, flags }: {
 }
 
 export function EditSkillForm({ skill, isNew, onSave, onCancel }: {
-  skill: { id?: string; name: string; description: string; prompt: string; model: string | null; projectId?: string | null };
+  skill: { id?: string; name: string; description: string; prompt: string; model: string | null; projectId?: string | null; isInit?: boolean };
   isNew?: boolean;
-  onSave: (data: { name: string; description: string; prompt: string; model: string; projectId?: string | null }) => void;
+  onSave: (data: { name: string; description: string; prompt: string; model: string; projectId?: string | null; isInit: boolean }) => void;
   onCancel: () => void;
 }) {
   const [name, setName] = useState(skill.name);
   const [description, setDescription] = useState(skill.description);
   const [prompt, setPrompt] = useState(skill.prompt);
   const [model, setModel] = useState(skill.model || "");
+  const [isInit, setIsInit] = useState(skill.isInit ?? false);
   const [enhancing, setEnhancing] = useState(false);
   const [preEnhanceSnapshot, setPreEnhanceSnapshot] = useState<{ name: string; description: string; prompt: string } | null>(null);
 
@@ -203,9 +206,18 @@ export function EditSkillForm({ skill, isNew, onSave, onCancel }: {
           className="flex-1 text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
         />
       </div>
+      <label className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400">
+        <input
+          type="checkbox"
+          checked={isInit}
+          onChange={(e) => setIsInit(e.target.checked)}
+          className="rounded border-gray-300 dark:border-gray-600"
+        />
+        Init skill (one-time project-init step, suggested — never auto-run)
+      </label>
       <div className="flex gap-2 flex-wrap">
         <button
-          onClick={() => onSave({ name, description, prompt, model })}
+          onClick={() => onSave({ name, description, prompt, model, isInit })}
           disabled={!name || !prompt}
           className="text-xs px-3 py-1.5 bg-brand-600 text-white rounded hover:bg-brand-700 disabled:opacity-50"
         >
@@ -260,6 +272,7 @@ export function formatNextFire(value: string | null | undefined): string {
 
 export type SettingsTextSetter = (key: keyof Settings) => (value: string) => void;
 export type SettingsBoolSetter = (key: keyof Settings) => (checked: boolean) => void;
-export type SkillSetting = { id: string; name: string; description: string; prompt: string; model: string | null; projectId: string | null; isBuiltin: boolean };
-export type TagSetting = { id: string; name: string; color: string | null; isBuiltin: boolean };
-export type ProjectSettingsState = { defaultBranch: string; setupScript: string; setupBlocking: boolean; setupEnabled: boolean; teardownScript: string; verifyScript: string; color: string | null; symlinkEnabled: boolean; symlinkDirs: string; defaultSkillId: string | null };
+export type ProjectSettingsState = { defaultBranch: string; setupScript: string; setupBlocking: boolean; setupEnabled: boolean; teardownScript: string; verifyScript: string; color: string | null; symlinkEnabled: boolean; symlinkDirs: string; defaultSkillId: string | null } & ServicesConfigFormFields;
+
+/** #610 — re-exported so this panel's existing importers are unchanged. */
+export type { SkillSetting, TagSetting } from "../lib/settingsTypes.js";
