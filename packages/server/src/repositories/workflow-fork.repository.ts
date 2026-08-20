@@ -202,11 +202,15 @@ export async function insertQueuedChildWorkspace(
   await database.insert(workspaces).values(values);
 }
 
-export async function selectPendingForkChildren(parentId: string, database: Database = db) {
+export async function selectPendingForkChildren(parentId: string, database: Database = db, forkNodeId?: string) {
   return database
     .select({ id: workspaces.id })
     .from(workspaces)
-    .where(and(eq(workspaces.parentWorkspaceId, parentId), inArray(workspaces.forkStatus, ["running", "queued"])));
+    .where(and(
+      eq(workspaces.parentWorkspaceId, parentId),
+      inArray(workspaces.forkStatus, ["running", "queued"]),
+      ...(forkNodeId ? [eq(workspaces.forkNodeId, forkNodeId)] : []),
+    ));
 }
 
 export async function selectForkIssue(issueId: string, database: Database = db) {
@@ -247,7 +251,7 @@ export async function selectStdoutSessionMessages(sessionId: string, database: D
 
 export async function selectChildJoinContext(childWorkspaceId: string, database: Database = db) {
   return database
-    .select({ id: workspaces.id, parentWorkspaceId: workspaces.parentWorkspaceId, forkJoinNodeId: workspaces.forkJoinNodeId })
+    .select({ id: workspaces.id, parentWorkspaceId: workspaces.parentWorkspaceId, forkNodeId: workspaces.forkNodeId, forkJoinNodeId: workspaces.forkJoinNodeId })
     .from(workspaces)
     .where(eq(workspaces.id, childWorkspaceId))
     .limit(1);
@@ -278,15 +282,42 @@ export async function selectConsolidateIssue(issueId: string, database: Database
   return database.select({ issueNumber: issues.issueNumber, title: issues.title, description: issues.description, projectId: issues.projectId, workflowTemplateId: issues.workflowTemplateId }).from(issues).where(eq(issues.id, issueId)).limit(1);
 }
 
-export async function selectForkChildrenForConsolidate(parentId: string, database: Database = db) {
+export async function selectForkChildrenForConsolidate(parentId: string, database: Database = db, forkNodeId?: string) {
   return database
     .select({ id: workspaces.id, branch: workspaces.branch, workingDir: workspaces.workingDir, forkStatus: workspaces.forkStatus, forkNodeId: workspaces.forkNodeId })
     .from(workspaces)
-    .where(eq(workspaces.parentWorkspaceId, parentId));
+    .where(and(
+      eq(workspaces.parentWorkspaceId, parentId),
+      ...(forkNodeId ? [eq(workspaces.forkNodeId, forkNodeId)] : []),
+    ));
 }
 
 export async function selectCancelOverdueChild(childWorkspaceId: string, database: Database = db) {
-  return database.select({ forkStatus: workspaces.forkStatus, parentWorkspaceId: workspaces.parentWorkspaceId }).from(workspaces).where(eq(workspaces.id, childWorkspaceId)).limit(1);
+  return database.select({ forkStatus: workspaces.forkStatus, parentWorkspaceId: workspaces.parentWorkspaceId, forkNodeId: workspaces.forkNodeId, forkJoinNodeId: workspaces.forkJoinNodeId, currentNodeId: workspaces.currentNodeId }).from(workspaces).where(eq(workspaces.id, childWorkspaceId)).limit(1);
+}
+
+/**
+ * Fork-child context for the post-session-exit join reconciler (#1000): does this
+ * workspace belong to a fork (has a parent) and, if so, is it already sitting on
+ * its recorded `forkJoinNodeId` (the agent successfully called propose_transition
+ * before its session exited) even though `forkStatus` was never flipped to
+ * "joined" — the fire-and-forget cross-process notify that normally does that
+ * (`notifyWorkflowAdvanced`) has no delivery guarantee and can be lost/raced by a
+ * concurrent session-exit status write (e.g. usage-limit -> blocked).
+ */
+export async function selectForkChildNodeContext(childWorkspaceId: string, database: Database = db) {
+  return database
+    .select({
+      id: workspaces.id,
+      currentNodeId: workspaces.currentNodeId,
+      parentWorkspaceId: workspaces.parentWorkspaceId,
+      forkNodeId: workspaces.forkNodeId,
+      forkJoinNodeId: workspaces.forkJoinNodeId,
+      forkStatus: workspaces.forkStatus,
+    })
+    .from(workspaces)
+    .where(eq(workspaces.id, childWorkspaceId))
+    .limit(1);
 }
 
 export async function updateChildWorkspaceCancelled(

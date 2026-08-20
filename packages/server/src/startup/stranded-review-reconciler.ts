@@ -1,6 +1,7 @@
-import { issues, projectStatuses, sessions, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, projectStatuses, sessions, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
+import { isTerminalNodeType } from "@agentic-kanban/shared/lib/workflow-engine";
 import { and, eq } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
@@ -138,12 +139,17 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
       baseBranch: workspaces.baseBranch,
       issueNumber: issues.issueNumber,
       projectId: issues.projectId,
+      currentNodeId: workspaces.currentNodeId,
+      currentNodeType: workflowNodes.nodeType,
+      parentWorkspaceId: workspaces.parentWorkspaceId,
+      forkStatus: workspaces.forkStatus,
       preflightFailures: workspaces.reviewPreflightFailures,
       preflightSignature: workspaces.reviewPreflightSignature,
     })
     .from(workspaces)
     .innerJoin(issues, eq(workspaces.issueId, issues.id))
     .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+    .leftJoin(workflowNodes, eq(workspaces.currentNodeId, workflowNodes.id))
     .where(and(
       eq(workspaces.status, "idle"),
       eq(workspaces.isDirect, false),
@@ -155,6 +161,15 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
   let blocked = 0;
   for (const c of candidates) {
     if (!c.workingDir || !c.baseBranch) continue;
+    // #998: a fork child (parentWorkspaceId set, or forkStatus stamped) is an ephemeral
+    // sub-branch consolidated by its JOIN — never eligible for the stranded-review
+    // reconciler, which would otherwise re-launch a review on it or mark it readyForMerge.
+    if (c.parentWorkspaceId || c.forkStatus) continue;
+    // #997: a workspace parked on a non-terminal workflow-template node is owned
+    // by the graph — its own node-driven stages decide review/fix, not this
+    // legacy reconciler. Skip it so a mid-workflow branch never gets silently
+    // re-launched into review or marked readyForMerge.
+    if (c.currentNodeId && !isTerminalNodeType(c.currentNodeType)) continue;
     // A merge in flight OWNS this workspace (#270): its pre-lock gate runs for 20-40 minutes
     // with the workspace still idle, which is exactly the window in which this reconciler
     // used to launch a second review and strand the merge. The merge path runs/ran its own

@@ -14,12 +14,30 @@ export type TestDb = ReturnType<typeof drizzle<typeof schema>>;
 /**
  * Applies all MIGRATION_FILES to a libsql Client (in-memory or file-based).
  * Shared by createTestDb() and CLI tests that need a file-backed database.
+ *
+ * Also stamps `__drizzle_migrations` (same table/columns `applyMigrations` in
+ * `db/manual-migrate.ts` uses to track what's applied). Without this, a CLI test
+ * that spawns a subprocess against this file-backed DB (`runCli()`) triggers that
+ * subprocess's own `runMigrations()` — which finds no bookkeeping, assumes
+ * NOTHING is applied, and replays every migration from scratch against an
+ * already-migrated DB, blowing up on non-idempotent DDL (`DROP TABLE` FK
+ * failures, "table already exists"). Recording each tag here as it's applied
+ * keeps the two migration runners' bookkeeping in sync.
  */
 export function applyMigrationsToClient(client: Client): void {
+  client.execute(`
+    CREATE TABLE IF NOT EXISTS __drizzle_migrations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      hash text NOT NULL,
+      created_at number
+    )
+  `);
   for (const file of MIGRATION_FILES) {
+    const tag = file.replace(/\.sql$/, "");
     for (const stmt of readMigrationStatements(file, MIGRATIONS_DIR)) {
       client.execute(stmt);
     }
+    client.execute({ sql: "INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)", args: [tag, Date.now()] });
   }
 }
 
