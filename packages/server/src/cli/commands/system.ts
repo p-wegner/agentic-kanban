@@ -76,60 +76,107 @@ Examples:
 
   program
     .command("install-skill")
-    .description("Install built-in agent skills as SKILL.md files into a project's .claude/skills/ directory.\n\nWorks without a running server or database. Each skill is written as .claude/skills/<name>/SKILL.md.")
+    .description("Install agent skills into a project's .claude/skills/ directory, or into your user agent-skill directories with --user.\n\nWorks without a running server or database. Prompt-only built-ins are written as .claude/skills/<name>/SKILL.md; BUNDLED skills (which carry a references/ directory) are junctioned into the installed package by default, so `npm update agentic-kanban` refreshes them with no re-install.")
     .argument("[target-path]", "Path to the target project (defaults to current directory)", ".")
     .option("-n, --names <names>", "Comma-separated list of skill names to install (default: all)")
-    .option("--list", "List available built-in skills without installing")
+    .option("--user", "Install into your user agent-skill directories (~/.claude*/skills, ~/.codex/skills) instead of a project")
+    .option("--no-link", "Copy bundled skills instead of junctioning them (they will not track package upgrades)")
+    .option("--list", "List available skills without installing")
     .addHelpText("after", `
 Examples:
   $ npx agentic-kanban install-skill                        # install all skills to cwd
   $ npx agentic-kanban install-skill /path/to/project       # install to a specific project
+  $ npx agentic-kanban install-skill --user                 # install for every agent profile on this machine
   $ npx agentic-kanban install-skill -n "board-navigator"   # install a single skill
   $ npx agentic-kanban install-skill --list                  # list available skills
+
+Bundled vs prompt-only:
+  A BUNDLED skill is a directory shipped with the package (SKILL.md + references/). With --user it is
+  junctioned, so it stays current across upgrades — verify with 'agentic-kanban skill verify'.
+  A junction is not always possible (npx cache, no symlink permission); a copy is made instead and
+  reported as such.
 `)
-    .action(async (targetPath: string, options: { names?: string; list?: boolean }) => {
+    .action(async (targetPath: string, options: { names?: string; list?: boolean; user?: boolean; link?: boolean }) => {
       try {
+        const { listBundledSkills, installBundledSkill, discoverUserSkillRoots } =
+          await import("@agentic-kanban/shared/lib/bundled-skills");
+        const bundled = await listBundledSkills();
+        const bundledNames = new Set(bundled.map(s => s.name));
+        // A bundled directory WINS over a same-named prompt-only built-in: it is the richer
+        // form of the same skill, and installing both would leave the loser's SKILL.md behind.
+        const promptOnly = BUILTIN_SKILLS.filter(s => !bundledNames.has(s.name));
+
         if (options.list) {
-          console.log("Available built-in skills:");
-          for (const skill of BUILTIN_SKILLS) {
-            console.log(`  ${skill.name} — ${skill.description}`);
-          }
+          console.log("Bundled skills (directory + references, junctioned on install):");
+          if (!bundled.length) console.log("  (none found — the package's skills/ directory is missing)");
+          for (const s of bundled) console.log(`  ${s.name} — ${s.description}`);
+          console.log("\nPrompt-only built-in skills:");
+          for (const s of promptOnly) console.log(`  ${s.name} — ${s.description}`);
           process.exit(0);
         }
 
-        const { resolve: resolvePath } = await import("node:path");
-        const { access } = await import("node:fs/promises");
-        const resolvedPath = resolvePath(targetPath);
-        try {
-          await access(resolvedPath);
-        } catch {
-          console.error(`Target path does not exist: ${resolvedPath}`);
-          process.exit(1);
-        }
-
-        let skills = [...BUILTIN_SKILLS];
+        let selectedBundled = bundled;
+        let selectedPrompt = promptOnly;
         if (options.names) {
-          const nameSet = new Set(options.names.split(",").map(n => n.trim()));
-          skills = skills.filter(s => nameSet.has(s.name));
-          if (skills.length === 0) {
-            console.error(`No matching skills found. Available: ${BUILTIN_SKILLS.map(s => s.name).join(", ")}`);
+          const nameSet = new Set(options.names.split(",").map(n => n.trim()).filter(Boolean));
+          selectedBundled = bundled.filter(s => nameSet.has(s.name));
+          selectedPrompt = promptOnly.filter(s => nameSet.has(s.name));
+          if (!selectedBundled.length && !selectedPrompt.length) {
+            const all = [...bundled.map(s => s.name), ...promptOnly.map(s => s.name)].sort();
+            console.error(`No matching skills found. Available: ${all.join(", ")}`);
             process.exit(1);
           }
         }
 
-        const { writeAgentSkillFile } = await import("@agentic-kanban/shared/lib/agent-skill-files");
+        const { resolve: resolvePath, join } = await import("node:path");
+        const { access } = await import("node:fs/promises");
+        const { writeAgentSkillFileInto, ensureCodexSkillsLink } =
+          await import("@agentic-kanban/shared/lib/agent-skill-files");
 
-        for (const skill of skills) {
-          await writeAgentSkillFile(resolvedPath, {
-            name: skill.name,
-            description: skill.description,
-            prompt: skill.prompt,
-          });
+        // --user targets the agent HOMES directly (~/.claude/skills); a project target goes
+        // through the project's own .claude/skills, with .codex linked to it as usual.
+        let skillsDirs: string[];
+        if (options.user) {
+          skillsDirs = await discoverUserSkillRoots();
+          if (!skillsDirs.length) {
+            console.error("No user agent directories found (looked for ~/.claude* and ~/.codex). Install an agent CLI first, or pass a project path.");
+            process.exit(1);
+          }
+        } else {
+          const resolved = resolvePath(targetPath);
+          try {
+            await access(resolved);
+          } catch {
+            console.error(`Target path does not exist: ${resolved}`);
+            process.exit(1);
+          }
+          skillsDirs = [join(resolved, ".claude", "skills")];
+          // Prompt-only skills below do this themselves; do it up front so a bundled-only
+          // install still leaves Codex pointing at the same directory.
+          if (selectedBundled.length) await ensureCodexSkillsLink(resolved);
         }
 
-        console.log(`Installed ${skills.length} skill(s) to ${resolvedPath}/.claude/skills/:`);
-        for (const s of skills) {
-          console.log(`  - ${s.name}`);
+        let copiedWithoutLink = false;
+        for (const skillsDir of skillsDirs) {
+          const installed: string[] = [];
+          for (const skill of selectedBundled) {
+            const result = await installBundledSkill(skill, skillsDir, { link: options.link !== false });
+            installed.push(`${skill.name} (${result.mode})`);
+            if (result.linkError) {
+              copiedWithoutLink = true;
+              console.warn(`  ! ${skill.name}: could not junction (${result.linkError}) — copied instead`);
+            }
+          }
+          for (const skill of selectedPrompt) {
+            await writeAgentSkillFileInto(skillsDir, { name: skill.name, description: skill.description, prompt: skill.prompt });
+            installed.push(skill.name);
+          }
+          console.log(`Installed ${installed.length} skill(s) to ${skillsDir}:`);
+          for (const line of installed) console.log(`  - ${line}`);
+        }
+
+        if (copiedWithoutLink) {
+          console.log("\nSome skills were copied rather than linked — re-run this command after upgrading the package.");
         }
         process.exit(0);
       } catch (err) {

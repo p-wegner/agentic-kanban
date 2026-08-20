@@ -103,12 +103,28 @@ export async function writeAgentSkillFile(targetPath: string, skill: AgentSkillF
     throw new Error(`Invalid skill name for filesystem use: "${String((skill as { name: unknown }).name)}"`);
   }
   const skillsDir = skillsDirOf(targetPath);
-  const skillDir = skillDirOf(targetPath, skill.name);
-
-  await mkdir(skillDir, { recursive: true });
-  await writeFile(join(skillDir, "SKILL.md"), buildSkillMarkdown(skill), "utf-8");
+  const { skillDir } = await writeAgentSkillFileInto(skillsDir, skill);
   await ensureCodexSkillsLink(targetPath);
 
+  return { skillsDir, skillDir };
+}
+
+/**
+ * Write a skill into an ARBITRARY skills directory.
+ *
+ * `writeAgentSkillFile` above assumes the `<root>/.claude/skills` layout, which is right for a
+ * project but wrong for a user-level install: `~/.codex/skills` is a real directory of its own,
+ * not `~/.claude/skills`, and deriving a "root" from it would write to the wrong agent (and let
+ * `ensureCodexSkillsLink` replace one of the two with a link to the other). Same name guard,
+ * same markdown builder — only the directory is caller-chosen.
+ */
+export async function writeAgentSkillFileInto(skillsDir: string, skill: AgentSkillFile) {
+  if (!isSafeSkillName(skill.name)) {
+    throw new Error(`Invalid skill name for filesystem use: "${String((skill as { name: unknown }).name)}"`);
+  }
+  const skillDir = join(skillsDir, skill.name);
+  await mkdir(skillDir, { recursive: true });
+  await writeFile(join(skillDir, "SKILL.md"), buildSkillMarkdown(skill), "utf-8");
   return { skillsDir, skillDir };
 }
 

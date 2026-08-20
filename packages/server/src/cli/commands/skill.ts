@@ -1,5 +1,6 @@
 import type { Command } from "commander";
 import { cliAction } from "../shared.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import {
   listAgentSkills,
   getAgentSkillById,
@@ -9,7 +10,7 @@ import {
 } from "../../repositories/agent-skill.repository.js";
 
 export function registerSkillCommand(program: Command) {
-  const skillCmd = program.command("skill").description("Manage agent skills.\n\nSkills are prompt templates that can be injected into agent context when creating workspaces. Built-in skills (board-navigator, code-review, dependency-analyzer, ticket-enhancer) are seeded on first run and cannot be modified.\n\nSkills can be global (available to all projects) or project-scoped.\n\nSubcommands: list, get, create, export");
+  const skillCmd = program.command("skill").description("Manage agent skills.\n\nSkills are prompt templates that can be injected into agent context when creating workspaces. Built-in skills (board-navigator, code-review, dependency-analyzer, ticket-enhancer) are seeded on first run and cannot be modified.\n\nSkills can be global (available to all projects) or project-scoped.\n\nSubcommands: list, get, create, export, verify");
 
   skillCmd
     .command("list")
@@ -152,4 +153,64 @@ Examples:
       }
       process.exit(0);
     }));
+
+  skillCmd
+    .command("verify")
+    .description("Check whether the bundled agent skills an agent actually reads are current.\n\nRuns without a server or database. A junctioned install always reports 'linked' — it cannot go stale, which is the point of linking; a COPY is compared against the bundle and reported stale when it has fallen behind.")
+    .argument("[target-path]", "Project whose .claude/skills to check (defaults to current directory)", ".")
+    .option("--user", "Check your user agent-skill directories (~/.claude*/skills, ~/.codex/skills)")
+    .addHelpText("after", `
+Examples:
+  $ agentic-kanban skill verify              # is this project's copy current?
+  $ agentic-kanban skill verify --user       # are my user-level installs current?
+
+Exit code is 1 when anything is stale, so this is usable from a hook or from CI.
+`)
+    .action(async (targetPath: string, options: { user?: boolean }) => {
+      try {
+        const { listBundledSkills, inspectInstalledSkill, discoverUserSkillRoots, findBundledSkillsDir } =
+          await import("@agentic-kanban/shared/lib/bundled-skills");
+        const { skillsDirOf } = await import("@agentic-kanban/shared/lib/agent-skill-files");
+        const { resolve: resolvePath } = await import("node:path");
+
+        const bundleDir = findBundledSkillsDir();
+        const bundled = await listBundledSkills(bundleDir);
+        if (!bundled.length) {
+          console.error("No bundled skills found — the package's skills/ directory is missing.");
+          process.exit(1);
+        }
+        console.log(`Bundle: ${bundleDir}`);
+        for (const s of bundled) console.log(`  ${s.name} @ ${s.commit ?? "unstamped"}`);
+
+        const dirs = options.user ? await discoverUserSkillRoots() : [skillsDirOf(resolvePath(targetPath))];
+        let stale = 0;
+        let absent = 0;
+        for (const dir of dirs) {
+          console.log(`\n${dir}`);
+          for (const skill of bundled) {
+            const state = await inspectInstalledSkill(skill, dir);
+            if (state.state === "linked") {
+              console.log(`  ${skill.name}: linked (tracks the package)`);
+            } else if (state.state === "current") {
+              console.log(`  ${skill.name}: current copy @ ${state.commit ?? "unstamped"}`);
+            } else if (state.state === "absent") {
+              absent++;
+              console.log(`  ${skill.name}: not installed`);
+            } else {
+              stale++;
+              console.log(`  ${skill.name}: STALE copy @ ${state.commit ?? "unstamped"} (bundle is @ ${state.bundledCommit ?? "unstamped"})`);
+            }
+          }
+        }
+
+        if (stale || absent) {
+          console.log(`\n${stale} stale, ${absent} not installed. Fix with:`);
+          console.log(`  agentic-kanban install-skill${options.user ? " --user" : " " + targetPath}`);
+        }
+        process.exit(stale ? 1 : 0);
+      } catch (err) {
+        console.error("Error:", errorMessage(err));
+        process.exit(1);
+      }
+    });
 }

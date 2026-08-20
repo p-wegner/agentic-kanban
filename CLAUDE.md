@@ -260,6 +260,34 @@ Prompt templates in the `agent_skills` table, written to `.claude/skills/<name>/
 - The review prompt uses built-in `code-review`; override per-project with a project-scoped `code-review` skill. Placeholders: `{{branch}}`, `{{baseBranch}}`, `{{issueId}}`, `{{autoFixInstructions}}`.
 - A **plugin** skill is junctioned into `.claude/skills/<name>` on enable, so it is a *disk* skill with a whole bundle (`tools/`, `references/`), not a DB row. Both the scanners and `copySkillToWorktree` handle that now — junctions are followed (`readdir` reports them as symlinks, never directories) and the FULL directory is copied into the worktree, since a skill whose `tools/` is missing documents commands that don't exist.
 
+### Bundled skills — a DIRECTORY that ships in the package, generated from source
+`packages/server/skills/<name>/` (in `files`, so it ships on npm). Today: **`agentic-kanban`** — the
+board's own feature map for any agent on any machine: a hand-written overview plus `references/`
+(concepts, workflows, and a generated MCP-tool / CLI / views-and-shortcuts reference).
+
+Why a directory and not another `builtin-skills.ts` string: a prompt string cannot carry a
+`references/` bundle, and it cannot be **linked**. A bundled skill is junctioned into its install
+target, so one install keeps tracking the package across upgrades instead of rotting into a copy of
+last release's feature list.
+
+- **Generated from source, not maintained by hand.** `node packages/server/scripts/generate-bundled-skill.mjs`
+  (`pnpm skill:generate`) extracts the MCP tool table, every CLI command group, the view registry and
+  the shortcut registry, and rewrites only the `<!-- GENERATED:… -->` blocks plus the `commit:` stamp
+  — the prose between them is hand-written and never touched. `--check` (`pnpm skill:check`) exits 1
+  when the committed output differs from what source would produce now.
+- **The gate is content-based, not SHA-based** — `bundled-skill-freshness.test.ts` (`@gate:always-run`,
+  it spawns the generator over the whole tree) fails only when an enumerable thing actually changed.
+  So adding an MCP tool or a CLI command turns it red until you re-run the generator; editing an
+  unrelated file does not.
+- **Install:** `agentic-kanban install-skill [path]` (project) or `install-skill --user` (every
+  `~/.claude*/skills` and `~/.codex/skills` on the machine), MCP `install_skill`. Junction by default,
+  `--no-link` to copy. A junction that cannot be created (npx cache, no symlink permission) degrades
+  to a copy and SAYS SO rather than failing.
+- **Check:** `agentic-kanban skill verify [path] [--user]` — `linked` (cannot go stale), `current`,
+  `stale`, or `absent`; exit 1 on stale, so it works from a hook or CI.
+- A bundled directory **wins over a same-named DB built-in** in both the CLI and the MCP tool: it is
+  the richer form of the same skill, and installing both would leave the loser's `SKILL.md` behind.
+
 ## Plugins
 **Writing or reviewing one? Read [docs/plugin-development.md](docs/plugin-development.md) first** — the self-contained guide (lifecycle, every field, the four loop rules that fail silently, a copy-pasteable minimal plugin, a test recipe, a checklist, and the known gaps). It is written for an agent with no prior knowledge of this board, so it is also the thing to hand to one.
 
