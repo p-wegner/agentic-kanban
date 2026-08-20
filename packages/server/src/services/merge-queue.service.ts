@@ -590,7 +590,18 @@ export function createMergeQueueService(deps: {
           let gateWorktree: string | null = null;
           try {
             gateWorktree = await gitService.createWorktree(repoPath, trainRef, undefined, { pathNamespace: "train" });
-            const gate = await runPreMergeGate({ id: `train:${label}`, workingDir: gateWorktree, baseBranch }, projectId, database);
+            // `memberWorkspaceIds`: the synthetic `train:<label>` id matches no `repos` row, so
+            // without it the #628 deferred-install check passes vacuously for the whole train.
+            const gate = await runPreMergeGate(
+              {
+                id: `train:${label}`,
+                workingDir: gateWorktree,
+                baseBranch,
+                memberWorkspaceIds: members.map((m) => m.workspaceId),
+              },
+              projectId,
+              database,
+            );
             return { passed: gate.passed, message: gate.message };
           } catch (err) {
             // Fail CLOSED: a gate we could not run is not a gate that passed.

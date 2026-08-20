@@ -3,6 +3,8 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Database } from "../db/index.js";
 import { getPreference } from "../repositories/preferences.repository.js";
+import { resolveEffectiveVerify } from "./stack-profile.service.js";
+import { gateVerificationKey } from "./merge-gate-tree-memo.js";
 
 /**
  * The three verify-gate tiers (#538), replacing `verify_file_scope` plus the implicit
@@ -123,6 +125,11 @@ export interface GateTierInfo {
    *  file-scoping is a real, narrower tier that must not be reported as "full". */
   packageScoped: boolean;
   fileScoped: boolean;
+  /** The diff was docs-only, so the verify script ran ONLY the `@gate:always-run` guard
+   *  suites (`KANBAN_TEST_GUARDS_ONLY`). Narrower than every other tier, and reported as its
+   *  own name because the previous behavior — skipping verification entirely — read as a bare
+   *  "skipped" and hid that the markdown-reading guards never ran. */
+  guardsOnly?: boolean;
   changedFileCount: number;
   guardSuiteCount: number;
   maxWorkers: number;
@@ -151,15 +158,61 @@ export interface GateTierInfo {
  */
 export function buildGateTierMessage(tierInfo: GateTierInfo | null): string {
   if (!tierInfo) return "pre-merge gate passed (smoke check only — no verify_script tier)";
-  const tier = tierInfo.fileScoped ? "file-scoped" : tierInfo.packageScoped ? "package-scoped" : "full";
+  const tier = tierInfo.guardsOnly
+    ? "guards-only (docs-only diff)"
+    : tierInfo.fileScoped
+      ? "file-scoped"
+      : tierInfo.packageScoped
+        ? "package-scoped"
+        : "full";
   const parts = [
     `tier: ${tier}`,
     `${tierInfo.changedFileCount} changed file(s)`,
-    ...(tierInfo.fileScoped ? [`+${tierInfo.guardSuiteCount} guard suites`] : []),
+    ...(tierInfo.fileScoped || tierInfo.guardsOnly ? [`${tierInfo.guardsOnly ? "" : "+"}${tierInfo.guardSuiteCount} guard suites`] : []),
     `workers ${tierInfo.maxWorkers}`,
     ...(tierInfo.buildersQuiesced === undefined
       ? []
       : [tierInfo.buildersQuiesced ? "builders held" : "builders NOT held"]),
   ];
   return `pre-merge gate passed (${parts.join(", ")})`;
+}
+
+/**
+ * What verification the gate is about to apply: the tier, the effective verify command, and an
+ * opaque `verificationKey` folding both.
+ *
+ * **The ordering is the point.** The gate-PASS tree memo (#492) was keyed on project + merged
+ * tree and consulted BEFORE either of these resolved. The tree carries the base commit by
+ * content, so that part was sound — but not what the pass BOUGHT. Within the memo's 2 h TTL, a
+ * pass banked under `verify_gate_strategy = scoped` was replayed after an operator switched the
+ * project to `full`, and a pass banked under a looser `verify_script` was replayed after the
+ * script was tightened. That is a level weakening verification INVISIBLY, which is the one thing
+ * the tier contract above forbids. Resolving both here — two cheap pref reads — lets the caller
+ * consult the memo with a key that says which verification earned the pass.
+ *
+ * `resolveEffectiveVerify` is the #551 single resolver ("what will the gate run" — override
+ * first, derived second), the same call `workspace-provision` makes to tell the builder what to
+ * run, so the two can never name different commands. `persistDerived` re-derives ONCE at gate
+ * time when nothing is configured (#377): `verify_script` is otherwise only derived at
+ * REGISTRATION, so a project registered from an empty repo would have no gate forever however
+ * many suites it later grows. It never clobbers an existing value or writes an empty one, so it
+ * can only ADD a gate. Honest limit, measured on #377's project: detection reads the repo ROOT
+ * only, so a `package.json` under `src/` recovers nothing — the `unverified` flag covers that.
+ *
+ * A read error means we cannot tell whether a gate is configured, so it degrades to "no verify
+ * gate" — fail-closed applies to a CONFIGURED gate that cannot RUN, never to gate DETECTION.
+ */
+export async function resolveGateVerification(
+  projectId: string,
+  database: Database,
+): Promise<{
+  strategy: VerifyGateStrategy;
+  effectiveVerify: Awaited<ReturnType<typeof resolveEffectiveVerify>> | null;
+  verifyScript: string | null;
+  verificationKey: string;
+}> {
+  const strategy = await resolveVerifyGateStrategy(projectId, database);
+  const effectiveVerify = await resolveEffectiveVerify(projectId, database, { persistDerived: true }).catch(() => null);
+  const verifyScript = effectiveVerify?.command ?? null;
+  return { strategy, effectiveVerify, verifyScript, verificationKey: gateVerificationKey(strategy, verifyScript) };
 }

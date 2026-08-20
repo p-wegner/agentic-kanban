@@ -90,4 +90,19 @@ describe("the tier MESSAGE agrees with the tier that ran", () => {
     expect(msg).toContain("3 changed file(s)");
     expect(msg).toContain("+14 guard suites");
   });
+
+  // A docs-only diff used to skip verification entirely and report "pre-merge gate skipped —
+  // docs-only diff", which read as "nothing could have broken" while the markdown-reading
+  // @gate:always-run suites were exactly what went unrun. It now runs those guards, so the
+  // message must name the narrower tier rather than passing as an ordinary run.
+  it("names the guards-only tier for a docs-only diff", () => {
+    const msg = buildGateTierMessage({
+      strategy: "full", packageScoped: false, fileScoped: false, guardsOnly: true,
+      changedFileCount: 2, guardSuiteCount: 16, maxWorkers: 6,
+    });
+    expect(msg).toContain("tier: guards-only (docs-only diff)");
+    expect(msg).toContain("16 guard suites");
+    // Must not read as a full run — that is the dishonesty this tier exists to avoid.
+    expect(msg).not.toContain("tier: full");
+  });
 });
