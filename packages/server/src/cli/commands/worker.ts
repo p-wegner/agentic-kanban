@@ -47,11 +47,15 @@ export function buildWorkerConnectSteps(boardUrl: string, pairingToken: string):
         "the BOARD machine run `node scripts/pack-worker.mjs`, which builds, refuses to pack a tarball whose bin " +
         "map lacks the worker, and stamps a `<version>-dev.<sha>` prerelease so npm can never serve a cached " +
         "same-version copy in its place. Copy the tarball here and install it by path. `--blob` additionally " +
-        "puts it on an ACP relay and prints a ref, for a machine you cannot copy files to directly.",
+        "puts it on an ACP relay and prints a ref, for a machine you cannot copy files to directly. " +
+        "Verify the install: `--version` reports the version from the installed manifest, so it must echo the " +
+        "tarball's `-dev.<sha>` stamp back. A bare `0.0.1` means an old build (the version used to be hardcoded); " +
+        "the registry's plain `0.1.9` means npm served a cached copy instead of your file.",
       commands: [
         "npm view agentic-kanban bin   # does the published bin map have agentic-kanban-worker?",
         "npm i -g <path-to-agentic-kanban-*.tgz>",
-        "agentic-kanban-worker --version",
+        "agentic-kanban-worker --version        # must print the tarball's version, not 0.0.1",
+        "npm ls -g --depth 0 agentic-kanban     # cross-check: catches npm serving a cached copy",
       ],
     },
     {

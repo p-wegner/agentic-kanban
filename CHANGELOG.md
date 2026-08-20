@@ -15,6 +15,10 @@ All notable changes to this project are documented here. The format is based on
   gained a matching step, because the runbook previously assumed the binary already existed.
 
 ### Fixed
+- **`agentic-kanban-worker --version` reported a hardcoded `0.0.1`** regardless of which build was
+  installed. Since worker builds are handed over as sha-stamped tarballs, `--version` is the one
+  question that binary needs to answer honestly; it now reads the version from its own installed
+  manifest and falls back to `unknown` rather than to any number.
 - **The dev client published the unauthenticated board API to the network.** Vite binds `::`
   (every interface) on 5173 and proxies `/api`, `/health` and `/ws` to the loopback API, so a
   board brought up for cross-machine fleet work exposed every issue, transcript and merge
