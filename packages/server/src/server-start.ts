@@ -11,6 +11,7 @@ import * as agentService from "./services/agent.service.js";
 import { createBoardEvents } from "./services/board-events.js";
 import { createSessionManager } from "./services/session.manager.js";
 import { createWorkflowEngine } from "./startup/exit-workflow.js";
+import { createWorkflowForkService } from "./services/workflow-fork.service.js";
 import { createAutoMerge } from "./startup/merge-workflow.js";
 import { createMonitorSetup } from "./startup/monitor-setup.js";
 import { setupProcessHandlers } from "./startup/process-handlers.js";
@@ -129,7 +130,18 @@ export async function startServer(port?: number, hostname?: string) {
     onTodos: (projectId, issueId, todos) => boardEvents.broadcastTodos(projectId, issueId, todos),
   });
 
-  const workflow = createWorkflowEngine({ sessionManager, boardEvents, autoMerge: (...args) => autoMerge(...args) });
+  // Shared with route-setup's internal /workflow-advanced handler (#1000): the
+  // exit workflow needs this same instance's `reconcileJoinedForkChild` to
+  // recover a fork child whose join notify (cross-process, fire-and-forget) was
+  // lost or lost the race against a session-exit status write.
+  const forkService = createWorkflowForkService({ database: db, getSessionManager: () => sessionManager, boardEvents });
+
+  const workflow = createWorkflowEngine({
+    sessionManager,
+    boardEvents,
+    autoMerge: (...args) => autoMerge(...args),
+    reconcileForkChildOnExit: (workspaceId) => forkService.reconcileJoinedForkChild(workspaceId),
+  });
   autoMerge = createAutoMerge({ sessionManager, boardEvents, learningSessionIds: workflow.learningSessionIds });
   runWorkflowOnExit = workflow.runWorkflowOnExit;
 
@@ -168,7 +180,7 @@ export async function startServer(port?: number, hostname?: string) {
   }
 
   await runSessionRestore(workflow);
-  setupRoutes(app, { sessionManager, boardEvents, reviewSessionIds: workflow.reviewSessionIds, fixAndMergeSessionIds: workflow.fixAndMergeSessionIds, db, upgradeWebSocket });
+  setupRoutes(app, { sessionManager, boardEvents, reviewSessionIds: workflow.reviewSessionIds, fixAndMergeSessionIds: workflow.fixAndMergeSessionIds, db, upgradeWebSocket, forkService });
 
   const serverPort = port || Number(process.env.PORT) || 3001;
   const serverHost = hostname || process.env.KANBAN_HOST || "127.0.0.1";

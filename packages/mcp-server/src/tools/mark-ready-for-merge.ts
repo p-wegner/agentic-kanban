@@ -3,14 +3,14 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { notifyBoard } from "../notify.js";
-import { mcpJson, requireEntity } from "../db-utils.js";
+import { mcpJson, mcpStructuredError, requireEntity } from "../db-utils.js";
 
 export function registerMarkReadyForMerge(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema } = deps;
 
   server.tool(
     "mark_ready_for_merge",
-    "Mark a workspace as reviewed and ready to merge. Call this after a successful code review with no critical or major issues. This flag allows future agents to merge the workspace without requiring another review.",
+    "Mark a workspace as reviewed and ready to merge. Call this after a successful code review with no critical or major issues. This flag allows future agents to merge the workspace without requiring another review. NOT for fork-child workspaces (a workspace with a parent) — their verdicts flow through join consolidation via propose_transition, never through this tool.",
     {
       workspaceId: z.string().describe("The workspace ID to mark as ready for merge"),
     },
@@ -20,6 +20,17 @@ export function registerMarkReadyForMerge(server: McpServer, deps: ToolDeps = pr
         .limit(1);
       const r = requireEntity(wsRows, workspaceId, "Workspace");
       if (!r.ok) return r.error;
+
+      // Fork children never mark themselves ready for merge — their review
+      // verdicts must flow through join consolidation (propose_transition
+      // toward the join stage), not straight to merge. See #1001.
+      if (r.value.parentWorkspaceId) {
+        return mcpStructuredError(
+          "FORK_CHILD_CANNOT_MARK_READY",
+          "This workspace is a fork child. Fork children must not mark themselves ready for merge — advance to the join stage instead by calling propose_transition, and let join consolidation decide readiness.",
+          { workspaceId, parentWorkspaceId: r.value.parentWorkspaceId },
+        );
+      }
 
       const issueRows = await db.select({ projectId: schema.issues.projectId })
         .from(schema.issues)

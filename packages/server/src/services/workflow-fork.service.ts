@@ -37,6 +37,7 @@ import {
   selectCancelOverdueChild,
   updateChildWorkspaceCancelled,
   selectWorkspaceNodeContext,
+  selectForkChildNodeContext,
 } from "../repositories/workflow-fork.repository.js";
 import type { Database } from "../db/index.js";
 import type { SessionLauncher } from "./session.manager.js";
@@ -51,10 +52,15 @@ import {
   buildTransitionBlock,
   placeWorkspaceOnNode,
   findJoinNode,
+  findJoinNodeForFork,
   getJoinStrategy,
   getForkMode,
+  getForkMaxParallel,
+  getNodeAgentOverride,
   type WorkflowNodeRow,
 } from "@agentic-kanban/shared/lib/workflow-engine";
+import { getNumber } from "@agentic-kanban/shared/lib/settings-registry";
+import { getProfilePrefKey } from "./agent-provider.js";
 import { writeAgentSkillFile, readLocalSkillPrompt, copySkillToWorktree } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import { resolveEffectiveModel } from "./effective-config.service.js";
@@ -67,7 +73,13 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { slugify } from "@agentic-kanban/shared/lib/slugify";
 
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
-/** Default concurrency + timeout caps for parallel fork children (#82). */
+
+/**
+ * Default concurrency + timeout caps for parallel fork children (#82). The
+ * concurrency caps are configurable: globally via the settings
+ * workflow_fork_max_per_workspace / workflow_fork_max_per_project, and
+ * per-fork-node via `maxParallel` in the fork node's config.
+ */
 const MAX_CONCURRENT_PER_WORKSPACE = 2;
 const MAX_CONCURRENT_PER_PROJECT = 4;
 const CHILD_TIMEOUT_MS = 30 * 60 * 1000;
@@ -85,12 +97,42 @@ export function createWorkflowForkService(deps: {
   const { database, getSessionManager, boardEvents } = deps;
   const gitService = deps.gitService ?? realGitService;
 
-  async function resolveAgentConfig() {
+  /**
+   * Resolve the agent settings for a launch, honoring the node's `agent` config
+   * override (provider/profile/model) when present — same overlay pattern as
+   * review's applyWorkspaceProfileToPrefs: the override is written into a copy
+   * of the pref map so the single resolution path (resolveAgentSettings +
+   * resolveEffectiveModel) stays authoritative.
+   */
+  async function resolveAgentConfig(node?: WorkflowNodeRow | null) {
     const prefRows = await selectAllPreferences(database);
     const prefMap = toPrefMap(prefRows);
+    const override = node ? getNodeAgentOverride(node.config) : null;
+    if (override?.provider) prefMap.set("provider", override.provider);
+    if (override?.profile) {
+      const provider = override.provider ?? prefMap.get("provider");
+      prefMap.set(getProfilePrefKey(provider), override.profile);
+    }
     const s = resolveAgentSettings(prefMap);
-    const model = resolveEffectiveModel({ prefMap, provider: s.provider }).model;
+    const model = override?.model ?? resolveEffectiveModel({ prefMap, provider: s.provider }).model;
     return { ...s, model };
+  }
+
+  /**
+   * Resolve the concurrency caps for a fork: the fork node's `maxParallel`
+   * config wins for the per-workspace cap, else the global settings, else the
+   * hard-coded defaults. Both caps are clamped to >= 1.
+   */
+  async function resolveForkCaps(forkNode: WorkflowNodeRow): Promise<{ perWorkspace: number; perProject: number }> {
+    const prefRows = await selectAllPreferences(database);
+    const prefMap = new Map(prefRows.map((r) => [r.key, r.value]));
+    const globalPerWorkspace = getNumber(prefMap, "workflow_fork_max_per_workspace", MAX_CONCURRENT_PER_WORKSPACE);
+    const perProject = getNumber(prefMap, "workflow_fork_max_per_project", MAX_CONCURRENT_PER_PROJECT);
+    const perWorkspace = getForkMaxParallel(forkNode.config) ?? globalPerWorkspace;
+    return {
+      perWorkspace: Math.max(1, Math.floor(perWorkspace) || MAX_CONCURRENT_PER_WORKSPACE),
+      perProject: Math.max(1, Math.floor(perProject) || MAX_CONCURRENT_PER_PROJECT),
+    };
   }
 
   /** Write the node's attached skill into a child worktree, returning its name. */
@@ -196,7 +238,7 @@ export function createWorkflowForkService(deps: {
       `${ws.description ?? ""}\n\n` +
       buildTransitionBlock(node, transitions, workspaceId);
 
-    const cfg = await resolveAgentConfig();
+    const cfg = await resolveAgentConfig(node);
     await getSessionManager().startSession({
       workspaceId,
       prompt,
@@ -240,17 +282,23 @@ export function createWorkflowForkService(deps: {
 
     const skillName = await injectNodeSkill(entry, worktreePath, project.repoPath);
     const transitions = await getOutgoingTransitions(database, entry.id);
+    const forkChildGuardrail =
+      "You are a FORK CHILD. Never call `mark_ready_for_merge` — that verdict belongs to join consolidation, not " +
+      "an individual fork branch/stage. When your work here is done, advance to the join stage via " +
+      "`propose_transition`; do not attempt to merge, mark ready, or write to kanban.db yourself.\n\n";
     const prompt = sharedWorktree
       ? `You are working on a SHARED worktree for issue #${issue.issueNumber ?? "?"} — "${issue.title}", on branch \`${parent.branch}\`.\n` +
         `This is the "${entry.name}" stage of a fork whose stages run ONE AT A TIME on this same branch/worktree. Earlier stages' work is already committed here. Do ONLY this stage's work, add NEW files or additive changes (avoid rewriting other stages' work), commit it on this branch, then advance to the join stage.\n\n` +
+        forkChildGuardrail +
         `${issue.description ?? ""}\n\n` +
         buildTransitionBlock(entry, transitions, childWorkspaceId)
       : `You are working on a PARALLEL BRANCH of issue #${issue.issueNumber ?? "?"} — "${issue.title}".\n` +
         `This is the "${entry.name}" branch of a fork; sibling branches run concurrently. Do ONLY this branch's work, commit it, then advance to the join stage so your work can be consolidated.\n\n` +
+        forkChildGuardrail +
         `${issue.description ?? ""}\n\n` +
         buildTransitionBlock(entry, transitions, childWorkspaceId);
 
-    const cfg = await resolveAgentConfig();
+    const cfg = await resolveAgentConfig(entry);
 
     await insertLaunchedChildWorkspace({
       id: childWorkspaceId,
@@ -287,6 +335,7 @@ export function createWorkflowForkService(deps: {
 
     if (getSessionManager) {
       try {
+        console.log(`[fork] child "${entry.name}" (${childWorkspaceId}) launching on provider=${toExecutorProvider(cfg.provider)}${cfg.model ? ` model=${cfg.model}` : ""}.`);
         await getSessionManager().startSession({
           workspaceId: childWorkspaceId,
           prompt,
@@ -326,7 +375,7 @@ export function createWorkflowForkService(deps: {
     const project = projRows[0];
 
     if (!issue.workflowTemplateId) return;
-    const joinNode = await findJoinNode(database, issue.workflowTemplateId);
+    const joinNode = await findJoinNodeForFork(database, forkNode);
     if (!joinNode) {
       console.warn(`[fork] template ${issue.workflowTemplateId} has a fork but no parallel-join node — skipping fork.`);
       return;
@@ -348,13 +397,14 @@ export function createWorkflowForkService(deps: {
 
     // Shared mode runs strictly one stage at a time on the parent branch, so the
     // effective per-workspace concurrency is 1 (the rest queue and drain on join).
-    const perWorkspaceCap = sharedWorktree ? 1 : MAX_CONCURRENT_PER_WORKSPACE;
+    const caps = await resolveForkCaps(forkNode);
+    const perWorkspaceCap = sharedWorktree ? 1 : caps.perWorkspace;
     let launchedNow = 0;
     for (const entry of entries) {
       const childId = randomUUID();
       const projectRunning = await projectRunningForkCount(issue.projectId);
       const canLaunch =
-        launchedNow < perWorkspaceCap && projectRunning < MAX_CONCURRENT_PER_PROJECT;
+        launchedNow < perWorkspaceCap && projectRunning < caps.perProject;
       if (canLaunch) {
         try {
           await launchChild({ parent, project, issue, forkNode, joinNode, entry, childWorkspaceId: childId, sharedWorktree });
@@ -382,8 +432,8 @@ export function createWorkflowForkService(deps: {
     }
     console.log(`[fork] parent=${parent.id} spawned ${launchedNow}/${entries.length} children now (rest queued).`);
 
-    const pending = await selectPendingForkChildren(parent.id, database);
-    if (pending.length === 0) await consolidate(parent.id);
+    const pending = await selectPendingForkChildren(parent.id, database, forkNode.id);
+    if (pending.length === 0) await consolidate(parent.id, { forkNodeId: forkNode.id, joinNodeId: joinNode.id });
   }
 
   /** Drain queued children for a parent up to the concurrency caps. */
@@ -399,8 +449,16 @@ export function createWorkflowForkService(deps: {
     if (projRows.length === 0) return;
     const project = projRows[0];
 
+    // #1000: reconcile any "running" child that is actually already sitting on
+    // its join node (a lost/raced notify left forkStatus stale) BEFORE counting
+    // capacity — otherwise a stuck-but-really-joined child both occupies a
+    // concurrency slot forever and blocks the fork from ever consolidating.
     const running = await selectRunningForkChildren(parent.id, database);
-    let runningCount = running.length;
+    for (const r of running) {
+      await reconcileJoinedForkChild(r.id);
+    }
+    const stillRunning = await selectRunningForkChildren(parent.id, database);
+    let runningCount = stillRunning.length;
 
     const queued = await selectQueuedForkChildren(parent.id, database);
 
@@ -411,9 +469,10 @@ export function createWorkflowForkService(deps: {
       if (!forkNode || !joinNode || !entry) continue;
       const sharedWorktree = getForkMode(forkNode.config) === "shared";
       // Shared mode is strictly sequential (one stage at a time on the parent branch).
-      const perWorkspaceCap = sharedWorktree ? 1 : MAX_CONCURRENT_PER_WORKSPACE;
+      const caps = await resolveForkCaps(forkNode);
+      const perWorkspaceCap = sharedWorktree ? 1 : caps.perWorkspace;
       if (runningCount >= perWorkspaceCap) break;
-      if ((await projectRunningForkCount(issue.projectId)) >= MAX_CONCURRENT_PER_PROJECT) break;
+      if ((await projectRunningForkCount(issue.projectId)) >= caps.perProject) break;
       // Remove the placeholder row; launchChild re-inserts a full one with the same id.
       await deleteWorkspaceById(q.id, database);
       await launchChild({ parent, project, issue, forkNode, joinNode, entry, childWorkspaceId: q.id, sharedWorktree });
@@ -459,11 +518,40 @@ export function createWorkflowForkService(deps: {
     return tail.length > 1500 ? tail.slice(-1500) : tail;
   }
 
+  /**
+   * #1000 reconciler: a fork child that already sits ON its recorded
+   * `forkJoinNodeId` (its agent successfully called `propose_transition` before
+   * exiting) but whose `forkStatus` never flipped to "joined" — because the
+   * cross-process notify that normally triggers `handleChildJoined`
+   * (`notifyWorkflowAdvanced`, fire-and-forget, no delivery guarantee) was lost or
+   * lost the race against a concurrent session-exit status write (e.g. a
+   * rate-limit exit blocking the workspace). Treat "already placed on the join
+   * node" as the source of truth for "joined" — status (blocked/failed) never
+   * decides it — and drive the same join path `handleChildJoined` would have.
+   * Idempotent / safe to call from anywhere a fork child's session just exited:
+   * a no-op for a non-fork-child, a child not yet at its join, or one already in
+   * a terminal forkStatus (joined/cancelled).
+   */
+  async function reconcileJoinedForkChild(childWorkspaceId: string): Promise<void> {
+    const rows = await selectForkChildNodeContext(childWorkspaceId, database);
+    if (rows.length === 0) return;
+    const child = rows[0];
+    if (!child.parentWorkspaceId || !child.forkJoinNodeId || !child.currentNodeId) return;
+    if (child.currentNodeId !== child.forkJoinNodeId) return;
+    if (child.forkStatus === "joined" || child.forkStatus === "cancelled") return;
+    console.warn(
+      `[fork] reconciled stuck child ${childWorkspaceId}: already on join node ${child.forkJoinNodeId} but forkStatus was "${child.forkStatus}" — treating as joined`,
+    );
+    await handleChildJoined(childWorkspaceId);
+  }
+
   /** Mark a child as joined; when all siblings are done, consolidate into the parent. */
   async function handleChildJoined(childWorkspaceId: string): Promise<void> {
     const rows = await selectChildJoinContext(childWorkspaceId, database);
     if (rows.length === 0 || !rows[0].parentWorkspaceId) return;
     const parentId: string = rows[0].parentWorkspaceId;
+    const forkNodeId = rows[0].forkNodeId ?? undefined;
+    const joinNodeId = rows[0].forkJoinNodeId ?? undefined;
     const now = new Date().toISOString();
 
     await updateChildWorkspaceJoined(childWorkspaceId, now, database);
@@ -476,11 +564,11 @@ export function createWorkflowForkService(deps: {
 
     await drainQueued(parentId);
 
-    // All children done? (none running or queued)
-    const pending = await selectPendingForkChildren(parentId, database);
+    // All of THIS fork's children done? (none running or queued)
+    const pending = await selectPendingForkChildren(parentId, database, forkNodeId);
     if (pending.length > 0) return;
 
-    await consolidate(parentId);
+    await consolidate(parentId, { forkNodeId, joinNodeId });
   }
 
   /**
@@ -548,7 +636,8 @@ export function createWorkflowForkService(deps: {
         (artifactsPath ? `Read \`WORKFLOW_FORK_ARTIFACTS.md\` in this worktree for each branch's diff and summary.\n` : `${artifacts}\n`) +
         `${consolidateLine}\n\n` +
         buildTransitionBlock(joinNode, joinTransitions, parent.id);
-      const cfg = await resolveAgentConfig();
+      const cfg = await resolveAgentConfig(joinNode);
+      console.log(`[fork] join "${joinNode.name}" (${parent.id}) launching on provider=${toExecutorProvider(cfg.provider)}${cfg.model ? ` model=${cfg.model}` : ""}.`);
       const skillName = await injectNodeSkill(joinNode, parent.workingDir ?? project.repoPath, project.repoPath);
       await getSessionManager()
         .startSession({
@@ -571,7 +660,7 @@ export function createWorkflowForkService(deps: {
    * null — so the caller bails — when any is missing OR the parent is already on the
    * join node (idempotency: only consolidate once).
    */
-  async function loadConsolidateContext(parentWorkspaceId: string) {
+  async function loadConsolidateContext(parentWorkspaceId: string, joinNodeId?: string) {
     const parentRows = await selectConsolidateParent(parentWorkspaceId, database);
     if (parentRows.length === 0) return null;
     const parent = parentRows[0];
@@ -583,8 +672,12 @@ export function createWorkflowForkService(deps: {
     if (projRows.length === 0) return null;
     const project = projRows[0];
 
-    const joinNode = await findJoinNode(database, issue.workflowTemplateId!);
-    if (!joinNode) return null;
+    // Prefer the join node recorded on the fork's children (supports multiple
+    // fork/join pairs per template); fall back to the template-wide lookup.
+    const joinNode = joinNodeId
+      ? await getNode(database, joinNodeId)
+      : await findJoinNode(database, issue.workflowTemplateId!);
+    if (!joinNode || joinNode.nodeType !== "parallel-join") return null;
 
     // Idempotency: only consolidate once (parent not already on/past the join).
     if (parent.currentNodeId === joinNode.id) return null;
@@ -593,12 +686,18 @@ export function createWorkflowForkService(deps: {
   }
 
   /** Write the fork artifacts file and advance the parent into the join node. */
-  async function consolidate(parentWorkspaceId: string): Promise<void> {
-    const ctx = await loadConsolidateContext(parentWorkspaceId);
+  async function consolidate(
+    parentWorkspaceId: string,
+    scope?: { forkNodeId?: string | null; joinNodeId?: string | null },
+  ): Promise<void> {
+    const ctx = await loadConsolidateContext(parentWorkspaceId, scope?.joinNodeId ?? undefined);
     if (!ctx) return;
     const { parent, issue, project, joinNode } = ctx;
 
-    const children = await selectForkChildrenForConsolidate(parent.id, database);
+    // Scope to THIS fork's children — a template can have several fork/join
+    // pairs, and a later consolidation must not re-collect an earlier fork's
+    // already-joined children.
+    const children = await selectForkChildrenForConsolidate(parent.id, database, scope?.forkNodeId ?? undefined);
 
     // Shared-worktree forks ran sequentially on the parent branch, so their work
     // is already committed here — there's nothing to merge, and their workingDir
@@ -682,6 +781,15 @@ export function createWorkflowForkService(deps: {
   async function cancelOverdueChild(childWorkspaceId: string): Promise<void> {
     const rows = await selectCancelOverdueChild(childWorkspaceId, database);
     if (rows.length === 0 || rows[0].forkStatus !== "running") return;
+    // #1000: before cancelling an "overdue" child, check whether it actually
+    // already completed its work and reached the join node — a lost/raced
+    // notify can leave forkStatus stuck at "running" for a child that is done.
+    // Wrongly cancelling that child discards a real, finished contribution.
+    if (rows[0].currentNodeId && rows[0].forkJoinNodeId && rows[0].currentNodeId === rows[0].forkJoinNodeId) {
+      console.warn(`[fork] child ${childWorkspaceId} hit the overdue timeout but is already on its join node — reconciling as joined instead of cancelling.`);
+      await reconcileJoinedForkChild(childWorkspaceId);
+      return;
+    }
     const now = new Date().toISOString();
     if (getSessionManager) {
       const running = await selectRunningSessionsForWorkspace(childWorkspaceId, database);
@@ -691,9 +799,10 @@ export function createWorkflowForkService(deps: {
     console.warn(`[fork] child ${childWorkspaceId} timed out -> cancelled.`);
     const parentId = rows[0].parentWorkspaceId;
     if (parentId) {
+      const forkNodeId = rows[0].forkNodeId ?? undefined;
       await drainQueued(parentId);
-      const pending = await selectPendingForkChildren(parentId, database);
-      if (pending.length === 0) await consolidate(parentId);
+      const pending = await selectPendingForkChildren(parentId, database, forkNodeId);
+      if (pending.length === 0) await consolidate(parentId, { forkNodeId, joinNodeId: rows[0].forkJoinNodeId });
     }
   }
 
@@ -723,7 +832,7 @@ export function createWorkflowForkService(deps: {
     }
   }
 
-  return { onWorkspaceEnteredNode, cancelOverdueChild };
+  return { onWorkspaceEnteredNode, cancelOverdueChild, reconcileJoinedForkChild };
 }
 
 export type WorkflowForkService = ReturnType<typeof createWorkflowForkService>;

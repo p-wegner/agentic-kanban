@@ -140,17 +140,37 @@ Examples:
 
   program
     .command("cleanup")
-    .description("Show stale worktrees for closed workspaces, and clean up leaked temp-fixture project registrations.\n\nLists git worktrees belonging to closed/merged workspaces (remove manually with 'git worktree remove --force <path>'). Also unregisters any project whose repoPath is both gone from disk and under the OS temp dir (leaked test/lab fixtures), and reports any OTHER registered project with a missing repoPath so it stays visible instead of silent -- non-temp paths are never auto-removed.")
+    .description("Show stale worktrees for closed workspaces, and clean up leaked temp-fixture project registrations.\n\nLists git worktrees belonging to closed/merged workspaces (remove manually with 'git worktree remove --force <path>'). Also unregisters any project whose repoPath is both gone from disk and under the OS temp dir (leaked test/lab fixtures), and reports any OTHER registered project with a missing repoPath so it stays visible instead of silent -- non-temp paths are never auto-removed.\n\nUse --dry-run to preview the worktree listing with explicit \"would be removed\" wording and a summary count, making no changes at all.")
+    .option("--dry-run", "List what would be removed without making any changes")
     .addHelpText("after", `
 Example:
   $ agentic-kanban cleanup
   # Then manually remove stale worktrees with:
   $ git worktree remove --force <path>
+
+  $ agentic-kanban cleanup --dry-run
+  # Lists what would be removed; makes no changes
 `)
-    .action(cliAction(async () => {
+    .action(cliAction(async (options: { dryRun?: boolean }) => {
 
       const closedWorkspaces = await getClosedWorkspaces();
       const withWorktrees = closedWorkspaces.filter((ws) => ws.workingDir);
+
+      // #1002: --dry-run reports and changes NOTHING. It returns before the
+      // temp-fixture unregistration below as well, not just before the worktree
+      // advice, because that path deletes project registrations.
+      if (options.dryRun) {
+        if (withWorktrees.length === 0) {
+          console.log("Dry run: 0 worktree(s) would be removed. No changes made.");
+          process.exit(0);
+        }
+        console.log(`Dry run: would remove ${withWorktrees.length} worktree(s):`);
+        for (const ws of withWorktrees) {
+          console.log(`  ${ws.branch} -> ${ws.workingDir} (session ${ws.id})`);
+        }
+        console.log(`\nDry run: ${withWorktrees.length} worktree(s) would be removed. No changes made.`);
+        process.exit(0);
+      }
 
       if (withWorktrees.length === 0) {
         console.log("No stale worktrees found.");

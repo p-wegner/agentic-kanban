@@ -13,6 +13,7 @@ import { ReviewError, startManualReview } from "../services/review.service.js";
 import { createSessionManager } from "../services/session.manager.js";
 import { createWorkerWsRoute } from "../services/worker-connection.service.js";
 import { getWorkerFleet } from "../services/worker-fleet.service.js";
+import type { createWorkflowForkService } from "../services/workflow-fork.service.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -23,9 +24,11 @@ export interface RouteSetupDeps {
   fixAndMergeSessionIds: Set<string>;
   db: Database;
   upgradeWebSocket: UpgradeWebSocket;
+  /** Shared with the session-exit workflow — see `RouteOptions.forkService`. */
+  forkService?: ReturnType<typeof createWorkflowForkService>;
 }
 
-export function setupRoutes(app: Hono, { sessionManager, boardEvents, reviewSessionIds, fixAndMergeSessionIds, db, upgradeWebSocket }: RouteSetupDeps) {
+export function setupRoutes(app: Hono, { sessionManager, boardEvents, reviewSessionIds, fixAndMergeSessionIds, db, upgradeWebSocket, forkService }: RouteSetupDeps) {
   app.post("/api/workspaces/:id/review", async (c) => {
     const workspaceId = c.req.param("id");
     try {
@@ -63,7 +66,7 @@ export function setupRoutes(app: Hono, { sessionManager, boardEvents, reviewSess
   // shared with /api/workers and the session lifecycle's remote dispatch.
   const workerFleet = getWorkerFleet(db);
   app.get("/ws/workers/:id", createWorkerWsRoute(upgradeWebSocket, workerFleet.registry, workerFleet.connections));
-  app.route("/api", createRoutes(db, () => sessionManager, { boardEvents, fixAndMergeSessionIds }));
+  app.route("/api", createRoutes(db, () => sessionManager, { boardEvents, fixAndMergeSessionIds, forkService }));
   app.route("/api/sessions", createSessionsRoute(db));
 
   const clientDir = resolve(__dirname, "../client");

@@ -47,6 +47,8 @@ async function seedWorkspace(
     readyForMerge?: boolean;
     workspaceStatus?: string;
     isDirect?: boolean;
+    parentWorkspaceId?: string;
+    forkStatus?: string;
   },
 ) {
   const now = new Date().toISOString();
@@ -72,6 +74,8 @@ async function seedWorkspace(
     isDirect: opts.isDirect ?? false,
     status: opts.workspaceStatus ?? "idle",
     readyForMerge: opts.readyForMerge ?? false,
+    parentWorkspaceId: opts.parentWorkspaceId ?? null,
+    forkStatus: opts.forkStatus ?? null,
     provider: "claude",
     createdAt: now,
     updatedAt: now,
@@ -119,6 +123,24 @@ describe("auto-merge orchestrator", () => {
     const ids = await orchestrator.findCompletedWorkspaceIds();
     expect(ids).toEqual(expect.arrayContaining([ready, aiReviewed, doneReady]));
     expect(ids).toHaveLength(3);
+  });
+
+  it("excludes a fork child (parentWorkspaceId or forkStatus set) even when readyForMerge/In Review (#998)", async () => {
+    const { db } = createTestDb();
+    const { projectId, statusIds } = await seedProject(db);
+    const parent = await seedWorkspace(db, { projectId, statusId: statusIds["In Review"], readyForMerge: true });
+    const forkChildByParentId = await seedWorkspace(db, {
+      projectId, statusId: statusIds["In Review"], readyForMerge: true, parentWorkspaceId: parent,
+    });
+    const forkChildByStatus = await seedWorkspace(db, {
+      projectId, statusId: statusIds["AI Reviewed"], readyForMerge: true, forkStatus: "joined",
+    });
+
+    const orchestrator = createAutoMergeOrchestrator({ database: db });
+    const ids = await orchestrator.findCompletedWorkspaceIds();
+    expect(ids).toContain(parent);
+    expect(ids).not.toContain(forkChildByParentId);
+    expect(ids).not.toContain(forkChildByStatus);
   });
 
   it("excludes a project that has auto_merge_disabled_<projectId> set", async () => {
