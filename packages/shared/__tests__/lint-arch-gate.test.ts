@@ -97,4 +97,52 @@ describe("lint:arch — the merge-blocking layering gate (#602)", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  // #694 — `lint:arch`'s exit code counts only ERROR-severity violations, so the one
+  // `severity: "warn"` rule in the set (`startup-bypasses-repositories`, #595)
+  // is invisible to
+  // the assertion above: deleting that rule fails nothing at all. A rule nothing would miss is
+  // not enforcement, so the rule INVENTORY is ratcheted by name here, independent of severity.
+  //
+  // Names rather than a count, because a count is satisfied by any replacement and would go
+  // green on a rename that silently drops coverage.
+  const EXPECTED_RULES = [
+    "no-circular",
+    "shared-is-a-leaf",
+    "mcp-no-server-internals",
+    "services-not-up-to-routes",
+    "repositories-not-up-to-routes",
+    "client-no-drizzle-or-schema",
+    "routes-not-down-to-persistence",
+    "cli-not-down-to-persistence",
+    "repositories-are-infra-pure",
+    "repositories-not-up-to-services",
+    "client-lib-is-leaf",
+    "client-hooks-not-up-to-components-or-routes",
+    "client-components-not-up-to-routes",
+    "services-bypass-repositories",
+    "startup-bypasses-repositories",
+  ];
+
+  it("no layering rule disappears silently — including the warn-severity one", async () => {
+    const config = await import(join(REPO_ROOT, ".dependency-cruiser.cjs"));
+    const rules: { name: string; severity?: string }[] =
+      (config.default ?? config).forbidden ?? [];
+    const present = new Set(rules.map((r) => r.name));
+    const missing = EXPECTED_RULES.filter((n) => !present.has(n));
+    expect(
+      missing,
+      "a layering rule was removed or renamed. If that is deliberate, remove it from " +
+        "EXPECTED_RULES in the same commit and say why — the point is that dropping a rule is a " +
+        "reviewed decision rather than a silent one:" + String.fromCharCode(10) + "  " + missing.join(", "),
+    ).toEqual([]);
+  });
+
+  it("the warn-severity rule is still declared, though lint:arch cannot fail on it", () => {
+    const raw = readFileSync(join(REPO_ROOT, ".dependency-cruiser.cjs"), "utf8");
+    // Asserted on the source text as well as the loaded config: this rule's whole risk is that
+    // nothing observes it, so both the declaration and the loaded shape are pinned.
+    expect(raw).toContain("startup-bypasses-repositories");
+    expect(raw).toMatch(/severity:\s*"warn"/);
+  });
 });

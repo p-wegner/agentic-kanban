@@ -61,13 +61,14 @@ export {
  * split already done for #464).
  */
 
-export type PluginGateAction = { id: string; label: string; input?: "text" };
-export type PluginGate = {
-  id: string;
-  question: string;
-  artifacts?: string[];
-  actions: PluginGateAction[];
-};
+// #694 — declared in `lib/pluginLoopTypes.ts` and re-exported here so every existing
+// `from "./PluginLoopExtras.js"` import keeps resolving. `lib/gateCardPolicy.ts` needs these
+// three, and a lib module importing from components is the upward type-only edge
+// `9d9cce93be` removed and HEAD had reintroduced.
+import type { PluginGateAction, PluginGate, PluginCheck } from "../lib/pluginLoopTypes.js";
+// Imported AND re-exported: this module still renders with them (`ChecksBadges`), and a bare
+// `export type { … } from` would re-export without binding the names locally.
+export type { PluginGateAction, PluginGate, PluginCheck };
 export type PluginProgressStep = {
   id: string;
   label: string;
@@ -85,7 +86,6 @@ export type PluginProgressStep = {
    */
   ticket?: { issueId: string; issueNumber: number | null };
 };
-export type PluginCheck = { name: string; verdict: "pass" | "warn" | "fail"; detail?: string };
 export type StartPolicy = { mode: string; autoStartUnblocked: boolean } | null;
 
 /**
