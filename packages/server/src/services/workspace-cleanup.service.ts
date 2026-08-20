@@ -239,7 +239,7 @@ export function createWorkspaceCleanupService(deps: {
     // agent — `deleteWorkspace` already guards this (workspace-crud.service.ts); stale-worktree
     // cleanup must too (#673), since it removes the same directory with no such check today.
     const sharers = (await crudRepo.findWorkspacesByWorkingDir(workspace.workingDir, database))
-      .filter((row) => row.id !== workspaceId);
+      .filter((row) => row.id !== workspaceId && row.status !== "closed");
     if (sharers.length > 0) {
       return { success: false, error: `Worktree ${workspace.workingDir} is still referenced by ${sharers.length} other workspace(s) — skipping removal` };
     }

@@ -179,7 +179,7 @@ export async function findWorkspacesByWorkingDir(
   database: Database = db,
 ) {
   return database
-    .select({ id: workspaces.id })
+    .select({ id: workspaces.id, status: workspaces.status })
     .from(workspaces)
     .where(eq(workspaces.workingDir, workingDir));
 }

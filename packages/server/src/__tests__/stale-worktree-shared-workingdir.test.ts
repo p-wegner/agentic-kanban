@@ -108,4 +108,30 @@ describe("removeStaleWorktree does not delete a workingDir another workspace sti
     expect(result.success).toBe(true);
     expect(gitService.removeWorktree).toHaveBeenCalledWith(repoPath, workingDir);
   });
+
+  it("removes the directory when the only other sharer is ALSO closed (no live-vs-live deadlock)", async () => {
+    const { db } = createTestDb();
+    const { issueId, now } = await seed(db);
+
+    // Both workspaces are closed — e.g. the original EBUSY-stuck pair from #670's repro.
+    // A sharer-check that ignores status would have these two block each other forever.
+    await db.insert(workspaces).values({
+      id: "closed-ws", issueId, branch: "feature/ak-670-x", workingDir,
+      baseBranch: "main", isDirect: false, status: "closed", provider: "claude",
+      createdAt: now, updatedAt: now,
+    });
+    await db.insert(workspaces).values({
+      id: "closed-ws-2", issueId, branch: "feature/ak-670-x", workingDir,
+      baseBranch: "main", isDirect: false, status: "closed", provider: "claude",
+      createdAt: now, updatedAt: now,
+    });
+
+    const gitService = makeGitService();
+    const cleanup = createWorkspaceCleanupService({ database: db, gitService: gitService as never });
+
+    const result = await cleanup.removeStaleWorktree("closed-ws");
+
+    expect(result.success).toBe(true);
+    expect(gitService.removeWorktree).toHaveBeenCalledWith(repoPath, workingDir);
+  });
 });
