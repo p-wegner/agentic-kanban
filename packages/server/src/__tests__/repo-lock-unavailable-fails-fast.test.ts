@@ -39,8 +39,12 @@ describe("on-disk repo lock: UNAVAILABLE fails fast (#230)", () => {
       }),
     ).rejects.toThrow(/not lock contention/);
 
+    // `sleeps === 0` is the real proof that the wait budget was not spent — it is exact and
+    // load-independent. The wall-clock check is kept as a coarse backstop but widened well past
+    // anything contention can produce (#680): at 5s it was a second load-dependent assertion
+    // guarding a property the line above already establishes.
     expect(sleeps).toBe(0);
-    expect(Date.now() - startedAt).toBeLessThan(5_000);
+    expect(Date.now() - startedAt).toBeLessThan(60_000);
   });
 
   it("surfaces the failure to the MERGE caller as a repo_lock_unavailable WorkspaceError", async () => {
@@ -73,7 +77,17 @@ describe("on-disk repo lock: UNAVAILABLE fails fast (#230)", () => {
       let sleeps = 0;
       await expect(
         acquireOnDiskRepoLock(repo, "waiter", {
-          timeoutMs: 40,
+          // #680 — this was `timeoutMs: 40, pollMs: 10`, and it is one of the ten load-dependent
+          // failures that made master red while passing in isolation (observed: failed in 192ms,
+          // an assertion rather than a timeout). With a 40ms budget, a single scheduling hiccup
+          // on a loaded box means the deadline passes before the FIRST poll is attempted, so
+          // `sleeps` is 0 and the assertion below fails — reporting "contention is not waited
+          // out" when the only thing measured was the scheduler.
+          //
+          // 2s with 10ms polls keeps the property (~200 polls available, so at least one is
+          // certain) while still failing in about two seconds. The injected `sleep` really waits,
+          // so this does not spin.
+          timeoutMs: 2_000,
           pollMs: 10,
           sleep: async (ms) => { sleeps++; await new Promise((r) => setTimeout(r, ms)); },
         }),

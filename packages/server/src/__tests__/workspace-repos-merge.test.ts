@@ -18,6 +18,7 @@ import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { insertWorkspaceRepo, listWorkspaceRepos } from "../repositories/repo.repository.js";
 import { prevalidateSiblingMerges, executeSiblingMerges } from "../services/workspace-repos.service.js";
 import type { Database } from "../db/index.js";
+import { GIT_HEAVY_TEST_TIMEOUT_MS } from "./helpers/timeouts.js";
 
 function exec(cmd: string, args: string[], cwd: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -69,7 +70,7 @@ beforeEach(async () => {
   await db.insert(issues).values({ id: issueId, projectId, statusId, title: "t", issueNumber: 1 });
   workspaceId = randomUUID();
   await db.insert(workspaces).values({ id: workspaceId, issueId, branch: "feature/mrm" });
-}, 60000);
+}, GIT_HEAVY_TEST_TIMEOUT_MS);
 
 afterEach(async () => {
   while (cleanupDirs.length) {
@@ -109,7 +110,7 @@ describe("multi-repo merge prevalidation + execution", () => {
     expect(log).toContain("sibling change");
     const [row] = await listWorkspaceRepos(workspaceId, db);
     expect(row.mergedHeadSha).toBe(results[0].mergedHeadSha);
-  }, 60000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("returns no plan for a sibling with zero commits ahead", async () => {
     const worktreePath = await gitService.createWorktree(extraRepo, "feature/mrm", "main");
@@ -119,7 +120,7 @@ describe("multi-repo merge prevalidation + execution", () => {
     }, db);
     const plans = await prevalidateSiblingMerges({ gitService, database: db as unknown as Database, workspaceId });
     expect(plans).toEqual([]);
-  }, 60000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("throws all-or-nothing when a sibling has conflicts (nothing merged)", async () => {
     const worktreePath = await gitService.createWorktree(extraRepo, "feature/mrm", "main");
@@ -138,7 +139,7 @@ describe("multi-repo merge prevalidation + execution", () => {
     // Nothing merged: main still has only its own edit.
     const log = await exec("git", ["log", "--oneline", "main"], extraRepo);
     expect(log).not.toContain("branch edit");
-  }, 60000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("no-op for a workspace without sibling repos", async () => {
     const plans = await prevalidateSiblingMerges({ gitService, database: db as unknown as Database, workspaceId });

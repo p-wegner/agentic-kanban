@@ -19,6 +19,7 @@ import { buildWorkspaceSummaryMap } from "../services/workspace-summary.service.
 import * as realGitService from "../services/git.service.js";
 import { insertWorkspaceRepo, listWorkspaceRepos } from "../repositories/repo.repository.js";
 import type { BranchTipAncestryResult } from "@agentic-kanban/shared/lib/git-service";
+import { GIT_HEAVY_TEST_TIMEOUT_MS } from "./helpers/timeouts.js";
 
 type CheckAncestor = (repoPath: string, branch: string, baseBranch: string, worktreeDir?: string) => Promise<BranchTipAncestryResult>;
 type CountCommits = (repoPath: string, baseSha: string, branchSha: string) => Promise<number>;
@@ -535,7 +536,7 @@ describe("reconcileAncestorBranchWorkspaces — sibling-aware terminalization (#
     ({ db } = createTestDb());
     siblingRepo = await createTempRepo("kanban-ancestor-sib-");
     cleanupDirs.push(siblingRepo);
-  }, 60000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   afterEach(async () => {
     while (cleanupDirs.length) {
@@ -614,7 +615,7 @@ describe("reconcileAncestorBranchWorkspaces — sibling-aware terminalization (#
 
     const comments = await commentsForIssue(issueId);
     expect(comments.some((c) => /landed 1 sibling repo merge/i.test(c.body))).toBe(true);
-  }, 90000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("leaves the issue open (not Done) when the pending sibling cannot land cleanly", async () => {
     const { projectId, issueId, workspaceId } = await seedLeadingWorkspace();
@@ -646,5 +647,5 @@ describe("reconcileAncestorBranchWorkspaces — sibling-aware terminalization (#
 
     const comments = await commentsForIssue(issueId);
     expect(comments.some((c) => /Ancestor-branch reconciliation found the leading branch/.test(c.body))).toBe(true);
-  }, 90000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 });

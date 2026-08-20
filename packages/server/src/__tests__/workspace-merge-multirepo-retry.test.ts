@@ -101,7 +101,7 @@ beforeEach(async () => {
   issueId = randomUUID();
   await db.insert(issues).values({ id: issueId, projectId, statusId: todoStatusId, title: "t", issueNumber: 18 });
   workspaceId = randomUUID();
-}, 60000);
+}, GIT_HEAVY_TEST_TIMEOUT_MS);
 
 afterEach(async () => {
   while (cleanupDirs.length) {
@@ -164,7 +164,7 @@ describe("multi-repo merge retry after a partial merge (#2/#18)", () => {
 
     // Issue converged to Done.
     expect(await issueStatusName()).toBe("Done");
-  }, 90000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("refuses the retry and preserves the sibling branch when it cannot land (conflict)", async () => {
     const now = new Date().toISOString();
@@ -191,7 +191,7 @@ describe("multi-repo merge retry after a partial merge (#2/#18)", () => {
     const mainLog = await exec("git", ["log", "--oneline", "main"], siblingRepo);
     expect(mainLog).not.toContain("branch edit");
     expect(existsSync(worktreePath)).toBe(true);
-  }, 90000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 });
 
 describe("sibling-only workspace merges through the normal pipeline (#3)", () => {
@@ -221,5 +221,5 @@ describe("sibling-only workspace merges through the normal pipeline (#3)", () =>
     await vi.waitFor(() => {
       expect(activeMerges.size).toBe(0);
     }, { timeout: GIT_HEAVY_TEST_TIMEOUT_MS });
-  }, 120000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 });

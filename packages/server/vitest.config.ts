@@ -27,7 +27,12 @@ import os from "node:os";
 // never do. 60s restores real headroom without hiding a hang (a hang still never finishes).
 const cpuCount = os.cpus().length || 4;
 const maxWorkers = Number(process.env.VITEST_MAX_WORKERS) || Math.max(2, Math.floor(cpuCount / 2));
-const testTimeout = Number(process.env.VITEST_TEST_TIMEOUT) || 60_000;
+// #680: 60s was still measuring load, not correctness. A full run on master failed 10 suites
+// that all pass in isolation, several of them on the CONFIG default rather than a hand-set
+// budget (merge-overlap-cluster-landing, get-context-boundary). 120s for the same reason #206
+// went 20s -> 60s: a hang still never finishes, so a larger budget hides nothing, while a red
+// gate withholds every merge board-wide.
+const testTimeout = Number(process.env.VITEST_TEST_TIMEOUT) || 120_000;
 
 export default defineConfig({
   test: {
