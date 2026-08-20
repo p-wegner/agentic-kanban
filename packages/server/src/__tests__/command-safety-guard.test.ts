@@ -408,8 +408,17 @@ describe("validate-command-safety — broad node kills and read-only PS vars (#5
   it("still ALLOWS a port-scoped kill — the sanctioned dev-server recipe", () => {
     // The rule is "never ALL node", not "never kill anything": the dev-server skill's
     // Stop-PortOwner recipe must keep working, or the guard just gets routed around.
+    //
+    // #674 — the port here must NOT be 3001. `isMainBoardPortKill` blocks a kill scoped to
+    // the BOARD's port, but only when the guard runs from a worktree
+    // (`if (!isWorktreeProjectDir()) return false`). runGuard spawns with cwd = REPO_ROOT,
+    // which IS a worktree during a pre-merge gate run — so a 3001-scoped kill was correctly
+    // blocked there while passing in the main checkout, and this case failed in EVERY gate
+    // run on this board by construction. The guard is right; the port choice was wrong. A
+    // worktree-style port asserts what this case actually means without colliding with the
+    // board-port rule.
     const command =
-      `$owner = (Get-NetTCPConnection -LocalPort 3001 -State Listen).OwningProcess; ` +
+      `$owner = (Get-NetTCPConnection -LocalPort 3672 -State Listen).OwningProcess; ` +
       `${STOP} -Id $owner -Force`;
     expect(runGuard(command).blocked).toBe(false);
   });
