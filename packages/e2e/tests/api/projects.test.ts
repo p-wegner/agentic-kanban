@@ -8,18 +8,10 @@ import { getE2EProjectId } from "../helpers/e2e-project.js";
 
 test.describe("@smoke: Projects API", () => {
   let projectId: string;
-  const createdStatusIds: string[] = [];
 
   test.beforeAll(async ({ request }) => {
     // Use the dedicated E2E project set by global-setup (not projects[0] which may be a real project).
     projectId = await getE2EProjectId(request);
-  });
-
-  test.afterAll(async ({ request }) => {
-    // Clean up any extra statuses created inline during tests.
-    for (const id of createdStatusIds) {
-      await request.delete(`${SERVER_URL}/api/projects/${projectId}/statuses/${id}`).catch(() => {});
-    }
   });
 
   test("GET /api/projects returns list", async ({ request }) => {
@@ -93,35 +85,58 @@ test.describe("@smoke: Projects API", () => {
     expect(names).toContain("Cancelled");
   });
 
+  // #696 — this was `test.skip(true, …)` from 2026-06-17 to 2026-08-20 because it added a
+  // column to the SHARED E2E project, which broke other tests' board column-count assertions.
+  // A permanent skip meant project-column creation — a write endpoint — had no coverage at
+  // all for two months. The interference was the shared fixture, not the assertion, so the
+  // test now creates its OWN throwaway project (the same temp-repo pattern the create-project
+  // test above uses) and deletes it, which cannot affect any other test's column count.
   test("POST /api/projects/:id/statuses creates a new status", async ({
     request,
   }) => {
-    test.skip(true, "skipped: creates extra columns — interferes with board column count assertions in other tests");
-    const statusName = `Test Status ${Date.now()}`;
-    const res = await request.post(
-      `${SERVER_URL}/api/projects/${projectId}/statuses`,
-      {
-        data: { name: statusName, sortOrder: 99 },
-      },
-    );
-    expect(res.status()).toBe(201);
-    const body = await res.json();
-    expect(body.id).toBeDefined();
-    expect(body.name).toBe(statusName);
-    expect(body.projectId).toBe(projectId);
+    const tmpDir = mkdtempSync(join(tmpdir(), "e2e-status-"));
+    execSync("git init", { cwd: tmpDir });
+    execSync("git config user.email test@test.com", { cwd: tmpDir });
+    execSync("git config user.name Test", { cwd: tmpDir });
 
-    // Track for cleanup (the E2E project deletion in global-teardown will also cover this,
-    // but explicit cleanup ensures no leaks if teardown is skipped).
-    createdStatusIds.push(body.id);
+    let ownProjectId: string | undefined;
+    try {
+      const createRes = await request.post(`${SERVER_URL}/api/projects`, {
+        data: { name: "E2E Status Project " + Date.now(), repoPath: tmpDir },
+      });
+      expect(createRes.status()).toBe(201);
+      ownProjectId = (await createRes.json()).id as string;
+      expect(ownProjectId).toBeDefined();
 
-    // Verify it appears in the list
-    const listRes = await request.get(
-      `${SERVER_URL}/api/projects/${projectId}/statuses`,
-    );
-    const list = await listRes.json();
-    expect(
-      list.some((s: { name: string }) => s.name === statusName),
-    ).toBeTruthy();
+      const statusName = `Test Status ${Date.now()}`;
+      const res = await request.post(
+        `${SERVER_URL}/api/projects/${ownProjectId}/statuses`,
+        {
+          data: { name: statusName, sortOrder: 99 },
+        },
+      );
+      expect(res.status()).toBe(201);
+      const body = await res.json();
+      expect(body.id).toBeDefined();
+      expect(body.name).toBe(statusName);
+      expect(body.projectId).toBe(ownProjectId);
+
+      // Verify it appears in the list — the assertion the skip was costing us.
+      const listRes = await request.get(
+        `${SERVER_URL}/api/projects/${ownProjectId}/statuses`,
+      );
+      const list = await listRes.json();
+      expect(
+        list.some((s: { name: string }) => s.name === statusName),
+      ).toBeTruthy();
+    } finally {
+      // Deleting the project removes its columns with it, so nothing leaks into the shared
+      // board even if an assertion above fails.
+      if (ownProjectId) {
+        await request.delete(`${SERVER_URL}/api/projects/${ownProjectId}`).catch(() => {});
+      }
+      try { rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+    }
   });
 
   test("GET /api/projects/:id/branches returns branches", async ({
