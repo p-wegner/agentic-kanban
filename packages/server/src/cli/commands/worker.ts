@@ -50,7 +50,11 @@ export function buildWorkerConnectSteps(boardUrl: string, pairingToken: string):
         "puts it on an ACP relay and prints a ref, for a machine you cannot copy files to directly. " +
         "Verify the install: `--version` reports the version from the installed manifest, so it must echo the " +
         "tarball's `-dev.<sha>` stamp back. A bare `0.0.1` means an old build (the version used to be hardcoded); " +
-        "the registry's plain `0.1.9` means npm served a cached copy instead of your file.",
+        "the registry's plain `0.1.9` means npm served a cached copy instead of your file. " +
+        "An ERESOLVE peer warning about `zod` on install is EXPECTED and harmless: the agent SDK declares a " +
+        "`zod ^4` peer while this tree pins 3.x, but that peer is type-level only (no runtime file in the SDK " +
+        "imports zod) — see the note in pnpm-workspace.yaml. It does not affect the worker, which does not bundle " +
+        "the SDK at all.",
       commands: [
         "npm view agentic-kanban bin   # does the published bin map have agentic-kanban-worker?",
         "npm i -g <path-to-agentic-kanban-*.tgz>",

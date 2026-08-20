@@ -15,12 +15,6 @@
   "engines": {
     "node": ">=20.11"
   },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild",
-      "@swc/core"
-    ]
-  },
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "dev:server": "pnpm --filter agentic-kanban dev",
