@@ -24,14 +24,10 @@ vi.mock("../services/agent-settings.service.js", () => ({
   toExecutorProvider: vi.fn((p: string) => p),
   MOCK_AGENT_COMMAND: "mock",
 }));
-vi.mock("../services/codex-rate-limit.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../services/codex-rate-limit.js")>()),
-  isCodexUsageLimitStats: vi.fn((stats: string | null | undefined) => !!stats?.includes("codex-limit")),
-}));
-vi.mock("../services/claude-rate-limit.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../services/claude-rate-limit.js")>()),
-  isClaudeUsageLimitStats: vi.fn(() => false),
-}));
+// #542 replaced the per-provider `isCodexUsageLimitStats` / `isClaudeUsageLimitStats`
+// predicates with ONE structured read of the stats blob (`readUsageLimitStats`, keyed on
+// `rateLimited` + `rateLimitKind`). Mocking those predicates is therefore inert now — the
+// seeded stats blob below is what decides whether this exit is a usage-limit exit.
 
 const rotateCodexLicense = vi.fn();
 vi.mock("../services/codex-license-ring.js", async (importOriginal) => ({
@@ -110,7 +106,7 @@ async function seedForkChildAlreadyOnJoinNode(db: ReturnType<typeof createTestDb
   });
   await db.insert(sessions).values({
     id: sessionId, workspaceId: childId, status: "stopped",
-    stats: JSON.stringify({ marker: "codex-limit", retryAfter: "2026-06-20T00:00:00.000Z" }),
+    stats: JSON.stringify({ rateLimited: true, rateLimitKind: "codex-usage-limit", retryAfter: "2026-06-20T00:00:00.000Z" }),
     startedAt: now,
   });
 

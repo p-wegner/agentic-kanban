@@ -13,17 +13,24 @@ vi.mock("../services/git.service.js", () => ({
   prepareForReview: vi.fn(async () => ({ success: true, diffRef: "master", conflictingFiles: [], uncommittedChanges: [] })),
 }));
 vi.mock("../services/butler-event-feed.js", () => ({ emitButlerSystemEvent: vi.fn() }));
+// #557 deleted `startup/review-helpers.js` (the process-singleton shim) and #541 moved the
+// launch-settings ladder into agent-settings.service — so the two helpers this test used to
+// stub on review-helpers now have to exist on THIS mock, or launchAutoReviewReserved throws
+// "No export is defined on the mock" and the review session silently never launches.
 vi.mock("../services/agent-settings.service.js", () => ({
+  applyWorkspaceProfileToPrefs: vi.fn((m: Map<string, string>) => m),
+  resolveWorkspaceLaunchSettings: vi.fn(() => ({
+    agentCommand: undefined, agentArgs: undefined, profile: undefined,
+    provider: "claude", resumeWithNewModel: false, permissionPromptTool: undefined,
+  })),
   isMockProfile: vi.fn(() => false),
   toExecutorProvider: vi.fn((p: string) => p),
   MOCK_AGENT_COMMAND: "mock",
 }));
-vi.mock("../startup/review-helpers.js", () => ({
-  buildReviewArgs: vi.fn(() => undefined),
+// buildReviewPrompt moved to review.service (#557). Partial mock so the rest stays real.
+vi.mock("../services/review.service.js", async (importOriginal) => ({
+  ...(await importOriginal() as Record<string, unknown>),
   buildReviewPrompt: vi.fn(async () => ({ prompt: "review", model: undefined })),
-  getEffectiveProfile: vi.fn(() => undefined),
-  parseProviderPref: vi.fn(() => "claude"),
-  applyWorkspaceProfileToPrefs: vi.fn((m: Map<string, string>) => m),
 }));
 vi.mock("../startup/merge-strategy.js", () => ({
   isAutomaticMergeEnabled: vi.fn(() => false),
