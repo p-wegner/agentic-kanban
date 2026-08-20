@@ -9,6 +9,7 @@ import { createBoardWsRoute } from "../routes/board-ws.js";
 import { createRoutes } from "../routes/index.js";
 import { createSessionsRoute } from "../routes/sessions.js";
 import type { createBoardEvents } from "../services/board-events.js";
+import { domainErrorHandler } from "../middleware/error-handler.js";
 import { ReviewError, startManualReview } from "../services/review.service.js";
 import { createSessionManager } from "../services/session.manager.js";
 import { createWorkerWsRoute } from "../services/worker-connection.service.js";
@@ -53,6 +54,17 @@ export function setupRoutes(app: Hono, { sessionManager, boardEvents, reviewSess
         if (err.code === "BAD_REQUEST") return c.json({ error: err.message, code: err.code }, 400);
       }
       console.error("[workflow] manual review trigger failed:", err);
+      // #683 — this handler is registered BEFORE `app.route("/api", createRoutes(...))`, so
+      // Hono resolves it first and `domainErrorHandler` never saw its errors. Everything that
+      // is not a ReviewError reached the client as 500 `{code:"INTERNAL"}`: `startManualReview`
+      // rethrows `startSession`'s errors unchanged, so a stale safety policy lost its 409 AND
+      // its `staleFiles` payload (which the UI and monitor branch on), and strict worker
+      // dispatch with no live worker reported an internal error rather than 503.
+      //
+      // Delegate to the ONE mapper instead of rivaling it. The ReviewError branch above stays:
+      // it carries a request-shaped payload (activeSessionId, latestTriggerType, …) that is
+      // this endpoint's own contract, not a domain-error concern.
+      if (err instanceof Error) return domainErrorHandler(err, c);
       return c.json({ error: String(err), code: "INTERNAL" }, 500);
     }
   });
