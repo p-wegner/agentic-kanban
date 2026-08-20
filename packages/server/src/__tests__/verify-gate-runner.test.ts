@@ -5,6 +5,7 @@ import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { copyFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { GIT_HEAVY_TEST_TIMEOUT_MS } from "./helpers/timeouts.js";
 
 const RUNNER_SRC = join(__dirname, "../scaffold/verify-gate-runner.js");
 // The dev checkout's LIVE hook — a deliberate copy of the canonical (tested) scaffold source.
@@ -35,7 +36,7 @@ function runGate(opts: {
     encoding: "utf8",
     env: { ...process.env, ...env },
     windowsHide: true,
-    timeout: 30_000,
+    timeout: GIT_HEAVY_TEST_TIMEOUT_MS,
   });
   return {
     status: result.status ?? 1,
@@ -264,7 +265,7 @@ describe("verify-gate-runner — zombie process sweep (#172)", () => {
       alive = isPidAlive(pid);
     }
     expect(alive).toBe(false);
-  }, 20_000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("does not kill an orphaned descendant under cwd that owns a listening TCP port (#172 regression)", async () => {
     // Simulates a `pnpm dev` server left running for visual verification, per this
@@ -327,7 +328,7 @@ describe("verify-gate-runner — zombie process sweep (#172)", () => {
       // OS has actually reaped it — see rmTree.
       await waitForExit(pid);
     }
-  }, 20_000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("does not kill an unrelated live process whose parent is still alive, even if its command line references cwd (#172 regression)", async () => {
     // Simulates a legitimate `pnpm dev` server (or another agent's session) that is
@@ -358,7 +359,7 @@ describe("verify-gate-runner — zombie process sweep (#172)", () => {
     } finally {
       liveServerProc.kill("SIGKILL");
     }
-  }, 20_000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 });
 
 describe("verify-gate-runner — bounded self-repair loop (#795)", () => {

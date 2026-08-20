@@ -88,16 +88,6 @@ const TOUCHES_DISK =
  *  single changed source file imports. */
 const READS_MIGRATIONS_DIR = /\bMIGRATIONS_DIR\b/;
 
-/**
- * #687 — enumerating a DIRECTORY is invisible to the import graph even without climbing out
- * of it. `repo-path-literal-ratchet.test.ts` does `readdirSync(join(import.meta.dirname))`:
- * it reads every sibling test file, so a diff to any of them selects nothing that reaches
- * this suite — yet `CLIMBS_OUT_OF_OWN_DIR` never matches, so it scored zero signatures.
- *
- * That file is the one this suite's own doc comment names as *the* example to copy, which
- * made the gap self-refuting: deleting its marker left the ratchet green.
- */
-const ENUMERATES_A_DIRECTORY = /\b(readdirSync|readdir|globSync|glob)\b/;
 
 /**
  * #687 — imports a repo SCRIPT (`scripts/…`) rather than a module in its own package.
@@ -114,9 +104,24 @@ const UNSOUND_SIGNATURES: Array<{ name: string; test: (source: string) => boolea
     test: (s) => ANCHORED_AT_OWN_MODULE.test(s) && CLIMBS_OUT_OF_OWN_DIR.test(s) && TOUCHES_DISK.test(s),
   },
   { name: "reads-migrations-dir", test: (s) => READS_MIGRATIONS_DIR.test(s) },
+  /**
+   * #687 — reading repo state anchored at your OWN directory is invisible to the import graph even
+   * without climbing out of it. `repo-path-literal-ratchet.test.ts` does
+   * `readdirSync(join(import.meta.dirname))` and reads every SIBLING test file; a diff to any of
+   * them selects nothing that reaches it — yet `CLIMBS_OUT_OF_OWN_DIR` never matches, so it scored
+   * zero signatures. That file is the one this suite's doc comment names as *the* example to copy,
+   * which made the gap self-refuting: deleting its marker left the ratchet green.
+   *
+   * Deliberately `!CLIMBS` so it stays disjoint from `reads-outside-own-dir` above and a failure
+   * message names one signature rather than two. Measured across all four packages: exactly two
+   * files match this and not that (`repo-path-literal-ratchet` and `git-heavy-budget-ratchet`),
+   * both already marked — so broadening from "enumerates a directory" to "touches disk" added no
+   * false positives while catching the sibling-file readers a narrower regex missed.
+   */
   {
-    name: "enumerates-a-directory",
-    test: (s) => ANCHORED_AT_OWN_MODULE.test(s) && ENUMERATES_A_DIRECTORY.test(s),
+    name: "reads-repo-state-from-own-dir",
+    test: (s) =>
+      ANCHORED_AT_OWN_MODULE.test(s) && TOUCHES_DISK.test(s) && !CLIMBS_OUT_OF_OWN_DIR.test(s),
   },
   { name: "imports-a-repo-script", test: (s) => IMPORTS_A_REPO_SCRIPT.test(s) },
 ];

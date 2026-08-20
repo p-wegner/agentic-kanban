@@ -22,6 +22,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
 import * as gitService from "../services/git.service.js";
+import { GIT_HEAVY_TEST_TIMEOUT_MS } from "./helpers/timeouts.js";
 
 function exec(cmd: string, args: string[], cwd: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -97,7 +98,7 @@ describe("prepareForReview (git-integration.rebase.prepare-review)", () => {
 
     const status = (await exec("git", ["status", "--porcelain"], wt)).trim();
     expect(status).toBe("");
-  }, 40000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("on a rebase conflict returns the --diff-filter=U file list and leaves a clean tree (no half-rebase)", async () => {
     const { dir: repo, base } = await createTempRepo();
@@ -121,5 +122,5 @@ describe("prepareForReview (git-integration.rebase.prepare-review)", () => {
     const status = (await exec("git", ["status", "--porcelain"], wt)).trim();
     expect(status).toBe("");
     expect(await gitService.isRebaseInProgress(wt)).toBe(false);
-  }, 40000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 });

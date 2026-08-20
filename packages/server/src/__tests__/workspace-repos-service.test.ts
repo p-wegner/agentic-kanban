@@ -28,6 +28,7 @@ import {
 } from "../services/workspace-repos.service.js";
 import type { RepoRow } from "../repositories/repo.repository.js";
 import type { Database } from "../db/index.js";
+import { GIT_HEAVY_TEST_TIMEOUT_MS } from "./helpers/timeouts.js";
 
 function repo(partial: Partial<RepoRow> & { id: string; path: string }): RepoRow {
   return { name: null, ...partial } as unknown as RepoRow;
@@ -93,7 +94,7 @@ beforeAll(async () => {
   await db.insert(workspaces).values({ id: workspaceId, issueId, branch: "feature/multi" });
 
   await insertProjectRepo({ projectId, path: extraRepo, name: "extra", defaultBranch: "main" }, db);
-}, 60000);
+}, GIT_HEAVY_TEST_TIMEOUT_MS);
 
 afterAll(async () => {
   for (const dir of [leadRepo, extraRepo]) {
@@ -162,7 +163,7 @@ describe("multi-repo sibling worktrees", () => {
     // Branch must be gone too — stale-branch reuse guard.
     const branches = await exec("git", ["branch", "--list", "feature/multi"], extraRepo);
     expect(branches.trim()).toBe("");
-  }, 60000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("rolls back already-provisioned siblings when a later repo fails", async () => {
     // Two additional repos; the second has a defaultBranch that doesn't exist, so
@@ -193,7 +194,7 @@ describe("multi-repo sibling worktrees", () => {
         try { await rm(join(dir, ".."), { recursive: true, force: true }); } catch { /* best effort */ }
       }
     }
-  }, 60000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("honors repoScope: a deselected sibling gets NO worktree; a selected one does (#91)", async () => {
     // Deselect the only sibling (scope = leading sentinel only) → nothing provisioned.
@@ -223,7 +224,7 @@ describe("multi-repo sibling worktrees", () => {
     // Cleanup the provisioned worktree + branch directly (no DB rows written for it).
     await gitService.removeWorktree(extraRepo, some[0].worktreePath);
     await gitService.deleteBranch(extraRepo, "feature/scope-some", { force: true });
-  }, 60000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("is a no-op for a project with no additional repos", async () => {
     const otherProjectId = randomUUID();
@@ -235,7 +236,7 @@ describe("multi-repo sibling worktrees", () => {
       branch: "feature/solo",
     });
     expect(siblings).toEqual([]);
-  }, 30000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("does not destroy the leading worktree when the additional repo shares its parent directory", async () => {
     // Regression (adversarial finding #1): every worktree lands at
@@ -279,7 +280,7 @@ describe("multi-repo sibling worktrees", () => {
     } finally {
       try { await rm(parent, { recursive: true, force: true }); } catch { /* best effort */ }
     }
-  }, 60000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   it("skips sibling cleanup while another live workspace still references the shared worktree/branch", async () => {
     // Regression (adversarial findings #5/#9): a second workspace on the same branch
@@ -314,7 +315,7 @@ describe("multi-repo sibling worktrees", () => {
     await cleanupSiblingWorktrees(gitService, wsA, db as unknown as Database);
     expect(existsSync(siblings[0].worktreePath)).toBe(false);
     expect((await exec("git", ["branch", "--list", "feature/guarded"], extraRepo)).trim()).toBe("");
-  }, 60000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 
   // #153: a sibling worktree an agent edited but never committed carries no landed
   // commits (mergedHeadSha stays null) AND 0 commits ahead of base — the exact shape
@@ -353,5 +354,5 @@ describe("multi-repo sibling worktrees", () => {
     await gitExec(["clean", "-fd"], { cwd: siblings[0].worktreePath });
     await cleanupSiblingWorktrees(gitService, wsDirty, db as unknown as Database, { preserveUnmerged: true });
     expect(existsSync(siblings[0].worktreePath)).toBe(false);
-  }, 60000);
+  }, GIT_HEAVY_TEST_TIMEOUT_MS);
 });
