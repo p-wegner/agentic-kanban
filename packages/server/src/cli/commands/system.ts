@@ -76,35 +76,38 @@ Examples:
 
   program
     .command("install-skill")
-    .description("Install agent skills into a project's .claude/skills/ directory, or into your user agent-skill directories with --user.\n\nWorks without a running server or database. Prompt-only built-ins are written as .claude/skills/<name>/SKILL.md; BUNDLED skills (which carry a references/ directory) are junctioned into the installed package by default, so `npm update agentic-kanban` refreshes them with no re-install.")
+    .description("Install agent skills into a project's .claude/skills/ directory, or into your user agent-skill directories with --user.\n\nWorks without a running server or database. Prompt-only built-ins are written as .claude/skills/<name>/SKILL.md; BUNDLED skills (which carry a references/ directory) are junctioned into the installed package by default, so `npm update agentic-kanban` refreshes them with no re-install. --user installs only BUNDLED skills unless a prompt-only built-in is named with -n, since those are per-project working prompts.")
     .argument("[target-path]", "Path to the target project (defaults to current directory)", ".")
     .option("-n, --names <names>", "Comma-separated list of skill names to install (default: all)")
-    .option("--user", "Install into your user agent-skill directories (~/.claude*/skills, ~/.codex/skills) instead of a project")
+    .option("--user", "Install into your user agent-skill directories (~/.claude*/skills, ~/.codex/skills) instead of a project. Bundled skills only, unless -n names a prompt-only built-in")
     .option("--no-link", "Copy bundled skills instead of junctioning them (they will not track package upgrades)")
     .option("--list", "List available skills without installing")
     .addHelpText("after", `
 Examples:
   $ npx agentic-kanban install-skill                        # install all skills to cwd
   $ npx agentic-kanban install-skill /path/to/project       # install to a specific project
-  $ npx agentic-kanban install-skill --user                 # install for every agent profile on this machine
+  $ npx agentic-kanban install-skill --user                 # bundled skills, every agent profile on this machine
+  $ npx agentic-kanban install-skill --user -n "code-review" # ...plus a named prompt-only built-in
   $ npx agentic-kanban install-skill -n "board-navigator"   # install a single skill
   $ npx agentic-kanban install-skill --list                  # list available skills
 
 Bundled vs prompt-only:
-  A BUNDLED skill is a directory shipped with the package (SKILL.md + references/). With --user it is
-  junctioned, so it stays current across upgrades — verify with 'agentic-kanban skill verify'.
-  A junction is not always possible (npx cache, no symlink permission); a copy is made instead and
-  reported as such.
+  A BUNDLED skill is a directory shipped with the package (SKILL.md + references/). It is junctioned,
+  so it stays current across upgrades — verify with 'agentic-kanban skill verify'. A junction is not
+  always possible (npx cache, no symlink permission); a copy is made instead and reported as such.
+  A PROMPT-ONLY built-in is a single SKILL.md the board also materializes into worktrees itself.
+  Those are per-project working prompts, so --user installs only BUNDLED skills unless you name one
+  with -n; a project target still gets both.
 `)
     .action(async (targetPath: string, options: { names?: string; list?: boolean; user?: boolean; link?: boolean }) => {
       try {
-        const { listBundledSkills, installBundledSkill, discoverUserSkillRoots } =
+        const { listBundledSkills, installBundledSkill, discoverUserSkillRoots, selectSkillsToInstall } =
           await import("@agentic-kanban/shared/lib/bundled-skills");
         const bundled = await listBundledSkills();
-        const bundledNames = new Set(bundled.map(s => s.name));
-        // A bundled directory WINS over a same-named prompt-only built-in: it is the richer
-        // form of the same skill, and installing both would leave the loser's SKILL.md behind.
-        const promptOnly = BUILTIN_SKILLS.filter(s => !bundledNames.has(s.name));
+        // `selectSkillsToInstall` owns both selection rules (a bundled directory beats a
+        // same-named prompt-only skill; --user is bundled-only by default) — call it rather
+        // than re-deriving either one here.
+        const { promptOnly } = selectSkillsToInstall({ bundled, promptOnly: BUILTIN_SKILLS });
 
         if (options.list) {
           console.log("Bundled skills (directory + references, junctioned on install):");
@@ -115,17 +118,16 @@ Bundled vs prompt-only:
           process.exit(0);
         }
 
-        let selectedBundled = bundled;
-        let selectedPrompt = promptOnly;
-        if (options.names) {
-          const nameSet = new Set(options.names.split(",").map(n => n.trim()).filter(Boolean));
-          selectedBundled = bundled.filter(s => nameSet.has(s.name));
-          selectedPrompt = promptOnly.filter(s => nameSet.has(s.name));
-          if (!selectedBundled.length && !selectedPrompt.length) {
-            const all = [...bundled.map(s => s.name), ...promptOnly.map(s => s.name)].sort();
-            console.error(`No matching skills found. Available: ${all.join(", ")}`);
-            process.exit(1);
-          }
+        const { bundled: selectedBundled, promptOnly: selectedPrompt } = selectSkillsToInstall({
+          bundled,
+          promptOnly: BUILTIN_SKILLS,
+          names: options.names?.split(","),
+          user: options.user,
+        });
+        if (options.names && !selectedBundled.length && !selectedPrompt.length) {
+          const all = [...bundled.map(s => s.name), ...promptOnly.map(s => s.name)].sort();
+          console.error(`No matching skills found. Available: ${all.join(", ")}`);
+          process.exit(1);
         }
 
         const { resolve: resolvePath, join } = await import("node:path");

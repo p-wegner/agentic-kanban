@@ -283,6 +283,11 @@ last release's feature list.
   `~/.claude*/skills` and `~/.codex/skills` on the machine), MCP `install_skill`. Junction by default,
   `--no-link` to copy. A junction that cannot be created (npx cache, no symlink permission) degrades
   to a copy and SAYS SO rather than failing.
+- **`--user` is bundled-only** unless a prompt-only built-in is named with `-n`. The prompt-only
+  built-ins are per-project working prompts the board materializes into worktrees itself; installing
+  them machine-wide would offer every agent in every repo a review prompt written for one board. Both
+  rules (this one, and bundled-beats-same-named-prompt) live in `selectSkillsToInstall` — call it
+  rather than re-deriving either at a new install site.
 - **Check:** `agentic-kanban skill verify [path] [--user]` — `linked` (cannot go stale), `current`,
   `stale`, or `absent`; exit 1 on stale, so it works from a hook or CI.
 - A bundled directory **wins over a same-named DB built-in** in both the CLI and the MCP tool: it is
