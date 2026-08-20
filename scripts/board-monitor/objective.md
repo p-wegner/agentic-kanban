@@ -43,7 +43,7 @@ When selecting a provider for a new workspace, apply these rules in priority ord
 1. **FILL** profiles should always have capacity — start work on them first.
 2. **THROTTLE** profiles are preferred for main work. Respect their headroom percentage.
 3. **FALLBACK-ONLY** profiles are last resort — only use if all others are exhausted or the user explicitly selects them.
-- **claude:the-organisation_team_5x_2** [claude:the-organisation_team_5x_2]: FILL — use aggressively, keep busy at all times (Primary harness - all new workspaces launch on claude:the-organisation_team_5x_2 (the-organisation team plan). Fallbacks _1/_3/_4 come from allowed_profiles + subscription rotation. Single source of truth (set-provider-default skill).)
+- **claude:the-organisation_team_5x_3** [claude:the-organisation_team_5x_3]: FILL — use aggressively, keep busy at all times (Primary harness - the-organisation team seat peter.wegner.3. Fallback order (allowed_profiles): _3, _4, _1, _2; _2 last on purpose, it is the seat the operator/butler session runs on. Quota rotation via claude_subscription_rotation.)
 <!-- STRATEGY_BULLSEYE_GENERATED_END -->
 
 ## FOCUS POLICY (operator directive 2026-06-14 — authoritative; overrides the REFILL_FOCUS wording above)
