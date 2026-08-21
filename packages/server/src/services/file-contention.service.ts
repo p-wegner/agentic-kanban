@@ -1,3 +1,6 @@
+import type { ContentionFile, ContentionWorkspace } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { ContentionFile, ContentionWorkspace };
 import type { Database } from "../db/index.js";
 import { NotFoundError } from "../errors/index.js";
 import { getChangedFileNames } from "./git.service.js";
@@ -6,20 +9,9 @@ import { listWorkspaceRepos } from "../repositories/repo.repository.js";
 import { WIP_OCCUPYING_STATUSES } from "@agentic-kanban/shared/lib/workspace-status";
 import { resolveDiffRef } from "@agentic-kanban/shared/lib/git-service";
 
-export interface ContentionWorkspace {
-  workspaceId: string;
-  issueId: string;
-  issueNumber: number | null;
-  issueTitle: string;
-  branch: string;
-  status: string;
-  issueStatus: string;
-}
 
-export interface ContentionFile {
-  path: string;
-  workspaces: ContentionWorkspace[];
-}
+
+
 
 export interface FileContentionResult {
   projectId: string;

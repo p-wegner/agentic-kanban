@@ -1,3 +1,6 @@
+import type { RunbookEntry } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { RunbookEntry };
 /**
  * Runbook discovery + reading (#606).
  *
@@ -13,11 +16,7 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import { basename, extname, join, relative, resolve } from "node:path";
 
-export interface RunbookEntry {
-  path: string;
-  title: string;
-  lastModified: string;
-}
+
 
 /** Well-known files with hand-crafted titles. Paths use forward slashes. */
 const STATIC_RUNBOOKS: Array<{ rel: string; title: string }> = [

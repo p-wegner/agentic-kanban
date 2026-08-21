@@ -1,3 +1,6 @@
+import type { ButlerSessionMessage, ButlerSessionSummary } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { ButlerSessionMessage, ButlerSessionSummary };
 /**
  * Butler transcript service — surfaces past butler conversations in the UI by
  * reading the Claude Agent SDK JSONL transcripts on disk.
@@ -23,20 +26,9 @@ import { homedir } from "node:os";
 import { readOfflineTranscript } from "@agentic-kanban/shared/lib/offline-transcript";
 import { encodeTranscriptCwd } from "@agentic-kanban/shared/lib/transcript-cwd-encoding";
 
-export interface ButlerSessionSummary {
-  sessionId: string;
-  startedAt: string;
-  endedAt: string;
-  title: string;
-  turnCount: number;
-  model?: string;
-}
 
-export interface ButlerSessionMessage {
-  role: "user" | "assistant";
-  text: string;
-  ts: number;
-}
+
+
 
 /** Resolve the Claude projects transcript directory for the given repo path. */
 export function resolveTranscriptDir(repoPath: string): string {

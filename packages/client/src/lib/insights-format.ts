@@ -1,3 +1,6 @@
+import type { QuotaMetric, QuotaProviderEntry, QuotaUsageResult } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { QuotaMetric, QuotaProviderEntry, QuotaUsageResult };
 export type ProviderFilter = string;
 
 export type InsightsRange = "7d" | "30d" | "90d" | "all";
@@ -97,32 +100,11 @@ export interface InsightsData {
   };
 }
 
-export interface QuotaMetric {
-  label: string;
-  percent: number | null;
-  detail: string | null;
-  resetInSeconds: number | null;
-  expectedPercent?: number;
-  pace?: number;
-  projectedAtReset?: number;
-}
 
-export interface QuotaProviderEntry {
-  id: string;
-  label: string;
-  accent: string;
-  loginUrl: string;
-  hasCreds: boolean;
-  status: "ok" | "auth" | "error";
-  plan?: string;
-  metrics?: QuotaMetric[];
-  error?: string;
-}
 
-export interface QuotaUsageResult {
-  providers: QuotaProviderEntry[];
-  scrapedAt: string;
-}
+
+
+
 
 export interface InsightsPanelProps {
   projectId: string | null;

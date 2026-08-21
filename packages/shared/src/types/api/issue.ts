@@ -121,3 +121,9 @@ export interface IssueArtifact {
   caption: string | null;
   createdAt: string;
 }
+
+export interface TouchedFile {
+  path: string;
+  reason: string;
+  confidence: "high" | "medium" | "low";
+}

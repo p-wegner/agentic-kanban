@@ -1,3 +1,6 @@
+import type { FocusData, FocusIssue } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { FocusData, FocusIssue };
 /**
  * Focus ranking (#606).
  *
@@ -59,37 +62,9 @@ const ESTIMATE_WEIGHT: Record<string, number> = {
 };
 
 
-export interface FocusIssue {
-  issueId: string;
-  issueNumber: number | null;
-  title: string;
-  statusName: string;
-  priority: string;
-  issueType: string;
-  estimate: string | null;
-  /** IDs of still-open issues directly blocking this one. */
-  blockedBy: Array<{ issueId: string; issueNumber: number | null; title: string }>;
-  /** Count of still-open issues this one transitively unblocks. */
-  unblocks: number;
-  focusScore: number;
-  /** Short human-readable reasons explaining the score (for the UI). */
-  reasons: string[];
-}
 
-export interface FocusData {
-  now: string;
-  /** Ready-to-start issues, highest focusScore first. */
-  ready: FocusIssue[];
-  /** Open issues with at least one unresolved blocker, highest leverage first. */
-  blocked: FocusIssue[];
-  headline: {
-    openCount: number;
-    readyCount: number;
-    blockedCount: number;
-    inFlightCount: number;
-    topScore: number;
-  };
-}
+
+
 
 export async function computeFocus(
   projectId: string,

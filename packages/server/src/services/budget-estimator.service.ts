@@ -1,3 +1,6 @@
+import type { BudgetEstimate, BudgetRisk } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { BudgetEstimate, BudgetRisk };
 import type { Database } from "../db/index.js";
 import {
   getIssueDescriptionAndProject,
@@ -5,16 +8,9 @@ import {
   getRecentSessionStats,
 } from "../repositories/budget-estimator.repository.js";
 
-export type BudgetRisk = "low" | "medium" | "high";
 
-export interface BudgetEstimate {
-  risk: BudgetRisk;
-  estimatedTokens: number | null;
-  avgTokensFromHistory: number | null;
-  sessionCount: number;
-  descriptionTokens: number;
-  reason: string;
-}
+
+
 
 // Rough token estimate: ~4 chars per token
 function charsToTokens(chars: number): number {

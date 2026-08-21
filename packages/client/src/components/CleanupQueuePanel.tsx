@@ -1,20 +1,11 @@
+import type { CleanupWarningEntry } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { CleanupWarningEntry };
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch, apiPost } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 
-interface CleanupWarningEntry {
-  id: string;
-  branch: string;
-  workingDir: string | null;
-  cleanupWarning: string;
-  closedAt: string | null;
-  mergedAt: string | null;
-  updatedAt: string | null;
-  issueId: string;
-  issueNumber: number;
-  issueTitle: string;
-  projectId: string;
-}
+
 
 interface CleanupQueuePanelProps {
   projectId: string | null;

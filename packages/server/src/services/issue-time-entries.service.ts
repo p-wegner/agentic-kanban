@@ -1,3 +1,6 @@
+import type { TimeEntry } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { TimeEntry };
 import type { Database } from "../db/index.js";
 import {
   insertTimeEntry,
@@ -7,13 +10,7 @@ import {
   type TimeEntryRow,
 } from "../repositories/issue-time-entries.repository.js";
 
-export interface TimeEntry {
-  id: string;
-  issueId: string;
-  minutes: number;
-  note: string | null;
-  createdAt: string;
-}
+
 
 function toApiEntry(row: TimeEntryRow): TimeEntry {
   return {

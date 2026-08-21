@@ -1,20 +1,12 @@
+import type { FailurePattern, PatternMatch } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { FailurePattern, PatternMatch };
 import React, { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 
-interface FailurePattern {
-  id: string;
-  title: string;
-  errorClass: string | null;
-  rootCause: string | null;
-  fix: string | null;
-  sourceRef: string | null;
-}
 
-interface PatternMatch {
-  pattern: FailurePattern;
-  score: number;
-  matchedKeywords: string[];
-}
+
+
 
 interface FailurePatternHintProps {
   workspaceId: string;

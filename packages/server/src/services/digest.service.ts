@@ -1,3 +1,6 @@
+import type { DigestData, DigestIssueRef, DigestRange, SessionDigestEntry } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { DigestData, DigestIssueRef, DigestRange, SessionDigestEntry };
 /**
  * Activity-digest aggregation (#606).
  *
@@ -31,64 +34,18 @@ const RANGE_HOURS = {
   "7d": 168,
 } as const;
 
-export type DigestRange = keyof typeof RANGE_HOURS;
+
 
 export function parseRange(value: string | undefined): DigestRange {
   if (value === "24h" || value === "3d" || value === "7d") return value;
   return "24h";
 }
 
-export interface DigestIssueRef {
-  issueId: string;
-  issueNumber: number | null;
-  title: string;
-  statusName: string;
-  priority: string;
-  issueType: string;
-  at: string;
-}
 
-export interface SessionDigestEntry {
-  sessionId: string;
-  issueId: string;
-  issueNumber: number | null;
-  issueTitle: string;
-  startedAt: string;
-  endedAt: string | null;
-  success: boolean;
-  durationMs: number;
-  costUsd: number;
-  triggerType: string | null;
-}
 
-export interface DigestData {
-  range: DigestRange;
-  since: string;
-  now: string;
-  created: DigestIssueRef[];
-  completed: DigestIssueRef[];
-  moved: DigestIssueRef[];
-  merged: Array<{
-    workspaceId: string;
-    issueId: string;
-    issueNumber: number | null;
-    issueTitle: string;
-    branch: string;
-    closedAt: string;
-  }>;
-  sessions: SessionDigestEntry[];
-  blocked: DigestIssueRef[];
-  headline: {
-    createdCount: number;
-    completedCount: number;
-    mergedCount: number;
-    sessionCount: number;
-    sessionSuccessCount: number;
-    totalCostUsd: number;
-    blockedCount: number;
-    activeAgents: number;
-  };
-}
+
+
+
 
 function parseStats(raw: string | null): { success: boolean; durationMs: number; costUsd: number } {
   if (!raw) return { success: false, durationMs: 0, costUsd: 0 };

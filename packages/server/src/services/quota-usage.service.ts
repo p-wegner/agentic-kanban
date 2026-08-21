@@ -1,36 +1,13 @@
+import type { QuotaMetric, QuotaProviderEntry, QuotaUsageResult } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { QuotaMetric, QuotaProviderEntry, QuotaUsageResult };
 import { request } from "node:http";
 
-export interface QuotaMetric {
-  label: string;
-  percent: number | null;
-  detail: string | null;
-  resetAt: number | null;
-  resetIso: string | null;
-  resetInSeconds: number | null;
-  periodMs: number | null;
-  fractionElapsed?: number;
-  expectedPercent?: number;
-  pace?: number;
-  projectedAtReset?: number;
-}
 
-export interface QuotaProviderEntry {
-  id: string;
-  label: string;
-  accent: string;
-  loginUrl: string;
-  transport: "browser" | "http";
-  hasCreds: boolean;
-  status: "ok" | "auth" | "error";
-  plan?: string;
-  metrics?: QuotaMetric[];
-  error?: string;
-}
 
-export interface QuotaUsageResult {
-  providers: QuotaProviderEntry[];
-  scrapedAt: string;
-}
+
+
+
 
 export interface QuotaUsageProvider {
   fetchUsage(): Promise<QuotaUsageResult>;

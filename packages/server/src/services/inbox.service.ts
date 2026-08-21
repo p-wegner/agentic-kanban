@@ -1,3 +1,6 @@
+import type { InboxItem } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { InboxItem };
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import { getActiveProjectSummaries } from "../repositories/project.repository.js";
@@ -6,43 +9,7 @@ import { listPendingQuestionsForProject } from "./agent-questions/listing.js";
 import { getPluginService } from "./plugin.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
-/**
- * Cross-project "Waiting on you" inbox (#302) — the union of every decision that is
- * blocked on a human, across ALL projects: pending plugin-loop gates, unanswered agent
- * questions, and un-decided tool approvals. Nothing like this existed at any layer:
- * each of those was project-scoped and lived in its own pane, so a gate on a project
- * whose tab wasn't open was invisible once its 4-second toast faded.
- *
- * Read-only aggregation — every item carries what a client needs to DEEP-LINK to the
- * surface that can actually resolve it. Plan approvals (spec-planning workspaces) are
- * a known follow-up; they need a cheap cross-project "planning awaiting approval"
- * query that doesn't exist yet.
- */
 
-export interface InboxItem {
-  /**
-   * `plugin-merge` (#440) is a loop whose builder finished but whose merge never
-   * landed. It waits on a human exactly as a gate does — nothing advances the loop
-   * until someone lands or discards it — but it was omitted here for months while
-   * `list_plugin_gates` reported it, so the two surfaces disagreed on what
-   * "waiting on you" means.
-   */
-  kind: "plugin-gate" | "plugin-merge" | "agent-question" | "tool-approval";
-  projectId: string;
-  projectName: string;
-  title: string;
-  detail: string | null;
-  /** Client-side navigation hints — which surface resolves this item. */
-  link: {
-    view: "plugin-views" | "butler" | "board";
-    pluginId?: string;
-    pluginSlug?: string;
-    loopName?: string;
-    workspaceId?: string;
-    issueNumber?: number | null;
-  };
-  createdAt: string | null;
-}
 
 /** The slice of a loop status the inbox actually reads off the bulk plugin surface. */
 type InboxLoopStatus = Awaited<ReturnType<ReturnType<typeof getPluginService>["listLoopSurfacesForProjects"]>> extends Map<string, Array<infer L>> ? L : never;

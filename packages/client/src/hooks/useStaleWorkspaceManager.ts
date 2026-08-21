@@ -1,22 +1,11 @@
+import type { StaleWorktreeEntry } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { StaleWorktreeEntry };
 import { useState, useEffect, useCallback } from "react";
 import { apiFetch, apiDelete } from "../lib/api.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
-export interface StaleWorktreeEntry {
-  id: string;
-  branch: string;
-  workingDir: string;
-  workspaceStatus: string;
-  closedAt: string | null;
-  mergedAt: string | null;
-  updatedAt: string | null;
-  issueId: string;
-  issueNumber: number;
-  issueTitle: string;
-  issueStatusName: string;
-  projectId: string;
-  repoPath: string;
-}
+
 
 interface UseStaleWorkspaceManagerOptions {
   /** Only fetch when the stale tab is active. */

@@ -1,3 +1,6 @@
+import type { InboxItem } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { InboxItem };
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { requestIssueFocus, requestProjectSelection, requestViewNavigation } from "../lib/navigateView.js";
@@ -6,23 +9,7 @@ import { markProgrammaticNavigation } from "../lib/navigationBurst.js";
 import { usePluginViewStore } from "../stores/pluginViewStore.js";
 import { startStaggeredPoll, type PollHandle } from "../lib/pollScheduler.js";
 
-/** GET /api/inbox (#302) — everything blocked on a human, across ALL projects. */
-export interface InboxItem {
-  kind: "plugin-gate" | "plugin-merge" | "agent-question" | "tool-approval";
-  projectId: string;
-  projectName: string;
-  title: string;
-  detail: string | null;
-  link: {
-    view: "plugin-views" | "butler" | "board";
-    pluginId?: string;
-    pluginSlug?: string;
-    loopName?: string;
-    workspaceId?: string;
-    issueNumber?: number | null;
-  };
-  createdAt: string | null;
-}
+
 
 export const INBOX_KIND_MARK: Record<InboxItem["kind"], string> = {
   "plugin-gate": "✋",

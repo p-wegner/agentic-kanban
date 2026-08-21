@@ -1,16 +1,12 @@
+import type { BudgetEstimate, BudgetRisk } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { BudgetEstimate, BudgetRisk };
 import { useEffect, useState, useRef } from "react";
 import { apiFetch } from "../lib/api.js";
 
-export type BudgetRisk = "low" | "medium" | "high";
 
-export interface BudgetEstimate {
-  risk: BudgetRisk;
-  estimatedTokens: number | null;
-  avgTokensFromHistory: number | null;
-  sessionCount: number;
-  descriptionTokens: number;
-  reason: string;
-}
+
+
 
 export interface LaunchPreviewData {
   branch: string | null;

@@ -1,61 +1,18 @@
+import type { DigestData, DigestIssueRef, DigestRange, SessionDigestEntry } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { DigestData, DigestIssueRef, DigestRange, SessionDigestEntry };
 import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { SEMANTIC } from "../lib/chartColors";
 import { ISSUE_PRIORITIES, PRIORITY_TRAITS } from "../lib/priorityTraits.js";
 
-type DigestRange = "24h" | "3d" | "7d";
 
-interface DigestIssueRef {
-  issueId: string;
-  issueNumber: number | null;
-  title: string;
-  statusName: string;
-  priority: string;
-  issueType: string;
-  at: string;
-}
 
-interface SessionDigestEntry {
-  sessionId: string;
-  issueId: string;
-  issueNumber: number | null;
-  issueTitle: string;
-  startedAt: string;
-  endedAt: string | null;
-  success: boolean;
-  durationMs: number;
-  costUsd: number;
-  triggerType: string | null;
-}
 
-interface DigestData {
-  range: DigestRange;
-  since: string;
-  now: string;
-  created: DigestIssueRef[];
-  completed: DigestIssueRef[];
-  moved: DigestIssueRef[];
-  merged: Array<{
-    workspaceId: string;
-    issueId: string;
-    issueNumber: number | null;
-    issueTitle: string;
-    branch: string;
-    closedAt: string;
-  }>;
-  sessions: SessionDigestEntry[];
-  blocked: DigestIssueRef[];
-  headline: {
-    createdCount: number;
-    completedCount: number;
-    mergedCount: number;
-    sessionCount: number;
-    sessionSuccessCount: number;
-    totalCostUsd: number;
-    blockedCount: number;
-    activeAgents: number;
-  };
-}
+
+
+
+
 
 interface DigestViewProps {
   projectId: string;

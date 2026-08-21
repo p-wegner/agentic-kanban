@@ -1,3 +1,6 @@
+import type { SprintCapacityPlan, SprintCapacityPolicy, SprintEligibleIssue } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { SprintCapacityPlan, SprintCapacityPolicy, SprintEligibleIssue };
 import type { Database } from "../db/index.js";
 import { deriveMonitorTunables, parseStrategyBullseyeConfig, type MonitorTunables } from "./strategy-objective.service.js";
 import {
@@ -8,30 +11,11 @@ import {
   getStrategyBullseyePref,
 } from "../repositories/sprint-capacity.repository.js";
 
-export interface SprintCapacityPolicy {
-  activeAgentsTarget: number;
-  currentActive: number;
-  availableSlots: number;
-  maxNewStartsPerCycle: number;
-  backlogFloor: number;
-  currentBacklogSize: number;
-  willStartCount: number;
-}
 
-export interface SprintEligibleIssue {
-  id: string;
-  issueNumber: number | null;
-  title: string;
-  priority: string | null;
-  statusName: string;
-  blockers: string[];
-  canStart: boolean;
-}
 
-export interface SprintCapacityPlan {
-  policy: SprintCapacityPolicy;
-  nextEligibleIssues: SprintEligibleIssue[];
-}
+
+
+
 
 async function loadMonitorTunables(database: Database, projectId: string): Promise<MonitorTunables> {
   const value = await getStrategyBullseyePref(projectId, database);

@@ -1,3 +1,6 @@
+import type { RiskLevel, RiskSignal, WorkspaceRiskEntry, WorkspaceRiskResponse } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { RiskLevel, RiskSignal, WorkspaceRiskEntry, WorkspaceRiskResponse };
 import { useState, useEffect } from "react";
 import { apiFetch } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
@@ -5,35 +8,13 @@ import type { IssueWithStatus } from "@agentic-kanban/shared";
 import { CollapsibleSection } from "./CollapsibleSection.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
-type RiskLevel = "high" | "medium" | "low" | "none";
 
-interface RiskSignal {
-  key: string;
-  label: string;
-  value: string | number | boolean | null;
-  severity: "high" | "medium" | "low" | "none";
-  detail?: string;
-}
 
-interface WorkspaceRiskEntry {
-  workspaceId: string;
-  issueId: string;
-  issueNumber: number | null;
-  issueTitle: string;
-  issueStatusName: string;
-  branch: string;
-  workspaceStatus: string;
-  riskLevel: RiskLevel;
-  riskScore: number;
-  signals: RiskSignal[];
-  changedFiles: string[];
-}
 
-interface WorkspaceRiskResponse {
-  projectId: string;
-  generatedAt: string;
-  entries: WorkspaceRiskEntry[];
-}
+
+
+
+
 
 interface WorkspaceRiskHeatmapProps {
   projectId: string;

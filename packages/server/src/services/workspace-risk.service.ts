@@ -1,3 +1,6 @@
+import type { RiskLevel, RiskSignal, WorkspaceRiskEntry, WorkspaceRiskResponse } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { RiskLevel, RiskSignal, WorkspaceRiskEntry, WorkspaceRiskResponse };
 import { getProjectById } from "../repositories/project.repository.js";
 import type { Database } from "../db/index.js";
 import { NotFoundError } from "../errors/index.js";
@@ -21,36 +24,13 @@ import {
   getWorkspaceRiskRowsForIssues,
 } from "../repositories/workspace-risk.repository.js";
 
-export type RiskLevel = "high" | "medium" | "low" | "none";
 
-export interface RiskSignal {
-  key: string;
-  label: string;
-  value: string | number | boolean | null;
-  severity: "high" | "medium" | "low" | "none";
-  detail?: string;
-}
 
-export interface WorkspaceRiskEntry {
-  workspaceId: string;
-  issueId: string;
-  issueNumber: number | null;
-  issueTitle: string;
-  issueStatusName: string;
-  branch: string;
-  workspaceStatus: string;
-  riskLevel: RiskLevel;
-  riskScore: number;
-  signals: RiskSignal[];
-  /** Changed files for this workspace (used for overlap computation) */
-  changedFiles: string[];
-}
 
-export interface WorkspaceRiskResponse {
-  projectId: string;
-  generatedAt: string;
-  entries: WorkspaceRiskEntry[];
-}
+
+
+
+
 
 const ACTIVE_STATUSES = new Set(["active", "reviewing", "fixing", "idle"]);
 const STALE_AGE_HIGH_MS = 4 * 60 * 60 * 1000; // 4 hours

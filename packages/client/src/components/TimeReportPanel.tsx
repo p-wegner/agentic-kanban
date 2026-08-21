@@ -1,3 +1,6 @@
+import type { TimeReportByDay, TimeReportByIssue, TimeReportData } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { TimeReportByDay, TimeReportByIssue, TimeReportData };
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 
@@ -5,25 +8,11 @@ type Range = "7d" | "30d" | "90d" | "all";
 type SortKey = "minutes" | "issueNumber" | "title";
 type SortDir = "asc" | "desc";
 
-interface TimeReportByIssue {
-  issueId: string;
-  issueNumber: number | null;
-  issueTitle: string;
-  totalMinutes: number;
-}
 
-interface TimeReportByDay {
-  date: string;
-  totalMinutes: number;
-}
 
-interface TimeReportData {
-  byIssue: TimeReportByIssue[];
-  byDay: TimeReportByDay[];
-  totalMinutes: number;
-  dateFrom: string;
-  dateTo: string;
-}
+
+
+
 
 interface TimeReportPanelProps {
   projectId: string;
