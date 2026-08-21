@@ -25,6 +25,7 @@ import type { Database } from "../db/index.js";
 import { KANBAN_INCOMING_REF_PREFIX } from "../services/git-http.service.js";
 import { listWorkerAssignedBranches } from "../repositories/worker.repository.js";
 import { syncIncomingBranch, clearIncomingRef } from "../services/worker-remote-sync.service.js";
+import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 
 /** #592 — the shared pass core, plus the outcome lists only this pass has. */
 export interface IncomingSweepResult extends PassReport {
@@ -34,7 +35,7 @@ export interface IncomingSweepResult extends PassReport {
 
 async function listIncomingBranches(repoPath: string): Promise<string[]> {
   const result = await gitExec(["for-each-ref", "--format=%(refname)", KANBAN_INCOMING_REF_PREFIX], { cwd: repoPath });
-  if (result.code !== 0) return [];
+  if (!execSucceeded(result)) return [];
   return result.stdout
     .split(/\r?\n/)
     .map((line) => line.trim())

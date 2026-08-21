@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { execFile, execFileSync, spawn, type ChildProcess, type ExecFileException, type StdioOptions } from "node:child_process";
 import { existsSync } from "node:fs";
-import type { ExecResult } from "./exec-result.js";
+import { execFailedToRun, type ExecResult } from "./exec-result.js";
 import { recordOperation } from "./operation-metrics.js";
 
 /**
@@ -380,7 +380,7 @@ export function gitExec(args: string[], opts: GitExecOptions = {}): Promise<GitE
       // transient failure into 1.5s of guaranteed failures. Non-zero exits ARE
       // memoized: for an identical read-only argv they are as deterministic as
       // success (`diff --quiet`'s exit 1 is its answer).
-      if (result.code !== null) {
+      if (!execFailedToRun(result)) {
         resultMemo.set(key, { result, expiresAt: Date.now() + GIT_DEDUPE_MEMO_TTL_MS });
         sweepResultMemo(Date.now());
       }

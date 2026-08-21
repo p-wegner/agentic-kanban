@@ -30,7 +30,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ServiceStackConfig, ServiceStackState } from "@agentic-kanban/shared";
 import { composeProjectName, isInstanceManagedComposeProject } from "@agentic-kanban/shared";
-import { execErrorMessage } from "@agentic-kanban/shared/lib/exec-result";
+import { execErrorMessage, execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 import { dockerExec, dockerAvailable } from "@agentic-kanban/shared/lib/docker-exec";
 import { createStackPortAllocator, releaseStackPorts, type StackPortAllocator } from "./port-allocator.js";
 import {
@@ -228,7 +228,7 @@ export function createDefaultComposeRunner(): ComposeRunner {
         ["compose", "-p", projectName, ...fileArgs, "--env-file", envFile, ...upFlags],
         { cwd, env, timeoutMs },
       );
-      return { ok: res.code === 0, stderr: execErrorMessage(res) };
+      return { ok: execSucceeded(res), stderr: execErrorMessage(res) };
     },
     async down({ projectName, cwd, env, removeVolumes }) {
       if (!(await dockerAvailable(env))) {
@@ -247,7 +247,7 @@ export function createDefaultComposeRunner(): ComposeRunner {
           ? ["down", "--remove-orphans"]
           : ["down", "-v", "--rmi", "local", "--remove-orphans"];
       const res = await dockerExec(["compose", "-p", projectName, ...downFlags], { cwd, env });
-      return { ok: res.code === 0, stderr: execErrorMessage(res) };
+      return { ok: execSucceeded(res), stderr: execErrorMessage(res) };
     },
     async restart({ composeFile, extraComposeFiles, projectName, cwd, envFile, env, timeoutMs }) {
       if (!(await dockerAvailable(env))) {
@@ -258,7 +258,7 @@ export function createDefaultComposeRunner(): ComposeRunner {
         ["compose", "-p", projectName, ...fileArgs, "--env-file", envFile, "restart"],
         { cwd, env, timeoutMs: timeoutMs ?? 120000 },
       );
-      return { ok: res.code === 0, stderr: execErrorMessage(res) };
+      return { ok: execSucceeded(res), stderr: execErrorMessage(res) };
     },
     async logs({ composeFile, extraComposeFiles, projectName, cwd, envFile, tail, env, timeoutMs }) {
       if (!(await dockerAvailable(env))) {
@@ -272,12 +272,12 @@ export function createDefaultComposeRunner(): ComposeRunner {
         ["compose", "-p", projectName, ...fileArgs, "--env-file", envFile, "logs", "--no-color", "--tail", String(safeTail)],
         { cwd, env, timeoutMs: timeoutMs ?? 20000 },
       );
-      return { ok: res.code === 0, stdout: res.stdout, stderr: execErrorMessage(res) };
+      return { ok: execSucceeded(res), stdout: res.stdout, stderr: execErrorMessage(res) };
     },
     async list(env) {
       if (!(await dockerAvailable(env))) return [];
       const res = await dockerExec(["compose", "ls", "--all", "--format", "json"], { env });
-      if (res.code !== 0) return [];
+      if (!execSucceeded(res)) return [];
       try {
         const parsed: unknown = JSON.parse(res.stdout || "[]");
         if (!Array.isArray(parsed)) return [];
@@ -298,7 +298,7 @@ export function createDefaultComposeRunner(): ComposeRunner {
       ];
       for (const args of queries) {
         const res = await dockerExec(args, { env });
-        if (res.code !== 0) continue;
+        if (!execSucceeded(res)) continue;
         for (const line of res.stdout.split("\n")) {
           const name = line.trim();
           if (name) names.add(name);
@@ -315,7 +315,7 @@ export function createDefaultComposeRunner(): ComposeRunner {
       const stderrParts: string[] = [];
       const removeByKind = async (listArgs: string[], removeCmd: (ids: string[]) => string[]) => {
         const listRes = await dockerExec(listArgs, { env });
-        if (listRes.code !== 0) {
+        if (!execSucceeded(listRes)) {
           ok = false;
           stderrParts.push(execErrorMessage(listRes));
           return;
@@ -323,7 +323,7 @@ export function createDefaultComposeRunner(): ComposeRunner {
         const ids = listRes.stdout.split("\n").map((l) => l.trim()).filter(Boolean);
         if (ids.length === 0) return;
         const removeRes = await dockerExec(removeCmd(ids), { env });
-        if (removeRes.code !== 0) {
+        if (!execSucceeded(removeRes)) {
           ok = false;
           stderrParts.push(execErrorMessage(removeRes));
         }

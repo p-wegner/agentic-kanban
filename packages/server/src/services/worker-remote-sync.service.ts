@@ -13,6 +13,7 @@
 import { gitExec, gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { KANBAN_INCOMING_REF_PREFIX } from "./git-http.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 
 export function incomingRefFor(branch: string): string {
   return `${KANBAN_INCOMING_REF_PREFIX}${branch}`;
@@ -33,13 +34,13 @@ export async function syncIncomingBranch(repoPath: string, branch: string): Prom
   const target = `refs/heads/${branch}`;
 
   const incomingSha = await gitExec(["rev-parse", "--verify", `${incoming}^{commit}`], { cwd: repoPath });
-  if (incomingSha.code !== 0) {
+  if (!execSucceeded(incomingSha)) {
     return { ok: false, status: "missing", error: `no incoming ref ${incoming}` };
   }
   const sha = incomingSha.stdout.trim();
 
   const currentSha = await gitExec(["rev-parse", "--verify", `${target}^{commit}`], { cwd: repoPath });
-  if (currentSha.code !== 0) {
+  if (!execSucceeded(currentSha)) {
     try {
       await gitExecOrThrow(["update-ref", target, sha], { cwd: repoPath });
       return { ok: true, status: "created", sha };
@@ -52,7 +53,7 @@ export async function syncIncomingBranch(repoPath: string, branch: string): Prom
 
   // Fast-forward check: the current tip must be an ancestor of the incoming one.
   const ancestor = await gitExec(["merge-base", "--is-ancestor", current, sha], { cwd: repoPath });
-  if (ancestor.code !== 0) {
+  if (!execSucceeded(ancestor)) {
     return {
       ok: false,
       status: "diverged",
@@ -85,7 +86,7 @@ export async function syncIncomingBranch(repoPath: string, branch: string): Prom
 /** True when `branch` is checked out in the main checkout or any linked worktree. */
 export async function isBranchCheckedOut(repoPath: string, branch: string): Promise<boolean> {
   const result = await gitExec(["worktree", "list", "--porcelain"], { cwd: repoPath });
-  if (result.code !== 0) return false;
+  if (!execSucceeded(result)) return false;
   return result.stdout.split(/\r?\n/).some((line) => line.trim() === `branch refs/heads/${branch}`);
 }
 
@@ -97,16 +98,16 @@ export async function isBranchCheckedOut(repoPath: string, branch: string): Prom
 export async function syncIncomingIntoWorktree(worktreePath: string, branch: string): Promise<SyncOutcome> {
   const incoming = incomingRefFor(branch);
   const shaResult = await gitExec(["rev-parse", "--verify", `${incoming}^{commit}`], { cwd: worktreePath });
-  if (shaResult.code !== 0) {
+  if (!execSucceeded(shaResult)) {
     return { ok: false, status: "missing", error: `no incoming ref ${incoming}` };
   }
   const sha = shaResult.stdout.trim();
   const head = await gitExec(["rev-parse", "HEAD"], { cwd: worktreePath });
-  if (head.code === 0 && head.stdout.trim() === sha) {
+  if (execSucceeded(head) && head.stdout.trim() === sha) {
     return { ok: true, status: "unchanged", sha };
   }
   const merge = await gitExec(["merge", "--ff-only", incoming], { cwd: worktreePath });
-  if (merge.code !== 0) {
+  if (!execSucceeded(merge)) {
     return {
       ok: false,
       status: "diverged",

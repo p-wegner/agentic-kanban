@@ -20,6 +20,7 @@ import { deletePluginViewProcessesForPlugin } from "../repositories/plugin-view-
 import { PluginError } from "./plugin-errors.js";
 import type { EnableReport } from "./plugin-enablement.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 
 export interface PluginUpdateResult {
   row: PluginRow;
@@ -83,7 +84,7 @@ export function createPluginLifecycleOps(deps: {
   /** True when `dir` is a git checkout whose origin is (the normalized form of) `source`. */
   async function cloneMatchesRemote(dir: string, source: string): Promise<boolean> {
     const result = await gitExec(["remote", "get-url", "origin"], { cwd: dir });
-    if (result.code !== 0) return false;
+    if (!execSucceeded(result)) return false;
     return normalizeGitUrl(result.stdout) === normalizeGitUrl(source);
   }
 

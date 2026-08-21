@@ -40,6 +40,7 @@ import {
 import { resolveEffectiveVerify } from "./stack-profile.service.js";
 import { recordDriveObstacle, type ObstacleBroadcaster } from "./drive-obstacles.service.js";
 import { emitButlerSystemEvent } from "./butler-event-feed.js";
+import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 
 /** First retry delay once a failure has been seen (also the doubling base). */
 export const MERGE_BACKOFF_BASE_MS = 10 * 60_000;
@@ -172,7 +173,7 @@ async function defaultBranchHeadSha(workingDir: string): Promise<string | null> 
  */
 async function defaultHasSubstantiveChangeSince(workingDir: string, sha: string): Promise<boolean | null> {
   const res = await gitExec(["diff", "--quiet", sha, "HEAD"], { cwd: workingDir });
-  if (res.code === 0) return false; // identical trees — the tip moved but nothing changed
+  if (execSucceeded(res)) return false; // identical trees — the tip moved but nothing changed
   if (res.code === 1) return true; // differences present
   return null; // sha unreachable / git failed — the caller decides
 }

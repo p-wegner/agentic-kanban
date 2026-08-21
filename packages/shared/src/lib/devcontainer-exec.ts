@@ -1,7 +1,7 @@
 import { execFile, type ExecFileException } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import type { ExecResult } from "./exec-result.js";
+import { execSucceeded, type ExecResult } from "./exec-result.js";
 
 /**
  * The single sanctioned adapter for spawning the `devcontainer` CLI.
@@ -101,7 +101,7 @@ export function devcontainerExec(
 /** true if `devcontainer --version` exits 0 within a short timeout. */
 export async function devcontainerAvailable(env?: NodeJS.ProcessEnv): Promise<boolean> {
   const result = await devcontainerExec(["--version"], { env, timeoutMs: 15000 });
-  return result.code === 0;
+  return execSucceeded(result);
 }
 
 /**
@@ -197,6 +197,6 @@ export async function devcontainerUp(
     args.push("--mount", formatMount(mount));
   }
   const result = await devcontainerExec(args, execOpts);
-  if (result.code !== 0) return undefined;
+  if (!execSucceeded(result)) return undefined;
   return parseDevcontainerUpResult(result.stdout);
 }
