@@ -36,18 +36,17 @@ const BASELINE: Record<string, string[]> = {
     "**/append-only-hotfile-merge.integration.test.ts",
     "**/migration-renumber-conflict-guard.test.ts",
   ],
+  // #679 removed seven of these thirteen. They ran on in-memory SQLite with an injected
+  // gitService and had no environmental excuse; `helpers/temp-repo.ts` only mkdirs a `.git`
+  // so the repo lock accepts the path, and deliberately never runs `git init`. Measured
+  // together: 193 tests, ~78s. This shrink is exactly the explicit, reviewed edit the
+  // mechanism above exists to force — the list moving in the good direction still needs
+  // someone to notice.
   server: [
     "**/cli.test.ts",
     "**/cli-butler.test.ts",
     "**/git.service.test.ts",
-    "**/done-unmerged-invariant-sweep.test.ts",
-    "**/workspace-merge-service.test.ts",
-    "**/workspace-already-merged.test.ts",
     "**/api-workspace.test.ts",
-    "**/workspace-lifecycle-transitions.test.ts",
-    "**/merge-endpoint-reconcile-noop.test.ts",
-    "**/merge-service-edge-cases.test.ts",
-    "**/preferences.test.ts",
     "**/worker-git-transport-e2e.test.ts",
     "**/compose-lifecycle-real-docker.test.ts",
   ],
@@ -58,8 +57,16 @@ const BASELINE: Record<string, string[]> = {
 /** Total at the moment the ratchet landed — the number an unreviewed growth would move. */
 const BASELINE_TOTAL = Object.values(BASELINE).reduce((n, list) => n + list.length, 0);
 
-type Pkg = { dir: string; label: string; exclude: string[] };
+/**
+ * #679 made each entry `{ glob, reason }` so an exclusion carries the argument for its own
+ * existence — the comment form drifted away from the entries it described, which is how six
+ * unjustified exclusions survived. This ratchet still reasons about the GLOBS; the reasons
+ * get their own assertion at the bottom.
+ */
+type Exclusion = { glob: string; reason: string };
+type Pkg = { dir: string; label: string; exclude: Exclusion[] };
 const packages = PACKAGES as Pkg[];
+const globsOf = (pkg: Pkg): string[] => pkg.exclude.map((e) => e.glob);
 
 /** `**\/foo.test.ts` → `foo.test.ts`. Every exclusion in this repo is that one shape. */
 function basenameOf(glob: string): string | null {
@@ -89,7 +96,7 @@ function testFileNames(pkgDir: string): Set<string> {
 
 describe("test:mine flaky-exclusion ratchet (#641)", () => {
   it("matches the reviewed baseline exactly — growth is an explicit edit, not a side effect", () => {
-    const actual = Object.fromEntries(packages.map((p) => [p.label, [...p.exclude]]));
+    const actual = Object.fromEntries(packages.map((p) => [p.label, globsOf(p)]));
     expect(actual).toEqual(BASELINE);
   });
 
@@ -101,7 +108,7 @@ describe("test:mine flaky-exclusion ratchet (#641)", () => {
   it("has no exclusion that outlived its file — a stale glob hides nothing and misleads", () => {
     for (const pkg of packages) {
       const names = testFileNames(resolve(REPO_ROOT, pkg.dir));
-      for (const glob of pkg.exclude) {
+      for (const glob of globsOf(pkg)) {
         const base = basenameOf(glob);
         expect(base, `${pkg.label}: unexpected exclusion shape "${glob}" — expected "**/<file>.test.ts"`).toBeTruthy();
         expect(names.has(base!), `${pkg.label}: excludes "${base}" but no such test file exists any more`).toBe(true);
@@ -111,12 +118,44 @@ describe("test:mine flaky-exclusion ratchet (#641)", () => {
 
   it("excludes only files, never a directory or a wildcard that could swallow future suites", () => {
     for (const pkg of packages) {
-      for (const glob of pkg.exclude) {
+      for (const glob of globsOf(pkg)) {
         expect(glob.endsWith(".test.ts"), `${pkg.label}: "${glob}" is not a single test file`).toBe(true);
         // `**/foo*.test.ts` would silently absorb a suite nobody triaged.
         expect(glob.slice(3).includes("*"), `${pkg.label}: "${glob}" wildcards beyond the leading **/`).toBe(false);
       }
     }
+  });
+
+  // #679. The baseline above makes a change VISIBLE; these make it ARGUED. Six of the seven
+  // suites removed in #679 were excluded with no environmental excuse at all, and the reader
+  // could not tell — the justification lived in a comment above the list, which drifted away
+  // from the entries it was written for. The rule the reasons are judged against: an exclusion
+  // is legitimate when the suite needs something the gate box may not have or cannot share
+  // under parallelism. "It is slow" is not a reason; scope it or speed it up.
+  it("gives every excluded glob a reason that says something", () => {
+    const missing = packages.flatMap((p) =>
+      p.exclude.filter((e) => !e.reason || e.reason.trim().length < 15).map((e) => `${p.label}: ${e.glob}`),
+    );
+    expect(
+      missing,
+      "An exclusion is a hole in the pre-merge gate. Say what the suite needs that the gate box " +
+        "may not have — not that it is slow.",
+    ).toEqual([]);
+  });
+
+  it("rejects a reason that names no environmental need", () => {
+    // Words naming a resource the gate box may not have or cannot share. A reason containing
+    // none of them is asserting nothing checkable — most likely "slow", the case this rejects.
+    const ENVIRONMENTAL = ["git", "docker", "daemon", "spawn", "child process", "binary", "transport", "parallelism"];
+    const unjustified = packages.flatMap((p) =>
+      p.exclude
+        .filter((e) => !ENVIRONMENTAL.some((w) => e.reason.toLowerCase().includes(w)))
+        .map((e) => `${p.label}: ${e.glob} — "${e.reason}"`),
+    );
+    expect(
+      unjustified,
+      "These exclusions give a reason naming no real git/docker/spawned-process need.",
+    ).toEqual([]);
   });
 
   it("every excluded suite is reachable by `pnpm test:full` (#640: it was reachable by nothing)", async () => {
