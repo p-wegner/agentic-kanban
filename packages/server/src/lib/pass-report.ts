@@ -58,13 +58,23 @@ export function recordSkipped(report: PassReport, id: string, reason: string): v
 }
 
 /**
- * One log line for a pass. Names the unaccounted-for remainder explicitly rather than
+ * The pass summary WITHOUT a `[tag]` prefix, for a sweep that logs through an injected
+ * `log` (#616 — the injected logger already applies the file's tag, so `formatPassReport`
+ * there would double it). Names the unaccounted-for remainder explicitly rather than
  * letting it vanish — `scanned 9, acted 2, skipped 5` silently hides 2 failures.
  */
-export function formatPassReport(name: string, report: PassReport): string {
+export function formatPassReportBody(report: PassReport): string {
   const unaccounted = report.scanned - report.acted - report.skipped;
   const tail = unaccounted > 0 ? `, ${unaccounted} unaccounted` : "";
-  return `[${name}] scanned ${report.scanned}, acted ${report.acted}, skipped ${report.skipped}${tail}`;
+  return `scanned ${report.scanned}, acted ${report.acted}, skipped ${report.skipped}${tail}`;
+}
+
+/**
+ * One log line for a pass, tagged. For a sweep with no injected logger; a sweep that HAS
+ * one passes `formatPassReportBody` to it instead.
+ */
+export function formatPassReport(name: string, report: PassReport): string {
+  return `[${name}] ${formatPassReportBody(report)}`;
 }
 
 /** Reasons grouped by reason string — what a monitor or digest actually wants. */
