@@ -33,7 +33,7 @@ import { clearWorkspaceWorkingDir } from "../repositories/workspace-crud.reposit
 import { stampWorkspaceMergedAt } from "../repositories/workspace-merge-execution.repository.js";
 import { getWorkspaceById } from "../repositories/workspace-reads.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-import { resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
+import { resolveBoardClientPort, resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
 
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 export type MergeWorkspace = Pick<typeof workspaces.$inferSelect, "id" | "isDirect" | "branch" | "workingDir" | "baseBranch" | "issueId">;
@@ -423,7 +423,7 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
               const issueTagged = await db.select({ tagId: issueTags.tagId }).from(issueTags).where(eq(issueTags.issueId, issueId)).limit(100).then((rows) => rows.some((r) => r.tagId !== null));
               if (verifyAgent === "dedicated" && issueTagged) {
                 try {
-                  const clientPort = process.env.KANBAN_CLIENT_PORT || process.env.VITE_PORT || "5173";
+                  const clientPort = resolveBoardClientPort();
                   const serverPort = resolveBoardServerPort();
                   const verifyPrompt = `You are a visual verification agent. The branch '${workspace.branch}' was just merged into master.
 

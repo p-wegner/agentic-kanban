@@ -20,7 +20,7 @@ import * as gitService from "./git.service.js";
 import { applyWorkspaceProfileToPrefs, resolveAgentSettings, toExecutorProvider } from "./agent-settings.service.js";
 import { loadProjectRuntimeConfig } from "./project-runtime-config.service.js";
 import { buildReviewContext } from "./phase-context.service.js";
-import { resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
+import { resolveBoardClientPort, resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
 
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 export const DEFAULT_MONITOR_NUDGE_PROMPT =
@@ -155,7 +155,7 @@ Steps to resolve:
   }
 
   const serverPort = String(resolveBoardServerPort());
-  const clientPort = process.env.KANBAN_CLIENT_PORT || process.env.VITE_PORT || "5173";
+  const clientPort = String(resolveBoardClientPort());
   const visualProofAttachTarget = workspaceId
     ? `\`workspaceId: "${workspaceId}"\``
     : `\`issueId: "${issueId}"\``;

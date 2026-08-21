@@ -5,6 +5,7 @@ import { BUILTIN_SKILLS } from "../../builtin-skills.js";
 import { runMigrations, logDefaultBranch, timeSince, cliAction } from "../shared.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { parseIssueNumberFromBranch } from "@agentic-kanban/shared/lib/branch";
+import { resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
 
 export function registerSystemCommands(program: Command) {
   program
@@ -190,7 +191,7 @@ Bundled vs prompt-only:
   program
     .command("dev")
     .description("Start the development server (server + built client UI)")
-    .option("-p, --port <port>", "Server port", process.env.PORT || "3001")
+    .option("-p, --port <port>", "Server port", String(resolveBoardServerPort()))
     .option("-H, --host <host>", "Server hostname", process.env.KANBAN_HOST || "127.0.0.1")
     .option("--no-open", "Do not open browser")
     .addHelpText("after", `

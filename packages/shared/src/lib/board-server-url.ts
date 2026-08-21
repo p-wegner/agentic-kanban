@@ -1,5 +1,6 @@
 const LOOPBACK_HOST = "127.0.0.1";
 const DEFAULT_PORT = 3001;
+const DEFAULT_CLIENT_PORT = 5173;
 
 /**
  * THE board-server port ladder (#615). `KANBAN_SERVER_PORT || PORT || "3001"` was copied
@@ -26,6 +27,23 @@ export function resolveBoardServerPort(
     Number(env.PORT) ||
     DEFAULT_PORT
   );
+}
+
+/**
+ * THE board-client port ladder — the client-side twin of `resolveBoardServerPort` (#690).
+ * `KANBAN_CLIENT_PORT || VITE_PORT || "5173"` was copied verbatim into three services
+ * (agent launch env, review-agent prompt, the post-merge verify-agent prompt) with no
+ * shared resolver, so a rung added to one copy would silently miss the others.
+ */
+export function resolveBoardClientPort(
+  override?: string | number,
+  env: Record<string, string | undefined> = process.env,
+): number {
+  if (override !== undefined) {
+    const parsed = Number(override);
+    if (parsed) return parsed;
+  }
+  return Number(env.KANBAN_CLIENT_PORT) || Number(env.VITE_PORT) || DEFAULT_CLIENT_PORT;
 }
 
 export function boardApiUrl(path: string, port?: string | number): string {
