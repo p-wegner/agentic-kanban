@@ -1,7 +1,6 @@
 import { issues, projects, workspaces, sessions, agentSkills, projectStatuses, issueDependencies, workflowNodes } from "@agentic-kanban/shared/schema";
 import { setWorkspaceStatus, type WorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
-import { TERMINAL_WORKSPACE_STATUSES } from "@agentic-kanban/shared/lib/workspace-liveness";
-import { eq, inArray, notInArray, and, isNotNull, ne } from "drizzle-orm";
+import { eq, inArray, and, isNotNull, ne } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database, TransactionClient } from "../db/index.js";
 import { getProjectById } from "./project.repository.js";
@@ -183,31 +182,6 @@ export async function findWorkspacesByWorkingDir(
     .select({ id: workspaces.id, status: workspaces.status })
     .from(workspaces)
     .where(eq(workspaces.workingDir, workingDir));
-}
-
-/**
- * Working directories still held by a NON-TERMINAL workspace (#699).
- *
- * This is the DB half of the answer `createWorktree` needs before it recursively deletes
- * a directory it has decided is a "leftover". Its own guards ask git, and git is the
- * authority that has already failed in the case that matters — a live worktree whose
- * `.git` file is unreadable is unregistered and therefore indistinguishable from an
- * abandoned directory. A workspace row is not: it names the path and says it is live.
- *
- * Terminal rows are deliberately excluded — a merged/closed workspace's worktree IS a
- * leftover, and that is the case the cleanup exists to handle.
- */
-export async function listLiveWorkspaceWorkingDirs(database: Database = db) {
-  const rows = await database
-    .select({ workingDir: workspaces.workingDir })
-    .from(workspaces)
-    .where(
-      and(
-        isNotNull(workspaces.workingDir),
-        notInArray(workspaces.status, TERMINAL_WORKSPACE_STATUSES as unknown as string[]),
-      ),
-    );
-  return rows.map((r) => r.workingDir).filter((d): d is string => !!d);
 }
 
 export async function getSessionStatusesForWorkspace(

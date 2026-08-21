@@ -5,7 +5,7 @@ import {
   agentSkills,
   repos,
 } from "@agentic-kanban/shared/schema";
-import { desc, eq, inArray, and, ne, sql } from "drizzle-orm";
+import { desc, eq, inArray, notInArray, and, isNotNull, ne, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 
 /**
@@ -17,6 +17,7 @@ const leadingRepo = alias(repos, "leading_repo");
 import { findOpenUnmergedWorkspace as findOpenUnmergedWorkspaceShared } from "@agentic-kanban/shared/lib/issue-status-orchestration";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { TERMINAL_WORKSPACE_STATUSES } from "@agentic-kanban/shared/lib/workspace-liveness";
 import { mapWorkspaceDetailsRow } from "../lib/workspace-details-projection.js";
 import type { WorkspaceDetails } from "../lib/workspace-details-projection.js";
 
@@ -277,4 +278,29 @@ export async function findLiveWorkspacesOnBranch(
       ne(workspaces.status, "closed"),
     ))
     .limit(3);
+}
+
+/**
+ * Working directories still held by a NON-TERMINAL workspace (#699).
+ *
+ * This is the DB half of the answer `createWorktree` needs before it recursively deletes
+ * a directory it has decided is a "leftover". Its own guards ask git, and git is the
+ * authority that has already failed in the case that matters — a live worktree whose
+ * `.git` file is unreadable is unregistered and therefore indistinguishable from an
+ * abandoned directory. A workspace row is not: it names the path and says it is live.
+ *
+ * Terminal rows are deliberately excluded — a merged/closed workspace's worktree IS a
+ * leftover, and that is the case the cleanup exists to handle.
+ */
+export async function listLiveWorkspaceWorkingDirs(database: Database = db) {
+  const rows = await database
+    .select({ workingDir: workspaces.workingDir })
+    .from(workspaces)
+    .where(
+      and(
+        isNotNull(workspaces.workingDir),
+        notInArray(workspaces.status, TERMINAL_WORKSPACE_STATUSES as unknown as string[]),
+      ),
+    );
+  return rows.map((r) => r.workingDir).filter((d): d is string => !!d);
 }

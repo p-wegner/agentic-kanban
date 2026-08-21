@@ -17,6 +17,7 @@ import { samePath } from "@agentic-kanban/shared/lib/path-key";
 import { buildAgentPrompt } from "./workspace-create/policy.js";
 import type { Database } from "../db/index.js";
 import * as crudRepo from "../repositories/workspace-crud.repository.js";
+import { listLiveWorkspaceWorkingDirs } from "../repositories/workspace-reads.repository.js";
 import { getEnabledPluginBySlug, listEnabledPlugins } from "./plugin-enabled.js";
 import { parsePluginLoopUnitKey, pluginSkillName } from "@agentic-kanban/shared/lib/plugin-manifest";
 import { parseOnboardingUnitKey, parseInitSkillStepId } from "@agentic-kanban/shared/lib/onboarding-plan";
@@ -101,8 +102,7 @@ export function createWorkspaceProvisionService(deps: {
       // leftover-cleanup inside createWorktree cannot rm -rf a worktree an agent is
       // working in. Best-effort — a failed read must not block provisioning, and the
       // guards inside createWorktree still apply.
-      const liveWorkingDirs = await crudRepo
-        .listLiveWorkspaceWorkingDirs(database)
+      const liveWorkingDirs = await listLiveWorkspaceWorkingDirs(database)
         .catch(() => [] as string[]);
       worktreePath = await gitService.createWorktree(repoPath, branch, baseBranch, {
         isPathClaimed: (candidate) => liveWorkingDirs.some((dir) => samePath(dir, candidate)),
