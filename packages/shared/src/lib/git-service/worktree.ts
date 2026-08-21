@@ -119,8 +119,28 @@ export async function createWorktree(
   repoPath: string,
   branch: string,
   baseBranch?: string,
-  opts: { pathNamespace?: string } = {},
+  opts: {
+    pathNamespace?: string;
+    /**
+     * Does a LIVE workspace still claim this directory? (#699)
+     *
+     * The leftover-cleanup below deletes an existing directory recursively, and both of
+     * its guards ask GIT — which is exactly the authority that has already failed in the
+     * case that matters. Callers that can answer from the DB should pass this; it is the
+     * only source that knows a non-terminal workspace row names the path as its
+     * `workingDir`. Optional, so the CLI/MCP call sites are unaffected.
+     */
+    isPathClaimed?: (worktreePath: string) => boolean;
+  } = {},
 ): Promise<string> {
+  // Read the registrations BEFORE pruning (#699). `pruneWorktrees` unregisters any
+  // worktree git can no longer resolve — including a LIVE one whose `.git` file has
+  // become unreadable — so capturing the list afterwards means the leftover-cleanup
+  // guard below is evaluated against a list this function itself just emptied. That is
+  // not hypothetical: it is reproducible, and it deleted two live worktrees on the dev
+  // board (ak-697, ak-670) along with their uncommitted work.
+  const registeredBeforePrune = await listWorktrees(repoPath).catch(() => []);
+
   // Prune stale worktree references (directories deleted but git still tracks them).
   // This is critical on Windows where locked directories can survive removal.
   try { await pruneWorktrees(repoPath); } catch { /* best effort */ }
@@ -177,8 +197,16 @@ export async function createWorktree(
   try {
     await stat(worktreePath);
     let removed = false;
-    const claimedByThisRepo = isRegisteredWorktreePath(existing, worktreePath);
-    if (!claimedByThisRepo && !(await isForeignCheckout(repoPath, worktreePath))) {
+    // Claimed by git — under EITHER view. The pre-prune list is the load-bearing half:
+    // a live worktree whose `.git` is damaged is absent from `existing` and present here.
+    const claimedByThisRepo =
+      isRegisteredWorktreePath(existing, worktreePath) ||
+      isRegisteredWorktreePath(registeredBeforePrune, worktreePath);
+    // Claimed by the DB — covers a registration lost in an EARLIER call, which the
+    // pre-prune capture cannot see. A directory a live workspace is working in is never
+    // a leftover, whatever git thinks.
+    const claimedByLiveWorkspace = opts.isPathClaimed?.(worktreePath) ?? false;
+    if (!claimedByThisRepo && !claimedByLiveWorkspace && !(await isForeignCheckout(repoPath, worktreePath))) {
       // Break junctions first (top-level + nested) so the recursive delete cannot
       // traverse a Windows junction into a main checkout's shared store (#518/#780).
       await breakJunctionsRecursively(worktreePath).catch(() => undefined);
