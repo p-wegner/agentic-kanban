@@ -27,6 +27,7 @@ import {
 } from "./container-profile.service.js";
 import { ensureMcpHttpBridge } from "./mcp-http-bridge.service.js";
 import type { ContainerPathMapping } from "./agent-provider/container-wrap.js";
+import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 
 /**
  * Provisions the devcontainer a builder agent runs inside.
@@ -467,7 +468,7 @@ async function warnIfBoardUnreachable(handle: DevcontainerHandle, port: number):
     "hosts",
     HOST_GATEWAY_HOSTNAME,
   ]);
-  if (probe.code === 0 && probe.stdout.trim()) return;
+  if (execSucceeded(probe) && probe.stdout.trim()) return;
   console.warn(
     `[devcontainer] the container cannot resolve ${HOST_GATEWAY_HOSTNAME}, so the board MCP ` +
       `endpoint on :${port} is unreachable and the builder will have NO board tools. ` +
@@ -495,7 +496,7 @@ export async function findStaleProfileContainers(
   const stale: string[] = [];
   for (const containerId of containers) {
     const inspect = await dockerExec(["inspect", "--format", "{{json .Mounts}}", containerId]);
-    if (inspect.code !== 0) continue;
+    if (!execSucceeded(inspect)) continue;
     let mounts: Array<{ Destination?: string; Source?: string }>;
     try {
       mounts = JSON.parse(inspect.stdout.trim()) as Array<{ Destination?: string; Source?: string }>;
@@ -535,7 +536,7 @@ async function recreateStaleProfileContainers(
   );
   for (const containerId of stale) {
     const removed = await dockerExec(["rm", "-f", containerId]);
-    if (removed.code !== 0) {
+    if (!execSucceeded(removed)) {
       console.warn(
         `[devcontainer] could not remove stale-profile container ${containerId.slice(0, 12)}: ` +
           `${execErrorMessage(removed)} — the next 'up' may reuse it with the wrong profile.`,
@@ -566,7 +567,7 @@ export async function chownDependencyVolumes(
     handle.remoteUser,
     ...volumes.map((v) => v.containerPath),
   ]);
-  if (result.code !== 0) {
+  if (!execSucceeded(result)) {
     console.warn(
       `[devcontainer] could not chown dependency volumes to ${handle.remoteUser}: ` +
         `${execErrorMessage(result)} — the install may fail with EACCES.`,
@@ -637,7 +638,7 @@ export async function reapWorkspaceContainer(opts: {
     const containers = await findWorkspaceContainers(worktreePath);
     for (const containerId of containers) {
       const removed = await dockerExec(["rm", "-f", containerId]);
-      if (removed.code === 0) containersRemoved++;
+      if (execSucceeded(removed)) containersRemoved++;
       else
         console.warn(
           `[devcontainer] could not remove container ${containerId.slice(0, 12)}: ${execErrorMessage(removed)}`,
@@ -647,7 +648,7 @@ export async function reapWorkspaceContainer(opts: {
     if (workspaceId) {
       for (const volume of await findWorkspaceVolumes(workspaceId)) {
         const removed = await dockerExec(["volume", "rm", volume]);
-        if (removed.code === 0) volumesRemoved++;
+        if (execSucceeded(removed)) volumesRemoved++;
         else
           console.warn(
             `[devcontainer] could not remove volume ${volume}: ${execErrorMessage(removed)}`,
@@ -684,7 +685,7 @@ export async function findWorkspaceContainers(worktreePath: string): Promise<str
     "--format",
     '{{.ID}}\t{{.Label "devcontainer.local_folder"}}',
   ]);
-  if (result.code !== 0) return [];
+  if (!execSucceeded(result)) return [];
   return result.stdout
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -697,7 +698,7 @@ export async function findWorkspaceContainers(worktreePath: string): Promise<str
 export async function findWorkspaceVolumes(workspaceId: string): Promise<string[]> {
   const prefix = workspaceVolumePrefix(workspaceId);
   const result = await dockerExec(["volume", "ls", "--format", "{{.Name}}"]);
-  if (result.code !== 0) return [];
+  if (!execSucceeded(result)) return [];
   return result.stdout
     .split(/\r?\n/)
     .map((line) => line.trim())

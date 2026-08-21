@@ -24,6 +24,7 @@
 import { existsSync } from "node:fs";
 import { dockerExec, dockerAvailable } from "@agentic-kanban/shared/lib/docker-exec";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 
 export type DockerDeploymentMode = "native" | "dood" | "dind" | "unknown";
 
@@ -124,7 +125,7 @@ async function defaultProbeDataRootVisible(dataRoot: string): Promise<"visible" 
     ["run", "--rm", "-v", `${dataRoot}:/probe:ro`, "busybox", "sh", "-c", "ls -A /probe | head -1"],
     { timeoutMs: 30000 },
   );
-  if (res.code !== 0) return "inconclusive";
+  if (!execSucceeded(res)) return "inconclusive";
   return res.stdout.trim().length > 0 ? "visible" : "empty";
 }
 

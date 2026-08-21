@@ -22,6 +22,7 @@ import { sanitizeUtf8 } from "@agentic-kanban/shared/lib/sanitize-utf8";
 import { wrapLaunchConfigForContainer } from "./agent-provider/container-wrap.js";
 import { dockerExec } from "@agentic-kanban/shared/lib/docker-exec";
 import { isPidAlive as probePid } from "../lib/pid.js";
+import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 
 function resolveWorktreeDevPorts(worktreePath: string): { serverPort: string; clientPort: string } | null {
   const ports = resolveWorktreeDevPortsShared(worktreePath);
@@ -155,7 +156,7 @@ function killPid(pid: number, context: Record<string, unknown>): boolean {
 function killContainerAgent(sessionId: string, containerId: string): void {
   console.log(`[agent] killing containerized agent: sessionId=${sessionId} containerId=${containerId.slice(0, 12)}`);
   void dockerExec(["kill", containerId]).then((result) => {
-    if (result.code !== 0) {
+    if (!execSucceeded(result)) {
       console.warn(
         `[agent] docker kill failed: sessionId=${sessionId} containerId=${containerId.slice(0, 12)}: ${execErrorMessage(result)}`,
       );

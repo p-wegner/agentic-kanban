@@ -14,6 +14,7 @@ import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { PLUGIN_MANIFEST_FILENAME, parsePluginManifest, type PluginManifest } from "@agentic-kanban/shared/lib/plugin-manifest";
 import { PluginError } from "./plugin-errors.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 
 /** Where cloned plugins live. Overridable so tests never touch a real plugin store. */
 export function pluginsHomeDir(): string {
@@ -113,15 +114,15 @@ export function removeLink(path: string): void {
  */
 export async function commitPathWithRetry(repoPath: string, relPath: string, message: string): Promise<boolean> {
   const clean = await gitExec(["status", "--porcelain", "--", relPath], { cwd: repoPath });
-  if (clean.code === 0 && clean.stdout.trim() === "") return true;
+  if (execSucceeded(clean) && clean.stdout.trim() === "") return true;
   for (let attempt = 0; attempt < 5; attempt++) {
     if (attempt > 0) await new Promise((r) => setTimeout(r, 1500 * attempt));
     const add = await gitExec(["add", "--", relPath], { cwd: repoPath });
-    if (add.code !== 0) continue;
+    if (!execSucceeded(add)) continue;
     const diff = await gitExec(["diff", "--cached", "--quiet", "--", relPath], { cwd: repoPath });
-    if (diff.code === 0) return true; // nothing staged — already committed/clean
+    if (execSucceeded(diff)) return true; // nothing staged — already committed/clean
     const commit = await gitExec(["commit", "-m", message, "--", relPath], { cwd: repoPath });
-    if (commit.code === 0) return true;
+    if (execSucceeded(commit)) return true;
   }
   return false;
 }

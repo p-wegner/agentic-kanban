@@ -18,6 +18,7 @@ import { join } from "node:path";
 import { gitExec, gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import type { WorkerRepoTransport } from "@agentic-kanban/shared/lib/worker-protocol";
+import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 
 export function defaultWorkerWorkRoot(): string {
   return join(homedir(), ".agentic-kanban", "worker");
@@ -101,7 +102,7 @@ export async function provisionWorkerCheckout(
   // branch name that can never collide.
   const localBranch = `kanban/${sessionId}`;
   const branchProbe = await gitExec(["rev-parse", "--verify", `refs/remotes/origin/${repo.branch}`], { cwd: cacheDir });
-  const startPoint = branchProbe.code === 0
+  const startPoint = execSucceeded(branchProbe)
     ? `refs/remotes/origin/${repo.branch}`
     : `refs/remotes/origin/${repo.baseBranch}`;
   await gitExecOrThrow(["worktree", "add", "-b", localBranch, checkoutDir, startPoint], { cwd: cacheDir });

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { createTtlMemo } from "@agentic-kanban/shared/lib/ttl-memo";
+import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 
 /**
  * Skip a gate run for a tree that was already gated green (#492, item 2).
@@ -76,7 +77,7 @@ export async function mergedTreeHash(
 ): Promise<string | null> {
   if (!workingDir || !baseBranch) return null;
   const result = await gitExec(["merge-tree", "--write-tree", baseBranch, "HEAD"], { cwd: workingDir });
-  if (result.code !== 0) return null;
+  if (!execSucceeded(result)) return null;
   const hash = result.stdout.trim().split(/\r?\n/)[0]?.trim() ?? "";
   // A tree id and nothing else. `merge-tree` prints conflict bodies on some paths, and a
   // partial match there would key the memo on garbage.

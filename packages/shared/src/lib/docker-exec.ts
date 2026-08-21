@@ -1,5 +1,5 @@
 import { execFile, type ExecFileException } from "node:child_process";
-import type { ExecResult } from "./exec-result.js";
+import { execSucceeded, type ExecResult } from "./exec-result.js";
 
 /**
  * The single sanctioned adapter for spawning the `docker` CLI.
@@ -65,5 +65,5 @@ export function dockerExec(args: string[], opts: DockerExecOptions = {}): Promis
 /** true if `docker version` exits 0 within a short timeout. */
 export async function dockerAvailable(env?: NodeJS.ProcessEnv): Promise<boolean> {
   const result = await dockerExec(["version"], { env, timeoutMs: 5000 });
-  return result.code === 0;
+  return execSucceeded(result);
 }
