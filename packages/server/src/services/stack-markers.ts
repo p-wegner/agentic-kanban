@@ -10,19 +10,16 @@
  */
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-
-const PROJECT_MARKER_FILES = [
-  "package.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb", "bun.lock",
-  "Cargo.toml", "go.mod", "requirements.txt", "Pipfile", "pyproject.toml", "uv.lock",
-  "pom.xml", "build.gradle", "build.gradle.kts", "Gemfile", "mix.exs",
-  "composer.json", "composer.lock",
-  "Makefile", "justfile", "Taskfile.yml",
-];
+// The vocabulary lives in `shared` because `container-dep-volumes.ts` needs it too and a
+// shared module cannot import from `server` — which is exactly how a second copy of this
+// list grew there unnoticed (#695). This module stays the canonical DETECTOR; it is only
+// the list of filenames that is shared.
+import { PROJECT_MARKER_FILES } from "@agentic-kanban/shared/lib/stack-marker-files";
 
 export function detectProjectMarkers(repoPath: string): string[] {
   try {
     const files = readdirSync(repoPath);
-    return files.filter(f => PROJECT_MARKER_FILES.includes(f));
+    return files.filter((f) => (PROJECT_MARKER_FILES as readonly string[]).includes(f));
   } catch {
     return [];
   }

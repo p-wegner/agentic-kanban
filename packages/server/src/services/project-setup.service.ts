@@ -4,12 +4,17 @@ import { deriveVerifyCommand } from "@agentic-kanban/shared/lib/verify-command";
 import type { Database } from "../db/index.js";
 import { invokeClaudePrompt } from "./claude-cli.service.js";
 import { getProjectById } from "../repositories/project.repository.js";
-import { detectProjectMarkers, isUvProject } from "./stack-markers.js";
+import { detectProjectMarkers } from "./stack-markers.js";
 import { detectStackProfile } from "./stack-detector.service.js";
 
-// Re-exported so the many existing importers of these two keep working; they LIVE in
-// `stack-markers.ts` now (#521), which is what lets this module call the detector.
-export { detectProjectMarkers, isUvProject };
+// Re-exported so existing importers keep working; it LIVES in `stack-markers.ts` now
+// (#521), which is what lets this module call the detector.
+//
+// `isUvProject` used to be re-exported here too and had ZERO consumers by this path —
+// its one caller imports it from `stack-markers.js` directly (#695). A compat shim with
+// no importers is not a stable import path, it is just a second name for the same
+// function, so it is gone rather than documented.
+export { detectProjectMarkers };
 
 export async function generateSetupScript(projectId: string, database: Database): Promise<string> {
   const project = await getProjectById(projectId, database);

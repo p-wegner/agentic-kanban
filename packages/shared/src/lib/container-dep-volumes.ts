@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { discoverWorkspaceNodeModules, parseSymlinkDirs } from "./worktree-symlink-bootstrap.js";
+import type { ProjectMarkerFile } from "./stack-marker-files.js";
 
 /**
  * Dependency directories for a CONTAINERIZED builder, backed by named volumes (#138).
@@ -43,7 +44,13 @@ export const DEP_VOLUME_PREFIX = "agentic-kanban-deps";
  * Gradle's caches live in GOPATH / GRADLE_USER_HOME outside the tree, so those
  * stacks get no volume here (and need none — they never hit the rename flake).
  */
-const MARKER_DEP_DIRS: ReadonlyArray<{ marker: string; dirs: string[] }> = [
+// `marker` is typed as ProjectMarkerFile, not string, so this table can only speak the
+// ONE marker vocabulary (#695). Before, it carried its own copy of the filenames — a
+// second ladder that survived the detector consolidation because a `shared` module cannot
+// import the `server` detector, so nothing could see the duplication. The DIRS half stays
+// local on purpose: which directories hold installed dependencies is this module's
+// question, and nothing else asks it.
+const MARKER_DEP_DIRS: ReadonlyArray<{ marker: ProjectMarkerFile; dirs: string[] }> = [
   { marker: "package.json", dirs: ["node_modules"] },
   { marker: "Cargo.toml", dirs: ["target"] },
   { marker: "pyproject.toml", dirs: [".venv"] },
