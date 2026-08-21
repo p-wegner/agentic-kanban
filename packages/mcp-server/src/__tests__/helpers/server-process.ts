@@ -104,7 +104,19 @@ export function startMcpServer(
   return new Promise<ChildProcess>((resolveP, reject) => {
     // Process launch on a loaded Windows box is not a 5s operation; this budget is
     // about catching a genuine hang, not about measuring machine load.
-    const timeoutMs = opts.startupTimeoutMs ?? 30_000;
+    //
+    // 30s WAS a load measurement, and it fired as one. `pnpm test:mine` doubles as the
+    // merge verify_script, so the whole suite spawns these servers while the box is
+    // saturated: measured 18s idle but >50s under a full gate run, which failed both
+    // suites that use this helper and turned a green master into a red merge gate for
+    // every branch (#672/#673/#674 all blocked on it). Worse, at 30s this budget was
+    // HALF the package's 60s testTimeout — so the helper always fired first, defeating
+    // the very headroom vitest.config.ts was raised to provide.
+    // 90s keeps the hang check (a genuine hang never reports "running on stdio" at all)
+    // while leaving the spawn room to be slow. Env-overridable so a dedicated CI runner
+    // can tighten it without touching this file.
+    const timeoutMs =
+      opts.startupTimeoutMs ?? (Number(process.env.MCP_TEST_STARTUP_TIMEOUT_MS) || 90_000);
     let stderr = "";
     const timer = setTimeout(() => {
       void stopMcpServer(proc);

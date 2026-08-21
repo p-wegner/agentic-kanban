@@ -27,9 +27,18 @@ import os from "node:os";
 // #206: raised 20s -> 60s in lockstep with packages/server and packages/shared. `pnpm test:mine`
 // doubles as the merge verify_script, so a budget that trips under machine load turns a green
 // codebase into a red merge gate board-wide. Keep the three packages in sync.
+//
+// This package now DELIBERATELY deviates upward (60s -> 150s), and it is the only one that
+// should: it is the only package whose tests spawn a REAL `node --import tsx` server process
+// per test, paying a full tsx compile of the server entry each time. Measured: ~18s idle,
+// >50s under a saturated full-gate run. helpers/server-process.ts budgets 90s for that spawn
+// alone, so a 60s testTimeout would fire FIRST and report a useless generic timeout instead of
+// the helper's "didn't report running on stdio" message with the captured stderr. The test
+// budget must stay above the spawn budget for the specific error to survive.
+// The other two packages spawn nothing and stay at 60s.
 const cpuCount = os.cpus().length || 4;
 const maxWorkers = Number(process.env.VITEST_MAX_WORKERS) || Math.max(2, Math.floor(cpuCount / 2));
-const testTimeout = Number(process.env.VITEST_TEST_TIMEOUT) || 60_000;
+const testTimeout = Number(process.env.VITEST_TEST_TIMEOUT) || 150_000;
 
 export default defineConfig({
   test: {
