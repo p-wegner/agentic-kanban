@@ -1,4 +1,10 @@
-#!/usr/bin/env node
+// No shebang, deliberately. This module is IMPORTED by dev-script.test.mjs, so vitest
+// transforms it — and a transformed `#!` line is a syntax error unless the transform's
+// shebang strip recognises it, which it does not do for the CRLF form every Windows
+// checkout receives. That combination took the pre-merge gate down for every branch
+// (#703). The shebang bought nothing: the only entry point is `node
+// scripts/ensure-shared-fresh.mjs` in package.json's `typecheck`, never `./ensure-…`.
+// Keep it off any script that is also imported.
 /**
  * Rebuild `packages/shared/dist` when it is older than `packages/shared/src` (#582).
  *
