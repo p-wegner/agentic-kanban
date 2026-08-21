@@ -3,7 +3,7 @@
  * and a red base plus a green branch produces a gate message that attributes the failure to the
  * base rather than the branch under test.
  */
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -15,10 +15,25 @@ import {
   getLatestBaseBranchHealth,
   getBaseBranchHealthForSha,
 } from "../repositories/base-branch-health.repository.js";
-import {
-  getBaseBranchHealthAtMergeBase,
-  describeRedBaseAttribution,
-} from "../services/base-branch-health.service.js";
+
+// #674: verifyBaseBranchHealth must INSTALL the clone before running verify_script, and must
+// record "unverified" (never "red") when the install itself fails. Mock the two shared
+// primitives it calls so the test drives that orchestration without spawning real git/pnpm.
+const runSetupScript = vi.fn();
+vi.mock("@agentic-kanban/shared/lib/setup-script", () => ({
+  runSetupScript: (...args: unknown[]) => runSetupScript(...args),
+}));
+const cloneBranchTo = vi.fn(async () => {});
+vi.mock("@agentic-kanban/shared/lib/git-service", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return { ...actual, cloneBranchTo: (...args: unknown[]) => cloneBranchTo(...args) };
+});
+
+const { verifyBaseBranchHealth, getBaseBranchHealthAtMergeBase, describeRedBaseAttribution } =
+  await import("../services/base-branch-health.service.js");
+const { saveStackProfile } = await import("../services/stack-profile.service.js");
+const { setPreference } = await import("../repositories/preferences.repository.js");
+const { verifyScriptPrefKey } = await import("../services/stack-profile.service.js");
 
 const tempRepos: string[] = [];
 function makeRepoPath(): string {
@@ -238,5 +253,111 @@ describe("base-branch-health — unverified is not a red base (#674)", () => {
     const attribution = describeRedBaseAttribution({ mergeBaseSha: sha, health });
 
     expect(attribution).toContain("BASE BRANCH ALREADY RED");
+  });
+});
+
+// #674 — verifyBaseBranchHealth's actual orchestration: it must install the clone before
+// running verify_script, and must record "unverified" (not "red") when the install itself
+// fails, keeping the raw failure text so the gate can quote WHAT failed instead of just the
+// head of a combined log.
+describe("verifyBaseBranchHealth — installs before verifying (#674)", () => {
+  let db: ReturnType<typeof createTestDb>["db"];
+
+  function makeRealGitRepo(): string {
+    const dir = mkdtempSync(join(tmpdir(), "base-branch-health-realrepo-"));
+    const { execFileSync } = require("node:child_process") as typeof import("node:child_process");
+    const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" });
+    git("init", "-q", "-b", "master");
+    git("config", "user.email", "test@example.com");
+    git("config", "user.name", "Test");
+    git("commit", "--allow-empty", "-q", "-m", "base commit");
+    tempRepos.push(dir);
+    return dir;
+  }
+
+  beforeEach(() => {
+    ({ db } = createTestDb());
+    runSetupScript.mockReset();
+    cloneBranchTo.mockClear();
+  });
+
+  it("runs the derived install command before verify_script, and only verify_script decides green/red", async () => {
+    const repoPath = makeRealGitRepo();
+    const projectId = await seedProject(db, repoPath);
+    await setPreference(verifyScriptPrefKey(projectId), "pnpm test", db);
+    await saveStackProfile(
+      projectId,
+      {
+        stack: "node", packageManager: "pnpm", isMonorepo: true, workspaces: ["packages/*"],
+        installCommand: "pnpm install -r", buildCommand: null, testCommand: "pnpm test",
+        quickTestCommand: null, lintCommand: null, typecheckCommand: null, devCommand: null,
+        isWeb: false, devHealthUrl: null, devPort: null, testDir: null, testRunner: null,
+        source: "detected", detectedMarkers: [], updatedAt: new Date().toISOString(),
+      },
+      db,
+    );
+
+    const calls: string[] = [];
+    runSetupScript.mockImplementation(async (_dest: string, command: string) => {
+      calls.push(command);
+      return { exitCode: 0, stdout: "ok", stderr: "" };
+    });
+
+    const result = await verifyBaseBranchHealth(projectId, db);
+
+    expect(calls).toEqual(["pnpm install -r", "pnpm test"]);
+    expect(result?.outcome).toBe("green");
+    expect(cloneBranchTo).toHaveBeenCalledTimes(1);
+  });
+
+  it("records 'unverified' (never 'red') when the install itself fails, without running verify_script", async () => {
+    const repoPath = makeRealGitRepo();
+    const projectId = await seedProject(db, repoPath);
+    await setPreference(verifyScriptPrefKey(projectId), "pnpm test", db);
+    await saveStackProfile(
+      projectId,
+      {
+        stack: "node", packageManager: "pnpm", isMonorepo: true, workspaces: ["packages/*"],
+        installCommand: "pnpm install -r", buildCommand: null, testCommand: "pnpm test",
+        quickTestCommand: null, lintCommand: null, typecheckCommand: null, devCommand: null,
+        isWeb: false, devHealthUrl: null, devPort: null, testDir: null, testRunner: null,
+        source: "detected", detectedMarkers: [], updatedAt: new Date().toISOString(),
+      },
+      db,
+    );
+
+    runSetupScript.mockImplementation(async (_dest: string, command: string) => {
+      if (command === "pnpm install -r") {
+        return { exitCode: 1, stdout: "", stderr: "ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL: shared has no dist" };
+      }
+      throw new Error("verify_script must not run when install failed");
+    });
+
+    const result = await verifyBaseBranchHealth(projectId, db);
+
+    expect(result?.outcome).toBe("unverified");
+    expect(result?.message).toContain("pnpm install -r");
+    expect(result?.message).toContain("shared has no dist");
+    expect(result?.message).not.toBeUndefined();
+  });
+
+  it("surfaces the tail (the failing step) of a red verify run, not the head of the log", async () => {
+    const repoPath = makeRealGitRepo();
+    const projectId = await seedProject(db, repoPath);
+    await setPreference(verifyScriptPrefKey(projectId), "pnpm check:arch && pnpm test", db);
+
+    const headNoise = Array.from({ length: 60 }, (_, i) => `head noise line ${i} (depcruise: 0 errors)`).join("\n");
+    const realFailure = "ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL Command failed with exit code 1: vitest run src/__tests__/mcp-catalog-parity.test.ts";
+    runSetupScript.mockImplementation(async () => ({
+      exitCode: 1,
+      stdout: `${headNoise}\n${realFailure}`,
+      stderr: "",
+    }));
+
+    const result = await verifyBaseBranchHealth(projectId, db);
+
+    expect(result?.outcome).toBe("red");
+    expect(result?.message).toContain(realFailure);
+    expect(result?.message).not.toContain("head noise line 0 ");
   });
 });
