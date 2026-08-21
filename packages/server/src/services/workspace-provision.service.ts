@@ -13,6 +13,7 @@
 import { mkdirSync, writeFileSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
+import { samePath } from "@agentic-kanban/shared/lib/path-key";
 import { buildAgentPrompt } from "./workspace-create/policy.js";
 import type { Database } from "../db/index.js";
 import * as crudRepo from "../repositories/workspace-crud.repository.js";
@@ -96,7 +97,16 @@ export function createWorkspaceProvisionService(deps: {
       }
       branch = input.branch || (issue ? suggestBranchName(issue) : "");
       baseCommitSha = await gitService.revParse(repoPath, baseBranch);
-      worktreePath = await gitService.createWorktree(repoPath, branch, baseBranch);
+      // #699: hand git the DB's view of which directories are still live, so the
+      // leftover-cleanup inside createWorktree cannot rm -rf a worktree an agent is
+      // working in. Best-effort — a failed read must not block provisioning, and the
+      // guards inside createWorktree still apply.
+      const liveWorkingDirs = await crudRepo
+        .listLiveWorkspaceWorkingDirs(database)
+        .catch(() => [] as string[]);
+      worktreePath = await gitService.createWorktree(repoPath, branch, baseBranch, {
+        isPathClaimed: (candidate) => liveWorkingDirs.some((dir) => samePath(dir, candidate)),
+      });
     }
 
     // Symlink dependency directories from the main checkout into the worktree.
