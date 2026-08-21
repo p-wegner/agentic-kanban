@@ -238,13 +238,22 @@ the loop — check `failedSuites` on the newest row rather than assuming.
 
 ## Next steps
 
-**The board is empty of open work** — 0 Backlog, 0 In Progress, 0 workspaces. Everything below
+**The board is empty of open work** — 0 Backlog, 0 Todo, 0 In Progress, 0 workspaces
+(#709 was filed by another session mid-way through this one and is now Done). Everything below
 is either done or a decision that is not this session's to make.
 
 - [x] Full suite verified green at `0ad6497aec`, and again at `ebf1f626dd` (all four packages)
 - [x] #700 verified stale and closed (`exit-workflow.ts` is 967 lines, gate exits 0)
 - [x] #704, #705, #707, #708 implemented and closed — see the section above
 - [x] #681 half B landed (`ede3021258`); #681 closed
+- [x] **#709 landed (`5ef076b79c`) and closed** — the Stop hook's main-checkout branch now
+      attributes the dirty set to the stopping session's own transcript before it warns.
+      It had no notion of authorship, so in this shared checkout it reliably blocked an
+      uninvolved session and handed it another agent's in-flight work — pressure toward
+      exactly the cross-author commit the root CLAUDE.md names by hash. Unknown authorship
+      (unreadable transcript) still reports EVERYTHING; only silence would have been a
+      regression. The `restore` branch (#771 deletion-desync) is deliberately unfiltered.
+      Verified live both directions against a genuinely dirty tree, plus 7 new tests.
 - [ ] **Decide whether to push master** (60+ commits ahead of origin, other agents' work
       included). Deliberately left to the operator — see the section above.
 - [ ] `pnpm install` so #688's `pnpm test:coverage` can run. Left undone on purpose: it mutates
