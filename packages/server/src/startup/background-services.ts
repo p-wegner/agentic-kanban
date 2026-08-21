@@ -22,6 +22,7 @@ import { startBaseBranchHealthReconciler, stopBaseBranchHealthReconciler } from 
 import { startWorkerConnectionReaper, stopWorkerConnectionReaper } from "../services/worker-connection-reaper.service.js";
 import { getWorkerFleet } from "../services/worker-fleet.service.js";
 import { startInstallStalenessReconciler, stopInstallStalenessReconciler } from "./install-staleness-reconciler.js";
+import { startAgentSessionRegistryReaper, stopAgentSessionRegistryReaper } from "./agent-session-registry-reaper.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 
 /**
@@ -237,6 +238,17 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
     start() {
       startInstallStalenessReconciler();
       return stopInstallStalenessReconciler;
+    },
+  },
+  {
+    // #708 — the board kills agents by PID, and a killed Claude process never removes its
+    // own `<CLAUDE_CONFIG_DIR>/sessions/<pid>.json`. The files then name PIDs the OS
+    // recycles, so anything reading that registry sees sessions that do not exist. Last
+    // in the list because it touches no board state at all: nothing else waits on it.
+    name: "agent-session-registry-reaper",
+    start() {
+      startAgentSessionRegistryReaper();
+      return stopAgentSessionRegistryReaper;
     },
   },
 ];
