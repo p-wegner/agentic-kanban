@@ -294,7 +294,15 @@ describe("workspace.service", () => {
 
       // Worktree was created off the project default branch
       expect(gitService.revParse).toHaveBeenCalledWith("/tmp/test-repo", "main");
-      expect(gitService.createWorktree).toHaveBeenCalledWith("/tmp/test-repo", "feature/ak-1-test", "main");
+      // The 4th argument is the #699 live-worktree claim port. Asserted as a shape rather
+      // than ignored: it is what stops the leftover-cleanup deleting a worktree an agent is
+      // working in, and a call that silently stopped passing it would be the regression.
+      expect(gitService.createWorktree).toHaveBeenCalledWith(
+        "/tmp/test-repo",
+        "feature/ak-1-test",
+        "main",
+        expect.objectContaining({ isPathClaimed: expect.any(Function) }),
+      );
       // Agent launch happened (deferred — flush the provision+launch chain first)
       await flushDeferred();
       expect(sessionManager.startSession).toHaveBeenCalledOnce();
@@ -508,6 +516,7 @@ describe("workspace.service", () => {
         "/tmp/test-repo",
         "feature/ak-1-implement-feature",
         "main",
+        expect.objectContaining({ isPathClaimed: expect.any(Function) }),
       );
     });
 
@@ -530,6 +539,7 @@ describe("workspace.service", () => {
         "/tmp/test-repo",
         "feature/my-custom-branch",
         "main",
+        expect.objectContaining({ isPathClaimed: expect.any(Function) }),
       );
     });
   });

@@ -58,7 +58,22 @@ function collectSources(dir: string, rel = ""): { rel: string; full: string }[] 
   return out;
 }
 
+/**
+ * Explicit budget for the scanning tests, and a memo so the walk happens ONCE.
+ *
+ * Two tests called `upwardEdges()` independently, so the tree was walked and every file
+ * read twice. Alone that fits inside vitest's 5s default; under `pnpm test:mine` — where
+ * this competes with the other workers, and which doubles as the merge verify_script — it
+ * did not, and the timeout read as a failing merge gate on unrelated diffs. The cost here
+ * is I/O, not the code under test, which is the same reasoning as the git suites'
+ * `GIT_IO_TIMEOUT_MS`. A hang still never completes, so the budget only removes false reds.
+ */
+const SCAN_TIMEOUT_MS = Number(process.env.VITEST_GUARD_SCAN_TIMEOUT) || 60_000;
+
+let upwardEdgesMemo: string[] | null = null;
+
 function upwardEdges(): string[] {
+  if (upwardEdgesMemo) return upwardEdgesMemo;
   const found: string[] = [];
   for (const layer of SCAN_DIRS) {
     for (const { rel, full } of collectSources(path.join(clientSrc, layer))) {
@@ -69,6 +84,7 @@ function upwardEdges(): string[] {
       }
     }
   }
+  upwardEdgesMemo = found;
   return found;
 }
 
@@ -76,7 +92,7 @@ describe("client upward type-edge ratchet (#694)", () => {
   it("the scan reaches real files — a path typo would make the assertion vacuous", () => {
     const scanned = SCAN_DIRS.flatMap((d) => collectSources(path.join(clientSrc, d)));
     expect(scanned.length).toBeGreaterThan(20);
-  });
+  }, SCAN_TIMEOUT_MS);
 
   it("no lib/ or hooks/ module imports from components/ or routes/, type-only included", () => {
     const edges = upwardEdges();
@@ -89,7 +105,7 @@ describe("client upward type-edge ratchet (#694)", () => {
         "will NOT catch this: its rule exempts type-only imports and tsPreCompilationDeps is " +
         `false, which is why this scan exists:\n  ${edges.join("\n  ")}`,
     ).toEqual([]);
-  });
+  }, SCAN_TIMEOUT_MS);
 
   it("detects an upward type-only edge when one is present", () => {
     // Proves the regex sees the erased form, not just value imports — the whole failure mode.
