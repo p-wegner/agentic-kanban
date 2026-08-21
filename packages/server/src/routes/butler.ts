@@ -273,7 +273,10 @@ export function createButlerRoute(
   async function resolveButlerPrompt(projectId: string, projectName: string, repoPath: string): Promise<string> {
     const prompt = await getButlerPrompt(projectId, database);
     const serverPort = String(resolveBoardServerPort());
-    const appPort = process.env.KANBAN_CLIENT_PORT || serverPort;
+    // #690: deliberately not `resolveBoardClientPort()` — its final rung is the hardcoded
+    // dev default 5173, wrong for a production single-port deployment where the UI is
+    // served off the API port. Falls back to the already-resolved `serverPort` instead.
+    const appPort = process.env.KANBAN_CLIENT_PORT || process.env.VITE_PORT || serverPort;
     const appBaseUrl = `http://localhost:${appPort}`;
     const boardGuidePath = ensureBoardGuideFile();
     const resolved = (prompt ?? DEFAULT_BUTLER_PROMPT)

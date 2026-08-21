@@ -91,7 +91,7 @@ Examples:
     .description("Predict which source files an issue will likely modify.\n\nUses a fast AI model for analysis. Results are cached on the issue. Requires the kanban server to be running (pnpm dev).")
     .option("--refresh", "Force re-analysis even if a cached result exists")
     .option("--json", "Output raw JSON response")
-    .option("-p, --port <port>", "Server port (default: $KANBAN_SERVER_PORT or 3001)")
+    .option("-p, --port <port>", "Server port (default: $KANBAN_BOARD_SERVER_PORT/$KANBAN_SERVER_PORT/$SERVER_PORT/$PORT, or 3001)")
     .addHelpText("after", `
 Examples:
   $ agentic-kanban workspace analyze-touched <issue-id>
@@ -135,7 +135,7 @@ Examples:
     .description("Read agent session output (terminal messages) for a workspace.\n\nReturns the last N messages, stripped of ANSI codes. Requires the kanban server to be running (pnpm dev).")
     .option("--limit <n>", "Number of most recent messages to return (default: 200, max: 2000)", "200")
     .option("--json", "Output raw JSON response")
-    .option("-p, --port <port>", "Server port (default: $KANBAN_SERVER_PORT or 3001)")
+    .option("-p, --port <port>", "Server port (default: $KANBAN_BOARD_SERVER_PORT/$KANBAN_SERVER_PORT/$SERVER_PORT/$PORT, or 3001)")
     .addHelpText("after", `
 Examples:
   $ agentic-kanban workspace terminal <workspace-id>
@@ -188,7 +188,7 @@ Examples:
     .description("List diff review comments for a workspace.\n\nOptionally filter by file path. Requires the kanban server to be running (pnpm dev).")
     .option("--file <filePath>", "Filter comments by file path")
     .option("--json", "Output raw JSON response")
-    .option("-p, --port <port>", "Server port (default: $KANBAN_SERVER_PORT or 3001)")
+    .option("-p, --port <port>", "Server port (default: $KANBAN_BOARD_SERVER_PORT/$KANBAN_SERVER_PORT/$SERVER_PORT/$PORT, or 3001)")
     .addHelpText("after", `
 Examples:
   $ agentic-kanban workspace comment-list <workspace-id>
@@ -238,7 +238,7 @@ Examples:
     .option("--line <n>", "Line number on the new side of the diff")
     .option("--line-old <n>", "Line number on the old (base) side of the diff")
     .option("--side <side>", "Which side of the diff: new or old (default: new)", "new")
-    .option("-p, --port <port>", "Server port (default: $KANBAN_SERVER_PORT or 3001)")
+    .option("-p, --port <port>", "Server port (default: $KANBAN_BOARD_SERVER_PORT/$KANBAN_SERVER_PORT/$SERVER_PORT/$PORT, or 3001)")
     .addHelpText("after", `
 Examples:
   $ agentic-kanban workspace comment-add <workspace-id> --file src/index.ts --line 42 --body "Consider extracting this"
@@ -289,7 +289,7 @@ Examples:
     .command("handoff-bundle <workspace-id>")
     .description("Export a compact handoff bundle for a workspace.\n\nReturns workspace metadata, issue context, diff stats, agent summary, changed files, errors, and reviewer notes. Useful for stuck, awaiting-review, or human-transferred workspaces. Requires the kanban server to be running (pnpm dev).")
     .option("--format <format>", "Output format: json or markdown (default: json)", "json")
-    .option("-p, --port <port>", "Server port (default: $KANBAN_SERVER_PORT or 3001)")
+    .option("-p, --port <port>", "Server port (default: $KANBAN_BOARD_SERVER_PORT/$KANBAN_SERVER_PORT/$SERVER_PORT/$PORT, or 3001)")
     .addHelpText("after", `
 Examples:
   $ agentic-kanban workspace handoff-bundle <workspace-id>
@@ -326,7 +326,7 @@ Examples:
     .option("--tool <toolName>", "The tool name to request approval for (required)")
     .option("--input <json>", "JSON-encoded tool input (default: {})", "{}")
     .option("--session <sessionId>", "The session ID requesting approval")
-    .option("-p, --port <port>", "Server port (default: $KANBAN_SERVER_PORT or 3001)")
+    .option("-p, --port <port>", "Server port (default: $KANBAN_BOARD_SERVER_PORT/$KANBAN_SERVER_PORT/$SERVER_PORT/$PORT, or 3001)")
     .addHelpText("after", `
 Examples:
   $ agentic-kanban workspace approve-tool <workspace-id> --tool bash --input '{"command":"ls"}'

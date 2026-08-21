@@ -7,6 +7,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { corsOrigin } from "./lib/cors-origin.js";
 import { runWithGitPriority } from "@agentic-kanban/shared/lib/git-exec";
+import { resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
 import { db } from "./db/index.js";
 import * as agentService from "./services/agent.service.js";
 import { createBoardEvents } from "./services/board-events.js";
@@ -171,7 +172,7 @@ export async function startServer(port?: number, hostname?: string) {
   await runSessionRestore(workflow);
   setupRoutes(app, { sessionManager, boardEvents, reviewSessionIds: workflow.reviewSessionIds, fixAndMergeSessionIds: workflow.fixAndMergeSessionIds, db, upgradeWebSocket });
 
-  const serverPort = port || Number(process.env.PORT) || 3001;
+  const serverPort = port || resolveBoardServerPort();
   const serverHost = hostname || process.env.KANBAN_HOST || "127.0.0.1";
   const monitorSetup = createMonitorSetup({ sessionManager, boardEvents, serverPort, reviewSessionIds: workflow.reviewSessionIds, fixAndMergeSessionIds: workflow.fixAndMergeSessionIds });
   cleanupCallbacks.push(() => monitorSetup.stop());

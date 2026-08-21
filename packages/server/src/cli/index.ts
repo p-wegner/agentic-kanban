@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getAllProjects } from "../repositories/project.repository.js";
+import { resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
 import { registerRegisterCommand } from "./commands/register.js";
 import { registerCreateCommand } from "./commands/create.js";
 import { registerPreferencesCommand } from "./commands/preferences.js";
@@ -157,7 +158,7 @@ if (!hasArgs) {
       }
 
       // Start server
-      const port = Number(process.env.PORT || 3001);
+      const port = resolveBoardServerPort();
       const host = process.env.KANBAN_HOST || "127.0.0.1";
       process.env.PORT = String(port);
       process.env.KANBAN_HOST = host;
