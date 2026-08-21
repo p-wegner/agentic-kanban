@@ -144,18 +144,24 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
   }
 
   /**
-   * Drop a worker's live socket immediately. Used when a worker is REVOKED: its
-   * bearer token stops authenticating new requests, but an already-upgraded
-   * socket was never checked again, so a revoked worker kept streaming events
-   * into in-flight sessions (and kept receiving assignments) until it happened
-   * to disconnect. Closing here makes revocation take effect at once.
+   * Drop a worker's live socket immediately.
+   *
+   * Originally for REVOCATION: a revoked worker's bearer token stops authenticating new
+   * requests, but an already-upgraded socket was never checked again, so it kept
+   * streaming events into in-flight sessions (and kept receiving assignments) until it
+   * happened to disconnect. Closing here makes revocation take effect at once.
+   *
+   * The stale-connection reaper (#706) closes sockets for a SECOND reason — a worker
+   * that went silent without ever delivering a close. Hence `reason`: without it every
+   * reap logged "revoked worker" for a peer nobody revoked, which is exactly the kind
+   * of confidently-wrong log line that sends the next reader after the wrong bug.
    */
-  function closeConnection(workerId: string): boolean {
+  function closeConnection(workerId: string, reason = "revoked"): boolean {
     const conn = connections.get(workerId);
     if (!conn) return false;
     connections.delete(workerId);
     try { conn.ws.close(); } catch { /* already gone */ }
-    console.log(`[worker-connection] closed socket for revoked worker: id=${workerId}`);
+    console.log(`[worker-connection] closed socket: id=${workerId} reason=${reason}`);
     for (const listener of disconnectListeners) {
       try { listener(workerId); } catch (err) { console.error(`[worker-connection] disconnect-listener error`, err); }
     }

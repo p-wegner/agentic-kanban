@@ -95,6 +95,7 @@ describe("every background sweep is registered (#584)", () => {
       "done-unmerged-scanner",
       "terminal-workspace-reaper",
       "service-stack-reaper",
+      "worker-connection-reaper",
       "monitor-butler",
       "project-conductor-supervisor",
       "backup-scheduler",
