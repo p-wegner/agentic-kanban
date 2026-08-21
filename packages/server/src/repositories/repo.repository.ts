@@ -260,6 +260,36 @@ export async function listWorkspaceRepoInstallStates(
     .where(eq(repos.workspaceId, workspaceId));
 }
 
+/**
+ * #685 — every repo row across every LIVE (non-closed) workspace whose install is still
+ * `pending`/`running`, with `installUpdatedAt` so a staleness sweep can tell "still working"
+ * apart from "abandoned mid-install" (server crash, an early return before the runner started,
+ * or a blocking leading-setup failure that skipped the deferred provisioning step entirely —
+ * none of which ever advance this row again on their own). Closed workspaces are excluded:
+ * their merge gate no longer matters, and reaping the row would just be noise.
+ */
+export async function listOutstandingRepoInstallRows(
+  database: RepoDb = db,
+): Promise<Array<{ workspaceId: string | null; path: string; name: string | null; installState: string | null; installUpdatedAt: string | null }>> {
+  return database
+    .select({
+      workspaceId: repos.workspaceId,
+      path: repos.path,
+      name: repos.name,
+      installState: repos.installState,
+      installUpdatedAt: repos.installUpdatedAt,
+    })
+    .from(repos)
+    .innerJoin(workspaces, eq(repos.workspaceId, workspaces.id))
+    .where(
+      and(
+        isNotNull(repos.workspaceId),
+        or(eq(repos.installState, "pending"), eq(repos.installState, "running")),
+        ne(workspaces.status, "closed"),
+      ),
+    );
+}
+
 export async function deleteProjectRepo(repoId: string, projectId: string, database: RepoDb = db): Promise<boolean> {
   // Select-before-delete: libsql reports rowsAffected/changes unreliably (see
   // issue-service.repository.ts), so existence is checked explicitly.
