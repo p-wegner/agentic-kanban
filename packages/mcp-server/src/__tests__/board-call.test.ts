@@ -1,5 +1,6 @@
 // @covers mcp.board-call.boardApiText [contract, error-handling]
 // @covers mcp.board-call.boardErrorText [contract]
+// @covers mcp.board-call.mcpUnreachable [contract]
 //
 // #684. `board-call.ts` is the shared board-API seam ~20 MCP tools call, and it had no test
 // of its own (#688 lists it among the wave's untested files). The two things asserted here
@@ -11,8 +12,10 @@
 //     have landed at all, and Conductor/monitor/butler all branch on "no error = merged".
 //  2. `boardErrorText` read only `data.error`, dropping `data.detail` — the field the
 //     server's `AiOperationError` branch uses to say WHY a prediction failed.
+//
+// #688: `mcpUnreachable` (the unreachable-board MCP response) had no test of its own either.
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { boardApiText, boardErrorText } from "../board-call.js";
+import { boardApiText, boardErrorText, mcpUnreachable } from "../board-call.js";
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; vi.restoreAllMocks(); });
@@ -90,5 +93,26 @@ describe("boardErrorText", () => {
   it("uses detail alone when there is no error field", () => {
     expect(boardErrorText({ detail: "model returned no JSON" }, "Internal Server Error"))
       .toBe("model returned no JSON");
+  });
+});
+
+describe("mcpUnreachable", () => {
+  it("names the default target, the port, and the underlying error message", () => {
+    const res = mcpUnreachable(new Error("ECONNREFUSED"));
+    expect(res.content).toHaveLength(1);
+    const text = res.content[0].text;
+    expect(text).toContain("Failed to reach the board server");
+    expect(text).toMatch(/is it running on port \d+\?/);
+    expect(text).toContain("ECONNREFUSED");
+  });
+
+  it("names the caller-supplied target instead of the default", () => {
+    const res = mcpUnreachable(new Error("timeout"), "the git HTTP transport");
+    expect(res.content[0].text).toContain("Failed to reach the git HTTP transport");
+  });
+
+  it("renders a non-Error rejection via errorMessage rather than dropping it", () => {
+    const res = mcpUnreachable("plain string rejection");
+    expect(res.content[0].text).toContain("plain string rejection");
   });
 });
