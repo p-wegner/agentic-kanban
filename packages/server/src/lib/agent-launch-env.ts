@@ -5,7 +5,7 @@
 // extraEnv precedence) become directly unit-testable. The actual spawn, fd setup,
 // and watcher wiring stay in agent.service.
 
-import { resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
+import { resolveBoardClientPort, resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
 import { gradleUserHomeForWorktree } from "@agentic-kanban/shared/lib/gradle-env";
 
 export const DEFAULT_BOARD_SERVER_PORT = "3001";
@@ -47,7 +47,7 @@ export function resolveLaunchPorts(
   // added later — `KANBAN_BOARD_SERVER_PORT`, which is precisely how a worktree names the
   // MAIN board, and `SERVER_PORT` — never reached the env an agent is launched with.
   const boardServerPort = String(resolveBoardServerPort(undefined, env));
-  const boardClientPort = env.KANBAN_CLIENT_PORT || env.VITE_PORT || DEFAULT_BOARD_CLIENT_PORT;
+  const boardClientPort = String(resolveBoardClientPort(undefined, env));
   return {
     boardServerPort,
     boardClientPort,

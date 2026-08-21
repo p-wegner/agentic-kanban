@@ -31,6 +31,16 @@ const SCAN_ROOTS = ["server/src", "shared/src", "mcp-server/src", "client/src"];
 const LADDER = /\bKANBAN_SERVER_PORT\b\s*\)?\s*(?:\|\||\?\?)/;
 
 /**
+ * A SHORTER hand-rolled ladder that skips `KANBAN_SERVER_PORT` entirely — `process.env.PORT`
+ * fed straight into the board's own `3001` default. This is the shape the original guard's
+ * regex could not see (#690): `cli/index.ts`, `cli/commands/system.ts` and `server-start.ts`
+ * each spelled `process.env.PORT || 3001` (or the `??`/pre-set-then-read variant), honouring
+ * NONE of the ladder's rungs, and the KANBAN_SERVER_PORT-anchored regex above never fired on
+ * any of them.
+ */
+const BARE_PORT_LADDER = /\bprocess\.env\.PORT\b[^;\n]*3001/;
+
+/**
  * Comments are stripped before scanning. Without this the guard flags the DOCUMENTATION of
  * its own rule — the resolver's header quotes the ladder it replaced, and so does the
  * comment left at each drained call site. A guard that fires on prose about itself teaches
@@ -60,7 +70,8 @@ describe("board-server port ladder is single-source (#615)", () => {
       for (const file of walkPackageSources(path.join(packagesRoot, root))) {
         const rel = relFromRepo(file);
         if (rel in SANCTIONED) continue;
-        if (LADDER.test(stripComments(fs.readFileSync(file, "utf8")))) offenders.push(rel);
+        const text = stripComments(fs.readFileSync(file, "utf8"));
+        if (LADDER.test(text) || BARE_PORT_LADDER.test(text)) offenders.push(rel);
       }
     }
     expect(

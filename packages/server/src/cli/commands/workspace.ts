@@ -191,7 +191,7 @@ Tip: Use 'issue list' to find the issue ID.
     .command("launch <workspace-id>")
     .description("Relaunch an idle workspace by starting a new agent session.\n\nRequires the kanban server to be running (pnpm dev). The workspace must be in 'idle' status.")
     .option("--prompt <text>", "Prompt to send to the agent (default: issue title + description)")
-    .option("-p, --port <port>", "Server port (default: $KANBAN_SERVER_PORT or 3001)")
+    .option("-p, --port <port>", "Server port (default: $KANBAN_BOARD_SERVER_PORT/$KANBAN_SERVER_PORT/$SERVER_PORT/$PORT, or 3001)")
     .addHelpText("after", `
 Examples:
   $ agentic-kanban workspace launch <workspace-id>
@@ -238,7 +238,7 @@ Examples:
     .command("resume <issue-number>")
     .description("Resume the latest workspace for an issue by launching a new agent session.\n\nLooks up the workspace by issue number and calls the launch API. Auto-builds the prompt from the issue title/description if not provided. Requires the kanban server to be running (pnpm dev).")
     .option("--prompt <text>", "Prompt to send to the agent (default: issue title + description)")
-    .option("-p, --port <port>", "Server port (default: $KANBAN_SERVER_PORT or 3001)")
+    .option("-p, --port <port>", "Server port (default: $KANBAN_BOARD_SERVER_PORT/$KANBAN_SERVER_PORT/$SERVER_PORT/$PORT, or 3001)")
     .addHelpText("after", `
 Examples:
   $ agentic-kanban workspace resume 17
@@ -299,7 +299,7 @@ Examples:
   wsCmd
     .command("wait <issue-number>")
     .description("Block until a workspace leaves its active state, then exit.\n\nResolves the latest workspace for an issue number (same lookup as 'resume'), subscribes to the board WebSocket, and waits for the workspace to reach a terminal status. Prints each status transition as it arrives. Replaces sleep-loop polling of GET /api/workspaces/:id. Requires the kanban server to be running (pnpm dev).\n\nExit code 0: status reached idle, ready_for_merge, closed, or merged.\nExit code 1: status reached an error state, a workflow error was broadcast, the WS closed unexpectedly, or the timeout elapsed.")
-    .option("-p, --port <port>", "Server port (default: $KANBAN_SERVER_PORT or 3001)")
+    .option("-p, --port <port>", "Server port (default: $KANBAN_BOARD_SERVER_PORT/$KANBAN_SERVER_PORT/$SERVER_PORT/$PORT, or 3001)")
     .option("--timeout <seconds>", "Give up after N seconds (default: no timeout)")
     .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
     .addHelpText("after", `
@@ -321,7 +321,7 @@ Examples:
   wsCmd
     .command("review <workspace-id>")
     .description("Trigger an AI code review for an idle workspace.\n\nRequires the kanban server to be running (pnpm dev). The workspace must be in 'idle' status.")
-    .option("-p, --port <port>", "Server port (default: $KANBAN_SERVER_PORT or 3001)")
+    .option("-p, --port <port>", "Server port (default: $KANBAN_BOARD_SERVER_PORT/$KANBAN_SERVER_PORT/$SERVER_PORT/$PORT, or 3001)")
     .addHelpText("after", `
 Example:
   $ agentic-kanban workspace review <workspace-id>
@@ -359,7 +359,7 @@ Example:
     .option("--project <projectId>", "Project the issue NUMBER belongs to (default: the active project)")
     .option("--base <baseBranch>", "Base branch to create from (default: project default branch)")
     .option("--profile <claudeProfile>", "Claude profile to use for the agent session")
-    .option("-p, --port <port>", "Server port (default: $KANBAN_SERVER_PORT or 3001)")
+    .option("-p, --port <port>", "Server port (default: $KANBAN_BOARD_SERVER_PORT/$KANBAN_SERVER_PORT/$SERVER_PORT/$PORT, or 3001)")
     .addHelpText("after", `
 Examples:
   $ agentic-kanban workspace start 701
@@ -406,7 +406,7 @@ Examples:
     .command("diff <workspace-id>")
     .description("Get the git diff for a workspace.\n\nReturns the diff between the workspace branch and its base branch. Requires the kanban server to be running (pnpm dev).")
     .option("--json", "Output raw JSON response")
-    .option("-p, --port <port>", "Server port (default: $KANBAN_SERVER_PORT or 3001)")
+    .option("-p, --port <port>", "Server port (default: $KANBAN_BOARD_SERVER_PORT/$KANBAN_SERVER_PORT/$SERVER_PORT/$PORT, or 3001)")
     .addHelpText("after", `
 Examples:
   $ agentic-kanban workspace diff <workspace-id>
@@ -443,7 +443,7 @@ Examples:
     .command("scorecard <workspace-id>")
     .description("Get the PR quality scorecard for a workspace.\n\nReturns a 0-100 score with per-dimension breakdown (Tests, Types, Scope, Diff size, Conflicts, Docs, Skill output). Requires the kanban server to be running (pnpm dev).")
     .option("--json", "Output raw JSON response")
-    .option("-p, --port <port>", "Server port (default: $KANBAN_SERVER_PORT or 3001)")
+    .option("-p, --port <port>", "Server port (default: $KANBAN_BOARD_SERVER_PORT/$KANBAN_SERVER_PORT/$SERVER_PORT/$PORT, or 3001)")
     .addHelpText("after", `
 Examples:
   $ agentic-kanban workspace scorecard <workspace-id>
@@ -482,7 +482,7 @@ Examples:
   wsCmd
     .command("merge <workspace-id>")
     .description("Merge a workspace branch into the project's default branch.\n\nCloses the workspace and auto-transitions the issue to Done. Requires the kanban server to be running (pnpm dev).")
-    .option("-p, --port <port>", "Server port (default: $KANBAN_SERVER_PORT or 3001)")
+    .option("-p, --port <port>", "Server port (default: $KANBAN_BOARD_SERVER_PORT/$KANBAN_SERVER_PORT/$SERVER_PORT/$PORT, or 3001)")
     .addHelpText("after", `
 Example:
   $ agentic-kanban workspace merge <workspace-id>
@@ -514,7 +514,7 @@ Example:
   wsCmd
     .command("close <workspace-id>")
     .description("Close a workspace without merging.\n\nUse for direct workspaces or abandoned work. Use 'merge' instead if you want to merge the branch. Requires the kanban server to be running (pnpm dev).")
-    .option("-p, --port <port>", "Server port (default: $KANBAN_SERVER_PORT or 3001)")
+    .option("-p, --port <port>", "Server port (default: $KANBAN_BOARD_SERVER_PORT/$KANBAN_SERVER_PORT/$SERVER_PORT/$PORT, or 3001)")
     .addHelpText("after", `
 Example:
   $ agentic-kanban workspace close <workspace-id>
@@ -546,7 +546,7 @@ Example:
   wsCmd
     .command("stop <workspace-id>")
     .description("Stop any running agent session for a workspace.\n\nRequires the kanban server to be running (pnpm dev).")
-    .option("-p, --port <port>", "Server port (default: $KANBAN_SERVER_PORT or 3001)")
+    .option("-p, --port <port>", "Server port (default: $KANBAN_BOARD_SERVER_PORT/$KANBAN_SERVER_PORT/$SERVER_PORT/$PORT, or 3001)")
     .addHelpText("after", `
 Example:
   $ agentic-kanban workspace stop <workspace-id>
@@ -579,7 +579,7 @@ Example:
     .command("delete <workspace-id>")
     .description("Delete a workspace and all its sessions, messages, and diff comments.\n\nRequires the kanban server to be running (pnpm dev).")
     .option("--force", "Skip confirmation (for scripting)")
-    .option("-p, --port <port>", "Server port (default: $KANBAN_SERVER_PORT or 3001)")
+    .option("-p, --port <port>", "Server port (default: $KANBAN_BOARD_SERVER_PORT/$KANBAN_SERVER_PORT/$SERVER_PORT/$PORT, or 3001)")
     .addHelpText("after", `
 Examples:
   $ agentic-kanban workspace delete <workspace-id>
@@ -615,7 +615,7 @@ Examples:
     .command("relaunch <workspace-id>")
     .description("Relaunch an idle workspace by starting a new agent session.\n\nThe workspace must be in 'idle' status. Requires the kanban server to be running (pnpm dev).")
     .option("--prompt <text>", "Prompt to send to the agent (default: issue title + description)")
-    .option("-p, --port <port>", "Server port (default: $KANBAN_SERVER_PORT or 3001)")
+    .option("-p, --port <port>", "Server port (default: $KANBAN_BOARD_SERVER_PORT/$KANBAN_SERVER_PORT/$SERVER_PORT/$PORT, or 3001)")
     .addHelpText("after", `
 Examples:
   $ agentic-kanban workspace relaunch <workspace-id>
@@ -661,7 +661,7 @@ Examples:
   wsCmd
     .command("mark-ready <workspace-id>")
     .description("Mark a workspace as reviewed and ready to merge.\n\nCall after a successful code review with no critical or major issues. Allows future agents to merge the workspace without requiring another review. Requires the kanban server to be running (pnpm dev).")
-    .option("-p, --port <port>", "Server port (default: $KANBAN_SERVER_PORT or 3001)")
+    .option("-p, --port <port>", "Server port (default: $KANBAN_BOARD_SERVER_PORT/$KANBAN_SERVER_PORT/$SERVER_PORT/$PORT, or 3001)")
     .addHelpText("after", `
 Example:
   $ agentic-kanban workspace mark-ready <workspace-id>
@@ -694,7 +694,7 @@ Example:
     .command("propose-transition <workspace-id> <target-status>")
     .description("Advance a workspace's workflow to the next stage.\n\nPosts to the workflow transition endpoint. Use when a stage's work is complete. Requires the kanban server to be running (pnpm dev).")
     .option("--summary <text>", "Short summary of what was completed at the current stage")
-    .option("-p, --port <port>", "Server port (default: $KANBAN_SERVER_PORT or 3001)")
+    .option("-p, --port <port>", "Server port (default: $KANBAN_BOARD_SERVER_PORT/$KANBAN_SERVER_PORT/$SERVER_PORT/$PORT, or 3001)")
     .addHelpText("after", `
 Examples:
   $ agentic-kanban workspace propose-transition <workspace-id> Done
