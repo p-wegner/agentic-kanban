@@ -11,3 +11,36 @@ docker/*.sh text eol=lf
 # own advice ("commit the workspace first") would commit pure line-ending churn into the
 # ticket's branch. Pinning LF makes materialization a no-op in git's eyes. (#217)
 .claude/skills/** text eol=lf
+
+# A file that vitest TRANSFORMS must be LF if it carries a shebang. `scripts/*.mjs` are
+# imported directly by tests (dev-script.test.mjs imports ten of them), and under CRLF the
+# `#!/usr/bin/env node` line survives the transform's shebang strip — the `#!` then sits
+# inside the wrapped module, which dies with `SyntaxError: Invalid or unexpected token` and
+# is reported as `no tests`.
+#
+# This bit ONLY outside the main checkout, which is why it went unexplained for so long: main
+# happened to hold `scripts/ensure-shared-fresh.mjs` as LF, while every fresh clone and every
+# board worktree gets CRLF from core.autocrlf=true. dev-script.test.mjs is @gate:always-run,
+# so the pre-merge gate failed on EVERY branch and no merge could land at all. Proven by
+# bisection: that one file, CRLF, is sufficient; the same file CRLF minus its shebang passes.
+# (#703 — see shebang-eol-guard.test.ts, which stops the class from recurring.)
+scripts/** text eol=lf
+
+# The rest of the repo's shebang files, same reason as `scripts/**` above. This is a
+# deliberately NARROW pin rather than a repo-wide `* text=auto eol=lf`: the main checkout is
+# genuinely mixed (measured at 1234 LF vs 1855 CRLF files), so a global flip would rewrite
+# ~1855 files on disk for every checkout — a large, unrelated change to carry on a fix for a
+# merge outage. Pinning the files that actually carry `#!` is necessary and sufficient, and
+# `shebang-eol-guard.test.ts` fails on a NEW shebang file that is not covered here, so the
+# list cannot silently fall behind. (#703)
+# Directory-level pins for the two tooling trees, matching the .claude/skills/** rule above.
+.claude/hooks/** text eol=lf
+.codex/skills/** text eol=lf
+packages/desktop/src-tauri/src/main.rs text eol=lf
+packages/mcp-server/src/index.ts text eol=lf
+packages/server/bin/*.js text eol=lf
+packages/server/plugins/**/tools/*.mjs text eol=lf
+packages/server/scripts/*.mjs text eol=lf
+packages/server/src/cli/index.ts text eol=lf
+packages/server/src/scaffold/*.js text eol=lf
+packages/server/src/worker/worker-cli.ts text eol=lf
