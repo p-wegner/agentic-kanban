@@ -12,6 +12,7 @@ import { projects as projectsTable } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { verifyBaseBranchHealth } from "../services/base-branch-health.service.js";
+import { getLatestBaseBranchHealth } from "../repositories/base-branch-health.repository.js";
 import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 
 const DEFAULT_INTERVAL_MS = 30 * 60 * 1000;
@@ -25,8 +26,28 @@ export function stopBaseBranchHealthReconciler(): void {
   activeSweep = null;
 }
 
-/** Run one pass: verify every registered project's base branch, sequentially (never overlapping the build gate). */
-export async function runBaseBranchHealthCheckOnce(database: Database = db): Promise<void> {
+/**
+ * Run one pass: verify every registered project's base branch, sequentially.
+ *
+ * A project whose last recorded result is NEWER than one interval is skipped (#699 follow-up).
+ *
+ * Without that, the "periodic" in this sweep's name was not true. `INITIAL_DELAY_MS` is two
+ * minutes and `tsx watch` restarts the dev server on every merge, so a run of merges re-armed
+ * the sweep from scratch each time and it started over — a full `verify_script` for EVERY
+ * registered project, ~25 of them, serially. Measured today: it was running a second complete
+ * copy of `pnpm check:arch && pnpm typecheck && pnpm test:mine` on the main checkout alongside
+ * a developer's own suite, which is the most likely source of the `Worker exited unexpectedly`
+ * crashes and 5s guard-suite timeouts that read as unrelated test failures.
+ *
+ * `tickInFlight` never covered this: it guards a pass against ITSELF within one process, and
+ * every one of these passes was in a freshly restarted process. Persisted recency is the only
+ * thing a restart cannot forget.
+ */
+export async function runBaseBranchHealthCheckOnce(
+  database: Database = db,
+  intervalMs = DEFAULT_INTERVAL_MS,
+  nowMs: number = Date.now(),
+): Promise<void> {
   if (tickInFlight) return; // a prior pass is still running (verify can take many minutes)
   tickInFlight = true;
   try {
@@ -35,6 +56,9 @@ export async function runBaseBranchHealthCheckOnce(database: Database = db): Pro
       .from(projectsTable);
     for (const { id } of rows) {
       try {
+        const latest = await getLatestBaseBranchHealth(id, database).catch(() => null);
+        const lastMs = latest?.createdAt ? Date.parse(latest.createdAt) : NaN;
+        if (Number.isFinite(lastMs) && nowMs - lastMs < intervalMs) continue;
         await verifyBaseBranchHealth(id, database);
       } catch (err) {
         console.warn(`[base-branch-health] check failed for project ${id} (non-fatal):`, err instanceof Error ? err.message : String(err));
@@ -54,6 +78,6 @@ export function startBaseBranchHealthReconciler(database: Database = db, interva
     name: "base-branch-health",
     intervalMs,
     bootDelayMs: INITIAL_DELAY_MS,
-    tick: () => runBaseBranchHealthCheckOnce(database),
+    tick: () => runBaseBranchHealthCheckOnce(database, intervalMs),
   });
 }
