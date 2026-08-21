@@ -13,6 +13,12 @@ export interface RecordBaseBranchHealthInput {
   outcome: BaseBranchHealthOutcome;
   durationMs?: number;
   message?: string;
+  /**
+   * The suites this probe named as failed (#681 half B). `undefined`/`null` means the probe
+   * produced no per-suite verdict at all — see the column comment in the schema; it is NOT
+   * the same as an empty array.
+   */
+  failedSuites?: string[] | null;
 }
 
 /** Record one verify attempt against a project's base branch at a given sha. Returns the row id. */
@@ -29,6 +35,10 @@ export async function recordBaseBranchHealth(
     outcome: input.outcome,
     durationMs: input.durationMs ?? null,
     message: input.message ?? null,
+    // `== null` covers both absent and explicit null, and only those: an empty array must
+    // still be stored as `"[]"`, since "green, nothing failed" is the verdict that breaks a
+    // suite's red streak.
+    failedSuites: input.failedSuites == null ? null : JSON.stringify(input.failedSuites),
     createdAt: new Date().toISOString(),
   });
   return id;
@@ -116,4 +126,47 @@ export async function countBaseBranchHealthOutcomes(
     if (row.lastAt && (lastAt === null || row.lastAt > lastAt)) lastAt = row.lastAt;
   }
   return { total, byOutcome, firstAt, lastAt };
+}
+
+/**
+ * One probe's per-suite verdict, newest first — the input to the rot detector (#681 half B).
+ *
+ * Deliberately NOT `listBaseBranchHealth`: that returns whole rows including a 40-line message
+ * tail, and the detector reads a window of them per project on every monitor warning refresh.
+ * Selecting three columns keeps that cheap enough to run unconditionally.
+ */
+export async function listSuiteVerdicts(
+  projectId: string,
+  limit = 30,
+  database: Database = db,
+): Promise<{ createdAt: string; outcome: BaseBranchHealthOutcome; failedSuites: string[] | null }[]> {
+  const rows = await database
+    .select({
+      createdAt: baseBranchHealth.createdAt,
+      outcome: baseBranchHealth.outcome,
+      failedSuites: baseBranchHealth.failedSuites,
+    })
+    .from(baseBranchHealth)
+    .where(eq(baseBranchHealth.projectId, projectId))
+    .orderBy(desc(baseBranchHealth.createdAt))
+    .limit(limit);
+
+  return rows.map((row) => ({
+    createdAt: row.createdAt,
+    outcome: row.outcome as BaseBranchHealthOutcome,
+    // A row written before the column existed, or one whose JSON is unreadable, is `null` —
+    // "no verdict", which the detector neither extends nor breaks a streak with. Swallowing a
+    // parse error into `[]` would silently clear every streak that crosses such a row.
+    failedSuites: parseSuiteList(row.failedSuites),
+  }));
+}
+
+function parseSuiteList(raw: string | null): string[] | null {
+  if (raw === null || raw === undefined) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : null;
+  } catch {
+    return null;
+  }
 }

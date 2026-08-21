@@ -605,6 +605,26 @@ export function LastRunSection({
   );
 }
 
+/**
+ * The unreachable arm of `MonitorWarningsSection`'s dispatch, kept honest rather than deleted.
+ *
+ * Every `MonitorWarning` member is handled by an explicit `type` check above, so `warning` is
+ * `never` here and tsc fails the moment a fifth member is added without a branch. Until someone
+ * writes that branch, this renders the member's own `message` — which every member carries —
+ * instead of borrowing another shape's fields. That is the #681 lesson: the old `else` branch
+ * assumed the dirty-main shape and rendered the new third member as "dirty main checkout" with
+ * `undefined` counts.
+ */
+function UnhandledWarning({ warning }: { warning: never }) {
+  const fallback = warning as { projectId?: string; projectName?: string; type?: string; message?: string };
+  return (
+    <div key={`warning-${fallback.projectId ?? "unknown"}`} className="text-[11px] text-red-800 dark:text-red-200 leading-snug">
+      <div className="font-semibold">{fallback.projectName ?? "Unknown project"}: {fallback.type ?? "warning"}</div>
+      <div>{fallback.message ?? "This warning type has no renderer yet."}</div>
+    </div>
+  );
+}
+
 export function MonitorWarningsSection({
   warnings,
   lastHealthCheckAt,
@@ -653,15 +673,39 @@ export function MonitorWarningsSection({
               </div>
             );
           }
-          return (
-            <div key={`dirty-${warning.projectId}`} className="text-[11px] text-red-800 dark:text-red-200 leading-snug">
-              <div className="font-semibold">{warning.projectName}: dirty main checkout</div>
-              <div>{warning.fileCount} tracked source change{warning.fileCount === 1 ? "" : "s"} must be committed or reverted.</div>
-              <div className="mt-1 font-mono text-[10px] text-red-600 dark:text-red-300 truncate" title={warning.files.join(", ")}>
-                {warning.files.slice(0, 3).join(", ")}{warning.files.length > 3 ? `, +${warning.files.length - 3}` : ""}
+          if (warning.type === "rotted_suite") {
+            return (
+              <div key={`rotted-suite-${warning.projectId}`} className="text-[11px] text-red-800 dark:text-red-200 leading-snug">
+                <div className="font-semibold">
+                  {warning.projectName}: {warning.suiteCount} suite{warning.suiteCount === 1 ? "" : "s"} red across every probe
+                </div>
+                <div>{warning.message}</div>
+                <div
+                  className="mt-1 font-mono text-[10px] text-red-600 dark:text-red-300 truncate"
+                  title={warning.suites.map((s) => `${s.suite} (${s.consecutiveRedProbes} probes, since ${s.redSinceAt})`).join("\n")}
+                >
+                  {warning.suites.slice(0, 3).map((s) => `${s.suite} ×${s.consecutiveRedProbes}`).join(", ")}
+                  {warning.suites.length > 3 ? `, +${warning.suites.length - 3}` : ""}
+                </div>
               </div>
-            </div>
-          );
+            );
+          }
+          if (warning.type === "dirty_main_checkout") {
+            return (
+              <div key={`dirty-${warning.projectId}`} className="text-[11px] text-red-800 dark:text-red-200 leading-snug">
+                <div className="font-semibold">{warning.projectName}: dirty main checkout</div>
+                <div>{warning.fileCount} tracked source change{warning.fileCount === 1 ? "" : "s"} must be committed or reverted.</div>
+                <div className="mt-1 font-mono text-[10px] text-red-600 dark:text-red-300 truncate" title={warning.files.join(", ")}>
+                  {warning.files.slice(0, 3).join(", ")}{warning.files.length > 3 ? `, +${warning.files.length - 3}` : ""}
+                </div>
+              </div>
+            );
+          }
+          // Every member is now handled by an explicit `type` check, so this is unreachable —
+          // and it renders `message` rather than a shape, so the NEXT member added to the union
+          // shows up honestly instead of borrowing the last branch's fields the way #681's
+          // third member borrowed dirty-main's. `never` makes tsc say so at the same time.
+          return <UnhandledWarning warning={warning} />;
         })}
       </div>
     </div>

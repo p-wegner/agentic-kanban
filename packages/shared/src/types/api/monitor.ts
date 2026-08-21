@@ -118,7 +118,39 @@ export interface DegenerateBaseHealthWarning {
   message: string;
 }
 
-export type MonitorWarning = DirtyMainCheckoutWarning | AutodriveStallWarning | DegenerateBaseHealthWarning;
+/**
+ * One or more test suites have been red across CONSECUTIVE base-health probes (#681 half B).
+ *
+ * The other half of the same ticket. Half A catches a probe that cannot produce a green; this
+ * catches a TREE that stays red while every commit message claims otherwise — measured breakage
+ * age at repair: ~26 days for `console-tag-ratchet`, 47.9 h / 144 commits for the #614
+ * time-spelling ratchet. The durable record was one boolean per probe, so "red again for the
+ * same reason" and "red for a new reason" were the same row.
+ */
+export interface RottedSuiteWarning {
+  type: "rotted_suite";
+  projectId: string;
+  projectName: string;
+  detectedAt: string;
+  /** How many distinct suites are in a red streak. */
+  suiteCount: number;
+  /** The longest streak's length, in probes, and its span in whole hours. */
+  longestStreakProbes: number;
+  longestStreakHours: number;
+  suites: RottedSuiteEntry[];
+  message: string;
+}
+
+export interface RottedSuiteEntry {
+  /** Repo-relative test-file path, as the runner printed it. */
+  suite: string;
+  consecutiveRedProbes: number;
+  /** The oldest and newest probe in this suite's current red streak. */
+  redSinceAt: string;
+  lastRedAt: string;
+}
+
+export type MonitorWarning = DirtyMainCheckoutWarning | AutodriveStallWarning | DegenerateBaseHealthWarning | RottedSuiteWarning;
 
 export interface MonitorAction {
   at: string;
