@@ -18,6 +18,21 @@ Active project is "agentic-kanban" — use it for all monitor/workspace/MCP oper
 Change only what the task requires. Don't fix unrelated issues, rename/reformat out of scope, or add features while refactoring. File a kanban ticket (`mcp__agentic-kanban__create_issue`) for unrelated issues instead of fixing inline. Run `scope-guard` before committing (creep signal: >3–4 files for a small task, or files unrelated to the ticket).
 For narrow tickets that name the expected files, compare the staged file list to that scope and treat unrelated deletions as a blocker before commit.
 
+### Declaring a partial refactor ("batch 1 of N") requires a disclosure channel (#691)
+A commit message that says "batch 1", "N remain", or "the rest is a mechanical follow-up" is a
+promise about future work — and a promise with nowhere to land is invisible: #569 (13 of 74
+duplicates removed, 61 never migrated), #591 (a shared `ExecResult` helper with 0 non-test
+callers), and #513 (a commit that understated the remaining count 2.4×) all closed as Done with
+no trail. Before such a commit merges, it must do at least one of:
+- **Add or point at a shrink-only ratchet test** that fails if the remainder regrows (see
+  `packages/shared/__tests__/wire-dto-single-declaration.test.ts` for the pattern: a
+  grandfathered set that may only shrink, plus a test that catches a stale entry).
+- **File a follow-up ticket** (`mcp__agentic-kanban__create_issue`) referencing the original
+  ticket number, describing exactly what remains.
+Doing neither is not an acceptable disclosure of partial work, even if the batch-1 portion is
+itself correct and tested. Record the true current state in `CONTINUE.md` (see the global
+CLAUDE.md's `CONTINUE.md`/`BACKLOG.md` convention) when landing a batch-1 commit.
+
 ### Several agents committing in ONE checkout — commit by pathspec, never via the index
 `git add <paths>` + `git commit` is NOT safe when other agents work in the same checkout: the index is
 shared process-wide, so a concurrent `git add`/`git reset` between your add and your commit sweeps
