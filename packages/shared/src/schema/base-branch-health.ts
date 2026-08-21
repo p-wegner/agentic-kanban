@@ -22,6 +22,19 @@ export const baseBranchHealth = sqliteTable("base_branch_health", {
   durationMs: integer("duration_ms"),
   /** Human-readable failure summary (verify_script stdout/stderr tail); null when outcome=green. */
   message: text("message"),
+  /**
+   * JSON array of the test-suite paths this probe reported as FAILED (#681 half B), parsed
+   * from the FULL verify output before it is tailed into `message`.
+   *
+   * `null` and `[]` are deliberately different, and the difference is the whole point.
+   * `[]` means the probe produced a per-suite verdict and named no failure — a green run
+   * writes `[]`, which is what BREAKS a suite's red streak. `null` means no list exists:
+   * a `timeout` or `unverified` probe (which learned nothing about any suite), or a row
+   * written before this column existed. The rot detector treats a null row as neither
+   * extending nor breaking a streak, because inferring "then it passed" from a row that
+   * never looked is exactly the class of false verdict #681 exists to catch.
+   */
+  failedSuites: text("failed_suites"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
 }, (table) => ({
   projectIdIdx: index("idx_base_branch_health_project_id").on(table.projectId),

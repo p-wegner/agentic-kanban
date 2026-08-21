@@ -23,6 +23,7 @@ import {
 } from "../services/start-policy.service.js";
 import { advanceDuePluginLoops } from "../services/plugin-loop-monitor.js";
 import { scanDirtyMainCheckouts } from "../services/dirty-main-checkout.js";
+import { scanRottedSuites } from "../services/rotted-suite-scan.js";
 import { scanDegenerateBaseHealth } from "../services/degenerate-base-health.js";
 import { scanAutodriveStallWarnings, buildAutoStartSkipWarnings } from "../services/autodrive-stall-warning.service.js";
 import { resolveMergePolicy } from "./merge-strategy.js";
@@ -206,6 +207,9 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
       // #681: a probe that has never once been green is not measuring anything, and its reds
       // are consumed as if they were. Nothing asked that question before.
       ...await scanDegenerateBaseHealth(db).catch(() => []),
+      // #681 half B: the other question nobody asked — is a suite red on EVERY probe, i.e.
+      // still red on the next one, which is what turned a broken guard into 26 days of silence.
+      ...await scanRottedSuites(db).catch(() => []),
     ];
     lastScannedWarnings = warnings;
     composeWarnings();
@@ -220,7 +224,12 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
             return `dirty_main:${warning.projectId}:${warning.files.join("|")}`;
           case "degenerate_base_health":
             return `degenerate_base_health:${warning.projectId}:${warning.probeCount}`;
-          default:
+          case "rotted_suite":
+            // The suite LIST and each streak length, so a suite joining or leaving the set —
+            // or an existing one rotting one probe longer — re-notifies. Not the count alone:
+            // one suite going green as another goes red would leave that unchanged.
+            return `rotted_suite:${warning.projectId}:${warning.suites.map((s) => `${s.suite}@${s.consecutiveRedProbes}`).join("|")}`;
+          case "autodrive_stall":
             return `${warning.type}:${warning.projectId}:${warning.cause}:${warning.lastProgressAt}:${warning.workspaceIds.join("|")}`;
         }
       })

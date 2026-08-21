@@ -18,6 +18,7 @@ import type { Database } from "../db/index.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { getProjectById } from "../repositories/project.repository.js";
 import { VERIFY_SCRIPT_TIMEOUT_MS } from "./verify-budget.js";
+import { failedSuitesForOutcome } from "./failed-suite-parse.js";
 import { resolveEffectiveVerify, deriveSetupScriptFromProfile, getStackProfile } from "./stack-profile.service.js";
 import {
   recordBaseBranchHealth,
@@ -43,6 +44,12 @@ export interface BaseBranchVerifyResult {
   branch: string;
   durationMs: number;
   message?: string;
+  /**
+   * The suites this run named as failed (#681 half B), parsed from the FULL output before
+   * `tail()` throws 40 lines' worth away. `null` when the run could not speak about suites at
+   * all — see `failedSuitesForOutcome`.
+   */
+  failedSuites?: string[] | null;
 }
 
 /**
@@ -119,13 +126,30 @@ ${tail(combined)}`,
       timedOut: false,
     }));
     const durationMs = Date.now() - startedAt;
+    const combined = [run.stderr, run.stdout].filter(Boolean).join("\n").trim();
     if (run.timedOut) {
-      result = { outcome: "timeout", sha, branch, durationMs, message: `verify_script timed out after ${VERIFY_TIMEOUT_MS}ms` };
+      result = {
+        outcome: "timeout",
+        sha,
+        branch,
+        durationMs,
+        message: `verify_script timed out after ${VERIFY_TIMEOUT_MS}ms`,
+        failedSuites: failedSuitesForOutcome("timeout", combined),
+      };
     } else if (run.exitCode !== 0) {
-      const combined = [run.stderr, run.stdout].filter(Boolean).join("\n").trim();
-      result = { outcome: "red", sha, branch, durationMs, message: tail(combined) };
+      result = {
+        outcome: "red",
+        sha,
+        branch,
+        durationMs,
+        message: tail(combined),
+        // Parsed from the UNTAILED output (#681 half B): the failing-suite lines are scattered
+        // through a vitest run, and the 40-line tail that becomes `message` routinely keeps
+        // none of them.
+        failedSuites: failedSuitesForOutcome("red", combined),
+      };
     } else {
-      result = { outcome: "green", sha, branch, durationMs };
+      result = { outcome: "green", sha, branch, durationMs, failedSuites: failedSuitesForOutcome("green", combined) };
     }
   } catch (e) {
     result = {
@@ -140,7 +164,15 @@ ${tail(combined)}`,
   }
 
   await recordBaseBranchHealth(
-    { projectId, sha: result.sha, branch: result.branch, outcome: result.outcome, durationMs: result.durationMs, message: result.message },
+    {
+      projectId,
+      sha: result.sha,
+      branch: result.branch,
+      outcome: result.outcome,
+      durationMs: result.durationMs,
+      message: result.message,
+      failedSuites: result.failedSuites,
+    },
     database,
   );
   return result;
