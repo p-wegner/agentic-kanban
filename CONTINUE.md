@@ -99,13 +99,10 @@ new suites; #679's seven re-included suites pass together (193 tests, ~78s).
 
 ### Two things deliberately NOT done
 
-- **#681 half B** — "alarm on an `@gate:always-run` suite red for more than one cycle" is
-  NOT implemented, and #681 is left open with a comment recording exactly this. Half A
-  (degenerate distribution, N probes 0 green) landed earlier in `8e42105e27`. Half B needs
-  per-suite outcome persistence across probes — a real feature, not a follow-on edit. A
-  base-health *streak* alarm was considered as a cheap substitute and rejected: it alarms on
-  a different thing and would let the ticket close without the per-suite attribution that is
-  its whole point.
+- ~~**#681 half B**~~ — was left open here as not implemented; it landed later in the same
+  session as `ede3021258`. See "#681 is now closed too" below. The rejected cheap substitute
+  (a base-health *streak* alarm without per-suite attribution) stayed rejected — the shipped
+  version does carry the per-suite attribution that is the ticket's whole point.
 - **`pnpm install` for #688's new devDep** — `@vitest/coverage-v8` is in `package.json` and
   the lockfile but not in this checkout's `node_modules`, so `pnpm test:coverage` needs an
   install first. `pnpm test` / `test:mine` are unaffected (verified — the full suite above
@@ -134,12 +131,106 @@ operator's call, not this session's.
   while it proceeds — do not diagnose the next one as a server bug without checking that
   first.
 
+## The four follow-up tickets are landed (session 2026-08-21, continued)
+
+Direct on master (mode 1), one commit each, after the wave above:
+
+| # | What | Landed as |
+|---|---|---|
+| #708 | orphaned agent-session registry files are reaped | `6a06c665fe` |
+| #705 | `ExecResult` helpers have real callers, and a ratchet keeps them | `dd901d01e1` |
+| #707 | every `process.env` read has a stated owner | `4c1d7953a5` |
+| #704 | 45 of 61 grandfathered wire DTOs collapsed to one declaration | `ebf1f626dd` |
+
+Three of them close the loop this file opened above: #704 and #705 are the follow-up
+tickets #691 required, and #707 replaces the "not yet a complete inventory" caveat on
+`docs/env-vars.md` with a gate.
+
+**What each is worth knowing about:**
+
+- **#708** is a background sweep, not a kill-site hook, because the board is not the only
+  source of orphans (a crash, `killAll`, a hard reboot, a `SIGKILL` of the board itself all
+  leave files behind) and a hook could not have removed the 48 already on disk. A file whose
+  PID is now recycled onto a live process is a deliberate **keep**: deleting one that might
+  describe a running session is the worse error.
+- **#705** migrated 38 hand-rolled `.code === 0` checks across 13 files. The `execErrorMessage`
+  caller floor is 3, not the 5 first written — the extra `${x.error}` sites found were domain
+  result objects with a string `error`, not `ExecResult`, so the floor was lowered to the
+  honest count rather than met by inventing migrations. Floors are floors, not targets.
+- **#707** deliberately has **no grandfathered baseline**, against the ticket's own
+  suggestion: a frozen "these N are undocumented" set is a budget that reads green while the
+  debt sits. Both categories were answerable today. Its stale-FOREIGN check then caught six
+  entries in its author's own first draft (`ANTHROPIC_*`, `CODEX_HOME`, `NODE_ENV`, `VITEST`,
+  `npm_execpath`) that the tree does not read as `process.env.X` — they reach an agent through
+  the spawn-env object `buildSpawnEnv` builds. The ticket's numbers were also stale: 62 reads /
+  34 names / 27 files today, not 84 / 42 / 32.
+- **#704** is a partial pass by design and 16 names stay grandfathered. Five of the 45 were
+  genuinely drifted and are resolved rather than moved blindly — the commit message names
+  each and which side won. The remaining 16 are where drift is a decision, not a subset.
+
+Every new guard was **proven to bite** before being trusted: a hand-rolled `.code !== 0`
+reintroduced for #705, and `KANBAN_FAKE_UNDOCUMENTED` / `SOMEONE_ELSES_VAR` added to
+`pid.ts` in turn for #707. All restored.
+
+### Verified at `ebf1f626dd`
+
+| Package | Files | Tests |
+|---|---|---|
+| shared | 96 | 934 passed, 2 skipped |
+| client | 153 | 1378 |
+| mcp-server | 43 | 204 |
+| server | 682 | 6241 passed, 4 skipped |
+
+`pnpm typecheck` clean across all four packages, and the client production build succeeds —
+the latter is what proves #704's re-export shims did not become runtime value imports.
+mcp-server was run at `--maxWorkers=4` for the contention reason recorded above.
+
+### #681 is now closed too — half B landed
+
+`ede3021258`. The previous session left it open with a design comment saying half B "needs
+per-suite outcome persistence across probes — a real feature, not a follow-on edit". That was
+right, and this is that feature:
+
+- `base_branch_health.failed_suites` (migration **0126**) stores the suite list parsed from the
+  FULL verify output, before the 40-line tail that becomes `message` throws it away.
+- `null` vs `[]` is load-bearing and is the part to not "simplify" later. `[]` = a probe that
+  produced a per-suite verdict and named nothing (a green run — the value that BREAKS a red
+  streak). `null` = a probe that could not speak about suites at all (timeout, unverified, a red
+  run that died in `tsc` before vitest started, or any row predating the column). The detector
+  skips nulls rather than treating them as a pass.
+- `findRottedSuites` reports a suite red across ≥2 consecutive verdict-bearing probes; a suite
+  green NOW is never reported, however long it was red before.
+- Fourth `MonitorWarning` member, one warning per project.
+
+**Scope is deliberately wider than the ticket's wording** ("any `@gate:always-run` suite"): it
+reports every suite. The marker tells a SCOPED run what it must not skip, and the base-health
+probe runs the whole verify script, so every suite in it is equally observed. Gating on the
+marker would narrow the alarm AND require re-deriving the marker set from the tree at runtime —
+a second copy of the scan `scripts/test-mine.mjs` owns. All four measured rot cases are guard
+suites and are caught either way.
+
+**What is verified, and what is not.** The decision function, the parser and the column
+round-trip are covered by 24 tests, and the parser was run against REAL vitest output both ways
+(the 47KB all-green server log → `[]`; a deliberately-failing temp suite → named exactly).
+**Not yet observed in production**: no base-health probe has run since the column landed, so no
+row carries a non-null `failed_suites` yet and the warning has never fired against live data.
+The first probe on any project is what will confirm the end-to-end path.
+
 ## Next steps
-- [x] Full suite verified green at `0ad6497aec` (all four packages)
-- [ ] Decide whether to push master (56+ commits ahead of origin, other agents' work included)
-- [ ] `pnpm install` so #688's `pnpm test:coverage` can run
-- [ ] #681 half B — the guard-suite-rot alarm (see the ticket comment for the design)
-- [ ] #700 looks stale — verify and close (`exit-workflow.ts` is 967 lines, gate exits 0)
-- [ ] #704 and #705 get worked (see BACKLOG.md once re-exported, or query the board directly)
+
+**The board is empty of open work** — 0 Backlog, 0 In Progress, 0 workspaces. Everything below
+is either done or a decision that is not this session's to make.
+
+- [x] Full suite verified green at `0ad6497aec`, and again at `ebf1f626dd` (all four packages)
+- [x] #700 verified stale and closed (`exit-workflow.ts` is 967 lines, gate exits 0)
+- [x] #704, #705, #707, #708 implemented and closed — see the section above
+- [x] #681 half B landed (`ede3021258`); #681 closed
+- [ ] **Decide whether to push master** (60+ commits ahead of origin, other agents' work
+      included). Deliberately left to the operator — see the section above.
+- [ ] `pnpm install` so #688's `pnpm test:coverage` can run. Left undone on purpose: it mutates
+      a shared checkout while a dev server is running.
+- [ ] **Confirm #681 half B end-to-end on live data** — the code is tested and the parser is
+      proven against real vitest output both ways, but no base-health probe has run since the
+      column landed, so no row carries a non-null `failed_suites` yet.
 - [ ] Nothing further open on #691 itself — this file + the CLAUDE.md rule + the two
-      follow-up tickets are the complete fix.
+      follow-up tickets (both now landed) are the complete fix.
