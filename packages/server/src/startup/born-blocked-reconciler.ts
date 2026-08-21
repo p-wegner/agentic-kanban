@@ -55,7 +55,7 @@ import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
-import { emptyPassReport, recordActed, recordSkipped, type PassReport } from "../lib/pass-report.js";
+import { emptyPassReport, formatPassReportBody, recordActed, recordSkipped, type PassReport } from "../lib/pass-report.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.service.js";
@@ -221,6 +221,12 @@ export async function reconcileBornBlockedWorkspaces(
       log(`setup failed again for ${ref} (exit ${exitCode}) — still blocked, verdict restamped`);
     }
   }
+  // #689: the summary line is the reason `PassReport` exists — without it, a row that threw
+  // mid-loop and landed in neither `closed`/`released`/`retriedAndReleased`/`held` was
+  // invisible; this is what actually names it "N unaccounted" instead of a silent swallow.
+  // Through the injected `log`, not `console` — it already applies the `[born-blocked]`
+  // tag (#616) and is what lets a test silence the pass.
+  log(formatPassReportBody(result));
   return result;
 }
 

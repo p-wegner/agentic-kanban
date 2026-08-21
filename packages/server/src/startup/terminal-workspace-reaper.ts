@@ -9,7 +9,7 @@ import { logBoardHealthEvent } from "../repositories/board-health-events.reposit
 import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.service.js";
 import { listWorkspaceRepos, type RepoRow } from "../repositories/repo.repository.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
-import { emptyPassReport, recordActed, recordSkipped, type PassReport } from "../lib/pass-report.js";
+import { emptyPassReport, formatPassReportBody, recordActed, recordSkipped, type PassReport } from "../lib/pass-report.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 
@@ -304,6 +304,11 @@ export async function reapTerminalWorkspaces(
     }
   }
 
+  // #689: a failed close above (caught, warned, but recorded as neither reaped nor
+  // skipped) and a candidate never reached because of `maxReapedPerRun` both belong in
+  // the unaccounted remainder — this line is what makes either visible instead of only
+  // the per-row logs above. The tag is a literal first argument on purpose (#616).
+  console.log(`[terminal-workspace-reaper] ${formatPassReportBody(result)}`);
   return result;
 }
 

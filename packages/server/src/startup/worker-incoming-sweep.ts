@@ -17,7 +17,7 @@
 // `workspaces.branch`); unmatched refs are HELD and reported, and left in the
 // staging namespace so a real one can still be recovered by hand.
 
-import { emptyPassReport, recordActed, recordSkipped, type PassReport } from "../lib/pass-report.js";
+import { emptyPassReport, formatPassReportBody, recordActed, recordSkipped, type PassReport } from "../lib/pass-report.js";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { projects } from "@agentic-kanban/shared/schema";
 import { db as realDb } from "../db/index.js";
@@ -101,7 +101,10 @@ export async function sweepIncomingWorkerRefs(database: Database = realDb): Prom
     }
   }
   if (result.landed.length > 0 || result.held.length > 0) {
-    console.log(`[worker-sweep] incoming refs: ${result.landed.length} landed, ${result.held.length} held`);
+    // #689: the report body names the unaccounted remainder — a branch whose sync threw
+    // outside the per-branch handling above would otherwise vanish between "landed" and
+    // "held". Tag stays a literal first argument (#616).
+    console.log(`[worker-sweep] ${formatPassReportBody(result)}`);
   }
   return result;
 }
