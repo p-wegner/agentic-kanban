@@ -19,6 +19,8 @@ import { startProjectConductorSupervisor } from "../services/project-conductor.s
 import { startBackupScheduler, stopBackupScheduler } from "./backup-scheduler.js";
 import { startSessionMessagePruner, stopSessionMessagePruner } from "../services/session-message-pruner.service.js";
 import { startBaseBranchHealthReconciler, stopBaseBranchHealthReconciler } from "./base-branch-health-reconciler.js";
+import { startWorkerConnectionReaper, stopWorkerConnectionReaper } from "../services/worker-connection-reaper.service.js";
+import { getWorkerFleet } from "../services/worker-fleet.service.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 
 /**
@@ -161,6 +163,19 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
     start() {
       startServiceStackReaper();
       return stopServiceStackReaper;
+    },
+  },
+  {
+    // Closes worker sockets whose peer has gone silent (#706). Nothing else ever removes
+    // one without a delivered close, so a network partition left a dead worker in the
+    // connection map indefinitely and the Worker Fleet view rendered it as connected —
+    // measured at 68 minutes from the worker's side. DISPATCH was never affected and is
+    // deliberately untouched; see the module header.
+    name: "worker-connection-reaper",
+    start({ db }) {
+      const fleet = getWorkerFleet(db);
+      startWorkerConnectionReaper({ registry: fleet.registry, connections: fleet.connections });
+      return stopWorkerConnectionReaper;
     },
   },
   {
