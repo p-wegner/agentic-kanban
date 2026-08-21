@@ -17,7 +17,7 @@
 
 const { execFileSync } = require("child_process");
 const { resolve } = require("path");
-const { existsSync } = require("fs");
+const { existsSync, readFileSync } = require("fs");
 const readline = require("readline");
 
 // `node:sqlite` needs `--experimental-sqlite` on most Node 22.x builds, and a builder
@@ -95,8 +95,100 @@ function classifyStranded({ edited, deleted, all }) {
   return { action: "commit", files: all };
 }
 
+// ---------------------------------------------------------------------------
+// Authorship (#709) — WHICH of the dirty files did THIS session write?
+//
+// Case 2 above has no notion of authorship, so in a checkout shared by several
+// agents it reliably tells an uninvolved session to commit someone else's live
+// work. Observed three times in one session: a session whose every edit was in a
+// DIFFERENT repo was blocked on Stop and handed 14 files from another agent's
+// in-flight `execSucceeded` sweep, one of which was a new file referenced by the
+// others — a snapshot of which would have committed a non-compiling tree.
+//
+// That is pressure toward exactly the failure the root CLAUDE.md names by hash
+// (`0a7d00bef3`): one agent's changes committed under another's message,
+// unrewritable once someone builds on it. An agent that complies produces a bad
+// commit; one that refuses argues with a blocking hook every turn.
+// ---------------------------------------------------------------------------
+
+/** Tool calls whose input names a file this session wrote. */
+const WRITE_TOOLS = new Set(["Edit", "Write", "NotebookEdit", "MultiEdit"]);
+/** Tool calls whose `command` string may NAME a file the session then wrote through a shell. */
+const SHELL_TOOLS = new Set(["Bash", "PowerShell"]);
+
+/**
+ * Everything this session's transcript says it touched: the explicit write-tool targets, and
+ * the raw text of every shell command it ran.
+ *
+ * The shell half is not paranoia — a session that edits with `sed -i` or a heredoc makes no
+ * `Edit` call at all, so a write-tool-only scan would silently stop warning about its OWN
+ * stranded work. Matching a dirty path against the command TEXT keeps those attributed while
+ * only ever widening attribution to files this session's own commands named.
+ *
+ * Returns `null` when the transcript cannot be read. That is the load-bearing fallback:
+ * unknown authorship must degrade to the OLD behaviour (warn about everything), never to
+ * silence — a hook that goes quiet when it cannot tell is worse than one that over-reports.
+ */
+function readSessionActivity(transcriptPath) {
+  if (!transcriptPath || !existsSync(transcriptPath)) return null;
+  let raw;
+  try {
+    raw = readFileSync(transcriptPath, "utf8");
+  } catch {
+    return null;
+  }
+  const written = new Set();
+  const commands = [];
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    let entry;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue; // a partially-flushed final line is normal on a live transcript
+    }
+    const content = entry?.message?.content;
+    if (!Array.isArray(content)) continue;
+    for (const block of content) {
+      if (block?.type !== "tool_use") continue;
+      if (WRITE_TOOLS.has(block.name)) {
+        const p = block.input?.file_path ?? block.input?.notebook_path;
+        if (typeof p === "string") written.add(p.replace(/\\/g, "/"));
+      } else if (SHELL_TOOLS.has(block.name) && typeof block.input?.command === "string") {
+        commands.push(block.input.command);
+      }
+    }
+  }
+  return { written, commandText: commands.join("\n").replace(/\\/g, "/") };
+}
+
+/**
+ * Of `paths` (repo-relative, forward slashes), the ones this session appears to have written.
+ *
+ * `activity === null` means authorship is unknown, and every path is returned — see above.
+ * A path counts as ours when a write tool named it (compared by suffix, since the tool records
+ * an absolute path and porcelain a relative one) or when the text of a shell command we ran
+ * contains it.
+ */
+function attributeToSession(paths, activity, repoRoot) {
+  if (!activity) return paths;
+  const rootPrefix = repoRoot ? repoRoot.replace(/\\/g, "/").replace(/\/$/, "") + "/" : null;
+  return paths.filter((p) => {
+    for (const w of activity.written) {
+      if (w === p || w.endsWith("/" + p) || (rootPrefix && w === rootPrefix + p)) return true;
+    }
+    return activity.commandText.includes(p);
+  });
+}
+
 if (require.main !== module) {
-  module.exports = { trackedSourceChanges, classifyStranded, SOURCE_RE };
+  module.exports = {
+    trackedSourceChanges,
+    classifyStranded,
+    SOURCE_RE,
+    readSessionActivity,
+    attributeToSession,
+  };
 }
 
 function lookupWorkspace(sessionId) {
@@ -160,7 +252,8 @@ async function main() {
 
   // Case 2: non-workspace session — check the MAIN checkout for stranded source fixes.
   const mainCheckout = resolve(__dirname, "..", "..");
-  const verdict = classifyStranded(trackedSourceChanges(mainCheckout));
+  const changes = trackedSourceChanges(mainCheckout);
+  const verdict = classifyStranded(changes);
 
   if (verdict.action === "ok") process.exit(0);
 
@@ -183,11 +276,26 @@ async function main() {
     process.exit(1);
   }
 
-  // verdict.action === "commit": genuine stranded edits.
-  console.error("WARNING: Uncommitted source changes in the MAIN checkout:");
-  for (const f of verdict.files) console.error(`  - ${f}`);
+  // verdict.action === "commit": genuine stranded edits — but only OURS (#709). In a shared
+  // checkout the dirty set routinely belongs to a co-tenant still working, and telling this
+  // session to commit it is pressure toward the cross-author commit the root CLAUDE.md names
+  // by hash. `attributeToSession` returns everything when authorship is unknown, so a session
+  // with no readable transcript still gets the old, useful warning.
+  const activity = readSessionActivity(input.transcript_path);
+  const mine = attributeToSession(verdict.files, activity, mainCheckout);
+  if (mine.length === 0) process.exit(0);
+
+  console.error("WARNING: Uncommitted source changes in the MAIN checkout, written by THIS session:");
+  for (const f of mine) console.error(`  - ${f}`);
+  if (activity && mine.length < verdict.files.length) {
+    console.error(
+      `(${verdict.files.length - mine.length} other dirty source file(s) are not attributed to this ` +
+        "session and are NOT listed — they may be another agent's in-flight work. Do not commit them.)"
+    );
+  }
   console.error(
-    "Commit them before stopping — stranded fixes here block auto-merge and can be lost."
+    "Commit them before stopping — stranded fixes here block auto-merge and can be lost." +
+      (activity ? " Commit by pathspec (`git commit -F msg.txt -- <paths>`), never via the shared index." : "")
   );
   process.exit(1);
 }
