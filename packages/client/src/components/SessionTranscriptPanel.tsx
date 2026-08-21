@@ -7,6 +7,7 @@ import {
   type AgentOutputFormat,
 } from "../lib/agent-output-parser.js";
 import { parseSessionTranscript, type TranscriptEvent } from "../lib/parseSessionTranscript.js";
+import { isRunningToEndedTransition } from "../lib/sessionTranscriptTrailing.js";
 import {
   OPEN_SESSION_TRANSCRIPT_EVENT,
   SESSION_ACTIVITY_WS_EVENT,
@@ -28,6 +29,15 @@ const LIVE_POLL_MS = 4000;
  * full-file read on every poll.
  */
 const TRANSCRIPT_TAIL_BYTES = 256 * 1024;
+/**
+ * One extra refetch this long after a session is first observed to have ended.
+ * A detached agent's final stdout write can land on the .out file a moment
+ * after the exit event fires; the poll/WS-activity listeners below both stop
+ * as soon as `isRunning(summary)` goes false, so without this trailing fetch a
+ * fast-exiting session can get stuck showing whatever content existed at that
+ * exact instant — the assistant/result lines never arrive (#672).
+ */
+const TRAILING_REFETCH_DELAY_MS = 1500;
 
 interface ResolvedTarget {
   sessionId: string;
@@ -162,6 +172,8 @@ export function SessionTranscriptPanel() {
   const fetchingRef = useRef(false);
   /** ETag of the last /output response — echoed as If-None-Match so an unchanged transcript polls as a body-less 304. */
   const outputEtagRef = useRef<string | null>(null);
+  /** Whether we've observed this session as running, so the running→ended edge can be detected. */
+  const wasRunningRef = useRef(false);
 
   // Open on the window CustomEvent from any launch site.
   useEffect(() => {
@@ -173,6 +185,7 @@ export function SessionTranscriptPanel() {
       setLoading(true);
       stickToBottomRef.current = true;
       outputEtagRef.current = null;
+      wasRunningRef.current = false;
       resolveTarget(target)
         .then((r) => {
           if (!r) {
@@ -242,6 +255,21 @@ export function SessionTranscriptPanel() {
   }, [resolved, summary, refetch]);
 
   usePoll(() => void refetch(), LIVE_POLL_MS, !!resolved && isRunning(summary));
+
+  // Trailing refetch on the running→ended edge: both the poll above and the
+  // WS-activity listener stop the instant `isRunning(summary)` goes false, so a
+  // session that exits right after its final stdout write (common for a fast,
+  // successful turn) can leave the panel stuck on stale content forever — there
+  // is no later trigger to pick up the tail once polling has stopped (#672).
+  useEffect(() => {
+    if (!resolved) return;
+    const runningNow = isRunning(summary);
+    const shouldSchedule = isRunningToEndedTransition(wasRunningRef.current, runningNow);
+    wasRunningRef.current = runningNow;
+    if (!shouldSchedule) return;
+    const timer = setTimeout(() => void refetch(), TRAILING_REFETCH_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [resolved, summary, refetch]);
 
   // Auto-scroll to the newest event when the user is already near the bottom.
   useEffect(() => {
