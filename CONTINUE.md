@@ -211,7 +211,9 @@ suites and are caught either way.
 
 **What is verified, and what is not.** The decision function, the parser and the column
 round-trip are covered by 24 tests, and the parser was run against REAL vitest output both ways
-(the 47KB all-green server log → `[]`; a deliberately-failing temp suite → named exactly).
+(the 47KB all-green server log → `[]`; a deliberately-failing temp suite → named exactly). Full
+suite green on top of `ede3021258`: server 683 files / 6265 passed + 4 skipped, shared 96/934,
+mcp-server 43/204, client 153/1378; typecheck clean; `pnpm check:arch` 0 errors.
 **Live so far**: the dev server hot-reloaded onto the new code, applied migration 0126, and
 `GET /api/projects/:id/base-branch-health` now returns `failedSuites` — `null` on all 20
 pre-existing rows, which is exactly what the column's null-vs-`[]` rule says a row written
@@ -219,6 +221,20 @@ before it existed should read as. **Still unobserved**: no probe has run SINCE, 
 carries a non-null list and the warning has never fired against live data. This board's probe
 does run (the newest row is a 951s red against `6a06c665fe`), so the next one is what closes
 the loop — check `failedSuites` on the newest row rather than assuming.
+
+### Two things about RUNNING the server suite here, both learned the hard way
+
+- **A background run of it gets killed.** It happened twice more this session, always to a
+  `run_in_background` run and never to a foreground one — the same pattern the "Incidental
+  findings" note above describes. The reliable way to run all 683 server files is **eight
+  foreground shards**: `pnpm exec vitest run --maxWorkers=4 --shard=N/8` from
+  `packages/server`, each ~5–8 min, which fits the foreground timeout. Sum the per-shard
+  numbers; they add up to the same total (761+548+818+910+818+783+818+809 = 6265 + 4 skipped).
+- **`merge-response-before-cleanup.test.ts` flakes under full-suite parallelism.** One of its
+  10 tests failed in a full run and passed both in isolation and across all eight shards; the
+  same window carries `[resource-sweep] process enumeration failed`. It is NOT on the
+  `test-mine.mjs` exclusion list and should not be added to one on this evidence — a single
+  observation. Re-run it in isolation before treating it as a real failure.
 
 ## Next steps
 
