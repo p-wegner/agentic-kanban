@@ -31,7 +31,32 @@ function walk(dir: string, out: string[] = []): string[] {
 
 const files = walk(clientSrc);
 const rel = (f: string) => path.relative(clientSrc, f).split(path.sep).join("/");
-const read = (f: string) => fs.readFileSync(f, "utf8");
+/**
+ * Read each file at most ONCE for the whole suite.
+ *
+ * Every `it` below walks the same ~500-file list, so an uncached read did the same I/O
+ * four times over. Alone that still finished inside vitest's 5s default; under
+ * `pnpm test:mine`, where this suite competes with the other workers, it did not — and
+ * because `test:mine` doubles as the merge verify_script, the timeout read as a FAILING
+ * GATE on diffs that had nothing to do with it. Same failure mode, and same reasoning, as
+ * the git suites' `GIT_IO_TIMEOUT_MS` note: the cost is I/O, not the code under test.
+ */
+const readCache = new Map<string, string>();
+const read = (f: string) => {
+  let cached = readCache.get(f);
+  if (cached === undefined) {
+    cached = fs.readFileSync(f, "utf8");
+    readCache.set(f, cached);
+  }
+  return cached;
+};
+
+/**
+ * Explicit budget for the scanning tests. Belt to the cache's braces: it removes the
+ * redundant work, this survives a slow or loaded machine. A hang still never completes,
+ * so this only removes the false red.
+ */
+const SCAN_TIMEOUT_MS = Number(process.env.VITEST_GUARD_SCAN_TIMEOUT) || 60_000;
 
 /**
  * Blank out comment bodies, keeping line count so reported line numbers stay true.
@@ -49,7 +74,7 @@ function stripComments(text: string): string {
 describe("client conventions (#601)", () => {
   it("the scan reaches the client tree", () => {
     expect(files.length).toBeGreaterThan(200);
-  });
+  }, SCAN_TIMEOUT_MS);
 
   /**
    * One transport. A raw `fetch` outside `lib/api.ts` is allowed ONLY with the
@@ -83,7 +108,7 @@ describe("client conventions (#601)", () => {
       "use apiFetch/apiPost/… from lib/api.ts, or add an `eslint-disable-next-line " +
         "no-restricted-syntax -- <reason>` above the call:\n" + offenders.join("\n"),
     ).toEqual([]);
-  });
+  }, SCAN_TIMEOUT_MS);
 
   /**
    * One URL writer (#446). Components change STATE; `routes/` decides the path and whether
@@ -107,7 +132,7 @@ describe("client conventions (#601)", () => {
       "change state and let routes/boardRouteSync.ts decide the path (see client/CLAUDE.md " +
         "“URL scheme”):\n" + offenders.join("\n"),
     ).toEqual([]);
-  });
+  }, SCAN_TIMEOUT_MS);
 
   /**
    * One settings reader. `settingsStore` owns `/api/preferences` — a raw hit bypasses
@@ -125,9 +150,9 @@ describe("client conventions (#601)", () => {
       hits.length,
       "read/write settings through lib/settingsStore (it calls invalidateSettings):\n" + hits.join("\n"),
     ).toBeLessThanOrEqual(PREFERENCES_BYPASS_BASELINE);
-  });
+  }, SCAN_TIMEOUT_MS);
 
   it("the baseline is not stale — lower it when the count drops", () => {
     expect(preferenceBypasses().length).toBe(PREFERENCES_BYPASS_BASELINE);
-  });
+  }, SCAN_TIMEOUT_MS);
 });
