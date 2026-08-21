@@ -53,7 +53,7 @@ import { issues, projectStatuses, workflowNodes, workspaces } from "@agentic-kan
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import { reconcileMergedIssue } from "../services/merge-cleanup.service.js";
-import { emptyPassReport, recordActed, recordSkipped, type PassReport } from "../lib/pass-report.js";
+import { emptyPassReport, formatPassReportBody, recordActed, recordSkipped, type PassReport } from "../lib/pass-report.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 
@@ -177,6 +177,11 @@ export async function reconcileWorkflowNodeDivergence(
       log(`failed to reconcile ${ref}: ${errorMessage(err)}`);
     }
   }
+  // #689: print the summary the report exists to deliver — a caught-and-logged failure
+  // above stays neither acted nor skipped, and this line is what names that remainder
+  // instead of letting the per-row logs above read as a clean run. Through the injected
+  // `log`, which already carries the `[node-divergence]` tag (#616).
+  log(formatPassReportBody(result));
   return result;
 }
 
