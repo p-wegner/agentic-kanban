@@ -101,6 +101,7 @@ describe("every background sweep is registered (#584)", () => {
       "backup-scheduler",
       "session-message-pruner",
       "base-branch-health-reconciler",
+      "install-staleness-reconciler",
     ]);
   });
 
