@@ -42,6 +42,14 @@ export default defineConfig({
     pool: "forks",
     maxWorkers,
     minWorkers: 1,
+    // #688: see packages/server/vitest.config.ts for rationale — no threshold yet,
+    // this only makes coverage measurable and reportable.
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "lcov", "json-summary"],
+      reportsDirectory: "coverage",
+      exclude: ["**/dist/**", "**/node_modules/**", "**/__tests__/**", "**/*.test.ts", "**/*.test.tsx"],
+    },
   },
   resolve: {
     alias: {
