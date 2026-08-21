@@ -55,4 +55,14 @@ export default defineConfig(({ command }) => ({
       "/ws": { target: `http://127.0.0.1:${serverPort}`, ws: true },
     },
   },
+  test: {
+    // #688: see packages/server/vitest.config.ts for rationale — no threshold yet,
+    // this only makes coverage measurable and reportable.
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "lcov", "json-summary"],
+      reportsDirectory: "coverage",
+      exclude: ["**/dist/**", "**/node_modules/**", "**/*.test.ts", "**/*.test.tsx", "src/**/*.d.ts"],
+    },
+  },
 }));

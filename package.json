@@ -41,6 +41,7 @@
     "test": "pnpm --filter agentic-kanban test",
     "test:full": "pnpm --no-bail --workspace-concurrency=1 --filter @agentic-kanban/shared --filter agentic-kanban --filter @agentic-kanban/mcp-server --filter @agentic-kanban/client test",
     "test:mine": "node scripts/test-mine.mjs",
+    "test:coverage": "pnpm --no-bail --workspace-concurrency=1 --filter @agentic-kanban/shared --filter agentic-kanban --filter @agentic-kanban/mcp-server --filter @agentic-kanban/client test -- --coverage",
     "temp:sweep": "node scripts/sweep-temp-dirs.mjs",
     "test:docker": "pnpm --filter agentic-kanban test:docker",
     "test:unit": "pnpm test",
@@ -74,6 +75,7 @@
   "devDependencies": {
     "@changesets/cli": "^2.31.0",
     "@eslint/js": "^9.18.0",
+    "@vitest/coverage-v8": "^4.0.0",
     "concurrently": "^9.1.2",
     "dependency-cruiser": "^17.4.3",
     "esbuild": "^0.25.12",

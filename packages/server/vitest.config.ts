@@ -49,6 +49,24 @@ export default defineConfig({
     pool: "forks",
     maxWorkers,
     minWorkers: 1,
+    // #688: line coverage was entirely unmeasured — no provider installed, no
+    // report ever produced. `pnpm test:coverage` (root) runs this with `--coverage`;
+    // no threshold is set, so a low/dropping number is visible but never fails the
+    // gate on its own.
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "lcov", "json-summary"],
+      reportsDirectory: "coverage",
+      exclude: [
+        "**/dist/**",
+        "**/node_modules/**",
+        "**/__tests__/**",
+        "**/*.test.ts",
+        "**/*.test.tsx",
+        "src/cli/**",
+        "src/scripts/**",
+      ],
+    },
   },
   resolve: {
     alias: {
