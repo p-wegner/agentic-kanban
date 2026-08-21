@@ -1,9 +1,16 @@
 # Environment variables
 
-Every environment variable the board reads. **The naming rule: a board variable is
-`KANBAN_*`.** In an agent's spawn env — sitting beside the agent CLI's own variables — an
-unprefixed name is genuinely ambiguous about who owns it, and 34 prefixed vars had grown
-alongside a dozen bare ones with no list anywhere.
+The board-owned environment variables that have a naming/precedence story worth writing
+down — the `#615`-renamed set, the port ladders, worktree/session context, process
+supervision, and test-run scoping. **The naming rule: a board variable is `KANBAN_*`.** In
+an agent's spawn env — sitting beside the agent CLI's own variables — an unprefixed name is
+genuinely ambiguous about who owns it, and 34 prefixed vars had grown alongside a dozen bare
+ones with no list anywhere.
+
+This is **not yet a complete inventory**: a bare `process.env.<NAME>` read outside this
+registry is not currently forbidden, and more of those exist in the tree than are documented
+below (#690 tracks closing that gap). Treat an unlisted `KANBAN_*` variable you find in code
+as undocumented, not as nonexistent.
 
 The renamed vars in the first table are **data**, in
 `packages/server/src/lib/env-registry.ts` (`KANBAN_ENV`), and this page is checked against
@@ -35,6 +42,9 @@ server's registry. The precedence is identical and the parity test pins the pair
 The board-server port has ONE ladder — `resolveBoardServerPort` in
 `shared/lib/board-server-url.ts` (#615), guarded by
 `board-port-ladder-single-source.test.ts`. Do not hand-roll it.
+
+The board-**client** port has its own ladder — `resolveBoardClientPort`, same file (#690),
+guarded by `board-client-port-ladder-single-source.test.ts`.
 
 | Variable | Purpose |
 |---|---|
