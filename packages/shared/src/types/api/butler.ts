@@ -15,3 +15,46 @@ export interface ButlerAskResponse {
   isError: boolean;
   error?: string;
 }
+
+/** Compact slash-command descriptor surfaced to the UI autocomplete. */
+export interface ButlerCommand {
+  name: string;
+  description: string;
+  argumentHint?: string;
+}
+
+/** One question of an AskUserQuestion call, normalised for the chat UI. */
+export interface ButlerQuestion {
+  question: string;
+  header: string;
+  multiSelect: boolean;
+  options: ButlerQuestionOption[];
+}
+
+/** The user's answer to one question (one entry for single-select, N for multi). */
+export interface ButlerQuestionAnswer {
+  question: string;
+  header: string;
+  answers: string[];
+}
+
+/** One selectable choice of an AskUserQuestion question. */
+export interface ButlerQuestionOption {
+  label: string;
+  description?: string;
+}
+
+export interface ButlerSessionMessage {
+  role: "user" | "assistant";
+  text: string;
+  ts: number;
+}
+
+export interface ButlerSessionSummary {
+  sessionId: string;
+  startedAt: string;
+  endedAt: string;
+  title: string;
+  turnCount: number;
+  model?: string;
+}

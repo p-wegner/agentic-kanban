@@ -1,3 +1,6 @@
+import type { ProjectActivityEvent, ProjectActivityResult } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { ProjectActivityEvent, ProjectActivityResult };
 import type { Database } from "../db/index.js";
 import {
   getProjectActivityIssues,
@@ -6,24 +9,9 @@ import {
   getProjectActivityComments,
 } from "../repositories/project-activity.repository.js";
 
-export interface ProjectActivityEvent {
-  id: string;
-  type: string;
-  summary: string;
-  actor: string | null;
-  timestamp: string;
-  issueId: string;
-  issueNumber: number | null;
-  issueTitle: string;
-  workspaceId?: string | null;
-  sessionId?: string | null;
-  commentKind?: string | null;
-}
 
-export interface ProjectActivityResult {
-  events: ProjectActivityEvent[];
-  generatedAt: string;
-}
+
+
 
 type IssueRow = Awaited<ReturnType<typeof getProjectActivityIssues>>[number];
 type WsRow = Awaited<ReturnType<typeof getProjectActivityWorkspaces>>[number];

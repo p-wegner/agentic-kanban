@@ -1,3 +1,6 @@
+import type { FailurePattern, PatternMatch } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { FailurePattern, PatternMatch };
 /**
  * Failure-pattern memory service.
  *
@@ -25,25 +28,9 @@ import {
 } from "../repositories/failure-pattern.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
-export interface FailurePattern {
-  id: string;
-  title: string;
-  errorClass: string | null;
-  keywords: string;
-  description: string | null;
-  rootCause: string | null;
-  fix: string | null;
-  sourceType: string;
-  sourceRef: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
 
-export interface PatternMatch {
-  pattern: FailurePattern;
-  score: number;
-  matchedKeywords: string[];
-}
+
+
 
 function overlapScore(aKw: string[], bKw: Set<string>): { score: number; matched: string[] } {
   const matched = aKw.filter(k => bKw.has(k));

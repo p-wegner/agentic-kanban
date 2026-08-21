@@ -1,3 +1,6 @@
+import type { ButlerCommand, ButlerSessionMessage, ButlerSessionSummary } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { ButlerCommand, ButlerSessionMessage, ButlerSessionSummary };
 // Shared Butler UI types. Extracted from ButlerView.tsx so both the container
 // (ButlerView) and its presenter (ButlerViewBody) can reference the same shapes
 // without the presenter importing from its own container. Pure type module — no
@@ -17,26 +20,11 @@ export interface ButlerState {
   selectedProfile?: string;
 }
 
-export interface ButlerCommand {
-  name: string;
-  description: string;
-  argumentHint?: string;
-}
 
-export interface ButlerSessionSummary {
-  sessionId: string;
-  startedAt: string;
-  endedAt: string;
-  title: string;
-  turnCount: number;
-  model?: string;
-}
 
-export interface ButlerSessionMessage {
-  role: "user" | "assistant";
-  text: string;
-  ts: number;
-}
+
+
+
 
 /** A defined butler plus this project's runtime state for it (GET /:id/butlers). */
 export interface ButlerListItem {

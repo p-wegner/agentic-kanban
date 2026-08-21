@@ -1,39 +1,16 @@
+import type { ActivityEventType, ProjectActivityEvent, ProjectActivityResult } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { ActivityEventType, ProjectActivityEvent, ProjectActivityResult };
 import { useApiResource } from "../hooks/useApiResource.js";
 import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 
-type ActivityEventType =
-  | "issue_created"
-  | "status_changed"
-  | "workspace_created"
-  | "workspace_launched"
-  | "workspace_merged"
-  | "workspace_closed"
-  | "session_started"
-  | "session_completed"
-  | "session_failed"
-  | "session_stopped"
-  | "comment";
 
-interface ProjectActivityEvent {
-  id: string;
-  type: ActivityEventType;
-  summary: string;
-  actor: string | null;
-  timestamp: string;
-  issueId: string;
-  issueNumber: number | null;
-  issueTitle: string;
-  workspaceId?: string | null;
-  sessionId?: string | null;
-  commentKind?: string | null;
-}
 
-interface ProjectActivityResult {
-  events: ProjectActivityEvent[];
-  generatedAt: string;
-}
+
+
+
 
 interface ActivityFeedViewProps {
   projectId: string;

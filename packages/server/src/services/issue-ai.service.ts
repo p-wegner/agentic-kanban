@@ -1,3 +1,6 @@
+import type { TouchedFile } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { TouchedFile };
 import { randomUUID } from "node:crypto";
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -296,11 +299,7 @@ Only include genuinely useful dependencies, not just topical similarity.`;
   return { dependencies: created, flagged, couplingSuggestions, total: created.length };
 }
 
-export interface TouchedFile {
-  path: string;
-  reason: string;
-  confidence: "high" | "medium" | "low";
-}
+
 
 export interface AnalyzeTouchedFilesResult {
   files: TouchedFile[];

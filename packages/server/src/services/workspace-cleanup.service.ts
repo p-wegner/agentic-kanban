@@ -1,3 +1,6 @@
+import type { CleanupWarningEntry, StaleWorktreeEntry } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { CleanupWarningEntry, StaleWorktreeEntry };
 /**
  * Workspace teardown & cleanup operations, extracted from workspace-crud.service.ts.
  *
@@ -24,34 +27,8 @@ import { reapWorkspaceContainer } from "./devcontainer-workspace.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { isInsideManagedWorktreesRoot } from "@agentic-kanban/shared/lib/git-service";
 
-export interface StaleWorktreeEntry {
-  id: string;
-  branch: string;
-  workingDir: string;
-  workspaceStatus: string;
-  closedAt: string | null;
-  mergedAt: string | null;
-  updatedAt: string | null;
-  issueId: string;
-  issueNumber: number;
-  issueTitle: string;
-  issueStatusName: string;
-  projectId: string;
-  repoPath: string;
-}
-export interface CleanupWarningEntry {
-  id: string;
-  branch: string;
-  workingDir: string | null;
-  cleanupWarning: string;
-  closedAt: string | null;
-  mergedAt: string | null;
-  updatedAt: string | null;
-  issueId: string;
-  issueNumber: number;
-  issueTitle: string;
-  projectId: string;
-}
+
+
 
 export function createWorkspaceCleanupService(deps: {
   database: Database;

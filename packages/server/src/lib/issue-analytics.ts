@@ -1,3 +1,6 @@
+import type { BurndownBucket, LeadTimeBucket } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { BurndownBucket, LeadTimeBucket };
 import { isTerminalStatusName } from "@agentic-kanban/shared";
 import { buildDateAxis, subDays } from "./analytics-window.js";
 
@@ -40,12 +43,7 @@ export interface DoneIssueRow {
   statusChangedAt: string | null;
 }
 
-export interface BurndownBucket {
-  date: string;
-  remaining: number;
-  opened: number;
-  closed: number;
-}
+
 
 export interface BurndownResult {
   buckets: BurndownBucket[];
@@ -170,12 +168,7 @@ function percentile(sorted: number[], p: number): number {
   return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
 }
 
-export interface LeadTimeBucket {
-  date: string;
-  count: number;
-  medianMs: number | null;
-  p90Ms: number | null;
-}
+
 
 export interface LeadTimeResult {
   buckets: LeadTimeBucket[];

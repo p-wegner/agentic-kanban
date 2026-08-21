@@ -1,22 +1,14 @@
+import type { ContentionFile, ContentionWorkspace } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { ContentionFile, ContentionWorkspace };
 import { useState, useEffect, useCallback } from "react";
 import { apiFetch } from "../lib/api.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { issueStatusToneClass, workspaceStatusToneClass } from "../lib/badgeTones.js";
 
-interface ContentionWorkspace {
-  workspaceId: string;
-  issueId: string;
-  issueNumber: number | null;
-  issueTitle: string;
-  branch: string;
-  status: string;
-  issueStatus: string;
-}
 
-interface ContentionFile {
-  path: string;
-  workspaces: ContentionWorkspace[];
-}
+
+
 
 interface FileContentionResult {
   projectId: string;

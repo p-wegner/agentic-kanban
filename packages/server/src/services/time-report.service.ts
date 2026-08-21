@@ -1,3 +1,6 @@
+import type { TimeReportByDay, TimeReportByIssue, TimeReportData } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { TimeReportByDay, TimeReportByIssue, TimeReportData };
 /**
  * Time-report aggregation (#606).
  *
@@ -29,25 +32,11 @@ export function parseRange(value: string | undefined): TimeReportRange {
   return "30d";
 }
 
-export interface TimeReportByIssue {
-  issueId: string;
-  issueNumber: number | null;
-  issueTitle: string;
-  totalMinutes: number;
-}
 
-export interface TimeReportByDay {
-  date: string;
-  totalMinutes: number;
-}
 
-export interface TimeReportData {
-  byIssue: TimeReportByIssue[];
-  byDay: TimeReportByDay[];
-  totalMinutes: number;
-  dateFrom: string;
-  dateTo: string;
-}
+
+
+
 
 export async function computeTimeReport(
   projectId: string,

@@ -1,3 +1,6 @@
+import type { ButlerQuestion, ButlerQuestionAnswer, ButlerQuestionOption } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { ButlerQuestion, ButlerQuestionAnswer, ButlerQuestionOption };
 // Pure state machine for the Butler SSE event stream.
 //
 // Extracted from ButlerView's imperative handleButlerEvent so the reduction is
@@ -7,26 +10,11 @@
 // reducer never touches the DOM, Date.now, or Math.random (both injected via
 // deps) so it can be exercised deterministically.
 
-/** One selectable choice of an AskUserQuestion question. */
-export interface ButlerQuestionOption {
-  label: string;
-  description?: string;
-}
 
-/** One question of an AskUserQuestion call (server: normalizeButlerQuestions). */
-export interface ButlerQuestion {
-  question: string;
-  header: string;
-  multiSelect: boolean;
-  options: ButlerQuestionOption[];
-}
 
-/** The user's answer to one question (one entry for single-select, N for multi). */
-export interface ButlerQuestionAnswer {
-  question: string;
-  header: string;
-  answers: string[];
-}
+
+
+
 
 /** A question card in the chat: pending (answerable) or resolved (read-only). */
 export interface ButlerQuestionPrompt {

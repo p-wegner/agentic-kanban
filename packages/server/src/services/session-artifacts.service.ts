@@ -1,3 +1,6 @@
+import type { ArtifactEntry } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { ArtifactEntry };
 import { readdir, stat, readFile, realpath } from "node:fs/promises";
 import { join, resolve, extname, relative, isAbsolute } from "node:path";
 import type { Database } from "../db/index.js";
@@ -10,18 +13,7 @@ import {
   getWorkspaceArtifacts,
 } from "../repositories/session-artifacts.repository.js";
 
-export interface ArtifactEntry {
-  /** Relative path from the workspace workingDir */
-  path: string;
-  /** Artifact category */
-  type: "image" | "text" | "trace" | "other";
-  /** File size in bytes */
-  size: number;
-  /** ISO timestamp of last modification */
-  modified: string;
-  /** Human-readable file extension (e.g. ".png") */
-  ext: string;
-}
+
 
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".svg"]);
 const TEXT_EXTENSIONS = new Set([

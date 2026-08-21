@@ -1,3 +1,6 @@
+import type { ActivityEvent, ActivityEventType, StatusDuration, TimeEntry, TouchedFile } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { ActivityEvent, ActivityEventType, StatusDuration, TimeEntry, TouchedFile };
 /**
  * DTO shapes for the issue-detail surface (#610).
  *
@@ -17,45 +20,13 @@
  * Follows the `lib/<feature>Types.ts` convention set by `projectTypes.ts`.
  */
 
-/** One file the agent touched, as the touched-files section consumes it. */
-export interface TouchedFile {
-  path: string;
-  reason: string;
-  confidence: "high" | "medium" | "low";
-}
 
-export type ActivityEventType =
-  | "issue_created"
-  | "status_changed"
-  | "workspace_created"
-  | "workspace_launched"
-  | "workspace_merged"
-  | "workspace_closed"
-  | "session_started"
-  | "session_completed"
-  | "session_failed"
-  | "session_stopped"
-  | "comment";
 
-export interface ActivityEvent {
-  id: string;
-  type: ActivityEventType;
-  summary: string;
-  actor: string | null;
-  timestamp: string;
-  workspaceId?: string | null;
-  sessionId?: string | null;
-  commentKind?: string | null;
-}
 
-/**
- * Time spent in one status. Exported (it was file-local in the component) because
- * `CycleTimeData` embeds it — a consumer of the parent could not name the child.
- */
-export interface StatusDuration {
-  statusName: string;
-  durationMs: number;
-}
+
+
+
+
 
 export interface CycleTimeData {
   totalAgeMs: number;
@@ -65,13 +36,7 @@ export interface CycleTimeData {
   statusBreakdowns: StatusDuration[];
 }
 
-export interface TimeEntry {
-  id: string;
-  issueId: string;
-  minutes: number;
-  note: string | null;
-  createdAt: string;
-}
+
 
 export interface TimeEntriesData {
   entries: TimeEntry[];

@@ -1,3 +1,6 @@
+import type { ButlerCommand, ButlerQuestion, ButlerQuestionAnswer, ButlerQuestionOption } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { ButlerCommand, ButlerQuestion, ButlerQuestionAnswer, ButlerQuestionOption };
 /**
  * Shared type/interface contracts for the butler SDK service (#465 decomposition).
  * Pure types — no behavior — split out so every sub-module can depend on the
@@ -8,33 +11,13 @@ import type { PermissionResult, Query, SDKUserMessage } from "@anthropic-ai/clau
 import type { ProviderName } from "../agent-provider.js";
 import type { Pushable } from "./pushable.js";
 
-/** Compact slash-command descriptor surfaced to the UI autocomplete. */
-export interface ButlerCommand {
-  name: string;
-  description: string;
-  argumentHint?: string;
-}
 
-/** One selectable choice of an AskUserQuestion question. */
-export interface ButlerQuestionOption {
-  label: string;
-  description?: string;
-}
 
-/** One question of an AskUserQuestion call, normalised for the chat UI. */
-export interface ButlerQuestion {
-  question: string;
-  header: string;
-  multiSelect: boolean;
-  options: ButlerQuestionOption[];
-}
 
-/** The user's answer to one question (one entry for single-select, N for multi). */
-export interface ButlerQuestionAnswer {
-  question: string;
-  header: string;
-  answers: string[];
-}
+
+
+
+
 
 export type ButlerEvent =
   | { type: "ready" }

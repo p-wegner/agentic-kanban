@@ -1,13 +1,12 @@
+import type { RunbookEntry } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { RunbookEntry };
 import { useCallback, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { apiFetch } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 
-interface RunbookEntry {
-  path: string;
-  title: string;
-  lastModified: string;
-}
+
 
 interface RunbookContent {
   path: string;

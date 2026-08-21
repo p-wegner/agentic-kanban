@@ -1,34 +1,14 @@
+import type { FocusData, FocusIssue } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { FocusData, FocusIssue };
 import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { BRAND, ACCENT } from "../lib/chartColors";
 import { ISSUE_PRIORITIES, PRIORITY_TRAITS } from "../lib/priorityTraits.js";
 
-interface FocusIssue {
-  issueId: string;
-  issueNumber: number | null;
-  title: string;
-  statusName: string;
-  priority: string;
-  issueType: string;
-  estimate: string | null;
-  blockedBy: Array<{ issueId: string; issueNumber: number | null; title: string }>;
-  unblocks: number;
-  focusScore: number;
-  reasons: string[];
-}
 
-interface FocusData {
-  now: string;
-  ready: FocusIssue[];
-  blocked: FocusIssue[];
-  headline: {
-    openCount: number;
-    readyCount: number;
-    blockedCount: number;
-    inFlightCount: number;
-    topScore: number;
-  };
-}
+
+
 
 interface FocusViewProps {
   projectId: string;

@@ -1,31 +1,15 @@
+import type { SprintCapacityPlan, SprintCapacityPolicy, SprintEligibleIssue } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { SprintCapacityPlan, SprintCapacityPolicy, SprintEligibleIssue };
 import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { priorityTraits } from "../lib/priorityTraits.js";
 
-interface SprintCapacityPolicy {
-  activeAgentsTarget: number;
-  currentActive: number;
-  availableSlots: number;
-  maxNewStartsPerCycle: number;
-  backlogFloor: number;
-  currentBacklogSize: number;
-  willStartCount: number;
-}
 
-interface SprintEligibleIssue {
-  id: string;
-  issueNumber: number | null;
-  title: string;
-  priority: string | null;
-  statusName: string;
-  blockers: string[];
-  canStart: boolean;
-}
 
-interface SprintCapacityPlan {
-  policy: SprintCapacityPolicy;
-  nextEligibleIssues: SprintEligibleIssue[];
-}
+
+
+
 
 interface SprintCapacityPlannerProps {
   projectId: string;

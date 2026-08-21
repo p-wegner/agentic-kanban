@@ -1,13 +1,11 @@
+import type { BurndownBucket } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { BurndownBucket };
 import { useMemo, useState } from "react";
 import { BRAND } from "../lib/chartColors.js";
 import { useApiResource } from "../hooks/useApiResource.js";
 
-interface BurndownBucket {
-  date: string;
-  remaining: number;
-  opened: number;
-  closed: number;
-}
+
 
 interface BurndownData {
   buckets: BurndownBucket[];

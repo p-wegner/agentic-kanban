@@ -1,13 +1,11 @@
+import type { LeadTimeBucket } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { LeadTimeBucket };
 import { useMemo, useState } from "react";
 import { ACCENT, STATUS_COLORS } from "../lib/chartColors.js";
 import { useApiResource } from "../hooks/useApiResource.js";
 
-interface LeadTimeBucket {
-  date: string;
-  count: number;
-  medianMs: number | null;
-  p90Ms: number | null;
-}
+
 
 interface LeadTimeData {
   buckets: LeadTimeBucket[];

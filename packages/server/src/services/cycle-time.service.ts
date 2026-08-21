@@ -1,3 +1,6 @@
+import type { StatusDuration } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { StatusDuration };
 import type { Database } from "../db/index.js";
 import {
   getIssueWithStatusName,
@@ -6,10 +9,7 @@ import {
   getWorkflowNodeStatusNames,
 } from "../repositories/cycle-time.repository.js";
 
-export interface StatusDuration {
-  statusName: string;
-  durationMs: number;
-}
+
 
 export interface CycleTimeResult {
   totalAgeMs: number;

@@ -1,14 +1,11 @@
+import type { ArtifactEntry } from "@agentic-kanban/shared";
+// #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
+export type { ArtifactEntry };
 import { useEffect, useState, useCallback } from "react";
 import { apiFetch } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 
-interface ArtifactEntry {
-  path: string;
-  type: "image" | "text" | "trace" | "other";
-  size: number;
-  modified: string;
-  ext: string;
-}
+
 
 interface WorkspaceArtifactsBrowserProps {
   workspaceId: string;
