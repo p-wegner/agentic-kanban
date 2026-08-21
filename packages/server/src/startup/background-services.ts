@@ -21,6 +21,7 @@ import { startSessionMessagePruner, stopSessionMessagePruner } from "../services
 import { startBaseBranchHealthReconciler, stopBaseBranchHealthReconciler } from "./base-branch-health-reconciler.js";
 import { startWorkerConnectionReaper, stopWorkerConnectionReaper } from "../services/worker-connection-reaper.service.js";
 import { getWorkerFleet } from "../services/worker-fleet.service.js";
+import { startInstallStalenessReconciler, stopInstallStalenessReconciler } from "./install-staleness-reconciler.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 
 /**
@@ -226,6 +227,16 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
     start({ db }) {
       startBaseBranchHealthReconciler(db);
       return stopBaseBranchHealthReconciler;
+    },
+  },
+  {
+    // #685 — a deferred sibling install's `pending`/`running` row has no other way out: no
+    // timeout, no re-run path, and the row survives a server restart or a skipped deferred
+    // step untouched. This sweep is what finally reads `installUpdatedAt`.
+    name: "install-staleness-reconciler",
+    start() {
+      startInstallStalenessReconciler();
+      return stopInstallStalenessReconciler;
     },
   },
 ];
