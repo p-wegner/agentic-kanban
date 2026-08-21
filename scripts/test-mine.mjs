@@ -89,47 +89,86 @@ import { dirname, resolve } from "node:path";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
 
-/** @type {{ dir: string, label: string, exclude: string[] }[]} */
+/**
+ * An exclusion must say WHY it is one (#679).
+ *
+ * `ae6de9b34d` pointed the verify gate at `test:mine` and, in the SAME commit, added 12
+ * exclusions to it — the gate was made cheap and simultaneously blinded to the suites
+ * guarding what it protects. Nothing recorded which of those were environmental (real git,
+ * a real docker daemon, a spawned CLI — the #173 shape the mechanism exists for) and which
+ * were merely slow, so the list could only grow, and re-auditing it meant re-deriving every
+ * entry from scratch. Six had no environmental excuse at all.
+ *
+ * A `{ glob, reason }` pair makes the argument part of the entry rather than a comment that
+ * drifts away from it, and `exclusion-reasons.test.ts` fails on a missing or boilerplate one.
+ * The rule the reasons are judged against: an exclusion is legitimate when the suite needs
+ * something the gate box may not have or cannot share — a real `git` process, a docker
+ * daemon, a spawned CLI binary. "It is slow" is not a reason; scope it or speed it up.
+ *
+ * @type {{ dir: string, label: string, exclude: { glob: string, reason: string }[] }[]}
+ */
 export const PACKAGES = [
   {
     dir: "packages/shared",
     label: "shared",
     exclude: [
-      "**/git-service.integration.test.ts",
-      // Same #173 shape as the server list below: real git on temp dirs, green in isolation,
-      // starved under full-suite parallelism. Measured on master 2026-08-03, isolation vs the
-      // merge gate's parallel run:
+      {
+        glob: "**/git-service.integration.test.ts",
+        reason: "drives real `git` processes against temp repos",
+      },
+      // Same #173 shape: real git on temp dirs, green in isolation, starved under full-suite
+      // parallelism. Measured on master 2026-08-03, isolation vs the merge gate's parallel run:
       //   append-only-hotfile-merge.integration  5 passed in 316s (~63s/test) -> TIMED OUT at 240s
       //   migration-renumber-conflict-guard      2 passed in 152s (~75s/test) -> TIMED OUT at 60s
       // They were failing EVERY pre-merge gate on this repo, so the gate blocked all merges
       // while providing no signal. They run in `pnpm test:full`.
-      "**/append-only-hotfile-merge.integration.test.ts",
-      "**/migration-renumber-conflict-guard.test.ts",
+      {
+        glob: "**/append-only-hotfile-merge.integration.test.ts",
+        reason: "real git on temp dirs; ~63s/test in isolation and times out under gate parallelism",
+      },
+      {
+        glob: "**/migration-renumber-conflict-guard.test.ts",
+        reason: "real git on temp dirs; ~75s/test in isolation and times out under gate parallelism",
+      },
     ],
   },
   {
     dir: "packages/server",
     label: "server",
+    // #679 RE-INCLUDED seven suites (193 tests) that were excluded with no environmental
+    // excuse: workspace-merge-service, done-unmerged-invariant-sweep, preferences,
+    // workspace-lifecycle-transitions, merge-service-edge-cases, merge-endpoint-reconcile-noop,
+    // workspace-already-merged. They run on in-memory SQLite with an injected `gitService`;
+    // the ones that touch `helpers/temp-repo.ts` only need a directory with a `.git` inside so
+    // the repo lock accepts it — that helper deliberately never runs `git init`. Measured
+    // together on master: 193 tests, ~78s wall. What their absence let through: re-breaking
+    // conflict-marker spillover (#598-600), reintroducing the 0-commit false-positive Done,
+    // breaking merge-retry idempotency, breaking `resolveMergeState`'s decision table — each
+    // already shipped once as a bug, each covered by a test that did not run.
     exclude: [
-      "**/cli.test.ts",
-      "**/cli-butler.test.ts",
-      "**/git.service.test.ts",
-      "**/done-unmerged-invariant-sweep.test.ts",
-      "**/workspace-merge-service.test.ts",
-      "**/workspace-already-merged.test.ts",
-      "**/api-workspace.test.ts",
-      "**/workspace-lifecycle-transitions.test.ts",
-      "**/merge-endpoint-reconcile-noop.test.ts",
-      "**/merge-service-edge-cases.test.ts",
-      "**/preferences.test.ts",
-      "**/worker-git-transport-e2e.test.ts",
-      "**/compose-lifecycle-real-docker.test.ts",
+      { glob: "**/cli.test.ts", reason: "spawns the CLI binary as a child process" },
+      { glob: "**/cli-butler.test.ts", reason: "spawns the CLI binary as a child process" },
+      { glob: "**/git.service.test.ts", reason: "drives real `git` processes against temp repos" },
+      {
+        glob: "**/api-workspace.test.ts",
+        reason: "execFileSync(\"git\", ...) — really runs git init/add/commit per case",
+      },
+      {
+        glob: "**/worker-git-transport-e2e.test.ts",
+        reason: "end-to-end git smart-HTTP transport over a real server and real clones",
+      },
+      {
+        glob: "**/compose-lifecycle-real-docker.test.ts",
+        reason: "needs a real docker daemon; pulls and builds images",
+      },
     ],
   },
   {
     dir: "packages/mcp-server",
     label: "mcp-server",
-    exclude: ["**/mcp-tools.test.ts"],
+    exclude: [
+      { glob: "**/mcp-tools.test.ts", reason: "spawns the MCP server as a child process" },
+    ],
   },
   {
     // #601: the client was NOT in this list, so `pnpm test:mine` — which IS what the
@@ -142,7 +181,6 @@ export const PACKAGES = [
     exclude: [],
   },
 ];
-
 // Extra args after `--` (pnpm strips the first `--`; node leaves the rest in argv).
 const passthrough = process.argv.slice(2);
 
@@ -389,7 +427,7 @@ function runPackage({ dir, label, exclude }, mode = null) {
       resolvePromise(1);
       return;
     }
-    const excludeArgs = exclude.flatMap((glob) => ["--exclude", glob]);
+    const excludeArgs = exclude.flatMap(({ glob }) => ["--exclude", glob]);
     const modeArgs = mode?.kind === "related"
       ? ["related", ...mode.files, "--run", "--passWithNoTests"]
       : mode?.kind === "guards"
