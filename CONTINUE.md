@@ -212,9 +212,13 @@ suites and are caught either way.
 **What is verified, and what is not.** The decision function, the parser and the column
 round-trip are covered by 24 tests, and the parser was run against REAL vitest output both ways
 (the 47KB all-green server log → `[]`; a deliberately-failing temp suite → named exactly).
-**Not yet observed in production**: no base-health probe has run since the column landed, so no
-row carries a non-null `failed_suites` yet and the warning has never fired against live data.
-The first probe on any project is what will confirm the end-to-end path.
+**Live so far**: the dev server hot-reloaded onto the new code, applied migration 0126, and
+`GET /api/projects/:id/base-branch-health` now returns `failedSuites` — `null` on all 20
+pre-existing rows, which is exactly what the column's null-vs-`[]` rule says a row written
+before it existed should read as. **Still unobserved**: no probe has run SINCE, so no row
+carries a non-null list and the warning has never fired against live data. This board's probe
+does run (the newest row is a 951s red against `6a06c665fe`), so the next one is what closes
+the loop — check `failedSuites` on the newest row rather than assuming.
 
 ## Next steps
 
@@ -229,8 +233,8 @@ is either done or a decision that is not this session's to make.
       included). Deliberately left to the operator — see the section above.
 - [ ] `pnpm install` so #688's `pnpm test:coverage` can run. Left undone on purpose: it mutates
       a shared checkout while a dev server is running.
-- [ ] **Confirm #681 half B end-to-end on live data** — the code is tested and the parser is
-      proven against real vitest output both ways, but no base-health probe has run since the
-      column landed, so no row carries a non-null `failed_suites` yet.
+- [ ] **Confirm #681 half B end-to-end on live data** — migration 0126 is applied on the live
+      DB and the endpoint returns the field, but every row still reads `null` because no probe
+      has run since. Check `failedSuites` on the newest base-health row after the next one.
 - [ ] Nothing further open on #691 itself — this file + the CLAUDE.md rule + the two
       follow-up tickets (both now landed) are the complete fix.
