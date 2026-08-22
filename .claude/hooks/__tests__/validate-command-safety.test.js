@@ -9,22 +9,43 @@
 //   node .claude/hooks/__tests__/validate-command-safety.test.js
 "use strict";
 
+const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 const assert = require("node:assert/strict");
 
 const HOOK_PATH = path.join(__dirname, "..", "validate-command-safety.js");
 
-function runHook(command, env = {}) {
+function runHook(command, env = {}, cwd = process.cwd()) {
   try {
     const stdout = execFileSync(process.execPath, [HOOK_PATH], {
-      input: JSON.stringify({ command, cwd: process.cwd() }),
+      input: JSON.stringify({ command, cwd }),
       encoding: "utf8",
-      env: { ...process.env, CLAUDE_PROJECT_DIR: process.cwd(), ...env },
+      env: { ...process.env, CLAUDE_PROJECT_DIR: cwd, ...env },
     });
     return { blocked: false, stdout };
   } catch (err) {
     return { blocked: true, stdout: err.stdout ?? "", stderr: err.stderr ?? "" };
+  }
+}
+
+/**
+ * A throwaway checkout holding a REAL-sized `packages/server/kanban.db`.
+ *
+ * A case asserting "a destructive shape aimed at the database blocks" must supply the database
+ * itself: the repo-relative path means "whatever file sits there", and on a machine where that
+ * is a stray sub-12KB stub the #406 carve-out correctly ALLOWS its removal — which turned the
+ * file-erasure case below red here while it was green wherever it was written.
+ */
+function withRealDbCheckout(run) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "kanban-hook-checkout-"));
+  try {
+    fs.mkdirSync(path.join(root, "packages", "server"), { recursive: true });
+    fs.writeFileSync(path.join(root, "packages", "server", "kanban.db"), Buffer.alloc(16_384, 1));
+    return run(root, { CLAUDE_PROJECT_DIR: root, KANBAN_MAIN_CHECKOUT: root });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 }
 
@@ -73,8 +94,10 @@ const cases = [
   {
     name: "still blocks the pre-existing file-erasure case (rm kanban.db)",
     run: () => {
-      const r = runHook(`rm packages/server/kanban.db`);
-      assert.equal(r.blocked, true, "expected file-erasure case to remain blocked");
+      withRealDbCheckout((root, env) => {
+        const r = runHook(`rm packages/server/kanban.db`, env, root);
+        assert.equal(r.blocked, true, "expected file-erasure case to remain blocked");
+      });
     },
   },
 ];

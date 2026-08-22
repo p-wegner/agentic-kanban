@@ -35,11 +35,35 @@ interface RunResult {
  */
 const REPO_ROOT = join(__dirname, "../../../..");
 
-function runGuard(command: string, env: Record<string, string> = {}): RunResult {
+/**
+ * Second brush with the same trap the comment above describes, and pinning the CWD was only
+ * half the cure. A fixture written as the repo-relative `packages/server/kanban.db` still means
+ * "whatever file happens to sit there" — and on a machine where that path holds a stray 0-byte
+ * file (the shadow-stub the CLI tells you to delete), the #406 sub-12KB carve-out fires and the
+ * SAME four cases go green-to-red with no code change. Measured: the pre-merge hook bytes give
+ * the identical verdict, so nothing in the guard had moved.
+ *
+ * A case whose subject is "a destructive shape aimed at the REAL database blocks" must therefore
+ * supply a real database itself, in a checkout it owns. `KANBAN_MAIN_CHECKOUT` + `CLAUDE_PROJECT_DIR`
+ * point both the guard's db resolution and its relative-token resolution at that checkout, so the
+ * command string keeps its real-world repo-relative shape while meaning something the test controls.
+ */
+async function makeCheckoutWithRealDb(bytes = 16_384): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "kanban-guard-checkout-"));
+  await mkdir(join(root, "packages", "server"), { recursive: true });
+  await writeFile(join(root, "packages", "server", "kanban.db"), Buffer.alloc(bytes, 1));
+  return root;
+}
+
+function checkoutEnv(root: string): Record<string, string> {
+  return { CLAUDE_PROJECT_DIR: root, KANBAN_MAIN_CHECKOUT: root };
+}
+
+function runGuard(command: string, env: Record<string, string> = {}, cwd: string = REPO_ROOT): RunResult {
   const result = spawnSync(process.execPath, [HOOK], {
     input: JSON.stringify({ tool_input: { command } }),
     encoding: "utf8",
-    cwd: REPO_ROOT,
+    cwd,
     env: { ...process.env, ALLOW_DB_DESTROY: "", DB_URL: "", AGENTIC_KANBAN_DIR: "", ...env },
     windowsHide: true,
     timeout: 30_000,
@@ -79,9 +103,16 @@ describe("validate-command-safety — db name in transmitted DATA is not a files
     expect(runGuard("grep -rn kanban.db packages/").blocked).toBe(false);
   });
 
-  it("still blocks when the db name appears OUTSIDE the heredoc as a real argument", () => {
-    const command = ["rm packages/server/kanban.db <<'EOF'", "unrelated body", "EOF"].join("\n");
-    expect(runGuard(command).blocked).toBe(true);
+  it("still blocks when the db name appears OUTSIDE the heredoc as a real argument", async () => {
+    // A real database in a checkout this case owns — see `makeCheckoutWithRealDb`. The subject
+    // here is heredoc parsing, so the verdict must not depend on what the ambient repo path holds.
+    const checkout = await makeCheckoutWithRealDb();
+    try {
+      const command = ["rm packages/server/kanban.db <<'EOF'", "unrelated body", "EOF"].join("\n");
+      expect(runGuard(command, checkoutEnv(checkout), checkout).blocked).toBe(true);
+    } finally {
+      await rm(checkout, { recursive: true, force: true });
+    }
   });
 });
 
@@ -118,6 +149,20 @@ describe("validate-command-safety — redirects are judged by their TARGET (#137
 });
 
 describe("validate-command-safety — destructive verbs still block (no regression)", () => {
+  // Every case here asserts "this SHAPE blocks when it is aimed at a real database", so the
+  // database is supplied by the case, not borrowed from the ambient repo (see
+  // `makeCheckoutWithRealDb`). The absolute-path, home-path, `db:reset` and glob cases are
+  // path-independent and unaffected by running inside the fixture checkout.
+  let checkout: string;
+
+  beforeEach(async () => {
+    checkout = await makeCheckoutWithRealDb();
+  });
+
+  afterEach(async () => {
+    await rm(checkout, { recursive: true, force: true });
+  });
+
   for (const command of [
     "rm packages/server/kanban.db",
     "rm -rf /mnt/c/projects/andrena/agentic-kanban/packages/server/kanban.db",
@@ -127,7 +172,7 @@ describe("validate-command-safety — destructive verbs still block (no regressi
     "rm *.db",
   ]) {
     it(`blocks: ${command}`, () => {
-      expect(runGuard(command).blocked).toBe(true);
+      expect(runGuard(command, checkoutEnv(checkout), checkout).blocked).toBe(true);
     });
   }
 });
@@ -191,6 +236,26 @@ describe("validate-command-safety — sub-12KB stub removal is allowed (#406)", 
 
   it("still blocks when the target file is MISSING (path could resolve to the real db)", () => {
     expect(runGuard(`rm ${posix(join(dir, "kanban.db"))}`).blocked).toBe(true);
+  });
+
+  it("still blocks rm of a sub-floor db whose -wal sidecar holds real data", async () => {
+    // The one shape where "sub-12KB ⇒ not a database" is false: in WAL mode the committed pages
+    // sit in `kanban.db-wal` until a checkpoint folds them back, so a small main file beside a
+    // large WAL is a database, not a stray stub.
+    const db = join(dir, "kanban.db");
+    await writeFile(db, Buffer.alloc(4096));
+    await writeFile(db + "-wal", Buffer.alloc(64_000, 1));
+
+    expect(runGuard(`rm ${posix(db)}`).blocked).toBe(true);
+  });
+
+  it("still allows the stub when only a small -shm sidecar is beside it", async () => {
+    // `-shm` is a rebuildable shared-memory index, never data — it must not veto the carve-out.
+    const db = join(dir, "kanban.db");
+    await writeFile(db, "");
+    await writeFile(db + "-shm", Buffer.alloc(32_768, 0));
+
+    expect(runGuard(`rm ${posix(db)}`).blocked).toBe(false);
   });
 
   it("still blocks a redirect/truncation INTO a stub (no size exemption for writes)", async () => {
@@ -276,10 +341,18 @@ describe("validate-command-safety — backup covers the db actually in use (#137
     expect(backups.some((f) => /^kanban-.*\.db$/.test(f))).toBe(true);
   });
 
-  it("says explicitly that NO backup exists when the db is absent, rather than implying one ran", () => {
-    const result = runGuard("rm packages/server/kanban.db", {
-      AGENTIC_KANBAN_DIR: join(dataDir, "empty"),
-    });
+  it("says explicitly that NO backup exists when the db is absent, rather than implying one ran", async () => {
+    // The subject is the MESSAGE, so the command must reach the message: it needs a shape that
+    // blocks (a real db behind the named token — see `makeCheckoutWithRealDb`, otherwise the #406
+    // stub carve-out allows it and there is no message to inspect) while the db the guard RESOLVES
+    // to — here an empty AGENTIC_KANBAN_DIR — is absent, so no backup can be taken.
+    const checkout = await makeCheckoutWithRealDb();
+    const result = runGuard(
+      "rm packages/server/kanban.db",
+      { AGENTIC_KANBAN_DIR: join(dataDir, "empty"), ...checkoutEnv(checkout) },
+      checkout,
+    );
+    await rm(checkout, { recursive: true, force: true });
 
     expect(result.blocked).toBe(true);
     expect(result.reason).toContain("NO BACKUP EXISTS");
