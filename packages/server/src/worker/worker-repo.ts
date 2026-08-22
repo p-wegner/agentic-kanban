@@ -17,7 +17,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { gitExec, gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
-import type { WorkerRepoTransport } from "@agentic-kanban/shared/lib/worker-protocol";
+import { isBareFileName, type WorkerRepoTransport } from "@agentic-kanban/shared/lib/worker-protocol";
 import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 
 export function defaultWorkerWorkRoot(): string {
@@ -116,6 +116,21 @@ export async function provisionWorkerCheckout(
       description: skill.description ?? "",
       prompt: skill.content,
     });
+  }
+
+  // #749: the ticket-context file(s) the board wrote into ITS worktree. They arrive as
+  // name + content because a board path names nothing here, and they must land BEFORE the
+  // agent starts: claude reads `CLAUDE.local.md` as project memory at session start, and
+  // copilot attaches it by (now relative) name. Written after the skills and before the
+  // setup script so a setup script could still consult them.
+  for (const file of repo.contextFiles ?? []) {
+    if (!isBareFileName(file.name)) {
+      // Defence in depth: the parser already drops these, but this write is what would
+      // escape the checkout, so it refuses on its own account too.
+      console.warn(`[worker] refusing context file with a non-bare name: ${file.name}`);
+      continue;
+    }
+    writeFileSync(join(checkoutDir, file.name), file.content, "utf-8");
   }
 
   if (repo.setupScript?.trim()) {
