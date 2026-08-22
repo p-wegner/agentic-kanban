@@ -24,6 +24,11 @@ export const DOMAIN_ERROR_CODES = [
   "FORBIDDEN",
   "BAD_REQUEST",
   "VALIDATION_ERROR",
+  // 422: a syntactically valid request whose CONTENT cannot be acted on. Added in the
+  // #617 wave because the fleet routes were already answering 422 inline — a status the
+  // one-place mapping could not produce, which is exactly the drift this vocabulary exists
+  // to prevent.
+  "UNPROCESSABLE",
   "INVALID_DATA",
   "INTERNAL",
   "AI_ERROR",
@@ -93,6 +98,13 @@ export class NotFoundError extends AppError {
 export class ValidationError extends AppError {
   constructor(message: string) {
     super(message, 400, "VALIDATION_ERROR");
+  }
+}
+
+/** 422 — the request parsed, but its content cannot be acted on (a missing required field). */
+export class UnprocessableError extends AppError {
+  constructor(message: string) {
+    super(message, 422, "UNPROCESSABLE");
   }
 }
 

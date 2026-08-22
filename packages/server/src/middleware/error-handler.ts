@@ -10,7 +10,7 @@ import {
 import { WorkspaceError } from "../services/workspace-internals.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
-type StatusCode = 400 | 403 | 404 | 409 | 500 | 503;
+type StatusCode = 400 | 403 | 404 | 409 | 422 | 500 | 503;
 
 /**
  * The shared domain error-code vocabulary → HTTP status, mapped in ONE place.
@@ -34,6 +34,7 @@ const DOMAIN_CODE_STATUS: Record<DomainErrorCode, StatusCode> = {
   FORBIDDEN: 403,
   BAD_REQUEST: 400,
   VALIDATION_ERROR: 400,
+  UNPROCESSABLE: 422,
   INVALID_DATA: 400,
   INTERNAL: 500,
   AI_ERROR: 500,

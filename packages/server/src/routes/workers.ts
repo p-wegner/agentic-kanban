@@ -1,3 +1,4 @@
+import { ConflictError, UnprocessableError } from "../errors/index.js";
 import type { Context, Hono } from "hono";
 import { createRouter } from "../middleware/create-router.js";
 import { parseOptionalJsonBody } from "../middleware/parse-body.js";
@@ -61,17 +62,19 @@ function registerOwnerRoutes(router: Hono, reg: WorkerRegistry, database: Databa
 
   router.post("/incoming/land", async (c) => {
     const body = await parseOptionalJsonBody<{ projectId?: string; branch?: string }>(c);
-    if (!body.projectId || !body.branch) return c.json({ error: "projectId and branch are required" }, 422);
+    if (!body.projectId || !body.branch) throw new UnprocessableError("projectId and branch are required");
     const result = await landIncomingRef(body.projectId, body.branch, database);
-    if (!result.ok) return c.json({ error: result.error, outcome: result.outcome }, 409);
+    if (!result.ok) throw new ConflictError(`${result.error} (outcome: ${JSON.stringify(result.outcome)})`);
     return c.json({ ok: true, outcome: result.outcome });
   });
 
   router.post("/incoming/discard", async (c) => {
     const body = await parseOptionalJsonBody<{ projectId?: string; branch?: string; force?: boolean }>(c);
-    if (!body.projectId || !body.branch) return c.json({ error: "projectId and branch are required" }, 422);
+    if (!body.projectId || !body.branch) throw new UnprocessableError("projectId and branch are required");
     const result = await discardIncomingRef(body.projectId, body.branch, database, { force: body.force === true });
-    if (!result.ok) return c.json({ error: result.error }, 409);
+    // `error` is optional on the result type, so the inline body this replaced could answer a
+    // bare `{}` on refusal. A refusal always says why now.
+    if (!result.ok) throw new ConflictError(result.error ?? `discard refused for ${body.branch}`);
     return c.json({ ok: true, sha: result.sha });
   });
 
@@ -81,7 +84,7 @@ function registerOwnerRoutes(router: Hono, reg: WorkerRegistry, database: Databa
   // reports preference values and the whole fleet's shape.
   router.get("/explain", async (c) => {
     const projectId = c.req.query("projectId") || (await getPreferenceValue("activeProjectId", database));
-    if (!projectId) return c.json({ error: "projectId is required (and no active project is set)" }, 422);
+    if (!projectId) throw new UnprocessableError("projectId is required (and no active project is set)");
     const provider = c.req.query("provider") as ProviderName | undefined;
     const issueParam = c.req.query("issue");
     if (issueParam === undefined) {
@@ -97,7 +100,7 @@ function registerOwnerRoutes(router: Hono, reg: WorkerRegistry, database: Databa
     }
     const issueNumber = Number(issueParam);
     if (!Number.isInteger(issueNumber) || issueNumber <= 0) {
-      return c.json({ error: `issue must be a positive integer, got ${JSON.stringify(issueParam)}` }, 422);
+      throw new UnprocessableError(`issue must be a positive integer, got ${JSON.stringify(issueParam)}`);
     }
     const report = await explainIssuePlacement({ database, projectId, issueNumber, providerName: provider });
     if ("error" in report) return c.json(report, 404);
