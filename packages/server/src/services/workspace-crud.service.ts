@@ -147,7 +147,23 @@ export function createWorkspaceCrudService(deps: {
       const { repoPath } = await resolveProjectRepo(workspaceId, database).catch(() => ({ repoPath: null as string | null }));
       if (repoPath) {
         try {
-          await withStepTimeout("remove-worktree", () => gitService.removeWorktree(repoPath, workspace.workingDir!));
+          // #713: closeWorkspace is a SIXTH co-residency delete site — the same shape as
+          // mcp `close_workspace`, and the ticket's list did not name it. Guarded like the
+          // rest: a live sharer's checkout must survive this close. A refusal lands in the
+          // same cleanup-warning escape hatch as a failed removal, which is exactly right —
+          // the directory legitimately stays and should be discoverable, not silent.
+          await withStepTimeout("remove-worktree", async () => {
+            const outcome = await removeWorktreeUnlessShared({
+              database,
+              workingDir: workspace.workingDir!,
+              workspaceId,
+              label: "close-workspace",
+              removeWorktree: () => gitService.removeWorktree(repoPath, workspace.workingDir!),
+            });
+            if (!outcome.removed) {
+              throw outcome.reason === "remove-failed" ? outcome.error : new Error(outcome.message);
+            }
+          });
           workingDirRemoved = true;
         } catch (err) {
           // Escape hatch (#268): a worktree that cannot be cleanly removed — whether
