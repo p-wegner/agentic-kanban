@@ -25,7 +25,7 @@ import { registerBoardCommand } from "./commands/board.js";
 import { registerServicesCommand } from "./commands/services.js";
 import { registerWorkerCommand } from "./commands/worker.js";
 import { runMigrations, logDefaultBranch } from "./shared.js";
-import { homeFallbackDbWarning } from "./db-warning.js";
+import { homeFallbackDbWarning, probeCheckoutDb } from "./db-warning.js";
 import { checkAndRecordDbResolution } from "./last-resolved-db.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
@@ -89,8 +89,18 @@ program.hook("preAction", async (_thisCommand, actionCommand) => {
     if (cmd.name() === "worker") return;
   }
   try {
-    const { DB_LOCATION } = await import("../db/data-dir.js");
-    const homeFallback = homeFallbackDbWarning(DB_LOCATION);
+    const { DB_LOCATION, LOCAL_DB_CANDIDATES } = await import("../db/data-dir.js");
+    // #733: the split-brain warning is conditional on an in-checkout kanban.db
+    // actually existing. When none does, the home DB is the ONLY database and
+    // there is nothing to warn about — the old unconditional text asserted a
+    // divergence that did not exist and talked callers out of correct writes.
+    const homeFallback = homeFallbackDbWarning(
+      DB_LOCATION,
+      probeCheckoutDb(LOCAL_DB_CANDIDATES, {
+        resolvedPath: DB_LOCATION.path,
+        rejectedLocalCandidates: DB_LOCATION.rejectedLocalCandidates,
+      }),
+    );
     if (homeFallback) console.warn(homeFallback);
     const flip = checkAndRecordDbResolution(DB_LOCATION);
     if (flip) console.warn(flip);

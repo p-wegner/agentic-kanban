@@ -8,7 +8,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // In-checkout dev DB candidates, both pointing at packages/server/kanban.db:
 //   - bundled mode (__dirname = dist/)   → ../kanban.db
 //   - dev mode     (__dirname = src/db/) → ../../kanban.db
-const LOCAL_DB_CANDIDATES = [
+export const LOCAL_DB_CANDIDATES = [
   resolve(__dirname, "../kanban.db"),
   resolve(__dirname, "../../kanban.db"),
 ];
