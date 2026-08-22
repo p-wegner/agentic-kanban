@@ -514,3 +514,56 @@ is either done or a decision that is not this session's to make.
       cannot fail.
 - [ ] Nothing further open on #691 itself — this file + the CLAUDE.md rule + the two
       follow-up tickets (both now landed) are the complete fix.
+
+## #726 — the god-module gate now has a signal a file split cannot move (landed 2026-08-22)
+
+**Ticket premise was partly wrong; corrected in the ticket itself before building on it.** Its
+headline files (`plugin.service.ts` "max CC 30, worst in repo", `plugin-loop.service.ts` "608
+lines, CC 33, 38 functions") measure, at HEAD, **364 lines / 9 branches** and **353 lines / 25
+branches / 12 functions** — and both had already been decomposed by #727, which IS HEAD
+(`42e54edf70`). The `code-metrics` composite risk scores (0.904 / 0.901) were not reproducible
+from any cheap structural signal. That is the **third** analyzer-derived ticket claim to fail
+verification this week (#741 licence count, #727 function-count signal, now this).
+
+**The thesis held on different files, which is why the work was still done.** "The two worst
+files pass the gate" is true of `packages/shared/src/lib/agent-stream/copilot.ts` (341 lines —
+34% of the ceiling — `parseCopilotEvent` at 41 branches) and
+`packages/client/src/components/WorkspaceCard.tsx` (966 lines, parked 34 under the ceiling,
+`WorkspaceCard` at 35). And **13 files sit at 900–999 lines with zero above 1000** — the ceiling
+is a floor, exactly as the #710–#725 batch measured independently.
+
+**What landed.** `MAX_FUNCTION_BRANCHES = 25`, measured per FUNCTION (a per-file sum is size
+again, and a split lowers it for free), in both copies of the gate —
+`scripts/check-god-modules.mjs` (of record) and `packages/shared/__tests__/max-file-size.test.ts`
+(in-IDE) — plus `COMPLEXITY_BASELINE`, 22 entries, shrink-only. The existing two-copy parity test
+was generalized to cover the new threshold and the new baseline, so the second shared baseline is
+parity-checked from the day it lands rather than after it drifts.
+
+- **Measured distribution** (1448 production files): p50 **5**, p75 **9**, p90 **13**, p95 **18**,
+  p99 **28**, max **55** (`runAutoStart`, `startup/monitor-auto-start.ts:288`). 22 files over 25.
+- **Verified**: `node scripts/check-god-modules.mjs` exits 0 and prints
+  `peak function branch complexity 55 … 22 file(s) over the 25-branch threshold, all baselined`;
+  the same numbers come out of the vitest copy (4 tests pass, incl. the parity test);
+  `check-god-modules-script.test.ts` still passes both directions; a 31-branch probe in an
+  isolated `--root` tree is correctly REFUSED. `eslint` clean, `tsc --noEmit` on `shared` clean.
+- **Logical operators (`&&`, `||`, `??`) are deliberately NOT counted.** Measured both ways:
+  including them put 39 of 253 `.tsx` files over threshold (vs 3) and read `parseCopilotEvent` as
+  156 instead of 41 — it becomes a proxy for JSX conditional rendering and for defensive `??`
+  defaulting, which is the idiom that makes code safer.
+- **Rejected, with reasons, so nobody re-tries them**: nesting depth (co-linear with branch count,
+  and it saturates — measured peak 9 with a long flat tail); fan-in/fan-out "blast radius" (needs
+  the resolved import graph `lint:arch` already owns; fan-out is lowered by the very facade barrel
+  this gate's message recommends, and fan-in is a property of a file's IMPORTERS, so an author
+  would get a failure they cannot fix locally); complexity-weighted-by-missing-tests (this repo's
+  suites are named by concept, not per source file, so the mapping is a guess — and the guess is
+  gamed by adding a trivial test). The ticket's own suggestion of wiring the gate to a
+  `code-metrics analyze`/`diff` run was also rejected: a merge-blocking gate cannot depend on a
+  composite score this session could not reproduce, nor on two snapshots it has no place to keep.
+- **Not verified by this session**: `pnpm check:arch` as a whole does NOT currently pass, on a
+  `lint:arch` error unrelated to this change —
+  `services-bypass-repositories: packages/server/src/services/issue-comment-retention.service.ts`,
+  an UNTRACKED file belonging to another agent working in this checkout. The god-module half of
+  `check:arch` passes. Re-check once that file lands.
+- **Open**: the 22 baseline entries are a real backlog, and the gate PRINTS (never fails) entries a
+  file has improved past, so they have to be lowered by hand. `runAutoStart` at 55 is more than
+  double the threshold and is the obvious first restructure.

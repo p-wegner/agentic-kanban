@@ -44,6 +44,34 @@ per-provider parsers live in `src/lib/agent-stream/{claude,codex,copilot,pi}.ts`
 in `agent-stream/shared.ts`, all re-exported through the unchanged facade so consumers' imports of
 `@agentic-kanban/shared/lib/agent-stream-parser` don't change.
 
+**Third signal: MAX BRANCH COMPLEXITY OF ONE FUNCTION (#726) — because the other two measure
+SIZE.** A file split moves lines and top-level declarations for free, so a gate made only of
+those two rewards decomposition-for-the-gate. Measured on the tree at #726: the two most
+branch-complex functions in the repo were in files that clear the ceiling comfortably
+(`agent-stream/copilot.ts`, 341 lines, `parseCopilotEvent` at 41 branches) or park just under it
+(`WorkspaceCard.tsx` at 966 lines, 35 branches) — and 13 files sat at 900–999 lines with none
+over 1000, i.e. the ceiling had become a floor. `MAX_FUNCTION_BRANCHES = 25` is checked
+per FUNCTION, not summed per file: a per-file sum is size again, whereas a single function's
+branch count only falls if someone actually restructures it, and relocating a branchy function
+lands it on a path with no baseline entry so the flat threshold catches it there.
+
+Counted: `if`, the three `for` forms, `while`/`do`, each non-default `case`, `catch`, `?:`, plus 1
+for the function (McCabe). **Not counted: `&&`, `||`, `??`** — measured both ways, and including
+them made the metric a proxy for JSX conditional rendering (39 of 253 `.tsx` files over threshold
+vs 3 without; `parseCopilotEvent` read 156 instead of 41) and for defensive `?? fallback`
+defaulting, which is the idiom that makes code safer. Excluded, it separates 22 files from 1426
+instead of smearing 99. Measured distribution: p50 5, p75 9, p90 13, p95 18, p99 28, max 55
+(`runAutoStart` in `startup/monitor-auto-start.ts`). `COMPLEXITY_BASELINE` (in BOTH files,
+parity-checked) grandfathers those 22 shrink-only; the gate PRINTS entries a file has since
+improved past rather than failing them, and a passing run always names the peak and how many
+files are baselined — #726 was filed because a green gate said nothing. Rejected as the new
+dimension: nesting depth (co-linear with this, and it saturates at 9), fan-in/fan-out (needs the
+import graph `lint:arch` already owns; fan-out is lowered by the very facade barrel this gate
+recommends, and fan-in depends on a file's importers so an author could not fix their own
+failure), and complexity-weighted-by-missing-tests (source→test mapping here is a guess, gamed
+by adding a trivial test). Without the `typescript` devDep the complexity signal is SKIPPED and
+says so — branches cannot be approximated by regex.
+
 ## `lib/` is SEVEN kinds, and only one may touch the DB (#590)
 
 `packages/shared/src/lib` holds 143 files that are not one thing. Placement and the
