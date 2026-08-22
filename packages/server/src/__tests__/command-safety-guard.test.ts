@@ -2,6 +2,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
 import { mkdtemp, rm, writeFile, readdir, mkdir } from "node:fs/promises";
+import { statSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -64,7 +66,10 @@ function runGuard(command: string, env: Record<string, string> = {}, cwd: string
     input: JSON.stringify({ tool_input: { command } }),
     encoding: "utf8",
     cwd,
-    env: { ...process.env, ALLOW_DB_DESTROY: "", DB_URL: "", AGENTIC_KANBAN_DIR: "", ...env },
+    // #767: the guard now reads the canonical `KANBAN_DB_URL` too, so it must be cleared
+    // alongside `DB_URL` — otherwise an operator with the documented pin set in their shell
+    // silently redirects every case below at the pinned database.
+    env: { ...process.env, ALLOW_DB_DESTROY: "", KANBAN_DB_URL: "", DB_URL: "", AGENTIC_KANBAN_DIR: "", ...env },
     windowsHide: true,
     timeout: 30_000,
   });
@@ -460,6 +465,139 @@ describe("validate-command-safety — the in-checkout db must clear the #165 flo
     expect(result.blocked).toBe(true);
     expect(result.reason).toContain("is not a regular file");
     expect((await homeBackups()).length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * #767 — the remaining divergences #758 left in place, now closed:
+ *
+ *   1. the #663 board-CONTENT probe was not mirrored, so a migrated-but-EMPTY in-checkout
+ *      leftover (~850 KB — comfortably over the #165 size floor) was still named as "the db in
+ *      use" while the CLI resolver opened the home DB. Strictly narrower than #758 (the backup
+ *      then covers a real file with a real schema), but the block message's one checkable claim
+ *      was wrong again, which is the specific thing #758 was about.
+ *   2. the guard read `process.env.DB_URL` only, never the canonical `KANBAN_DB_URL` that
+ *      db-path.ts prefers — so pinning the database the DOCUMENTED way was ignored and the
+ *      backup covered whatever the candidate search landed on.
+ *
+ * Fixtures are built with `node:sqlite` because only a REAL database distinguishes the two
+ * rejection grounds; `pragma page_size` lifts them over the 12288-byte floor so the floor is
+ * not what decides these cases.
+ */
+describe("validate-command-safety — a real-but-EMPTY in-checkout db is not 'the db in use' (#767)", () => {
+  const RESET_CMD = `pnpm ${"db" + ":reset"}`;
+  let root: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "kanban-guard-content-"));
+    await mkdir(join(root, "packages", "server"), { recursive: true });
+    await mkdir(join(root, "home", ".agentic-kanban"), { recursive: true });
+    await writeFile(join(root, "home", ".agentic-kanban", "kanban.db"), Buffer.alloc(16_384, 1));
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const env = () => ({
+    ...checkoutEnv(root),
+    HOME: join(root, "home"),
+    USERPROFILE: join(root, "home"),
+  });
+
+  const localDb = () => join(root, "packages", "server", "kanban.db");
+  const homeBackups = () => readdir(join(root, "home", ".agentic-kanban", ".db-backups"));
+  const localBackups = () => readdir(join(root, "packages", "server", ".db-backups"));
+
+  /** A real SQLite file over the #165 floor, with `rows` rows in `projects`. */
+  function writeLocalSqlite(rows: number): void {
+    const db = new DatabaseSync(localDb());
+    try {
+      // page_size 16384 puts the file at 32768 bytes, so the size floor never decides here.
+      db.exec("pragma page_size=16384; vacuum; create table projects (id text primary key)");
+      for (let i = 0; i < rows; i++) db.exec(`insert into projects (id) values ('p${i}')`);
+    } finally {
+      db.close();
+    }
+  }
+
+  it("a schema-only (migrated-but-empty) local db resolves to the home fallback", async () => {
+    writeLocalSqlite(0);
+    expect(statSync(localDb()).size).toBeGreaterThanOrEqual(12_288);
+
+    const result = runGuard(RESET_CMD, env(), root);
+
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toContain("resolved via home-fallback");
+    expect(result.reason).toContain(join(root, "home", ".agentic-kanban", "kanban.db"));
+    expect((await homeBackups()).some((f) => /^kanban-.*\.db$/.test(f))).toBe(true);
+    // The empty shadow must not be the thing that got "protected".
+    await expect(localBackups()).rejects.toThrow();
+  });
+
+  it("distinguishes 'no board content' from 'below the floor' in the block message", async () => {
+    writeLocalSqlite(0);
+
+    const result = runGuard(RESET_CMD, env(), root);
+
+    expect(result.reason).toContain(localDb());
+    expect(result.reason).toContain("is NOT the database in use");
+    expect(result.reason).toContain("IS a real database, but holds no board content");
+    expect(result.reason).toContain("#663");
+    // The two diagnoses lead to different remedies, so the floor's wording must NOT appear.
+    expect(result.reason).not.toContain("below the 12288-byte");
+  });
+
+  it("a local db WITH a projects row is still adopted (the normal dev case)", async () => {
+    writeLocalSqlite(1);
+
+    const result = runGuard(RESET_CMD, env(), root);
+
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toContain("resolved via local-checkout");
+    expect(result.reason).not.toContain("is NOT the database in use");
+    expect((await localBackups()).some((f) => /^kanban-.*\.db$/.test(f))).toBe(true);
+  });
+
+  it("an unreadable/corrupt real-sized local db fails OPEN and stays adopted", async () => {
+    // A briefly-locked healthy dev DB must never be demoted to the home fallback on a failed
+    // probe — the guard would then back up the wrong file for a reason unrelated to which
+    // database is real. Non-SQLite bytes are the probe-fails case that is trivially reproducible.
+    await writeFile(localDb(), Buffer.alloc(16_384, 7));
+
+    const result = runGuard(RESET_CMD, env(), root);
+
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toContain("resolved via local-checkout");
+    expect(result.reason).not.toContain("holds no board content");
+    expect((await localBackups()).some((f) => /^kanban-.*\.db$/.test(f))).toBe(true);
+  });
+
+  it("an explicit KANBAN_DB_URL wins over any local candidate", async () => {
+    // A perfectly good local candidate — it must lose to the documented pin, exactly as
+    // db-path.ts's precedence has it (rule 1 beats rule 3).
+    writeLocalSqlite(1);
+    const pinned = join(root, "pinned", "kanban.db");
+    await mkdir(join(root, "pinned"), { recursive: true });
+    await writeFile(pinned, Buffer.alloc(16_384, 1));
+
+    const result = runGuard(RESET_CMD, { ...env(), KANBAN_DB_URL: `file:${pinned.replace(/\\/g, "/")}` }, root);
+
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toContain("resolved via DB_URL");
+    expect(result.reason).toContain(pinned);
+    expect((await readdir(join(root, "pinned", ".db-backups"))).some((f) => /^kanban-.*\.db$/.test(f))).toBe(true);
+    await expect(localBackups()).rejects.toThrow();
+  });
+
+  it("the legacy DB_URL is still honoured when KANBAN_DB_URL is unset", async () => {
+    const pinned = join(root, "legacy", "kanban.db");
+    await mkdir(join(root, "legacy"), { recursive: true });
+    await writeFile(pinned, Buffer.alloc(16_384, 1));
+
+    const result = runGuard(RESET_CMD, { ...env(), DB_URL: `file:${pinned.replace(/\\/g, "/")}` }, root);
+
+    expect(result.reason).toContain(pinned);
   });
 });
 
