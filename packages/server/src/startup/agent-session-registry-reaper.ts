@@ -193,7 +193,12 @@ export async function reapAgentSessionRegistry(
     }
   }
 
-  if (result.scanned > 0) log(formatPassReportBody(result));
+  // Unconditional (#718). The `if (result.scanned > 0)` guard this replaces contradicted
+  // pass-report.ts's own premise — a pass that found nothing must not be indistinguishable
+  // from one that reported nothing — and it also hid the interesting case: a config dir
+  // whose `listFiles` threw is logged per-dir but leaves `scanned` at 0, so the run that
+  // failed to scan anything was the run that printed no summary.
+  log(formatPassReportBody(result));
   return result;
 }
 

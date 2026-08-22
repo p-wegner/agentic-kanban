@@ -58,23 +58,33 @@ export function recordSkipped(report: PassReport, id: string, reason: string): v
 }
 
 /**
- * The pass summary WITHOUT a `[tag]` prefix, for a sweep that logs through an injected
- * `log` (#616 — the injected logger already applies the file's tag, so `formatPassReport`
- * there would double it). Names the unaccounted-for remainder explicitly rather than
- * letting it vanish — `scanned 9, acted 2, skipped 5` silently hides 2 failures.
+ * The pass summary, WITHOUT a `[tag]` prefix. This is the ONLY formatter — the caller owns
+ * the tag (#718).
+ *
+ * There used to be a tagged `formatPassReport(name, report)` wrapper beside it. It had ZERO
+ * production callers and could not have had any, because both ways a pass emits its summary
+ * already own the tag:
+ *
+ *  - a sweep with an injected `log` (born-blocked, node-divergence, session-registry-reaper)
+ *    hands the BODY to a logger that already applies the file's tag (#616) — the wrapper
+ *    would double it; and
+ *  - a sweep logging directly writes `console.log(`[tag] ${formatPassReportBody(r)}`)`,
+ *    because `console-tag-ratchet.test.ts` requires the FIRST ARGUMENT of a `console.*` call
+ *    to open with a literal `[`. Passing `formatPassReport("tag", r)` there is untagged as
+ *    far as that ratchet can see, so adopting the wrapper would have pushed its two-sided
+ *    baseline up by one per site.
+ *
+ * So the guard forced a helper into existence that no production site could call — the
+ * 0-non-test-caller defect #591/#705 exist to catch. Deleting it is the honest fix; the
+ * caller-owns-the-tag rule is what both the tag convention and the ratchet already require.
+ *
+ * Names the unaccounted-for remainder explicitly rather than letting it vanish —
+ * `scanned 9, acted 2, skipped 5` silently hides 2 failures.
  */
 export function formatPassReportBody(report: PassReport): string {
   const unaccounted = report.scanned - report.acted - report.skipped;
   const tail = unaccounted > 0 ? `, ${unaccounted} unaccounted` : "";
   return `scanned ${report.scanned}, acted ${report.acted}, skipped ${report.skipped}${tail}`;
-}
-
-/**
- * One log line for a pass, tagged. For a sweep with no injected logger; a sweep that HAS
- * one passes `formatPassReportBody` to it instead.
- */
-export function formatPassReport(name: string, report: PassReport): string {
-  return `[${name}] ${formatPassReportBody(report)}`;
 }
 
 /** Reasons grouped by reason string — what a monitor or digest actually wants. */

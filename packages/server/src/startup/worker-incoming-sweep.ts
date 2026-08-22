@@ -101,11 +101,16 @@ export async function sweepIncomingWorkerRefs(database: Database = realDb): Prom
       }
     }
   }
-  if (result.landed.length > 0 || result.held.length > 0) {
-    // #689: the report body names the unaccounted remainder — a branch whose sync threw
-    // outside the per-branch handling above would otherwise vanish between "landed" and
-    // "held". Tag stays a literal first argument (#616).
-    console.log(`[worker-sweep] ${formatPassReportBody(result)}`);
-  }
+  // #689: the report body names the unaccounted remainder — a branch whose sync threw
+  // outside the per-branch handling above would otherwise vanish between "landed" and
+  // "held". Tag stays a literal first argument (#616).
+  //
+  // UNCONDITIONAL (#718). This used to be guarded by `landed.length > 0 || held.length > 0`,
+  // which suppressed the line in exactly the case the comment above describes: a branch that
+  // was scanned and then threw is in neither list, so the one run whose remainder needed
+  // naming was the one that printed nothing. `PassReport` exists because "a pass that found
+  // nothing is indistinguishable from one that reported nothing" — a `scanned 0` line is the
+  // report, not noise.
+  console.log(`[worker-sweep] ${formatPassReportBody(result)}`);
   return result;
 }
