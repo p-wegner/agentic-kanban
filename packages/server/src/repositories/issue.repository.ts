@@ -58,6 +58,9 @@ export async function initializeProjectStatuses(
   //
   // Insert only the names the project does not already have, and return ids for ALL of them:
   // the caller wants the project's status map, not a record of what this call happened to write.
+  // Order-INDEPENDENT (#773): only a Set of names and an id-by-name record are built from
+  // this. (The load-bearing "first status" read lives in `resolveNewIssueDefaults` below,
+  // which carries its own explicit ORDER BY.)
   const existing = await listProjectStatusIdNames(projectId, database);
   const existingNames = new Set(existing.map((row) => row.name));
 

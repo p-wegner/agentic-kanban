@@ -18,6 +18,8 @@ export async function getProjectStatusRows(
   projectId: string,
   database: Database = db,
 ) {
+  // Order-INDEPENDENT (#773): the caller reduces these to a Set of terminal status ids and
+  // a Map<id, name>; neither reads a position.
   return listProjectStatusIdNames(projectId, database);
 }
 

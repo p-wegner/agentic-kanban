@@ -41,6 +41,8 @@ export async function getProjectStatusList(
   projectId: string,
   database: Database = db,
 ): Promise<{ id: string; name: string }[]> {
+  // Order-INDEPENDENT (#773): fetchEligibleIssues filters by name against
+  // BACKLOG_STATUS_NAMES and feeds the ids to an `inArray`, which is order-blind.
   return listProjectStatusIdNames(projectId, database);
 }
 

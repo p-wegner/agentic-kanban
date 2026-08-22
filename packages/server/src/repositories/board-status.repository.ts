@@ -37,12 +37,18 @@ export async function getAutoMergePreferences(
     .where(inArray(preferences.key, ["auto_merge", "auto_merge_in_review"]));
 }
 
-/** Project statuses (id/name), ordered by sortOrder. */
+/**
+ * Project statuses (id/name), ordered by sortOrder.
+ *
+ * ORDER-DEPENDENT (#773): these are the board's columns as a human reads them, left to
+ * right. `listProjectStatusIdNames` orders unconditionally, so the `{ ordered: true }`
+ * this used to pass is gone rather than moved.
+ */
 export async function getBoardStatusStatuses(
   projectId: string,
   database: Database = db,
 ) {
-  return listProjectStatusIdNames(projectId, database, { ordered: true });
+  return listProjectStatusIdNames(projectId, database);
 }
 
 /** Issues with status names + current workflow node type (LEFT JOIN for non-workflow issues). */

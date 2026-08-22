@@ -81,6 +81,8 @@ export async function getProjectStatusIdsAndNames(
   projectId: string,
   database: Database = db,
 ) {
+  // Order-INDEPENDENT (#773): the caller filters to name === "Archived" and keeps the ids
+  // as a set, so no consumer ever reads position 0 or renders the list.
   return listProjectStatusIdNames(projectId, database);
 }
 
