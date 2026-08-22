@@ -118,14 +118,19 @@ export async function scanTransportFeatures(repoPath: string): Promise<Transport
  * filesystem-sharing worker needs no transport at all, which is why the caller only
  * asks on the true-remote path.
  */
-export async function remoteDispatchBlockedByRepoShape(params: {
+export async function remoteDispatchBlockedByRepoShape(opts: {
   projectId: string;
   repoPath: string;
   database?: Database;
   /** Test seam: an `unknown` scan is otherwise only reachable from a broken git. */
   scan?: (repoPath: string) => Promise<TransportFeatureScan>;
 }): Promise<TransportVerdict> {
-  const { projectId, repoPath, database = realDb, scan = scanTransportFeatures } = params;
+  const { projectId, repoPath, scan = scanTransportFeatures } = opts;
+  // `opts.database ?? realDb` is one of the two sanctioned injection spellings (#604). The
+  // destructure-with-default form this replaced is grandfathered shrink-only, so a new one
+  // fails the wiring ratchet. (Spelling it out here would ALSO fail it — that regex counts
+  // prose as an instance, see #779.)
+  const database = opts.database ?? realDb;
 
   let siblings: Array<{ name: string | null; path: string }>;
   try {
