@@ -20,6 +20,7 @@ import {
   type WorkerCheckout,
 } from "./worker-repo.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { resolveSpecCommand } from "./worker-command-resolver.js";
 
 export type SendToBoard = (message: WorkerToBoardMessage) => void;
 
@@ -179,16 +180,27 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     }
     exited.delete(sessionId);
 
+    // #747: the board no longer decides how to invoke the agent on a machine it cannot
+    // see. When the spec carries a launch INTENT, the executable and the shell decision are
+    // resolved HERE, against this platform — which is what makes a mixed-OS fleet possible.
+    const launch = resolveSpecCommand(spec);
+    if (spec.intent) {
+      console.log(
+        `[worker] resolved launch intent: sessionId=${sessionId} provider=${spec.intent.provider} ` +
+        `program=${spec.intent.program} -> ${launch.command} (${launch.source}, shell=${launch.useShell})`,
+      );
+    }
+
     let proc: ChildProcess;
     try {
-      proc = spawn(spec.command, spec.args, {
+      proc = spawn(launch.command, spec.args, {
         cwd: spec.cwd,
         // #244: MERGE the board's (allowlisted, non-secret) wiring over THIS
         // machine's environment — never replace it. The worker authenticates its
         // agent with its own local login, so HOME/USERPROFILE/PATH and the
         // provider config dir must stay this machine's (decision 012).
         env: { ...process.env, ...spec.env },
-        shell: spec.useShell ?? false,
+        shell: launch.useShell,
         windowsHide: true,
         stdio: ["pipe", "pipe", "pipe"],
       });
@@ -197,7 +209,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
       return;
     }
     processes.set(sessionId, proc);
-    console.log(`[worker] launched agent: sessionId=${sessionId} pid=${proc.pid} command=${spec.command}`);
+    console.log(`[worker] launched agent: sessionId=${sessionId} pid=${proc.pid} command=${launch.command}`);
 
     // Every byte of agent output proves liveness, so it resets the silence
     // watchdog armed below.
