@@ -190,4 +190,71 @@ describe("worker git transport e2e (phase 2)", () => {
       rmSync(secondAgent, { force: true });
     }
   }, 90000);
+
+  // #743 — THE case the two above could not see. They pass a `worktreePath` that is never
+  // created, so the branch is checked out nowhere and the ref-only `update-ref` sync works.
+  // A real workspace is the opposite: `POST /api/workspaces` carves the worktree (and
+  // therefore checks the branch out) before placement is even resolved, and the ref sync is
+  // refused for every genuine remote build. Before the fix this test failed with
+  // "Worker result could not be landed" and exit 1, and the branch stayed at base.
+  it("lands the result even though a REAL board worktree holds the branch", async () => {
+    const branch = "feature/ak-743-worktree-held";
+    const sessionId = `sess-${randomUUID()}`;
+    const worktreePath = join(repoDir, ".worktrees", "ak-743");
+    // Exactly what workspace creation does: a worktree with the feature branch attached.
+    await gitExecOrThrow(["worktree", "add", "-b", branch, worktreePath, "master"], { cwd: repoDir });
+    const baseSha = (await gitExecOrThrow(["rev-parse", `refs/heads/${branch}`], { cwd: repoDir })).trim();
+
+    const agent = join(tmpdir(), `mock-agent-git3-${randomUUID()}.cjs`);
+    writeFileSync(
+      agent,
+      `const { execFileSync } = require("child_process");
+       const fs = require("fs");
+       fs.writeFileSync("held-branch-output.txt", "landed into a held branch\\n");
+       const g = (...a) => execFileSync("git", a, { stdio: "pipe" });
+       g("config", "user.email", "worker@test"); g("config", "user.name", "Worker");
+       g("add", "."); g("commit", "-m", "work for a branch the board has checked out");
+       console.log("AGENT-DONE");`,
+    );
+    const events: AgentOutputEvent[] = [];
+    try {
+      dispatch.launch({
+        worktreePath,
+        sessionId,
+        prompt: "do the held-branch ticket",
+        agentArgs: undefined,
+        onOutput: (e) => events.push(e),
+        agentCommand: `node ${agent}`,
+        keepAlive: false,
+        placement: {
+          kind: "remote",
+          workerId: daemon.workerId,
+          repo: { projectId: PROJECT_ID, repoPath: repoDir, branch, baseBranch: "master" },
+        },
+      });
+      await vi.waitFor(() => expect(events.some((e) => e.type === "exit")).toBe(true), { timeout: 60000 });
+
+      const stderr = events.filter((e) => e.type === "stderr").map((e) => e.data).join("");
+      expect(stderr).not.toContain("could not be landed");
+      expect(events.find((e) => e.type === "exit")!.exitCode).toBe(0);
+
+      // The REAL branch advanced past the base — so diff/review/merge see the work.
+      const tip = (await gitExecOrThrow(["rev-parse", `refs/heads/${branch}`], { cwd: repoDir })).trim();
+      expect(tip).not.toBe(baseSha);
+      const file = await gitExecOrThrow(["show", `refs/heads/${branch}:held-branch-output.txt`], { cwd: repoDir });
+      expect(file).toContain("landed into a held branch");
+      // The board worktree that HOLDS the branch was fast-forwarded with it, so its HEAD,
+      // index and working tree agree with the branch (a bare `update-ref` would not).
+      expect((await gitExecOrThrow(["rev-parse", "HEAD"], { cwd: worktreePath })).trim()).toBe(tip);
+      expect(existsSync(join(worktreePath, "held-branch-output.txt"))).toBe(true);
+      const status = await gitExecOrThrow(["status", "--porcelain"], { cwd: worktreePath });
+      expect(status.trim()).toBe("");
+      // The staging ref is cleared once it has landed.
+      const incoming = await gitExec(["rev-parse", "--verify", incomingRefFor(branch)], { cwd: repoDir });
+      expect(incoming.code).not.toBe(0);
+    } finally {
+      await gitExec(["worktree", "remove", "--force", worktreePath], { cwd: repoDir });
+      rmSync(agent, { force: true });
+    }
+  }, 90000);
 });
