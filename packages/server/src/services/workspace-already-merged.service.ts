@@ -17,6 +17,7 @@ import {
   type GitService,
 } from "./workspace-internals.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
 import { releaseWorkspaceResources } from "./workspace-resource-release.js";
 
 export type AlreadyMergedCheck = {
@@ -301,7 +302,15 @@ export async function reconcileAlreadyMerged(
     // Stack + container BEFORE the worktree is removed, like every other end path —
     // reconcile-already-merged previously leaked both (#F4, #576).
     await releaseWorkspaceResources({ ...workspace, id }, { phase: "reconcile-already-merged" });
-    try { await gitService.removeWorktree(repoPath, workspace.workingDir); } catch { /* non-fatal */ }
+    // #713: co-residency (#394) is supported — reconciling one co-resident as merged must
+    // not delete the live sharer's checkout. Non-fatal either way, as before.
+    await removeWorktreeUnlessShared({
+      database,
+      workingDir: workspace.workingDir,
+      workspaceId: id,
+      label: "merge:reconcile-already-merged",
+      removeWorktree: () => gitService.removeWorktree(repoPath, workspace.workingDir!),
+    });
   }
 
   // Multi-repo (#114/#115, unified in #168): the reconciler agent hand-merged BOTH the leading

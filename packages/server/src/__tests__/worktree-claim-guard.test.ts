@@ -16,6 +16,8 @@ import { randomUUID } from "node:crypto";
 import { describe, it, expect, vi } from "vitest";
 import { issues, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
+import { cleanupMergedWorktreeAndBranch } from "../services/merge-executor.service.js";
+import type { GitService } from "../services/workspace-internals.js";
 import {
   findLiveWorktreeSharers,
   removeWorktreeUnlessShared,
@@ -220,5 +222,63 @@ describe("removeWorktreeUnlessShared — the co-residency delete guard", () => {
 
     expect(await findLiveWorktreeSharers(db, dir, { excludeWorkspaceId: id })).toHaveLength(0);
     expect(await findLiveWorktreeSharers(db, dir)).toHaveLength(1);
+  });
+});
+
+describe("cleanupMergedWorktreeAndBranch — the post-merge delete path (#673 at 1 of 5)", () => {
+  function fakeGit(): GitService {
+    return {
+      removeWorktree: vi.fn(async () => {}),
+      deleteBranch: vi.fn(async () => {}),
+    } as unknown as GitService;
+  }
+
+  it("does NOT remove the worktree when a live workspace co-resides in it", async () => {
+    const { db } = createTestDb();
+    const issueId = await seedIssue(db);
+    const dir = "/tmp/claim-repo/.worktrees/ak-20";
+    const mergedId = await seedWorkspace(db, issueId, "closed", dir);
+    await seedWorkspace(db, issueId, "active", dir);
+    const gitService = fakeGit();
+    const onRemoveWorktreeError = vi.fn();
+
+    await cleanupMergedWorktreeAndBranch({
+      repoPath: "/tmp/claim-repo",
+      workingDir: dir,
+      branch: "feature/ak-20",
+      gitService,
+      database: db,
+      workspaceId: mergedId,
+      onRemoveWorktreeError,
+    });
+
+    expect(gitService.removeWorktree).not.toHaveBeenCalled();
+    // The refusal is REPORTED, not swallowed — it reaches the caller's warning hook.
+    expect(onRemoveWorktreeError).toHaveBeenCalledOnce();
+    // The branch delete is unaffected: it is not the co-resident's resource.
+    expect(gitService.deleteBranch).toHaveBeenCalledOnce();
+  });
+
+  it("removes the worktree when the only other sharer is terminal", async () => {
+    const { db } = createTestDb();
+    const issueId = await seedIssue(db);
+    const dir = "/tmp/claim-repo/.worktrees/ak-21";
+    const mergedId = await seedWorkspace(db, issueId, "closed", dir);
+    await seedWorkspace(db, issueId, "closed", dir);
+    const gitService = fakeGit();
+    const onRemoveWorktreeError = vi.fn();
+
+    await cleanupMergedWorktreeAndBranch({
+      repoPath: "/tmp/claim-repo",
+      workingDir: dir,
+      branch: "feature/ak-21",
+      gitService,
+      database: db,
+      workspaceId: mergedId,
+      onRemoveWorktreeError,
+    });
+
+    expect(gitService.removeWorktree).toHaveBeenCalledOnce();
+    expect(onRemoveWorktreeError).not.toHaveBeenCalled();
   });
 });

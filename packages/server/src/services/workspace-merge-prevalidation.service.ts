@@ -18,6 +18,7 @@ import {
 import { finalizeMergeCleanup } from "./merge-cleanup.service.js";
 import { cleanupSiblingWorktrees, executeSiblingMerges, type SiblingMergeResult } from "./workspace-repos.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
 import { releaseWorkspaceResources } from "./workspace-resource-release.js";
 
 export type MergeWarning = { step: string; message: string; recoverable: true };
@@ -197,10 +198,22 @@ async function reconcileAlreadyMergedRetry(args: {
       { killDir: args.killProcesses },
     );
     await args.killWorktreeProcesses(workspace.workingDir, "merge:already-merged");
-    try {
-      await gitService.removeWorktree(repoPath, workspace.workingDir);
-    } catch (err) {
-      addRecoverableWarning(warnings, "remove-worktree", err);
+    // #713: co-residency (#394) is supported — never delete a directory another LIVE
+    // workspace still names as its workingDir. #673 added this only to the stale-worktree
+    // path; the already-merged resolution removes the same directory and had no check.
+    const removal = await removeWorktreeUnlessShared({
+      database,
+      workingDir: workspace.workingDir,
+      workspaceId: id,
+      label: "merge:already-merged",
+      removeWorktree: () => gitService.removeWorktree(repoPath, workspace.workingDir!),
+    });
+    if (!removal.removed) {
+      addRecoverableWarning(
+        warnings,
+        "remove-worktree",
+        removal.reason === "remove-failed" ? removal.error : new Error(removal.message),
+      );
     }
   }
 
