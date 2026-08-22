@@ -29,6 +29,7 @@ import { releaseWorkspaceResources } from "./workspace-resource-release.js";
 import { resolveProjectDevServerPlan } from "./dev-server.service.js";
 import { isSelfProjectRepo } from "./self-project.js";
 import type { WorkspaceDevServerPlanResponse } from "@agentic-kanban/shared";
+import { resolveWorktreeClaims } from "@agentic-kanban/shared/lib/worktree-claim";
 
 export function createWorkspaceCrudService(deps: {
   database: Database;
@@ -217,7 +218,12 @@ export function createWorkspaceCrudService(deps: {
     const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
     console.log(`[workspace-service] setup: workspaceId=${id} branch=${workspace.branch} repoPath=${repoPath} baseBranch=${baseBranch}`);
 
-    const worktreePath = await gitService.createWorktree(repoPath, workspace.branch, baseBranch);
+    // #713: this is #699's OWN scenario — recreating a worktree for a workspace whose
+    // directory went missing — and it was the one path that never got the guard, so the
+    // recursive leftover-delete ran on git's word alone.
+    const worktreePath = await gitService.createWorktree(repoPath, workspace.branch, baseBranch, {
+      ...(await resolveWorktreeClaims(database, { label: "setup-workspace" })),
+    });
     console.log(`[workspace-service] setup complete: workspaceId=${id} worktreePath=${worktreePath}`);
 
     const now = new Date().toISOString();

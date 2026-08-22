@@ -124,4 +124,25 @@ describe("createWorktree never deletes a LIVE worktree (#699)", () => {
     expect(existsSync(join(leftover, "stale.txt"))).toBe(false);
     expect(existsSync(join(wt, "app.txt"))).toBe(true);
   }, GIT_IO_TIMEOUT_MS);
+
+  /**
+   * #713 — the guard is FAIL-CLOSED. A predicate that throws (a DB hiccup surfacing through
+   * the port) used to propagate as "not claimed" via `?? false`, i.e. as a green light for
+   * the recursive delete. The asymmetry is the whole argument: a wrong "claimed" costs a
+   * suffixed directory, a wrong "not claimed" costs an agent's uncommitted work.
+   */
+  it("refuses the delete when the claim predicate THROWS instead of answering", async () => {
+    const leftover = join(parent, ".worktrees", "app", "ak-1001");
+    await mkdir(leftover, { recursive: true });
+    await writeFile(join(leftover, "maybe-live.txt"), WORK);
+
+    const wt = await createWorktree(repo, "feature/ak-1001-fresh", "main", {
+      isPathClaimed: () => {
+        throw new Error("database is locked");
+      },
+    });
+
+    expect(resolve(wt)).not.toBe(resolve(leftover));
+    expect(existsSync(join(leftover, "maybe-live.txt"))).toBe(true);
+  }, GIT_IO_TIMEOUT_MS);
 });

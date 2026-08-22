@@ -20,6 +20,7 @@ import {
   updateIssueStatus,
   updateWorkspaceStatus,
 } from "../repositories/followup-workspace.repository.js";
+import { resolveWorktreeClaims } from "@agentic-kanban/shared/lib/worktree-claim";
 
 /** Issues carrying this tag are an explicit opt-out of monitor/cascade auto-start. */
 const SKIP_AUTO_START_TAG = "no-auto-start";
@@ -92,7 +93,10 @@ export async function autoStartFollowups(
       const wsId = randomUUID();
       const now = new Date().toISOString();
 
-      const worktreePath = await gitService.createWorktree(project[0].repoPath, branch, project[0].defaultBranch);
+      // #713: DB-backed claim guard — see resolveWorktreeClaims.
+      const worktreePath = await gitService.createWorktree(project[0].repoPath, branch, project[0].defaultBranch, {
+        ...(await resolveWorktreeClaims(database, { label: "followup" })),
+      });
 
       await insertFollowupWorkspace({
         id: wsId,

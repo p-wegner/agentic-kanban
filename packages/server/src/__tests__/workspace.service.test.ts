@@ -276,6 +276,22 @@ describe("workspace.service", () => {
       const gitService = createFakeGitService();
       const sessionManager = createMockSessionManager();
 
+      // A live workspace already holding a worktree — the thing the #699/#713 claim port
+      // exists to protect. Seeded BEFORE the call, because the predicate handed to
+      // createWorktree is a snapshot taken at provisioning time.
+      const liveSharerDir = "/tmp/test-repo/.worktrees/ak-999";
+      const nowSeed = new Date().toISOString();
+      await db.insert(workspaces).values({
+        id: randomUUID(),
+        issueId,
+        branch: "feature/ak-999-live",
+        status: "active",
+        workingDir: liveSharerDir,
+        isDirect: false,
+        createdAt: nowSeed,
+        updatedAt: nowSeed,
+      });
+
       const service = createWorkspaceService({
         database: db,
         getSessionManager: () => sessionManager,
@@ -303,6 +319,15 @@ describe("workspace.service", () => {
         "main",
         expect.objectContaining({ isPathClaimed: expect.any(Function) }),
       );
+      // …and that the predicate ACTUALLY ANSWERS (#713). `expect.any(Function)` is satisfied
+      // by `() => false`, which is exactly the un-wired default it was meant to catch, so the
+      // shape assertion above cannot tell "wired" from "wired and permanently answering no".
+      // The live workspace seeded before the call must come back claimed; an unrelated leaf
+      // must not.
+      const claimOpts = vi.mocked(gitService.createWorktree).mock.calls.at(-1)?.[3] as
+        { isPathClaimed?: (p: string) => boolean } | undefined;
+      expect(claimOpts?.isPathClaimed?.(liveSharerDir)).toBe(true);
+      expect(claimOpts?.isPathClaimed?.("/tmp/test-repo/.worktrees/nobody-lives-here")).toBe(false);
       // Agent launch happened (deferred — flush the provision+launch chain first)
       await flushDeferred();
       expect(sessionManager.startSession).toHaveBeenCalledOnce();

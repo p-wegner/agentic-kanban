@@ -17,6 +17,7 @@ import { runMergeCore } from "./merge-executor.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { getPreference } from "../repositories/preferences.repository.js";
+import { resolveWorktreeClaims } from "@agentic-kanban/shared/lib/worktree-claim";
 
 /**
  * Resolve the subset of a project's ADDITIONAL repos that a workspace should span,
@@ -387,6 +388,9 @@ export async function provisionSiblingWorktrees(params: {
   // error it hit; nothing throws out of the map, because a rejection racing other in-flight
   // creations would leave those worktrees on disk with no one holding a reference to remove
   // them — the orphan-debris failure #630 describes, arriving via the rollback path.
+  // #713: one DB snapshot for the whole fan-out, not one per repo — the claim set does not
+  // change while these worktrees are being cut.
+  const claimGuard = await resolveWorktreeClaims(database, { label: "sibling-worktree" });
   type Outcome = { ok: true; sibling: SiblingWorktree; repo: RepoRow } | { ok: false; err: unknown };
   const outcomes = await mapBounded(projectRepos, SIBLING_WORKTREE_CONCURRENCY, async (repo): Promise<Outcome> => {
     try {
@@ -414,7 +418,9 @@ export async function provisionSiblingWorktrees(params: {
       }
       const baseCommitSha = await gitService.revParse(repo.path, baseBranch);
       // No pathNamespace: createWorktree already namespaces by basename(repo.path).
-      const worktreePath = await gitService.createWorktree(repo.path, branch, baseBranch);
+      // #713: pass the DB's live-working-dir view so createWorktree's leftover-cleanup
+      // cannot rm -rf a sibling worktree another live workspace is working in.
+      const worktreePath = await gitService.createWorktree(repo.path, branch, baseBranch, claimGuard);
       return {
         ok: true,
         repo,

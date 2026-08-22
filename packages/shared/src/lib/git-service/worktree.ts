@@ -139,7 +139,16 @@ export async function createWorktree(
   // guard below is evaluated against a list this function itself just emptied. That is
   // not hypothetical: it is reproducible, and it deleted two live worktrees on the dev
   // board (ak-697, ak-670) along with their uncommitted work.
-  const registeredBeforePrune = await listWorktrees(repoPath).catch(() => []);
+  //
+  // A FAILED read is not an empty one (#713). `.catch(() => [])` made a git hiccup
+  // indistinguishable from "git knows of no worktrees", and that difference decides a
+  // recursive delete: an empty list green-lights it. Record the failure and let the
+  // leftover-cleanup below refuse instead.
+  let prePruneListFailed = false;
+  const registeredBeforePrune = await listWorktrees(repoPath).catch(() => {
+    prePruneListFailed = true;
+    return [] as Awaited<ReturnType<typeof listWorktrees>>;
+  });
 
   // Prune stale worktree references (directories deleted but git still tracks them).
   // This is critical on Windows where locked directories can survive removal.
@@ -205,8 +214,26 @@ export async function createWorktree(
     // Claimed by the DB — covers a registration lost in an EARLIER call, which the
     // pre-prune capture cannot see. A directory a live workspace is working in is never
     // a leftover, whatever git thinks.
-    const claimedByLiveWorkspace = opts.isPathClaimed?.(worktreePath) ?? false;
-    if (!claimedByThisRepo && !claimedByLiveWorkspace && !(await isForeignCheckout(repoPath, worktreePath))) {
+    // A caller that CAN answer this from the DB but whose read threw hands back a
+    // predicate that answers `true` for everything (see `resolveWorktreeClaims`), so a DB
+    // hiccup lands here as "claimed" rather than as silence.
+    let claimedByLiveWorkspace: boolean;
+    try {
+      claimedByLiveWorkspace = opts.isPathClaimed?.(worktreePath) ?? false;
+    } catch {
+      // A predicate that throws is not evidence the path is free (#713).
+      claimedByLiveWorkspace = true;
+    }
+    // #713: an unreadable git view is not a clean bill of health either. When the
+    // pre-prune listing failed we cannot tell a leftover from a live worktree whose
+    // `.git` went unreadable — the exact case #699 exists for — so refuse the recursive
+    // delete and take the numeric-suffix alternative path below instead.
+    if (
+      !claimedByThisRepo
+      && !claimedByLiveWorkspace
+      && !prePruneListFailed
+      && !(await isForeignCheckout(repoPath, worktreePath))
+    ) {
       // Break junctions first (top-level + nested) so the recursive delete cannot
       // traverse a Windows junction into a main checkout's shared store (#518/#780).
       await breakJunctionsRecursively(worktreePath).catch(() => undefined);
