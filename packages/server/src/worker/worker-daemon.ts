@@ -464,6 +464,12 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
         case "stop":
           runner.stop(message.sessionId);
           break;
+        case "sync_repo":
+          runner.repoOp("sync", message.sessionId, message.requestId, message.auth);
+          break;
+        case "push_head":
+          runner.repoOp("push", message.sessionId, message.requestId, message.auth);
+          break;
       }
     });
 

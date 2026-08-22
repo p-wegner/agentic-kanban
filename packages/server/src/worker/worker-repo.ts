@@ -17,7 +17,12 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { gitExec, gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
-import { isBareFileName, type WorkerRepoTransport } from "@agentic-kanban/shared/lib/worker-protocol";
+import {
+  isBareFileName,
+  type WorkerRepoOpAuth,
+  type WorkerRepoOpStatus,
+  type WorkerRepoTransport,
+} from "@agentic-kanban/shared/lib/worker-protocol";
 import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 
 export function defaultWorkerWorkRoot(): string {
@@ -159,6 +164,145 @@ export async function pushWorkerResult(
     timeout: 10 * 60 * 1000,
     env: gitAuthEnv(repo),
   });
+}
+
+/** Outcome of a mid-session repo operation in a worker checkout (#783, #784). */
+export interface WorkerRepoOpOutcome {
+  ok: boolean;
+  status: WorkerRepoOpStatus;
+  sha?: string;
+  error?: string;
+}
+
+/**
+ * The URL + auth for a mid-session operation, built from the FRESH per-request token
+ * (#783). The assignment's own token is expiring and a board restart invalidates it
+ * (#775), so the request's token is what travels — `branch`/`incomingRef` come with it so
+ * a stale stored transport can never redirect the operation.
+ */
+function opTransport(auth: WorkerRepoOpAuth): WorkerRepoTransport {
+  return {
+    projectId: auth.projectId,
+    gitPort: auth.gitPort,
+    gitToken: auth.gitToken,
+    branch: auth.branch,
+    // Never used by a mid-session operation — a sync is relative to the session's own
+    // branch and a push aims at the incoming ref. Present only to satisfy the shape.
+    baseBranch: auth.branch,
+    incomingRef: auth.incomingRef,
+  };
+}
+
+/**
+ * Pull the BOARD's current tip of the session's branch into the worker's live checkout
+ * (#783).
+ *
+ * Between two turns of a remote session the board may have rebased the branch
+ * (`update-base`), landed a fix-and-merge commit, or committed a review fix — all of which
+ * exist only board-side. Without this, the second turn runs against the tree the session
+ * cloned and can rebuild on the wrong base.
+ *
+ * FAST-FORWARD ONLY, and deliberately in a shape that cannot lose work:
+ *  - no `reset --hard`, so the agent's uncommitted edits are never discarded;
+ *  - no `--force`, no `--rebase`, no `--autostash`;
+ *  - a checkout whose HEAD is not an ancestor of the board's tip is reported `diverged`
+ *    and left exactly as it is, which is the same contract `worker-remote-sync.service.ts`
+ *    applies board-side;
+ *  - a `merge --ff-only` that git refuses because it would overwrite local changes is
+ *    reported `dirty-held`, not retried with force.
+ */
+export async function syncWorkerCheckout(
+  boardUrl: string,
+  auth: WorkerRepoOpAuth,
+  checkout: WorkerCheckout,
+): Promise<WorkerRepoOpOutcome> {
+  const repo = opTransport(auth);
+  const gitUrl = composeGitUrl(boardUrl, repo);
+  const authEnv = gitAuthEnv(repo);
+  const remoteRef = `refs/remotes/origin/${auth.branch}`;
+  const fetched = await gitExec(
+    ["fetch", gitUrl, `+refs/heads/${auth.branch}:${remoteRef}`],
+    { cwd: checkout.cwd, timeout: 5 * 60 * 1000, env: authEnv },
+  );
+  if (!execSucceeded(fetched)) {
+    const detail = (fetched.stderr || fetched.stdout).trim().slice(-400);
+    // A branch the board no longer has is `missing`, not a transport error: the board
+    // must be able to tell "I cannot reach you" from "there is nothing to sync to".
+    const status: WorkerRepoOpStatus = /couldn't find remote ref|not our ref/i.test(detail)
+      ? "missing"
+      : "error";
+    return { ok: false, status, error: `fetch of ${auth.branch} failed: ${detail}` };
+  }
+  const target = await gitExec(["rev-parse", "--verify", `${remoteRef}^{commit}`], { cwd: checkout.cwd });
+  if (!execSucceeded(target)) {
+    return { ok: false, status: "missing", error: `board has no ${auth.branch} to sync to` };
+  }
+  const sha = target.stdout.trim();
+  const head = await gitExec(["rev-parse", "HEAD"], { cwd: checkout.cwd });
+  if (!execSucceeded(head)) {
+    return { ok: false, status: "error", error: `could not read HEAD in ${checkout.cwd}` };
+  }
+  if (head.stdout.trim() === sha) return { ok: true, status: "unchanged", sha };
+  const ancestor = await gitExec(["merge-base", "--is-ancestor", "HEAD", sha], { cwd: checkout.cwd });
+  if (!execSucceeded(ancestor)) {
+    return {
+      ok: false,
+      status: "diverged",
+      error:
+        `the worker checkout (${head.stdout.trim().slice(0, 8)}) is not an ancestor of the board's ` +
+        `${auth.branch} (${sha.slice(0, 8)}); refusing to fast-forward — this needs a human`,
+    };
+  }
+  const merged = await gitExec(["merge", "--ff-only", sha], { cwd: checkout.cwd });
+  if (!execSucceeded(merged)) {
+    return {
+      ok: false,
+      status: "dirty-held",
+      error:
+        `fast-forward to ${sha.slice(0, 8)} was refused (most likely local changes the agent ` +
+        `has not committed): ${(merged.stderr || merged.stdout).trim().slice(-400)}`,
+    };
+  }
+  console.log(`[worker] checkout fast-forwarded to ${sha.slice(0, 8)} for ${auth.branch}`);
+  return { ok: true, status: "updated", sha };
+}
+
+/**
+ * Push the checkout's CURRENT HEAD to the incoming ref mid-session (#784), so the board
+ * can show a diff before the agent exits.
+ *
+ * Cheap and non-disturbing by construction: it reads HEAD and pushes, and touches neither
+ * the index nor the working tree, so the running agent cannot observe it. Force is correct
+ * for the same reason it is in {@link pushWorkerResult} — the incoming namespace is a
+ * board-owned staging slot for exactly this branch — and the BOARD's landing is still
+ * fast-forward only, so a force here can never rewrite history the board has accepted.
+ *
+ * Only COMMITTED work travels. The worker will not commit on the agent's behalf, so a
+ * mid-session diff shows what the agent has committed, not its working tree.
+ */
+export async function pushWorkerHead(
+  boardUrl: string,
+  auth: WorkerRepoOpAuth,
+  checkout: WorkerCheckout,
+): Promise<WorkerRepoOpOutcome> {
+  const repo = opTransport(auth);
+  const head = await gitExec(["rev-parse", "HEAD"], { cwd: checkout.cwd });
+  if (!execSucceeded(head)) {
+    return { ok: false, status: "error", error: `could not read HEAD in ${checkout.cwd}` };
+  }
+  const sha = head.stdout.trim();
+  const pushed = await gitExec(
+    ["push", "--force", composeGitUrl(boardUrl, repo), `HEAD:${auth.incomingRef}`],
+    { cwd: checkout.cwd, timeout: 5 * 60 * 1000, env: gitAuthEnv(repo) },
+  );
+  if (!execSucceeded(pushed)) {
+    return {
+      ok: false,
+      status: "error",
+      error: `mid-session push to ${auth.incomingRef} failed: ${(pushed.stderr || pushed.stdout).trim().slice(-400)}`,
+    };
+  }
+  return { ok: true, status: "pushed", sha };
 }
 
 /** Best-effort teardown of the per-session worktree (cache clone stays). */

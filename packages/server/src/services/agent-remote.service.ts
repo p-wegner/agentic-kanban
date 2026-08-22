@@ -51,6 +51,8 @@ import { listAgentSkills } from "../repositories/agent-skill.repository.js";
 import { REMOTE_SESSION_ABANDON_MS } from "./remote-session-liveness.js";
 import { WORKER_HEARTBEAT_STALE_MS } from "./worker-registry.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { getProjectByRepoPath } from "../repositories/project.repository.js";
+import type { WorkerRepoOpKind, WorkerRepoOpResult } from "@agentic-kanban/shared/lib/worker-protocol";
 
 /**
  * How long a disconnected worker may be silent before the board REPORTS the gap.
@@ -82,7 +84,7 @@ interface RemoteSession {
   onOutput: AgentOutputCallback;
   stdinOpen: boolean;
   /** Set for git-transport sessions: sync the pushed branch back before exit. */
-  repo?: { repoPath: string; branch: string };
+  repo?: RemoteSessionRepo;
   /**
    * The dispatch proxy's late-launch-failure hook (#751). Held per session because
    * `assign_failed` arrives on the manager's message channel, long after `launch`
@@ -103,6 +105,26 @@ interface RemoteSession {
 }
 
 /**
+ * What the board knows about a git-transport session's repo.
+ *
+ * `projectId` was added for #783/#784: a mid-session repo operation needs a FRESH scoped
+ * git token, and `issueToken` is scoped by project. It is optional because a session
+ * ADOPTED after a board restart (#745) has only the path — see `resolveOpAuth`, which
+ * recovers the project from `repoPath` rather than guessing.
+ */
+export interface RemoteSessionRepo {
+  repoPath: string;
+  branch: string;
+  projectId?: string;
+  incomingRef?: string;
+}
+
+/** How a board-initiated repo operation on a live remote session ended (#783, #784). */
+export type RemoteRepoOpOutcome =
+  | { ok: true; status: WorkerRepoOpResult["status"]; sha?: string }
+  | { ok: false; status: WorkerRepoOpResult["status"] | "timeout" | "not-tracked" | "undeliverable"; error: string };
+
+/**
  * The remote execution service. A superset of `AgentExecutionService`: a remote
  * session outlives the board process, so it also needs to be ADOPTED back (#745).
  */
@@ -111,11 +133,40 @@ export interface RemoteAgentService extends AgentExecutionService {
     sessionId: string;
     workerId: string;
     onOutput: AgentOutputCallback;
-    repo?: { repoPath: string; branch: string };
+    repo?: RemoteSessionRepo;
   }): void;
   /** Session ids this process currently tracks (live or detached). */
   trackedSessionIds(): string[];
+  /**
+   * What this process tracks about a session, for callers that must know whether it is
+   * remote AND whether it runs over git transport before acting (#783, #784). A
+   * filesystem-sharing worker has no `repo`: it works in the board's own worktree, so
+   * there is nothing to sync and nothing to push.
+   */
+  remoteSessionInfo(sessionId: string): { workerId: string; repo?: RemoteSessionRepo } | undefined;
+  /**
+   * Ask the worker to fast-forward its live checkout to the board's branch tip (#783) or
+   * to push its current HEAD to the incoming ref (#784), and WAIT for the answer.
+   *
+   * Bounded: an unanswered request resolves `{ok:false, status:"timeout"}` rather than
+   * hanging, because the caller refuses a turn on it.
+   */
+  requestRepoOp(
+    sessionId: string,
+    op: WorkerRepoOpKind,
+    opts?: { timeoutMs?: number },
+  ): Promise<RemoteRepoOpOutcome>;
 }
+
+/**
+ * How long the board waits for a worker's answer to a repo operation (#783).
+ *
+ * A fetch + fast-forward of one branch over the board's own git transport, so seconds in
+ * the normal case; the ceiling exists for the worker that never answers at all (a build
+ * that predates these messages drops them as unknown, exactly as this protocol module
+ * intends). The refusal it produces names that possibility.
+ */
+export const REPO_OP_TIMEOUT_MS = 60 * 1000;
 
 export function createRemoteAgentService(
   manager: WorkerConnectionManager,
@@ -128,6 +179,18 @@ export function createRemoteAgentService(
   const graceMs = opts?.reconnectGraceMs ?? WORKER_RECONNECT_GRACE_MS;
   const abandonMs = Math.max(opts?.abandonMs ?? REMOTE_SESSION_ABANDON_MS, graceMs);
   const assignSettleMs = opts?.assignSettleMs ?? WORKER_ASSIGN_SETTLE_MS;
+  /**
+   * Repo operations awaiting a worker's answer, by `requestId` (#783, #784).
+   *
+   * Correlated by request rather than by session because a diff request and a pre-turn
+   * sync can be in flight for the same session at the same time, and resolving the wrong
+   * one would report a push as a sync.
+   */
+  const pendingRepoOps = new Map<
+    string,
+    { sessionId: string; op: WorkerRepoOpKind; settle: (outcome: RemoteRepoOpOutcome) => void }
+  >();
+  let repoOpSeq = 0;
 
   function finishSession(sessionId: string, session: RemoteSession, stderr: string, exitCode: number | null): void {
     sessions.delete(sessionId);
@@ -362,6 +425,24 @@ export function createRemoteAgentService(
           manager.send(workerId, { type: "stop", sessionId });
         }
       })();
+      return;
+    }
+    if (message.type === "repo_op_result") {
+      const pending = pendingRepoOps.get(message.result.requestId);
+      // An answer to a request this process never made (or already timed out) is dropped:
+      // the caller has been told, and re-resolving would report a stale outcome as fresh.
+      if (!pending) return;
+      pendingRepoOps.delete(message.result.requestId);
+      const { ok, status, sha, error } = message.result;
+      pending.settle(
+        ok
+          ? { ok: true, status, ...(sha ? { sha } : {}) }
+          : {
+              ok: false,
+              status,
+              error: error ?? `worker ${workerId} refused the ${pending.op} with status ${status}`,
+            },
+      );
       return;
     }
     if (message.type === "assign_failed") {
@@ -615,7 +696,17 @@ export function createRemoteAgentService(
       workerId,
       onOutput,
       stdinOpen: Boolean(config.keepStdinOpen && !config.suppressStdinPrompt),
-      repo: placement.repo ? { repoPath: placement.repo.repoPath, branch: placement.repo.branch } : undefined,
+      repo: placement.repo
+        ? {
+            repoPath: placement.repo.repoPath,
+            branch: placement.repo.branch,
+            // #783/#784: a mid-session sync or push needs a FRESH token, which is scoped
+            // by project + incoming ref. Recorded here so the operation never has to
+            // re-derive either from a path.
+            projectId: placement.repo.projectId,
+            incomingRef: incomingRefFor(placement.repo.branch),
+          }
+        : undefined,
       onDeferredLaunchFailure,
     });
     updateSessionWorkerId(sessionId, workerId, database)
@@ -704,12 +795,115 @@ export function createRemoteAgentService(
     );
   }
 
+  function remoteSessionInfo(sessionId: string): { workerId: string; repo?: RemoteSessionRepo } | undefined {
+    const session = sessions.get(sessionId);
+    if (!session) return undefined;
+    return { workerId: session.workerId, ...(session.repo ? { repo: session.repo } : {}) };
+  }
+
+  /**
+   * The fresh, scoped git capability the worker needs for one repo operation (#783).
+   *
+   * Goes through the EXISTING `issueToken({workerId, projectId, incomingRef})` seam — the
+   * same per-assignment scoping #247 established — rather than minting a wider credential
+   * for the convenience of a mid-session call. Decision 012 is untouched: this is a git
+   * capability for one ref, not an agent login.
+   */
+  async function resolveOpAuth(
+    sessionId: string,
+    session: RemoteSession,
+    repo: RemoteSessionRepo,
+  ): Promise<{ projectId: string; gitPort: number; gitToken: string; branch: string; incomingRef: string }> {
+    // An ADOPTED session (#745) carries only the path, so the project is recovered from it
+    // rather than guessed — git is the authority for the branch, the DB for the project.
+    const projectId = repo.projectId ?? (await getProjectByRepoPath(repo.repoPath, database))?.id;
+    if (!projectId) {
+      throw new Error(
+        `no project is registered at ${repo.repoPath}, so no scoped git token can be issued for session ${sessionId}`,
+      );
+    }
+    const incomingRef = repo.incomingRef ?? incomingRefFor(repo.branch);
+    const git = await ensureGitHttpServer(database);
+    return {
+      projectId,
+      gitPort: git.port,
+      gitToken: git.issueToken({ workerId: session.workerId, projectId, incomingRef }),
+      branch: repo.branch,
+      incomingRef,
+    };
+  }
+
+  async function requestRepoOp(
+    sessionId: string,
+    op: WorkerRepoOpKind,
+    opts?: { timeoutMs?: number },
+  ): Promise<RemoteRepoOpOutcome> {
+    const session = sessions.get(sessionId);
+    if (!session) {
+      return {
+        ok: false,
+        status: "not-tracked",
+        error: `this board process does not track session ${sessionId} as remote`,
+      };
+    }
+    if (!session.repo) {
+      return {
+        ok: false,
+        status: "not-tracked",
+        error: `session ${sessionId} runs on a filesystem-sharing worker, which has no checkout of its own`,
+      };
+    }
+    let auth;
+    try {
+      auth = await resolveOpAuth(sessionId, session, session.repo);
+    } catch (err) {
+      return { ok: false, status: "error", error: errorMessage(err) };
+    }
+    const requestId = `${op}-${sessionId}-${++repoOpSeq}`;
+    const timeoutMs = opts?.timeoutMs ?? REPO_OP_TIMEOUT_MS;
+    return await new Promise<RemoteRepoOpOutcome>((resolve) => {
+      let done = false;
+      const settle = (outcome: RemoteRepoOpOutcome): void => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        pendingRepoOps.delete(requestId);
+        resolve(outcome);
+      };
+      const timer = setTimeout(() => {
+        settle({
+          ok: false,
+          status: "timeout",
+          error:
+            `fleet worker ${session.workerId} did not answer the ${op} request within ` +
+            `${Math.round(timeoutMs / 1000)}s — it may be busy, unreachable, or a build that ` +
+            `predates the sync_repo/push_head messages (such a worker drops them silently)`,
+        });
+      }, timeoutMs);
+      if (timer.unref) timer.unref();
+      pendingRepoOps.set(requestId, { sessionId, op, settle });
+      const delivered = manager.send(session.workerId, {
+        type: op === "sync" ? "sync_repo" : "push_head",
+        sessionId,
+        requestId,
+        auth,
+      });
+      if (!delivered) {
+        settle({
+          ok: false,
+          status: "undeliverable",
+          error: `fleet worker ${session.workerId} is not connected, so its checkout cannot be reached`,
+        });
+      }
+    });
+  }
+
   function trackedSessionIds(): string[] {
     return [...sessions.keys()];
   }
 
   return {
     launch, kill, sendInput, closeStdin, isStdinOpen, getProcess, getPid, isPidAlive,
-    adoptSession, trackedSessionIds,
+    adoptSession, trackedSessionIds, remoteSessionInfo, requestRepoOp,
   };
 }
