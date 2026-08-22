@@ -292,8 +292,10 @@ recordSkipped(result, row.workspaceId, "hold");     // it deliberately left it a
 
 **`acted + skipped` may be LESS than `scanned`, on purpose.** A candidate that threw is
 neither, so it stays in the remainder that `formatPassReportBody` prints as `N unaccounted` —
-a pass that swallowed failures must not read as a clean run. `passReasonCounts` groups the
-reasons for a digest or a monitor.
+a pass that swallowed failures must not read as a clean run. `passReasonCounts` is AVAILABLE to
+group those reasons for a digest or a monitor, but nothing does yet — it has 0 production callers
+(the #592 monitor digest never adopted it) and is exempted in `pass-report-emission.test.ts`'s
+`TEST_FACING_ONLY`, where a staleness check fails the moment it gains one.
 
 Not in `packages/shared`: every pass is server-side, and `shared/lib` is for code more than
 one package needs (#590).
