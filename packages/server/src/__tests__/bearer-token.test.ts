@@ -20,12 +20,14 @@ describe("extractBearer (#556)", () => {
     expect(extractBearer("Token abc")).toBeNull();
   });
 
-  it("accepts Basic ONLY when asked, and takes the token from either slot", () => {
-    // git sends `http://x-token:<token>@host`, i.e. the password slot — but a user who pastes
-    // the token as the username should get a working clone, not an unexplainable 401.
+  it("accepts Basic ONLY when asked, and takes the token from the PASSWORD slot only", () => {
+    // git sends `http://x-token:<token>@host`, i.e. the password slot. #753 stopped also
+    // accepting it as the USERNAME: that is the half of a credential which gets echoed into
+    // `git remote -v`, proxy access logs and error text, while the password half is what
+    // tooling knows to redact. A legible 401 is recoverable; a token in a log is not.
     const basic = (raw: string) => `Basic ${Buffer.from(raw).toString("base64")}`;
     expect(extractBearer(basic("x-token:secret"), { allowBasic: true })).toBe("secret");
-    expect(extractBearer(basic("secret"), { allowBasic: true })).toBe("secret");
+    expect(extractBearer(basic("secret"), { allowBasic: true })).toBeNull();
     expect(extractBearer(basic("x-token:secret"))).toBeNull();
     // An empty Basic payload has no token in either slot; garbage base64 is not asserted on
     // because Node decodes it to arbitrary bytes rather than throwing.

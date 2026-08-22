@@ -173,7 +173,8 @@ listeners instead:
 # Board machine. NEVER KANBAN_HOST=0.0.0.0 — that publishes the unauthenticated board API.
 KANBAN_FLEET_PORT=3003 KANBAN_GIT_HTTP_PORT=3002 VITE_HOST=127.0.0.1 pnpm dev
 
-# VPN-only: bind both listeners to the VPN address instead of every interface
+# Cross-machine, VPN-only: name the interface. This is the intended posture --- without
+# a named interface (or KANBAN_FLEET_INSECURE=1) both listeners stay on loopback.
 KANBAN_FLEET_PORT=3003 KANBAN_FLEET_HOST=100.x.y.z \
 KANBAN_GIT_HTTP_PORT=3002 KANBAN_GIT_HTTP_HOST=100.x.y.z \
 VITE_HOST=127.0.0.1 pnpm dev
@@ -183,11 +184,51 @@ VITE_HOST=127.0.0.1 pnpm dev
 |---|---|---|
 | `KANBAN_FLEET_PORT` | Worker register / heartbeat / WebSocket, plus `/health` and `/api/health`. Nothing else | **Unset = disabled.** No port is opened |
 | `KANBAN_GIT_HTTP_PORT` | The git smart-HTTP transport only | **Unset = an OS-assigned port**, i.e. a different one every board boot. A cross-machine fleet must pin it — no firewall rule can match a port that moves |
-| `KANBAN_FLEET_HOST` / `KANBAN_GIT_HTTP_HOST` | Which interface each binds | Unset = `0.0.0.0`, every interface |
+| `KANBAN_FLEET_HOST` / `KANBAN_GIT_HTTP_HOST` | Which interface each binds | **Unset = `127.0.0.1`** (#753). Naming the interface is how a listener leaves this machine |
+| `KANBAN_FLEET_INSECURE` | Nothing on its own. `=1` lets an unset host mean every interface again | Unset. Only the exact value `1` counts — `true` does not |
 
 The board API is never mounted on either listener, so "unreachable from the network" is a
-property of what is mounted where rather than a warning a misconfiguration can violate. A
-fleet still belongs on a trusted network (LAN / VPN / Tailscale), not the open internet.
+property of what is mounted where rather than a warning a misconfiguration can violate.
+
+**Unset used to mean every interface, and no longer does (#753).** The old default was
+chosen as "no behaviour change for anyone", but it meant that pinning a fleet port — the one
+thing a cross-machine setup must do — silently published a plaintext credential-bearing
+channel on every network the board machine happened to be attached to: office LAN, home LAN,
+hotel wifi. If a worker suddenly cannot connect and the board log says `binding 127.0.0.1:
+this listener is plaintext and no interface was named`, that is this change: name the
+interface, or set `KANBAN_FLEET_INSECURE=1` if every interface is genuinely what you want.
+The direction is deliberate — the old default could only be too wide, and the new one fails
+visibly.
+
+### Threat model: everything here is plaintext
+
+Both listeners are plain HTTP and neither supports TLS today. What that means concretely,
+because "keep it on a trusted network" is too vague to act on:
+
+| In the clear on the wire | If an attacker can READ it | If an attacker can WRITE it |
+|---|---|---|
+| The per-worker bearer token (every heartbeat, and the WS upgrade) | Impersonate that worker: take its assignments, stream fabricated output into its sessions | — |
+| The per-assignment git token (in the `assign` frame, then `Authorization: Basic` on every git request) | Clone that one project, for as long as that assignment is current | Push a chosen tree to that branch's incoming ref |
+| Repo contents, both directions | Source disclosure | — |
+| The board-authored `setupScript` inside the `assign` frame | — | **Arbitrary code execution on the worker machine**, as the worker's user |
+
+The last row decides the posture: this is not merely a confidentiality-sensitive transport,
+it is an **RCE channel into every worker** for anyone who can inject frames. So:
+
+- **A fleet belongs on a tailnet or a VPN** — a network whose peers are cryptographically
+  identified by something other than this board. Tailscale/WireGuard supplies exactly the
+  encryption and peer authentication this transport does not have.
+- **A plain LAN is not sufficient** for that last row: traffic injection on wifi, or from one
+  compromised host on a switched segment, is a real capability.
+- **Tailscale Funnel must never be used** — that is the public internet in front of a board.
+- **Do not put a TLS-terminating proxy in front of the git transport.** The worker rebuilds
+  the URL itself and drops any path prefix (section 8), so such a proxy is bypassed rather
+  than enforced.
+- TLS on either listener is **not implemented**. Until it is, the network *is* the control.
+
+The scoping in #247 / #246 / #753 bounds what a stolen *git* token is worth — one worker, one
+project, one ref, and only while its dispatch is current. It does not make the channel
+confidential, and it does nothing about the `setupScript` row.
 
 **`VITE_HOST=127.0.0.1` is mandatory in `pnpm dev`.** The Vite dev server binds `::` —
 every interface — and proxies `/api`, `/health` and `/ws` straight through to the loopback
@@ -206,7 +247,7 @@ is a **silent host fallback** with a `[worker-fleet]` warning in the server log;
 mode each becomes a refusal the monitor reports as `no_available_worker`.
 
 1. **`worker_dispatch_<projectId>` is not `true`.** Everything runs on the host, with no
-   log line at all — this is the quietest of the five.
+   log line at all — this is the quietest of the six.
 2. **The project has a profile allowlist.** `allowed_profiles_<projectId>` non-empty or
    unparseable → never remote (§5).
 3. **No eligible worker.** All of these must hold, and any one of them failing looks
@@ -220,8 +261,20 @@ mode each becomes a refusal the monitor reports as `no_available_worker`.
 4. **No branch to push back.** A true remote worker needs git transport, and a workspace
    with no feature branch has nothing safe to land — host.
 5. **The project has no `repoPath`.** Nothing to serve over git transport — host.
+6. **The repository shape does not fit the transport.** The board's git transport carries ONE
+   repository per assignment, without LFS objects and without submodules, so a project with
+   sibling repos, LFS or submodules is refused rather than dispatched against an incomplete
+   checkout (#748). A layout that cannot be read at all fails closed the same way.
 
-A worker carrying the `shares-filesystem` label skips 4 and 5 entirely.
+A worker carrying the `shares-filesystem` label skips 4, 5 and 6 entirely — it reads the
+board's own worktrees, siblings and LFS objects included.
+
+**Ask the board instead of reading this list.** `agentic-kanban worker explain <N>` (and
+`GET /api/workers/explain?issue=<N>`) walks these same six checks against live state and
+names the one that decided, with the values it read (#755). The chain it walks is pinned to
+`resolveWorkerPlacement`'s source order and to this section's numbering by
+`placement-chain-parity.test.ts`, and every answer carries `agreesWithResolver` — so if the
+explanation and the resolver ever disagree, the payload says so rather than guessing.
 
 ## 8. Two traps that fail with no visible cause
 
@@ -253,6 +306,46 @@ branch is held and reported, never force-updated.
 
 Git tokens are per assignment — scoped to one worker, one project and one incoming ref,
 expiring, and invalidated by revoke (which also closes the worker's live socket).
+
+**And bound to a live dispatch (#753).** That scoping was complete in space and not in time:
+nothing happened when a session ENDED, so a token's only bounds were its 24h TTL and an
+explicit revoke. A token holder could clone the project and force-push a descendant of
+`master` to the branch's incoming ref hours after review and merge had finished — and
+because the startup sweep matched "any session ever stamped with a workerId for this
+branch", the next board restart would fast-forward it. Both halves are now time-bound:
+
+- **Every git request re-derives authority from the DB.** The dispatch behind the token must
+  still be current: a session `running`, or ended within
+  `WORKER_RESULT_LANDABLE_AFTER_END_MS` (1 hour, which covers a push in flight when the
+  stale-session sweep finalizes the row at board startup). A token that fails is refused
+  **and dropped**, so the holder cannot keep probing until some later session happens to
+  make it valid again. One gap is left open deliberately: a token younger than 5 minutes is
+  honoured even with no dispatch row at all, because `sessions.workerId` is stamped
+  asynchronously *after* the assignment goes out and a fast clone legitimately beats that
+  write.
+- **`refs/kanban/incoming/*` is hidden from `upload-pack`.** A token authorised a full clone,
+  whose ref advertisement included every *other* worker's unlanded result. A worker only ever
+  fetches `refs/heads/*`, so hiding them costs nothing.
+- **The startup sweep lands only a current dispatch**, and judges a recycled `ak-<N>` branch
+  name by its *newest* dispatch rather than by any dispatch that ever wore the name. Anything
+  else is held and reported — and `POST /api/workers/incoming/land` still lets an operator
+  land it deliberately, keeping the looser "was ever dispatched" gate there on purpose: a
+  human choosing one ref is a different act from a startup pass landing whatever it finds.
+
+**The push path has real resource limits (#753), not just a ref check.** The receive-pack
+guard buffered the command section with no cap of any kind, so an authenticated client could
+stream never-completing pkt-lines and OOM the board process, taking every worktree agent on
+the machine with it. Now: the command section is capped at 64 KiB and 64 lines; an empty
+refname is refused (it used to skip the ref check entirely); one request body is capped at
+1 GiB counted *after* gzip, so a compression bomb is bounded by the same number
+(`KANBAN_GIT_MAX_BODY_BYTES` raises it); headers must arrive within 60 s and a request must
+finish within 15 min; and a client that disconnects mid-push has its `git receive-pack`
+killed rather than left holding a stdin nobody will ever close.
+
+**The git credential is read from the Basic *password* slot only.** It used to be accepted as
+the username too, so that pasting it the wrong way round still worked. That put a live token
+in the half of a URL which gets echoed into `git remote -v`, proxy access logs and error
+text, while the password half is the one every tool in that chain knows to redact.
 
 **Losing the socket does not kill agents.** The daemon keeps them running, reconnects with
 backoff, re-announces them with `hello`, and queues `exit` / `assign_failed` messages while

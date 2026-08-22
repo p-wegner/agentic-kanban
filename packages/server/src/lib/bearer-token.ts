@@ -32,8 +32,14 @@ export function digestsEqual(a: string, b: string): boolean {
 export interface ExtractBearerOptions {
   /**
    * Also accept HTTP Basic, for git: it sends `http://x-token:<token>@host`, so the token
-   * rides in the password slot — but accept it in either slot, since a user who pastes it as
-   * the username gets a working clone rather than a 401 they cannot explain.
+   * rides in the PASSWORD slot — and only there (#753).
+   *
+   * It used to be accepted in the username slot too, on the reasoning that someone who
+   * pasted it the wrong way round should get a working clone instead of an unexplainable
+   * 401. That trades a legible error for a credential in the worst possible place: a
+   * username is the half of a URL that gets echoed into prompts, `git remote -v` output,
+   * proxy access logs and error messages, while the password half is what every tool in
+   * that chain knows to redact. A 401 is recoverable; a token in a log is not.
    */
   allowBasic?: boolean;
 }
@@ -50,9 +56,10 @@ export function extractBearer(header: string | string[] | undefined | null, opts
   try {
     const decoded = Buffer.from(basic[1]!, "base64").toString("utf8");
     const idx = decoded.indexOf(":");
-    const user = idx >= 0 ? decoded.slice(0, idx) : decoded;
-    const pass = idx >= 0 ? decoded.slice(idx + 1) : "";
-    return pass || user || null;
+    // Password slot ONLY (#753). No colon at all means there is no password slot, so
+    // there is no token here — not "treat the whole thing as the token".
+    if (idx < 0) return null;
+    return decoded.slice(idx + 1) || null;
   } catch {
     return null;
   }
@@ -154,4 +161,41 @@ export function envPort<T extends number | null>(name: string, opts: EnvPortOpti
     return opts.fallback;
   }
   return parsed;
+}
+
+/**
+ * The shared "which interface" decision for both plaintext fleet listeners (#753).
+ *
+ * One function because one policy: an explicit host is used as given, an absent host means
+ * LOOPBACK, and every-interface has to be asked for by name via `KANBAN_FLEET_INSECURE=1`.
+ * The two listeners keep separate host variables (they can legitimately sit on different
+ * interfaces) but must not drift on what "unset" means.
+ *
+ * Why the default changed: everything on both listeners is plaintext HTTP — the assignment
+ * token rides an `Authorization: Basic` header, the pack data and the board-authored setup
+ * script are in clear — so binding every interface by default published a
+ * credential-bearing channel onto whatever networks the machine happens to be on (office
+ * LAN, home LAN, hotel wifi) as a side effect of pinning a port. Opening it wider is a
+ * decision, so it is now said out loud.
+ */
+export function resolveListenHost(opts: {
+  raw: string | undefined;
+  insecure: string | undefined;
+  logPrefix: string;
+}): string {
+  const raw = opts.raw?.trim();
+  if (raw) return raw;
+  if (opts.insecure?.trim() === "1") {
+    console.warn(
+      `${opts.logPrefix} KANBAN_FLEET_INSECURE=1: binding 0.0.0.0 with no host restriction. ` +
+        "This is a plaintext, bearer-authed listener — every interface of this machine now carries it.",
+    );
+    return "0.0.0.0";
+  }
+  console.warn(
+    `${opts.logPrefix} binding 127.0.0.1: this listener is plaintext and no interface was named. ` +
+      "For a cross-machine fleet name it explicitly (e.g. the tailnet address) — " +
+      "or set KANBAN_FLEET_INSECURE=1 to accept every interface. See docs/worker-fleet.md section 6.",
+  );
+  return "127.0.0.1";
 }

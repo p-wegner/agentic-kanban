@@ -16,6 +16,19 @@
 // matching assignment for that project and branch (`sessions.workerId` +
 // `workspaces.branch`); unmatched refs are HELD and reported, and left in the
 // staging namespace so a real one can still be recovered by hand.
+//
+// THE MATCH IS NOW TIME-BOUND TOO (#753). "The DB holds a matching assignment"
+// was read as "any session ever stamped with a workerId for this branch" — no
+// status, no recency, no worker identity. That is not a bound: a branch that has
+// EVER been dispatched stays landable forever, so a token holder could force-push
+// a descendant of master hours after review and merge finished (or after the
+// `ak-<N>` branch name had been recycled onto a different issue) and have the
+// next board restart fast-forward it. The predicate is now the NEWEST dispatch
+// for that branch, and only while it is still current — running, or ended within
+// `WORKER_RESULT_LANDABLE_AFTER_END_MS`. Everything else is HELD, and an operator
+// can still land it deliberately via `POST /api/workers/incoming/land`, which
+// keeps the looser "was ever dispatched" gate on purpose: a human choosing one
+// ref is a different act from a startup pass landing whatever it finds.
 
 import { emptyPassReport, formatPassReportBody, recordActed, recordSkipped, type PassReport } from "../lib/pass-report.js";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
@@ -23,7 +36,10 @@ import { projects } from "@agentic-kanban/shared/schema";
 import { db as realDb } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { KANBAN_INCOMING_REF_PREFIX } from "../services/git-http.service.js";
-import { listWorkerAssignedBranches } from "../repositories/worker.repository.js";
+import {
+  listLandableWorkerBranches,
+  WORKER_RESULT_LANDABLE_AFTER_END_MS,
+} from "../repositories/worker.repository.js";
 import { syncIncomingBranch, clearIncomingRef } from "../services/worker-remote-sync.service.js";
 import { reclaimLandedIncomingRefs, INCOMING_REF_STALE_AFTER_MS } from "../services/worker-incoming-refs.service.js";
 import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
@@ -68,7 +84,7 @@ export async function sweepIncomingWorkerRefs(database: Database = realDb): Prom
     result.scanned += branches.length;
     let assigned: Set<string>;
     try {
-      assigned = await listWorkerAssignedBranches(project.id, database);
+      assigned = await listLandableWorkerBranches(project.id, database);
     } catch (err) {
       console.error(`[worker-sweep] could not read worker assignments for project ${project.id}:`, err);
       // Fail CLOSED: with no assignment record we cannot tell a worker's result
@@ -81,11 +97,14 @@ export async function sweepIncomingWorkerRefs(database: Database = realDb): Prom
     }
     for (const branch of branches) {
       if (!assigned.has(branch)) {
-        result.held.push({ branch, reason: "no worker assignment for this branch" });
-        recordSkipped(result, branch, "no worker assignment for this branch");
+        const reason = "no current worker assignment for this branch";
+        result.held.push({ branch, reason });
+        recordSkipped(result, branch, reason);
         console.warn(
           `[worker-sweep] refusing to land ${branch} in project ${project.id}: ` +
-          `no session was ever dispatched to a worker for that branch`,
+          `its newest fleet dispatch is not current (no session dispatched to a worker for that branch, ` +
+          `or the newest one ended more than ${Math.round(WORKER_RESULT_LANDABLE_AFTER_END_MS / 60_000)} min ago). ` +
+          `Land it deliberately with POST /api/workers/incoming/land if it is genuinely yours (#753).`,
         );
         continue;
       }

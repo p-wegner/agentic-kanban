@@ -6,9 +6,17 @@
  * depth — but the second listener exists precisely to expose the minimum deliberately,
  * and the interface is part of that minimum.
  *
- * The contract these tests pin: absent = today's `0.0.0.0` (no behaviour change for
- * anyone), and a value the operator did set is honoured verbatim — no rewriting, no
- * silent fallback that would leave the port wider open than the operator was told.
+ * The contract these tests pin: a value the operator did set is honoured verbatim — no
+ * rewriting, no silent fallback that would leave the port wider open than the operator
+ * was told.
+ *
+ * #753 CHANGED WHAT ABSENT MEANS, deliberately. It used to be `0.0.0.0`, chosen as "no
+ * behaviour change for anyone" — but both listeners are plaintext HTTP carrying a bearer
+ * credential, so pinning a fleet port published that channel on every interface the
+ * machine happens to be on as a side effect. Absent now means loopback, and every
+ * interface has to be asked for by name (`KANBAN_FLEET_INSECURE=1`). The direction of the
+ * change is the point: the old default could only be too wide, the new one too narrow,
+ * and too narrow fails visibly.
  */
 import { describe, it, expect } from "vitest";
 import { resolveFleetHost } from "../services/fleet-listener.service.js";
@@ -20,13 +28,24 @@ const RESOLVERS: Array<[string, (env: NodeJS.ProcessEnv) => string, string]> = [
 ];
 
 describe.each(RESOLVERS)("%s bind host (#652)", (_name, resolve, envVar) => {
-  it("defaults to every interface, exactly as before the option existed", () => {
-    expect(resolve({})).toBe("0.0.0.0");
+  it("defaults to LOOPBACK, not every interface (#753)", () => {
+    expect(resolve({})).toBe("127.0.0.1");
+  });
+
+  it("binds every interface only when told to in so many words (#753)", () => {
+    expect(resolve({ KANBAN_FLEET_INSECURE: "1" })).toBe("0.0.0.0");
+    // Anything other than the exact opt-in stays closed — "true"/"yes" are not it.
+    expect(resolve({ KANBAN_FLEET_INSECURE: "true" })).toBe("127.0.0.1");
+    expect(resolve({ KANBAN_FLEET_INSECURE: "0" })).toBe("127.0.0.1");
+  });
+
+  it("prefers a named interface over the insecure opt-in", () => {
+    expect(resolve({ [envVar]: "100.101.102.103", KANBAN_FLEET_INSECURE: "1" })).toBe("100.101.102.103");
   });
 
   it("treats blank and whitespace as unset rather than binding to nothing", () => {
-    expect(resolve({ [envVar]: "" })).toBe("0.0.0.0");
-    expect(resolve({ [envVar]: "   " })).toBe("0.0.0.0");
+    expect(resolve({ [envVar]: "" })).toBe("127.0.0.1");
+    expect(resolve({ [envVar]: "   " })).toBe("127.0.0.1");
   });
 
   it("honours a configured address verbatim", () => {
