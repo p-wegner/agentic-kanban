@@ -58,6 +58,25 @@ function makeWorkspace(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/**
+ * A database stub that answers "no workspace claims this directory".
+ *
+ * #713 routed every worktree removal through `removeWorktreeUnlessShared`, which asks the DB
+ * whether a LIVE co-resident workspace shares the `workingDir` before deleting it — and that
+ * guard is deliberately FAIL-CLOSED: a DB error means "assume claimed", so it refuses. So
+ * `database: {} as never` no longer means "the database is irrelevant here"; it means
+ * `database.select is not a function`, the guard refuses, and `removeWorktree` is never
+ * called. That is the guard working, not a regression — the stub just has to be able to
+ * answer. Shape mirrors `selectWorkingDirClaims`: `.select().from().where()`, awaited.
+ *
+ * Use `makeSharedWorkingDirDb([...])` if a test ever needs to assert the REFUSAL path.
+ */
+function makeNoSharersDb() {
+  return {
+    select: () => ({ from: () => ({ where: async () => [] as unknown[] }) }),
+  } as never;
+}
+
 function makeGit(overrides: Record<string, unknown> = {}) {
   return {
     countBehindCommits: vi.fn(async () => 0),
@@ -208,7 +227,7 @@ describe("workspace merge execution service", () => {
       workspace: workspace as never,
       repoPath: "/repo",
       targetBranch: "master",
-      database: {} as never,
+      database: makeNoSharersDb(),
       gitService: git as never,
       createBackup: async () => {},
       recordMergeAttempt,
@@ -241,7 +260,7 @@ describe("workspace merge cleanup service", () => {
       setupEnabled: true,
       isDirect: false,
     }, {
-      database: {} as never,
+      database: makeNoSharersDb(),
       gitService: git as never,
       killProcesses: vi.fn(async () => 0),
     });
@@ -273,7 +292,7 @@ describe("workspace merge cleanup service", () => {
       isDirect: false,
       serviceState: JSON.stringify({ composeProjectName: "ak-testinst-ws-owner1234abcd", status: "up" }),
     }, {
-      database: {} as never,
+      database: makeNoSharersDb(),
       gitService: makeGit() as never,
       killProcesses: vi.fn(async () => 0),
     });
