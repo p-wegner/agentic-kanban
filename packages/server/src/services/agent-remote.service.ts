@@ -225,11 +225,13 @@ export function createRemoteAgentService(
       // finished with (terminal row, or no row at all) is the zombie the stop was
       // written for.
       //
-      // NOTE: leaving it running is not the same as adopting it. This process still
-      // has no output callback for that session, so its streamed output is dropped
-      // and its exit does not finalize the row here. Full adoption — rebuilding the
-      // callback so the exit lands through the normal path — is the better fix and
-      // is NOT implemented; this only stops the board destroying live work.
+      // NOTE: leaving it running is not the same as adopting it — but adoption now
+      // exists (#745). `startup/remote-session-readoption.ts` runs before the pid
+      // sweep and rebuilds the output callback for every session this board left on a
+      // worker, so in the normal restart case a hello arrives AFTER adoption and this
+      // branch is not even reached. It still is when the board never held the row
+      // (adopted by a different board, or a row that predates the sweep), and there
+      // the old rule stands: leave it alone, and let the incoming-ref sweep land it.
       // The REVERSE direction (#746): the board tracks a session on THIS worker that
       // the worker's own hello does not list. Genuinely ambiguous — the daemon may
       // have restarted (its children killed) or crashed (children orphaned, their

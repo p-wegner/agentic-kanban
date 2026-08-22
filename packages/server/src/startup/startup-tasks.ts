@@ -14,6 +14,7 @@ import { cleanupSiblingWorktrees } from "../services/workspace-repos.service.js"
 import { listProjectRepos } from "../repositories/repo.repository.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { Database } from "../db/index.js";
+import { recoverRemoteSessionsAtBoot } from "./remote-session-readoption.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { isPidAlive } from "../lib/pid.js";
 import { reconcileAncestorBranchWorkspaces } from "./ancestor-branch-reconciler.js";
@@ -334,15 +335,28 @@ export async function alignLiveDbForeignKeys(): Promise<void> {
   }
 }
 
-/** Clean up stale sessions and reattach surviving agent processes. */
+/**
+ * Clean up stale sessions and reattach surviving agent processes.
+ *
+ * #745: this used to sweep EVERY `running` session by pid, and a session dispatched
+ * to a fleet worker has no local pid — so a board restart marked all in-flight remote
+ * work `stopped`, and the reconnecting worker's `hello` then found a terminal row and
+ * was told to stop a live agent. Remote sessions are handled FIRST, by evidence
+ * (`readoptRemoteSessions`), and excluded from the pid sweep entirely: the board does
+ * not own those processes and cannot read their liveness from a pid it never had.
+ */
 export async function cleanupStaleSessions(sessionManager: SessionManager, agentServiceModule = agentService): Promise<void> {
-  const staleSessions = await db.select({
+  await recoverRemoteSessionsAtBoot(sessionManager);
+
+  const staleSessions = (await db.select({
     id: sessions.id,
     workspaceId: sessions.workspaceId,
     pid: sessions.pid,
     executor: sessions.executor,
     containerId: sessions.containerId,
-  }).from(sessions).where(eq(sessions.status, "running"));
+    workerId: sessions.workerId,
+  }).from(sessions).where(eq(sessions.status, "running")))
+    .filter((s) => s.workerId == null);
 
   if (staleSessions.length === 0) return;
 
