@@ -267,6 +267,12 @@ export interface DrainReport {
    * a drain can flush the queue to a live socket, but it cannot persist it.
    */
   criticalMessagesLost: number;
+  /**
+   * Finished results still held on this machine because every push attempt failed (#750).
+   * Their checkouts are KEPT — the daemon logs each path — so they are recoverable by
+   * hand, but the in-memory retry list itself does not survive this process.
+   */
+  resultsRetained: number;
 }
 
 export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<WorkerDaemonHandle> {
@@ -413,6 +419,21 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       while (pendingCritical.length > 0) {
         socket.send(JSON.stringify(pendingCritical.shift()));
       }
+      // #750: a result whose push failed while the board was unreachable can only be
+      // saved by an attempt made after it is back — this is that attempt. The push lands
+      // in the incoming namespace, where the #752 operator surface can land it.
+      void runner.retryPendingPushes().then((outcome) => {
+        if (outcome.pushed.length > 0) {
+          log(`[worker] pushed ${outcome.pushed.length} retained result(s) after reconnecting`);
+        }
+        for (const retained of runner.unpushedResults()) {
+          log(
+            `[worker] still holding an unpushed result: sessionId=${retained.sessionId} ` +
+              `checkout=${retained.checkoutPath} branch=${retained.localBranch} ` +
+              `attempts=${retained.attempts} lastError=${retained.lastError}`,
+          );
+        }
+      });
       resolveConnected();
     });
 
@@ -586,12 +607,23 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       // agent's `exit` handler, so exiting now is precisely the bug: wait for it.
       const drained = await runner.drainPushes(timeoutMs);
       const criticalMessagesLost = flushCritical();
+      const retained = runner.unpushedResults();
       const report: DrainReport = {
         pushesCompleted: drained.completed,
         pushesAbandoned: drained.abandoned,
         agentsLeftRunning: runner.runningSessionIds().length,
         criticalMessagesLost,
+        resultsRetained: retained.length,
       };
+      for (const result of retained) {
+        // #750/#775: the checkout was NOT removed, so this is recoverable by hand — but
+        // only if the operator is told where it is before the process goes away.
+        log(
+          `[worker] KEPT an unpushed result: sessionId=${result.sessionId} is in ` +
+            `${result.checkoutPath} on branch ${result.localBranch} (target ${result.incomingRef}); ` +
+            `last push error: ${result.lastError}`,
+        );
+      }
       if (report.pushesAbandoned > 0 || report.criticalMessagesLost > 0) {
         log(
           `[worker] shutdown INCOMPLETE: ${report.pushesAbandoned} result push(es) abandoned after ` +
