@@ -175,6 +175,10 @@ export function formatCommentRetentionPlan(plan: CommentRetentionPlan): string {
  * CLI entry — driven by `scripts/comment-retention.mjs`. It lives beside the policy rather
  * than in the script file so the runnable thing and the rules it runs cannot drift apart.
  */
+/** Program output on stdout (see the note at its first use), deliberately not a log line. */
+function out(line: string): void {
+  process.stdout.write(`${line}\n`);
+}
 export async function commentRetentionCli(argv: string[]): Promise<number> {
   const flag = (name: string): string | undefined => {
     const i = argv.indexOf(`--${name}`);
@@ -193,12 +197,15 @@ export async function commentRetentionCli(argv: string[]): Promise<number> {
     },
     db,
   );
-  console.log(formatCommentRetentionPlan(result.plan));
+  // CLI output, not log lines: this is a report an operator asked for on stdout, so it goes
+  // through process.stdout rather than console.* — which is also why the #616 tag convention
+  // (greppable per-subsystem LOG lines) does not apply to it.
+  out(formatCommentRetentionPlan(result.plan));
   if (result.dryRun) {
-    console.log(`\nDRY RUN — nothing was deleted. Re-run with --apply to delete these ${result.plan.deletableRows.toLocaleString("en-US")} rows.`);
+    out(`\nDRY RUN — nothing was deleted. Re-run with --apply to delete these ${result.plan.deletableRows.toLocaleString("en-US")} rows.`);
   } else {
-    console.log(`\nAPPLIED — deleted ${result.deleted.toLocaleString("en-US")} rows.`);
-    console.log(`SQLite does not hand freed pages back to the OS on DELETE — run 'pnpm db:repair' (which VACUUMs) to shrink the file.`);
+    out(`\nAPPLIED — deleted ${result.deleted.toLocaleString("en-US")} rows.`);
+    out(`SQLite does not hand freed pages back to the OS on DELETE — run 'pnpm db:repair' (which VACUUMs) to shrink the file.`);
   }
   return 0;
 }
@@ -208,7 +215,7 @@ if (process.argv[1] && process.argv[1].split("\\").join("/").endsWith("issue-com
   commentRetentionCli(process.argv.slice(2))
     .then((code) => process.exit(code))
     .catch((err) => {
-      console.error(err);
+      console.error("[retention] failed", err);
       process.exit(1);
     });
 }
