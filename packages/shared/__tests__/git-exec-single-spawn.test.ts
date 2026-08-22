@@ -134,6 +134,15 @@ const ALLOWLIST = new Map<string, string>([
       "`git rev-parse --git-common-dir`) before the app runs. Morally test infrastructure; the " +
       ".test.ts/.spec.ts exclusion simply does not name it.",
   ],
+  [
+    join("scripts", "measure-package-coupling.mjs"),
+    "Standalone measurement script (#730) run as bare `node scripts/measure-package-coupling.mjs`, " +
+      "with no bundler and no tsx — so it cannot import the adapter, which is TypeScript under " +
+      "packages/shared/src. One read-only `git log` over the whole history; it is committed so the " +
+      "cross-package coupling verdict is REBUILDABLE rather than a number in a doc, which is the " +
+      "point of keeping it. Same rationale as the .claude/hooks entries above: dependency-free by " +
+      "necessity, not by accident.",
+  ],
 ]);
 
 /** Source file extensions the gate parses. `.js`/`.mjs`/`.cjs` added in #17 so scaffold hook scripts are visible. */
