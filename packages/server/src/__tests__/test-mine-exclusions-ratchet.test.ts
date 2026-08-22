@@ -20,7 +20,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { resolve, join } from "node:path";
-import { readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { PACKAGES } from "../../../../scripts/test-mine.mjs";
 
 const REPO_ROOT = resolve(__dirname, "../../../..");
@@ -88,9 +88,9 @@ function basenameOf(glob: string): string | null {
   return m ? m[1] : null;
 }
 
-/** Every `*.test.ts` filename anywhere under a package dir. */
-function testFileNames(pkgDir: string): Set<string> {
-  const found = new Set<string>();
+/** Every `*.test.ts` file anywhere under a package dir, by basename -> absolute path. */
+function testFilePaths(pkgDir: string): Map<string, string> {
+  const found = new Map<string, string>();
   const walk = (dir: string) => {
     let entries;
     try {
@@ -101,12 +101,47 @@ function testFileNames(pkgDir: string): Set<string> {
     for (const e of entries) {
       if (e.name === "node_modules" || e.name === "dist" || e.name.startsWith(".")) continue;
       if (e.isDirectory()) walk(join(dir, e.name));
-      else if (e.name.endsWith(".test.ts")) found.add(e.name);
+      else if (e.name.endsWith(".test.ts")) found.set(e.name, join(dir, e.name));
     }
   };
   walk(pkgDir);
   return found;
 }
+
+/**
+ * The resources an exclusion may legitimately claim, and what would CORROBORATE the claim in
+ * the excluded suite's own source (#734).
+ *
+ * This is the part the #679 rule was missing. It asserted that a reason contained one of eight
+ * words, and one of those words was `parallelism` — under a doc comment stating that "it is
+ * slow" is not a reason. #721 probed it, and the reason *"it is just slow, so we skip it under
+ * gate parallelism"* was accepted verbatim. That made the rule the opposite of what it said: it
+ * did not forbid slowness exclusions, it taught you the phrasing that buys one. Two of the
+ * three live `shared` entries already carried exactly that dressing.
+ *
+ * So `parallelism` is gone from the vocabulary — it names how the gate RUNS, not a resource the
+ * box may lack — and each remaining word must now be BACKED BY THE SUITE. A reason claiming
+ * `git` has to be attached to a suite whose source actually reaches for git.
+ *
+ * What this still cannot do, stated plainly rather than implied: it cannot verify the claimed
+ * resource is the REAL reason for the exclusion. A slow suite that happens to spawn git can
+ * still be excluded for being slow. What it does is turn an unfalsifiable phrase into a claim
+ * about the code that a reader can check in one grep — a lie instead of boilerplate — which is
+ * as far as a static rule reaches here. `MAX_EXCLUSIONS` remains the counter-pressure that
+ * does not depend on believing any reason at all.
+ */
+const RESOURCE_CLAIMS: Array<{ word: string; corroboration: RegExp }> = [
+  { word: "git", corroboration: /\bgit\b/i },
+  { word: "docker", corroboration: /docker|compose/i },
+  { word: "daemon", corroboration: /docker|daemon|listen/i },
+  { word: "spawn", corroboration: /spawn|execFile|execSync|child_process|fork\(/ },
+  { word: "child process", corroboration: /spawn|execFile|execSync|child_process|fork\(/ },
+  { word: "binary", corroboration: /spawn|execFile|execSync|child_process|\.(exe|cmd)\b/i },
+  { word: "transport", corroboration: /http|websocket|clone|fetch|serve/i },
+];
+
+/** Phrases that are a slowness argument, which the rule above says is not a reason on its own. */
+const SLOWNESS_ONLY = /\bslow\b|\bslower\b|takes too long|\bparallelism\b/i;
 
 describe("test:mine flaky-exclusion ratchet (#641)", () => {
   it("matches the reviewed baseline exactly — growth is an explicit edit, not a side effect", () => {
@@ -130,7 +165,7 @@ describe("test:mine flaky-exclusion ratchet (#641)", () => {
 
   it("has no exclusion that outlived its file — a stale glob hides nothing and misleads", () => {
     for (const pkg of packages) {
-      const names = testFileNames(resolve(REPO_ROOT, pkg.dir));
+      const names = testFilePaths(resolve(REPO_ROOT, pkg.dir));
       for (const glob of globsOf(pkg)) {
         const base = basenameOf(glob);
         expect(base, `${pkg.label}: unexpected exclusion shape "${glob}" — expected "**/<file>.test.ts"`).toBeTruthy();
@@ -154,7 +189,9 @@ describe("test:mine flaky-exclusion ratchet (#641)", () => {
   // could not tell — the justification lived in a comment above the list, which drifted away
   // from the entries it was written for. The rule the reasons are judged against: an exclusion
   // is legitimate when the suite needs something the gate box may not have or cannot share
-  // under parallelism. "It is slow" is not a reason; scope it or speed it up.
+  // under parallelism. "It is slow" is not a reason; scope it or speed it up. #734 made that
+  // last sentence TRUE — until then `parallelism` was itself an accepted excuse. See
+  // RESOURCE_CLAIMS above for what changed and what is still beyond a static check.
   it("gives every excluded glob a reason that says something", () => {
     const missing = packages.flatMap((p) =>
       p.exclude.filter((e) => !e.reason || e.reason.trim().length < 15).map((e) => `${p.label}: ${e.glob}`),
@@ -167,17 +204,63 @@ describe("test:mine flaky-exclusion ratchet (#641)", () => {
   });
 
   it("rejects a reason that names no environmental need", () => {
-    // Words naming a resource the gate box may not have or cannot share. A reason containing
-    // none of them is asserting nothing checkable — most likely "slow", the case this rejects.
-    const ENVIRONMENTAL = ["git", "docker", "daemon", "spawn", "child process", "binary", "transport", "parallelism"];
     const unjustified = packages.flatMap((p) =>
       p.exclude
-        .filter((e) => !ENVIRONMENTAL.some((w) => e.reason.toLowerCase().includes(w)))
+        .filter((e) => !RESOURCE_CLAIMS.some((c) => e.reason.toLowerCase().includes(c.word)))
         .map((e) => `${p.label}: ${e.glob} — "${e.reason}"`),
     );
     expect(
       unjustified,
-      "These exclusions give a reason naming no real git/docker/spawned-process need.",
+      "These exclusions give a reason naming no real git/docker/spawned-process need. Note that " +
+        "the word `parallelism` stopped counting as one in #734: it describes how the gate runs, " +
+        "not a resource the box may lack, and it was the loophole that let a pure slowness " +
+        "excuse pass this very assertion.",
+    ).toEqual([]);
+  });
+
+  // #734 — the reason is now checked against SOMETHING REAL: the excluded suite's own source.
+  it("backs every claimed resource with evidence in the excluded suite itself", () => {
+    const uncorroborated: string[] = [];
+    for (const pkg of packages) {
+      const paths = testFilePaths(resolve(REPO_ROOT, pkg.dir));
+      for (const e of pkg.exclude) {
+        const base = basenameOf(e.glob);
+        const full = base ? paths.get(base) : undefined;
+        if (!full) continue; // the stale-glob assertion above owns that failure
+        const source = readFileSync(full, "utf8");
+        for (const claim of RESOURCE_CLAIMS) {
+          if (!e.reason.toLowerCase().includes(claim.word)) continue;
+          if (claim.corroboration.test(source)) continue;
+          uncorroborated.push(
+            `${pkg.label}: ${e.glob} claims "${claim.word}" but nothing in its source matches ${claim.corroboration}`,
+          );
+        }
+      }
+    }
+    expect(
+      uncorroborated,
+      "An exclusion's reason names a resource the excluded suite does not actually reach for. " +
+        "Either the reason is wrong (fix it) or the exclusion is (delete it):\n  " +
+        uncorroborated.join("\n  "),
+    ).toEqual([]);
+  });
+
+  // #734 — the other half: a reason may ARGUE slowness, but never ONLY slowness. Before this,
+  // `parallelism` was itself in the accepted vocabulary, so a slowness-only reason passed.
+  it("rejects a reason whose whole argument is that the suite is slow", () => {
+    const slownessOnly = packages.flatMap((p) =>
+      p.exclude
+        .filter(
+          (e) =>
+            SLOWNESS_ONLY.test(e.reason) && !RESOURCE_CLAIMS.some((c) => e.reason.toLowerCase().includes(c.word)),
+        )
+        .map((e) => `${p.label}: ${e.glob} — "${e.reason}"`),
+    );
+    expect(
+      slownessOnly,
+      "These reasons argue only that the suite is slow, which the rule above says is not a " +
+        "reason: scope it or speed it up. A timing measurement is welcome ALONGSIDE a resource " +
+        "the gate box cannot share — which is what the two `shared` git-integration entries do.",
     ).toEqual([]);
   });
 
