@@ -64,7 +64,10 @@ const BASELINE: Record<string, number> = {
   "session-lifecycle.repository.ts::sessions-read": 2,
   "session-message-pruner.repository.ts::sessions-read": 1,
   "session-stats.repository.ts::sessions-read": 1,
-  "workflow-fork.repository.ts::sessions-read": 4,
+  // #722: workflow-fork.repository.ts was decomposed behind a facade barrel; its four
+  // sessions reads moved together into workflow-fork-session-reads.repository.ts, so the
+  // entry MOVED (same count) rather than being split across the five new modules.
+  "workflow-fork-session-reads.repository.ts::sessions-read": 4,
   "workspace-crud.repository.ts::sessions-read": 2,
   "workspace-handoff-bundle.repository.ts::sessions-read": 1,
   "workspace-launch-failures.repository.ts::sessions-read": 1,
