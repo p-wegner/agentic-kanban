@@ -5,8 +5,9 @@ import type { IssueComment } from "@agentic-kanban/shared/types";
 import { isIssueCommentKind } from "@agentic-kanban/shared/lib/issue-comment-kind";
 import {
   insertIssueComment,
-  getIssueComments,
+  getIssueCommentsPage,
   deleteIssueComment,
+  type IssueCommentsPageOptions,
   type AddIssueCommentInput,
   type IssueCommentRow,
 } from "../repositories/issue-comments.repository.js";
@@ -48,9 +49,27 @@ export function createIssueCommentsService(deps: {
     return toApiComment(row);
   }
 
-  async function listComments(issueId: string): Promise<IssueComment[]> {
-    const rows = await getIssueComments(issueId, database);
-    return rows.map(toApiComment);
+  /**
+   * The newest page of an issue's comments, ascending. CAPPED (#738) — an unbounded read
+   * pulled 7,478 rows for a single issue. Callers that need to walk further back pass
+   * `before` (the previous page's `nextCursor`).
+   */
+  async function listComments(issueId: string, opts: IssueCommentsPageOptions = {}): Promise<IssueComment[]> {
+    return (await listCommentsPage(issueId, opts)).comments;
+  }
+
+  /** Same read as `listComments`, plus the paging metadata a caller needs to offer "show older". */
+  async function listCommentsPage(
+    issueId: string,
+    opts: IssueCommentsPageOptions = {},
+  ): Promise<{ comments: IssueComment[]; totalCount: number; hasMore: boolean; nextCursor: string | null }> {
+    const page = await getIssueCommentsPage(issueId, opts, database);
+    return {
+      comments: page.comments.map(toApiComment),
+      totalCount: page.totalCount,
+      hasMore: page.hasMore,
+      nextCursor: page.nextCursor,
+    };
   }
 
   async function removeComment(issueId: string, commentId: string): Promise<void> {
@@ -59,7 +78,7 @@ export function createIssueCommentsService(deps: {
     if (projectId) boardEvents?.broadcast(projectId, "issue_updated");
   }
 
-  return { addComment, listComments, removeComment };
+  return { addComment, listComments, listCommentsPage, removeComment };
 }
 
 export type IssueCommentsService = ReturnType<typeof createIssueCommentsService>;
