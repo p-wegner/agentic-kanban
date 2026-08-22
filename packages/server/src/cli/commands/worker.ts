@@ -2,7 +2,12 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Command } from "commander";
-import { startWorkerDaemon, defaultWorkerStateFile } from "../../worker/worker-daemon.js";
+import {
+  startWorkerDaemon,
+  defaultWorkerStateFile,
+  DEFAULT_DRAIN_TIMEOUT_MS,
+  WorkerRegistrationRefused,
+} from "../../worker/worker-daemon.js";
 import { SHARES_FILESYSTEM_LABEL } from "@agentic-kanban/shared/lib/worker-protocol";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 // Type-only + a db-free formatter: this module is also the standalone worker
@@ -360,6 +365,12 @@ export function registerWorkerSubcommands(workerCmd: Command) {
     .option("--state-file <path>", `Pairing state file (default: ${defaultWorkerStateFile()})`)
     .option("--work-root <path>", "Root for git-transport clones/checkouts (default: ~/.agentic-kanban/worker)")
     .option("--leave-agents", "On Ctrl+C, leave running agent processes alive instead of killing them")
+    .option(
+      "--drain-timeout <seconds>",
+      "On Ctrl+C, how long to wait for finished agents' results to finish pushing to the board " +
+        `(default ${Math.round(DEFAULT_DRAIN_TIMEOUT_MS / 1000)})`,
+      (v) => parseInt(v, 10),
+    )
     .action(async (options: {
       board: string;
       token?: string;
@@ -371,12 +382,18 @@ export function registerWorkerSubcommands(workerCmd: Command) {
       workRoot?: string;
       sharesFilesystem?: boolean;
       leaveAgents?: boolean;
+      drainTimeout?: number;
     }) => {
       try {
         const labels = splitList(options.labels) ?? [];
         if (options.sharesFilesystem && !labels.includes(SHARES_FILESYSTEM_LABEL)) {
           labels.push(SHARES_FILESYSTEM_LABEL);
         }
+        // The reconnect timers are unref'd; this keeps the CLI process alive.
+        const keepAlive = setInterval(() => {}, 60_000);
+        const drainTimeoutMs = options.drainTimeout !== undefined && options.drainTimeout > 0
+          ? options.drainTimeout * 1000
+          : undefined;
         const daemon = await startWorkerDaemon({
           boardUrl: options.board,
           pairingToken: options.token,
@@ -386,20 +403,53 @@ export function registerWorkerSubcommands(workerCmd: Command) {
           maxConcurrency: options.maxConcurrency,
           stateFile: options.stateFile,
           workRoot: options.workRoot,
+          drainTimeoutMs,
+          // #754: a revoked worker, or one the board refuses on protocol grounds, used to
+          // retry every 30 s forever with a red tray and nothing in any log saying why.
+          // It is now a clean non-zero exit carrying the reason — which is also what makes
+          // a supervisor (the Windows scheduled task) stop restarting it into the same wall.
+          onFatal: (reason) => {
+            console.error(`[worker] ${reason}`);
+            clearInterval(keepAlive);
+            process.exit(2);
+          },
         });
-        // The reconnect timers are unref'd; this keeps the CLI process alive.
-        const keepAlive = setInterval(() => {}, 60_000);
+        let shuttingDown = false;
         const shutdown = () => {
+          // Ctrl+C twice must still get you out, even if a push is hung on a slow link.
+          if (shuttingDown) {
+            console.log("[worker] second interrupt — exiting without waiting for the drain");
+            process.exit(130);
+          }
+          shuttingDown = true;
           console.log("\n[worker] shutting down" + (options.leaveAgents ? " (leaving agents running)" : ""));
-          clearInterval(keepAlive);
-          daemon.stop({ killAgents: !options.leaveAgents });
-          process.exit(0);
+          // #754: AWAIT the drain. This used to be a sync stop() followed immediately by
+          // process.exit(0), so with the agents killed the process was gone before their
+          // exit handlers could push the results back — completed work was silently lost
+          // and the board reported it as a failure 60 s later.
+          void daemon.stop({ killAgents: !options.leaveAgents }).then((report) => {
+            clearInterval(keepAlive);
+            if (options.leaveAgents && report.agentsLeftRunning > 0) {
+              console.log(
+                `[worker] ${report.agentsLeftRunning} agent(s) left running. Their results CANNOT be ` +
+                  "pushed by a future daemon — the checkout mapping lives in this process only — so " +
+                  "the board will fall back to its disconnect grace for them.",
+              );
+            }
+            process.exit(report.pushesAbandoned > 0 || report.criticalMessagesLost > 0 ? 1 : 0);
+          }, (err: unknown) => {
+            console.error(`[worker] drain failed: ${errorMessage(err)}`);
+            clearInterval(keepAlive);
+            process.exit(1);
+          });
         };
         process.on("SIGINT", shutdown);
         process.on("SIGTERM", shutdown);
       } catch (err) {
         console.error(errorMessage(err));
-        process.exit(1);
+        // A build the board refuses is not a usage error and not a transient one: give it
+        // its own code so a supervisor can tell "fix the install" from "try again" (#754).
+        process.exit(err instanceof WorkerRegistrationRefused ? 2 : 1);
       }
     });
 
@@ -435,7 +485,7 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         console.error(`Failed to list workers (${res.status}). Is the board running at ${options.board}?`);
         process.exit(1);
       }
-      const body = await res.json() as { workers: Array<{ id: string; name: string; effectiveStatus: string; status: string; os: string | null; labels: string | null; maxConcurrency: number; lastHeartbeatAt: string | null }> };
+      const body = await res.json() as { workers: Array<{ id: string; name: string; effectiveStatus: string; status: string; os: string | null; labels: string | null; maxConcurrency: number; lastHeartbeatAt: string | null; protocolVersion?: number; workerVersion?: string }> };
       if (options.json) {
         console.log(JSON.stringify(body, null, 2));
         return;
@@ -446,7 +496,11 @@ export function registerWorkerSubcommands(workerCmd: Command) {
       }
       for (const w of body.workers) {
         const labels = w.labels ? ` labels=${w.labels}` : "";
-        console.log(`  ${w.name} [${w.effectiveStatus}] id=${w.id} os=${w.os ?? "?"} maxConcurrency=${w.maxConcurrency}${labels} lastHeartbeat=${w.lastHeartbeatAt ?? "never"}`);
+        // #754: "which build is that machine running" was unanswerable from the board, and
+        // with dev tarballs it is the first question a skew bug raises. `?` means the
+        // worker has not spoken since this board started — not that it is old.
+        const build = ` protocol=${w.protocolVersion ?? "?"} build=${w.workerVersion ?? "?"}`;
+        console.log(`  ${w.name} [${w.effectiveStatus}] id=${w.id} os=${w.os ?? "?"} maxConcurrency=${w.maxConcurrency}${labels}${build} lastHeartbeat=${w.lastHeartbeatAt ?? "never"}`);
       }
     });
 
