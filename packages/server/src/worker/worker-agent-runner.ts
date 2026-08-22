@@ -12,12 +12,21 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { sanitizeUtf8 } from "@agentic-kanban/shared/lib/sanitize-utf8";
 import { resolveAgentHangTimeoutMs, startHangWatchdog } from "../lib/agent-launch-env.js";
-import type { WorkerLaunchSpec, WorkerRepoTransport, WorkerToBoardMessage } from "@agentic-kanban/shared/lib/worker-protocol";
+import type {
+  WorkerLaunchSpec,
+  WorkerRepoOpAuth,
+  WorkerRepoOpKind,
+  WorkerRepoTransport,
+  WorkerToBoardMessage,
+} from "@agentic-kanban/shared/lib/worker-protocol";
 import {
   provisionWorkerCheckout,
   pushWorkerResult,
+  pushWorkerHead,
+  syncWorkerCheckout,
   cleanupWorkerCheckout,
   type WorkerCheckout,
+  type WorkerRepoOpOutcome,
 } from "./worker-repo.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { resolveSpecCommand } from "./worker-command-resolver.js";
@@ -94,6 +103,10 @@ export interface WorkerRepoOps {
   ) => Promise<WorkerCheckout>;
   push: (boardUrl: string, repo: WorkerRepoTransport, checkout: WorkerCheckout) => Promise<void>;
   cleanup: (checkout: WorkerCheckout) => Promise<void>;
+  /** #783: fast-forward the live checkout to the board's branch tip. Never destructive. */
+  sync: (boardUrl: string, auth: WorkerRepoOpAuth, checkout: WorkerCheckout) => Promise<WorkerRepoOpOutcome>;
+  /** #784: push the live checkout's HEAD to the incoming ref, mid-session. */
+  pushHead: (boardUrl: string, auth: WorkerRepoOpAuth, checkout: WorkerCheckout) => Promise<WorkerRepoOpOutcome>;
 }
 
 /**
@@ -108,6 +121,8 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     provision: options.repoOps?.provision ?? provisionWorkerCheckout,
     push: options.repoOps?.push ?? pushWorkerResult,
     cleanup: options.repoOps?.cleanup ?? cleanupWorkerCheckout,
+    sync: options.repoOps?.sync ?? syncWorkerCheckout,
+    pushHead: options.repoOps?.pushHead ?? pushWorkerHead,
   };
   const processes = new Map<string, ChildProcess>();
   const exited = new Set<string>();
@@ -319,6 +334,44 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
       attempts: entry.attempts,
       lastError: entry.lastError,
     }));
+  }
+
+  /**
+   * Answer one board-initiated repo operation on a LIVE session's checkout (#783, #784).
+   *
+   * Always answers, including when this worker has no such checkout (`no-session`): the
+   * board BLOCKS on the reply — a follow-up turn is refused when the sync did not complete
+   * — so a silent drop would turn a knowable refusal into a timeout.
+   */
+  function repoOp(op: WorkerRepoOpKind, sessionId: string, requestId: string, auth: WorkerRepoOpAuth): void {
+    const answer = (outcome: WorkerRepoOpOutcome): void => {
+      send({ type: "repo_op_result", sessionId, result: { requestId, op, ...outcome } });
+    };
+    const pending = checkouts.get(sessionId);
+    if (!pending) {
+      answer({
+        ok: false,
+        status: "no-session",
+        error:
+          `this worker holds no git-transport checkout for session ${sessionId} ` +
+          `(it never ran here, it has already exited, or its result was already pushed)`,
+      });
+      return;
+    }
+    if (!options.boardUrl) {
+      answer({ ok: false, status: "error", error: "worker has no board URL for git transport" });
+      return;
+    }
+    void (async () => {
+      try {
+        const outcome = op === "sync"
+          ? await repoOps.sync(options.boardUrl!, auth, pending.checkout)
+          : await repoOps.pushHead(options.boardUrl!, auth, pending.checkout);
+        answer(outcome);
+      } catch (err) {
+        answer({ ok: false, status: "error", error: errorMessage(err) });
+      }
+    })();
   }
 
   function emitExit(sessionId: string, exitCode: number | null): void {
@@ -616,7 +669,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
 
   return {
     assign, assignWithRepo, input, closeStdin, stop, stopAll, runningSessionIds,
-    drainPushes, pendingPushCount, retryPendingPushes, unpushedResults,
+    drainPushes, pendingPushCount, retryPendingPushes, unpushedResults, repoOp,
   };
 }
 

@@ -397,6 +397,57 @@ offline so session finalization is not lost. The limits of that, precisely:
   still running on the worker. A gap longer than a minute therefore destroys the run rather
   than pausing it. That is a known defect, not intended behaviour.
 
+### Mid-session, board-to-worker: the checkout is not write-once (#783, #784)
+
+Everything above is the worker pushing at exit. Two board-to-worker operations act
+**while the agent is still running**, and both are strictly fast-forward:
+
+- **`sync_repo` (#783) — before a follow-up turn.** `POST /api/workspaces/:id/turn`
+  first asks the worker to fast-forward its live checkout to the board's tip of the
+  branch, and **refuses the turn** if that could not be done. It has to: between two
+  turns the board may have rebased the branch (`update-base`), committed a
+  fix-and-merge change, or landed a review fix — all of which exist only board-side.
+  Without the sync the second turn rebuilds on the tree the session cloned, and the
+  result is indistinguishable afterwards from the agent deliberately reverting the
+  board's work. So a remote workspace used to be **one-shot in practice**, which
+  quietly made every feature built on follow-up turns (nudges, fix-and-merge, monitor
+  unstick, the review loop) host-only.
+  - `409` — the worker's checkout has **diverged** (both sides committed), or a
+    fast-forward would have had to overwrite the agent's **uncommitted** work. Held for
+    a human; nothing is reset and nothing is forced.
+  - `422` — the sync could not complete: the worker did not answer within the bound
+    (a build predating these messages drops them), the socket is gone, or the board
+    cannot see the worker at all. An `unknown` liveness HOLDS here — it is absence of
+    information, not evidence that the checkout is fine.
+  - A worker with the `shares-filesystem` label is skipped: it already works in the
+    board's own worktree.
+- **`push_head` (#784) — before a diff is read.** A true-remote worker used to push
+  exactly once, post-exit, so the board-side worktree sat at the base tip for the whole
+  run and `GET /api/workspaces/:id/diff` showed **nothing** until the agent finished.
+  Now the diff asks the worker for its current HEAD, lands it through the one landing
+  path (`syncIncomingBranch`, i.e. ref-arm then `merge --ff-only` in the holding
+  worktree), and returns a `remoteMidSession` block saying what happened and how old
+  it is.
+
+**ON DEMAND, NOT ON A TIMER — the deliberate choice.** The session's branch is checked
+out in a board worktree, so a landing moves that working tree: files change under
+anything else reading it. A timer would do that at moments nothing asked for, to
+workspaces nobody is looking at. Landing when a diff is REQUESTED keeps the movement
+inside a read that already expects new content, makes the cost proportional to how
+often anyone looks, and gives a fresher answer than any tick would. Repeat reads for
+one workspace are throttled (`MID_SESSION_LAND_MIN_INTERVAL_MS`, 15 s) and the previous
+landing is then reported **with its real age** rather than as a fresh result.
+
+**Only COMMITTED work travels.** The worker will not commit on the agent's behalf, so a
+mid-session diff shows what the agent has committed — not its working tree. A remote
+agent that never commits until the end still shows nothing until the end.
+
+**No new credential.** A mid-session operation carries a **fresh** token minted through
+the existing `issueToken({workerId, projectId, incomingRef})` seam, because the
+assignment's own token expires and a board restart invalidates it. It is a git
+capability for one ref, and decision 012 is untouched: no provider login and no
+`CLAUDE_CONFIG_DIR` crosses the machine boundary.
+
 ### Stopping a worker without losing work (#754)
 
 **Ctrl+C now drains.** `worker start` waits for the results of agents it just killed to

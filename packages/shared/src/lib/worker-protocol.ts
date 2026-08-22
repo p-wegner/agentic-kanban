@@ -102,6 +102,65 @@ export interface WorkerRepoTransport {
   contextFiles?: Array<{ name: string; content: string }>;
 }
 
+/**
+ * What a worker needs to talk to the board's git transport for ONE repo operation
+ * on an ALREADY-PROVISIONED session checkout (#783, #784).
+ *
+ * A deliberate subset of {@link WorkerRepoTransport}: no setup script, no skills, no
+ * context files — none of that is re-applied by a sync or a push — and above all a FRESH
+ * `gitToken`. The token the assignment carried is per-assignment and expires (and a board
+ * restart invalidates it, #775), so a mid-session operation cannot reuse it; the board
+ * issues a new one through the same `issueToken({workerId, projectId, incomingRef})` seam
+ * and it travels here. `baseBranch` is absent on purpose: both operations are relative to
+ * the session's own branch, and nothing may re-derive a start point mid-session.
+ */
+export interface WorkerRepoOpAuth {
+  projectId: string;
+  gitPort: number;
+  gitToken: string;
+  branch: string;
+  incomingRef: string;
+}
+
+/** Which repo operation a {@link WorkerRepoOpResult} answers. */
+export type WorkerRepoOpKind = "sync" | "push";
+
+/**
+ * How a worker-side repo operation ended.
+ *
+ * `diverged` and `dirty-held` are the two outcomes that must NEVER be resolved
+ * automatically: the first means the worker's checkout and the board's branch both moved,
+ * the second that a fast-forward would have had to overwrite the agent's uncommitted work.
+ * Both are HELD and reported, exactly as `worker-remote-sync.service.ts` holds a divergence
+ * board-side — never a `reset --hard`, never a force.
+ */
+export type WorkerRepoOpStatus =
+  | "updated"
+  | "unchanged"
+  | "pushed"
+  | "missing"
+  | "diverged"
+  | "dirty-held"
+  | "no-session"
+  | "error";
+
+/**
+ * A worker's answer to one `sync_repo` / `push_head` request, correlated by `requestId`.
+ *
+ * Correlated rather than fire-and-forget because the board BLOCKS on it: a follow-up turn
+ * is refused when the sync did not complete (#783), which is only a meaningful contract if
+ * "did not complete" is observable.
+ */
+export interface WorkerRepoOpResult {
+  requestId: string;
+  op: WorkerRepoOpKind;
+  ok: boolean;
+  status: WorkerRepoOpStatus;
+  /** The commit the checkout (sync) or the incoming ref (push) now points at. */
+  sha?: string;
+  error?: string;
+}
+
 /** Mirrors agent.service's AgentOutputEvent so events plug into broadcast as-is. */
 export interface WorkerAgentEvent {
   type: "stdout" | "stderr" | "exit";
@@ -239,7 +298,18 @@ export type BoardToWorkerMessage =
   | { type: "assign"; sessionId: string; spec: WorkerLaunchSpec; repo?: WorkerRepoTransport }
   | { type: "input"; sessionId: string; data: string }
   | { type: "close_stdin"; sessionId: string }
-  | { type: "stop"; sessionId: string };
+  | { type: "stop"; sessionId: string }
+  /**
+   * #783: pull the BOARD's current branch tip into the worker's live checkout, so a
+   * follow-up turn does not run against the tree the session cloned. Fast-forward only.
+   */
+  | { type: "sync_repo"; sessionId: string; requestId: string; auth: WorkerRepoOpAuth }
+  /**
+   * #784: push the worker's current HEAD to the incoming ref NOW, mid-session, so the
+   * board can show a diff before the agent exits. On demand — the board asks when a diff
+   * is actually wanted; the worker runs no timer of its own.
+   */
+  | { type: "push_head"; sessionId: string; requestId: string; auth: WorkerRepoOpAuth };
 
 export type WorkerToBoardMessage =
   | {
@@ -253,7 +323,9 @@ export type WorkerToBoardMessage =
       capabilities?: WorkerCapabilities;
     }
   | { type: "event"; event: WorkerAgentEvent }
-  | { type: "assign_failed"; sessionId: string; error: string };
+  | { type: "assign_failed"; sessionId: string; error: string }
+  /** The answer to one `sync_repo`/`push_head` (#783, #784), by `requestId`. */
+  | { type: "repo_op_result"; sessionId: string; result: WorkerRepoOpResult };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
@@ -309,9 +381,62 @@ export function parseWorkerToBoardMessage(raw: unknown): WorkerToBoardMessage | 
     case "assign_failed":
       if (typeof msg.sessionId !== "string" || typeof msg.error !== "string") return null;
       return { type: "assign_failed", sessionId: msg.sessionId, error: msg.error };
+    case "repo_op_result": {
+      if (typeof msg.sessionId !== "string") return null;
+      const result = parseWorkerRepoOpResult(msg.result);
+      if (!result) return null;
+      return { type: "repo_op_result", sessionId: msg.sessionId, result };
+    }
     default:
       return null;
   }
+}
+
+/**
+ * Shape-check a repo-op auth blob. Null = drop the whole message: a sync or push with a
+ * missing port/token/ref cannot be attempted, and attempting it with defaults would aim a
+ * force-push at a ref the board did not name.
+ */
+export function parseWorkerRepoOpAuth(raw: unknown): WorkerRepoOpAuth | null {
+  const auth = asRecord(raw);
+  if (!auth) return null;
+  if (
+    typeof auth.projectId !== "string" ||
+    typeof auth.gitPort !== "number" ||
+    typeof auth.gitToken !== "string" ||
+    typeof auth.branch !== "string" ||
+    typeof auth.incomingRef !== "string"
+  ) {
+    return null;
+  }
+  return {
+    projectId: auth.projectId,
+    gitPort: auth.gitPort,
+    gitToken: auth.gitToken,
+    branch: auth.branch,
+    incomingRef: auth.incomingRef,
+  };
+}
+
+const REPO_OP_STATUSES = new Set<string>([
+  "updated", "unchanged", "pushed", "missing", "diverged", "dirty-held", "no-session", "error",
+]);
+
+/** Shape-check a repo-op result off the wire. Null = drop it (the board then times out). */
+export function parseWorkerRepoOpResult(raw: unknown): WorkerRepoOpResult | null {
+  const result = asRecord(raw);
+  if (!result) return null;
+  if (typeof result.requestId !== "string" || typeof result.ok !== "boolean") return null;
+  if (result.op !== "sync" && result.op !== "push") return null;
+  if (typeof result.status !== "string" || !REPO_OP_STATUSES.has(result.status)) return null;
+  return {
+    requestId: result.requestId,
+    op: result.op,
+    ok: result.ok,
+    status: result.status as WorkerRepoOpStatus,
+    ...(typeof result.sha === "string" ? { sha: result.sha } : {}),
+    ...(typeof result.error === "string" ? { error: result.error } : {}),
+  };
 }
 
 /**
@@ -425,6 +550,13 @@ export function parseBoardToWorkerMessage(raw: unknown): BoardToWorkerMessage | 
       return { type: "close_stdin", sessionId: msg.sessionId };
     case "stop":
       return { type: "stop", sessionId: msg.sessionId };
+    case "sync_repo":
+    case "push_head": {
+      if (typeof msg.requestId !== "string" || !msg.requestId) return null;
+      const auth = parseWorkerRepoOpAuth(msg.auth);
+      if (!auth) return null;
+      return { type: msg.type, sessionId: msg.sessionId, requestId: msg.requestId, auth };
+    }
     default:
       return null;
   }

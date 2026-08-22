@@ -225,3 +225,239 @@ export async function syncIncomingBranch(
 export async function clearIncomingRef(repoPath: string, branch: string): Promise<void> {
   await gitExec(["update-ref", "-d", incomingRefFor(branch)], { cwd: repoPath });
 }
+
+// -- Mid-session, BOARD-INITIATED repo operations on a live remote session -----------
+//
+// Everything above lands a result the worker pushed at exit. The two functions below are
+// the other direction and the other TIME: they act while the agent is still running.
+//
+//  - #783: before a follow-up `/turn` reaches a remote agent's stdin, the worker's
+//    checkout is fast-forwarded to the board's branch tip. Without it the second turn
+//    runs against the tree the session cloned, and every board feature built on
+//    follow-up turns (nudges, fix-and-merge, monitor unstick, the review loop) is
+//    silently host-only.
+//  - #784: before a diff is READ, the worker is asked to push its current HEAD, and the
+//    board lands it through `syncIncomingBranch` -- the one landing path.
+//
+// Both take their collaborators as PARAMETERS rather than importing them. That is not
+// taste: the remote agent service imports this module (to land at exit) and the live
+// liveness probe imports the fleet facade which constructs that service, so importing
+// either here -- statically or as a type, which dependency-cruiser also counts -- closes
+// a cycle. `remote-session-liveness.ts` documents the same constraint for the same reason.
+
+/** The subset of the remote agent service these operations need. Structural on purpose. */
+export interface RemoteRepoOpPort {
+  remoteSessionInfo(sessionId: string): { workerId: string; repo?: { repoPath: string; branch: string } } | undefined;
+  requestRepoOp(
+    sessionId: string,
+    op: "sync" | "push",
+    opts?: { timeoutMs?: number },
+  ): Promise<{ ok: boolean; status: string; sha?: string; error?: string }>;
+}
+
+/** A remote session as the two operations below need to see it. */
+export interface RemoteSessionRef {
+  id: string;
+  workerId: string | null;
+  startedAt?: string | null;
+}
+
+/** The liveness rule, injected (see the note above on why it is not imported). */
+export type ProbeLiveness = (row: { workerId: string; startedAt?: string | null }) => Promise<{
+  liveness: "alive" | "dead" | "unknown";
+  reason: string;
+}>;
+
+export type RemoteTurnGate =
+  | {
+      ok: true;
+      /**
+       * `not-remote` -- a host session, or a filesystem-sharing worker that works in the
+       * board's own worktree: nothing to sync, and saying so is not the same as syncing.
+       */
+      status: "not-remote" | "synced" | "unchanged";
+      reason: string;
+      sha?: string;
+    }
+  | {
+      ok: false;
+      /** CONFLICT (409) needs a human; UNPROCESSABLE (422) means the sync could not be done. */
+      kind: "conflict" | "unprocessable";
+      status: string;
+      reason: string;
+    };
+
+/**
+ * Decide whether a follow-up turn may be delivered to this workspace's running session,
+ * syncing the worker's checkout first when it is remote (#783).
+ *
+ * The refusal is the point. A turn written into a stale checkout produces a diff that can
+ * silently revert the board's own commits, and the board cannot tell that apart from the
+ * agent's intent -- whereas a refused turn is a sentence an operator can act on. So:
+ *
+ *  - `diverged` / `dirty-held` from the worker -> CONFLICT. Both mean a fast-forward would
+ *    have had to destroy something, and neither is ever resolved automatically here.
+ *  - liveness `unknown` -> UNPROCESSABLE, not "the checkout is probably fine". `unknown` is
+ *    absence of information (see `remote-session-liveness.ts`), and the board holds on it
+ *    everywhere else.
+ *  - no answer within the bound -> UNPROCESSABLE.
+ */
+export async function gateRemoteTurn(params: {
+  session: RemoteSessionRef | null;
+  ops: RemoteRepoOpPort;
+  probeLiveness: ProbeLiveness;
+  timeoutMs?: number;
+}): Promise<RemoteTurnGate> {
+  const { session, ops, probeLiveness, timeoutMs } = params;
+  if (!session?.workerId) {
+    return { ok: true, status: "not-remote", reason: "session does not run on a fleet worker" };
+  }
+  const info = ops.remoteSessionInfo(session.id);
+  if (!info) {
+    return {
+      ok: false,
+      kind: "unprocessable",
+      status: "not-tracked",
+      reason:
+        `session ${session.id} runs on fleet worker ${session.workerId}, but this board process ` +
+        `does not track it (it was started before a restart), so its checkout cannot be brought ` +
+        `up to date - relaunch the workspace instead of continuing it`,
+    };
+  }
+  if (!info.repo) {
+    return {
+      ok: true,
+      status: "not-remote",
+      reason: `worker ${session.workerId} shares this filesystem, so it already works in the board's worktree`,
+    };
+  }
+  const verdict = await probeLiveness({ workerId: session.workerId, startedAt: session.startedAt ?? null });
+  if (verdict.liveness !== "alive") {
+    return {
+      ok: false,
+      kind: "unprocessable",
+      status: verdict.liveness,
+      reason:
+        `the worker running this session is ${verdict.liveness} (${verdict.reason}), so its checkout ` +
+        `cannot be synced - a turn delivered into a stale checkout is worse than a refused one`,
+    };
+  }
+  const outcome = await ops.requestRepoOp(session.id, "sync", timeoutMs ? { timeoutMs } : undefined);
+  if (outcome.ok) {
+    return {
+      ok: true,
+      status: outcome.status === "unchanged" ? "unchanged" : "synced",
+      reason: `worker checkout ${outcome.status}${outcome.sha ? ` at ${outcome.sha.slice(0, 8)}` : ""}`,
+      ...(outcome.sha ? { sha: outcome.sha } : {}),
+    };
+  }
+  const conflict = outcome.status === "diverged" || outcome.status === "dirty-held";
+  return {
+    ok: false,
+    kind: conflict ? "conflict" : "unprocessable",
+    status: outcome.status,
+    reason: outcome.error ?? `the worker could not sync its checkout (${outcome.status})`,
+  };
+}
+
+/** What a mid-session diff read learned about the remote session's work (#784). */
+export interface MidSessionLanding {
+  /** True when new commits were fast-forwarded onto the board's branch by THIS call. */
+  landed: boolean;
+  status: string;
+  sha?: string;
+  /** How the landing went, or why it did not happen -- always populated. */
+  reason: string;
+  /** ms between asking the worker and having it landed, i.e. how fresh the diff is. */
+  ageMs?: number;
+  /** The worker's liveness at the time of the read; `unknown` is NOT "no new work". */
+  liveness?: "alive" | "dead" | "unknown";
+}
+
+/**
+ * Bring a RUNNING remote session's work onto the board's branch so a diff can see it
+ * (#784), then report how fresh that is.
+ *
+ * ON DEMAND, NOT ON A TIMER -- the decision this ticket asked for, and the reason is the
+ * board's own worktree. The session's branch is checked out there, so a landing moves that
+ * working tree: files change under anything else reading it (the diff service's own git
+ * spawns, a verify script, an operator with an editor open). A timer would do that at
+ * moments nothing asked for, to a workspace nobody is looking at, repeatedly. Landing when
+ * a diff is REQUESTED keeps the movement inside one read that already expects to see new
+ * content, makes the cost proportional to how often anyone actually looks, and -- since
+ * the request is what triggers the worker's push -- means the answer is as fresh as it can
+ * be rather than as fresh as the last tick. The board pays nothing for a remote session
+ * nobody inspects.
+ *
+ * Fast-forward only, through `syncIncomingBranch` and no private second path. A divergence
+ * is HELD and reported, never forced -- mid-session is exactly when a force would destroy
+ * work that only exists on one side.
+ */
+export async function landRemoteMidSessionWork(params: {
+  session: RemoteSessionRef | null;
+  ops: RemoteRepoOpPort;
+  probeLiveness: ProbeLiveness;
+  timeoutMs?: number;
+  nowMs?: number;
+}): Promise<MidSessionLanding | null> {
+  const { session, ops, probeLiveness, timeoutMs } = params;
+  if (!session?.workerId) return null;
+  const info = ops.remoteSessionInfo(session.id);
+  // A filesystem-sharing worker writes into the board's worktree, so the diff is already
+  // live and there is nothing to land.
+  if (!info?.repo) return null;
+  const startedMs = params.nowMs ?? Date.now();
+  const verdict = await probeLiveness({ workerId: session.workerId, startedAt: session.startedAt ?? null });
+  if (verdict.liveness !== "alive") {
+    // #784 item 4: `unknown` must not read as "no new work". The diff still answers -- with
+    // whatever already landed -- but it says that it may be behind, and why.
+    return {
+      landed: false,
+      status: verdict.liveness,
+      liveness: verdict.liveness,
+      reason:
+        `the worker running this session is ${verdict.liveness} (${verdict.reason}), so this diff may ` +
+        `be missing work that exists only in the worker's checkout`,
+    };
+  }
+  const pushed = await ops.requestRepoOp(session.id, "push", timeoutMs ? { timeoutMs } : undefined);
+  if (!pushed.ok) {
+    return {
+      landed: false,
+      status: pushed.status,
+      liveness: "alive",
+      reason:
+        `the worker could not push its current work (${pushed.status}: ${pushed.error ?? "no detail"}), ` +
+        `so this diff shows only what had already landed`,
+    };
+  }
+  const repo = info.repo;
+  const outcome = await syncIncomingBranch(repo.repoPath, repo.branch);
+  const ageMs = Math.max(0, Date.now() - startedMs);
+  if (!outcome.ok) {
+    return {
+      landed: false,
+      status: outcome.status,
+      liveness: "alive",
+      ageMs,
+      reason:
+        `the worker's mid-session push could not be landed on ${repo.branch} (${outcome.status}: ` +
+        `${outcome.error}); it is HELD in ${incomingRefFor(repo.branch)} and nothing was forced`,
+    };
+  }
+  // Drop the staging ref once it has landed, so it never means anything but "pushed and
+  // not yet landed". Leaving a stale mid-session ref behind would let the EXIT path land
+  // it and report success for work older than the run (`landAndFinish` reads this ref).
+  await clearIncomingRef(repo.repoPath, repo.branch).catch(() => {});
+  return {
+    landed: outcome.status === "updated" || outcome.status === "created",
+    status: outcome.status,
+    liveness: "alive",
+    ageMs,
+    ...(outcome.sha ? { sha: outcome.sha } : {}),
+    reason:
+      `the worker's current HEAD was pushed and fast-forwarded onto ${repo.branch} ` +
+      `(${outcome.status}${outcome.via ? ` via ${outcome.via}` : ""}); only COMMITTED work travels - ` +
+      `the agent's uncommitted edits stay in its own checkout`,
+  };
+}

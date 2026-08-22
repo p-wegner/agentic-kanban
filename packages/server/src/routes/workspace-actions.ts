@@ -12,12 +12,68 @@ import { parseJsonBody, parseOptionalJsonBody } from "../middleware/parse-body.j
 import { completeMergeJob, failMergeJob, getMergeJob, startMergeJob } from "../services/merge-job.service.js";
 
 import { queryFlag } from "../middleware/query-params.js";
+import { ConflictError, UnprocessableError } from "../errors/index.js";
+import { findRunningSession } from "../repositories/session.repository.js";
+import { getWorkerFleet } from "../services/worker-fleet.service.js";
+import { probeRemoteSessionLiveness } from "../services/fleet-liveness-probe.js";
+import {
+  gateRemoteTurn,
+  landRemoteMidSessionWork,
+  type MidSessionLanding,
+  type ProbeLiveness,
+  type RemoteRepoOpPort,
+} from "../services/worker-remote-sync.service.js";
+
+/**
+ * How often the board will ask a worker to push its mid-session HEAD for ONE workspace
+ * (#784).
+ *
+ * The landing is on demand, but "on demand" includes a dashboard polling `?stats=1` every
+ * few seconds, and each ask is a real `git push` plus a fast-forward of the board's
+ * worktree. Inside this window the previous landing is reported again WITH ITS AGE, which
+ * is the honest answer and the one the ticket asks for: never present a stale mid-session
+ * ref as current without saying how old it is.
+ */
+export const MID_SESSION_LAND_MIN_INTERVAL_MS = 15_000;
+
 export function createWorkspaceActionsRoute(
   getSessionManager: () => SessionManager,
   database: Database,
-  options?: { boardEvents?: BoardEventSink; fixAndMergeSessionIds?: Set<string> },
+  options?: {
+    boardEvents?: BoardEventSink;
+    fixAndMergeSessionIds?: Set<string>;
+    /**
+     * The fleet seam for #783/#784, injected for tests. Production resolves it from the
+     * worker-fleet facade below; a test passes a fake worker so the refusal contract can be
+     * exercised without a WebSocket, a git listener or a second machine.
+     */
+    remoteFleet?: { ops: RemoteRepoOpPort; probeLiveness: ProbeLiveness };
+  },
 ) {
   const router = createRouter();
+
+  /**
+   * The remote-session collaborators, or null when this process has no fleet at all.
+   *
+   * The cast is the same one `startup/remote-session-readoption.ts` makes: the facade types
+   * its member as the narrow `AgentExecutionService`, while the remote implementation is a
+   * documented superset. `RemoteRepoOpPort` is deliberately structural, so nothing here
+   * depends on the concrete service type.
+   */
+  function resolveRemoteFleet(): { ops: RemoteRepoOpPort; probeLiveness: ProbeLiveness } | null {
+    if (options?.remoteFleet) return options.remoteFleet;
+    try {
+      const ops = getWorkerFleet(database).remoteAgentService as unknown as RemoteRepoOpPort;
+      if (typeof ops.remoteSessionInfo !== "function" || typeof ops.requestRepoOp !== "function") return null;
+      return { ops, probeLiveness: (row) => probeRemoteSessionLiveness(row, database) };
+    } catch (err) {
+      console.error(`[workspace-actions] could not reach the worker fleet`, err);
+      return null;
+    }
+  }
+
+  /** Per-workspace memo of the last mid-session landing (#784). See the interval constant. */
+  const midSessionLandings = new Map<string, { at: number; landing: MidSessionLanding }>();
 
   const workspaceService = createWorkspaceService({
     database,
@@ -93,10 +149,37 @@ export function createWorkspaceActionsRoute(
   });
 
   // POST /api/workspaces/:id/turn
+  //
+  // #783: a REMOTE session's worker holds its own checkout, and nothing used to push the
+  // board's side of the branch into it — so a second turn ran against the tree the session
+  // cloned, missing an `update-base` rebase, a fix-and-merge commit or a landed review fix.
+  // The worker is therefore fast-forwarded FIRST, and the turn is REFUSED when that could
+  // not be done: a turn delivered into a stale checkout is worse than a refused one, and it
+  // is indistinguishable afterwards from the agent deciding to revert the board's work.
   router.post("/:id/turn", async (c) => {
     const id = c.req.param("id");
     const body = await parseJsonBody<{ content?: string }>(c);
     if (!body.content) return c.json({ error: "content is required" }, 400);
+    const fleet = resolveRemoteFleet();
+    if (fleet) {
+      const session = await findRunningSession(id, database);
+      const gate = await gateRemoteTurn({
+        session: session ? { id: session.id, workerId: session.workerId, startedAt: session.startedAt } : null,
+        ops: fleet.ops,
+        probeLiveness: fleet.probeLiveness,
+      });
+      if (!gate.ok) {
+        const message =
+          `This workspace's agent runs on a fleet worker and its checkout could not be brought up ` +
+          `to date (${gate.status}), so the follow-up was not delivered: ${gate.reason}`;
+        // The domain-error vocabulary, not an inline c.json(4xx): 409 when a human has to
+        // resolve a divergence, 422 when the sync itself could not complete.
+        throw gate.kind === "conflict" ? new ConflictError(message) : new UnprocessableError(message);
+      }
+      if (gate.status !== "not-remote") {
+        console.log(`[workspace-actions] remote checkout ${gate.status} before turn: workspaceId=${id} (${gate.reason})`);
+      }
+    }
     const result = await workspaceService.sendTurn(id, body.content);
     if (result.type === "sent") return c.json({ ok: true });
     return c.json({ sessionId: result.sessionId, resumed: true }, 201);
@@ -150,6 +233,43 @@ export function createWorkspaceActionsRoute(
     return c.json(await workspaceService.getLatestCommit(id));
   });
 
+  /**
+   * Land a running remote session's committed work so the diff below can see it (#784).
+   *
+   * Returns null for every non-remote workspace, so the response shape is unchanged for
+   * host sessions. Never throws: a diff that cannot reach the worker still answers, with a
+   * `remoteMidSession` block that says what it is missing and why.
+   */
+  async function landMidSessionWork(id: string): Promise<MidSessionLanding | null> {
+    const fleet = resolveRemoteFleet();
+    if (!fleet) return null;
+    try {
+      const session = await findRunningSession(id, database);
+      if (!session?.workerId) {
+        midSessionLandings.delete(id);
+        return null;
+      }
+      const memo = midSessionLandings.get(id);
+      if (memo && Date.now() - memo.at < MID_SESSION_LAND_MIN_INTERVAL_MS) {
+        // Throttled: report the SAME landing with its real age rather than a fresh-looking
+        // repeat of it (#784 item 4).
+        return { ...memo.landing, ageMs: Date.now() - memo.at };
+      }
+      const landing = await landRemoteMidSessionWork({
+        session: { id: session.id, workerId: session.workerId, startedAt: session.startedAt },
+        ops: fleet.ops,
+        probeLiveness: fleet.probeLiveness,
+      });
+      if (!landing) return null;
+      midSessionLandings.set(id, { at: Date.now(), landing });
+      if (midSessionLandings.size > 2000) midSessionLandings.clear(); // crude cap; entries are tiny
+      return landing;
+    } catch (err) {
+      console.error(`[workspace-actions] mid-session remote landing failed: workspaceId=${id}`, err);
+      return null;
+    }
+  }
+
   // GET /api/workspaces/:id/diff — full diff, or with `?stats=1` only the per-repo
   // shortstat numbers (#415: one spawn per repo instead of three, tiny payload).
   //
@@ -173,10 +293,16 @@ export function createWorkspaceActionsRoute(
         return new Response(null, { status: 304, headers: { ETag: memo.etag } });
       }
     }
+    // #784: a true-remote worker pushes ONCE, post-exit, so the board-side worktree this
+    // diff reads stayed at the base tip for the whole run — every mid-session reader (review
+    // preparation, the monitor's progress signals, "is it changing files at all") was blind
+    // on remote placement while working on host placement. Ask the worker for its current
+    // HEAD, land it fast-forward-only, and SAY how fresh the answer is.
+    const remoteMidSession = await landMidSessionWork(id);
     const result = statsOnly
       ? await workspaceService.getWorkspaceDiffStats(id)
       : await workspaceService.getWorkspaceDiff(id);
-    const body = JSON.stringify(result);
+    const body = JSON.stringify(remoteMidSession ? { ...result, remoteMidSession } : result);
     const etag = `"${createHash("sha1").update(body).digest("hex").slice(0, 16)}"`;
     if (statsOnly) {
       if (diffStatsEtagMemo.size > 2000) diffStatsEtagMemo.clear(); // crude cap; entries are tiny
