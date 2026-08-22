@@ -25,6 +25,7 @@ import type { Database } from "../db/index.js";
 import { KANBAN_INCOMING_REF_PREFIX } from "../services/git-http.service.js";
 import { listWorkerAssignedBranches } from "../repositories/worker.repository.js";
 import { syncIncomingBranch, clearIncomingRef } from "../services/worker-remote-sync.service.js";
+import { reclaimLandedIncomingRefs, INCOMING_REF_STALE_AFTER_MS } from "../services/worker-incoming-refs.service.js";
 import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 
 /** #592 — the shared pass core, plus the outcome lists only this pass has. */
@@ -88,18 +89,43 @@ export async function sweepIncomingWorkerRefs(database: Database = realDb): Prom
         );
         continue;
       }
+      // `syncIncomingBranch` falls through to a `merge --ff-only` in the worktree that
+      // holds the branch (#743). Before it did, this sweep could recover only refs whose
+      // workspace had already been torn down — a live workspace holds its branch, which
+      // is the normal case, so "restart recovery" recovered almost nothing.
       const sync = await syncIncomingBranch(project.repoPath, branch);
       if (sync.ok) {
         result.landed.push(branch);
         recordActed(result, branch, "landed");
         await clearIncomingRef(project.repoPath, branch).catch(() => {});
-        console.log(`[worker-sweep] recovered worker push for ${branch} (${sync.status})`);
+        console.log(`[worker-sweep] recovered worker push for ${branch} via ${sync.via} (${sync.status})`);
       } else {
         result.held.push({ branch, reason: sync.error });
         recordSkipped(result, branch, "sync failed");
         console.warn(`[worker-sweep] could not land worker push for ${branch}: ${sync.error}`);
       }
     }
+  }
+  // #752: the held list stops here being a value the caller drops. The retention pass
+  // clears refs whose commits are provably on a branch already, and everything still
+  // held is named with its age — which is what makes decision 012's "reported and held"
+  // true rather than half true. Nothing unreachable is deleted at any age; that needs an
+  // explicit `discardIncomingRef`. `GET /api/workers/incoming` serves the same view live.
+  try {
+    const reclaim = await reclaimLandedIncomingRefs(database);
+    for (const dropped of reclaim.reclaimed) {
+      console.log(`[worker-sweep] reclaimed stale incoming ref ${dropped.branch} (${dropped.reason})`);
+    }
+    for (const stuck of reclaim.held) {
+      const days = Math.round(stuck.ageMs / 86_400_000);
+      console.warn(
+        `[worker-sweep] HELD incoming ref ${stuck.branch} in project ${stuck.projectId}: ${stuck.reason} ` +
+        `(${days}d old${stuck.stale ? `, past the ${Math.round(INCOMING_REF_STALE_AFTER_MS / 86_400_000)}d retention flag` : ""}). ` +
+        `See GET /api/workers/incoming to land or discard it.`,
+      );
+    }
+  } catch (err) {
+    console.error("[worker-sweep] incoming-ref retention pass failed:", err);
   }
   // #689: the report body names the unaccounted remainder — a branch whose sync threw
   // outside the per-branch handling above would otherwise vanish between "landed" and
