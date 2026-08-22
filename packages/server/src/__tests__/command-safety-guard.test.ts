@@ -364,6 +364,106 @@ describe("validate-command-safety — backup covers the db actually in use (#137
 });
 
 /**
+ * #758 — the hook's local-checkout probe was a bare `existsSync`, so it disagreed with the
+ * CLI resolver (`LOCAL_DB_CANDIDATES` / `isValidLocalDb`, which applies the #165 size floor).
+ * Live consequence on the dev machine: a 0-byte `packages/server/kanban.db` beside the real
+ * 186 MB `~/.agentic-kanban/kanban.db` made the guard call the STUB "the db in use", so every
+ * destructive-db block took a 0-byte backup and then honestly reported "NO BACKUP EXISTS"
+ * while the actual database sat one path away, unprotected.
+ *
+ * The destructive shape used below is a reset, assembled from pieces (see `RESET` above): it
+ * blocks on its own shape, so these cases reach the block MESSAGE without depending on the
+ * #406 stub carve-out, which would correctly ALLOW removing the stub instead.
+ */
+describe("validate-command-safety — the in-checkout db must clear the #165 floor to be 'the db in use' (#758)", () => {
+  const RESET_CMD = `pnpm ${"db" + ":reset"}`;
+  let root: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "kanban-guard-floor-"));
+    await mkdir(join(root, "packages", "server"), { recursive: true });
+    await mkdir(join(root, "home", ".agentic-kanban"), { recursive: true });
+    await writeFile(join(root, "home", ".agentic-kanban", "kanban.db"), Buffer.alloc(16_384, 1));
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const env = () => ({
+    ...checkoutEnv(root),
+    HOME: join(root, "home"),
+    USERPROFILE: join(root, "home"),
+  });
+
+  const homeBackups = () => readdir(join(root, "home", ".agentic-kanban", ".db-backups"));
+  const localDb = () => join(root, "packages", "server", "kanban.db");
+
+  it("backs up the REAL home db, not a 0-byte in-checkout stub", async () => {
+    await writeFile(localDb(), "");
+
+    const result = runGuard(RESET_CMD, env(), root);
+
+    expect(result.blocked).toBe(true);
+    expect((await homeBackups()).some((f) => /^kanban-.*\.db$/.test(f))).toBe(true);
+    // The claim an agent can check against disk: which file the backup covered.
+    expect(result.reason).toContain(join(root, "home", ".agentic-kanban", "kanban.db"));
+    expect(result.reason).toContain("resolved via home-fallback");
+  });
+
+  it("names the rejected in-checkout candidate rather than skipping it silently", async () => {
+    await writeFile(localDb(), "");
+
+    const result = runGuard(RESET_CMD, env(), root);
+
+    expect(result.reason).toContain(localDb());
+    expect(result.reason).toContain("is NOT the database in use");
+    expect(result.reason).toContain("0 bytes");
+    expect(result.reason).toContain("12288");
+  });
+
+  it("rejects an in-checkout db one byte BELOW the floor", async () => {
+    await writeFile(localDb(), Buffer.alloc(12_287));
+
+    const result = runGuard(RESET_CMD, env(), root);
+
+    expect(result.blocked).toBe(true);
+    expect((await homeBackups()).length).toBeGreaterThan(0);
+  });
+
+  it("still adopts an in-checkout db exactly AT the floor (the normal dev case)", async () => {
+    // Same boundary the #406 carve-out uses: 12288 bytes is a database, not a stub. The floor
+    // must not quietly demote a real dev DB to the home fallback.
+    await writeFile(localDb(), Buffer.alloc(12_288, 1));
+
+    const result = runGuard(RESET_CMD, env(), root);
+
+    expect(result.blocked).toBe(true);
+    expect(await readdir(join(root, "packages", "server", ".db-backups"))).not.toHaveLength(0);
+    expect(result.reason).toContain("resolved via local-checkout");
+    expect(result.reason).not.toContain("is NOT the database in use");
+  });
+
+  it("says nothing about a rejected candidate when the checkout simply has no db (fresh clone)", async () => {
+    const result = runGuard(RESET_CMD, env(), root);
+
+    expect(result.blocked).toBe(true);
+    expect(result.reason).not.toContain("is NOT the database in use");
+    expect(result.reason).toContain("resolved via home-fallback");
+  });
+
+  it("a directory at the db path is rejected, never adopted", async () => {
+    await mkdir(localDb(), { recursive: true });
+
+    const result = runGuard(RESET_CMD, env(), root);
+
+    expect(result.blocked).toBe(true);
+    expect(result.reason).toContain("is not a regular file");
+    expect((await homeBackups()).length).toBeGreaterThan(0);
+  });
+});
+
+/**
  * #420 — two false positives, both reproduced live (2026-08-11/12).
  *
  * Guard precision matters double here: every false positive trains agents to reflexively split or

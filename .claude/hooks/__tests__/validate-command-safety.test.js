@@ -100,6 +100,83 @@ const cases = [
       });
     },
   },
+  {
+    // #758: the local-checkout probe was a bare `existsSync`, so a 0-byte stray
+    // `packages/server/kanban.db` made the hook name that STUB as "the db in use" and
+    // `backupDatabase()` copy 0 bytes — while the real database sat in the home dir,
+    // unprotected, behind a message that honestly reported "NO BACKUP EXISTS". The CLI
+    // resolver has applied the #165 size floor all along, so the two disagreed about
+    // which file the board uses. The reset shape is assembled from pieces because the
+    // LIVE guard reads this file's own text whenever it is edited through a shell.
+    name: "a sub-floor in-checkout db is not the db in use — the real home db gets the backup (#758)",
+    run: () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "kanban-hook-stub-local-"));
+      try {
+        fs.mkdirSync(path.join(root, "packages", "server"), { recursive: true });
+        fs.writeFileSync(path.join(root, "packages", "server", "kanban.db"), "");
+        const home = path.join(root, "home");
+        fs.mkdirSync(path.join(home, ".agentic-kanban"), { recursive: true });
+        const realDb = path.join(home, ".agentic-kanban", "kanban.db");
+        fs.writeFileSync(realDb, Buffer.alloc(16_384, 1));
+
+        // A reset blocks on its own shape, so this reaches the block MESSAGE without
+        // depending on the #406 stub carve-out (which would ALLOW removing the stub).
+        const r = runHook(`pnpm ${"db" + ":reset"}`, {
+          CLAUDE_PROJECT_DIR: root,
+          KANBAN_MAIN_CHECKOUT: root,
+          HOME: home,
+          USERPROFILE: home,
+          DB_URL: "",
+          AGENTIC_KANBAN_DIR: "",
+        }, root);
+
+        assert.equal(r.blocked, true, "expected the reset to stay blocked");
+        assert.ok(
+          fs.existsSync(path.join(home, ".agentic-kanban", ".db-backups")),
+          "expected the REAL home database to be the thing backed up",
+        );
+        assert.equal(
+          fs.existsSync(path.join(root, "packages", "server", ".db-backups")),
+          false,
+          "the sub-floor stub must not be treated as the database in use",
+        );
+        // The block message must name the file the backup actually covered — that claim
+        // is the one an agent can check against disk.
+        assert.ok(
+          r.stdout.includes(JSON.stringify(realDb).slice(1, -1)),
+          "block message must name the db the backup covered",
+        );
+        assert.match(r.stdout, /is NOT the database in use/);
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    // The floor must not swallow the normal dev case: a real in-checkout database is
+    // still adopted, and is what gets backed up.
+    name: "a real-sized in-checkout db is still adopted as the db in use (#758)",
+    run: () => {
+      withRealDbCheckout((root, env) => {
+        const home = path.join(root, "home");
+        fs.mkdirSync(path.join(home, ".agentic-kanban"), { recursive: true });
+        fs.writeFileSync(path.join(home, ".agentic-kanban", "kanban.db"), Buffer.alloc(16_384, 2));
+
+        const r = runHook(`pnpm ${"db" + ":reset"}`, { ...env, HOME: home, USERPROFILE: home, DB_URL: "", AGENTIC_KANBAN_DIR: "" }, root);
+
+        assert.equal(r.blocked, true, "expected the reset to stay blocked");
+        assert.ok(
+          fs.existsSync(path.join(root, "packages", "server", ".db-backups")),
+          "expected the in-checkout database to be backed up",
+        );
+        assert.equal(
+          fs.existsSync(path.join(home, ".agentic-kanban", ".db-backups")),
+          false,
+          "the home fallback must not be reached while a real in-checkout db exists",
+        );
+      });
+    },
+  },
 ];
 
 let failed = 0;
