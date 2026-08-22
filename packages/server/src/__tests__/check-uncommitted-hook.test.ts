@@ -8,7 +8,7 @@
  * deletions; following that would delete packages/shared from the branch. These tests
  * exercise the pure classifier plus the porcelain parser against a real temp git repo.
  */
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -22,15 +22,30 @@ const hookPath = resolve(import.meta.dirname, "..", "..", "..", "..", ".claude",
 type SessionActivity = {
   writtenAbs: Set<string>;
   writtenRel: Set<string>;
+  inFlightAbs: Set<string>;
+  inFlightRel: Set<string>;
+  liveSubagents: number;
   agentCalls: number;
   subagentTranscripts: number;
   subagentAuthorshipUnknown: boolean;
 } | null;
-const { classifyStranded, trackedSourceChanges, readSessionActivity, attributeToSession } = requireCjs(hookPath) as {
+type StopReport = { exitCode: number; lines: string[] };
+const {
+  classifyStranded,
+  trackedSourceChanges,
+  readSessionActivity,
+  attributeToSession,
+  partitionAuthored,
+  buildStopReport,
+  SUBAGENT_STALE_MS,
+} = requireCjs(hookPath) as {
   classifyStranded: (c: { edited: string[]; deleted: string[]; all: string[] }) => { action: string; files?: string[]; deleted?: string[]; edited?: string[] };
   trackedSourceChanges: (cwd: string) => { edited: string[]; deleted: string[]; all: string[] };
-  readSessionActivity: (transcriptPath: string | undefined) => SessionActivity;
+  readSessionActivity: (transcriptPath: string | undefined, nowMs?: number) => SessionActivity;
   attributeToSession: (paths: string[], activity: SessionActivity, repoRoot: string) => string[];
+  partitionAuthored: (paths: string[], activity: SessionActivity, repoRoot: string) => { stranded: string[]; inFlight: string[] };
+  buildStopReport: (arg: { stranded: string[]; inFlight: string[]; activity: SessionActivity; totalDirty?: number }) => StopReport;
+  SUBAGENT_STALE_MS: number;
 };
 
 function git(cwd: string, args: string[]): Promise<string> {
@@ -394,5 +409,194 @@ describe("check-uncommitted hook — attribution defects (#720)", () => {
       await transcriptAt("elsewhere.jsonl", [edit(`${OTHER_REPO}/src/a.ts`), bash(`cat ${FOO}`)]),
     );
     expect(attributeToSession(ALL, elsewhere, REPO)).toEqual([]);
+  });
+});
+/**
+ * #724 — IN FLIGHT vs STRANDED.
+ *
+ * #720 made a parent see its subagents' writes. The consequence, hit repeatedly in one
+ * orchestrator session that ran up to 9 implementation subagents against the shared main
+ * checkout: every turn end listed those live agents' half-finished files as "written by THIS
+ * session — commit them before stopping". One was mid-refactor with a syntax error. Committing on
+ * that advice is the cross-author, broken-intermediate commit the root CLAUDE.md names by hash.
+ *
+ * The distinguishing signal comes from the subagent's own transcript, and the fixtures below
+ * mirror what real ones look like (checked against 26 transcripts of the session that filed this
+ * ticket): a FINISHED subagent's last assistant entry carries `stop_reason: "end_turn"`; a LIVE
+ * one ends on a `tool_use` whose result never arrived. The parent's tool result cannot tell you —
+ * subagents launch async, so it reads `status: "async_launched"` from the moment they start.
+ */
+describe("check-uncommitted hook — in-flight vs stranded (#724)", () => {
+  const REPO = "C:/projects/andrena/agentic-kanban";
+  const FOO = "packages/server/src/services/foo.ts";
+  const BAR = "packages/server/src/services/bar.ts";
+  const ALL = [FOO, BAR];
+
+  let dir = "";
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "ak-hook-724-"));
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  const edit = (filePath: string) => ({ type: "tool_use", name: "Edit", input: { file_path: filePath } });
+  const agent = (prompt: string) => ({ type: "tool_use", name: "Agent", input: { prompt } });
+
+  /**
+   * A parent transcript plus one subagent transcript, in Claude Code's real on-disk layout.
+   * `closed: true` appends the terminal `end_turn` assistant entry a finished subagent writes;
+   * `closed: false` leaves the transcript ending on an unanswered tool_use, i.e. still running.
+   * `parentBlocks` are the parent's OWN write tool calls, which are never in flight.
+   */
+  async function session(opts: {
+    agentId: string;
+    childBlocks: unknown[];
+    closed: boolean;
+    parentBlocks?: unknown[];
+    withSubTranscript?: boolean;
+  }): Promise<string> {
+    const p = join(dir, "parent.jsonl");
+    const parentLines = [
+      JSON.stringify({ cwd: REPO, message: { content: [agent("do the work")] } }),
+      // Real shape: the parent's result records the LAUNCH, not the outcome.
+      JSON.stringify({ cwd: REPO, toolUseResult: { agentId: opts.agentId, status: "async_launched" } }),
+      ...(opts.parentBlocks ?? []).map((b) => JSON.stringify({ cwd: REPO, type: "assistant", message: { role: "assistant", stop_reason: "tool_use", content: [b] } })),
+    ];
+    await writeFile(p, parentLines.join("\n") + "\n");
+    if (opts.withSubTranscript !== false) {
+      const subDir = join(dir, "parent", "subagents");
+      await mkdir(subDir, { recursive: true });
+      const lines = opts.childBlocks.map((b) =>
+        JSON.stringify({ cwd: REPO, agentId: opts.agentId, type: "assistant", message: { role: "assistant", stop_reason: "tool_use", content: [b] } }),
+      );
+      if (opts.closed) {
+        lines.push(
+          JSON.stringify({ cwd: REPO, agentId: opts.agentId, type: "assistant", message: { role: "assistant", stop_reason: "end_turn", content: [{ type: "text", text: "Done." }] } }),
+        );
+      }
+      await writeFile(join(subDir, `agent-${opts.agentId}.jsonl`), lines.join("\n") + "\n");
+    }
+    return p;
+  }
+
+  it("a file written by a STILL-RUNNING subagent is IN FLIGHT, never demanded", async () => {
+    const p = await session({ agentId: "aliveaaa1", childBlocks: [edit(`${REPO}/${FOO}`)], closed: false });
+    const activity = readSessionActivity(p);
+    expect(activity?.subagentAuthorshipUnknown).toBe(false);
+    expect(activity?.liveSubagents).toBe(1);
+    // Still ATTRIBUTED to this session (#720 stays true) — but not stranded.
+    expect(attributeToSession(ALL, activity, REPO)).toEqual([FOO]);
+    expect(partitionAuthored(ALL, activity, REPO)).toEqual({ stranded: [], inFlight: [FOO] });
+  });
+
+  it("a file written by a FINISHED subagent IS demanded (stranded)", async () => {
+    const p = await session({ agentId: "doneaaaa1", childBlocks: [edit(`${REPO}/${FOO}`)], closed: true });
+    const activity = readSessionActivity(p);
+    expect(activity?.liveSubagents).toBe(0);
+    expect(partitionAuthored(ALL, activity, REPO)).toEqual({ stranded: [FOO], inFlight: [] });
+    expect(buildStopReport({ stranded: [FOO], inFlight: [], activity }).exitCode).toBe(1);
+  });
+
+  it("when EVERY dirty file is in flight the hook exits 0 with an informational line", async () => {
+    const p = await session({ agentId: "aliveaaa2", childBlocks: [edit(`${REPO}/${FOO}`), edit(`${REPO}/${BAR}`)], closed: false });
+    const activity = readSessionActivity(p);
+    const { stranded, inFlight } = partitionAuthored(ALL, activity, REPO);
+    expect(stranded).toEqual([]);
+    expect(inFlight).toEqual(ALL);
+    const report = buildStopReport({ stranded, inFlight, activity, totalDirty: ALL.length });
+    expect(report.exitCode).toBe(0);
+    const text = report.lines.join("\n");
+    expect(text).toContain("IN FLIGHT");
+    expect(text).toContain("Nothing is STRANDED");
+    // The dangerous sentence must be absent entirely, not merely softened.
+    expect(text).not.toContain("Commit them before stopping");
+  });
+
+  it("names the two states DIFFERENTLY — the core of the ticket", async () => {
+    const strandedOnly = buildStopReport({
+      stranded: [FOO],
+      inFlight: [],
+      activity: { writtenAbs: new Set(), writtenRel: new Set(), inFlightAbs: new Set(), inFlightRel: new Set(), liveSubagents: 0, agentCalls: 0, subagentTranscripts: 0, subagentAuthorshipUnknown: false },
+    });
+    const inFlightOnly = buildStopReport({
+      stranded: [],
+      inFlight: [FOO],
+      activity: { writtenAbs: new Set(), writtenRel: new Set(), inFlightAbs: new Set(), inFlightRel: new Set(), liveSubagents: 1, agentCalls: 1, subagentTranscripts: 1, subagentAuthorshipUnknown: false },
+    });
+    const strandedText = strandedOnly.lines.join("\n");
+    const inFlightText = inFlightOnly.lines.join("\n");
+
+    expect(strandedText).toContain("written by THIS session");
+    expect(strandedText).toContain("Commit them before stopping");
+    expect(strandedText).not.toContain("IN FLIGHT");
+
+    expect(inFlightText).toContain("IN FLIGHT");
+    expect(inFlightText).toContain("Do NOT commit");
+    expect(inFlightText).not.toContain("written by THIS session");
+
+    // Same file, opposite advice — so the wordings cannot be confused for one another.
+    expect(strandedText).not.toEqual(inFlightText);
+    expect(strandedOnly.exitCode).not.toBe(inFlightOnly.exitCode);
+  });
+
+  it("a MIXED tree lists both sets and scopes the commit demand to the stranded ones", async () => {
+    const p = await session({
+      agentId: "aliveaaa3",
+      childBlocks: [edit(`${REPO}/${FOO}`)],
+      closed: false,
+      parentBlocks: [edit(`${REPO}/${BAR}`)],
+    });
+    const activity = readSessionActivity(p);
+    const { stranded, inFlight } = partitionAuthored(ALL, activity, REPO);
+    expect(stranded).toEqual([BAR]);
+    expect(inFlight).toEqual([FOO]);
+    const report = buildStopReport({ stranded, inFlight, activity, totalDirty: ALL.length });
+    expect(report.exitCode).toBe(1);
+    const text = report.lines.join("\n");
+    expect(text).toContain(`  - ${BAR}`);
+    expect(text).toContain(`  ~ ${FOO}`);
+    expect(text).toContain("Commit the STRANDED files listed above");
+    expect(text).not.toContain("Commit them before stopping");
+  });
+
+  it("a subagent whose transcript has gone STALE is treated as stranded, not live", async () => {
+    // A subagent that died without ever closing its turn would otherwise look live forever —
+    // silence, which is the one outcome worse than noise. Past the staleness window its files
+    // are reported again.
+    const p = await session({ agentId: "staleaaa1", childBlocks: [edit(`${REPO}/${FOO}`)], closed: false });
+    const fresh = readSessionActivity(p);
+    expect(fresh?.liveSubagents).toBe(1);
+    const stale = readSessionActivity(p, Date.now() + 2 * SUBAGENT_STALE_MS);
+    expect(stale?.liveSubagents).toBe(0);
+    expect(partitionAuthored(ALL, stale, REPO)).toEqual({ stranded: [FOO], inFlight: [] });
+  });
+
+  it("keeps #720's safe direction: an unresolvable subagent still reports EVERYTHING as stranded", async () => {
+    const p = await session({ agentId: "missingaa", childBlocks: [edit(`${REPO}/${FOO}`)], closed: false, withSubTranscript: false });
+    const activity = readSessionActivity(p);
+    expect(activity?.subagentAuthorshipUnknown).toBe(true);
+    // Unknown authorship must NOT be laundered into "probably in flight, exit 0".
+    expect(partitionAuthored(ALL, activity, REPO)).toEqual({ stranded: ALL, inFlight: [] });
+    const report = buildStopReport({ stranded: ALL, inFlight: [], activity, totalDirty: ALL.length });
+    expect(report.exitCode).toBe(1);
+    expect(report.lines.join("\n")).toContain("authorship UNCERTAIN");
+  });
+
+  it("an unreadable transcript still reports everything (null activity)", () => {
+    expect(partitionAuthored(ALL, null, REPO)).toEqual({ stranded: ALL, inFlight: [] });
+    expect(buildStopReport({ stranded: ALL, inFlight: [], activity: null }).exitCode).toBe(1);
+  });
+
+  it("still runs as a live Stop hook script and exits 0 on re-entry", async () => {
+    // This file IS the checkout's wired Stop hook, so the script path must keep working — a
+    // regression here breaks every session's stop, not just this test.
+    const code = await new Promise<number | null>((res, reject) => {
+      const child = spawn(process.execPath, [hookPath], { stdio: ["pipe", "ignore", "ignore"] });
+      child.on("error", reject);
+      child.on("close", (c) => res(c));
+      child.stdin!.end(JSON.stringify({ stop_hook_active: true }));
+    });
+    expect(code).toBe(0);
   });
 });

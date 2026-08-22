@@ -17,7 +17,7 @@
 
 const { execFileSync } = require("child_process");
 const { resolve } = require("path");
-const { existsSync, readFileSync, readdirSync } = require("fs");
+const { existsSync, readFileSync, readdirSync, statSync } = require("fs");
 const readline = require("readline");
 
 // `node:sqlite` needs `--experimental-sqlite` on most Node 22.x builds, and a builder
@@ -299,6 +299,60 @@ function collectShellWrites(command, baseCwd, abs, rel) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// #724 — IN FLIGHT vs STRANDED.
+//
+// #720 made the parent see its subagents' writes. That is right, and it created the
+// next hazard: an orchestrator that fans work out to N subagents against the shared
+// main checkout is now told, on every turn end, to commit files those subagents are
+// STILL MID-EDIT (one observed with a syntax error mid-refactor). Committing on that
+// advice is exactly the cross-author, broken-intermediate commit the root CLAUDE.md
+// names by hash (`0a7d00bef3`).
+//
+// A subagent's transcript records its terminal result: the last assistant entry of a
+// finished subagent carries `stop_reason: "end_turn"`, while a live one ends on an
+// unanswered `tool_use` (verified against 26 real subagent transcripts of one
+// orchestrator session — every member of the running batch lacked `end_turn`, every
+// member of the finished batches had it). The parent's own tool RESULT cannot answer
+// this: subagents launch async, so it reads `status: "async_launched"` from the start.
+//
+// A subagent that DIED without ever closing its turn would otherwise look live
+// forever — the silent outcome. So liveness also requires a recently-touched
+// transcript: past SUBAGENT_STALE_MS with no write, its files go back to being
+// reported as stranded (noise, not silence).
+// ---------------------------------------------------------------------------
+
+/** A subagent transcript untouched for this long is no longer treated as live (#724). */
+const SUBAGENT_STALE_MS = 20 * 60 * 1000;
+
+function newSink() {
+  return {
+    writtenAbs: new Set(),
+    writtenRel: new Set(),
+    agentCalls: 0,
+    agentIds: new Set(),
+    // Whether the transcript's last assistant turn CLOSED (`stop_reason: "end_turn"`).
+    // Reset by any later tool_use, so a closed turn followed by more work counts as open.
+    turnClosed: false,
+  };
+}
+
+/**
+ * Does this subagent transcript look like it is still RUNNING?
+ * A closed turn means done. An open turn means live, unless the file has gone stale — or its
+ * mtime is unreadable, in which case we prefer "not live" (report it) over silence.
+ */
+function subagentLooksLive(path, sink, nowMs) {
+  if (sink.turnClosed) return false;
+  let mtimeMs;
+  try {
+    mtimeMs = statSync(path).mtimeMs;
+  } catch {
+    return false;
+  }
+  return (typeof nowMs === "number" ? nowMs : Date.now()) - mtimeMs < SUBAGENT_STALE_MS;
+}
+
 /** `<dir>/<session-id>.jsonl` -> every `.jsonl` under the sibling `<dir>/<session-id>/` tree. */
 function subagentTranscriptFiles(transcriptPath) {
   const dir = normPath(transcriptPath).replace(/\.jsonl$/i, "");
@@ -342,11 +396,15 @@ function parseTranscript(path, sink) {
     // "this session had N subagents" apart from "we found N subagent transcripts".
     const resultAgentId = entry?.toolUseResult?.agentId;
     if (typeof resultAgentId === "string") sink.agentIds.add(resultAgentId);
+    // Terminal-result tracking (#724): an assistant entry that ends the turn closes it; any
+    // later tool_use re-opens it. A transcript left open is a subagent still working.
+    if (entry?.type === "assistant" && entry?.message?.stop_reason === "end_turn") sink.turnClosed = true;
     const content = entry?.message?.content;
     if (!Array.isArray(content)) continue;
     const entryCwd = typeof entry?.cwd === "string" ? entry.cwd : null;
     for (const block of content) {
       if (block?.type !== "tool_use") continue;
+      sink.turnClosed = false;
       if (WRITE_TOOLS.has(block.name)) {
         const p = block.input?.file_path ?? block.input?.notebook_path;
         if (typeof p === "string") {
@@ -379,14 +437,33 @@ function parseTranscript(path, sink) {
  * The same rule covers a spawned subagent whose transcript we could not find:
  * `subagentAuthorshipUnknown` makes attribution report everything.
  */
-function readSessionActivity(transcriptPath) {
+function readSessionActivity(transcriptPath, nowMs) {
   if (!transcriptPath || !existsSync(transcriptPath)) return null;
-  const sink = { writtenAbs: new Set(), writtenRel: new Set(), agentCalls: 0, agentIds: new Set() };
+  const sink = newSink();
   if (!parseTranscript(transcriptPath, sink)) return null;
 
+  // Each subagent gets its OWN sink so its writes can be marked IN FLIGHT while it is still
+  // running (#724); the union is merged back afterwards for authorship exactly as in #720.
   const parsedBasenames = new Set();
+  const inFlightAbs = new Set();
+  const inFlightRel = new Set();
+  let liveSubagents = 0;
   for (const f of subagentTranscriptFiles(transcriptPath)) {
-    if (parseTranscript(f, sink)) parsedBasenames.add(f.split("/").pop().toLowerCase());
+    const sub = newSink();
+    if (!parseTranscript(f, sub)) continue;
+    parsedBasenames.add(f.split("/").pop().toLowerCase());
+    const live = subagentLooksLive(f, sub, nowMs);
+    if (live) liveSubagents += 1;
+    for (const w of sub.writtenAbs) {
+      sink.writtenAbs.add(w);
+      if (live) inFlightAbs.add(w);
+    }
+    for (const w of sub.writtenRel) {
+      sink.writtenRel.add(w);
+      if (live) inFlightRel.add(w);
+    }
+    sink.agentCalls += sub.agentCalls;
+    for (const id of sub.agentIds) sink.agentIds.add(id);
   }
 
   // A subagent we KNOW ran but whose transcript we could not read leaves its writes invisible.
@@ -402,6 +479,9 @@ function readSessionActivity(transcriptPath) {
   return {
     writtenAbs: sink.writtenAbs,
     writtenRel: sink.writtenRel,
+    inFlightAbs,
+    inFlightRel,
+    liveSubagents,
     agentCalls: sink.agentCalls,
     subagentTranscripts: parsedBasenames.size,
     subagentAuthorshipUnknown,
@@ -416,22 +496,124 @@ function readSessionActivity(transcriptPath) {
  * write-verb shell command named it, matched ANCHORED at `repoRoot` so a same-relative-path file in
  * a DIFFERENT repo never cross-attributes (#720).
  */
-function attributeToSession(paths, activity, repoRoot) {
-  if (!activity) return paths;
-  if (activity.subagentAuthorshipUnknown) return paths;
+function matchWritten(paths, writtenAbs, writtenRel, repoRoot) {
   const root = repoRoot ? joinPath("", normPath(repoRoot)).replace(/\/+$/, "") : null;
-  const lowerAbs = new Set([...activity.writtenAbs].map((w) => w.toLowerCase()));
+  const lowerAbs = new Set([...writtenAbs].map((w) => w.toLowerCase()));
   return paths.filter((p) => {
-    if (activity.writtenRel.has(p)) return true;
+    if (writtenRel.has(p)) return true;
     if (root) {
       const abs = root + "/" + p;
-      return activity.writtenAbs.has(abs) || lowerAbs.has(abs.toLowerCase());
+      return writtenAbs.has(abs) || lowerAbs.has(abs.toLowerCase());
     }
     // No repo root to anchor against — fall back to a suffix match, which widens (noise) rather
     // than narrows (silence).
-    for (const w of activity.writtenAbs) if (w === p || w.endsWith("/" + p)) return true;
+    for (const w of writtenAbs) if (w === p || w.endsWith("/" + p)) return true;
     return false;
   });
+}
+
+function attributeToSession(paths, activity, repoRoot) {
+  if (!activity) return paths;
+  if (activity.subagentAuthorshipUnknown) return paths;
+  return matchWritten(paths, activity.writtenAbs, activity.writtenRel, repoRoot);
+}
+
+/**
+ * Split this session's own dirty files into the two states the message must NOT conflate (#724).
+ *
+ *   - `inFlight`: a subagent of this session that has NOT reported a terminal result wrote it.
+ *     It is being edited RIGHT NOW; committing it snapshots a half-finished (possibly
+ *     non-compiling) intermediate under the wrong author. Never demanded.
+ *   - `stranded`: everything else this session wrote — its own tool calls, or a subagent that has
+ *     finished. This is the work that genuinely blocks auto-merge if it is left behind.
+ *
+ * A file BOTH the parent and a live subagent wrote counts as in-flight: the subagent's next edit
+ * can still break it, so "do not commit" is the safe classification even though we authored it too.
+ *
+ * Unknown authorship keeps #720's safe direction: EVERYTHING is reported as stranded (under the
+ * "authorship UNCERTAIN" header), because we cannot claim a live agent owns any of it.
+ */
+function partitionAuthored(paths, activity, repoRoot) {
+  const mine = attributeToSession(paths, activity, repoRoot);
+  if (!activity || activity.subagentAuthorshipUnknown) return { stranded: mine, inFlight: [] };
+  const inFlightSet = new Set(
+    matchWritten(mine, activity.inFlightAbs || new Set(), activity.inFlightRel || new Set(), repoRoot)
+  );
+  return {
+    stranded: mine.filter((p) => !inFlightSet.has(p)),
+    inFlight: mine.filter((p) => inFlightSet.has(p)),
+  };
+}
+
+/**
+ * The Stop-hook verdict for a main-checkout session, as pure data (#724).
+ *
+ * Two states, deliberately worded so they can never be mistaken for one another:
+ *
+ *   - STRANDED  — "written by THIS session" + "Commit them before stopping". Blocks (exit 1).
+ *   - IN FLIGHT — "still being written by N live subagent(s)" + "Do NOT commit". Informational.
+ *
+ * Sharing one wording is precisely the #724 bug: the single wording told the session to commit a
+ * live subagent's half-finished file. So an all-in-flight tree exits 0 with the informational line
+ * instead of demanding anything, and a mixed tree lists the two sets separately (`-` vs `~`) with
+ * the commit demand explicitly scoped to the stranded ones.
+ */
+function buildStopReport({ stranded, inFlight, activity, totalDirty }) {
+  const lines = [];
+  const mineCount = stranded.length + inFlight.length;
+  if (mineCount === 0) return { exitCode: 0, lines };
+
+  const pushInFlight = () => {
+    lines.push(
+      `IN FLIGHT — ${inFlight.length} of this session's uncommitted source file(s) are still being ` +
+        `written by ${activity && activity.liveSubagents ? activity.liveSubagents : inFlight.length} ` +
+        "live subagent(s) (no terminal result recorded yet):"
+    );
+    for (const f of inFlight) lines.push(`  ~ ${f}`);
+    lines.push(
+      "Do NOT commit the IN FLIGHT files — they are mid-edit and may not even parse. Let those " +
+        "subagents finish and commit their own work."
+    );
+  };
+
+  if (stranded.length === 0) {
+    // Every dirty file of ours is in flight: informational only, and the stop is NOT blocked (#724).
+    pushInFlight();
+    lines.push("Nothing is STRANDED, so this stop is not blocked.");
+    return { exitCode: 0, lines };
+  }
+
+  const uncertain = !activity || activity.subagentAuthorshipUnknown;
+  lines.push(
+    uncertain
+      ? "WARNING: Uncommitted source changes in the MAIN checkout (authorship UNCERTAIN — see below):"
+      : "WARNING: Uncommitted source changes in the MAIN checkout, written by THIS session:"
+  );
+  for (const f of stranded) lines.push(`  - ${f}`);
+  if (inFlight.length > 0) pushInFlight();
+  if (activity && activity.subagentAuthorshipUnknown) {
+    // #720 defect 1: a subagent's writes live in its own transcript. When one ran and we could not
+    // read it, we cannot narrow the list — reporting nothing would hide real stranded work.
+    lines.push(
+      `(This session spawned ${activity.agentCalls} subagent(s) whose transcript(s) could not all be ` +
+        "read, so ALL dirty source files are listed — some may be another agent's in-flight work. " +
+        "Check each before committing.)"
+    );
+  }
+  if (activity && typeof totalDirty === "number" && mineCount < totalDirty) {
+    lines.push(
+      `(${totalDirty - mineCount} other dirty source file(s) are not attributed to this ` +
+        "session and are NOT listed — they may be another agent's in-flight work. Do not commit them.)"
+    );
+  }
+  lines.push(
+    (inFlight.length > 0
+      ? "Commit the STRANDED files listed above (the `-` lines, NOT the `~` IN FLIGHT ones) before stopping"
+      : "Commit them before stopping") +
+      " — stranded fixes here block auto-merge and can be lost." +
+      (activity ? " Commit by pathspec (`git commit -F msg.txt -- <paths>`), never via the shared index." : "")
+  );
+  return { exitCode: 1, lines };
 }
 
 if (require.main !== module) {
@@ -441,6 +623,9 @@ if (require.main !== module) {
     SOURCE_RE,
     readSessionActivity,
     attributeToSession,
+    partitionAuthored,
+    buildStopReport,
+    SUBAGENT_STALE_MS,
   };
 }
 
@@ -535,36 +720,10 @@ async function main() {
   // by hash. `attributeToSession` returns everything when authorship is unknown, so a session
   // with no readable transcript still gets the old, useful warning.
   const activity = readSessionActivity(input.transcript_path);
-  const uncertain = !activity || activity.subagentAuthorshipUnknown;
-  const mine = attributeToSession(verdict.files, activity, mainCheckout);
-  if (mine.length === 0) process.exit(0);
-
-  console.error(
-    uncertain
-      ? "WARNING: Uncommitted source changes in the MAIN checkout (authorship UNCERTAIN — see below):"
-      : "WARNING: Uncommitted source changes in the MAIN checkout, written by THIS session:"
-  );
-  for (const f of mine) console.error(`  - ${f}`);
-  if (activity && activity.subagentAuthorshipUnknown) {
-    // #720 defect 1: a subagent's writes live in its own transcript. When one ran and we could not
-    // read it, we cannot narrow the list — reporting nothing would hide real stranded work.
-    console.error(
-      `(This session spawned ${activity.agentCalls} subagent(s) whose transcript(s) could not all be ` +
-        "read, so ALL dirty source files are listed — some may be another agent's in-flight work. " +
-        "Check each before committing.)"
-    );
-  }
-  if (activity && mine.length < verdict.files.length) {
-    console.error(
-      `(${verdict.files.length - mine.length} other dirty source file(s) are not attributed to this ` +
-        "session and are NOT listed — they may be another agent's in-flight work. Do not commit them.)"
-    );
-  }
-  console.error(
-    "Commit them before stopping — stranded fixes here block auto-merge and can be lost." +
-      (activity ? " Commit by pathspec (`git commit -F msg.txt -- <paths>`), never via the shared index." : "")
-  );
-  process.exit(1);
+  const { stranded, inFlight } = partitionAuthored(verdict.files, activity, mainCheckout);
+  const report = buildStopReport({ stranded, inFlight, activity, totalDirty: verdict.files.length });
+  for (const line of report.lines) console.error(line);
+  process.exit(report.exitCode);
 }
 
 // #725: guarded by the SAME condition that gates the exports above, which it previously was
