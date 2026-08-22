@@ -116,10 +116,13 @@ export function startWorkerConnectionReaper(
       // Silent when there was nothing to reap — a per-minute line reporting zero would
       // drown the log this sweep exists to make trustworthy.
       //
-      // The tag is written out literally rather than left to `formatPassReport` (which
-      // does emit one) because `console-tag-ratchet.test.ts` can only see LITERAL tags;
-      // routing it through a call would spend one of that ratchet's shrink-only slots on
-      // a line that is in fact tagged.
+      // The tag is written out literally because `console-tag-ratchet.test.ts` can only
+      // see LITERAL tags; routing it through a call would spend one of that ratchet's
+      // shrink-only slots on a line that is in fact tagged. That reasoning is now the
+      // canonical rule — the caller owns the tag, `formatPassReportBody` is the only
+      // formatter — and it lives in `lib/pass-report.ts` (#718, which deleted the tagged
+      // `formatPassReport` wrapper this comment used to point at: no call site could
+      // adopt it without either double-tagging or pushing that ratchet's baseline up).
       if (result.reaped.length > 0) {
         const detail = result.reasons
           .filter((r) => r.reason !== "live")

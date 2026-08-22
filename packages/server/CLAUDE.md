@@ -291,7 +291,7 @@ recordSkipped(result, row.workspaceId, "hold");     // it deliberately left it a
 ```
 
 **`acted + skipped` may be LESS than `scanned`, on purpose.** A candidate that threw is
-neither, so it stays in the remainder that `formatPassReport` prints as `N unaccounted` —
+neither, so it stays in the remainder that `formatPassReportBody` prints as `N unaccounted` —
 a pass that swallowed failures must not read as a clean run. `passReasonCounts` groups the
 reasons for a digest or a monitor.
 
