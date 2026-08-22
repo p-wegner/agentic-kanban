@@ -2,15 +2,14 @@ import { workspaces, issues, projectStatuses, sessions, sessionMessages } from "
 import { eq, inArray, and, desc } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { projectStatusIdName, sessionLifecycleColumns } from "./projections.js";
+import { listProjectStatusIdNames } from "./project-status.repository.js";
 
 export async function getProjectStatusRows(
   projectId: string,
   database: Database = db,
 ) {
-  return database
-    .select({ id: projectStatuses.id, name: projectStatuses.name })
-    .from(projectStatuses)
-    .where(eq(projectStatuses.projectId, projectId));
+  return listProjectStatusIdNames(projectId, database);
 }
 
 export async function getProjectIssueRows(
@@ -57,11 +56,7 @@ export async function getRiskSessionRowsDesc(
 ) {
   return database
     .select({
-      id: sessions.id,
-      workspaceId: sessions.workspaceId,
-      status: sessions.status,
-      startedAt: sessions.startedAt,
-      endedAt: sessions.endedAt,
+      ...sessionLifecycleColumns,
       exitCode: sessions.exitCode,
       stats: sessions.stats,
       triggerType: sessions.triggerType,

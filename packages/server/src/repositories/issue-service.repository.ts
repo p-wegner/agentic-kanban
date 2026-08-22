@@ -7,6 +7,7 @@ import { db } from "../db/index.js";
 import type { Database, TransactionClient } from "../db/index.js";
 import { hasPath } from "../lib/dependency-graph.js";
 import type { BatchIssueInput, BatchDependencyInput } from "../lib/batch-create-issues.js";
+import { issueDependencyColumns } from "./projections.js";
 
 /** A drizzle connection that is either the base db or an open transaction. */
 type DbOrTx = Database | TransactionClient;
@@ -238,10 +239,7 @@ export async function getDependencyRowsForProjects(
 ) {
   return database
     .select({
-      id: issueDependencies.id,
-      issueId: issueDependencies.issueId,
-      dependsOnId: issueDependencies.dependsOnId,
-      type: issueDependencies.type,
+      ...issueDependencyColumns,
       projectId: issues.projectId,
     })
     .from(issueDependencies)

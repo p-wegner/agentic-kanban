@@ -3,6 +3,7 @@ import { issueDependencies, issues, preferences, projectStatuses, workflowNodes,
 import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { issueDependencyColumns, issueIdentityColumns, preferenceKeyValueColumns } from "./projections.js";
 
 /**
  * The preference rows the WIP limit is derived from (#654).
@@ -23,7 +24,7 @@ export async function getWipLimitPrefMap(
 ): Promise<Map<string, string>> {
   const keys = [wipLimitPref.key(projectId), boardStrategyPref.key(projectId), "nudge_wip_limit"];
   const prefRows = await database
-    .select({ key: preferences.key, value: preferences.value })
+    .select(preferenceKeyValueColumns)
     .from(preferences)
     .where(inArray(preferences.key, keys));
   return new Map(prefRows.map((r) => [r.key, r.value] as const));
@@ -63,9 +64,7 @@ export async function getProjectIssuesForWave(
 ) {
   return database
     .select({
-      id: issues.id,
-      issueNumber: issues.issueNumber,
-      title: issues.title,
+      ...issueIdentityColumns,
       statusName: projectStatuses.name,
       statusId: issues.statusId,
       sortOrder: issues.sortOrder,
@@ -98,10 +97,7 @@ export async function getWaveDependencyRows(
   if (!hasIssues) return [];
   return database
     .select({
-      id: issueDependencies.id,
-      issueId: issueDependencies.issueId,
-      dependsOnId: issueDependencies.dependsOnId,
-      type: issueDependencies.type,
+      ...issueDependencyColumns,
     })
     .from(issueDependencies)
     .innerJoin(issues, eq(issueDependencies.issueId, issues.id))

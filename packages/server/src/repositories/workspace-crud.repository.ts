@@ -7,6 +7,7 @@ import { getProjectById } from "./project.repository.js";
 import { mirrorWorkspaceColumnsToLeadingRepo } from "./repo.repository.js";
 import { setWorkspaceWorkingDir as setWorkspaceWorkingDirShared } from "@agentic-kanban/shared/lib/workspace-git-state";
 import { getAllPreferences as canonicalGetAllPreferences } from "./preferences.repository.js";
+import { issueIdentityColumns } from "./projections.js";
 
 export async function updateLatestSetupRunFields(
   workspaceId: string,
@@ -392,9 +393,7 @@ export async function getBlockerIssues(
 ) {
   return database
     .select({
-      id: issues.id,
-      issueNumber: issues.issueNumber,
-      title: issues.title,
+      ...issueIdentityColumns,
       statusName: projectStatuses.name,
       currentNodeId: issues.currentNodeId,
       currentNodeType: workflowNodes.nodeType,

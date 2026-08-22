@@ -4,6 +4,8 @@ import { eq, and, inArray, notInArray, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database, TransactionClient } from "../db/index.js";
 import { getPreference as canonicalGetPreference } from "./preferences.repository.js";
+import { issueTriageColumns, projectStatusIdName } from "./projections.js";
+import { listProjectStatusIdNames } from "./project-status.repository.js";
 
 export async function getProjectsBasePath(database: Database = db) {
   const rows = await database
@@ -79,10 +81,7 @@ export async function getProjectStatusIdsAndNames(
   projectId: string,
   database: Database = db,
 ) {
-  return database
-    .select({ id: projectStatuses.id, name: projectStatuses.name })
-    .from(projectStatuses)
-    .where(eq(projectStatuses.projectId, projectId));
+  return listProjectStatusIdNames(projectId, database);
 }
 
 export async function getBoardIssueRows(
@@ -120,10 +119,7 @@ export async function getBoardIssues(
 ) {
   return database
     .select({
-      id: issues.id,
-      issueNumber: issues.issueNumber,
-      title: issues.title,
-      priority: issues.priority,
+      ...issueTriageColumns,
       issueType: issues.issueType,
       sortOrder: issues.sortOrder,
       statusId: issues.statusId,
@@ -169,10 +165,7 @@ export async function getGraphIssues(
   // /graph payload.
   return database
     .select({
-      id: issues.id,
-      issueNumber: issues.issueNumber,
-      title: issues.title,
-      priority: issues.priority,
+      ...issueTriageColumns,
       issueType: issues.issueType,
       sortOrder: issues.sortOrder,
       statusId: issues.statusId,
@@ -198,10 +191,7 @@ export async function getCrossProjectIssues(
 ) {
   return database
     .select({
-      id: issues.id,
-      issueNumber: issues.issueNumber,
-      title: issues.title,
-      priority: issues.priority,
+      ...issueTriageColumns,
       issueType: issues.issueType,
       sortOrder: issues.sortOrder,
       statusId: issues.statusId,

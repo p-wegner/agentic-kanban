@@ -3,6 +3,8 @@ import { eq, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getProjectById } from "./project.repository.js";
+import { issueTriageColumns, preferenceKeyValueColumns, projectStatusIdName, sessionLifecycleColumns } from "./projections.js";
+import { listProjectStatusIdNames } from "./project-status.repository.js";
 
 /** Resolve the active project id from the `activeProjectId` preference. */
 export async function getActiveProjectIdPref(
@@ -30,7 +32,7 @@ export async function getAutoMergePreferences(
   database: Database = db,
 ) {
   return database
-    .select({ key: preferences.key, value: preferences.value })
+    .select(preferenceKeyValueColumns)
     .from(preferences)
     .where(inArray(preferences.key, ["auto_merge", "auto_merge_in_review"]));
 }
@@ -40,11 +42,7 @@ export async function getBoardStatusStatuses(
   projectId: string,
   database: Database = db,
 ) {
-  return database
-    .select({ id: projectStatuses.id, name: projectStatuses.name })
-    .from(projectStatuses)
-    .where(eq(projectStatuses.projectId, projectId))
-    .orderBy(projectStatuses.sortOrder);
+  return listProjectStatusIdNames(projectId, database, { ordered: true });
 }
 
 /** Issues with status names + current workflow node type (LEFT JOIN for non-workflow issues). */
@@ -54,10 +52,7 @@ export async function getBoardStatusIssues(
 ) {
   return database
     .select({
-      id: issues.id,
-      issueNumber: issues.issueNumber,
-      title: issues.title,
-      priority: issues.priority,
+      ...issueTriageColumns,
       issueType: issues.issueType,
       statusId: issues.statusId,
       statusName: projectStatuses.name,
@@ -130,11 +125,7 @@ export async function getSessionsForWorkspaces(
   if (wsIds.length === 0) return [];
   return database
     .select({
-      id: sessions.id,
-      workspaceId: sessions.workspaceId,
-      status: sessions.status,
-      startedAt: sessions.startedAt,
-      endedAt: sessions.endedAt,
+      ...sessionLifecycleColumns,
       stats: sessions.stats,
       triggerType: sessions.triggerType,
     })

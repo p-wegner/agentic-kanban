@@ -2,6 +2,7 @@ import { issues, projectStatuses, issueDependencies, tags, issueTags, workflowNo
 import { eq, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { issueDependencyColumns } from "./projections.js";
 
 export type GraphEdge = {
   id: string;
@@ -69,10 +70,7 @@ export async function getGraphEdgesForIssues(
   if (issueIds.length === 0) return [];
   return database
     .select({
-      id: issueDependencies.id,
-      issueId: issueDependencies.issueId,
-      dependsOnId: issueDependencies.dependsOnId,
-      type: issueDependencies.type,
+      ...issueDependencyColumns,
       issueTitle: issues.title,
       issueStatusName: projectStatuses.name,
       issueNumber: issues.issueNumber,

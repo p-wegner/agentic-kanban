@@ -3,6 +3,7 @@ import { and, eq, like, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { ACTIVE_WORKSPACE_STATUSES } from "@agentic-kanban/shared/lib/workspace-activity-state";
+import { preferenceKeyValueColumns } from "./projections.js";
 
 export type PluginRow = typeof plugins.$inferSelect;
 
@@ -327,7 +328,7 @@ export async function listPluginEnabledPreferences(
   database: Database = db,
 ): Promise<Array<{ key: string; value: string }>> {
   return database
-    .select({ key: preferences.key, value: preferences.value })
+    .select(preferenceKeyValueColumns)
     .from(preferences)
     .where(like(preferences.key, "plugin_enabled_%"));
 }

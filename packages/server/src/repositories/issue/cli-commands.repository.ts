@@ -13,6 +13,7 @@ import { randomUUID } from "node:crypto";
 import { db } from "../../db/index.js";
 import type { Database } from "../../db/index.js";
 import { isIssueNumberUniqueConstraintError, nextIssueNumber } from "../issue-number.repository.js";
+import { issueIdentityColumns, issueTextColumns } from "../projections.js";
 
 type Issue = typeof issues.$inferSelect;
 const ISSUE_NUMBER_INSERT_ATTEMPTS = 3;
@@ -47,10 +48,7 @@ export async function getIssueListForProject(projectId: string, database: Databa
 export async function getIssueHeaderByNumber(projectId: string, issueNumber: number, database: Database = db) {
   const rows = await database
     .select({
-      id: issues.id,
-      issueNumber: issues.issueNumber,
-      title: issues.title,
-      description: issues.description,
+      ...issueTextColumns,
       priority: issues.priority,
       issueType: issues.issueType,
       statusName: projectStatuses.name,
@@ -114,9 +112,7 @@ export async function getIssueByNumberOrId(
 export async function getIssueWithStatusById(issueId: string, database: Database = db) {
   const rows = await database
     .select({
-      id: issues.id,
-      issueNumber: issues.issueNumber,
-      title: issues.title,
+      ...issueIdentityColumns,
       statusName: projectStatuses.name,
       priority: issues.priority,
       issueType: issues.issueType,

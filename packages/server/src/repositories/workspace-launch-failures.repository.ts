@@ -3,6 +3,8 @@ import { eq, inArray, desc, and, ne } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getProjectById } from "./project.repository.js";
+import { projectStatusIdName } from "./projections.js";
+import { listProjectStatusIdNames } from "./project-status.repository.js";
 
 export async function getProjectIdOrNull(
   projectId: string,
@@ -16,10 +18,7 @@ export async function getProjectStatusRows(
   projectId: string,
   database: Database = db,
 ) {
-  return database
-    .select({ id: projectStatuses.id, name: projectStatuses.name })
-    .from(projectStatuses)
-    .where(eq(projectStatuses.projectId, projectId));
+  return listProjectStatusIdNames(projectId, database);
 }
 
 export async function getProjectIssueRows(

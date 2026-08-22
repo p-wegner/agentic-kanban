@@ -5,6 +5,8 @@ import type { Database } from "../db/index.js";
 import { ACTIVE_WORKSPACE_STATUSES } from "@agentic-kanban/shared";
 
 import { strategyPrefKey } from "@agentic-kanban/shared/lib/strategy-policy";
+import { issueTriageColumns, projectStatusIdName } from "./projections.js";
+import { listProjectStatusIdNames } from "./project-status.repository.js";
 /** Raw value of the `board_strategy_<projectId>` preference, if any. */
 export async function getStrategyBullseyePref(
   projectId: string,
@@ -39,10 +41,7 @@ export async function getProjectStatusList(
   projectId: string,
   database: Database = db,
 ): Promise<{ id: string; name: string }[]> {
-  return database
-    .select({ id: projectStatuses.id, name: projectStatuses.name })
-    .from(projectStatuses)
-    .where(eq(projectStatuses.projectId, projectId));
+  return listProjectStatusIdNames(projectId, database);
 }
 
 /** Issues in a project that belong to the given status ids. */
@@ -54,10 +53,7 @@ export async function getIssuesByStatusIds(
   if (statusIds.length === 0) return [];
   return database
     .select({
-      id: issues.id,
-      issueNumber: issues.issueNumber,
-      title: issues.title,
-      priority: issues.priority,
+      ...issueTriageColumns,
       statusName: projectStatuses.name,
     })
     .from(issues)

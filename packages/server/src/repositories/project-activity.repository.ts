@@ -2,13 +2,12 @@ import { eq, inArray, sql } from "drizzle-orm";
 import { issues, workspaces, sessions, issueComments, projectStatuses } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { issueIdentityColumns } from "./projections.js";
 
 export async function getProjectActivityIssues(projectId: string, database: Database = db) {
   return database
     .select({
-      id: issues.id,
-      issueNumber: issues.issueNumber,
-      title: issues.title,
+      ...issueIdentityColumns,
       createdAt: issues.createdAt,
       statusChangedAt: issues.statusChangedAt,
       statusName: projectStatuses.name,
