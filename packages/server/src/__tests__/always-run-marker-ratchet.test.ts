@@ -28,6 +28,12 @@ import path from "node:path";
  * reachable via its own imports (so file-scoping is safe to apply to it) belongs in
  * `KNOWN_SAFE_UNMARKED` with a one-line reason, not silently ignored — the same
  * "explain the exception in the test" discipline as every other ratchet here.
+ *
+ * #734 closed the two holes #687 disclosed in this file. Both exemption lists were keyed by
+ * BASENAME, so eight strings were permanently un-guardable NAMES rather than eight exempted
+ * files; they are keyed by `<package-label>/<path>` now. And a suite that reached the tree
+ * only through the shared `guard-scan` helper matched no signature at all — a hole that WIDENED
+ * with every guard centralised onto that helper — so using it is now a signature of its own.
  */
 
 const packagesRoot = path.join(import.meta.dirname!, "..", "..", "..");
@@ -69,10 +75,10 @@ const TEST_FILE = /\.test\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
  * Measured after the rewrite: 39 of 44 marked suites match, and it independently
  * rediscovered 18 unmarked repo-tree readers (now marked) including the three #647 named.
  *
- * Still a heuristic net, not a proof — the 5 marked suites it does not match reach the tree
- * through a helper or an unanchored literal, and a NEW suite in that shape would not be
- * asked for a marker. Narrowing the gap is the goal; closing it would need a real import
- * analysis.
+ * Still a heuristic net, not a proof. The "through a helper" half of that gap is closed since
+ * #734 (see USES_SHARED_GUARD_HELPER below); what remains is an unanchored path literal, and a
+ * NEW suite in that shape would not be asked for a marker. Narrowing the gap is the goal;
+ * closing it would need a real import analysis.
  */
 const ANCHORED_AT_OWN_MODULE = /__dirname|import\.meta\.dirname|import\.meta\.url/;
 
@@ -98,7 +104,27 @@ const READS_MIGRATIONS_DIR = /\bMIGRATIONS_DIR\b/;
  */
 const IMPORTS_A_REPO_SCRIPT = /from\s+["'][^"']*\/scripts\/[^"']+["']/;
 
+/**
+ * #734 — reaches the repo tree through the SHARED guard machinery
+ * (`packages/shared/__tests__/helpers/guard-scan.ts`: `walkPackageSources`, `walkTestFiles`,
+ * `packagesRootFrom`, `parseGuardSource`).
+ *
+ * This was the hole that WIDENED every time a guard was centralised onto that helper, which
+ * the repo is actively doing (21 suites today, plus #721's typed AST layer and #734's own
+ * conversions). A suite can now scan every package's sources without writing any of the
+ * idioms the other signatures look for: `packagesRootFrom(import.meta.dirname, 2)` names no
+ * `..` segment and calls no `readFileSync` — the walking and the reading both happen inside
+ * the helper — so it matched nothing and was never asked for a marker. Delete its marker and
+ * the ratchet stayed green, exactly the rot this suite exists to catch.
+ *
+ * Measured when added: all 21 suites that import the helper already carry the marker, so this
+ * signature introduced no new offenders — it defends the marker they already have, and asks
+ * for one from the next suite of that shape.
+ */
+const USES_SHARED_GUARD_HELPER = /guard-scan|walkPackageSources|walkTestFiles|packagesRootFrom|parseGuardSource/;
+
 const UNSOUND_SIGNATURES: Array<{ name: string; test: (source: string) => boolean }> = [
+  { name: "reaches-tree-via-shared-guard-helper", test: (s) => USES_SHARED_GUARD_HELPER.test(s) },
   {
     name: "reads-outside-own-dir",
     test: (s) => ANCHORED_AT_OWN_MODULE.test(s) && CLIMBS_OUT_OF_OWN_DIR.test(s) && TOUCHES_DISK.test(s),
@@ -140,25 +166,29 @@ const UNSOUND_SIGNATURES: Array<{ name: string; test: (source: string) => boolea
  * genuinely reachable through their own imports but are wanted on every gate run regardless.
  * Those are named here with a reason. Anything else must match a signature — which is what
  * makes a new marker either self-defending or a deliberate, reviewed exception.
+ *
+ * Keyed by `<package-label>/<path-under-__tests__>` since #734, for the same reason as
+ * {@link KNOWN_SAFE_UNMARKED}: a basename key exempts every future file that happens to be
+ * called that, anywhere in any package.
  */
 const MARKED_BY_POLICY = new Set<string>([
   // Cross-package parity invariants: both sides are imported, so `vitest related` does reach
   // them. Marked because a registry/keys mismatch breaks settings for every project and is
   // milliseconds to check.
-  "settings-registry.test.ts",
-  "settings-registry-keys.test.ts",
+  "shared/settings-registry.test.ts",
+  "server/settings-registry-keys.test.ts",
   // Pins the scheduler every background reconciler depends on (#529). Import-reachable;
   // marked because a regression here silently stops all sweeps rather than failing loudly.
-  "periodic-sweep.test.ts",
+  "server/periodic-sweep.test.ts",
   // #643 — asserts the tier CONTRACT (a level may only weaken verification visibly) against
   // the tier module it imports. Marked because the gate's own honesty is what it guards.
-  "gate-tier-scoping.test.ts",
+  "server/gate-tier-scoping.test.ts",
   // #687 — reaches the tree only through the helper it is testing (`countAlwaysRunGuardSuites`,
   // imported from pre-merge-gate-tier) and against TEMP fixture roots, never the real tree, so
   // no signature here applies. Marked because it is the suite that proves the guard COUNT in
   // every gate message is real; a wrong count is the number an operator checks instead of the
   // suite list.
-  "guard-suite-count.test.ts",
+  "server/guard-suite-count.test.ts",
 ]);
 
 /**
@@ -166,6 +196,13 @@ const MARKED_BY_POLICY = new Set<string>([
  * states why file-scoping is still safe for it (e.g. it also imports the real module under
  * test, so `vitest related` reaches it through the ordinary dependency graph). Only SHRINK
  * this list; a file that stops matching its stated reason should be removed, not left stale.
+ *
+ * **Keyed by `<package-label>/<path-under-__tests__>` since #734.** It used to match by
+ * BASENAME, which made these eight strings permanently un-guardable NAMES rather than
+ * exemptions for eight files: a brand-new tree-scanning guard called `cli.test.ts` in any
+ * package inherited the exemption of a spawn-based CLI integration test it has nothing to do
+ * with, and `project-scripts.test.ts` already exists twice in this repo (server + e2e). An
+ * exemption should be as narrow as the argument that earned it.
  */
 const KNOWN_SAFE_UNMARKED = new Set<string>([
   // #647 item 5 removed three entries rather than adding any:
@@ -181,24 +218,24 @@ const KNOWN_SAFE_UNMARKED = new Set<string>([
   // Spawn-based CLI integration tests, already excluded from `pnpm test:mine` entirely
   // (scripts/test-mine.mjs ALWAYS_RUN_TESTS never runs for a package whose suite is
   // excluded outright) — the MIGRATIONS_DIR read is real but moot for file-scoping.
-  "cli.test.ts",
-  "cli-butler.test.ts",
+  "server/cli.test.ts",
+  "server/cli-butler.test.ts",
   // Import the real service under test (`merge-cleanup.service.ts` / project-scripts route /
   // `reconcileMergedIssue`); MIGRATIONS_DIR is only used to seed a temp test DB with the real
   // schema, not to assert a repo-wide property — reachable via the ordinary import graph.
-  "merge-cleanup.service.test.ts",
-  "project-scripts.test.ts",
-  "reconcile-merged-issue.test.ts",
+  "server/merge-cleanup.service.test.ts",
+  "server/project-scripts.test.ts",
+  "server/reconcile-merged-issue.test.ts",
   // #661: same shape as merge-cleanup.service.test.ts above — imports the services under
   // test (merge-cleanup + workspace-issue-members repository) directly; MIGRATIONS_DIR
   // only seeds the temp DB.
-  "ticket-groups.test.ts",
+  "server/ticket-groups.test.ts",
   // #647: same MIGRATIONS_DIR-shaped exemption, reached by the rewritten signature. Each
   // resolves the monorepo root only to find `packages/shared/drizzle` and seed a TEMP DB
   // with the real schema; the subject under test is the MCP tool, reachable by import.
-  "disabled-tools.test.ts",
-  "mcp-tools.test.ts",
-  "get-context-boundary.test.ts",
+  "mcp-server/disabled-tools.test.ts",
+  "mcp-server/mcp-tools.test.ts",
+  "mcp-server/tools/get-context-boundary.test.ts",
 ]);
 
 interface Offender {
@@ -225,13 +262,27 @@ function collectTestFiles(testsDir: string, rel = ""): { name: string; rel: stri
   return out;
 }
 
-function scanTestsDir(testsDir: string): Offender[] {
+/**
+ * Every scanned test file by its `<label>/<rel>` key — the identity both exemption lists are
+ * keyed by since #734. Two files with the same basename in different packages are two entries,
+ * which is the whole point of the change.
+ */
+function collectByPath(): Map<string, string> {
+  const byPath = new Map<string, string>();
+  for (const { label, testsDir } of SCAN_PACKAGES) {
+    for (const f of collectTestFiles(testsDir)) byPath.set(`${label}/${f.rel}`, f.full);
+  }
+  return byPath;
+}
+
+function scanTestsDir(label: string, testsDir: string): Offender[] {
   const offenders: Offender[] = [];
-  for (const { name, rel, full } of collectTestFiles(testsDir)) {
+  for (const { rel, full } of collectTestFiles(testsDir)) {
     const source = fs.readFileSync(full, "utf8");
     if (source.includes(MARKER)) continue;
-    // Matched by BASENAME, so an allowlisted file keeps its exemption wherever it moves to.
-    if (KNOWN_SAFE_UNMARKED.has(name)) continue;
+    // Matched by PATH since #734: an exemption covers the file it was argued for, and moving
+    // that file is a reviewed edit here rather than a silent transfer to its new neighbour.
+    if (KNOWN_SAFE_UNMARKED.has(`${label}/${rel}`)) continue;
     const matched = UNSOUND_SIGNATURES.filter((sig) => sig.test(source)).map((sig) => sig.name);
     if (matched.length > 0) offenders.push({ file: rel, signatures: matched });
   }
@@ -242,7 +293,7 @@ describe("always-run marker ratchet (#538)", () => {
   it("every suite with an unsound (import-graph-invisible) signature carries the @gate:always-run marker", () => {
     const offenders: string[] = [];
     for (const { label, testsDir } of SCAN_PACKAGES) {
-      for (const { file, signatures } of scanTestsDir(testsDir)) {
+      for (const { file, signatures } of scanTestsDir(label, testsDir)) {
         offenders.push(`${label}/${file} (${signatures.join(", ")})`);
       }
     }
@@ -259,17 +310,18 @@ describe("always-run marker ratchet (#538)", () => {
 
   it("KNOWN_SAFE_UNMARKED entries are not stale", () => {
     const stale: string[] = [];
-    const byName = new Map<string, string>();
-    for (const { testsDir } of SCAN_PACKAGES) {
-      for (const f of collectTestFiles(testsDir)) byName.set(f.name, f.full);
-    }
-    {
-      for (const name of KNOWN_SAFE_UNMARKED) {
-        const full = byName.get(name);
-        if (!full) continue;
-        const source = fs.readFileSync(full, "utf8");
-        const stillMatches = UNSOUND_SIGNATURES.some((sig) => sig.test(source));
-        if (!stillMatches) stale.push(`${name}: no longer matches any unsound signature — remove the entry`);
+    const byPath = collectByPath();
+    for (const key of KNOWN_SAFE_UNMARKED) {
+      const full = byPath.get(key);
+      // #734: a path key that resolves to nothing is itself staleness — under the old basename
+      // keys a moved or deleted file silently kept its exemption alive for its own name.
+      if (!full) {
+        stale.push(`${key}: no such test file — remove the entry`);
+        continue;
+      }
+      const source = fs.readFileSync(full, "utf8");
+      if (!UNSOUND_SIGNATURES.some((sig) => sig.test(source))) {
+        stale.push(`${key}: no longer matches any unsound signature — remove the entry`);
       }
     }
     expect(stale, `Stale KNOWN_SAFE_UNMARKED entries:\n${stale.join("\n")}`).toEqual([]);
@@ -301,10 +353,10 @@ describe("always-run marker ratchet (#538)", () => {
   it("every marked suite either matches a signature or is a declared policy marker", () => {
     const undefended: string[] = [];
     for (const { label, testsDir } of SCAN_PACKAGES) {
-      for (const { name, rel, full } of collectTestFiles(testsDir)) {
+      for (const { rel, full } of collectTestFiles(testsDir)) {
         const source = fs.readFileSync(full, "utf8");
         if (!source.includes(MARKER)) continue;
-        if (MARKED_BY_POLICY.has(name)) continue;
+        if (MARKED_BY_POLICY.has(`${label}/${rel}`)) continue;
         if (UNSOUND_SIGNATURES.some((sig) => sig.test(source))) continue;
         undefended.push(`${label}/${rel}`);
       }
@@ -323,17 +375,14 @@ describe("always-run marker ratchet (#538)", () => {
   it("MARKED_BY_POLICY entries are not stale", () => {
     // An entry that has started matching a signature is defended by the signature now, and
     // leaving it here would re-hide the next suite that lands in the same shape.
-    const byName = new Map<string, string>();
-    for (const { testsDir } of SCAN_PACKAGES) {
-      for (const f of collectTestFiles(testsDir)) byName.set(f.name, f.full);
-    }
+    const byPath = collectByPath();
     const stale: string[] = [];
-    for (const name of MARKED_BY_POLICY) {
-      const full = byName.get(name);
-      if (!full) { stale.push(`${name} (no such test file)`); continue; }
+    for (const key of MARKED_BY_POLICY) {
+      const full = byPath.get(key);
+      if (!full) { stale.push(`${key} (no such test file)`); continue; }
       const source = fs.readFileSync(full, "utf8");
-      if (!source.includes(MARKER)) { stale.push(`${name} (no longer marked)`); continue; }
-      if (UNSOUND_SIGNATURES.some((sig) => sig.test(source))) stale.push(`${name} (now matches a signature)`);
+      if (!source.includes(MARKER)) { stale.push(`${key} (no longer marked)`); continue; }
+      if (UNSOUND_SIGNATURES.some((sig) => sig.test(source))) stale.push(`${key} (now matches a signature)`);
     }
     expect(stale, `remove these from MARKED_BY_POLICY:\n  ${stale.join("\n  ")}`).toEqual([]);
   });
