@@ -9,7 +9,8 @@ import { setWorkspaceStatus } from "../repositories/workspace-status.repository.
 import { getMergeJob } from "../services/merge-job.service.js";
 import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 import { isPidAlive } from "../lib/pid.js";
-import { probeRemoteSessionLiveness, type LivenessVerdict } from "../services/remote-session-liveness.js";
+import type { LivenessVerdict } from "../services/remote-session-liveness.js";
+import { probeRemoteSessionLiveness } from "../services/fleet-liveness-probe.js";
 
 /** Grace window: a fix-and-merge session must be this old before it is a candidate. */
 const GRACE_WINDOW_MS = 60_000;

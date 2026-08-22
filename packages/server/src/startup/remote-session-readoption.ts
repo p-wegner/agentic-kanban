@@ -26,15 +26,13 @@
 //    finishing a push after a board restart gets 401 regardless of what happens
 //    here. That is the second half of #745 and needs a persisted token digest.
 
-import { and, eq, isNotNull } from "drizzle-orm";
-import { issues, projects, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { db as realDb } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { listRunningWorkerSessions } from "../repositories/remote-session.repository.js";
+import { updateSessionStoppedNoStats } from "../repositories/session-lifecycle.repository.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
-import {
-  probeRemoteSessionLiveness,
-  type LivenessVerdict,
-} from "../services/remote-session-liveness.js";
+import type { LivenessVerdict } from "../services/remote-session-liveness.js";
+import { probeRemoteSessionLiveness } from "../services/fleet-liveness-probe.js";
 import type { RemoteAgentService } from "../services/agent-remote.service.js";
 import type { AgentOutputEvent } from "../services/agent.service.js";
 
@@ -84,23 +82,7 @@ export async function readoptRemoteSessions(deps: RemoteReadoptionDeps): Promise
   const probe = deps.probe ?? probeRemoteSessionLiveness;
   const result: RemoteReadoptionResult = { adopted: [], finalized: [] };
 
-  const rows = await database
-    .select({
-      sessionId: sessions.id,
-      workerId: sessions.workerId,
-      startedAt: sessions.startedAt,
-      executor: sessions.executor,
-      workspaceId: workspaces.id,
-      branch: workspaces.branch,
-      issueId: workspaces.issueId,
-      projectId: issues.projectId,
-      repoPath: projects.repoPath,
-    })
-    .from(sessions)
-    .innerJoin(workspaces, eq(sessions.workspaceId, workspaces.id))
-    .innerJoin(issues, eq(workspaces.issueId, issues.id))
-    .innerJoin(projects, eq(issues.projectId, projects.id))
-    .where(and(eq(sessions.status, "running"), isNotNull(sessions.workerId)));
+  const rows = await listRunningWorkerSessions(database);
 
   if (rows.length === 0) return result;
 
@@ -119,10 +101,7 @@ export async function readoptRemoteSessions(deps: RemoteReadoptionDeps): Promise
       console.warn(
         `[startup] remote session ${row.sessionId} cannot be recovered: ${verdict.reason} — marking stopped`,
       );
-      await database
-        .update(sessions)
-        .set({ status: "stopped", endedAt: now })
-        .where(eq(sessions.id, row.sessionId));
+      await updateSessionStoppedNoStats(row.sessionId, now, database);
       await setWorkspaceStatus(database, row.workspaceId, "idle", { now });
       result.finalized.push(row.sessionId);
       continue;
