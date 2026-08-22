@@ -6,9 +6,13 @@
 // session-keyed surface the session lifecycle consumes, plus a dispatching proxy
 // that picks an implementation per launch and remembers the choice for the
 // follow-up calls (kill/sendInput/closeStdin/...) that arrive keyed by sessionId
-// only. Today only the host implementation exists; the proxy is deliberately a
-// near-identity wrapper that establishes the routing contract remote dispatch
-// (phase 1c #5) will plug into.
+// only. BOTH implementations exist today: `session-manager/session-lifecycle.ts`
+// builds this proxy as `createAgentDispatch({ host: realAgentService, remote:
+// getWorkerFleet().remoteAgentService })`, so a `remote` placement really does
+// route to `agent-remote.service.ts` and out over a fleet worker's WebSocket.
+// (This header used to say "today only the host implementation exists" and call
+// the proxy a near-identity wrapper. That was true of phase 0 and stopped being
+// true when phase 1c #5 landed — corrected in #756.)
 
 import type { AgentOutputCallback } from "./agent.service.js";
 import type { ProviderId, ProviderName } from "./agent-provider.js";
@@ -17,9 +21,13 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
  * Where a session's agent should execute. Carried through StartSessionOptions.
- * `container` placement currently still travels as the separate
- * `containerProvision` launch argument (folded into this union in phase 1c);
  * `remote` names a connected worker from the worker registry (phase 1a).
+ *
+ * `kind: "container"` is a DEAD arm: the fold never happened, so nothing in the
+ * tree constructs or matches it and container placement still travels as the
+ * separate `containerProvision` launch argument. The old comment here promised
+ * the fold "in phase 1c", which is misleading in the direction that matters —
+ * a reader looking for container placement would look in the wrong place.
  */
 /**
  * Strict-mode refusal: dispatch was required but no worker could take the work.

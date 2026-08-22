@@ -119,8 +119,14 @@ unaffected.
 - Two network surfaces exist (fleet + git). Both are token-authed and each serves one
   narrow purpose, but they are real attack surface the loopback-only API does not have.
   Both are opt-in — an unconfigured board opens nothing.
-- Live stdout during a socket gap is dropped (exit events are queued and delivered);
-  full replay is deliberately out of scope.
+- Live stdout during a socket gap is dropped; full replay is deliberately out of scope.
+  Exit/`assign_failed` events ARE queued and delivered on reconnect — but only within
+  three limits worth stating, because the bare claim overpromises: the queue is
+  in-memory in the daemon (a daemon restart loses it), it is capped at 200 messages
+  (`PENDING_QUEUE_CAP`), and the BOARD gives up after `WORKER_RECONNECT_GRACE_MS` = 60 s,
+  finalizing every session on that worker with a synthesized stderr + `exit(1)` while the
+  agent is still running on the worker. So a gap under a minute is survivable and a longer
+  one destroys the run rather than pausing it. That last part is a defect, not the intent.
 - The worker keeps a per-project clone, trading disk for clone time.
 - Placement policy is per project (`worker_dispatch_<id>`, `worker_labels_<id>`,
   `worker_dispatch_strict_<id>`) — three more preference keys in a codebase that already
@@ -231,19 +237,31 @@ parser now requires canonical `[0-9a-f]{4}` lengths instead of trusting `parseIn
 
 ## Operating it
 
+The operator-facing chapter — pairing, labels, strict dispatch, "nothing dispatches", the
+traps — is [docs/worker-fleet.md](../worker-fleet.md). What follows is the minimum.
+
 ```bash
 # Board machine, cross-machine fleet only: expose the two token-authed listeners.
 # NEVER KANBAN_HOST=0.0.0.0 — that publishes the unauthenticated board API.
-KANBAN_FLEET_PORT=3003 KANBAN_GIT_HTTP_PORT=3002 pnpm dev
+# VITE_HOST is not optional in dev — see "The listener split is not sufficient" above.
+KANBAN_FLEET_PORT=3003 KANBAN_GIT_HTTP_PORT=3002 VITE_HOST=127.0.0.1 pnpm dev
 
-# On the board machine: mint a single-use pairing token (or use the Workers UI panel)
+# On the board machine: mint a single-use pairing token (or use the Workers UI panel).
+# --board defaults to the loopback API port; `pair` is an OWNER endpoint and exists
+# only there, so this command cannot be run from a worker machine.
 pnpm cli -- worker pair
 
-# On the worker machine (needs only the board URL — no checkout, no board DB)
-agentic-kanban worker start --board http://<board-host>:3001 --token <pairing-token> \
+# On the worker machine (needs only the board URL — no checkout, no board DB).
+# --board is the FLEET port: register, heartbeat and the assignment WebSocket are all
+# served there, and the API port binds 127.0.0.1 so it is unreachable from here.
+agentic-kanban-worker start --board http://<board-host>:3003 --token <pairing-token> \
   --labels docker,linux --providers claude --max-concurrency 2
 
-# A worker that shares the board's filesystem skips git transport entirely:
+# Back on the board machine: confirm the fleet's own view (also an owner endpoint).
+pnpm cli -- worker list
+
+# A worker that shares the board's filesystem skips git transport entirely. Same
+# machine, so the loopback API port is the right --board here.
 agentic-kanban worker start --board http://127.0.0.1:3001 --token <t> --shares-filesystem
 ```
 
@@ -251,3 +269,28 @@ Opt a project in with `worker_dispatch_<projectId>=true`; require capabilities w
 `worker_labels_<projectId>=docker,linux`; forbid the host fallback with
 `worker_dispatch_strict_<projectId>=true` (the monitor then reports the
 `no_available_worker` skip reason instead of running locally).
+
+**Do not put a path-based reverse proxy in front of the git transport** (`tailscale serve`,
+an nginx `location` prefix). `composeGitUrl` (`worker/worker-repo.ts`) rebuilds the clone
+URL as `scheme://<board-hostname>:<gitPort>/git/<projectId>` — it keeps only the *hostname*
+from `--board`, discards any path prefix, and substitutes the port the board announced. The
+clone then hangs with no visible cause. Use the machine's own name/address with the ports
+directly; Tailscale Funnel must never be used at all.
+
+### `worker list` is board-only (correction, 2026-08-22)
+
+An earlier version of this section showed `--board http://<board-host>:3001` for
+`worker start`, which is the API port and unreachable from another machine, and the
+`worker instructions` runbook still marks its verification step as runnable from either
+machine. Neither is true. The owner endpoints — `POST /api/workers/pairing-token`,
+`GET /api/workers`, `DELETE /api/workers/:id` — are registered by `registerOwnerRoutes`
+and mounted only on the loopback board app; the fleet listener is handed
+`createFleetWorkersRoute`, which registers `registerWorkerFacingRoutes` and nothing else.
+So `worker list` against the fleet port is a 404, and against the API port it cannot
+connect at all.
+
+From a worker machine the available checks are: `/health` (or `/api/health`) on the fleet
+port, the daemon's own `[worker] connected to …` / `registered with …` log lines, and on
+Windows `ak-worker-service.ps1 -Status`, which derives its state from the log tail for
+exactly this reason. A token-authed `GET /api/workers/me` on the fleet listener plus a
+`worker status` verb would close the gap; neither is implemented.

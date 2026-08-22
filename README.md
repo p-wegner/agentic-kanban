@@ -68,8 +68,8 @@ pnpm cli -- register <path>     # register a git repo as a project
 pnpm cli -- list                # list registered projects
 pnpm cli -- unregister <name>   # remove a project by name or ID
 pnpm cli -- cleanup             # show stale worktrees for closed workspaces
-pnpm cli -- worker pair         # mint a pairing token for a compute worker
-pnpm cli -- worker list         # show connected workers and their capacity
+pnpm cli -- worker pair         # mint a pairing token for a compute worker (board machine)
+pnpm cli -- worker list         # show connected workers and their capacity (board machine)
 ```
 
 Agent skills ship with the CLI: `npx agentic-kanban install-skill --list` to see them, `npx agentic-kanban install-skill <path> -n <name>` to write one into a project as `.claude/skills/<name>/SKILL.md`, and `npx agentic-kanban install-skill --user` to install the bundled `agentic-kanban` skill into every agent profile on the machine — see [Using the board from any project](#using-the-board-from-any-project--the-bundled-agent-skill).
@@ -175,22 +175,26 @@ Agent sessions don't have to run on the board's machine. Pair other machines as 
 **Connect a machine** — the CLI prints the full runbook with your board URL filled in, so you can follow it (or hand it to an agent) without prior context:
 
 ```bash
-agentic-kanban worker instructions --board http://<board-host>:3001
-agentic-kanban worker instructions --board http://<board-host>:3001 --json   # machine-readable
+agentic-kanban-worker instructions --board http://<board-host>:3003
+agentic-kanban-worker instructions --board http://<board-host>:3003 --json   # machine-readable
 ```
 
-The short version:
+The short version. Note **which machine each command runs on**: minting a token and listing the fleet are *owner* endpoints that only exist on the board's loopback API, so they cannot be run from a worker.
 
 ```bash
 # On the BOARD machine — single-use, expires in 10 minutes
 agentic-kanban worker pair
 
-# On the WORKER machine — no board checkout, no board database, HTTP/WS only
-agentic-kanban-worker start --board http://<board-host>:3001 --token <pairing-token> \
+# On the WORKER machine — no board checkout, no board database, HTTP/WS only.
+# --board is the board's FLEET port (see Networking below), not its API port.
+agentic-kanban-worker start --board http://<board-host>:3003 --token <pairing-token> \
   --labels docker,linux --providers claude --max-concurrency 2
 
-agentic-kanban-worker list --board http://<board-host>:3001   # should read "online"
+# Back on the BOARD machine — the worker should read "online"
+agentic-kanban worker list
 ```
+
+From the worker itself you can confirm reachability (`curl http://<board-host>:3003/health`) and read the daemon's own `[worker] connected to …` line; the board's view of the fleet is only queryable on the board. Full operator chapter — labels, strict dispatch, "nothing dispatches", the reverse-proxy trap: **[docs/worker-fleet.md](docs/worker-fleet.md)**.
 
 `agentic-kanban-worker` is a **standalone binary** for worker machines: it loads only the daemon (a ~36 KB bundle) instead of the board's command tree, so it starts in ~0.25s instead of ~1.5s and never opens or creates a database. The same commands are also available as `agentic-kanban worker <cmd>` on a machine that already runs the board.
 
@@ -203,10 +207,12 @@ Registration alone routes nothing — opt a project in with `worker_dispatch_<pr
 **Networking.** The board API has no authentication — its defense is that it listens only on 127.0.0.1, and it stays there. A cross-machine fleet instead opens two purpose-built listeners, each serving one narrow, bearer-token-authenticated surface:
 
 ```bash
-KANBAN_FLEET_PORT=3003 KANBAN_GIT_HTTP_PORT=3002 pnpm dev
+KANBAN_FLEET_PORT=3003 KANBAN_GIT_HTTP_PORT=3002 VITE_HOST=127.0.0.1 pnpm dev
 ```
 
-`KANBAN_FLEET_PORT` serves only worker register/heartbeat/WebSocket; `KANBAN_GIT_HTTP_PORT` serves only the git transport (pin it, or it moves every boot and no firewall rule can match). Both are opt-in: unset means nothing is exposed. A remote worker points `--board` at the **fleet** port. Because the board API is never mounted on either listener, it is unreachable from the network by construction rather than by convention — though a fleet still belongs on a trusted network (LAN/VPN/Tailscale), not the open internet. Design rationale: [docs/decisions/012-worker-fleet-compute-model.md](docs/decisions/012-worker-fleet-compute-model.md).
+`KANBAN_FLEET_PORT` serves only worker register/heartbeat/WebSocket (plus `/health`); `KANBAN_GIT_HTTP_PORT` serves only the git transport (pin it, or it moves every boot and no firewall rule can match). The fleet port is opt-in — unset means no port is opened; an unset git port still exists, just on an OS-assigned number that changes every boot. A remote worker points `--board` at the **fleet** port. Because the board API is never mounted on either listener, it is unreachable from the network by construction rather than by convention — though a fleet still belongs on a trusted network (LAN/VPN/Tailscale), not the open internet. `KANBAN_FLEET_HOST` / `KANBAN_GIT_HTTP_HOST` narrow which interface each one binds.
+
+`VITE_HOST=127.0.0.1` is not optional in `pnpm dev`: the Vite dev server binds every interface and proxies `/api` straight to the loopback API, so without it a board brought up for cross-machine work publishes the unauthenticated API on the tailnet. Operator chapter: [docs/worker-fleet.md](docs/worker-fleet.md). Design rationale: [docs/decisions/012-worker-fleet-compute-model.md](docs/decisions/012-worker-fleet-compute-model.md).
 
 ## MCP Server
 
