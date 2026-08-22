@@ -177,6 +177,8 @@ export const workspaces = sqliteTable("workspaces", {
   createdAtIdx: index("idx_workspaces_created_at").on(table.createdAt),
   parentWorkspaceIdIdx: index("idx_workspaces_parent_workspace_id").on(table.parentWorkspaceId),
   showdownIdIdx: index("idx_workspaces_showdown_id").on(table.showdownId),
+  // FK-supporting index (#740).
+  skillIdIdx: index("idx_workspaces_skill_id").on(table.skillId),
 }));
 
 export const workspacesRelations = relations(workspaces, ({ one, many }) => ({

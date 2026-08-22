@@ -91,6 +91,8 @@ export const workflowNodes = sqliteTable(
   },
   (table) => ({
     templateIdIdx: index("idx_workflow_nodes_template_id").on(table.templateId),
+    // FK-supporting index (#740).
+    skillIdIdx: index("idx_workflow_nodes_skill_id").on(table.skillId),
   }),
 );
 
@@ -119,6 +121,8 @@ export const workflowEdges = sqliteTable(
   (table) => ({
     templateIdIdx: index("idx_workflow_edges_template_id").on(table.templateId),
     fromNodeIdIdx: index("idx_workflow_edges_from_node_id").on(table.fromNodeId),
+    // FK-supporting index (#740) — from_node_id had one, to_node_id did not.
+    toNodeIdIdx: index("idx_workflow_edges_to_node_id").on(table.toNodeId),
   }),
 );
 

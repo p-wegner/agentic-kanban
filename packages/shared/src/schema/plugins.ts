@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, index, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { projects } from "./projects.js";
 
 /**
@@ -52,4 +52,6 @@ export const pluginViewProcesses = sqliteTable("plugin_view_processes", {
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
 }, (table) => ({
   keyIdx: uniqueIndex("idx_plugin_view_processes_key").on(table.pluginRowId, table.viewId, table.projectId),
+  // FK-supporting index (#740): project_id is only the third column of the key above.
+  projectIdIdx: index("idx_plugin_view_processes_project_id").on(table.projectId),
 }));

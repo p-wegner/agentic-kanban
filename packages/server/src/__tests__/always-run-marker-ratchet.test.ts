@@ -189,6 +189,11 @@ const MARKED_BY_POLICY = new Set<string>([
   // every gate message is real; a wrong count is the number an operator checks instead of the
   // suite list.
   "server/guard-suite-count.test.ts",
+  // #740 — asserts that every FK in the migrated schema has a leading index. It reaches the
+  // migration .sql files only THROUGH createTestDb, so it names no MIGRATIONS_DIR itself and
+  // matches no signature; but a new table with an un-indexed FK arrives as a migration file in
+  // ANOTHER package, which package/import-graph scoping would not map to this suite.
+  "server/fk-leading-index-ratchet.test.ts",
 ]);
 
 /**
