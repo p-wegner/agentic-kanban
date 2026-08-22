@@ -567,4 +567,12 @@ async function main() {
   process.exit(1);
 }
 
-main().catch(() => process.exit(0));
+// #725: guarded by the SAME condition that gates the exports above, which it previously was
+// not. `main()` ran unconditionally at module load, so `require`ing this file from a test
+// started it — and it only survived under vitest because stdin never ends. A future test that
+// closed stdin would have let `main()` proceed to a real `git status` on the main checkout and
+// then call `process.exit()`, killing the vitest worker mid-run. #709 and #720 both added
+// reasons to import this file from tests, so the trap had become load-bearing.
+if (require.main === module) {
+  main().catch(() => process.exit(0));
+}
