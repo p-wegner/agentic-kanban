@@ -174,15 +174,20 @@ export async function getWorkspaceDeletionContext(
     .limit(1);
 }
 
-export async function findWorkspacesByWorkingDir(
-  workingDir: string,
-  database: Database = db,
-) {
-  return database
-    .select({ id: workspaces.id, status: workspaces.status })
-    .from(workspaces)
-    .where(eq(workspaces.workingDir, workingDir));
-}
+/*
+ * `findWorkspacesByWorkingDir` was removed in #735.
+ *
+ * It was the co-residency question — "who else points at this directory?" — and it answered
+ * it with `eq(working_dir, ...)`, which on Windows misses a row stored with different
+ * separators or drive-letter casing. A miss there is the unrecoverable direction: it reads as
+ * "nothing claims this" and the caller recursive-deletes a live agent's checkout. #713 moved
+ * that question into `findLiveWorktreeSharers` (`@agentic-kanban/shared/lib/worktree-claim`),
+ * which compares with `samePath` and filters with `holdsLiveResources`, and #735 converted the
+ * last three callers of the raw delete — leaving this with zero non-test callers.
+ *
+ * Ask the guard, not the table: `removeWorktreeUnlessShared` for a removal,
+ * `findLiveWorktreeSharers` / `findLiveBranchHolders` to just ask.
+ */
 
 export async function getSessionStatusesForWorkspace(
   workspaceId: string,
