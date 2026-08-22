@@ -1,6 +1,8 @@
 import { applyDeferredWorkingTreeSync, extractPendingWorkingTreeSync, getDeletedPathsVsHead } from "@agentic-kanban/shared/lib/git-service";
 import type { GitService } from "./workspace-internals.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
+import type { Database } from "../db/index.js";
 
 /**
  * The ONE merge executor core (#945).
@@ -201,15 +203,33 @@ export async function cleanupMergedWorktreeAndBranch(args: {
   workingDir: string | null | undefined;
   branch: string;
   gitService: GitService;
+  /** Required for the #673/#713 co-residency guard below — see `removeWorktreeUnlessShared`. */
+  database: Database;
+  /** The merged workspace, so it is not counted as its own sharer. */
+  workspaceId?: string;
   onRemoveWorktreeError?: (err: unknown) => void | Promise<void>;
   onBranchDeleted?: () => void;
   onDeleteBranchError?: (err: unknown) => void;
 }): Promise<void> {
   if (args.workingDir) {
-    try {
-      await args.gitService.removeWorktree(args.repoPath, args.workingDir);
-    } catch (err) {
-      await args.onRemoveWorktreeError?.(err);
+    // #713: co-residency (#394) is a SUPPORTED state — a shared-worktree fork child reuses
+    // its parent's workingDir — so merging one co-resident used to delete the other's live
+    // checkout. #673 added this check to the stale-worktree path only; this is the same
+    // directory and had none. A refused removal surfaces through the caller's existing
+    // `onRemoveWorktreeError` hook (a recoverable merge warning / a persisted cleanup
+    // warning), which is exactly what a leftover directory should produce.
+    const workingDir = args.workingDir;
+    const outcome = await removeWorktreeUnlessShared({
+      database: args.database,
+      workingDir,
+      workspaceId: args.workspaceId,
+      label: "merge:post-merge-cleanup",
+      removeWorktree: () => args.gitService.removeWorktree(args.repoPath, workingDir),
+    });
+    if (!outcome.removed) {
+      await args.onRemoveWorktreeError?.(
+        outcome.reason === "remove-failed" ? outcome.error : new Error(outcome.message),
+      );
     }
   }
   try {

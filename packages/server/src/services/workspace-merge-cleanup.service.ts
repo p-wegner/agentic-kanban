@@ -231,6 +231,9 @@ async function removeWorktreeAndBranch(
     workingDir: args.workingDir,
     branch: args.branch,
     gitService: deps.gitService,
+    // #713: the co-residency guard needs the DB and the merged workspace's own id.
+    database: deps.database,
+    workspaceId: args.workspaceId,
     onRemoveWorktreeError: async (err) => {
       addRecoverableWarning(warnings, "remove-worktree", err);
       const warningMsg = errorMessage(err);

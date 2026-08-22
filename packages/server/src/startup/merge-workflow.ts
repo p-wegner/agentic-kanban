@@ -409,6 +409,9 @@ export function createAutoMerge({ sessionManager, boardEvents, learningSessionId
                 workingDir: workspace.workingDir,
                 branch: workspace.branch,
                 gitService,
+                // #713: the co-residency guard needs the DB and the merged workspace's own id.
+                database: db,
+                workspaceId: workspace.id,
               });
               // Multi-repo: drop sibling worktrees + branches (no-op single-repo);
               // an unmerged sibling (failed post-prevalidation) is preserved.

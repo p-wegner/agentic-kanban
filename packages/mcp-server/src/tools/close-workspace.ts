@@ -7,6 +7,7 @@ import { notifyBoard } from "../notify.js";
 import { mcpJson, requireEntity } from "../db-utils.js";
 import { setWorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
 import { setWorkspaceWorkingDir } from "@agentic-kanban/shared/lib/workspace-git-state";
+import { removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
 
 export function registerCloseWorkspace(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema } = deps;
@@ -40,7 +41,20 @@ export function registerCloseWorkspace(server: McpServer, deps: ToolDeps = prodD
           .where(eq(schema.projects.id, projectId))
           .limit(1);
         if (projectRows[0]?.repoPath) {
-          try { await gitService.removeWorktree(projectRows[0].repoPath, workspace.workingDir); } catch {}
+          // #713: co-residency (#394) is a SUPPORTED state — a shared-worktree fork child
+          // reuses its parent's workingDir — so closing one co-resident used to delete the
+          // other's live checkout. #673 added this check to the server's stale-worktree path
+          // only; this tool removes the same directory and had none. The guard lives in
+          // shared/lib because mcp-server cannot reach the server's services.
+          const repoPath = projectRows[0].repoPath;
+          const workingDir = workspace.workingDir;
+          await removeWorktreeUnlessShared({
+            database: db,
+            workingDir,
+            workspaceId,
+            label: "mcp:close_workspace",
+            removeWorktree: () => gitService.removeWorktree(repoPath, workingDir),
+          });
         }
       }
 
