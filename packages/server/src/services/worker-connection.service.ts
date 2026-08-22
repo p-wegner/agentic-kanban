@@ -17,6 +17,27 @@ import {
   type WorkerToBoardMessage,
 } from "@agentic-kanban/shared/lib/worker-protocol";
 import type { WorkerRegistry } from "./worker-registry.service.js";
+import type { DeferredLaunchFailure } from "./agent-dispatch.service.js";
+
+/**
+ * What KIND of launch failure a worker's `assign_failed` reports (#751).
+ *
+ * The board used to turn every `assign_failed` into a synthesized `exit 1` on the
+ * session, which erases the one distinction an operator needs: "no worker took this"
+ * looks identical to "a worker took it and the launch died on that machine". They
+ * need different responses — a capacity refusal means ANOTHER worker would have
+ * succeeded, a provisioning failure means that worker's checkout is broken.
+ *
+ * Matching on the worker's own message is a heuristic, not a protocol: the daemon
+ * sends free text. It narrows the gap rather than closing it, and `unknown` is an
+ * honest answer, not a fallback that pretends to know.
+ */
+export function classifyAssignFailure(error: string): DeferredLaunchFailure["kind"] {
+  const text = error.toLowerCase();
+  if (/\bcapacity\b|max ?concurrency|too many|at capacity/.test(text)) return "capacity";
+  if (/clone|checkout|worktree|provision|setup|lock ref|fetch|lfs|submodule/.test(text)) return "provisioning";
+  return "dispatch";
+}
 
 export type WorkerMessageListener = (workerId: string, message: WorkerToBoardMessage) => void;
 
@@ -96,6 +117,13 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
         else conn.runningSessionIds.add(message.event.sessionId);
       } else if (message.type === "assign_failed") {
         conn.pendingSessionIds.delete(message.sessionId);
+        // Say what KIND of failure this is on the line an operator actually reads
+        // (#751). A bare "assign failed" plus a synthesized exit 1 downstream is
+        // indistinguishable from an agent that ran and returned 1.
+        console.warn(
+          `[worker-connection] assign_failed kind=${classifyAssignFailure(message.error)} ` +
+            `worker=${workerId} session=${message.sessionId}: ${message.error}`,
+        );
       }
     }
     // Any authenticated traffic proves liveness — keep the registry heartbeat fresh.

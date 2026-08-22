@@ -156,12 +156,22 @@ describe("agent-dispatch", () => {
     });
   });
 
-  it("clears the session routing on kill", () => {
+  it("keeps the session routing across a kill, until the exit arrives (#751)", () => {
+    // This used to drop the mapping inside `kill`, so between the kill and the
+    // worker's exit event every session-keyed query was answered by the host
+    // implementation — which reports a session it never launched as gone, while the
+    // remote service still holds it and is still streaming its output.
     const dispatch = createAgentDispatch({ host, remote });
     launchOn(dispatch, "s1", { kind: "remote", workerId: "w1" });
     dispatch.kill("s1");
     expect(remote.kill).toHaveBeenCalledWith("s1");
     dispatch.sendInput("s1", "after kill");
-    expect(host.sendInput).toHaveBeenCalledWith("s1", "after kill");
+    expect(remote.sendInput).toHaveBeenCalledWith("s1", "after kill");
+    expect(host.sendInput).not.toHaveBeenCalled();
+
+    const wrapped = (remote.launch as ReturnType<typeof vi.fn>).mock.calls[0][0].onOutput as AgentOutputCallback;
+    wrapped({ type: "exit", sessionId: "s1", exitCode: 143 });
+    dispatch.sendInput("s1", "after exit");
+    expect(host.sendInput).toHaveBeenCalledWith("s1", "after exit");
   });
 });
