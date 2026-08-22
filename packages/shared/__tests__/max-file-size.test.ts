@@ -59,8 +59,19 @@ const COHESION_MAX_FN_DECLS = 20;
 
 // Ratchet baseline (#889): large modules grandfathered at their current top-level
 // declaration count so the gate ships green. A baselined file may only SHRINK — the
-// gate fails if it grows past its baseline. Keep in sync with check-god-modules.mjs.
+// gate fails if it grows past its baseline.
 // Decomposition tracked on the board (#911/#912/#913); drop an entry once split.
+//
+// This map is a SECOND COPY of the one in `scripts/check-god-modules.mjs`, and this
+// comment used to say "keep in sync with check-god-modules.mjs" — a hand-sync
+// instruction, which is exactly what drifted. #722's decomposition of
+// workflow-fork.repository.ts removed that file's entry from the script and this copy
+// kept it, so this suite would have let the new facade barrel regrow to 33 declarations
+// unnoticed while the script correctly refused. The `baselines match the script` test
+// below now asserts the two copies are identical, so the sync is checked rather than
+// remembered. (Unifying them into one module is the better fix and is a bigger change
+// than a baseline entry: the script is a spawned `.mjs` and this is a typechecked `.ts`
+// in another package. The parity test is what makes deferring that safe.)
 const COHESION_BASELINE: Record<string, number> = {
   // session-summary.ts rewritten to consume the agent-stream parsers (#951) — entry removed.
   "packages/server/src/services/butler-sdk.service.ts": 30,
@@ -80,7 +91,6 @@ const COHESION_BASELINE: Record<string, number> = {
   // files sat in the old blind spot — under 600 lines but over 20 top-level function
   // declarations — and are grandfathered at their current count. Shrink-only, same as
   // every entry above.
-  "packages/server/src/repositories/workflow-fork.repository.ts": 33,
   "packages/server/src/repositories/issue-ai.repository.ts": 31,
   "packages/server/src/repositories/issue-service.repository.ts": 30,
   "packages/server/src/repositories/workspace-crud.repository.ts": 27,
@@ -217,5 +227,53 @@ describe("god-module gate (cohesion-aware)", () => {
         `barrel (see workflow-engine.ts / git-service.ts / agent-stream-parser.ts):\n` +
         offenders.join("\n"),
     ).toEqual([]);
+  });
+
+  // The thresholds and the ratchet baseline live in TWO files by design: this suite is the
+  // in-IDE signal, and `scripts/check-god-modules.mjs` is the merge-blocking gate of record
+  // wired into `pnpm check:arch` and CI (see packages/shared/CLAUDE.md). Both that doc and
+  // the comment above this file's own baseline said "keep in sync" — and it drifted anyway:
+  // #722's decomposition of workflow-fork.repository.ts dropped that entry from the script
+  // and this copy kept it, which would have let the new facade barrel regrow to 33
+  // declarations while only the script refused. A hand-sync instruction is not a mechanism.
+  it("thresholds and baseline match scripts/check-god-modules.mjs, the gate of record", () => {
+    const scriptText = readFileSync(join(REPO_ROOT, "scripts", "check-god-modules.mjs"), "utf8");
+
+    const scalar = (name: string): string | null => {
+      const m = scriptText.match(new RegExp("\\b" + name + "\\s*=\\s*(\\d+)"));
+      return m ? m[1] : null;
+    };
+    expect(scalar("MAX_LINES"), "MAX_LINES differs from the gate of record").toBe(String(MAX_LINES));
+    expect(
+      scalar("COHESION_MAX_FN_DECLS"),
+      "COHESION_MAX_FN_DECLS differs from the gate of record",
+    ).toBe(String(COHESION_MAX_FN_DECLS));
+
+    // Parsed by TEXT rather than imported: the script is a spawned `.mjs` with no export, and
+    // giving it one purely to satisfy a test would change the shape of the thing under test.
+    // Sliced with indexOf rather than a multiline regex — a regex spanning the literal is
+    // exactly the kind of brittleness this suite exists to catch elsewhere.
+    const openAt = scriptText.indexOf("const COHESION_BASELINE");
+    expect(openAt, "could not locate COHESION_BASELINE in check-god-modules.mjs").toBeGreaterThan(-1);
+    const braceAt = scriptText.indexOf("{", openAt);
+    const closeAt = scriptText.indexOf("\n};", braceAt);
+    expect(closeAt, "COHESION_BASELINE literal is not closed by a line-initial `};`").toBeGreaterThan(braceAt);
+    const scriptBaseline: Record<string, number> = {};
+    for (const line of scriptText.slice(braceAt + 1, closeAt).split("\n")) {
+      const m = line.match(/^\s*"([^"]+)"\s*:\s*(\d+)\s*,?/);
+      if (m) scriptBaseline[m[1]] = Number(m[2]);
+    }
+    expect(
+      Object.keys(scriptBaseline).length,
+      "parsed no baseline entries — this parser has gone stale against the script's shape",
+    ).toBeGreaterThan(0);
+
+    expect(
+      scriptBaseline,
+      "COHESION_BASELINE has drifted between this suite and scripts/check-god-modules.mjs. " +
+        "The script is the gate of record: make this file match it, and when a decomposition " +
+        "removes an entry, remove it from BOTH. A stale entry here silently re-grants a file " +
+        "headroom the merge-blocking gate has already taken away.",
+    ).toEqual(COHESION_BASELINE);
   });
 });
