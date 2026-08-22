@@ -666,3 +666,42 @@ What the batched gate found, none of it visible to the owning ticket's own suite
   deleted. `pnpm db:repair` VACUUMs afterwards — SQLite does not return freed pages on DELETE.
 - **The push** is still unmade and still recommended: master's `arch-gate` now passes, which
   origin's own tip has not done since 2026-08-20.
+
+## #730 — the premise did not survive measurement (2026-08-22)
+
+#730 claimed "one unit of work costs 3 packages: 29% of changes cross a package boundary and
+`shared` has 14% containment", and proposed splitting `shared` by consumer (and asking about a
+vertical feature slice). **Every number reproduces; the conclusion does not follow.** Verified by
+re-deriving from git history, not from the analyzer that produced the ticket:
+`node scripts/measure-package-coupling.mjs` (new, committed).
+
+- 27.4% of commits touch 2+ packages (26.2% production-only), mean 1.37, `shared` containment
+  17%, `mcp-server` 64% / `server` 56% / `client` 50%. All within noise of #730's figures — the
+  deltas are its PR-grouped changesets vs. commits, plus 3,200 commits of history since.
+- **The attribution is what the headline hides.** Of the 1,336 genuine production crossings:
+  **49.7% contain no `shared` file at all** (`client <-> server`, two processes over HTTP — no
+  package layout collapses it; the missing *enforcement* is #780), ~21% are `schema`/`types`
+  (the Drizzle tables and the wire DTOs — one declaration, several consumers, by design), and
+  only **25.9%** involve `shared/lib` at all.
+- **Upper bound on the proposed refactor: 2.3%.** Relocating *every* single-consumer module out
+  of `shared/lib` would collapse 36 of 1,587 multi-package commits (27.4% → 26.8%). Rejected as
+  churn in the package everything imports. The vertical slice is rejected on the same number.
+- **`shared`'s low containment is not a defect.** It holds the DB schema and the wire contract;
+  a package whose job is to be the one declaration several packages consume cannot have high
+  containment. `mcp-server`'s 64% is not better modularity, it is a package with no such job.
+
+**The one real finding is narrower than the ticket**: #590 says `shared/lib` is for code more
+than one package needs, and nothing ever checked it — **31 of 108** modules directly under
+`lib/` have exactly one consuming package (28 of them `server` alone) and are not used by
+`shared`'s own code either. Those 31 are now a **shrink-only** grandfathered set in
+`packages/shared/__tests__/shared-lib-single-consumer-ratchet.test.ts` (`@gate:always-run`), so
+a NEW single-consumer module fails — the case where the fix is free. The 31 retroactive moves
+are deliberately **not** done (see the 2.3% above); this is the #691 disclosure for that, not a
+promise.
+
+Verified: the ratchet was fault-injected both ways (a new deep-imported single-consumer module
+fails it; adding a second consumer via the barrel clears it; a grandfathered entry that gains a
+second consumer trips the stale half). `pnpm check:arch` still 0 errors / 31 warnings.
+Reasoning and the full tables: `docs/package-boundaries.md`.
+
+**Not done, and deliberately**: the 31 relocations. Anyone tempted should read the 2.3% first.

@@ -105,6 +105,34 @@ column VOCABULARY (`as const`) from `shared/schema` — `dependency-type-traits.
 `shared-schema` element intent explicitly blesses vocabularies living beside their tables. A
 pure module importing a TABLE is always a violation.
 
+### The AUDIENCE rule was the unenforced half — #730 ratchet
+
+The seven kinds above say what a `lib/` module may DO. They never said how many packages must
+need it, although #590's premise is that `shared/lib` is for code **more than one package**
+needs. Measured at #730: **31 of 108** modules directly under `lib/` have exactly one consuming
+package — 28 of them `server` alone — and are not imported by `shared`'s own code either. Each
+costs a second package on every commit that touches it and buys nothing.
+
+`shared-lib-single-consumer-ratchet.test.ts` (`@gate:always-run`) freezes those 31 as a
+**shrink-only** set: a NEW single-consumer module fails, which is the case where the fix is free
+(move it to `packages/<pkg>/src/lib/`, drop its `lib/index.ts` re-export, delete the line). The
+existing 31 are deliberately NOT relocated — relocating all of them would collapse 2.3% of
+multi-package commits, which does not pay for churn in the package everything imports. Full
+measurement and the reasoning: `docs/package-boundaries.md`.
+
+Two traps if you re-derive this by hand. **Consumers import through the
+`@agentic-kanban/shared/lib` barrel, not by path** — a path-only scan missed a real external
+importer for 18 modules, so attribution has to go through the exported symbol. And **a module
+that another `shared` module imports stays in `shared`** whatever its external consumer count
+(`exec-result.ts` under `git-exec.ts`); 40 of the 108 are in that position and are exempt.
+
+**`shared`'s low co-change containment (17%) is not a defect and is not what this ratchet is
+about.** This package holds the DB schema and the wire contract; a package whose job is to be
+the one declaration several packages consume cannot have high containment. Half of all
+cross-package commits contain no `shared` file at all. Read `docs/package-boundaries.md` before
+acting on a containment number — #730 proposed splitting `shared` by consumer on the strength of
+that figure and the proposal was rejected on measurement.
+
 ## Exec adapters — `lib/<system>-exec.ts`, one result shape (#591)
 
 An exec adapter wraps exactly ONE external CLI: `<system>Exec(args, opts)` + `<system>Available()`,
