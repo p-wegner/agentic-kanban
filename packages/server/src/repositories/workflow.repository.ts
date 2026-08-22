@@ -214,6 +214,52 @@ export async function getCurrentNodeRow(
     .limit(1);
 }
 
+/**
+ * One workflow node by id (`null` when it does not exist).
+ *
+ * #757: the exit engine needs a node's `nodeType`/`statusName` to decide whether the graph or
+ * the legacy auto-review pipeline owns a workspace, and no accessor read a node BY NODE ID —
+ * which is why those two queries were still raw drizzle inside `startup/exit-workflow.ts`.
+ */
+export async function getWorkflowNodeById(
+  nodeId: string,
+  database: Database = db,
+) {
+  const rows = await database
+    .select()
+    .from(workflowNodes)
+    .where(eq(workflowNodes.id, nodeId))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+/**
+ * The workflow node a workspace is CURRENTLY parked on — read fresh, `null` when the workspace
+ * is not workflow-managed (no `currentNodeId`) or the node is gone.
+ *
+ * #757: the exit engine snapshots the workspace row at the START of an exit pass, but the
+ * status transition it performs DURING that pass re-points `currentNodeId` (via
+ * `syncCurrentNodeToStatus`). A guard deciding who owns review therefore has to re-read the
+ * node rather than trust the snapshot, which still names the builder stage.
+ */
+export async function getWorkspaceCurrentWorkflowNode(
+  workspaceId: string,
+  database: Database = db,
+) {
+  const rows = await database
+    .select({
+      id: workflowNodes.id,
+      name: workflowNodes.name,
+      nodeType: workflowNodes.nodeType,
+      statusName: workflowNodes.statusName,
+    })
+    .from(workspaces)
+    .innerJoin(workflowNodes, eq(workspaces.currentNodeId, workflowNodes.id))
+    .where(eq(workspaces.id, workspaceId))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
 export async function getWorkspaceProjectRow(
   workspaceId: string,
   database: Database = db,
