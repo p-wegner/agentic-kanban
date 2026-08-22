@@ -20,6 +20,7 @@ import { cachedWorktreeDiffStats, scheduleWorktreeDiffStatsRefresh, type DiffSta
 import { ProjectError } from "./project-error.js";
 import type { Database } from "../db/index.js";
 import { releaseWorkspaceResources } from "./workspace-resource-release.js";
+import { removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
 
 export function createProjectWorktreesService(database: Database) {
 
@@ -188,7 +189,28 @@ export function createProjectWorktreesService(database: Database) {
       // not reclaim a sibling worktree at all — they had to be removed by hand with
       // `git worktree remove` per repo. Resolve the OWNING repo from the path instead.
       const owner = await resolveOwningRepoPath(projectId, removedPath, project.repoPath, database);
-      try { await removeWorktree(owner, removedPath); } catch { /* best effort */ }
+      // #735: this was a raw `removeWorktree` with NO claim analysis of its own — the last
+      // shape #713 warned about. It matters most on the `path`-only call (the Worktrees
+      // panel's cleanup action on an entry it reported as orphaned): that path is not
+      // derived from a workspace row at all, so nothing here ruled out a LIVE workspace
+      // still working in it. Co-residency (#394) makes that a real state, and the failure
+      // is unrecoverable. Routed through the one guard; the `workspaceId` branch above has
+      // already cascade-deleted its own row, so the exclusion is belt-and-braces.
+      const path = removedPath;
+      const outcome = await removeWorktreeUnlessShared({
+        database,
+        workingDir: path,
+        workspaceId: body.workspaceId,
+        label: "project-worktree-prune",
+        removeWorktree: () => removeWorktree(owner, path),
+      });
+      // The old code swallowed every failure (`catch { /* best effort */ }`). Best-effort is
+      // still right — the HTTP layer answers `{success:true}` either way and the panel
+      // re-reads the list — but a refusal has to leave a trace, so it is logged rather than
+      // dropped. `removeWorktreeUnlessShared` never throws, so this stays non-fatal.
+      if (!outcome.removed) {
+        console.warn(`[projects] worktree removal not performed: ${outcome.message}`);
+      }
     }
   }
 

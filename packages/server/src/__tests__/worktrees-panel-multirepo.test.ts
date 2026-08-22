@@ -48,12 +48,24 @@ beforeEach(() => {
   listWorktreesMock.mockImplementation(async (repoPath: string) => [{ path: repoPath, branch: "refs/heads/main" }]);
 });
 
-/** The service is a factory over injected collaborators; only `getWorktrees`/`removeWorktreeById` matter here. */
-async function service() {
+/**
+ * The service is a factory over injected collaborators; only `getWorktrees`/`removeWorktreeById`
+ * matter here.
+ *
+ * `from().where()` (no join) is the shape `removeWorktreeUnlessShared`'s claim query uses since
+ * #735 routed the delete through the guard. `workingDirClaims` seeds it, so a test can put a
+ * live sharer in front of the delete; the default is "nothing claims anything".
+ */
+async function service(workingDirClaims: { id: string; status: string; workingDir: string }[] = []) {
   const { createProjectService } = await import("../services/project.service.js");
   return createProjectService({
     database: {
-      select: () => ({ from: () => ({ innerJoin: () => ({ where: async () => [] }) }) }),
+      select: () => ({
+        from: () => ({
+          innerJoin: () => ({ where: async () => [] }),
+          where: async () => workingDirClaims,
+        }),
+      }),
     },
   } as never);
 }
@@ -152,5 +164,42 @@ describe("worktree deletion reaches siblings (#631)", () => {
     const leadingWt = "C:\\projects\\comet\\.worktrees\\documentation\\ak-2";
     await (await service()).removeWorktreeById("p1", { path: leadingWt });
     expect(removeWorktreeMock).toHaveBeenCalledWith(LEADING, leadingWt);
+  });
+
+  // #735 — this path had no claim analysis of its own, so a `path`-only delete (the panel's
+  // cleanup action) could recursive-rm a directory a LIVE workspace is working in. Co-residency
+  // (#394) is a supported state, and the loss is unrecoverable, so the refusal is the assertion.
+  it("REFUSES to remove a worktree a live workspace still claims, and says so", async () => {
+    const leadingWt = "C:\\projects\\comet\\.worktrees\\documentation\\ak-2";
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await (await service([{ id: "ws-live", status: "active", workingDir: leadingWt }]))
+      .removeWorktreeById("p1", { path: leadingWt });
+
+    expect(removeWorktreeMock).not.toHaveBeenCalled();
+    // A refusal that nothing records is indistinguishable from a silent success.
+    expect(warn.mock.calls.flat().join(" ")).toContain("skipping removal");
+    warn.mockRestore();
+  });
+
+  it("REFUSES when the claim query itself fails — a DB hiccup is not a green light", async () => {
+    const { createProjectService } = await import("../services/project.service.js");
+    const svc = createProjectService({
+      database: {
+        select: () => ({
+          from: () => ({
+            innerJoin: () => ({ where: async () => [] }),
+            where: async () => { throw new Error("database is locked"); },
+          }),
+        }),
+      },
+    } as never);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await svc.removeWorktreeById("p1", { path: "C:\\projects\\comet\\.worktrees\\documentation\\ak-3" });
+
+    expect(removeWorktreeMock).not.toHaveBeenCalled();
+    expect(warn.mock.calls.flat().join(" ")).toContain("refusing to remove worktree");
+    warn.mockRestore();
   });
 });

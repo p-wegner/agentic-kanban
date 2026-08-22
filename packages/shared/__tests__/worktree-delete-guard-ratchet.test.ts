@@ -109,8 +109,6 @@ const BASELINE: Readonly<Record<string, number>> = {
   [rel("packages/server/src/services/workspace-repos.service.ts")]: 2,
   // OWN RESOURCE — a fork child's sub-worktree, torn down by the fork that created it.
   [rel("packages/server/src/services/workflow-fork.service.ts")]: 1,
-  // TO CONVERT — project-level worktree pruning for a repo removed from a project.
-  [rel("packages/server/src/services/project-worktrees.service.ts")]: 1,
   // TO CONVERT — the orphaned-worktree reconciler. It has its own "nothing claims this"
   // analysis, which is why it is not simply wrong today; it should still route through
   // the one guard so both answers come from the same place.
