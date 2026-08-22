@@ -40,6 +40,13 @@ try {
 // actually breaks builds, blocks merges, or silently loses fixes.
 const SOURCE_RE = /^packages\/.+\.(ts|tsx|sql)$/;
 
+// This hook only ever READS git state (`status`, `diff`) — it never runs `git add`, and must
+// never touch the shared index. `stdio[2]: "ignore"` is not cosmetic: `execFileSync` inherits
+// stderr to the parent by default, so git's per-file eol advice ("LF will be replaced by CRLF the
+// next time Git touches it") printed ~28 lines ahead of the hook's actual finding and buried it —
+// and read as if the hook were staging files.
+const GIT_READ_STDIO = ["ignore", "pipe", "ignore"];
+
 function gitPorcelain(cwd) {
   try {
     return execFileSync("git", ["status", "--porcelain"], {
@@ -47,20 +54,73 @@ function gitPorcelain(cwd) {
       encoding: "utf8",
       timeout: 5000,
       windowsHide: true,
+      stdio: GIT_READ_STDIO,
     });
   } catch {
     return "";
   }
 }
 
-// Tracked (not "??") changes to source files, classified by whether each is a
-// DELETION (file removed from the working tree) or an EDIT/ADD. A working tree
-// that is dominated by deletions is a desync to RESTORE, never a set of changes
-// to commit (#771): a board merge whose working-tree sync regressed can leave
-// 100+ tracked source files showing as `D` while HEAD still contains them.
-// Committing them would DELETE packages/shared from the branch — so the hook must
-// tell the agent to investigate/restore, not "commit before stopping".
-function trackedSourceChanges(cwd) {
+/** One `git` invocation whose stdout we want, or `null` when git could not answer at all. */
+function gitOut(cwd, args) {
+  try {
+    return execFileSync("git", args, {
+      cwd,
+      encoding: "utf8",
+      timeout: 15000,
+      windowsHide: true,
+      stdio: GIT_READ_STDIO,
+    });
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// #770 — a dirty path must differ in CONTENT, not merely in stat metadata.
+//
+// Observed: the hook called `packages/server/src/worker/worker-repo.ts` STRANDED and told the
+// session to commit it, while the worktree blob and the index blob were byte-identical
+// (`ebe8e79f…` both sides) and `git diff` for the path was empty — `git add` staged nothing.
+// The instruction was to make an empty commit, in the same breath as the legitimate warning
+// that stranded fixes block auto-merge. A guard whose instruction is sometimes vacuous gets
+// read as noise, and then the real warning is ignored too — and "make it go away" in a shared
+// checkout means `git add`-ing a wider pathspec, which is how another agent's staged work gets
+// swept into the wrong commit.
+//
+// `git status --porcelain` answers "does the index entry differ from the worktree entry (or
+// HEAD)", which a stale stat entry, a mode flip or a type change can satisfy with identical
+// bytes. `git diff --name-status HEAD` (worktree vs HEAD) and `git diff --cached --name-status
+// HEAD` (index vs HEAD) are TREE comparisons: a path whose content equals HEAD's cannot appear
+// in either, whatever its mtime says. Their union is therefore exactly "content that a commit
+// would actually change" — including a change staged and then reverted in the worktree, which
+// worktree-vs-HEAD alone would miss.
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse `git diff --name-status -z` output into edited/deleted source paths.
+ *
+ * NUL-separated fields: `<status>\0<path>\0`, and `R<score>\0<old>\0<new>\0` for a rename/copy
+ * (we keep the NEW path as an edit, matching the porcelain parser's `->` handling, so a
+ * rename-heavy branch is not mistaken for the deletion-dominant desync below).
+ */
+function parseNameStatusZ(raw, edited, deleted) {
+  const fields = String(raw || "").split("\0").filter((f) => f.length > 0);
+  for (let i = 0; i < fields.length; ) {
+    const status = fields[i++];
+    const code = status[0];
+    let p = fields[i++];
+    if (code === "R" || code === "C") p = fields[i++];
+    if (p === undefined) break;
+    const norm = p.replace(/\\/g, "/");
+    if (!SOURCE_RE.test(norm)) continue;
+    if (code === "D") deleted.push(norm);
+    else edited.push(norm);
+  }
+}
+
+/** The porcelain (stat-cache-trusting) classifier — kept only as the fallback when git cannot diff. */
+function porcelainSourceChanges(cwd) {
   const edited = [];
   const deleted = [];
   for (const line of gitPorcelain(cwd).split(/\r?\n/)) {
@@ -77,6 +137,38 @@ function trackedSourceChanges(cwd) {
     else edited.push(p);
   }
   return { edited, deleted, all: [...edited, ...deleted] };
+}
+
+// Tracked (not "??") CONTENT changes to source files, classified by whether each is a
+// DELETION (file removed from the working tree) or an EDIT/ADD. A working tree
+// that is dominated by deletions is a desync to RESTORE, never a set of changes
+// to commit (#771): a board merge whose working-tree sync regressed can leave
+// 100+ tracked source files showing as `D` while HEAD still contains them.
+// Committing them would DELETE packages/shared from the branch — so the hook must
+// tell the agent to investigate/restore, not "commit before stopping".
+//
+// `run` is injectable so the content-vs-stat-cache behaviour can be unit-tested without
+// manufacturing a stale index (#770).
+function trackedSourceChanges(cwd, run = (args) => gitOut(cwd, args)) {
+  const worktree = run(["diff", "--name-status", "-z", "HEAD"]);
+  const staged = run(["diff", "--cached", "--name-status", "-z", "HEAD"]);
+  if (worktree === null && staged === null) {
+    // No HEAD (fresh repo — nothing is tracked, so this is empty anyway) or git is unusable.
+    // Degrade to the old stat-cache answer rather than going silent: over-reporting is the
+    // recoverable direction, silence is not.
+    return porcelainSourceChanges(cwd);
+  }
+  const edited = [];
+  const deleted = [];
+  parseNameStatusZ(worktree, edited, deleted);
+  parseNameStatusZ(staged, edited, deleted);
+  const dedupe = (list, seen) => list.filter((p) => (seen.has(p) ? false : (seen.add(p), true)));
+  const seen = new Set();
+  // A path both deleted from the worktree and (still) staged as an edit is a deletion to
+  // restore — the deletion classification wins, so it can never be proposed for commit.
+  const del = dedupe(deleted, seen);
+  const ed = dedupe(edited, seen);
+  return { edited: ed, deleted: del, all: [...ed, ...del] };
 }
 
 // Decide what the Stop hook should report for a non-workspace (main-checkout)
@@ -619,6 +711,8 @@ function buildStopReport({ stranded, inFlight, activity, totalDirty }) {
 if (require.main !== module) {
   module.exports = {
     trackedSourceChanges,
+    porcelainSourceChanges,
+    parseNameStatusZ,
     classifyStranded,
     SOURCE_RE,
     readSessionActivity,
