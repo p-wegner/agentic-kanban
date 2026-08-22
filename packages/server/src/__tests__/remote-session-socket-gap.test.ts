@@ -177,13 +177,15 @@ describe("a remote session survives a socket gap (#746)", () => {
     }
   });
 
-  it("a worker that reconnects WITHOUT the session finalizes it instead of hanging forever", async () => {
+  it("a worker that reconnects WITHOUT a session it was RUNNING finalizes it instead of hanging forever", async () => {
     const fm = fakeManager(["w1"]);
     const service = createRemoteAgentService(fm.manager, db, { reconnectGraceMs: 1000, abandonMs: 10_000 });
     const events: AgentOutputEvent[] = [];
     launch(service, "s1", (e) => events.push(e), {
       projectId: "p1", repoPath: "C:/repo", branch: "feature/ak-1-x", baseBranch: "main",
     });
+    // The worker spoke about this session, so it demonstrably took the assign.
+    fm.fireMessage("w1", { type: "event", event: { type: "stdout", sessionId: "s1", data: "working" } } as never);
 
     // Daemon restarted: it is back, and its hello enumerates everything it holds — no s1.
     fm.fireMessage("w1", { type: "hello", runningSessionIds: [] } as never);
@@ -195,6 +197,52 @@ describe("a remote session survives a socket gap (#746)", () => {
     expect(events.find((e) => e.type === "exit")?.exitCode).toBe(1);
     expect(events.some((e) => e.type === "stderr" && String(e.data).includes("reconnected without this session"))).toBe(true);
     expect(service.trackedSessionIds()).not.toContain("s1");
+  });
+
+  // The race the first cut of this fix introduced, caught by the worker-dispatch e2e: a
+  // reconnect can cross a fresh `assign`, and the worker legitimately does not list a
+  // session it has not registered yet. Acting on that hello failed work the board had
+  // just dispatched. A worker DOES list provisioning sessions, so the honest window is
+  // short — but it is not zero, and skipping outright would reinstate the hang for an
+  // ADOPTED session, which this process has never seen an event for.
+  it("a hello that crosses a fresh assign does not kill the session — it re-checks", () => {
+    vi.useFakeTimers();
+    try {
+      const fm = fakeManager(["w1"]);
+      const service = createRemoteAgentService(fm.manager, db, { assignSettleMs: 5000 });
+      const events: AgentOutputEvent[] = [];
+      launch(service, "s1", (e) => events.push(e));
+
+      fm.fireMessage("w1", { type: "hello", runningSessionIds: [] } as never);
+      vi.advanceTimersByTime(1000);
+      expect(events.some((e) => e.type === "exit")).toBe(false);
+      expect(service.trackedSessionIds()).toContain("s1");
+
+      // It starts speaking inside the window: the hello meant nothing.
+      fm.fireMessage("w1", { type: "event", event: { type: "stdout", sessionId: "s1", data: "hi" } } as never);
+      vi.advanceTimersByTime(60_000);
+      expect(events.some((e) => e.type === "exit")).toBe(false);
+      expect(service.trackedSessionIds()).toContain("s1");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a session that never speaks IS lost once the settle window passes", async () => {
+    vi.useFakeTimers();
+    try {
+      const fm = fakeManager(["w1"]);
+      const service = createRemoteAgentService(fm.manager, db, { assignSettleMs: 5000 });
+      const events: AgentOutputEvent[] = [];
+      launch(service, "s1", (e) => events.push(e));
+
+      fm.fireMessage("w1", { type: "hello", runningSessionIds: [] } as never);
+      vi.advanceTimersByTime(6000);
+      await vi.waitFor(() => expect(events.some((e) => e.type === "exit")).toBe(true));
+      expect(events.find((e) => e.type === "exit")?.exitCode).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("a hello that DOES list the session leaves it completely alone", async () => {
@@ -217,5 +265,91 @@ describe("a remote session survives a socket gap (#746)", () => {
     // 60s was shorter than the daemon's own supervisor backoff plus a reconnect, and
     // shorter than the board's own definition of an offline worker.
     expect(WORKER_RECONNECT_GRACE_MS).toBeGreaterThanOrEqual(WORKER_HEARTBEAT_STALE_MS);
+  });
+});
+
+// #751's last line, which had to be wired from THIS side: a launch failure the remote
+// service discovers AFTER `launch` returned must reach the dispatch proxy's
+// `onDeferredLaunchFailure`, which owns the #245 host-fallback/strict rule. Flattening
+// it into a synthesized exit(1) here is what made a non-strict project get a failed
+// session instead of a host run.
+describe("a late LAUNCH failure reaches the dispatch proxy, not the exit code (#751)", () => {
+  let db: Database;
+  beforeEach(() => {
+    db = createTestDb().db as unknown as Database;
+    syncCalls.length = 0;
+  });
+
+  function launchWithHook(
+    service: ReturnType<typeof createRemoteAgentService>,
+    sessionId: string,
+    onOutput: (e: AgentOutputEvent) => void,
+    onDeferredLaunchFailure: (f: { kind: string; reason: string }) => void,
+    repo?: { projectId: string; repoPath: string; branch: string; baseBranch: string },
+  ) {
+    return service.launch({
+      worktreePath: "C:/some/worktree", sessionId, prompt: "do the ticket",
+      agentArgs: undefined, onOutput, agentCommand: MOCK_AGENT_COMMAND, keepAlive: false,
+      placement: { kind: "remote", workerId: "w1", ...(repo ? { repo } : {}) },
+      onDeferredLaunchFailure: onDeferredLaunchFailure as never,
+    });
+  }
+
+  it("reports a git-transport dispatch failure instead of synthesizing exit(1)", async () => {
+    // The worker is NOT connected, so the assign cannot be delivered — and this path
+    // cannot throw, because it resolves the listener/token asynchronously.
+    const fm = fakeManager([]);
+    const service = createRemoteAgentService(fm.manager, db);
+    const events: AgentOutputEvent[] = [];
+    const failures: Array<{ kind: string; reason: string }> = [];
+    launchWithHook(service, "s1", (e) => events.push(e), (f) => failures.push(f), {
+      projectId: "p1", repoPath: "C:/repo", branch: "feature/ak-1-x", baseBranch: "main",
+    });
+
+    await vi.waitFor(() => expect(failures).toHaveLength(1));
+    expect(failures[0].kind).toBe("dispatch");
+    expect(failures[0].reason).toContain("not connected");
+    // No exit was synthesized: the proxy decides host-fallback vs strict refusal.
+    expect(events.some((e) => e.type === "exit")).toBe(false);
+    expect(service.trackedSessionIds()).not.toContain("s1");
+  });
+
+  it("classifies an assign_failed refusal by KIND so a capacity refusal is re-placeable", async () => {
+    const fm = fakeManager(["w1"]);
+    const service = createRemoteAgentService(fm.manager, db);
+    const events: AgentOutputEvent[] = [];
+    const failures: Array<{ kind: string; reason: string }> = [];
+    launchWithHook(service, "s1", (e) => events.push(e), (f) => failures.push(f));
+
+    fm.fireMessage("w1", {
+      type: "assign_failed", sessionId: "s1", error: "refused: worker already at capacity",
+    } as never);
+
+    expect(failures).toEqual([{ kind: "capacity", reason: "refused: worker already at capacity" }]);
+    expect(events.some((e) => e.type === "exit")).toBe(false);
+  });
+
+  it("a provisioning refusal is named as such, and no hook still degrades to exit(1)", async () => {
+    const fm = fakeManager(["w1"]);
+    const service = createRemoteAgentService(fm.manager, db);
+    const withHook: Array<{ kind: string }> = [];
+    launchWithHook(service, "s1", () => {}, (f) => withHook.push(f));
+    fm.fireMessage("w1", {
+      type: "assign_failed", sessionId: "s1", error: "repo provisioning failed: clone timed out",
+    } as never);
+    expect(withHook.map((f) => f.kind)).toEqual(["provisioning"]);
+
+    // Same refusal with no proxy listening: the old behaviour is still there, so a
+    // direct consumer of the service never loses the failure entirely.
+    const events: AgentOutputEvent[] = [];
+    service.launch({
+      worktreePath: "C:/some/worktree", sessionId: "s2", prompt: "p",
+      agentArgs: undefined, onOutput: (e) => events.push(e),
+      agentCommand: MOCK_AGENT_COMMAND, keepAlive: false,
+      placement: { kind: "remote", workerId: "w1" },
+    });
+    fm.fireMessage("w1", { type: "assign_failed", sessionId: "s2", error: "boom" } as never);
+    expect(events.map((e) => e.type)).toEqual(["stderr", "exit"]);
+    expect(events[1].exitCode).toBe(1);
   });
 });

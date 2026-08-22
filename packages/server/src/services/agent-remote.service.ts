@@ -20,8 +20,11 @@ import { buildRemoteContextFiles } from "./remote-context-files.js";
 // Failure contract:
 //  - assign not deliverable (worker vanished between placement and launch):
 //    launch THROWS — the dispatch proxy catches and re-launches on the host.
-//  - assign_failed from the worker: surfaced as stderr + exit(1) events, which
-//    the exit state machine classifies as a launch failure.
+//  - a LAUNCH failure discovered after `launch` returned (the git-transport path
+//    resolves its prerequisites asynchronously, so it cannot throw; or the worker
+//    answers `assign_failed`): reported to `onDeferredLaunchFailure`, so the DISPATCH
+//    proxy applies the #245 rule — host relaunch, or a refusal that names itself one
+//    (#751). Only with no hook present does it degrade to a synthesized exit(1).
 //  - worker socket lost mid-session: the worker keeps the agent running, so the
 //    board HOLDS. Past the reconnect grace the session is marked DETACHED and the
 //    hold is reported into the transcript; it is finalized only when the abandon
@@ -39,9 +42,9 @@ import { resolveWorktreeDevPorts } from "./worktree-ports.js";
 import { db as realDb } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { updateSessionWorkerId, getSessionLiveness } from "../repositories/worker.repository.js";
-import type { AgentExecutionService, AgentHandle } from "./agent-dispatch.service.js";
+import type { AgentExecutionService, AgentHandle, DeferredLaunchFailure } from "./agent-dispatch.service.js";
 import type { AgentOutputCallback } from "./agent.service.js";
-import type { WorkerConnectionManager } from "./worker-connection.service.js";
+import { classifyAssignFailure, type WorkerConnectionManager } from "./worker-connection.service.js";
 import { ensureGitHttpServer } from "./git-http.service.js";
 import { syncIncomingBranch, clearIncomingRef, incomingRefFor } from "./worker-remote-sync.service.js";
 import { listAgentSkills } from "../repositories/agent-skill.repository.js";
@@ -63,12 +66,34 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
  */
 export const WORKER_RECONNECT_GRACE_MS = 2 * WORKER_HEARTBEAT_STALE_MS;
 
+/**
+ * How long after an `assign` a hello may omit the session without that meaning
+ * anything (#746). A worker lists PROVISIONING sessions too
+ * (`worker-agent-runner.runningSessionIds`), so the only window in which a live
+ * session is legitimately absent from a hello is between the board's `send(assign)`
+ * and the worker registering it — sub-second in practice. It is real though: a
+ * reconnect racing a fresh assign made the board declare a session it had just
+ * dispatched "lost" and fail it, which an e2e run caught immediately.
+ */
+export const WORKER_ASSIGN_SETTLE_MS = 30 * 1000;
+
 interface RemoteSession {
   workerId: string;
   onOutput: AgentOutputCallback;
   stdinOpen: boolean;
   /** Set for git-transport sessions: sync the pushed branch back before exit. */
   repo?: { repoPath: string; branch: string };
+  /**
+   * The dispatch proxy's late-launch-failure hook (#751). Held per session because
+   * `assign_failed` arrives on the manager's message channel, long after `launch`
+   * returned, and a launch failure must reach the proxy's placement rule rather than
+   * being flattened into an exit code here.
+   */
+  onDeferredLaunchFailure?: (failure: DeferredLaunchFailure) => void;
+  /** Has this worker ever spoken about this session? Positive proof it took the assign. */
+  observed?: boolean;
+  /** A deferred "is this really lost?" re-check, armed by a hello inside the settle window. */
+  lostCheckTimer?: ReturnType<typeof setTimeout>;
   /**
    * Epoch ms at which the board stopped being able to see this session (the
    * reconnect grace expired). Non-null means DETACHED: held, reported, not
@@ -95,13 +120,14 @@ export interface RemoteAgentService extends AgentExecutionService {
 export function createRemoteAgentService(
   manager: WorkerConnectionManager,
   database: Database = realDb,
-  opts?: { reconnectGraceMs?: number; abandonMs?: number },
+  opts?: { reconnectGraceMs?: number; abandonMs?: number; assignSettleMs?: number },
 ): RemoteAgentService {
   const sessions = new Map<string, RemoteSession>();
   const disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const abandonTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const graceMs = opts?.reconnectGraceMs ?? WORKER_RECONNECT_GRACE_MS;
   const abandonMs = Math.max(opts?.abandonMs ?? REMOTE_SESSION_ABANDON_MS, graceMs);
+  const assignSettleMs = opts?.assignSettleMs ?? WORKER_ASSIGN_SETTLE_MS;
 
   function finishSession(sessionId: string, session: RemoteSession, stderr: string, exitCode: number | null): void {
     sessions.delete(sessionId);
@@ -168,6 +194,31 @@ export function createRemoteAgentService(
     }
   }
 
+  /**
+   * The worker is up and does not have this session: its exit can never arrive (the
+   * worker's pending-result queue is in-memory and does not survive a daemon restart,
+   * and the pipe to an orphaned child died with the old daemon). Land anything it
+   * pushed, then finalize non-zero — the board never observed the agent's own verdict,
+   * so recording it as a clean success would be worse than a visible failure (#746).
+   */
+  function loseSession(sessionId: string, workerId: string): void {
+    const session = sessions.get(sessionId);
+    if (!session) return;
+    if (session.lostCheckTimer) clearTimeout(session.lostCheckTimer);
+    console.warn(
+      `[agent-remote] worker ${workerId} is connected but does not list session ${sessionId} ` +
+        `(daemon restart or crash); its exit can never arrive — landing any pushed result and failing it`,
+    );
+    report(
+      sessionId,
+      session,
+      `Fleet worker ${workerId} reconnected without this session: its agent is gone and no exit can ` +
+        `arrive (the worker's pending-result queue does not survive a daemon restart). Any result it ` +
+        `pushed is being landed on the branch before this session is closed.`,
+    );
+    void landAndFinish(sessionId, session, 1);
+  }
+
   function clearWorkerTimers(workerId: string): void {
     const grace = disconnectTimers.get(workerId);
     if (grace) { clearTimeout(grace); disconnectTimers.delete(workerId); }
@@ -179,6 +230,13 @@ export function createRemoteAgentService(
     if (message.type === "event") {
       const session = sessions.get(message.event.sessionId);
       if (!session || session.workerId !== workerId) return;
+      // The worker has spoken about this session, so a later hello that omits it is
+      // information rather than a race (see WORKER_ASSIGN_SETTLE_MS).
+      session.observed = true;
+      if (session.lostCheckTimer) {
+        clearTimeout(session.lostCheckTimer);
+        session.lostCheckTimer = undefined;
+      }
       if (message.event.type !== "exit") {
         try {
           session.onOutput(message.event);
@@ -247,20 +305,30 @@ export function createRemoteAgentService(
       // saw the agent's own verdict, and recording an unobserved run as a clean
       // success is the one outcome worse than a visible failure.
       const listed = new Set(message.runningSessionIds);
-      const lost = [...sessions.entries()].filter(([id, sess]) => sess.workerId === workerId && !listed.has(id));
-      for (const [sessionId, session] of lost) {
+      const missing = [...sessions.entries()].filter(([id, sess]) => sess.workerId === workerId && !listed.has(id));
+      for (const [sessionId, session] of missing) {
+        if (session.observed) {
+          loseSession(sessionId, workerId);
+          continue;
+        }
+        // Never observed: this hello may simply have crossed a fresh assign. Re-check
+        // once the settle window has passed instead of guessing either way — skipping
+        // outright would reinstate the infinite hang for an ADOPTED session (which this
+        // process has never seen an event for), and acting now fails live work.
+        if (session.lostCheckTimer) continue;
         console.warn(
-          `[agent-remote] worker ${workerId} reconnected but no longer lists session ${sessionId} ` +
-            `(daemon restart or crash); its exit can never arrive — landing any pushed result and failing it`,
+          `[agent-remote] worker ${workerId} does not list session ${sessionId}, which this process has ` +
+            `not yet seen it speak about; re-checking in ${Math.round(assignSettleMs / 1000)}s`,
         );
-        report(
-          sessionId,
-          session,
-          `Fleet worker ${workerId} reconnected without this session: its agent is gone and no exit can ` +
-            `arrive (the worker's pending-result queue does not survive a daemon restart). Any result it ` +
-            `pushed is being landed on the branch before this session is closed.`,
-        );
-        void landAndFinish(sessionId, session, 1);
+        const timer = setTimeout(() => {
+          const current = sessions.get(sessionId);
+          if (!current || current.workerId !== workerId) return;
+          current.lostCheckTimer = undefined;
+          if (current.observed) return;
+          loseSession(sessionId, workerId);
+        }, assignSettleMs);
+        if (timer.unref) timer.unref();
+        session.lostCheckTimer = timer;
       }
 
       const unknown = message.runningSessionIds.filter((id) => !sessions.has(id));
@@ -299,7 +367,18 @@ export function createRemoteAgentService(
     if (message.type === "assign_failed") {
       const session = sessions.get(message.sessionId);
       if (!session || session.workerId !== workerId) return;
-      console.warn(`[agent-remote] assign failed on worker ${workerId}: ${message.error}`);
+      // A worker's refusal is a LAUNCH failure, not a run that exited 1 — and the kind
+      // matters: a capacity refusal means another worker would have taken it, a
+      // provisioning failure means THIS worker's checkout is broken. Report it to the
+      // dispatch proxy, which owns the host-fallback/strict decision (#751); only
+      // synthesize an exit when nobody is listening.
+      const kind = classifyAssignFailure(message.error);
+      console.warn(`[agent-remote] assign failed on worker ${workerId} (${kind}): ${message.error}`);
+      if (session.onDeferredLaunchFailure) {
+        sessions.delete(message.sessionId);
+        session.onDeferredLaunchFailure({ kind, reason: message.error });
+        return;
+      }
       finishSession(message.sessionId, session, `Worker could not start the agent: ${message.error}`, 1);
     }
   });
@@ -398,7 +477,7 @@ export function createRemoteAgentService(
       worktreePath, sessionId, prompt, agentArgs, onOutput,
       providerSessionId, agentCommand, keepAlive, permissionPromptTool,
       planMode, provider, profile, extraEnv, skipPermissions,
-      model, contextFiles, systemInstructions, placement,
+      model, contextFiles, systemInstructions, placement, onDeferredLaunchFailure,
     } = request;
     if (placement?.kind !== "remote") {
       throw new Error("remote agent service requires a remote placement");
@@ -517,6 +596,15 @@ export function createRemoteAgentService(
         } catch (err) {
           const message = errorMessage(err);
           console.error(`[agent-remote] git-transport assignment failed: sessionId=${sessionId}: ${message}`);
+          // This path CANNOT throw to the dispatch proxy — `launch` returned before the
+          // git-http listener, skill payload and scoped token resolved. Reporting it as
+          // a deferred launch failure is what restores the #245 contract here: a
+          // non-strict project gets its host run instead of a failed session (#751).
+          if (onDeferredLaunchFailure) {
+            sessions.delete(sessionId);
+            onDeferredLaunchFailure({ kind: "dispatch", reason: message });
+            return;
+          }
           const session = sessions.get(sessionId);
           if (session) finishSession(sessionId, session, `Could not dispatch to worker: ${message}`, 1);
         }
@@ -528,6 +616,7 @@ export function createRemoteAgentService(
       onOutput,
       stdinOpen: Boolean(config.keepStdinOpen && !config.suppressStdinPrompt),
       repo: placement.repo ? { repoPath: placement.repo.repoPath, branch: placement.repo.branch } : undefined,
+      onDeferredLaunchFailure,
     });
     updateSessionWorkerId(sessionId, workerId, database)
       .catch((err) => console.error(`[agent-remote] failed to stamp session workerId: sessionId=${sessionId}`, err));
@@ -571,6 +660,13 @@ export function createRemoteAgentService(
   function getPid(_sessionId: string): number | undefined {
     return undefined;
   }
+
+  // NOTE on `worker-lost`: the abandon path does NOT report a deferred launch failure,
+  // even though the kind exists. By then the agent has been RUNNING on the worker,
+  // possibly for many minutes and possibly having pushed — a host relaunch would
+  // duplicate work rather than recover a launch. `onDeferredLaunchFailure` is for
+  // failures of the LAUNCH; a lost worker mid-run is finalized by the abandon bound
+  // after landing whatever arrived (#746).
 
   /**
    * #746: this used to require a live socket, so a detached session read as DEAD and
