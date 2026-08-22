@@ -4,6 +4,8 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
+import { projectStatusIdName } from "./projections.js";
+import { listProjectStatusIdNames } from "./project-status.repository.js";
 
 /**
  * Find or create the `voice-capture` tag for the given database.
@@ -41,10 +43,7 @@ export async function getProjectStatusNamesForVoiceCapture(
   projectId: string,
   database: Database = db,
 ): Promise<Array<{ id: string; name: string }>> {
-  return database
-    .select({ id: projectStatuses.id, name: projectStatuses.name })
-    .from(projectStatuses)
-    .where(eq(projectStatuses.projectId, projectId));
+  return listProjectStatusIdNames(projectId, database);
 }
 
 export async function getIssueByNumberForVoiceCapture(

@@ -7,6 +7,7 @@ import {
 } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { issueIdentityColumns } from "./projections.js";
 
 export type ScopedIssueRow = {
   id: string;
@@ -37,9 +38,7 @@ export async function getScopedIssueRows(
   if (scopedIds.length === 0) return [];
   return database
     .select({
-      id: issues.id,
-      issueNumber: issues.issueNumber,
-      title: issues.title,
+      ...issueIdentityColumns,
       projectId: issues.projectId,
       statusName: projectStatuses.name,
       currentNodeId: issues.currentNodeId,

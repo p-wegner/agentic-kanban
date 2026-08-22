@@ -17,6 +17,7 @@ import { eq, and, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { projectStatusIdName } from "./projections.js";
 
 export async function getProjectStatuses(
   projectId: string,
@@ -132,4 +133,35 @@ export async function getStatusIdsByName(
     .from(projectStatuses)
     .where(and(eq(projectStatuses.projectId, projectId), inArray(projectStatuses.name, statusNames)));
   return rows.map((r) => r.id);
+}
+
+/**
+ * The `{ id, name }` list for a project's statuses — declared ONCE (#732).
+ *
+ * Six repositories each carried a byte-identical copy of this query under six different
+ * names: `getProjectStatusOptions` (merge-cleanup), `getProjectStatusIdsAndNames`
+ * (project-service), `getProjectStatusList` (sprint-capacity),
+ * `getProjectStatusNamesForVoiceCapture` (voice-capture) and `getProjectStatusRows` — the
+ * same name, twice, in workspace-launch-failures and workspace-risk. Two more read it
+ * inline. That is the "repeated accessor shape" #732 names, and the copies had already
+ * DRIFTED: board-status's variant orders by `sortOrder`, the other six return whatever
+ * SQLite hands back, so the same list is stable in one view and arbitrary in five.
+ *
+ * `ordered` is opt-in rather than always-on so this is a pure consolidation: making the six
+ * unordered callers newly ordered would be a behaviour change smuggled into a refactor.
+ *
+ * The six original names are kept as one-line delegations at their old locations (the
+ * `compat shim` kind — see packages/server/CLAUDE.md), so no service caller changes and the
+ * query exists exactly once.
+ */
+export async function listProjectStatusIdNames(
+  projectId: string,
+  database: Database = db,
+  opts: { ordered?: boolean } = {},
+) {
+  const query = database
+    .select(projectStatusIdName)
+    .from(projectStatuses)
+    .where(eq(projectStatuses.projectId, projectId));
+  return opts.ordered ? query.orderBy(projectStatuses.sortOrder) : query;
 }

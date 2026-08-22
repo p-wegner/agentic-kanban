@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db, withTransaction } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { projectStatusIdName } from "./projections.js";
 
 /** All full issue rows for a project, ordered by sort order then issue number — export source. */
 export async function getFullIssuesForProject(projectId: string, database: Database = db) {
@@ -90,8 +91,12 @@ export async function applyBacklogImport(
 
     // --- Resolve status ids (existing + newly created), keyed case-insensitively.
     const statusByName = new Map<string, string>();
+    // Reads inside the transaction, so `tx` (an SQLiteTransaction) cannot be passed to
+    // `listProjectStatusIdNames`, whose seam is `database: Database = db` — the sanctioned
+    // fn-module spelling (#604) and not transaction-typed. The shared projection still
+    // applies; only the accessor cannot be reused here.
     const existingStatuses = await tx
-      .select({ id: projectStatuses.id, name: projectStatuses.name })
+      .select(projectStatusIdName)
       .from(projectStatuses)
       .where(eq(projectStatuses.projectId, plan.projectId));
     for (const s of existingStatuses) statusByName.set(s.name.toLowerCase(), s.id);

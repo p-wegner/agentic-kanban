@@ -3,6 +3,7 @@ import { and, eq, inArray, sql, desc } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { sessionLifecycleColumns } from "./projections.js";
 
 /**
  * The workspace's LEADING repo row (#222 stage 1, migration 0110). Aliased so the join
@@ -148,11 +149,7 @@ export async function getWorkflowNodeNamesByIds(nodeIds: string[], database: Dat
 export async function getSessionsForWorkspaces(workspaceIds: string[], database: Database = db) {
   return database
     .select({
-      id: sessions.id,
-      workspaceId: sessions.workspaceId,
-      status: sessions.status,
-      startedAt: sessions.startedAt,
-      endedAt: sessions.endedAt,
+      ...sessionLifecycleColumns,
       triggerType: sessions.triggerType,
     })
     .from(sessions)

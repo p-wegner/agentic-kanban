@@ -8,6 +8,8 @@ import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { ValidationError } from "../errors/index.js";
 import { nextIssueNumber } from "./issue-number.repository.js";
+import { issueDependencyColumns, issueIdentityColumns, issueTextColumns, projectStatusIdName } from "./projections.js";
+import { listProjectStatusIdNames } from "./project-status.repository.js";
 
 // --- CLI-command-specific queries/mutations (#465 decomposition — the blanket
 // /repositories/ cohesion exemption was removed by #957, so this facade ships its
@@ -56,10 +58,7 @@ export async function initializeProjectStatuses(
   //
   // Insert only the names the project does not already have, and return ids for ALL of them:
   // the caller wants the project's status map, not a record of what this call happened to write.
-  const existing = await database
-    .select({ id: projectStatuses.id, name: projectStatuses.name })
-    .from(projectStatuses)
-    .where(eq(projectStatuses.projectId, projectId));
+  const existing = await listProjectStatusIdNames(projectId, database);
   const existingNames = new Set(existing.map((row) => row.name));
 
   const rows = buildProjectStatusRows(projectId, now).filter((row) => !existingNames.has(row.name));
@@ -155,10 +154,7 @@ export async function getIssuesByProject(
     : 0;
 
   const fullSelection = {
-    id: issues.id,
-    issueNumber: issues.issueNumber,
-    title: issues.title,
-    description: issues.description,
+    ...issueTextColumns,
     priority: issues.priority,
     issueType: issues.issueType,
     sortOrder: issues.sortOrder,
@@ -226,10 +222,7 @@ export async function getIssueDescription(
 ) {
   const rows = await database
     .select({
-      id: issues.id,
-      issueNumber: issues.issueNumber,
-      title: issues.title,
-      description: issues.description,
+      ...issueTextColumns,
       priority: issues.priority,
       issueType: issues.issueType,
       sortOrder: issues.sortOrder,
@@ -283,10 +276,7 @@ export async function getOutgoingDependencies(
 ) {
   return database
     .select({
-      id: issueDependencies.id,
-      issueId: issueDependencies.issueId,
-      dependsOnId: issueDependencies.dependsOnId,
-      type: issueDependencies.type,
+      ...issueDependencyColumns,
       createdAt: issueDependencies.createdAt,
       issueTitle: issues.title,
       issueStatusName: projectStatuses.name,
@@ -304,10 +294,7 @@ export async function getIncomingDependencies(
 ) {
   return database
     .select({
-      id: issueDependencies.id,
-      issueId: issueDependencies.issueId,
-      dependsOnId: issueDependencies.dependsOnId,
-      type: issueDependencies.type,
+      ...issueDependencyColumns,
       createdAt: issueDependencies.createdAt,
       issueTitle: issues.title,
       issueStatusName: projectStatuses.name,
@@ -327,9 +314,7 @@ export async function getIncomingDependencies(
 export async function getFocusIssueRows(projectId: string, database: Database = db) {
   return database
     .select({
-      id: issues.id,
-      issueNumber: issues.issueNumber,
-      title: issues.title,
+      ...issueIdentityColumns,
       statusId: issues.statusId,
       statusName: projectStatuses.name,
       currentNodeId: issues.currentNodeId,
@@ -374,9 +359,7 @@ export async function getIssueTouchedFilesWithProject(
 export async function getProjectIssuesTouchedFiles(projectId: string, database: Database = db) {
   return database
     .select({
-      id: issues.id,
-      issueNumber: issues.issueNumber,
-      title: issues.title,
+      ...issueIdentityColumns,
       touchedFilesJson: issues.touchedFilesJson,
     })
     .from(issues)
@@ -431,9 +414,7 @@ export async function getDoneIssuesSince(projectId: string, cutoffDay: string, d
 export async function getDigestIssueRows(projectId: string, database: Database = db) {
   return database
     .select({
-      id: issues.id,
-      issueNumber: issues.issueNumber,
-      title: issues.title,
+      ...issueIdentityColumns,
       statusId: issues.statusId,
       statusName: projectStatuses.name,
       currentNodeId: issues.currentNodeId,
@@ -563,10 +544,7 @@ export async function deleteArtifact(
 export async function getIssuesForExport(projectId: string, database: Database = db) {
   return database
     .select({
-      id: issues.id,
-      issueNumber: issues.issueNumber,
-      title: issues.title,
-      description: issues.description,
+      ...issueTextColumns,
       priority: issues.priority,
       issueType: issues.issueType,
       estimate: issues.estimate,

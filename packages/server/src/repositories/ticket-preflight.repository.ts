@@ -3,6 +3,7 @@ import { issues, workflowNodes } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getStatusIdsByName } from "./project-status.repository.js";
+import { issueTextColumns } from "./projections.js";
 
 export async function getPreflightTargetIssue(
   issueId: string,
@@ -10,10 +11,7 @@ export async function getPreflightTargetIssue(
 ) {
   const rows = await database
     .select({
-      id: issues.id,
-      issueNumber: issues.issueNumber,
-      title: issues.title,
-      description: issues.description,
+      ...issueTextColumns,
     })
     .from(issues)
     .where(eq(issues.id, issueId))
@@ -36,10 +34,7 @@ export async function getProjectIssuesWithNodeType(
 ) {
   return database
     .select({
-      id: issues.id,
-      issueNumber: issues.issueNumber,
-      title: issues.title,
-      description: issues.description,
+      ...issueTextColumns,
       statusId: issues.statusId,
       currentNodeId: issues.currentNodeId,
       currentNodeType: workflowNodes.nodeType,

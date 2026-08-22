@@ -7,6 +7,7 @@ import { getProjectById } from "./project.repository.js";
 import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { getStatusIdsByName } from "./project-status.repository.js";
 import { getPreference as canonicalGetPreference } from "./preferences.repository.js";
+import { issueTextColumns } from "./projections.js";
 
 export async function getIssueBasics(
   issueId: string,
@@ -35,10 +36,7 @@ export async function getOpenIssuesWithNode(
 ) {
   return database
     .select({
-      id: issues.id,
-      issueNumber: issues.issueNumber,
-      title: issues.title,
-      description: issues.description,
+      ...issueTextColumns,
       statusId: issues.statusId,
       currentNodeId: issues.currentNodeId,
       currentNodeType: workflowNodes.nodeType,

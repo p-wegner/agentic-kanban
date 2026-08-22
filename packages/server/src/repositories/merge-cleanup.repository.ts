@@ -3,6 +3,8 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
+import { projectStatusIdName } from "./projections.js";
+import { listProjectStatusIdNames } from "./project-status.repository.js";
 
 export async function getIssueStatusAndProject(issueId: string, database: Database = db) {
   const rows = await database
@@ -25,10 +27,7 @@ export async function getIssueProject(issueId: string, database: Database = db) 
 }
 
 export async function getProjectStatusOptions(projectId: string, database: Database = db) {
-  return database
-    .select({ id: projectStatuses.id, name: projectStatuses.name })
-    .from(projectStatuses)
-    .where(eq(projectStatuses.projectId, projectId));
+  return listProjectStatusIdNames(projectId, database);
 }
 
 export async function setIssueStatus(
