@@ -54,8 +54,22 @@ const BASELINE: Record<string, string[]> = {
   client: [],
 };
 
-/** Total at the moment the ratchet landed — the number an unreviewed growth would move. */
-const BASELINE_TOTAL = Object.values(BASELINE).reduce((n, list) => n + list.length, 0);
+/**
+ * A HARD CEILING on how many suites `test:mine` may skip, across all packages — written as a
+ * literal on purpose (#721).
+ *
+ * It used to be `Object.values(BASELINE).reduce(...)`, which made the assertion below
+ * tautological: the test above already asserts the live list deep-equals `BASELINE`, so a
+ * total derived FROM `BASELINE` could never disagree with it. It was a dead assertion
+ * presented as a second line of defence.
+ *
+ * As a literal it is a genuinely independent check, because it does not move when `BASELINE`
+ * does: adding an exclusion to both the script and `BASELINE` — the edit the mechanism above
+ * is designed to make visible, and which a reviewer can wave through as "one more line" —
+ * still fails here until someone raises a number that has only ever been lowered. Lower it
+ * whenever the list shrinks; think hard before raising it.
+ */
+const MAX_EXCLUSIONS = 10;
 
 /**
  * #679 made each entry `{ glob, reason }` so an exclusion carries the argument for its own
@@ -100,9 +114,18 @@ describe("test:mine flaky-exclusion ratchet (#641)", () => {
     expect(actual).toEqual(BASELINE);
   });
 
-  it("never grows past the baseline count without this number moving too", () => {
+  it("never skips more suites than the standing ceiling, whatever the baseline says", () => {
     const total = packages.reduce((n, p) => n + p.exclude.length, 0);
-    expect(total).toBeLessThanOrEqual(BASELINE_TOTAL);
+    expect(
+      total,
+      `test:mine skips ${total} suites; the ceiling is ${MAX_EXCLUSIONS}. This is deliberately ` +
+        "NOT derived from BASELINE — updating both the script and BASELINE does not buy a pass here.",
+    ).toBeLessThanOrEqual(MAX_EXCLUSIONS);
+    // And the other direction, so the ceiling cannot quietly become a budget.
+    expect(
+      MAX_EXCLUSIONS - total,
+      `the exclusion list has shrunk to ${total} — lower MAX_EXCLUSIONS to match`,
+    ).toBe(0);
   });
 
   it("has no exclusion that outlived its file — a stale glob hides nothing and misleads", () => {
