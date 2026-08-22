@@ -28,6 +28,7 @@ import {
   reserveWorkerSlot,
   reservedSlotCount,
 } from "./worker-slot-reservation.service.js";
+import { remoteDispatchBlockedByRepoShape } from "./worker-transport-support.service.js";
 export { SHARES_FILESYSTEM_LABEL };
 
 // Strict-mode refusal. Defined in the dispatch layer (which must throw it when it
@@ -326,6 +327,27 @@ async function resolvePlacementWithReservation(
       console.warn(`[worker-fleet] project ${projectId} has no repoPath; launching on host`);
       return { kind: "host" };
     }
+    // #748: the git transport carries ONE repository, without LFS and without
+    // submodules. A project that needs more than that was dispatched anyway — the
+    // worker built against an incomplete checkout and returned a result that looked
+    // legitimate. So refuse, exactly as #651 refuses a profile-allowlisted project:
+    // the board cannot serve this shape remotely, so it does not go remote.
+    //
+    // Asked HERE and not beside the allowlist because a filesystem-sharing worker
+    // needs no transport at all — it reads the board's own worktrees, siblings and
+    // LFS objects included — and that branch has already returned above.
+    const repoShape = await remoteDispatchBlockedByRepoShape({
+      projectId,
+      repoPath: project.repoPath,
+      database,
+    });
+    if (repoShape.blocked) {
+      if (strict) refuseHost(`project ${projectId} cannot dispatch remotely: ${repoShape.reason}`);
+      console.warn(
+        `[worker-fleet] project ${projectId} wants worker dispatch but ${repoShape.reason}; launching on host`,
+      );
+      return { kind: "host" };
+    }
     return {
       kind: "remote",
       workerId,
@@ -372,6 +394,23 @@ export async function projectCanDispatch(params: {
     if (allowlistBlock.blocked) return { available: false, reason: allowlistBlock.reason };
     const fleet = getWorkerFleet(database);
     const requiredLabels = parseRequiredLabels(await getPreferenceValue(workerLabelsPrefKey(projectId), database));
+    // #748: same refusal the placement makes, one step earlier, so the monitor skips
+    // the start with the REAL reason instead of starting and then falling back. Only
+    // when no eligible worker shares the board's filesystem: such a worker needs no
+    // git transport, so the repo shape does not constrain it.
+    const eligible = await eligibleWorkers(fleet, providerName, requiredLabels, now);
+    const sharing = await Promise.all(eligible.map((w) => workerSharesFilesystem(fleet, w.id, now)));
+    if (eligible.length > 0 && !sharing.some(Boolean)) {
+      const project = await getProjectById(projectId, database);
+      if (project?.repoPath) {
+        const repoShape = await remoteDispatchBlockedByRepoShape({
+          projectId,
+          repoPath: project.repoPath,
+          database,
+        });
+        if (repoShape.blocked) return { available: false, reason: repoShape.reason };
+      }
+    }
     const capacity = await resolveFleetCapacity(fleet, providerName, requiredLabels, now);
     if (capacity.freeSlots > 0) return { available: true };
     const detail = requiredLabels.length > 0 ? ` matching [${requiredLabels.join(",")}]` : "";

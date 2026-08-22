@@ -3,6 +3,7 @@ import { preferences, projects as projectsTable } from "@agentic-kanban/shared/s
 import { createTestDb } from "./helpers/test-db.js";
 import type { Database } from "../db/index.js";
 import type { WSContext } from "hono/ws";
+import { __resetWorkerSlotReservations } from "../services/worker-slot-reservation.service.js";
 import {
   getWorkerFleet,
   resolveWorkerPlacement,
@@ -14,6 +15,17 @@ import {
 
 const PROJECT_ID = "aaaa1111-2222-3333-4444-555566667777";
 
+/**
+ * The fleet grew a protocol handshake, so `registerWorker` refuses a worker that
+ * reports no version. Declared through an intersection rather than by importing the
+ * new constant: this suite is about placement and should not go red over a field it
+ * does not test.
+ */
+type RegisterWorkerInput = Parameters<WorkerFleet["registry"]["registerWorker"]>[0] & {
+  protocolVersion?: number;
+};
+const SPEAKS_CURRENT_PROTOCOL: Pick<RegisterWorkerInput, "protocolVersion"> = { protocolVersion: 1 };
+
 function fakeWs(): WSContext {
   return { send: () => {}, close: () => {} } as unknown as WSContext;
 }
@@ -23,6 +35,9 @@ describe("worker-fleet placement (phase 1c)", () => {
   let fleet: WorkerFleet;
 
   beforeEach(() => {
+    // #751's slot ledger is process-wide (the dispatch proxy has no db handle), so a
+    // case that leaves a reservation behind would otherwise starve the next one.
+    __resetWorkerSlotReservations();
     db = createTestDb().db as unknown as Database;
     fleet = getWorkerFleet(db);
   });
@@ -44,6 +59,7 @@ describe("worker-fleet placement (phase 1c)", () => {
       providers: overrides?.providers,
       maxConcurrency: overrides?.maxConcurrency,
       labels: overrides?.labels,
+      ...SPEAKS_CURRENT_PROTOCOL,
     });
     if (!result.ok) throw new Error(result.error);
     return result.workerId;
@@ -79,7 +95,9 @@ describe("worker-fleet placement (phase 1c)", () => {
     const workerId = await registerLocalWorker({ providers: ["claude"] });
     fleet.connections.handleOpen(workerId, fakeWs());
     const placement = await resolveWorkerPlacement({ database: db, projectId: PROJECT_ID, providerName: "claude" });
-    expect(placement).toEqual({ kind: "remote", workerId, strict: false });
+    // #751: a remote placement also carries the capacity slot it claimed, so a
+    // concurrent placement cannot be handed the same one.
+    expect(placement).toEqual({ kind: "remote", workerId, strict: false, reservationId: expect.any(String) });
   });
 
   it("gives a TRUE remote worker git transport with the branch and repo", async () => {
@@ -95,6 +113,7 @@ describe("worker-fleet placement (phase 1c)", () => {
       kind: "remote",
       workerId,
       strict: false,
+      reservationId: expect.any(String),
       repo: {
         projectId: PROJECT_ID,
         repoPath: "C:/repos/fixture",
