@@ -8,6 +8,11 @@ import {
   type WorkerRegistry,
   type WorkerStatus,
 } from "../services/worker-registry.service.js";
+import {
+  listIncomingRefs,
+  landIncomingRef,
+  discardIncomingRef,
+} from "../services/worker-incoming-refs.service.js";
 
 function bearerFrom(c: Context): string | null {
   return extractBearer(c.req.header("authorization"));
@@ -30,11 +35,35 @@ function bearerFrom(c: Context): string | null {
  * actions with no credential of their own — they ride the board's
  * "only reachable from this machine" trust, exactly like the rest of /api.
  */
-function registerOwnerRoutes(router: Hono, reg: WorkerRegistry): void {
+function registerOwnerRoutes(router: Hono, reg: WorkerRegistry, database: Database): void {
   router.post("/pairing-token", (c) => c.json(reg.mintPairingToken(), 201));
 
   router.get("/", async (c) => {
     return c.json({ workers: await reg.listWorkersView() });
+  });
+
+  // #752 — the incoming-ref staging namespace, made observable and reclaimable.
+  // Owner-only for the same reason the rest of this block is: landing a ref moves
+  // a branch, and discarding one drops commits. Never on the fleet listener.
+  router.get("/incoming", async (c) => {
+    const projectId = c.req.query("projectId") || undefined;
+    return c.json(await listIncomingRefs(database, { projectId }));
+  });
+
+  router.post("/incoming/land", async (c) => {
+    const body = await parseOptionalJsonBody<{ projectId?: string; branch?: string }>(c);
+    if (!body.projectId || !body.branch) return c.json({ error: "projectId and branch are required" }, 422);
+    const result = await landIncomingRef(body.projectId, body.branch, database);
+    if (!result.ok) return c.json({ error: result.error, outcome: result.outcome }, 409);
+    return c.json({ ok: true, outcome: result.outcome });
+  });
+
+  router.post("/incoming/discard", async (c) => {
+    const body = await parseOptionalJsonBody<{ projectId?: string; branch?: string; force?: boolean }>(c);
+    if (!body.projectId || !body.branch) return c.json({ error: "projectId and branch are required" }, 422);
+    const result = await discardIncomingRef(body.projectId, body.branch, database, { force: body.force === true });
+    if (!result.ok) return c.json({ error: result.error }, 409);
+    return c.json({ ok: true, sha: result.sha });
   });
 
   router.delete("/:id", async (c) => {
@@ -92,7 +121,7 @@ function registerWorkerFacingRoutes(router: Hono, reg: WorkerRegistry): void {
 export function createWorkersRoute(database: Database, registry?: WorkerRegistry) {
   const router = createRouter();
   const reg = registry ?? getWorkerRegistry(database);
-  registerOwnerRoutes(router, reg);
+  registerOwnerRoutes(router, reg, database);
   registerWorkerFacingRoutes(router, reg);
   return router;
 }
