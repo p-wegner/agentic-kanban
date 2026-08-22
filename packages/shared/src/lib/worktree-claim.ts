@@ -141,11 +141,64 @@ export async function findLiveWorktreeSharers(
   );
 }
 
+/** One workspace row that holds a branch. */
+export interface BranchClaim {
+  id: string;
+  status: string;
+  branch: string;
+}
+
+/**
+ * The live workspaces (other than `excludeWorkspaceId`) whose BRANCH is `branch`.
+ *
+ * Absorbed from `orphaned-worktree-reconciler.ts` in #735. That reconciler's own claim
+ * analysis was STRONGER than this module's on exactly one point, and it is the unrecoverable
+ * direction: finishing a merge NULLS `workspaces.working_dir`
+ * (`finalizeMergeCleanup` → `clearWorkspaceWorkingDir`), so a live workspace can hold a
+ * worktree that no row names by path. `findLiveWorktreeSharers` sees no claim there and
+ * would wave the delete through; a branch-keyed lookup still recognises it.
+ *
+ * Deliberately UNSCOPED by project, like `selectWorkingDirClaims`: a branch name that
+ * collides across projects makes this refuse, which is the cheap direction.
+ *
+ * An empty/whitespace branch matches nothing — a detached-HEAD worktree must not be
+ * "claimed" by every row whose branch column is empty (the reconciler's own
+ * `does not let an empty branch string match an empty claim branch` case).
+ *
+ * Throws on a DB failure — callers route through `removeWorktreeUnlessShared`, which turns
+ * that into a refusal.
+ */
+export async function findLiveBranchHolders(
+  database: WorktreeClaimDb,
+  branch: string,
+  opts: { excludeWorkspaceId?: string } = {},
+): Promise<BranchClaim[]> {
+  if (!branch.trim()) return [];
+  const rows = await database
+    .select({ id: workspaces.id, status: workspaces.status, branch: workspaces.branch })
+    .from(workspaces)
+    .where(isNotNull(workspaces.branch));
+  return rows.flatMap((r) =>
+    typeof r.branch === "string"
+    && r.branch === branch
+    && r.id !== opts.excludeWorkspaceId
+    && holdsLiveResources(r.status)
+      ? [{ id: r.id, status: r.status, branch: r.branch }]
+      : [],
+  );
+}
+
 export type WorktreeRemovalOutcome =
   /** The removal ran and reported success. */
   | { removed: true }
   /** Another live workspace shares the directory — nothing was touched. */
   | { removed: false; reason: "shared"; sharers: WorkingDirClaim[]; message: string }
+  /**
+   * A live workspace holds the worktree's BRANCH even though no row names its path
+   * (a merge nulls `working_dir`) — nothing was touched. Only reachable when the caller
+   * supplies `branch`.
+   */
+  | { removed: false; reason: "branch-claimed"; holders: BranchClaim[]; message: string }
   /** The sharer check itself failed, so the removal was refused rather than guessed. */
   | { removed: false; reason: "claim-check-failed"; message: string; error: unknown }
   /** The guard passed; the removal itself threw. */
@@ -154,8 +207,14 @@ export type WorktreeRemovalOutcome =
 /**
  * THE guarded worktree removal. Every path that deletes a workspace's `workingDir` goes
  * through here — delete-workspace, stale-worktree cleanup, post-merge cleanup, the merge
- * prevalidation's already-merged resolution, the already-merged reconciler, and mcp
- * `close_workspace`.
+ * prevalidation's already-merged resolution, the already-merged reconciler, mcp
+ * `close_workspace`, and (since #735) the project worktree-panel prune, the startup
+ * stale-worktree sweep and the orphaned-worktree reconciler.
+ *
+ * The claim question is answered in up to two ways, both fail-closed: by PATH always
+ * (`findLiveWorktreeSharers`), and by BRANCH when the caller supplies one
+ * (`findLiveBranchHolders`) — the second is what sees a live workspace whose `working_dir`
+ * a completed merge already nulled.
  *
  * Never throws: callers report the outcome in their own idiom (a `{success:false}` result,
  * a recoverable merge warning, a persisted cleanup warning, a log line), which is the only
@@ -166,6 +225,16 @@ export async function removeWorktreeUnlessShared(args: {
   workingDir: string;
   /** The workspace on whose behalf the removal runs — never counts as its own sharer. */
   workspaceId?: string;
+  /**
+   * The branch this worktree is checked out on, when the caller knows it (#735).
+   *
+   * Optional and additive: supplying it adds the branch-keyed claim check
+   * (`findLiveBranchHolders`) on top of the path-keyed one, which is the only way to see a
+   * live workspace whose `working_dir` a completed merge already nulled. Callers that
+   * delete a directory their OWN row still names (delete-workspace, stale-worktree
+   * cleanup, post-merge) do not pass it and are unaffected.
+   */
+  branch?: string;
   /** Short tag for the log line, e.g. `"merge:post-merge"`. */
   label: string;
   /** The actual removal. Injected so this module stays free of the git service. */
@@ -190,6 +259,28 @@ export async function removeWorktreeUnlessShared(args: {
       + `workspace(s) — skipping removal [${args.label}]`;
     console.log(`[worktree-claim] ${message}`);
     return { removed: false, reason: "shared", sharers, message };
+  }
+
+  if (args.branch) {
+    let holders: BranchClaim[];
+    try {
+      holders = await findLiveBranchHolders(args.database, args.branch, {
+        excludeWorkspaceId: args.workspaceId,
+      });
+    } catch (err) {
+      const message =
+        `[${args.label}] refusing to remove worktree ${args.workingDir}: could not determine `
+        + `whether a live workspace holds branch ${args.branch} (${errorMessage(err)})`;
+      console.warn(`[worktree-claim] ${message}`);
+      return { removed: false, reason: "claim-check-failed", message, error: err };
+    }
+    if (holders.length > 0) {
+      const message =
+        `Worktree ${args.workingDir} sits on branch ${args.branch}, which ${holders.length} live `
+        + `workspace(s) still hold — skipping removal [${args.label}]`;
+      console.log(`[worktree-claim] ${message}`);
+      return { removed: false, reason: "branch-claimed", holders, message };
+    }
   }
 
   try {

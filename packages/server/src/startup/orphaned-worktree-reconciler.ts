@@ -1,6 +1,8 @@
 import { existsSync } from "node:fs";
 import { samePath as sharedSamePath } from "@agentic-kanban/shared/lib/path-key";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
+import type { Database } from "../db/index.js";
 
 /**
  * #361 (Observation C, second half) — a git worktree left registered after its unit merged, which
@@ -37,6 +39,30 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
  * It is deliberately conservative. Anything holding work that has not landed is reported and kept;
  * only a worktree that nothing claims AND that carries nothing unshipped is removed. `removeWorktree`
  * adds its own hard guard (it refuses any path not strictly inside `.worktrees/`).
+ *
+ * ## Where the claim question is answered (#735)
+ *
+ * The removal now goes through the ONE guard, `removeWorktreeUnlessShared`
+ * (`@agentic-kanban/shared/lib/worktree-claim`), which is the last word on "does a live
+ * workspace still claim this directory?". Two things were true before that and are worth
+ * stating, because this file was the one `TO CONVERT` site that was NOT simply wrong:
+ *
+ *  - This file's analysis was STRONGER than the shared guard's on one point, and it is the
+ *    unrecoverable direction: a live workspace whose `working_dir` a completed merge already
+ *    nulled still holds its BRANCH, and a path-keyed sharer query cannot see it. That
+ *    strength was absorbed into the guard as `findLiveBranchHolders` / the optional `branch`
+ *    argument rather than left here, and is passed below — so the guard is now a SUPERSET of
+ *    `classifyWorktree`'s liveness rules, not a second opinion beside them.
+ *  - Two of `classifyWorktree`'s rules are deliberately NOT in the guard. `main_checkout`
+ *    is a path-shape question, not a claim (and `removeWorktree`'s own `.worktrees/` guard
+ *    covers it). "A row still NAMES this path, whatever its status" exists to avoid racing
+ *    `pruneStaleWorktrees`, and absorbing it would deadlock the three guarded sites that
+ *    remove exactly a directory a row being closed still names.
+ *
+ * `classifyWorktree` therefore stays: it is the project-scoped PRE-FILTER (it also decides
+ * `unshipped_work`, which the guard knows nothing about, and it is what keeps three git calls
+ * off an obviously-claimed entry). It can only ever be more conservative than the guard; the
+ * guard is the authority.
  */
 
 /** What a workspace row contributes to the "is this worktree still claimed?" question. */
@@ -115,6 +141,13 @@ export interface OrphanedWorktreeGitPort {
 export interface OrphanedWorktreeReport {
   removed: string[];
   keptWithUnshippedWork: string[];
+  /**
+   * Worktrees the shared guard refused to remove — a live workspace shares the path or holds
+   * the branch, or the claim read itself failed (#735). Reported rather than swallowed: this
+   * reconciler's whole idiom is "say what you did and what you left", and a refusal that only
+   * appears in a log line is the shape that lets a stuck sweep look like a clean one.
+   */
+  keptClaimed: string[];
 }
 
 /**
@@ -165,8 +198,15 @@ export async function reconcileOrphanedWorktrees(args: {
   baseBranch: string;
   claims: WorktreeClaimRow[];
   git: OrphanedWorktreeGitPort;
+  /**
+   * Read by the shared removal guard (#735) — the reconciler itself still classifies from
+   * `claims`. Required rather than optional: an optional database would mean either a
+   * silently unguarded removal (the bug) or a sweep that refuses everything, and neither is
+   * something a caller should be able to reach by forgetting an argument.
+   */
+  database: Database;
 }): Promise<OrphanedWorktreeReport> {
-  const report: OrphanedWorktreeReport = { removed: [], keptWithUnshippedWork: [] };
+  const report: OrphanedWorktreeReport = { removed: [], keptWithUnshippedWork: [], keptClaimed: [] };
 
   let worktrees: { path: string; branch: string }[];
   try {
@@ -195,12 +235,28 @@ export async function reconcileOrphanedWorktrees(args: {
       continue;
     }
 
-    try {
-      await args.git.removeWorktree(args.repoPath, worktree.path);
+    // #735: the removal itself is the ONE guard's, not this file's. `branch` is passed
+    // because it is precisely this reconciler's subject — a worktree whose row has a nulled
+    // `working_dir` — and the absorbed branch-keyed check is the only thing that sees a live
+    // workspace behind one. See the module header for what the guard does and does not take
+    // over from `classifyWorktree`.
+    const outcome = await removeWorktreeUnlessShared({
+      database: args.database,
+      workingDir: worktree.path,
+      branch: worktree.branch,
+      label: "startup:orphaned-worktree-reconcile",
+      removeWorktree: () => args.git.removeWorktree(args.repoPath, worktree.path),
+    });
+    if (outcome.removed) {
       console.log(`[worktree-reconcile] removed orphaned worktree ${worktree.path} (${worktree.branch || "detached"}) — no workspace claims it and it holds nothing unshipped (#361)`);
       report.removed.push(worktree.path);
-    } catch (err) {
-      console.warn(`[worktree-reconcile] could not remove orphaned worktree ${worktree.path}: ${errorMessage(err)}`);
+    } else if (outcome.reason === "remove-failed") {
+      console.warn(`[worktree-reconcile] could not remove orphaned worktree ${worktree.path}: ${errorMessage(outcome.error)}`);
+    } else {
+      // The guard saw a claim this file's project-scoped `claims` did not (a live sharer, a
+      // live branch holder, or a claim read that failed). Reported, not swallowed.
+      console.warn(`[worktree-reconcile] ${outcome.message}`);
+      report.keptClaimed.push(worktree.path);
     }
   }
 

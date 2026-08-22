@@ -62,11 +62,36 @@ function makeGit(overrides: Partial<OrphanedWorktreeGitPort> = {}): OrphanedWork
   };
 }
 
+/**
+ * The workspace rows the shared removal guard reads (#735).
+ *
+ * Distinct from `claims` above on purpose: `claims` is what this reconciler classifies from
+ * (project-scoped, and for the sibling sweep it comes from `repos` rather than `workspaces`),
+ * while the guard runs its own UNFILTERED read over `workspaces`. One stub serves both of the
+ * guard's queries — `selectWorkingDirClaims` keeps the rows with a non-empty `workingDir`,
+ * `findLiveBranchHolders` keeps the ones whose `branch` matches — so a row set with all four
+ * columns exercises whichever the guard reaches.
+ */
+type GuardRow = { id: string; status: string; workingDir: string | null; branch: string | null };
+
+function guardDb(rows: GuardRow[] = []) {
+  return {
+    select: () => ({ from: () => ({ where: async () => rows }) }),
+  } as never;
+}
+
+/** A guard read that throws — the DB hiccup that must never read as "safe to delete". */
+function brokenGuardDb() {
+  return {
+    select: () => ({ from: () => ({ where: async () => { throw new Error("database is locked"); } }) }),
+  } as never;
+}
+
 describe("#361: reconcileOrphanedWorktrees on the measured kassenbuch state", () => {
   it("removes BOTH orphans that every workingDir-keyed sweeper was blind to, and never the main checkout", async () => {
     const git = makeGit();
 
-    const report = await reconcileOrphanedWorktrees({ repoPath: REPO, baseBranch: "master", claims: KASSENBUCH_CLAIMS, git });
+    const report = await reconcileOrphanedWorktrees({ repoPath: REPO, baseBranch: "master", claims: KASSENBUCH_CLAIMS, git, database: guardDb() });
 
     expect(report.removed.sort()).toEqual([WT12, WT6].sort());
     expect(report.keptWithUnshippedWork).toEqual([]);
@@ -80,7 +105,7 @@ describe("#361: reconcileOrphanedWorktrees on the measured kassenbuch state", ()
     // recoverable; `worktree remove --force`-ing away real commits is not.
     const git = makeGit({ countUniqueCommits: vi.fn(async (_r, _b, branch) => (branch === BR6_SURVIVING ? 3 : 0)) });
 
-    const report = await reconcileOrphanedWorktrees({ repoPath: REPO, baseBranch: "master", claims: KASSENBUCH_CLAIMS, git });
+    const report = await reconcileOrphanedWorktrees({ repoPath: REPO, baseBranch: "master", claims: KASSENBUCH_CLAIMS, git, database: guardDb() });
 
     expect(report.keptWithUnshippedWork).toEqual([WT6]);
     expect(report.removed).toEqual([WT12]);
@@ -89,7 +114,7 @@ describe("#361: reconcileOrphanedWorktrees on the measured kassenbuch state", ()
   it("keeps an orphan with uncommitted edits", async () => {
     const git = makeGit({ getWorkingTreeDiff: vi.fn(async (p) => (p === WT6 ? "diff --git a/src/x.js b/src/x.js\n" : "")) });
 
-    const report = await reconcileOrphanedWorktrees({ repoPath: REPO, baseBranch: "master", claims: KASSENBUCH_CLAIMS, git });
+    const report = await reconcileOrphanedWorktrees({ repoPath: REPO, baseBranch: "master", claims: KASSENBUCH_CLAIMS, git, database: guardDb() });
 
     expect(report.keptWithUnshippedWork).toEqual([WT6]);
   });
@@ -97,7 +122,7 @@ describe("#361: reconcileOrphanedWorktrees on the measured kassenbuch state", ()
   it("fails CLOSED when git cannot be read — an unverifiable worktree is kept, not force-removed", async () => {
     const git = makeGit({ getWorkingTreeDiff: vi.fn(async () => { throw new Error("EBUSY"); }) });
 
-    const report = await reconcileOrphanedWorktrees({ repoPath: REPO, baseBranch: "master", claims: KASSENBUCH_CLAIMS, git });
+    const report = await reconcileOrphanedWorktrees({ repoPath: REPO, baseBranch: "master", claims: KASSENBUCH_CLAIMS, git, database: guardDb() });
 
     expect(report.removed).toEqual([]);
     expect(report.keptWithUnshippedWork.sort()).toEqual([WT12, WT6].sort());
@@ -111,7 +136,7 @@ describe("#361: reconcileOrphanedWorktrees on the measured kassenbuch state", ()
       revParse: vi.fn(async (_r, ref) => { if (ref === "feature/ak-6-gone") throw new Error("unknown revision"); return "c747e8e"; }),
     });
 
-    const report = await reconcileOrphanedWorktrees({ repoPath: REPO, baseBranch: "master", claims: KASSENBUCH_CLAIMS, git });
+    const report = await reconcileOrphanedWorktrees({ repoPath: REPO, baseBranch: "master", claims: KASSENBUCH_CLAIMS, git, database: guardDb() });
 
     expect(report.removed).toEqual([WT6]);
   });
@@ -120,9 +145,9 @@ describe("#361: reconcileOrphanedWorktrees on the measured kassenbuch state", ()
     const claims: WorktreeClaimRow[] = [{ workingDir: WT6, branch: BR6_SURVIVING, status: "closed" }, { workingDir: WT12, branch: BR12, status: "closed" }];
     const git = makeGit();
 
-    const report = await reconcileOrphanedWorktrees({ repoPath: REPO, baseBranch: "master", claims, git });
+    const report = await reconcileOrphanedWorktrees({ repoPath: REPO, baseBranch: "master", claims, git, database: guardDb() });
 
-    expect(report).toEqual({ removed: [], keptWithUnshippedWork: [] });
+    expect(report).toEqual({ removed: [], keptWithUnshippedWork: [], keptClaimed: [] });
     expect(vi.mocked(git.getWorkingTreeDiff)).not.toHaveBeenCalled();
     expect(vi.mocked(git.removeWorktree)).not.toHaveBeenCalled();
   });
@@ -130,7 +155,70 @@ describe("#361: reconcileOrphanedWorktrees on the measured kassenbuch state", ()
   it("returns empty (never throws) when the repo cannot be listed", async () => {
     const git = makeGit({ listWorktrees: vi.fn(async () => { throw new Error("not a git repository"); }) });
 
-    await expect(reconcileOrphanedWorktrees({ repoPath: REPO, baseBranch: "master", claims: [], git })).resolves.toEqual({ removed: [], keptWithUnshippedWork: [] });
+    await expect(reconcileOrphanedWorktrees({ repoPath: REPO, baseBranch: "master", claims: [], git, database: guardDb() })).resolves.toEqual({ removed: [], keptWithUnshippedWork: [], keptClaimed: [] });
+  });
+});
+
+/**
+ * #735 — the removal is the shared guard's now, and the guard is a SUPERSET of what this
+ * file's `claims` can see: its read is unfiltered by project, so a claim this reconciler's
+ * project-scoped rows do not contain still stops the delete.
+ *
+ * These are not duplicates of the `classifyWorktree` cases below. There the claim is IN
+ * `claims`; here `claims` says "orphaned" and the guard overrules it — which is the only
+ * arrangement under which routing through the guard actually bought something.
+ */
+describe("#735: the shared guard has the last word on the removal", () => {
+  it("REFUSES a worktree a live workspace shares by PATH, even when `claims` calls it orphaned", async () => {
+    const git = makeGit();
+
+    const report = await reconcileOrphanedWorktrees({
+      repoPath: REPO, baseBranch: "master", claims: KASSENBUCH_CLAIMS, git,
+      database: guardDb([{ id: "ws-live", status: "active", workingDir: WT6, branch: "unrelated" }]),
+    });
+
+    expect(report.removed).toEqual([WT12]);
+    expect(report.keptClaimed).toEqual([WT6]);
+    for (const call of vi.mocked(git.removeWorktree).mock.calls) expect(call[1]).not.toBe(WT6);
+  });
+
+  it("REFUSES a worktree whose BRANCH a live workspace holds with a nulled workingDir", async () => {
+    // The absorbed strength: a completed merge nulls `working_dir`, so a path-keyed sharer
+    // query sees nothing while the workspace is still live on the branch. This is the exact
+    // case this reconciler was built for, and the guard now answers it too.
+    const git = makeGit();
+
+    const report = await reconcileOrphanedWorktrees({
+      repoPath: REPO, baseBranch: "master", claims: KASSENBUCH_CLAIMS, git,
+      database: guardDb([{ id: "ws-live", status: "active", workingDir: null, branch: BR6_SURVIVING }]),
+    });
+
+    expect(report.keptClaimed).toEqual([WT6]);
+    expect(report.removed).toEqual([WT12]);
+  });
+
+  it("does NOT refuse when the branch holder is terminal — a closed row claims nothing", async () => {
+    const git = makeGit();
+
+    const report = await reconcileOrphanedWorktrees({
+      repoPath: REPO, baseBranch: "master", claims: KASSENBUCH_CLAIMS, git,
+      database: guardDb([{ id: "ws-done", status: "closed", workingDir: null, branch: BR6_SURVIVING }]),
+    });
+
+    expect(report.removed.sort()).toEqual([WT12, WT6].sort());
+    expect(report.keptClaimed).toEqual([]);
+  });
+
+  it("REFUSES every removal when the claim read itself fails — a locked DB is not a green light", async () => {
+    const git = makeGit();
+
+    const report = await reconcileOrphanedWorktrees({
+      repoPath: REPO, baseBranch: "master", claims: KASSENBUCH_CLAIMS, git, database: brokenGuardDb(),
+    });
+
+    expect(report.removed).toEqual([]);
+    expect(report.keptClaimed.sort()).toEqual([WT12, WT6].sort());
+    expect(vi.mocked(git.removeWorktree)).not.toHaveBeenCalled();
   });
 });
 
