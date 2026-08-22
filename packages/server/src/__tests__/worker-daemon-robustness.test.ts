@@ -288,6 +288,9 @@ describe("the daemon against a real board socket (#754 items 2,4,5,6)", () => {
       pushesAbandoned: 0,
       agentsLeftRunning: 0,
       criticalMessagesLost: 0,
+      // #750: nothing was held back either — a retained result would mean work still
+      // sitting in a checkout on this machine.
+      resultsRetained: 0,
     });
   }, 30000);
 
