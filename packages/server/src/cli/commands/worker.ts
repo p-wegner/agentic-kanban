@@ -5,6 +5,10 @@ import type { Command } from "commander";
 import { startWorkerDaemon, defaultWorkerStateFile } from "../../worker/worker-daemon.js";
 import { SHARES_FILESYSTEM_LABEL } from "@agentic-kanban/shared/lib/worker-protocol";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+// Type-only + a db-free formatter: this module is also the standalone worker
+// binary's entry point, which must never pull in the database graph.
+import { renderPlacementExplanation } from "../../lib/placement-explanation-format.js";
+import type { IssuePlacementReport, SessionPlacementRecord } from "../../services/placement-explain.service.js";
 
 const DEFAULT_BOARD_URL = "http://127.0.0.1:3001";
 
@@ -443,6 +447,83 @@ export function registerWorkerSubcommands(workerCmd: Command) {
       for (const w of body.workers) {
         const labels = w.labels ? ` labels=${w.labels}` : "";
         console.log(`  ${w.name} [${w.effectiveStatus}] id=${w.id} os=${w.os ?? "?"} maxConcurrency=${w.maxConcurrency}${labels} lastHeartbeat=${w.lastHeartbeatAt ?? "never"}`);
+      }
+    });
+
+  workerCmd
+    .command("explain <issue>")
+    .description(
+      "Why was #N not dispatched to a worker? Walks the SAME ordered chain resolveWorkerPlacement " +
+        "applies — opt-in, profile allowlist, eligible worker, branch, repoPath, repository shape — " +
+        "against live state, names the check that decided, and shows the values it read. Board machine only.",
+    )
+    .option("--board <url>", "Board base URL", DEFAULT_BOARD_URL)
+    .option("--project <projectId>", "Project id (defaults to the board's active project)")
+    .option("--provider <name>", "Provider to resolve for (defaults to what this project's next launch would use)")
+    .option("--json", "Output raw JSON")
+    .action(async (issue: string, options: { board: string; project?: string; provider?: string; json?: boolean }) => {
+      const params = new URLSearchParams({ issue });
+      if (options.project) params.set("projectId", options.project);
+      if (options.provider) params.set("provider", options.provider);
+      const res = await fetch(`${options.board.replace(/\/+$/, "")}/api/workers/explain?${params}`);
+      const body = (await res.json()) as IssuePlacementReport | { error: string };
+      if (!res.ok || "error" in body) {
+        console.error("error" in body ? body.error : `request failed (${res.status})`);
+        process.exit(1);
+      }
+      if (options.json) {
+        console.log(JSON.stringify(body, null, 2));
+        return;
+      }
+      console.log(renderPlacementExplanation(body));
+      // A disagreement is a defect in the EXPLANATION, not in the placement, so it
+      // must not read as a successful answer.
+      if (!body.explanation.agreesWithResolver) process.exit(1);
+    });
+
+  workerCmd
+    .command("placements")
+    .description(
+      "Which machine each recent session actually ran on (host, or a named worker). Board machine only.",
+    )
+    .option("--board <url>", "Board base URL", DEFAULT_BOARD_URL)
+    .option("--project <projectId>", "Restrict to one project")
+    .option("--worker <workerId>", "Restrict to one worker")
+    .option("--remote-only", "Only sessions that ran on a worker")
+    .option("--limit <n>", "How many sessions to list", "20")
+    .option("--json", "Output raw JSON")
+    .action(async (options: {
+      board: string;
+      project?: string;
+      worker?: string;
+      remoteOnly?: boolean;
+      limit: string;
+      json?: boolean;
+    }) => {
+      const params = new URLSearchParams({ limit: options.limit });
+      if (options.project) params.set("projectId", options.project);
+      if (options.worker) params.set("workerId", options.worker);
+      if (options.remoteOnly) params.set("remoteOnly", "true");
+      const res = await fetch(`${options.board.replace(/\/+$/, "")}/api/workers/placements?${params}`);
+      if (!res.ok) {
+        console.error(`Failed to list placements (${res.status}). Is the board running at ${options.board}?`);
+        process.exit(1);
+      }
+      const body = (await res.json()) as { placements: SessionPlacementRecord[] };
+      if (options.json) {
+        console.log(JSON.stringify(body, null, 2));
+        return;
+      }
+      if (body.placements.length === 0) {
+        console.log("No sessions found.");
+        return;
+      }
+      for (const p of body.placements) {
+        // A revoked worker keeps its id on the session: "ran remotely on a worker that
+        // no longer exists" must stay distinguishable from "ran on the host".
+        const where = p.placement === "remote" ? `worker ${p.workerName ?? `${p.workerId} (revoked)`}` : "host";
+        const issue = p.issueNumber === null ? "" : ` #${p.issueNumber}`;
+        console.log(`  ${p.startedAt}${issue} ${p.executor} [${p.status}] on ${where}`);
       }
     });
 }

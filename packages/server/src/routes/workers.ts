@@ -5,14 +5,23 @@ import { extractBearer } from "../lib/bearer-token.js";
 import type { Database } from "../db/index.js";
 import {
   getWorkerRegistry,
+  PROTOCOL_MISMATCH_PREFIX,
   type WorkerRegistry,
   type WorkerStatus,
 } from "../services/worker-registry.service.js";
+import { parseWorkerCapabilities } from "@agentic-kanban/shared/lib/worker-protocol";
 import {
   listIncomingRefs,
   landIncomingRef,
   discardIncomingRef,
 } from "../services/worker-incoming-refs.service.js";
+import {
+  explainIssuePlacement,
+  explainPlacement,
+  listSessionPlacements,
+} from "../services/placement-explain.service.js";
+import { getPreferenceValue } from "../repositories/session-lifecycle.repository.js";
+import type { ProviderName } from "../services/agent-provider.js";
 
 function bearerFrom(c: Context): string | null {
   return extractBearer(c.req.header("authorization"));
@@ -66,6 +75,52 @@ function registerOwnerRoutes(router: Hono, reg: WorkerRegistry, database: Databa
     return c.json({ ok: true, sha: result.sha });
   });
 
+  // #755 — "why was #N not dispatched?" Answered by walking the SAME ordered chain
+  // `resolveWorkerPlacement` applies, against live state, and cross-checking the
+  // result against the resolver itself. Owner-only like the rest of this block: it
+  // reports preference values and the whole fleet's shape.
+  router.get("/explain", async (c) => {
+    const projectId = c.req.query("projectId") || (await getPreferenceValue("activeProjectId", database));
+    if (!projectId) return c.json({ error: "projectId is required (and no active project is set)" }, 422);
+    const provider = c.req.query("provider") as ProviderName | undefined;
+    const issueParam = c.req.query("issue");
+    if (issueParam === undefined) {
+      // Project-level: "would anything dispatch right now?" — no issue, so the
+      // branch-dependent check is evaluated against the branch the caller names.
+      const explanation = await explainPlacement({
+        database,
+        projectId,
+        providerName: provider ?? "claude",
+        branch: c.req.query("branch") || undefined,
+      });
+      return c.json({ projectId, explanation });
+    }
+    const issueNumber = Number(issueParam);
+    if (!Number.isInteger(issueNumber) || issueNumber <= 0) {
+      return c.json({ error: `issue must be a positive integer, got ${JSON.stringify(issueParam)}` }, 422);
+    }
+    const report = await explainIssuePlacement({ database, projectId, issueNumber, providerName: provider });
+    if ("error" in report) return c.json(report, 404);
+    return c.json(report);
+  });
+
+  // #755 — per-session placement. `sessions.worker_id` has been written since epic #1
+  // and read by nothing, so "which machine ran this" was unanswerable after the fact.
+  router.get("/placements", async (c) => {
+    const limitParam = Number(c.req.query("limit"));
+    return c.json({
+      placements: await listSessionPlacements({
+        database,
+        projectId: c.req.query("projectId") || undefined,
+        issueId: c.req.query("issueId") || undefined,
+        workspaceId: c.req.query("workspaceId") || undefined,
+        workerId: c.req.query("workerId") || undefined,
+        remoteOnly: c.req.query("remoteOnly") === "true",
+        limit: Number.isInteger(limitParam) && limitParam > 0 ? Math.min(limitParam, 500) : undefined,
+      }),
+    });
+  });
+
   router.delete("/:id", async (c) => {
     const ok = await reg.revokeWorker(c.req.param("id"));
     if (!ok) return c.json({ error: "worker not found" }, 404);
@@ -89,6 +144,8 @@ function registerWorkerFacingRoutes(router: Hono, reg: WorkerRegistry): void {
       labels?: string[];
       providers?: string[];
       maxConcurrency?: number;
+      protocolVersion?: number;
+      workerVersion?: string;
     }>(c);
     const result = await reg.registerWorker({
       pairingToken: body.pairingToken ?? "",
@@ -98,20 +155,48 @@ function registerWorkerFacingRoutes(router: Hono, reg: WorkerRegistry): void {
       labels: body.labels,
       providers: body.providers,
       maxConcurrency: body.maxConcurrency,
+      protocolVersion: body.protocolVersion,
+      workerVersion: body.workerVersion,
     });
     if (!result.ok) {
-      const status = result.error.includes("pairing token") ? 401 : 422;
-      return c.json({ error: result.error }, status);
+      // 409 for a version mismatch (#754): it is neither a credential problem nor a
+      // malformed request, and the daemon must be able to tell "never going to work,
+      // stop and say so" from "retry" without reading the message.
+      const status = result.error.startsWith(PROTOCOL_MISMATCH_PREFIX)
+        ? 409
+        : result.error.includes("pairing token")
+          ? 401
+          : 422;
+      return c.json({ error: result.error, boardProtocolVersion: reg.boardProtocolVersion() }, status);
     }
     return c.json(result, 201);
   });
 
   router.post("/:id/heartbeat", async (c) => {
     const token = bearerFrom(c);
-    const body = await parseOptionalJsonBody<{ status?: WorkerStatus }>(c);
-    const result = await reg.heartbeat(c.req.param("id"), token ?? "", { status: body.status });
+    const body = await parseOptionalJsonBody<{
+      status?: WorkerStatus;
+      capabilities?: unknown;
+      protocolVersion?: number;
+      workerVersion?: string;
+    }>(c);
+    const capabilities = parseWorkerCapabilities(body.capabilities);
+    const result = await reg.heartbeat(c.req.param("id"), token ?? "", {
+      status: body.status,
+      ...(capabilities ? { capabilities } : {}),
+      // Only forward the key when the worker sent one: `"protocolVersion" in opts` is how
+      // the registry distinguishes "declared nothing" (a legacy caller, e.g. the board's
+      // own internal touch) from "declared a version we must judge".
+      ...("protocolVersion" in body ? { protocolVersion: body.protocolVersion } : {}),
+      ...(body.workerVersion !== undefined ? { workerVersion: body.workerVersion } : {}),
+    });
     if (!result.ok) {
-      return c.json({ error: result.error }, result.error === "unauthorized" ? 401 : 422);
+      const status = result.error === "unauthorized"
+        ? 401
+        : result.error?.startsWith(PROTOCOL_MISMATCH_PREFIX)
+          ? 409
+          : 422;
+      return c.json({ error: result.error, boardProtocolVersion: reg.boardProtocolVersion() }, status);
     }
     return c.json({ ok: true });
   });
