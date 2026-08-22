@@ -68,6 +68,13 @@ The `update-ref` old-value argument is the point: if another agent committed whi
 it fails instead of clobbering. Afterwards verify `git diff HEAD -- <file>` is *exactly* the other
 agent's remaining delta, so you can show you left their work intact and committable.
 
+**Aftermath to clean up:** a private-index commit leaves any NEW file it added looking
+**staged-deleted** in the shared index (the shared index never learned about it, but HEAD now has
+it). Reconcile with a targeted `git add <your-new-files>` — and check afterwards that you did not
+also stage a neighbour's in-flight edit. If you did, unstage exactly that path with
+`git restore --staged -- <path>`, never `git reset`, which is what destroys the other agent's
+staged state.
+
 ## Board Feedback Conventions — what to do when you hit a flaw IN THE BOARD
 Using the board (driving a project, implementing a ticket, running the monitor) surfaces bugs and
 impediments in the board itself. There are four ways to route that feedback. Pick by CONTEXT, not by
