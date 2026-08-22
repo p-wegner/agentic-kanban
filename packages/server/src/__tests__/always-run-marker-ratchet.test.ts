@@ -194,6 +194,11 @@ const MARKED_BY_POLICY = new Set<string>([
   // matches no signature; but a new table with an un-indexed FK arrives as a migration file in
   // ANOTHER package, which package/import-graph scoping would not map to this suite.
   "server/fk-leading-index-ratchet.test.ts",
+  // #739 — pins the column count of `workspaces` (88) and of each of its prefix column
+  // families. Same shape as the FK ratchet above: it reaches the migrated schema only
+  // THROUGH createTestDb, so it names no MIGRATIONS_DIR itself, but column 89 arrives as a
+  // migration .sql file in ANOTHER package that import-graph scoping cannot map here.
+  "server/workspaces-table-width-ratchet.test.ts",
 ]);
 
 /**
