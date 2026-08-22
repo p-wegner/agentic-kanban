@@ -23,6 +23,11 @@ import {
   allowedProfilesPrefKey,
   remoteDispatchBlockedByAllowlist,
 } from "@agentic-kanban/shared/lib/profile-allowlist";
+import {
+  releaseWorkerSlot,
+  reserveWorkerSlot,
+  reservedSlotCount,
+} from "./worker-slot-reservation.service.js";
 export { SHARES_FILESYSTEM_LABEL };
 
 // Strict-mode refusal. Defined in the dispatch layer (which must throw it when it
@@ -125,15 +130,24 @@ export async function workerSharesFilesystem(fleet: WorkerFleet, workerId: strin
 /**
  * Pick the worker for a new launch: connected + effectively online (not
  * draining), provider available (an empty/absent provider list means "any"),
- * free capacity — least-loaded first. Null = no eligible worker.
+ * free capacity — least-loaded first. Empty = no eligible worker.
+ *
+ * SPLIT INTO AN AWAIT AND A SYNCHRONOUS FILTER on purpose (#751). The reservation
+ * that makes concurrent selection safe has to be taken in the same synchronous turn
+ * as the load read it is based on, and an `async` helper cannot offer that: its
+ * return crosses a microtask boundary, so two callers both read "free" before either
+ * reserves. That was the actual defect — a reservation placed after this function
+ * returned would have looked correct and fixed nothing.
  */
-async function eligibleWorkers(
+type WorkerCandidate = { id: string; load: number; cap: number };
+
+function filterEligibleWorkers(
   fleet: WorkerFleet,
+  workers: Awaited<ReturnType<WorkerRegistry["listWorkersView"]>>,
   providerName: ProviderName,
   requiredLabels: string[],
-  now?: string,
-): Promise<Array<{ id: string; load: number; cap: number }>> {
-  const workers = await fleet.registry.listWorkersView(now);
+  nowMs?: number,
+): WorkerCandidate[] {
   return workers
     .filter((w) => w.effectiveStatus === "online")
     .filter((w) => fleet.connections.isConnected(w.id))
@@ -151,11 +165,32 @@ async function eligibleWorkers(
       const labels = parseLabels(w.labels);
       return requiredLabels.every((required) => labels.includes(required));
     })
-    // Load counts DISPATCHED work, not just work that has already spoken (#248):
-    // otherwise three placements in a row all read 0 and pile onto one worker.
-    .map((w) => ({ id: w.id, load: fleet.connections.assignedSessionIds(w.id).length, cap: w.maxConcurrency }))
+    // Load counts DISPATCHED work, not just work that has already spoken (#248) —
+    // and, since #751, work that has been PLACED but not yet dispatched. For a
+    // true-remote placement the `assign` is sent from an async continuation, so
+    // "dispatched" is not the same instant as "decided": without the reservations a
+    // second concurrent placement reads this worker as free and both land on it.
+    .map((w) => {
+      const assigned = fleet.connections.assignedSessionIds(w.id, nowMs);
+      return {
+        id: w.id,
+        load: assigned.length + reservedSlotCount(w.id, assigned, nowMs),
+        cap: w.maxConcurrency,
+      };
+    })
     .filter((w) => w.load < w.cap)
     .sort((a, b) => a.load - b.load);
+}
+
+async function eligibleWorkers(
+  fleet: WorkerFleet,
+  providerName: ProviderName,
+  requiredLabels: string[],
+  now?: string,
+  nowMs?: number,
+): Promise<WorkerCandidate[]> {
+  const workers = await fleet.registry.listWorkersView(now);
+  return filterEligibleWorkers(fleet, workers, providerName, requiredLabels, nowMs);
 }
 
 export async function selectWorkerForLaunch(
@@ -166,6 +201,34 @@ export async function selectWorkerForLaunch(
 ): Promise<string | null> {
   const candidates = await eligibleWorkers(fleet, providerName, requiredLabels, now);
   return candidates[0]?.id ?? null;
+}
+
+/**
+ * Pick a worker AND claim its slot atomically (#751).
+ *
+ * `selectWorkerForLaunch` answers a question; this one takes an action, and the
+ * difference is the whole fix. The registry read is awaited FIRST and everything
+ * after it — filtering, the load read, the reservation — runs in one synchronous
+ * turn, so two concurrent callers cannot both come back with the last free slot on
+ * the same worker: whichever resumes second filters against a load that already
+ * includes the first one's reservation.
+ *
+ * The caller MUST either hand the `reservationId` to the placement (so the launch
+ * claims it) or `releaseWorkerSlot` it — a reservation nobody claims pins capacity
+ * until its TTL.
+ */
+export async function selectAndReserveWorkerForLaunch(
+  fleet: WorkerFleet,
+  providerName: ProviderName,
+  requiredLabels: string[] = [],
+  now?: string,
+  nowMs?: number,
+): Promise<{ workerId: string; reservationId: string } | null> {
+  const workers = await fleet.registry.listWorkersView(now);
+  // --- no `await` past this line, or the reservation proves nothing ---
+  const chosen = filterEligibleWorkers(fleet, workers, providerName, requiredLabels, nowMs)[0];
+  if (!chosen) return null;
+  return { workerId: chosen.id, reservationId: reserveWorkerSlot(chosen.id, nowMs) };
 }
 
 /**
@@ -182,8 +245,30 @@ export async function resolveWorkerPlacement(params: {
   branch?: string;
   baseBranch?: string;
   now?: string;
+  nowMs?: number;
 }): Promise<Placement> {
-  const { database, projectId, providerName, branch, baseBranch, now } = params;
+  // #751: a remote decision claims a capacity slot, and EVERY exit from this
+  // function that is not a remote placement has to give it back — including the
+  // strict refusal, which leaves by throwing. Doing that at one seam (here) rather
+  // than at each of the five `return { kind: "host" }` sites is the point: the
+  // failure mode of a missed release is a worker that silently loses a slot until
+  // the TTL expires, which is invisible in exactly the way #751 was.
+  const reservation: { id?: string } = {};
+  try {
+    const placement = await resolvePlacementWithReservation(params, reservation);
+    if (placement.kind !== "remote") releaseWorkerSlot(reservation.id);
+    return placement;
+  } catch (err) {
+    releaseWorkerSlot(reservation.id);
+    throw err;
+  }
+}
+
+async function resolvePlacementWithReservation(
+  params: Parameters<typeof resolveWorkerPlacement>[0],
+  reservation: { id?: string },
+): Promise<Placement> {
+  const { database, projectId, providerName, branch, baseBranch, now, nowMs } = params;
   try {
     const pref = await getPreferenceValue(workerDispatchPrefKey(projectId), database);
     if (pref !== "true") return { kind: "host" };
@@ -209,8 +294,10 @@ export async function resolveWorkerPlacement(params: {
       return { kind: "host" };
     }
     const requiredLabels = parseRequiredLabels(await getPreferenceValue(workerLabelsPrefKey(projectId), database));
-    const workerId = await selectWorkerForLaunch(fleet, providerName, requiredLabels, now);
-    if (!workerId) {
+    // #751: select AND reserve atomically. Reading the load and then reserving after
+    // another `await` would leave the same window this fixes.
+    const placed = await selectAndReserveWorkerForLaunch(fleet, providerName, requiredLabels, now, nowMs);
+    if (!placed) {
       const detail = requiredLabels.length > 0 ? ` with labels [${requiredLabels.join(",")}]` : "";
       if (strict) refuseHost(`no eligible ${providerName} worker${detail}`);
       console.warn(
@@ -218,8 +305,10 @@ export async function resolveWorkerPlacement(params: {
       );
       return { kind: "host" };
     }
+    const { workerId } = placed;
+    reservation.id = placed.reservationId;
     if (await workerSharesFilesystem(fleet, workerId, now)) {
-      return { kind: "remote", workerId, strict };
+      return { kind: "remote", workerId, strict, reservationId: reservation.id };
     }
 
     // True remote worker: it needs the repo over git transport. Without a
@@ -241,6 +330,7 @@ export async function resolveWorkerPlacement(params: {
       kind: "remote",
       workerId,
       strict,
+      reservationId: reservation.id,
       repo: {
         projectId,
         repoPath: project.repoPath,

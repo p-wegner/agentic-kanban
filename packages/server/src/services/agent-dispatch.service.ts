@@ -18,6 +18,7 @@ import type { AgentOutputCallback } from "./agent.service.js";
 import type { ProviderId, ProviderName } from "./agent-provider.js";
 import type { ContainerProvision } from "./devcontainer-workspace.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { claimWorkerSlot, releaseWorkerSlot } from "./worker-slot-reservation.service.js";
 
 /**
  * Where a session's agent should execute. Carried through StartSessionOptions.
@@ -60,6 +61,17 @@ export type Placement =
        * which is exactly what strict mode exists to prevent.
        */
       strict?: boolean;
+      /**
+       * Capacity slot claimed for this decision (#751), to be released when the
+       * decision is abandoned and claimed by the session when it is honoured.
+       *
+       * Fleet load is otherwise counted from the moment the `assign` goes on the
+       * wire, which for a git-transport dispatch is an async continuation away from
+       * the placement — so two concurrent placements read the same worker as free.
+       * The reservation makes the DECISION the thing that occupies the slot, which
+       * is the only point at which the choice is actually made.
+       */
+      reservationId?: string;
       /**
        * Git transport for a TRUE remote worker (phase 2): the worker clones the
        * project from the board and pushes results back. Absent = same-machine
@@ -123,7 +135,57 @@ export interface AgentLaunchRequest {
    */
   containerProvision?: ContainerProvision;
   placement?: Placement;
+  /**
+   * Set by the dispatch proxy; implemented by the proxy, called by a NON-HOST
+   * implementation (#751).
+   *
+   * The host-fallback / strict contract below is written against a THROWN `launch`.
+   * A git-transport remote launch cannot throw: its prerequisites (the git-http
+   * listener, the skill payload, the scoped token) resolve after `launch` has
+   * already returned, so a worker that vanished in that window — or answered
+   * `assign_failed` — used to become a synthesized `exit 1` on the session. That is
+   * the same bug class #245 fixed for the synchronous path: a non-strict project got
+   * a failed session instead of a host run, and a strict project got a failure whose
+   * reason said nothing about dispatch.
+   *
+   * So the strictness lives on the DECISION and the proxy owns both paths. An
+   * implementation that discovers a LAUNCH failure late reports it here instead of
+   * synthesizing an exit, and the proxy applies the identical rule: host fallback,
+   * or a refusal that names itself as one.
+   */
+  onDeferredLaunchFailure?: (failure: DeferredLaunchFailure) => void;
 }
+
+/**
+ * A launch that failed AFTER `launch` returned — reported through
+ * `AgentLaunchRequest.onDeferredLaunchFailure`.
+ *
+ * `kind` exists so the proxy can tell "nobody took this" from "someone took it and
+ * the launch died there", which is the distinction `assign_failed` used to erase by
+ * arriving as a plain `exit 1` (#751). It is also what makes a capacity refusal
+ * re-placeable in principle: it is the one kind where another worker would have
+ * succeeded.
+ */
+export interface DeferredLaunchFailure {
+  kind:
+    /** The assign could not be delivered (worker gone between placement and send). */
+    | "dispatch"
+    /** The worker refused: already at maxConcurrency. Another worker could take it. */
+    | "capacity"
+    /** The worker took it but could not build a runnable checkout (clone/setup/LFS). */
+    | "provisioning"
+    /** The worker disappeared and did not come back within the grace window. */
+    | "worker-lost";
+  reason: string;
+}
+
+/**
+ * Prefix of the stderr line the dispatch proxy synthesizes when it cannot place a
+ * session anywhere. Exported so the exit classifier can recognise a LAUNCH failure
+ * (which belongs on the launch-failure surfaces and the auth-rotation ring) rather
+ * than reading it as a model that ran and exited non-zero.
+ */
+export const DISPATCH_LAUNCH_FAILURE_PREFIX = "[dispatch:launch-failed]";
 
 export interface AgentExecutionService {
   launch(request: AgentLaunchRequest): AgentHandle;
@@ -138,7 +200,13 @@ export interface AgentExecutionService {
 
 export interface AgentDispatchImplementations {
   host: AgentExecutionService;
-  /** Registered by the worker-fleet remote service (phase 1c); absent today. */
+  /**
+   * The fleet's remote execution service. Registered by `session-lifecycle.ts`
+   * whenever the worker fleet is available, i.e. normally — it is optional only so a
+   * test (or a host-only embedding) can build the proxy without the fleet graph. The
+   * old comment said "absent today", which stopped being true when phase 1c #5
+   * landed and sent readers looking for a code path that does not exist (#751).
+   */
   remote?: AgentExecutionService;
 }
 
@@ -175,12 +243,87 @@ export function createAgentDispatch(implementations: AgentDispatchImplementation
     launch(request) {
       const { sessionId, placement, onOutput } = request;
       const impl = resolveImplementation(sessionId, placement);
+      const reservationId = reservationIdOf(placement);
+      if (impl === implementations.host) releaseWorkerSlot(reservationId);
       bySession.set(sessionId, impl);
       const onOutputWithCleanup: AgentOutputCallback = (event) => {
-        if (event.type === "exit") bySession.delete(sessionId);
+        if (event.type === "exit") {
+          bySession.delete(sessionId);
+          releaseWorkerSlot(reservationId);
+        }
         onOutput(event);
       };
-      const relayed: AgentLaunchRequest = { ...request, onOutput: onOutputWithCleanup };
+      // The placement's capacity slot now belongs to this session, so it stops
+      // counting on its own: the connection manager counts the session from the
+      // moment the assign lands, and counting both would make one dispatch look
+      // like two (#751).
+      if (reservationId && impl !== implementations.host) claimWorkerSlot(reservationId, sessionId);
+
+      /**
+       * The host-fallback / strict rule for a failure discovered AFTER `launch`
+       * returned. Shared with the synchronous catch below, because strictness is a
+       * property of the DECISION and not of which code path happened to notice the
+       * failure (#245, #751).
+       */
+      const handleLateLaunchFailure = (failure: DeferredLaunchFailure): void => {
+        bySession.delete(sessionId);
+        releaseWorkerSlot(reservationId);
+        const detail = `${failure.kind}: ${failure.reason}`;
+        if (placement?.kind === "remote" && placement.strict) {
+          // Nothing to throw to — `launch` returned long ago. The session has to be
+          // finalized through its own output channel, and it has to say that this
+          // was a DISPATCH failure: an operator reading a bare "exit 1" cannot tell
+          // "no worker took it" from "a worker took it and the launch died".
+          console.warn(
+            `[agent-dispatch] deferred remote launch failure under STRICT worker dispatch; refusing the host fallback: sessionId=${sessionId}: ${detail}`,
+          );
+          onOutput({
+            type: "stderr",
+            sessionId,
+            data:
+              `${DISPATCH_LAUNCH_FAILURE_PREFIX} NO_AVAILABLE_WORKER — remote launch on worker ` +
+              `${placement.workerId} failed (${detail}) and worker dispatch is strict for this project.`,
+          });
+          onOutput({ type: "exit", sessionId, exitCode: 1 });
+          return;
+        }
+        console.warn(
+          `[agent-dispatch] deferred non-host launch failure (${detail}); relaunching on host: sessionId=${sessionId}`,
+        );
+        try {
+          bySession.set(sessionId, implementations.host);
+          implementations.host.launch({
+            ...request,
+            onOutput: onOutputWithCleanup,
+            placement: { kind: "host" },
+            onDeferredLaunchFailure: undefined,
+          });
+        } catch (err) {
+          bySession.delete(sessionId);
+          onOutput({
+            type: "stderr",
+            sessionId,
+            data:
+              `${DISPATCH_LAUNCH_FAILURE_PREFIX} remote launch failed (${detail}) and the host fallback ` +
+              `also failed: ${errorMessage(err)}`,
+          });
+          onOutput({ type: "exit", sessionId, exitCode: 1 });
+        }
+      };
+
+      // A late failure is handled exactly once, by whichever of the two paths sees
+      // it first — the synchronous catch below or the deferred hook.
+      let launchSettled = false;
+      const relayed: AgentLaunchRequest = {
+        ...request,
+        onOutput: onOutputWithCleanup,
+        onDeferredLaunchFailure: (failure) => {
+          if (launchSettled) return;
+          launchSettled = true;
+          handleLateLaunchFailure(failure);
+        },
+      };
+
       try {
         return impl.launch(relayed);
       } catch (err) {
@@ -189,8 +332,10 @@ export function createAgentDispatch(implementations: AgentDispatchImplementation
         // the project forbids host execution (#245), in which case the session
         // must fail with NO_AVAILABLE_WORKER instead of quietly running here.
         if (impl === implementations.host) throw err;
+        launchSettled = true;
+        const detail = errorMessage(err);
+        releaseWorkerSlot(reservationId);
         if (placement?.kind === "remote" && placement.strict) {
-          const detail = errorMessage(err);
           console.warn(
             `[agent-dispatch] remote launch failed under STRICT worker dispatch; refusing the host fallback: sessionId=${sessionId}: ${detail}`,
           );
@@ -200,18 +345,27 @@ export function createAgentDispatch(implementations: AgentDispatchImplementation
           );
         }
         console.warn(
-          `[agent-dispatch] non-host launch failed (${errorMessage(err)}); falling back to host: sessionId=${sessionId}`,
+          `[agent-dispatch] non-host launch failed (${detail}); falling back to host: sessionId=${sessionId}`,
         );
         bySession.set(sessionId, implementations.host);
         // The fallback differs from the relayed request in exactly one field, which is
         // now visible instead of being the twentieth positional argument.
-        return implementations.host.launch({ ...relayed, placement: { kind: "host" } });
+        return implementations.host.launch({
+          ...relayed,
+          placement: { kind: "host" },
+          onDeferredLaunchFailure: undefined,
+        });
       }
     },
     kill(sessionId) {
-      const impl = forSession(sessionId);
-      bySession.delete(sessionId);
-      return impl.kill(sessionId);
+      // NON-MUTATING (#751). This used to drop the routing entry before killing,
+      // so between the kill and the worker's exit event every session-keyed query
+      // (`isPidAlive`, `getProcess`, `isStdinOpen`) was answered by the HOST
+      // implementation — which has never heard of the session and reports it gone,
+      // while the remote service still holds it and is still streaming its output.
+      // The exit event clears the entry, which is the moment the session is
+      // genuinely over; a kill only asks for that to happen.
+      return forSession(sessionId).kill(sessionId);
     },
     sendInput: (sessionId, content) => forSession(sessionId).sendInput(sessionId, content),
     closeStdin: (sessionId) => forSession(sessionId).closeStdin(sessionId),
@@ -220,4 +374,8 @@ export function createAgentDispatch(implementations: AgentDispatchImplementation
     getPid: (sessionId) => forSession(sessionId).getPid(sessionId),
     isPidAlive: (sessionId) => forSession(sessionId).isPidAlive(sessionId),
   };
+}
+
+function reservationIdOf(placement?: Placement): string | undefined {
+  return placement?.kind === "remote" ? placement.reservationId : undefined;
 }
