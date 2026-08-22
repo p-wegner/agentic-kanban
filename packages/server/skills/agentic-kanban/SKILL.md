@@ -1,8 +1,8 @@
 ---
 name: agentic-kanban
 description: Operate the agentic-kanban board — a kanban board where each card is an AI coding session in its own git worktree. Use when asked to work a ticket, drive a project hands-off, review or merge agent work, inspect what agents are doing, or wire the board into another tool. Covers the MCP tools, CLI, board views, statuses, and the review/merge gate.
-commit: 3b5ecaf247
-generated: 2026-08-20
+commit: b80484aec6
+generated: 2026-08-22
 ---
 
 # agentic-kanban
