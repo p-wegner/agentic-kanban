@@ -20,14 +20,14 @@
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
-import { isSpecPlanningStageName, isTerminalNodeType, transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
+import { isSpecPlanningStageName, transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import { RUN_GATE } from "../services/pre-merge-gate.service.js";
 import { runGateWithEvidence } from "../services/merge-gate-evidence.js";
 import { getAutoLandLoopTicket } from "../services/plugin-loop-hooks.service.js";
 import { reconcileGroupMemberIssues } from "../services/merge-cleanup.service.js";
-import { issues, projectStatuses, projects, scheduledRunHistory, scheduledRuns, sessions, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, projectStatuses, projects, scheduledRunHistory, scheduledRuns, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { desc, eq } from "drizzle-orm";
 import { getCommitCountAhead as commitsAhead } from "@agentic-kanban/shared/lib/git-service";
 import { db as defaultDb } from "../db/index.js";
@@ -52,6 +52,8 @@ import { createReviewLauncher } from "./exit/review-launch.js";
 import { createUsageLimitExitHandler, findUsageLimitProvider } from "./exit/usage-limit-exit.js";
 import { launchLearningStep } from "./exit/learning-step.js";
 import type { AutoMergeFn, ExitContext, WorkspaceRow } from "./exit/exit-context.js";
+import { graphOwnsPostExitReview } from "./exit/workflow-ownership.js";
+import { getWorkflowNodeById, getWorkspaceCurrentWorkflowNode } from "../repositories/workflow.repository.js";
 
 const autoMergeDisabledPref = projectPref("auto_merge_disabled");
 
@@ -93,37 +95,27 @@ async function hasCommittedChanges(workspace: WorkspaceRow, defaultBranch: strin
 
 async function isSpecPlanningNode(database: Database, currentNodeId: string | null): Promise<boolean> {
   if (!currentNodeId) return false;
-  const rows = await database
-    .select({ name: workflowNodes.name })
-    .from(workflowNodes)
-    .where(eq(workflowNodes.id, currentNodeId))
-    .limit(1);
-  return isSpecPlanningStageName(rows[0]?.name);
+  const node = await getWorkflowNodeById(currentNodeId, database);
+  return isSpecPlanningStageName(node?.name);
 }
 
 /**
- * #997 Guard: a workspace parked on a workflow-template node (currentNodeId set)
- * that is NOT a terminal ("end") node is still owned by the graph — its own
- * node-driven stages decide review/fix, not the legacy triggerType:"review"
- * pipeline. Without this, a Prepare-stage builder exit (e.g. a planning-docs-only
- * commit) launches legacy auto-review, which can arm readyForMerge on a branch
- * the workflow never intended to merge yet.
+ * #997/#757 Guard: is this workspace's CURRENT workflow stage owned by the graph rather than by
+ * the legacy `triggerType:"review"` pipeline?
  *
- * STACKS WITH `isSpecPlanningNode` above rather than replacing it: that one is
- * narrower (spec-planning stage names only) but fires EARLIER in
- * handleBuilderSessionExit, before the learning step and the auto-land path, so
- * removing it would change behaviour on those paths. Both guards present is the
- * conservative composition — see the PR body's open question.
+ * The predicate itself (and the argument for where the line falls) lives in
+ * `./exit/workflow-ownership.ts`. Two things are deliberate here:
+ *
+ *  - The node is re-read from the DB rather than taken from the exit snapshot. The builder-exit
+ *    path transitions the issue to In Review DURING this pass, and `syncCurrentNodeToStatus`
+ *    re-points `workspaces.currentNodeId` at the In-Review-mapped node; the snapshot still names
+ *    the builder stage, so trusting it would classify every builder exit as graph-owned (#757).
+ *  - It STACKS with `isSpecPlanningNode` above rather than replacing it: that one is narrower
+ *    (spec-planning stage names only) but fires EARLIER in handleBuilderSessionExit, before the
+ *    learning step and the auto-land path.
  */
-async function isWorkspaceOnNonTerminalWorkflowNode(database: Database, currentNodeId: string | null): Promise<boolean> {
-  if (!currentNodeId) return false;
-  const rows = await database
-    .select({ nodeType: workflowNodes.nodeType })
-    .from(workflowNodes)
-    .where(eq(workflowNodes.id, currentNodeId))
-    .limit(1);
-  if (rows.length === 0) return false;
-  return !isTerminalNodeType(rows[0].nodeType);
+async function graphOwnsWorkspaceReview(database: Database, workspaceId: string): Promise<boolean> {
+  return graphOwnsPostExitReview(await getWorkspaceCurrentWorkflowNode(workspaceId, database));
 }
 
 export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, reconcileForkChildOnExit, database, gitService: injectedGitService }: WorkflowDeps) {
@@ -340,11 +332,14 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
     const { workspace, projectId, issueId, sessionId, now, prefMap, statuses, findStatus, autoMergeEnabled, defaultBranch, autoMergeDisabledProjectIds } = ctx;
     const workspaceId = workspace.id;
     reviewSessionIds.delete(sessionId);
-    // #997 defensive guard: a stray/legacy review session exiting while the
-    // workspace sits on a non-terminal workflow node must not arm readyForMerge —
-    // the graph owns merge eligibility for workflow-managed workspaces.
-    if (await isWorkspaceOnNonTerminalWorkflowNode(db, workspace.currentNodeId)) {
-      console.log(`[workflow] review session ${sessionId} exited but workspace ${workspaceId} is on a non-terminal workflow node  withholding readyForMerge (#997)`);
+    // #997 defensive guard: a stray/legacy review session exiting while the workspace sits on a
+    // graph-owned workflow stage must not arm readyForMerge — the graph owns merge eligibility
+    // there. #757 narrowed "graph-owned": a node MAPPED to the In Review status is the graph
+    // saying "review this", and nothing in the graph launches or lands that review, so the
+    // legacy path is its executor and readyForMerge is armed on a branch the workflow did mean
+    // to review.
+    if (await graphOwnsWorkspaceReview(db, workspaceId)) {
+      console.log(`[workflow] review session ${sessionId} exited but workspace ${workspaceId} sits on a graph-owned workflow stage  withholding readyForMerge (#997/#757)`);
       boardEvents.broadcast(projectId, "issue_updated");
       return;
     }
@@ -558,8 +553,12 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
       return;
     }
     if (getBool(prefMap, "learning_step_after_agent") && workspace.workingDir) await launchLearningStep(learningStepDeps, workspace, prefMap, "after agent");
-    if (await isWorkspaceOnNonTerminalWorkflowNode(db, workspace.currentNodeId)) {
-      console.log(`[workflow] workspace ${workspaceId} is on a non-terminal workflow node  skipping legacy auto-review (#997)`);
+    // #997/#757: skip the legacy auto-review only when the graph really owns the next stage.
+    // Re-read the node — the In Review transition above just re-pointed it (see
+    // graphOwnsWorkspaceReview). A stage the graph owns but has no machinery for would strand
+    // the workspace at `idle` with no review and no error, which is the #757 regression.
+    if (await graphOwnsWorkspaceReview(db, workspaceId)) {
+      console.log(`[workflow] workspace ${workspaceId} sits on a graph-owned workflow stage  skipping legacy auto-review (#997/#757)`);
       return;
     }
     // #998: a fork child (parentWorkspaceId set, or forkStatus stamped) is an ephemeral

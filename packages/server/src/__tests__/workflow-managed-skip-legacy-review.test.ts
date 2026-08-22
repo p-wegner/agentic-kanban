@@ -6,6 +6,20 @@
  * it, and readyForMerge must never arm from that legacy path. Observed live on #996: a
  * Prepare-stage builder exit with a planning-docs-only commit launched legacy auto-review,
  * which would have set readyForMerge=true on a branch never intended to merge yet.
+ *
+ * #757 REFINED, did not reverse, that rule — and the refinement is asserted at the bottom of
+ * the first describe block. "The graph owns it" was implemented as "do nothing", but the graph
+ * has NO stage that launches a review: `onWorkspaceEnteredNode` acts only on
+ * parallel-fork/parallel-join nodes and on spec-driven phase nodes carrying a skill. For a plain
+ * node MAPPED to the "In Review" status, "the graph owns it" therefore meant nobody owned it, and
+ * the workspace was left parked at `idle` with no review, no transition and no error — which is
+ * what broke #678's exit-0 -> In Review guarantee (see
+ * `active-stopped-workspace-enters-review.test.ts`). The guard now skips the legacy pipeline for
+ * every non-terminal node EXCEPT one whose statusName is "In Review": there, the graph has
+ * already decided review is what happens next and has no machinery to carry it out, so the legacy
+ * pipeline is the executor of the graph's own decision — and readyForMerge is armed on a branch
+ * the workflow DID mean to review. The three cases below are unchanged by that refinement
+ * (nodeType "normal" with statusName null is still fully graph-owned).
  */
 
 vi.mock("../db/index.js", () => ({ db: {} }));
@@ -54,6 +68,7 @@ import { issues, projectStatuses, projects, sessions, workflowNodes, workflowTem
 import { createTestDb } from "./helpers/test-db.js";
 import { createWorkflowEngine } from "../startup/exit-workflow.js";
 import { reconcileStrandedReviews } from "../startup/stranded-review-reconciler.js";
+import { graphOwnsPostExitReview, REVIEW_STAGE_STATUS_NAME } from "../startup/exit/workflow-ownership.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
 
@@ -65,7 +80,11 @@ function makeSessionManager() {
   return { startSession: vi.fn(async () => randomUUID()) };
 }
 
-async function seedWorkflowManagedBuilderExit(db: ReturnType<typeof createTestDb>["db"], nodeType: "normal" | "end") {
+async function seedWorkflowManagedBuilderExit(
+  db: ReturnType<typeof createTestDb>["db"],
+  nodeType: "normal" | "end",
+  opts: { nodeName?: string; nodeStatusName?: string | null } = {},
+) {
   const now = new Date().toISOString();
   const projectId = randomUUID();
   const inProgressId = randomUUID();
@@ -89,12 +108,15 @@ async function seedWorkflowManagedBuilderExit(db: ReturnType<typeof createTestDb
     ticketType: null, isDefault: false, isBuiltin: false, createdAt: now, updatedAt: now,
   });
   await db.insert(workflowNodes).values({
-    id: nodeId, templateId, name: "Prepare", nodeType, statusName: null, createdAt: now,
+    id: nodeId, templateId, name: opts.nodeName ?? "Prepare", nodeType,
+    statusName: opts.nodeStatusName ?? null, createdAt: now,
   });
   await db.insert(issues).values({
     id: issueId, issueNumber: 996, title: "Multi-harness plan review",
     priority: "medium", sortOrder: 0,
     statusId: inProgressId,
+    workflowTemplateId: templateId,
+    currentNodeId: nodeId,
     projectId, createdAt: now, updatedAt: now,
   });
   await db.insert(workspaces).values({
@@ -228,6 +250,65 @@ describe("exit-workflow: workflow-managed workspaces skip legacy auto-review (is
 
     expect(sessionManager.startSession).toHaveBeenCalled();
     void issueId; void projectId;
+  });
+
+  /**
+   * #757 — the one narrowing of the rule above, asserted here rather than in a suite of its own
+   * so the two halves of the intent stay side by side.
+   *
+   * A non-terminal node whose `statusName` is "In Review" is the graph SAYING "this workspace is
+   * in review now". Nothing in the graph launches or lands that review (see the file header), so
+   * withholding the legacy pipeline there does not hand the workspace to another owner — it
+   * strands it at `idle` forever. The legacy pipeline is the executor of the graph's decision,
+   * and the branch it arms is one the workflow explicitly moved into review.
+   */
+  it("DOES launch legacy auto-review for a non-terminal node MAPPED to the In Review status (#757)", async () => {
+    const { workspaceId, builderSessionId } = await seedWorkflowManagedBuilderExit(db, "normal", {
+      nodeName: "Review",
+      nodeStatusName: "In Review",
+    });
+
+    const boardEvents = makeBoardEvents();
+    const sessionManager = makeSessionManager();
+
+    const engine = createWorkflowEngine({
+      sessionManager: sessionManager as never,
+      boardEvents: boardEvents as never,
+      autoMerge: vi.fn(async () => {}),
+      database: db as never,
+    });
+
+    await engine.runWorkflowOnExit(workspaceId, builderSessionId, 0);
+
+    expect(sessionManager.startSession).toHaveBeenCalledTimes(1);
+    const [ws] = await db.select({ status: workspaces.status })
+      .from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.status).toBe("reviewing");
+  });
+});
+
+/**
+ * The predicate the two guards (exit engine + stranded-review reconciler) share, tested directly
+ * so the #997/#757 line is pinned once instead of being inferred from two integration suites.
+ */
+describe("graphOwnsPostExitReview (#757)", () => {
+  it("is false for a workspace that is not workflow-managed", () => {
+    expect(graphOwnsPostExitReview(null)).toBe(false);
+    expect(graphOwnsPostExitReview(undefined)).toBe(false);
+  });
+
+  it("is false on a terminal (end) node — the workflow is finished, legacy path lands it", () => {
+    expect(graphOwnsPostExitReview({ nodeType: "end", statusName: null })).toBe(false);
+  });
+
+  it("is true on a non-terminal node the graph has not advanced into review (#997)", () => {
+    expect(graphOwnsPostExitReview({ nodeType: "normal", statusName: null })).toBe(true);
+    expect(graphOwnsPostExitReview({ nodeType: "normal", statusName: "In Progress" })).toBe(true);
+    expect(graphOwnsPostExitReview({ nodeType: "parallel-fork", statusName: null })).toBe(true);
+  });
+
+  it("is false on a node MAPPED to the In Review status — the graph decided, legacy executes (#757)", () => {
+    expect(graphOwnsPostExitReview({ nodeType: "normal", statusName: REVIEW_STAGE_STATUS_NAME })).toBe(false);
   });
 });
 

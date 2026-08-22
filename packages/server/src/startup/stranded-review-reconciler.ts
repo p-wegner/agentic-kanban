@@ -1,7 +1,7 @@
 import { issues, projectStatuses, sessions, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
-import { isTerminalNodeType } from "@agentic-kanban/shared/lib/workflow-engine";
+import { graphOwnsPostExitReview } from "./exit/workflow-ownership.js";
 import { and, eq } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
@@ -141,6 +141,7 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
       projectId: issues.projectId,
       currentNodeId: workspaces.currentNodeId,
       currentNodeType: workflowNodes.nodeType,
+      currentNodeStatusName: workflowNodes.statusName,
       parentWorkspaceId: workspaces.parentWorkspaceId,
       forkStatus: workspaces.forkStatus,
       preflightFailures: workspaces.reviewPreflightFailures,
@@ -165,11 +166,13 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
     // sub-branch consolidated by its JOIN — never eligible for the stranded-review
     // reconciler, which would otherwise re-launch a review on it or mark it readyForMerge.
     if (c.parentWorkspaceId || c.forkStatus) continue;
-    // #997: a workspace parked on a non-terminal workflow-template node is owned
-    // by the graph — its own node-driven stages decide review/fix, not this
-    // legacy reconciler. Skip it so a mid-workflow branch never gets silently
-    // re-launched into review or marked readyForMerge.
-    if (c.currentNodeId && !isTerminalNodeType(c.currentNodeType)) continue;
+    // #997: a workspace parked on a graph-owned workflow stage is owned by the graph — its own
+    // node-driven stages decide review/fix, not this legacy reconciler. Skip it so a
+    // mid-workflow branch never gets silently re-launched into review or marked readyForMerge.
+    // #757 narrowed "graph-owned" to exclude a node MAPPED to the In Review status: nothing in
+    // the graph launches a review for such a node, so skipping it here strands exactly the
+    // workspace this reconciler exists to rescue. Same predicate as the exit engine's guard.
+    if (graphOwnsPostExitReview(c.currentNodeId ? { nodeType: c.currentNodeType, statusName: c.currentNodeStatusName } : null)) continue;
     // A merge in flight OWNS this workspace (#270): its pre-lock gate runs for 20-40 minutes
     // with the workspace still idle, which is exactly the window in which this reconciler
     // used to launch a second review and strand the merge. The merge path runs/ran its own
