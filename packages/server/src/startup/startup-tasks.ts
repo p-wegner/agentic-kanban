@@ -32,6 +32,7 @@ import { refreshContainerMcpConfig } from "../services/devcontainer-workspace.se
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
 import { clearWorkspaceWorkingDir } from "../repositories/workspace-crud.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
 import { runNonFatal } from "./run-non-fatal.js";
 
 /** Kill orphaned tsx server processes from previous hot-reload cycles (Windows only). */
@@ -562,7 +563,35 @@ export async function pruneStaleWorktrees(): Promise<void> {
         const projRows = await db.select({ repoPath: projects.repoPath }).from(projects).where(eq(projects.id, issueRows[0].projectId)).limit(1);
         if (projRows.length > 0) {
           const { repoPath } = projRows[0];
-          try { await realGitService.removeWorktree(repoPath, ws.workingDir!); } catch { /* locked — skip */ }
+          const workingDir = ws.workingDir!;
+          // #735: this was a raw `removeWorktree` with no claim analysis — the third of
+          // #713's `TO CONVERT` sites. `status='closed'` on THIS row says nothing about
+          // whether another workspace shares the directory, and co-residency (#394) is a
+          // supported state: a shared-worktree fork child reuses its parent's workingDir,
+          // so a boot that closed the parent would recursive-delete the live child's
+          // checkout. `workspace-cleanup.service.ts`'s stale-worktree cleanup — the same
+          // sweep on demand rather than at boot — has been guarded since #673/#713; this
+          // copy never was.
+          //
+          // Deliberately does NOT pass `branch`: this path is keyed off a row that still
+          // NAMES the directory, so the path-keyed check is the exact question. The
+          // branch-keyed one exists for the opposite case (a nulled workingDir) and here
+          // would only add refusals — see `orphaned-worktree-reconciler.ts`, which does
+          // pass it.
+          const outcome = await removeWorktreeUnlessShared({
+            database: db,
+            workingDir,
+            workspaceId: ws.id,
+            label: "startup:prune-stale-worktrees",
+            removeWorktree: () => realGitService.removeWorktree(repoPath, workingDir),
+          });
+          // A locked worktree was always skipped silently here; a REFUSAL must not be, or
+          // the sweep looks like it ran. Logged, not thrown: the loop's own catch already
+          // treats a failure as non-fatal, and clearing `workingDir` below is still right —
+          // the directory belongs to whoever still claims it, not to this closed row.
+          if (!outcome.removed && outcome.reason !== "remove-failed") {
+            console.warn(`[startup] ${outcome.message}`);
+          }
         }
       }
       // Multi-repo: sibling worktrees + branches too (no-op single-repo).
