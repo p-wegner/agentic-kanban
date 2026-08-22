@@ -92,13 +92,13 @@ describe("startView — readiness (#252)", () => {
     });
     const projectId = await insertProject(db);
 
-    const started = await service.startView(plugin.id, "panel", projectId);
+    const started = await service.startView({ pluginRowId: plugin.id, viewId: "panel", projectId });
     expect(started.ready).toBe(true);
     // No polling, no grace period: what the caller would frame is already serving.
     const res = await fetch(started.url, { signal: AbortSignal.timeout(2000) });
     expect(res.status).toBeLessThan(500);
 
-    await service.stopView(plugin.id, "panel", projectId);
+    await service.stopView({ pluginRowId: plugin.id, viewId: "panel", projectId });
   });
 
   it("gives up after the bounded timeout, reporting not-ready while keeping the child supervised", async () => {
@@ -111,13 +111,13 @@ describe("startView — readiness (#252)", () => {
     });
     const projectId = await insertProject(db);
 
-    const started = await service.startView(plugin.id, "panel", projectId);
+    const started = await service.startView({ pluginRowId: plugin.id, viewId: "panel", projectId });
     expect(started.ready).toBe(false);
     expect(started.port).toBeGreaterThan(0);
 
     // Still tracked, so it can be polled and — critically — stopped.
-    const status = await service.getViewStatus(plugin.id, "panel", projectId);
+    const status = await service.getViewStatus({ pluginRowId: plugin.id, viewId: "panel", projectId });
     expect(status).toMatchObject({ running: true, healthy: false });
-    expect(await service.stopView(plugin.id, "panel", projectId)).toEqual({ stopped: true });
+    expect(await service.stopView({ pluginRowId: plugin.id, viewId: "panel", projectId })).toEqual({ stopped: true });
   });
 });

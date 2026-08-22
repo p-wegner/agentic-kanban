@@ -130,7 +130,7 @@ export function createPluginService(deps: {
     boardUrl,
     // PID bookkeeping for the startup reap of orphaned view servers (#228).
     persistViewProcess: (values) => upsertPluginViewProcess(values, database),
-    dropViewProcess: (pluginRowId, viewId, projectId) => deletePluginViewProcess(pluginRowId, viewId, projectId, database),
+    dropViewProcess: (ref) => deletePluginViewProcess(ref, database),
   });
 
   async function requirePlugin(id: string): Promise<PluginRow & { manifest: PluginManifest }> {

@@ -6,9 +6,28 @@ import type { Database } from "../db/index.js";
 
 export type PluginViewProcessRow = typeof pluginViewProcesses.$inferSelect;
 
+/**
+ * The identity of ONE plugin view — the `(pluginRowId, viewId, projectId)` triple.
+ *
+ * It was already a concept in this code (the unique index below, and the `viewKey()`
+ * cache key in `plugin-views.service.ts`) with no name: every signature carried the
+ * three strings positionally, in an order nothing enforced, and every caller
+ * re-assembled them by hand. #766.
+ *
+ * Declared HERE — the lowest layer that needs it — rather than in the views service, so
+ * the repository never has to import upwards (`repositories-not-up-to-services` is an
+ * error gate in `.dependency-cruiser.cjs`). `plugin-views.service.ts` re-exports it, so
+ * the views concern is still where service-side consumers get it from.
+ */
+export interface PluginViewRef {
+  pluginRowId: string;
+  viewId: string;
+  projectId: string;
+}
+
 /** Insert-or-update keyed on `(pluginRowId, viewId, projectId)` (the unique index). */
 export async function upsertPluginViewProcess(
-  values: { pluginRowId: string; viewId: string; projectId: string; pid: number; port: number; command: string },
+  values: PluginViewRef & { pid: number; port: number; command: string },
   database: Database = db,
 ): Promise<void> {
   await database
@@ -21,9 +40,7 @@ export async function upsertPluginViewProcess(
 }
 
 export async function deletePluginViewProcess(
-  pluginRowId: string,
-  viewId: string,
-  projectId: string,
+  { pluginRowId, viewId, projectId }: PluginViewRef,
   database: Database = db,
 ): Promise<void> {
   await database

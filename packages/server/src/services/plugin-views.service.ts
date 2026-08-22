@@ -27,6 +27,10 @@ import { spawnShellCommand, taskkillTree } from "./process-exec.js";
 import { tailOutput as tail } from "./plugin-exec.js";
 import { findView, probeHealth } from "./plugin-view-probe.js";
 import type { EnabledPlugin } from "./plugin-enabled.js";
+// Type-only (erased at compile time, `tsPreCompilationDeps: false`), so the "no database and
+// no repository imports" property of this module still holds: `PluginViewRef` is the named
+// `(pluginRowId, viewId, projectId)` identity, declared at the layer that owns its unique index.
+import type { PluginViewRef } from "../repositories/plugin-view-processes.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
@@ -46,6 +50,9 @@ function readinessTimeoutMs(): number {
   const raw = Number(readBoardEnv("KANBAN_PLUGIN_VIEW_READY_TIMEOUT_MS"));
   return Number.isFinite(raw) && raw >= 0 ? raw : DEFAULT_READINESS_TIMEOUT_MS;
 }
+
+/** Re-exported so the views concern is where service-side consumers get it from (#766). */
+export type { PluginViewRef };
 
 export interface PluginViewStartResult {
   url: string;
@@ -116,7 +123,7 @@ async function waitUntilReady(port: number, healthPath: string | undefined, chil
   }
 }
 
-function viewKey(pluginRowId: string, viewId: string, projectId: string): string {
+function viewKey({ pluginRowId, viewId, projectId }: PluginViewRef): string {
   return `${pluginRowId}:${viewId}:${projectId}`;
 }
 
@@ -238,17 +245,17 @@ export function createPluginViewsRuntime<P extends PluginWithManifest, Pr extend
    * lets the NEXT server generation reap children orphaned by a tsx-watch restart is injected.
    * Both are best-effort: a persistence failure must never fail a view start/stop.
    */
-  persistViewProcess?: (values: { pluginRowId: string; viewId: string; projectId: string; pid: number; port: number; command: string }) => Promise<void>;
-  dropViewProcess?: (pluginRowId: string, viewId: string, projectId: string) => Promise<void>;
+  persistViewProcess?: (values: PluginViewRef & { pid: number; port: number; command: string }) => Promise<void>;
+  dropViewProcess?: (ref: PluginViewRef) => Promise<void>;
 }) {
   const { requirePlugin, requireProject, resolveOutputRepoPath, listEnabledPlugins, boardUrl, persistViewProcess, dropViewProcess } = deps;
 
-  async function startView(pluginRowId: string, viewId: string, projectId: string): Promise<PluginViewStartResult> {
+  async function startView(ref: PluginViewRef): Promise<PluginViewStartResult> {
     // Serialize per view BEFORE the first await — see `startingViews` (#251).
-    const key = viewKey(pluginRowId, viewId, projectId);
+    const key = viewKey(ref);
     const inFlight = startingViews.get(key);
     if (inFlight) return inFlight;
-    const attempt = startViewSerialized(pluginRowId, viewId, projectId);
+    const attempt = startViewSerialized(ref);
     startingViews.set(key, attempt);
     try {
       return await attempt;
@@ -257,11 +264,12 @@ export function createPluginViewsRuntime<P extends PluginWithManifest, Pr extend
     }
   }
 
-  async function startViewSerialized(pluginRowId: string, viewId: string, projectId: string): Promise<PluginViewStartResult> {
+  async function startViewSerialized(ref: PluginViewRef): Promise<PluginViewStartResult> {
+    const { pluginRowId, viewId, projectId } = ref;
     const plugin = await requirePlugin(pluginRowId);
     const project = await requireProject(projectId);
     const view = findView(plugin.manifest, viewId);
-    const key = viewKey(pluginRowId, viewId, projectId);
+    const key = viewKey(ref);
 
     const existing = viewChildren.get(key);
     if (existing) {
@@ -315,7 +323,7 @@ export function createPluginViewsRuntime<P extends PluginWithManifest, Pr extend
       if (process.platform === "win32" && child.pid) {
         void taskkillTree(child.pid).catch(() => { /* already gone */ });
       }
-      void dropViewProcess?.(pluginRowId, viewId, projectId).catch(() => {});
+      void dropViewProcess?.(ref).catch(() => {});
       if (code !== 0 && code !== null) {
         console.warn(`[plugins] view ${plugin.pluginId}:${viewId} exited with code ${code}${stderrTail ? `: ${stderrTail.slice(-500)}` : ""}`);
       }
@@ -352,8 +360,8 @@ export function createPluginViewsRuntime<P extends PluginWithManifest, Pr extend
     return { url: `http://localhost:${port}`, port, pid: child.pid ?? null, ready };
   }
 
-  async function stopView(pluginRowId: string, viewId: string, projectId: string): Promise<{ stopped: boolean }> {
-    const key = viewKey(pluginRowId, viewId, projectId);
+  async function stopView(ref: PluginViewRef): Promise<{ stopped: boolean }> {
+    const key = viewKey(ref);
     const entry = viewChildren.get(key);
     if (!entry) return { stopped: false };
     // AWAITED (#352): `stopView` is already async and every caller awaits it, so there is no
@@ -363,17 +371,17 @@ export function createPluginViewsRuntime<P extends PluginWithManifest, Pr extend
     await killChildAsync(entry);
     if (entry.pid) spawnedViewPids.delete(entry.pid);
     viewChildren.delete(key);
-    await dropViewProcess?.(pluginRowId, viewId, projectId).catch(() => {});
+    await dropViewProcess?.(ref).catch(() => {});
     return { stopped: true };
   }
 
-  async function getViewStatus(pluginRowId: string, viewId: string, projectId: string) {
-    const entry = viewChildren.get(viewKey(pluginRowId, viewId, projectId));
+  async function getViewStatus(ref: PluginViewRef) {
+    const entry = viewChildren.get(viewKey(ref));
     if (!entry || entry.child.exitCode !== null) {
       return { running: false as const };
     }
-    const plugin = await requirePlugin(pluginRowId);
-    const view = findView(plugin.manifest, viewId);
+    const plugin = await requirePlugin(ref.pluginRowId);
+    const view = findView(plugin.manifest, ref.viewId);
     return {
       running: true as const,
       port: entry.port,
@@ -390,7 +398,7 @@ export function createPluginViewsRuntime<P extends PluginWithManifest, Pr extend
     await requireProject(projectId);
     const views = [];
     for (const view of plugin.manifest.views ?? []) {
-      views.push({ id: view.id, label: view.label, kind: view.kind, ...(await getViewStatus(pluginRowId, view.id, projectId)) });
+      views.push({ id: view.id, label: view.label, kind: view.kind, ...(await getViewStatus({ pluginRowId, viewId: view.id, projectId })) });
     }
     return views;
   }
@@ -407,7 +415,7 @@ export function createPluginViewsRuntime<P extends PluginWithManifest, Pr extend
             id: view.id,
             label: view.label,
             kind: view.kind,
-            ...(await getViewStatus(row.id, view.id, projectId)),
+            ...(await getViewStatus({ pluginRowId: row.id, viewId: view.id, projectId })),
           });
         }
       } catch {
