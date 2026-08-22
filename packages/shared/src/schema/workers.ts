@@ -26,3 +26,39 @@ export const workers = sqliteTable("workers", {
 }, (table) => ({
   statusIdx: index("idx_workers_status").on(table.status),
 }));
+
+/**
+ * Persisted git-transport tokens for the worker fleet (#775).
+ *
+ * Only the sha-256 DIGEST is stored, never the token — same rule as `workers.tokenHash`.
+ * The row is the SCOPE (#247): which worker, which project, which incoming ref, and the
+ * TTL ceiling. Authority is still re-derived from `sessions` on every request (#753), so
+ * this table can never widen what a token may do; it only stops the board FORGETTING a
+ * token it issued.
+ *
+ * Why it has to survive a restart: the scope used to live solely in an in-memory
+ * `createExpiringDigestStore`, so after a board restart a worker finishing its run pushed
+ * with a token the board no longer knew and got a 401 it could not recover from. That is
+ * what made #745's recovery promise partial — the board keeps the session and waits for the
+ * worker's exit, but the worker could not deliver its push.
+ *
+ * Deliberately NO foreign key to `workers`: revocation deletes these rows explicitly
+ * (`deleteGitTokensForWorker`, called from `revokeWorker`), and an FK would make a token
+ * insert fail — silently, since the insert is fire-and-forget off a synchronous
+ * `issueToken` — whenever the worker row is written in the same turn.
+ */
+export const workerGitTokens = sqliteTable("worker_git_tokens", {
+  /** sha-256 hex of the clear token. The primary key: lookup is BY DIGEST, never by compare. */
+  tokenHash: text("token_hash").primaryKey(),
+  workerId: text("worker_id").notNull(),
+  projectId: text("project_id").notNull(),
+  /** The one ref a receive-pack under this token may update. NULL = read-only in practice. */
+  incomingRef: text("incoming_ref"),
+  /** Epoch ms — the clock the assignment-settle window is measured from. */
+  issuedAtMs: integer("issued_at_ms").notNull(),
+  /** Epoch ms ceiling. Not the bound that matters (see #753), but it bounds this table's growth. */
+  expiresAtMs: integer("expires_at_ms").notNull(),
+}, (table) => ({
+  workerIdx: index("idx_worker_git_tokens_worker_id").on(table.workerId),
+  expiresIdx: index("idx_worker_git_tokens_expires_at_ms").on(table.expiresAtMs),
+}));
