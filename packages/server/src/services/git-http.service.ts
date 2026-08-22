@@ -9,10 +9,10 @@
 //
 // SECURITY — mirrors mcp-http-bridge/http-transport exactly: the listener must
 // be reachable off-loopback (that is its whole point), so every request needs a
-// bearer token. Git clients authenticate with URL-embedded basic auth
-// (`http://x-token:<token>@host:port/...`); both Basic (password) and Bearer are
-// accepted. `/health` is unauthenticated. No "localhost is trusted" shortcut —
-// see http-transport.ts's module comment.
+// bearer token. Git clients authenticate with an `Authorization: Basic` header
+// carrying the token in the PASSWORD slot; Bearer is accepted too. `/health` is
+// unauthenticated. No "localhost is trusted" shortcut — see http-transport.ts's
+// module comment.
 //
 // TOKENS ARE PER-ASSIGNMENT AND SCOPED (#247). The first cut minted ONE
 // board-wide token per boot: it granted a full clone of EVERY registered project
@@ -22,6 +22,17 @@
 // worker, one project and (for pushes) one incoming ref, expires, and is dropped
 // when its worker is revoked (`revokeGitTokensForWorker`).
 //
+// TOKENS ARE ALSO BOUND TO A LIVE ASSIGNMENT (#753). That scoping was complete
+// in SPACE and not in TIME: the only bounds were a 24h TTL and `revokeWorker`,
+// and nothing at all happened when the session ENDED. So a token holder could
+// still clone the project and force-push a descendant of master to the branch's
+// incoming ref hours after review and merge had finished. Authority is now
+// re-derived from the DB on EVERY request (`authorizeAssignment`): the dispatch
+// behind the token must still be current — running, or ended inside
+// `WORKER_RESULT_LANDABLE_AFTER_END_MS` — and a token whose assignment is over
+// is dropped from the store on the spot rather than left to age out. The TTL is
+// now only an upper ceiling, not the bound that matters.
+//
 // Push contract: workers push ONLY to the `refs/kanban/incoming/*` namespace,
 // and only to the ONE ref their token was issued for (#246) — never to
 // refs/heads/*, because feature branches are checked out in board-side worktrees
@@ -30,20 +41,55 @@
 // (worker-remote-sync service).
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { createExpiringDigestStore, envPort, extractBearer } from "../lib/bearer-token.js";
+import { createExpiringDigestStore, envPort, extractBearer, resolveListenHost } from "../lib/bearer-token.js";
 import { createGunzip } from "node:zlib";
-import { Transform } from "node:stream";
 import { gitStream } from "@agentic-kanban/shared/lib/git-exec";
 import { db as realDb } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getProjectRepoPath } from "../repositories/project.repository.js";
+import {
+  findCurrentWorkerAssignment,
+  WORKER_RESULT_LANDABLE_AFTER_END_MS,
+} from "../repositories/worker.repository.js";
+import {
+  createBodyLimit,
+  createReceiveGuard,
+  KANBAN_INCOMING_REF_PREFIX,
+  parsePktLineLength,
+  resolveMaxRpcBodyBytes,
+  type ReceiveViolation,
+} from "../lib/git-receive-guard.js";
 
-export const KANBAN_INCOMING_REF_PREFIX = "refs/kanban/incoming/";
+// Re-exported from their new home so existing importers (the sweep, the sync
+// service, tests) keep one import site for the transport's vocabulary.
+export { KANBAN_INCOMING_REF_PREFIX, parsePktLineLength };
 
 const SERVICES = new Set(["git-upload-pack", "git-receive-pack"]);
 
-/** How long an issued git token stays valid. A worker re-issues per assignment. */
+/**
+ * Absolute ceiling on an issued git token, whatever the assignment does.
+ *
+ * No longer the bound that matters: an assignment-liveness check runs on every request
+ * (#753), so a token dies with its session. This is the backstop for the one case that
+ * check cannot see — a token issued for an assignment whose session row never appeared.
+ */
 export const DEFAULT_GIT_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * How long a token works before its assignment shows up in the DB.
+ *
+ * `updateSessionWorkerId` is fire-and-forget on the dispatch path and runs after the
+ * `assign` frame goes out, so a worker that clones very fast can legitimately arrive
+ * before the row it will be checked against exists. Failing closed on that race would
+ * break every remote launch, so an unmatched token is honoured for this long and then
+ * refused. It is the one window in which a token has no assignment behind it, and it is
+ * minutes rather than the day it used to be.
+ */
+export const ASSIGNMENT_SETTLE_MS = 5 * 60 * 1000;
+
+/** Headers must arrive quickly; a body may be a large packfile over a slow link. */
+const HEADERS_TIMEOUT_MS = 60 * 1000;
+const REQUEST_TIMEOUT_MS = 15 * 60 * 1000;
 
 export interface IssueGitTokenInput {
   /** The worker the token is for — revoking that worker invalidates it. */
@@ -64,7 +110,21 @@ interface GitTokenScope {
   workerId: string;
   projectId: string;
   incomingRef?: string;
+  /** When this token was minted — the clock the settle window above is measured from. */
+  issuedAtMs: number;
 }
+
+/**
+ * Whether the dispatch behind a token is still current. Injectable so the transport can be
+ * tested without a sessions/workspaces/issues fixture, and so a caller with no database at
+ * all (none today) could supply its own source of truth.
+ */
+export type AssignmentLookup = (params: {
+  workerId: string;
+  projectId: string;
+  branch: string;
+  nowMs: number;
+}) => Promise<boolean>;
 
 export interface GitHttpHandle {
   port: number;
@@ -87,12 +147,83 @@ function createGitTokenStore() {
   return {
     issue: (input: IssueGitTokenInput): string =>
       store.issue(
-        { workerId: input.workerId, projectId: input.projectId, incomingRef: input.incomingRef },
+        {
+          workerId: input.workerId,
+          projectId: input.projectId,
+          incomingRef: input.incomingRef,
+          issuedAtMs: input.now ?? Date.now(),
+        },
         { now: input.now, ttlMs: input.ttlMs },
       ),
     resolve: (token: string, nowMs?: number) => store.resolve(token, nowMs),
+    /**
+     * Drop THIS token — used when its assignment turns out to be over (#753). `consume`
+     * with `nowMs: 0` because we want the entry GONE regardless of whether it had also
+     * expired; the return value only says whether one was there.
+     */
+    drop: (token: string) => store.consume(token, 0) !== null,
     revokeWorker: (workerId: string) => store.revokeWhere((scope) => scope.workerId === workerId),
   };
+}
+
+/** The branch an incoming ref stages, or null when the scope carries no ref at all. */
+export function branchFromIncomingRef(incomingRef: string | undefined): string | null {
+  if (!incomingRef || !incomingRef.startsWith(KANBAN_INCOMING_REF_PREFIX)) return null;
+  const branch = incomingRef.slice(KANBAN_INCOMING_REF_PREFIX.length);
+  return branch.length > 0 ? branch : null;
+}
+
+export type AuthorizeOutcome =
+  | { ok: true; reason: "assignment-current" | "settling" }
+  | { ok: false; reason: string };
+
+/**
+ * Is this token's assignment still current (#753)?
+ *
+ * Three answers, and the middle one is the whole subtlety:
+ *  - a current dispatch for (worker, project, branch) exists → allowed;
+ *  - none exists but the token was minted less than {@link ASSIGNMENT_SETTLE_MS} ago →
+ *    allowed, because the board stamps `sessions.workerId` asynchronously after it sends
+ *    the assignment and a fast clone can beat that write;
+ *  - anything else → refused, and the caller drops the token.
+ *
+ * A scope with no incoming ref has no branch to check, so it gets the settle window and
+ * nothing more — which is the correct authority for a token that cannot push anywhere.
+ */
+export async function authorizeAssignment(
+  scope: { workerId: string; projectId: string; incomingRef?: string; issuedAtMs: number },
+  lookup: AssignmentLookup,
+  nowMs: number = Date.now(),
+): Promise<AuthorizeOutcome> {
+  const branch = branchFromIncomingRef(scope.incomingRef);
+  if (branch) {
+    let current = false;
+    try {
+      current = await lookup({ workerId: scope.workerId, projectId: scope.projectId, branch, nowMs });
+    } catch (err) {
+      // Fail CLOSED. A lookup that throws leaves us unable to tell a live worker from a
+      // token holder whose session ended, and this transport's job is handing out repo
+      // contents — the wrong answer here is not a degraded feature.
+      console.error(`[git-http] assignment lookup failed for worker ${scope.workerId}:`, err);
+      return { ok: false, reason: "assignment lookup failed" };
+    }
+    if (current) return { ok: true, reason: "assignment-current" };
+  }
+  if (nowMs - scope.issuedAtMs <= ASSIGNMENT_SETTLE_MS) return { ok: true, reason: "settling" };
+  const window = Math.round(WORKER_RESULT_LANDABLE_AFTER_END_MS / 60_000);
+  return {
+    ok: false,
+    reason: branch
+      ? `no current dispatch of ${branch} to worker ${scope.workerId} ` +
+        `(a session must be running, or have ended within ${window} min)`
+      : `token carries no incoming ref and is past the ${Math.round(ASSIGNMENT_SETTLE_MS / 60_000)} min settle window`,
+  };
+}
+
+/** The DB-backed lookup used in production. */
+export function createAssignmentLookup(database: Database): AssignmentLookup {
+  return async ({ workerId, projectId, branch, nowMs }) =>
+    (await findCurrentWorkerAssignment({ workerId, projectId, branch, nowMs }, database)) !== null;
 }
 
 function pktLine(payload: string): string {
@@ -108,6 +239,19 @@ async function resolveRepoPath(projectId: string, database: Database): Promise<s
   return getProjectRepoPath(projectId, database);
 }
 
+/**
+ * Args that hide the staging namespace from the READ side (#753).
+ *
+ * A token authorised a full `upload-pack`, which advertises every ref in the repo —
+ * including `refs/kanban/incoming/*`, i.e. every OTHER worker's unlanded result. A worker
+ * has no business reading those, and it never asks for them (it fetches
+ * `+refs/heads/*`), so hiding them costs nothing. Only upload-pack: hiding a ref from
+ * receive-pack would take the target of the worker's own push out of the advertisement.
+ */
+function hiddenRefArgs(cmd: string): string[] {
+  return cmd === "upload-pack" ? ["-c", `uploadpack.hideRefs=${KANBAN_INCOMING_REF_PREFIX}`] : [];
+}
+
 /** GET /git/:id/info/refs — the ref advertisement that starts every fetch/push. */
 function handleInfoRefs(res: ServerResponse, service: string, repoPath: string): void {
   const cmd = service.replace(/^git-/, "");
@@ -117,80 +261,12 @@ function handleInfoRefs(res: ServerResponse, service: string, repoPath: string):
   });
   res.write(pktLine(`# service=${service}\n`));
   res.write("0000");
-  const proc = gitStream([cmd, "--stateless-rpc", "--advertise-refs", repoPath]);
+  const proc = gitStream([...hiddenRefArgs(cmd), cmd, "--stateless-rpc", "--advertise-refs", repoPath]);
   proc.stdout!.pipe(res);
   proc.stderr!.on("data", (d: Buffer) => console.warn(`[git-http] ${cmd} advertise stderr: ${d.toString().trim()}`));
   proc.on("error", (err) => {
     console.error(`[git-http] ${cmd} advertise failed:`, err);
     res.destroy();
-  });
-}
-
-/**
- * Strict pkt-line length: exactly four LOWERCASE hex digits, and never 1..3
- * (those are shorter than the header itself and would desync the offset).
- * `Number.parseInt(hex, 16)` was too permissive — it accepts `"+000"`, `" 000"`
- * and `"-000"` as 0 (a fake flush that would end the command section early) and
- * `"0abz"` as 10. Git's own parser rejects such streams first, so no bypass was
- * demonstrated, but a guard must not depend on the thing it guards.
- */
-export function parsePktLineLength(lenHex: string): number | null {
-  if (!/^[0-9a-f]{4}$/.test(lenHex)) return null;
-  const len = Number.parseInt(lenHex, 16);
-  if (len >= 1 && len <= 3) return null;
-  return len;
-}
-
-/**
- * A Transform that parses the receive-pack COMMAND section (pkt-lines of
- * `<old-sha> <new-sha> <refname>[\0caps]` up to the `0000` flush) and destroys
- * the stream if any refname is outside `refs/kanban/incoming/` or outside the
- * ONE ref this token was issued for — after the flush it becomes a passthrough
- * for the packfile. Keeps worker pushes out of refs/heads/* (checked out in
- * board worktrees) and out of other workers' branches (#246).
- */
-function createReceiveGuard(allowedRef: string | undefined, onViolation: (refname: string) => void): Transform {
-  let buffered: Buffer = Buffer.alloc(0);
-  let commandsDone = false;
-  return new Transform({
-    transform(chunk: Buffer, _enc, callback) {
-      if (commandsDone) {
-        callback(null, chunk);
-        return;
-      }
-      buffered = Buffer.concat([buffered, chunk]);
-      let offset = 0;
-      while (offset + 4 <= buffered.length) {
-        const lenHex = buffered.subarray(offset, offset + 4).toString("latin1");
-        const len = parsePktLineLength(lenHex);
-        if (len === null) {
-          onViolation(`<malformed pkt-line: ${lenHex}>`);
-          callback(new Error("malformed receive-pack stream"));
-          return;
-        }
-        if (len === 0) {
-          // Flush-pkt: command section over; release everything and pass through.
-          commandsDone = true;
-          const out = buffered;
-          buffered = Buffer.alloc(0);
-          callback(null, out);
-          return;
-        }
-        if (offset + len > buffered.length) break; // incomplete pkt — wait for more
-        const line = buffered.subarray(offset + 4, offset + len).toString("utf8");
-        const refname = (line.split("\0")[0] ?? "").trim().split(/\s+/)[2] ?? "";
-        if (refname && (!refname.startsWith(KANBAN_INCOMING_REF_PREFIX) || refname !== allowedRef)) {
-          onViolation(refname);
-          callback(new Error(`push to ${refname} refused`));
-          return;
-        }
-        offset += len;
-      }
-      callback(); // hold buffered bytes until the section completes
-    },
-    flush(callback) {
-      callback(null, buffered.length > 0 ? buffered : undefined);
-    },
   });
 }
 
@@ -207,18 +283,43 @@ function handleServiceRpc(
     "Content-Type": `application/x-${service}-result`,
     "Cache-Control": "no-cache",
   });
-  const proc = gitStream([cmd, "--stateless-rpc", repoPath]);
+  const proc = gitStream([...hiddenRefArgs(cmd), cmd, "--stateless-rpc", repoPath]);
+  let settled = false;
+  const abortGit = (why: string) => {
+    if (settled) return;
+    settled = true;
+    console.warn(`[git-http] ${cmd} aborted: ${why}; killing git (repo=${repoPath})`);
+    try { proc.kill(); } catch { /* already gone */ }
+    res.destroy();
+  };
+  // #753: a client that disconnects mid-push used to leave `git receive-pack` running with
+  // a stdin nobody would ever close — one orphaned index-pack per abandoned request, which
+  // is a resource-exhaustion primitive on its own.
+  req.on("aborted", () => abortGit("client aborted"));
+  res.on("close", () => { if (!res.writableFinished) abortGit("response closed early"); });
+  proc.on("exit", () => { settled = true; });
+
+  const maxBody = resolveMaxRpcBodyBytes();
   let body: NodeJS.ReadableStream = req.headers["content-encoding"] === "gzip" ? req.pipe(createGunzip()) : req;
+  // Counted after any gunzip, so this bounds DECOMPRESSED bytes and a compression bomb is
+  // bounded by the same number.
+  const limit = createBodyLimit(maxBody, (seen) =>
+    console.warn(`[git-http] refused ${cmd}: body exceeded ${maxBody} bytes (saw ${seen}; repo=${repoPath})`),
+  );
+  limit.on("error", () => abortGit(`body over ${maxBody} bytes`));
+  body = body.pipe(limit);
   if (cmd === "receive-pack") {
-    const guard = createReceiveGuard(allowedRef, (refname) => {
-      console.warn(
-        `[git-http] refused push to ${refname}: token is scoped to ${allowedRef ?? "<no ref>"} (repo=${repoPath})`,
-      );
+    const guard = createReceiveGuard(allowedRef, (violation: ReceiveViolation) => {
+      if (violation.kind === "refname") {
+        console.warn(
+          `[git-http] refused push to ${violation.refname || "<empty refname>"}: ` +
+          `token is scoped to ${allowedRef ?? "<no ref>"} (repo=${repoPath})`,
+        );
+      } else {
+        console.warn(`[git-http] refused push: ${violation.detail} (repo=${repoPath})`);
+      }
     });
-    guard.on("error", () => {
-      try { proc.kill(); } catch { /* already gone */ }
-      res.destroy();
-    });
+    guard.on("error", () => abortGit("receive guard refused the stream"));
     body = body.pipe(guard);
   }
   body.pipe(proc.stdin!);
@@ -250,22 +351,27 @@ export function resolveConfiguredGitPort(env: NodeJS.ProcessEnv = process.env): 
 }
 
 /**
- * Which interface the git transport binds, from `KANBAN_GIT_HTTP_HOST` (#652).
- * Same contract and same rationale as `resolveFleetHost` — absent = `0.0.0.0`.
+ * Which interface the git transport binds, from `KANBAN_GIT_HTTP_HOST` (#652, #753).
+ * Absent no longer means `0.0.0.0` — see {@link resolveListenHost}.
  */
 export function resolveConfiguredGitHost(env: NodeJS.ProcessEnv = process.env): string {
-  const raw = env.KANBAN_GIT_HTTP_HOST;
-  if (raw === undefined || raw.trim() === "") return "0.0.0.0";
-  return raw.trim();
+  return resolveListenHost({
+    raw: env.KANBAN_GIT_HTTP_HOST,
+    insecure: env.KANBAN_FLEET_INSECURE,
+    logPrefix: "[git-http]",
+  });
 }
 
 export async function startGitHttpServer(opts?: {
   database?: Database;
   port?: number;
   host?: string;
+  /** Injectable for tests; defaults to the DB-backed dispatch check. */
+  assignmentLookup?: AssignmentLookup;
 }): Promise<GitHttpHandle> {
   const database = opts?.database ?? realDb;
   const tokens = createGitTokenStore();
+  const assignmentLookup = opts?.assignmentLookup ?? createAssignmentLookup(database);
 
   const http: Server = createServer((req, res) => {
     void (async () => {
@@ -279,8 +385,18 @@ export async function startGitHttpServer(opts?: {
 
         const provided = extractBearer(req.headers.authorization, { allowBasic: true });
         const scope = provided ? tokens.resolve(provided) : null;
-        if (!scope) {
+        if (!scope || !provided) {
           reject(res, 401, "unauthorized");
+          return;
+        }
+
+        // #753: the token proves WHO, the assignment proves STILL. Checked before the path
+        // is even parsed, so no request of any shape outlives its session.
+        const authorized = await authorizeAssignment(scope, assignmentLookup);
+        if (!authorized.ok) {
+          tokens.drop(provided);
+          console.warn(`[git-http] refused and revoked a token for worker ${scope.workerId}: ${authorized.reason}`);
+          reject(res, 403, "assignment is no longer current");
           return;
         }
 
@@ -328,6 +444,10 @@ export async function startGitHttpServer(opts?: {
       }
     })();
   });
+  // #753: a slowloris on this listener is a board-wide outage, not a slow clone. Bounded
+  // explicitly rather than left to whatever the Node major happens to default to.
+  http.headersTimeout = HEADERS_TIMEOUT_MS;
+  http.requestTimeout = REQUEST_TIMEOUT_MS;
 
   const host = opts?.host ?? resolveConfiguredGitHost();
   const port = await new Promise<number>((resolve, rejectListen) => {
