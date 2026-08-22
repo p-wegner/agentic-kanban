@@ -1,6 +1,7 @@
 import type { AgentLaunchRequest } from "./agent-dispatch.service.js";
 import { resolveEffectivePrompt } from "./agent-provider/context-files-prompt.js";
-import { stripMcpConfigArgs } from "./agent-provider/container-wrap.js";
+import { buildRemoteLaunchSpec } from "./remote-launch-spec.js";
+import { buildRemoteContextFiles } from "./remote-context-files.js";
 // Remote agent execution over a fleet worker's WebSocket (epic #1, phase 1c #5).
 //
 // Implements the AgentExecutionService seam (phase 0): `launch` builds the SAME
@@ -286,29 +287,29 @@ export function createRemoteAgentService(
     });
     const stdinPrompt = config.promptPrefix ? `${config.promptPrefix}\n\n${prompt}` : prompt;
 
-    // #244's sibling: the ENV is projected for a cross-machine spec, but the ARGS
-    // were shipped verbatim — and they carry board-host paths too. `--mcp-config`
-    // names a file in this machine's tmpdir, so a true remote worker died on
-    // "Invalid MCP configuration: MCP config file not found" before running a single
-    // turn. Shipping the file would not help: the MCP server it configures talks to
-    // the board API, which is loopback-only by design and unreachable from there.
-    // A same-filesystem worker keeps the arg, exactly as it keeps host paths in env.
+    // #244's sibling, generalized in #747: the ENV is projected for a cross-machine spec,
+    // but the COMMAND and ARGS were built for the BOARD's machine — an absolute
+    // `claude.exe`, a `useShell` derived from the board's own platform, and args naming
+    // board-host paths (`--mcp-config` in this machine's tmpdir, `--settings` in this
+    // machine's home). A true-remote spec therefore carries INTENT and the worker resolves
+    // its own executable; see remote-launch-spec.ts for the full rationale. A
+    // same-filesystem worker keeps everything verbatim, exactly as it keeps host paths in
+    // env.
     const isTrueRemote = Boolean(placement.repo);
-    const specArgs = isTrueRemote ? stripMcpConfigArgs(config.args) : config.args;
-
-    const spec = {
-      command: config.command,
-      args: specArgs,
+    const spec = buildRemoteLaunchSpec({
+      config,
       env,
       cwd: worktreePath,
       stdinPrompt,
-      keepStdinOpen: config.keepStdinOpen,
-      suppressStdinPrompt: config.suppressStdinPrompt,
-      useShell: config.useShell,
       // Same policy as a host launch: mock agents are deterministic and
       // short-lived, everything else gets the silence watchdog.
       hangTimeoutMs: config.isMockAgent ? 0 : resolveAgentHangTimeoutMs(),
-    };
+      provider,
+      trueRemote: isTrueRemote,
+      // An explicit agentCommand (or KANBAN_AGENT_COMMAND, which isMockAgent reflects) is
+      // the operator's exact command, not a provider's platform guess — it travels as-is.
+      explicitCommand: Boolean(agentCommand) || Boolean(config.isMockAgent),
+    });
 
     // Same-machine dispatch (no repo in the placement): the worker shares this
     // filesystem, so assign directly. Git transport needs the git-http listener
@@ -341,6 +342,9 @@ export function createRemoteAgentService(
               baseBranch: repo.baseBranch,
               incomingRef,
               setupScript: repo.setupScript,
+              // #749: the ticket-context file travels as CONTENT (the board's path names
+              // nothing on the worker) and is retargeted for a machine with no board MCP.
+              contextFiles: buildRemoteContextFiles(contextFiles),
               skills: skillRows
                 .filter((s) => typeof s.prompt === "string" && s.prompt.trim().length > 0)
                 .map((s) => ({ name: s.name, description: s.description ?? "", content: s.prompt })),
