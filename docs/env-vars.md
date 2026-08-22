@@ -12,7 +12,12 @@ read under `packages/*/src` is checked by `env-read-ownership.test.ts`: a board-
 (`KANBAN_*` or `AGENTIC_KANBAN_*`) must have a row on this page, and every other name must be
 declared FOREIGN in that suite with a note saying whose it is. So a new variable cannot reach
 master undocumented, and an unlisted `KANBAN_*` in code is a bug in one of the two, not a var
-nobody wrote down. (The caveat this replaces was true when #690 filed it: 84 reads across 42
+nobody wrote down. **One hole is real and pinned rather than closed**: a name read through a
+helper that takes it as an ARGUMENT — `envPort("KANBAN_FLEET_PORT", …)` — is a
+`process.env[<expression>]` read at the scan's eyes, so no name-based rule can judge it. The
+suite caps those at a baseline of 5 instead of naming them, which is why `KANBAN_FLEET_PORT`
+and `KANBAN_GIT_HTTP_PORT` reached master with no row here until #756 added them. A new
+board-owned variable introduced that way still needs its row by hand. (The caveat this replaces was true when #690 filed it: 84 reads across 42
 names were unforbidden and roughly a third undocumented.)
 
 The renamed vars in the first table are **data**, in
@@ -59,8 +64,11 @@ guarded by `board-client-port-ladder-single-source.test.ts`.
 | `KANBAN_WORKTREE_CLIENT_PORT` | This worktree's own client port (`5173 + N`). |
 | `KANBAN_INTERNAL_SERVER_PORT` | The port the backend BINDS in dev, behind the stable dev proxy. Never in a public URL. |
 | `KANBAN_HOST` | Interface the board API binds. **Never `0.0.0.0`** — the API has no auth. |
+| `KANBAN_FLEET_PORT` | Port for the worker-fleet listener (register/heartbeat/ws + `/health`, nothing else). **Unset = disabled**: no port is opened. |
 | `KANBAN_FLEET_HOST` | Interface the fleet port binds (worker register/heartbeat/ws only). |
+| `KANBAN_GIT_HTTP_PORT` | Port for the git smart-HTTP transport. **Unset = an OS-assigned port**, which changes every board boot — a cross-machine fleet must pin it. |
 | `KANBAN_GIT_HTTP_HOST` | Interface the git transport binds. |
+| `VITE_HOST` | Interface the Vite dev client binds (default `::`, every interface). **Set to `127.0.0.1` whenever a fleet listener is configured** — the dev client proxies `/api` to the unauthenticated board API, so a default bind publishes it on every interface. Read in `packages/client/vite.config.ts`; see [worker-fleet.md](worker-fleet.md). |
 | `KANBAN_SERVICE_HOST` | Host that project service stacks bind. |
 | `KANBAN_STACK_PORT_RANGE` | Port range allocated to project service stacks. |
 | `KANBAN_TLS_CERT`, `KANBAN_TLS_KEY` | TLS material for the board server. |

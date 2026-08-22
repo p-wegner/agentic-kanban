@@ -25,8 +25,9 @@ source: "packages/client/src, packages/server/src, packages/mcp-server/src, docs
 10. [CLI Reference](#cli-reference)
 11. [MCP Tools](#mcp-tools)
 12. [Monitoring & Automation](#monitoring-automation)
-13. [Desktop App](#desktop-app)
-14. [Troubleshooting](#troubleshooting)
+13. [Worker Fleet](#worker-fleet)
+14. [Desktop App](#desktop-app)
+15. [Troubleshooting](#troubleshooting)
 
 
 ## Installation & Setup
@@ -831,6 +832,30 @@ The board stats bar shows:
 - Active profile badge
 - Blocked filter toggle
 - Commits on main counter
+
+## Worker Fleet
+
+Agent sessions do not have to run on the board's machine. Pair other machines as **workers**
+and the board schedules ticket work onto them; a worker dials the board, so it needs no
+inbound access of its own.
+
+**The full operator chapter is [../worker-fleet.md](../worker-fleet.md)** — pairing, labels,
+strict dispatch, the two network listeners, what to check when nothing dispatches, and the two
+traps (a path-based reverse proxy in front of the git transport, and a version string that is
+not evidence of the contents). It lives in its own file because this manual is generated and
+would overwrite a hand-written chapter here.
+
+The four things worth knowing before you open it:
+
+| | |
+|---|---|
+| **`worker pair` and `worker list` are board-machine only** | They are owner endpoints on the board's loopback API. From a worker they 404 (fleet port) or cannot connect (API port). |
+| **`--board` for `worker start` is the FLEET port** | `KANBAN_FLEET_PORT`, not the board's API port — the API binds `127.0.0.1` and stays there. |
+| **Registration alone routes nothing** | A project opts in with `worker_dispatch_<projectId>=true`. |
+| **Credentials never travel** | A worker runs the agent with its own local provider login; the board sends a launch spec, never a key. |
+
+Manage the fleet in the UI via the command palette → **Worker Fleet** (pair, revoke, status,
+capacity, labels).
 
 ## Desktop App
 

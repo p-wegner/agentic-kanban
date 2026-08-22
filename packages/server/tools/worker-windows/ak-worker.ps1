@@ -26,9 +26,14 @@ $prefix = (npm prefix -g).Trim()
 $manifest = Join-Path $prefix "node_modules\$pkg\package.json"
 
 function Get-Installed {
-  # The authoritative version is the installed manifest. Do NOT trust
-  # `agentic-kanban-worker --version`: it is hardcoded to 0.0.1 in the daemon and
-  # reports that no matter which build is installed.
+  # The authoritative version is the installed manifest - and it is also what
+  # `agentic-kanban-worker --version` now reports: resolveVersion() in
+  # worker/worker-cli.ts walks up to our own package.json, falling back to
+  # "unknown" rather than to a plausible number. So the two agree, and reading the
+  # manifest here just avoids shelling out. (This comment used to say --version was
+  # hardcoded to 0.0.1; that was true of an older build. Corrected in #756. A bare
+  # 0.0.1 from --version therefore means an OLD binary is installed, which is still
+  # worth checking after a tarball handover.)
   if (-not (Test-Path $manifest)) { return $null }
   Get-Content $manifest -Raw | ConvertFrom-Json
 }
