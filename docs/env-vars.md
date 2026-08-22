@@ -102,6 +102,7 @@ Set by the board on an agent subprocess; read by hooks and skills inside a workt
 | `KANBAN_TEST_PACKAGES` | Restrict the pre-merge gate's test half to these packages. |
 | `KANBAN_TEST_FILES` | Restrict it to these files. |
 | `KANBAN_TEST_MAX_WORKERS` | Cap vitest workers. |
+| `KANBAN_TEST_GUARDS_ONLY` | Set to 1 to make `test:mine` run ONLY the `@gate:always-run` guard suites — the narrowest verify tier. |
 | `KANBAN_VERIFY_CONCURRENCY` | Cap concurrent verify-gate runs. |
 
 ## `AGENTIC_KANBAN_*` — the npm package's own surface
@@ -124,6 +125,7 @@ unambiguous prefix" is an argument about the NAME and says nothing about what ea
 
 | Variable | Purpose |
 |---|---|
+| `KANBAN_STATUS_TRANSITION_STRICT` | Set to 1 to make an illegal workspace status transition throw (`IllegalStatusTransitionError`) instead of warning and falling through to the terminal guard. |
 | `UV_THREADPOOL_SIZE` | Node's libuv pool, default 4 and shared by every async fs op *and* the libsql file driver. The board raises it to 12 **if unset** (`packages/server/src/uv-threadpool.ts`, imported first from every entry point since libuv reads it lazily at the first submission): at 4, a single-SELECT endpoint queued behind a workspace-summary rebuild and measured 6–24s. An explicit value always wins. |
 
 ## Not renamed, and why
