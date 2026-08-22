@@ -6,6 +6,11 @@
  *
  * #513 landed `hooks/useApiResource.ts`, so entries are now removed by MIGRATING a panel
  * onto that hook rather than by rewriting its ladder in place.
+ *
+ * #732 removed four in one go — the windowed dashboard charts (ProviderMix,
+ * ProviderCostOverTime, ScorecardDistribution, Throughput) now share
+ * `hooks/useWindowedChartData.ts`, which is itself a thin layer over `useApiResource` and
+ * so adds no new entry of its own.
  */
 export const FETCH_IN_EFFECT_BASELINE: Record<string, number> = {
   // #513: THE sanctioned ladder. Every entry below is a hand-rolled copy waiting to be
@@ -50,13 +55,10 @@ export const FETCH_IN_EFFECT_BASELINE: Record<string, number> = {
   "components/ProjectHealthOverview.tsx": 1,
   "components/ProjectScriptsMenu.tsx": 2,
   "components/ProjectScriptsSettingsSection.tsx": 1,
-  "components/ProviderCostOverTimeChart.tsx": 1,
-  "components/ProviderMixChart.tsx": 1,
   "components/QualityMetricsView.tsx": 2,
   "components/QuickTasksPanel.tsx": 1,
   "components/RepoMergeStatusStrip.tsx": 1,
   "components/RunbooksView.tsx": 2,
-  "components/ScorecardDistributionChart.tsx": 1,
   "components/SessionReplay.tsx": 1,
   "components/SessionTranscriptPanel.tsx": 3,
   "components/SettingsPanel.tsx": 4,
@@ -67,7 +69,6 @@ export const FETCH_IN_EFFECT_BASELINE: Record<string, number> = {
   "components/StackProfileSettingsSection.tsx": 1,
   "components/StrategyTargetsView.tsx": 1,
   "components/TableView.tsx": 1,
-  "components/ThroughputChart.tsx": 1,
   "components/TimeReportPanel.tsx": 1,
   "components/WorkflowAnalyticsDashboard.tsx": 2,
   "components/WorkflowBuilder.tsx": 3,
