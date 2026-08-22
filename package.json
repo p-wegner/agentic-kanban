@@ -78,7 +78,7 @@
     "@changesets/cli": "^2.31.0",
     "@eslint/js": "^9.18.0",
     "@vitest/coverage-v8": "^4.0.0",
-    "concurrently": "^9.1.2",
+    "concurrently": "^10.0.5",
     "dependency-cruiser": "^17.4.3",
     "esbuild": "^0.25.12",
     "eslint": "^9.18.0",
