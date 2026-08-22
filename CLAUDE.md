@@ -220,7 +220,7 @@ Inject optional `now?: string` (`nowOverride`) into any service calling `new Dat
 - **`now?: string`** — ISO, for code that PERSISTS the value (it lands in a column).
 - **`nowMs?: number`** — epoch ms, for pure arithmetic (`ageMs`, TTL comparisons).
 
-Everything else (`nowIso`, `nowOverride`, `now: Date`, `now: () => number`, …) is grandfathered at its current count by `time-injection-spelling-ratchet.test.ts` and may only shrink. Adding a tenth spelling fails that gate.
+Everything else (`nowIso`, `nowOverride`, `now: Date`, `now: () => number`, …) is grandfathered at its current count by `time-injection-spelling-ratchet.test.ts` and may only shrink. Adding a tenth spelling fails that gate — **true since #721**, and it was not true before: the gate was a regex over six hard-coded names, so it could only catch the REUSE of a spelling someone had already used, and `asOf: number` / `currentTimeMs: number` were both verified to pass. It now matches the SHAPE of an injection point on the TS AST (a `now`/`clock`/`instant` word or an `asOf…` prefix; a `time`/`date`/`epoch` word made specific by a currentness marker or by being optional/defaulted; or — name-independently — any time-typed parameter defaulting to or coalesced with a clock read), so a name it has never seen fails it too.
 
 ### In-flight workspace recovery
 Don't resume many stale workspaces at once — one, then at most two more once healthy. A transcript showing ~1 s with zero tokens = launch-failed/stale; stop it and rebuild the branch.
