@@ -2,7 +2,15 @@
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { walkPackageSources } from "../../../shared/__tests__/helpers/guard-scan.js";
+import ts from "typescript";
+import {
+  walkPackageSources,
+  parseGuardSource,
+  forEachNode,
+  lineOf,
+  unwrapExpression,
+  calleeName,
+} from "../../../shared/__tests__/helpers/guard-scan.js";
 
 /**
  * #947 — ratchet gate against raw preference polarity reads.
@@ -24,6 +32,33 @@ import { walkPackageSources } from "../../../shared/__tests__/helpers/guard-scan
  * When you migrate a key's reads to getBool/parseBoolSetting, REMOVE (or lower) its
  * baseline entries — the test also fails when an entry is stale, so the ratchet can
  * only tighten.
+ *
+ * ## Why this is an AST pass and not a per-line regex (#779)
+ *
+ * It was a per-line regex until #779, and that is not a stylistic detail: the guard was
+ * GREEN on a tree that contained exactly what it forbids. `plugin-loop.service.ts` held
+ *
+ *     const wasDone =
+ *       (await getPreference(key, args.database)) === "true";
+ *
+ * for months. Split across two lines, neither line carries both `getPreference(` and the
+ * `=== "true"`, so no line matched — until #727's decomposition reflowed the expression
+ * onto ONE line and the "new" violation appeared. A guard whose green depends on where a
+ * formatter chose to wrap has never been evidence of anything, and the evasion is
+ * undeliberate: any developer whose editor wraps a long comparison gets an exemption
+ * nobody chose.
+ *
+ * The fix is the #721 one — match the SHAPE on the TypeScript AST. A `BinaryExpression`
+ * whose operator is `===`/`!==` and one of whose sides is the literal `"true"`/`"false"`
+ * is the same node however it is printed, so line breaks, added parentheses and an
+ * intervening `await` are all invisible to it. Two false-positive classes fall out for
+ * free, because comments and string literals are not expressions: prose about the pattern
+ * is no longer counted (the #617 defect, where documenting yourself raised a cap), and
+ * neither is the shape written inside a string.
+ *
+ * NOT done by joining the file into one string and matching across newlines: that trades
+ * this false negative for false positives spanning unrelated statements, and still cannot
+ * tell a comparison from a comment.
  */
 
 const packagesRoot = path.join(import.meta.dirname!, "..", "..", "..");
@@ -57,6 +92,15 @@ const BASELINE: Record<string, number> = {
   "server/src/services/autodrive-stall-warning.service.ts::<row-value>": 1,
   "server/src/services/autodrive-stall-warning.service.ts::auto_merge_disabled_${row.projectId}": 1,
   "server/src/services/project.service.ts::export_skills_on_registration": 1,
+  // #779: three pre-existing reads the per-line REGEX could not see either — its key group
+  // was `[^()]*?`, so a key built by a CALL (`get(autodrivePrefKey(id))`) never matched. The
+  // AST pass reads the argument whatever its shape, so they surface for the first time here.
+  // Grandfathered, not fixed: production source is not #779's to touch. Each is a per-project
+  // dynamic key with an intentional default-OFF, the same class as the `${projectId}` entries
+  // above.
+  "server/src/services/project-runtime-config.service.ts::autoMergeDisabledPrefKey(input.projectId)": 1,
+  "server/src/services/project-runtime-config.service.ts::autodrivePrefKey(input.projectId)": 1,
+  "server/src/services/project-runtime-config.service.ts::harnessSettingKey(harness, \"plan_auto_continue\")": 1,
   "server/src/services/start-policy.service.ts::board_autodrive_${projectId}": 1,
   "server/src/startup/ancestor-branch-reconciler.ts::<row-value>": 1,
   "server/src/startup/auto-merge-orchestrator.ts::<row-value>": 1,
@@ -79,51 +123,115 @@ const BASELINE: Record<string, number> = {
 
 /** String-typed settings whose legit VALUES include "true"/"false" — not polarity reads. */
 const IGNORED_KEYS = new Set(["output_parser"]);
-/** Non-preference sources that share the same syntactic shape. */
-const LINE_SKIP = /c\.req\.query\(|localStorage|searchParams/;
-const POLARITY = /(?:===|!==)\s*["'](?:true|false)["']/;
-
-/** #583 — the tree walk every guard suite needs, from the one shared helper. */
-const listTsFiles = (dir: string): string[] => walkPackageSources(dir);
+/**
+ * Non-preference sources that share the same syntactic shape. Tested against the TEXT of
+ * the COMPARISON's own subtree rather than the whole line: the per-line version excused
+ * every read that merely happened to share a line with a `searchParams` mention.
+ */
+const NON_PREF_SOURCE = /c\.req\.query\(|localStorage|searchParams/;
+/** Receivers whose property reads are a client Settings record, not an arbitrary object. */
+const SETTINGS_RECEIVERS = new Set(["settings", "prefs", "s"]);
 
 function normalizeKey(raw: string): string {
   return raw.trim().replace(/^["'`]|["'`]$/g, "");
 }
 
-/** Extract the pref keys of every raw polarity read recognizable on this line. */
-function scanLine(line: string): string[] {
-  const keys: string[] = [];
-  if (LINE_SKIP.test(line)) return keys;
-  // prefMap.get("key") === "true" (any receiver, literal or dynamic key)
-  for (const m of line.matchAll(/\.get\(\s*([^()]*?)\s*\)\s*(?:===|!==)\s*["'](?:true|false)["']/g)) keys.push(normalizeKey(m[1]!));
-  // (await getPreference("key")) !== "false"
-  if (line.includes("getPreference(") && POLARITY.test(line)) {
-    const m = line.match(/getPreference\(\s*["']([\w.]+)["']/);
-    keys.push(m ? m[1]! : "<getPreference>");
+/** `"true"` / `"false"` written as a literal — the polarity half of the comparison. */
+function isPolarityLiteral(expr: ts.Expression): boolean {
+  const node = unwrapExpression(expr);
+  return ts.isStringLiteralLike(node) && (node.text === "true" || node.text === "false");
+}
+
+/**
+ * The preference key that the non-literal side of the comparison reads, or `null` when
+ * that side is not a recognizable preference read. The recognized shapes are the ones the
+ * per-line version had, one node kind each:
+ *
+ *   - `prefMap.get(<key>)`            — any receiver, literal or dynamic key
+ *   - `getPreference("key", …)`       — a dynamic key degrades to `<getPreference>`
+ *   - `settings.key` / `prefs[expr]`  — the client Settings-record style
+ *   - `row.value` / a bare `value`    — a DB row whose key is dynamic
+ */
+function preferenceKeyOf(expr: ts.Expression, sf: ts.SourceFile): string | null {
+  const node = unwrapExpression(expr);
+  // `(settings["harness.codex.plan_auto_continue"] ?? settings.plan_auto_continue) !== "false"`:
+  // a coalesced read is ONE polarity decision with a primary key and a fallback, so it counts
+  // once, under the key whose default the polarity actually expresses — the LAST operand.
+  if (ts.isBinaryExpression(node)) {
+    const op = node.operatorToken.kind;
+    if (op === ts.SyntaxKind.QuestionQuestionToken || op === ts.SyntaxKind.BarBarToken) {
+      return preferenceKeyOf(node.right, sf) ?? preferenceKeyOf(node.left, sf);
+    }
+    return null;
   }
-  // settings.key === "true" / prefs.key / s.key (client Settings-record style)
-  for (const m of line.matchAll(/\b(?:settings|prefs|s)\.([A-Za-z_]\w*)\s*\)?\s*(?:===|!==)\s*["'](?:true|false)["']/g)) keys.push(m[1]!);
-  // settings[`dynamic_${id}`] === "true"
-  for (const m of line.matchAll(/\b(?:settings|prefs|s)\[([^\]]+)\]\s*\)?\s*(?:===|!==)\s*["'](?:true|false)["']/g)) keys.push(normalizeKey(m[1]!));
-  // row[0].value !== "false" / ([key, value]) => value === "true"
-  for (const _m of line.matchAll(/\bvalue\s*(?:===|!==)\s*["'](?:true|false)["']/g)) keys.push("<row-value>");
-  return keys.filter((k) => !IGNORED_KEYS.has(k));
+  if (ts.isCallExpression(node)) {
+    const name = calleeName(node);
+    const first = node.arguments[0];
+    if (name === "get") return first ? normalizeKey(first.getText(sf)) : null;
+    if (name === "getPreference") {
+      if (first && ts.isStringLiteralLike(first)) return first.text;
+      return "<getPreference>";
+    }
+    return null;
+  }
+  if (ts.isPropertyAccessExpression(node)) {
+    if (node.name.text === "value") return "<row-value>";
+    const receiver = unwrapExpression(node.expression);
+    if (ts.isIdentifier(receiver) && SETTINGS_RECEIVERS.has(receiver.text)) return node.name.text;
+    return null;
+  }
+  if (ts.isElementAccessExpression(node)) {
+    const receiver = unwrapExpression(node.expression);
+    if (ts.isIdentifier(receiver) && SETTINGS_RECEIVERS.has(receiver.text)) {
+      return normalizeKey(node.argumentExpression.getText(sf));
+    }
+    return null;
+  }
+  // `([key, value]) => value === "true"` — the key is dynamic, the shape is still a read.
+  if (ts.isIdentifier(node) && node.text === "value") return "<row-value>";
+  return null;
+}
+
+export interface PolarityHit {
+  key: string;
+  line: number;
+  text: string;
+}
+
+/**
+ * Every raw polarity read in one source text. Kept as a named function taking the text so
+ * the #779 proof cases below can run the REAL scanner over a synthetic source instead of
+ * asserting things about a regex — a proof against a copy proves nothing.
+ */
+export function scanPolaritySource(cacheKey: string, text: string): PolarityHit[] {
+  const sf = parseGuardSource(cacheKey, text);
+  const hits: PolarityHit[] = [];
+  forEachNode(sf, (node) => {
+    if (!ts.isBinaryExpression(node)) return;
+    const op = node.operatorToken.kind;
+    if (op !== ts.SyntaxKind.EqualsEqualsEqualsToken && op !== ts.SyntaxKind.ExclamationEqualsEqualsToken) return;
+    const readSide = isPolarityLiteral(node.right) ? node.left : isPolarityLiteral(node.left) ? node.right : null;
+    if (!readSide) return;
+    const subtree = node.getText(sf);
+    if (NON_PREF_SOURCE.test(subtree)) return;
+    const key = preferenceKeyOf(readSide, sf);
+    if (key === null || IGNORED_KEYS.has(key)) return;
+    hits.push({ key, line: lineOf(sf, node), text: subtree.replace(/\s+/g, " ").slice(0, 160) });
+  });
+  return hits;
 }
 
 function scanActual(): Map<string, { count: number; sites: string[] }> {
   const actual = new Map<string, { count: number; sites: string[] }>();
   for (const root of scanRoots) {
-    for (const file of listTsFiles(root)) {
+    for (const file of walkPackageSources(root)) {
       const rel = path.relative(packagesRoot, file).replace(/\\/g, "/");
-      const text = fs.readFileSync(file, "utf-8");
-      for (const [i, line] of text.split(/\r?\n/).entries()) {
-        for (const key of scanLine(line)) {
-          const id = `${rel}::${key}`;
-          const entry = actual.get(id) ?? { count: 0, sites: [] };
-          entry.count += 1;
-          entry.sites.push(`${rel}:${i + 1}: ${line.trim().slice(0, 160)}`);
-          actual.set(id, entry);
-        }
+      for (const hit of scanPolaritySource(file, fs.readFileSync(file, "utf-8"))) {
+        const id = `${rel}::${hit.key}`;
+        const entry = actual.get(id) ?? { count: 0, sites: [] };
+        entry.count += 1;
+        entry.sites.push(`${rel}:${hit.line}: ${hit.text}`);
+        actual.set(id, entry);
       }
     }
   }
@@ -156,5 +264,63 @@ describe("raw preference polarity reads are ratcheted (#947)", () => {
       if (count < allowed) stale.push(`${id}: baseline ${allowed}, found ${count} — lower/remove the entry`);
     }
     expect(stale, `Stale baseline entries (nice work — tighten the ratchet):\n${stale.join("\n")}`).toEqual([]);
+  });
+});
+
+/**
+ * #779's proof obligation: a conversion is worth nothing unless it is shown to catch the
+ * form the old guard could not see. These drive the REAL {@link scanPolaritySource} — the
+ * same function the tree scan above uses — so a regression in the scanner fails here
+ * rather than silently re-opening the exemption.
+ */
+describe("the polarity scan sees forms the per-line version could not (#779)", () => {
+  const scan = (name: string, lines: string[]): PolarityHit[] =>
+    scanPolaritySource(`/virtual/pref-polarity/${name}.ts`, lines.join("\n"));
+
+  it("catches the exact wrapped read that hid in plugin-loop.service.ts for months", () => {
+    // The pre-#727 shape: `getPreference(` and the `=== "true"` are on DIFFERENT lines, so
+    // no single line carried both and the old per-line regex saw nothing at all.
+    const hits = scan("wrapped-get-preference", [
+      "async function f(key: string, args: { database: unknown }) {",
+      "  const wasDone =",
+      '    (await getPreference(key, args.database)) === "true";',
+      "  return wasDone;",
+      "}",
+    ]);
+    expect(hits.map((h) => h.key)).toEqual(["<getPreference>"]);
+  });
+
+  it("catches a wrapped prefMap.get() read, literal key intact across the break", () => {
+    const hits = scan("wrapped-map-get", ["const on =", '  prefs.get("auto_monitor")', '    === "true";']);
+    expect(hits.map((h) => h.key)).toEqual(["auto_monitor"]);
+  });
+
+  it("catches a wrapped settings-record read with the polarity literal on the LEFT", () => {
+    const hits = scan("literal-left", ['const on = "true"', "  === settings.persistent_agent;"]);
+    expect(hits.map((h) => h.key)).toEqual(["persistent_agent"]);
+  });
+
+  it("does not count PROSE about the pattern, which the text scan did", () => {
+    // The #617 defect in this same shape: a comment explaining the convention read as an
+    // instance of it, so documenting yourself pushed the ratchet up.
+    const hits = scan("prose", [
+      '// Never write `getPreference("auto_monitor") === "true"` — use getBool instead.',
+      '/* settings.persistent_agent === "true" is the shape this ratchet forbids. */',
+      "const message = 'getPreference(\"x\") === \"true\"';",
+      "export const noop = () => message;",
+    ]);
+    expect(hits).toEqual([]);
+  });
+
+  it("still excuses a non-preference source, and now only within the comparison itself", () => {
+    const excused = scan("non-pref", ['const raw = c.req.query("flag") === "true";']);
+    expect(excused).toEqual([]);
+    // …but a real read no longer rides along just because a neighbour on the same line
+    // mentioned searchParams, which is what the LINE_SKIP regex used to grant.
+    const caught = scan("non-pref-neighbour", [
+      'const q = new URLSearchParams(location.search).get("x");',
+      'const on = prefs.get("auto_monitor") === "true";',
+    ]);
+    expect(caught.map((h) => h.key)).toEqual(["auto_monitor"]);
   });
 });
