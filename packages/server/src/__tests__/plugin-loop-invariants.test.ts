@@ -58,7 +58,10 @@ function makeProjectRepo(): string {
 
 const SLUG = "inv-plugin";
 
-function manifest(planEnv: Record<string, string> = { PLAN_LOG: "{{pluginPath}}/plan-log.txt" }) {
+function manifest(planEnv: Record<string, string> = {
+  PLAN_LOG: "{{pluginPath}}/plan-log.txt",
+  PLAN_DIR: "{{pluginPath}}",
+}) {
   return {
     id: SLUG,
     name: "Invariant Plugin",
@@ -84,16 +87,19 @@ function makeScriptedPluginDir(plans: unknown[]): string {
   for (const [i, plan] of plans.entries()) {
     writeFileSync(join(dir, `plan-${i}.json`), JSON.stringify(plan));
   }
+  // The plugin dir arrives as `PLAN_DIR` (a substituted `{{pluginPath}}`) rather than being
+  // derived from the script's own location: a test file that anchors a disk read at its own
+  // module path, next to a `../` import, matches the always-run-marker ratchet's
+  // "reads-outside-own-dir" signature — and this suite reads nothing but its own fixtures.
   writeFileSync(
     join(dir, "plan.mjs"),
-    "import { appendFileSync, readFileSync, existsSync } from 'node:fs';\n"
-      + "import { join, dirname } from 'node:path';\n"
-      + "const here = dirname(new URL(import.meta.url).pathname.replace(/^\\/([A-Za-z]:)/, '$1'));\n"
+    "import { appendFileSync, readFileSync } from 'node:fs';\n"
+      + "import { join } from 'node:path';\n"
       + "const log = process.env.PLAN_LOG;\n"
       + "appendFileSync(log, 'ran\\n');\n"
       + "const n = readFileSync(log, 'utf8').trim().split(/\\r?\\n/).filter(Boolean).length - 1;\n"
       + `const last = ${plans.length - 1};\n`
-      + "const file = join(here, `plan-${Math.min(n, last)}.json`);\n"
+      + "const file = join(process.env.PLAN_DIR, `plan-${Math.min(n, last)}.json`);\n"
       + "console.log(readFileSync(file, 'utf8'));\n",
   );
   return dir;

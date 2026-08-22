@@ -1,13 +1,8 @@
-import { existsSync, readFileSync } from "node:fs";
-import { listWorkflowTemplates, type WorkflowDb } from "@agentic-kanban/shared/lib/workflow-engine";
 import {
   parsePluginManifest,
-  pluginSkillName,
   substitutePluginEnv,
-  buildPluginPlaceholderVars,
   substitutePluginPlaceholders,
   type PluginManifest,
-  type PluginPlaceholderVars,
 } from "@agentic-kanban/shared/lib/plugin-manifest";
 import type { Database } from "../db/index.js";
 import { resolvePublicBoardUrl } from "../runtime-port.js";
@@ -28,6 +23,18 @@ import { createPluginEnablementOps } from "./plugin-enablement.service.js";
 import { createPluginLifecycleOps } from "./plugin-lifecycle.service.js";
 import { createPluginListingOps } from "./plugin-listing.service.js";
 import { createPluginProjectSurfaceOps } from "./plugin-project-surface.service.js";
+import { buildButlerFragments } from "./plugin/butler-fragments.js";
+import {
+  resolveLoopRunContext as resolveLoopRunContextIn,
+  resolvePluginRunContext as resolvePluginRunContextIn,
+  type RunContextDeps,
+} from "./plugin/run-context.js";
+import {
+  runPluginSkill,
+  type PluginSkillRunResult,
+  type RunSkillOptions,
+} from "./plugin/skill-run.js";
+import { resolveWorkflowTemplateId as resolveWorkflowTemplateIdIn } from "./plugin/workflow-resolution.js";
 
 /**
  * Plugin system core (server side).
@@ -49,9 +56,7 @@ import { createPluginProjectSurfaceOps } from "./plugin-project-surface.service.
 
 // Re-exported so existing `import { PluginError } from "./plugin.service.js"` keeps working.
 export { PluginError } from "./plugin-errors.js";
-import { resolveInside } from "./plugin-fs.js";
 import { PluginError } from "./plugin-errors.js";
-import { requireScaffoldReady } from "./plugin-scaffold.js";
 import { createPluginLoopExtras, validatePluginSource } from "./plugin-loop-extras.service.js";
 import type { BoardEvents } from "./board-events.js";
 import {
@@ -81,23 +86,9 @@ export type PluginScriptResult = PluginCommandResult;
 export type { EnableReport } from "./plugin-enablement.service.js";
 export type { PluginUpdateResult } from "./plugin-lifecycle.service.js";
 
-export interface PluginSkillRunResult {
-  issueId: string;
-  issueNumber: number | null;
-  workspaceId: string;
-  branch: string;
-}
-
-/**
- * Stages of a skill launch, in order. The ticket lands in milliseconds and the workspace behind
- * it takes minutes (worktree → the project's setup script → agent launch), so a launcher that
- * only sees the final result stares at a spinner with no evidence anything happened — while the
- * ticket has in fact been on the board the whole time.
- */
-export type PluginSkillRunProgress =
-  | { stage: "ticket"; issueId: string; issueNumber: number | null; title: string }
-  | { stage: "workspace"; issueId: string; issueNumber: number | null; setupScript: string | null }
-  | ({ stage: "done" } & PluginSkillRunResult);
+// The agentic skill launch lives in plugin/skill-run.ts; its result/progress types are
+// re-exported here because the plugins route and its streaming mode import them from this module.
+export type { PluginSkillRunResult, PluginSkillRunProgress } from "./plugin/skill-run.js";
 
 export function createPluginService(deps: {
   database: Database;
@@ -178,82 +169,12 @@ export function createPluginService(deps: {
   });
 
   /**
-   * What an enabled plugin can be ASKED to do, derived from its manifest so it cannot drift out of
-   * date the way hand-written prose does. Returns "" when the plugin declares neither skills nor
-   * loops, so a plugin with nothing to offer adds nothing to the butler's context.
+   * What the butler is told about the enabled plugins — the author's own fragment plus a DERIVED
+   * capability roster. Lives in plugin/butler-fragments.ts; `peekOutputRepoPath` is passed rather
+   * than `resolveOutputRepoPath` because assembling a prompt must not materialize a sidecar repo.
    */
-  function pluginCapabilityRoster(manifest: PluginManifest): string {
-    const lines: string[] = [];
-    const skills = manifest.skills ?? [];
-    if (skills.length) {
-      lines.push("**Skills it provides** (run one to create a ticket and launch a workspace against it):");
-      for (const s of skills) {
-        const name = pluginSkillName(s.dir);
-        lines.push(s.description ? `- \`${name}\` — ${s.description}` : `- \`${name}\``);
-      }
-    }
-    const loops = manifest.loops ?? [];
-    if (loops.length) {
-      if (lines.length) lines.push("");
-      lines.push("**Converging loops** (each advance tickets the units its plan says are ready):");
-      for (const l of loops) {
-        const via = l.skill ? ` — hands out \`${l.skill}\`` : "";
-        lines.push(`- \`${l.name}\`${l.label && l.label !== l.name ? ` (${l.label})` : ""}${via}`);
-      }
-    }
-    return lines.join("\n");
-  }
-
   async function getButlerFragments(projectId: string): Promise<string[]> {
-    const enabledPlugins = await listEnabledPlugins(projectId, database);
-    if (enabledPlugins.length === 0) return [];
-    let project: { id: string; repoPath: string; name: string } | null = null;
-    try {
-      project = await requireProject(projectId);
-    } catch {
-      return [];
-    }
-    const fragments: string[] = [];
-    for (const { row, manifest } of enabledPlugins) {
-      try {
-        // `{{repoPath}}` is the OUTPUT repo at every other substitution site; this one used to
-        // hand the butler the LEADING repo for both placeholders, so in sidecar mode a fragment
-        // saying "the register lives in {{repoPath}}/docs" named a path with nothing in it.
-        // Resolved WITHOUT creating anything — assembling a prompt must not materialize a repo —
-        // so a sidecar that has not been created yet still falls back to the leading repo.
-        const vars = buildPluginPlaceholderVars({
-          outputRepoPath: await peekOutputRepoPath(row.pluginId, project),
-          leadingRepoPath: project.repoPath,
-          projectName: project.name,
-          pluginPath: row.localPath,
-          boardUrl,
-          projectId,
-        });
-
-        const parts: string[] = [];
-        if (manifest.butler?.promptFragment) {
-          const fragmentPath = resolveInside(row.localPath, manifest.butler.promptFragment, "butler.promptFragment");
-          if (existsSync(fragmentPath)) {
-            const text = substitutePluginPlaceholders(readFileSync(fragmentPath, "utf8"), vars).trim();
-            if (text) parts.push(text);
-          }
-        }
-
-        // The roster is DERIVED, not authored. A plugin's own fragment is written by its author and
-        // drifts: it explains how to consume the output and rarely lists what the plugin can be
-        // ASKED to do. So every enabled plugin contributes its skills and loops here automatically,
-        // and a plugin that ships no fragment at all still announces its capabilities instead of
-        // being invisible. Skill names are the directory basenames — the same identifiers
-        // `loops[].skill` uses and the same ones materialized into each ticket's worktree.
-        const roster = pluginCapabilityRoster(manifest);
-        if (roster) parts.push(roster);
-
-        if (parts.length) fragments.push(`## Plugin: ${row.name}\n\n${parts.join("\n\n")}`);
-      } catch {
-        /* a broken plugin must never take the butler down */
-      }
-    }
-    return fragments;
+    return buildButlerFragments(projectId, { database, boardUrl, requireProject, peekOutputRepoPath });
   }
 
   async function runScript(pluginRowId: string, scriptName: string, projectId: string): Promise<PluginScriptResult> {
@@ -268,107 +189,25 @@ export function createPluginService(deps: {
   }
 
   /**
-   * Launch an agentic (judgment-requiring) plugin skill against a project — the
-   * counterpart to `runScript` for the manifest's `skills` entries, which cannot be
-   * a deterministic subprocess (e.g. `prd-consolidation` reads/translates analysis
-   * docs, it doesn't just shell out). Creates a ticket carrying the skill's brief,
-   * then launches a workspace against it exactly like the board's own "New
-   * Workspace" flow — so it inherits the project's Strategy Bullseye provider
-   * selection, review, and merge gates, same as any other ticket.
+   * Launch an agentic (judgment-requiring) plugin skill against a project — a ticket carrying the
+   * skill's brief plus a workspace against it, so it inherits the board's own provider selection,
+   * review and merge gates. See plugin/skill-run.ts.
    */
   async function runSkill(
     pluginRowId: string,
     skillName: string,
     projectId: string,
-    opts?: {
-      title?: string;
-      description?: string;
-      prompt?: string;
-      /** Explicit workflow template for the ticket; overrides the manifest's declared default. */
-      workflowTemplateId?: string | null;
-      onProgress?: (event: PluginSkillRunProgress) => void;
-    },
+    opts?: RunSkillOptions,
   ): Promise<PluginSkillRunResult> {
-    if (!createIssue || !createWorkspace) {
-      throw new PluginError("Skill execution is not available on this route", "BAD_REQUEST");
-    }
-    const plugin = await requirePlugin(pluginRowId);
-    const project = await requireProject(projectId);
-    const skillDef = (plugin.manifest.skills ?? []).find((s) => pluginSkillName(s.dir) === skillName);
-    if (!skillDef) throw new PluginError(`Skill "${skillName}" not found in plugin manifest`, "NOT_FOUND");
-
-    // Workflow precedence: what the launcher picked → what the plugin declares for this skill →
-    // the board's per-issue-type default. The launcher's choice always wins; the manifest only
-    // supplies a better starting point than "whatever the board does for a generic task".
-    const workflowTemplateId = opts?.workflowTemplateId
-      ?? await resolveWorkflowTemplateId(projectId, skillDef.workflow);
-
-    const title = opts?.title?.trim() || `${plugin.name}: run ${skillName}`;
-    const base = opts?.description?.trim()
-      || `Run the \`${skillName}\` skill from the "${plugin.name}" plugin against this project.`;
-    // `prompt` is what the launcher typed: extra context for THIS run ("only the billing
-    // module", "focus on the error paths"). It is APPENDED rather than substituted, because a
-    // description that replaced the base would drop the one sentence naming the skill to run.
-    const extra = opts?.prompt?.trim();
-    const description = extra ? `${base}\n\n## Additional context for this run\n\n${extra}` : base;
-
-    const issue = await createIssue({
-      projectId,
-      title,
-      description,
-      issueType: "task",
-      priority: "medium",
-      skipAutoReview: true,
-      workflowTemplateId,
-    });
-    // The ticket exists within milliseconds; provisioning the workspace behind it takes MINUTES
-    // (worktree, then the project's setup script, then the agent launch). Reporting the ticket
-    // now is the difference between "nothing happened" and "it is running" — see the route's
-    // streaming mode, which forwards these to the launcher.
-    opts?.onProgress?.({ stage: "ticket", issueId: issue.id, issueNumber: issue.issueNumber, title });
-    opts?.onProgress?.({
-      stage: "workspace",
-      issueId: issue.id,
-      issueNumber: issue.issueNumber,
-      setupScript: project.setupEnabled === false ? null : project.setupScript ?? null,
-    });
-
-    const workspace = await createWorkspace({ issueId: issue.id, skillName });
-    const result = {
-      issueId: issue.id,
-      issueNumber: issue.issueNumber,
-      workspaceId: workspace.id,
-      branch: workspace.branch,
-    };
-    opts?.onProgress?.({ stage: "done", ...result });
-    return result;
+    return runPluginSkill(
+      { pluginRowId, skillName, projectId, opts },
+      { database, requirePlugin, requireProject, createIssue, createWorkspace },
+    );
   }
 
-  /**
-   * Resolve a manifest's `workflow` string to a template id for this project.
-   *
-   * Accepts a builtin key (`research-task`), a template name ("Research Task"), or an id, in
-   * that order — a plugin ships one manifest for every board, so it cannot know local template
-   * ids, and builtin keys are the only stable handle across installs. An unresolvable value is
-   * NOT an error: the board's own default takes over and a warning is logged, because a plugin
-   * naming a workflow this board has never heard of should degrade, not block the launch.
-   */
-  async function resolveWorkflowTemplateId(
-    projectId: string,
-    workflow: string | undefined,
-  ): Promise<string | null> {
-    const wanted = workflow?.trim();
-    if (!wanted) return null;
-    const templates = await listWorkflowTemplates(database as unknown as WorkflowDb, projectId);
-    const needle = wanted.toLowerCase();
-    const match = templates.find((t) => t.builtinKey?.toLowerCase() === needle)
-      ?? templates.find((t) => t.name.toLowerCase() === needle)
-      ?? templates.find((t) => t.id === wanted);
-    if (!match) {
-      console.warn(`[plugins] workflow "${wanted}" not found for project ${projectId} — using the board default`);
-      return null;
-    }
-    return match.id;
+  /** A manifest's `workflow` string resolved to a template id for this project. */
+  async function resolveWorkflowTemplateId(projectId: string, workflow: string | undefined) {
+    return resolveWorkflowTemplateIdIn(projectId, workflow, database);
   }
 
   /** Per-loop ticket counts for one plugin (cheap — does not run the planner). */
@@ -379,68 +218,28 @@ export function createPluginService(deps: {
   }
 
   /**
-   * Everything a plugin RUN needs, resolved once (#554): the plugin row + manifest, the
-   * project, where its output goes, and the placeholder vars. The prelude (requirePlugin →
-   * requireProject → resolveOutputRepoPath → optional scaffold check) was written out at
-   * every entry point, and each copy could disagree — the measured one handed the butler
-   * the leading repo as `{{repoPath}}`.
+   * The prelude every plugin entry point shares (#554) — see plugin/run-context.ts, which owns
+   * the `{{repoPath}}` = OUTPUT repo / `{{leadingRepoPath}}` = product repo rule (#213).
    */
+  const runContextDeps: RunContextDeps = {
+    boardUrl, database, requirePlugin, requireProject, resolveOutputRepoPath,
+  };
+
   async function resolvePluginRunContext(
     pluginRowId: string,
     projectId: string,
     opts?: { requireScaffoldFor?: "loops" | "scripts" },
   ): Promise<PluginRunContext> {
-    const plugin = await requirePlugin(pluginRowId);
-    const project = await requireProject(projectId);
-    const outputRepoPath = await resolveOutputRepoPath(plugin, project);
-    if (opts?.requireScaffoldFor) await requireScaffoldReady(plugin, outputRepoPath, opts.requireScaffoldFor);
-    return {
-      plugin,
-      project,
-      outputRepoPath,
-      vars: buildPluginPlaceholderVars({
-        outputRepoPath,
-        leadingRepoPath: project.repoPath,
-        projectName: project.name,
-        pluginPath: plugin.localPath,
-        boardUrl,
-        projectId,
-      }),
-    };
+    return resolvePluginRunContextIn(pluginRowId, projectId, runContextDeps, opts);
   }
 
-  /**
-   * The same, plus the flat argument object every loop entry point passes to the loop
-   * engine — `advanceLoop` and `resolveLoopGate` built it field by field from identical
-   * preludes, including the "a loop declares its own workflow, or inherits its skill's"
-   * rule, which nobody is at the keyboard to supply when the monitor advances a round.
-   */
   async function resolveLoopRunContext(
     pluginRowId: string,
     loopName: string,
     projectId: string,
     opts?: { requireScaffoldFor?: "loops" },
   ): Promise<PluginLoopRunContext> {
-    const ctx = await resolvePluginRunContext(pluginRowId, projectId, opts);
-    const loopDef = (ctx.plugin.manifest.loops ?? []).find((l) => l.name === loopName);
-    const skillDef = (ctx.plugin.manifest.skills ?? []).find((s) => pluginSkillName(s.dir) === loopDef?.skill);
-    const workflowTemplateId = await resolveWorkflowTemplateId(projectId, loopDef?.workflow ?? skillDef?.workflow);
-    return {
-      ...ctx,
-      args: {
-        pluginRowId: ctx.plugin.id,
-        manifest: ctx.plugin.manifest,
-        pluginSlug: ctx.plugin.pluginId,
-        pluginName: ctx.plugin.name,
-        pluginLocalPath: ctx.plugin.localPath,
-        loopName,
-        projectId,
-        projectName: ctx.project.name,
-        repoPath: ctx.outputRepoPath,
-        leadingRepoPath: ctx.project.repoPath,
-        workflowTemplateId,
-      },
-    };
+    return resolveLoopRunContextIn(pluginRowId, loopName, projectId, runContextDeps, opts);
   }
 
   /**

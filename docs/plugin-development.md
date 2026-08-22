@@ -386,7 +386,11 @@ JSON`:
 
 #### Four loop rules that will bite you
 
-Every one of these fails *silently* — the loop looks fine and the work does not happen.
+Every one of these fails *silently* — the loop looks fine and the work does not happen. Rules 1
+and 2 are the board's side of the contract, so they are guarded rather than only documented:
+`packages/server/src/__tests__/plugin-loop-invariants.test.ts` fails if an advance stops skipping
+an already-ticketed unit whose ticket is terminal, or if `converged` starts being persisted for a
+plan that handed out work.
 
 1. **A unit id is a permanent dedupe key.** An advance skips any unit already ticketed — terminal
    or not. Re-reporting `billing` forever is read as "already ticketed" and does nothing. Work
@@ -854,8 +858,13 @@ half-valid. The rules that are easy to trip:
 | Concern | File |
 |---|---|
 | the contract (types, parser, helpers) | `packages/shared/src/lib/plugin-manifest.ts` |
-| install, enable, fan-out, views, scripts, skills | `packages/server/src/services/plugin.service.ts` |
+| install, enable, fan-out, views, scripts, skills | `packages/server/src/services/plugin.service.ts` (composition root; the sub-services it wires are the `plugin-*.service.ts` siblings and `services/plugin/*`) |
 | loop advance: plan → dedupe → tickets | `packages/server/src/services/plugin-loop.service.ts` |
+| the unit-id dedupe — **the planner's contract** | `packages/server/src/services/plugin/loop-unit-tickets.ts` |
+| running the planner, parsing its plan | `packages/server/src/services/plugin/loop-plan.ts` |
+| serializing overlapping advances of one loop | `packages/server/src/services/plugin/loop-advance-lock.ts` |
+| gate notifications; applying a human's decision | `packages/server/src/services/plugin/loop-gate-notify.ts`, `…/loop-gate-resolve.ts` |
+| per-loop status the UI polls (planner NOT run) | `packages/server/src/services/plugin/loop-status.ts` |
 | the monitor pass that continues loops | `packages/server/src/services/plugin-loop-monitor.ts` |
 | running a plugin command | `packages/server/src/services/plugin-exec.ts` |
 | REST surface | `packages/server/src/routes/plugins.ts` |
