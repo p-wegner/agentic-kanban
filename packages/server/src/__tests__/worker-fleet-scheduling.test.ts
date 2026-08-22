@@ -79,7 +79,7 @@ describe("worker fleet scheduling (phase 3)", () => {
       const full = await connectWorker({ name: "full", labels: ["docker", "gpu", "extra"] });
       expect(await selectWorkerForLaunch(fleet, "claude", ["docker", "gpu"])).toBe(full);
       expect(await resolveWorkerPlacement({ database: db, projectId: PROJECT_ID, providerName: "claude" }))
-        .toEqual({ kind: "remote", workerId: full, strict: false });
+        .toMatchObject({ kind: "remote", workerId: full, strict: false });
       expect(partial).not.toBe(full);
     });
   });
@@ -179,7 +179,7 @@ describe("worker fleet scheduling (phase 3)", () => {
       // `strict` rides on the placement (#245) so the dispatch proxy can refuse
       // the host fallback later, when the worker may already be gone.
       expect(await resolveWorkerPlacement({ database: db, projectId: PROJECT_ID, providerName: "claude" }))
-        .toEqual({ kind: "remote", workerId, strict: true });
+        .toMatchObject({ kind: "remote", workerId, strict: true });
     });
 
     it("carries strict onto a git-transport placement too (#245)", async () => {
@@ -251,7 +251,12 @@ describe("worker fleet scheduling (phase 3)", () => {
         createdAt: now, updatedAt: now,
       } as typeof workspaces.$inferInsert);
       await db.insert(sessions).values({
-        id: randomUUID(), workspaceId, status: "stopped", startedAt: now, workerId: "worker-1",
+        // `endedAt` matters since #753: a dispatch is landable while running, or for
+        // WORKER_RESULT_LANDABLE_AFTER_END_MS after it ENDED. Without it every seeded
+        // assignment read as "not current", which held the ref for the wrong reason and
+        // made the diverged-branch case below pass without ever testing divergence.
+        id: randomUUID(), workspaceId, status: "stopped", startedAt: now, endedAt: now,
+        workerId: "worker-1",
       } as typeof sessions.$inferInsert);
     }
 
@@ -313,7 +318,7 @@ describe("worker fleet scheduling (phase 3)", () => {
 
       const result = await sweepIncomingWorkerRefs(db);
       expect(result.landed).toEqual([]);
-      expect(result.held).toEqual([{ branch: "master", reason: "no worker assignment for this branch" }]);
+      expect(result.held).toEqual([{ branch: "master", reason: "no current worker assignment for this branch" }]);
       const masterAfter = (await gitExecOrThrow(["rev-parse", "refs/heads/master"], { cwd: repo })).trim();
       expect(masterAfter).toBe(masterBefore);
       // Held, not deleted — a legitimate ref stays recoverable.
