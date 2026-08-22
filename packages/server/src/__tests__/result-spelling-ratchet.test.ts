@@ -29,7 +29,9 @@ import path from "node:path";
 const SERVER_SRC = path.join(import.meta.dirname!, "..");
 const SHARED_LIB = path.join(SERVER_SRC, "..", "..", "shared", "src", "lib");
 
-const SUCCESS_SPELLING_CAP = 38;
+// 38 -> 35: the old cap counted 3 PROSE mentions (see stripComments below). Lowered to the
+// honest code-only count rather than left slack — slack in a shrink-only ratchet is budget.
+const SUCCESS_SPELLING_CAP = 35;
 /**
  * 168 -> 169 (#595). NOT a new inline body: `routes/internal-monitor.ts` MOVED here from
  * `startup/monitor-setup.ts`, carrying its unchanged `c.json({ error: "resource sweep
@@ -38,7 +40,8 @@ const SUCCESS_SPELLING_CAP = 38;
  * here too. Raising a ratchet is otherwise forbidden; this is an accounting correction for
  * a population that grew by relocation, and the guard is unchanged for new code.
  */
-const INLINE_ROUTE_ERROR_CAP = 169;
+// 169 -> 167, same reason: two of those were comments about the pattern, not instances of it.
+const INLINE_ROUTE_ERROR_CAP = 167;
 
 function tsFiles(dir: string, skip: (name: string, full: string) => boolean = () => false): string[] {
   if (!fs.existsSync(dir)) return [];
@@ -49,11 +52,33 @@ function tsFiles(dir: string, skip: (name: string, full: string) => boolean = ()
   });
 }
 
+/**
+ * Strip comments before counting. Both caps below are about the SPELLING A CALLER MUST
+ * BRANCH ON, which a comment is not — and this scan counted prose for as long as it has
+ * existed. It surfaced when #735 wrote the sentence "the HTTP layer answers `{success:true}`
+ * either way" into `project-worktrees.service.ts` and pushed the cap from 38 to 39: a
+ * comment ABOUT the spelling read as a new instance of it. Two pre-existing matches
+ * (`session-exit-stats.ts`, `workspace-launch-failures.service.ts`) are also prose, so the
+ * old caps were partly counting documentation.
+ *
+ * Same defect class as #707's "documented" check, which accepted any backticked mention of
+ * a variable as a doc row until #734 tightened it. A guard that cannot tell code from prose
+ * punishes explaining yourself, which is the opposite of what these ratchets are for.
+ *
+ * Deliberately a text strip, not an AST pass: this suite counts a SPELLING and never needs
+ * to resolve a symbol, so a parse would buy nothing. A `//` inside a string literal (a URL)
+ * is the known imprecision; it can only UNDER-count, and undercounting a shrink-only cap
+ * cannot let a new spelling in unnoticed — the cap moves down with it.
+ */
+function stripComments(text: string): string {
+  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+}
+
 function count(files: string[], re: RegExp): { total: number; byFile: Array<[string, number]> } {
   const byFile: Array<[string, number]> = [];
   let total = 0;
   for (const f of files) {
-    const n = (fs.readFileSync(f, "utf8").match(re) ?? []).length;
+    const n = (stripComments(fs.readFileSync(f, "utf8")).match(re) ?? []).length;
     if (n > 0) {
       byFile.push([path.relative(SERVER_SRC, f).split(path.sep).join("/"), n]);
       total += n;
