@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
 
 export const projects = sqliteTable("projects", {
   id: text("id").primaryKey(),
@@ -29,4 +29,8 @@ export const projects = sqliteTable("projects", {
   servicesConfig: text("services_config"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
-});
+}, (table) => ({
+  // FK-supporting index (#740) — the FK itself lives in SQL only (see the migrations),
+  // but deleting an agent skill still has to check this column.
+  defaultSkillIdIdx: index("idx_projects_default_skill_id").on(table.defaultSkillId),
+}));

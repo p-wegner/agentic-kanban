@@ -40,5 +40,9 @@ export const workspaceProvisioning = sqliteTable(
     phase: text("phase").notNull(),
     startedAt: text("started_at").notNull(),
   },
-  (table) => [index("idx_workspace_provisioning_issue").on(table.issueId)],
+  (table) => [
+    index("idx_workspace_provisioning_issue").on(table.issueId),
+    // FK-supporting index (#740).
+    index("idx_workspace_provisioning_project_id").on(table.projectId),
+  ],
 );

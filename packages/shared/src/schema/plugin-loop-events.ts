@@ -34,4 +34,7 @@ export const pluginLoopEvents = sqliteTable("plugin_loop_events", {
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
 }, (table) => ({
   loopIdx: index("idx_plugin_loop_events_loop").on(table.pluginSlug, table.loopName, table.projectId, table.createdAt),
+  // FK-supporting index (#740): project_id is only the THIRD column of the composite
+  // index above, so the cascade check on a project delete was a full scan.
+  projectIdIdx: index("idx_plugin_loop_events_project_id").on(table.projectId),
 }));

@@ -1,4 +1,4 @@
-import { sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, index, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { relations } from "drizzle-orm";
 import { issues } from "./issues.js";
 
@@ -44,6 +44,9 @@ export const issueDependencies = sqliteTable("issue_dependencies", {
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
 }, (t) => [
   uniqueIndex("issue_dependencies_unique").on(t.issueId, t.dependsOnId, t.type),
+  // FK-supporting index (#740): dependsOnId is only the SECOND column of the unique
+  // index above, so reverse-edge lookups and the cascade check were full scans.
+  index("idx_issue_dependencies_depends_on_id").on(t.dependsOnId),
 ]);
 
 export const issueDependenciesRelations = relations(issueDependencies, ({ one }) => ({

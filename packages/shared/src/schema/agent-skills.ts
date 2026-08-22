@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
 import { projects } from "./projects.js";
 
 export const agentSkills = sqliteTable("agent_skills", {
@@ -21,4 +21,7 @@ export const agentSkills = sqliteTable("agent_skills", {
   contentHash: text("content_hash"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
-});
+}, (table) => ({
+  // FK-supporting index (#740); also the hot path for project-scoped skill lookups.
+  projectIdIdx: index("idx_agent_skills_project_id").on(table.projectId),
+}));

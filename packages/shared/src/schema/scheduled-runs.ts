@@ -18,7 +18,11 @@ export const scheduledRuns = sqliteTable("scheduled_runs", {
   lastRunWorkspaceId: text("last_run_workspace_id"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   updatedAt: text("updated_at").notNull().$defaultFn(() => new Date().toISOString()),
-});
+}, (table) => ({
+  // FK-supporting indexes (#740) — the table had none at all.
+  projectIdIdx: index("idx_scheduled_runs_project_id").on(table.projectId),
+  skillIdIdx: index("idx_scheduled_runs_skill_id").on(table.skillId),
+}));
 
 export const scheduledRunHistory = sqliteTable("scheduled_run_history", {
   id: text("id").primaryKey(),
