@@ -136,7 +136,8 @@ export async function getStatusIdsByName(
 }
 
 /**
- * The `{ id, name }` list for a project's statuses — declared ONCE (#732).
+ * The `{ id, name }` list for a project's statuses — declared ONCE (#732), and always
+ * ORDERED by `sortOrder` (#773).
  *
  * Six repositories each carried a byte-identical copy of this query under six different
  * names: `getProjectStatusOptions` (merge-cleanup), `getProjectStatusIdsAndNames`
@@ -144,11 +145,46 @@ export async function getStatusIdsByName(
  * `getProjectStatusNamesForVoiceCapture` (voice-capture) and `getProjectStatusRows` — the
  * same name, twice, in workspace-launch-failures and workspace-risk. Two more read it
  * inline. That is the "repeated accessor shape" #732 names, and the copies had already
- * DRIFTED: board-status's variant orders by `sortOrder`, the other six return whatever
- * SQLite hands back, so the same list is stable in one view and arbitrary in five.
+ * DRIFTED: board-status's variant ordered by `sortOrder`, the other six returned whatever
+ * SQLite handed back. #732 preserved that split behind an `opts.ordered` flag so the
+ * consolidation stayed behaviour-preserving; #773 resolves it.
  *
- * `ordered` is opt-in rather than always-on so this is a pure consolidation: making the six
- * unordered callers newly ordered would be a behaviour change smuggled into a refactor.
+ * ## Why there is no longer a flag
+ *
+ * "Unordered" is not a cheaper mode, it is an unspecified one. Measured on the real board DB
+ * (29 projects, 7 statuses each), the unordered plan is
+ * `SEARCH project_statuses USING INDEX project_statuses_project_name_unique (project_id=?)`
+ * — so today it returns NAME order: `AI Reviewed, Backlog, Cancelled, Done, In Progress,
+ * In Review, Todo`, whose first element is "AI Reviewed" and not the board's actual first
+ * column "Backlog". That is #668's failure mode still latent in six call sites; it moves
+ * again with any index/plan/VACUUM change.
+ *
+ * The cost of always ordering was measured before deciding, since there is no
+ * `(project_id, sort_order)` index and the ordered plan adds `USE TEMP B-TREE FOR ORDER BY`:
+ * over 4000 queries against the real DB, unordered ran 53-60 us and ordered 49-54 us — the
+ * ORDER BY is inside the noise (and both runs happened to favour it) because the temp B-tree
+ * sorts seven rows. So no index is needed and no caller pays for correctness; an
+ * `{ ordered: false }` escape hatch would only be an invitation to reintroduce the bug.
+ *
+ * ## The eight callers, classified (#773)
+ *
+ * Order-DEPENDENT — would be silently wrong on an unordered read:
+ * - `board-status.repository` -> the board's columns, rendered left-to-right to a human.
+ * - `voice-capture.repository` -> `findTargetStatus` falls back to a SUBSTRING match
+ *   (`"review"` matches both "In Review" and "AI Reviewed", first hit wins) and the
+ *   not-found error renders the whole list to the user.
+ *
+ * Order-INDEPENDENT — each reduces the rows to a keyed lookup, and `project_statuses` has a
+ * UNIQUE (project_id, name) index since 0125, so no `find`-by-name can be ambiguous:
+ * - `issue.repository` (`initializeProjectStatuses`) -> Set of names + id-by-name record.
+ * - `merge-cleanup.repository` -> `find` by exact name, and by status id.
+ * - `project-service.repository` -> `filter(name === "Archived").map(id)`.
+ * - `sprint-capacity.repository` -> `filter(name in BACKLOG_STATUS_NAMES).map(id)`.
+ * - `workspace-launch-failures.repository` / `workspace-risk.repository` -> a Set of
+ *   terminal ids + a `Map<id, name>`.
+ *
+ * They get ordered rows anyway, which is free and cannot hurt them. Each call site carries a
+ * one-line note saying which group it is in, so the next reader does not re-derive this.
  *
  * The six original names are kept as one-line delegations at their old locations (the
  * `compat shim` kind — see packages/server/CLAUDE.md), so no service caller changes and the
@@ -157,11 +193,10 @@ export async function getStatusIdsByName(
 export async function listProjectStatusIdNames(
   projectId: string,
   database: Database = db,
-  opts: { ordered?: boolean } = {},
 ) {
-  const query = database
+  return database
     .select(projectStatusIdName)
     .from(projectStatuses)
-    .where(eq(projectStatuses.projectId, projectId));
-  return opts.ordered ? query.orderBy(projectStatuses.sortOrder) : query;
+    .where(eq(projectStatuses.projectId, projectId))
+    .orderBy(projectStatuses.sortOrder);
 }

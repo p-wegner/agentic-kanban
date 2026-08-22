@@ -26,6 +26,10 @@ export async function getIssueProject(issueId: string, database: Database = db) 
   return rows[0] ?? null;
 }
 
+// Order-INDEPENDENT (#773): reconcileMergedIssue only `find`s by exact name ("Done" /
+// "AI Reviewed") and by the issue's own status id, and (project_id, name) is unique since
+// 0125, so no ordering can change which row it picks. Ordered anyway — the accessor always
+// is, at no measured cost.
 export async function getProjectStatusOptions(projectId: string, database: Database = db) {
   return listProjectStatusIdNames(projectId, database);
 }
