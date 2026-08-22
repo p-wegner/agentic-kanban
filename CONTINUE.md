@@ -567,3 +567,102 @@ parity-checked from the day it lands rather than after it drifts.
 - **Open**: the 22 baseline entries are a real backlog, and the gate PRINTS (never fails) entries a
   file has improved past, so they have to be lowered by hand. `runAutoStart` at 55 is more than
   double the threshold and is the obvious first restructure.
+
+## The backlog wave (2026-08-22, session 97d17e44) — 20 tickets landed, ONE gate pass
+
+Asked to "implement all backlog items", run as `direct-master` mode 2 (subagents on the shared
+main checkout, partitioned by file overlap, pathspec commits, **gates once per wave** rather than
+per ticket). 40 commits. The board's Backlog went 35 → 28, and the 28 are almost all NEW —
+findings this wave produced, not leftovers.
+
+### Landed and closed — all verified by the ONE gate pass recorded below
+
+| # | What | Commit(s) |
+|---|---|---|
+| 726 | god-module gate gains `MAX_FUNCTION_BRANCHES=25`, per-FUNCTION | `10f4997420` |
+| 727 | plugin-loop.service 871→353, plugin.service 565→364; 4 untested loop invariants covered | `21c2479dfc`, `42e54edf70` |
+| 731 | Node floor → 22 everywhere it is declared | `6633ae80c3`, `cc62e3a3d4` |
+| 732 | 4 charts → one shell; repository projections declared once | `c21cefc16c`, `be96067114` |
+| 738 | issue-comment read cap + dedup at the single write path + retention (DRY RUN only) | `7bff66c72d`, `bf7a21d7f7`, `26df801175` |
+| 740 | the 12 un-indexed FKs, + an equality ratchet | `36046c6d25` |
+| 741 | `pnpm security` — advisory + licence scan with a stated failure policy | `ed20661444` |
+| 743 | **a true-remote result can now actually land** | `b656904d0e` |
+| 744/745/746 | remote liveness is alive/dead/**unknown**; restart re-adopts; a socket gap holds | `92f02bf8d6`, `198dff3464`, `6eb11f2ddf`, `1488878090` |
+| 747/749 | launch spec carries INTENT, worker resolves its own binary; remote ticket context | `9e04629a36`, `23eb2e0fd6`, `80f06470c5` |
+| 748/751 | repo shapes the transport cannot carry are REFUSED; placement decides the capacity slot | `f082f3bc1b`, `9526bfa104`, `f723c95913` |
+| 752 | held incoming refs observable + reclaimable | `3dc32a299b` |
+| 753/754 | git token dies with its session; daemon drains, survives EPIPE, refuses legibly | `a31daeedbc`, `75b250be80` |
+| 755 | "why was #N not dispatched" as a RECORDED chain + per-session placement | `80f6376581`, `7d57e7ecc3` |
+| 756 | fleet runbook drift + the missing operator manual | `64c99ae0e3` |
+| 758 | the db-safety hook backed up a 0-byte stub while the real 186 MB db sat unprotected | `f3b1cf08f8` |
+
+### The ONE gate pass — and it caught SIX things no per-ticket run could
+
+`check:arch` **0 errors** (god-module OK at 1462 files, `lint:arch` 31 warnings, mcp parity 3/3),
+`pnpm typecheck` clean in all four packages, shared **98 files / 951 tests**, mcp-server **44 / 206**,
+client **156 / 1407**, server **8 shards, 6,619 tests** — green except one pre-existing failure
+(#778, below).
+
+What the batched gate found, none of it visible to the owning ticket's own suites:
+
+1. **#748 hand-rolled `result.code !== 0`** — and `code` cannot distinguish "exited non-zero" from
+   "never spawned", which is the exact distinction that scanner turns on (`95240a67cd`).
+2. **#745's new `startup/` module imported the `db` singleton** — against #715's shrink-only
+   ratchet. Took the ratchet's own advice (inject it) rather than adding a baseline entry
+   (`f16084e73b`).
+3. **#747's POSIX lookup spawned without `windowsHide`** — a CLAUDE.md hard constraint, because a
+   console flash steals focus and kills other agents' worktree servers (`f16084e73b`).
+4. **The new fleet routes answered 422, a status `DOMAIN_CODE_STATUS` could not produce** — so
+   those statuses were invisible to the one place that owns the mapping. Added `UNPROCESSABLE`
+   and converted all six inline bodies; the #617 cap stayed at 167 (`5a4be306ac`).
+5. **#751's new `reservationId` broke two whole-object placement assertions**, and — the real find
+   — `seedWorkerAssignment` never stamped `endedAt`, so since #753 EVERY seeded assignment read as
+   stale. That made "holds (never force-lands) a diverged branch" **pass without ever testing
+   divergence** (`11c886fd8f`). A fixture that silently stops exercising its subject is worse than
+   a red test.
+6. **A #947 polarity violation that only became VISIBLE when #727 reformatted it** onto one line —
+   the guard matches per line, so the multi-line form had always been invisible (`af06546050`).
+
+### Two corrections to things this session itself asserted
+
+- **#777 as filed was wrong.** "Both fleet e2e suites are red at HEAD" — they pass in ISOLATION
+  (3/3 and 16/16). The failures are cross-suite interference, which is **#680**, and the evidence
+  is strong: a DIFFERENT suite failed on each of three full runs while the deterministic guard
+  failures stayed stable. Corrected in the ticket; suggested disposition is to fold it into #680.
+- **#778 is pre-existing, NOT this wave's.** #737's own test — the one asserting that a genuine
+  change still reaches the timeline — has been red since it landed. Proven: the test and its whole
+  path have **0 commits** in `931ef537ff..HEAD`, `listRecentIssueComments` is byte-identical, and
+  disabling #738's collapse changes nothing. So #737 over-suppresses: its signature keys on repo +
+  commit count, and a second conflicting file in the same repo is invisible to it.
+
+### Process facts worth not re-deriving
+
+- **Pathspec commits do NOT isolate two agents editing the SAME file** — a pathspec commit takes
+  that path's whole worktree state. Two agents hit this independently and both chose a private
+  `GIT_INDEX_FILE` + `commit-tree` + CAS `update-ref`. Now in CLAUDE.md (`d594d576af`), together
+  with its aftermath: such a commit leaves NEW files looking staged-deleted, and the obvious
+  `git add` fix can sweep a neighbour's edit — undo with `git restore --staged`, never `git reset`
+  (`b7e56f8ceb`).
+- **A usage limit killed five agents mid-edit.** ~1,400 uncommitted lines survived because they
+  were backed up and the agents were RESUMED from their own transcripts rather than re-briefed.
+  Re-establish file ownership from ticket markers in the actual diff before resuming — ownership
+  had shifted while they were down.
+- **The Stop hook is wrong three ways in a shared checkout**, all filed: #759 (typecheck has no
+  in-flight awareness — it demanded a fix to a live agent's half-renamed file), #770 (stat-cache
+  noise reported as STRANDED, i.e. commit a no-op), #771 (attributed 1 of 3 in-flight files and
+  said to commit two agents' mid-edit work from two different tickets). #771 is the dangerous one:
+  while any subagent is live, an unattributable dirty file must be UNKNOWN, never STRANDED.
+- **Five analyzer-derived ticket claims failed verification this week** (#741's "40 of 50 licences
+  unknown" → really 3 of 558; #727's function-count signal; #726's two worst files, already
+  decomposed; #732's 37 duplicated files → 25; #740 was the one that held up exactly). Every agent
+  in this wave was told to expect it, and each corrected its ticket before building on it.
+
+### Open, and deliberately not this session's call
+
+- **The 0-byte `packages/server/kanban.db`** (appeared 15:22 today) is the shadow-db trap and is
+  what made four safety tests look merged-away. Deleting any `kanban.db` is a hard constraint, so
+  it needs the operator.
+- **#738's retention purge**: 5,698 rows at 30 days / 45,828 at 14 / 70,036 at 7. Nothing was
+  deleted. `pnpm db:repair` VACUUMs afterwards — SQLite does not return freed pages on DELETE.
+- **The push** is still unmade and still recommended: master's `arch-gate` now passes, which
+  origin's own tip has not done since 2026-08-20.
