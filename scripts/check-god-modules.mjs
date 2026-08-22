@@ -75,7 +75,9 @@ const COHESION_BASELINE = {
   // files sat in the old blind spot — under 600 lines but over 20 top-level function
   // declarations — and are grandfathered at their current count. Shrink-only, same as
   // every entry above.
-  "packages/server/src/repositories/workflow-fork.repository.ts": 33,
+  // workflow-fork.repository.ts decomposed into ./workflow-fork-{children,join,session-reads,
+  // phase,launch-context}.repository.ts (#722); the facade barrel re-exports only, so its
+  // baseline entry is removed.
   "packages/server/src/repositories/issue-ai.repository.ts": 31,
   "packages/server/src/repositories/issue-service.repository.ts": 30,
   "packages/server/src/repositories/workspace-crud.repository.ts": 27,
