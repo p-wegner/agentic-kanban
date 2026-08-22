@@ -14,7 +14,21 @@ overrides:
   # hono is also pulled transitively by @modelcontextprotocol/sdk at 4.12.16 (< the
   # direct bump in packages/server), so override it too — fixes the high CORS-reflect
   # and moderate CSS-injection advisories and dedupes to one 4.x version.
-  hono: "^4.12.31"
+  #
+  # Pinned EXACTLY, and it must stay in step with packages/server/package.json (#761):
+  # an override replaces the direct dependency's spec too, so a caret range here would
+  # silently outrank that exact pin and the manifest would stop describing what installs.
+  # 4.12.34 clears GHSA-8j4g-w8fx-2239, GHSA-f23p-vx2j-j53r, GHSA-54fx-42gc-7vw4 (CORS
+  # and Language middleware ReDoS, memo() SSR leak) and GHSA-79qm-7rj5-m7r9.
+  hono: "4.12.34"
+  # @hono/node-server is BOTH a direct dependency of packages/server and a transitive
+  # dependency of @modelcontextprotocol/sdk (which declares ^1.19.9 and had resolved to
+  # 1.19.14). Bumping only the direct dep therefore left the vulnerable copy in the
+  # PRODUCTION graph, so this is overridden and pinned exactly for the same reason as
+  # hono above — keep it in step with packages/server/package.json (#761).
+  # 1.19.15 fixes GHSA-frvp-7c67-39w9, a Windows path traversal in serve-static; this
+  # board serves its client through that handler and Windows is its primary platform.
+  "@hono/node-server": "1.19.17"
   fast-uri: "^3.1.2"
   ws: "^8.21.0"
   "brace-expansion@2": "^2.1.2"
