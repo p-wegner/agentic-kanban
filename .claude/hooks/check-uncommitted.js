@@ -17,7 +17,7 @@
 
 const { execFileSync } = require("child_process");
 const { resolve } = require("path");
-const { existsSync, readFileSync } = require("fs");
+const { existsSync, readFileSync, readdirSync } = require("fs");
 const readline = require("readline");
 
 // `node:sqlite` needs `--experimental-sqlite` on most Node 22.x builds, and a builder
@@ -115,30 +115,221 @@ function classifyStranded({ edited, deleted, all }) {
 const WRITE_TOOLS = new Set(["Edit", "Write", "NotebookEdit", "MultiEdit"]);
 /** Tool calls whose `command` string may NAME a file the session then wrote through a shell. */
 const SHELL_TOOLS = new Set(["Bash", "PowerShell"]);
+/** Tool calls that fan work out to a SUBAGENT, whose own writes live in another transcript (#720). */
+const AGENT_TOOLS = new Set(["Agent", "Task"]);
+
+// ---------------------------------------------------------------------------
+// #720 — three ways the #709 attribution filter was wrong, all in the SILENT
+// direction (a false negative here means the hook says nothing about real
+// stranded work, which is strictly worse than over-reporting):
+//
+//   1. A subagent's writes were invisible: `Agent`/`Task` was in neither tool set,
+//      and the subagent's tool calls live in a DIFFERENT transcript file. We now
+//      recurse into the sibling `<transcript-without-.jsonl>/subagents/*.jsonl`
+//      tree, and when a spawned subagent's transcript cannot be found we fall back
+//      to reporting EVERYTHING (pre-#709 behaviour) rather than nothing.
+//   2. `cd packages/server && sed -i ... src/services/bar.ts` was not attributed,
+//      because the raw command text was substring-matched against the
+//      repo-RELATIVE porcelain path. Shell paths are now resolved against the
+//      command's effective cwd (tracked across `cd` within the command, based at
+//      the transcript entry's own `cwd`) before comparison.
+//   3. `cat`/`grep`/`head` of a path made the session its author. Read verbs are
+//      now separated from write verbs, so a read never attributes.
+//
+// Plus: the old `w.endsWith("/" + p)` suffix match attributed a same-relative-path
+// file in a DIFFERENT repo. Matching is now anchored at the repo root.
+// ---------------------------------------------------------------------------
+
+/** Verbs that only ever READ. A `cat`/`grep`/`head` must never make the session an author (#720). */
+const READ_VERBS = new Set([
+  // POSIX read/inspect
+  "cat", "head", "tail", "less", "more", "bat", "nl", "rev",
+  "grep", "rg", "egrep", "fgrep", "ag", "ack", "ripgrep",
+  "ls", "dir", "find", "fd", "tree", "stat", "file", "wc", "du", "df", "readlink", "realpath",
+  "diff", "cmp", "md5sum", "sha1sum", "sha256sum", "cksum",
+  "cut", "sort", "uniq", "tr", "column", "jq", "yq", "xxd", "od", "strings", "fold", "paste", "join",
+  "which", "type", "whereis", "pwd", "echo", "printf", "date", "basename", "dirname", "true", "false",
+  // PowerShell read/inspect
+  "get-content", "get-childitem", "get-item", "get-itemproperty", "select-string", "test-path",
+  "measure-object", "select-object", "where-object", "foreach-object", "sort-object", "group-object",
+  "resolve-path", "write-host", "write-output", "compare-object", "get-location", "convertfrom-json",
+]);
+
+/** Verbs that only write when asked to edit IN PLACE (`sed -i`). Without it they are filters. */
+const INPLACE_VERBS = new Set(["sed", "perl", "awk", "gawk", "ruby"]);
+
+/** `git <sub>` subcommands that only read. Anything else (apply, checkout, restore, mv, ...) may write. */
+const GIT_READ_SUBS = new Set([
+  "status", "diff", "log", "show", "grep", "blame", "ls-files", "ls-tree", "rev-parse", "rev-list",
+  "cat-file", "describe", "shortlog", "for-each-ref", "merge-tree", "check-ignore", "check-attr",
+  "name-rev", "symbolic-ref", "count-objects", "verify-pack", "whatchanged", "annotate",
+]);
+
+/** Wrappers that prefix a real command without changing what it does. */
+const VERB_PREFIXES = new Set(["sudo", "command", "time", "nohup", "env", "exec", "builtin", "nice", "xargs"]);
+
+/** Verbs that CHANGE the effective working directory for the rest of the command. */
+const CD_VERBS = new Set(["cd", "pushd", "chdir", "set-location", "sl"]);
+
+/** Forward slashes, quotes stripped, drive letter upper-cased so `c:/x` and `C:/x` compare equal. */
+function normPath(s) {
+  let out = String(s).replace(/\\/g, "/").trim();
+  out = out.replace(/^["']/, "").replace(/["']$/, "");
+  if (/^[a-z]:/.test(out)) out = out[0].toUpperCase() + out.slice(1);
+  return out;
+}
+
+function isAbsPath(p) {
+  return /^([A-Za-z]:)?\//.test(p);
+}
+
+/** Resolve `rel` against `base` (both forward-slash), collapsing `.` and `..`. */
+function joinPath(base, rel) {
+  const combined = isAbsPath(rel) || !base ? rel : base.replace(/\/+$/, "") + "/" + rel;
+  const m = /^([A-Za-z]:)?\//.exec(combined);
+  const prefix = m ? (m[1] || "") + "/" : "";
+  const out = [];
+  for (const seg of combined.slice(m ? m[0].length : 0).split("/")) {
+    if (!seg || seg === ".") continue;
+    if (seg === "..") {
+      if (out.length > 0 && out[out.length - 1] !== "..") out.pop();
+      else if (!prefix) out.push("..");
+      continue;
+    }
+    out.push(seg);
+  }
+  return prefix + out.join("/");
+}
+
+/** Split a shell/PowerShell command into the segments that run as separate commands. */
+function splitSegments(command) {
+  return command.split(/\n|&&|\|\||;|\|/g);
+}
+
+function tokenize(segment) {
+  const tokens = [];
+  const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let m;
+  while ((m = re.exec(segment)) !== null) {
+    const t = m[1] !== undefined ? m[1] : m[2] !== undefined ? m[2] : m[3];
+    if (t !== "") tokens.push(t);
+  }
+  return tokens;
+}
+
+function segmentVerb(tokens) {
+  for (const raw of tokens) {
+    const t = raw.replace(/^[(){}!]+/, "");
+    if (t === "" || /^[A-Za-z_][A-Za-z0-9_]*=/.test(t)) continue; // `FOO=bar cmd`
+    const bare = t.replace(/\\/g, "/").split("/").pop().replace(/\.(exe|cmd|bat|sh)$/i, "");
+    const verb = bare.toLowerCase();
+    if (VERB_PREFIXES.has(verb)) continue;
+    return verb;
+  }
+  return "";
+}
+
+/** Does this token look like a path we could compare against a porcelain entry? */
+function looksLikePath(tok) {
+  if (tok.startsWith("-")) return false;
+  if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(tok)) return false;
+  return tok.includes("/") || /\.[A-Za-z0-9_]{1,8}$/.test(tok);
+}
+
+/** Files this segment REDIRECTS into (`> out.ts`, `>> out.ts`) — written even by a read verb. */
+function redirectTargets(segment) {
+  const out = [];
+  const re = /\d?>>?\s*("[^"]+"|'[^']+'|[^\s;|&<>]+)/g;
+  let m;
+  while ((m = re.exec(segment)) !== null) {
+    const t = normPath(m[1]);
+    if (!t || t.startsWith("&") || t === "/dev/null" || t.toLowerCase() === "$null") continue;
+    out.push(t);
+  }
+  return out;
+}
+
+/** Whether a segment's verb can WRITE at all (defect 3: reads must never attribute). */
+function segmentCanWrite(verb, tokens) {
+  if (verb === "") return false;
+  if (CD_VERBS.has(verb)) return false;
+  if (READ_VERBS.has(verb)) return false;
+  if (INPLACE_VERBS.has(verb)) {
+    return tokens.some((t) => /^-[a-zA-Z]*i/.test(t) || t === "--in-place");
+  }
+  if (verb === "git") {
+    const sub = tokens.find((t, i) => i > 0 && !t.startsWith("-"));
+    return !(sub && GIT_READ_SUBS.has(sub.toLowerCase()));
+  }
+  return true;
+}
 
 /**
- * Everything this session's transcript says it touched: the explicit write-tool targets, and
- * the raw text of every shell command it ran.
+ * Paths a shell command wrote, resolved against its EFFECTIVE cwd (defect 2).
  *
- * The shell half is not paranoia — a session that edits with `sed -i` or a heredoc makes no
- * `Edit` call at all, so a write-tool-only scan would silently stop warning about its OWN
- * stranded work. Matching a dirty path against the command TEXT keeps those attributed while
- * only ever widening attribution to files this session's own commands named.
- *
- * Returns `null` when the transcript cannot be read. That is the load-bearing fallback:
- * unknown authorship must degrade to the OLD behaviour (warn about everything), never to
- * silence — a hook that goes quiet when it cannot tell is worse than one that over-reports.
+ * `baseCwd` is the transcript entry's own `cwd` when known; a `cd` inside the command moves it for
+ * every later segment. Absolute results go in `abs`, results we could only keep relative (no known
+ * base) in `rel` — `attributeToSession` checks both.
  */
-function readSessionActivity(transcriptPath) {
-  if (!transcriptPath || !existsSync(transcriptPath)) return null;
+function collectShellWrites(command, baseCwd, abs, rel) {
+  const base = baseCwd ? normPath(baseCwd) : "";
+  let cwd = base;
+  for (const segment of splitSegments(normPath(command))) {
+    if (!segment.trim()) continue;
+    const tokens = tokenize(segment);
+    const verb = segmentVerb(tokens);
+    if (CD_VERBS.has(verb)) {
+      const target = tokens.find((t, i) => i > 0 && !t.startsWith("-"));
+      if (!target || target === "-" || target === "~") cwd = base;
+      else cwd = joinPath(cwd, normPath(target));
+      continue;
+    }
+    const targets = redirectTargets(segment);
+    if (segmentCanWrite(verb, tokens)) {
+      for (const t of tokens.slice(1)) {
+        const tok = normPath(t);
+        if (looksLikePath(tok)) targets.push(tok);
+      }
+    }
+    for (const t of targets) {
+      const resolved = joinPath(cwd, t);
+      if (isAbsPath(resolved)) abs.add(resolved);
+      else rel.add(resolved);
+    }
+  }
+}
+
+/** `<dir>/<session-id>.jsonl` -> every `.jsonl` under the sibling `<dir>/<session-id>/` tree. */
+function subagentTranscriptFiles(transcriptPath) {
+  const dir = normPath(transcriptPath).replace(/\.jsonl$/i, "");
+  const found = [];
+  const walk = (d, depth) => {
+    if (depth > 4 || found.length >= 200) return;
+    let entries;
+    try {
+      entries = readdirSync(d, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const full = d + "/" + e.name;
+      if (e.isDirectory()) walk(full, depth + 1);
+      else if (/\.jsonl$/i.test(e.name)) found.push(full);
+      if (found.length >= 200) return;
+    }
+  };
+  if (existsSync(dir)) walk(dir, 0);
+  return found;
+}
+
+/** Parse one transcript file into `sink`. Returns false when it could not be read at all. */
+function parseTranscript(path, sink) {
   let raw;
   try {
-    raw = readFileSync(transcriptPath, "utf8");
+    raw = readFileSync(path, "utf8");
   } catch {
-    return null;
+    return false;
   }
-  const written = new Set();
-  const commands = [];
   for (const line of raw.split(/\r?\n/)) {
     if (!line.trim()) continue;
     let entry;
@@ -147,37 +338,99 @@ function readSessionActivity(transcriptPath) {
     } catch {
       continue; // a partially-flushed final line is normal on a live transcript
     }
+    // The parent records a spawned subagent's id in the tool RESULT; that is how we tell
+    // "this session had N subagents" apart from "we found N subagent transcripts".
+    const resultAgentId = entry?.toolUseResult?.agentId;
+    if (typeof resultAgentId === "string") sink.agentIds.add(resultAgentId);
     const content = entry?.message?.content;
     if (!Array.isArray(content)) continue;
+    const entryCwd = typeof entry?.cwd === "string" ? entry.cwd : null;
     for (const block of content) {
       if (block?.type !== "tool_use") continue;
       if (WRITE_TOOLS.has(block.name)) {
         const p = block.input?.file_path ?? block.input?.notebook_path;
-        if (typeof p === "string") written.add(p.replace(/\\/g, "/"));
+        if (typeof p === "string") {
+          const np = normPath(p);
+          if (isAbsPath(np)) sink.writtenAbs.add(joinPath("", np));
+          else if (entryCwd) sink.writtenAbs.add(joinPath(normPath(entryCwd), np));
+          else sink.writtenRel.add(joinPath("", np));
+        }
+      } else if (AGENT_TOOLS.has(block.name)) {
+        sink.agentCalls += 1;
       } else if (SHELL_TOOLS.has(block.name) && typeof block.input?.command === "string") {
-        commands.push(block.input.command);
+        collectShellWrites(block.input.command, entryCwd, sink.writtenAbs, sink.writtenRel);
       }
     }
   }
-  return { written, commandText: commands.join("\n").replace(/\\/g, "/") };
+  return true;
+}
+
+/**
+ * Everything this session's transcript (and its subagents' transcripts) says it WROTE.
+ *
+ * The shell half is not paranoia — a session that edits with `sed -i` or a heredoc makes no
+ * `Edit` call at all, so a write-tool-only scan would silently stop warning about its OWN
+ * stranded work. But only WRITE verbs attribute, and the path is resolved against the command's
+ * effective cwd rather than substring-matched (#720).
+ *
+ * Returns `null` when the transcript cannot be read. That is the load-bearing fallback:
+ * unknown authorship must degrade to the OLD behaviour (warn about everything), never to
+ * silence — a hook that goes quiet when it cannot tell is worse than one that over-reports.
+ * The same rule covers a spawned subagent whose transcript we could not find:
+ * `subagentAuthorshipUnknown` makes attribution report everything.
+ */
+function readSessionActivity(transcriptPath) {
+  if (!transcriptPath || !existsSync(transcriptPath)) return null;
+  const sink = { writtenAbs: new Set(), writtenRel: new Set(), agentCalls: 0, agentIds: new Set() };
+  if (!parseTranscript(transcriptPath, sink)) return null;
+
+  const parsedBasenames = new Set();
+  for (const f of subagentTranscriptFiles(transcriptPath)) {
+    if (parseTranscript(f, sink)) parsedBasenames.add(f.split("/").pop().toLowerCase());
+  }
+
+  // A subagent we KNOW ran but whose transcript we could not read leaves its writes invisible.
+  // Silence is the one outcome worse than noise here (#720), so flag it and report everything.
+  let subagentAuthorshipUnknown = false;
+  if (sink.agentCalls > 0) {
+    const resolved = [...sink.agentIds].filter((id) =>
+      parsedBasenames.has(`agent-${id}.jsonl`.toLowerCase())
+    ).length;
+    subagentAuthorshipUnknown = resolved < sink.agentCalls;
+  }
+
+  return {
+    writtenAbs: sink.writtenAbs,
+    writtenRel: sink.writtenRel,
+    agentCalls: sink.agentCalls,
+    subagentTranscripts: parsedBasenames.size,
+    subagentAuthorshipUnknown,
+  };
 }
 
 /**
  * Of `paths` (repo-relative, forward slashes), the ones this session appears to have written.
  *
- * `activity === null` means authorship is unknown, and every path is returned — see above.
- * A path counts as ours when a write tool named it (compared by suffix, since the tool records
- * an absolute path and porcelain a relative one) or when the text of a shell command we ran
- * contains it.
+ * `activity === null` (unreadable transcript) or `subagentAuthorshipUnknown` means authorship is
+ * unknown, and every path is returned — see above. Otherwise a path is ours when a write tool or a
+ * write-verb shell command named it, matched ANCHORED at `repoRoot` so a same-relative-path file in
+ * a DIFFERENT repo never cross-attributes (#720).
  */
 function attributeToSession(paths, activity, repoRoot) {
   if (!activity) return paths;
-  const rootPrefix = repoRoot ? repoRoot.replace(/\\/g, "/").replace(/\/$/, "") + "/" : null;
+  if (activity.subagentAuthorshipUnknown) return paths;
+  const root = repoRoot ? joinPath("", normPath(repoRoot)).replace(/\/+$/, "") : null;
+  const lowerAbs = new Set([...activity.writtenAbs].map((w) => w.toLowerCase()));
   return paths.filter((p) => {
-    for (const w of activity.written) {
-      if (w === p || w.endsWith("/" + p) || (rootPrefix && w === rootPrefix + p)) return true;
+    if (activity.writtenRel.has(p)) return true;
+    if (root) {
+      const abs = root + "/" + p;
+      return activity.writtenAbs.has(abs) || lowerAbs.has(abs.toLowerCase());
     }
-    return activity.commandText.includes(p);
+    // No repo root to anchor against — fall back to a suffix match, which widens (noise) rather
+    // than narrows (silence).
+    for (const w of activity.writtenAbs) if (w === p || w.endsWith("/" + p)) return true;
+    return false;
   });
 }
 
@@ -282,11 +535,25 @@ async function main() {
   // by hash. `attributeToSession` returns everything when authorship is unknown, so a session
   // with no readable transcript still gets the old, useful warning.
   const activity = readSessionActivity(input.transcript_path);
+  const uncertain = !activity || activity.subagentAuthorshipUnknown;
   const mine = attributeToSession(verdict.files, activity, mainCheckout);
   if (mine.length === 0) process.exit(0);
 
-  console.error("WARNING: Uncommitted source changes in the MAIN checkout, written by THIS session:");
+  console.error(
+    uncertain
+      ? "WARNING: Uncommitted source changes in the MAIN checkout (authorship UNCERTAIN — see below):"
+      : "WARNING: Uncommitted source changes in the MAIN checkout, written by THIS session:"
+  );
   for (const f of mine) console.error(`  - ${f}`);
+  if (activity && activity.subagentAuthorshipUnknown) {
+    // #720 defect 1: a subagent's writes live in its own transcript. When one ran and we could not
+    // read it, we cannot narrow the list — reporting nothing would hide real stranded work.
+    console.error(
+      `(This session spawned ${activity.agentCalls} subagent(s) whose transcript(s) could not all be ` +
+        "read, so ALL dirty source files are listed — some may be another agent's in-flight work. " +
+        "Check each before committing.)"
+    );
+  }
   if (activity && mine.length < verdict.files.length) {
     console.error(
       `(${verdict.files.length - mine.length} other dirty source file(s) are not attributed to this ` +
