@@ -22,9 +22,15 @@ import { buildRemoteContextFiles } from "./remote-context-files.js";
 //    launch THROWS — the dispatch proxy catches and re-launches on the host.
 //  - assign_failed from the worker: surfaced as stderr + exit(1) events, which
 //    the exit state machine classifies as a launch failure.
-//  - worker socket lost mid-session: the worker keeps the agent running; if it
-//    does not reconnect within the grace window, the session is finalized with
-//    a synthesized stderr + exit(1) so it never hangs "running" forever.
+//  - worker socket lost mid-session: the worker keeps the agent running, so the
+//    board HOLDS. Past the reconnect grace the session is marked DETACHED and the
+//    hold is reported into the transcript; it is finalized only when the abandon
+//    bound (REMOTE_SESSION_ABANDON_MS) passes with no reconnect. A reconnect
+//    re-adopts it. See the disconnect handler for why 60s of silence is not death
+//    (#746).
+//  - worker reconnects and no longer LISTS a session it was running: the exit can
+//    never arrive (the worker's pending-result queue is in-memory), so the session
+//    is finalized — but only after any pushed result is landed. See onHello.
 
 import { buildAgentLaunchConfig } from "./agent-provider.js";
 import { resolveLaunchPorts, buildAgentSpawnEnv, resolveAgentHangTimeoutMs } from "../lib/agent-launch-env.js";
@@ -39,10 +45,23 @@ import type { WorkerConnectionManager } from "./worker-connection.service.js";
 import { ensureGitHttpServer } from "./git-http.service.js";
 import { syncIncomingBranch, clearIncomingRef, incomingRefFor } from "./worker-remote-sync.service.js";
 import { listAgentSkills } from "../repositories/agent-skill.repository.js";
+import { REMOTE_SESSION_ABANDON_MS } from "./remote-session-liveness.js";
+import { WORKER_HEARTBEAT_STALE_MS } from "./worker-registry.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
-/** How long a disconnected worker may take to reconnect before its sessions are failed. */
-export const WORKER_RECONNECT_GRACE_MS = 60 * 1000;
+/**
+ * How long a disconnected worker may be silent before the board REPORTS the gap.
+ *
+ * Was 60s, and expiry FAILED every session on that worker with a synthesized
+ * exit(1) while the agent was still running there — confirmed live. 60s is shorter
+ * than the worker daemon's own supervisor backoff (up to 30s) plus a reconnect, and
+ * shorter than the board's own `WORKER_HEARTBEAT_STALE_MS` (90s) window for calling
+ * a worker offline: the board gave up before its own definition of "offline" had
+ * even triggered. Two heartbeat windows is the shortest defensible value (#746).
+ *
+ * Expiry no longer finalizes anything — it marks the session detached and says so.
+ */
+export const WORKER_RECONNECT_GRACE_MS = 2 * WORKER_HEARTBEAT_STALE_MS;
 
 interface RemoteSession {
   workerId: string;
@@ -50,16 +69,39 @@ interface RemoteSession {
   stdinOpen: boolean;
   /** Set for git-transport sessions: sync the pushed branch back before exit. */
   repo?: { repoPath: string; branch: string };
+  /**
+   * Epoch ms at which the board stopped being able to see this session (the
+   * reconnect grace expired). Non-null means DETACHED: held, reported, not
+   * finalized. Cleared on reconnect.
+   */
+  detachedSinceMs?: number;
+}
+
+/**
+ * The remote execution service. A superset of `AgentExecutionService`: a remote
+ * session outlives the board process, so it also needs to be ADOPTED back (#745).
+ */
+export interface RemoteAgentService extends AgentExecutionService {
+  adoptSession(params: {
+    sessionId: string;
+    workerId: string;
+    onOutput: AgentOutputCallback;
+    repo?: { repoPath: string; branch: string };
+  }): void;
+  /** Session ids this process currently tracks (live or detached). */
+  trackedSessionIds(): string[];
 }
 
 export function createRemoteAgentService(
   manager: WorkerConnectionManager,
   database: Database = realDb,
-  opts?: { reconnectGraceMs?: number },
-): AgentExecutionService {
+  opts?: { reconnectGraceMs?: number; abandonMs?: number },
+): RemoteAgentService {
   const sessions = new Map<string, RemoteSession>();
   const disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const abandonTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const graceMs = opts?.reconnectGraceMs ?? WORKER_RECONNECT_GRACE_MS;
+  const abandonMs = Math.max(opts?.abandonMs ?? REMOTE_SESSION_ABANDON_MS, graceMs);
 
   function finishSession(sessionId: string, session: RemoteSession, stderr: string, exitCode: number | null): void {
     sessions.delete(sessionId);
@@ -69,6 +111,68 @@ export function createRemoteAgentService(
     } catch (err) {
       console.error(`[agent-remote] output callback error: sessionId=${sessionId}`, err);
     }
+  }
+
+  /**
+   * Land whatever the worker pushed, then finalize. Used by the normal exit path AND
+   * by every give-up path (#746): a session the board stops waiting for may still
+   * have PUSHED its result, and orphaning that work in the incoming ref is the most
+   * expensive possible outcome. Landing goes through the #743 path
+   * (`syncIncomingBranch`) — never a second, private one.
+   *
+   * A sync failure downgrades the exit code, so a session whose work did not land is
+   * never recorded as a clean success.
+   */
+  async function landAndFinish(
+    sessionId: string,
+    session: RemoteSession,
+    reportedExitCode: number | null,
+  ): Promise<void> {
+    sessions.delete(sessionId);
+    let exitCode = reportedExitCode;
+    if (session.repo) {
+      try {
+        const result = await syncIncomingBranch(session.repo.repoPath, session.repo.branch);
+        if (result.ok) {
+          console.log(`[agent-remote] synced ${session.repo.branch} (${result.status}) for session ${sessionId}`);
+          await clearIncomingRef(session.repo.repoPath, session.repo.branch).catch(() => {});
+        } else if (result.status === "missing" && exitCode !== 0) {
+          // The agent failed before producing anything to push — nothing to sync.
+          console.warn(`[agent-remote] no incoming ref for failed session ${sessionId}; nothing to sync`);
+        } else {
+          session.onOutput({
+            type: "stderr",
+            sessionId,
+            data: `Worker result could not be landed on ${session.repo.branch}: ${result.error}`,
+          });
+          exitCode = exitCode === 0 || exitCode === null ? 1 : exitCode;
+        }
+      } catch (err) {
+        session.onOutput({ type: "stderr", sessionId, data: `Branch sync failed: ${errorMessage(err)}` });
+        exitCode = exitCode === 0 || exitCode === null ? 1 : exitCode;
+      }
+    }
+    try {
+      session.onOutput({ type: "exit", sessionId, exitCode });
+    } catch (err) {
+      console.error(`[agent-remote] exit callback error: sessionId=${sessionId}`, err);
+    }
+  }
+
+  /** Report into the session's own transcript, so a hold is visible where the run is. */
+  function report(sessionId: string, session: RemoteSession, text: string): void {
+    try {
+      session.onOutput({ type: "stderr", sessionId, data: text });
+    } catch (err) {
+      console.error(`[agent-remote] output callback error: sessionId=${sessionId}`, err);
+    }
+  }
+
+  function clearWorkerTimers(workerId: string): void {
+    const grace = disconnectTimers.get(workerId);
+    if (grace) { clearTimeout(grace); disconnectTimers.delete(workerId); }
+    const abandon = abandonTimers.get(workerId);
+    if (abandon) { clearTimeout(abandon); abandonTimers.delete(workerId); }
   }
 
   manager.onMessage((workerId, message) => {
@@ -99,35 +203,7 @@ export function createRemoteAgentService(
         }
         return;
       }
-      void (async () => {
-        let exitCode = exitEvent.exitCode ?? null;
-        try {
-          const result = await syncIncomingBranch(session.repo!.repoPath, session.repo!.branch);
-          if (result.ok) {
-            console.log(`[agent-remote] synced ${session.repo!.branch} (${result.status}) for session ${sessionId}`);
-            await clearIncomingRef(session.repo!.repoPath, session.repo!.branch).catch(() => {});
-          } else if (result.status === "missing" && exitCode !== 0) {
-            // The agent failed before producing anything to push — nothing to sync.
-            console.warn(`[agent-remote] no incoming ref for failed session ${sessionId}; nothing to sync`);
-          } else {
-            session.onOutput({
-              type: "stderr",
-              sessionId,
-              data: `Worker result could not be landed on ${session.repo!.branch}: ${result.error}`,
-            });
-            exitCode = exitCode === 0 || exitCode === null ? 1 : exitCode;
-          }
-        } catch (err) {
-          const text = errorMessage(err);
-          session.onOutput({ type: "stderr", sessionId, data: `Branch sync failed: ${text}` });
-          exitCode = exitCode === 0 || exitCode === null ? 1 : exitCode;
-        }
-        try {
-          session.onOutput({ type: "exit", sessionId, exitCode });
-        } catch (err) {
-          console.error(`[agent-remote] exit callback error: sessionId=${sessionId}`, err);
-        }
-      })();
+      void landAndFinish(sessionId, session, exitEvent.exitCode ?? null);
       return;
     }
     if (message.type === "hello") {
@@ -154,6 +230,37 @@ export function createRemoteAgentService(
       // and its exit does not finalize the row here. Full adoption — rebuilding the
       // callback so the exit lands through the normal path — is the better fix and
       // is NOT implemented; this only stops the board destroying live work.
+      // The REVERSE direction (#746): the board tracks a session on THIS worker that
+      // the worker's own hello does not list. Genuinely ambiguous — the daemon may
+      // have restarted (its children killed) or crashed (children orphaned, their
+      // pipes gone either way).
+      //
+      // DECIDED: finalize it, after landing anything it pushed. A hello is POSITIVE
+      // information — the daemon is up and has enumerated what it holds — and the
+      // exit can no longer reach us in ANY of the branches: the worker's
+      // pending-result queue is in-memory (`PENDING_QUEUE_CAP`, lost on daemon
+      // restart) and the pipe to an orphaned child died with the old daemon. So
+      // holding here would hang the workspace forever, which is the bug this ticket
+      // names. It exits non-zero even when the branch landed cleanly: the board never
+      // saw the agent's own verdict, and recording an unobserved run as a clean
+      // success is the one outcome worse than a visible failure.
+      const listed = new Set(message.runningSessionIds);
+      const lost = [...sessions.entries()].filter(([id, sess]) => sess.workerId === workerId && !listed.has(id));
+      for (const [sessionId, session] of lost) {
+        console.warn(
+          `[agent-remote] worker ${workerId} reconnected but no longer lists session ${sessionId} ` +
+            `(daemon restart or crash); its exit can never arrive — landing any pushed result and failing it`,
+        );
+        report(
+          sessionId,
+          session,
+          `Fleet worker ${workerId} reconnected without this session: its agent is gone and no exit can ` +
+            `arrive (the worker's pending-result queue does not survive a daemon restart). Any result it ` +
+            `pushed is being landed on the branch before this session is closed.`,
+        );
+        void landAndFinish(sessionId, session, 1);
+      }
+
       const unknown = message.runningSessionIds.filter((id) => !sessions.has(id));
       if (unknown.length === 0) return;
       void (async () => {
@@ -195,36 +302,89 @@ export function createRemoteAgentService(
     }
   });
 
+  // A lost socket is a lost VIEW, not a dead agent (#746). The old rule synthesized
+  // exit(1) for every session on the worker after 60s — destroying a run the worker was
+  // still executing, and pre-empting its push. So the gap has two bounds and they mean
+  // different things:
+  //
+  //   graceMs   -> REPORT. The session is marked DETACHED and the hold is written into
+  //                its own transcript. Nothing is finalized; a reconnect re-adopts it.
+  //   abandonMs -> GIVE UP. Only now is the session finalized, and only after landing
+  //                anything the worker managed to push.
   manager.onDisconnect((workerId) => {
     const affected = [...sessions.entries()].filter(([, s]) => s.workerId === workerId);
     if (affected.length === 0) return;
     console.warn(
       `[agent-remote] worker ${workerId} disconnected with ${affected.length} session(s); ` +
-      `waiting ${Math.round(graceMs / 1000)}s for reconnect`,
+      `holding — reporting at ${Math.round(graceMs / 1000)}s, giving up at ${Math.round(abandonMs / 60000)}m`,
     );
-    const timer = setTimeout(() => {
+    clearWorkerTimers(workerId);
+
+    const graceTimer = setTimeout(() => {
       disconnectTimers.delete(workerId);
+      const detachedAt = Date.now();
       for (const [sessionId, session] of sessions.entries()) {
         if (session.workerId !== workerId) continue;
-        console.error(`[agent-remote] worker ${workerId} did not reconnect; failing session ${sessionId}`);
-        finishSession(
+        session.detachedSinceMs = detachedAt;
+        console.warn(
+          `[agent-remote] worker ${workerId} has not reconnected in ${Math.round(graceMs / 1000)}s; ` +
+            `session ${sessionId} is DETACHED (held, not failed) until ${Math.round(abandonMs / 60000)}m`,
+        );
+        report(
           sessionId,
           session,
-          `Fleet worker ${workerId} disconnected and did not reconnect within ${Math.round(graceMs / 1000)}s.`,
-          1,
+          `Lost the connection to fleet worker ${workerId} ${Math.round(graceMs / 1000)}s ago. The agent is ` +
+            `most likely still running there; the board simply cannot see it, so live output is dropped from ` +
+            `here on. This session is HELD, not failed — it resumes if the worker reconnects within ` +
+            `${Math.round(abandonMs / 60000)} minutes.`,
         );
       }
     }, graceMs);
-    if (timer.unref) timer.unref();
-    disconnectTimers.set(workerId, timer);
+    if (graceTimer.unref) graceTimer.unref();
+    disconnectTimers.set(workerId, graceTimer);
+
+    const abandonTimer = setTimeout(() => {
+      abandonTimers.delete(workerId);
+      for (const [sessionId, session] of [...sessions.entries()]) {
+        if (session.workerId !== workerId) continue;
+        console.error(
+          `[agent-remote] worker ${workerId} silent for ${Math.round(abandonMs / 60000)}m; abandoning session ${sessionId}`,
+        );
+        report(
+          sessionId,
+          session,
+          `Fleet worker ${workerId} has been unreachable for ${Math.round(abandonMs / 60000)} minutes. Giving ` +
+            `up on this session. If the worker pushed a result before it vanished it is being landed on the ` +
+            `branch now; otherwise its work remains only in the worker's own clone.`,
+        );
+        void landAndFinish(sessionId, session, 1);
+      }
+    }, abandonMs);
+    if (abandonTimer.unref) abandonTimer.unref();
+    abandonTimers.set(workerId, abandonTimer);
   });
 
   manager.onConnect((workerId) => {
-    const timer = disconnectTimers.get(workerId);
-    if (timer) {
-      clearTimeout(timer);
-      disconnectTimers.delete(workerId);
+    const held = disconnectTimers.has(workerId) || abandonTimers.has(workerId);
+    clearWorkerTimers(workerId);
+    if (!held) return;
+    const readopted: string[] = [];
+    for (const [sessionId, session] of sessions.entries()) {
+      if (session.workerId !== workerId) continue;
+      if (session.detachedSinceMs !== undefined) readopted.push(sessionId);
+      session.detachedSinceMs = undefined;
+    }
+    if (readopted.length === 0) {
       console.log(`[agent-remote] worker ${workerId} reconnected within grace; sessions continue`);
+      return;
+    }
+    console.log(
+      `[agent-remote] worker ${workerId} reconnected; re-adopting detached session(s) ${readopted.join(", ")} — ` +
+        `their callbacks were never torn down, so streaming resumes`,
+    );
+    for (const sessionId of readopted) {
+      const session = sessions.get(sessionId);
+      if (session) report(sessionId, session, `Fleet worker ${workerId} reconnected; this session is live again.`);
     }
   });
 
@@ -410,10 +570,48 @@ export function createRemoteAgentService(
     return undefined;
   }
 
+  /**
+   * #746: this used to require a live socket, so a detached session read as DEAD and
+   * the session-lifecycle's stale-session cleanup finalized it out from under a
+   * running agent. While the board still TRACKS a session it has no evidence of
+   * death: a missing socket is a missing view. The abandon timer is what ends a held
+   * session, deliberately and with a reason.
+   */
   function isPidAlive(sessionId: string): boolean {
-    const session = sessions.get(sessionId);
-    return Boolean(session && manager.isConnected(session.workerId));
+    return sessions.has(sessionId);
   }
 
-  return { launch, kill, sendInput, closeStdin, isStdinOpen, getProcess, getPid, isPidAlive };
+  /**
+   * Re-adopt a session this process did not launch — the board restarted while the
+   * worker kept running the agent (#745). Rebuilding the mapping is what makes the
+   * worker's next event (and its exit) land through the NORMAL path, instead of being
+   * dropped as "a session we do not track".
+   */
+  function adoptSession(params: {
+    sessionId: string;
+    workerId: string;
+    onOutput: AgentOutputCallback;
+    repo?: { repoPath: string; branch: string };
+  }): void {
+    if (sessions.has(params.sessionId)) return;
+    sessions.set(params.sessionId, {
+      workerId: params.workerId,
+      onOutput: params.onOutput,
+      // Stdin state does not survive a restart; a follow-up turn must relaunch.
+      stdinOpen: false,
+      repo: params.repo,
+    });
+    console.log(
+      `[agent-remote] adopted session ${params.sessionId} on worker ${params.workerId} after a board restart`,
+    );
+  }
+
+  function trackedSessionIds(): string[] {
+    return [...sessions.keys()];
+  }
+
+  return {
+    launch, kill, sendInput, closeStdin, isStdinOpen, getProcess, getPid, isPidAlive,
+    adoptSession, trackedSessionIds,
+  };
 }
