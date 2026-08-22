@@ -1,140 +1,64 @@
+/**
+ * The session-exit workflow engine: what the board does when an agent session ends.
+ *
+ * This module is the DISPATCHER plus the terminal handlers that own board policy — which is what
+ * is left after #700 gave each self-contained sub-protocol its own module in `./exit/`:
+ *
+ *   ./exit/usage-limit-exit.ts    the provider-quota path (rotate the ring, relaunch or block)
+ *   ./exit/fix-and-merge-exit.ts  the resolver path (retry the merge, then verify it landed, #764)
+ *   ./exit/review-launch.ts       starting a review session (reservation, profile ladder, #529)
+ *   ./exit/clean-clone-checks.ts  clean-clone buildability of the branch (#812 repair, #792 gate)
+ *   ./exit/learning-step.ts       the compounding-engineering learning step
+ *   ./exit/exit-context.ts        the snapshot type the dispatcher hands every handler
+ *
+ * Each of those is a factory taking an explicit deps object, so the boundary is a real dependency
+ * contract rather than a re-export: the collaborators a sub-protocol needs (the rotation rings,
+ * the review prompt builder, the cold-clone checker) are imported by that module alone and are
+ * invisible here. What stays is the part that cannot be pulled apart without hiding policy — the
+ * one snapshot load, the classification, and the handlers the classification selects between.
+ */
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { isSpecPlanningStageName, isTerminalNodeType, transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
-import { runUnderBuildSemaphore } from "../services/jvm-build-semaphore.js";
-import { RUN_GATE, type MergeGateToken } from "../services/pre-merge-gate.service.js";
+import { RUN_GATE } from "../services/pre-merge-gate.service.js";
 import { runGateWithEvidence } from "../services/merge-gate-evidence.js";
 import { getAutoLandLoopTicket } from "../services/plugin-loop-hooks.service.js";
 import { reconcileGroupMemberIssues } from "../services/merge-cleanup.service.js";
 import { issues, projectStatuses, projects, scheduledRunHistory, scheduledRuns, sessions, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { desc, eq } from "drizzle-orm";
-import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { getCommitCountAhead as commitsAhead } from "@agentic-kanban/shared/lib/git-service";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { db as defaultDb } from "../db/index.js";
-import { toExecutorProvider } from "../services/agent-settings.service.js";
 import { createBoardEvents } from "../services/board-events.js";
 import { emitButlerSystemEvent } from "../services/butler-event-feed.js";
-import { ensureBuildableFromClean } from "../services/project-scaffold.js";
 import * as realGitService from "../services/git.service.js";
 import type { GitService } from "../services/workspace-internals.js";
 import { createSessionManager } from "../services/session.manager.js";
-// #557: the pure service helper, called with the ENGINE's db — the `review-helpers.ts` shim
-// existed only to inject the process singleton, which silently ignored an injected `database`.
-import { buildReviewPrompt } from "../services/review.service.js";
-import { applyWorkspaceProfileToPrefs, resolveWorkspaceLaunchSettings } from "../services/agent-settings.service.js";
-import { buildReviewContext } from "../services/phase-context.service.js";
-import type { MergeWorkspace } from "./merge-workflow.js";
 import { isAutomaticMergeEnabled } from "./merge-strategy.js";
 import type { Database } from "../db/index.js";
-import { rotateCodexLicense } from "../services/codex-license-ring.js";
-import { readUsageLimitStats, type UsageLimitKind } from "@agentic-kanban/shared/lib/session-stats-blob";
-import { rotateClaudeSubscription } from "../services/claude-subscription-ring.js";
-import { decideRateLimitExit, formatRateLimitBlockedReason } from "./rate-limit-exit-decision.js";
 import { classifySessionExit, resolveSessionRoleFlags } from "./session-exit-classification.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { workspaceHasCommittedWork } from "../services/workspace-commits.js";
 import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.service.js";
-import { tryReserveReviewLaunch, releaseReviewLaunch } from "../services/review.service.js";
-import type { SessionRoleFlags } from "./session-exit-classification.js";
-import { buildLearningStepPrompt } from "../services/merge-helpers.service.js";
 import { isFoundationalBlocker } from "../services/foundational-merge.service.js";
-import { isColdCloneCheckEnabled, runColdCloneBuildCheckForProject } from "../services/cold-clone-build-check.service.js";
-import type { ColdCloneCheckResult } from "../services/cold-clone-build-check.service.js";
-import type { ProviderId, ProviderName } from "../services/agent-provider.js";
-import type { RateLimitProvider } from "./rate-limit-exit-decision.js";
 import { clearWorkspaceWorkingDir } from "../repositories/workspace-crud.repository.js";
 import { findUncommittedWork } from "./uncommitted-work-report.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-
-type WorkspaceRow = typeof workspaces.$inferSelect;
-
-/** Project status row, used by the session-exit workflow handlers. */
-type StatusRow = typeof projectStatuses.$inferSelect;
-
-/**
- * Per-call context for the session-exit workflow. Loaded once by the dispatcher
- * (`runWorkflowOnExit`) after the early short-circuits, then threaded to each
- * scenario handler so they all share one snapshot of the workspace, prefs,
- * project statuses and merge policy.
- */
-interface ExitContext {
-  workspace: WorkspaceRow;
-  projectId: string;
-  issueId: string;
-  skipAutoReview: boolean;
-  sessionId: string;
-  exitCode: number | null;
-  now: string;
-  prefMap: Map<string, string>;
-  statuses: StatusRow[];
-  findStatus: (name: string) => StatusRow | undefined;
-  autoMergeEnabled: boolean;
-  defaultBranch: string | null;
-  autoMergeDisabledProjectIds: Set<string>;
-}
-
-/** Structural view of a profile-ring rotation result (shared by the Codex/Claude rings). */
-type RingRotationResult = { rotated: boolean; fromProfile: string; toProfile?: string; reason: string };
-
-/**
- * Per-provider knobs for the session-exit usage-limit path. The Codex (license)
- * and Claude (subscription) branches were ~45 lines of near-identical logic —
- * rotate the profile ring, decide relaunch-vs-block, then relaunch the worktree or
- * leave it blocked — that could drift apart (the #696–699 / #779 rotation-outage
- * class). This config + the shared `handleUsageLimitExit` collapse them into one
- * implementation parameterized only by what actually differs between providers.
- */
-interface UsageLimitProviderConfig {
-  /** Human-facing provider label used in logs and butler events. */
-  label: RateLimitProvider;
-  /** Settings pref key holding this provider's active profile. */
-  profilePrefKey: string;
-  /** Executor provider passed to `startSession` on relaunch. */
-  executorProvider: ProviderId;
-  /** `profile.provider` passed to `startSession` on relaunch. */
-  profileSelectionProvider: ProviderName;
-  /** The provider discriminant on a usage-limit stats blob (#542). */
-  kind: UsageLimitKind;
-  /** Rotate the provider's profile ring, cooling the exhausted profile. */
-  rotate: (
-    database: Database,
-    prefMap: Map<string, string>,
-    currentProfile: string,
-    resetsAt: string | null,
-    now: Date,
-  ) => Promise<RingRotationResult>;
-}
-
-const USAGE_LIMIT_PROVIDERS: UsageLimitProviderConfig[] = [
-  {
-    label: "Codex",
-    profilePrefKey: "codex_profile",
-    executorProvider: "codex",
-    profileSelectionProvider: "codex",
-    kind: "codex",
-    rotate: rotateCodexLicense,
-  },
-  {
-    label: "Claude",
-    profilePrefKey: "claude_profile",
-    executorProvider: "claude-code",
-    profileSelectionProvider: "claude",
-    kind: "claude",
-    rotate: rotateClaudeSubscription,
-  },
-];
+import { createCleanCloneChecks } from "./exit/clean-clone-checks.js";
+import { createFixAndMergeExitHandler } from "./exit/fix-and-merge-exit.js";
+import { createReviewLauncher } from "./exit/review-launch.js";
+import { createUsageLimitExitHandler, findUsageLimitProvider } from "./exit/usage-limit-exit.js";
+import { launchLearningStep } from "./exit/learning-step.js";
+import type { AutoMergeFn, ExitContext, WorkspaceRow } from "./exit/exit-context.js";
 
 const autoMergeDisabledPref = projectPref("auto_merge_disabled");
 
 export interface WorkflowDeps {
   sessionManager: ReturnType<typeof createSessionManager>;
   boardEvents: ReturnType<typeof createBoardEvents>;
-  autoMerge: (workspace: MergeWorkspace, projectId: string, issueId: string, doneStatusId: string | null, now: string, gate: MergeGateToken) => Promise<void>;
+  autoMerge: AutoMergeFn;
   /**
    * #1000: reconcile a fork child that already sits on its join node (agent
    * called propose_transition) but never got marked "joined" — the cross-process
@@ -155,39 +79,6 @@ export interface WorkflowDeps {
   gitService?: GitService;
 }
 
-async function waitForLearningSession(database: Database, learnSessId: string, label: string, timeoutMessage: string) {
-  return new Promise<void>((resolve) => {
-    const timeout = setTimeout(() => { console.log(timeoutMessage); resolve(); }, 3 * 60 * 1000);
-    const poll = setInterval(() => {
-      void (async () => {
-        const sessRows = await database.select({ status: sessions.status }).from(sessions).where(eq(sessions.id, learnSessId)).limit(1);
-        if (sessRows.length > 0 && sessRows[0].status !== "running") {
-          clearInterval(poll); clearTimeout(timeout);
-          console.log(`[workflow] learning step (${label}) finished`); resolve();
-        }
-      })();
-    }, 5000);
-  });
-}
-
-async function launchLearningStep(database: Database, sessionManager: ReturnType<typeof createSessionManager>, learningSessionIds: Set<string>, workspace: { id: string; provider: string | null; claudeProfile: string | null }, prefMap: Map<string, string>, label: "after review" | "after agent", wait = false) {
-  const workspaceId = workspace.id;
-  try {
-    // Run the learning step on the same provider/profile the workspace was built
-    // with (e.g. its Codex OAuth license), not the global default which may have rotated.
-    // #541: was an eight-line hand-rolled copy of resolveAgentSettings.
-    const { agentCommand, agentArgs, provider, profile } = resolveWorkspaceLaunchSettings(prefMap, workspace);
-    const prompt = buildLearningStepPrompt(false);
-    const learnSessId = await sessionManager.startSession({ workspaceId, prompt, agentCommand, agentArgs, provider: toExecutorProvider(provider), triggerType: "learning", profile });
-    learningSessionIds.add(learnSessId);
-    console.log(`[workflow] learning step (${label}) started: session=${learnSessId}`);
-    return wait ? waitForLearningSession(database, learnSessId, label, `[workflow] learning step (${label}) timed out after 3m`) : Promise.resolve();
-  } catch (err) {
-    console.warn(`[workflow] learning step (${label}) failed (non-fatal):`, err);
-    return Promise.resolve();
-  }
-}
-
 async function hasCommittedChanges(workspace: WorkspaceRow, defaultBranch: string | null, workspaceId: string, database: Database) {
   // #539: the leading-OR-sibling probe now lives in one place (services/workspace-commits).
   // `onUnknown: true` because "no commits" licenses CLOSING the workspace and forcing the
@@ -198,30 +89,6 @@ async function hasCommittedChanges(workspace: WorkspaceRow, defaultBranch: strin
     database,
     { onUnknown: true },
   );
-}
-
-/** Extract the "try again / resets at X" hint persisted on the rate-limited session's stats. */
-function parseRateLimitRetryAfter(stats: string | null | undefined): string | null {
-  return readUsageLimitStats(stats)?.retryAfter ?? null;
-}
-
-/** Build a continuation prompt so the rotated-to account picks the ticket back up in the same worktree. */
-async function buildRotationContinuationPrompt(database: Database, issueId: string, providerLabel: string): Promise<string> {
-  const rows = await database
-    .select({ issueNumber: issues.issueNumber, title: issues.title, description: issues.description })
-    .from(issues)
-    .where(eq(issues.id, issueId))
-    .limit(1);
-  const issue = rows[0];
-  const heading = issue ? `ticket #${issue.issueNumber}: ${issue.title}` : "your current ticket";
-  return [
-    `You are resuming work on ${heading}.`,
-    `A previous ${providerLabel} session was interrupted by an account usage limit and has now resumed on a different ${providerLabel} account.`,
-    "Your partial work is already in THIS worktree. First run `git status` and `git diff` to see what exists, then continue implementing the ticket to completion and COMMIT when done.",
-    "",
-    "Ticket description:",
-    issue?.description || "(no description)",
-  ].join("\n");
 }
 
 async function isSpecPlanningNode(database: Database, currentNodeId: string | null): Promise<boolean> {
@@ -264,147 +131,11 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
   const gitService = injectedGitService ?? realGitService;
   const reviewSessionIds = new Set<string>(), fixAndMergeSessionIds = new Set<string>(), learningSessionIds = new Set<string>();
 
-  /**
-   * #764 stranded-resolver guard. After a fix-and-merge resolver session exits, verify the
-   * branch actually landed on its base. If it did NOT (the concurrent-merge loser whose
-   * conflict against the moved base is real — autoMerge's plumbing merge threw and was
-   * swallowed), make sure the workspace stays OPEN and idle so it is retryable, and clear the
-   * stale readyForMerge flag so nothing re-treats a conflicted branch as mergeable. Never close
-   * it — that is exactly the strand (ticket conflicted, no workspace) this guard prevents.
-   *
-   * Best-effort and idempotent: if the branch DID land, autoMerge has already closed the
-   * workspace and this is a no-op (we only touch OPEN workspaces). If the ancestry check can't
-   * run, we conservatively leave the open workspace idle (still retryable) rather than risk
-   * stranding it.
-   */
-  async function keepResolverWorkspaceRetryableIfUnlanded(
-    workspace: WorkspaceRow,
-    projectId: string,
-    issueId: string,
-    defaultBranch: string | null,
-    sessionId: string,
-  ): Promise<void> {
-    try {
-      // Re-read the live workspace: autoMerge may have closed it on a successful landing.
-      const freshRows = await db.select().from(workspaces).where(eq(workspaces.id, workspace.id)).limit(1);
-      const fresh = freshRows[0];
-      // Already closed/merged (resolver succeeded) or worktree gone — nothing to keep open.
-      if (!fresh || fresh.status === "closed" || fresh.mergedAt || !fresh.workingDir || fresh.isDirect) return;
-
-      const baseBranch = fresh.baseBranch || defaultBranch;
-      const repoRows = await db.select({ repoPath: projects.repoPath }).from(projects).where(eq(projects.id, projectId)).limit(1);
-      const repoPath = repoRows[0]?.repoPath;
-
-      let landed = false;
-      if (baseBranch && repoPath) {
-        try {
-          const ancestry = await gitService.checkBranchTipIsAncestor(repoPath, fresh.branch, baseBranch, fresh.workingDir ?? undefined);
-          landed = ancestry.isAncestor;
-        } catch (err) {
-          // Couldn't determine — assume NOT landed and keep it retryable (safe default).
-          console.warn(`[workflow] #764 landing check failed for workspace ${workspace.id} (treating as not landed):`, errorMessage(err));
-        }
-      }
-
-      if (landed) return; // Branch is on base; resolver did its job (cleanup runs elsewhere).
-
-      // Not landed: keep the workspace OPEN + idle and retryable. Clear readyForMerge so a
-      // conflicted branch is not silently re-queued as "ready". Surface a clear signal.
-      const now = new Date().toISOString();
-      await setWorkspaceStatus(db, workspace.id, "idle", { now, set: { readyForMerge: false, mergeGateRanAt: null, mergeGateStage: null, mergeGateSource: null } });
-      boardEvents.broadcast(projectId, "workspace_idle");
-      boardEvents.broadcast(projectId, "workflow_error");
-      emitButlerSystemEvent({
-        projectId,
-        kind: "merge_failed",
-        workspaceId: workspace.id,
-        text: `Fix-and-merge resolver for workspace ${workspace.id} (branch ${fresh.branch}) exited but the branch did not land on ${baseBranch ?? "base"} (likely a real concurrent-merge conflict). Workspace left open and idle for retry — not stranded.`,
-      });
-      console.warn(`[workflow] #764 fix-and-merge resolver for workspace ${workspace.id} (session ${sessionId}) did NOT land branch ${fresh.branch} on ${baseBranch ?? "base"} — kept open + idle for retry`);
-    } catch (err) {
-      console.warn(`[workflow] #764 stranded-resolver guard failed (non-fatal) for workspace ${workspace.id}:`, errorMessage(err));
-    }
-  }
-
-  /**
-   * Shared session-exit handler for a provider usage-limit (Codex license / Claude
-   * subscription). Rotates the profile ring; for a builder session on a freshly
-   * rotated profile it relaunches the worktree to continue the ticket, otherwise it
-   * leaves the workspace blocked with a clear reason. Replaces the two formerly
-   * duplicated Codex/Claude branches — see `UsageLimitProviderConfig`.
-   */
-  async function handleUsageLimitExit(
-    cfg: UsageLimitProviderConfig,
-    workspaceId: string,
-    sessionId: string,
-    issueId: string,
-    projectId: string,
-    now: string,
-    statsJson: string | null | undefined,
-    roleFlags: SessionRoleFlags,
-  ): Promise<void> {
-    const resetsAt = parseRateLimitRetryAfter(statsJson);
-    const rotationPrefMap = toPrefMap(await getAllPreferencesCached(db));
-    const currentProfile = rotationPrefMap.get(cfg.profilePrefKey) || "default";
-    const rotation = await cfg.rotate(db, rotationPrefMap, currentProfile, resetsAt, new Date(now));
-    // Builder = none of the special roles. Resolved from the in-memory sets AND the
-    // persisted triggerType so a reattached (post-restart) review/fix/learning session
-    // is never relaunched as if it were a builder (#950).
-    const builder = !roleFlags.isReview && !roleFlags.isFixAndMerge && !roleFlags.isLearning;
-
-    // #1000: a fork child can independently finish and close itself (joined) via
-    // handleChildJoined WHILE this usage-limit exit is being processed for the
-    // same workspace (the classic race the ticket describes). Re-read fresh
-    // immediately before writing so that race's winner is respected instead of
-    // unconditionally overwriting a workspace another exit path already closed.
-    const freshRows = await db.select({ status: workspaces.status, forkStatus: workspaces.forkStatus }).from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
-    if (freshRows[0]?.status === "closed") {
-      console.log(`[workflow] ${cfg.label}-rate-limited session ${sessionId} exited but workspace ${workspaceId} is already closed (forkStatus=${freshRows[0].forkStatus ?? "n/a"}) — skipping blocked/relaunch write`);
-      return;
-    }
-
-    if (decideRateLimitExit(rotation, builder).action === "relaunch") {
-      try {
-        const continuation = await buildRotationContinuationPrompt(db, issueId, cfg.label);
-        await setWorkspaceStatus(db, workspaceId, "active", { now });
-        const relaunchSessionId = await sessionManager.startSession({
-          workspaceId,
-          prompt: continuation,
-          agentCommand: rotationPrefMap.get("agent_command") || undefined,
-          agentArgs: rotationPrefMap.get("agent_args") || undefined,
-          provider: cfg.executorProvider,
-          triggerType: "agent",
-          profile: { provider: cfg.profileSelectionProvider, name: rotation.toProfile ?? "" },
-        });
-        boardEvents.broadcastActivity(projectId, { issueId, sessionId, activity: "" });
-        boardEvents.broadcast(projectId, "issue_updated");
-        emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `${cfg.label} usage limit on '${rotation.fromProfile}' — rotated to '${rotation.toProfile}' and relaunched workspace ${workspaceId}.` });
-        console.log(`[workflow] ${cfg.label} profile rotated ${rotation.fromProfile} -> ${rotation.toProfile}; relaunched workspace ${workspaceId} session ${relaunchSessionId}`);
-        return;
-      } catch (err) {
-        console.error(`[workflow] ${cfg.label} profile rotation relaunch failed:`, err);
-        // fall through to blocked
-      }
-    }
-
-    await setWorkspaceStatus(db, workspaceId, "blocked", { now });
-    boardEvents.broadcastActivity(projectId, { issueId, sessionId, activity: "" });
-    boardEvents.broadcast(projectId, "session_completed");
-    boardEvents.broadcast(projectId, "workflow_error");
-    const blockedReason = formatRateLimitBlockedReason(cfg.label, workspaceId, rotation);
-    emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: blockedReason });
-    console.warn(`[workflow] ${cfg.label}-rate-limited workspace ${workspaceId} from session ${sessionId} left blocked (${rotation.reason})`);
-    // #1000: a rate-limit exit can race a fork child's own propose_transition onto
-    // its join node — the child successfully finished and moved itself, but this
-    // blocked-write and the cross-process join notify are unordered. Reconcile
-    // now so a child that is actually done doesn't sit blocked until the 30-min
-    // overdue timeout wrongly cancels it.
-    if (reconcileForkChildOnExit) {
-      await reconcileForkChildOnExit(workspaceId).catch((err) =>
-        console.warn(`[workflow] fork-child join reconcile failed (non-fatal) for workspace ${workspaceId}:`, err instanceof Error ? err.message : String(err)),
-      );
-    }
-  }
+  const handleUsageLimitExit = createUsageLimitExitHandler({ database: db, sessionManager, boardEvents, reconcileForkChildOnExit });
+  const { handleFixAndMergeExit } = createFixAndMergeExitHandler({ database: db, gitService, boardEvents, autoMerge, fixAndMergeSessionIds });
+  const { applyBuildApprovalRepair, runColdCloneGate } = createCleanCloneChecks({ database: db, gitService, boardEvents });
+  const { launchAutoReview } = createReviewLauncher({ database: db, gitService, sessionManager, boardEvents, reviewSessionIds });
+  const learningStepDeps = { database: db, sessionManager, learningSessionIds };
 
   async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCode: number | null, wasPlanMode?: boolean) {
     try {
@@ -450,20 +181,19 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
       // Provider usage-limit rotation (Codex license / Claude subscription): this
       // account hit its quota. Cool it down, switch to the next available profile, and
       // relaunch a builder on the fresh account (review/fix sessions inherit the switched
-      // pref and rely on their own reconciler). Both providers share one implementation
-      // parameterized by `USAGE_LIMIT_PROVIDERS`.
+      // pref and rely on their own reconciler). Both providers share one implementation,
+      // parameterized by the provider table in ./exit/usage-limit-exit.ts.
       const sessionRows = await db.select({ stats: sessions.stats, triggerType: sessions.triggerType }).from(sessions).where(eq(sessions.id, sessionId)).limit(1);
       // #950: resolve the session's role from the in-memory sets (fast path) AND the
       // persisted sessions.triggerType (source of truth that survives restarts). A
       // reattached review/fix-and-merge/learning session exits into EMPTY sets — the
       // DB value keeps it from being misrouted to the builder handler.
       const roleFlags = resolveSessionRoleFlags(sessionId, sessionRows[0]?.triggerType, { reviewSessionIds, fixAndMergeSessionIds, learningSessionIds });
-      // One read of the discriminant picks the provider config (#542), instead of asking
-      // each provider's predicate whether the blob is its own.
-      const usageLimit = readUsageLimitStats(sessionRows[0]?.stats);
-      const usageLimitCfg = usageLimit ? USAGE_LIMIT_PROVIDERS.find((cfg) => cfg.kind === usageLimit.kind) : undefined;
+      // One read of the stats discriminant picks the provider config (#542), instead of
+      // asking each provider's predicate whether the blob is its own.
+      const usageLimitCfg = findUsageLimitProvider(sessionRows[0]?.stats);
       if (usageLimitCfg) {
-        await handleUsageLimitExit(usageLimitCfg, workspaceId, sessionId, issueId, projectId, now, sessionRows[0]?.stats, roleFlags);
+        await handleUsageLimitExit({ cfg: usageLimitCfg, workspaceId, sessionId, issueId, projectId, now, statsJson: sessionRows[0]?.stats, roleFlags });
         return;
       }
       // Route the (non-already-merged, non-usage-limited) exit to exactly one terminal
@@ -545,48 +275,6 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
     }
   }
 
-  async function handleFixAndMergeExit(ctx: ExitContext): Promise<void> {
-    const { workspace, projectId, issueId, sessionId, exitCode, now, findStatus, defaultBranch, autoMergeDisabledProjectIds } = ctx;
-    const workspaceId = workspace.id;
-    fixAndMergeSessionIds.delete(sessionId);
-    if (exitCode === 0) {
-      if (autoMergeDisabledProjectIds.has(projectId)) {
-        console.log(`[workflow] fix-and-merge session ${sessionId} completed but auto_merge_disabled for project ${projectId} — skipping retry merge`);
-        boardEvents.broadcast(projectId, "workspace_idle");
-      } else {
-        console.log(`[workflow] fix-and-merge session ${sessionId} completed  retrying merge`);
-        // autoMerge swallows its own conflict errors, so its return tells us nothing.
-        // The landing guard below is what verifies the branch actually merged.
-        // #638: this used to pass `gateSkipExplicit("the fix agent already rebuilt/verified the
-        // branch in-worktree this session")` — a claim the fix agent's own prompt does not
-        // support. That prompt (`merge-helpers.service.ts`) is entirely about working-tree
-        // cleanliness; it never instructs the agent to run verify, build or tests. So the
-        // "explicit documented skip" documented something that was not happening, and every
-        // fix-and-merge landed ungated.
-        //
-        // It also cannot be right in principle: a fix session exists because the merge did not
-        // apply cleanly, so it rebases/resolves — which changes the merge RESULT. Whatever was
-        // verified before is not what is about to land. Run the gate. Where the branch is
-        // genuinely unchanged, the gate's own SHA-pinned evidence path makes the re-run cheap.
-        await autoMerge(workspace, projectId, issueId, findStatus("Done")?.id ?? null, now, RUN_GATE);
-      }
-    } else {
-      console.log(`[workflow] fix-and-merge session ${sessionId} exited with code ${exitCode}  not retrying merge`);
-      boardEvents.broadcast(projectId, "workflow_error");
-      emitButlerSystemEvent({ projectId, kind: "merge_failed", workspaceId, text: `Fix-and-merge session for workspace ${workspaceId} exited with code ${exitCode}.` });
-    }
-    // #764: stranded-resolver guard. A fix-and-merge resolver can exit (any code) WITHOUT
-    // the branch landing — the concurrent-merge LOSER whose conflict against the moved base
-    // is real, so autoMerge's plumbing merge throws and is swallowed. Left unchecked the
-    // ticket ends up conflicted with NO open workspace to retry from (manual git recovery).
-    // Verify the branch actually landed; if it did NOT, KEEP the workspace OPEN and idle
-    // (retryable) and clear the stale readyForMerge flag so nothing treats a conflicted
-    // branch as mergeable. Never close/strand it. (Acceptance for the concurrent-merge-loser
-    // path; complements #761/#762.)
-    await keepResolverWorkspaceRetryableIfUnlanded(workspace, projectId, issueId, defaultBranch, sessionId);
-    return;
-  }
-
   async function handleFailedSessionExit(ctx: ExitContext): Promise<void> {
     const { workspace, projectId, sessionId, exitCode } = ctx;
     const workspaceId = workspace.id;
@@ -619,103 +307,33 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
     } catch (fpErr) {
       console.warn("[workflow] failure-pattern match failed (non-fatal):", errorMessage(fpErr));
     }
-    return;
   }
 
   /**
-   * #812 build-approval repair. NOT a gate — a repair run BEFORE the shared verify/smoke gate.
+   * Arm `readyForMerge` and persist the merge-gate evidence quartet (#182/#243/#540).
    *
-   * A builder that created the build manifest may not have approved native build scripts or pinned
-   * a package-manager version that honors the approval, so a FRESH clone of master can fail to
-   * install even though the warm-store worktree builds. `ensureBuildableFromClean` dispatches per
-   * stack (pnpm → onlyBuiltDependencies, bun → trustedDependencies, npm/yarn → pin only, and
-   * cargo/go/python/java → a clean no-op). We commit that fix onto the branch BEFORE the verify
-   * build (which now runs inside the shared `runPreMergeGate`) so the fix merges to master and
-   * clones build clean. Only meaningful when a verify_script is configured and a worktree exists;
-   * a repair failure never blocks the merge — it reverts and returns.
-   *
-   * (arch-review §1.2: the verify/smoke DECISION itself is no longer duplicated here — it lives in
-   * the single owner `runPreMergeGate`, which the review-exit path below calls, exactly like the
-   * manual/monitor merge paths. This function keeps ONLY the repair that must precede that build.)
+   * ONE writer for what used to be two near-identical nine-line object literals in
+   * `handleReviewSessionExit` — the auto-merge-enabled path and the auto-merge-disabled path —
+   * whose only real difference was whether the evidence may be trusted. `trustworthy: false`
+   * (a tip moved DURING the gate run) nulls the whole quartet rather than leaving a ranAt/stage
+   * the merge path would honour on age alone for code the gate never saw. `ranAt` is the moment
+   * the gate FINISHED, never `ctx.now`, which predates the gate by its entire runtime.
    */
-  async function applyBuildApprovalRepair(ctx: ExitContext): Promise<void> {
-    const { workspace, projectId, prefMap } = ctx;
-    const workspaceId = workspace.id;
-    const verifyScript = prefMap.get(`verify_script_${projectId}`);
-    if (!verifyScript || !verifyScript.trim() || !workspace.workingDir) return;
-    // BUILD_APPROVAL_REPAIR_PATHS is the complete set of files the repair can ever touch (any
-    // stack); we stage/revert only the ones that actually exist, so a non-pnpm project (no
-    // pnpm-workspace.yaml) or a non-Node project (no package.json) is a clean no-op rather than
-    // failing on a missing pathspec.
-    const BUILD_APPROVAL_REPAIR_PATHS = ["package.json", "pnpm-workspace.yaml"];
-    try {
-      const approvalChanged = ensureBuildableFromClean(workspace.workingDir);
-      if (approvalChanged) {
-        const candidatePaths = BUILD_APPROVAL_REPAIR_PATHS.filter((p) =>
-          existsSync(join(workspace.workingDir!, p)),
-        );
-        const committed = candidatePaths.length
-          ? await gitService.commitPaths(
-              workspace.workingDir,
-              candidatePaths,
-              "chore: make project buildable from a clean clone (verify gate #812)",
-            )
-          : false;
-        if (committed) console.log(`[workflow] committed build-approval repair for workspace ${workspaceId} (#812)`);
-      }
-    } catch (e) {
-      // Never let a repair failure leave the worktree dirty — an uncommitted manifest change would
-      // block the auto-merge (silent merge loss). Revert and continue.
-      console.warn(`[workflow] build-approval repair failed for workspace ${workspaceId}: ${errorMessage(e)}`);
-      const revertPaths = BUILD_APPROVAL_REPAIR_PATHS.filter((p) =>
-        existsSync(join(workspace.workingDir!, p)),
-      );
-      if (revertPaths.length) {
-        try {
-          await gitExec(["checkout", "--", ...revertPaths], { cwd: workspace.workingDir! });
-        } catch { /* best-effort cleanup */ }
-      }
-    }
-  }
-
-  /**
-   * #792 cold-clone build gate. Opt-in per project; verifies a FRESH clone of the
-   * branch builds (the worktree warm-store can hide #783-class breakage). Returns
-   * false to WITHHOLD readyForMerge.
-   */
-  async function runColdCloneGate(ctx: ExitContext): Promise<boolean> {
-    const { workspace, projectId } = ctx;
-    const workspaceId = workspace.id;
-    // #792 cold-clone build check: the in-worktree verify gate above runs in a
-    // dependency-symlinked worktree with a warm pnpm store, so it can pass even
-    // when a FRESH clone of the branch would not build (the #783 class: unapproved
-    // native build scripts, an unpinned package manager, an uncommitted generated
-    // file). Opt-in per project via `cold_clone_check_<projectId>` — a pure no-op
-    // when unset. Runs AFTER the verify block so it picks up any pnpm-approval
-    // repair just committed onto the branch. A non-zero clean-build exit WITHHOLDS
-    // readyForMerge so the #783 class is caught at review, not after merge.
-    if (await isColdCloneCheckEnabled(projectId, db)) {
-      const repoRows = await db.select({ repoPath: projects.repoPath }).from(projects).where(eq(projects.id, projectId)).limit(1);
-      const repoPath = repoRows[0]?.repoPath;
-      if (repoPath && workspace.branch) {
-        const coldResult: ColdCloneCheckResult = await runUnderBuildSemaphore(() =>
-          runColdCloneBuildCheckForProject(
-            projectId,
-            { repoPath, branch: workspace.branch },
-            db,
-          ).catch((e) => ({ ok: false, reason: "build-failed" as const, output: errorMessage(e) })),
-        );
-        if (!coldResult.ok) {
-          const detail = coldResult.failedCommand ? `${coldResult.failedCommand} (exit ${coldResult.exitCode})` : coldResult.reason;
-          console.log(`[workflow] cold-clone build check failed (${coldResult.reason}) for workspace ${workspaceId} — withholding readyForMerge (#792)`);
-          boardEvents.broadcast(projectId, "workflow_error");
-          emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `Cold-clone build check failed for workspace ${workspaceId}: ${detail}. Builds in the worktree but not on a fresh clone (the #783 class); not approved for merge. ${(coldResult.output || "").slice(0, 300)}` });
-          return false;
-        }
-        console.log(`[workflow] cold-clone build check passed for workspace ${workspaceId} (#792)`);
-      }
-    }
-    return true;
+  async function armReadyForMerge(
+    workspaceId: string,
+    projectId: string,
+    evidence: { ranAt: string; stage: string; source: string; branchSha: string | null; baseSha: string | null; trustworthy: boolean },
+  ): Promise<void> {
+    await db.update(workspaces).set({
+      readyForMerge: true,
+      updatedAt: evidence.ranAt,
+      mergeGateRanAt: evidence.trustworthy ? evidence.ranAt : null,
+      mergeGateStage: evidence.trustworthy ? evidence.stage : null,
+      mergeGateSource: evidence.trustworthy ? evidence.source : null,
+      mergeGateBranchSha: evidence.branchSha,
+      mergeGateBaseSha: evidence.baseSha,
+    }).where(eq(workspaces.id, workspaceId));
+    boardEvents.broadcast(projectId, "workspace_ready_for_merge");
   }
 
   async function handleReviewSessionExit(ctx: ExitContext): Promise<void> {
@@ -784,22 +402,16 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
     }
     // Persist the REAL gate evidence (ranAt/stage) alongside readyForMerge — this is what the
     // monitor's later auto-merge trigger reads to build honest `MergeGateEvidence` instead of
-    // fabricating `ranAt: new Date()` at merge time (#182). `ranAt` is `gateRanAt` — the moment
-    // the gate FINISHED — not `ctx.now`, which predates the gate by its entire runtime.
-    await db.update(workspaces).set({
-      readyForMerge: true,
-      updatedAt: gateRanAt,
-      // A gate whose worktree moved under it produced no trustworthy proof — clear the whole
-      // evidence quartet rather than leaving a ranAt/stage that the merge path would honour
-      // on age alone (#243).
-      mergeGateRanAt: tipMovedDuringGate ? null : gateRanAt,
-      mergeGateStage: tipMovedDuringGate ? null : preMergeGate.stage,
-      mergeGateSource: tipMovedDuringGate ? null : "review-exit gate",
-      mergeGateBranchSha: gateShas.branchSha ?? null,
-      mergeGateBaseSha: gateShas.baseSha ?? null,
-    }).where(eq(workspaces.id, workspaceId));
-    boardEvents.broadcast(projectId, "workspace_ready_for_merge");
-    const learningAfterReview = getBool(prefMap, "learning_step_after_review") && workspace.workingDir ? launchLearningStep(db, sessionManager, learningSessionIds, workspace, prefMap, "after review", true) : Promise.resolve();
+    // fabricating `ranAt: new Date()` at merge time (#182).
+    const evidence = {
+      ranAt: gateRanAt,
+      stage: preMergeGate.stage,
+      source: "review-exit gate",
+      branchSha: gateShas.branchSha ?? null,
+      baseSha: gateShas.baseSha ?? null,
+    };
+    await armReadyForMerge(workspaceId, projectId, { ...evidence, trustworthy: !tipMovedDuringGate });
+    const learningAfterReview = getBool(prefMap, "learning_step_after_review") && workspace.workingDir ? launchLearningStep(learningStepDeps, workspace, prefMap, "after review", true) : Promise.resolve();
     if (autoMergeEnabled) {
       await learningAfterReview;
       // #797 synchronous foundational merge. A no-dependency scaffold/shell ticket that
@@ -820,27 +432,17 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
         // there is nothing worth trusting (a tip moved during the run, or nothing was gated), and
         // then RUN_GATE makes the executor decide for itself. #540 fixed the old branch here: it
         // minted sha-less evidence for a run whose tip HAD moved, i.e. proof accepted on age alone
-        // for code the gate never saw — the exact thing the persisted-evidence block above nulls.
+        // for code the gate never saw — the exact thing `armReadyForMerge`'s `trustworthy` nulls.
         await autoMerge(workspace, projectId, issueId, findStatus("Done")?.id ?? null, now,
           preMergeGate.token ?? RUN_GATE);
       } else {
         console.log(`[workflow] review session ${sessionId} completed  queued for scheduled auto-merge`);
       }
     } else {
-      await db.update(workspaces).set({
-        readyForMerge: true,
-        updatedAt: gateRanAt,
-        mergeGateRanAt: gateRanAt,
-        mergeGateStage: preMergeGate.stage,
-        mergeGateSource: "review-exit gate",
-        mergeGateBranchSha: gateShas.branchSha ?? null,
-        mergeGateBaseSha: gateShas.baseSha ?? null,
-      }).where(eq(workspaces.id, workspaceId));
-      boardEvents.broadcast(projectId, "workspace_ready_for_merge");
+      await armReadyForMerge(workspaceId, projectId, { ...evidence, trustworthy: true });
       console.log(`[workflow] review session ${sessionId} completed  auto-merge disabled, marked ready_for_merge and left in In Review`);
       await learningAfterReview;
     }
-    return;
   }
 
   async function handleBuilderSessionExit(ctx: ExitContext): Promise<void> {
@@ -955,7 +557,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
       await autoMerge(workspace, projectId, issueId, findStatus("Done")?.id ?? null, now, RUN_GATE);
       return;
     }
-    if (getBool(prefMap, "learning_step_after_agent") && workspace.workingDir) await launchLearningStep(db, sessionManager, learningSessionIds, workspace, prefMap, "after agent");
+    if (getBool(prefMap, "learning_step_after_agent") && workspace.workingDir) await launchLearningStep(learningStepDeps, workspace, prefMap, "after agent");
     if (await isWorkspaceOnNonTerminalWorkflowNode(db, workspace.currentNodeId)) {
       console.log(`[workflow] workspace ${workspaceId} is on a non-terminal workflow node  skipping legacy auto-review (#997)`);
       return;
@@ -973,76 +575,5 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
     await launchAutoReview(ctx);
   }
 
-  /**
-   * Launch the auto-review session for a builder that produced committed changes.
-   * Runs on the same provider/profile the workspace was built with; on launch
-   * failure resets the workspace to idle so the stranded-review reconciler can
-   * recover it (#529) rather than leaving it stuck at "reviewing".
-   */
-  async function launchAutoReview(ctx: ExitContext): Promise<void> {
-    const workspaceId = ctx.workspace.id;
-    // Cross-path launch reservation (#270): the stranded-review reconciler and manual review
-    // share this slot, so two paths deciding "this workspace needs a review" in the same
-    // second can no longer both spawn a session.
-    if (!tryReserveReviewLaunch(workspaceId)) {
-      console.log(`[workflow] review launch already in progress for workspace ${workspaceId} — skipping duplicate auto-review`);
-      return;
-    }
-    try {
-      await launchAutoReviewReserved(ctx);
-    } finally {
-      releaseReviewLaunch(workspaceId);
-    }
-  }
-
-  async function launchAutoReviewReserved(ctx: ExitContext): Promise<void> {
-    const { workspace, projectId, issueId, now, prefMap, defaultBranch } = ctx;
-    const workspaceId = workspace.id;
-    // Review on the same provider/profile the workspace was built with (e.g. its
-    // Codex OAuth license), not the global default which may have rotated since.
-    // #541: same ladder as the learning step, spelled differently. Now one call.
-    const reviewPrefs = applyWorkspaceProfileToPrefs(prefMap, workspace);
-    const { agentCommand, agentArgs: reviewArgs, provider: reviewProvider, profile: profileSelection } =
-      resolveWorkspaceLaunchSettings(prefMap, workspace);
-    const autoFix = workspace.isDirect ? false : getBool(reviewPrefs, "review_auto_fix");
-    let diffRef = workspace.baseBranch || defaultBranch, conflictingFiles: string[] | undefined, uncommittedChanges: string[] | undefined;
-    if (workspace.isDirect) diffRef = workspace.baseCommitSha || defaultBranch;
-    else if (workspace.workingDir) {
-      const baseBranch = workspace.baseBranch || defaultBranch;
-      if (!baseBranch) { console.warn(`[workflow] cannot launch review for workspace ${workspaceId}: no base/default branch configured`); return; }
-      const prep = await gitService.prepareForReview(workspace.workingDir, baseBranch);
-      diffRef = prep.diffRef;
-      if (!prep.success) {
-        conflictingFiles = prep.conflictingFiles; uncommittedChanges = prep.uncommittedChanges;
-        console.warn(`[workflow] rebase failed for workspace ${workspaceId}: ${prep.error}  reviewer will resolve conflicts`);
-      }
-    }
-    const reviewSkillName = workspace.thoroughReview ? "code-review-thorough" : "code-review";
-    const verifyAgent = prefMap.get("after_merge_verify_agent") || "none";
-    // Hand the reviewer the diff instead of making a cold agent rediscover it (#128).
-    // Skipped when the rebase failed — the tree is mid-conflict, so a diff taken now
-    // would describe a state the reviewer is about to change.
-    const precomputedContext = workspace.workingDir && diffRef && !conflictingFiles && !uncommittedChanges
-      ? await buildReviewContext({ workingDir: workspace.workingDir, baseRef: diffRef, isDirect: workspace.isDirect })
-      : null;
-    const { prompt, model } = await buildReviewPrompt(db, workspace.branch, diffRef, issueId, autoFix, projectId, conflictingFiles, uncommittedChanges, workspaceId, reviewSkillName, verifyAgent, precomputedContext);
-    const reviewArgsWithModel = model && reviewProvider === "claude" ? `${reviewArgs ?? ""} --model ${model}`.trim() : reviewArgs;
-    try {
-      await setWorkspaceStatus(db, workspaceId, "reviewing", { now });
-      boardEvents.broadcast(projectId, "issue_updated");
-      const reviewSessionId = await sessionManager.startSession({ workspaceId, prompt, agentCommand, agentArgs: reviewArgsWithModel, provider: toExecutorProvider(reviewProvider), triggerType: "review", profile: profileSelection, extraEnv: { KANBAN_SESSION_TYPE: "review", KANBAN_AFTER_MERGE_VERIFY: verifyAgent } });
-      reviewSessionIds.add(reviewSessionId);
-      console.log(`[workflow] launched ${reviewSkillName} session ${reviewSessionId} for workspace ${workspaceId} (verifyAgent=${verifyAgent})`);
-    } catch (err) {
-      console.error("[workflow] Failed to launch review session:", err);
-      // Do NOT swallow this and leave the workspace stuck at "reviewing" with no
-      // running session (the #529 stranding). Reset to idle and surface the failure;
-      // the stranded-review reconciler then re-launches it instead of it sitting
-      // forever as never-reviewed / not-mergeable.
-      await setWorkspaceStatus(db, workspaceId, "idle");
-      boardEvents.broadcast(projectId, "workflow_error");
-      emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: `Auto-review failed to launch for workspace ${workspaceId}; reset to idle for recovery.` });
-    }
-  }
   return { runWorkflowOnExit, reviewSessionIds, fixAndMergeSessionIds, learningSessionIds };
 }
