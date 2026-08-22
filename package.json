@@ -42,6 +42,8 @@
     "test:full": "pnpm --no-bail --workspace-concurrency=1 --filter @agentic-kanban/shared --filter agentic-kanban --filter @agentic-kanban/mcp-server --filter @agentic-kanban/client test",
     "test:mine": "node scripts/test-mine.mjs",
     "test:coverage": "pnpm --no-bail --workspace-concurrency=1 --filter @agentic-kanban/shared --filter agentic-kanban --filter @agentic-kanban/mcp-server --filter @agentic-kanban/client test -- --coverage",
+    "security": "node scripts/security-scan.mjs",
+    "security:json": "node scripts/security-scan.mjs --json",
     "temp:sweep": "node scripts/sweep-temp-dirs.mjs",
     "test:docker": "pnpm --filter agentic-kanban test:docker",
     "test:unit": "pnpm test",

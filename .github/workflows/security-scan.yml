@@ -1,0 +1,57 @@
+name: security-scan
+
+# Dependency advisory + licence gate (#741).
+#
+# Before this workflow, no advisory scan had EVER run against this repo — not
+# locally, not in CI. The external metrics tooling reported
+# `skipped:no_lockfile` because it looks for `package-lock.json` / `Gemfile.lock`
+# / a Python lock and this repo's lockfile is `pnpm-lock.yaml`. pnpm has a native
+# audit, so the gap was wiring, not tooling.
+#
+# The job deliberately contains NO policy of its own: it runs
+# `scripts/security-scan.mjs`, which holds the single POLICY object (fail on
+# high/critical in the PRODUCTION dependency graph, everything else reports;
+# rationale and the dated acceptance list in docs/security-policy.md). That way
+# `pnpm security` on a laptop and this job cannot give different answers.
+#
+# `pnpm install --frozen-lockfile` is required, not incidental: `pnpm licenses
+# list` reads the licence field of the actually-installed packages, so without
+# an install there is no licence answer at all.
+#
+# Scheduled as well as per-PR, because a dependency tree becomes vulnerable
+# without anyone touching the repo.
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+  schedule:
+    # Mondays 06:00 UTC — new advisories land against an unchanged lockfile.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  dependency-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: dependency advisories + licences (policy in scripts/security-scan.mjs)
+        run: pnpm security
+      # Keep the machine-readable report even when the gate fails, so a red
+      # build shows WHICH advisory is new rather than only that something is.
+      - name: report artifact
+        if: always()
+        run: pnpm security -- --json > security-report.json || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-report
+          path: security-report.json
+          if-no-files-found: warn
