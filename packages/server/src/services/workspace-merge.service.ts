@@ -462,14 +462,8 @@ export function createWorkspaceMergeService(deps: {
     // #491 — re-check base-branch health right after a merge lands, so a base that just went
     // red is recorded before it silently gets charged to the next branch's gate. Fire-and-forget:
     // never blocks the merge response, and a failure here is non-fatal to the merge itself.
-    //
-    // #712 — this is the SECOND, unsynchronised caller of the probe (the other is the periodic
-    // sweep), and a merge is exactly when both fire. It used to start a rival run that shared a
-    // deterministic temp dir with the sweep's, so each deleted the other's tree mid-verify and
-    // the wreck was recorded as a red base — withholding every subsequent merge on the project.
-    // `verifyBaseBranchHealth` now coalesces per project: if the sweep is already probing, this
-    // JOINS that run instead of racing it. Left unconditional deliberately — "the base moved, so
-    // re-measure it" is this call's whole reason to exist; the dedup belongs in the probe.
+    // #712 — the second, unsynchronised caller (the sweep is the other). Deliberately left
+    // unconditional: the dedup belongs in the probe, which now coalesces per project.
     if (postMergeContext.projectId) {
       const projectIdForHealth = postMergeContext.projectId;
       setImmediate(() => {
