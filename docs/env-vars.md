@@ -66,7 +66,7 @@ guarded by `board-client-port-ladder-single-source.test.ts`.
 | `KANBAN_HOST` | Interface the board API binds. **Never `0.0.0.0`** — the API has no auth. |
 | `KANBAN_FLEET_PORT` | Port for the worker-fleet listener (register/heartbeat/ws + `/health`, nothing else). **Unset = disabled**: no port is opened. |
 | `KANBAN_FLEET_HOST` | Interface the fleet port binds (worker register/heartbeat/ws only). **Unset = `127.0.0.1`** since #753 — a cross-machine fleet must name the interface (or set `KANBAN_FLEET_INSECURE=1`). |
-| `KANBAN_GIT_HTTP_PORT` | Port for the git smart-HTTP transport. **Unset = an OS-assigned port**, which changes every board boot — a cross-machine fleet must pin it. |
+| `KANBAN_GIT_HTTP_PORT` | Port for the git smart-HTTP transport. **Unset = an OS-assigned port**, which changes every board boot. **REQUIRED whenever `KANBAN_FLEET_PORT` is set** (#776): the git transport refuses to start on an ephemeral port while a fleet listener is configured, because a worker holds the `gitPort` from its `assign` and rebuilds every clone/push URL from it. |
 | `KANBAN_GIT_HTTP_HOST` | Interface the git transport binds. **Unset = `127.0.0.1`** since #753, same rule as `KANBAN_FLEET_HOST`. |
 | `KANBAN_FLEET_INSECURE` | Set to exactly `1` to let both fleet listeners bind every interface with no interface named. Both are plaintext HTTP carrying a bearer credential, so this is the explicit "yes, on every network this machine is on" switch. Anything other than `1` (including `true`) keeps them on loopback. |
 | `KANBAN_GIT_MAX_BODY_BYTES` | Cap on ONE git smart-HTTP request body, counted after gzip decompression (default 1 GiB). Raise it only for a repo whose real pushes exceed it. |

@@ -33,6 +33,16 @@
 // is dropped from the store on the spot rather than left to age out. The TTL is
 // now only an upper ceiling, not the bound that matters.
 //
+// TOKEN SCOPES ARE PERSISTED (#775). The store above was memory-only, so a board
+// restart made the board FORGET every token it had issued: a worker finishing its
+// run pushed with a token nobody recognised, got a 401 on every retry, and its work
+// survived only as the orphan `kanban/<sessionId>` branch in its cache clone. That
+// is what made #745's recovery promise partial — the board keeps the session and
+// waits for the worker's exit, but the worker could not deliver its push. The DIGEST
+// and the scope now live in `worker_git_tokens`; the clear token still never leaves
+// the `assign` frame, and the assignment check above still gates every request, so
+// the table can only make the board REMEMBER, never let a token do more.
+//
 // Push contract: workers push ONLY to the `refs/kanban/incoming/*` namespace,
 // and only to the ONE ref their token was issued for (#246) — never to
 // refs/heads/*, because feature branches are checked out in board-side worktrees
@@ -41,7 +51,14 @@
 // (worker-remote-sync service).
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { createExpiringDigestStore, envPort, extractBearer, resolveListenHost } from "../lib/bearer-token.js";
+import {
+  createExpiringDigestStore,
+  envPort,
+  extractBearer,
+  resolveConfiguredFleetPort,
+  resolveListenHost,
+  sha256Hex,
+} from "../lib/bearer-token.js";
 import { createGunzip } from "node:zlib";
 import { gitStream } from "@agentic-kanban/shared/lib/git-exec";
 import { db as realDb } from "../db/index.js";
@@ -51,6 +68,13 @@ import {
   findCurrentWorkerAssignment,
   WORKER_RESULT_LANDABLE_AFTER_END_MS,
 } from "../repositories/worker.repository.js";
+import {
+  deleteGitToken,
+  deleteGitTokensForWorker,
+  findGitTokenByHash,
+  insertGitToken,
+  pruneExpiredGitTokens,
+} from "../repositories/git-token.repository.js";
 import {
   createBodyLimit,
   createReceiveGuard,
@@ -130,8 +154,12 @@ export interface GitHttpHandle {
   port: number;
   /** Mint a scoped, expiring token for one assignment. Returns the clear token once. */
   issueToken(input: IssueGitTokenInput): string;
-  /** Drop every token held by a worker (called from revokeWorker). Returns the count. */
-  revokeWorkerTokens(workerId: string): number;
+  /**
+   * Drop every token held by a worker (called from revokeWorker), in memory AND in the
+   * persisted table. Async since #775: forgetting only this process's copy would let a
+   * restart resurrect a revoked worker's credential straight out of the row.
+   */
+  revokeWorkerTokens(workerId: string): Promise<number>;
   close(): Promise<void>;
 }
 
@@ -141,28 +169,114 @@ export interface GitHttpHandle {
  * comparison to leak timing. #556: the map, the mint, the prune and the digest helper are the
  * shared `createExpiringDigestStore`; what stays here is the SCOPE — which worker, which
  * project, which incoming ref — because that is the part git transport actually decides.
+ *
+ * #775 makes the in-memory store a CACHE in front of `worker_git_tokens`: writes go to both,
+ * a read falls through to the table on a miss (which is what a restart looks like), and every
+ * delete removes the row as well as the entry. Digests only, in both halves.
  */
-function createGitTokenStore() {
+function createGitTokenStore(database: Database) {
   const store = createExpiringDigestStore<GitTokenScope>({ ttlMs: DEFAULT_GIT_TOKEN_TTL_MS });
+
+  /**
+   * In-flight persistence (#775).
+   *
+   * `issueToken` is SYNCHRONOUS — its caller puts the clear token straight into the
+   * `assign` frame — so the row is written fire-and-forget. Every reader that must not see a
+   * stale table awaits this barrier first. Revocation above all: a revoke racing an issue
+   * would otherwise clear memory and leave the row behind, which is exactly resurrecting the
+   * credential the operator just killed.
+   */
+  const pending = new Set<Promise<unknown>>();
+  function track(work: Promise<unknown>): void {
+    pending.add(work);
+    void work.finally(() => pending.delete(work));
+  }
+  async function persistenceSettled(): Promise<void> {
+    // A loop, not one await: settling a batch can start another (two dispatches in the same
+    // turn), and `allSettled` only covers the snapshot it was handed.
+    while (pending.size > 0) await Promise.allSettled([...pending]);
+  }
+
   return {
-    issue: (input: IssueGitTokenInput): string =>
-      store.issue(
-        {
-          workerId: input.workerId,
-          projectId: input.projectId,
-          incomingRef: input.incomingRef,
-          issuedAtMs: input.now ?? Date.now(),
-        },
-        { now: input.now, ttlMs: input.ttlMs },
-      ),
-    resolve: (token: string, nowMs?: number) => store.resolve(token, nowMs),
+    issue: (input: IssueGitTokenInput): string => {
+      const issuedAtMs = input.now ?? Date.now();
+      const scope: GitTokenScope = {
+        workerId: input.workerId,
+        projectId: input.projectId,
+        incomingRef: input.incomingRef,
+        issuedAtMs,
+      };
+      const token = store.issue(scope, { now: input.now, ttlMs: input.ttlMs });
+      // The DIGEST, never the token: the row is a scope record, not a credential store.
+      track(
+        insertGitToken(
+          sha256Hex(token),
+          { ...scope, expiresAtMs: issuedAtMs + (input.ttlMs ?? DEFAULT_GIT_TOKEN_TTL_MS) },
+          database,
+        ).catch((err) =>
+          console.error(`[git-http] failed to persist token scope for worker ${input.workerId}:`, err),
+        ),
+      );
+      return token;
+    },
     /**
-     * Drop THIS token — used when its assignment turns out to be over (#753). `consume`
-     * with `nowMs: 0` because we want the entry GONE regardless of whether it had also
-     * expired; the return value only says whether one was there.
+     * The scope for a token. A memory hit answers immediately; a MISS falls through to the
+     * table, which is the whole point of #775 — after a board restart the store is empty, so
+     * a worker still holding a live assignment's token got a 401 it could not recover from,
+     * and its work survived only as an orphan `kanban/<sessionId>` branch nothing enumerates.
+     *
+     * This does NOT widen authority: `authorizeAssignment` still re-derives the dispatch from
+     * `sessions` on every request (#753), so a surviving row for a finished session authorises
+     * nothing — it is dropped on the spot instead.
      */
-    drop: (token: string) => store.consume(token, 0) !== null,
-    revokeWorker: (workerId: string) => store.revokeWhere((scope) => scope.workerId === workerId),
+    resolve: async (token: string, nowMs: number = Date.now()): Promise<GitTokenScope | null> => {
+      const cached = store.resolve(token, nowMs);
+      if (cached) return cached;
+      await persistenceSettled();
+      const hash = sha256Hex(token);
+      const row = await findGitTokenByHash(hash, database).catch((err) => {
+        // Fail CLOSED, same reasoning as the assignment lookup below: a lookup that throws
+        // leaves us unable to tell a live token from an unknown one, and what is on the line
+        // is repo contents.
+        console.error("[git-http] persisted token lookup failed:", err);
+        return null;
+      });
+      if (!row) return null;
+      if (row.expiresAtMs <= nowMs) {
+        await deleteGitToken(hash, database).catch(() => { /* the boot prune gets it */ });
+        return null;
+      }
+      return {
+        workerId: row.workerId,
+        projectId: row.projectId,
+        incomingRef: row.incomingRef ?? undefined,
+        issuedAtMs: row.issuedAtMs,
+      };
+    },
+    /**
+     * Drop THIS token — used when its assignment turns out to be over (#753). `consume` with
+     * `nowMs: 0` because we want the entry GONE regardless of whether it had also expired;
+     * the ROW goes too, or the next request would resolve it straight back out of the table.
+     */
+    drop: async (token: string): Promise<boolean> => {
+      await persistenceSettled();
+      const hadEntry = store.consume(token, 0) !== null;
+      await deleteGitToken(sha256Hex(token), database).catch((err) =>
+        console.error("[git-http] failed to delete a persisted token scope:", err),
+      );
+      return hadEntry;
+    },
+    revokeWorker: async (workerId: string): Promise<number> => {
+      await persistenceSettled();
+      const fromMemory = store.revokeWhere((scope) => scope.workerId === workerId);
+      const fromTable = await deleteGitTokensForWorker(workerId, database).catch((err) => {
+        console.error(`[git-http] failed to delete persisted token scopes for worker ${workerId}:`, err);
+        return 0;
+      });
+      // The table is the superset — it also holds tokens issued by a PREVIOUS board process,
+      // which memory cannot know about — so it is the count worth reporting.
+      return Math.max(fromMemory, fromTable);
+    },
   };
 }
 
@@ -351,6 +465,48 @@ export function resolveConfiguredGitPort(env: NodeJS.ProcessEnv = process.env): 
 }
 
 /**
+ * Why an OS-assigned git port is not allowed once a fleet listener exists (#776).
+ *
+ * THE INVARIANT: while `KANBAN_FLEET_PORT` is set, the git transport must be on a PINNED
+ * port. A worker receives `gitPort` once, in its `assign` frame, and rebuilds every clone and
+ * push URL as `scheme://<host>:<gitPort>/git/<projectId>` for the life of that assignment.
+ * With `KANBAN_GIT_HTTP_PORT` unset the port is OS-assigned on every boot, so a board restart
+ * (or any relisten) silently invalidates a value a worker is still using: its push lands on
+ * some unrelated service, or on nothing, and neither side can say why.
+ *
+ * REFUSED rather than re-announced. #776 offered the alternative of broadcasting the current
+ * git port to connected workers on listener start and having the worker prefer the announced
+ * value over its assignment. That fixes the STALE-VALUE symptom and not the cause: a remote
+ * worker reaches this listener through a firewall/NAT rule, and no rule can match a port that
+ * moves every boot — so the re-announced number would be accurate and still unreachable. It
+ * would also need a new protocol frame plus worker-side precedence logic to paper over a
+ * misconfiguration that one environment variable fixes. Failing closed with a named cause is
+ * the smaller mechanism, and "the failure has no visible cause on either side" was the actual
+ * defect.
+ *
+ * Scope of the refusal: the git TRANSPORT only, and only when it is started without an
+ * explicit port. A same-filesystem worker (`--shares-filesystem`) never reaches the transport,
+ * and the transport is started lazily by the first git-transport dispatch — so this surfaces
+ * as one legible failed dispatch, not a board that will not boot.
+ *
+ * @returns the operator-facing reason to refuse, or null when the configuration is sound.
+ */
+export function gitPortStabilityViolation(env: NodeJS.ProcessEnv = process.env): string | null {
+  const fleetPort = resolveConfiguredFleetPort(env);
+  if (fleetPort === null) return null;
+  // The RESOLVED git port, deliberately: an invalid KANBAN_GIT_HTTP_PORT falls back to 0 and
+  // is therefore not pinned, which is the right answer — a typo is not a promise.
+  if (resolveConfiguredGitPort(env) !== 0) return null;
+  return (
+    "refusing to start the git transport on an OS-assigned port while a fleet listener is " +
+    `configured (KANBAN_FLEET_PORT=${fleetPort}). A worker holds the gitPort from its assign ` +
+    "and rebuilds every clone/push URL from it, so an ephemeral port breaks after any board " +
+    "restart or relisten with no visible cause. Set KANBAN_GIT_HTTP_PORT to a pinned port " +
+    "(see docs/worker-fleet.md section 6)."
+  );
+}
+
+/**
  * Which interface the git transport binds, from `KANBAN_GIT_HTTP_HOST` (#652, #753).
  * Absent no longer means `0.0.0.0` — see {@link resolveListenHost}.
  */
@@ -370,7 +526,18 @@ export async function startGitHttpServer(opts?: {
   assignmentLookup?: AssignmentLookup;
 }): Promise<GitHttpHandle> {
   const database = opts?.database ?? realDb;
-  const tokens = createGitTokenStore();
+  // #776: checked only when no explicit port was passed — an explicit port is the test /
+  // embedding seam, and its caller has already decided what it wants.
+  if (opts?.port === undefined) {
+    const violation = gitPortStabilityViolation();
+    if (violation) throw new Error(`[git-http] ${violation}`);
+  }
+  const tokens = createGitTokenStore(database);
+  // #775: the in-memory store pruned on every issue; the table needs one sweep per boot,
+  // or a board that issues nothing for a month keeps a month of dead rows.
+  void pruneExpiredGitTokens(Date.now(), database).catch((err) =>
+    console.error("[git-http] failed to prune expired token scopes:", err),
+  );
   const assignmentLookup = opts?.assignmentLookup ?? createAssignmentLookup(database);
 
   const http: Server = createServer((req, res) => {
@@ -384,7 +551,7 @@ export async function startGitHttpServer(opts?: {
         }
 
         const provided = extractBearer(req.headers.authorization, { allowBasic: true });
-        const scope = provided ? tokens.resolve(provided) : null;
+        const scope = provided ? await tokens.resolve(provided) : null;
         if (!scope || !provided) {
           reject(res, 401, "unauthorized");
           return;
@@ -394,7 +561,7 @@ export async function startGitHttpServer(opts?: {
         // is even parsed, so no request of any shape outlives its session.
         const authorized = await authorizeAssignment(scope, assignmentLookup);
         if (!authorized.ok) {
-          tokens.drop(provided);
+          await tokens.drop(provided);
           console.warn(`[git-http] refused and revoked a token for worker ${scope.workerId}: ${authorized.reason}`);
           reject(res, 403, "assignment is no longer current");
           return;
@@ -489,11 +656,28 @@ export function ensureGitHttpServer(database?: Database): Promise<GitHttpHandle>
  * the UI told the operator the token stopped working immediately. A no-op when
  * the git listener was never started (nothing was ever issued).
  */
-export async function revokeGitTokensForWorker(workerId: string): Promise<number> {
-  if (!activeServer) return 0;
-  const handle = await activeServer.catch(() => null);
-  const removed = handle?.revokeWorkerTokens(workerId) ?? 0;
-  if (removed > 0) console.log(`[git-http] revoked ${removed} git token(s) for worker ${workerId}`);
+export async function revokeGitTokensForWorker(
+  workerId: string,
+  database: Database = realDb,
+): Promise<number> {
+  // #775: NOT a no-op when the listener was never started in this process. That early return
+  // was correct while tokens lived only in memory (nothing had been issued, so nothing could
+  // be revoked) and became a hole the moment they were persisted: the transport starts lazily
+  // on the first git-transport dispatch, so an operator revoking a worker right after a board
+  // restart would have cleared nothing, and the next dispatch would resolve the revoked
+  // worker's surviving row straight out of the table.
+  if (activeServer) {
+    const handle = await activeServer.catch(() => null);
+    if (handle) {
+      const removed = await handle.revokeWorkerTokens(workerId);
+      if (removed > 0) console.log(`[git-http] revoked ${removed} git token(s) for worker ${workerId}`);
+      return removed;
+    }
+  }
+  const removed = await deleteGitTokensForWorker(workerId, database);
+  if (removed > 0) {
+    console.log(`[git-http] revoked ${removed} persisted git token scope(s) for worker ${workerId} (listener not running)`);
+  }
   return removed;
 }
 

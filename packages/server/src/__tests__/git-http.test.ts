@@ -139,7 +139,8 @@ describe("git-http service (worker fleet phase 2)", () => {
     );
     expect(before.status).toBe(200);
 
-    expect(handle.revokeWorkerTokens("worker-doomed")).toBe(1);
+    // Async since #775 — revocation now clears the persisted row as well as the entry.
+    expect(await handle.revokeWorkerTokens("worker-doomed")).toBe(1);
 
     const after = await fetch(
       `http://127.0.0.1:${handle.port}/git/${GIT_ID}/info/refs?service=git-upload-pack`,

@@ -27,7 +27,7 @@ import type { Database } from "../db/index.js";
 import { createWorkerWsRoute } from "./worker-connection.service.js";
 import { getWorkerFleet } from "./worker-fleet.service.js";
 import type { WorkerRegistry } from "./worker-registry.service.js";
-import { envPort, resolveListenHost } from "../lib/bearer-token.js";
+import { resolveConfiguredFleetPort, resolveListenHost } from "../lib/bearer-token.js";
 
 /**
  * Factory for the owner+worker-facing `/api/workers` router. Injected by the
@@ -48,13 +48,11 @@ export interface FleetListenerHandle {
  * values warn and disable rather than crashing the board on a typo.
  */
 export function resolveFleetPort(env: NodeJS.ProcessEnv = process.env): number | null {
-  // Fallback null = disabled, deliberately unlike git-http's 0 = OS-assigned: a
-  // single-machine board must not open a network port just by existing (#556).
-  return envPort("KANBAN_FLEET_PORT", {
-    fallback: null,
-    logPrefix: "[fleet-listener]",
-    onInvalid: "the fleet listener stays disabled",
-  }, env);
+  // Delegated to the shared primitive (#776): the git transport now needs the SAME answer
+  // to decide whether an OS-assigned git port is acceptable, and two hand-copied parses of
+  // one variable is the drift #556 removed. This stays the exported name because "the fleet
+  // port" is this module's concept; only the parse moved.
+  return resolveConfiguredFleetPort(env);
 }
 
 /**

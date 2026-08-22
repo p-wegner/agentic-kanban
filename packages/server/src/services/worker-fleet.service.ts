@@ -52,7 +52,9 @@ export function getWorkerFleet(database: Database = realDb): WorkerFleet {
     // The socket half of revocation lives in the connection manager itself; the
     // git-transport credential is this layer's business (#247).
     registry.onRevoke(async (workerId) => {
-      await revokeGitTokensForWorker(workerId).catch((err) =>
+      // #775: pass the fleet's database — token scopes are persisted now, and revocation has
+      // to reach the rows even when this process never started the git listener.
+      await revokeGitTokensForWorker(workerId, database).catch((err) =>
         console.error(`[worker-fleet] could not revoke git tokens for worker ${workerId}`, err),
       );
     });

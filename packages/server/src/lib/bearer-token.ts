@@ -164,6 +164,26 @@ export function envPort<T extends number | null>(name: string, opts: EnvPortOpti
 }
 
 /**
+ * Is a fleet listener configured, and on which port? Absent/empty/invalid = no listener.
+ *
+ * Lives here, next to {@link envPort}, because TWO callers now need the answer and they
+ * must not drift: `fleet-listener.service.ts` delegates to it to decide whether to open the
+ * port at all, and the git transport asks it to decide whether an OS-assigned git port is
+ * acceptable (#776) — a fleet listener means remote workers hold a `gitPort` from their
+ * `assign` across a board restart, and an ephemeral port makes that value a lie. Reading
+ * the variable twice with hand-copied fallbacks is exactly the drift #556 removed.
+ */
+export function resolveConfiguredFleetPort(env: NodeJS.ProcessEnv = process.env): number | null {
+  // Fallback null = disabled, deliberately unlike git-http's 0 = OS-assigned: a
+  // single-machine board must not open a network port just by existing (#556).
+  return envPort("KANBAN_FLEET_PORT", {
+    fallback: null,
+    logPrefix: "[fleet-listener]",
+    onInvalid: "the fleet listener stays disabled",
+  }, env);
+}
+
+/**
  * The shared "which interface" decision for both plaintext fleet listeners (#753).
  *
  * One function because one policy: an explicit host is used as given, an absent host means

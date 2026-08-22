@@ -198,9 +198,32 @@ VITE_HOST=127.0.0.1 pnpm dev
 | Variable | Serves | Default |
 |---|---|---|
 | `KANBAN_FLEET_PORT` | Worker register / heartbeat / WebSocket, plus `/health` and `/api/health`. Nothing else | **Unset = disabled.** No port is opened |
-| `KANBAN_GIT_HTTP_PORT` | The git smart-HTTP transport only | **Unset = an OS-assigned port**, i.e. a different one every board boot. A cross-machine fleet must pin it — no firewall rule can match a port that moves |
+| `KANBAN_GIT_HTTP_PORT` | The git smart-HTTP transport only | **Unset = an OS-assigned port**, i.e. a different one every board boot. **Required once `KANBAN_FLEET_PORT` is set** — see the invariant below |
 | `KANBAN_FLEET_HOST` / `KANBAN_GIT_HTTP_HOST` | Which interface each binds | **Unset = `127.0.0.1`** (#753). Naming the interface is how a listener leaves this machine |
 | `KANBAN_FLEET_INSECURE` | Nothing on its own. `=1` lets an unset host mean every interface again | Unset. Only the exact value `1` counts — `true` does not |
+
+**INVARIANT: a configured fleet listener requires a PINNED `KANBAN_GIT_HTTP_PORT` (#776).**
+A worker receives `gitPort` exactly once, in its `assign` frame, and rebuilds every clone and
+push URL as `scheme://<host>:<gitPort>/git/<projectId>` for the life of that assignment. With
+`KANBAN_GIT_HTTP_PORT` unset the port is OS-assigned on every boot, so a board restart — or
+any relisten — silently invalidates a value a worker is still using: its push lands on some
+unrelated service, or on nothing, and the failure has no visible cause on either side. The
+git transport therefore **refuses to start** on an OS-assigned port while `KANBAN_FLEET_PORT`
+is set, and says why:
+
+```
+[git-http] refusing to start the git transport on an OS-assigned port while a fleet
+listener is configured (KANBAN_FLEET_PORT=3003). ... Set KANBAN_GIT_HTTP_PORT to a pinned
+port (see docs/worker-fleet.md section 6).
+```
+
+It surfaces as ONE failed git-transport dispatch, not a board that will not boot: the
+transport is started lazily by the first such dispatch, and a `--shares-filesystem` worker
+never reaches it at all. The alternative considered — re-announcing the current git port to
+connected workers on listener start — was rejected because it fixes the stale-value symptom
+and not the cause: a remote worker reaches this listener through a firewall/NAT rule, and no
+rule can match a port that moves every boot, so the re-announced number would be accurate and
+still unreachable.
 
 The board API is never mounted on either listener, so "unreachable from the network" is a
 property of what is mounted where rather than a warning a misconfiguration can violate.
