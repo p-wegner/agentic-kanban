@@ -12,7 +12,24 @@
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+/**
+ * The repair step is the one place this sweep swallows an exception, so it is the only way to
+ * produce the `scanned - acted - skipped` remainder that #723 is about. Mocked per-test via the
+ * flag rather than globally: every other case here must exercise the real scaffold.
+ */
+let scaffoldThrows = false;
+vi.mock("../services/project-scaffold.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../services/project-scaffold.js")>();
+  return {
+    ...actual,
+    ensureHookScaffold: (repoPath: string, options?: Parameters<typeof actual.ensureHookScaffold>[1]) => {
+      if (scaffoldThrows) throw new Error("settings.json is unwritable");
+      return actual.ensureHookScaffold(repoPath, options);
+    },
+  };
+});
+
 import { auditHookWiring, sweepHookWiring, formatHookWiringReport } from "../services/hook-wiring-audit.service.js";
 
 const created: string[] = [];
@@ -97,7 +114,7 @@ describe("sweepHookWiring", () => {
       { id: "1", name: "broken", repoPath: broken },
       { id: "2", name: "fine", repoPath: fine },
       { id: "3", name: "none", repoPath: none },
-    ]);
+    ], { log: () => {} });
     expect(result.scanned).toBe(3);
     expect(result.broken.map((b) => b.projectName)).toEqual(["broken"]);
     expect(result.unguarded).toEqual(["none"]);
@@ -105,20 +122,102 @@ describe("sweepHookWiring", () => {
 
   it("skips a project whose repo path is gone instead of reporting it", () => {
     // A moved/unmounted project is a different problem; reporting it here would bury the finding.
-    const result = sweepHookWiring([{ id: "1", name: "gone", repoPath: join(tmpdir(), "ak-does-not-exist-xyz") }]);
+    const result = sweepHookWiring([{ id: "1", name: "gone", repoPath: join(tmpdir(), "ak-does-not-exist-xyz") }], { log: () => {} });
     expect(result.scanned).toBe(0);
     expect(result.broken).toEqual([]);
   });
 
   it("names the missing matcher in the report, not just the count", () => {
     const broken = makeRepo({ matchers: ["Write|Edit|MultiEdit|NotebookEdit"] });
-    const lines = formatHookWiringReport(sweepHookWiring([{ id: "1", name: "broken", repoPath: broken }]));
+    const lines = formatHookWiringReport(sweepHookWiring([{ id: "1", name: "broken", repoPath: broken }], { log: () => {} }));
     expect(lines.join("\n")).toContain("Bash|PowerShell");
     expect(lines.join("\n")).toContain("looks installed and does not run");
   });
 
   it("is silent when every project is wired", () => {
     const fine = makeRepo({ matchers: ["Write|Edit|MultiEdit|NotebookEdit", "Bash|PowerShell"] });
-    expect(formatHookWiringReport(sweepHookWiring([{ id: "1", name: "fine", repoPath: fine }]))).toEqual([]);
+    expect(
+      formatHookWiringReport(sweepHookWiring([{ id: "1", name: "fine", repoPath: fine }], { log: () => {} })),
+    ).toEqual([]);
+  });
+});
+
+// #723: this sweep was the fifth `PassReport` adopter, and the one #689 missed — it built the
+// report and returned it, while `formatHookWiringReport` returned `[]` for a clean run. The
+// remainder the shape exists to expose therefore reached no log at all, so a run where every
+// candidate threw read exactly like a run where every project was wired.
+//
+// These assertions are deliberately about what was LOGGED, not about the returned object: an
+// assertion on the result would have passed before the fix too, which is precisely how the
+// defect survived four other adopters being fixed.
+describe("sweepHookWiring EMITS its pass summary (#723)", () => {
+  it("logs the summary on a completely clean run, when the findings report is empty", () => {
+    const fine = makeRepo({ matchers: ["Write|Edit|MultiEdit|NotebookEdit", "Bash|PowerShell"] });
+    const alsoFine = makeRepo({ matchers: ["Write|Edit|MultiEdit|NotebookEdit", "Bash|PowerShell"] });
+    const lines: string[] = [];
+
+    const result = sweepHookWiring(
+      [
+        { id: "1", name: "fine", repoPath: fine },
+        { id: "2", name: "also-fine", repoPath: alsoFine },
+      ],
+      { log: (message) => lines.push(message) },
+    );
+
+    // Nothing to act on — and that is exactly the case the old guard suppressed.
+    expect(formatHookWiringReport(result)).toEqual([]);
+    expect(
+      lines,
+      "the hook-wiring sweep returned a PassReport but logged no summary — the #689/#723 defect",
+    ).toContain("scanned 2, acted 0, skipped 2");
+  });
+
+  it("logs the summary when it scanned nothing at all", () => {
+    const lines: string[] = [];
+
+    sweepHookWiring([{ id: "1", name: "gone", repoPath: join(tmpdir(), "ak-no-such-repo-723") }], {
+      log: (message) => lines.push(message),
+    });
+
+    // A `scanned 0` line IS the report (#718): a pass that found nothing must not be
+    // indistinguishable from a pass that never ran.
+    expect(lines).toContain("scanned 0, acted 0, skipped 0");
+  });
+
+  it("names the unaccounted remainder, so a swallowed failure cannot read as a clean run", () => {
+    // One project whose audit succeeds and whose repair path throws: neither acted nor skipped,
+    // which is the whole reason `PassReport` distinguishes the two from `scanned`.
+    const broken = makeRepo({ matchers: ["Write|Edit|MultiEdit|NotebookEdit"] });
+    const lines: string[] = [];
+    scaffoldThrows = true;
+    try {
+      sweepHookWiring([{ id: "1", name: "broken", repoPath: broken }], {
+        repair: true,
+        log: (message) => lines.push(message),
+      });
+    } finally {
+      scaffoldThrows = false;
+    }
+
+    expect(lines).toContain("scanned 1, acted 0, skipped 0, 1 unaccounted");
+  });
+
+  it("applies its [hook-audit] tag once, in the default logger (#616)", () => {
+    const fine = makeRepo({ matchers: ["Write|Edit|MultiEdit|NotebookEdit", "Bash|PowerShell"] });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let logged: unknown[][];
+
+    try {
+      sweepHookWiring([{ id: "1", name: "fine", repoPath: fine }]);
+      // Read the calls BEFORE restoring: `mockRestore` also RESETS the spy, so a snapshot taken
+      // afterwards is always empty (and the assertion always vacuously... fails, in this case).
+      logged = warn.mock.calls.map((call) => [...call]);
+    } finally {
+      warn.mockRestore();
+    }
+
+    // The tag is a literal first argument (what `console-tag-ratchet.test.ts` requires), and an
+    // injected `log` must therefore not add one — `[hook-audit] [hook-audit]` is the regression.
+    expect(logged).toContainEqual(["[hook-audit] scanned 1, acted 0, skipped 1"]);
   });
 });

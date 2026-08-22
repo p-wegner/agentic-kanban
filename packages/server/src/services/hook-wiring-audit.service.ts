@@ -16,7 +16,7 @@
  * The audit is read-only; repair is `ensureHookScaffold`, which is idempotent and additive (it
  * appends missing hook entries and never overwrites a script or an existing array).
  */
-import { emptyPassReport, recordActed, recordSkipped, type PassReport } from "../lib/pass-report.js";
+import { emptyPassReport, formatPassReportBody, recordActed, recordSkipped, type PassReport } from "../lib/pass-report.js";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ensureHookScaffold } from "./project-scaffold.js";
@@ -123,8 +123,9 @@ export interface HookWiringSweepResult extends PassReport {
  */
 export function sweepHookWiring(
   projects: { id: string; name: string; repoPath: string | null }[],
-  opts: { repair?: boolean } = {},
+  opts: { repair?: boolean; log?: (message: string) => void } = {},
 ): HookWiringSweepResult {
+  const log = opts.log ?? ((message: string) => console.warn(`[hook-audit] ${message}`));
   const broken: HookWiringStatus[] = [];
   const repaired: string[] = [];
   const unguarded: string[] = [];
@@ -160,10 +161,31 @@ export function sweepHookWiring(
       /* repair is best-effort; the finding is already recorded in `broken` */
     }
   }
+  // UNCONDITIONAL, and inside the pass rather than in the formatter (#723). This sweep was the
+  // fifth `PassReport` adopter and the one #689 missed: it built a full report and returned it,
+  // while `formatHookWiringReport` returned `[]` for a clean run and never printed the body at
+  // all. So a run in which EVERY candidate threw — `existsSync` racing a mount, a settings.json
+  // read failing, `ensureHookScaffold` blowing up outside the narrow catch below — looked
+  // byte-identical in the server log to a run where every project was correctly wired.
+  //
+  // The emission belongs to the pass, not to its formatter: the formatter's job is the
+  // per-project findings a human acts on, and it is legitimately empty when there are none,
+  // whereas the remainder must be stated whether or not there is anything to act on. Same shape
+  // as `startup/worker-incoming-sweep.ts` and `startup/agent-session-registry-reaper.ts` after
+  // #718 removed their `if (...)` guards — a `scanned 0` line IS the report, not noise. The tag
+  // is applied by the default logger (#616), so an injected `log` must not add one.
+  log(formatPassReportBody(report));
   return { ...report, broken, repaired, unguarded };
 }
 
-/** One-line-per-project report for the server log. Empty array when everything is wired. */
+/**
+ * One-line-per-project report for the server log: the FINDINGS, not the pass summary.
+ *
+ * Still empty when everything is wired, and that is now safe — `sweepHookWiring` emits the
+ * `scanned / acted / skipped / unaccounted` body itself, unconditionally (#723). Do not move the
+ * body back in here: these lines exist for a human to act on, an empty findings list is a real
+ * answer, and a summary that only prints when something is wrong is the #689 defect.
+ */
 export function formatHookWiringReport(result: HookWiringSweepResult): string[] {
   if (result.broken.length === 0) {
     return result.unguarded.length > 0
