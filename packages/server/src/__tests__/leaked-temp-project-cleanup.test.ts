@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, parse } from "node:path";
 import { mkdirSync, rmSync } from "node:fs";
 import { createClient, type Client } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
@@ -85,7 +85,20 @@ async function seed(d: TestDb): Promise<Seeded & { livePath: string; leakedTempP
   const leakedTempPath = join(tmpdir(), `leaked-cleanup-gone-${randomUUID()}`);
 
   // Missing, but NOT under the OS temp dir — must be reported, never auto-removed.
-  const missingNonTempPath = resolve(process.cwd(), `not-a-real-project-${randomUUID()}`);
+  //
+  // Deliberately NOT derived from the repo root / process.cwd() (#711): the base-branch-health
+  // probe clones this repo into `%TEMP%\kanban-base-health-<projectId>-<branch>`, so under that
+  // probe the repo root IS inside the OS temp dir and a cwd-relative fixture is classified as a
+  // leaked temp project — unregistered, failing both assertions here (red on 12 consecutive
+  // probes while green in the main checkout).
+  //
+  // `isUnderTempDir` (project-registration.ts) is a normalized string-prefix test against
+  // `tmpdir() + sep`, so the one place that is provably outside it no matter where the repo
+  // lives is the FILESYSTEM ROOT of the volume holding the temp dir: `C:\` on Windows, `/` on
+  // POSIX. `tmpdir()` is always at least one segment below its own root, so a child of that root
+  // can never carry the `tmpdir()` prefix. Nothing is created on disk (the path must stay
+  // missing), so no write permission at the root is needed.
+  const missingNonTempPath = join(parse(tmpdir()).root, `not-a-real-project-${randomUUID()}`);
 
   await d.insert(schema.projects).values([
     { id: ids.liveId, name: "live-project", repoPath: livePath, repoName: "live-project", defaultBranch: "main", createdAt: now, updatedAt: now },
