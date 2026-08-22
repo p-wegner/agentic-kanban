@@ -19,7 +19,13 @@ const requireCjs = createRequire(import.meta.url);
 // Hook lives at repo-root/.claude/hooks/check-uncommitted.js. From
 // packages/server/src/__tests__ that's five levels up.
 const hookPath = resolve(import.meta.dirname, "..", "..", "..", "..", ".claude", "hooks", "check-uncommitted.js");
-type SessionActivity = { written: Set<string>; commandText: string } | null;
+type SessionActivity = {
+  writtenAbs: Set<string>;
+  writtenRel: Set<string>;
+  agentCalls: number;
+  subagentTranscripts: number;
+  subagentAuthorshipUnknown: boolean;
+} | null;
 const { classifyStranded, trackedSourceChanges, readSessionActivity, attributeToSession } = requireCjs(hookPath) as {
   classifyStranded: (c: { edited: string[]; deleted: string[]; all: string[] }) => { action: string; files?: string[]; deleted?: string[]; edited?: string[] };
   trackedSourceChanges: (cwd: string) => { edited: string[]; deleted: string[]; all: string[] };
@@ -178,7 +184,11 @@ describe("check-uncommitted hook — authorship attribution (#709)", () => {
   });
 
   it("matches a write-tool path recorded with Windows separators", async () => {
-    const activity = readSessionActivity(await transcript([edit("C:\projects\andrena\agentic-kanban\\" + MINE.replace(/\//g, "\\"))]));
+    // NB: the backslashes must be ESCAPED here. Written raw, the string was
+    // `C:projectsandrenaagentic-kanban\\packages\\...` and matched only because attribution used a
+    // loose suffix match — the very thing #720 tightened. See the cross-repo test below.
+    const winPath = "C:\\projects\\andrena\\agentic-kanban\\" + MINE.replace(/\//g, "\\");
+    const activity = readSessionActivity(await transcript([edit(winPath)]));
     expect(attributeToSession([MINE, THEIRS], activity, REPO)).toEqual([MINE]);
   });
 
@@ -203,5 +213,186 @@ describe("check-uncommitted hook — authorship attribution (#709)", () => {
       await transcript([{ type: "tool_use", name: "Read", input: { file_path: `${REPO}/${THEIRS}` } }]),
     );
     expect(attributeToSession([MINE, THEIRS], activity, REPO)).toEqual([]);
+  });
+});
+
+/**
+ * #720 — the three ways #709's attribution filter was WRONG, all in the silent direction.
+ *
+ * #709 made the hook attribute the dirty set to the stopping session's own transcript and then
+ * `process.exit(0)` when nothing was attributed. A false negative there is therefore SILENT, which
+ * is the dangerous direction: real stranded work goes unreported. The ticket's own observation, run
+ * against the real exported functions, was:
+ *
+ *     transcript: Agent(prompt names .../foo.ts)
+ *                 Bash("cd packages/server && sed -i 's/a/b/' src/services/bar.ts")
+ *                 Bash("cat .../readonly.ts")
+ *     attributed: [ readonly.ts ]     // the one file it did NOT write
+ *
+ * Each `it` below pins one of the three defects plus the cross-repo suffix match.
+ */
+describe("check-uncommitted hook — attribution defects (#720)", () => {
+  const REPO = "C:/projects/andrena/agentic-kanban";
+  const OTHER_REPO = "C:/projects/andrena/other-board";
+  const FOO = "packages/server/src/services/foo.ts";
+  const BAR = "packages/server/src/services/bar.ts";
+  const RO = "packages/server/src/services/readonly.ts";
+  const ALL = [FOO, BAR, RO];
+
+  let dir = "";
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "ak-hook-720-"));
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  const edit = (filePath: string) => ({ type: "tool_use", name: "Edit", input: { file_path: filePath } });
+  const bash = (command: string) => ({ type: "tool_use", name: "Bash", input: { command } });
+  const agent = (prompt: string) => ({ type: "tool_use", name: "Agent", input: { prompt } });
+
+  /** A transcript whose entries carry a real `cwd`, which is what resolves relative shell paths. */
+  async function transcriptAt(name: string, entries: unknown[], cwd = REPO): Promise<string> {
+    const p = join(dir, name);
+    await writeFile(p, entries.map((e) => JSON.stringify({ cwd, message: { content: [e] } })).join("\n") + "\n");
+    return p;
+  }
+
+  /**
+   * A parent transcript that spawned one subagent, laid out the way Claude Code does it:
+   * `<dir>/<id>.jsonl` beside `<dir>/<id>/subagents/agent-<agentId>.jsonl`, with the parent's
+   * tool RESULT carrying the `agentId`. `withSubTranscript: false` omits the child's file, which is
+   * the case the hook cannot narrow.
+   */
+  async function parentWithSubagent(agentId: string, childBlocks: unknown[], withSubTranscript: boolean) {
+    const p = join(dir, "parent.jsonl");
+    await writeFile(
+      p,
+      [
+        JSON.stringify({ cwd: REPO, message: { content: [agent("do the work")] } }),
+        JSON.stringify({ cwd: REPO, toolUseResult: { agentId, status: "completed" } }),
+      ].join("\n") + "\n",
+    );
+    if (withSubTranscript) {
+      const subDir = join(dir, "parent", "subagents");
+      await mkdir(subDir, { recursive: true });
+      await writeFile(
+        join(subDir, `agent-${agentId}.jsonl`),
+        childBlocks.map((b) => JSON.stringify({ cwd: REPO, agentId, message: { content: [b] } })).join("\n") + "\n",
+      );
+    }
+    return p;
+  }
+
+  it("defect 1: a SUBAGENT's writes are attributed from its own transcript", async () => {
+    // Agent/Task was in neither WRITE_TOOLS nor SHELL_TOOLS, and the subagent's tool calls live in
+    // a different file — so a session whose only main-checkout edits came from a subagent exited 0
+    // with no warning at all. That is the modal case in a repo that fans work out constantly.
+    const p = await parentWithSubagent("abc123def", [edit(`${REPO}/${FOO}`)], true);
+    const activity = readSessionActivity(p);
+    expect(activity?.subagentTranscripts).toBe(1);
+    expect(activity?.subagentAuthorshipUnknown).toBe(false);
+    expect(attributeToSession(ALL, activity, REPO)).toEqual([FOO]);
+  });
+
+  it("defect 1: a subagent whose transcript is MISSING reports EVERYTHING, never nothing", async () => {
+    // Silence is the one outcome worse than noise: we know a subagent ran, so we cannot claim the
+    // session wrote nothing. Fall back to the pre-#709 behaviour rather than exiting 0.
+    const p = await parentWithSubagent("abc123def", [edit(`${REPO}/${FOO}`)], false);
+    const activity = readSessionActivity(p);
+    expect(activity?.agentCalls).toBe(1);
+    expect(activity?.subagentAuthorshipUnknown).toBe(true);
+    expect(attributeToSession(ALL, activity, REPO)).toEqual(ALL);
+  });
+
+  it("defect 2: `sed -i` after a `cd` is attributed (resolved against the effective cwd)", async () => {
+    // The old code substring-matched the repo-RELATIVE porcelain path against the raw command text,
+    // so `cd packages/server && sed -i ... src/services/bar.ts` never matched — and this repo's own
+    // instructions tell agents to edit with sed.
+    const activity = readSessionActivity(
+      await transcriptAt("sed.jsonl", [bash("cd packages/server && sed -i 's/a/b/' src/services/bar.ts")]),
+    );
+    expect(attributeToSession(ALL, activity, REPO)).toEqual([BAR]);
+  });
+
+  it("defect 2: a `cd` into an absolute path elsewhere does NOT attribute this repo's files", async () => {
+    const activity = readSessionActivity(
+      await transcriptAt("cd-away.jsonl", [bash(`cd ${OTHER_REPO} && sed -i 's/a/b/' ${BAR}`)]),
+    );
+    expect(attributeToSession(ALL, activity, REPO)).toEqual([]);
+  });
+
+  it("defect 3: READING a file never makes the session its author", async () => {
+    // `cat`/`grep`/`head` of a path used to attribute it. Under this repo's own instruction to read
+    // with cat/head and search with grep, the filter degenerated to no filter.
+    const activity = readSessionActivity(
+      await transcriptAt("reads.jsonl", [
+        bash(`cat ${RO}`),
+        bash(`grep -n "export" ${FOO}`),
+        bash(`head -40 ${BAR}`),
+        bash(`sed -n '1,20p' ${BAR}`),
+        bash(`git diff -- ${FOO}`),
+        bash(`wc -l ${RO} | sort`),
+      ]),
+    );
+    expect(attributeToSession(ALL, activity, REPO)).toEqual([]);
+  });
+
+  it("defect 3: a redirect into a file still attributes it, even from a read verb", async () => {
+    // `cat > file <<EOF` is how an agent writes without an Edit call — the write half of the shell
+    // scan must survive the read/write split.
+    const activity = readSessionActivity(
+      await transcriptAt("redirect.jsonl", [bash(`cat ${RO} > ${BAR}`)]),
+    );
+    expect(attributeToSession(ALL, activity, REPO)).toEqual([BAR]);
+  });
+
+  it("does not cross-attribute a same-relative-path file in a DIFFERENT repo", async () => {
+    // The old `w.endsWith("/" + p)` matched any repo sharing the layout — so a session editing a
+    // sibling board's packages/server/src/services/foo.ts was told to commit ours.
+    const activity = readSessionActivity(await transcriptAt("cross.jsonl", [edit(`${OTHER_REPO}/${FOO}`)]));
+    expect(attributeToSession(ALL, activity, REPO)).toEqual([]);
+  });
+
+  it("reproduces the ticket's exact observation, and now gets it right", async () => {
+    // Before: attributed [readonly.ts] — the only file the session did NOT write.
+    // After: the subagent is visible (and here unresolvable, so everything is reported rather than
+    // the one wrong file), and `bar.ts` is attributed on its own merits.
+    const withoutAgent = readSessionActivity(
+      await transcriptAt("observed.jsonl", [
+        bash("cd packages/server && sed -i 's/a/b/' src/services/bar.ts"),
+        bash(`cat ${RO}`),
+      ]),
+    );
+    expect(attributeToSession(ALL, withoutAgent, REPO)).toEqual([BAR]);
+
+    const p = join(dir, "observed-agent.jsonl");
+    await writeFile(
+      p,
+      [
+        JSON.stringify({ cwd: REPO, message: { content: [agent(`edit ${REPO}/${FOO}`)] } }),
+        JSON.stringify({
+          cwd: REPO,
+          message: { content: [bash("cd packages/server && sed -i 's/a/b/' src/services/bar.ts")] },
+        }),
+        JSON.stringify({ cwd: REPO, message: { content: [bash(`cat ${RO}`)] } }),
+      ].join("\n") + "\n",
+    );
+    const withAgent = readSessionActivity(p);
+    expect(withAgent?.subagentAuthorshipUnknown).toBe(true);
+    expect(attributeToSession(ALL, withAgent, REPO)).toEqual(ALL);
+  });
+
+  it("still attributes plain write tools and plain shell writes with no subagent involved", async () => {
+    // #709's actual win must survive: an uninvolved session is still handed nothing.
+    const mineOnly = readSessionActivity(
+      await transcriptAt("mine.jsonl", [edit(`${REPO}/${FOO}`), bash(`tee ${BAR} < /dev/null`)]),
+    );
+    expect(attributeToSession(ALL, mineOnly, REPO)).toEqual([FOO, BAR]);
+
+    const elsewhere = readSessionActivity(
+      await transcriptAt("elsewhere.jsonl", [edit(`${OTHER_REPO}/src/a.ts`), bash(`cat ${FOO}`)]),
+    );
+    expect(attributeToSession(ALL, elsewhere, REPO)).toEqual([]);
   });
 });
