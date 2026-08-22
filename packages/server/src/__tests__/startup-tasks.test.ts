@@ -144,6 +144,90 @@ describe("pruneStaleWorktrees", () => {
     expect(opts).toEqual({ preserveUnmerged: true });
   });
 
+  /**
+   * #735 — `pruneStaleWorktrees` was the third of #713's `TO CONVERT` sites: a raw
+   * `removeWorktree` with no claim analysis at all. `status='closed'` on the row being swept
+   * says nothing about whether ANOTHER workspace shares the directory, and co-residency
+   * (#394) is supported — a shared-worktree fork child reuses its parent's workingDir. So a
+   * boot that closed the parent recursive-deleted the live child's checkout.
+   *
+   * Query order in the guarded path: closed workspaces -> issue -> project -> the guard's
+   * own unfiltered claim read.
+   */
+  function seedOneStaleWorkspace(claims: { id: string; status: string; workingDir: string }[]) {
+    mockDb.select
+      .mockReturnValueOnce({
+        from: vi.fn(() => ({
+          where: vi.fn(() => Promise.resolve([
+            { id: "ws-1", branch: "feature/x", workingDir: "C:/wt/x", issueId: "issue-1" },
+          ])),
+        })),
+      })
+      .mockReturnValueOnce({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({ limit: vi.fn(() => Promise.resolve([{ projectId: "proj-1" }])) })),
+        })),
+      })
+      .mockReturnValueOnce({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({ limit: vi.fn(() => Promise.resolve([{ repoPath: "C:/repo" }])) })),
+        })),
+      })
+      .mockReturnValueOnce({
+        from: vi.fn(() => ({ where: vi.fn(() => Promise.resolve(claims)) })),
+      });
+  }
+
+  it("removes the stale worktree when nothing live claims it", async () => {
+    seedOneStaleWorkspace([{ id: "ws-1", status: "closed", workingDir: "C:/wt/x" }]);
+
+    await pruneStaleWorktrees();
+
+    expect(vi.mocked(gitService.removeWorktree)).toHaveBeenCalledWith("C:/repo", "C:/wt/x");
+  });
+
+  it("REFUSES to remove a worktree a co-resident LIVE workspace still shares", async () => {
+    // The fork-child shape: a second, non-terminal row on the SAME workingDir.
+    seedOneStaleWorkspace([
+      { id: "ws-1", status: "closed", workingDir: "C:/wt/x" },
+      { id: "ws-child", status: "active", workingDir: "C:/wt/x" },
+    ]);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await pruneStaleWorktrees();
+
+    expect(vi.mocked(gitService.removeWorktree)).not.toHaveBeenCalled();
+    expect(warn.mock.calls.flat().join(" ")).toContain("skipping removal");
+    warn.mockRestore();
+  });
+
+  it("REFUSES when the claim read itself fails — a locked DB is not a green light", async () => {
+    mockDb.select
+      .mockReturnValueOnce({
+        from: vi.fn(() => ({
+          where: vi.fn(() => Promise.resolve([
+            { id: "ws-1", branch: "feature/x", workingDir: "C:/wt/x", issueId: "issue-1" },
+          ])),
+        })),
+      })
+      .mockReturnValueOnce({
+        from: vi.fn(() => ({ where: vi.fn(() => ({ limit: vi.fn(() => Promise.resolve([{ projectId: "proj-1" }])) })) })),
+      })
+      .mockReturnValueOnce({
+        from: vi.fn(() => ({ where: vi.fn(() => ({ limit: vi.fn(() => Promise.resolve([{ repoPath: "C:/repo" }])) })) })),
+      })
+      .mockReturnValueOnce({
+        from: vi.fn(() => ({ where: vi.fn(() => { throw new Error("database is locked"); }) })),
+      });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await pruneStaleWorktrees();
+
+    expect(vi.mocked(gitService.removeWorktree)).not.toHaveBeenCalled();
+    expect(warn.mock.calls.flat().join(" ")).toContain("refusing to remove worktree");
+    warn.mockRestore();
+  });
+
   it("does nothing when no closed workspace still has a workingDir", async () => {
     mockDb.select.mockReturnValueOnce({
       from: vi.fn(() => ({

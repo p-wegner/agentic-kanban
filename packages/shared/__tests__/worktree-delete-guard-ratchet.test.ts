@@ -113,8 +113,6 @@ const BASELINE: Readonly<Record<string, number>> = {
   // analysis, which is why it is not simply wrong today; it should still route through
   // the one guard so both answers come from the same place.
   [rel("packages/server/src/startup/orphaned-worktree-reconciler.ts")]: 1,
-  // TO CONVERT — startup sweep over workspaces whose worktree outlived them.
-  [rel("packages/server/src/startup/startup-tasks.ts")]: 1,
 };
 
 function rel(posixPath: string): string {
