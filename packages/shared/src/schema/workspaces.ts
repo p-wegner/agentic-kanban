@@ -3,6 +3,34 @@ import { relations } from "drizzle-orm";
 import { issues } from "./issues.js";
 import { agentSkills } from "./agent-skills.js";
 
+/**
+ * 88 columns, and it should not become 89 (#739).
+ *
+ * The next widest table in this schema has 23 (`issues`, `repos`); the median across 44
+ * tables is 9. What is here is not one entity but ten concerns flattened into one row by
+ * prefix — `latest_setup_*` (8), `latest_symlink_*` (8), `merge_backoff_*` (7),
+ * `merge_gate_*` (5), `summary_*` (5), `diff_stat_cache_*` (5), `review_preflight_*` (4),
+ * `conflict_cache_*` (3), `scorecard_*` (3), `fork_*`/`showdown_*` (5), `code_metrics_*` (2).
+ * Each `latest_*` / `*_cache_*` / `*_gate_*` group is a one-to-many relationship collapsed
+ * to its last row: there is one setup run per column set, so its history is unrecoverable by
+ * construction, and any new field on any of those concerns is another `ALTER TABLE` on the
+ * hottest table in the board.
+ *
+ * A new field on one of those concerns therefore belongs in that concern's OWN table, keyed
+ * by `workspace_id` — not in another column here. `workspaces-table-width-ratchet.test.ts`
+ * enforces that: the total and each family count are pinned, so widening fails the gate.
+ *
+ * Twelve columns are NULL in all 659 rows of the live DB — `agent_command`,
+ * `pending_plan_path`, `parent_workspace_id`, `fork_node_id`, `fork_join_node_id`,
+ * `fork_status`, `showdown_id`, `showdown_label`, `latest_symlink_error`, `service_state`,
+ * `isolation_downgrade_reason`, `review_preflight_blocked_at`. **None of them is dead.**
+ * #739 checked every one: each has a real writer and a real reader (fork via
+ * `workflow-fork.service`, showdown via `POST /api/issues/:id/showdown`, service_state via
+ * the Docker service-stack repository, and so on). They are NULL because no row on that
+ * instance has reached that state, which is a usage fact, not a schema fact — so dropping
+ * them would delete working features. The remedy for this table is extraction, not deletion —
+ * sequenced, with the coupling of each family counted, in #781.
+ */
 export const workspaces = sqliteTable("workspaces", {
   id: text("id").primaryKey(),
   issueId: text("issue_id").notNull().references(() => issues.id),
