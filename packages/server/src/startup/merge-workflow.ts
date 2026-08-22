@@ -239,6 +239,24 @@ const STRAND_SIGNATURE_KEY = "strandSignature";
  * `conflict` slots are independent and cannot flip-flop against each other, and a
  * conflict that recurs after genuinely clearing still reports (only the LATEST comment of
  * that eventType is consulted, not a history window).
+ *
+ * WHAT MAKES THE SIGNATURE MOVE (#778 re-derived this, because the guard test for it was
+ * red for a different reason): for the `conflict`/guard path the parts carry the guard
+ * FAILURE STRINGS, and `checkPendingSiblingMergeGuards` renders the conflicting files into
+ * them (`<repo>: merge conflicts in a.txt, b.txt`, first 5) — so a second conflicting file
+ * IS a different signature, on top of the changed `uniqueCommits` in `strandPendingParts`.
+ * Residual blind spot: conflicting files beyond the 5th are elided into "…", so a change
+ * only there is invisible unless the commit count also moved.
+ *
+ * The `merged` path's parts are the landed repo names, which is enough because it is not a
+ * repeating event: landing stamps `repos.mergedHeadSha`, and the candidate query above
+ * requires that column to be NULL — the same repo cannot be announced landed twice.
+ *
+ * One more bound comes from OUTSIDE this function: reads here go through the git-exec
+ * adapter's ~1.5s read-dedupe memo (#398), which out-of-band commits (the agent in the
+ * worktree) do not invalidate. At this compensator's 5-minute cadence that margin is
+ * irrelevant; it is only observable when ticks are compressed, which is exactly what the
+ * unit test does — see `stranded-sibling-reconciler.test.ts`.
  */
 async function recordStrandedSiblingComment(
   database: Database,

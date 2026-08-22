@@ -7,6 +7,16 @@
 // progress state (repos rows with mergedHeadSha NULL on a mergedAt-stamped workspace),
 // git-verifies the strand, lands it via the guarded sibling pipeline, and records
 // everything on the issue. Real temp git repos + real test DB.
+//
+// Deliberately carries no always-run gate marker (#778 considered it; the token itself is
+// not spelled here, because `always-run-marker-ratchet.test.ts` scans for the literal and
+// would read a mention as a claim). That marker's criterion is
+// "reaches state outside its own import graph", and this suite reaches nothing of the kind
+// — it imports `reconcileStrandedSiblingMerges` (and transitively git-exec) directly, so
+// scoped test selection already picks it up whenever the code it guards changes. The
+// compensator's 5-minute production cadence is an argument about blast radius, not about
+// import-graph blindness, and force-marking on that basis would erode the one property that
+// keeps the always-run set from drifting back into a hand-maintained list.
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -15,6 +25,7 @@ import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
+import { __resetGitExecSchedulerForTests } from "@agentic-kanban/shared/lib/git-exec";
 import { projects, workspaces, issues, projectStatuses, issueComments } from "@agentic-kanban/shared/schema";
 import * as gitService from "../services/git.service.js";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
@@ -44,10 +55,25 @@ async function createTempRepo(prefix: string): Promise<string> {
   return dir;
 }
 
+/**
+ * Commit through the raw `git` CLI — deliberately NOT through the git-exec adapter, because
+ * that is what production looks like: the commits a reconciler observes were made by an
+ * AGENT in a worktree, i.e. by another process entirely.
+ *
+ * Which is why it also drops the adapter's read-dedupe memo (#398, `GIT_DEDUPE_MEMO_TTL_MS`
+ * = 1.5s). That memo is invalidated by adapter-driven mutations only; an out-of-band commit
+ * is bounded purely by the TTL. Production is safe on that margin — the stranded-sibling
+ * compensator ticks every 5 MINUTES — but this test compresses four ticks into ~2 seconds,
+ * so without the reset tick 3 re-reads tick 2's memoized `rev-list --count` and `merge-tree`
+ * and cannot see the new blocker at all. That is what made the #737 over-suppression test
+ * red from the day it landed (#778): the signature was never the problem, the elapsed time
+ * the test failed to simulate was.
+ */
 async function commitFile(dir: string, file: string, content: string, message: string): Promise<void> {
   await writeFile(join(dir, file), content);
   await exec("git", ["add", "."], dir);
   await exec("git", ["commit", "-m", message], dir);
+  __resetGitExecSchedulerForTests();
 }
 
 const BRANCH = "feature/strand";
@@ -175,6 +201,11 @@ describe("reconcileStrandedSiblingMerges (#18)", () => {
     const after = await commentsForIssue();
     expect(after).toHaveLength(2);
     expect(after.filter((c) => /Multi-repo merge INCOMPLETE/.test(c.body))).toHaveLength(2);
+    // The genuine change is not merely COUNTED — the new comment must name the new
+    // blocker, which is what makes it worth reaching the timeline at all (#778).
+    expect(after[0].body).toContain("README.md");
+    expect(after[0].body).not.toContain("extra.txt");
+    expect(after[1].body).toContain("extra.txt");
 
     // And that new state is itself only reported once.
     await reconcileStrandedSiblingMerges(db as unknown as Database);
