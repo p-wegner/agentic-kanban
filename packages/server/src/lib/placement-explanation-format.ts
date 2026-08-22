@@ -8,7 +8,7 @@
 import type {
   IssuePlacementReport,
   PlacementCheckOutcome,
-} from "../services/placement-explain.service.js";
+} from "./placement-explain.types.js";
 
 const OUTCOME_MARKS: Record<PlacementCheckOutcome, string> = {
   pass: "ok  ",

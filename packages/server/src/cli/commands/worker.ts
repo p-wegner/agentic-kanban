@@ -13,7 +13,7 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 // Type-only + a db-free formatter: this module is also the standalone worker
 // binary's entry point, which must never pull in the database graph.
 import { renderPlacementExplanation } from "../../lib/placement-explanation-format.js";
-import type { IssuePlacementReport, SessionPlacementRecord } from "../../services/placement-explain.service.js";
+import type { IssuePlacementReport, SessionPlacementRecord } from "../../lib/placement-explain.types.js";
 
 const DEFAULT_BOARD_URL = "http://127.0.0.1:3001";
 
