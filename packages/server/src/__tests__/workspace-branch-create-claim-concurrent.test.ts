@@ -17,6 +17,11 @@
 // second test below asserted, as intended behaviour, that such a pair is allowed to race.
 // The mock now derives the leaf with the real `worktreeDirLeafForBranch`, so a test can no
 // longer assume a collision away.
+//
+// #736 threads `repoPath` into the claim so the key is the FULL resolved path rather than
+// `issueId + leaf`, which closes the cross-issue case exercised below (an explicit branch
+// naming ANOTHER issue's number), and rewords the 409 to name the directory both creates
+// resolve to instead of claiming "same-issue/same-branch".
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join } from "node:path";
@@ -66,7 +71,23 @@ async function seedIssue(db: ReturnType<typeof createTestDb>["db"]) {
     id: issueId, issueNumber: 670, title: "Two workspaces for one issue", description: null,
     priority: "medium", sortOrder: 0, statusId, projectId, createdAt: now, updatedAt: now,
   });
-  return { projectId, issueId };
+  return { projectId, statusId, issueId };
+}
+
+/** A second issue in the SAME project (hence the same repo, hence one `.worktrees` subtree). */
+async function seedSiblingIssue(
+  db: ReturnType<typeof createTestDb>["db"],
+  seeded: { projectId: string; statusId: string },
+  issueNumber: number,
+) {
+  const now = new Date().toISOString();
+  const issueId = randomUUID();
+  await db.insert(issues).values({
+    id: issueId, issueNumber, title: "Another issue in the same repo", description: null,
+    priority: "medium", sortOrder: 1, statusId: seeded.statusId, projectId: seeded.projectId,
+    createdAt: now, updatedAt: now,
+  });
+  return issueId;
 }
 
 describe("createWorkspace refuses a concurrent same-issue/same-branch race (#673)", () => {
@@ -174,8 +195,19 @@ describe("createWorkspace refuses a concurrent same-issue/same-branch race (#673
     expect(rejected).toHaveLength(1);
     expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({
       code: "CONFLICT",
-      data: expect.objectContaining({ code: "BRANCH_CREATE_IN_FLIGHT", issueId }),
+      data: expect.objectContaining({
+        code: "BRANCH_CREATE_IN_FLIGHT",
+        issueId,
+        worktreePath: derivedWorktreePath("/tmp/repo", "feature/ak-670-a"),
+      }),
     });
+    // #736 gap 3: this caller passed a DELIBERATELY different branch, so the old message
+    // ("Same-issue/same-branch is never a deliberate second workspace") denied what had just
+    // happened to them. The refusal must name the resource that actually collided.
+    const message = (rejected[0] as PromiseRejectedResult).reason.message as string;
+    expect(message).toContain("worktree directory");
+    expect(message).toContain(derivedWorktreePath("/tmp/repo", "feature/ak-670-a"));
+    expect(message).not.toContain("same-branch");
     const wsRows = await db.select().from(workspaces).where(eq(workspaces.issueId, issueId));
     expect(wsRows).toHaveLength(1);
   });
@@ -218,5 +250,60 @@ describe("createWorkspace refuses a concurrent same-issue/same-branch race (#673
     expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(2);
     const wsRows = await db.select().from(workspaces).where(eq(workspaces.issueId, issueId));
     expect(wsRows).toHaveLength(2);
+  });
+
+  // #736 gap 1: the residual hole #719 left open. Its key was `issueId + leaf`, so ANOTHER
+  // issue's create on an explicit branch carrying issue 670's number got a DIFFERENT key for
+  // the SAME directory and was granted — the exact destructive race this guard exists for,
+  // just across two issues of one project instead of two branches of one issue.
+  it("refuses another issue's create whose explicit branch resolves to THIS issue's worktree", async () => {
+    const { db } = createTestDb();
+    const seeded = await seedIssue(db);
+    const otherIssueId = await seedSiblingIssue(db, seeded, 812);
+
+    const git = makeGitService();
+    const sessionManager = {
+      startSession: vi.fn(async () => "session-id"),
+      stopSession: vi.fn(),
+      subscribe: vi.fn(),
+      unsubscribe: vi.fn(),
+    };
+    const svc = createWorkspaceCrudService({
+      database: db,
+      getSessionManager: () => sessionManager as never,
+      gitService: git as never,
+    });
+
+    // The premise, asserted so the test cannot quietly stop being about a collision: the two
+    // issues' branches resolve to ONE directory, because the leaf comes from the branch.
+    expect(derivedWorktreePath("/tmp/repo", "feature/ak-670-a"))
+      .toBe(derivedWorktreePath("/tmp/repo", "feature/ak-670-typo"));
+
+    const results = await Promise.allSettled([
+      svc.createWorkspace({
+        issueId: seeded.issueId, isDirect: false, branch: "feature/ak-670-a", requiresReview: false,
+        thoroughReview: false, planMode: false, tddMode: false, includeVisualProof: false,
+        skipSetup: true, skipContextPacker: true,
+      }),
+      svc.createWorkspace({
+        issueId: otherIssueId, isDirect: false, branch: "feature/ak-670-typo", requiresReview: false,
+        thoroughReview: false, planMode: false, tddMode: false, includeVisualProof: false,
+        skipSetup: true, skipContextPacker: true,
+      }),
+    ]);
+
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    const rejected = results.filter((r) => r.status === "rejected");
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({
+      code: "CONFLICT",
+      data: expect.objectContaining({
+        code: "BRANCH_CREATE_IN_FLIGHT",
+        worktreePath: derivedWorktreePath("/tmp/repo", "feature/ak-670-a"),
+      }),
+    });
+    // Exactly one workspace row landed across BOTH issues — no shared-worktree duplicate.
+    const allRows = await db.select().from(workspaces);
+    expect(allRows).toHaveLength(1);
   });
 });

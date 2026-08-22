@@ -1,8 +1,10 @@
+import { basename, dirname, join } from "node:path";
 import { worktreeDirLeafForBranch } from "@agentic-kanban/shared/lib/git-service";
 
 /**
  * Mutual exclusion for workspace creation, keyed by the WORKTREE DIRECTORY a create is
- * about to provision — #673 item 1, re-keyed and given a TTL in #719.
+ * about to provision — #673 item 1, re-keyed and given a TTL in #719, keyed on the full
+ * path and given a claim token in #736.
  *
  * `auto-start-claim.ts` (#366) already closes a race between AUTOMATIC starters, but it is
  * issue-scoped and deliberately exempts non-auto-starter creates ("deliberate multi-workspace
@@ -15,7 +17,7 @@ import { worktreeDirLeafForBranch } from "@agentic-kanban/shared/lib/git-service
  * create-job.service.ts). Two rows landed 9s apart sharing one worktree, and both launched an
  * agent into it.
  *
- * ## Why the key is the PATH, not the branch (#719)
+ * ## Why the key is the PATH, not the branch (#719) — and the WHOLE path (#736)
  *
  * #673 keyed this on `(issueId, branch)` and wrote down, as a feature, that two branches of
  * one issue are exempt — the "provider showdown" case #366 carved out. That exemption was the
@@ -29,9 +31,24 @@ import { worktreeDirLeafForBranch } from "@agentic-kanban/shared/lib/git-service
  * recursively delete the winner's fresh worktree instead of falling through to the `ak-N-2`
  * alternative path.
  *
- * So the key is the worktree LEAF the create will resolve to, derived from the SAME function
- * `createWorktree` uses (`worktreeDirLeafForBranch`) rather than re-implemented here — a
- * second copy of that derivation is a second thing to drift.
+ * #719 keyed on `issueId + leaf`, using `issueId` as a stand-in for the repo (an issue belongs
+ * to exactly one project, hence one repo). That left one hole open: a create whose EXPLICIT
+ * branch names a DIFFERENT issue's number — issue A on `feature/ak-670-x` resolves to the leaf
+ * `ak-670` — contended with issue 670's directory without being refused, because the two
+ * claims differed in their `issueId` half. #736 closes it by keying on the RESOLVED WORKTREE
+ * PATH: `<parent>/.worktrees/<repoDirName>/<leaf>`, with `repoPath` threaded in from
+ * `workspace-create.service.ts` (where it is resolved a few lines above the claim, and — this
+ * is what makes it possible — held in a synchronous local, so the check-and-set stays
+ * `await`-free). `issueId` is now carried for the log line and the 409 only; it is no longer
+ * part of the key, which is why cross-issue leaf collisions are now caught.
+ *
+ * The leaf comes from the SAME function `createWorktree` uses (`worktreeDirLeafForBranch`)
+ * rather than being re-implemented here. The `.worktrees/<repoDirName>` prefix is composed
+ * here (git-service's `worktreesDirFor` is private), which is a derivation in two places — but
+ * a benign one for a KEY: both racing creates run it, so they agree, and where its
+ * segment-sanitizing differs from git-service's the direction is over-refusal (two repos whose
+ * basenames sanitize to one segment really do share a `.worktrees` subtree). Exporting
+ * `worktreesDirFor` would collapse it, and is the right follow-up if that prefix ever grows.
  *
  * Refusing is right for this resource: two creates cannot provision one directory
  * concurrently under any reading. A DELIBERATE second workspace is not blocked, it is
@@ -39,18 +56,6 @@ import { worktreeDirLeafForBranch } from "@agentic-kanban/shared/lib/git-service
  * `createWorktree` sees the directory registered to git and takes the `ak-N-2` alternative
  * path, which is how a sequential provider showdown already worked. #394 co-residency is
  * likewise untouched: it adopts an ALREADY-PROVISIONED worktree, so it never takes a claim.
- *
- * ## Scope of the key: one issue, not one repo
- *
- * The full colliding resource is `<parent>/.worktrees/<repoDirName>/<leaf>`, and this seam
- * does not have `repoPath`: the claim must be taken with NO `await` between resolving the
- * branch and claiming it (that is what makes it atomic on Node's single-threaded event loop),
- * and `repoPath` is a value the caller holds but does not pass. `issueId` stands in for the
- * repo — an issue belongs to exactly one project, hence one repo, so for a given `issueId`
- * the leaf IS the path. The residual gap is a create whose EXPLICIT branch names a DIFFERENT
- * issue's number (issue A on `feature/ak-670-x` collides with issue 670's leaf); that is
- * still unguarded, and closing it means threading `repoPath` through from
- * `workspace-create.service.ts` — tracked as #736.
  *
  * ## TTL, and why a claim must be able to go stale
  *
@@ -60,14 +65,16 @@ import { worktreeDirLeafForBranch } from "@agentic-kanban/shared/lib/git-service
  * it was taken and is treated as abandoned once older than `CLAIM_TTL_MS`; a later create
  * takes it over and says so in the log.
  *
- * Known consequence, accepted: `releaseBranchForCreate` identifies a claim by key alone (the
- * call site tracks a branch string, not a token), so a hung create that wakes up after its
- * claim was taken over releases the SUCCESSOR's claim. That degrades to #673's own
- * "no claim held" state for the remainder of that create rather than to a wedge, which is the
- * direction worth erring in. A claim token would close it, and needs a call-site change (#736).
+ * ## The claim token, and what it prevents (#736)
  *
- * The 409 message `workspace-create.service.ts` raises still reads "same-issue/same-branch";
- * the refusal is now same-issue/same-WORKTREE. Also #736.
+ * A TTL means a claim can change hands, so "release the claim on this key" is not the same
+ * request as "release MY claim". #719 released by key alone (the call site tracked a branch
+ * string), so a hung create that woke up after its claim was taken over deleted the
+ * SUCCESSOR's claim — degrading to #673's own "no claim held" state for the rest of the
+ * successor's create. `claimBranchForCreate` therefore returns an opaque
+ * {@link BranchCreateClaimToken}, and `releaseBranchForCreate` no-ops when the claim now
+ * stored under that path was taken by someone else. The token is also how the call site knows
+ * WHICH path it claimed, so the 409 and the release cannot disagree about the resource.
  *
  * ## Durability: in-process only, deliberately
  *
@@ -93,65 +100,95 @@ import { worktreeDirLeafForBranch } from "@agentic-kanban/shared/lib/git-service
  */
 export const CLAIM_TTL_MS = 30 * 60 * 1000;
 
+/** The (repo, branch) a create is about to provision a worktree for. */
+export interface BranchCreateTarget {
+  /** The LEADING repo's path — the `<parent>/.worktrees/<repoDirName>` the leaf sits under. */
+  repoPath: string;
+  /** Carried for the log line and the 409 only; deliberately NOT part of the key (#736). */
+  issueId: string;
+  branch: string;
+}
+
+/**
+ * Proof that a specific create holds a specific claim. Opaque: pass it back to
+ * {@link releaseBranchForCreate}, and read `worktreePath` when reporting the refusal.
+ */
+export interface BranchCreateClaimToken {
+  /** The worktree directory this claim covers — the key, and the resource to name in a 409. */
+  readonly worktreePath: string;
+  /** Identifies this HOLDER, so a taken-over predecessor cannot release its successor. */
+  readonly holderId: string;
+}
+
 interface BranchCreateClaim {
   issueId: string;
-  /** The branch the claim was taken for — for the log line only; the KEY is the leaf. */
+  /** The branch the claim was taken for — for the log line only; the KEY is the path. */
   branch: string;
   claimedAtMs: number;
+  holderId: string;
 }
 
 const claims = new Map<string, BranchCreateClaim>();
+let holderCounter = 0;
 
 /**
- * The worktree directory a create for this issue will provision, as a claim key.
+ * The worktree directory a create for this (repo, branch) will provision, as a claim key.
  *
  * Every branch of issue N collapses to the same leaf, so every branch of issue N collapses
- * to the same key — which is the whole point of #719.
+ * to the same key — which is the whole point of #719 — and so does another issue's branch
+ * that happens to name N, which is the point of #736.
  */
-function claimKey(issueId: string, branch: string): string {
-  return `${issueId} ${worktreeDirLeafForBranch(branch)}`;
+export function worktreeClaimPath(repoPath: string, branch: string): string {
+  return join(dirname(repoPath), ".worktrees", basename(repoPath), worktreeDirLeafForBranch(branch));
 }
 
 /**
- * Atomically claim the worktree directory a create is about to provision. Returns false when
- * another create is already provisioning it.
+ * Atomically claim the worktree directory a create is about to provision. Returns a token on
+ * success, or `null` when another create is already provisioning that directory.
  *
  * Synchronous and `await`-free on purpose — see the module header.
  */
 export function claimBranchForCreate(
-  issueId: string,
-  branch: string,
+  target: BranchCreateTarget,
   opts: { nowMs?: number; ttlMs?: number } = {},
-): boolean {
+): BranchCreateClaimToken | null {
   const nowMs = opts.nowMs ?? Date.now();
   const ttlMs = opts.ttlMs ?? CLAIM_TTL_MS;
-  const key = claimKey(issueId, branch);
+  const key = worktreeClaimPath(target.repoPath, target.branch);
   const held = claims.get(key);
   if (held) {
     const ageMs = nowMs - held.claimedAtMs;
-    if (ageMs < ttlMs) return false;
+    if (ageMs < ttlMs) return null;
     console.warn(
       `[workspaces] taking over an abandoned worktree-create claim on "${key}" — held for `
-        + `${Math.round(ageMs / 1000)}s (branch "${held.branch}", TTL ${Math.round(ttlMs / 1000)}s). `
-        + `The create that took it never reached its release, so it is assumed dead.`,
+        + `${Math.round(ageMs / 1000)}s (issue ${held.issueId}, branch "${held.branch}", `
+        + `TTL ${Math.round(ttlMs / 1000)}s). The create that took it never reached its `
+        + `release, so it is assumed dead.`,
     );
   }
-  claims.set(key, { issueId, branch, claimedAtMs: nowMs });
-  return true;
+  const holderId = `${++holderCounter}`;
+  claims.set(key, { issueId: target.issueId, branch: target.branch, claimedAtMs: nowMs, holderId });
+  return { worktreePath: key, holderId };
 }
 
-/** Release a claim taken by `claimBranchForCreate`. Safe to call even if never claimed. */
-export function releaseBranchForCreate(issueId: string, branch: string): void {
-  claims.delete(claimKey(issueId, branch));
+/**
+ * Release a claim taken by {@link claimBranchForCreate}. Safe to call with `null` (never
+ * claimed), and a NO-OP when the claim on that path has since been taken over by a later
+ * create — releasing the successor's claim is the #736 hole this token closes.
+ */
+export function releaseBranchForCreate(token: BranchCreateClaimToken | null | undefined): void {
+  if (!token) return;
+  const held = claims.get(token.worktreePath);
+  if (!held || held.holderId !== token.holderId) return;
+  claims.delete(token.worktreePath);
 }
 
-/** Is a create currently provisioning the worktree this (issue, branch) resolves to? */
+/** Is a create currently provisioning the worktree this (repo, branch) resolves to? */
 export function isBranchCreateClaimed(
-  issueId: string,
-  branch: string,
+  target: Pick<BranchCreateTarget, "repoPath" | "branch">,
   opts: { nowMs?: number; ttlMs?: number } = {},
 ): boolean {
-  const held = claims.get(claimKey(issueId, branch));
+  const held = claims.get(worktreeClaimPath(target.repoPath, target.branch));
   if (!held) return false;
   return (opts.nowMs ?? Date.now()) - held.claimedAtMs < (opts.ttlMs ?? CLAIM_TTL_MS);
 }
