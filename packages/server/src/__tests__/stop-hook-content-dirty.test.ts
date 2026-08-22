@@ -1,3 +1,5 @@
+// @gate:always-run - spawns the .claude/hooks Stop hook script and drives real git repos,
+// so it reaches state outside its own import graph and import-graph scoping cannot see it.
 /**
  * #770 — the Stop hook must call a file dirty only when its CONTENT differs.
  *

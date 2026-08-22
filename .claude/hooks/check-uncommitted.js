@@ -357,37 +357,97 @@ function segmentCanWrite(verb, tokens) {
 }
 
 /**
+ * Interpreters that take their program on stdin or inline (`python - <<'EOF'`, `node -e '…'`).
+ * Measured (#771): with this repo's own bypass-permissions instruction to "make file changes with
+ * sed, heredocs, or short scripts", this is the DOMINANT write idiom — of 137 shell commands from
+ * ten live sibling agents, ZERO used a write tool, and the file-patching ones all looked like
+ * `python - <<'EOF' … open(p,"w").write(s) … EOF`. The old scan saw nothing in those: the
+ * interpreter's own tokens are `-` and `<<'EOF'`, and every body line parses as either a variable
+ * assignment (skipped as `FOO=bar cmd`) or an unclassifiable verb. So a live agent's mid-edit file
+ * was invisible to in-flight detection and got reported as STRANDED — "commit this" — which is the
+ * bug.
+ */
+const STDIN_SCRIPT_VERBS = new Set([
+  "python", "python3", "py", "node", "perl", "ruby", "php", "bash", "sh", "zsh", "pwsh", "powershell",
+]);
+
+/** Every path-shaped literal anywhere in a command, heredoc body included. Weak evidence by nature. */
+function harvestPathLiterals(command) {
+  const out = [];
+  const re = /[A-Za-z0-9_@.\-]*(?:[/\\][A-Za-z0-9_@.\- ]+)+\.[A-Za-z0-9]{1,8}/g;
+  let m;
+  while ((m = re.exec(command)) !== null) {
+    const tok = normPath(m[0]);
+    if (looksLikePath(tok)) out.push(tok);
+  }
+  return out;
+}
+
+/** Does this command hand a whole program to an interpreter (stdin, heredoc, or `-e`/`-c`)? */
+function runsInlineScript(command, verbs) {
+  if (/<<-?\s*["']?[A-Za-z_]/.test(command)) return true;
+  for (const v of verbs) if (STDIN_SCRIPT_VERBS.has(v)) return true;
+  return false;
+}
+
+/**
  * Paths a shell command wrote, resolved against its EFFECTIVE cwd (defect 2).
  *
  * `baseCwd` is the transcript entry's own `cwd` when known; a `cd` inside the command moves it for
  * every later segment. Absolute results go in `abs`, results we could only keep relative (no known
  * base) in `rel` — `attributeToSession` checks both.
+ *
+ * `strongAbs`/`strongRel` (optional) receive the subset backed by UNAMBIGUOUS evidence — a redirect
+ * target or an in-place edit. Everything else is a guess, and #771 is what happens when a guess is
+ * allowed to say "commit this".
  */
-function collectShellWrites(command, baseCwd, abs, rel) {
+function collectShellWrites(command, baseCwd, abs, rel, strongAbs, strongRel) {
   const base = baseCwd ? normPath(baseCwd) : "";
   let cwd = base;
-  for (const segment of splitSegments(normPath(command))) {
+  const norm = normPath(command);
+  const verbs = [];
+  const add = (t, strong) => {
+    const resolved = joinPath(cwd, t);
+    if (isAbsPath(resolved)) {
+      abs.add(resolved);
+      if (strong && strongAbs) strongAbs.add(resolved);
+    } else {
+      rel.add(resolved);
+      if (strong && strongRel) strongRel.add(resolved);
+    }
+  };
+  for (const segment of splitSegments(norm)) {
     if (!segment.trim()) continue;
     const tokens = tokenize(segment);
     const verb = segmentVerb(tokens);
+    verbs.push(verb);
     if (CD_VERBS.has(verb)) {
       const target = tokens.find((t, i) => i > 0 && !t.startsWith("-"));
       if (!target || target === "-" || target === "~") cwd = base;
       else cwd = joinPath(cwd, normPath(target));
       continue;
     }
-    const targets = redirectTargets(segment);
+    // A redirect is a write, full stop — even from a read verb (`cat x > y`).
+    for (const t of redirectTargets(segment)) add(t, true);
     if (segmentCanWrite(verb, tokens)) {
+      // `sed -i`/`perl -i` name their target outright; any other verb we could not classify is
+      // only guessing that its path arguments are outputs.
+      const strong = INPLACE_VERBS.has(verb);
       for (const t of tokens.slice(1)) {
         const tok = normPath(t);
-        if (looksLikePath(tok)) targets.push(tok);
+        if (looksLikePath(tok)) add(tok, strong);
       }
     }
-    for (const t of targets) {
-      const resolved = joinPath(cwd, t);
-      if (isAbsPath(resolved)) abs.add(resolved);
-      else rel.add(resolved);
-    }
+  }
+  // Widening (#771): an inline/heredoc script's paths live in its BODY, not in its argv. Harvest
+  // them as weak evidence — enough to mark a live agent's file as in flight, never enough to
+  // demand a commit. Resolved against the command's base cwd, since a `cd` before the interpreter
+  // is what the body's relative paths are written against.
+  if (runsInlineScript(norm, verbs)) {
+    const savedCwd = cwd;
+    cwd = base;
+    for (const t of harvestPathLiterals(norm)) add(t, false);
+    cwd = savedCwd;
   }
 }
 
@@ -421,6 +481,13 @@ function newSink() {
   return {
     writtenAbs: new Set(),
     writtenRel: new Set(),
+    // #771 — the SAME path set, restricted to evidence that can carry a "commit this" demand:
+    // a write tool's `file_path`, a shell redirect target, an in-place edit (`sed -i`). Everything
+    // else the shell scan produces is a GUESS (a bare path argument to a verb we could not classify,
+    // a `for f in …` list, a path harvested out of a heredoc body), which is fine for widening
+    // "someone is holding this" but must never be the basis for telling a session to commit.
+    strongAbs: new Set(),
+    strongRel: new Set(),
     agentCalls: 0,
     agentIds: new Set(),
     // Whether the transcript's last assistant turn CLOSED (`stop_reason: "end_turn"`).
@@ -501,14 +568,29 @@ function parseTranscript(path, sink) {
         const p = block.input?.file_path ?? block.input?.notebook_path;
         if (typeof p === "string") {
           const np = normPath(p);
-          if (isAbsPath(np)) sink.writtenAbs.add(joinPath("", np));
-          else if (entryCwd) sink.writtenAbs.add(joinPath(normPath(entryCwd), np));
-          else sink.writtenRel.add(joinPath("", np));
+          // A write tool's own `file_path` is the strongest evidence there is.
+          if (isAbsPath(np)) {
+            sink.writtenAbs.add(joinPath("", np));
+            sink.strongAbs.add(joinPath("", np));
+          } else if (entryCwd) {
+            sink.writtenAbs.add(joinPath(normPath(entryCwd), np));
+            sink.strongAbs.add(joinPath(normPath(entryCwd), np));
+          } else {
+            sink.writtenRel.add(joinPath("", np));
+            sink.strongRel.add(joinPath("", np));
+          }
         }
       } else if (AGENT_TOOLS.has(block.name)) {
         sink.agentCalls += 1;
       } else if (SHELL_TOOLS.has(block.name) && typeof block.input?.command === "string") {
-        collectShellWrites(block.input.command, entryCwd, sink.writtenAbs, sink.writtenRel);
+        collectShellWrites(
+          block.input.command,
+          entryCwd,
+          sink.writtenAbs,
+          sink.writtenRel,
+          sink.strongAbs,
+          sink.strongRel
+        );
       }
     }
   }
@@ -539,11 +621,17 @@ function readSessionActivity(transcriptPath, nowMs) {
   const parsedBasenames = new Set();
   const inFlightAbs = new Set();
   const inFlightRel = new Set();
+  // The PARENT's own strong writes, kept apart from the subagent union (#771): while any subagent
+  // is live, these are the only paths whose stranding this session can vouch for.
+  const parentStrongAbs = new Set(sink.strongAbs);
+  const parentStrongRel = new Set(sink.strongRel);
   let liveSubagents = 0;
+  let subagentCount = 0;
   for (const f of subagentTranscriptFiles(transcriptPath)) {
     const sub = newSink();
     if (!parseTranscript(f, sub)) continue;
     parsedBasenames.add(f.split("/").pop().toLowerCase());
+    subagentCount += 1;
     const live = subagentLooksLive(f, sub, nowMs);
     if (live) liveSubagents += 1;
     for (const w of sub.writtenAbs) {
@@ -554,6 +642,8 @@ function readSessionActivity(transcriptPath, nowMs) {
       sink.writtenRel.add(w);
       if (live) inFlightRel.add(w);
     }
+    for (const w of sub.strongAbs) sink.strongAbs.add(w);
+    for (const w of sub.strongRel) sink.strongRel.add(w);
     sink.agentCalls += sub.agentCalls;
     for (const id of sub.agentIds) sink.agentIds.add(id);
   }
@@ -573,7 +663,10 @@ function readSessionActivity(transcriptPath, nowMs) {
     writtenRel: sink.writtenRel,
     inFlightAbs,
     inFlightRel,
+    parentStrongAbs,
+    parentStrongRel,
     liveSubagents,
+    subagentCount,
     agentCalls: sink.agentCalls,
     subagentTranscripts: parsedBasenames.size,
     subagentAuthorshipUnknown,
@@ -624,17 +717,59 @@ function attributeToSession(paths, activity, repoRoot) {
  *
  * Unknown authorship keeps #720's safe direction: EVERYTHING is reported as stranded (under the
  * "authorship UNCERTAIN" header), because we cannot claim a live agent owns any of it.
+ *
+ * ---------------------------------------------------------------------------
+ * #771 — the third bucket, and why the default had to flip.
+ *
+ * #724's mechanism is right; its COVERAGE is not, and the gap is PER-PATH, not per-agent. Observed
+ * three times in one orchestrator session: 1 of 3 attributed, then 11 of 16, then — decisively —
+ * ONE live agent's ONE coherent 774-insertion change split 4-in-flight / 2-stranded across six
+ * files, same agent, same tickets, same minute. That rules out every theory keyed on the agent
+ * (liveness, resume, identity, agent count) and leaves the write RECORD: measured over 137 shell
+ * commands from ten live sibling agents here, ZERO writes went through a write tool — they went
+ * through `python - <<'EOF' … open(p,"w") …`, whose target appears only in the heredoc BODY, which
+ * the scan did not read. Meanwhile a `grep -n "a\|b" some/file.ts` DOES attribute (the segment
+ * splitter cuts on the `|` inside the quoted regex, so the read verb is lost) — so a path can be
+ * "ours" on the strength of a read and then be reported as stranded because no live agent's record
+ * names it. Both errors compose into exactly the observed instruction: commit another agent's
+ * half-written file.
+ *
+ * Two changes, in this order of importance:
+ *
+ *  1. FAIL SAFE. While ANY subagent is live, the only paths that may be called STRANDED are the
+ *     ones the PARENT wrote with strong evidence (a write tool, a redirect, `sed -i`). Everything
+ *     else that is dirty is reported as UNKNOWN — "leave it alone" — because the cost matrix is
+ *     asymmetric: calling in-flight work stranded commits a mid-edit file under the wrong author
+ *     and is unrewritable once built on; calling stranded work unknown delays a commit to the next
+ *     Stop. A subagent's file is never demanded while others are live, finished or not: an agent
+ *     that has closed its turn may be between turns or resumed, and "wait one Stop" costs nothing.
+ *  2. WIDEN. Heredoc/inline-script bodies are now harvested (weak evidence), which is what puts a
+ *     `python - <<EOF`-patched file into the live agent's IN FLIGHT set instead of nobody's.
+ *
+ * `unknown` is omitted when empty so the exact-shape assertions #724 wrote against this function
+ * stay valid; read it as `result.unknown ?? []`.
  */
 function partitionAuthored(paths, activity, repoRoot) {
   const mine = attributeToSession(paths, activity, repoRoot);
-  if (!activity || activity.subagentAuthorshipUnknown) return { stranded: mine, inFlight: [] };
+  const withUnknown = (stranded, inFlight, unknown) =>
+    unknown.length > 0 ? { stranded, inFlight, unknown } : { stranded, inFlight };
+  if (!activity || activity.subagentAuthorshipUnknown) return withUnknown(mine, [], []);
   const inFlightSet = new Set(
     matchWritten(mine, activity.inFlightAbs || new Set(), activity.inFlightRel || new Set(), repoRoot)
   );
-  return {
-    stranded: mine.filter((p) => !inFlightSet.has(p)),
-    inFlight: mine.filter((p) => inFlightSet.has(p)),
-  };
+  const inFlight = mine.filter((p) => inFlightSet.has(p));
+  const rest = mine.filter((p) => !inFlightSet.has(p));
+  // No live subagent: there is nobody whose work a commit demand could corrupt, so the pre-#771
+  // behaviour stands and every remaining file of ours is stranded.
+  if (!activity.liveSubagents) return withUnknown(rest, inFlight, []);
+  const parentStrong = new Set(
+    matchWritten(rest, activity.parentStrongAbs || new Set(), activity.parentStrongRel || new Set(), repoRoot)
+  );
+  return withUnknown(
+    rest.filter((p) => parentStrong.has(p)),
+    inFlight,
+    rest.filter((p) => !parentStrong.has(p))
+  );
 }
 
 /**
@@ -650,9 +785,34 @@ function partitionAuthored(paths, activity, repoRoot) {
  * instead of demanding anything, and a mixed tree lists the two sets separately (`-` vs `~`) with
  * the commit demand explicitly scoped to the stranded ones.
  */
-function buildStopReport({ stranded, inFlight, activity, totalDirty }) {
+function buildStopReport({ stranded, inFlight, unknown, activity, totalDirty }) {
   const lines = [];
-  const mineCount = stranded.length + inFlight.length;
+  const unknownList = unknown || [];
+  const mineCount = stranded.length + inFlight.length + unknownList.length;
+
+  const pushUnknown = () => {
+    if (unknownList.length === 0) return;
+    lines.push(
+      `UNKNOWN — ${unknownList.length} dirty source file(s) could not be attributed to a writer ` +
+        `while ${activity && activity.liveSubagents ? activity.liveSubagents : "some"} subagent(s) ` +
+        "are live, so they are LEFT ALONE (a live agent may be mid-edit in them):"
+    );
+    for (const f of unknownList) lines.push(`  ? ${f}`);
+  };
+  const pushUnattributedCount = () => {
+    // #771: the size of the gap must be visible rather than silent — a hook whose coverage
+    // quietly varies (1 of 3, then 11 of 16, then 4 of 6 within one agent's single change) is
+    // read as authoritative when it is guessing.
+    if (!activity || typeof totalDirty !== "number") return;
+    const accounted = stranded.length + inFlight.length;
+    if (totalDirty - accounted <= 0) return;
+    lines.push(
+      `(${totalDirty - accounted} of ${totalDirty} dirty source file(s) could not be attributed ` +
+        "to this session and are NOT proposed for commit — they may be another agent's in-flight " +
+        "work. Do not commit them.)"
+    );
+  };
+
   if (mineCount === 0) return { exitCode: 0, lines };
 
   const pushInFlight = () => {
@@ -669,8 +829,10 @@ function buildStopReport({ stranded, inFlight, activity, totalDirty }) {
   };
 
   if (stranded.length === 0) {
-    // Every dirty file of ours is in flight: informational only, and the stop is NOT blocked (#724).
-    pushInFlight();
+    // Nothing of ours is stranded: informational only, and the stop is NOT blocked (#724, #771).
+    if (inFlight.length > 0) pushInFlight();
+    pushUnknown();
+    pushUnattributedCount();
     lines.push("Nothing is STRANDED, so this stop is not blocked.");
     return { exitCode: 0, lines };
   }
@@ -692,12 +854,8 @@ function buildStopReport({ stranded, inFlight, activity, totalDirty }) {
         "Check each before committing.)"
     );
   }
-  if (activity && typeof totalDirty === "number" && mineCount < totalDirty) {
-    lines.push(
-      `(${totalDirty - mineCount} other dirty source file(s) are not attributed to this ` +
-        "session and are NOT listed — they may be another agent's in-flight work. Do not commit them.)"
-    );
-  }
+  pushUnknown();
+  pushUnattributedCount();
   lines.push(
     (inFlight.length > 0
       ? "Commit the STRANDED files listed above (the `-` lines, NOT the `~` IN FLIGHT ones) before stopping"
@@ -814,8 +972,14 @@ async function main() {
   // by hash. `attributeToSession` returns everything when authorship is unknown, so a session
   // with no readable transcript still gets the old, useful warning.
   const activity = readSessionActivity(input.transcript_path);
-  const { stranded, inFlight } = partitionAuthored(verdict.files, activity, mainCheckout);
-  const report = buildStopReport({ stranded, inFlight, activity, totalDirty: verdict.files.length });
+  const { stranded, inFlight, unknown } = partitionAuthored(verdict.files, activity, mainCheckout);
+  const report = buildStopReport({
+    stranded,
+    inFlight,
+    unknown,
+    activity,
+    totalDirty: verdict.files.length,
+  });
   for (const line of report.lines) console.error(line);
   process.exit(report.exitCode);
 }
