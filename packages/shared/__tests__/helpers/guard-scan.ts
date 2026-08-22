@@ -19,6 +19,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import ts from "typescript";
 
 const SKIP_DIRS = new Set(["__tests__", "node_modules", "dist", "coverage", ".git"]);
 
@@ -143,4 +144,77 @@ export function importedBindingsFrom(source: string, modulePattern: RegExp): str
     if (modulePattern.test(m[2])) names.push(m[1]);
   }
   return names;
+}
+
+/* ------------------------------------------------------------------------- *
+ * The TYPED layer (#721)
+ *
+ * Every guard in this repo used to be a regex over source TEXT, and #721's
+ * fault-injection round showed what that costs: the semantically identical
+ * variant always escapes. `res.code === 0` was caught; `res.code > 0`,
+ * `!res.code` and `const { code } = res` were not. A guard that scans text can
+ * only ever assert one SPELLING of its invariant.
+ *
+ * These helpers give a guard the TypeScript AST instead, cheaply:
+ *
+ *   - `parseGuardSource` parses with `setParentNodes: false`. That flag is not a
+ *     detail — measured over this repo's 1410 source files, `true` costs 49 s and
+ *     `false` costs 0.7 s. A `@gate:always-run` suite runs on every merge, so the
+ *     fast path is the only affordable one, and the price is that `node.parent`
+ *     is undefined: use {@link forEachNode}, which hands the parent down.
+ *   - Parses are memoised per absolute path for the lifetime of the worker, so
+ *     several guard suites in one vitest process parse the tree once between them.
+ * ------------------------------------------------------------------------- */
+
+const parseCache = new Map<string, ts.SourceFile>();
+
+/** The parsed AST of one source file, memoised. Comments are not nodes, so a guard walking this tree never needs to strip them. */
+export function parseGuardSource(absFile: string, text?: string): ts.SourceFile {
+  const cached = parseCache.get(absFile);
+  if (cached) return cached;
+  const source = text ?? fs.readFileSync(absFile, "utf8");
+  const sf = ts.createSourceFile(
+    absFile,
+    source,
+    ts.ScriptTarget.Latest,
+    /* setParentNodes */ false,
+    absFile.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+  parseCache.set(absFile, sf);
+  return sf;
+}
+
+/**
+ * Every node under `root`, depth-first, with its parent — the parent that
+ * `setParentNodes: false` does not store on the node itself.
+ */
+export function forEachNode(root: ts.Node, visit: (node: ts.Node, parent: ts.Node | undefined) => void): void {
+  const walk = (node: ts.Node, parent: ts.Node | undefined): void => {
+    visit(node, parent);
+    node.forEachChild((child) => walk(child, node));
+  };
+  walk(root, undefined);
+}
+
+/** The 1-based line of a node, for an offender message a human can jump to. */
+export function lineOf(sf: ts.SourceFile, node: ts.Node): number {
+  return sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
+}
+
+/** Strip `await`, parentheses and `as`/`!` assertions to get at the expression that actually produces a value. */
+export function unwrapExpression(expr: ts.Expression): ts.Expression {
+  let cur = expr;
+  for (;;) {
+    if (ts.isAwaitExpression(cur) || ts.isParenthesizedExpression(cur) || ts.isNonNullExpression(cur)) cur = cur.expression;
+    else if (ts.isAsExpression(cur) || ts.isTypeAssertionExpression(cur)) cur = cur.expression;
+    else return cur;
+  }
+}
+
+/** The callee's simple name for `f(...)`, `a.f(...)` or `a?.f(...)`; `null` for anything more exotic. */
+export function calleeName(call: ts.CallExpression): string | null {
+  const target = unwrapExpression(call.expression);
+  if (ts.isIdentifier(target)) return target.text;
+  if (ts.isPropertyAccessExpression(target)) return target.name.text;
+  return null;
 }
