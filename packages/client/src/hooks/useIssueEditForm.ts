@@ -2,7 +2,13 @@ import { useRef, useState } from "react";
 import type { IssueWithStatus, UpdateIssueRequest } from "@agentic-kanban/shared";
 import { apiPost } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
-import { isHttpUrl } from "../lib/url.js";
+import {
+  buildIssueUpdatePayload,
+  hasIssueEditChanges,
+  issueEditBaseline,
+  validateIssueEditFields,
+  type IssueEditFields,
+} from "../lib/issueEditForm.js";
 
 /**
  * Owns IssueDetailPanel's full edit-form lifecycle: the editable field state,
@@ -18,36 +24,32 @@ export function useIssueEditForm(
   issue: IssueWithStatus,
   onUpdate: (id: string, data: UpdateIssueRequest) => Promise<void>,
 ) {
+  const initial = issueEditBaseline(issue);
   const [editing, setEditing] = useState(false);
   const [descriptionMode, setDescriptionMode] = useState<"edit" | "preview">("edit");
-  const [title, setTitle] = useState(issue.title);
-  const [description, setDescription] = useState(issue.description ?? "");
+  const [title, setTitle] = useState(initial.title);
+  const [description, setDescription] = useState(initial.description);
   const [pastedImages, setPastedImages] = useState<string[]>([]);
-  const [issueType, setIssueType] = useState(issue.issueType ?? "task");
-  const [estimate, setEstimate] = useState<string>(issue.estimate ?? "");
-  const [dueDate, setDueDate] = useState<string>(issue.dueDate ?? "");
-  const [externalKey, setExternalKey] = useState<string>(issue.externalKey ?? "");
-  const [externalUrl, setExternalUrl] = useState<string>(issue.externalUrl ?? "");
-  const [skipAutoReview, setSkipAutoReview] = useState(issue.skipAutoReview ?? false);
+  const [issueType, setIssueType] = useState(initial.issueType);
+  const [estimate, setEstimate] = useState<string>(initial.estimate);
+  const [dueDate, setDueDate] = useState<string>(initial.dueDate);
+  const [externalKey, setExternalKey] = useState<string>(initial.externalKey);
+  const [externalUrl, setExternalUrl] = useState<string>(initial.externalUrl);
+  const [skipAutoReview, setSkipAutoReview] = useState(initial.skipAutoReview);
   const [saving, setSaving] = useState(false);
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
   const [enhancing, setEnhancing] = useState(false);
   const [preEnhanceSnapshot, setPreEnhanceSnapshot] = useState<{ title: string; description: string } | null>(null);
   const [estimating, setEstimating] = useState(false);
-  const [milestoneId, setMilestoneId] = useState<string | null>(issue.milestoneId ?? null);
+  const [milestoneId, setMilestoneId] = useState<string | null>(initial.milestoneId);
 
-  // Track unsaved changes for warning
-  const hasChanges = editing && (
-    title !== issue.title ||
-    description !== (issue.description ?? "") ||
-    issueType !== (issue.issueType ?? "task") ||
-    estimate !== (issue.estimate ?? "") ||
-    dueDate !== (issue.dueDate ?? "") ||
-    externalKey !== (issue.externalKey ?? "") ||
-    externalUrl !== (issue.externalUrl ?? "") ||
-    skipAutoReview !== (issue.skipAutoReview ?? false) ||
-    milestoneId !== (issue.milestoneId ?? null)
-  );
+  const fields: IssueEditFields = {
+    title, description, issueType, estimate, dueDate,
+    externalKey, externalUrl, skipAutoReview, milestoneId,
+  };
+
+  // Track unsaved changes for warning (the nine-field comparison lives in lib/, #782)
+  const hasChanges = editing && hasIssueEditChanges(fields, issue);
 
   function handleCancelEdit() {
     if (hasChanges) {
@@ -56,15 +58,16 @@ export function useIssueEditForm(
     setEditing(false);
     setDescriptionMode("edit");
     setPreEnhanceSnapshot(null);
-    setTitle(issue.title);
-    setDescription(issue.description ?? "");
-    setIssueType(issue.issueType ?? "task");
-    setEstimate(issue.estimate ?? "");
-    setDueDate(issue.dueDate ?? "");
-    setExternalKey(issue.externalKey ?? "");
-    setExternalUrl(issue.externalUrl ?? "");
-    setSkipAutoReview(issue.skipAutoReview ?? false);
-    setMilestoneId(issue.milestoneId ?? null);
+    const baseline = issueEditBaseline(issue);
+    setTitle(baseline.title);
+    setDescription(baseline.description);
+    setIssueType(baseline.issueType);
+    setEstimate(baseline.estimate);
+    setDueDate(baseline.dueDate);
+    setExternalKey(baseline.externalKey);
+    setExternalUrl(baseline.externalUrl);
+    setSkipAutoReview(baseline.skipAutoReview);
+    setMilestoneId(baseline.milestoneId);
   }
 
   async function handleEnhance() {
@@ -106,26 +109,14 @@ export function useIssueEditForm(
 
   async function handleSave() {
     if (saving) return;
-    const trimmedUrl = externalUrl.trim();
-    if (trimmedUrl && !isHttpUrl(trimmedUrl)) {
-      showToast("External URL must start with http:// or https://", "error");
+    const invalid = validateIssueEditFields(fields);
+    if (invalid) {
+      showToast(invalid, "error");
       return;
     }
     setSaving(true);
     try {
-      const imageMarkdown = pastedImages.map((url, i) => `![screenshot-${i + 1}](${url})`).join("\n");
-      const fullDescription = [description.trim(), imageMarkdown].filter(Boolean).join("\n\n");
-      await onUpdate(issue.id, {
-        title: title.trim(),
-        description: fullDescription || undefined,
-        issueType: issueType as UpdateIssueRequest["issueType"],
-        estimate: (estimate || null) as UpdateIssueRequest["estimate"],
-        skipAutoReview,
-        dueDate: dueDate || null,
-        externalKey: externalKey.trim() || null,
-        externalUrl: trimmedUrl || null,
-        milestoneId: milestoneId || null,
-      });
+      await onUpdate(issue.id, buildIssueUpdatePayload(fields, pastedImages));
       setPastedImages([]);
       setEditing(false);
       setDescriptionMode("edit");

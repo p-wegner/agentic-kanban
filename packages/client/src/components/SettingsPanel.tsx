@@ -1,7 +1,5 @@
 import { useEffect, useState } from "react";
 import { isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
-import type { ServiceStackConfig } from "@agentic-kanban/shared";
-import { buildServicesConfig } from "../lib/services-config.js";
 import { apiFetch, apiPost, apiPut, apiPatch } from "../lib/api.js";
 import { setSettings as savePreferences } from "../lib/settingsStore.js";
 import { invalidateClientSurfaceLocal } from "../lib/clientInvalidation.js";
@@ -10,6 +8,10 @@ import { useIssueTemplates } from "../hooks/useIssueTemplates.js";
 import { useConfigImportExport } from "../hooks/useConfigImportExport.js";
 import { applyPreflightResult, CODEX_DEFAULT_PROFILE, COPILOT_DEFAULT_PROFILE, DEFAULT_SETTINGS, PI_DEFAULT_PROFILE, TABS, uniqueProfiles, type AgentProfileHealth, type McpHealth, type ProjectSettingsState, type Settings, type SettingsPanelProps, type Tab } from "./SettingsPanel.shared.js";
 import { normalizeConfig, setProviderFillPolicy, clearProviderFillPolicy, settingsKey, type ConcreteProvider } from "../lib/strategy-targets.js";
+// Pure core of this panel — the project-row projection, the PATCH body, the settings blob and
+// the default-branch rule (#782). This is the client's most-reworked file; those four were the
+// parts of it that never needed React, and they now have tests.
+import { buildProjectPatchBody, buildProjectSettingsState, buildSettingsToSave, isDefaultBranchInvalid, verifyScriptKey, type SettingsProjectRow } from "../lib/settingsPanelState.js";
 import { allowedProfilesPrefKey, parseProfileAllowlist, serializeProfileAllowlist, type AllowedProfile } from "@agentic-kanban/shared/lib/profile-allowlist";
 import { parseDisabledTools, withToolDisabled } from "../lib/mcp-tool-toggle.js";
 import { useTagsEditor } from "../hooks/useTagsEditor.js";
@@ -17,44 +19,6 @@ import { useTemplateEditorState } from "../hooks/useTemplateEditorState.js";
 import { useSkillsManager } from "../hooks/useSkillsManager.js";
 import { useMonitorControls } from "../hooks/useMonitorControls.js";
 
-/** Raw project row shape returned by GET /api/projects, narrowed to the fields the panel reads. */
-type ProjectRow = {
-  id: string;
-  defaultBranch: string | null;
-  setupScript: string | null;
-  setupBlocking: boolean;
-  color: string | null;
-  setupEnabled?: boolean;
-  teardownScript?: string | null;
-  symlinkEnabled?: boolean;
-  symlinkDirs?: string | null;
-  defaultSkillId?: string | null;
-  servicesConfig?: ServiceStackConfig | null;
-};
-
-/** Map a raw project row + its verify-script pref into the panel's ProjectSettingsState. */
-function buildProjectSettingsState(project: ProjectRow, verifyScript: string): ProjectSettingsState {
-  const svc = project.servicesConfig ?? null;
-  return {
-    defaultBranch: project.defaultBranch || "",
-    setupScript: project.setupScript || "",
-    setupBlocking: project.setupBlocking !== false,
-    setupEnabled: project.setupEnabled !== false,
-    teardownScript: project.teardownScript || "",
-    verifyScript,
-    color: project.color || null,
-    symlinkEnabled: project.symlinkEnabled === true,
-    symlinkDirs: project.symlinkDirs || "",
-    defaultSkillId: project.defaultSkillId || null,
-    servicesEnabled: svc?.enabled === true,
-    servicesComposeFile: svc?.composeFile || "",
-    servicesComposeRepo: svc?.composeRepo || "",
-    servicesPorts: (svc?.ports ?? []).join(", "),
-    // Full fetched config: buildServicesConfig merges the form fields over this so
-    // API-only fields (env, readyTimeoutMs) survive a settings save.
-    servicesConfigBase: svc,
-  };
-}
 import { AgentSettings } from "./settings/AgentSettings.js";
 import { WorkflowSettings } from "./settings/WorkflowSettings.js";
 import { SkillsSettings } from "./settings/SkillsSettings.js";
@@ -288,12 +252,12 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
             .then((div) => { if (!cancelled) setProviderDivergence(div); })
             .catch(() => { /* non-fatal */ });
 
-          apiFetch<ProjectRow[]>("/api/projects")
+          apiFetch<SettingsProjectRow[]>("/api/projects")
             .then((projects) => {
               if (cancelled) return;
               const project = projects.find((p) => p.id === activeProjectId);
               if (project) {
-                setProjectSettings(buildProjectSettingsState(project, (data)[`verify_script_${activeProjectId}`] || ""));
+                setProjectSettings(buildProjectSettingsState(project, data[verifyScriptKey(activeProjectId)] || ""));
               }
             })
             .catch(() => { /* use defaults for project settings */ });
@@ -383,28 +347,12 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
     }
     setSaving(true);
     try {
-      const settingsToSave = { ...settings };
-      if (activeProjectId) {
-        settingsToSave[`verify_script_${activeProjectId}` as keyof Settings] = projectSettings.verifyScript;
-      }
+      const settingsToSave = buildSettingsToSave(settings, projectSettings, activeProjectId);
       const promises: Promise<unknown>[] = [
         apiPut("/api/preferences/settings", settingsToSave),
       ];
       if (activeProjectId) {
-        promises.push(
-          apiPatch(`/api/projects/${activeProjectId}`, {
-              setupScript: projectSettings.setupScript || null,
-              setupBlocking: projectSettings.setupBlocking,
-              setupEnabled: projectSettings.setupEnabled,
-              teardownScript: projectSettings.teardownScript || null,
-              color: projectSettings.color || null,
-              defaultBranch: projectSettings.defaultBranch.trim() || null,
-              symlinkEnabled: projectSettings.symlinkEnabled,
-              symlinkDirs: projectSettings.symlinkDirs.trim() || null,
-              defaultSkillId: projectSettings.defaultSkillId || null,
-              servicesConfig: buildServicesConfig(projectSettings),
-            }),
-        );
+        promises.push(apiPatch(`/api/projects/${activeProjectId}`, buildProjectPatchBody(projectSettings)));
       }
       await Promise.all(promises);
       // Invalidate BEFORE onClose: the close handler re-reads settings via the
@@ -429,8 +377,7 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
     setSettings((s) => ({ ...s, [key]: checked ? "true" : "false" }));
 
   const autoReviewOn = isAutoReviewEnabled(settings.auto_review);
-  const defaultBranchValue = projectSettings.defaultBranch.trim();
-  const defaultBranchInvalid = !!defaultBranchValue && !!projectBranches && !projectBranches.local.includes(defaultBranchValue);
+  const defaultBranchInvalid = isDefaultBranchInvalid(projectSettings.defaultBranch, projectBranches);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2">
