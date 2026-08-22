@@ -14,14 +14,25 @@
  * identical from the outside; the distinguishing fact is which suite, which vitest already
  * prints and which `failed_suites` now keeps.
  *
- * **Scope: every suite, not only `@gate:always-run` ones**, despite the ticket's wording. The
- * marker's job is to tell a SCOPED test run what it must not skip; a base-health probe runs the
- * whole verify script, so every suite in it is equally observed and equally able to rot. Every
- * one of the measured cases above is a guard suite and would be caught either way, so gating on
- * the marker would only narrow the alarm — and it would do so by re-deriving the marker set
- * from the repo tree at runtime, a second copy of the scan that `scripts/test-mine.mjs` owns.
- * The root CLAUDE.md is explicit that every copy of such a walker is a place the scan can
- * diverge from what it claims to cover.
+ * **Scope: every suite the project's verify script actually RAN, not only `@gate:always-run`
+ * ones.** The marker's job is to tell a SCOPED test run what it must not skip; gating the alarm
+ * on it would only narrow the alarm, and would do so by re-deriving the marker set from the repo
+ * tree at runtime — a second copy of the scan that `scripts/test-mine.mjs` owns, and the root
+ * CLAUDE.md is explicit that every copy of such a walker is a place the scan can diverge from
+ * what it claims to cover. Every one of the measured cases above is a guard suite and is caught
+ * either way.
+ *
+ * **What this alarm CANNOT see (#717).** An earlier version of this comment said the probe "runs
+ * the whole verify script, so every suite in it is equally observed". That was false, and it was
+ * the stated justification for the scope decision above — so the decision stands but the reason
+ * has been corrected. `deriveVerifyCommand` prefers `quickTestCommand` on node
+ * (`shared/lib/verify-command.ts`), i.e. `pnpm test:mine`, which carries a deliberate exclusion
+ * list (`scripts/test-mine.mjs`). A live probe's own output shows it:
+ * `[test:mine] mcp-server: node vitest run --exclude ** /mcp-tools.test.ts`. An EXCLUDED suite is
+ * never named by any probe, so it can rot indefinitely and this alarm is structurally blind to
+ * it — the same class of blindness #679 was filed to fix. Widening the probe to the full test
+ * command would close that, at the cost of the flake-under-load reason `verify-command.ts` gives
+ * for preferring the quick command; that trade is not made here.
  */
 import type { RottedSuiteWarning } from "@agentic-kanban/shared/types";
 import type { Database } from "../db/index.js";
