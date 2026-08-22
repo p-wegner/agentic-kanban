@@ -144,20 +144,28 @@ describe("agent-remote service (worker fleet phase 1c)", () => {
     expect(fm.sent.some((m) => m.message.type === "stop")).toBe(true);
   });
 
-  it("fails sessions when the worker disconnects past the grace window", async () => {
+  // #746: this used to assert that grace expiry FAILED the session (stderr + exit 1).
+  // That was the defect, not the contract — the agent is still running on the worker,
+  // so expiry now reports the gap and HOLDS; only the abandon bound finalizes.
+  // The hold/re-adopt/abandon behaviour is covered in depth by
+  // remote-session-socket-gap.test.ts.
+  it("holds sessions past the grace window and only abandons them at the abandon bound", async () => {
     vi.useFakeTimers();
     try {
       const fm = fakeManager(["w1"]);
-      const service = createRemoteAgentService(fm.manager, db, { reconnectGraceMs: 1000 });
+      const service = createRemoteAgentService(fm.manager, db, { reconnectGraceMs: 1000, abandonMs: 10_000 });
       const events: AgentOutputEvent[] = [];
       launchOn(service, "w1", "s1", (e) => events.push(e));
 
       fm.fireDisconnect("w1");
       expect(events).toHaveLength(0);
       vi.advanceTimersByTime(1500);
-      expect(events.map((e) => e.type)).toEqual(["stderr", "exit"]);
-      expect(events[0].data).toContain("disconnected");
-      expect(events[1].exitCode).toBe(1);
+      expect(events.map((e) => e.type)).toEqual(["stderr"]);
+      expect(events[0].data).toContain("HELD, not failed");
+
+      vi.advanceTimersByTime(10_000);
+      await vi.waitFor(() => expect(events.some((e) => e.type === "exit")).toBe(true));
+      expect(events.find((e) => e.type === "exit")?.exitCode).toBe(1);
     } finally {
       vi.useRealTimers();
     }
