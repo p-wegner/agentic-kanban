@@ -35,24 +35,25 @@ const POLICY = {
   // developer's machine against a checkout that machine already trusts.
   failOnSeverities: ["critical", "high"],
 
-  // Advisories present in the production graph when this gate was introduced.
-  // Keyed by GHSA id (stable across pnpm's own numeric re-issues). This makes
-  // the gate a RATCHET: "no NEW high/critical in prod". Shrink-only — an entry
-  // whose advisory is no longer reported FAILS the scan, so a fixed advisory
-  // cannot leave a stale exemption behind for the next one to hide in.
+  // Advisories accepted in the production graph. Keyed by GHSA id (stable across
+  // pnpm's own numeric re-issues). This makes the gate a RATCHET: "no NEW
+  // high/critical in prod". Shrink-only — an entry whose advisory is no longer
+  // reported FAILS the scan, so a fixed advisory cannot leave a stale exemption
+  // behind for the next one to hide in.
   //
   // Do not add to this list to make a red build green. Fix the dependency, or
   // file a ticket and add the entry in the SAME commit that explains why not.
-  acceptedProdAdvisories: {
-    "GHSA-mh99-v99m-4gvg":
-      "brace-expansion <2.1.3 DoS — transitive via ts-morph>@ts-morph/common>minimatch; needs an upstream minimatch bump. Accepted 2026-08-22 at gate introduction (#741).",
-    "GHSA-rgw5-rvv9-x895":
-      "brace-expansion <2.1.4 DoS — same dependency path as GHSA-mh99-v99m-4gvg. Accepted 2026-08-22 at gate introduction (#741).",
-    "GHSA-7p8r-x3mc-p8w7":
-      "fast-uri <3.1.5 host confusion via backslash authority — transitive under the JSON-schema stack. Accepted 2026-08-22 at gate introduction (#741).",
-    "GHSA-mwp4-54f8-5fhr":
-      "ip-address <=10.3.0 leading-zero octet decoding — transitive; the board makes no security decision on a parsed IP. Accepted 2026-08-22 at gate introduction (#741).",
-  },
+  //
+  // EMPTY as of #760 (2026-08-23). The four entries this list was born with
+  // (GHSA-mh99-v99m-4gvg + GHSA-rgw5-rvv9-x895 brace-expansion,
+  // GHSA-7p8r-x3mc-p8w7 fast-uri, GHSA-mwp4-54f8-5fhr ip-address) were all
+  // cleared by raising the override floors in pnpm-workspace.yaml, so keeping
+  // them would now be exactly the stale exemption the ratchet exists to catch.
+  // Measured after that change: production 287 packages, 0 critical / 0 high /
+  // 0 moderate / 1 low, 1 advisory (body-parser GHSA-v422-hmwv-36x6, a `low`
+  // and therefore not gating). Nothing in the production graph is currently
+  // unfixable, which is why nothing is accepted.
+  acceptedProdAdvisories: {},
 
   // Licences. The board ships to npm, so the production graph is what matters
   // for redistribution; dev-only copyleft never leaves the developer's machine.

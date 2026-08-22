@@ -5,11 +5,14 @@ packages:
 # (npm audit --prod highs/moderates). Each package resolves to a single major in
 # our tree, so a plain override is safe; brace-expansion is scoped to @2 because a
 # 1.x line is also present (forcing all of it to 2.x would break the 1.x consumers).
-#   fast-uri      high  — path traversal / host confusion (via @modelcontextprotocol/sdk>ajv)
+#   fast-uri      high  — host confusion via a backslash authority (via @modelcontextprotocol/sdk>ajv)
 #   ws            high  — DoS + uninitialized-memory disclosure (via @libsql/client)
-#   brace-expansion high — DoS via exponential expansion (via ts-morph>minimatch)
-#   ip-address    moderate — XSS in Address6 HTML methods
+#   brace-expansion high — ReDoS via exponential expansion (via ts-morph>minimatch)
+#   ip-address    high + 2 moderates — leading-zero octet decoding, XSS in the Address6
+#                 HTML methods (via @modelcontextprotocol/sdk>express-rate-limit)
 #   qs            moderate — remotely-triggerable stringify DoS
+# Each entry names the GHSA ids it clears, so a version here that stops being needed
+# is visible rather than inherited. Measured with `pnpm security` (#741).
 overrides:
   # hono is also pulled transitively by @modelcontextprotocol/sdk at 4.12.16 (< the
   # direct bump in packages/server), so override it too — fixes the high CORS-reflect
@@ -29,10 +32,33 @@ overrides:
   # 1.19.15 fixes GHSA-frvp-7c67-39w9, a Windows path traversal in serve-static; this
   # board serves its client through that handler and Windows is its primary platform.
   "@hono/node-server": "1.19.17"
-  fast-uri: "^3.1.2"
+  # 3.1.5 fixes GHSA-7p8r-x3mc-p8w7 (host confusion via a backslash authority),
+  # the high in the production graph under @modelcontextprotocol/sdk>ajv. ajv
+  # declares ^3.0.1, so this raises a floor rather than forcing an out-of-range
+  # version (#760). Verified against the installed ajv@8.20.0 manifest.
+  fast-uri: "^3.1.5"
   ws: "^8.21.0"
-  "brace-expansion@2": "^2.1.2"
-  ip-address: "^10.1.1"
+  # 2.1.4 fixes both production highs GHSA-mh99-v99m-4gvg and GHSA-rgw5-rvv9-x895
+  # (ReDoS) under ts-morph>@ts-morph/common>minimatch. That minimatch is 9.0.9, which
+  # declares brace-expansion ^2.0.2 (verified in the installed manifest), and
+  # brace-expansion is a leaf (its only dependency is balanced-match), so the override
+  # is in-range and cannot pull anything else with it. 2.1.4 is the last 2.x release;
+  # the newer GHSA-3jxr-9vmj-r5cp only covers the 1.x/3.x-4.x lines, which this
+  # `@2`-scoped override does not touch (#760).
+  "brace-expansion@2": "^2.1.4"
+  # 10.3.1 fixes the production high GHSA-mwp4-54f8-5fhr (leading-zero octet
+  # decoding) plus the two moderates GHSA-4xrf-jv44-h6hh and GHSA-22jq-vg5j-6vgg,
+  # under @modelcontextprotocol/sdk>express-rate-limit (#760).
+  #
+  # Unlike the other entries here this one FORCES past the declared range:
+  # express-rate-limit@8.4.1 pins `ip-address: "10.1.0"` exactly, so any patched
+  # version is out of range by construction and there is no non-forcing fix short of
+  # an upstream release. That is a knowingly accepted risk, not an oversight — the
+  # previous override already forced 10.2.0 over the same exact pin and has shipped
+  # that way, ip-address 10.x is semver-minor throughout, and express-rate-limit uses
+  # it only to normalise the client IP for keying. Re-check if express-rate-limit
+  # starts depending on 10.1-specific behaviour.
+  ip-address: "^10.3.1"
   qs: "^6.15.2"
 
 # Always fetch the win32-x64 native binaries (rollup/esbuild/swc) in addition to
