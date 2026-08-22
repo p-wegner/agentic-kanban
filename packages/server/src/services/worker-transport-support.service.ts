@@ -28,6 +28,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
+import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 import { db as realDb } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { listProjectRepos } from "../repositories/repo.repository.js";
@@ -63,7 +64,7 @@ async function listTrackedFiles(repoPath: string, patterns: string[]): Promise<s
     cwd: repoPath,
     timeout: DETECT_TIMEOUT_MS,
   });
-  if (result.code !== 0) return null;
+  if (!execSucceeded(result)) return null;
   return unique(result.stdout.split("\0").map((entry) => entry.trim()));
 }
 
@@ -73,7 +74,7 @@ export async function scanTransportFeatures(repoPath: string): Promise<Transport
     cwd: repoPath,
     timeout: DETECT_TIMEOUT_MS,
   });
-  if (isRepo.code !== 0 || isRepo.stdout.trim() !== "true") return { kind: "not-a-repo" };
+  if (!execSucceeded(isRepo) || isRepo.stdout.trim() !== "true") return { kind: "not-a-repo" };
 
   const [gitmodules, gitattributes] = await Promise.all([
     listTrackedFiles(repoPath, [".gitmodules", "*/.gitmodules"]),
