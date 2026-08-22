@@ -46,6 +46,32 @@ import {
   listSessionPlacementRows,
 } from "../repositories/placement-observability.repository.js";
 import type { ProviderName } from "./agent-provider.js";
+import type {
+  BranchSource,
+  IssuePlacementReport,
+  PlacementCheckId,
+  PlacementCheckOutcome,
+  PlacementCheckResult,
+  PlacementExplanation,
+  PlacementOutcome,
+  SessionPlacementRecord,
+  WorkerEligibility,
+} from "../lib/placement-explain.types.js";
+
+// Re-exported so existing importers of this service keep working; the declarations
+// live in `lib/placement-explain.types.ts` so the worker binary's leaf consumers can
+// depend on the shapes without this module's db graph (worker-cli-isolation guard).
+export type {
+  BranchSource,
+  IssuePlacementReport,
+  PlacementCheckId,
+  PlacementCheckOutcome,
+  PlacementCheckResult,
+  PlacementExplanation,
+  PlacementOutcome,
+  SessionPlacementRecord,
+  WorkerEligibility,
+};
 import { WorkerDispatchUnavailableError } from "./agent-dispatch.service.js";
 import { releaseWorkerSlot } from "./worker-slot-reservation.service.js";
 import {
@@ -63,13 +89,6 @@ import {
 import { loadProjectRuntimeConfig } from "./project-runtime-config.service.js";
 import { remoteDispatchBlockedByRepoShape } from "./worker-transport-support.service.js";
 
-export type PlacementCheckId =
-  | "dispatch_opt_in"
-  | "profile_allowlist"
-  | "eligible_worker"
-  | "branch_for_transport"
-  | "project_repo_path"
-  | "repo_transport_shape";
 
 export interface PlacementCheckSpec {
   id: PlacementCheckId;
@@ -146,73 +165,11 @@ export const PLACEMENT_CHECK_CHAIN: readonly PlacementCheckSpec[] = [
   },
 ] as const;
 
-export type PlacementCheckOutcome = "pass" | "skipped" | "decided" | "not-reached";
 
-export interface PlacementCheckResult {
-  id: PlacementCheckId;
-  docStep: number;
-  title: string;
-  outcome: PlacementCheckOutcome;
-  /** One line an operator can act on. */
-  detail: string;
-  /** The values this check actually read, so nothing has to be taken on trust. */
-  observed: Record<string, string | number | boolean | null>;
-  /** Preference keys to change to make this check pass. */
-  prefKeys: string[];
-}
 
-export type PlacementOutcome =
-  | { kind: "remote"; workerId: string }
-  | { kind: "host" }
-  | { kind: "refused"; message: string };
 
-export interface WorkerEligibility {
-  workerId: string;
-  name: string;
-  effectiveStatus: string;
-  connected: boolean;
-  load: number;
-  maxConcurrency: number;
-  sharesFilesystem: boolean;
-  eligible: boolean;
-  /** Why this worker is not a candidate — the first failing condition, or null. */
-  ineligibleReason: string | null;
-}
 
-export type BranchSource = "workspace" | "assumed-feature-branch" | "none";
 
-export interface PlacementExplanation {
-  projectId: string;
-  provider: ProviderName;
-  /** `worker_dispatch_strict_<projectId>` — decides whether a failed check refuses or degrades. */
-  strict: boolean;
-  requiredLabels: string[];
-  /** Where the branch used for check 4 came from: a real workspace, or a prediction. */
-  branchSource: BranchSource;
-  branch: string | null;
-  chain: PlacementCheckResult[];
-  /** The check that decided the outcome; null when the chain reached remote dispatch. */
-  decidedBy: PlacementCheckId | null;
-  /** What the chain concludes. */
-  predicted: PlacementOutcome;
-  /** What `resolveWorkerPlacement` actually answers for the same inputs (read-only dry run). */
-  actual: PlacementOutcome;
-  /**
-   * False = this explanation's chain no longer matches the resolver it describes.
-   * The resolver is the truth; treat the chain as the bug and say so loudly.
-   */
-  agreesWithResolver: boolean;
-  fleet: {
-    registered: number;
-    online: number;
-    connected: number;
-    eligible: number;
-    freeSlots: number;
-    workers: WorkerEligibility[];
-  };
-  /** Single-sentence answer to "why was it not dispatched". */
-  summary: string;
-}
 
 function parseJsonList(raw: string | null | undefined): string[] {
   if (!raw) return [];
@@ -642,21 +599,6 @@ export async function explainPlacement(params: {
  * ever read it, so "where did this run" was unanswerable after the fact.
  * ------------------------------------------------------------------ */
 
-export interface SessionPlacementRecord {
-  sessionId: string;
-  workspaceId: string;
-  branch: string | null;
-  issueNumber: number | null;
-  issueTitle: string | null;
-  status: string;
-  executor: string;
-  startedAt: string;
-  endedAt: string | null;
-  placement: "remote" | "host";
-  workerId: string | null;
-  /** Null with a non-null workerId = the worker was revoked or removed since. */
-  workerName: string | null;
-}
 
 export async function listSessionPlacements(
   opts: {
@@ -702,12 +644,6 @@ export async function listSessionPlacements(
  * The operator's actual question: "why was #N not dispatched?"
  * ------------------------------------------------------------------ */
 
-export interface IssuePlacementReport {
-  issue: { id: string; issueNumber: number; title: string; projectId: string };
-  explanation: PlacementExplanation;
-  /** What actually happened, for the sessions this issue has already run. */
-  sessions: SessionPlacementRecord[];
-}
 
 /**
  * The branch matters — check 4 turns on it — so use the issue's REAL workspace when
