@@ -346,7 +346,7 @@ export async function alignLiveDbForeignKeys(): Promise<void> {
  * not own those processes and cannot read their liveness from a pid it never had.
  */
 export async function cleanupStaleSessions(sessionManager: SessionManager, agentServiceModule = agentService): Promise<void> {
-  await recoverRemoteSessionsAtBoot(sessionManager);
+  await recoverRemoteSessionsAtBoot(sessionManager, db);
 
   const staleSessions = (await db.select({
     id: sessions.id,

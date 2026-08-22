@@ -26,7 +26,6 @@
 //    finishing a push after a board restart gets 401 regardless of what happens
 //    here. That is the second half of #745 and needs a persisted token digest.
 
-import { db as realDb } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { listRunningWorkerSessions } from "../repositories/remote-session.repository.js";
 import { updateSessionStoppedNoStats } from "../repositories/session-lifecycle.repository.js";
@@ -56,7 +55,12 @@ export interface RemoteReadoptionResult {
 
 export interface RemoteReadoptionDeps {
   sessionManager: RemoteReadoptionSessionManager;
-  database?: Database;
+  /**
+   * Injected, never the `db` singleton: packages/server/src/startup/ has no persistence
+   * boundary (#715) and its ratchet may only shrink, so a new startup/ module must not
+   * import it. The caller (startup-tasks.ts) already holds the connection.
+   */
+  database: Database;
   /** Injected for testing — the live one comes from the worker fleet. */
   remoteService?: RemoteAgentService;
   probe?: (
@@ -76,7 +80,7 @@ export interface RemoteReadoptionDeps {
  * say it out loud.
  */
 export async function readoptRemoteSessions(deps: RemoteReadoptionDeps): Promise<RemoteReadoptionResult> {
-  const database = deps.database ?? realDb;
+  const database = deps.database;
   const now = deps.now ?? new Date().toISOString();
   const nowMs = new Date(now).getTime();
   const probe = deps.probe ?? probeRemoteSessionLiveness;
@@ -174,7 +178,7 @@ async function defaultSharesFilesystem(workerId: string, database: Database): Pr
  */
 export async function recoverRemoteSessionsAtBoot(
   sessionManager: RemoteReadoptionSessionManager,
-  database?: Database,
+  database: Database,
 ): Promise<RemoteReadoptionResult> {
   try {
     const res = await readoptRemoteSessions({ sessionManager, database });

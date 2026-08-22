@@ -45,7 +45,12 @@ export function defaultProgramLookup(platform: NodeJS.Platform = process.platfor
       const out =
         platform === "win32"
           ? execFileSync("where", [program], { encoding: "utf8", windowsHide: true })
-          : execFileSync("/bin/sh", ["-c", `command -v ${JSON.stringify(program)}`], { encoding: "utf8" });
+          : execFileSync("/bin/sh", ["-c", `command -v ${JSON.stringify(program)}`], {
+              encoding: "utf8",
+              // A no-op off Windows, but the #597 guard is blanket on purpose: the next
+              // person to copy this call may not be on POSIX.
+              windowsHide: true,
+            });
       const first = out.split(/\r?\n/).map((l) => l.trim()).find((l) => l.length > 0);
       return first ?? null;
     } catch {
