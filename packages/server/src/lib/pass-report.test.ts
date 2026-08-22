@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   emptyPassReport,
-  formatPassReport,
+  formatPassReportBody,
   passReasonCounts,
   recordActed,
   recordSkipped,
@@ -33,15 +33,13 @@ describe("PassReport (#592)", () => {
     recordActed(report, "a", "landed");
     recordActed(report, "b", "landed");
     for (const id of ["c", "d", "e", "f", "g"]) recordSkipped(report, id, "held");
-    expect(formatPassReport("incoming", report)).toBe(
-      "[incoming] scanned 9, acted 2, skipped 5, 2 unaccounted",
-    );
+    expect(formatPassReportBody(report)).toBe("scanned 9, acted 2, skipped 5, 2 unaccounted");
   });
 
   it("omits the remainder when everything is accounted for", () => {
     const report = emptyPassReport(1);
     recordSkipped(report, "only", "nothing-to-do");
-    expect(formatPassReport("reaper", report)).toBe("[reaper] scanned 1, acted 0, skipped 1");
+    expect(formatPassReportBody(report)).toBe("scanned 1, acted 0, skipped 1");
   });
 
   it("groups reasons for a digest", () => {
@@ -55,7 +53,7 @@ describe("PassReport (#592)", () => {
 
   it("an empty pass is a valid report, not an absence of one", () => {
     const report = emptyPassReport();
-    expect(formatPassReport("noop", report)).toBe("[noop] scanned 0, acted 0, skipped 0");
+    expect(formatPassReportBody(report)).toBe("scanned 0, acted 0, skipped 0");
     expect(passReasonCounts(report)).toEqual({});
   });
 });
