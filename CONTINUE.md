@@ -280,63 +280,66 @@ invariant it declares. Second pattern: **the fix lands at one call site of N**, 
 disclosing a smaller remainder than exists — which is #691's own batch-1 rule, unapplied by the
 wave that wrote it.
 
-### Confirmed defects, highest first
+All twelve are filed as tickets #710-#721 against the agentic-kanban project, plus #722 for the
+origin integration; **#700 is reopened** (it was closed on a false rationale — see above).
 
-1. **#681 half B: a red probe can persist a false GREEN per-suite verdict.** Reproduced against
+### Confirmed defects, highest first — each now a ticket
+
+1. **#710 — #681 half B: a red probe can persist a false GREEN per-suite verdict.** Reproduced against
    the real module: `failedSuitesForOutcome("red", out)` returns `[]` whenever `out` carries a
    `Test Files` summary but no FAIL lines — and `[]` is what the schema comment and
    `findRottedSuites` both define as the value that BREAKS a red streak. Reachable because the
    derived verify is `chainAll(typecheck, test, build)`: build runs AFTER vitest, so any
    build-stage failure emits a passing `Test Files` line. Correct value is `null`. **A test pins
    the wrong behaviour**: `rotted-suite-scan.test.ts:160-164`.
-2. **#681's scope justification is false.** `rotted-suite-scan.ts:19-24` (and this file, and the
+2. **#717 — #681's scope justification is false.** `rotted-suite-scan.ts:19-24` (and this file, and the
    commit message) claim "the probe runs the whole verify script, so every suite is equally
    observed". `verify-command.ts:194` prefers `quickTestCommand` = `pnpm test:mine`, which excludes
    suites by design — and the live probe output proves it, containing
    `[test:mine] mcp-server: node vitest run --exclude **/mcp-tools.test.ts`. Excluded suites can
    rot forever, invisibly.
-3. **#681 reports false suite names.** A test whose NAME contains a path is attributed as a failed
+3. **#710 (same ticket) — #681 reports false suite names.** A test whose NAME contains a path is attributed as a failed
    suite — reproduced: a `×` line reading "parses paths in src/__tests__/other.test.ts correctly"
    yields `["src/__tests__/other.test.ts"]`. Worst case in a repo full of ratchets that cite paths
    in their test names; the commit's own standard is "a false name is worse than no name".
-4. **`startup/` has no persistence boundary, and the wave widened it.** Verified: 31 of 32
+4. **#715 — `startup/` has no persistence boundary, and the wave widened it.** Verified: 31 of 32
    `startup/` files import `drizzle-orm` directly; `services/` does so **zero** times. The rule
    that would catch it, `startup-bypasses-repositories`, is pinned `warn` so it can never block,
    and the wave added a new offender (`install-staleness-reconciler.ts`). Largest live layering
    breach in the repo; the only invariant of this size with no ratchet.
-5. **`shebang-eol-guard` is green while the bug is on disk.** It asserts the `.gitattributes`
+5. **#716 — `shebang-eol-guard` is green while the bug is on disk.** It asserts the `.gitattributes`
    attribute and explicitly refuses to look at bytes. Verified: tracked shebang files still carry
    CRLF working-tree bytes, including `scripts/board-monitor/loop.sh` (`attr/text eol=lf`,
    `w/crlf`) — the Conductor loop — and all eight `.claude/hooks/*.js`. `.claude/skills/**` has
    been pinned since #217 and is still CRLF, i.e. the pin demonstrably does not repair an existing
    checkout. Fix is `git add --renormalize`, plus a byte-level assertion.
-6. **`formatPassReport` has zero production callers.** Verified: all five real emission sites call
+6. **#718 — `formatPassReport` has zero production callers.** Verified: all five real emission sites call
    `formatPassReportBody` and hand-write the tag; the tagged wrapper is referenced only by tests
    and a comment. Dead code created BY a guard (the console-tag ratchet's first-argument rule) —
    the exact defect #591/#705 exist to catch, and no ratchet cross-checks guard-mandated helpers.
-7. **Single-spelling ratchets.** Each defends the one shape the past bug took, not the class.
+7. **#721 — single-spelling ratchets.** Each defends the one shape the past bug took, not the class.
    Probed and GREEN (i.e. undetected): `res.code > 0`, `!res.code`, destructured `code === 0`,
    loose `res.code == 0` for #705's guard; `asOf`/`currentTimeMs` for the time-spelling ratchet
    (so CLAUDE.md's "adding a tenth spelling fails that gate" is false); a `VITE_PORT` fallback for
    the new client-port guard — the very miss #690 was filed to fix on the server side; and
    `env.NAME` after `const env = process.env` for #707 (34 live sites, so coverage SHRINKS as the
    code improves toward injectable env). None of these guards use the TS AST.
-8. **Fixes wired at one site of N**: #699's `isPathClaimed` at 1 of 8 (the unwired ones include
+8. **#713 — fixes wired at one site of N**: #699's `isPathClaimed` at 1 of 8 (the unwired ones include
    `workspace-crud.service.ts:220`, literally #699's own scenario); #673's co-residency delete
    guard at 1 of 5; `a2efe48691`'s closed-sharer correction at 1 of 2 — and both copies compare a
    literal `"closed"` instead of `isTerminalWorkspaceStatus`, so an `error`-status workspace counts
    as a live sharer forever.
-9. **#685's reclaim `UPDATE` has no `installState IN ('pending','running')` predicate** and runs
+9. **#714 — #685's reclaim `UPDATE` has no `installState IN ('pending','running')` predicate** and runs
    against rows from an earlier `SELECT`; with no heartbeat, a legitimately long install is
    reclaimed mid-flight and a `done` row can be clobbered to `failed`.
-10. **#673's create guard is keyed on `issueId + branch`** while the worktree path collapses to
+10. **#719 — #673's create guard is keyed on `issueId + branch`** while the worktree path collapses to
     `ak-N`, so it deliberately exempts the exact pair that collides. In-process `Set`, no unique
     constraint, no TTL — a create hung in `setupWorktree` wedges `409` for the process lifetime.
-11. **#709's Stop hook silently reports NOTHING for two common paths**: subagent writes
+11. **#720 — #709's Stop hook silently reports NOTHING for two common paths**: subagent writes
     (`WRITE_TOOLS` has no `Agent`, and the subagent's transcript is never recursed into) and a
     `sed -i` issued after a `cd` into a package (attribution compares repo-relative paths).
     Meanwhile `cat`/`grep` of a file makes you its author — unreliable in both directions.
-12. **The base-health probe has no in-flight lock on a deterministic temp dir**
+12. **#712 — the base-health probe has no in-flight lock on a deterministic temp dir**
     (`base-branch-health.service.ts:78`), removes it recursively before cloning, and has two
     callers — the sweep and a fire-and-forget probe after EVERY merge. Probe B wipes A's tree
     mid-verify and the wreck records as `outcome: "red"`. A strong candidate for the
@@ -391,8 +394,11 @@ is either done or a decision that is not this session's to make.
       regression. The `restore` branch (#771 deletion-desync) is deliberately unfiltered.
       Verified live both directions against a genuinely dirty tree, plus 7 new tests.
 - [ ] **Push master** — recommended, but only after the origin integration and the three
-      god-module fixes. See the corrected divergence section above for the order and why
-      pushing first is the wrong move.
+      god-module fixes. Filed as **#722**, with **#700 reopened** as its main sub-task. See the
+      corrected divergence section above for the order and why pushing first is the wrong move.
+- [ ] **Thirteen tickets from the 2026-08-22 review are in Backlog: #710-#721 plus #722.**
+      #710, #711, #712 are the ones that make a green run untrustworthy today; #711 is why
+      master HEAD is red. The board is no longer empty of open work.
 - [ ] `pnpm install` so #688's `pnpm test:coverage` can run. Left undone on purpose: it mutates
       a shared checkout while a dev server is running.
 - [x] **#681 half B confirmed end-to-end on live data (2026-08-22)** — probes have run since.
