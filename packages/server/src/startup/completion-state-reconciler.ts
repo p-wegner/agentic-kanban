@@ -4,11 +4,8 @@ import type { Database } from "../db/index.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { workspaceHasCommittedWork } from "../services/workspace-commits.js";
 import { isPidAlive } from "../lib/pid.js";
-import {
-  classifySessionLiveness,
-  probeRemoteSessionLiveness,
-  type LivenessVerdict,
-} from "../services/remote-session-liveness.js";
+import { classifySessionLiveness, type LivenessVerdict } from "../services/remote-session-liveness.js";
+import { probeRemoteSessionLiveness } from "../services/fleet-liveness-probe.js";
 
 /** How long a workspace must be in 'active' with a live PID before we reconcile it (hung agent). */
 const HUNG_AGENT_THRESHOLD_MS = 30 * 60 * 1000;

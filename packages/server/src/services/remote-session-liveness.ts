@@ -139,22 +139,30 @@ export function classifySessionLiveness(
     : { liveness: "dead", reason: `pid=${row.pid} is dead` };
 }
 
+/**
+ * Is this worker holding a live socket right now? Injected rather than imported:
+ * the answer lives in the worker-fleet facade, which CONSTRUCTS the remote agent
+ * service, which needs this module's abandon bound — importing it here (statically or
+ * dynamically; dependency-cruiser counts both) closes a cycle
+ * agent-remote -> liveness -> worker-fleet -> agent-remote. Taking it as a parameter
+ * also makes the whole rule unit-testable with no fleet at all, which is the point.
+ *
+ * `services/fleet-liveness-probe.ts` is where the live accessor is wired in.
+ */
+export type IsWorkerConnected = (workerId: string) => boolean;
+
 /** Read the fleet evidence for one remote session. Never throws. */
 export async function readRemoteEvidence(
   workerId: string,
   fallbackEvidenceAt: string | null,
+  isWorkerConnected: IsWorkerConnected,
   database: Database = realDb,
 ): Promise<RemoteEvidence | undefined> {
   try {
     const worker = await getWorkerById(workerId, database);
-    // Imported lazily: worker-fleet.service constructs the remote agent service, which
-    // imports this module for its abandon bound. A static import here would close that
-    // cycle for no benefit — the fleet is only needed when a probe actually runs.
-    const { getWorkerFleet } = await import("./worker-fleet.service.js");
-    const connected = getWorkerFleet(database).connections.isConnected(workerId);
     return {
       workerExists: Boolean(worker),
-      workerConnected: connected,
+      workerConnected: isWorkerConnected(workerId),
       lastEvidenceAt: worker?.lastHeartbeatAt ?? fallbackEvidenceAt,
     };
   } catch (err) {
@@ -166,13 +174,17 @@ export async function readRemoteEvidence(
 /**
  * The remote half of the decision, for reconcilers that hold a row and a DB.
  * Returns `unknown` (hold) whenever the board cannot see enough to be sure.
+ *
+ * Callers use the wired `probeRemoteSessionLiveness` from
+ * `services/fleet-liveness-probe.ts` rather than passing the accessor by hand.
  */
-export async function probeRemoteSessionLiveness(
+export async function probeRemoteSessionLivenessWith(
+  isWorkerConnected: IsWorkerConnected,
   row: { workerId: string; startedAt?: string | null },
   database: Database = realDb,
   opts: { nowMs?: number; abandonAfterMs?: number } = {},
 ): Promise<LivenessVerdict> {
-  const evidence = await readRemoteEvidence(row.workerId, row.startedAt ?? null, database);
+  const evidence = await readRemoteEvidence(row.workerId, row.startedAt ?? null, isWorkerConnected, database);
   return classifySessionLiveness(
     { pid: null, workerId: row.workerId },
     { checkPid: () => false, remoteEvidence: evidence, nowMs: opts.nowMs, abandonAfterMs: opts.abandonAfterMs },
