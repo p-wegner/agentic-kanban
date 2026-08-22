@@ -74,3 +74,21 @@ export const PRIMARY_SERIES = BRAND;
 /** Activity-heatmap intensity ramp (low -> high), sage/accent family instead of
  *  GitHub green. Index 0 is the "empty cell" surface. */
 export const HEATMAP_SCALE = ["#efe9df", "#c0d0b5", "#98b288", "#719161", "#415c37"] as const;
+
+/**
+ * Agent-provider -> chart color. Extracted in #732: `ProviderMixChart` and
+ * `ProviderCostOverTimeChart` each carried an identical copy of this table plus its
+ * lookup, with a comment in the second one asking the reader to keep them in step by
+ * hand — which is the failure mode this module exists to remove.
+ */
+export const PROVIDER_COLORS: Record<string, string> = {
+  claude:  BRAND,            // terracotta
+  codex:   ACCENT,           // sage
+  copilot: SEMANTIC.created, // muted slate-teal
+  unknown: "#b3a89a",        // warm neutral gray
+};
+
+/** Stable color for a provider key, falling back to the neutral ink-faint hue. */
+export function providerColor(key: string): string {
+  return PROVIDER_COLORS[key.toLowerCase()] ?? "#8a8175";
+}
