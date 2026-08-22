@@ -4,6 +4,11 @@ import type { Database } from "../db/index.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { workspaceHasCommittedWork } from "../services/workspace-commits.js";
 import { isPidAlive } from "../lib/pid.js";
+import {
+  classifySessionLiveness,
+  probeRemoteSessionLiveness,
+  type LivenessVerdict,
+} from "../services/remote-session-liveness.js";
 
 /** How long a workspace must be in 'active' with a live PID before we reconcile it (hung agent). */
 const HUNG_AGENT_THRESHOLD_MS = 30 * 60 * 1000;
@@ -58,18 +63,31 @@ export async function reconcileCompletionStates(
       workspace: { id: string; workingDir: string | null; baseBranch: string | null; isDirect?: boolean | null; baseCommitSha?: string | null },
       database: Database,
     ) => Promise<boolean>;
+    /**
+     * Injected for testing — defaults to probeRemoteSessionLiveness. Answers
+     * liveness for a session running on a fleet worker, where the board holds no
+     * process handle at all (#744).
+     */
+    probeRemote?: (
+      row: { workerId: string; startedAt?: string | null },
+      database: Database,
+      probeOpts: { nowMs: number },
+    ) => Promise<LivenessVerdict>;
     /** Current time override for testing. */
     now?: string;
   } = {},
 ): Promise<number> {
   const checkPid = opts.checkPid ?? isPidAlive;
   const checkCommits = opts.checkCommits ?? workspaceHasCommittedChanges;
+  const probeRemote = opts.probeRemote ?? probeRemoteSessionLiveness;
   const now = opts.now ?? new Date().toISOString();
+  const nowMs = new Date(now).getTime();
 
   const candidates = await database
     .select({
       sessionId: sessions.id,
       sessionPid: sessions.pid,
+      sessionWorkerId: sessions.workerId,
       sessionStatus: sessions.status,
       sessionStartedAt: sessions.startedAt,
       workspaceId: workspaces.id,
@@ -128,7 +146,33 @@ export async function reconcileCompletionStates(
     let shouldReconcile = false;
     let reason = "";
 
-    if (!pid || !isPidAliveCheck(checkPid, pid)) {
+    // #744: this pass used to read `!pid` as proof of death. A session dispatched to
+    // a fleet worker has NO local pid by construction, so every running remote
+    // session was force-stopped on the first tick with candidates — its workspace
+    // idled and the ticket relaunched, putting two agents on one branch. Liveness is
+    // now decided in ONE place that knows the difference between "no process" and
+    // "no information" (services/remote-session-liveness.ts), and an `unknown`
+    // verdict HOLDS: the board reports what it cannot see and changes nothing.
+    const verdict: LivenessVerdict = c.sessionWorkerId
+      ? await probeRemote(
+          { workerId: c.sessionWorkerId, startedAt: c.sessionStartedAt },
+          database,
+          { nowMs },
+        ).catch((err) => {
+          console.error(`[reconciler] remote liveness probe failed for session ${c.sessionId}`, err);
+          return { liveness: "unknown" as const, reason: "remote liveness probe failed" };
+        })
+      : classifySessionLiveness({ pid, workerId: null }, { checkPid });
+
+    if (verdict.liveness === "unknown") {
+      console.log(
+        `[reconciler] holding session ${c.sessionId} (workspace ${c.workspaceId}): ${verdict.reason}. ` +
+          `Nothing is changed while the board cannot tell — it is an observer of remote work, not its owner.`,
+      );
+      continue;
+    }
+
+    if (verdict.liveness === "dead") {
       // For a dead PID (not null), verify the agent committed work before marking stopped.
       // This prevents false positives from transient PID-check failures (e.g. reused PIDs,
       // EPERM edge cases) from killing sessions that are actually still producing output.
@@ -141,7 +185,7 @@ export async function reconcileCompletionStates(
         if (!hasCommits) continue;
       }
       shouldReconcile = true;
-      reason = pid ? `pid=${pid} is dead` : "pid=null (no process was tracked)";
+      reason = verdict.reason;
     } else {
       // PID alive — check for hung agent: issue already moved out of In Progress by the
       // agent via MCP, but the process is still running.
@@ -150,7 +194,7 @@ export async function reconcileCompletionStates(
       const isStale = updatedAt < staleThreshold;
       if (notInProgress && isStale) {
         shouldReconcile = true;
-        reason = `pid=${pid} alive but issue is in '${c.issueStatusName}' and workspace has been active for >${HUNG_AGENT_THRESHOLD_MS / 60000}m`;
+        reason = `${verdict.reason} but issue is in '${c.issueStatusName}' and workspace has been active for >${HUNG_AGENT_THRESHOLD_MS / 60000}m`;
       }
     }
 
@@ -174,12 +218,4 @@ export async function reconcileCompletionStates(
   }
 
   return reconciled;
-}
-
-function isPidAliveCheck(checkPid: (pid: number) => boolean, pid: number): boolean {
-  try {
-    return checkPid(pid);
-  } catch {
-    return false;
-  }
 }

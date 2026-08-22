@@ -9,6 +9,7 @@ import { setWorkspaceStatus } from "../repositories/workspace-status.repository.
 import { getMergeJob } from "../services/merge-job.service.js";
 import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 import { isPidAlive } from "../lib/pid.js";
+import { probeRemoteSessionLiveness, type LivenessVerdict } from "../services/remote-session-liveness.js";
 
 /** Grace window: a fix-and-merge session must be this old before it is a candidate. */
 const GRACE_WINDOW_MS = 60_000;
@@ -29,6 +30,18 @@ export interface ZombieFixSessionReconcilerDeps {
    * reads the live preference from the DB at each tick.
    */
   enabled?: boolean;
+  /** Epoch-ms clock override (arithmetic only — nothing here persists it). */
+  nowMs?: number;
+  /**
+   * Injected for testing — defaults to probeRemoteSessionLiveness. A session on a
+   * fleet worker has no local pid, so the pidless-grace rule below would have
+   * reaped every remote review/fix session (#744).
+   */
+  probeRemote?: (
+    row: { workerId: string; startedAt?: string | null },
+    database: Database,
+    opts: { nowMs: number },
+  ) => Promise<LivenessVerdict>;
 }
 
 /**
@@ -48,6 +61,8 @@ export interface ZombieFixSessionReconcilerDeps {
  */
 export async function reconcileZombieFixSessions(deps: ZombieFixSessionReconcilerDeps): Promise<number> {
   const database = deps.database ?? db;
+  const nowMs = deps.nowMs ?? Date.now();
+  const probeRemote = deps.probeRemote ?? probeRemoteSessionLiveness;
 
   const isEnabled = deps.enabled !== undefined
     ? deps.enabled
@@ -69,7 +84,7 @@ export async function reconcileZombieFixSessions(deps: ZombieFixSessionReconcile
     return 0;
   }
 
-  const cutoff = new Date(Date.now() - GRACE_WINDOW_MS).toISOString();
+  const cutoff = new Date(nowMs - GRACE_WINDOW_MS).toISOString();
 
   // Find sessions that are 'running', triggered by fix-and-merge or review,
   // and started before the grace window.
@@ -78,6 +93,7 @@ export async function reconcileZombieFixSessions(deps: ZombieFixSessionReconcile
       sessionId: sessions.id,
       workspaceId: sessions.workspaceId,
       pid: sessions.pid,
+      workerId: sessions.workerId,
       startedAt: sessions.startedAt,
       triggerType: sessions.triggerType,
     })
@@ -109,13 +125,32 @@ export async function reconcileZombieFixSessions(deps: ZombieFixSessionReconcile
   let recovered = 0;
 
   for (const s of fixOrReview) {
-    // #545: this probe used to read EPERM as DEAD, so an agent running under a protected
-    // PID would have been "recovered" out from under itself. `isPidAlive` is the one rule.
-    if (s.pid != null && isPidAlive(s.pid)) continue; // Real running session — leave it alone.
+    // #744: a session dispatched to a fleet worker has no local pid EVER, so the
+    // pidless rule below (reap after 5 minutes with no process) reaped live remote
+    // review/fix sessions on schedule. Remote liveness is a different question with a
+    // different answer set — ask the one seam that knows, and HOLD on `unknown`.
+    if (s.workerId) {
+      const verdict = await probeRemote({ workerId: s.workerId, startedAt: s.startedAt }, database, { nowMs })
+        .catch((err) => {
+          console.error(`[zombie-fix] remote liveness probe failed for session ${s.sessionId}`, err);
+          return { liveness: "unknown" as const, reason: "remote liveness probe failed" };
+        });
+      if (verdict.liveness !== "dead") {
+        console.log(
+          `[zombie-fix] holding remote session ${s.sessionId} on worker ${s.workerId}: ${verdict.reason}`,
+        );
+        continue;
+      }
+      console.warn(`[zombie-fix] remote session ${s.sessionId} is unrecoverable: ${verdict.reason}`);
+    } else {
+      // #545: this probe used to read EPERM as DEAD, so an agent running under a protected
+      // PID would have been "recovered" out from under itself. `isPidAlive` is the one rule.
+      if (s.pid != null && isPidAlive(s.pid)) continue; // Real running session — leave it alone.
 
-    // No PID yet: the launch may simply not have finished registering — give it the long
-    // grace before treating the missing process as proof of death (#270).
-    if (s.pid == null && Date.parse(s.startedAt) > Date.now() - PIDLESS_GRACE_WINDOW_MS) continue;
+      // No PID yet: the launch may simply not have finished registering — give it the long
+      // grace before treating the missing process as proof of death (#270).
+      if (s.pid == null && Date.parse(s.startedAt) > nowMs - PIDLESS_GRACE_WINDOW_MS) continue;
+    }
 
     // A merge in flight owns this workspace (#270): resetting it to idle here abandoned an
     // in-flight merge silently (no verdict, mergedAt and mergeError both null). Let the merge
@@ -169,7 +204,7 @@ export async function reconcileZombieFixSessions(deps: ZombieFixSessionReconcile
       }
 
       console.log(
-        `[zombie-fix] stopped zombie ${s.triggerType} session ${s.sessionId} (ws=${s.workspaceId}, pid=${s.pid ?? "none"}, msgs=0, age=${Math.round((Date.now() - new Date(s.startedAt).getTime()) / 1000)}s) — workspace reset to idle`,
+        `[zombie-fix] stopped zombie ${s.triggerType} session ${s.sessionId} (ws=${s.workspaceId}, pid=${s.pid ?? "none"}, msgs=0, age=${Math.round((nowMs - new Date(s.startedAt).getTime()) / 1000)}s) — workspace reset to idle`,
       );
       recovered++;
     } catch (err) {
