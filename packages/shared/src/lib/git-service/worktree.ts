@@ -56,6 +56,22 @@ function shortenWorktreeLeaf(safeName: string): string {
 }
 
 /**
+ * The on-disk worktree LEAF a branch resolves to — `feature/ak-719-foo` → `ak-719`.
+ *
+ * Exported because the leaf, not the branch, is the resource two concurrent creates
+ * contend on: every branch of issue N collapses to `ak-N` (see
+ * {@link shortenWorktreeLeaf}), so `workspace-branch-create-claim.ts` keys its mutual
+ * exclusion on this (#719). A second copy of the derivation there would be a second
+ * thing to drift, so `createWorktree` below calls this too.
+ *
+ * Note this is the leaf only — the full path adds `<parent>/.worktrees/<repoDirName>/`
+ * (see {@link worktreesDirFor}) and may gain a `-2` suffix when the directory is taken.
+ */
+export function worktreeDirLeafForBranch(branch: string): string {
+  return shortenWorktreeLeaf(branch.replace(/[^a-zA-Z0-9._-]/g, "_"));
+}
+
+/**
  * Sanitize one path segment for use as a directory name under `.worktrees`, or
  * return null when nothing safe is left (`""`, `.`, `..` would resolve to the
  * `.worktrees` dir itself or its parent).
@@ -189,7 +205,7 @@ export async function createWorktree(
     );
   }
   const worktreesDir = worktreesDirFor(repoPath, opts.pathNamespace);
-  const dirLeaf = shortenWorktreeLeaf(safeName);
+  const dirLeaf = worktreeDirLeafForBranch(branch);
   let worktreePath = join(worktreesDir, dirLeaf);
 
   await mkdir(worktreesDir, { recursive: true });
