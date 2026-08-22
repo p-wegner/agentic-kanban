@@ -1,9 +1,9 @@
-import { randomUUID } from "node:crypto";
-import { issueComments, issueDependencies, issues, issueTags, projectStatuses, tags, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
+import { issueDependencies, issues, issueTags, projectStatuses, tags, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import type { DependencyType } from "@agentic-kanban/shared/schema";
+import { insertIssueComment } from "./issue-comments.repository.js";
 
 // #523: this file used to re-declare DependencyType locally, and the copy had already
 // DRIFTED — it was missing "coupled_with", so the union here disagreed with the schema's.
@@ -148,14 +148,17 @@ export async function insertAutoChainAuditComment(
   },
   database: Database = db,
 ): Promise<void> {
-  await database.insert(issueComments).values({
-    id: randomUUID(),
-    issueId: args.issueId,
-    workspaceId: args.workspaceId ?? null,
-    kind: "note",
-    author: "butler",
-    body: args.body,
-    payload: JSON.stringify({ trigger: "dependency-auto-chain", ...args.payload }),
-    createdAt: new Date().toISOString(),
-  });
+  // Routed through the repository's single write path (#738) rather than inserting directly,
+  // so this audit note gets the same identical-repeat collapse as every other machine comment.
+  await insertIssueComment(
+    {
+      issueId: args.issueId,
+      workspaceId: args.workspaceId ?? null,
+      kind: "note",
+      author: "butler",
+      body: args.body,
+      payload: { trigger: "dependency-auto-chain", ...args.payload },
+    },
+    database,
+  );
 }

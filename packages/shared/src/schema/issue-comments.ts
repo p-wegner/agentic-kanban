@@ -1,4 +1,4 @@
-import { sqliteTable, text, index } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
 import { relations } from "drizzle-orm";
 import { issues } from "./issues.js";
 import { workspaces } from "./workspaces.js";
@@ -18,6 +18,14 @@ export const issueComments = sqliteTable(
     // JSON-encoded structured Q&A pairs for replay / re-inject (nullable)
     payload: text("payload"),
     createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
+    // #738: how many times this exact comment was written. The write path collapses a
+    // machine-authored comment that is identical to the newest one in the same
+    // (issueId, kind, workspaceId) thread into this counter instead of a new row — 97,798 of
+    // the table's 99,797 rows were such a repeat. 1 = written once (the normal case).
+    repeatCount: integer("repeat_count").notNull().default(1),
+    // When the collapse last happened; NULL when the comment never repeated, so `createdAt`
+    // remains the only timestamp for almost every row.
+    lastRepeatedAt: text("last_repeated_at"),
   },
   (table) => ({
     issueIdIdx: index("idx_issue_comments_issue_id").on(table.issueId),

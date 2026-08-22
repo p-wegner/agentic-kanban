@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { issueComments } from "@agentic-kanban/shared/schema";
-import { and, desc, eq, lt, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, lt, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 
@@ -21,24 +21,109 @@ export interface AddIssueCommentInput {
 
 export type IssueCommentRow = typeof issueComments.$inferSelect;
 
+/**
+ * Authors whose comments the write path may COLLAPSE (#738).
+ *
+ * Deliberately not "everything except user". `user` is the one author that means a person
+ * typed this, and silently swallowing a person's second identical comment is worse than a
+ * duplicate row — there are 132 user comments in the whole live table, so they cost nothing.
+ * A machine re-reporting a state it already reported is the opposite: 97,798 of 99,797 rows.
+ *
+ * An author string outside this set is NOT collapsed. That is the fail-closed direction for
+ * dedup: an unrecognised provenance keeps its own row.
+ */
+const COLLAPSIBLE_AUTHORS: ReadonlySet<string> = new Set(["system", "butler", "agent", "preflight"]);
+
+/**
+ * Write one comment — collapsing an identical machine-authored repeat instead of appending it.
+ *
+ * WHY THE SEAM IS HERE. #737 taught one producer (the stranded-sibling compensator) to report
+ * a change rather than a state, which stopped that bleed — but it left the property with the
+ * CALLER, so the next chatty writer re-creates the same 99,797-row table. This function is the
+ * single write path for `issue_comments` (enforced by
+ * `packages/server/src/__tests__/issue-comments-single-write-path.test.ts`), which makes it the
+ * only place a rule can be a property of the TABLE. The alternatives were both worse: a UNIQUE
+ * index cannot express "identical to the PREVIOUS one" (a state that legitimately returns after
+ * something else happened must be writable again), and a trigger would put board policy in SQL
+ * where no test or reviewer looks.
+ *
+ * The rule: a comment identical in (issueId, kind, workspaceId, author, body, payload) to the
+ * NEWEST comment in that thread bumps `repeat_count`/`last_repeated_at` on that row and
+ * returns it. "Newest in the thread" — not "exists anywhere" — is what keeps a recurring state
+ * legible: `A A A B A` still records that A came back after B.
+ *
+ * FAILS OPEN. If the dedup lookup or the bump throws, the comment is inserted. Losing a
+ * comment because a size optimisation broke is not a trade this board makes.
+ */
 export async function insertIssueComment(
   input: AddIssueCommentInput,
   database: Database = db,
 ): Promise<IssueCommentRow> {
-  const id = randomUUID();
   const createdAt = input.createdAt ?? new Date().toISOString();
+  const payload = input.payload === undefined ? null : JSON.stringify(input.payload);
+
+  if (COLLAPSIBLE_AUTHORS.has(input.author)) {
+    try {
+      const collapsed = await collapseIntoPreviousComment(input, payload, createdAt, database);
+      if (collapsed) return collapsed;
+    } catch {
+      // Fail open — fall through to the plain insert.
+    }
+  }
+
   const row = {
-    id,
+    id: randomUUID(),
     issueId: input.issueId,
     workspaceId: input.workspaceId ?? null,
     kind: input.kind,
     author: input.author,
     body: input.body,
-    payload: input.payload === undefined ? null : JSON.stringify(input.payload),
+    payload,
     createdAt,
+    repeatCount: 1,
+    lastRepeatedAt: null,
   };
   await database.insert(issueComments).values(row);
   return row;
+}
+
+/**
+ * If the newest comment in this (issueId, kind, workspaceId) thread is identical, bump its
+ * repeat counter and return the updated row; otherwise return null and let the caller insert.
+ */
+async function collapseIntoPreviousComment(
+  input: AddIssueCommentInput,
+  payload: string | null,
+  createdAt: string,
+  database: Database,
+): Promise<IssueCommentRow | null> {
+  const workspaceId = input.workspaceId ?? null;
+  const previous = await database
+    .select()
+    .from(issueComments)
+    .where(
+      and(
+        eq(issueComments.issueId, input.issueId),
+        eq(issueComments.kind, input.kind),
+        workspaceId === null ? isNull(issueComments.workspaceId) : eq(issueComments.workspaceId, workspaceId),
+      ),
+    )
+    .orderBy(desc(issueComments.createdAt), desc(issueComments.id))
+    .limit(1);
+
+  const prev = previous[0];
+  if (!prev) return null;
+  if (prev.author !== input.author || prev.body !== input.body || prev.payload !== payload) return null;
+  // A repeat written BEFORE the row it would collapse into is not a repeat — it is
+  // out-of-order backfill (tests and importers pass explicit createdAt). Insert it.
+  if (createdAt < prev.createdAt) return null;
+
+  const repeatCount = prev.repeatCount + 1;
+  await database
+    .update(issueComments)
+    .set({ repeatCount, lastRepeatedAt: createdAt })
+    .where(eq(issueComments.id, prev.id));
+  return { ...prev, repeatCount, lastRepeatedAt: createdAt };
 }
 
 /** Most recent comment of a given kind for an issue, or null. Used to dedup repeated system notes. */
