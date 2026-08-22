@@ -9,6 +9,15 @@ issues: 20
 
 # agentic-kanban — backlog
 
+> **STALE as of 2026-08-22.** This export is from 2026-08-20 and lists 20 issues; the board
+> now holds **30 open**. Everything below in `## Backlog` except #728 and #742 is **Done** —
+> see the "backlog wave" section of `CONTINUE.md` for what landed and its verification. The
+> current open set is mostly tickets FILED by that wave (#758-#784), which are not here at all.
+>
+> Regenerate with `pnpm cli -- backlog export --out BACKLOG.md`. That goes through the HTTP
+> API, so it needs a running dev server (`pnpm dev`, or the `dev-server` skill) — which is why
+> this file was not refreshed in the same session that invalidated it.
+
 <!-- Backlog Markdown (kanban-md 1). One `##` per status column, one `###` per issue; the backtick line under a heading is its metadata. Edit freely and re-import — issues match by #number, then by title. Spec: docs/backlog-markdown.md -->
 
 ## Backlog
