@@ -50,6 +50,18 @@ export interface SessionLifecycleDeps {
 /** Re-exported from the exit state machine, which now owns the canonical value. */
 export const ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS = EXIT_WINDOW_MS;
 
+/**
+ * The provider session this launch will actually resume, if any — `resumeWithNewModel`
+ * deliberately drops `--resume` so the new profile/provider is used instead.
+ *
+ * Module-level rather than inline in `startSession`, which is at its grandfathered
+ * control-flow-branch ceiling: a ternary at the call site pushes it over the god-module
+ * gate's limit, and the answer is not `startSession`'s to compute anyway.
+ */
+function resumedProviderSessionId(resumeWithNewModel: boolean | undefined, providerSessionId: string | undefined): string | undefined {
+  return resumeWithNewModel ? undefined : providerSessionId;
+}
+
 export function createSessionLifecycle(
   state: SessionState,
   options: SessionManagerOptions | undefined,
@@ -570,6 +582,10 @@ export function createSessionLifecycle(
         providerName,
         branch: workspace.isDirect ? undefined : workspace.branch,
         baseBranch: workspace.baseBranch ?? undefined,
+        // #750: a resume's provider transcript and checkout live on the worker that ran
+        // it, so placement prefers that worker. `resumeWithNewModel` drops --resume, so
+        // there is nothing to be near in that case — same condition as the launch below.
+        resumeProviderSessionId: resumedProviderSessionId(resumeWithNewModel, providerSessionId),
       }).catch((err) => {
         if (err instanceof WorkerDispatchUnavailableError) {
           throw new WorkspaceError(err.message, "CONFLICT", { code: "NO_AVAILABLE_WORKER" });

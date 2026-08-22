@@ -29,6 +29,7 @@ import {
   reservedSlotCount,
 } from "./worker-slot-reservation.service.js";
 import { remoteDispatchBlockedByRepoShape } from "./worker-transport-support.service.js";
+import { resolveResumeWorkerAffinity } from "./worker-resume-affinity.service.js";
 export { SHARES_FILESYSTEM_LABEL };
 
 // Strict-mode refusal. Defined in the dispatch layer (which must throw it when it
@@ -224,12 +225,24 @@ export async function selectAndReserveWorkerForLaunch(
   requiredLabels: string[] = [],
   now?: string,
   nowMs?: number,
-): Promise<{ workerId: string; reservationId: string } | null> {
+  /**
+   * Resume affinity (#750): the worker that holds this session's transcript and checkout.
+   * A PREFERENCE over the least-loaded default, applied to the already-filtered candidate
+   * list — so a holder with no free slot cannot be over-assigned, it is simply not there.
+   */
+  preferWorkerId?: string,
+): Promise<{ workerId: string; reservationId: string; honouredAffinity?: boolean } | null> {
   const workers = await fleet.registry.listWorkersView(now);
   // --- no `await` past this line, or the reservation proves nothing ---
-  const chosen = filterEligibleWorkers(fleet, workers, providerName, requiredLabels, nowMs)[0];
+  const candidates = filterEligibleWorkers(fleet, workers, providerName, requiredLabels, nowMs);
+  const preferred = preferWorkerId ? candidates.find((c) => c.id === preferWorkerId) : undefined;
+  const chosen = preferred ?? candidates[0];
   if (!chosen) return null;
-  return { workerId: chosen.id, reservationId: reserveWorkerSlot(chosen.id, nowMs) };
+  return {
+    workerId: chosen.id,
+    reservationId: reserveWorkerSlot(chosen.id, nowMs),
+    ...(preferWorkerId ? { honouredAffinity: chosen.id === preferWorkerId } : {}),
+  };
 }
 
 /**
@@ -245,6 +258,12 @@ export async function resolveWorkerPlacement(params: {
   /** Workspace branch info — required to give a true remote worker git transport. */
   branch?: string;
   baseBranch?: string;
+  /**
+   * Set when this launch RESUMES a provider session (#750). The transcript and the
+   * checkout both live on the worker that ran it, so placement prefers that worker over
+   * the least-loaded one. Omitted for a fresh session, where there is nothing to be near.
+   */
+  resumeProviderSessionId?: string;
   now?: string;
   nowMs?: number;
 }): Promise<Placement> {
@@ -269,7 +288,7 @@ async function resolvePlacementWithReservation(
   params: Parameters<typeof resolveWorkerPlacement>[0],
   reservation: { id?: string },
 ): Promise<Placement> {
-  const { database, projectId, providerName, branch, baseBranch, now, nowMs } = params;
+  const { database, projectId, providerName, branch, baseBranch, resumeProviderSessionId, now, nowMs } = params;
   try {
     const pref = await getPreferenceValue(workerDispatchPrefKey(projectId), database);
     if (pref !== "true") return { kind: "host" };
@@ -297,7 +316,16 @@ async function resolvePlacementWithReservation(
     const requiredLabels = parseRequiredLabels(await getPreferenceValue(workerLabelsPrefKey(projectId), database));
     // #751: select AND reserve atomically. Reading the load and then reserving after
     // another `await` would leave the same window this fixes.
-    const placed = await selectAndReserveWorkerForLaunch(fleet, providerName, requiredLabels, now, nowMs);
+    // #750: a resume follows its own state. Resolved BEFORE the selection because the
+    // selection's reservation must be taken in one synchronous turn (see #751) — an await
+    // between the load read and the reserve would undo that.
+    const preferWorkerId =
+      resumeProviderSessionId && branch
+        ? (await resolveResumeWorkerAffinity({ projectId, branch }, database)) ?? undefined
+        : undefined;
+    const placed = await selectAndReserveWorkerForLaunch(
+      fleet, providerName, requiredLabels, now, nowMs, preferWorkerId,
+    );
     if (!placed) {
       const detail = requiredLabels.length > 0 ? ` with labels [${requiredLabels.join(",")}]` : "";
       if (strict) refuseHost(`no eligible ${providerName} worker${detail}`);
@@ -308,6 +336,16 @@ async function resolvePlacementWithReservation(
     }
     const { workerId } = placed;
     reservation.id = placed.reservationId;
+    if (preferWorkerId && placed.honouredAffinity === false) {
+      // Said out loud: the resume names a provider session whose transcript is on ANOTHER
+      // machine, so it will most likely fail there with "no conversation found" — which
+      // arrives as a launch failure and explains nothing on its own.
+      console.warn(
+        `[worker-fleet] resume of ${branch ?? "(no branch)"} wanted worker ${preferWorkerId} ` +
+          `(it holds the provider transcript and the checkout) but that worker has no free ` +
+          `slot; placing on ${workerId} instead — the resume may fail with "no conversation found"`,
+      );
+    }
     if (await workerSharesFilesystem(fleet, workerId, now)) {
       return { kind: "remote", workerId, strict, reservationId: reservation.id };
     }
