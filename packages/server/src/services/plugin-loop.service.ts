@@ -5,6 +5,7 @@ import {
   type PluginManifest,
 } from "@agentic-kanban/shared/lib/plugin-manifest";
 import { setPreferenceChecked } from "@agentic-kanban/shared/lib/checked-preference-write";
+import { parseBoolSetting } from "@agentic-kanban/shared/lib/settings-registry";
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import {
   insertPluginLoopEvent,
@@ -313,7 +314,11 @@ async function persistConvergence(args: {
 }): Promise<{ isDone: boolean; wasDone: boolean }> {
   const key = pluginLoopConvergedPreferenceKey(args.pluginSlug, args.loopName, args.projectId);
   const isDone = args.converged && args.plannedUnits === 0;
-  const wasDone = (await getPreference(key, args.database)) === "true";
+  // `parseBoolSetting` rather than a raw `=== "true"` (#947): this is a dynamic per-loop key
+  // with no SETTINGS_REGISTRY entry, so it takes the `fallback = false` branch and the polarity
+  // is identical to the comparison it replaces — the win is that the read says which rule it
+  // follows instead of hard-coding one.
+  const wasDone = parseBoolSetting(key, await getPreference(key, args.database));
   await setPreferenceChecked(args.database, [{ key, value: isDone ? "true" : "false" }]);
   return { isDone, wasDone };
 }
