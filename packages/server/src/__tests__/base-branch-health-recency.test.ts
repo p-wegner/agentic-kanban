@@ -17,9 +17,17 @@ import { createTestDb } from "./helpers/test-db.js";
 import { recordBaseBranchHealth } from "../repositories/base-branch-health.repository.js";
 
 const verifyBaseBranchHealth = vi.fn(async () => {});
-vi.mock("../services/base-branch-health.service.js", () => ({
-  verifyBaseBranchHealth: (...args: unknown[]) => verifyBaseBranchHealth(...args),
-}));
+// Only the probe itself is stubbed; the sweep also reads this module's start-stamp key and
+// probe-ceiling constant (#712), and a partial mock would leave those undefined — which the
+// sweep's per-project try/catch would swallow into "check failed", making every assertion
+// below pass or fail for the wrong reason.
+vi.mock("../services/base-branch-health.service.js", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    verifyBaseBranchHealth: (...args: unknown[]) => verifyBaseBranchHealth(...args),
+  };
+});
 
 const { runBaseBranchHealthCheckOnce } = await import("../startup/base-branch-health-reconciler.js");
 
