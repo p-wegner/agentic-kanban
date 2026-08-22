@@ -49,6 +49,25 @@ Never `git add -A`/`-a`/`.` in a shared checkout. On `index.lock` contention, wa
 may then not typecheck standalone (a symbol can land one commit later); that is acceptable as long as
 HEAD is coherent — say so in the commit message.
 
+**Pathspec is NOT enough when two agents edit the SAME file** — it takes that path's whole current
+worktree state, so it commits the other agent's half-written hunks under your subject. That is the
+`0a7d00bef3` failure again, just via a different door. Waiting works only if they commit; when they
+don't, commit YOUR HUNKS ONLY through a private index, which touches neither the shared index nor the
+working tree:
+```bash
+export GIT_INDEX_FILE=$(mktemp)          # a private index — the shared one is untouched
+git read-tree HEAD                        # start from HEAD, not from whatever is staged
+# stage only your version of the contested file (e.g. from a blob you wrote aside),
+# then build the commit object directly and move the ref under a compare-and-swap:
+tree=$(git write-tree)
+new=$(git commit-tree "$tree" -p "$(git rev-parse HEAD)" -F msg.txt)
+git update-ref refs/heads/master "$new" "$(git rev-parse HEAD)"   # CAS: fails if HEAD moved
+unset GIT_INDEX_FILE
+```
+The `update-ref` old-value argument is the point: if another agent committed while you were building,
+it fails instead of clobbering. Afterwards verify `git diff HEAD -- <file>` is *exactly* the other
+agent's remaining delta, so you can show you left their work intact and committable.
+
 ## Board Feedback Conventions — what to do when you hit a flaw IN THE BOARD
 Using the board (driving a project, implementing a ticket, running the monitor) surfaces bugs and
 impediments in the board itself. There are four ways to route that feedback. Pick by CONTEXT, not by
