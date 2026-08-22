@@ -372,6 +372,96 @@ Cost now imposed on every merge: `KANBAN_TEST_GUARDS_ONLY=1` gives **98 suites /
 gate cheap. Two of those suites were red on master inside this same window, and a red always-run
 suite blocks every merge board-wide.
 
+## The review's findings are implemented (session 2026-08-22, continued)
+
+Thirteen tickets closed, 26 commits, all direct on master in the main checkout via
+subagents on a shared checkout (the `direct-master` skill's mode 2), committed by pathspec.
+**Nothing pushed** — see the divergence section above.
+
+| # | What landed | Commit(s) |
+|---|---|---|
+| #710 | a red probe no longer persists a false GREEN per-suite verdict; suite names are marker-anchored | `07cc517c8c` |
+| #711 | the non-temp fixture derives from the filesystem root, not the repo root | `79db900aaa` |
+| #712 | per-probe temp dir, in-flight coalescing, persisted START stamp, `isBaseHealthProbeDue` | `defda0fce7`, `204b018e0d` |
+| #713 | claim guard at all 6 callers + co-residency guard at all 6 delete sites + a ratchet | `87a8875273`, `9f92092496`, `6449fc8320`, `450f2e5c98`, `9446d3b800`, `97f3402adf` |
+| #714 | compare-and-swap reclaim + an install heartbeat | `07a4f83c09` |
+| #715 | shrink-only baseline on `startup/`'s drizzle imports | `40f323a8c6`, `2521976d82` |
+| #716 | the shebang guard asserts the BYTES; 48 files repaired | `782e228a29` |
+| #717 | the rot alarm's false scope reason corrected, blind spot named | `e4154c9e82` |
+| #718 | dead `formatPassReport` deleted; two emitters stop suppressing their own case | `2a02afa965`, `674e81879f` |
+| #719 | the create claim is keyed on the worktree PATH, with a TTL | `7c03abfff1` |
+| #720 | the Stop hook resolves subagent transcripts, cwd-aware paths, reads never attribute | `b88d87c7a3` |
+| #721 | three ratchets moved onto the TS AST; the exclusion ceiling is a real assertion | `e89da2b8bb`, `a6d4c065b3`, `28c85546c7`, `b4221e35d0` |
+| #725 | a `CLAUDE_CONFIG_DIR`-dependent test, and the hook running `main()` on import | `c780ccc0ce`, `ba53ef4ff` |
+
+### Verified — ONE gate pass for the whole batch, at `ba53ef4ff`
+
+Run once for the group rather than per ticket, and this is what ran:
+
+| Gate | Result |
+|---|---|
+| `pnpm check:arch` | **PASS** — god-module gate OK (1411 files); `lint:arch` 0 errors / 31 warnings; mcp-catalog-parity 3 |
+| `pnpm typecheck` | **clean**, all four packages |
+| always-run guards (`KANBAN_TEST_GUARDS_ONLY=1`) | **101 suites / 595 tests** (was 98/578 — this batch added 3) |
+| shared | 97 files / 939 passed, 2 skipped |
+| mcp-server | 43 / 204 (`--maxWorkers=4`, the documented contention) |
+| client | 153 / 1378 |
+| server, 8 foreground shards | 688 files / **6335 passed, 5 skipped** (769+536+833+913+842+786+844+817) |
+
+`lint:arch` is 31 warnings not 32 because #714's drain removed one — and #715's baseline
+was lowered 31 → 30 in the same breath, which is the ratchet's stale-entry half doing its job.
+
+### The gate caught two things per-ticket runs had not
+
+Both are the argument for grouping the gates rather than trusting per-ticket green:
+
+1. **`workspace-merge-subservices.test.ts` failed** — `git.removeWorktree` was never called.
+   Not a regression: #713's guard is fail-closed, the test passed `database: {} as never`, and
+   a stub that cannot answer is indistinguishable from a DB outage. Refusing to delete a
+   worktree on a DB outage is #713's whole point. Fixed the STUB (`makeNoSharersDb`), not the
+   guard, at all three call sites.
+2. **`agent-session-registry-reaper.test.ts` failed** — it asserts an exact set while the
+   function also appends `$CLAUDE_CONFIG_DIR`, which is set for any non-default profile. Red
+   for those developers, green in CI, and nothing said which you were. Same class as #711.
+   This was the ONLY failure across all eight shards, and it predates the batch.
+
+### Two incidents worth not re-deriving
+
+- **The god-module ceiling bit this batch.** `workspace-merge.service.ts` was at 997 lines;
+  #712's 8-line explanatory comment took it to 1005 and failed `check:arch`. Trimmed to 999
+  (`204b018e0d`). Being honest: shaving a comment to pass a line gate is the anti-pattern
+  #726 documents, in miniature — acceptable only because a comment is not structure, so
+  nothing was hidden to buy a green gate. What it is really evidence FOR is the finding
+  itself: **13 files sit at 900–999, so any addition anywhere tips one over**, and this file
+  is now 1 line from the same wall.
+- **#716's byte repair left the tree looking dirty for hours.** The index already held LF;
+  the working tree held CRLF; rewriting the bytes made them match, but git would not refresh
+  the stat cache on its own, so 48 files showed as ` M` with an EMPTY `git diff`. `git add`
+  on the byte-identical paths settles it (verified: blob hash == worktree hash before adding,
+  nothing staged after). **This matters because a dirty main checkout blocks auto-merge
+  board-wide** — a repair that leaves the tree permanently ` M` is worse than the CRLF it
+  fixed. Also settled a related mystery: `workspace-branch-create-claim.ts` diffed as `Bin`
+  because its OLD blob held exactly one NUL byte; #719's rewrite removed it, so it is text now.
+
+### What each ticket left, disclosed rather than absorbed
+
+Every one of these is filed, per the #691 rule — nine follow-up tickets came out of doing
+the work: **#723** (`hook-wiring-audit` is the fifth PassReport adopter #689 missed, still
+write-only), **#724** (the Stop hook cannot tell IN-FLIGHT subagent work from STRANDED, and
+tells you to commit it — this misfired at the orchestrator repeatedly during this very
+batch), **#733** (the CLI's home-fallback warning is unconditional and false here, and it
+talked two subagents out of correct writes), **#734** (the guards #721 left on regexes:
+`env-read-ownership` blind to `env.NAME` at 34 live sites, `wire-dto` dodged by renaming,
+the reason-quality check fooled by the word "parallelism", the two #687 marker holes),
+**#735** (the 3 unguarded `workingDir` deletes #713 pinned, plus a now-dead repository read),
+**#736** (#719's three residual gaps). Plus **#726–#732** from an independent code-metrics
+run, which are not this session's work.
+
+**#690 and #689 both closed Done with live remainders** — #721's stricter predicate found
+three #690 port-ladder leftovers, and #718 found #689's fifth adopter. That is the review's
+central pattern reproducing itself in the tickets that fixed it, which is worth knowing
+before trusting any "closed" in this file.
+
 ## Next steps
 
 **The board is empty of open ISSUES** — 0 Backlog, 0 Todo, 0 In Progress. **Not 0 workspaces**
@@ -396,9 +486,13 @@ is either done or a decision that is not this session's to make.
 - [ ] **Push master** — recommended, but only after the origin integration and the three
       god-module fixes. Filed as **#722**, with **#700 reopened** as its main sub-task. See the
       corrected divergence section above for the order and why pushing first is the wrong move.
-- [ ] **Thirteen tickets from the 2026-08-22 review are in Backlog: #710-#721 plus #722.**
-      #710, #711, #712 are the ones that make a green run untrustworthy today; #711 is why
-      master HEAD is red. The board is no longer empty of open work.
+- [x] **The thirteen review tickets are implemented and closed** — #710-#721 plus #725, all
+      verified by the single gate pass at `ba53ef4ff` recorded above. #722 is the exception:
+      it needs the origin merge, which is the operator's call.
+- [ ] **Nine follow-ups are open, all filed rather than absorbed**: #723, #724, #733, #734,
+      #735, #736 (from doing the work), and #726-#732 (an independent code-metrics run).
+      #724 is the one that bites an operator today — the Stop hook tells a session to commit
+      its own live subagents' half-finished files.
 - [ ] `pnpm install` so #688's `pnpm test:coverage` can run. Left undone on purpose: it mutates
       a shared checkout while a dev server is running.
 - [x] **#681 half B confirmed end-to-end on live data (2026-08-22)** — probes have run since.
@@ -409,7 +503,10 @@ is either done or a decision that is not this session's to make.
       stored tail shows `(3 tests | 2 failed)` with two `×` lines). Wiring verified:
       `monitor-setup.ts:212` inside `refreshMonitorWarnings`, reached from `syncMonitorState`
       INDEPENDENTLY of `monitorShouldRun`, so conductor-mode projects are covered.
-- [ ] **Master HEAD is RED — fix `leaked-temp-project-cleanup.test.ts`.** It passes in the main
+- [x] **Master HEAD is no longer red** — `leaked-temp-project-cleanup.test.ts` fixed as #711
+      (`79db900aaa`), and the full suite is green at `ba53ef4ff`; see the gate table above.
+      Original finding kept for the record:
+- [x] ~~fix `leaked-temp-project-cleanup.test.ts`~~ It passes in the main
       checkout (3/3, 16s) and fails 2 of 3 in the probe's clone, because the probe clones to
       `%TEMP%\kanban-base-health-<projectId>-master`, so the test's deliberately
       missing-but-NOT-temp fixture is itself under `%TEMP%` and gets classified as leaked. Every
