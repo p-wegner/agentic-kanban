@@ -657,10 +657,18 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     return c.json({ success: true });
   });
 
-  // GET /api/issues/:id/comments — durable Q&A / activity thread for an issue
+  // GET /api/issues/:id/comments — durable Q&A / activity thread for an issue.
+  // CAPPED (#738): the newest page, ascending. `?limit=` narrows/widens it (hard ceiling in
+  // the repository), `?before=<ISO>` is the keyset cursor for older pages. The response
+  // carries `totalCount`/`hasMore`/`nextCursor` ALONGSIDE the unchanged `comments` array, so
+  // an existing client keeps working and a paging one has what it needs.
   router.get("/:id/comments", async (c) => {
     const issueId = c.req.param("id");
-    return c.json({ comments: await issueCommentsService.listComments(issueId) });
+    const limitParam = c.req.query("limit");
+    const limit = limitParam === undefined ? undefined : Number(limitParam);
+    const before = c.req.query("before") ?? null;
+    const page = await issueCommentsService.listCommentsPage(issueId, { limit, before });
+    return c.json(page);
   });
 
   // POST /api/issues/:id/comments
