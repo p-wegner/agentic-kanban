@@ -188,13 +188,25 @@ describe("discoverClaudeConfigDirs (#708)", () => {
       },
     });
 
-    expect(discoverClaudeConfigDirs(fs, join("C:", "home")).sort()).toEqual(
-      [
-        join("C:", "home", ".claude"),
-        join("C:", "home", ".claude-team_5x_3"),
-        join("C:", "home", ".claude-work"),
-      ].sort(),
-    );
+    // #725: this asserts an EXACT set, and `discoverClaudeConfigDirs` also appends
+    // `$CLAUDE_CONFIG_DIR` — which is set for every agent session launched with a non-default
+    // profile (here `~/.claude-andrena_team_5x_2`). The fake `fs` and `home` cannot isolate an
+    // env read, so the real dir leaked in as a fourth entry and this test failed for anyone
+    // whose environment sets it, while passing in CI and on a default profile. Stub it empty:
+    // the sibling test below owns the "explicit dir is included" case, so clearing it here is
+    // narrowing this test to its actual subject (home-directory discovery), not hiding anything.
+    vi.stubEnv("CLAUDE_CONFIG_DIR", "");
+    try {
+      expect(discoverClaudeConfigDirs(fs, join("C:", "home")).sort()).toEqual(
+        [
+          join("C:", "home", ".claude"),
+          join("C:", "home", ".claude-team_5x_3"),
+          join("C:", "home", ".claude-work"),
+        ].sort(),
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("includes an explicit CLAUDE_CONFIG_DIR pointing outside home", () => {
