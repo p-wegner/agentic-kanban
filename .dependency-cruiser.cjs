@@ -232,9 +232,16 @@ module.exports = {
         "within minutes (#594), and three live `/api/internal/*` routes defined inside " +
         "`startup/monitor-setup.ts` were exempt from routes-not-down-to-persistence and " +
         "no-circular until they were moved into routes/ — where they immediately failed both. " +
-        "WARN, not error, per this file's own severity policy (line 9): the 30-file backlog is " +
+        "WARN, not error, per this file's own severity policy (line 9): the 31-file backlog is " +
         "real work, and a rule that cannot go green today belongs at warn with its count " +
-        "written down. Tighten per slice; lower the number here each time. Backlog: 30.",
+        "written down. Tighten per slice; lower the number here each time. " +
+        "BUT a warn whose count nobody reads is indistinguishable from no rule: the 2026-08-20/21 " +
+        "wave ADDED an offender (install-staleness-reconciler.ts) and lint:arch reported the same " +
+        "N warnings / 0 errors as before. Since #715 the count below is a shrink-only BASELINE, " +
+        "asserted file-by-file (and against this very number) by " +
+        "packages/server/src/__tests__/startup-persistence-boundary-ratchet.test.ts - so it now " +
+        "fails on a 32nd offender, and fails again if a drain lands without lowering it here. " +
+        "Backlog: 31.",
       severity: "warn",
       from: { path: "^packages/server/src/startup/" },
       to: { path: "drizzle-orm" },
