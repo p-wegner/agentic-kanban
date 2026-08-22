@@ -12,8 +12,10 @@ Recorded here so the next session doesn't have to re-derive it:
 - **#569 (wire-DTO dedup, `c0bba1eef1`)** — batch 1 moved the agent-questions family,
   `OrchestratorStatus`, the scorecard pair, `IssueComment`/`IssueCommentKind`, and the
   preflight family into `shared/`: 75 duplicated names → 62 (measured directly against
-  `packages/shared/__tests__/wire-dto-single-declaration.test.ts:40` `GRANDFATHERED`, not the
-  ticket's own prose, which stated two different totals). **Verified low-risk to leave
+  `packages/shared/__tests__/wire-dto-single-declaration.test.ts` `GRANDFATHERED`, not the
+  ticket's own prose, which stated two different totals). **Correction (2026-08-22 review): the
+  number is 61, not 62** — 62 was the figure in the prose comment above the declaration, so this
+  entry made the exact error it was written to prevent. The #704 section below says 61 correctly. **Verified low-risk to leave
   partial**: a real shrink-only ratchet exists (`GRANDFATHERED` may only shrink; a NEW
   duplicate fails the suite), so the remainder cannot silently regrow — but it also isn't
   shrinking on its own. Follow-up ticket #704 files the mechanical migration.
@@ -25,6 +27,10 @@ Recorded here so the next session doesn't have to re-derive it:
   exists for this one** — unlike #569/#513 there is nothing stopping a new hand-rolled check
   from being added today. Follow-up ticket #705 covers both the migration and adding a
   shrink-only ratchet analogous to `wire-dto-single-declaration.test.ts`.
+  > **SUPERSEDED — do not act on the present tense above.** #705 landed (`dd901d01e1`): the
+  > helpers now have 64 call sites across 15 files, hand-rolled checks are down to 8 (all the
+  > `plugin-exec` different-shape exception), and `exec-result-helper-adoption.test.ts` is the
+  > ratchet. Verified 2026-08-22. The paragraph is kept for the #691 audit trail only.
 - **#513 (`useApiResource` hook, `51a928e120`/`8333db7e2f`)** — the commit message said "35
   ladders remain"; the actual count via
   `packages/client/src/__tests__/fetch-in-effect-ratchet.test.ts` is baseline-tracked per file
@@ -45,7 +51,8 @@ concrete on its own first two instances.
 
 ## In-flight wave landed (session 2026-08-21)
 
-Nine tickets reached master. Six were In Review and merged; three had **stranded
+Nine tickets reached master. (**Correction**: the table below lists eleven — #699 and #679
+are counted in it but not in the "nine".) Six were In Review and merged; three had **stranded
 uncommitted work** in idle workspaces whose agents died without committing — the work
 existed only in the worktrees and would have been lost when they were reaped.
 
@@ -108,15 +115,40 @@ new suites; #679's seven re-included suites pass together (193 tests, ~78s).
   install first. `pnpm test` / `test:mine` are unaffected (verified — the full suite above
   ran after the merge).
 
-### Master is 50+ commits ahead of origin and NOT pushed
+### Master has DIVERGED from origin — ahead 68, behind 38 (not "50+ ahead")
 
-Deliberate: it carries other agents' merged work on a public repo, so pushing is the
-operator's call, not this session's.
+Corrected 2026-08-22 (`git fetch` + `git rev-list --left-right --count`). This is not an
+unpushed fast-forward: `origin/master` carries 38 commits master lacks — the #996–#1003
+fork/workflow line plus the worker Windows service, landed as GitHub PRs #6/#7/#8. A plain
+`git push` is REJECTED today.
+
+Integration facts, all measured:
+- Only 4 files are touched by both sides, and our side of each is small (`workflow-fork.service.ts`
+  +8/-1 against their +135/-26; `workflow-fork.repository.ts` +13/-1; `server-start.ts` +20/-1;
+  `route-setup.ts` +12/-0). `git merge-tree --write-tree` reports a CLEAN merge.
+- Nothing unpublishable on our side: zero credential-shaped additions; 5 machine-path strings,
+  all doc narrative or path-comparison test fixtures.
+- `node scripts/check-god-modules.mjs` on our master: **OK, 1410 files, exit 0**.
+- But the merge tree resolves `exit-workflow.ts` to **1048 lines**, so `pnpm check:arch` fails on
+  the merge result with certainty — see the #700 correction above. `MAX_LINES = 1000` has no
+  exemption path.
+
+**Recommended order** (still the operator's call to execute): reopen #700 → merge
+`origin/master` locally → fix the three god-module breaches on the merged tree → verify full
+`pnpm check:arch` → then push (branch + PR for the audit trail). Do NOT push first: a PR today
+is checked against an already-red base, so `arch-gate` fails for reasons unrelated to this
+work, and a direct push puts our name on the red master.
 
 ### Incidental findings
 
-- **#700 is stale** — `exit-workflow.ts` is 967 lines and `check-god-modules.mjs` exits 0;
-  the ticket says it is 1048 and over the 1000 ceiling. Someone shrank it without closing.
+- ~~**#700 is stale**~~ — **THIS WAS WRONG, and #700's own triage note said so in advance**
+  ("do not close it as done"; the 1048-line file lives on the fork-workflow branch). Nobody
+  shrank anything: local master never contained the breach. `exit-workflow.ts` is 967 lines
+  HERE and **1048 on `origin/master`**, where `arch-gate` has been failing since 2026-08-20
+  (verified via `gh run list`: the god-module gate names `exit-workflow.ts` 1048 lines,
+  `WorkflowBuilder.tsx` 22 fns, `workflow-fork.repository.ts` 34 fns vs a baseline of 33).
+  A gate verified green on local master was read as evidence about a file local master has
+  never held. **#700 should be reopened**; it blocks the origin integration below.
 - **A real bug was found while chasing killed test runs, but it was not the cause.**
   `1ec5a2269e` is genuine and worth keeping: the base-branch health sweep re-armed on every
   `tsx watch` restart, so a run of merges had it starting a SECOND complete
@@ -153,7 +185,7 @@ tickets #691 required, and #707 replaces the "not yet a complete inventory" cave
   leave files behind) and a hook could not have removed the 48 already on disk. A file whose
   PID is now recycled onto a live process is a deliberate **keep**: deleting one that might
   describe a running session is the worse error.
-- **#705** migrated 38 hand-rolled `.code === 0` checks across 13 files. The `execErrorMessage`
+- **#705** migrated 38 hand-rolled `.code === 0` checks across 14 files (the commit said 13). The `execErrorMessage`
   caller floor is 3, not the 5 first written — the extra `${x.error}` sites found were domain
   result objects with a string `error`, not `ExecResult`, so the floor was lowered to the
   honest count rather than met by inventing migrations. Floors are floors, not targets.
@@ -236,9 +268,113 @@ the loop — check `failedSuites` on the newest row rather than assuming.
   `test-mine.mjs` exclusion list and should not be added to one on this evidence — a single
   observation. Re-run it in isolation before treating it as a real failure.
 
+## Adversarial review of the 2026-08-20/21 wave (2026-08-22)
+
+Four independent reviewers over the 68 commits `origin/master..master`, instructed to distrust
+this file. Everything below was reproduced or measured directly — claims the reviewers could not
+execute are not listed. The corrections they forced are already folded into the sections above.
+
+**The dominant pattern: the prose is doing the reviewing, and it is a different artifact from the
+code.** Repeatedly, a long and correct rationale sits directly above code that violates the
+invariant it declares. Second pattern: **the fix lands at one call site of N**, with the commit
+disclosing a smaller remainder than exists — which is #691's own batch-1 rule, unapplied by the
+wave that wrote it.
+
+### Confirmed defects, highest first
+
+1. **#681 half B: a red probe can persist a false GREEN per-suite verdict.** Reproduced against
+   the real module: `failedSuitesForOutcome("red", out)` returns `[]` whenever `out` carries a
+   `Test Files` summary but no FAIL lines — and `[]` is what the schema comment and
+   `findRottedSuites` both define as the value that BREAKS a red streak. Reachable because the
+   derived verify is `chainAll(typecheck, test, build)`: build runs AFTER vitest, so any
+   build-stage failure emits a passing `Test Files` line. Correct value is `null`. **A test pins
+   the wrong behaviour**: `rotted-suite-scan.test.ts:160-164`.
+2. **#681's scope justification is false.** `rotted-suite-scan.ts:19-24` (and this file, and the
+   commit message) claim "the probe runs the whole verify script, so every suite is equally
+   observed". `verify-command.ts:194` prefers `quickTestCommand` = `pnpm test:mine`, which excludes
+   suites by design — and the live probe output proves it, containing
+   `[test:mine] mcp-server: node vitest run --exclude **/mcp-tools.test.ts`. Excluded suites can
+   rot forever, invisibly.
+3. **#681 reports false suite names.** A test whose NAME contains a path is attributed as a failed
+   suite — reproduced: a `×` line reading "parses paths in src/__tests__/other.test.ts correctly"
+   yields `["src/__tests__/other.test.ts"]`. Worst case in a repo full of ratchets that cite paths
+   in their test names; the commit's own standard is "a false name is worse than no name".
+4. **`startup/` has no persistence boundary, and the wave widened it.** Verified: 31 of 32
+   `startup/` files import `drizzle-orm` directly; `services/` does so **zero** times. The rule
+   that would catch it, `startup-bypasses-repositories`, is pinned `warn` so it can never block,
+   and the wave added a new offender (`install-staleness-reconciler.ts`). Largest live layering
+   breach in the repo; the only invariant of this size with no ratchet.
+5. **`shebang-eol-guard` is green while the bug is on disk.** It asserts the `.gitattributes`
+   attribute and explicitly refuses to look at bytes. Verified: tracked shebang files still carry
+   CRLF working-tree bytes, including `scripts/board-monitor/loop.sh` (`attr/text eol=lf`,
+   `w/crlf`) — the Conductor loop — and all eight `.claude/hooks/*.js`. `.claude/skills/**` has
+   been pinned since #217 and is still CRLF, i.e. the pin demonstrably does not repair an existing
+   checkout. Fix is `git add --renormalize`, plus a byte-level assertion.
+6. **`formatPassReport` has zero production callers.** Verified: all five real emission sites call
+   `formatPassReportBody` and hand-write the tag; the tagged wrapper is referenced only by tests
+   and a comment. Dead code created BY a guard (the console-tag ratchet's first-argument rule) —
+   the exact defect #591/#705 exist to catch, and no ratchet cross-checks guard-mandated helpers.
+7. **Single-spelling ratchets.** Each defends the one shape the past bug took, not the class.
+   Probed and GREEN (i.e. undetected): `res.code > 0`, `!res.code`, destructured `code === 0`,
+   loose `res.code == 0` for #705's guard; `asOf`/`currentTimeMs` for the time-spelling ratchet
+   (so CLAUDE.md's "adding a tenth spelling fails that gate" is false); a `VITE_PORT` fallback for
+   the new client-port guard — the very miss #690 was filed to fix on the server side; and
+   `env.NAME` after `const env = process.env` for #707 (34 live sites, so coverage SHRINKS as the
+   code improves toward injectable env). None of these guards use the TS AST.
+8. **Fixes wired at one site of N**: #699's `isPathClaimed` at 1 of 8 (the unwired ones include
+   `workspace-crud.service.ts:220`, literally #699's own scenario); #673's co-residency delete
+   guard at 1 of 5; `a2efe48691`'s closed-sharer correction at 1 of 2 — and both copies compare a
+   literal `"closed"` instead of `isTerminalWorkspaceStatus`, so an `error`-status workspace counts
+   as a live sharer forever.
+9. **#685's reclaim `UPDATE` has no `installState IN ('pending','running')` predicate** and runs
+   against rows from an earlier `SELECT`; with no heartbeat, a legitimately long install is
+   reclaimed mid-flight and a `done` row can be clobbered to `failed`.
+10. **#673's create guard is keyed on `issueId + branch`** while the worktree path collapses to
+    `ak-N`, so it deliberately exempts the exact pair that collides. In-process `Set`, no unique
+    constraint, no TTL — a create hung in `setupWorktree` wedges `409` for the process lifetime.
+11. **#709's Stop hook silently reports NOTHING for two common paths**: subagent writes
+    (`WRITE_TOOLS` has no `Agent`, and the subagent's transcript is never recursed into) and a
+    `sed -i` issued after a `cd` into a package (attribution compares repo-relative paths).
+    Meanwhile `cat`/`grep` of a file makes you its author — unreliable in both directions.
+12. **The base-health probe has no in-flight lock on a deterministic temp dir**
+    (`base-branch-health.service.ts:78`), removes it recursively before cloning, and has two
+    callers — the sweep and a fire-and-forget probe after EVERY merge. Probe B wipes A's tree
+    mid-verify and the wreck records as `outcome: "red"`. A strong candidate for the
+    "199 red, 0 green" figure this repo cites as #674's evidence.
+
+### Aggregate quality verdict
+
+Measured shape of the wave (+9511/-1325, 220 files): 52% test code (15% of that tests ABOUT the
+repo), 33% production `src/` — of which 24% is machinery whose only consumer is this repo's own
+merge button — 9.5% process prose, and **0 new API routes, 0 MCP tools, 0 client views**.
+`check-god-modules.mjs` was not loosened, but 13 files sit parked at 900-999 against the 1000
+ceiling and 16 of the top 17 largest files were untouched. Reconcilers went 23 to 27; all four new
+ones compensate for state the primary write path does not keep consistent.
+
+Genuine wins, independently confirmed: **#679** (138 lines re-included 7 suites / 193 tests
+covering defects that had each already shipped once — best value-per-line in the range), **#704**
+(61 to 16 duplicate DTOs at net **-139 LOC**), **#705** (0 to 64 helper call sites; 42 to 8
+hand-rolled checks, the 8 correctly a different type), and **#687**'s reverse-direction marker
+check, the one guard that defends the guard mechanism itself.
+
+Least value: the self-improvement machinery was, in this window, a net source of gate
+unreliability — four board-wide merge outages in ~48h, all caused by the gate/guard mechanism and
+none by a product regression. `7675044331` (an empty-message automated commit) corrupted a test
+file into non-parsing, silently killing the whole `base-branch-health` suite including the #674
+regression test added in that same commit. And **#688** spent 965 lines making coverage measurable
+with no threshold, no baseline and no gate.
+
+Cost now imposed on every merge: `KANBAN_TEST_GUARDS_ONLY=1` gives **98 suites / 578 tests /
+~2m20s**, a fixed floor immune by construction to the `scoped` tiering that exists to make the
+gate cheap. Two of those suites were red on master inside this same window, and a red always-run
+suite blocks every merge board-wide.
+
 ## Next steps
 
-**The board is empty of open work** — 0 Backlog, 0 Todo, 0 In Progress, 0 workspaces
+**The board is empty of open ISSUES** — 0 Backlog, 0 Todo, 0 In Progress. **Not 0 workspaces**
+(corrected 2026-08-22): 3 idle `agentic-kanban` workspaces from July (#141, #148, #183), 57
+non-closed board-wide, and `git worktree list` shows 24 worktrees of which ~20 are stale
+(7 locked, one at sha `0000000000`, 4 prunable). Run the `cleanup` skill.
 (#709 was filed by another session mid-way through this one and is now Done). Everything below
 is either done or a decision that is not this session's to make.
 
@@ -254,12 +390,24 @@ is either done or a decision that is not this session's to make.
       (unreadable transcript) still reports EVERYTHING; only silence would have been a
       regression. The `restore` branch (#771 deletion-desync) is deliberately unfiltered.
       Verified live both directions against a genuinely dirty tree, plus 7 new tests.
-- [ ] **Decide whether to push master** (60+ commits ahead of origin, other agents' work
-      included). Deliberately left to the operator — see the section above.
+- [ ] **Push master** — recommended, but only after the origin integration and the three
+      god-module fixes. See the corrected divergence section above for the order and why
+      pushing first is the wrong move.
 - [ ] `pnpm install` so #688's `pnpm test:coverage` can run. Left undone on purpose: it mutates
       a shared checkout while a dev server is running.
-- [ ] **Confirm #681 half B end-to-end on live data** — migration 0126 is applied on the live
-      DB and the endpoint returns the field, but every row still reads `null` because no probe
-      has run since. Check `failedSuites` on the newest base-health row after the next one.
+- [x] **#681 half B confirmed end-to-end on live data (2026-08-22)** — probes have run since.
+      Greens store `[]`; this project's newest row (`d7be0289a4`, 2026-08-22T05:55Z) stores
+      `["src/__tests__/leaked-temp-project-cleanup.test.ts"]`, and **12 consecutive probes**
+      back to 2026-08-21T18:55Z carry that identical list, so `findRottedSuites` yields a
+      streak of 12 against a threshold of 2. The parse is accurate, not a false positive (the
+      stored tail shows `(3 tests | 2 failed)` with two `×` lines). Wiring verified:
+      `monitor-setup.ts:212` inside `refreshMonitorWarnings`, reached from `syncMonitorState`
+      INDEPENDENTLY of `monitorShouldRun`, so conductor-mode projects are covered.
+- [ ] **Master HEAD is RED — fix `leaked-temp-project-cleanup.test.ts`.** It passes in the main
+      checkout (3/3, 16s) and fails 2 of 3 in the probe's clone, because the probe clones to
+      `%TEMP%\kanban-base-health-<projectId>-master`, so the test's deliberately
+      missing-but-NOT-temp fixture is itself under `%TEMP%` and gets classified as leaked. Every
+      "full suite green" table in this file was measured in the one environment where this
+      cannot fail.
 - [ ] Nothing further open on #691 itself — this file + the CLAUDE.md rule + the two
       follow-up tickets (both now landed) are the complete fix.
