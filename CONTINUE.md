@@ -657,6 +657,69 @@ What the batched gate found, none of it visible to the owning ticket's own suite
   decomposed; #732's 37 duplicated files → 25; #740 was the one that held up exactly). Every agent
   in this wave was told to expect it, and each corrected its ticket before building on it.
 
+### Wave 3 — the four architectural tickets, and three of them refuted their own ticket
+
+Ran last because each needed judgement rather than execution. Each agent was told to re-derive
+its ticket's numbers first, and that instruction paid off three times out of four.
+
+- **#739 (`51196fe0e9`) — remedy REFUTED, ticket corrected on the board, closed.** The
+  measurements are exact (88 columns, 659 rows, next-widest table 23, median 9; eleven families
+  not ten — `code_metrics_*` was missed; the twelve all-NULL columns are exactly the twelve
+  named). But **all twelve have a real writer AND a real reader** — zero dead, zero write-only.
+  `showdown_*` has a live route, `service_state` has 44 referencing files, `fork_*` is reachable
+  via parallel-fork nodes, `latest_symlink_error` is only empty because Dependency Symlinks is
+  off here. **An all-NULL column is evidence about the ROWS, not about the code.** Dropping them
+  would have deleted working features. Landed instead: `workspaces-table-width-ratchet.test.ts`
+  (`@gate:always-run`, equality on the total AND every family count, mutation-checked three
+  ways) plus the finding recorded on the table itself. Remainder is **#781**, with a
+  coupling-derived extraction order (`review_preflight_*` 2 files → … → `scorecard_*` 43) and
+  `merge_backoff_*` named as the trivially-isolated first candidate. Also recorded so nobody
+  re-opens it: the drop WOULD have been mechanically safe (SQLite 3.45.1, in-place, 0 FK
+  violations).
+- **#730 (`1d012a22b3`) — premise REJECTED on the ticket's own measurement, closed.** Every
+  figure reproduced (27.4% vs 29.3% crossings, `shared` containment 17% vs 14%). Then: half of
+  all genuine crossings contain no `shared` file at all (`client ↔ server`, two processes over
+  HTTP — no package layout collapses that), ~21% are schema/wire DTOs where one declaration with
+  several consumers IS the design, and only 25.9% touch `shared/lib`. The largest crossing file
+  in the repo is `drizzle/meta/_journal.json` — generated bookkeeping. **A package whose job is
+  to be the one declaration others consume cannot have high containment**; `mcp-server`'s 64% is
+  not better modularity, it is a package with no such job. It measured the upper bound before
+  acting: relocating ALL 31 single-consumer `shared/lib` modules collapses 36 of 1,587
+  multi-package commits — 2.3%, i.e. 27.4% → 26.8%. So it moved NOTHING and froze the 31 as a
+  shrink-only set instead, so a NEW single-consumer module fails — the one case where the fix is
+  free. `scripts/measure-package-coupling.mjs` is committed so the verdict is rebuildable.
+- **#729 (`9d65300a5a`) — the ticket's actionable list measured the wrong thing; covered the
+  right files anyway, closed.** Its zero-safety-net table is a complexity × test-co-change
+  ranking, not a rework ranking, and the two are near-orthogonal here: its #1 (`GraphEdges.tsx`)
+  has **0 fix commits in 90 days**, while the two most-reworked untested components
+  (`TimelineView`, `TableView`, 31 each) are absent from it. Suite **156/1407 → 161/1484**, no
+  source file touched. All 16 mutations checked; two did not kill a test and the TESTS were
+  rewritten, not the mutation — one of those was a false pass (an apply-check fooled by a
+  line-ending rewrite, so the mutation had never applied). Follow-up **#782**: the client has no
+  jsdom and no `@testing-library/react` by convention, so a HOOK cannot be driven at all —
+  extract `useIssueEditForm`'s pure logic to `lib/` (where #589 already says it belongs) rather
+  than adding a browser harness.
+- **#750 (`015a5a63f5`, `c9f232038a`) — 2 of 4 landed, 2 filed, closed.** Push retry (with a
+  drain that cuts the backoff, and a failed result now KEPT rather than force-removed — that is
+  #775 item 2, done) and resume affinity (applied to the already-reserved candidate list, so it
+  cannot reintroduce #751's double assignment). Honest limits: retry cannot fix an invalidated
+  credential (#775 item 1), the retained list is in memory because persisting the token would
+  write a credential to the worker's disk, and the critical exit queue is still the 200-cap
+  in-memory one. **#783** (follow-up `/turn` must fast-forward the worker checkout first) and
+  **#784** (mid-session diff) need a new board→worker protocol message and are filed, not
+  promised.
+
+**Also fixed, from #730's own commit:** its measurement script tripped the git-exec single-spawn
+gate. Allowlisted with the reason (`130904a88b`) — it is a bare `node scripts/*.mjs` with no
+bundler and no tsx, so it cannot import a TypeScript adapter; same category as the
+`.claude/hooks` entries. And its CRLF working-tree bytes tripped the shebang guard; the committed
+blob was always LF, so that was a working-tree-only repair with nothing to commit.
+
+**A measurement trap worth knowing** (from #729): per-file `git log` counts undercount by ~6×
+without `--full-history`, because history simplification hides branch-side commits behind merges
+(`TableView.tsx`: 5 vs 31). That is a partial explanation for why so many analyzer-derived
+rankings did not survive re-derivation this week.
+
 ### Open, and deliberately not this session's call
 
 - **The 0-byte `packages/server/kanban.db`** (appeared 15:22 today) is the shadow-db trap and is
