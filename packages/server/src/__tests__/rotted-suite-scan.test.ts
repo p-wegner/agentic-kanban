@@ -19,6 +19,7 @@ import {
   parseFailedSuites,
   failedSuitesForOutcome,
   outputHasSuiteVerdicts,
+  outputHasFailureAttribution,
 } from "../services/failed-suite-parse.js";
 
 /** Newest-first, one hour apart, matching what `listSuiteVerdicts` returns. */
@@ -128,6 +129,21 @@ describe("parseFailedSuites (#681 half B)", () => {
     expect(parseFailedSuites(out)).toEqual(["packages/server/src/__tests__/e.test.ts"]);
   });
 
+  it("never names a path that is part of a TEST NAME (#710)", () => {
+    // This repo is full of ratchet tests whose names cite file paths, so this is the
+    // worst-case input — and the same standard applies: a false name is worse than no name.
+    const out = [
+      " × parses paths in src/__tests__/other.test.ts correctly",
+      " FAIL  packages/server/src/__tests__/real.test.ts > parses src/__tests__/other.test.ts",
+    ].join("\n");
+    expect(parseFailedSuites(out)).toEqual(["packages/server/src/__tests__/real.test.ts"]);
+  });
+
+  it("never names a file the summary mentions with `0 failed` (#710)", () => {
+    const out = " ❯ packages/server/src/__tests__/mentioned.test.ts (12 tests | 0 failed) 3ms";
+    expect(parseFailedSuites(out)).toEqual([]);
+  });
+
   it("returns a sorted, deduped list", () => {
     const out = [" FAIL  z/z.test.ts > a", " FAIL  a/a.test.ts > b", " FAIL  z/z.test.ts > c"].join("\n");
     expect(parseFailedSuites(out)).toEqual(["a/a.test.ts", "z/z.test.ts"]);
@@ -157,10 +173,37 @@ describe("failedSuitesForOutcome (#681 half B)", () => {
     expect(failedSuitesForOutcome("red", out)).toEqual(["packages/shared/__tests__/g.test.ts"]);
   });
 
-  it("records [] for a red run whose runner named no file", () => {
-    // The runner spoke (a `Test Files` line exists) but attributed nothing — an honest empty
-    // verdict, distinct from the null above.
-    expect(failedSuitesForOutcome("red", " Test Files  96 passed (96)")).toEqual([]);
+  it("records null for a red run whose runner attributed no failure at all (#710)", () => {
+    // A `Test Files` line alone is NOT a verdict about the failure: the runner spoke, but not
+    // about whatever stage went red. `[]` here would clear every suite's rot streak on a run
+    // that saw no suite fail — the bug #710 fixed.
+    expect(outputHasSuiteVerdicts(" Test Files  96 passed (96)")).toBe(true);
+    expect(outputHasFailureAttribution(" Test Files  96 passed (96)")).toBe(false);
+    expect(failedSuitesForOutcome("red", " Test Files  96 passed (96)")).toBeNull();
+  });
+
+  it("records null when the failure is in the BUILD stage after a green vitest run (#710)", () => {
+    // The derived verify command is `chainAll(typecheck, test, build)`, so this is the shape of
+    // every build-stage failure: a fully green `Test Files` summary followed by the real error.
+    const out = [
+      " Test Files  680 passed (680)",
+      "      Tests  4210 passed (4210)",
+      "   Duration  92.41s",
+      "",
+      "> agentic-kanban@ build",
+      "src/index.ts:3:1 - error TS2304: Cannot find name 'bar'.",
+      "ELIFECYCLE Command failed with exit code 2.",
+    ].join("\n");
+    expect(outputHasSuiteVerdicts(out)).toBe(true);
+    expect(failedSuitesForOutcome("red", out)).toBeNull();
+  });
+
+  it("records [] when the runner named a failure but no file (#710)", () => {
+    // This is the case `[]` is FOR: a failure was attributed, just not to a path. Distinct
+    // from the nulls above, and it legitimately breaks a suite's rot streak.
+    const out = [" × does a thing > deeply", " Test Files  1 failed | 95 passed (96)"].join("\n");
+    expect(outputHasFailureAttribution(out)).toBe(true);
+    expect(failedSuitesForOutcome("red", out)).toEqual([]);
   });
 });
 
