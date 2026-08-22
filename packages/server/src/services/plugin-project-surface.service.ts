@@ -4,6 +4,7 @@ import { getAllPreferencesCached } from "../repositories/preferences.repository.
 import { listEnabledPlugins, listEnabledPluginsByProjects, type PluginOwner } from "./plugin-enabled.js";
 import { resolveStartPolicy } from "./start-policy.service.js";
 import type { PluginLoopEngine, LoopStatus } from "./plugin-loop.service.js";
+import type { PluginViewRef } from "./plugin-views.service.js";
 
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 /**
@@ -17,7 +18,7 @@ export function createPluginProjectSurfaceOps(deps: {
   requireProject: (projectId: string) => Promise<unknown>;
   loops: PluginLoopEngine;
   readManifestDrift: (row: { localPath: string; manifestJson: string }) => Promise<boolean>;
-  getViewStatus: (pluginRowId: string, viewId: string, projectId: string) => Promise<Record<string, unknown>>;
+  getViewStatus: (ref: PluginViewRef) => Promise<Record<string, unknown>>;
 }) {
   const { database, requireProject, loops, readManifestDrift, getViewStatus } = deps;
 
@@ -46,7 +47,7 @@ export function createPluginProjectSurfaceOps(deps: {
           // #456 — resolved here, so every consumer sees the same default and a manifest
           // written before the field existed reads as `operator` rather than as unknown.
           audience: view.audience ?? DEFAULT_PLUGIN_AUDIENCE,
-          ...(await getViewStatus(row.id, view.id, projectId)),
+          ...(await getViewStatus({ pluginRowId: row.id, viewId: view.id, projectId })),
         });
       }
       // Cost rollup (#294) now lives inside `loopStatuses` (default `includeCosts: true`),

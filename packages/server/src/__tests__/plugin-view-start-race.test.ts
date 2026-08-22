@@ -90,8 +90,8 @@ describe("startView — concurrent starts (#251)", () => {
     const projectId = await insertProject(db, makeTempDir("view-race-repo-"));
 
     const [first, second] = await Promise.all([
-      service.startView(plugin.id, "panel", projectId),
-      service.startView(plugin.id, "panel", projectId),
+      service.startView({ pluginRowId: plugin.id, viewId: "panel", projectId }),
+      service.startView({ pluginRowId: plugin.id, viewId: "panel", projectId }),
     ]);
     expect(second.port).toBe(first.port);
     expect(second.pid).toBe(first.pid);
@@ -107,6 +107,6 @@ describe("startView — concurrent starts (#251)", () => {
     expect(spawns).toHaveLength(1);
 
     // The one child is the tracked one, so stopping the view really stops the server.
-    expect(await service.stopView(plugin.id, "panel", projectId)).toEqual({ stopped: true });
+    expect(await service.stopView({ pluginRowId: plugin.id, viewId: "panel", projectId })).toEqual({ stopped: true });
   });
 });

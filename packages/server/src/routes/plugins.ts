@@ -168,12 +168,12 @@ export function createPluginsRoute(
 
   router.post("/:id/views/:viewId/start", async (c) => {
     const projectId = await requireProjectId(c);
-    return c.json(await service.startView(c.req.param("id"), c.req.param("viewId"), projectId));
+    return c.json(await service.startView({ pluginRowId: c.req.param("id"), viewId: c.req.param("viewId"), projectId }));
   });
 
   router.post("/:id/views/:viewId/stop", async (c) => {
     const projectId = await requireProjectId(c);
-    return c.json(await service.stopView(c.req.param("id"), c.req.param("viewId"), projectId));
+    return c.json(await service.stopView({ pluginRowId: c.req.param("id"), viewId: c.req.param("viewId"), projectId }));
   });
 
   router.get("/:id/loops", async (c) => {

@@ -763,19 +763,19 @@ describe("plugin.service", () => {
     const plugin = await service.installPlugin({ source: pluginDir });
     const projectId = await insertProject(db, repo);
 
-    const started = await service.startView(plugin.id, "coverage", projectId);
+    const started = await service.startView({ pluginRowId: plugin.id, viewId: "coverage", projectId });
     expect(started.port).toBeGreaterThan(0);
     expect(started.url).toBe(`http://localhost:${started.port}`);
 
     // Double-start guard: same instance, same port.
-    const again = await service.startView(plugin.id, "coverage", projectId);
+    const again = await service.startView({ pluginRowId: plugin.id, viewId: "coverage", projectId });
     expect(again.port).toBe(started.port);
 
-    const status = await service.getViewStatus(plugin.id, "coverage", projectId);
+    const status = await service.getViewStatus({ pluginRowId: plugin.id, viewId: "coverage", projectId });
     expect(status.running).toBe(true);
 
-    expect(await service.stopView(plugin.id, "coverage", projectId)).toEqual({ stopped: true });
-    const after = await service.getViewStatus(plugin.id, "coverage", projectId);
+    expect(await service.stopView({ pluginRowId: plugin.id, viewId: "coverage", projectId })).toEqual({ stopped: true });
+    const after = await service.getViewStatus({ pluginRowId: plugin.id, viewId: "coverage", projectId });
     expect(after.running).toBe(false);
   });
 
@@ -800,11 +800,11 @@ describe("plugin.service", () => {
     const plugin = await withBoardUrl.installPlugin({ source: pluginDir });
     const projectId = await insertProject(db, makeProjectRepo());
 
-    const started = await withBoardUrl.startView(plugin.id, "coverage", projectId);
+    const started = await withBoardUrl.startView({ pluginRowId: plugin.id, viewId: "coverage", projectId });
     expect(started.ready).toBe(true);
     const body = await (await fetch(`http://127.0.0.1:${started.port}/`)).text();
     expect(body).toBe(`http://localhost:3123|${projectId}`);
-    await withBoardUrl.stopView(plugin.id, "coverage", projectId);
+    await withBoardUrl.stopView({ pluginRowId: plugin.id, viewId: "coverage", projectId });
   });
 
   it("startView persists the child's PID, stopView drops it (#228)", async () => {
@@ -817,14 +817,14 @@ describe("plugin.service", () => {
     const plugin = await service.installPlugin({ source: pluginDir });
     const projectId = await insertProject(db, repo);
 
-    const started = await service.startView(plugin.id, "coverage", projectId);
+    const started = await service.startView({ pluginRowId: plugin.id, viewId: "coverage", projectId });
     expect(started.pid).toBeGreaterThan(0);
 
     const rows = await db.select().from(schema.pluginViewProcesses);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ pluginRowId: plugin.id, viewId: "coverage", projectId, pid: started.pid });
 
-    await service.stopView(plugin.id, "coverage", projectId);
+    await service.stopView({ pluginRowId: plugin.id, viewId: "coverage", projectId });
     expect(await db.select().from(schema.pluginViewProcesses)).toHaveLength(0);
   });
 
@@ -842,7 +842,7 @@ describe("plugin.service", () => {
     const plugin = await service.installPlugin({ source: pluginDir });
     const projectId = await insertProject(db, repo);
 
-    const started = await service.startView(plugin.id, "coverage", projectId);
+    const started = await service.startView({ pluginRowId: plugin.id, viewId: "coverage", projectId });
     const pid = started.pid;
     expect(pid).toBeGreaterThan(0);
     // Confirm the process is really alive before reaping it.
@@ -864,7 +864,7 @@ describe("plugin.service", () => {
   async function waitForHealthy(pluginRowId: string, viewId: string, projectId: string) {
     let status: Awaited<ReturnType<typeof service.getViewStatus>> | undefined;
     for (let attempt = 0; attempt < 20; attempt++) {
-      status = await service.getViewStatus(pluginRowId, viewId, projectId);
+      status = await service.getViewStatus({ pluginRowId, viewId, projectId });
       if (status.running && status.healthy) return status;
       await new Promise((r) => setTimeout(r, 250));
     }
@@ -887,7 +887,7 @@ describe("plugin.service", () => {
     const plugin = await service.installPlugin({ source: pluginDir });
     const projectId = await insertProject(db, repo);
 
-    await service.startView(plugin.id, "coverage", projectId);
+    await service.startView({ pluginRowId: plugin.id, viewId: "coverage", projectId });
     const status = await waitForHealthy(plugin.id, "coverage", projectId);
     expect(status).toMatchObject({ running: true, healthy: true });
   });
@@ -919,7 +919,7 @@ describe("plugin.service", () => {
     const plugin = await service.installPlugin({ source: pluginDir });
     const projectId = await insertProject(db, repo);
 
-    await service.startView(plugin.id, "coverage", projectId);
+    await service.startView({ pluginRowId: plugin.id, viewId: "coverage", projectId });
     const status = await waitForHealthy(plugin.id, "coverage", projectId);
     expect(status).toMatchObject({ running: true, healthy: true });
   });
@@ -948,7 +948,7 @@ describe("plugin.service", () => {
     const plugin = await service.installPlugin({ source: pluginDir });
     const projectId = await insertProject(db, repo);
 
-    await service.startView(plugin.id, "coverage", projectId);
+    await service.startView({ pluginRowId: plugin.id, viewId: "coverage", projectId });
 
     // Small poll: the child needs a moment to write its marker after spawn.
     const deadline = Date.now() + 2000;
@@ -959,7 +959,7 @@ describe("plugin.service", () => {
     expect(existsSync(join(repo, "cwd-marker.txt"))).toBe(true);
     expect(existsSync(join(pluginDir, "cwd-marker.txt"))).toBe(false);
 
-    await service.stopView(plugin.id, "coverage", projectId);
+    await service.stopView({ pluginRowId: plugin.id, viewId: "coverage", projectId });
   });
 
   // #418: GET /api/plugins re-did per-plugin fs/manifest work on every request
