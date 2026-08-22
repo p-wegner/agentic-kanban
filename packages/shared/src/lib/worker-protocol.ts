@@ -15,6 +15,33 @@
  */
 export const SHARES_FILESYSTEM_LABEL = "shares-filesystem";
 
+/**
+ * What the board WANTS launched, as opposed to how the board itself would launch it (#747).
+ *
+ * A launch config is built on the board, by board-side providers that resolve their
+ * executable against the BOARD's platform: on Windows `claude-provider.ts` runs
+ * `where claude.exe` and hands back an absolute `...\claude.exe`, and every provider
+ * decides `useShell` from the board's own `process.platform`. Shipping those verbatim to a
+ * worker meant only a same-OS fleet could ever run: a Windows board sent a Linux worker an
+ * absolute `.exe` path (ENOENT), and a Linux board sent a Windows worker a bare `claude`
+ * with `shell: false`, which cannot resolve the `.cmd` shim.
+ *
+ * So a cross-machine spec carries INTENT instead — which provider, which logical program —
+ * and the worker resolves the executable and the shell decision on ITS OWN platform. The
+ * board does not guess the worker's OS; resolution lives where the binary lives.
+ *
+ * When present, `intent` OUTRANKS `spec.command`/`spec.useShell` for command resolution.
+ * `command` is still populated with the logical program name so an older worker (or one
+ * that chooses not to resolve) has something usable, and `useShell` is left unset so no
+ * board-shaped decision leaks in.
+ */
+export interface WorkerLaunchIntent {
+  /** Agent provider this spec launches — "claude" | "codex" | "copilot" | "pi". */
+  provider: string;
+  /** Logical program to resolve on the worker's PATH: no directory, no `.exe`/`.cmd` suffix. */
+  program: string;
+}
+
 /** Everything a worker needs to spawn one agent process. Fully serializable. */
 export interface WorkerLaunchSpec {
   command: string;
@@ -28,6 +55,11 @@ export interface WorkerLaunchSpec {
   /** The prompt travels via argv; close stdin immediately without writing. */
   suppressStdinPrompt?: boolean;
   useShell?: boolean;
+  /**
+   * Platform-independent launch intent (#747). When set, the worker resolves the
+   * executable and the shell decision itself and IGNORES `command`/`useShell`.
+   */
+  intent?: WorkerLaunchIntent;
   /**
    * Kill the agent after this many ms with no stdout/stderr. The BOARD decides
    * the policy (same rule as a host launch, 0 for mock agents) and the worker
@@ -55,6 +87,19 @@ export interface WorkerRepoTransport {
   setupScript?: string;
   /** Agent skills to materialize into the checkout's .claude/skills/. */
   skills?: Array<{ name: string; description?: string; content: string }>;
+  /**
+   * Ticket-context files to write into the checkout ROOT, by BASENAME + CONTENT (#749).
+   *
+   * The board writes these (`TICKET_CONTEXT_FILENAME`, i.e. `CLAUDE.local.md`) into its
+   * OWN worktree, where claude finds them as project memory and copilot attaches them by
+   * path. A true-remote worker works in a checkout of its own, so neither happened there:
+   * a claude/copilot builder on a fleet worker ran with no ticket context at all. Paths
+   * cannot be shipped — they name nothing on the worker — so the CONTENT travels and the
+   * worker materializes it next to the code, exactly where a board worktree has it.
+   *
+   * `name` is a bare filename; anything with a path separator is dropped on parse.
+   */
+  contextFiles?: Array<{ name: string; content: string }>;
 }
 
 /** Mirrors agent.service's AgentOutputEvent so events plug into broadcast as-is. */
@@ -127,6 +172,26 @@ export function parseWorkerToBoardMessage(raw: unknown): WorkerToBoardMessage | 
   }
 }
 
+/**
+ * A name that can only ever land directly in the directory it is written to: no path
+ * separator, no drive letter, no `.`/`..`. Shared by the board (which builds these names
+ * with `basename`) and the worker (which must not trust them).
+ */
+export function isBareFileName(name: string): boolean {
+  if (!name || name === "." || name === "..") return false;
+  if (/[\/]/.test(name)) return false;
+  if (/^[a-zA-Z]:/.test(name)) return false;
+  return true;
+}
+
+function parseLaunchIntent(raw: unknown): WorkerLaunchIntent | null {
+  const intent = asRecord(raw);
+  if (!intent) return null;
+  if (typeof intent.provider !== "string" || typeof intent.program !== "string") return null;
+  if (!intent.program.trim()) return null;
+  return { provider: intent.provider, program: intent.program };
+}
+
 function parseRepoTransport(raw: unknown): WorkerRepoTransport | null {
   const repo = asRecord(raw);
   if (!repo) return null;
@@ -153,6 +218,17 @@ function parseRepoTransport(raw: unknown): WorkerRepoTransport | null {
           content: s.content as string,
         }))
     : undefined;
+  const contextFiles = Array.isArray(repo.contextFiles)
+    ? repo.contextFiles
+        .map((f) => asRecord(f))
+        .filter((f): f is Record<string, unknown> => Boolean(f))
+        .filter((f) => typeof f.name === "string" && typeof f.content === "string")
+        // A bare filename only: the board writes into the checkout ROOT, and a name
+        // carrying a separator or `..` would escape it. Dropped, not sanitized — a
+        // spec that asks for that is malformed, not merely untidy.
+        .filter((f) => isBareFileName(f.name as string))
+        .map((f) => ({ name: f.name as string, content: f.content as string }))
+    : undefined;
   return {
     projectId: repo.projectId,
     gitPort: repo.gitPort,
@@ -162,6 +238,7 @@ function parseRepoTransport(raw: unknown): WorkerRepoTransport | null {
     incomingRef: repo.incomingRef,
     setupScript: typeof repo.setupScript === "string" ? repo.setupScript : undefined,
     ...(skills && skills.length > 0 ? { skills } : {}),
+    ...(contextFiles && contextFiles.length > 0 ? { contextFiles } : {}),
   };
 }
 
@@ -176,6 +253,7 @@ export function parseBoardToWorkerMessage(raw: unknown): BoardToWorkerMessage | 
       if (typeof spec.command !== "string" || typeof spec.cwd !== "string") return null;
       if (!Array.isArray(spec.args)) return null;
       const repo = parseRepoTransport(msg.repo);
+      const intent = parseLaunchIntent(spec.intent);
       return {
         type: "assign",
         sessionId: msg.sessionId,
@@ -191,6 +269,7 @@ export function parseBoardToWorkerMessage(raw: unknown): BoardToWorkerMessage | 
           keepStdinOpen: spec.keepStdinOpen === true,
           suppressStdinPrompt: spec.suppressStdinPrompt === true,
           useShell: spec.useShell === true,
+          ...(intent ? { intent } : {}),
           hangTimeoutMs: typeof spec.hangTimeoutMs === "number" && Number.isFinite(spec.hangTimeoutMs)
             ? spec.hangTimeoutMs
             : undefined,
