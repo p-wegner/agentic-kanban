@@ -36,6 +36,28 @@ export interface WorkerAgentRunnerOptions {
    * `worker-registry.service.ts`.
    */
   maxConcurrency?: number;
+  /**
+   * The three git-transport collaborators, overridable for tests (#754).
+   *
+   * A port, not a convenience: what had to be verified is that a shutdown WAITS for the
+   * result push, and a real `git push` can be made neither to hang on demand nor to finish
+   * on demand — while a real `provisionWorkerCheckout` needs a live git-HTTP listener and a
+   * real repo just to reach the code under test. Production passes nothing and gets the
+   * real three.
+   */
+  repoOps?: Partial<WorkerRepoOps>;
+}
+
+/** The worker's git-transport boundary: get a checkout, push it back, tear it down. */
+export interface WorkerRepoOps {
+  provision: (
+    boardUrl: string,
+    repo: WorkerRepoTransport,
+    sessionId: string,
+    workRoot?: string,
+  ) => Promise<WorkerCheckout>;
+  push: (boardUrl: string, repo: WorkerRepoTransport, checkout: WorkerCheckout) => Promise<void>;
+  cleanup: (checkout: WorkerCheckout) => Promise<void>;
 }
 
 /**
@@ -46,10 +68,25 @@ export interface WorkerAgentRunnerOptions {
 export const ASSIGN_REFUSED_AT_CAPACITY = "worker at capacity";
 
 export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentRunnerOptions = {}) {
+  const repoOps: WorkerRepoOps = {
+    provision: options.repoOps?.provision ?? provisionWorkerCheckout,
+    push: options.repoOps?.push ?? pushWorkerResult,
+    cleanup: options.repoOps?.cleanup ?? cleanupWorkerCheckout,
+  };
   const processes = new Map<string, ChildProcess>();
   const exited = new Set<string>();
   /** Sessions whose work lives in a worker-side checkout that must be pushed back. */
   const checkouts = new Map<string, { checkout: WorkerCheckout; repo: WorkerRepoTransport }>();
+  /**
+   * Result pushes currently in flight, by session (#754).
+   *
+   * These used to be a fire-and-forget async IIFE that nothing held a reference to, so
+   * `daemon.stop()` + `process.exit(0)` in the CLI killed the process mid-push: the agent
+   * had finished, the commit existed on the worker, and the board learned about it only
+   * via its 60 s disconnect grace — as a FAILURE. Holding them is what makes a bounded
+   * drain possible at all.
+   */
+  const inFlightPushes = new Map<string, Promise<void>>();
   /** Sessions provisioning a checkout — running for bookkeeping before a pid exists. */
   const provisioning = new Set<string>();
   /** Per-session silence watchdogs; reset on every byte of agent output. */
@@ -106,10 +143,10 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     // arrived yet. Push failure is reported as stderr and downgrades the exit
     // code so the session is never recorded as a clean success.
     checkouts.delete(sessionId);
-    void (async () => {
+    const push = (async () => {
       let effectiveExit = exitCode;
       try {
-        await pushWorkerResult(options.boardUrl ?? "", pending.repo, pending.checkout);
+        await repoOps.push(options.boardUrl ?? "", pending.repo, pending.checkout);
         console.log(`[worker] pushed session result: sessionId=${sessionId} ref=${pending.repo.incomingRef}`);
       } catch (err) {
         const message = errorMessage(err);
@@ -118,10 +155,16 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
         effectiveExit = exitCode === 0 || exitCode === null ? 1 : exitCode;
       }
       try {
-        await cleanupWorkerCheckout(pending.checkout);
+        await repoOps.cleanup(pending.checkout);
       } catch { /* best-effort */ }
       send({ type: "event", event: { type: "exit", sessionId, exitCode: effectiveExit } });
-    })();
+    })().finally(() => {
+      inFlightPushes.delete(sessionId);
+    });
+    // Retained (#754) so a shutdown can WAIT for it. Errors are already handled inside,
+    // so the stored promise never rejects — but attach a sink anyway: an unhandled
+    // rejection here would take the daemon down with every other agent on it.
+    inFlightPushes.set(sessionId, push.catch(() => {}));
   }
 
   /**
@@ -147,10 +190,10 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     exited.delete(sessionId);
     void (async () => {
       try {
-        const checkout = await provisionWorkerCheckout(options.boardUrl!, repo, sessionId, options.workRoot);
+        const checkout = await repoOps.provision(options.boardUrl!, repo, sessionId, options.workRoot);
         if (!provisioning.has(sessionId)) {
           // Stopped while provisioning — do not launch; drop the checkout.
-          await cleanupWorkerCheckout(checkout).catch(() => {});
+          await repoOps.cleanup(checkout).catch(() => {});
           return;
         }
         checkouts.set(sessionId, { checkout, repo });
@@ -221,6 +264,21 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     };
     proc.stdout?.on("data", (chunk: Buffer) => emitOutput("stdout", chunk));
     proc.stderr?.on("data", (chunk: Buffer) => emitOutput("stderr", chunk));
+    // #754: an EPIPE on this pipe used to CRASH THE WHOLE DAEMON, orphaning every other
+    // agent on the machine. An unhandled 'error' on a stream is a process-level uncaught
+    // exception, and the write below is synchronous-throw-guarded only — the async EPIPE
+    // that arrives when an agent exits before draining a large prompt (a bad flag, or a
+    // provider CLI that is not logged in — the runbook's own "starts then fails
+    // immediately" case) was never handled anywhere in worker/.
+    proc.stdin?.on("error", (err: Error & { code?: string }) => {
+      const expected = err.code === "EPIPE" || err.code === "ERR_STREAM_DESTROYED";
+      console.warn(
+        `[worker] stdin ${err.code ?? "error"} for sessionId=${sessionId}` +
+          (expected ? " (agent exited before reading its prompt)" : `: ${err.message}`),
+      );
+      // Not reported as session stderr: the agent's own exit and output are the real
+      // evidence, and a synthesized line here would read like agent output that is not.
+    });
     proc.on("error", (err) => {
       send({ type: "event", event: { type: "stderr", sessionId, data: `Process error: ${err.message}` } });
       emitExit(sessionId, 1);
@@ -257,12 +315,18 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     // Same stdin contract as agent.service.writeInitialStdin: argv-prompt agents
     // get stdin closed untouched; multi-turn keeps it open; default is
     // write-and-close (Windows claude.exe buffers stdout until stdin closes).
-    if (spec.suppressStdinPrompt) {
-      proc.stdin?.end();
-    } else if (spec.keepStdinOpen) {
-      proc.stdin?.write((spec.stdinPrompt ?? "") + "\n");
-    } else {
-      proc.stdin?.end((spec.stdinPrompt ?? "") + "\n");
+    // Guarded because a process that is ALREADY gone throws synchronously here, while one
+    // that dies mid-write emits on the handler above (#754). Both are normal.
+    try {
+      if (spec.suppressStdinPrompt) {
+        proc.stdin?.end();
+      } else if (spec.keepStdinOpen) {
+        proc.stdin?.write((spec.stdinPrompt ?? "") + "\n");
+      } else {
+        proc.stdin?.end((spec.stdinPrompt ?? "") + "\n");
+      }
+    } catch (err) {
+      console.warn(`[worker] could not write the prompt to sessionId=${sessionId}: ${errorMessage(err)}`);
     }
   }
 
@@ -317,7 +381,44 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     return [...new Set([...processes.keys(), ...provisioning])];
   }
 
-  return { assign, assignWithRepo, input, closeStdin, stop, stopAll, runningSessionIds };
+  /**
+   * Wait for every in-flight result push, up to `timeoutMs` (#754).
+   *
+   * Reports what it saved and what it abandoned rather than just resolving: a shutdown
+   * that lost a completed agent's work must SAY so, because the board's only other signal
+   * is a 60 s disconnect grace that finalizes the session as a failure.
+   *
+   * A push that starts AFTER the deadline (an agent killed at the very end of the window)
+   * is not waited for — bounding the wait is the point, and the ceiling is the operator's.
+   */
+  async function drainPushes(timeoutMs: number): Promise<{ completed: number; abandoned: number }> {
+    const started = inFlightPushes.size;
+    if (started === 0) return { completed: 0, abandoned: 0 };
+    let timer: NodeJS.Timeout | undefined;
+    const deadline = new Promise<"timeout">((resolve) => {
+      timer = setTimeout(() => resolve("timeout"), timeoutMs);
+      if (timer.unref) timer.unref();
+    });
+    // Re-read the map each round: an agent killed by stopAll() reaches its exit handler
+    // (and therefore starts its push) only after this function is already waiting.
+    while (inFlightPushes.size > 0) {
+      const outcome = await Promise.race([Promise.allSettled([...inFlightPushes.values()]), deadline]);
+      if (outcome === "timeout") break;
+    }
+    if (timer) clearTimeout(timer);
+    const abandoned = inFlightPushes.size;
+    return { completed: started - abandoned, abandoned };
+  }
+
+  /** How many result pushes are in flight right now. For tests and diagnostics. */
+  function pendingPushCount(): number {
+    return inFlightPushes.size;
+  }
+
+  return {
+    assign, assignWithRepo, input, closeStdin, stop, stopAll, runningSessionIds,
+    drainPushes, pendingPushCount,
+  };
 }
 
 export type WorkerAgentRunner = ReturnType<typeof createWorkerAgentRunner>;

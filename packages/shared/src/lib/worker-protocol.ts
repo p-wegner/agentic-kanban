@@ -110,6 +110,131 @@ export interface WorkerAgentEvent {
   exitCode?: number | null;
 }
 
+/**
+ * The fleet wire protocol's version (#754).
+ *
+ * Before this, `hello` and `register` carried no version at all and an unknown message
+ * type was dropped as "malformed" — so a board and a worker built from different commits
+ * failed as a silence, and with the dev-tarball distribution model skew is the NORMAL
+ * case, not an edge one. A version on both sides turns the whole class of future
+ * mismatch bugs into one legible refusal at pairing time.
+ *
+ * Bump this when a message shape changes in a way an older peer cannot honour. Adding an
+ * OPTIONAL field is not such a change (both parsers ignore what they do not know), so
+ * this number is deliberately not a build stamp — `workerVersion` carries that.
+ */
+export const WORKER_PROTOCOL_VERSION = 1;
+
+/** The oldest protocol a board will talk to. Raise this only with a real breaking change. */
+export const MIN_SUPPORTED_WORKER_PROTOCOL_VERSION = 1;
+
+/**
+ * What a worker that reports NO version is assumed to speak (#754).
+ *
+ * This is the deliberate compatibility window, and the reasoning is factual rather than
+ * generous: a pre-handshake build speaks *exactly* protocol 1, because protocol 1 IS the
+ * wire format as it stood when the handshake was added. Refusing such a worker would
+ * refuse a machine that works perfectly, on a fleet where the worker is on someone else's
+ * computer and upgrades are not synchronised with the board's — the worst possible place
+ * to make an upgrade mandatory for no gain.
+ *
+ * The handshake still earns its keep, just not today: the moment
+ * WORKER_PROTOCOL_VERSION goes to 2 with a change an older peer cannot honour,
+ * MIN_SUPPORTED is raised to 2 and every version-less worker is refused *then* — with a
+ * message naming the fix. That is the difference between a version check that prevents a
+ * class of bugs and one that only creates work.
+ *
+ * The assumption is NOT recorded as if the worker had claimed it: `worker list` shows `?`
+ * for a worker that reported nothing, because "we assumed 1" and "it said 1" are
+ * different facts and the first is the one that matters when diagnosing skew.
+ */
+export const PRE_HANDSHAKE_ASSUMED_PROTOCOL_VERSION = 1;
+
+/** What a worker reports about itself when it registers and on every heartbeat. */
+export interface WorkerIdentityInfo {
+  /** Absent = a build older than the handshake. Treated as 0, i.e. incompatible. */
+  protocolVersion?: number;
+  /** The package version of the worker build, for the panel and `worker list`. */
+  workerVersion?: string;
+}
+
+/**
+ * What a worker machine can do. Sent at registration AND on every heartbeat (#754):
+ * they used to travel only at first registration, so re-running
+ * `start --labels docker --max-concurrency 4` changed nothing on the board while the
+ * local runner enforced the NEW ceiling — board and worker silently disagreeing about
+ * the same machine.
+ */
+export interface WorkerCapabilities {
+  labels?: string[];
+  providers?: string[];
+  maxConcurrency?: number;
+}
+
+export type ProtocolCompatibility =
+  | { ok: true; version: number }
+  | { ok: false; reason: string };
+
+/**
+ * Is this peer's protocol one we can talk? Returns a reason written for a human, because
+ * the failure it replaces was a worker that connected, was dropped, and reconnected
+ * forever with nothing in any log explaining why.
+ */
+export function checkProtocolCompatibility(
+  reported: number | undefined,
+  opts: { min?: number; current?: number } = {},
+): ProtocolCompatibility {
+  const min = opts.min ?? MIN_SUPPORTED_WORKER_PROTOCOL_VERSION;
+  const current = opts.current ?? WORKER_PROTOCOL_VERSION;
+  // A missing or malformed version means a pre-handshake build, which speaks the protocol
+  // as it stood when the handshake landed. See PRE_HANDSHAKE_ASSUMED_PROTOCOL_VERSION.
+  const declared = reported !== undefined && Number.isInteger(reported) ? reported : undefined;
+  const effective = declared ?? PRE_HANDSHAKE_ASSUMED_PROTOCOL_VERSION;
+  if (effective < min) {
+    const what = declared === undefined
+      ? `worker reports no protocol version, so it predates the handshake and speaks ${effective}`
+      : `worker speaks protocol ${declared}`;
+    return {
+      ok: false,
+      reason:
+        `${what}, which is older than this board supports (${min}..${current}). ` +
+        `UPGRADE THE WORKER: on the board machine run 'node scripts/pack-worker.mjs', copy the ` +
+        `tarball to the worker, reinstall it there, then re-pair with a fresh token from ` +
+        `'agentic-kanban worker pair'`,
+    };
+  }
+  if (effective > current) {
+    return {
+      ok: false,
+      reason:
+        `worker speaks protocol ${effective}, which is NEWER than this board (${min}..${current}). ` +
+        `UPGRADE THE BOARD to match, or install a worker build made from this board's checkout ` +
+        `('node scripts/pack-worker.mjs')`,
+    };
+  }
+  return { ok: true, version: effective };
+}
+
+/** Shape-check a capabilities blob off the wire. Unknown/ill-typed fields are dropped. */
+export function parseWorkerCapabilities(raw: unknown): WorkerCapabilities | undefined {
+  const rec = asRecord(raw);
+  if (!rec) return undefined;
+  const strings = (value: unknown): string[] | undefined =>
+    Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : undefined;
+  const labels = strings(rec.labels);
+  const providers = strings(rec.providers);
+  const maxConcurrency =
+    typeof rec.maxConcurrency === "number" && Number.isInteger(rec.maxConcurrency) && rec.maxConcurrency > 0
+      ? rec.maxConcurrency
+      : undefined;
+  if (labels === undefined && providers === undefined && maxConcurrency === undefined) return undefined;
+  return {
+    ...(labels ? { labels } : {}),
+    ...(providers ? { providers } : {}),
+    ...(maxConcurrency !== undefined ? { maxConcurrency } : {}),
+  };
+}
+
 export type BoardToWorkerMessage =
   | { type: "assign"; sessionId: string; spec: WorkerLaunchSpec; repo?: WorkerRepoTransport }
   | { type: "input"; sessionId: string; data: string }
@@ -117,7 +242,16 @@ export type BoardToWorkerMessage =
   | { type: "stop"; sessionId: string };
 
 export type WorkerToBoardMessage =
-  | { type: "hello"; workerId: string; runningSessionIds: string[] }
+  | {
+      type: "hello";
+      workerId: string;
+      runningSessionIds: string[];
+      /** #754: absent means a pre-handshake worker build. */
+      protocolVersion?: number;
+      workerVersion?: string;
+      /** #754: re-declared on every connect, not frozen at first pairing. */
+      capabilities?: WorkerCapabilities;
+    }
   | { type: "event"; event: WorkerAgentEvent }
   | { type: "assign_failed"; sessionId: string; error: string };
 
@@ -141,15 +275,23 @@ export function parseWorkerToBoardMessage(raw: unknown): WorkerToBoardMessage | 
   const msg = parseJson(raw);
   if (!msg) return null;
   switch (msg.type) {
-    case "hello":
+    case "hello": {
       if (typeof msg.workerId !== "string") return null;
+      const capabilities = parseWorkerCapabilities(msg.capabilities);
       return {
         type: "hello",
         workerId: msg.workerId,
         runningSessionIds: Array.isArray(msg.runningSessionIds)
           ? msg.runningSessionIds.filter((s): s is string => typeof s === "string")
           : [],
+        // Optional on the wire on purpose: a pre-handshake worker must still PARSE, so
+        // that the board can refuse it with a sentence instead of dropping it as
+        // malformed — which is the failure mode #754 exists to remove.
+        ...(typeof msg.protocolVersion === "number" ? { protocolVersion: msg.protocolVersion } : {}),
+        ...(typeof msg.workerVersion === "string" ? { workerVersion: msg.workerVersion } : {}),
+        ...(capabilities ? { capabilities } : {}),
       };
+    }
     case "event": {
       const event = asRecord(msg.event);
       if (!event || typeof event.sessionId !== "string") return null;

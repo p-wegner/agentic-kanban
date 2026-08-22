@@ -8,13 +8,38 @@
 // finalization is never lost (stdout/stderr during a gap is dropped in this
 // phase). Credentials stay worker-local: the daemon runs agents with this
 // machine's own logins and never receives board credentials.
+//
+// #754 — THIS IS A LONG-RUNNING PROCESS ON SOMEONE ELSE'S MACHINE, so every
+// shutdown and every unrecoverable error is a data-loss bug until it is handled:
+//
+//  * `stop()` is ASYNC and DRAINS. It used to be sync and the CLI called
+//    `process.exit(0)` immediately after, so with `--kill-agents` the process was
+//    gone before `proc.on("exit")` → `emitExit` → `pushWorkerResult` could run:
+//    completed work was never pushed and the board learned about it via the 60 s
+//    grace, i.e. as a failure. Now: announce `draining` so the board stops
+//    assigning, stop accepting, then wait (bounded) for in-flight pushes and
+//    flush the critical queue before the socket closes.
+//  * `draining` is now actually SET. It was a declared status honoured by
+//    `eligibleWorkers` and coloured by the panel that nothing ever wrote, so the
+//    only way out of rotation was revoke — which kills in-flight tokens.
+//  * A 401 is FATAL, not a retry. A revoked/forgotten worker used to reconnect
+//    every 30 s forever with a red tray and nothing in any log explaining it,
+//    while the identity in worker-state.json blocked re-pairing even with a fresh
+//    `--token`. Now a 401 either re-registers (when a `--token` is present) or
+//    exits non-zero with the reason.
+//  * Capabilities ride every heartbeat, not just first registration.
+//  * `hello` and `register` carry a protocol version; an incompatible board
+//    refuses with a sentence instead of failing as a silence.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, hostname, platform, arch } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
 import {
   parseBoardToWorkerMessage,
+  WORKER_PROTOCOL_VERSION,
+  type WorkerCapabilities,
   type WorkerToBoardMessage,
 } from "@agentic-kanban/shared/lib/worker-protocol";
 import { createWorkerAgentRunner } from "./worker-agent-runner.js";
@@ -24,6 +49,24 @@ const RECONNECT_MIN_MS = 1000;
 const RECONNECT_MAX_MS = 30 * 1000;
 /** Bounded queue of undeliverable-but-critical messages (exit/assign_failed). */
 const PENDING_QUEUE_CAP = 200;
+
+/**
+ * Default ceiling on a drain (#754). Long enough for a `git push` of a normal result over
+ * a slow link, short enough that Ctrl+C still feels like Ctrl+C. Past it the daemon exits
+ * and says exactly what it abandoned rather than hanging on a push that may never finish.
+ */
+export const DEFAULT_DRAIN_TIMEOUT_MS = 30 * 1000;
+
+/**
+ * How many times a 401 may be answered by re-pairing before the daemon gives up (#754).
+ *
+ * Found by the test for this ticket: without a bound, "re-register on 401" is just a
+ * faster version of the forever-loop it replaced — a board that hands out a token and then
+ * rejects it produced 940 registrations in two minutes. A pairing token is single-use, so
+ * the honest number is small: the FIRST re-pairing is the recovery, and anything past it
+ * means the board is refusing this machine for a reason a new token cannot fix.
+ */
+export const MAX_REPAIR_ATTEMPTS = 2;
 
 export interface WorkerDaemonOptions {
   boardUrl: string;
@@ -39,6 +82,15 @@ export interface WorkerDaemonOptions {
   workRoot?: string;
   heartbeatIntervalMs?: number;
   log?: (line: string) => void;
+  /** How long `stop()` waits for in-flight result pushes (#754). */
+  drainTimeoutMs?: number;
+  /**
+   * Called once when this daemon can never work against this board again — a 401 with no
+   * pairing token to recover with, or a protocol the board refuses (#754). The daemon has
+   * already stopped reconnecting by then; the CLI turns this into a non-zero exit, because
+   * a red tray and a silent 30 s retry loop is the failure being removed.
+   */
+  onFatal?: (reason: string) => void;
 }
 
 interface WorkerIdentity {
@@ -77,6 +129,47 @@ function saveIdentity(stateFile: string, boardUrl: string, identity: WorkerIdent
   writeFileSync(stateFile, JSON.stringify(state, null, 2));
 }
 
+/** What this machine declares about itself, on every registration AND every beat (#754). */
+function capabilitiesOf(opts: WorkerDaemonOptions): WorkerCapabilities {
+  return {
+    ...(opts.labels ? { labels: opts.labels } : {}),
+    ...(opts.providers ? { providers: opts.providers } : {}),
+    ...(opts.maxConcurrency !== undefined ? { maxConcurrency: opts.maxConcurrency } : {}),
+  };
+}
+
+/** This build's own version — the same value `--version` reports. Never fabricated. */
+function resolveWorkerVersion(): string | undefined {
+  try {
+    let dir = dirname(fileURLToPath(import.meta.url));
+    for (let up = 0; up < 5; up++) {
+      try {
+        const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as {
+          name?: string;
+          version?: string;
+        };
+        if (pkg.name === "agentic-kanban" && pkg.version) return pkg.version;
+      } catch {
+        /* no manifest at this level */
+      }
+      const parent = dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  } catch {
+    /* fall through */
+  }
+  return undefined;
+}
+
+/** A registration the board refused for a reason retrying cannot fix (#754). */
+export class WorkerRegistrationRefused extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = "WorkerRegistrationRefused";
+  }
+}
+
 async function registerWithBoard(opts: WorkerDaemonOptions, boardUrl: string, name: string): Promise<WorkerIdentity> {
   if (!opts.pairingToken) {
     throw new Error(
@@ -95,20 +188,85 @@ async function registerWithBoard(opts: WorkerDaemonOptions, boardUrl: string, na
       labels: opts.labels,
       providers: opts.providers,
       maxConcurrency: opts.maxConcurrency,
+      // #754: the handshake. A board that speaks a different protocol says so here, once,
+      // instead of the mismatch surfacing later as dropped "malformed" messages.
+      protocolVersion: WORKER_PROTOCOL_VERSION,
+      workerVersion: resolveWorkerVersion(),
     }),
   });
-  const body = await res.json().catch(() => ({})) as { workerId?: string; workerToken?: string; error?: string };
+  const body = await res.json().catch(() => ({})) as {
+    workerId?: string;
+    workerToken?: string;
+    error?: string;
+    boardProtocolVersion?: number;
+  };
   if (!res.ok || !body.workerId || !body.workerToken) {
-    throw new Error(`Registration failed (${res.status}): ${body.error ?? "unexpected response"}`);
+    const detail = body.error ?? "unexpected response";
+    // 409 = the board understood us and refuses this build. Retrying is pointless, so it
+    // is a distinct error type the caller can turn into a clean non-zero exit.
+    if (res.status === 409) {
+      throw new WorkerRegistrationRefused(
+        `Board at ${boardUrl} refuses this worker build: ${detail} ` +
+          `(worker speaks protocol ${WORKER_PROTOCOL_VERSION}, board speaks ${body.boardProtocolVersion ?? "?"})`,
+        res.status,
+      );
+    }
+    throw new Error(`Registration failed (${res.status}): ${detail}`);
   }
   return { workerId: body.workerId, workerToken: body.workerToken, name };
+}
+
+/** Forget this board's pairing so a fresh `--token` can be used (#754). */
+function forgetIdentity(stateFile: string, boardUrl: string): void {
+  try {
+    const state = loadState(stateFile);
+    if (!(boardUrl in state.boards)) return;
+    delete state.boards[boardUrl];
+    mkdirSync(dirname(stateFile), { recursive: true });
+    writeFileSync(stateFile, JSON.stringify(state, null, 2));
+  } catch {
+    /* best-effort: the re-register below is what actually matters */
+  }
 }
 
 export interface WorkerDaemonHandle {
   workerId: string;
   /** Resolves once the first WS connection is established. */
   connected: Promise<void>;
-  stop(opts?: { killAgents?: boolean }): void;
+  /**
+   * Stop accepting work and shut down cleanly (#754).
+   *
+   * Awaitable and bounded: it announces `draining` to the board, stops reconnecting,
+   * optionally kills the agents, then waits up to `drainTimeoutMs` for the result pushes
+   * their exits kick off and flushes the critical queue before closing the socket. The
+   * report says what it saved and what it could not — see DrainReport.
+   */
+  stop(opts?: { killAgents?: boolean; drainTimeoutMs?: number }): Promise<DrainReport>;
+  /**
+   * Leave rotation WITHOUT stopping: the board stops assigning, running agents finish.
+   * The planned-restart move — `draining` had no writer at all before this.
+   */
+  drain(): Promise<void>;
+}
+
+/**
+ * What a shutdown managed to save, and what it did not (#754). Returned rather than
+ * logged-and-forgotten because "nothing was lost" and "one push was abandoned" are the
+ * two outcomes an operator needs told apart.
+ */
+export interface DrainReport {
+  /** Result pushes that completed during the drain. */
+  pushesCompleted: number;
+  /** Sessions still pushing when the drain timed out — their work stayed on the worker. */
+  pushesAbandoned: number;
+  /** Agents still running at exit (only possible with killAgents: false). */
+  agentsLeftRunning: number;
+  /**
+   * Critical messages (exit/assign_failed) that could not be delivered. The queue is
+   * in-memory and capped at PENDING_QUEUE_CAP, so anything still here at exit is LOST:
+   * a drain can flush the queue to a live socket, but it cannot persist it.
+   */
+  criticalMessagesLost: number;
 }
 
 export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<WorkerDaemonHandle> {
@@ -128,8 +286,82 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
 
   let ws: WebSocket | null = null;
   let stopped = false;
+  let draining = false;
+  let fatal: string | null = null;
+  /** Re-pairings attempted, and whether one is in flight (#754 — see handleUnauthorized). */
+  let repairAttempts = 0;
+  let repairing = false;
   let reconnectDelay = RECONNECT_MIN_MS;
   const pendingCritical: WorkerToBoardMessage[] = [];
+  const workerVersion = resolveWorkerVersion();
+
+  /**
+   * Give up on this board for good (#754): stop reconnecting and tell the caller why.
+   * The condition this replaces is a daemon that retried a 401 every 30 s forever while
+   * `worker-state.json` blocked the documented recovery ("revoke and start with a fresh
+   * token") — so the advice could not be followed without hand-deleting the file the same
+   * line forbids editing.
+   */
+  const giveUp = (reason: string): void => {
+    if (fatal) return;
+    fatal = reason;
+    stopped = true;
+    clearInterval(heartbeatTimer);
+    try { ws?.close(); } catch { /* already closed */ }
+    ws = null;
+    log(`[worker] FATAL: ${reason}`);
+    opts.onFatal?.(reason);
+  };
+
+  /**
+   * A 401 from the board (#754). Two very different situations wear the same status:
+   * the worker was revoked/forgotten (recoverable, IF the operator supplied a fresh
+   * pairing token), or the token is simply wrong (not recoverable here). Both used to
+   * look exactly like network loss, which is why the tray stayed red and no log said why.
+   */
+  const handleUnauthorized = async (where: string): Promise<void> => {
+    if (stopped || fatal || repairing) return;
+    if (!opts.pairingToken) {
+      giveUp(
+        `board rejected this worker's token (401 on ${where}). It was probably revoked, or the ` +
+          `board's database was reset. Mint a new pairing token on the board ` +
+          `('agentic-kanban worker pair') and restart with --token <token>; the stale pairing in ` +
+          `${stateFile} is dropped automatically when you do.`,
+      );
+      return;
+    }
+    if (repairAttempts >= MAX_REPAIR_ATTEMPTS) {
+      giveUp(
+        `board rejected this worker's token again after ${repairAttempts} re-pairing attempt(s) ` +
+          `(401 on ${where}). A pairing token is single-use, so this is not something another ` +
+          `token will fix: check that the board still lists this worker ` +
+          `('agentic-kanban worker list' on the board machine) and that --board points at the ` +
+          `fleet port of the board you paired with.`,
+      );
+      return;
+    }
+    // One repair at a time, and never re-entrantly: a 401 arrives on BOTH the heartbeat and
+    // the socket upgrade, so an unguarded handler runs the whole recovery twice per round —
+    // which is how the unbounded version reached 940 registrations in two minutes.
+    repairing = true;
+    repairAttempts += 1;
+    log(`[worker] board rejected our identity (401 on ${where}); re-pairing with the supplied --token`);
+    forgetIdentity(stateFile, boardUrl);
+    try {
+      identity = await registerWithBoard(opts, boardUrl, name);
+      saveIdentity(stateFile, boardUrl, identity);
+      log(`[worker] re-registered with ${boardUrl} as '${identity.name}' (id=${identity.workerId})`);
+      repairing = false;
+      if (!stopped && !fatal) connect();
+    } catch (err) {
+      repairing = false;
+      if (err instanceof WorkerRegistrationRefused) {
+        giveUp(err.message);
+        return;
+      }
+      giveUp(`re-registration after a 401 failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
 
   const sendToBoard = (message: WorkerToBoardMessage): void => {
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -172,6 +404,11 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
         type: "hello",
         workerId: identity.workerId,
         runningSessionIds: runner.runningSessionIds(),
+        // #754: declared on every connect, not frozen at first pairing — a machine that
+        // gained docker (or changed its ceiling) says so without being re-paired.
+        protocolVersion: WORKER_PROTOCOL_VERSION,
+        ...(workerVersion ? { workerVersion } : {}),
+        capabilities: capabilitiesOf(opts),
       } satisfies WorkerToBoardMessage));
       while (pendingCritical.length > 0) {
         socket.send(JSON.stringify(pendingCritical.shift()));
@@ -210,7 +447,9 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
     });
 
     const scheduleReconnect = (cause: string) => {
-      if (stopped) return;
+      // `repairing` too: the re-pairing path calls connect() itself once it has a new
+      // identity, and a backoff timer racing it opens a second socket with the OLD token.
+      if (stopped || fatal || repairing) return;
       const delay = reconnectDelay;
       reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS);
       // Say how long the connection lasted, not just when the next attempt is:
@@ -240,31 +479,132 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       log(`[worker] socket error: ${err.message}`);
       // 'close' follows and schedules the reconnect.
     });
+    // A rejected UPGRADE is an HTTP response, not a socket failure — and it is the only
+    // place the board's 401/409 is visible on the WS path (#754). Without this the status
+    // is swallowed and the daemon reconnects forever against a board that will never
+    // accept it.
+    socket.on("unexpected-response", (_req, res) => {
+      const status = res.statusCode ?? 0;
+      res.resume(); // drain, or the socket is left half-open
+      if (status === 401) {
+        void handleUnauthorized("the WebSocket upgrade");
+        return;
+      }
+      if (status === 409) {
+        giveUp(
+          `board refuses this worker build on the WebSocket upgrade (409). This worker speaks ` +
+            `protocol ${WORKER_PROTOCOL_VERSION}; rebuild the tarball from the board's checkout ` +
+            `(node scripts/pack-worker.mjs) and reinstall.`,
+        );
+      }
+      // Anything else falls through to close/reconnect, which is the right response to a
+      // 502 from a proxy or a board that is still starting up.
+    });
   }
 
   connect();
 
-  const heartbeatTimer = setInterval(() => {
-    void fetch(`${boardUrl}/api/workers/${identity.workerId}/heartbeat`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        authorization: `Bearer ${identity.workerToken}`,
-      },
-      body: JSON.stringify({}),
-    }).catch(() => { /* board unreachable — WS reconnect handles visibility */ });
-  }, opts.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS);
+  /**
+   * One heartbeat. Carries the capabilities and the protocol version every time (#754),
+   * and — unlike before — READS the status, because a 401 here is one of the two ways a
+   * revoked worker finds out, and it was being swallowed entirely.
+   */
+  async function sendHeartbeat(): Promise<void> {
+    if (stopped || fatal) return;
+    let res: Response;
+    try {
+      res = await fetch(`${boardUrl}/api/workers/${identity.workerId}/heartbeat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          authorization: `Bearer ${identity.workerToken}`,
+        },
+        body: JSON.stringify({
+          ...(draining ? { status: "draining" } : {}),
+          capabilities: capabilitiesOf(opts),
+          protocolVersion: WORKER_PROTOCOL_VERSION,
+          ...(workerVersion ? { workerVersion } : {}),
+        }),
+      });
+    } catch {
+      return; // board unreachable — the WS reconnect path owns visibility for that
+    }
+    if (res.status === 401) {
+      void handleUnauthorized("the heartbeat");
+      return;
+    }
+    if (res.status === 409) {
+      const body = await res.json().catch(() => ({})) as { error?: string; boardProtocolVersion?: number };
+      giveUp(
+        `board refuses this worker build: ${body.error ?? "protocol mismatch"} ` +
+          `(worker protocol ${WORKER_PROTOCOL_VERSION}, board ${body.boardProtocolVersion ?? "?"}). ` +
+          `Rebuild the worker tarball from the board's checkout and reinstall.`,
+      );
+    }
+  }
+
+  const heartbeatTimer = setInterval(() => { void sendHeartbeat(); }, opts.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS);
   if (heartbeatTimer.unref) heartbeatTimer.unref();
+
+  /** Flush queued exit/assign_failed frames. Returns how many could NOT be delivered. */
+  function flushCritical(): number {
+    while (pendingCritical.length > 0 && ws && ws.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(JSON.stringify(pendingCritical.shift()));
+      } catch {
+        break; // socket died mid-flush; the remainder is counted as lost
+      }
+    }
+    return pendingCritical.length;
+  }
 
   return {
     workerId: identity.workerId,
     connected,
-    stop(stopOpts) {
+
+    async drain() {
+      if (draining) return;
+      draining = true;
+      log("[worker] draining: the board will stop assigning; running agents finish");
+      // Announce immediately rather than at the next 30 s tick — the whole value of
+      // draining is that the board learns before it places the next session.
+      await sendHeartbeat();
+    },
+
+    async stop(stopOpts): Promise<DrainReport> {
+      const timeoutMs = stopOpts?.drainTimeoutMs ?? opts.drainTimeoutMs ?? DEFAULT_DRAIN_TIMEOUT_MS;
+      // Announce BEFORE killing anything: a board that keeps assigning into a dying
+      // daemon produces exactly the launch failures this shutdown is trying to avoid.
+      if (!draining && !fatal) {
+        draining = true;
+        await sendHeartbeat().catch(() => {});
+      }
       stopped = true;
       clearInterval(heartbeatTimer);
       if (stopOpts?.killAgents) runner.stopAll();
+      // The kill above only sends the signal. The result push is kicked off by the
+      // agent's `exit` handler, so exiting now is precisely the bug: wait for it.
+      const drained = await runner.drainPushes(timeoutMs);
+      const criticalMessagesLost = flushCritical();
+      const report: DrainReport = {
+        pushesCompleted: drained.completed,
+        pushesAbandoned: drained.abandoned,
+        agentsLeftRunning: runner.runningSessionIds().length,
+        criticalMessagesLost,
+      };
+      if (report.pushesAbandoned > 0 || report.criticalMessagesLost > 0) {
+        log(
+          `[worker] shutdown INCOMPLETE: ${report.pushesAbandoned} result push(es) abandoned after ` +
+            `${Math.round(timeoutMs / 1000)}s and ${report.criticalMessagesLost} undelivered ` +
+            `exit/assign_failed message(s) lost (the queue is in memory only). The board will fall ` +
+            `back to its disconnect grace for those sessions.`,
+        );
+      } else {
+        log(`[worker] drained cleanly: ${report.pushesCompleted} result push(es) completed`);
+      }
       try { ws?.close(); } catch { /* already closed */ }
       ws = null;
+      return report;
     },
   };
 }

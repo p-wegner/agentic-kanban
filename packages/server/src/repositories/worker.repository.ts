@@ -39,6 +39,34 @@ export async function updateWorkerStatus(
   await database.update(workers).set({ status, updatedAt: at }).where(eq(workers.id, id));
 }
 
+/**
+ * Re-declared capabilities for an already-paired worker (#754).
+ *
+ * They used to travel ONLY at first registration, and the daemon skips registration once
+ * paired — so re-running `start --labels docker --max-concurrency 4` changed nothing on
+ * the board while the local runner enforced the NEW ceiling. Board and worker then
+ * disagreed about the same machine, and `ak-worker-service.ps1 -Install` wrote the flags
+ * into config.json as if reinstalling had updated them.
+ *
+ * Only the fields the worker actually declared are written: a worker that passes no
+ * `--labels` is saying nothing about labels, not "I have none".
+ */
+export async function updateWorkerCapabilities(
+  id: string,
+  capabilities: { labels?: string[]; providers?: string[]; maxConcurrency?: number },
+  at: string,
+  database: Database = db,
+): Promise<void> {
+  const patch: Partial<NewWorkerRow> = {};
+  if (capabilities.labels !== undefined) patch.labels = JSON.stringify(capabilities.labels);
+  if (capabilities.providers !== undefined) patch.providers = JSON.stringify(capabilities.providers);
+  if (capabilities.maxConcurrency !== undefined && capabilities.maxConcurrency > 0) {
+    patch.maxConcurrency = capabilities.maxConcurrency;
+  }
+  if (Object.keys(patch).length === 0) return;
+  await database.update(workers).set({ ...patch, updatedAt: at }).where(eq(workers.id, id));
+}
+
 export async function deleteWorker(id: string, database: Database = db): Promise<void> {
   await database.delete(workers).where(eq(workers.id, id));
 }

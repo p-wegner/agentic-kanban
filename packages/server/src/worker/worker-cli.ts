@@ -53,6 +53,30 @@ function resolveVersion(): string {
   return "unknown";
 }
 
+/**
+ * #754 — a daemon that dies takes every agent on this machine with it.
+ *
+ * There was no top-level handler anywhere in the worker entry, so ANY unhandled error —
+ * an EPIPE on an agent's stdin being the concrete case that motivated this — terminated
+ * the process and orphaned every running session. A long-running process on someone
+ * else's machine has to prefer "log it and keep going" to "exit clean": whatever is
+ * broken, the other sessions on this worker are not, and their results are still owed to
+ * the board.
+ *
+ * Deliberately NOT a silent swallow: the stack is printed in full, because the failure
+ * this protects against is also the failure someone will have to diagnose from a log tail.
+ */
+function installProcessGuards(): void {
+  process.on("uncaughtException", (err) => {
+    console.error("[worker] uncaught exception (daemon staying up — running agents keep their sessions):", err);
+  });
+  process.on("unhandledRejection", (reason) => {
+    console.error("[worker] unhandled rejection (daemon staying up):", reason);
+  });
+}
+
+installProcessGuards();
+
 const program = new Command();
 
 program

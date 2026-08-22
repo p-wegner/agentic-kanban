@@ -103,8 +103,11 @@ agentic-kanban worker list
 ```
 
 The pairing token is exchanged for a per-worker bearer token stored in
-`~/.agentic-kanban/worker-state.json`, so later runs need no `--token`. Do not hand-edit
-that file — to re-pair, revoke the worker on the board and start again with a fresh token.
+`~/.agentic-kanban/worker-state.json`, so later runs need no `--token`. Do not hand-edit that
+file — to re-pair, revoke the worker on the board and start again with a fresh `--token`. That
+advice **now actually works** (#754): the daemon drops the stale pairing itself on the first
+401, which is what made it impossible before — the same line told you to re-pair with a token
+that "is ignored once paired".
 
 `agentic-kanban-worker` is the standalone binary for machines with no board: it loads
 only the daemon and never opens or creates a database. On a machine that also runs the
@@ -128,11 +131,23 @@ picks a worker:
 | `--max-concurrency 2` | How many sessions this machine will take | Enforced on both sides: the board counts a delivered `assign` as an occupied slot immediately, and the worker enforces its own ceiling rather than trusting the assigner |
 | `--shares-filesystem` | This worker sees the board's disk (same machine) | Skips git transport; the agent runs in the board's own worktree. Wrong across machines |
 
-Capabilities are captured at first registration. Changing `--labels`/`--providers` later
-does not update the board's record — revoke and re-pair to change them.
+Capabilities ride **every heartbeat**, not just the first registration (#754), so changing
+`--labels` / `--providers` / `--max-concurrency` and restarting the daemon updates the board
+within one beat — no revoke-and-re-pair. Before that fix they travelled only at registration,
+which the daemon SKIPS once paired: re-running `start --labels docker --max-concurrency 4`
+changed nothing on the board while the local runner enforced the new ceiling, so board and
+worker silently disagreed about the same machine (and `ak-worker-service.ps1 -Install` wrote
+the flags to `config.json` as if reinstalling had applied them).
+
+A capability the worker does not pass is left **unchanged**, not cleared: no `--labels` means
+"saying nothing about labels", not "I have none".
 
 A worker reads `offline` once its heartbeat is older than 90 s
 (`WORKER_HEARTBEAT_STALE_MS`); the daemon heartbeats every 30 s.
+
+`worker list` on the board shows each worker's `protocol=` and `build=` — the protocol it
+last reported and its package version. `?` means it has not heartbeated since this board
+process started (the values are held in memory, not in a column), not that it is old.
 
 ## 5. Opting a project in, and strict dispatch
 
@@ -359,6 +374,90 @@ offline so session finalization is not lost. The limits of that, precisely:
   still running on the worker. A gap longer than a minute therefore destroys the run rather
   than pausing it. That is a known defect, not intended behaviour.
 
+### Stopping a worker without losing work (#754)
+
+**Ctrl+C now drains.** `worker start` waits for the results of agents it just killed to
+finish pushing before the process exits, announces `draining` to the board first so no new
+session is placed into a dying daemon, and prints what it saved:
+
+```
+[worker] shutting down
+[worker] drained cleanly: 1 result push(es) completed
+```
+
+`--drain-timeout <seconds>` (default 30) bounds the wait; a second Ctrl+C exits immediately.
+The exit code is 0 when nothing was lost and 1 when something was, so a supervisor can tell.
+
+Before this, `stop()` was synchronous and the CLI called `process.exit(0)` straight after —
+so with the agents killed the process was gone before their exit handlers could push, and a
+**completed** agent's work was reported to the board as a failure 60 s later, via the
+disconnect grace.
+
+**What a drain can and cannot save.** Be precise about this, because the queue is the part
+that looks safer than it is:
+
+| Situation | Saved? |
+|---|---|
+| An agent finished, its push is in flight when you hit Ctrl+C | **Yes** — waited for, up to `--drain-timeout` |
+| An agent finished, its push needs longer than the timeout | **No.** Reported as `pushes abandoned`, exit code 1. The commit is still in the worker's checkout under `~/.agentic-kanban/worker/checkouts/<sessionId>` |
+| Queued `exit`/`assign_failed` frames, socket UP at shutdown | **Yes** — flushed before the socket closes |
+| Queued frames, socket DOWN at shutdown | **No.** The queue is in memory only (cap 200) and dies with the process; the board falls back to its 60 s grace |
+| More than 200 queued frames during a long outage | **No** — the excess was already dropped at enqueue time, before any shutdown |
+| `--leave-agents`: an agent still running at exit | **No, and this is the trap.** The agent survives, but the mapping from session to checkout lives in the dead daemon's memory, so **no future daemon can push its result.** The runbook's "leaves them alive" is only true for same-filesystem workers; for a git-transport session the work is stranded on disk. The daemon now says so at exit |
+
+Persisting the session→checkout mapping so a restarted daemon could adopt and push an
+orphaned result is **not implemented**, and deliberately not a quick win: the push needs the
+assignment's git token, and #753 just made that token die with its session — writing it to
+disk would undo that. The fix is for a restarted daemon to ask the board for a fresh token
+for a session it can prove it owns, which is a protocol addition.
+
+**Planned restart, no loss:** there is no `worker drain` verb (it would need the worker's own
+bearer token, which only the daemon has). A clean stop is `Ctrl+C` / `SIGTERM` — which
+announces `draining` and waits — then start the new build.
+
+### When a worker will never connect (#754)
+
+Two failures used to look exactly like a bad network, and both now stop with a reason:
+
+- **A 401** (revoked worker, or the board's DB was reset) is no longer retried every 30 s
+  forever. With `--token` the daemon drops the stale pairing from `worker-state.json` and
+  re-pairs — the recovery the runbook always described but the code could not perform,
+  because that file blocked it. Without `--token`, or after `MAX_REPAIR_ATTEMPTS` (2), it
+  **exits 2** and names the fix. A pairing token is single-use, so repeated rejection is not
+  something another token cures.
+- **A protocol mismatch** answers **409**, which the daemon treats as terminal rather than
+  retryable, and the message says which side to upgrade. See below.
+
+An unhandled error no longer takes the daemon down either: the entry installs
+`uncaughtException`/`unhandledRejection` handlers that log and keep running, and every
+agent's stdin has an `error` listener. An EPIPE there — an agent exiting before it drains a
+large prompt, i.e. the runbook's own "starts then fails immediately" case — used to kill the
+daemon and orphan **every other agent on the machine**, because an unhandled stream `error`
+is a process-level uncaught exception.
+
+### Protocol versions (#754)
+
+The daemon and the board each state a protocol version (`WORKER_PROTOCOL_VERSION`), in
+`register` and in every `hello` and heartbeat. Before this there was no version at all and an
+unknown message type was dropped as "malformed", so board/worker skew — the normal case with
+hand-copied dev tarballs — failed as a *silence*.
+
+| The worker says | The board does |
+|---|---|
+| The current version | Accepts |
+| **Nothing** (a build older than the handshake) | **Accepts.** It speaks exactly protocol 1, because protocol 1 *is* the wire format as it stood when the handshake was added. Refusing a machine that works, on a fleet where the worker is someone else's computer, would be a cost with no benefit |
+| A version older than `MIN_SUPPORTED_WORKER_PROTOCOL_VERSION` | Refuses: 409, "UPGRADE THE WORKER", with the `pack-worker.mjs` command |
+| A version newer than the board | Refuses: 409, "UPGRADE THE BOARD" |
+
+The compatibility window closes on its own at the first real bump: raise `MIN_SUPPORTED` to 2
+and every version-less worker is refused *then*, with a message naming the fix. A worker that
+heartbeats an incompatible version is marked `offline` immediately, which is how the refusal
+reaches the scheduler — `eligibleWorkers` already skips anything not effectively online, so no
+dispatch path needs to know about versions.
+
+A version column on `workers` (and the panel showing it) is **not implemented**; the values
+live in board memory and are re-learned within 30 s of a restart.
+
 ## 10. Reference
 
 - Design record: [decisions/012-worker-fleet-compute-model.md](decisions/012-worker-fleet-compute-model.md)
@@ -368,4 +467,5 @@ offline so session finalization is not lost. The limits of that, precisely:
 - Board-side modules: `services/worker-{registry,connection,fleet}.service.ts`,
   `services/agent-{dispatch,remote}.service.ts`, `services/git-http.service.ts`,
   `services/fleet-listener.service.ts`, `startup/worker-incoming-sweep.ts`
-- Worker-side modules: `worker/worker-{cli,daemon,agent-runner,repo}.ts`
+- Worker-side modules: `worker/worker-{cli,daemon,agent-runner,repo,command-resolver}.ts`
+- Wire protocol (both sides): `packages/shared/src/lib/worker-protocol.ts`
