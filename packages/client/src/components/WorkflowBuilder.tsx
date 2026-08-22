@@ -26,44 +26,44 @@ import {
   undoWorkflowHistory,
   type WorkflowHistoryState,
 } from "../lib/workflowHistory.js";
-
-const NODE_TYPES = ["start", "normal", "parallel-fork", "parallel-join", "end"] as const;
-const EDGE_CONDITIONS = ["manual", "auto_on_exit_0", "tests_pass", "tests_fail", "diff_clean", "diff_touches"] as const;
-
-const NODE_COLORS: Record<string, string> = {
-  start: "#dcfce7",
-  normal: "#eff6ff",
-  "parallel-fork": "#f3e8ff",
-  "parallel-join": "#f3e8ff",
-  end: "#e5e7eb",
-};
+import {
+  cloneEdges,
+  cloneNodes,
+  sameNodePositions,
+  type EdgeData,
+  type NodeData,
+  type WorkflowSnapshot,
+} from "../lib/workflowGraphSnapshot.js";
+import {
+  NODE_COLORS,
+  NODE_TYPES,
+  defaultStatus,
+  nodeStyle,
+  nodeTypeLabel,
+} from "../lib/workflowNodePresentation.js";
+import {
+  EDGE_CONDITIONS,
+  edgeConditionBase,
+  edgeLabel,
+  readDiffTouchesGlob,
+  writeDiffTouchesCondition,
+} from "../lib/workflowEdgeCondition.js";
+import {
+  AGENT_PROVIDERS,
+  readAgentField,
+  readForkMaxParallel,
+  readForkMode,
+  readGuidance,
+  readJoinStrategy,
+  writeAgentField,
+  writeForkMaxParallel,
+  writeForkMode,
+  writeGuidance,
+  writeJoinStrategy,
+} from "../lib/workflowNodeConfig.js";
 
 interface Skill { id: string; name: string }
 interface StatusOpt { id: string; name: string }
-
-type NodeData = {
-  label: string;
-  nodeType: string;
-  statusName: string | null;
-  skillId: string | null;
-  skillName: string | null;
-  maxVisits: number;
-  config: string | null;
-};
-
-type WorkflowSnapshot = {
-  nodes: Node<NodeData>[];
-  edges: Edge[];
-  selectedNodeId: string | null;
-  selectedEdgeId: string | null;
-};
-
-/** Arbitrary data carried on a react-flow edge in this builder. */
-type EdgeData = {
-  label: string | null;
-  condition: string;
-  isLoop: boolean;
-};
 
 /** A workflow-node row as returned by GET /api/workflows/templates/:id. */
 type WorkflowTemplateNode = {
@@ -304,7 +304,7 @@ export function WorkflowBuilder({
       {
         id,
         position: { x: 80 + Math.random() * 120, y: 60 + nds.length * 30 },
-        data: { label: cap(type), nodeType: type, statusName: defaultStatus(type), skillId: null, skillName: null, maxVisits: 0, config: null },
+        data: { label: nodeTypeLabel(type), nodeType: type, statusName: defaultStatus(type), skillId: null, skillName: null, maxVisits: 0, config: null },
         style: nodeStyle(type),
       },
     ]);
@@ -479,7 +479,7 @@ export function WorkflowBuilder({
           <div className="text-[11px] uppercase text-gray-400 mb-1">Add node</div>
           {NODE_TYPES.map((t) => (
             <button key={t} onClick={() => addNode(t)} className="w-full text-left text-xs px-2 py-1 rounded border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800" style={{ borderLeft: `4px solid ${NODE_COLORS[t]}` }}>
-              + {cap(t)}
+              + {nodeTypeLabel(t)}
             </button>
           ))}
           <div className="text-[11px] text-gray-400 pt-2">Drag from a node's handle to connect. Click a node/edge to edit.</div>
@@ -654,141 +654,4 @@ export function WorkflowBuilder({
       </div>
     </div>
   );
-}
-
-/** Read the join strategy from a node's JSON config (defaults to "artifacts"). */
-function readJoinStrategy(config: string | null): string {
-  if (!config) return "artifacts";
-  try { return (JSON.parse(config) as { joinStrategy?: string }).joinStrategy === "merge" ? "merge" : "artifacts"; }
-  catch { return "artifacts"; }
-}
-/** Write the join strategy into a node's JSON config, preserving other keys. */
-function writeJoinStrategy(config: string | null, strategy: string): string | null {
-  let obj: Record<string, unknown> = {};
-  if (config) { try { obj = JSON.parse(config) as Record<string, unknown>; } catch { obj = {}; } }
-  if (strategy === "merge") obj.joinStrategy = "merge"; else delete obj.joinStrategy;
-  return Object.keys(obj).length ? JSON.stringify(obj) : null;
-}
-
-/** Read the guidance string from a node's JSON config (defaults to ""). */
-function readGuidance(config: string | null): string {
-  if (!config) return "";
-  try { return (JSON.parse(config) as { guidance?: string }).guidance ?? ""; }
-  catch { return ""; }
-}
-/** Write the guidance string into a node's JSON config, preserving other keys. */
-function writeGuidance(config: string | null, value: string): string | null {
-  let obj: Record<string, unknown> = {};
-  if (config) { try { obj = JSON.parse(config) as Record<string, unknown>; } catch { obj = {}; } }
-  if (value) obj.guidance = value; else delete obj.guidance;
-  return Object.keys(obj).length ? JSON.stringify(obj) : null;
-}
-
-const AGENT_PROVIDERS = ["claude", "codex", "copilot", "pi"] as const;
-
-/** Read the fork's maxParallel from its JSON config ("" = use the global default). */
-function readForkMaxParallel(config: string | null): string {
-  if (!config) return "";
-  try {
-    const value = (JSON.parse(config) as { maxParallel?: unknown }).maxParallel;
-    return typeof value === "number" && value >= 1 ? String(value) : "";
-  } catch { return ""; }
-}
-/** Write the fork's maxParallel into its JSON config, preserving other keys. */
-function writeForkMaxParallel(config: string | null, raw: string): string | null {
-  let obj: Record<string, unknown> = {};
-  if (config) { try { obj = JSON.parse(config) as Record<string, unknown>; } catch { obj = {}; } }
-  const n = Math.floor(Number(raw));
-  if (Number.isFinite(n) && n >= 1) obj.maxParallel = n; else delete obj.maxParallel;
-  return Object.keys(obj).length ? JSON.stringify(obj) : null;
-}
-
-/** Read one field of the node's `agent` override from its JSON config (defaults to ""). */
-function readAgentField(config: string | null, field: "provider" | "profile" | "model"): string {
-  if (!config) return "";
-  try {
-    const agent = (JSON.parse(config) as { agent?: Record<string, unknown> }).agent;
-    const value = agent?.[field];
-    return typeof value === "string" ? value : "";
-  } catch { return ""; }
-}
-/** Write one field of the node's `agent` override into its JSON config, preserving other keys. */
-function writeAgentField(config: string | null, field: "provider" | "profile" | "model", value: string): string | null {
-  let obj: Record<string, unknown> = {};
-  if (config) { try { obj = JSON.parse(config) as Record<string, unknown>; } catch { obj = {}; } }
-  const agent = typeof obj.agent === "object" && obj.agent !== null ? { ...(obj.agent as Record<string, unknown>) } : {};
-  if (value) agent[field] = value; else delete agent[field];
-  if (Object.keys(agent).length) obj.agent = agent; else delete obj.agent;
-  return Object.keys(obj).length ? JSON.stringify(obj) : null;
-}
-
-/** Read the fork mode from a node's JSON config (defaults to "worktree"). */
-function readForkMode(config: string | null): string {
-  if (!config) return "worktree";
-  try { return (JSON.parse(config) as { forkMode?: string }).forkMode === "shared" ? "shared" : "worktree"; }
-  catch { return "worktree"; }
-}
-/** Write the fork mode into a node's JSON config, preserving other keys. */
-function writeForkMode(config: string | null, mode: string): string | null {
-  let obj: Record<string, unknown> = {};
-  if (config) { try { obj = JSON.parse(config) as Record<string, unknown>; } catch { obj = {}; } }
-  if (mode === "shared") obj.forkMode = "shared"; else delete obj.forkMode;
-  return Object.keys(obj).length ? JSON.stringify(obj) : null;
-}
-
-function cap(s: string) { return s.charAt(0).toUpperCase() + s.slice(1).replace(/-/g, " "); }
-function edgeConditionBase(condition: string): string {
-  const idx = condition.indexOf(":");
-  return idx === -1 ? condition : condition.slice(0, idx);
-}
-function readDiffTouchesGlob(condition: string): string {
-  return edgeConditionBase(condition) === "diff_touches" ? condition.slice("diff_touches:".length) : "";
-}
-function writeDiffTouchesCondition(glob: string): string {
-  return `diff_touches:${glob}`;
-}
-function defaultStatus(type: string): string | null {
-  if (type === "start") return "In Progress";
-  if (type === "end") return "Done";
-  if (type === "normal") return "In Progress";
-  return "In Review";
-}
-function edgeLabel(label: string | null | undefined, condition: string | null | undefined): string {
-  const parts = [label, condition && condition !== "manual" ? `[${condition}]` : ""].filter(Boolean);
-  return parts.join(" ") || "manual";
-}
-function nodeStyle(type: string) {
-  return {
-    background: NODE_COLORS[type] ?? "#fff",
-    border: "1px solid #94a3b8",
-    borderRadius: 8,
-    fontSize: 12,
-    padding: 6,
-    color: "#111",
-  };
-}
-
-function cloneNodes(nodes: Node<NodeData>[]): Node<NodeData>[] {
-  return nodes.map((node) => ({
-    ...node,
-    position: { ...node.position },
-    data: { ...node.data },
-    style: node.style ? { ...node.style } : node.style,
-  }));
-}
-
-function cloneEdges(edges: Edge[]): Edge[] {
-  return edges.map((edge) => ({
-    ...edge,
-    data: edge.data ? { ...edge.data } : edge.data,
-  }));
-}
-
-function sameNodePositions(a: Node<NodeData>[], b: Node<NodeData>[]): boolean {
-  if (a.length !== b.length) return false;
-  const byId = new Map(b.map((node) => [node.id, node]));
-  return a.every((node) => {
-    const other = byId.get(node.id);
-    return other?.position.x === node.position.x && other.position.y === node.position.y;
-  });
 }
