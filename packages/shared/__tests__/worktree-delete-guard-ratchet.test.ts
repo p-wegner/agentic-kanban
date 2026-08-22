@@ -88,8 +88,14 @@ const WORKTREE_PATH_EXPR = /work(ing)?[_]?dir|worktree/i;
  *    co-residency is a property of the latter.
  *  - INSIDE THE GUARDED HELPER — the fs-level fallbacks that a guarded caller reaches
  *    THROUGH `removeWorktreeAndBranch`; guarding them again would double-query.
- *  - TO CONVERT — a genuine workspace-`workingDir` delete that still needs routing. These
- *    are the remainder #713 deliberately discloses rather than leaving implied.
+ *
+ * There is no longer a **TO CONVERT** kind. #713 landed the guard at 6 of 9 sites and pinned
+ * the remaining 3 here; #735 converted all three (the project worktree-panel prune, the
+ * startup stale-worktree sweep, and the orphaned-worktree reconciler — the last of which had
+ * its own claim analysis, whose one genuinely stronger rule was absorbed into the guard as
+ * `findLiveBranchHolders` rather than dropped). Every entry that remains is a kind that is
+ * MEANT to stay: adding a "TO CONVERT" entry back is a claim that a new workspace-`workingDir`
+ * delete needs routing, and it should be routed instead.
  */
 const BASELINE: Readonly<Record<string, number>> = {
   // THE GUARD ITSELF — `await args.removeWorktree()` is the guarded invocation, reached only
@@ -109,10 +115,6 @@ const BASELINE: Readonly<Record<string, number>> = {
   [rel("packages/server/src/services/workspace-repos.service.ts")]: 2,
   // OWN RESOURCE — a fork child's sub-worktree, torn down by the fork that created it.
   [rel("packages/server/src/services/workflow-fork.service.ts")]: 1,
-  // TO CONVERT — the orphaned-worktree reconciler. It has its own "nothing claims this"
-  // analysis, which is why it is not simply wrong today; it should still route through
-  // the one guard so both answers come from the same place.
-  [rel("packages/server/src/startup/orphaned-worktree-reconciler.ts")]: 1,
 };
 
 function rel(posixPath: string): string {

@@ -20,6 +20,7 @@ import { cleanupMergedWorktreeAndBranch } from "../services/merge-executor.servi
 import type { GitService } from "../services/workspace-internals.js";
 import {
   findLiveWorktreeSharers,
+  findLiveBranchHolders,
   removeWorktreeUnlessShared,
   resolveWorktreeClaims,
 } from "@agentic-kanban/shared/lib/worktree-claim";
@@ -222,6 +223,117 @@ describe("removeWorktreeUnlessShared — the co-residency delete guard", () => {
 
     expect(await findLiveWorktreeSharers(db, dir, { excludeWorkspaceId: id })).toHaveLength(0);
     expect(await findLiveWorktreeSharers(db, dir)).toHaveLength(1);
+  });
+});
+
+/**
+ * #735 — the branch-keyed half of the claim question, absorbed from
+ * `startup/orphaned-worktree-reconciler.ts` when its removal was routed through this guard.
+ *
+ * That reconciler's own analysis was STRONGER than this module's on exactly one point, and
+ * it is the unrecoverable direction: finishing a merge NULLS `workspaces.working_dir`
+ * (`finalizeMergeCleanup` → `clearWorkspaceWorkingDir`), so a live workspace can hold a
+ * worktree that no row names by PATH. `findLiveWorktreeSharers` sees nothing there. Rather
+ * than leave that reasoning in a second file — the drift this module exists to end — it lives
+ * here as an OPTIONAL `branch` argument, so the guard is a superset of the reconciler's rules
+ * and the callers that delete a directory their own row still names are untouched.
+ */
+describe("removeWorktreeUnlessShared — the branch-keyed claim (#735)", () => {
+  async function seedOnBranch(db: TestDb, issueId: string, status: string, workingDir: string | null, branch: string): Promise<string> {
+    const now = new Date().toISOString();
+    const id = randomUUID();
+    await db.insert(workspaces).values({
+      id, issueId, branch, status, workingDir, isDirect: false, createdAt: now, updatedAt: now,
+    });
+    return id;
+  }
+
+  it("REFUSES when a LIVE workspace holds the branch, even though no row names the path", async () => {
+    const { db } = createTestDb();
+    const issueId = await seedIssue(db);
+    await seedOnBranch(db, issueId, "active", null, "feature/ak-42-live");
+    const removeWorktree = vi.fn(async () => {});
+
+    const outcome = await removeWorktreeUnlessShared({
+      database: db, workingDir: "/tmp/claim-repo/.worktrees/ak-42",
+      branch: "feature/ak-42-live", label: "test", removeWorktree,
+    });
+
+    expect(outcome).toMatchObject({ removed: false, reason: "branch-claimed" });
+    expect(removeWorktree).not.toHaveBeenCalled();
+  });
+
+  it("does NOT refuse for a TERMINAL branch holder — that is the #361 orphan being swept", async () => {
+    const { db } = createTestDb();
+    const issueId = await seedIssue(db);
+    await seedOnBranch(db, issueId, "closed", null, "feature/ak-43-merged");
+    const removeWorktree = vi.fn(async () => {});
+
+    const outcome = await removeWorktreeUnlessShared({
+      database: db, workingDir: "/tmp/claim-repo/.worktrees/ak-43",
+      branch: "feature/ak-43-merged", label: "test", removeWorktree,
+    });
+
+    expect(outcome.removed).toBe(true);
+  });
+
+  it("is INERT when no branch is passed — the six #713 call sites keep their exact behaviour", async () => {
+    const { db } = createTestDb();
+    const issueId = await seedIssue(db);
+    await seedOnBranch(db, issueId, "active", null, "feature/ak-44-live");
+    const removeWorktree = vi.fn(async () => {});
+
+    const outcome = await removeWorktreeUnlessShared({
+      database: db, workingDir: "/tmp/claim-repo/.worktrees/ak-44", label: "test", removeWorktree,
+    });
+
+    expect(outcome.removed).toBe(true);
+  });
+
+  it("never counts the workspace itself as its own branch holder", async () => {
+    const { db } = createTestDb();
+    const issueId = await seedIssue(db);
+    const id = await seedOnBranch(db, issueId, "active", null, "feature/ak-45-self");
+
+    expect(await findLiveBranchHolders(db, "feature/ak-45-self", { excludeWorkspaceId: id })).toHaveLength(0);
+    expect(await findLiveBranchHolders(db, "feature/ak-45-self")).toHaveLength(1);
+  });
+
+  it("an EMPTY branch matches nothing — a detached HEAD is not claimed by every blank row", async () => {
+    const { db } = createTestDb();
+    const issueId = await seedIssue(db);
+    await seedOnBranch(db, issueId, "active", null, "");
+
+    expect(await findLiveBranchHolders(db, "")).toHaveLength(0);
+    expect(await findLiveBranchHolders(db, "   ")).toHaveLength(0);
+  });
+
+  it("FAILS CLOSED: a broken branch read refuses instead of removing", async () => {
+    const removeWorktree = vi.fn(async () => {});
+    // The path query must succeed and the BRANCH query fail, so the refusal is provably the
+    // branch check's. `selectWorkingDirClaims` filters `isNotNull(working_dir)` in memory,
+    // so a row set with no workingDir answers the first query with "no sharers".
+    let call = 0;
+    const db = {
+      select: () => ({
+        from: () => ({
+          where: async () => {
+            call += 1;
+            if (call === 1) return [];
+            throw new Error("database is locked");
+          },
+        }),
+      }),
+    } as unknown as TestDb;
+
+    const outcome = await removeWorktreeUnlessShared({
+      database: db, workingDir: "/tmp/claim-repo/.worktrees/ak-46",
+      branch: "feature/ak-46", label: "test", removeWorktree,
+    });
+
+    expect(outcome).toMatchObject({ removed: false, reason: "claim-check-failed" });
+    expect(outcome).toHaveProperty("message", expect.stringContaining("holds branch feature/ak-46"));
+    expect(removeWorktree).not.toHaveBeenCalled();
   });
 });
 

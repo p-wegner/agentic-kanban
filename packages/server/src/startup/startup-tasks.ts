@@ -637,9 +637,10 @@ export async function pruneOrphanedWorktrees(): Promise<void> {
         baseBranch: project.defaultBranch || "master",
         claims,
         git: realGitService,
+        database: db,
       });
-      if (report.removed.length > 0 || report.keptWithUnshippedWork.length > 0) {
-        console.log(`[startup] orphaned worktrees for project '${project.name}': removed ${report.removed.length}, kept (unshipped work) ${report.keptWithUnshippedWork.length}`);
+      if (report.removed.length > 0 || report.keptWithUnshippedWork.length > 0 || report.keptClaimed.length > 0) {
+        console.log(`[startup] orphaned worktrees for project '${project.name}': removed ${report.removed.length}, kept (unshipped work) ${report.keptWithUnshippedWork.length}, kept (still claimed) ${report.keptClaimed.length}`);
       }
 
       // #630: the sweep above only ever looked at the LEADING repo, so for a multi-repo
@@ -693,11 +694,13 @@ export async function pruneOrphanedSiblingWorktrees(
         baseBranch: repo.defaultBranch || "master",
         claims,
         git,
+        database,
       });
-      if (report.removed.length > 0 || report.keptWithUnshippedWork.length > 0) {
+      if (report.removed.length > 0 || report.keptWithUnshippedWork.length > 0 || report.keptClaimed.length > 0) {
         console.log(
           `[startup] orphaned SIBLING worktrees in '${repo.name ?? repo.path}' (project '${project.name}'): ` +
-            `removed ${report.removed.length}, kept (unshipped work) ${report.keptWithUnshippedWork.length}`,
+            `removed ${report.removed.length}, kept (unshipped work) ${report.keptWithUnshippedWork.length}, ` +
+            `kept (still claimed) ${report.keptClaimed.length}`,
         );
       }
     } catch (err) {
