@@ -35,7 +35,7 @@ source: "packages/client/src, packages/server/src, packages/mcp-server/src, docs
 
 | Requirement | Version | Install |
 |-------------|---------|---------|
-| [Node.js](https://nodejs.org/) | 20.11+ (LTS 20/22) | `winget install OpenJS.NodeJS.LTS` |
+| [Node.js](https://nodejs.org/) | 22+ (LTS 22 recommended) | `winget install OpenJS.NodeJS.LTS` |
 | [pnpm](https://pnpm.io/) | 10.12.1 | `corepack enable && corepack prepare pnpm@10.12.1 --activate` |
 | [Git](https://git-scm.com/) | 2.20+ | `winget install Git.Git` |
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | latest | `npm install -g @anthropic-ai/claude-code` |
@@ -888,7 +888,7 @@ pnpm --filter @agentic-kanban/shared build
 
 ### Backend hangs (proxy up, nothing on :3001)
 
-`tsx watch` + Node 23.x hangs on Windows. Use Node LTS 20/22.
+`tsx watch` + Node 23.x hangs on Windows. Use Node LTS 22.
 
 ### DB looks empty / wrong project
 

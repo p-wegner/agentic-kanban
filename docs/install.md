@@ -4,12 +4,12 @@
 
 | Requirement | Version | Install |
 |-------------|---------|---------|
-| [Node.js](https://nodejs.org/) | 20.11+ (LTS 20/22) | `winget install OpenJS.NodeJS.LTS` |
+| [Node.js](https://nodejs.org/) | 22+ (LTS 22 recommended) | `winget install OpenJS.NodeJS.LTS` |
 | [pnpm](https://pnpm.io/) | 10.12.1 | `corepack enable && corepack prepare pnpm@10.12.1 --activate` |
 | [Git](https://git-scm.com/) | 2.20+ | `winget install Git.Git` |
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | latest | `npm install -g @anthropic-ai/claude-code` |
 
-> Node.js **LTS 20 or 22** is recommended. Node 23.x has a known issue where `tsx watch` of the full server hangs on Windows (see gotcha #3 below).
+> Node.js **LTS 22** is the supported floor (`engines.node` = `>=22`, and both Dockerfile stages run `node:22-bookworm-slim`). Node 20 reached end of support on 2026-04-30 and is no longer supported here. Avoid odd-numbered releases: Node 23.x has a known issue where `tsx watch` of the full server hangs on Windows (see gotcha #3 below).
 
 ### Verify
 
@@ -99,7 +99,7 @@ If you still see it, pnpm itself is missing from PATH entirely: `corepack enable
 
 **Symptom:** `[dev-proxy] API proxy listening at http://127.0.0.1:3001 → 13001` is logged but `/api/projects` hangs.
 
-**Cause:** `tsx watch` of the full server hangs on Windows with Node 23.x. Plain `tsx` works; Node LTS 20/22 avoids the issue.
+**Cause:** `tsx watch` of the full server hangs on Windows with Node 23.x. Plain `tsx` works; Node LTS 22 avoids the issue.
 
 **Workaround:** run backend without watch (loses hot-reload):
 
