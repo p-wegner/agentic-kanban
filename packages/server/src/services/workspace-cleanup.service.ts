@@ -26,6 +26,7 @@ import { cleanupSiblingWorktrees } from "./workspace-repos.service.js";
 import { reapWorkspaceContainer } from "./devcontainer-workspace.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { isInsideManagedWorktreesRoot } from "@agentic-kanban/shared/lib/git-service";
+import { removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
 
 
 
@@ -215,17 +216,25 @@ export function createWorkspaceCleanupService(deps: {
     // workingDir. Deleting the directory out from under it would pull the rug on a still-live
     // agent — `deleteWorkspace` already guards this (workspace-crud.service.ts); stale-worktree
     // cleanup must too (#673), since it removes the same directory with no such check today.
-    const sharers = (await crudRepo.findWorkspacesByWorkingDir(workspace.workingDir, database))
-      .filter((row) => row.id !== workspaceId && row.status !== "closed");
-    if (sharers.length > 0) {
-      return { success: false, error: `Worktree ${workspace.workingDir} is still referenced by ${sharers.length} other workspace(s) — skipping removal` };
-    }
-
-    try {
-      await gitService.removeWorktree(repoPath, workspace.workingDir);
-    } catch (err) {
-      const message = errorMessage(err);
-      return { success: false, error: `Failed to remove worktree: ${message}` };
+    //
+    // #713: routed through the ONE guarded removal. This copy compared the literal `"closed"`
+    // instead of the shared liveness vocabulary, so it and the `deleteWorkspace` copy answered
+    // "is this sharer alive?" differently; `removeWorktreeUnlessShared` uses
+    // `holdsLiveResources` and also refuses when the sharer query itself fails.
+    const outcome = await removeWorktreeUnlessShared({
+      database,
+      workingDir: workspace.workingDir,
+      workspaceId,
+      label: "stale-worktree-cleanup",
+      removeWorktree: () => gitService.removeWorktree(repoPath, workspace.workingDir!),
+    });
+    if (!outcome.removed) {
+      return {
+        success: false,
+        error: outcome.reason === "remove-failed"
+          ? `Failed to remove worktree: ${errorMessage(outcome.error)}`
+          : outcome.message,
+      };
     }
 
     // Multi-repo: sibling worktrees + branches too (no-op single-repo). Stale

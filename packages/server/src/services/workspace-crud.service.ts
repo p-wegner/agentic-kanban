@@ -29,7 +29,7 @@ import { releaseWorkspaceResources } from "./workspace-resource-release.js";
 import { resolveProjectDevServerPlan } from "./dev-server.service.js";
 import { isSelfProjectRepo } from "./self-project.js";
 import type { WorkspaceDevServerPlanResponse } from "@agentic-kanban/shared";
-import { resolveWorktreeClaims } from "@agentic-kanban/shared/lib/worktree-claim";
+import { resolveWorktreeClaims, removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
 
 export function createWorkspaceCrudService(deps: {
   database: Database;
@@ -73,24 +73,27 @@ export function createWorkspaceCrudService(deps: {
     // A shared-worktree fork child reuses its parent's workingDir. Never remove the
     // directory while another (e.g. the parent) workspace still points at it — this
     // row is already deleted above, so any match here is a genuine other sharer.
-    let sharedByOthers = false;
+    //
+    // #713: routed through the ONE guarded removal. This copy of the check was a bare
+    // `sharers.length > 0` — it counted a CLOSED sharer as live and so refused forever —
+    // and its sibling in workspace-cleanup compared the literal `"closed"` instead of the
+    // shared liveness vocabulary, so `merged` (and any future terminal status) disagreed
+    // between the two. `removeWorktreeUnlessShared` answers both with `holdsLiveResources`.
     if (workingDir && !isDirect && repoPath) {
-      const sharers = await crudRepo.findWorkspacesByWorkingDir(workingDir, database);
-      sharedByOthers = sharers.length > 0;
-      if (sharedByOthers) {
-        console.log(`[workspaces] worktree ${workingDir} still referenced by ${sharers.length} other workspace(s) — skipping removal`);
-      }
-    }
-
-    if (workingDir && !isDirect && repoPath && !sharedByOthers) {
-      await removeWorktreeAndBranch({
+      await removeWorktreeUnlessShared({
+        database,
         workingDir,
-        repoPath,
-        isDirect,
-        branch: wsRow[0]?.branch,
-        teardownScript: wsRow[0]?.teardownScript,
-        setupEnabled: wsRow[0]?.setupEnabled,
         workspaceId,
+        label: "delete-workspace",
+        removeWorktree: () => removeWorktreeAndBranch({
+          workingDir,
+          repoPath,
+          isDirect,
+          branch: wsRow[0]?.branch,
+          teardownScript: wsRow[0]?.teardownScript,
+          setupEnabled: wsRow[0]?.setupEnabled,
+          workspaceId,
+        }),
       });
     }
 
