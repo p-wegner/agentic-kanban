@@ -126,6 +126,7 @@ const cases = [
           KANBAN_MAIN_CHECKOUT: root,
           HOME: home,
           USERPROFILE: home,
+          KANBAN_DB_URL: "",
           DB_URL: "",
           AGENTIC_KANBAN_DIR: "",
         }, root);
@@ -162,7 +163,7 @@ const cases = [
         fs.mkdirSync(path.join(home, ".agentic-kanban"), { recursive: true });
         fs.writeFileSync(path.join(home, ".agentic-kanban", "kanban.db"), Buffer.alloc(16_384, 2));
 
-        const r = runHook(`pnpm ${"db" + ":reset"}`, { ...env, HOME: home, USERPROFILE: home, DB_URL: "", AGENTIC_KANBAN_DIR: "" }, root);
+        const r = runHook(`pnpm ${"db" + ":reset"}`, { ...env, HOME: home, USERPROFILE: home, KANBAN_DB_URL: "", DB_URL: "", AGENTIC_KANBAN_DIR: "" }, root);
 
         assert.equal(r.blocked, true, "expected the reset to stay blocked");
         assert.ok(
@@ -174,6 +175,88 @@ const cases = [
           false,
           "the home fallback must not be reached while a real in-checkout db exists",
         );
+      });
+    },
+  },
+  {
+    // #767: one notch narrower than #758. A leftover in-checkout DB that has been fully
+    // MIGRATED but holds zero rows is ~850 KB, so the #165 size floor waves it through — only
+    // CONTENT tells it apart from the real board, which is why the CLI resolver opens the DB
+    // read-only (`sqliteHasBoardContent`, #663) and why this hook now does too.
+    name: "a real-but-EMPTY in-checkout db is not the db in use (#767)",
+    run: () => {
+      const { DatabaseSync } = require("node:sqlite");
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "kanban-hook-empty-local-"));
+      try {
+        fs.mkdirSync(path.join(root, "packages", "server"), { recursive: true });
+        const local = path.join(root, "packages", "server", "kanban.db");
+        // page_size 16384 puts the file at 32768 bytes, well clear of the size floor, so
+        // content is the only thing that can decide this case.
+        const db = new DatabaseSync(local);
+        db.exec("pragma page_size=16384; vacuum; create table projects (id text primary key)");
+        db.close();
+        assert.ok(fs.statSync(local).size >= 12_288, "fixture must clear the #165 size floor");
+
+        const home = path.join(root, "home");
+        fs.mkdirSync(path.join(home, ".agentic-kanban"), { recursive: true });
+        fs.writeFileSync(path.join(home, ".agentic-kanban", "kanban.db"), Buffer.alloc(16_384, 1));
+
+        const r = runHook(`pnpm ${"db" + ":reset"}`, {
+          CLAUDE_PROJECT_DIR: root,
+          KANBAN_MAIN_CHECKOUT: root,
+          HOME: home,
+          USERPROFILE: home,
+          KANBAN_DB_URL: "",
+          DB_URL: "",
+          AGENTIC_KANBAN_DIR: "",
+        }, root);
+
+        assert.equal(r.blocked, true, "expected the reset to stay blocked");
+        assert.ok(
+          fs.existsSync(path.join(home, ".agentic-kanban", ".db-backups")),
+          "expected the REAL home database to be the thing backed up",
+        );
+        assert.equal(
+          fs.existsSync(path.join(root, "packages", "server", ".db-backups")),
+          false,
+          "a migrated-but-empty local db must not be treated as the database in use",
+        );
+        // The two rejection grounds lead to different remedies, so the message must say WHICH.
+        assert.match(r.stdout, /IS a real database, but holds no board content/);
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    },
+  },
+  {
+    // #767: `KANBAN_DB_URL` is the canonical name db-path.ts prefers; the hook read only the
+    // pre-rename `DB_URL`, so pinning the database the DOCUMENTED way was ignored and the
+    // guard's backup covered whatever its own candidate search landed on instead.
+    name: "an explicit KANBAN_DB_URL wins over a real in-checkout candidate (#767)",
+    run: () => {
+      withRealDbCheckout((root, env) => {
+        const pinned = path.join(root, "pinned", "kanban.db");
+        fs.mkdirSync(path.join(root, "pinned"), { recursive: true });
+        fs.writeFileSync(pinned, Buffer.alloc(16_384, 1));
+
+        const r = runHook(`pnpm ${"db" + ":reset"}`, {
+          ...env,
+          KANBAN_DB_URL: `file:${pinned.replace(/\\/g, "/")}`,
+          DB_URL: "",
+          AGENTIC_KANBAN_DIR: "",
+        }, root);
+
+        assert.equal(r.blocked, true, "expected the reset to stay blocked");
+        assert.ok(
+          fs.existsSync(path.join(root, "pinned", ".db-backups")),
+          "expected the KANBAN_DB_URL-pinned database to be the thing backed up",
+        );
+        assert.equal(
+          fs.existsSync(path.join(root, "packages", "server", ".db-backups")),
+          false,
+          "an explicit env pin must outrank the in-checkout candidate search",
+        );
+        assert.match(r.stdout, /resolved via DB_URL/);
       });
     },
   },
