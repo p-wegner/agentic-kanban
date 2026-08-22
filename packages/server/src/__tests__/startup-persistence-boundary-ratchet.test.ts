@@ -66,8 +66,12 @@ const DRIZZLE_BASELINE = new Set<string>([
   "drive-completion-reconciler.ts",
   "exit-workflow.ts",
   "hand-merged-branch-reconciler.ts",
-  // Added by the 2026-08-20/21 wave with nothing to notice it — the finding behind #715.
-  "install-staleness-reconciler.ts",
+  // `install-staleness-reconciler.ts` used to sit here — added by the 2026-08-20/21 wave with
+  // nothing to notice it, which is the finding behind #715. #714 then routed its queries
+  // through `repo.repository.ts` and its drizzle import is gone, so the entry is REMOVED
+  // rather than kept: a baseline that outlives its offender is the "stale entry" this suite's
+  // own second assertion exists to catch. It stays in DB_VALUE_BASELINE below — it still
+  // imports the `db` singleton, which is the wider half of the same breach.
   "merge-workflow.ts",
   "monitor-auto-start.ts",
   "monitor-backlog.ts",
