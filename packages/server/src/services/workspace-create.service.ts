@@ -30,7 +30,9 @@ import {
 } from "../repositories/workspace-provisioning.repository.js";
 import { warnIfBranchHeldByLiveWorkspace } from "./workspace-branch-holders.js";
 import { warnIfWorktreePathNotRegistered } from "./workspace-worktree-reconcile.js";
-import { claimBranchForCreate, releaseBranchForCreate } from "./workspace-branch-create-claim.js";
+import {
+  claimBranchForCreate, releaseBranchForCreate, worktreeClaimPath, type BranchCreateClaimToken,
+} from "./workspace-branch-create-claim.js";
 import type { ProviderName } from "./agent-provider.js";
 import {
   skippedSetupRun,
@@ -620,9 +622,9 @@ export function createWorkspaceCreateService(deps: {
     let siblingInstallTimeoutMs: number | undefined;
     // #630: whether the in-flight marker exists, so both exits can clear it exactly once.
     let provisioningMarked = false;
-    // #673: the branch a same-issue/same-branch create claim was taken on, so the `finally`
-    // below releases exactly the claim this call took (and only if it took one).
-    let claimedBranch: string | null = null;
+    // #673/#736: the token for the worktree-directory claim this call took, so the `finally`
+    // below releases exactly THIS claim — never a successor's, after a TTL takeover.
+    let createClaim: BranchCreateClaimToken | null = null;
 
     const phaseStart = Date.now();
     const timing = (phase: string, startMs: number) =>
@@ -640,23 +642,26 @@ export function createWorkspaceCreateService(deps: {
 
       t = Date.now();
       await assertNoOpenDirectWorkspaceForIssue(input.issueId);
-      // #673 item 1: claim (issueId, branch) BEFORE the DB-based live-workspace read below —
-      // that read is blind to a still-provisioning sibling create for 80s–8+ minutes (the
-      // workspace row lands only at the end of provisioning), which is exactly how #670 got
-      // two workspaces on one branch 9s apart. No `await` between resolving the branch and
-      // claiming it is what makes this atomic against another in-process create for the same
-      // (issueId, branch). Scoped to branch, not just issueId, so a deliberate second
-      // workspace for this issue on a DIFFERENT branch (provider showdown, #366) is untouched.
+      // #673 item 1: claim the WORKTREE DIRECTORY this create will provision BEFORE the
+      // DB-based live-workspace read below — that read is blind to a still-provisioning
+      // sibling create for 80s–8+ minutes, which is how #670 got two workspaces on one
+      // worktree 9s apart. No `await` between resolving the branch and claiming it is what
+      // makes this atomic against another in-process create for the same directory. #736:
+      // the key is the resolved `.worktrees/<repoDirName>/<leaf>` path (`project.repoPath`
+      // is already in hand, synchronously), so an explicit branch naming ANOTHER issue's
+      // number contends correctly too; a branch resolving to a DIFFERENT directory (provider
+      // showdown, #366) is still untouched.
       if (!isDirect) {
         const branchForClaim = input.branch || suggestBranchName(issue);
-        if (!claimBranchForCreate(input.issueId, branchForClaim)) {
+        const claimPath = worktreeClaimPath(project.repoPath, branchForClaim);
+        createClaim = claimBranchForCreate({ repoPath: project.repoPath, issueId: input.issueId, branch: branchForClaim });
+        if (!createClaim) {
           throw new WorkspaceError(
-            `A workspace creation is already in flight for issue ${input.issueId} on branch "${branchForClaim}". Same-issue/same-branch is never a deliberate second workspace — wait for the in-flight create to finish, or pass an explicit different branch to launch one on purpose.`,
+            `A workspace creation is already in flight for the worktree directory "${claimPath}", which issue ${input.issueId} on branch "${branchForClaim}" resolves to. Every branch of one issue collapses to that one directory (ak-<issue-number>), so two creates cannot provision it at once even when their branches deliberately differ. Wait for the in-flight create to finish; the next create then takes the "-2" alternative directory and can proceed.`,
             "CONFLICT",
-            { code: "BRANCH_CREATE_IN_FLIGHT", issueId: input.issueId, branch: branchForClaim },
+            { code: "BRANCH_CREATE_IN_FLIGHT", issueId: input.issueId, branch: branchForClaim, worktreePath: claimPath },
           );
         }
-        claimedBranch = branchForClaim;
         await warnIfBranchHeldByLiveWorkspace(branchForClaim, database);
       }
       timing("assert-no-open-direct", t);
@@ -963,9 +968,10 @@ export function createWorkspaceCreateService(deps: {
         claudeProfile, agentCommand, resolvedProvider, now,
       });
     } finally {
-      // #673: release exactly the (issueId, branch) claim this call took, on every exit path
-      // — success, a clean WorkspaceError refusal, or a handled create failure alike.
-      if (claimedBranch) releaseBranchForCreate(input.issueId, claimedBranch);
+      // #673: release exactly the claim this call took, on every exit path. #736: identified
+      // by TOKEN, so a create that hung past the TTL and was taken over releases nothing
+      // rather than freeing its successor's directory mid-provision.
+      releaseBranchForCreate(createClaim);
     }
   }
 
