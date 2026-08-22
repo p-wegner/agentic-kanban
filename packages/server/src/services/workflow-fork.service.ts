@@ -67,6 +67,7 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { slugify } from "@agentic-kanban/shared/lib/slugify";
 
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
+import { resolveWorktreeClaims } from "@agentic-kanban/shared/lib/worktree-claim";
 /** Default concurrency + timeout caps for parallel fork children (#82). */
 const MAX_CONCURRENT_PER_WORKSPACE = 2;
 const MAX_CONCURRENT_PER_PROJECT = 4;
@@ -243,7 +244,11 @@ export function createWorkflowForkService(deps: {
     const childBranch = persisted[0]?.branch ?? childBranchName(parent.branch, entry.name, sharedWorktree);
     const worktreePath = sharedWorktree
       ? (parent.workingDir ?? project.repoPath)
-      : await gitService.createWorktree(project.repoPath, childBranch, parent.branch);
+      // #713: DB-backed claim guard — a fork child's leaf can collide with a live
+      // sibling's, and the leftover-cleanup would otherwise delete it.
+      : await gitService.createWorktree(project.repoPath, childBranch, parent.branch, {
+        ...(await resolveWorktreeClaims(database, { label: "workflow-fork" })),
+      });
 
     const skillName = await injectNodeSkill(entry, worktreePath, project.repoPath);
     const transitions = await getOutgoingTransitions(database, entry.id);

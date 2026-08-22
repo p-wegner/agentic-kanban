@@ -64,6 +64,7 @@ import { runPreMergeGate } from "./pre-merge-gate.service.js";
 import { isPreMergeGateFailure } from "./workspace-merge-gate.js";
 import type { BoardEventSink } from "./board-events.js";
 import type { SessionLauncher } from "./session.manager.js";
+import { resolveWorktreeClaims } from "@agentic-kanban/shared/lib/worktree-claim";
 
 export interface WorkspaceConflictPreview {
   workspaceId: string;
@@ -589,7 +590,12 @@ export function createMergeQueueService(deps: {
           // how two individually-green branches can produce a red base with no conflict.
           let gateWorktree: string | null = null;
           try {
-            gateWorktree = await gitService.createWorktree(repoPath, trainRef, undefined, { pathNamespace: "train" });
+            // #713: DB-backed claim guard alongside the namespace — the train leaf lives
+            // under the same `.worktrees` root as every live workspace's.
+            gateWorktree = await gitService.createWorktree(repoPath, trainRef, undefined, {
+              pathNamespace: "train",
+              ...(await resolveWorktreeClaims(database, { label: "merge-train-gate" })),
+            });
             // `memberWorkspaceIds`: the synthetic `train:<label>` id matches no `repos` row, so
             // without it the #628 deferred-install check passes vacuously for the whole train.
             const gate = await runPreMergeGate(

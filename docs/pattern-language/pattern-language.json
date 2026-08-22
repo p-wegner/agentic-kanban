@@ -132,6 +132,7 @@
         "packages/shared/src/lib/session-messages\\.ts$",
         "packages/shared/src/lib/workspace-git-state\\.ts$",
         "packages/shared/src/lib/workspace-status\\.ts$",
+        "packages/shared/src/lib/worktree-claim\\.ts$",
         "packages/shared/src/lib/workflow-engine/node-queries\\.ts$",
         "packages/shared/src/lib/workflow-engine/status-resolution\\.ts$",
         "packages/shared/src/lib/workflow-engine/status-sync\\.ts$",

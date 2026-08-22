@@ -13,11 +13,10 @@
 import { mkdirSync, writeFileSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
-import { samePath } from "@agentic-kanban/shared/lib/path-key";
+import { resolveWorktreeClaims } from "@agentic-kanban/shared/lib/worktree-claim";
 import { buildAgentPrompt } from "./workspace-create/policy.js";
 import type { Database } from "../db/index.js";
 import * as crudRepo from "../repositories/workspace-crud.repository.js";
-import { listLiveWorkspaceWorkingDirs } from "../repositories/workspace-reads.repository.js";
 import { getEnabledPluginBySlug, listEnabledPlugins } from "./plugin-enabled.js";
 import { parsePluginLoopUnitKey, pluginSkillName } from "@agentic-kanban/shared/lib/plugin-manifest";
 import { parseOnboardingUnitKey, parseInitSkillStepId } from "@agentic-kanban/shared/lib/onboarding-plan";
@@ -98,14 +97,13 @@ export function createWorkspaceProvisionService(deps: {
       }
       branch = input.branch || (issue ? suggestBranchName(issue) : "");
       baseCommitSha = await gitService.revParse(repoPath, baseBranch);
-      // #699: hand git the DB's view of which directories are still live, so the
+      // #699/#713: hand git the DB's view of which directories are still live, so the
       // leftover-cleanup inside createWorktree cannot rm -rf a worktree an agent is
-      // working in. Best-effort — a failed read must not block provisioning, and the
-      // guards inside createWorktree still apply.
-      const liveWorkingDirs = await listLiveWorkspaceWorkingDirs(database)
-        .catch(() => [] as string[]);
+      // working in. Routed through the shared `resolveWorktreeClaims` — the hand-rolled
+      // version here was the only one of eight call sites that had it, and it swallowed a
+      // failed read to `[]`, i.e. to "nothing is claimed", which green-lit the delete.
       worktreePath = await gitService.createWorktree(repoPath, branch, baseBranch, {
-        isPathClaimed: (candidate) => liveWorkingDirs.some((dir) => samePath(dir, candidate)),
+        ...(await resolveWorktreeClaims(database, { label: "provision" })),
       });
     }
 
