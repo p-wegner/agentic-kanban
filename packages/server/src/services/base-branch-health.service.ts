@@ -9,13 +9,13 @@
 // the SAME `verify_script` the pre-merge gate uses, so a red base and a red branch gate are
 // directly comparable.
 
-import { rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import { cloneBranchTo, getMergeBase, revParse } from "@agentic-kanban/shared/lib/git-service";
 import type { Database } from "../db/index.js";
-import { getPreference } from "../repositories/preferences.repository.js";
+import { getPreference, setPreference } from "../repositories/preferences.repository.js";
 import { getProjectById } from "../repositories/project.repository.js";
 import { VERIFY_SCRIPT_TIMEOUT_MS } from "./verify-budget.js";
 import { failedSuitesForOutcome } from "./failed-suite-parse.js";
@@ -38,6 +38,37 @@ const CLONE_TIMEOUT_MS = 5 * 60 * 1000;
 const VERIFY_TIMEOUT_MS = VERIFY_SCRIPT_TIMEOUT_MS;
 const INSTALL_TIMEOUT_MS = 15 * 60 * 1000;
 
+/**
+ * The longest a single probe can legitimately take: clone + install + verify, each at its own
+ * ceiling. Two callers need this number and neither should re-derive it (#712):
+ *
+ *  - the sweep, to decide when a PERSISTED start stamp is stale enough to be an abandoned
+ *    probe from a killed process rather than a live one, and
+ *  - the sweep's due-predicate, to back a `timeout` outcome off by more than the probe's own
+ *    runtime — `DEFAULT_INTERVAL_MS` (30 min) is LESS than the verify ceiling (45 min), so a
+ *    permanently-timing-out project was due again the moment it finished timing out, i.e. it
+ *    ran continuously.
+ */
+export const PROBE_MAX_DURATION_MS = CLONE_TIMEOUT_MS + INSTALL_TIMEOUT_MS + VERIFY_TIMEOUT_MS;
+
+/**
+ * Preference key holding the ISO time at which a probe for this project STARTED, cleared when
+ * it finishes (#712).
+ *
+ * A preference rather than a column because the row this probe will eventually write is the
+ * only other candidate, and writing a placeholder row would poison every consumer — they all
+ * read the LATEST row and would see an in-progress marker as the base's current verdict. A
+ * pref needs no migration and is invisible to those readers.
+ *
+ * `1ec5a2269e` drew the right lesson ("persisted recency is the only thing a restart cannot
+ * forget") and applied it to the wrong END of the probe: it stamped completion only, so for
+ * the entire 45–60 minutes a probe ran the persisted "last result" was the OLD one and every
+ * `tsx watch` restart in that window launched a second full verify.
+ */
+export function baseHealthProbeStartPrefKey(projectId: string): string {
+  return `base_health_probe_started_${projectId}`;
+}
+
 export interface BaseBranchVerifyResult {
   outcome: BaseBranchHealthOutcome;
   sha: string;
@@ -53,13 +84,55 @@ export interface BaseBranchVerifyResult {
 }
 
 /**
+ * Probes running RIGHT NOW in this process, keyed by project (#712).
+ *
+ * Two independent callers exist — the periodic sweep and a fire-and-forget `setImmediate`
+ * after every merge — and neither knew about the other. With a deterministic temp dir that
+ * meant probe B `rm -rf`'d probe A's tree mid-verify and A's `finally` then deleted B's; the
+ * wreck was recorded by the outer catch as `outcome: "red"`, a FALSE RED that withholds every
+ * merge on the project.
+ *
+ * The unique per-probe directory below makes a collision harmless. This map makes it not
+ * happen: a second caller joins the running probe's promise instead of starting a rival run,
+ * so a merge during a sweep costs nothing rather than two concurrent 45-minute verifies.
+ */
+const inFlightProbes = new Map<string, Promise<BaseBranchVerifyResult | null>>();
+
+/** How many probes are currently running in this process — for tests and diagnostics. */
+export function inFlightBaseBranchProbeCount(): number {
+  return inFlightProbes.size;
+}
+
+/**
  * Run `verify_script` against the project's base branch at its CURRENT tip and persist the
  * result. Returns `null` when the project has no repo/base branch/verify_script configured —
  * a pure no-op, mirroring the pre-merge gate's own "nothing configured" behaviour.
+ *
+ * Concurrency-safe per project (#712): a call made while a probe for the same project is
+ * already running JOINS it and returns its result rather than starting a second one.
+ *
+ * `now` is the ISO start time — it is PERSISTED (the in-flight start stamp), hence the `now?:
+ * string` spelling rather than `nowMs`.
  */
-export async function verifyBaseBranchHealth(
+export function verifyBaseBranchHealth(
   projectId: string,
   database: Database,
+  now?: string,
+): Promise<BaseBranchVerifyResult | null> {
+  const running = inFlightProbes.get(projectId);
+  if (running) return running;
+
+  const probe = runBaseBranchProbe(projectId, database, now).finally(() => {
+    inFlightProbes.delete(projectId);
+  });
+  inFlightProbes.set(projectId, probe);
+  return probe;
+}
+
+async function runBaseBranchProbe(
+  projectId: string,
+  database: Database,
+  now?: string,
 ): Promise<BaseBranchVerifyResult | null> {
   const project = await getProjectById(projectId, database);
   if (!project?.repoPath || !project.defaultBranch) return null;
@@ -75,8 +148,23 @@ export async function verifyBaseBranchHealth(
   if (!sha) return null;
 
   const slug = branch.replace(/[^a-zA-Z0-9._-]/g, "_");
-  const dest = join(tmpdir(), `kanban-base-health-${projectId}-${slug}`);
+  // #712 — a UNIQUE directory per probe. This used to be
+  // `join(tmpdir(), \`kanban-base-health-${projectId}-${slug}\`)`: the same path every call,
+  // `rm -rf`'d before the clone and again in `finally`. Two overlapping probes therefore
+  // destroyed each other's working tree and the wreckage was recorded as a red base. The
+  // in-flight map above should keep them from overlapping at all, but a lock is a policy and
+  // this is the property: even if the lock is lost (two processes, a stale map, a future
+  // caller that bypasses it), a collision is now impossible rather than merely unlikely.
+  //
+  // `mkdtemp` creates the unique PARENT; the clone goes into a `repo` child so `git clone`
+  // still gets a non-existent destination, and the parent is what `finally` removes.
+  const probeRoot = await mkdtemp(join(tmpdir(), `kanban-base-health-${slug}-`));
+  const dest = join(probeRoot, "repo");
   const startedAt = Date.now();
+  // Stamp the START, persisted, so a process restart mid-probe does not read the stale
+  // previous RESULT and launch a rival verify (the restart storm `1ec5a2269e` aimed at).
+  await setPreference(baseHealthProbeStartPrefKey(projectId), now ?? new Date().toISOString(), database)
+    .catch(() => {});
 
   // #674: the clone must be INSTALLED before verify. "No warm deps" was meant to buy
   // cold-clone realism, but an UNINSTALLED clone is not a cold clone — it is a broken
@@ -91,7 +179,6 @@ export async function verifyBaseBranchHealth(
 
   let result: BaseBranchVerifyResult;
   try {
-    await rm(dest, { recursive: true, force: true });
     await cloneBranchTo(project.repoPath, branch, dest, CLONE_TIMEOUT_MS);
     if (installCommand) {
       const install = await runSetupScript(dest, installCommand, { timeoutMs: INSTALL_TIMEOUT_MS }).catch((e) => ({
@@ -160,7 +247,12 @@ ${tail(combined)}`,
       message: `base-branch health check errored: ${e instanceof Error ? e.message : String(e)}`,
     };
   } finally {
-    await rm(dest, { recursive: true, force: true }).catch(() => {});
+    // Only ever this probe's OWN directory — the whole point of `mkdtemp` above.
+    await rm(probeRoot, { recursive: true, force: true }).catch(() => {});
+    // Clear the in-flight stamp. An empty value reads as absent (see `isBaseHealthProbeDue`),
+    // so no delete accessor is needed; and if this write is lost the stamp still expires after
+    // `PROBE_MAX_DURATION_MS`, which is exactly the killed-process case.
+    await setPreference(baseHealthProbeStartPrefKey(projectId), "", database).catch(() => {});
   }
 
   await recordBaseBranchHealth(
