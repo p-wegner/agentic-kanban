@@ -24,7 +24,7 @@ import { killProcessesInDir } from "../services/process-cleanup.js";
 import { runScript } from "../services/script-runner.js";
 import { createSessionManager } from "../services/session.manager.js";
 import { resolveAgentSettings } from "../services/agent-settings.service.js";
-import { insertIssueComment } from "../repositories/issue-comments.repository.js";
+import { insertIssueComment, listRecentIssueComments } from "../repositories/issue-comments.repository.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { buildLearningStepPrompt } from "../services/merge-helpers.service.js";
 import { resolveMergeGate, type MergeGateToken } from "../services/pre-merge-gate.service.js";
@@ -33,6 +33,7 @@ import { clearWorkspaceWorkingDir } from "../repositories/workspace-crud.reposit
 import { stampWorkspaceMergedAt } from "../repositories/workspace-merge-execution.repository.js";
 import { getWorkspaceById } from "../repositories/workspace-reads.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { createHash } from "node:crypto";
 import { resolveBoardClientPort, resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
 
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
@@ -155,7 +156,8 @@ export async function reconcileStrandedSiblingMerges(database: Database = db): P
               `unmerged commits (likely a crash between the leading and sibling merges) and they cannot be landed automatically: ` +
               guardFailures.join("; ") +
               ". The sibling branches were preserved — fix the blockers and retry the workspace merge, or merge them manually.",
-            { mergeReason: "sibling_merge_pending", failures: guardFailures, detectedAt: now });
+            { mergeReason: "sibling_merge_pending", failures: guardFailures, detectedAt: now },
+            ["guard", ...guardFailures, ...strandPendingParts(pending)]);
           continue;
         }
 
@@ -170,7 +172,8 @@ export async function reconcileStrandedSiblingMerges(database: Database = db): P
           await recordStrandedSiblingComment(database, ws, "merged",
             `Startup reconciliation: landed ${landed.length} sibling repo merge(s) stranded by an interrupted multi-repo merge: ` +
               landed.map((r) => r.name ?? r.path).join(", ") + ".",
-            { siblingResults, reconciledAt: now });
+            { siblingResults, reconciledAt: now },
+            landed.map((r) => `landed:${r.name ?? r.path}`).sort());
           // Merged siblings' worktrees + branches can now be dropped; anything that
           // still failed stays preserved (preserveUnmerged re-verifies per repo).
           await cleanupSiblingWorktrees(gitService, ws.workspaceId, database, { preserveUnmerged: true });
@@ -181,7 +184,8 @@ export async function reconcileStrandedSiblingMerges(database: Database = db): P
             `Multi-repo merge INCOMPLETE: ${failed.length} stranded sibling repo merge(s) still failed at startup reconciliation: ` +
               failed.map((f) => `${f.name ?? f.path}: ${f.error}`).join("; ") +
               ". The unmerged sibling branches were preserved — merge them manually.",
-            { mergeReason: "sibling_merge_failed", siblingResults, detectedAt: now });
+            { mergeReason: "sibling_merge_failed", siblingResults, detectedAt: now },
+            ["post-prevalidation", ...failed.map((f) => `${f.name ?? f.path}: ${f.error}`).sort()]);
         }
       } catch (err) {
         console.warn(`[stranded-siblings] reconciliation failed for workspace ${ws.workspaceId} (non-fatal):`, errorMessage(err));
@@ -193,20 +197,88 @@ export async function reconcileStrandedSiblingMerges(database: Database = db): P
   return result;
 }
 
+/**
+ * Identity of a stranded-sibling REPORT: `<eventType>|sha1(state)[:16]`.
+ *
+ * Mirrors `computeMergeFailureSignature` (`merge-backoff.service.ts`) — the same
+ * "announce a CHANGE of state, not a state" primitive this repo already uses so a merge
+ * that cannot land does not retry-and-shout forever. Unlike that one, digits are NOT
+ * normalized: "1 sibling still pending" vs "2" IS a different situation here, and a
+ * changed commit count is exactly the genuine change that must be reported.
+ */
+export function computeStrandedSiblingSignature(eventType: "merged" | "conflict", parts: string[]): string {
+  const normalized = parts.map((p) => p.replace(/\s+/g, " ").trim()).filter(Boolean).join("\n").slice(0, 4000);
+  return `${eventType}|${createHash("sha1").update(normalized).digest("hex").slice(0, 16)}`;
+}
+
+/** The state parts identifying one pending-sibling set (repo identity + how far ahead + verifiability). */
+export function strandPendingParts(pending: { repo: { id: string; path: string; name: string | null }; uniqueCommits: number; unverifiable?: boolean }[]): string[] {
+  return pending
+    .map((p) => `${p.repo.id}:${p.repo.name ?? p.repo.path}:${p.uniqueCommits}${p.unverifiable ? ":unverifiable" : ""}`)
+    .sort();
+}
+
+const STRAND_SIGNATURE_KEY = "strandSignature";
+
+/**
+ * Record a stranded-sibling event on the issue timeline — but ONLY when it says something
+ * new (#737).
+ *
+ * The reconciler was boot-only when it was written, so an unconditional insert was
+ * harmless; #151 put it on the ancestor reconciler's 5-minute cadence, and a strand that
+ * *cannot* land is therefore re-detected and re-announced forever. Measured on the live
+ * board: 99,140 `merge-attempt` comments, 4 issues holding 7,478 comments each with 5–6
+ * distinct bodies, 127 MB of a 186 MB database.
+ *
+ * WHERE THE SIGNATURE LIVES: in the payload of the comment we write, not in a new column
+ * on `workspaces`. The timeline already IS the record of what was last reported, so a
+ * column would be a second copy of it that can drift from the comment beside it (and cost
+ * a migration + a second write per tick). `merge_backoff_signature` needs a column because
+ * its state has no artifact — a retry that is SKIPPED writes nothing; here the artifact is
+ * the comment itself. The lookup is compared per `eventType`, so the `merged` and
+ * `conflict` slots are independent and cannot flip-flop against each other, and a
+ * conflict that recurs after genuinely clearing still reports (only the LATEST comment of
+ * that eventType is consulted, not a history window).
+ */
 async function recordStrandedSiblingComment(
   database: Database,
   ws: { workspaceId: string; issueId: string; branch: string },
   eventType: "merged" | "conflict",
   body: string,
   payload: Record<string, unknown>,
+  /** State parts identifying this report. Same parts ⇒ same situation ⇒ nothing new to say. */
+  signatureParts: string[],
 ): Promise<void> {
+  const signature = computeStrandedSiblingSignature(eventType, signatureParts);
+  try {
+    const recent = await listRecentIssueComments(
+      ws.issueId,
+      { workspaceId: ws.workspaceId, kind: "merge-attempt", limit: 20 },
+      database,
+    );
+    const previous = recent
+      .map((row) => {
+        if (!row.payload) return null;
+        try { return (JSON.parse(row.payload) as Record<string, unknown>)[STRAND_SIGNATURE_KEY]; } catch { return null; }
+      })
+      .find((sig): sig is string => typeof sig === "string" && sig.startsWith(`${eventType}|`));
+    if (previous === signature) {
+      // Unchanged strand: already on the timeline. Nothing new to report.
+      return;
+    }
+  } catch (err) {
+    // Fail OPEN: if we cannot read the timeline we would rather duplicate a comment than
+    // silently drop the only signal that a multi-repo merge is incomplete.
+    console.warn("[stranded-siblings] could not check for a duplicate report (recording anyway):", errorMessage(err));
+  }
+
   await insertIssueComment({
     issueId: ws.issueId,
     workspaceId: ws.workspaceId,
     kind: "merge-attempt",
     author: "system",
     body,
-    payload: { eventType, workspaceId: ws.workspaceId, branch: ws.branch, ...payload },
+    payload: { eventType, workspaceId: ws.workspaceId, branch: ws.branch, [STRAND_SIGNATURE_KEY]: signature, ...payload },
     createdAt: new Date().toISOString(),
   }, database).catch((err) => {
     console.warn("[stranded-siblings] failed to record issue comment:", errorMessage(err));

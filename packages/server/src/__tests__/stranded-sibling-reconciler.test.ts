@@ -152,6 +152,36 @@ describe("reconcileStrandedSiblingMerges (#18)", () => {
     // Same real-git-under-load reasoning as the case above.
   }, 240000);
 
+  it("does not re-post the same conflict comment on every tick, but DOES report a genuine change (#737)", async () => {
+    const worktreePath = await insertStrandedSibling();
+    // Conflicting edits on the sibling branch vs its main — a strand that can never land.
+    await commitFile(worktreePath, "README.md", "# branch version\n", "feat: branch edit");
+    await commitFile(siblingRepo, "README.md", "# main version\n", "feat: main edit");
+
+    // #151 put this reconciler on the ancestor reconciler's 5-minute cadence, so "one tick"
+    // is not a boot — it repeats forever. An unchanged strand must be announced ONCE.
+    await reconcileStrandedSiblingMerges(db as unknown as Database);
+    expect(await commentsForIssue()).toHaveLength(1);
+
+    await reconcileStrandedSiblingMerges(db as unknown as Database);
+    expect(await commentsForIssue()).toHaveLength(1);
+
+    // ...but suppressing a REAL change would be worse than the duplication: a second
+    // conflicting file is a different blocker and must reach the timeline.
+    await commitFile(worktreePath, "extra.txt", "branch extra\n", "feat: branch extra");
+    await commitFile(siblingRepo, "extra.txt", "main extra\n", "feat: main extra");
+
+    await reconcileStrandedSiblingMerges(db as unknown as Database);
+    const after = await commentsForIssue();
+    expect(after).toHaveLength(2);
+    expect(after.filter((c) => /Multi-repo merge INCOMPLETE/.test(c.body))).toHaveLength(2);
+
+    // And that new state is itself only reported once.
+    await reconcileStrandedSiblingMerges(db as unknown as Database);
+    expect(await commentsForIssue()).toHaveLength(2);
+    // Same real-git-under-load reasoning as the cases above (four reconciler passes).
+  }, 240000);
+
   it("is a no-op when the sibling merge already landed (mergedHeadSha stamped)", async () => {
     await insertStrandedSibling();
     const [row] = await listWorkspaceRepos(workspaceId, db);

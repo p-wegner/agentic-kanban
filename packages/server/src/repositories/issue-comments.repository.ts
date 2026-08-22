@@ -73,3 +73,25 @@ export async function deleteIssueComment(
 ): Promise<void> {
   await database.delete(issueComments).where(eq(issueComments.id, commentId));
 }
+
+/**
+ * The most recent comments for one issue (optionally narrowed to a workspace and kind),
+ * newest first. Used by callers that must decide whether a system note they are about to
+ * write is a REPEAT of one already on the timeline (#737) — the timeline itself is the
+ * record of what was last reported, so no extra column is needed to remember it.
+ */
+export async function listRecentIssueComments(
+  issueId: string,
+  opts: { workspaceId?: string | null; kind?: IssueCommentKind; limit?: number } = {},
+  database: Database = db,
+): Promise<IssueCommentRow[]> {
+  const filters = [eq(issueComments.issueId, issueId)];
+  if (opts.workspaceId) filters.push(eq(issueComments.workspaceId, opts.workspaceId));
+  if (opts.kind) filters.push(eq(issueComments.kind, opts.kind));
+  return database
+    .select()
+    .from(issueComments)
+    .where(and(...filters))
+    .orderBy(desc(issueComments.createdAt))
+    .limit(opts.limit ?? 20);
+}
