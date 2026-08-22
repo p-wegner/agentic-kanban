@@ -12,6 +12,7 @@ import {
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import type { WorkflowNodeType, WorkflowEdgeCondition } from "@agentic-kanban/shared/schema";
+import type { NodeAgentOverride } from "@agentic-kanban/shared/lib/workflow-engine";
 
 /**
  * Built-in workflow template definitions. These are the general-system version
@@ -38,6 +39,16 @@ export interface BuiltinNodeDef {
   maxVisits?: number;
   /** Guidance injected into the agent prompt when it enters this node. */
   guidance?: string;
+  /** Per-node agent harness override (provider/profile/model) for server-launched sessions. */
+  agent?: NodeAgentOverride;
+}
+
+/** Build the node's JSON config string from its guidance + agent override. */
+function buildNodeConfig(node: BuiltinNodeDef): string | null {
+  const cfg: Record<string, unknown> = {};
+  if (node.guidance) cfg.guidance = node.guidance;
+  if (node.agent) cfg.agent = node.agent;
+  return Object.keys(cfg).length > 0 ? JSON.stringify(cfg) : null;
 }
 
 export interface BuiltinEdgeDef {
@@ -309,6 +320,239 @@ export const BUILTIN_WORKFLOWS: BuiltinTemplateDef[] = [
     ],
   },
   {
+    builtinKey: "multi-harness-review",
+    name: "Multi-Harness Review",
+    description:
+      "Implement, then a Claude reviewer and a Codex reviewer examine the change in parallel (report-only, no fixes); the join agent consolidates both reviews and implements the agreed findings. Set a per-node Agent harness in the builder to change who reviews or who fixes.",
+    ticketType: null,
+    isDefault: false,
+    nodes: [
+      {
+        key: "implement",
+        name: "Implement",
+        nodeType: "start",
+        statusName: "In Progress",
+        guidance: "Implement the change described in the ticket and commit. Do not run screenshot/browser-install/visual-verification steps as part of implementation; the board owns visual verification via visual_verification_mode. Then advance to Split Reviews.",
+      },
+      {
+        key: "fork",
+        name: "Split Reviews",
+        nodeType: "parallel-fork",
+        statusName: "In Review",
+        guidance: "Fork point: independent reviewers on different agent harnesses run concurrently in their own sub-worktrees.",
+      },
+      {
+        key: "review-claude",
+        name: "Claude Review",
+        nodeType: "normal",
+        statusName: "In Review",
+        skillName: "code-review",
+        agent: { provider: "claude" },
+        guidance:
+          "REPORT-ONLY review: do NOT modify the implementation or fix anything you find. Review the committed changes on this branch for correctness, security, error handling, and edge cases. Write your findings to `REVIEW-FINDINGS-CLAUDE.md` in the worktree root — one entry per finding with severity (CRITICAL/MAJOR/MINOR), file:line, what is wrong, and a suggested fix. Commit ONLY that file, then advance to Consolidate & Fix.",
+      },
+      {
+        key: "review-codex",
+        name: "Codex Review",
+        nodeType: "normal",
+        statusName: "In Review",
+        skillName: "code-review",
+        agent: { provider: "codex" },
+        guidance:
+          "REPORT-ONLY review: do NOT modify the implementation or fix anything you find. Review the committed changes on this branch for correctness, security, error handling, and edge cases. Write your findings to `REVIEW-FINDINGS-CODEX.md` in the worktree root — one entry per finding with severity (CRITICAL/MAJOR/MINOR), file:line, what is wrong, and a suggested fix. Commit ONLY that file, then advance to Consolidate & Fix.",
+      },
+      {
+        key: "join",
+        name: "Consolidate & Fix",
+        nodeType: "parallel-join",
+        statusName: "In Review",
+        guidance:
+          "Read WORKFLOW_FORK_ARTIFACTS.md — each reviewer branch's diff contains its REVIEW-FINDINGS-*.md report. Consolidate the findings: deduplicate overlapping ones, discard false positives (verify against the code before dismissing), and prioritize by severity. Then IMPLEMENT the agreed CRITICAL/MAJOR fixes on this branch, run the relevant tests, and commit. Do not merge the reviewer branches themselves. Advance to Done when the consolidated findings are addressed, or back to Implement for major rework.",
+      },
+      { key: "done", name: "Done", nodeType: "end", statusName: "Done" },
+    ],
+    edges: [
+      { from: "implement", to: "fork", condition: "auto_on_exit_0", label: "committed" },
+      { from: "fork", to: "review-claude", condition: "manual", label: "claude" },
+      { from: "fork", to: "review-codex", condition: "manual", label: "codex" },
+      { from: "review-claude", to: "join", condition: "manual", label: "findings reported" },
+      { from: "review-codex", to: "join", condition: "manual", label: "findings reported" },
+      { from: "join", to: "done", condition: "manual", label: "findings addressed" },
+      { from: "join", to: "implement", condition: "manual", label: "major rework", isLoop: true },
+    ],
+  },
+  {
+    builtinKey: "multi-harness-planning",
+    name: "Multi-Harness Planning",
+    description:
+      "A Claude planner and a Codex planner draft independent implementation plans in parallel (plan-only, no code); the join agent compares them, synthesizes the final plan, and implements it. Review before done. Set a per-node Agent harness in the builder to change who plans or who implements.",
+    ticketType: null,
+    isDefault: false,
+    nodes: [
+      {
+        key: "prepare",
+        name: "Prepare",
+        nodeType: "start",
+        statusName: "In Progress",
+        guidance:
+          "Do NOT implement anything yet. Read the ticket and the relevant code, then write a short problem framing (goal, constraints, affected areas, open questions) to `PLANNING-CONTEXT.md` in the worktree root and commit it. Then advance to Split Planning.",
+      },
+      {
+        key: "fork-plan",
+        name: "Split Planning",
+        nodeType: "parallel-fork",
+        statusName: "In Progress",
+        guidance: "Fork point: independent planners on different agent harnesses draft plans concurrently in their own sub-worktrees.",
+      },
+      {
+        key: "plan-claude",
+        name: "Claude Plan",
+        nodeType: "normal",
+        statusName: "In Progress",
+        agent: { provider: "claude" },
+        guidance:
+          "PLAN-ONLY: do NOT implement or modify any product code. Read `PLANNING-CONTEXT.md` and the relevant code, then produce a concrete implementation plan: chosen approach and why, files to change, ordered steps, risks/tradeoffs, and test strategy. Write it to `PLAN-CLAUDE.md` in the worktree root, commit ONLY that file, then advance to Consolidate Plan & Implement.",
+      },
+      {
+        key: "plan-codex",
+        name: "Codex Plan",
+        nodeType: "normal",
+        statusName: "In Progress",
+        agent: { provider: "codex" },
+        guidance:
+          "PLAN-ONLY: do NOT implement or modify any product code. Read `PLANNING-CONTEXT.md` and the relevant code, then produce a concrete implementation plan: chosen approach and why, files to change, ordered steps, risks/tradeoffs, and test strategy. Write it to `PLAN-CODEX.md` in the worktree root, commit ONLY that file, then advance to Consolidate Plan & Implement.",
+      },
+      {
+        key: "join-plan",
+        name: "Consolidate Plan & Implement",
+        nodeType: "parallel-join",
+        statusName: "In Progress",
+        guidance:
+          "Read WORKFLOW_FORK_ARTIFACTS.md — each planner branch's diff contains its PLAN-*.md. Compare the plans: adopt what they agree on; where they differ, pick the stronger approach and record why in `PLAN-FINAL.md` (commit it). Then IMPLEMENT PLAN-FINAL.md on this branch, run the relevant tests, and commit. Advance to Review when done.",
+      },
+      {
+        key: "review",
+        name: "Review",
+        nodeType: "normal",
+        statusName: "In Review",
+        skillName: "code-review",
+        guidance: "Review the implementation against PLAN-FINAL.md. Propose Done when satisfied, or send back to Consolidate Plan & Implement.",
+      },
+      { key: "done", name: "Done", nodeType: "end", statusName: "Done" },
+    ],
+    edges: [
+      { from: "prepare", to: "fork-plan", condition: "auto_on_exit_0", label: "context committed" },
+      { from: "fork-plan", to: "plan-claude", condition: "manual", label: "claude" },
+      { from: "fork-plan", to: "plan-codex", condition: "manual", label: "codex" },
+      { from: "plan-claude", to: "join-plan", condition: "manual", label: "plan ready" },
+      { from: "plan-codex", to: "join-plan", condition: "manual", label: "plan ready" },
+      { from: "join-plan", to: "review", condition: "manual", label: "implemented" },
+      { from: "review", to: "done", condition: "manual", label: "approved" },
+      { from: "review", to: "join-plan", condition: "manual", label: "changes requested", isLoop: true },
+    ],
+  },
+  {
+    builtinKey: "multi-harness-plan-review",
+    name: "Multi-Harness Plan + Review",
+    description:
+      "Full multi-harness pipeline: Claude + Codex plan in parallel → join agent synthesizes the final plan and implements it → Claude + Codex review in parallel (report-only) → join agent consolidates findings and fixes. Two fork/join pairs in one graph; per-node Agent harness configurable in the builder.",
+    ticketType: null,
+    isDefault: false,
+    nodes: [
+      {
+        key: "prepare",
+        name: "Prepare",
+        nodeType: "start",
+        statusName: "In Progress",
+        guidance:
+          "Do NOT implement anything yet. Read the ticket and the relevant code, then write a short problem framing (goal, constraints, affected areas, open questions) to `PLANNING-CONTEXT.md` in the worktree root and commit it. Then advance to Split Planning.",
+      },
+      {
+        key: "fork-plan",
+        name: "Split Planning",
+        nodeType: "parallel-fork",
+        statusName: "In Progress",
+        guidance: "Fork point: independent planners on different agent harnesses draft plans concurrently in their own sub-worktrees.",
+      },
+      {
+        key: "plan-claude",
+        name: "Claude Plan",
+        nodeType: "normal",
+        statusName: "In Progress",
+        agent: { provider: "claude" },
+        guidance:
+          "PLAN-ONLY: do NOT implement or modify any product code. Read `PLANNING-CONTEXT.md` and the relevant code, then produce a concrete implementation plan: chosen approach and why, files to change, ordered steps, risks/tradeoffs, and test strategy. Write it to `PLAN-CLAUDE.md` in the worktree root, commit ONLY that file, then advance to Consolidate Plan & Implement.",
+      },
+      {
+        key: "plan-codex",
+        name: "Codex Plan",
+        nodeType: "normal",
+        statusName: "In Progress",
+        agent: { provider: "codex" },
+        guidance:
+          "PLAN-ONLY: do NOT implement or modify any product code. Read `PLANNING-CONTEXT.md` and the relevant code, then produce a concrete implementation plan: chosen approach and why, files to change, ordered steps, risks/tradeoffs, and test strategy. Write it to `PLAN-CODEX.md` in the worktree root, commit ONLY that file, then advance to Consolidate Plan & Implement.",
+      },
+      {
+        key: "join-plan",
+        name: "Consolidate Plan & Implement",
+        nodeType: "parallel-join",
+        statusName: "In Progress",
+        guidance:
+          "Read WORKFLOW_FORK_ARTIFACTS.md — each planner branch's diff contains its PLAN-*.md. Compare the plans: adopt what they agree on; where they differ, pick the stronger approach and record why in `PLAN-FINAL.md` (commit it). Then IMPLEMENT PLAN-FINAL.md on this branch, run the relevant tests, and commit. Advance to Split Reviews when done.",
+      },
+      {
+        key: "fork-review",
+        name: "Split Reviews",
+        nodeType: "parallel-fork",
+        statusName: "In Review",
+        guidance: "Fork point: independent reviewers on different agent harnesses run concurrently in their own sub-worktrees.",
+      },
+      {
+        key: "review-claude",
+        name: "Claude Review",
+        nodeType: "normal",
+        statusName: "In Review",
+        skillName: "code-review",
+        agent: { provider: "claude" },
+        guidance:
+          "REPORT-ONLY review: do NOT modify the implementation or fix anything you find. Review the committed changes on this branch (against PLAN-FINAL.md where relevant) for correctness, security, error handling, and edge cases. Write your findings to `REVIEW-FINDINGS-CLAUDE.md` in the worktree root — one entry per finding with severity (CRITICAL/MAJOR/MINOR), file:line, what is wrong, and a suggested fix. Commit ONLY that file, then advance to Consolidate & Fix.",
+      },
+      {
+        key: "review-codex",
+        name: "Codex Review",
+        nodeType: "normal",
+        statusName: "In Review",
+        skillName: "code-review",
+        agent: { provider: "codex" },
+        guidance:
+          "REPORT-ONLY review: do NOT modify the implementation or fix anything you find. Review the committed changes on this branch (against PLAN-FINAL.md where relevant) for correctness, security, error handling, and edge cases. Write your findings to `REVIEW-FINDINGS-CODEX.md` in the worktree root — one entry per finding with severity (CRITICAL/MAJOR/MINOR), file:line, what is wrong, and a suggested fix. Commit ONLY that file, then advance to Consolidate & Fix.",
+      },
+      {
+        key: "join-review",
+        name: "Consolidate & Fix",
+        nodeType: "parallel-join",
+        statusName: "In Review",
+        guidance:
+          "Read WORKFLOW_FORK_ARTIFACTS.md — each reviewer branch's diff contains its REVIEW-FINDINGS-*.md report. Consolidate the findings: deduplicate overlapping ones, discard false positives (verify against the code before dismissing), and prioritize by severity. Then IMPLEMENT the agreed CRITICAL/MAJOR fixes on this branch, run the relevant tests, and commit. Do not merge the reviewer branches themselves. Advance to Done when the consolidated findings are addressed, or back to Consolidate Plan & Implement for major rework.",
+      },
+      { key: "done", name: "Done", nodeType: "end", statusName: "Done" },
+    ],
+    edges: [
+      { from: "prepare", to: "fork-plan", condition: "auto_on_exit_0", label: "context committed" },
+      { from: "fork-plan", to: "plan-claude", condition: "manual", label: "claude" },
+      { from: "fork-plan", to: "plan-codex", condition: "manual", label: "codex" },
+      { from: "plan-claude", to: "join-plan", condition: "manual", label: "plan ready" },
+      { from: "plan-codex", to: "join-plan", condition: "manual", label: "plan ready" },
+      { from: "join-plan", to: "fork-review", condition: "manual", label: "implemented" },
+      { from: "fork-review", to: "review-claude", condition: "manual", label: "claude" },
+      { from: "fork-review", to: "review-codex", condition: "manual", label: "codex" },
+      { from: "review-claude", to: "join-review", condition: "manual", label: "findings reported" },
+      { from: "review-codex", to: "join-review", condition: "manual", label: "findings reported" },
+      { from: "join-review", to: "done", condition: "manual", label: "findings addressed" },
+      { from: "join-review", to: "join-plan", condition: "manual", label: "major rework", isLoop: true },
+    ],
+  },
+  {
     builtinKey: "migration-with-ai",
     name: "Migration with AI",
     description:
@@ -503,7 +747,7 @@ export async function ensureBuiltinWorkflows(database: Database = db): Promise<v
         skillId: node.skillName ? skillIdByName.get(node.skillName) ?? null : null,
         skillName: node.skillName ?? null,
         maxVisits: node.maxVisits ?? 0,
-        config: node.guidance ? JSON.stringify({ guidance: node.guidance }) : null,
+        config: buildNodeConfig(node),
         posX: 0,
         posY: sort * 120,
         sortOrder: sort,
@@ -585,7 +829,7 @@ async function syncBuiltinWorkflowGraph(
       skillId: node.skillName ? skillIdByName.get(node.skillName) ?? null : null,
       skillName: node.skillName ?? null,
       maxVisits: node.maxVisits ?? 0,
-      config: node.guidance ? JSON.stringify({ guidance: node.guidance }) : null,
+      config: buildNodeConfig(node),
       posX: 0,
       posY: sort * 120,
       sortOrder: sort,

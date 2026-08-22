@@ -152,6 +152,30 @@ describe("reconcileStrandedReviews — relaunch path (recovers stranded reviews,
     expect(relaunchedIds).not.toContain(reviewed.workspaceId);
   });
 
+  it("does NOT relaunch or promote a fork child (parentWorkspaceId set), even though it looks stranded (#998)", async () => {
+    const { db } = createTestDb();
+    const { projectId, inReviewStatusId } = await seedProject(db);
+    // Genuinely stranded — should be recovered.
+    const stranded = await seedInReviewWorkspace(db, { projectId, statusId: inReviewStatusId, issueNumber: 529 });
+    // A fork child left "In Review" after its join — must be excluded entirely: no
+    // relaunch, no readyForMerge promotion. It is consolidated by the join, not by
+    // this legacy reconciler.
+    const forkChild = await seedInReviewWorkspace(db, { projectId, statusId: inReviewStatusId, issueNumber: 996 });
+    await db.update(workspaces)
+      .set({ parentWorkspaceId: stranded.workspaceId, forkStatus: "joined" })
+      .where(eq(workspaces.id, forkChild.workspaceId));
+
+    const recovered = await reconcileStrandedReviews(makeDeps(db));
+
+    expect(recovered).toBe(1);
+    const relaunchedIds = startManualReviewMock.mock.calls.map((c) => c[4]);
+    expect(relaunchedIds).toContain(stranded.workspaceId);
+    expect(relaunchedIds).not.toContain(forkChild.workspaceId);
+    const [forkRow] = await db.select({ readyForMerge: workspaces.readyForMerge })
+      .from(workspaces).where(eq(workspaces.id, forkChild.workspaceId));
+    expect(forkRow.readyForMerge).toBe(false);
+  });
+
   it("skips a workspace whose merge is in flight — the merge owns it (#270)", async () => {
     const { db } = createTestDb();
     const { projectId, inReviewStatusId } = await seedProject(db);

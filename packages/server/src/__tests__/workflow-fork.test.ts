@@ -92,6 +92,19 @@ describe("workflow fork/join orchestration", () => {
     expect(names.sort()).toEqual(["Correctness Review", "Security Review"]);
   });
 
+  it("#1001: every fork-child prompt explicitly forbids mark_ready_for_merge and points to propose_transition/the join", async () => {
+    const { parentId } = await setupForkAtSplit();
+    await svc.onWorkspaceEnteredNode(parentId);
+
+    expect(startSession).toHaveBeenCalledTimes(2);
+    for (const call of startSession.mock.calls) {
+      const prompt = call[0].prompt as string;
+      expect(prompt).toContain("FORK CHILD");
+      expect(prompt).toContain("Never call `mark_ready_for_merge`");
+      expect(prompt).toContain("advance to the join stage");
+    }
+  });
+
   it("consolidates into the parent join node once all children join", async () => {
     const { parentId, statusIds, issueId } = await setupForkAtSplit();
     await svc.onWorkspaceEnteredNode(parentId);
@@ -151,6 +164,136 @@ describe("workflow fork/join orchestration", () => {
     const after = await db.select().from(schema.workspaces).where(eq(schema.workspaces.parentWorkspaceId, parentId));
     expect(after.map((c) => c.forkStatus).sort()).toEqual(["failed", "joined"]);
     expect(startSession).toHaveBeenCalledTimes(2);
+  });
+
+  it("multi-harness-review: fork children launch on their node's agent override, join uses the board default", async () => {
+    const { projectId, statusIds } = await seedProject(db);
+    const templateId = (await resolveTemplateForIssueByKey(db, projectId, "multi-harness-review"))!;
+    const issueId = randomUUID();
+    const now = new Date().toISOString();
+    await db.insert(schema.issues).values({
+      id: issueId, issueNumber: 3, title: "Multi-harness demo", issueType: "task", priority: "medium",
+      sortOrder: 0, statusId: statusIds["Todo"], projectId, workflowTemplateId: templateId, createdAt: now, updatedAt: now,
+    });
+    const parentId = randomUUID();
+    await db.insert(schema.workspaces).values({
+      id: parentId, issueId, branch: "feature/mh", workingDir: "/fake/feature/mh", baseBranch: "main",
+      status: "active", createdAt: now, updatedAt: now,
+    });
+    await initWorkspaceWorkflow(db as any, { workspaceId: parentId, issueId });
+    const r = await proposeTransition(db as any, { workspaceId: parentId, toNodeName: "Split Reviews" });
+    expect(r.ok).toBe(true);
+
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    await svc.onWorkspaceEnteredNode(parentId);
+
+    // Two reviewers spawned, each on its node-pinned harness.
+    expect(startSession).toHaveBeenCalledTimes(2);
+    // Per-child launch logs name the resolved provider for each harness override.
+    expect(logSpy.mock.calls.some((c) => String(c[0]).includes("claude-code"))).toBe(true);
+    expect(logSpy.mock.calls.some((c) => String(c[0]).includes("codex"))).toBe(true);
+    const providersByPrompt = new Map<string, string>(
+      startSession.mock.calls.map((c: any[]) => [c[0].prompt as string, c[0].provider as string]),
+    );
+    const providerFor = (marker: string) =>
+      [...providersByPrompt.entries()].find(([prompt]) => prompt.includes(marker))?.[1];
+    expect(providerFor("Claude Review")).toBe("claude-code");
+    expect(providerFor("Codex Review")).toBe("codex");
+
+    // The child workspace rows record the overridden provider.
+    const children = await db.select().from(schema.workspaces).where(eq(schema.workspaces.parentWorkspaceId, parentId));
+    expect(children.map((c) => c.provider).sort()).toEqual(["claude", "codex"]);
+
+    // Reviewers join → the consolidator launches on the board default (no node override).
+    startSession.mockClear();
+    for (const child of children) {
+      const t = await proposeTransition(db as any, { workspaceId: child.id, toNodeName: "Consolidate & Fix" });
+      expect(t.ok).toBe(true);
+      await svc.onWorkspaceEnteredNode(child.id);
+    }
+    expect(startSession).toHaveBeenCalledTimes(1);
+    expect(startSession.mock.calls[0][0].provider).toBe("claude-code");
+    // Join launch logs the resolved (board-default) provider too.
+    expect(logSpy.mock.calls.some((c) => String(c[0]).includes("[fork] join") && String(c[0]).includes("claude-code"))).toBe(true);
+    logSpy.mockRestore();
+  });
+
+  it("multi-harness-plan-review: two fork/join pairs in one template, each consolidated separately", async () => {
+    const { projectId, statusIds } = await seedProject(db);
+    const templateId = (await resolveTemplateForIssueByKey(db, projectId, "multi-harness-plan-review"))!;
+    const issueId = randomUUID();
+    const now = new Date().toISOString();
+    await db.insert(schema.issues).values({
+      id: issueId, issueNumber: 4, title: "Plan+Review demo", issueType: "task", priority: "medium",
+      sortOrder: 0, statusId: statusIds["Todo"], projectId, workflowTemplateId: templateId, createdAt: now, updatedAt: now,
+    });
+    const parentId = randomUUID();
+    await db.insert(schema.workspaces).values({
+      id: parentId, issueId, branch: "feature/pr", workingDir: "/fake/feature/pr", baseBranch: "main",
+      status: "active", createdAt: now, updatedAt: now,
+    });
+    await initWorkspaceWorkflow(db as any, { workspaceId: parentId, issueId });
+
+    // Prepare -> Split Planning (fork 1)
+    expect((await proposeTransition(db as any, { workspaceId: parentId, toNodeName: "Split Planning" })).ok).toBe(true);
+    await svc.onWorkspaceEnteredNode(parentId);
+
+    let children = await db.select().from(schema.workspaces).where(eq(schema.workspaces.parentWorkspaceId, parentId));
+    expect(children.length).toBe(2);
+    // Planner children join -> parent must land on the PLANNING join, not the review join.
+    for (const child of children) {
+      expect((await proposeTransition(db as any, { workspaceId: child.id, toNodeName: "Consolidate Plan & Implement" })).ok).toBe(true);
+      await svc.onWorkspaceEnteredNode(child.id);
+    }
+    let parent = (await db.select().from(schema.workspaces).where(eq(schema.workspaces.id, parentId)))[0];
+    let node = (await db.select().from(schema.workflowNodes).where(eq(schema.workflowNodes.id, parent.currentNodeId!)))[0];
+    expect(node.name).toBe("Consolidate Plan & Implement");
+    // First consolidation captured exactly the 2 planner children's diffs.
+    expect(gitMock.getDiff.mock.calls.length + gitMock.getDiffFromRepo.mock.calls.length).toBe(2);
+
+    // Join agent "implements", then advances into the second fork.
+    expect((await proposeTransition(db as any, { workspaceId: parentId, toNodeName: "Split Reviews" })).ok).toBe(true);
+    await svc.onWorkspaceEnteredNode(parentId);
+
+    children = await db.select().from(schema.workspaces).where(eq(schema.workspaces.parentWorkspaceId, parentId));
+    expect(children.length).toBe(4);
+    const reviewers = children.filter((c) => c.forkStatus === "running");
+    expect(reviewers.length).toBe(2);
+    for (const child of reviewers) {
+      expect((await proposeTransition(db as any, { workspaceId: child.id, toNodeName: "Consolidate & Fix" })).ok).toBe(true);
+      await svc.onWorkspaceEnteredNode(child.id);
+    }
+    parent = (await db.select().from(schema.workspaces).where(eq(schema.workspaces.id, parentId)))[0];
+    node = (await db.select().from(schema.workflowNodes).where(eq(schema.workflowNodes.id, parent.currentNodeId!)))[0];
+    expect(node.name).toBe("Consolidate & Fix");
+    // Second consolidation only captured the 2 REVIEW children (2 + 2 = 4 diffs total, not 2 + 4).
+    expect(gitMock.getDiff.mock.calls.length + gitMock.getDiffFromRepo.mock.calls.length).toBe(4);
+  });
+
+  it("caps concurrency via the fork node's maxParallel config (rest queue)", async () => {
+    const { parentId } = await setupForkAtSplit();
+    // Pin the "Split Reviews" fork node to 1 parallel child.
+    const forkNodes = await db.select().from(schema.workflowNodes).where(eq(schema.workflowNodes.name, "Split Reviews"));
+    for (const n of forkNodes) {
+      const cfg = { ...(n.config ? JSON.parse(n.config) : {}), maxParallel: 1 };
+      await db.update(schema.workflowNodes).set({ config: JSON.stringify(cfg) }).where(eq(schema.workflowNodes.id, n.id));
+    }
+    await svc.onWorkspaceEnteredNode(parentId);
+
+    const children = await db.select().from(schema.workspaces).where(eq(schema.workspaces.parentWorkspaceId, parentId));
+    expect(children.map((c) => c.forkStatus).sort()).toEqual(["queued", "running"]);
+    expect(startSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("caps concurrency via the workflow_fork_max_per_workspace setting", async () => {
+    const { parentId } = await setupForkAtSplit();
+    await db.insert(schema.preferences).values({ key: "workflow_fork_max_per_workspace", value: "1" });
+    await svc.onWorkspaceEnteredNode(parentId);
+
+    const children = await db.select().from(schema.workspaces).where(eq(schema.workspaces.parentWorkspaceId, parentId));
+    expect(children.map((c) => c.forkStatus).sort()).toEqual(["queued", "running"]);
+    expect(startSession).toHaveBeenCalledTimes(1);
   });
 
   it("launches the attached spec phase skill when entering a spec-driven phase", async () => {

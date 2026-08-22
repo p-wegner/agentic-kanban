@@ -466,6 +466,25 @@ describe("workflow-engine", () => {
     expect(node.name).toBe("Review");
   });
 
+  it("syncCurrentNodeToStatus initializes currentNodeId for a fresh issue with no current node (regression: #999 fix must not block createIssue init)", async () => {
+    // createIssue() relies on syncCurrentNodeToStatus to set currentNodeId the
+    // first time a workflow template is assigned to a brand-new issue, where
+    // currentNodeId is still null (no existing position to protect, so this is
+    // initialization, not a teleport across the graph).
+    const { syncCurrentNodeToStatus } = await import("@agentic-kanban/shared/lib/workflow-engine");
+    const { projectId, statusIds } = await seedProject(db);
+    const templateId = await resolveTemplateForIssue(db as any, { projectId, issueType: "bug" });
+    const issueId = await seedIssue(db, projectId, statusIds["In Progress"], "bug");
+    await db.update(schema.issues).set({ workflowTemplateId: templateId, currentNodeId: null }).where(eq(schema.issues.id, issueId));
+
+    await syncCurrentNodeToStatus(db as any, issueId);
+
+    const issue = (await db.select().from(schema.issues).where(eq(schema.issues.id, issueId)))[0];
+    expect(issue.currentNodeId).toBeTruthy();
+    const node = (await db.select().from(schema.workflowNodes).where(eq(schema.workflowNodes.id, issue.currentNodeId!)))[0];
+    expect(node.statusName).toBe("In Progress");
+  });
+
   it("syncCurrentNodeToStatus also updates non-closed workspaces (regression: board endpoint staleness)", async () => {
     // Regression test for #552: after PATCH /api/issues/:id changes statusId, the board
     // endpoint was returning the old workflow-column because workspaces.currentNodeId was
@@ -582,6 +601,129 @@ describe("workflow-engine", () => {
 
     const wsClosedAfter = (await db.select().from(schema.workspaces).where(eq(schema.workspaces.id, wsId)))[0];
     expect(wsClosedAfter.currentNodeId).toBe(closedNodeId);
+  });
+
+  it("syncCurrentNodeToStatus does not teleport across a fork/join when multiple nodes share the target statusName (#999)", async () => {
+    // Reproduces #996: a template with TWO fork/join pairs, where a node in the
+    // FIRST pair ("Split Planning") and a node in the SECOND pair ("Split
+    // Reviews") both map to statusName "In Review". While the workspace sits on
+    // "Split Planning" (first pair, still In Progress-ish), some other actor
+    // (legacy review pipeline) moves the ISSUE to "In Review". A naive
+    // first-match sync would jump currentNodeId to "Split Reviews" in the
+    // second pair, silently skipping the rest of the planning half of the graph.
+    const { projectId, statusIds } = await seedProject(db);
+    const now = new Date().toISOString();
+    const templateId = randomUUID();
+    await db.insert(schema.workflowTemplates).values({
+      id: templateId,
+      projectId,
+      name: "Multi-fork",
+      isDefault: false,
+      isBuiltin: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const startId = randomUUID();
+    const planForkId = randomUUID();
+    const splitPlanningId = randomUUID(); // statusName: In Progress (current node)
+    const planJoinId = randomUUID();
+    const reviewForkId = randomUUID();
+    const splitReviewsId = randomUUID(); // statusName: In Review (unrelated match, far away)
+    const reviewJoinId = randomUUID();
+    const doneId = randomUUID();
+
+    await db.insert(schema.workflowNodes).values([
+      { id: startId, templateId, name: "Start", nodeType: "start", statusName: "Todo", maxVisits: 0, posX: 0, posY: 0, sortOrder: 0, createdAt: now } as any,
+      { id: planForkId, templateId, name: "Plan Fork", nodeType: "parallel-fork", statusName: "In Progress", maxVisits: 0, posX: 0, posY: 0, sortOrder: 1, createdAt: now } as any,
+      { id: splitPlanningId, templateId, name: "Split Planning", nodeType: "normal", statusName: "In Progress", maxVisits: 0, posX: 0, posY: 0, sortOrder: 2, createdAt: now } as any,
+      { id: planJoinId, templateId, name: "Plan Join", nodeType: "parallel-join", statusName: "In Progress", maxVisits: 0, posX: 0, posY: 0, sortOrder: 3, createdAt: now } as any,
+      { id: reviewForkId, templateId, name: "Review Fork", nodeType: "parallel-fork", statusName: "In Review", maxVisits: 0, posX: 0, posY: 0, sortOrder: 4, createdAt: now } as any,
+      { id: splitReviewsId, templateId, name: "Split Reviews", nodeType: "normal", statusName: "In Review", maxVisits: 0, posX: 0, posY: 0, sortOrder: 5, createdAt: now } as any,
+      { id: reviewJoinId, templateId, name: "Review Join", nodeType: "parallel-join", statusName: "In Review", maxVisits: 0, posX: 0, posY: 0, sortOrder: 6, createdAt: now } as any,
+      { id: doneId, templateId, name: "Done", nodeType: "end", statusName: "Done", maxVisits: 0, posX: 0, posY: 0, sortOrder: 7, createdAt: now } as any,
+    ]);
+    await db.insert(schema.workflowEdges).values([
+      { id: randomUUID(), templateId, fromNodeId: startId, toNodeId: planForkId, condition: "manual", sortOrder: 0, createdAt: now } as any,
+      { id: randomUUID(), templateId, fromNodeId: planForkId, toNodeId: splitPlanningId, condition: "manual", sortOrder: 1, createdAt: now } as any,
+      { id: randomUUID(), templateId, fromNodeId: splitPlanningId, toNodeId: planJoinId, condition: "manual", sortOrder: 2, createdAt: now } as any,
+      { id: randomUUID(), templateId, fromNodeId: planJoinId, toNodeId: reviewForkId, condition: "manual", sortOrder: 3, createdAt: now } as any,
+      { id: randomUUID(), templateId, fromNodeId: reviewForkId, toNodeId: splitReviewsId, condition: "manual", sortOrder: 4, createdAt: now } as any,
+      { id: randomUUID(), templateId, fromNodeId: splitReviewsId, toNodeId: reviewJoinId, condition: "manual", sortOrder: 5, createdAt: now } as any,
+      { id: randomUUID(), templateId, fromNodeId: reviewJoinId, toNodeId: doneId, condition: "manual", sortOrder: 6, createdAt: now } as any,
+    ]);
+
+    const issueId = await seedIssue(db, projectId, statusIds["Todo"], "task");
+    await db.update(schema.issues).set({ workflowTemplateId: templateId, currentNodeId: splitPlanningId }).where(eq(schema.issues.id, issueId));
+    const wsId = await seedWorkspace(db, issueId);
+    await db.update(schema.workspaces).set({ currentNodeId: splitPlanningId }).where(eq(schema.workspaces.id, wsId));
+
+    // Legacy pipeline moves the ISSUE status to "In Review" while the workspace
+    // is still logically on "Split Planning" (statusName "In Progress").
+    const { syncCurrentNodeToStatus } = await import("@agentic-kanban/shared/lib/workflow-engine");
+    await db.update(schema.issues).set({ statusId: statusIds["In Review"] }).where(eq(schema.issues.id, issueId));
+    await syncCurrentNodeToStatus(db as any, issueId);
+
+    const issueAfter = (await db.select().from(schema.issues).where(eq(schema.issues.id, issueId)))[0];
+    const wsAfter = (await db.select().from(schema.workspaces).where(eq(schema.workspaces.id, wsId)))[0];
+
+    // Must NOT have teleported to "Split Reviews" (the first template-order
+    // match for "In Review") since that node lives in an unrelated fork/join
+    // pair, unreachable in one hop from where the workspace actually is.
+    expect(issueAfter.currentNodeId).not.toBe(splitReviewsId);
+    expect(wsAfter.currentNodeId).not.toBe(splitReviewsId);
+  });
+
+  it("syncCurrentNodeToStatus picks the nearest reachable node when the status is ambiguous but resolvable", async () => {
+    // Same shape, but this time move the issue to a status ("In Progress")
+    // where the NEAREST reachable node from the current one is the correct
+    // target — the join right after the current node.
+    const { projectId, statusIds } = await seedProject(db);
+    const now = new Date().toISOString();
+    const templateId = randomUUID();
+    await db.insert(schema.workflowTemplates).values({
+      id: templateId,
+      projectId,
+      name: "Multi-fork-2",
+      isDefault: false,
+      isBuiltin: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const startId = randomUUID();
+    const forkId = randomUUID();
+    const branchAId = randomUUID(); // statusName: In Progress (current)
+    const branchBId = randomUUID(); // statusName: In Progress (sibling branch, also matches)
+    const joinId = randomUUID();
+
+    await db.insert(schema.workflowNodes).values([
+      { id: startId, templateId, name: "Start", nodeType: "start", statusName: "Todo", maxVisits: 0, posX: 0, posY: 0, sortOrder: 0, createdAt: now } as any,
+      { id: forkId, templateId, name: "Fork", nodeType: "parallel-fork", statusName: "In Progress", maxVisits: 0, posX: 0, posY: 0, sortOrder: 1, createdAt: now } as any,
+      { id: branchAId, templateId, name: "Branch A", nodeType: "normal", statusName: "In Progress", maxVisits: 0, posX: 0, posY: 0, sortOrder: 2, createdAt: now } as any,
+      { id: branchBId, templateId, name: "Branch B", nodeType: "normal", statusName: "In Progress", maxVisits: 0, posX: 0, posY: 0, sortOrder: 3, createdAt: now } as any,
+      { id: joinId, templateId, name: "Join", nodeType: "parallel-join", statusName: "In Review", maxVisits: 0, posX: 0, posY: 0, sortOrder: 4, createdAt: now } as any,
+    ]);
+    await db.insert(schema.workflowEdges).values([
+      { id: randomUUID(), templateId, fromNodeId: startId, toNodeId: forkId, condition: "manual", sortOrder: 0, createdAt: now } as any,
+      { id: randomUUID(), templateId, fromNodeId: forkId, toNodeId: branchAId, condition: "manual", sortOrder: 1, createdAt: now } as any,
+      { id: randomUUID(), templateId, fromNodeId: forkId, toNodeId: branchBId, condition: "manual", sortOrder: 2, createdAt: now } as any,
+      { id: randomUUID(), templateId, fromNodeId: branchAId, toNodeId: joinId, condition: "manual", sortOrder: 3, createdAt: now } as any,
+      { id: randomUUID(), templateId, fromNodeId: branchBId, toNodeId: joinId, condition: "manual", sortOrder: 4, createdAt: now } as any,
+    ]);
+
+    const issueId = await seedIssue(db, projectId, statusIds["Todo"], "task");
+    await db.update(schema.issues).set({ workflowTemplateId: templateId, currentNodeId: branchAId }).where(eq(schema.issues.id, issueId));
+    const wsId = await seedWorkspace(db, issueId);
+    await db.update(schema.workspaces).set({ currentNodeId: branchAId }).where(eq(schema.workspaces.id, wsId));
+
+    // Move status to "In Review" (only the join matches) — nearest reachable node.
+    const { syncCurrentNodeToStatus } = await import("@agentic-kanban/shared/lib/workflow-engine");
+    await db.update(schema.issues).set({ statusId: statusIds["In Review"] }).where(eq(schema.issues.id, issueId));
+    await syncCurrentNodeToStatus(db as any, issueId);
+
+    const issueAfter = (await db.select().from(schema.issues).where(eq(schema.issues.id, issueId)))[0];
+    expect(issueAfter.currentNodeId).toBe(joinId);
   });
 
   it("builds a transition block embedding the workspace id", async () => {
