@@ -22,6 +22,9 @@ import {
   type WorkerFleet,
 } from "../services/worker-fleet.service.js";
 import { allowedProfilesPrefKey } from "@agentic-kanban/shared/lib/profile-allowlist";
+// The board refuses a worker that reports no protocol version, so every fixture
+// registration must speak the current one.
+import { WORKER_PROTOCOL_VERSION } from "@agentic-kanban/shared/lib/worker-protocol";
 import {
   explainPlacement,
   explainIssuePlacement,
@@ -62,7 +65,12 @@ describe("placement explanation (#755)", () => {
 
   async function connectWorker(overrides?: { labels?: string[]; providers?: string[]; maxConcurrency?: number }) {
     const { pairingToken } = fleet.registry.mintPairingToken();
-    const result = await fleet.registry.registerWorker({ pairingToken, name: "w1", ...overrides });
+    const result = await fleet.registry.registerWorker({
+      pairingToken,
+      name: "w1",
+      protocolVersion: WORKER_PROTOCOL_VERSION,
+      ...overrides,
+    });
     if (!result.ok) throw new Error(result.error);
     fleet.connections.handleOpen(result.workerId, fakeWs());
     return result.workerId;
@@ -113,7 +121,11 @@ describe("placement explanation (#755)", () => {
   it("distinguishes a registered-but-disconnected worker from an offline one", async () => {
     await pref(workerDispatchPrefKey(PROJECT_ID), "true");
     const { pairingToken } = fleet.registry.mintPairingToken();
-    const reg = await fleet.registry.registerWorker({ pairingToken, name: "never-connected" });
+    const reg = await fleet.registry.registerWorker({
+      pairingToken,
+      name: "never-connected",
+      protocolVersion: WORKER_PROTOCOL_VERSION,
+    });
     if (!reg.ok) throw new Error(reg.error);
     const e = await explain();
     expect(e.decidedBy).toBe("eligible_worker");
