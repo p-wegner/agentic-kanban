@@ -96,7 +96,18 @@ export type TicketContext = {
  */
 export type BoardFeedbackRouting =
   | { kind: "file-ticket"; projectId: string; projectName: string; isCurrentProject: boolean }
-  | { kind: "gh-issue"; issuesUrl: string; deployment: "packaged" | "container" | "source-checkout" };
+  | {
+      kind: "gh-issue";
+      issuesUrl: string;
+      /**
+       * `remote-worker` is not a board deployment at all — it is the WORKER's situation
+       * (#749). A fleet worker runs the agent in its own checkout on another machine, with
+       * no board MCP server configured and no route to the loopback board API, so
+       * `create_issue` is not merely inconvenient there, it is impossible. Whatever the
+       * board's own deployment is, a remote worktree must be told the reachable channel.
+       */
+      deployment: "packaged" | "container" | "source-checkout" | "remote-worker";
+    };
 
 /**
  * Render the stack profile's exact feedback commands as a markdown section, or null
@@ -296,12 +307,20 @@ export const TICKET_CONTEXT_FILENAME = "CLAUDE.local.md";
  * a builder driving some OTHER project reads THAT project's CLAUDE.md, never the board's,
  * so the board's conventions reach it through exactly one channel — this file.
  */
+/**
+ * Heading of the board-feedback section. Exported because it is a SEAM, not decoration:
+ * {@link retargetTicketContextForRemoteWorker} rewrites the rendered file from this heading
+ * onwards, and `ticket-context-remote-worker.test.ts` pins that the section is rendered
+ * last so that truncation can never eat a section that came after it.
+ */
+export const BOARD_FEEDBACK_HEADING = "## If you hit a bug in the kanban board itself";
+
 export function buildBoardFeedbackSection(
   routing: TicketContext["boardFeedback"],
 ): string | null {
   if (!routing) return null;
   const lines = [
-    "## If you hit a bug in the kanban board itself",
+    BOARD_FEEDBACK_HEADING,
     "",
     "Distinct from a bug in the project you are building. You are in a WORKTREE, so the rule is",
     "fixed: **report it and keep going.** Do not try to fix the board's own code from here, and do",
@@ -330,11 +349,13 @@ export function buildBoardFeedbackSection(
     }
   } else {
     const why =
-      routing.deployment === "container"
-        ? "This board runs from a container image"
-        : routing.deployment === "packaged"
-          ? "This board runs from an installed package (npx/npm), not a source checkout"
-          : "This board's own repo is not registered as a project here";
+      routing.deployment === "remote-worker"
+        ? "You are running on a REMOTE FLEET WORKER — another machine, with no board MCP server and no route to the board's API"
+        : routing.deployment === "container"
+          ? "This board runs from a container image"
+          : routing.deployment === "packaged"
+            ? "This board runs from an installed package (npx/npm), not a source checkout"
+            : "This board's own repo is not registered as a project here";
     lines.push(
       `${why}, so there is`,
       "no board backlog on this machine to file into and no editable checkout to patch.",
@@ -352,6 +373,62 @@ export function buildBoardFeedbackSection(
     "which file/command produced it, and what you expected instead.",
   );
   return lines.join("\n");
+}
+
+/**
+ * The "you are on a remote fleet worker" preamble to the board-feedback rule (#749).
+ *
+ * A builder dispatched to a fleet worker reads a ticket-context file the BOARD rendered, so
+ * without this it is told to reflect progress and file findings through
+ * `mcp__agentic-kanban__*` — tools that do not exist on that machine. There is no MCP
+ * server configured in the remote launch spec (the board's `--mcp-config` names a file in
+ * the board's own tmpdir and is stripped), and the board API it would talk to is bound to
+ * loopback by design. So the honest instruction is: the board reads your OUTPUT, not your
+ * tool calls.
+ */
+export function buildRemoteWorkerSection(): string {
+  return [
+    "## You are running on a REMOTE FLEET WORKER",
+    "",
+    "This checkout is NOT a board worktree — it is a clone on a different machine, made for",
+    "this one assignment. Two consequences you must plan around:",
+    "",
+    "- **No board tools.** The `mcp__agentic-kanban__*` tools are NOT available here, and the",
+    "  board's HTTP API is not reachable from this machine. Do not try to call them, and do not",
+    "  treat their absence as a broken environment. Anything you would have recorded on the",
+    "  board — progress, findings, follow-up work, a ticket you could not finish — goes in your",
+    "  FINAL SUMMARY instead. That summary is what reaches the board.",
+    "- **Your work travels as commits.** Commit everything you want kept; the worker pushes your",
+    "  branch back to the board when the session ends, and anything uncommitted is discarded",
+    "  with this checkout.",
+  ].join("\n");
+}
+
+/**
+ * Retarget a rendered ticket-context file for a remote fleet worker's own checkout (#749).
+ *
+ * The board renders the file for ITS deployment — typically "file a ticket against the
+ * board's project via `create_issue`", which is right for a board worktree and unfulfillable
+ * on a worker. Rather than re-render (the caller has the file, not the `TicketContext` that
+ * produced it), the board-feedback section is cut at its heading and replaced with the
+ * remote-worker truth: no board tools, and board bugs go upstream.
+ *
+ * Safe because that section is rendered LAST — pinned by a test, so a future reordering
+ * fails loudly instead of silently truncating a section that came after it. A file with no
+ * such section (routing was null) just gets the remote sections appended.
+ */
+export function retargetTicketContextForRemoteWorker(
+  markdown: string,
+  opts: { issuesUrl: string },
+): string {
+  const cut = markdown.indexOf(BOARD_FEEDBACK_HEADING);
+  const head = (cut === -1 ? markdown : markdown.slice(0, cut)).trimEnd();
+  const feedback = buildBoardFeedbackSection({
+    kind: "gh-issue",
+    issuesUrl: opts.issuesUrl,
+    deployment: "remote-worker",
+  });
+  return [head, "", buildRemoteWorkerSection(), "", feedback ?? "", ""].join("\n");
 }
 
 /**
