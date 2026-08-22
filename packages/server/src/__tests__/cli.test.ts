@@ -316,6 +316,44 @@ describe("CLI cleanup", () => {
     expect(result.stdout).toContain("closed workspace(s) with worktrees");
     expect(result.stdout).toContain("feature/test");
   });
+
+  it("--dry-run lists worktrees without making changes", async () => {
+    const { id: projectId } = await seedProject(ctx.dbPath);
+    const { id: issueId } = await seedIssue(ctx.dbPath, projectId, { title: "WS Issue" });
+
+    const workspaceId = randomUUID();
+    const client = createClient({ url: `file:${ctx.dbPath}` });
+    const database = drizzle(client, { schema });
+    const now = new Date().toISOString();
+    await database.insert(schema.workspaces).values({
+      id: workspaceId, issueId, branch: "feature/test", workingDir: "/tmp/worktree",
+      baseBranch: "main", isDirect: false, status: "closed", createdAt: now, updatedAt: now,
+    });
+    client.close();
+
+    const result = runCli(["cleanup", "--dry-run"], ctx.dbPath);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("would be removed");
+    expect(result.stdout).toContain("1 worktree(s)");
+    expect(result.stdout).toContain("feature/test");
+    expect(result.stdout).toContain(workspaceId);
+    expect(result.stdout).not.toContain("git worktree remove --force");
+
+    const verifyClient = createClient({ url: `file:${ctx.dbPath}` });
+    const verifyDb = drizzle(verifyClient, { schema });
+    const rows = await verifyDb.select().from(schema.workspaces).where(eq(schema.workspaces.id, workspaceId));
+    verifyClient.close();
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe("closed");
+    expect(rows[0].workingDir).toBe("/tmp/worktree");
+  });
+
+  it("--dry-run shows dry-run message when no stale worktrees", () => {
+    const result = runCli(["cleanup", "--dry-run"], ctx.dbPath);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("0 worktree(s) would be removed");
+  });
 });
 
 // ── issue commands ────────────────────────────────────────────────────────────

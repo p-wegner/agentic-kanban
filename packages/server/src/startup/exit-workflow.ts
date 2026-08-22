@@ -1,7 +1,7 @@
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
-import { isSpecPlanningStageName, transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
+import { isSpecPlanningStageName, isTerminalNodeType, transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import { runUnderBuildSemaphore } from "../services/jvm-build-semaphore.js";
@@ -9,7 +9,7 @@ import { RUN_GATE, type MergeGateToken } from "../services/pre-merge-gate.servic
 import { runGateWithEvidence } from "../services/merge-gate-evidence.js";
 import { getAutoLandLoopTicket } from "../services/plugin-loop-hooks.service.js";
 import { reconcileGroupMemberIssues } from "../services/merge-cleanup.service.js";
-import { issues, preferences, projectStatuses, projects, scheduledRunHistory, scheduledRuns, sessions, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, projectStatuses, projects, scheduledRunHistory, scheduledRuns, sessions, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { desc, eq } from "drizzle-orm";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { getCommitCountAhead as commitsAhead } from "@agentic-kanban/shared/lib/git-service";
@@ -135,6 +135,15 @@ export interface WorkflowDeps {
   sessionManager: ReturnType<typeof createSessionManager>;
   boardEvents: ReturnType<typeof createBoardEvents>;
   autoMerge: (workspace: MergeWorkspace, projectId: string, issueId: string, doneStatusId: string | null, now: string, gate: MergeGateToken) => Promise<void>;
+  /**
+   * #1000: reconcile a fork child that already sits on its join node (agent
+   * called propose_transition) but never got marked "joined" — the cross-process
+   * notify that normally does that has no delivery guarantee and can lose the
+   * race against this very session-exit status write. Called (best-effort) after
+   * a fork child's session exits into blocked/failed. Optional so tests that
+   * don't exercise fork workflows can omit it.
+   */
+  reconcileForkChildOnExit?: (workspaceId: string) => Promise<void>;
   /** Injectable database for testing (defaults to the global singleton). */
   database?: Database;
   /**
@@ -225,7 +234,32 @@ async function isSpecPlanningNode(database: Database, currentNodeId: string | nu
   return isSpecPlanningStageName(rows[0]?.name);
 }
 
-export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, database, gitService: injectedGitService }: WorkflowDeps) {
+/**
+ * #997 Guard: a workspace parked on a workflow-template node (currentNodeId set)
+ * that is NOT a terminal ("end") node is still owned by the graph — its own
+ * node-driven stages decide review/fix, not the legacy triggerType:"review"
+ * pipeline. Without this, a Prepare-stage builder exit (e.g. a planning-docs-only
+ * commit) launches legacy auto-review, which can arm readyForMerge on a branch
+ * the workflow never intended to merge yet.
+ *
+ * STACKS WITH `isSpecPlanningNode` above rather than replacing it: that one is
+ * narrower (spec-planning stage names only) but fires EARLIER in
+ * handleBuilderSessionExit, before the learning step and the auto-land path, so
+ * removing it would change behaviour on those paths. Both guards present is the
+ * conservative composition — see the PR body's open question.
+ */
+async function isWorkspaceOnNonTerminalWorkflowNode(database: Database, currentNodeId: string | null): Promise<boolean> {
+  if (!currentNodeId) return false;
+  const rows = await database
+    .select({ nodeType: workflowNodes.nodeType })
+    .from(workflowNodes)
+    .where(eq(workflowNodes.id, currentNodeId))
+    .limit(1);
+  if (rows.length === 0) return false;
+  return !isTerminalNodeType(rows[0].nodeType);
+}
+
+export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, reconcileForkChildOnExit, database, gitService: injectedGitService }: WorkflowDeps) {
   const db = database ?? defaultDb;
   const gitService = injectedGitService ?? realGitService;
   const reviewSessionIds = new Set<string>(), fixAndMergeSessionIds = new Set<string>(), learningSessionIds = new Set<string>();
@@ -318,6 +352,17 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     // is never relaunched as if it were a builder (#950).
     const builder = !roleFlags.isReview && !roleFlags.isFixAndMerge && !roleFlags.isLearning;
 
+    // #1000: a fork child can independently finish and close itself (joined) via
+    // handleChildJoined WHILE this usage-limit exit is being processed for the
+    // same workspace (the classic race the ticket describes). Re-read fresh
+    // immediately before writing so that race's winner is respected instead of
+    // unconditionally overwriting a workspace another exit path already closed.
+    const freshRows = await db.select({ status: workspaces.status, forkStatus: workspaces.forkStatus }).from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
+    if (freshRows[0]?.status === "closed") {
+      console.log(`[workflow] ${cfg.label}-rate-limited session ${sessionId} exited but workspace ${workspaceId} is already closed (forkStatus=${freshRows[0].forkStatus ?? "n/a"}) — skipping blocked/relaunch write`);
+      return;
+    }
+
     if (decideRateLimitExit(rotation, builder).action === "relaunch") {
       try {
         const continuation = await buildRotationContinuationPrompt(db, issueId, cfg.label);
@@ -349,6 +394,16 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     const blockedReason = formatRateLimitBlockedReason(cfg.label, workspaceId, rotation);
     emitButlerSystemEvent({ projectId, kind: "session_failed", workspaceId, text: blockedReason });
     console.warn(`[workflow] ${cfg.label}-rate-limited workspace ${workspaceId} from session ${sessionId} left blocked (${rotation.reason})`);
+    // #1000: a rate-limit exit can race a fork child's own propose_transition onto
+    // its join node — the child successfully finished and moved itself, but this
+    // blocked-write and the cross-process join notify are unordered. Reconcile
+    // now so a child that is actually done doesn't sit blocked until the 30-min
+    // overdue timeout wrongly cancels it.
+    if (reconcileForkChildOnExit) {
+      await reconcileForkChildOnExit(workspaceId).catch((err) =>
+        console.warn(`[workflow] fork-child join reconcile failed (non-fatal) for workspace ${workspaceId}:`, err instanceof Error ? err.message : String(err)),
+      );
+    }
   }
 
   async function runWorkflowOnExit(workspaceId: string, sessionId: string, exitCode: number | null, wasPlanMode?: boolean) {
@@ -377,8 +432,14 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
       // If the workspace was already merged (e.g. via HTTP merge endpoint while a
       // fix-and-merge session was still running), do not reset the status back to
       // "idle" — that would overwrite "closed" and strand the issue in "In Review".
-      if (workspace.status === "closed" && workspace.mergedAt) {
-        console.log(`[workflow] session ${sessionId} exited but workspace ${workspaceId} is already merged (mergedAt=${workspace.mergedAt}) — skipping exit workflow`);
+      // #1003: a fork child is closed by its JOIN (forkStatus "joined"/"cancelled"), never
+      // individually merged — so it is "closed" with mergedAt null. Without this second
+      // condition, the child's own CLI process exiting after the join already closed it
+      // raced setWorkspaceStatus(..., "idle") past the terminal guard (which only protects
+      // closed+mergedAt), leaving status="idle" with closedAt still stamped from the join.
+      const forkTerminalStatuses = new Set(["joined", "cancelled", "failed"]);
+      if (workspace.status === "closed" && (workspace.mergedAt || (workspace.forkStatus && forkTerminalStatuses.has(workspace.forkStatus)))) {
+        console.log(`[workflow] session ${sessionId} exited but workspace ${workspaceId} is already closed (mergedAt=${workspace.mergedAt}, forkStatus=${workspace.forkStatus}) — skipping exit workflow`);
         boardEvents.broadcastActivity(projectId, { issueId, sessionId, activity: "" });
         boardEvents.broadcast(projectId, "session_completed");
         fixAndMergeSessionIds.delete(sessionId);
@@ -661,6 +722,14 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
     const { workspace, projectId, issueId, sessionId, now, prefMap, statuses, findStatus, autoMergeEnabled, defaultBranch, autoMergeDisabledProjectIds } = ctx;
     const workspaceId = workspace.id;
     reviewSessionIds.delete(sessionId);
+    // #997 defensive guard: a stray/legacy review session exiting while the
+    // workspace sits on a non-terminal workflow node must not arm readyForMerge —
+    // the graph owns merge eligibility for workflow-managed workspaces.
+    if (await isWorkspaceOnNonTerminalWorkflowNode(db, workspace.currentNodeId)) {
+      console.log(`[workflow] review session ${sessionId} exited but workspace ${workspaceId} is on a non-terminal workflow node  withholding readyForMerge (#997)`);
+      boardEvents.broadcast(projectId, "issue_updated");
+      return;
+    }
     const currentIssueRows = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId)).limit(1);
     const currentStatus = currentIssueRows.length > 0 ? statuses.find((s) => s.id === currentIssueRows[0].statusId) : null;
     const autoFix = getBool(prefMap, "review_auto_fix");
@@ -887,6 +956,18 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, d
       return;
     }
     if (getBool(prefMap, "learning_step_after_agent") && workspace.workingDir) await launchLearningStep(db, sessionManager, learningSessionIds, workspace, prefMap, "after agent");
+    if (await isWorkspaceOnNonTerminalWorkflowNode(db, workspace.currentNodeId)) {
+      console.log(`[workflow] workspace ${workspaceId} is on a non-terminal workflow node  skipping legacy auto-review (#997)`);
+      return;
+    }
+    // #998: a fork child (parentWorkspaceId set, or forkStatus stamped) is an ephemeral
+    // sub-branch consolidated by its JOIN — it must never be auto-reviewed or get
+    // readyForMerge on its own. Without this guard, a child that already joined can be
+    // picked up here on its own session exit and flipped back to idle/reviewing.
+    if (workspace.parentWorkspaceId || workspace.forkStatus) {
+      console.log(`[workflow] workspace ${workspaceId} is a fork child (parentWorkspaceId=${workspace.parentWorkspaceId ?? "n/a"}, forkStatus=${workspace.forkStatus ?? "n/a"})  skipping legacy auto-review (#998)`);
+      return;
+    }
     const autoReview = !skipAutoReview && (workspace.requiresReview || isAutoReviewEnabled(prefMap.get(AUTO_REVIEW_PREF_KEY)));
     if (!autoReview) return;
     await launchAutoReview(ctx);

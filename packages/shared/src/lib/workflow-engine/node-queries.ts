@@ -72,6 +72,32 @@ export async function countNodeVisits(
   return Number(rows[0]?.c ?? 0);
 }
 
+/**
+ * Find the parallel-join node belonging to a SPECIFIC fork by following the
+ * graph: the fork's outgoing edges lead to its entry (branch) nodes, whose
+ * outgoing edges lead to the join. Supports templates with multiple fork/join
+ * pairs (e.g. plan fork + review fork) — findJoinNode(templateId) alone would
+ * always return the first join in the template. Falls back to the template-wide
+ * lookup when the walk finds nothing.
+ */
+export async function findJoinNodeForFork(
+  db: WorkflowDb,
+  forkNode: WorkflowNodeRow,
+): Promise<WorkflowNodeRow | null> {
+  const entryEdges = await getOutgoingTransitions(db, forkNode.id);
+  for (const edge of entryEdges) {
+    const entry = await getNode(db, edge.toNodeId);
+    if (!entry) continue;
+    if (entry.nodeType === "parallel-join") return entry;
+    const next = await getOutgoingTransitions(db, entry.id);
+    for (const t of next) {
+      const candidate = await getNode(db, t.toNodeId);
+      if (candidate?.nodeType === "parallel-join") return candidate;
+    }
+  }
+  return findJoinNode(db, forkNode.templateId);
+}
+
 /** Find the (first) parallel-join node in a template, if any. */
 export async function findJoinNode(
   db: WorkflowDb,
