@@ -49,6 +49,18 @@ import { classifyAssignFailure } from "../services/worker-connection.service.js"
 
 const PROJECT_ID = "cccc1111-2222-3333-4444-555566667777";
 
+/**
+ * The fleet grew a protocol handshake while this suite was being written, so
+ * `registerWorker` now refuses a worker that reports no version. Declared through an
+ * intersection rather than by importing the new constant: this suite is about
+ * placement, and it should not go red either way over a field it does not test.
+ */
+type RegisterWorkerInput = Parameters<WorkerFleet["registry"]["registerWorker"]>[0] & {
+  protocolVersion?: number;
+};
+const SPEAKS_CURRENT_PROTOCOL: Pick<RegisterWorkerInput, "protocolVersion"> = { protocolVersion: 1 };
+
+
 function fakeWs(): WSContext {
   return { send: () => {}, close: () => {} } as unknown as WSContext;
 }
@@ -91,7 +103,9 @@ describe("#751 double assignment — placement claims the capacity slot", () => 
 
   async function connectWorker(maxConcurrency: number) {
     const { pairingToken } = fleet.registry.mintPairingToken();
-    const result = await fleet.registry.registerWorker({ pairingToken, name: "w", maxConcurrency });
+    const result = await fleet.registry.registerWorker({
+      pairingToken, name: "w", maxConcurrency, ...SPEAKS_CURRENT_PROTOCOL,
+    });
     if (!result.ok) throw new Error(result.error);
     fleet.connections.handleOpen(result.workerId, fakeWs());
     return result.workerId;
