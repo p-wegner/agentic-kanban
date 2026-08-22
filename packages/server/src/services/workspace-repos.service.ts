@@ -10,7 +10,7 @@ import { existsSync } from "node:fs";
 import { basename } from "node:path";
 import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import type { Database, TransactionClient } from "../db/index.js";
-import { listProjectRepos, listWorkspaceRepos, insertWorkspaceRepo, setWorkspaceRepoMergedSha, setWorkspaceRepoInstallState, findLiveSiblingSharers, findCrossProjectBranchHolders, type RepoRow } from "../repositories/repo.repository.js";
+import { listProjectRepos, listWorkspaceRepos, insertWorkspaceRepo, setWorkspaceRepoMergedSha, setWorkspaceRepoInstallState, touchOutstandingRepoInstalls, findLiveSiblingSharers, findCrossProjectBranchHolders, type RepoRow } from "../repositories/repo.repository.js";
 import { getAllWorkspaceRepos, siblingRefFromRow, stampRepoMergedHeadSha, type WorkspaceRepoRef } from "./workspace-all-repos.js";
 import { WorkspaceError, acquireRepoMergeLock, type GitService } from "./workspace-internals.js";
 import { runMergeCore } from "./merge-executor.service.js";
@@ -214,6 +214,46 @@ export function repoNeedsInstall(repo: Pick<RepoRow, "setupScript">): boolean {
  * Never throws: it is called fire-and-forget from the deferred launch path, where a rejection
  * would surface as a launch failure for a workspace whose agent is already running fine.
  */
+/**
+ * #714 — how often a live background run re-stamps `installUpdatedAt` on its still-outstanding
+ * rows. Far below `INSTALL_STALE_TIMEOUT_MS` (30 min) on purpose: the heartbeat is what lets the
+ * staleness reconciler mean "not progressing" instead of "started a while ago", so it has to be
+ * frequent enough that a sweep never lands between two beats.
+ */
+export const INSTALL_HEARTBEAT_INTERVAL_MS = 60_000;
+
+/**
+ * #714 — the liveness signal for a background install run.
+ *
+ * Not a `background sweep` (no module singleton, no start/stop pair in `BACKGROUND_SERVICES`):
+ * it is scoped to ONE run of `runBackgroundSiblingInstalls` and dies with it. Every beat covers
+ * the whole outstanding queue rather than just the repo currently installing, because with
+ * concurrency 1 it is the `pending` TAIL that crosses the staleness window first while the run
+ * ahead of it is perfectly healthy.
+ *
+ * Failures are logged and swallowed: a missed beat costs at most one premature reclaim, whereas
+ * a throw here would reject the fire-and-forget runner.
+ */
+function beginInstallHeartbeat(params: {
+  workspaceId: string;
+  paths: string[];
+  database: Database;
+  intervalMs: number;
+}): { stop: () => void } {
+  if (!(params.intervalMs > 0) || params.paths.length === 0) return { stop: () => {} };
+  const timer = setInterval(() => {
+    void touchOutstandingRepoInstalls({ workspaceId: params.workspaceId, paths: params.paths }, params.database).catch(
+      (err) => {
+        console.warn(
+          `[workspace-repos] install heartbeat for workspace ${params.workspaceId} failed: ${errorMessage(err)}`,
+        );
+      },
+    );
+  }, params.intervalMs);
+  timer.unref?.();
+  return { stop: () => clearInterval(timer) };
+}
+
 export async function runBackgroundSiblingInstalls(params: {
   workspaceId: string;
   projectId: string;
@@ -221,6 +261,8 @@ export async function runBackgroundSiblingInstalls(params: {
   database: Database;
   installMode: SiblingInstallMode;
   installTimeoutMs?: number;
+  /** #714 — heartbeat cadence; `0` disables it. Defaults to `INSTALL_HEARTBEAT_INTERVAL_MS`. */
+  heartbeatIntervalMs?: number;
   onProgress?: () => void;
 }): Promise<void> {
   const { workspaceId, projectId, database } = params;
@@ -234,22 +276,34 @@ export async function runBackgroundSiblingInstalls(params: {
   const concurrency = 1;
 
   console.log(`[workspace-repos] background installs starting for workspace ${workspaceId} (${pending.length} repo(s))`);
-  await mapBounded(pending, concurrency, async (sibling) => {
-    const repo = byPath.get(sibling.path);
-    if (!repo || !repoNeedsInstall(repo)) {
-      await setWorkspaceRepoInstallState({ workspaceId, path: sibling.path, state: "skipped", detail: "no setup script" }, database).catch(() => {});
-      params.onProgress?.();
-      return;
-    }
-    await setWorkspaceRepoInstallState({ workspaceId, path: sibling.path, state: "running" }, database).catch(() => {});
-    params.onProgress?.();
-    const outcome = await runSiblingSetupReporting(repo, sibling.worktreePath, params.installTimeoutMs);
-    await setWorkspaceRepoInstallState(
-      { workspaceId, path: sibling.path, state: outcome.ok ? "done" : "failed", detail: outcome.detail },
-      database,
-    ).catch(() => {});
-    params.onProgress?.();
+  // #714 — while this run is alive its outstanding rows are heartbeated, so the staleness
+  // reconciler cannot reclaim a long-but-live install or the tail of the queue behind it.
+  const heartbeat = beginInstallHeartbeat({
+    workspaceId,
+    paths: pending.map((s) => s.path),
+    database,
+    intervalMs: params.heartbeatIntervalMs ?? INSTALL_HEARTBEAT_INTERVAL_MS,
   });
+  try {
+    await mapBounded(pending, concurrency, async (sibling) => {
+      const repo = byPath.get(sibling.path);
+      if (!repo || !repoNeedsInstall(repo)) {
+        await setWorkspaceRepoInstallState({ workspaceId, path: sibling.path, state: "skipped", detail: "no setup script" }, database).catch(() => {});
+        params.onProgress?.();
+        return;
+      }
+      await setWorkspaceRepoInstallState({ workspaceId, path: sibling.path, state: "running" }, database).catch(() => {});
+      params.onProgress?.();
+      const outcome = await runSiblingSetupReporting(repo, sibling.worktreePath, params.installTimeoutMs);
+      await setWorkspaceRepoInstallState(
+        { workspaceId, path: sibling.path, state: outcome.ok ? "done" : "failed", detail: outcome.detail },
+        database,
+      ).catch(() => {});
+      params.onProgress?.();
+    });
+  } finally {
+    heartbeat.stop();
+  }
   console.log(`[workspace-repos] background installs finished for workspace ${workspaceId}`);
 }
 

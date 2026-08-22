@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { samePath as sharedSamePath } from "@agentic-kanban/shared/lib/path-key";
 import { repos, workspaces, issues } from "@agentic-kanban/shared/schema";
-import { and, eq, isNotNull, isNull, ne, or } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, ne, or } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database, TransactionClient } from "../db/index.js";
 import { getProjectById } from "./project.repository.js";
@@ -238,6 +238,75 @@ export async function setWorkspaceRepoInstallState(
       installUpdatedAt: new Date().toISOString(),
     })
     .where(and(eq(repos.workspaceId, params.workspaceId), eq(repos.path, params.path)));
+}
+
+/** The two states that mean "the deps for this repo are not on disk yet" (see `isRepoInstallOutstanding`). */
+const OUTSTANDING_INSTALL_STATES: readonly RepoInstallState[] = ["pending", "running"];
+
+/**
+ * #714 — the CONDITIONAL counterpart of `setWorkspaceRepoInstallState`, for a writer that read
+ * the row EARLIER and therefore cannot assume it still says what it said.
+ *
+ * The staleness reconciler is that writer: it `SELECT`s the outstanding rows, decides, and only
+ * then writes. An unconditional `UPDATE … WHERE workspaceId AND path` clobbers a row that
+ * reached `done` in between — the classic TOCTOU — and since the background runner writes the
+ * row too, the state then oscillates. Putting the state it READ into the `WHERE` makes the write
+ * itself the compare-and-swap.
+ *
+ * Returns whether the swap actually landed, so the caller reports what it DID rather than what
+ * it intended. The verdict is read back rather than taken from `rowsAffected`, which libsql
+ * reports unreliably (same reason `deleteProjectRepo` selects before deleting).
+ */
+export async function failRepoInstallIfStillIn(
+  params: { workspaceId: string; path: string; fromStates: readonly RepoInstallState[]; detail: string; now?: string },
+  database: RepoDb = db,
+): Promise<boolean> {
+  if (params.fromStates.length === 0) return false;
+  const now = params.now ?? new Date().toISOString();
+  const rowWhere = and(eq(repos.workspaceId, params.workspaceId), eq(repos.path, params.path));
+  await database
+    .update(repos)
+    .set({ installState: "failed", installDetail: params.detail, installUpdatedAt: now })
+    .where(and(rowWhere, inArray(repos.installState, [...params.fromStates])));
+  const after = await database
+    .select({ installState: repos.installState, installUpdatedAt: repos.installUpdatedAt })
+    .from(repos)
+    .where(rowWhere)
+    .limit(1);
+  const row = after[0];
+  return Boolean(row && row.installState === "failed" && row.installUpdatedAt === now);
+}
+
+/**
+ * #714 — the liveness signal the staleness sweep needs: re-stamp `installUpdatedAt` on the
+ * still-outstanding rows of a run that IS progressing.
+ *
+ * Without it `installUpdatedAt` only ever moves on a state TRANSITION, so "stale" meant
+ * "started a while ago" rather than "not progressing" — and the background runner installs at
+ * concurrency 1. Two live runs were therefore reclaimed as abandoned: an install legitimately
+ * longer than the staleness window (`sibling_install_timeout_ms_<projectId>` allows up to three
+ * hours), and the TAIL of a multi-repo `pending` queue, which crosses the window while the
+ * runner ahead of it is perfectly healthy. The heartbeat covers the whole outstanding queue for
+ * that reason, not just the row currently running.
+ *
+ * Scoped to `pending`/`running` so it can never touch a row that has already settled — the same
+ * predicate that makes the reclaim above a compare-and-swap.
+ */
+export async function touchOutstandingRepoInstalls(
+  params: { workspaceId: string; paths: readonly string[]; now?: string },
+  database: RepoDb = db,
+): Promise<void> {
+  if (params.paths.length === 0) return;
+  await database
+    .update(repos)
+    .set({ installUpdatedAt: params.now ?? new Date().toISOString() })
+    .where(
+      and(
+        eq(repos.workspaceId, params.workspaceId),
+        inArray(repos.path, [...params.paths]),
+        inArray(repos.installState, [...OUTSTANDING_INSTALL_STATES]),
+      ),
+    );
 }
 
 /**

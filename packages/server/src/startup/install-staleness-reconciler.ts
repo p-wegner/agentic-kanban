@@ -24,16 +24,36 @@
  * unblocked reads as blocked-by-a-known-failure, not blocked-by-an-invisible-hang), and it gives
  * the operator a re-run path: relaunching/recreating the workspace re-provisions the repo, which
  * inserts a fresh row and starts the state machine over.
+ *
+ * #714 — two things had to be true for that to be safe, and neither was:
+ *
+ *  1. **The reclaim must be a compare-and-swap.** The rows are read by one `SELECT` and written
+ *     by a later `UPDATE`, and the background runner writes the same rows — so a row that
+ *     reached `done` in between was clobbered to `failed`. The write now carries the state this
+ *     pass observed (`failRepoInstallIfStillIn`) and reports whether the swap landed.
+ *  2. **"Stale" must mean NOT PROGRESSING, not STARTED A WHILE AGO.** `installUpdatedAt` only
+ *     ever moved on a state transition, and the runner installs at concurrency 1 — so a single
+ *     install longer than the window (allowed: `sibling_install_timeout_ms_<projectId>` goes up
+ *     to three hours) and the tail of a multi-repo `pending` queue were both reclaimed while
+ *     the runner was alive and healthy. The runner now HEARTBEATS its outstanding rows
+ *     (`touchOutstandingRepoInstalls`, driven from `runBackgroundSiblingInstalls`), so an
+ *     un-advanced stamp is evidence of abandonment rather than of a long job.
+ *
+ * A reconciler that exists to stop false merge blocks must not manufacture them.
  */
-import { and, eq } from "drizzle-orm";
-import { repos } from "@agentic-kanban/shared/schema";
+import type { RepoInstallState } from "@agentic-kanban/shared/lib/repo-install-state";
+import { isRepoInstallState } from "@agentic-kanban/shared/lib/repo-install-state";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
-import { listOutstandingRepoInstallRows } from "../repositories/repo.repository.js";
+import { failRepoInstallIfStillIn, listOutstandingRepoInstallRows } from "../repositories/repo.repository.js";
 import { emptyPassReport, recordActed, recordSkipped, type PassReport } from "../lib/pass-report.js";
 import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 
-/** How long a `pending`/`running` install may sit with no update before it is deemed abandoned. */
+/**
+ * How long a `pending`/`running` install may sit with no update before it is deemed abandoned.
+ * Since #714 a live runner heartbeats its outstanding rows, so this is a no-progress budget and
+ * not a cap on how long an install may legitimately take.
+ */
 export const INSTALL_STALE_TIMEOUT_MS = 30 * 60 * 1000;
 /** How often the reconciler sweeps. */
 const SWEEP_INTERVAL_MS = 10 * 60 * 1000;
@@ -51,6 +71,10 @@ export type InstallStalenessAction = "fail" | "hold";
 /**
  * Decide what to do with one outstanding install row. Pure, so the timeout policy is testable
  * without a database or a clock.
+ *
+ * The clock it reads is a HEARTBEAT since #714, not a start time: a runner that is making
+ * progress re-stamps `installUpdatedAt` on its outstanding rows, so `ageMs` measures lack of
+ * progress. A long-but-live install is held; a silent one is failed.
  *
  * A row with no readable `installUpdatedAt` is treated as stale rather than held forever — an
  * unparseable/missing timestamp must not become a permanent excuse not to act, the same lesson
@@ -103,14 +127,32 @@ export async function reconcileStaleInstalls(
       recordSkipped(result, row.workspaceId, "hold");
       continue;
     }
-    await database
-      .update(repos)
-      .set({
-        installState: "failed",
-        installDetail: `install timed out — ${reason}`,
-        installUpdatedAt: new Date(nowMs).toISOString(),
-      })
-      .where(and(eq(repos.workspaceId, row.workspaceId), eq(repos.path, row.path)));
+    // #714 — the write is conditional on the state this pass READ. The rows come from a
+    // `SELECT` taken before the decision, and the background runner writes the same rows, so
+    // an unconditional `WHERE workspaceId AND path` clobbers a row that reached `done` in the
+    // meantime. Naming the observed state in the `WHERE` turns the write into a
+    // compare-and-swap: a row that moved on is simply not matched.
+    const observed: RepoInstallState | null = isRepoInstallState(row.installState) ? row.installState : null;
+    if (!observed) {
+      recordSkipped(result, row.workspaceId, "unrecognised installState — nothing safe to swap from");
+      continue;
+    }
+    const swapped = await failRepoInstallIfStillIn(
+      {
+        workspaceId: row.workspaceId,
+        path: row.path,
+        fromStates: [observed],
+        detail: `install timed out — ${reason}`,
+        now: new Date(nowMs).toISOString(),
+      },
+      database,
+    );
+    if (!swapped) {
+      // It advanced under us — which is the good outcome, not a failure to act.
+      recordSkipped(result, row.workspaceId, `advanced past '${observed}' since the scan — left alone`);
+      log(`skipped ${ref} — install advanced past '${observed}' since this pass read it`);
+      continue;
+    }
     result.failed.push({ workspaceId: row.workspaceId, path: row.path });
     recordActed(result, row.workspaceId, "install-timed-out");
     log(`marked ${ref} install as failed — ${reason}`);
