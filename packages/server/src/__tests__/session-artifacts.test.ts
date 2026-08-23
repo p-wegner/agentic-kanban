@@ -250,8 +250,15 @@ describe("session artifact routes", () => {
         writeFileSync(join(tempDir, "safe.txt"), "safe content");
         const { workspaceId } = await seedWorkspace(db, tempDir);
 
+        // An absolute path on THIS platform (#828). `C:\Windows\...` is absolute only on
+        // Windows; off it that string is a relative one-segment name, so it resolves
+        // INSIDE the workspace, clears the containment check correctly, and the route
+        // answers 404 (no such file) rather than 400 (outside).
+        const outside = process.platform === "win32"
+          ? "C:\\Windows\\System32\\config\\SAM"
+          : "/etc/shadow";
         const res = await app.request(
-          `/api/workspaces/${workspaceId}/artifacts-file?path=${encodeURIComponent("C:\\Windows\\System32\\config\\SAM")}`,
+          `/api/workspaces/${workspaceId}/artifacts-file?path=${encodeURIComponent(outside)}`,
         );
         expect(res.status).toBe(400);
         const body = await res.json();
