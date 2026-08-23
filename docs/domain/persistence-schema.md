@@ -292,10 +292,11 @@ runtime concerns* live in `server` because they touch Node builtins (`fs`, `os`)
   loses its isolation benefit and contention rises — but nothing re-checks WAL the way
   `assertForeignKeysEnabled` re-checks FK (`index.ts:32`). **Inferred, unverified:** no
   startup assertion guards WAL specifically.
-- **Migration snapshot chain abandoned at 0006.** Per `packages/shared/CLAUDE.md`,
-  `drizzle-kit generate --check` is unreliable; the schema↔migrations guarantee rests
-  on a fresh-apply drift test, not the snapshot chain. A maintainer who trusts
-  `--check` will be misled.
+- **Migration snapshot chain re-baselined at 0132 (#789).** It had been abandoned at
+  0006, making `drizzle-kit generate` unusable for ~126 migrations. A single snapshot
+  regenerated from the schema restored it; the 0007..0131 gap is left as a gap on
+  purpose. The schema↔migrations guarantee still rests on the fresh-apply drift test,
+  not the snapshot chain — see `packages/shared/CLAUDE.md` § "drizzle-kit generate".
 - **`providerSessionId` vs the reused `claudeSessionId` column.** The schema has a
   `provider_session_id` column (`sessions.ts:14`), yet the server doc describes Pi's
   resume id being stored in a legacy "claudeSessionId" column. **Open question:** the
