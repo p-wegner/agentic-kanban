@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { apiFetch, apiPut } from "../lib/api.js";
+import { getSettings, setSettings } from "../lib/settingsStore.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
@@ -42,7 +42,10 @@ export function WorkerDispatchPrefs({ projectId, projectName, onSaved }: WorkerD
   const [saved, setSaved] = useState(false);
 
   const load = useCallback(() => {
-    apiFetch<Record<string, string>>("/api/preferences/settings")
+    // Through settingsStore, not a raw fetch: its write half is what calls
+    // invalidateSettings(), so the shared cache and the server cannot disagree about a
+    // dispatch preference this panel just wrote (client conventions guard, #811).
+    getSettings()
       .then((settings) => {
         setDispatch(settings[keys.dispatch] === "true");
         setStrict(settings[keys.strict] === "true");
@@ -68,8 +71,8 @@ export function WorkerDispatchPrefs({ projectId, projectName, onSaved }: WorkerD
     try {
       // A 422 from the settings route means the key was rejected as unknown — surfaced
       // rather than swallowed, because a silently no-op'd preference write is exactly the
-      // failure #874 was about.
-      await apiPut("/api/preferences/settings", body);
+      // failure #874 was about. setSettings() bundles the mandatory invalidateSettings().
+      await setSettings(body);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
       onSaved?.();

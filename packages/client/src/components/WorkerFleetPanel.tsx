@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { apiFetch, apiPost, apiDelete } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { startStaggeredPoll } from "../lib/pollScheduler.js";
 import { WorkerEventTimeline } from "./WorkerEventTimeline.js";
 import { WorkerDispatchPrefs } from "./WorkerDispatchPrefs.js";
+import { useActiveProjectPreferenceQuery, useProjectsQuery } from "../hooks/useBoardDataQueries.js";
 
 /**
  * Mirrors one row of the enriched `GET /api/workers` response (#774).
@@ -89,7 +90,22 @@ export function WorkerFleetPanel({ onClose }: WorkerFleetPanelProps) {
   const [pairing, setPairing] = useState<{ pairingToken: string; expiresAt: string } | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [project, setProject] = useState<{ id: string; name: string } | null>(null);
+
+  /**
+   * Which project the dispatch preferences below apply to. Read here rather than taken as a
+   * prop: the overlay that renders this panel is not #774's file to change. It goes through the
+   * shared active-project query rather than a raw preference fetch (#811) — one cache key
+   * for the preference, so a project switch elsewhere on the board reaches this panel
+   * instead of leaving it on a stale answer for as long as it stays open.
+   */
+  const { data: activePreference } = useActiveProjectPreferenceQuery();
+  const { data: allProjects } = useProjectsQuery();
+  const project = useMemo(() => {
+    const activeId = activePreference?.projectId;
+    if (!activeId) return null;
+    const match = allProjects?.find((p) => p.id === activeId);
+    return match ? { id: match.id, name: match.name } : null;
+  }, [activePreference?.projectId, allProjects]);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -119,19 +135,6 @@ export function WorkerFleetPanel({ onClose }: WorkerFleetPanelProps) {
     const poll = startStaggeredPoll(load, 15000);
     return () => poll.stop();
   }, [load]);
-
-  useEffect(() => {
-    // Which project the dispatch preferences below apply to. Fetched here rather than taken
-    // as a prop: the overlay that renders this panel is not #774's file to change.
-    apiFetch<{ projectId: string | null }>("/api/preferences/active-project")
-      .then(async ({ projectId }) => {
-        if (!projectId) return;
-        const projects = await apiFetch<Array<{ id: string; name: string }>>("/api/projects");
-        const match = projects.find((p) => p.id === projectId);
-        if (match) setProject({ id: match.id, name: match.name });
-      })
-      .catch(() => setProject(null));
-  }, []);
 
   const mintPairingToken = async () => {
     try {
