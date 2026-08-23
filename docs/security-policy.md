@@ -137,12 +137,26 @@ Scope is again the production graph, because that is what gets redistributed.
 |---|---|
 | Strong copyleft / source-available (`AGPL`, `GPL-`, `SSPL`, `BUSL`, `CC-BY-NC`, `EUPL`, `OSL`, `CPAL`) | **Fail.** It would change the licensing of anything that installs us. |
 | Weak copyleft (`MPL-`, `LGPL`, `EPL-`, `CDDL`) | Reported for a human call — linking is normally fine, vendoring is not. |
-| No readable SPDX id (`Unknown`) | Capped by `POLICY.licences.prodUnknownCeiling`, currently **2**. |
+| No readable SPDX id (`Unknown`) | Must match a named pattern in `POLICY.licences.acceptedProdUnknownLicences`, each carrying a reason. |
 
-The two current unknowns are `@anthropic-ai/claude-agent-sdk` and its
-`win32-x64` binary — proprietary Anthropic terms, deliberately depended on. The
-ceiling exists so a *third* one cannot arrive unnoticed; it is a shrink-only
-number like the advisory list.
+The current unknowns are all the Anthropic Claude Agent SDK — the base package
+plus one binary per platform — under proprietary Anthropic terms, deliberately
+depended on.
+
+**This was a numeric ceiling (`prodUnknownCeiling: 2`) and the count turned out
+to be the wrong unit.** The SDK ships one package per platform, so the number
+moves whenever it adds a build target, with no change in who we depend on or
+under what terms. On 2026-08-23 `-linux-x64-musl` appeared, the count went
+2 → 3, and CI failed over our own dependency growing a target. A count is also
+weaker in the other direction: it says "three unknowns are acceptable" without
+saying *which*, so removing a known one silently makes room for an unrelated
+supplier to arrive under the ceiling.
+
+Accepting by name fixes both ends — a new platform variant of an already-accepted
+SDK passes, and a package from a genuinely new supplier fails however few
+unknowns there are. Acceptances are stale-checked the same way the advisory ones
+are: a pattern matching nothing fails the scan, so a dependency we have dropped
+cannot leave behind a rule that pre-accepts some future package.
 
 Dev-only copyleft is not gated: it never leaves the developer's machine. Today
 that is `lightningcss` (MPL-2.0, via the client build) and `argparse`

@@ -20,6 +20,8 @@
 // shadow config, no second copy in the CI workflow. The workflow runs this
 // script and nothing else, so CI and a developer's laptop cannot disagree.
 
+import { pathToFileURL } from "node:url";
+
 import { spawnSyncPnpm } from "./pnpm-exec.mjs";
 
 // ---------------------------------------------------------------------------
@@ -62,11 +64,27 @@ const POLICY = {
   licences: {
     denyInProd: [/^AGPL/i, /^GPL-/i, /^SSPL/i, /^BUSL/i, /^CC-BY-NC/i, /^EUPL/i, /^OSL/i, /^CPAL/i],
     reportInProd: [/^MPL-/i, /^LGPL/i, /^EPL-/i, /^CDDL/i],
-    // Packages in the production graph shipping no readable SPDX id. Shrink-only
-    // ceiling, for the same reason as the advisory list: today's two are both the
-    // Anthropic Claude Agent SDK (proprietary terms, deliberately depended on),
-    // and a third arriving unnoticed is exactly what this number catches.
-    prodUnknownCeiling: 2,
+    // Packages in the production graph shipping no readable SPDX id, accepted BY
+    // NAME rather than by count.
+    //
+    // This was a numeric ceiling of 2, and the count is the wrong unit. The two
+    // it described were both the Anthropic Claude Agent SDK, which ships ONE
+    // PACKAGE PER PLATFORM -- so the number moves whenever the SDK adds a target,
+    // with no change in who we depend on or under what terms. That fired for real
+    // on 2026-08-23: `-linux-x64-musl` appeared, the count went 2 -> 3, and CI went
+    // red over our own dependency growing a build target.
+    //
+    // A count is also weaker than it looks in the other direction: it says "three
+    // unknowns are acceptable" without saying WHICH, so dropping a known one
+    // silently makes room for an unrelated supplier to arrive under the ceiling.
+    // A name list says which unknowns are known and why, and a genuinely new one
+    // fails no matter how many are already accepted.
+    acceptedProdUnknownLicences: [
+      // Anthropic Claude Agent SDK -- proprietary terms, deliberately depended on.
+      // Matches the base package and its per-platform variants; the version is
+      // deliberately unpinned, since a version bump is not a licensing event.
+      /^@anthropic-ai\/claude-agent-sdk(-[a-z0-9-]+)*@/i,
+    ],
   },
 };
 
@@ -163,6 +181,11 @@ function main() {
   const sumProd = licenceSummary(licProd);
   const prodUnknown = sumProd.byLicence.get("Unknown") ?? [];
   const allUnknown = sumAll.byLicence.get("Unknown") ?? [];
+  const acceptedUnknownPatterns = POLICY.licences.acceptedProdUnknownLicences;
+  const unexplainedUnknown = prodUnknown.filter((pkg) => !matchAny(acceptedUnknownPatterns, pkg));
+  const staleUnknownAcceptances = acceptedUnknownPatterns.filter(
+    (re) => !prodUnknown.some((pkg) => re.test(pkg)),
+  );
   const prodDenied = [...sumProd.byLicence.entries()].filter(([l]) => matchAny(POLICY.licences.denyInProd, l));
   const prodWeak = [...sumProd.byLicence.entries()].filter(([l]) => matchAny(POLICY.licences.reportInProd, l));
 
@@ -180,9 +203,18 @@ function main() {
   for (const [licence, pkgs] of prodDenied) {
     failures.push(`denied licence in the production graph: ${licence} — ${pkgs.join(", ")}`);
   }
-  if (prodUnknown.length > POLICY.licences.prodUnknownCeiling) {
+  for (const pkg of unexplainedUnknown) {
     failures.push(
-      `${prodUnknown.length} production packages have no readable licence, ceiling is ${POLICY.licences.prodUnknownCeiling}: ${prodUnknown.join(", ")}`,
+      `production package with no readable licence and no acceptance: ${pkg} — if this is deliberate, add a pattern with a reason to POLICY.licences.acceptedProdUnknownLicences in scripts/security-scan.mjs`,
+    );
+  }
+  // The same staleness rule the advisory acceptances get: an acceptance that no
+  // longer matches anything is a claim about a dependency we no longer have, and
+  // leaving it in place would silently pre-accept a future package that happens
+  // to match it.
+  for (const re of staleUnknownAcceptances) {
+    failures.push(
+      `stale acceptance: ${re} matches no production package with an unreadable licence — remove it from POLICY.licences.acceptedProdUnknownLicences in scripts/security-scan.mjs`,
     );
   }
 
@@ -191,7 +223,7 @@ function main() {
       failOnSeverities: POLICY.failOnSeverities,
       scope: "production dependency graph",
       acceptedProdAdvisories: POLICY.acceptedProdAdvisories,
-      prodUnknownLicenceCeiling: POLICY.licences.prodUnknownCeiling,
+      acceptedProdUnknownLicences: POLICY.licences.acceptedProdUnknownLicences.map(String),
     },
     vulnerabilities: {
       wholeTree: {
@@ -208,7 +240,12 @@ function main() {
     },
     licences: {
       wholeTree: { packages: sumAll.total, unknown: allUnknown.length },
-      production: { packages: sumProd.total, unknown: prodUnknown.length, unknownPackages: prodUnknown },
+      production: {
+        packages: sumProd.total,
+        unknown: prodUnknown.length,
+        unknownPackages: prodUnknown,
+        unexplainedUnknownPackages: unexplainedUnknown,
+      },
       deniedInProduction: prodDenied.map(([l, p]) => ({ licence: l, packages: p })),
       weakCopyleftInProduction: prodWeak.map(([l, p]) => ({ licence: l, packages: p })),
       histogramWholeTree: Object.fromEntries([...sumAll.byLicence].map(([l, p]) => [l, p.length])),
@@ -247,9 +284,12 @@ function main() {
     line("");
     line(`licences, whole tree: ${sumAll.total} pkgs, ${allUnknown.length} with no readable licence`);
     line(
-      `licences, production: ${sumProd.total} pkgs, ${prodUnknown.length} with no readable licence (ceiling ${POLICY.licences.prodUnknownCeiling})`,
+      `licences, production: ${sumProd.total} pkgs, ${prodUnknown.length} with no readable licence ` +
+        `(${prodUnknown.length - unexplainedUnknown.length} accepted by name, ${unexplainedUnknown.length} unexplained)`,
     );
-    for (const p of prodUnknown) line(`  unknown: ${p}`);
+    for (const p of prodUnknown) {
+      line(`  ${unexplainedUnknown.includes(p) ? "UNEXPLAINED" : "accepted   "} unknown licence: ${p}`);
+    }
     for (const [l, pkgs] of prodWeak) line(`  weak copyleft: ${l} — ${pkgs.join(", ")}`);
     for (const [l, pkgs] of prodDenied) line(`  DENIED: ${l} — ${pkgs.join(", ")}`);
     line("");
@@ -266,4 +306,13 @@ function main() {
   process.exit(failures.length === 0 ? 0 : 1);
 }
 
-main();
+// Exported so the policy can be asserted on WITHOUT running a scan: `main()`
+// shells out to pnpm twice and then calls `process.exit`, so an importing test
+// would take the whole process down. The guard below keeps `pnpm security`
+// working exactly as before -- it is still the entry point, it just is not the
+// only way in.
+export { POLICY, matchAny };
+
+const invokedDirectly =
+  process.argv[1] !== undefined && pathToFileURL(process.argv[1]).href === import.meta.url;
+if (invokedDirectly) main();
