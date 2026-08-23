@@ -137,11 +137,44 @@ Recorded here so the next session doesn't have to re-derive it:
   in a non-grandfathered test made `pnpm typecheck` exit 1 with
   `src/__tests__/agent-provider-registry.test.ts(61,38): error TS2345`, while the OLD config
   exited 0 on the identical tree.
-- **The same hole exists in `client` (82 errors / 28 files) and `shared` (7 errors / 4 files)**
-  — client by an explicit `*.test.ts` exclude, shared because its `__tests__` dir sits outside
-  `"include": ["src"]`. Neither is fixed; `mcp-server` was always clean. Tracked as **#809**.
-  Shared's 7 were small enough to fix inline but its test files were being edited concurrently
-  by another agent, so they were deferred rather than swept into this ticket's commit.
+- **#809 (client + shared had the same hole, 2026-08-23) — CLOSED.** `mcp-server` was always
+  clean, so three of four packages hid their tests, by two different mechanisms.
+  - **`shared`: no exclude line existed to find.** Its `__tests__` dir simply sat outside
+    `"include": ["src"]` — the hole was the ABSENCE of a line, which is why reading the config
+    the way #788 read server's shows nothing wrong. 7 errors / 4 files, **all fixed**, no
+    grandfathering and no ratchet (a `.ts` import extension, and three
+    `ReturnType<typeof readdirSync>` annotations resolving to the Buffer overload while the
+    call returns `string[]`). Split into `tsconfig.json` (typecheck, `include: ["src",
+    "__tests__"]`, no `rootDir`) + `tsconfig.build.json` (emit); `package.json`'s `build`
+    points at the latter. Its emit exclusion was NOT too narrow, unlike server's: `dist` after
+    the change is byte-identical (`diff -rq`, empty) and holds no test file.
+  - **`client`: 90 errors / 29 files** (not the 82/28 first measured — that count predated
+    `rootDir` being dropped and some drift since). **44 fixed**, and they were not loose
+    fixtures but fixtures that had drifted from their DTOs: 9 `StatusWithIssues` literals
+    missing `count`, four of them also spelling `sortOrder` as a nonexistent `position` behind
+    an `as` cast; an `OnboardingStep extends { configKey: infer K } ? K : never` that resolved
+    to `never` so 9 call sites were passing strings to a `never` parameter; three fixtures
+    predating a field becoming required (`category`/`issueNumber`, `staleness`, the
+    `dirty_main_checkout` discriminant).
+  - **46 client errors remain, in 10 named files — none is a wrong call site.** All are
+    node-side guard/ratchet suites that walk the tree with `node:fs`, and `packages/client`
+    has no `@types/node` (nor is it hoisted). One dependency line clears all 46; that is a
+    lockfile change needing an install, so it is **#818** and the 10 are grandfathered BY NAME
+    (never a wildcard) in `packages/client/tsconfig.json`.
+  - **Ratchet exists**: `packages/shared/__tests__/client-test-typecheck-ratchet.test.ts`
+    (`@gate:always-run`), both halves — shrink-only AND no-stale-entry. It lives in **shared**
+    for the reason it guards: spawning tsc needs `node:child_process`, which does not
+    typecheck inside the client program, so in the client it would have had to grandfather
+    itself and grow the list it exists to shrink.
+  - **Verified by watching all three fail**: `formatDuration("not a number")` in
+    `agentGridView.test.ts` → client typecheck exit 1 with `error TS2345`, while the OLD
+    config exited 0 on the identical tree; `slugify(42)` → shared typecheck exit 2, OLD config
+    0. The ratchet's stale half fired on a swapped-in clean file, its growth half on an 11th
+    entry. All reverted. `pnpm typecheck` exits 0; `tsc -b` (client build) exits 0; the 17
+    touched client suites (155 tests) and the 4 touched shared suites (28 tests) pass.
+  - The client had **no** too-narrow emit exclude to find: `tsc` emits nothing there
+    (`noEmit`, `vite build` owns `dist`), so the `tsc -b` half of its build is a pure
+    typecheck.
 
 ## Process fix adopted
 
