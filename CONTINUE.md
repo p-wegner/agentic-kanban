@@ -768,3 +768,54 @@ second consumer trips the stale half). `pnpm check:arch` still 0 errors / 31 war
 Reasoning and the full tables: `docs/package-boundaries.md`.
 
 **Not done, and deliberately**: the 31 relocations. Anyone tempted should read the 2.3% first.
+
+## #772 duplication follow-up — landed partially (2026-08-23)
+
+#772 is the follow-up to #732 and named three clusters. Two landed, one could not be touched.
+Commits: `0fb71e964f` (whose message is WRONG — see below), `175d183ad1` (the correcting
+empty commit carrying that message), `580cee75c`, `15c30e66b8`.
+
+**Landed**
+- **`firstRow` — done, 104 sites.** `packages/server/src/lib/first-row.ts` is the one spelling
+  for "run this `.limit(1)` query, give me the row or null". 79 `return rows[0] ?? null;`, 20
+  `return rows[0]?.field ?? null;`, 4 `X.length === 0 ? null : X[0]` ternaries, 1 non-return
+  binding, and the 5 array-returning `scheduled-run-query` functions (plus their callers).
+  Ratchet: `packages/server/src/__tests__/first-row-single-spelling.test.ts` — AST-matched
+  (#779), `@gate:always-run`, hand-written spellings frozen at ZERO.
+- **`propose_transition` / `clarify_or_propose` — done.** The densest clone pair in the repo
+  (349 of 574 shared windows) now share `mcp-server/src/tools/workflow-transition-support.ts`.
+  No tool name or schema changed (`pnpm skill:check` current).
+- **`create_issue` / `create_sub_issue` — done.** Both use
+  `withUniqueIssueNumber` from `shared/lib/issue-number.ts`.
+
+**NOT done — the real remainder of #772**
+- **The `.limit(1)` array-returning drift: 50 repository functions** still hand the caller a
+  one-element array. Capped shrink-only by `LIMIT_ONE_ARRAY_CAP` in the ratchet above; the
+  migration changes 50 exported signatures and every call site.
+- **Four more copies of the issue-number retry loop** (server `issue.service.ts` x2,
+  `issue/cli-commands.repository.ts` x2, `cli/commands/issue.ts`,
+  `voice-capture.service.ts`) — now a mechanical `withUniqueIssueNumber` swap.
+- **`CreateIssuePanel.tsx` / `CreateIssueForm.tsx` (479 + 409 SLOC, the same form twice)** —
+  untouched. `packages/client/**` was owned by another agent for the whole session. This is
+  the ticket's own highest-value item and is entirely outstanding.
+- **Four mcp-server files whose clone partner lives in `packages/server`**: get-fleet-friction
+  and analyze-session vs `server/src/cli/commands/session.ts`, reviewer-fixes vs
+  `server/src/lib/review-effectiveness-report.ts`, update-dependencies-batch vs
+  `server/src/services/issue-dependency.service.ts`. Each needs both sides edited together.
+- **The residual repositories** (`scheduled-run-query`, `bisect`, `sprint-capacity`).
+
+**Measurement — reproduced, and it does not agree with the ticket.** The scanner described in
+#772 (15-token windows over comment-stripped, string-normalised production `.ts`/`.tsx` at
+>= 60 SLOC in `packages/{client,server,shared,mcp-server}`) was rebuilt and run before and
+after. It measures **15** files >= 50% duplicated at the pre-#772 tree, not the 18 the ticket
+states; the 15 are a strict SUBSET of the ticket's 18 (it does not reach `review.repository`,
+`board-column.repository` or `server/src/cli/commands/workspace.ts`). After this work: **13**.
+The `firstRow` migration by itself moved the count 15 -> 15 — its value is one spelling and a
+ratchet, not this metric, and any claim that it reduced duplication by this measure is false.
+The scanner is not committed (it is not a repo tool); the method above is enough to rebuild it.
+
+**`0fb71e964f` carries the wrong commit message.** A concurrent agent overwrote the message
+file between the write and the `git commit -F`, so the firstRow commit is titled
+`refactor(#802): split the rebase family out of workspace-merge.service`. #802's real code is
+`518a1f3cde`. A commit had already been built on top, so it was not rewritten; the correct
+message is the empty commit `175d183ad1`. Lesson: use a per-commit unique message filename.
