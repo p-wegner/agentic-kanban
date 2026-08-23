@@ -310,7 +310,9 @@ describe("mergeWorkspaceWithFixFallback wiring (#417)", () => {
     const fixAndMerge = vi.fn(async () => {});
     const actions = {
       launch: vi.fn(), delete: vi.fn(), updateBase: vi.fn(),
-      merge: vi.fn(async () => { throw new Error(DIRTY_MAIN_MSG); }),
+      // Annotated: without it the throwing body infers `Promise<never>`, and the later
+      // reassignment to a resolving mock (the recovery half of this case) stops type-checking.
+      merge: vi.fn(async (): Promise<void> => { throw new Error(DIRTY_MAIN_MSG); }),
       fixAndMerge,
     };
     const logs = { conflictMsg: "conflict", successMsg: "ok" };

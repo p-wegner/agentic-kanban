@@ -184,11 +184,11 @@ describe("schema ↔ migrations drift gate", () => {
         "AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '\\_\\_drizzle\\_%' ESCAPE '\\'",
     );
     for (const row of tableRows.rows) {
-      const tableName = String((row as { name: string }).name);
+      const tableName = String(row.name);
       const cols = await client.execute(`PRAGMA table_info(${tableName})`);
       migrated.set(
         tableName,
-        new Set(cols.rows.map((c) => String((c as { name: string }).name))),
+        new Set(cols.rows.map((c) => String(c.name))),
       );
     }
 

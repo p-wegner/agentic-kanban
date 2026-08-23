@@ -25,7 +25,7 @@ const invokeClaudePrompt = vi.fn(async (): Promise<string> => {
   throw new Error("invokeClaudePrompt must not be reached from a stack-profile read");
 });
 vi.mock("../services/claude-cli.service.js", () => ({
-  invokeClaudePrompt: (...args: unknown[]) => invokeClaudePrompt(...args),
+  invokeClaudePrompt: (...args: Parameters<typeof invokeClaudePrompt>) => invokeClaudePrompt(...args),
 }));
 
 import { randomUUID } from "node:crypto";

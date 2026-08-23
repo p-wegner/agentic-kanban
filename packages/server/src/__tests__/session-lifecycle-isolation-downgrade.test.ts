@@ -33,8 +33,8 @@ const devcontainerAvailable = vi.fn(async () => false);
 const devcontainerUp = vi.fn(async () => null);
 vi.mock("@agentic-kanban/shared/lib/devcontainer-exec", () => ({
   hasDevcontainerConfig: () => true,
-  devcontainerAvailable: (...args: unknown[]) => devcontainerAvailable(...args),
-  devcontainerUp: (...args: unknown[]) => devcontainerUp(...args),
+  devcontainerAvailable: (...args: Parameters<typeof devcontainerAvailable>) => devcontainerAvailable(...args),
+  devcontainerUp: (...args: Parameters<typeof devcontainerUp>) => devcontainerUp(...args),
 }));
 
 async function seedWorkspace(db: TestDb): Promise<string> {

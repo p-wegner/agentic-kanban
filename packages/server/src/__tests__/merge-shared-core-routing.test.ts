@@ -56,6 +56,7 @@ import { activeMerges } from "../services/workspace-internals.js";
 import type { createBoardEvents } from "../services/board-events.js";
 import type { createSessionManager } from "../services/session.manager.js";
 import { makeTempRepo } from "./helpers/temp-repo.js";
+import type { MergeWorkspaceResponse } from "./helpers/merge-result.js";
 
 /**
  * A REAL repo path (#273). This suite drives the actual merge path, whose repo lock
@@ -133,7 +134,7 @@ describe("#945: both merge entry paths route through the shared merge executor c
       processKiller: async () => 0,
     });
 
-    const result = await svc.mergeWorkspace(workspaceId);
+    const result = await svc.mergeWorkspace(workspaceId) as MergeWorkspaceResponse;
 
     expect(result.merged).toBe(true);
     expect(runMergeCore).toHaveBeenCalledTimes(1);

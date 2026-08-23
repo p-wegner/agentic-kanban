@@ -180,7 +180,10 @@ describe("butler AskUserQuestion — parked and answered (#460)", () => {
       { question: "Which colour do you prefer?", header: "Colour", answers: ["Green", "Blue"] },
     ]);
     const result = await pending;
-    expect((result as { updatedInput: { answers: Record<string, string> } }).updatedInput.answers).toEqual({
+    // Narrow the SDK's PermissionResult union instead of casting past it: only the "allow"
+    // arm carries `updatedInput`, and that is precisely what this case is asserting about.
+    if (result.behavior !== "allow") throw new Error(`expected an allow result, got ${result.behavior}`);
+    expect(result.updatedInput?.answers).toEqual({
       "Which colour do you prefer?": "Green, Blue",
     });
 

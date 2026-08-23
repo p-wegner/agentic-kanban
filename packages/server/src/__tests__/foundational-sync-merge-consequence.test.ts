@@ -183,7 +183,7 @@ describe("exit-workflow: foundational blocker merges SYNCHRONOUSLY so a dependen
     });
     await db.insert(sessions).values({
       id: reviewSessionId, workspaceId, status: "running",
-      triggerType: "review", createdAt: now, updatedAt: now,
+      triggerType: "review", startedAt: now,
     });
     return { issueId, workspaceId, reviewSessionId };
   }
@@ -193,7 +193,7 @@ describe("exit-workflow: foundational blocker merges SYNCHRONOUSLY so a dependen
     return vi.fn(async (workspace: { id: string; branch: string }, _projectId: string, issueId: string, doneStatusId: string | null, ts: string) => {
       await git(["merge", "--no-ff", workspace.branch, "-m", `merge ${workspace.branch}`], repo);
       const mergeSha = await git(["rev-parse", "master"], repo);
-      await db.update(workspaces).set({ status: "closed", mergedAt: ts, mergeCommitSha: mergeSha, updatedAt: ts }).where(eq(workspaces.id, workspace.id));
+      await db.update(workspaces).set({ status: "closed", mergedAt: ts, mergedHeadSha: mergeSha, updatedAt: ts }).where(eq(workspaces.id, workspace.id));
       if (doneStatusId) await db.update(issues).set({ statusId: doneStatusId, updatedAt: ts }).where(eq(issues.id, issueId));
     });
   }

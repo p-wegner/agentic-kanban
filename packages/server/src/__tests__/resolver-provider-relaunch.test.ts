@@ -23,6 +23,7 @@ function policy(provider: "claude" | "codex" | "copilot", profileName: string): 
     label: `${provider} (${profileName})`,
     mode: "fill",
     headroomPct: 0,
+    notes: "",
   };
 }
 

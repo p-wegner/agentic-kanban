@@ -8,6 +8,7 @@ import { gitExecSync } from "@agentic-kanban/shared/lib/git-exec";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createPluginService, stopAllPluginViewsAsync } from "../services/plugin.service.js";
 import type { Database } from "../db/index.js";
+import type { CreateIssueInput } from "../services/issue.service.js";
 
 const EM_DASH_TITLE = "Requirement extraction: auth-service — round 1";
 const EM_DASH_DESC = "The observed UI navigation graph — which pages link where.";
@@ -84,7 +85,7 @@ describe("plugin manifest / loop-plan UTF-8 repro", () => {
     let createdTitle: string | null = null;
     service = createPluginService({
       database: db as unknown as Database,
-      createIssue: async (input) => {
+      createIssue: async (input: CreateIssueInput) => {
         createdTitle = input.title;
         return { id: randomUUID(), issueNumber: 1 } as any;
       },

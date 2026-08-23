@@ -88,7 +88,7 @@ describe("reapStaleSupervisors", () => {
         makeProc(3001, `node ${CHECKOUT}/scripts/dev.mjs`),
         makeProc(3002, `node ${CHECKOUT}/scripts/dev.mjs`),
       ],
-      isServingPid: (pid) => pid === 3001,
+      isServingPid: (pid: number) => pid === 3001,
       checkPort: () => true,
       kill,
       exitProcess,

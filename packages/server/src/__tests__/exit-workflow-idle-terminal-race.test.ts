@@ -123,7 +123,7 @@ async function seedActiveWorkspace(db: TestDb) {
   await db.insert(sessions).values({
     id: sessionId, workspaceId,
     status: "running",
-    createdAt: now, updatedAt: now,
+    startedAt: now,
   });
 
   return { projectId, issueId, workspaceId, sessionId };

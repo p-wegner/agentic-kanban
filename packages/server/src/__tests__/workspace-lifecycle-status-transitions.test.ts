@@ -94,6 +94,7 @@ import { createWorkspaceSessionService } from "../services/workspace-session.ser
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
 import { activeMerges } from "../services/workspace-internals.js";
 import { makeTempRepo } from "./helpers/temp-repo.js";
+import type { MergeWorkspaceResponse } from "./helpers/merge-result.js";
 
 /**
  * A REAL repo path (#273). This suite drives the actual merge path, whose repo lock
@@ -443,7 +444,7 @@ describe("lifecycle: reviewing → Done on merge success", () => {
       processKiller: async () => 0,
     });
 
-    const result = await svc.mergeWorkspace(workspaceId);
+    const result = await svc.mergeWorkspace(workspaceId) as MergeWorkspaceResponse;
 
     expect(result.merged).toBe(true);
     expect(result.baseBranch).toBe("master");

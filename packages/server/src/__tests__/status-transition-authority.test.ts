@@ -181,7 +181,16 @@ describe("setWorkspaceStatus (#953 workspace authority, terminal invariant)", ()
     const wsId = await seedWorkspace(db, issueId, { status: "reviewing", readyForMerge: true, workingDir: "/wt" });
     const now = "2026-07-02T11:00:00.000Z";
 
-    const ok = await setWorkspaceStatus(db as any, wsId, "closed", { now, set: { workingDir: null, readyForMerge: false } });
+    const ok = await setWorkspaceStatus(db as any, wsId, "closed", { now, set: {
+      // #226 excludes the five leading-repo MIRROR columns from `set` at the TYPE level only —
+      // the runtime write is still one atomic UPDATE, and that atomicity is exactly what this
+      // case asserts. Passing the excluded column deliberately is the test; a cast would hide
+      // which column is exempted and why.
+      // @ts-expect-error — `workingDir` is excluded from `set` by design (#226); asserted here
+      // to pin that the exclusion is type-level and does not change the write.
+      workingDir: null,
+      readyForMerge: false,
+    } });
     expect(ok).toBe(true);
     const ws = (await db.select().from(schema.workspaces).where(eq(schema.workspaces.id, wsId)))[0];
     expect(ws.status).toBe("closed");

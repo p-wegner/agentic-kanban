@@ -106,7 +106,7 @@ async function seedReviewExitScenario(db: ReturnType<typeof createTestDb>["db"])
     id: reviewSessionId, workspaceId,
     status: "running",
     triggerType: "review",
-    createdAt: now, updatedAt: now,
+    startedAt: now,
   });
 
   return { projectId, issueId, workspaceId, reviewSessionId, inReviewId };

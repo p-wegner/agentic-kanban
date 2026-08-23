@@ -56,7 +56,7 @@ async function seed(opts: {
   });
   if (opts.withSession) {
     await db.insert(sessions).values({
-      id: randomUUID(), workspaceId, status: "stopped", startedAt: now, createdAt: now,
+      id: randomUUID(), workspaceId, status: "stopped", startedAt: now,
     });
   }
   return { projectId, issueId, workspaceId };

@@ -734,7 +734,7 @@ describe("workspace-summary.service", () => {
       id: statusId,
       projectId,
       name: "In Progress",
-      position: 1,
+      sortOrder: 1,
       createdAt: now,
     });
     await db.insert(issues).values({
@@ -743,7 +743,7 @@ describe("workspace-summary.service", () => {
       statusId,
       issueNumber: 1,
       title: "Tail read",
-      position: 1,
+      sortOrder: 1,
       createdAt: now,
       updatedAt: now,
     });

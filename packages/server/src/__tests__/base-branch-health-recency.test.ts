@@ -25,7 +25,7 @@ vi.mock("../services/base-branch-health.service.js", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return {
     ...actual,
-    verifyBaseBranchHealth: (...args: unknown[]) => verifyBaseBranchHealth(...args),
+    verifyBaseBranchHealth: (...args: Parameters<typeof verifyBaseBranchHealth>) => verifyBaseBranchHealth(...args),
   };
 });
 

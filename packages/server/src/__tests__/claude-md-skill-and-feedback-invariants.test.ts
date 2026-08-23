@@ -66,7 +66,7 @@ const BUILTIN_WITH_ONDISK_COPY = [
 
 describe("CLAUDE.md skill invariant — project-specific skills are not built-ins (#598)", () => {
   it("the built-in ∩ on-disk overlap is exactly the frozen set", () => {
-    const builtinNames = new Set(BUILTIN_SKILLS.map((s) => s.name));
+    const builtinNames = new Set<string>(BUILTIN_SKILLS.map((s) => s.name));
     const tracked = gitTrackedSkillDirs();
     expect(tracked.length, "no tracked skills found — the git query broke, not the rule").toBeGreaterThan(10);
     const overlap = tracked.filter((d) => builtinNames.has(d)).sort();
@@ -80,7 +80,7 @@ describe("CLAUDE.md skill invariant — project-specific skills are not built-in
 
   it("the named project-only skills are not built-ins", () => {
     // A direct restatement of the rule, so a failure names the offender rather than a diff.
-    const builtinNames = new Set(BUILTIN_SKILLS.map((s) => s.name));
+    const builtinNames = new Set<string>(BUILTIN_SKILLS.map((s) => s.name));
     const projectOnly = ["publish", "cleanup", "session-inspector", "board-monitor", "dev-server", "db-doctor"];
     const leaked = projectOnly.filter((name) => builtinNames.has(name));
     expect(leaked, `project-specific skills found in builtin-skills.ts: ${leaked.join(", ")}`).toEqual([]);

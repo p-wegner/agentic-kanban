@@ -23,10 +23,10 @@ async function seedProject(db: ReturnType<typeof createTestDb>["db"]) {
   const inReviewId = randomUUID();
   const doneId = randomUUID();
   await db.insert(schema.projectStatuses).values([
-    { id: todoId, projectId, name: "Todo", sortOrder: 0, createdAt: now, updatedAt: now },
-    { id: inProgressId, projectId, name: "In Progress", sortOrder: 1, createdAt: now, updatedAt: now },
-    { id: inReviewId, projectId, name: "In Review", sortOrder: 2, createdAt: now, updatedAt: now },
-    { id: doneId, projectId, name: "Done", sortOrder: 3, createdAt: now, updatedAt: now },
+    { id: todoId, projectId, name: "Todo", sortOrder: 0, createdAt: now },
+    { id: inProgressId, projectId, name: "In Progress", sortOrder: 1, createdAt: now },
+    { id: inReviewId, projectId, name: "In Review", sortOrder: 2, createdAt: now },
+    { id: doneId, projectId, name: "Done", sortOrder: 3, createdAt: now },
   ]);
 
   return { projectId, todoId, inProgressId, inReviewId, doneId };
@@ -90,8 +90,6 @@ async function createSession(
     workspaceId,
     status: sessionStatus,
     startedAt,
-    createdAt: now,
-    updatedAt: now,
   });
   return sessionId;
 }

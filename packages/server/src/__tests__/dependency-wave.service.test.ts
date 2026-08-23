@@ -155,7 +155,6 @@ describe("dependency wave planner", () => {
       nodeType: "normal",
       sortOrder: 1,
       createdAt: now,
-      updatedAt: now,
     });
 
     // Blocker is Done-status but stuck on a non-`end` workflow node (the desync).
@@ -245,7 +244,9 @@ describe("dependency wave planner", () => {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
-    const createWorkspace = vi.fn(async (issue: { id: string }) => ({ id: `ws-${issue.id}` }));
+    // The wave calls this with the options object too; a one-parameter mock made
+    // `mock.calls[0][1]` — the very thing this case asserts on — an out-of-range tuple index.
+    const createWorkspace = vi.fn(async (issue: { id: string }, _options: { planMode: boolean }) => ({ id: `ws-${issue.id}` }));
 
     const result = await startNextDependencyWave(db, projectId, { createWorkspace });
 
@@ -259,7 +260,9 @@ describe("dependency wave planner", () => {
     const { db } = createTestDb();
     const { projectId, statusIds } = await seedProject(db);
     await insertIssue(db, { projectId, statusId: statusIds.Todo, title: "Ready one", issueNumber: 1 });
-    const createWorkspace = vi.fn(async (issue: { id: string }) => ({ id: `ws-${issue.id}` }));
+    // The wave calls this with the options object too; a one-parameter mock made
+    // `mock.calls[0][1]` — the very thing this case asserts on — an out-of-range tuple index.
+    const createWorkspace = vi.fn(async (issue: { id: string }, _options: { planMode: boolean }) => ({ id: `ws-${issue.id}` }));
 
     await startNextDependencyWave(db, projectId, { createWorkspace });
 

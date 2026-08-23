@@ -8,7 +8,7 @@ import {
 } from "./helpers/api-test-helpers.js";
 
 describe("Agent Skills API", () => {
-  const { app } = createTestApp();
+  const { app, db: database } = createTestApp();
 
   it("POST /api/agent-skills creates a skill", async () => {
     const res = await app.request("/api/agent-skills", {
@@ -166,7 +166,11 @@ describe("Agent Skills API", () => {
   });
 
   it("GET /api/agent-skills?init=true filters to init skills only, merging global + project scope", async () => {
-    const { db: database } = createTestApp();
+    // The project must live in the SAME database this suite's `app` serves. It used to be
+    // created in a second, throwaway app — invisible to `app`, so the project-scoped POST
+    // below hit a FOREIGN KEY failure. That went unnoticed because the request sent
+    // `projectId: undefined` (a `.id` on a bare id string), which made the skill global and
+    // the assertion pass for the wrong reason.
     const project = await createProjectDirectly(database, { name: "init-filter-project" });
 
     await app.request("/api/agent-skills", {
@@ -182,10 +186,10 @@ describe("Agent Skills API", () => {
     await app.request("/api/agent-skills", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "project-init", description: "d", prompt: "p", isInit: true, projectId: project.id }),
+      body: JSON.stringify({ name: "project-init", description: "d", prompt: "p", isInit: true, projectId: project }),
     });
 
-    const res = await app.request(`/api/agent-skills?projectId=${project.id}&init=true`);
+    const res = await app.request(`/api/agent-skills?projectId=${project}&init=true`);
     expect(res.status).toBe(200);
     const body = await res.json() as any[];
     const names = body.map((s) => s.name);

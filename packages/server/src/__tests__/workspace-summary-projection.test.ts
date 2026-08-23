@@ -70,6 +70,7 @@ import {
 } from "../services/workspace-summary-projection.service.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
 import { activeMerges } from "../services/workspace-internals.js";
+import type { MergeWorkspaceResponse } from "./helpers/merge-result.js";
 
 const tempDirs: string[] = [];
 function makeTempWorktree(label: string): string {
@@ -363,7 +364,7 @@ describe("workspace-summary projection — board events mark dirty", () => {
       createBackup: async () => {},
       processKiller: async () => 0,
     });
-    const result = await svc.mergeWorkspace(workspaceId);
+    const result = await svc.mergeWorkspace(workspaceId) as MergeWorkspaceResponse;
     expect(result.merged).toBe(true);
 
     // The merge stamped mergedAt AND marked the projection dirty — incrementally, with

@@ -47,7 +47,10 @@ describe("generateHandoff multi-repo (#78)", () => {
     mockShortstat.mockImplementation(async (dir: string) =>
       dir === "/repo/wt" ? { filesChanged: 1, insertions: 5, deletions: 0 }
       : dir === "/auth/wt" ? { filesChanged: 2, insertions: 10, deletions: 3 }
-      : null);
+      // `getDiffShortstat` never RESOLVES null — `handoff.service` turns a rejection into
+      // null with `.catch(() => null)`. Rejecting keeps the mock inside the real contract
+      // and makes an unexpected worktree loud instead of silently statless.
+      : Promise.reject(new Error(`unexpected worktree: ${dir}`)));
     mockChanged.mockImplementation(async (dir: string) =>
       dir === "/repo/wt" ? ["src/index.ts"]
       : dir === "/auth/wt" ? ["src/server.js"]

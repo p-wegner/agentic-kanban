@@ -51,7 +51,7 @@ describe("broadcast insert-time session_messages cap (#404)", () => {
   function emitFlushes(sessionId: string, flushes: number) {
     // 50 non-stdout messages = one immediate batch-size flush
     for (let i = 0; i < flushes * 50; i++) {
-      broadcast(sessionId, { type: "stderr", data: `line ${i}` });
+      broadcast(sessionId, { type: "stderr", sessionId, data: `line ${i}` });
     }
   }
 
@@ -83,7 +83,7 @@ describe("broadcast insert-time session_messages cap (#404)", () => {
 
   it("resets the flush counter on session exit", async () => {
     emitFlushes("cap-s5", 3);
-    broadcast("cap-s5", { type: "exit", exitCode: 0 }); // exit row = 4th flush, then the counter is cleared
+    broadcast("cap-s5", { type: "exit", sessionId: "cap-s5", exitCode: 0 }); // exit row = 4th flush, then the counter is cleared
     await settleMicrotasks();
     expect(capMock).not.toHaveBeenCalled();
     // A later session reusing the id starts from 0: it fires on ITS 8th flush.

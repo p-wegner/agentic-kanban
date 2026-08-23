@@ -18,6 +18,7 @@ import { issues, projectStatuses, projects, workspaces } from "@agentic-kanban/s
 import { createTestDb } from "./helpers/test-db.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
 import { makeTempRepo } from "./helpers/temp-repo.js";
+import type { MergeWorkspaceResponse } from "./helpers/merge-result.js";
 
 /**
  * A REAL repo path (#273). This suite drives the actual merge path, whose repo lock
@@ -162,7 +163,7 @@ describe("#668: atomic Done transition — issue stays Done when workspace DB up
 
     // #668 fix: mergeWorkspace should NOT throw when the workspace close fails
     // after issue was transitioned to Done. The response still returns successfully.
-    const result = await svc.mergeWorkspace(workspaceId);
+    const result = await svc.mergeWorkspace(workspaceId) as MergeWorkspaceResponse;
 
     updateSpy.mockRestore();
 
@@ -196,7 +197,7 @@ describe("#668: atomic Done transition — issue stays Done when workspace DB up
       createBackup: async () => {},
     });
 
-    const result = await svc.mergeWorkspace(workspaceId);
+    const result = await svc.mergeWorkspace(workspaceId) as MergeWorkspaceResponse;
     updateSpy.mockRestore();
 
     // Merge succeeded at the git + issue level
@@ -233,7 +234,7 @@ describe("#668: atomic Done transition — issue stays Done when workspace DB up
       createBackup: async () => {},
     });
 
-    const result = await svc.mergeWorkspace(workspaceId);
+    const result = await svc.mergeWorkspace(workspaceId) as MergeWorkspaceResponse;
     updateSpy.mockRestore();
 
     expect(result.merged).toBe(true);
@@ -252,7 +253,7 @@ describe("#668: atomic Done transition — issue stays Done when workspace DB up
       createBackup: async () => {},
     });
 
-    const result = await svc.mergeWorkspace(workspaceId);
+    const result = await svc.mergeWorkspace(workspaceId) as MergeWorkspaceResponse;
 
     expect(result).toMatchObject({
       id: workspaceId,

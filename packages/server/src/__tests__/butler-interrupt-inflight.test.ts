@@ -90,6 +90,18 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => {
           outQueue.push(msg);
         }
       };
+      // Closing the out-channel is the same wake-the-waiter dance as `pushOut`, so it lives
+      // beside it. Inline in the async IIFE below it also read as `never`: an immediately
+      // invoked function keeps the enclosing flow's narrowing, where `outWaiter` is still the
+      // initializer's `null`.
+      const finishOut = () => {
+        outDone = true;
+        if (outWaiter) {
+          const w = outWaiter;
+          outWaiter = null;
+          w({ done: true, value: undefined as unknown as Record<string, unknown> });
+        }
+      };
 
       let currentGate: { promise: Promise<{ interrupted: boolean }>; resolve: (v: { interrupted: boolean }) => void } | null = null;
 
@@ -158,12 +170,7 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => {
           });
           pushOut({ type: "result", subtype: "success", result: `Full reply: ${text}` });
         }
-        outDone = true;
-        if (outWaiter) {
-          const w = outWaiter;
-          outWaiter = null;
-          w({ done: true, value: undefined as unknown as Record<string, unknown> });
-        }
+        finishOut();
       })();
 
       return instance;
@@ -277,7 +284,7 @@ describe("Butler interrupt of an in-flight streaming turn", () => {
     // second SDK query instance is spawned and no extra delta streams.
     const overlapping = await postMessage(app, projectId, "and the backlog?");
     expect(overlapping.status).toBe(409);
-    expect((await overlapping.json()).error).toMatch(/already processing/i);
+    expect((await overlapping.json() as { error?: string }).error).toMatch(/already processing/i);
     expect(sdkMock.instances).toHaveLength(1);
     expect(textEvents(events).map((e) => e.text)).toEqual(["First chunk "]);
 

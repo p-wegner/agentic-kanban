@@ -36,7 +36,9 @@ function makeGit(overrides: Partial<Record<string, unknown>> = {}) {
   } as never;
 }
 
-async function seed(db: TestDb, opts: { isDirect?: boolean; branch?: string | null; workingDir?: string | null } = {}) {
+// `workspaces.branch` is NOT NULL, so `branch` can only ever be narrowed to a string here;
+// no caller passes null, and declaring it nullable made the insert untypeable.
+async function seed(db: TestDb, opts: { isDirect?: boolean; branch?: string; workingDir?: string | null } = {}) {
   const now = new Date().toISOString();
   const projectId = randomUUID();
   const statusId = randomUUID();

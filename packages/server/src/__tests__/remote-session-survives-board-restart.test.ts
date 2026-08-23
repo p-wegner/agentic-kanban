@@ -53,6 +53,10 @@ vi.spyOn(console, "error").mockImplementation(() => {});
 import { projects, projectStatuses, issues, workspaces, sessions, workers } from "@agentic-kanban/shared/schema";
 import type { SessionManager } from "../services/session.manager.js";
 import type { AgentOutputEvent } from "../services/agent.service.js";
+// `worker-fleet.service` declares the field as the narrower `AgentExecutionService`; the
+// value it holds is always the remote one. `remote-session-readoption.ts` narrows it the
+// same way, so this is the production idiom rather than a test-only escape hatch.
+import type { RemoteAgentService } from "../services/agent-remote.service.js";
 
 const { cleanupStaleSessions } = await import("../startup/startup-tasks.js");
 const { readoptRemoteSessions } = await import("../startup/remote-session-readoption.js");
@@ -138,7 +142,7 @@ describe("a board restart preserves in-flight remote work (#745)", () => {
     // Re-adopted, not merely skipped: the remote service tracks it again, so the
     // worker's next event and its exit land through the normal path.
     expect(reattached).toContain(remote.sessionId);
-    expect(getWorkerFleet(db as never).remoteAgentService.trackedSessionIds?.()).toContain(remote.sessionId);
+    expect((getWorkerFleet(db as never).remoteAgentService as RemoteAgentService).trackedSessionIds()).toContain(remote.sessionId);
 
     // The host half of the sweep is untouched.
     const [hostRow] = await db.select().from(sessions).where(eq(sessions.id, host.sessionId)).limit(1);

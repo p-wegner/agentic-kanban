@@ -139,7 +139,7 @@ describe("Butler /message rejects a concurrent turn with HTTP 409", () => {
     const second = await postMessage(app, projectId, "and what about the backlog?");
     expect(second.status).toBe(409);
     // Tolerant match on the error (status 409 is the load-bearing contract; copy may reword).
-    expect((await second.json()).error).toMatch(/already processing/i);
+    expect((await second.json() as { error?: string }).error).toMatch(/already processing/i);
 
     // The 409 turn was NOT enqueued: no second concurrent SDK query was started
     // (no context fork) and the rejected prompt did not land in the transcript.
