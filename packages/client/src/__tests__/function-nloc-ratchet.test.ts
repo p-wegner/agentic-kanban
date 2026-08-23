@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import path from "node:path";
 import { compareNlocRatchet, measureFunctionNloc } from "../../../shared/__tests__/helpers/function-nloc.js";
-import { FUNCTION_NLOC_BASELINE, SHRINK_GRACE, LIST_THRESHOLD } from "./function-nloc-baseline.js";
+import { FUNCTION_NLOC_BASELINE, LIST_THRESHOLD } from "./function-nloc-baseline.js";
 
 /**
  * #763 — long functions are a SHRINK-ONLY ring, and the shape of that ring is the whole
@@ -79,7 +79,8 @@ const measureClient = (): Record<string, number> => measureFunctionNloc(CLIENT_S
 
 describe("client function nloc is a shrink-only ring (#763)", () => {
   const measured = measureClient();
-  const verdict = compareNlocRatchet(FUNCTION_NLOC_BASELINE, measured, SHRINK_GRACE, LIST_THRESHOLD);
+  // No grace set: #800 emptied #763's, and the baseline file says why.
+  const verdict = compareNlocRatchet(FUNCTION_NLOC_BASELINE, measured, [], LIST_THRESHOLD);
 
   it("the scanner finds the functions it claims to — a broken extent would silently pass everything", () => {
     // Guards the measurement itself. If the AST walk or the nloc counter regressed, every
@@ -106,13 +107,6 @@ describe("client function nloc is a shrink-only ring (#763)", () => {
 
   it(`no unlisted function is at or above ${LIST_THRESHOLD} nloc`, () => {
     expect(verdict.unlisted).toEqual([]);
-  });
-
-  it("every SHRINK_GRACE entry is a real baseline entry", () => {
-    // A grace entry that has drifted off the baseline excuses nothing and hides the fact that
-    // the temporary waiver was never cleaned up.
-    const ghosts = SHRINK_GRACE.filter((k) => !(k in FUNCTION_NLOC_BASELINE));
-    expect(ghosts).toEqual([]);
   });
 
 });
