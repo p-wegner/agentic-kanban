@@ -1,4 +1,4 @@
-import { resolve, dirname, parse, relative, sep } from "node:path";
+import { resolve, dirname, join, parse, relative, sep } from "node:path";
 import { Hono } from "hono";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
@@ -151,8 +151,13 @@ describe("stale worktree cleanup API", () => {
 
 describe("stale worktree path safety", () => {
   it("path inside .worktrees/ is considered safe", () => {
-    const repoPath = "C:\\andrena\\agentic-kanban";
-    const worktreePath = "C:\\andrena\\.worktrees\\feature_ak-42-test";
+    // Built from the platform's own root rather than a `C:\...` literal (#828): off Windows
+    // a backslash is an ordinary filename character, so the literal resolved to a RELATIVE
+    // path under the cwd and `relative()` answered `../..`. The safety rule under test is
+    // platform-independent; only the fixture was not.
+    const root = resolve(sep);
+    const repoPath = join(root, "andrena", "agentic-kanban");
+    const worktreePath = join(root, "andrena", ".worktrees", "feature_ak-42-test");
     const worktreesRoot = resolve(dirname(repoPath), ".worktrees");
     const targetResolved = resolve(worktreePath);
     const relativeToWorktreesRoot = relative(worktreesRoot, targetResolved);

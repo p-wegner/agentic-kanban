@@ -8,9 +8,16 @@ describe("isSelfProjectRepo", () => {
     expect(isSelfProjectRepo("C:/projects/andrena/agentic-kanban", selfRoot)).toBe(true);
   });
 
-  it("is slash/case/trailing-slash insensitive", () => {
+  // Separator direction and case-folding are WINDOWS semantics; `pathKey` applies them only
+  // on win32 (off it, `.../AGENTIC-KANBAN` is a different directory). #828 — this had never
+  // run off Windows, where it fails.
+  it.runIf(process.platform === "win32")("is slash/case/trailing-slash insensitive (win32)", () => {
     expect(isSelfProjectRepo("C:\\projects\\andrena\\agentic-kanban\\", selfRoot)).toBe(true);
     expect(isSelfProjectRepo("c:/projects/andrena/AGENTIC-KANBAN", selfRoot)).toBe(true);
+  });
+
+  it("is trailing-slash insensitive on every platform", () => {
+    expect(isSelfProjectRepo(`${selfRoot}/`, selfRoot)).toBe(true);
   });
 
   it("rejects a different project's repo", () => {

@@ -227,9 +227,21 @@ describe("#361: classifyWorktree", () => {
 
   it("never classifies the project's own checkout as removable, whatever the paths look like", () => {
     expect(classifyWorktree({ ...base, worktreePath: REPO, worktreeBranch: "master", claims: [] })).toBe("main_checkout");
-    // Windows: `git worktree list` and the DB disagree on separators and drive-letter case.
-    expect(classifyWorktree({ ...base, worktreePath: "c:\\projects\\andrena\\agentic-kanban-testprojects\\kassenbuch\\", worktreeBranch: "master", claims: [] })).toBe("main_checkout");
+    // A trailing separator must not make the checkout look like a different directory —
+    // `git worktree list` and the DB disagree about it on every platform.
+    expect(classifyWorktree({ ...base, worktreePath: `${REPO}/`, worktreeBranch: "master", claims: [] })).toBe("main_checkout");
   });
+
+  // Separator direction and drive-letter case are WINDOWS disagreements between
+  // `git worktree list` and the DB, and `pathKey` reconciles them only on win32 — off it a
+  // backslash is a filename character and case is significant. #828: this had never run
+  // off Windows, where it fails.
+  it.runIf(process.platform === "win32")(
+    "reconciles separator direction and drive-letter case with the checkout (win32)",
+    () => {
+      expect(classifyWorktree({ ...base, worktreePath: "c:\\projects\\andrena\\agentic-kanban-testprojects\\kassenbuch\\", worktreeBranch: "master", claims: [] })).toBe("main_checkout");
+    },
+  );
 
   it("treats a nulled workingDir on a CLOSED workspace as no claim — the #361 blind spot", () => {
     expect(classifyWorktree({ ...base, worktreePath: WT6, worktreeBranch: BR6_SURVIVING, claims: KASSENBUCH_CLAIMS })).toBe("orphaned");
