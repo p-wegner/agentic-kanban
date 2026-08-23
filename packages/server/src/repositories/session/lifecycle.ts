@@ -26,6 +26,27 @@ export async function updateSessionWorkerId(
   await database.update(sessions).set({ workerId }).where(eq(sessions.id, sessionId));
 }
 
+/**
+ * Stamp WHY the resolver placed a session where it did (#801) — same reasoning as
+ * `updateSessionWorkerId` above: the write belongs to the `sessions` aggregate, and
+ * `placement-observability.repository.ts` was flagged by the table-ownership ratchet
+ * (#957) for issuing it directly.
+ *
+ * Best-effort by contract, exactly like `updateSessionContainerId`: a diagnostic that can
+ * fail a launch is worse than a missing diagnostic. Callers do not await it into their
+ * critical path.
+ */
+export async function updateSessionPlacementReason(
+  sessionId: string,
+  reason: { id: string; detail: string },
+  database: Database = db,
+): Promise<void> {
+  await database
+    .update(sessions)
+    .set({ placementReason: reason.id, placementDetail: reason.detail })
+    .where(eq(sessions.id, sessionId));
+}
+
 export async function getSessionWorkspaceId(
   sessionId: string,
   database: Database = db,
