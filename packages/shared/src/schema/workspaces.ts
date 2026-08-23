@@ -4,20 +4,20 @@ import { issues } from "./issues.js";
 import { agentSkills } from "./agent-skills.js";
 
 /**
- * 46 columns, and it should not become 47 (#739, #781, #798, #815).
+ * 41 columns, and it should not become 42 (#739, #781, #798, #815).
  *
  * The next widest table in this schema has 23 (`issues`, `repos`); the median across 44
- * tables is 9. What is here is not one entity but three remaining concerns flattened into one row by
- * prefix — `diff_stat_cache_*` (5), `scorecard_*` (3),
- * `fork_*`/`showdown_*` (5). Eight families are no longer among them:
+ * tables is 9. What is here is not one entity but two remaining concerns flattened into one row by
+ * prefix — `scorecard_*` (3) and `fork_*`/`showdown_*` (5). Nine families are no longer
+ * among them:
  * #781 extracted `merge_backoff_*` (7) to `workspace_merge_backoff`, #798 extracted
  * `review_preflight_*` (4), `code_metrics_*` (2) and `latest_symlink_*` (8) to
  * `workspace_review_preflight`, `workspace_code_metrics` and `workspace_symlink_run`, and
- * #815 extracted `merge_gate_*` (5), `conflict_cache_*` (3), `latest_setup_*` (8) and
- * `summary_*` (5) to `workspace_merge_gate`, `workspace_conflict_cache`,
- * `workspace_setup_run` and `workspace_summary`.
- * The remaining order, by re-derived coupling, is
- * `diff_stat_cache_*` → `scorecard_*` (highest fan-out, last).
+ * #815 extracted `merge_gate_*` (5), `conflict_cache_*` (3), `latest_setup_*` (8),
+ * `summary_*` (5) and `diff_stat_cache_*` (5) to `workspace_merge_gate`,
+ * `workspace_conflict_cache`, `workspace_setup_run`, `workspace_summary` and
+ * `workspace_diff_stat_cache`.
+ * The one family still queued for extraction is `scorecard_*` (highest fan-out, last).
  * Each `latest_*` / `*_cache_*` / `*_gate_*` group is a one-to-many relationship collapsed
  * to its last row: there is one setup run per column set, so its history is unrecoverable by
  * construction, and any new field on any of those concerns is another `ALTER TABLE` on the
@@ -86,11 +86,6 @@ export const workspaces = sqliteTable("workspaces", {
    * the feature branch ref is gone.
    */
   mergedHeadSha: text("merged_head_sha"),
-  diffStatCacheCheckedAt: text("diff_stat_cache_checked_at"),
-  diffStatCacheHeadSha: text("diff_stat_cache_head_sha"),
-  diffStatCacheFilesChanged: integer("diff_stat_cache_files_changed"),
-  diffStatCacheInsertions: integer("diff_stat_cache_insertions"),
-  diffStatCacheDeletions: integer("diff_stat_cache_deletions"),
   scorecardScore: integer("scorecard_score"),
   scorecardJson: text("scorecard_json"),
   scorecardComputedAt: text("scorecard_computed_at"),

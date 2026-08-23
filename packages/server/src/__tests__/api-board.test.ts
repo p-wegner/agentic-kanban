@@ -321,15 +321,14 @@ describe("Board API", () => {
       issueId,
       branch: "feature/ak-324-null-summary",
       status: "closed",
-      // diffStat all zeros/null
-      diffStatCacheCheckedAt: now,
-      diffStatCacheFilesChanged: 0,
-      diffStatCacheInsertions: null,
-      diffStatCacheDeletions: null,
       // scorecardScore null
       scorecardScore: null,
       createdAt: now,
       updatedAt: now,
+    });
+    // #815: the diff-stat memo moved to its own table — all zeros/null, as before.
+    await database.insert(schema.workspaceDiffStatCache).values({
+      workspaceId, checkedAt: now, filesChanged: 0, insertions: null, deletions: null,
     });
     // #815: the conflict memo moved to its own table. `files` stored as the JSON-encoded
     // string "null" is the bug scenario this test exists for — it survives the move.
@@ -498,12 +497,12 @@ describe("Board API", () => {
       status: "idle",
       isDirect: false,
       readyForMerge: false,
-      diffStatCacheCheckedAt: now,
-      diffStatCacheFilesChanged: 0,
-      diffStatCacheInsertions: 0,
-      diffStatCacheDeletions: 0,
       provider: "claude",
       createdAt: now, updatedAt: now,
+    });
+    // #815: the diff-stat memo moved to its own table.
+    await database.insert(schema.workspaceDiffStatCache).values({
+      workspaceId: zeroDiffWsId, checkedAt: now, filesChanged: 0, insertions: 0, deletions: 0,
     });
 
     // Non-zero diff workspace in In Review — should NOT get planOnlyWarning
@@ -520,12 +519,12 @@ describe("Board API", () => {
       status: "idle",
       isDirect: false,
       readyForMerge: false,
-      diffStatCacheCheckedAt: now,
-      diffStatCacheFilesChanged: 3,
-      diffStatCacheInsertions: 42,
-      diffStatCacheDeletions: 5,
       provider: "claude",
       createdAt: now, updatedAt: now,
+    });
+    // #815: the diff-stat memo moved to its own table.
+    await database.insert(schema.workspaceDiffStatCache).values({
+      workspaceId: nonZeroDiffWsId, checkedAt: now, filesChanged: 3, insertions: 42, deletions: 5,
     });
 
     const res = await app.request(`/api/projects/${p}/board`);

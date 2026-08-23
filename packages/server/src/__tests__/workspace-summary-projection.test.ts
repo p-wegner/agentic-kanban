@@ -22,7 +22,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi, beforeEach, afterAll } from "vitest";
 import { eq } from "drizzle-orm";
-import { issues, projects, projectStatuses, workspaceCodeMetrics, workspaceConflictCache, workspaceSummary, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, projects, projectStatuses, workspaceCodeMetrics, workspaceConflictCache, workspaceDiffStatCache, workspaceSummary, workspaces } from "@agentic-kanban/shared/schema";
 import { setWorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
 import { createTestDb } from "./helpers/test-db.js";
 import { makeTempRepo } from "./helpers/temp-repo.js";
@@ -145,16 +145,22 @@ async function seed(db: ReturnType<typeof createTestDb>["db"], opts: SeedOpts = 
     baseBranch: "main",
     status: opts.status ?? "idle",
     readyForMerge: opts.readyForMerge ?? false,
-    ...(opts.diffCache !== false ? {
-      diffStatCacheCheckedAt: now,
-      diffStatCacheHeadSha: opts.projection?.summaryHeadSha ?? "abc123",
-      diffStatCacheFilesChanged: 2,
-      diffStatCacheInsertions: 8,
-      diffStatCacheDeletions: 1,
-    } : {}),
     createdAt: now,
     updatedAt: now,
   });
+  // #815: the diff-stat memo lives in `workspace_diff_stat_cache`, not in five
+  // `diff_stat_cache_*` columns. `diffCache: false` seeds NO row — which is what five NULL
+  // columns were: never diffed.
+  if (opts.diffCache !== false) {
+    await db.insert(workspaceDiffStatCache).values({
+      workspaceId,
+      checkedAt: now,
+      headSha: opts.projection?.summaryHeadSha ?? "abc123",
+      filesChanged: 2,
+      insertions: 8,
+      deletions: 1,
+    });
+  }
   // #815: the git projection lives in `workspace_summary`, not in five `summary_*` columns.
   // It is seeded EXPLICITLY and by default CLEAN, because an absent row reads as DIRTY —
   // that inversion is the whole trap this family carried.
@@ -229,10 +235,11 @@ describe("workspace-summary projection — hot path (#399)", () => {
           summaryHeadMessage: workspaceSummary.headMessage,
           summaryCommitCount: workspaceSummary.commitCount,
           summaryDirty: workspaceSummary.dirty,
-          diffStatCacheHeadSha: workspaces.diffStatCacheHeadSha,
+          diffStatCacheHeadSha: workspaceDiffStatCache.headSha,
         })
         .from(workspaces)
         .leftJoin(workspaceSummary, eq(workspaceSummary.workspaceId, workspaces.id))
+        .leftJoin(workspaceDiffStatCache, eq(workspaceDiffStatCache.workspaceId, workspaces.id))
         .where(eq(workspaces.id, workspaceId));
       expect(row.summaryHeadSha).toBe("abc999");
       expect(row.summaryHeadMessage).toBe("projected message");

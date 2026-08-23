@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
 import { eq } from "drizzle-orm";
-import { issueComments, issues, preferences, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
+import { issueComments, issues, preferences, projectStatuses, projects, workspaces, workspaceDiffStatCache } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { reconcileAncestorBranchWorkspaces } from "../startup/ancestor-branch-reconciler.js";
 import { buildWorkspaceSummaryMap } from "../services/workspace-summary.service.js";
@@ -109,15 +109,18 @@ async function seedWorkspace(
     status: opts.wsStatus ?? "idle",
     readyForMerge: opts.readyForMerge ?? false,
     mergedAt: opts.mergedAt !== undefined ? opts.mergedAt : null,
-    diffStatCacheCheckedAt: opts.staleCachedDiff ? now : null,
-    diffStatCacheHeadSha: opts.staleCachedDiff ? "pre-merge-head" : null,
-    diffStatCacheFilesChanged: opts.staleCachedDiff ? 2 : null,
-    diffStatCacheInsertions: opts.staleCachedDiff ? 10 : null,
-    diffStatCacheDeletions: opts.staleCachedDiff ? 1 : null,
     provider: "claude",
     createdAt: now,
     updatedAt: now,
   });
+  // #815: the diff-stat memo moved to `workspace_diff_stat_cache`. NO row is exactly what the
+  // five NULL columns were — never diffed — so the non-stale case seeds nothing at all.
+  if (opts.staleCachedDiff) {
+    await db.insert(workspaceDiffStatCache).values({
+      workspaceId, checkedAt: now, headSha: "pre-merge-head",
+      filesChanged: 2, insertions: 10, deletions: 1,
+    });
+  }
 
   return { projectId, issueId, workspaceId, statusId, doneStatusId };
 }

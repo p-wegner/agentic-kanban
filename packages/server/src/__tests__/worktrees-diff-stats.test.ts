@@ -90,11 +90,18 @@ async function seedProject(opts: {
     status: "active",
     createdAt: now,
     updatedAt: now,
-    diffStatCacheCheckedAt: opts.diffCache?.checkedAt ?? null,
-    diffStatCacheFilesChanged: opts.diffCache?.filesChanged ?? null,
-    diffStatCacheInsertions: opts.diffCache?.insertions ?? null,
-    diffStatCacheDeletions: opts.diffCache?.deletions ?? null,
   });
+  // #815: the memo moved to `workspace_diff_stat_cache`. NO row is exactly what four NULL
+  // columns were — a first sighting — so the no-cache case seeds nothing at all.
+  if (opts.diffCache) {
+    await db.insert(schema.workspaceDiffStatCache).values({
+      workspaceId,
+      checkedAt: opts.diffCache.checkedAt,
+      filesChanged: opts.diffCache.filesChanged,
+      insertions: opts.diffCache.insertions,
+      deletions: opts.diffCache.deletions,
+    });
+  }
   return { projectId, workspaceId };
 }
 

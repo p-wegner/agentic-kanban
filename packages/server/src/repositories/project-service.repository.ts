@@ -1,4 +1,4 @@
-import { projects, projectStatuses, issues, workspaces, preferences } from "@agentic-kanban/shared/schema";
+import { projects, projectStatuses, issues, workspaces, preferences, workspaceDiffStatCache } from "@agentic-kanban/shared/schema";
 import { ACTIVE_WORKSPACE_STATUSES } from "@agentic-kanban/shared/lib/workspace-activity-state";
 import { eq, and, inArray, notInArray, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
@@ -50,14 +50,19 @@ export async function getProjectWorkspacesWithIssue(
       issueTitle: issues.title,
       // Diff-stat cache columns, maintained by the board summary path. getWorktrees
       // serves them instead of spawning `git diff --shortstat` per worktree (#342).
-      diffStatCacheCheckedAt: workspaces.diffStatCacheCheckedAt,
-      diffStatCacheFilesChanged: workspaces.diffStatCacheFilesChanged,
-      diffStatCacheInsertions: workspaces.diffStatCacheInsertions,
-      diffStatCacheDeletions: workspaces.diffStatCacheDeletions,
-      diffStatCacheHeadSha: workspaces.diffStatCacheHeadSha,
+      // #815: the diff-stat memo moved to `workspace_diff_stat_cache`. Aliased back to the
+      // same field names, so every consumer of this projected row is untouched by the move.
+      diffStatCacheCheckedAt: workspaceDiffStatCache.checkedAt,
+      diffStatCacheFilesChanged: workspaceDiffStatCache.filesChanged,
+      diffStatCacheInsertions: workspaceDiffStatCache.insertions,
+      diffStatCacheDeletions: workspaceDiffStatCache.deletions,
+      diffStatCacheHeadSha: workspaceDiffStatCache.headSha,
     })
     .from(workspaces)
     .innerJoin(issues, eq(workspaces.issueId, issues.id))
+    // #815: LEFT, not inner — a never-diffed workspace has no memo row and must still be
+    // returned, or every read below silently loses it.
+    .leftJoin(workspaceDiffStatCache, eq(workspaceDiffStatCache.workspaceId, workspaces.id))
     .where(eq(issues.projectId, projectId));
 }
 

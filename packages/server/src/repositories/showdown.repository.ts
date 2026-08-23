@@ -1,5 +1,5 @@
 import { eq, inArray } from "drizzle-orm";
-import { showdowns, workspaces, issues, agentSkills } from "@agentic-kanban/shared/schema";
+import { showdowns, workspaces, issues, agentSkills, workspaceDiffStatCache } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { firstRow } from "../lib/first-row.js";
@@ -105,11 +105,16 @@ export async function getShowdownWorkspaces(
       showdownLabel: workspaces.showdownLabel,
       skillId: workspaces.skillId,
       model: workspaces.model,
-      diffStatCacheFilesChanged: workspaces.diffStatCacheFilesChanged,
-      diffStatCacheInsertions: workspaces.diffStatCacheInsertions,
-      diffStatCacheDeletions: workspaces.diffStatCacheDeletions,
+      // #815: the diff-stat memo moved to `workspace_diff_stat_cache`. Aliased back to the
+      // same field names, so every consumer of this projected row is untouched by the move.
+      diffStatCacheFilesChanged: workspaceDiffStatCache.filesChanged,
+      diffStatCacheInsertions: workspaceDiffStatCache.insertions,
+      diffStatCacheDeletions: workspaceDiffStatCache.deletions,
     })
     .from(workspaces)
+    // #815: LEFT, not inner — a never-diffed workspace has no memo row and must still be
+    // returned, or a showdown contestant disappears until its first diff.
+    .leftJoin(workspaceDiffStatCache, eq(workspaceDiffStatCache.workspaceId, workspaces.id))
     .where(eq(workspaces.showdownId, showdownId));
 }
 

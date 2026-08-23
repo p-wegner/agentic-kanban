@@ -1,4 +1,4 @@
-import { workspaces, sessions, sessionMessages, showdowns, workflowEdges, workflowNodes, repos, issues, workspaceCodeMetrics, workspaceConflictCache, workspaceSummary } from "@agentic-kanban/shared/schema";
+import { workspaces, sessions, sessionMessages, showdowns, workflowEdges, workflowNodes, repos, issues, workspaceCodeMetrics, workspaceConflictCache, workspaceSummary, workspaceDiffStatCache } from "@agentic-kanban/shared/schema";
 import { and, eq, inArray, sql, desc } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import { db } from "../db/index.js";
@@ -67,11 +67,15 @@ export async function fetchWorkspaceDetailRows(issueIds: string[], database: Dat
       conflictCacheHasConflicts: workspaceConflictCache.hasConflicts,
       conflictCacheFiles: workspaceConflictCache.files,
       readyForMerge: workspaces.readyForMerge,
-      diffStatCacheCheckedAt: workspaces.diffStatCacheCheckedAt,
-      diffStatCacheHeadSha: workspaces.diffStatCacheHeadSha,
-      diffStatCacheFilesChanged: workspaces.diffStatCacheFilesChanged,
-      diffStatCacheInsertions: workspaces.diffStatCacheInsertions,
-      diffStatCacheDeletions: workspaces.diffStatCacheDeletions,
+      // #815: the diff-stat memo moved to `workspace_diff_stat_cache`. Aliased back to the
+      // same five field names, so every consumer of this projected row is untouched by the
+      // move. No `coalesce` here, unlike `summaryDirty` above: all five dropped columns were
+      // nullable with no default, so the LEFT JOIN's own NULLs ARE the previous semantics.
+      diffStatCacheCheckedAt: workspaceDiffStatCache.checkedAt,
+      diffStatCacheHeadSha: workspaceDiffStatCache.headSha,
+      diffStatCacheFilesChanged: workspaceDiffStatCache.filesChanged,
+      diffStatCacheInsertions: workspaceDiffStatCache.insertions,
+      diffStatCacheDeletions: workspaceDiffStatCache.deletions,
       scorecardScore: workspaces.scorecardScore,
       // #798: the artifact moved to `workspace_code_metrics`. Aliased back to the same two
       // field names, so every consumer of this projected row is untouched by the move.
@@ -90,6 +94,9 @@ export async function fetchWorkspaceDetailRows(issueIds: string[], database: Dat
     // #815: LEFT, not inner — a never-projected workspace has no summary row and must still be
     // returned (dirty by absence), or the board silently loses every brand-new workspace.
     .leftJoin(workspaceSummary, eq(workspaceSummary.workspaceId, workspaces.id))
+    // #815: LEFT, not inner — a never-diffed workspace has no memo row and must still be
+    // returned, or the board silently loses every workspace it has not yet diffed.
+    .leftJoin(workspaceDiffStatCache, eq(workspaceDiffStatCache.workspaceId, workspaces.id))
     .where(inArray(workspaces.issueId, issueIds));
 }
 
@@ -100,22 +107,10 @@ export async function getShowdownStatuses(showdownIds: string[], database: Datab
     .where(inArray(showdowns.id, showdownIds));
 }
 
-export async function updateWorkspaceDiffStatCache(
-  workspaceId: string,
-  values: {
-    diffStatCacheCheckedAt: string;
-    diffStatCacheHeadSha: string | null;
-    diffStatCacheFilesChanged: number;
-    diffStatCacheInsertions: number;
-    diffStatCacheDeletions: number;
-  },
-  database: Database = db,
-): Promise<void> {
-  await database.update(workspaces).set(values).where(eq(workspaces.id, workspaceId));
-}
-
 // #815: `updateWorkspaceConflictCache` moved to `repositories/conflict-cache.repository.ts`
-// together with the three columns it wrote — the memo has its own table and its own owner now.
+// and `updateWorkspaceDiffStatCache` to `repositories/diff-stat-cache.repository.ts`,
+// together with the columns each wrote — both memos have their own table and their own owner
+// now. This file is left with reads only, so it no longer writes `workspaces` at all.
 
 export async function getWorkflowNodesByIds(nodeIds: string[], database: Database = db) {
   return database

@@ -8,7 +8,7 @@ import {
   updateRepoSummaryProjection,
   updateWorkspaceSummaryGitProjection,
 } from "../repositories/workspace-summary-projection.repository.js";
-import { updateWorkspaceDiffStatCache } from "../repositories/workspace-summary.repository.js";
+import { updateWorkspaceDiffStatCache } from "../repositories/diff-stat-cache.repository.js";
 import { notifySummaryWriteThrough } from "./summary-write-through-notifier.js";
 import type { Database } from "../db/index.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -123,11 +123,11 @@ export async function refreshWorkspaceGitProjection(
         const stats = await getDiffShortstat(ws.workingDir, diffRef).catch(() => null);
         if (stats) {
           await updateWorkspaceDiffStatCache(ws.id, {
-            diffStatCacheCheckedAt: now(),
-            diffStatCacheHeadSha: latest.sha,
-            diffStatCacheFilesChanged: stats.filesChanged,
-            diffStatCacheInsertions: stats.insertions,
-            diffStatCacheDeletions: stats.deletions,
+            checkedAt: now(),
+            headSha: latest.sha,
+            filesChanged: stats.filesChanged,
+            insertions: stats.insertions,
+            deletions: stats.deletions,
           }, database).catch(() => {});
         }
       }
