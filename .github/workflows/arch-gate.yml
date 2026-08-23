@@ -69,7 +69,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: build shared (the other packages import its dist)
+      - name: build shared (several server suites assert against packages/shared/dist)
         run: pnpm build:shared
       - name: coverage run (all four test packages)
         # `pnpm <pkg> test -- --coverage` does NOT work: pnpm swallows everything after

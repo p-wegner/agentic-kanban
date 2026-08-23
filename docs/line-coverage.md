@@ -82,6 +82,28 @@ becomes a measurement. Files the report does **not** cover keep the co-change pr
 report yields a mixed basis — `safety_net_basis_counts` says which files got which, and that field
 is the thing to read before believing any exposure ranking.
 
+### The measurement, made (2026-08-23, client lcov only, 11m22s)
+
+`provenance.scanners.coverage` went from `skipped:no_report` to `ok`, and the basis split:
+
+```
+safety_net_basis_counts  { coverage: 225, test_cochange: 1191 }   (was { test_cochange: 1375 })
+```
+
+225 files became measured off **one** package's report. The exposure ranking changed materially,
+which is the point — a proxy that reorders the worklist is not a conservative approximation:
+
+| | Proxy ranking (#765's ticket) | Measured |
+|---|---|---|
+| `components/GraphEdges.tsx` | 3rd worst, `safety_net 0.00`, exposure 0.238 | **out of the top 30**; 88% lines covered |
+| `settings/PluginsSettings.tsx` | not listed | **worst in repo**, exposure 0.335, 1.2% covered, max CC 35 |
+| `components/PluginSkillPane.tsx` | not listed | **2nd**, exposure 0.304, **0% covered**, max CC 39 |
+| `hooks/useCrossRepoActivity.ts` | not listed | 5th, 1.6% covered, max CC 32 |
+
+The two genuinely worst-protected complex files in the repo were invisible to the co-change proxy,
+and the file it pointed at was well covered. `scripts/analyze-claude-session.mjs` stays 3rd on
+`test_cochange` — see below.
+
 ## What coverage can never tell you here
 
 Root `scripts/*.mjs`, `packages/e2e` and `packages/desktop` are owned by no vitest project, so a v8
@@ -101,3 +123,9 @@ naming `plugin.service.ts`, `plugin-loop.service.ts`, `monitor-cycle.ts`,
 services/repositories) and #700 (`startup/exit-workflow.ts`). Every file those tickets name is in
 `packages/server`, so the useful move before starting any of them is a server coverage run and a
 look at the per-file numbers — not another pass over the co-change ranking.
+
+**That run has not happened.** Only `packages/client` has ever been measured, so every server file
+— including all of #726's, #728's and #700's — is still scored on the proxy that was just shown to
+reorder the worklist. #797 tracks it: run all four packages, record the wall time, and report the
+measured coverage of those files so the refactoring tickets can be sequenced behind test-writing
+where the number is low.
