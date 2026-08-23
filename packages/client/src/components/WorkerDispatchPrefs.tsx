@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { getSettings, setSettings } from "../lib/settingsStore.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 
 /**
  * The only UI for `worker_dispatch_<projectId>` / `worker_dispatch_strict_<projectId>` /
@@ -47,8 +48,11 @@ export function WorkerDispatchPrefs({ projectId, projectName, onSaved }: WorkerD
     // dispatch preference this panel just wrote (client conventions guard, #811).
     getSettings()
       .then((settings) => {
-        setDispatch(settings[keys.dispatch] === "true");
-        setStrict(settings[keys.strict] === "true");
+        // getBool, not a raw `=== "true"`: the polarity ratchet (#947) exists because a raw
+        // read silently ignores the per-key registry default. These two are dynamic
+        // per-project keys with no registry row, so the effective default stays false.
+        setDispatch(getBool(settings, keys.dispatch));
+        setStrict(getBool(settings, keys.strict));
         setLabels(settings[keys.labels] ?? "");
         setLoaded(true);
       })
