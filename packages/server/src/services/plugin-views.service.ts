@@ -23,7 +23,7 @@ import {
   substitutePluginPlaceholders,
   type PluginManifest,
 } from "@agentic-kanban/shared/lib/plugin-manifest";
-import { spawnShellCommand, taskkillTree } from "./process-exec.js";
+import { spawnShellCommand, killProcessTree } from "./process-exec.js";
 import { tailOutput as tail } from "./plugin-exec.js";
 import { findView, probeHealth } from "./plugin-view-probe.js";
 import type { EnabledPlugin } from "./plugin-enabled.js";
@@ -127,11 +127,36 @@ function viewKey({ pluginRowId, viewId, projectId }: PluginViewRef): string {
   return `${pluginRowId}:${viewId}:${projectId}`;
 }
 
+/**
+ * A kill that could not kill (#832).
+ *
+ * Every call below used to end in `.catch(() => {})`, and that empty catch is exactly why the
+ * win32-only `taskkillTree` calls survived undetected: off Windows `taskkill` does not exist,
+ * every kill failed with ENOENT, and NOTHING said so — a Linux board simply never killed a
+ * plugin view server. Silence is what made a portability bug indistinguishable from success,
+ * so the failure now leaves a `[plugins]` line.
+ *
+ * "Already gone" is NOT a failure and stays quiet. Both kill paths race the child's own exit
+ * BY DESIGN — the `exit` handler kills the tree of a pid that just exited, and shutdown kills
+ * pids whose servers may have stopped hours ago — so ESRCH (POSIX) and `taskkill`'s "not
+ * found" (Windows) are the expected outcome, not an incident. Warning on them would put lines
+ * on every normal shutdown and teach the reader to ignore the tag, which is the same failure
+ * mode as swallowing, one step further along.
+ */
+function reportKillFailure(pid: number, err: unknown): void {
+  const message = errorMessage(err);
+  if (/ESRCH|not found|no such process/i.test(message)) return;
+  console.warn(`[plugins] failed to kill view server tree for PID ${pid} (non-fatal): ${message}`);
+}
+
 function killChild(entry: PluginViewProcess): void {
-  // The child is a cmd.exe/sh wrapper; on Windows kill the tree so the actual
-  // server (a grandchild) dies too. Never touches anything but this exact pid.
-  if (process.platform === "win32" && entry.pid) {
-    void taskkillTree(entry.pid).catch(() => {});
+  // The child is a cmd.exe/sh wrapper; kill the tree so the actual server (a grandchild on
+  // Windows) dies too. Never touches anything but this exact pid. UNBRANCHED since #832: the
+  // platform decision lives in `killProcessTree`, so POSIX kills the pid instead of doing
+  // nothing at all, and one mocked seam asserts this site on both platforms.
+  if (entry.pid) {
+    const pid = entry.pid;
+    void killProcessTree(pid).catch((err) => reportKillFailure(pid, err));
   }
   try {
     entry.child.kill();
@@ -151,8 +176,9 @@ function killChild(entry: PluginViewProcess): void {
  * the directory removal fails with EBUSY and is swallowed as "best effort".
  */
 async function killChildAsync(entry: PluginViewProcess): Promise<void> {
-  if (process.platform === "win32" && entry.pid) {
-    await taskkillTree(entry.pid).catch(() => { /* already gone, or taskkill unavailable */ });
+  if (entry.pid) {
+    const pid = entry.pid;
+    await killProcessTree(pid).catch((err) => reportKillFailure(pid, err));
   }
   try {
     entry.child.kill();
@@ -175,9 +201,9 @@ export async function stopAllPluginViewsAsync(): Promise<number> {
   // orphan class; the loop above only covers children still tracked.
   const strays = [...spawnedViewPids];
   spawnedViewPids.clear();
-  if (process.platform === "win32") {
-    await Promise.all(strays.map((pid) => taskkillTree(pid).catch(() => { /* already gone */ })));
-  }
+  // #832: this sweep used to be win32-only, so on Linux the orphan class it exists to remove
+  // was never removed at all — the stray pids were collected, cleared, and forgotten.
+  await Promise.all(strays.map((pid) => killProcessTree(pid).catch((err) => reportKillFailure(pid, err))));
   return entries.length;
 }
 
@@ -319,9 +345,13 @@ export function createPluginViewsRuntime<P extends PluginWithManifest, Pr extend
       // NOTHING would ever kill it. It then holds a port and its cwd (a temp dir for a test
       // fixture) indefinitely: measured 22 live `node serve.mjs` orphans and 330 undeletable temp
       // dirs. Kill the tree of the pid we recorded, on the way out. Harmless if we are the ones
-      // who killed it — taskkill on a dead pid just fails and is swallowed.
-      if (process.platform === "win32" && child.pid) {
-        void taskkillTree(child.pid).catch(() => { /* already gone */ });
+      // who killed it — a kill on a dead pid just fails, and "already gone" is not reported.
+      // Unbranched since #832; POSIX reaches the pid we recorded, which for `sh -c "<cmd>"` is
+      // usually the server itself (sh execs the last command), so this is the POSIX analogue
+      // of the tree kill rather than a no-op.
+      if (child.pid) {
+        const pid = child.pid;
+        void killProcessTree(pid).catch((err) => reportKillFailure(pid, err));
       }
       void dropViewProcess?.(ref).catch(() => {});
       if (code !== 0 && code !== null) {
