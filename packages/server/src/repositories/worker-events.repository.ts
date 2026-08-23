@@ -59,7 +59,16 @@ export async function insertWorkerEvent(
   return id;
 }
 
-/** Newest-first events for one worker. */
+/**
+ * Newest-first events for one worker.
+ *
+ * The tiebreak is SQLite's insertion-ordered `rowid`, NOT the row id (#828). `id` is a
+ * random UUID, so two events written inside the same millisecond — a connect immediately
+ * followed by a close, which is exactly the #699/#706 flap this timeline exists to make
+ * readable — came back in a random order. It looked stable only because a Windows clock
+ * ticks in ~15ms steps and separated them; on a 1ms-resolution clock they collide and the
+ * timeline can render a disconnect before its own connect.
+ */
 export async function listWorkerEventRows(
   opts: { workerId: string; limit?: number; types?: string[] },
   database: Database = db,
@@ -70,7 +79,7 @@ export async function listWorkerEventRows(
     .select()
     .from(workerEvents)
     .where(and(...conditions))
-    .orderBy(desc(workerEvents.createdAt), desc(workerEvents.id))
+    .orderBy(desc(workerEvents.createdAt), desc(sql`rowid`))
     .limit(Math.min(Math.max(opts.limit ?? 100, 1), 500));
   return rows.map((r) => ({ ...r, sessionId: r.sessionId ?? null, payloadJson: r.payloadJson ?? null }));
 }
@@ -98,7 +107,7 @@ export async function pruneWorkerEvents(
     .select({ createdAt: workerEvents.createdAt })
     .from(workerEvents)
     .where(eq(workerEvents.workerId, workerId))
-    .orderBy(desc(workerEvents.createdAt), desc(workerEvents.id))
+    .orderBy(desc(workerEvents.createdAt), desc(sql`rowid`))
     .limit(limit);
   if (keep.length < limit) return 0;
   const cutoff = keep[keep.length - 1]!.createdAt;
