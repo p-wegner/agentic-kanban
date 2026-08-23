@@ -277,6 +277,154 @@ function runCheck(check, inputData, editedFiles) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// #759 — the compile check had no IN-FLIGHT awareness, so it demanded you fix a live agent's
+// half-written file.
+//
+// #724 taught the uncommitted-files check to tell IN-FLIGHT subagent work from STRANDED work.
+// The typecheck check in the same hook chain learned nothing, so it reproduced the failure #724
+// fixed. Observed twice in one session, with the transition captured:
+//
+//   src/services/agent-remote.service.ts(762,3): error TS2739: ... is missing the following
+//     properties from type 'RemoteAgentService': remoteSessionInfo, requestRepoOp
+//   -> "Fix the issues before stopping."
+//
+// `remoteSessionInfo`/`requestRepoOp` were the two protocol operations a LIVE agent was mid-way
+// through adding. No commit landed on that file; the next run of the same check passed, because
+// the agent simply finished writing it. The break existed in no committed state — and the
+// instruction was to edit a file another agent holds, which is the corruption the shared-index
+// rule exists to prevent. It also trains the reader to disbelieve the one check that catches a
+// real break per edit.
+//
+// So: classify before demanding. Reuses #724/#771's detection from check-uncommitted.js rather
+// than re-deriving it — one notion of "who is holding this file", or the two drift.
+//   - every error file is dirty AND held by a live agent (IN FLIGHT), or dirty-and-unattributable
+//     while agents are live (UNKNOWN, #771's fail-safe bucket) -> advisory, does NOT block.
+//   - anything else — a clean/committed file, or one attributed to THIS session — still blocks.
+//     That is the real signal and must not be weakened.
+//   - unparseable output, no transcript, detection unavailable -> block, as before (fail closed).
+// The message always names which case it took, so "your break" is never confused with "someone
+// else's edit in progress".
+// ---------------------------------------------------------------------------
+
+/** `src/x.ts(12,3): error TS2552: …` — tsc's own format, wherever it sits in a pnpm-prefixed line. */
+const TS_ERROR_LINE = /([\w@./\\-]+\.(?:ts|tsx|mts|cts))\((\d+),(\d+)\):\s*error\s+TS\d+/g;
+
+function parseCompileErrorFiles(output) {
+  const files = new Set();
+  const text = String(output || "");
+  TS_ERROR_LINE.lastIndex = 0;
+  let m;
+  while ((m = TS_ERROR_LINE.exec(text)) !== null) {
+    files.add(m[1].replace(/\\/g, "/").replace(/^\.\//, ""));
+  }
+  return [...files];
+}
+
+/**
+ * Does `errorFile` (as tsc printed it, usually package-relative) name `dirtyPath` (repo-relative)?
+ * Matching by tail is deliberate: tsc runs per package, so the two share only a suffix. A tail
+ * match can over-match across packages with the same relative layout, which errs toward "someone
+ * may be holding this" — the recoverable direction (#771).
+ */
+function compileErrorNamesPath(errorFile, dirtyPath) {
+  const e = errorFile.toLowerCase();
+  const d = dirtyPath.toLowerCase();
+  return d === e || d.endsWith("/" + e) || e.endsWith("/" + d);
+}
+
+/**
+ * Verdict for a failing compile check: `{ block, summary }`.
+ *
+ * `deps` is injectable so the classification is unit-testable without a live session
+ * (`loadHook` -> the check-uncommitted exports, `projectDir`, `transcriptPath`).
+ */
+function classifyCompileFailure(output, deps) {
+  const errorFiles = parseCompileErrorFiles(output);
+  if (errorFiles.length === 0) {
+    return { block: true, summary: "[typecheck] case: UNCLASSIFIED — no `file(line,col): error TSxxxx` lines to attribute; blocking (fail closed)." };
+  }
+  let hook;
+  try {
+    hook = deps.loadHook();
+  } catch {
+    hook = null;
+  }
+  if (!hook || typeof hook.trackedSourceChanges !== "function") {
+    return { block: true, summary: "[typecheck] case: NO IN-FLIGHT DATA — in-flight detection unavailable; blocking (fail closed)." };
+  }
+  const projectDir = deps.projectDir;
+  let activity = null;
+  let dirty = { all: [] };
+  try {
+    activity = deps.transcriptPath ? hook.readSessionActivity(deps.transcriptPath) : null;
+    dirty = hook.trackedSourceChanges(projectDir);
+  } catch {
+    return { block: true, summary: "[typecheck] case: NO IN-FLIGHT DATA — could not read git/transcript state; blocking (fail closed)." };
+  }
+  const live = activity && activity.liveSubagents ? activity.liveSubagents : 0;
+  if (!live) {
+    return {
+      block: true,
+      summary:
+        "[typecheck] case: YOURS — no live subagent is holding anything, so this break is this " +
+        "session's (or the committed state's). Blocking.",
+    };
+  }
+  const part = hook.partitionAuthored(dirty.all, activity, projectDir);
+  const heldByOthers = new Set([...(part.inFlight || []), ...(part.unknown || [])]);
+  const held = [];
+  const yours = [];
+  for (const f of errorFiles) {
+    const match = [...heldByOthers].find((p) => compileErrorNamesPath(f, p));
+    if (match) held.push(`${f} (held: ${match})`);
+    else yours.push(f);
+  }
+  if (yours.length === 0) {
+    return {
+      block: false,
+      summary:
+        `[typecheck] case: IN FLIGHT — all ${held.length} file(s) with errors are uncommitted and ` +
+        `held by ${live} live subagent(s), so the break exists only in a half-written working tree. ` +
+        "NOT blocking, and do NOT edit them:\n  ~ " + held.join("\n  ~ "),
+    };
+  }
+  return {
+    block: true,
+    summary:
+      `[typecheck] case: YOURS (mixed) — ${yours.length} file(s) with errors are NOT held by any of ` +
+      `the ${live} live subagent(s), so they are this session's or the committed state's break:\n  - ` +
+      yours.join("\n  - ") +
+      (held.length > 0
+        ? `\nThe other ${held.length} are in flight; leave them alone:\n  ~ ` + held.join("\n  ~ ")
+        : ""),
+  };
+}
+
+/**
+ * Wrap a failing check's result in the #759 classification when its output looks like compile
+ * errors. Opt-out (`inFlightAware: false`) rather than opt-in: the demand "fix this file" is only
+ * actionable for a file nobody live is holding, whichever check produced it — and the check that
+ * fired in the field is a GENERATED rule (`.claude/smart-hooks-rules.json`), not the hand-authored
+ * config entry, so an opt-in flag would have missed the observed case entirely.
+ */
+function applyInFlightAwareness(check, result, input) {
+  if (result.success || check.inFlightAware === false) return result;
+  if (parseCompileErrorFiles(result.output).length === 0) return result;
+  const verdict = classifyCompileFailure(result.output, {
+    loadHook: () => require("./check-uncommitted.js"),
+    projectDir: getProjectDir(),
+    transcriptPath: input && (input.transcript_path || input.transcriptPath),
+  });
+  console.error(verdict.summary);
+  if (verdict.block) {
+    return { ...result, output: `${verdict.summary}\n\n${result.output}` };
+  }
+  // Not `advisory` — that flag means "inconclusive/timed out". This is a CONCLUSION: the break
+  // is real and belongs to someone who is still writing it.
+  return { ...result, success: true, inFlightExcused: true, output: "" };
+}
+
 // --- PreToolUse: prevent destructive operations before execution ---
 
 function isShellTool(toolName) {
@@ -473,7 +621,13 @@ function handlePostToolUse(input) {
     }
 
     const command = check.command.replace(/\{file\}/g, rel);
-    const result = runCheck({ ...check, command }, input, state.editedFiles);
+    // #759 — a compile break in a file a live subagent is mid-way through writing is not this
+    // session's to fix. Observed on this path too, not just on Stop.
+    const result = applyInFlightAwareness(
+      check,
+      runCheck({ ...check, command }, input, state.editedFiles),
+      input
+    );
 
     if (result.advisory) {
       // #487 — inconclusive (timed out), deliberately not blocking. Say so on stderr so the
@@ -536,7 +690,7 @@ function handleStop(input) {
       continue;
     }
 
-    const result = runCheck(check, input, state.editedFiles);
+    const result = applyInFlightAwareness(check, runCheck(check, input, state.editedFiles), input);
 
     if (result.advisory) {
       console.error(`[smart-hooks] ${check.name || check.command}: SKIPPED (inconclusive)`);
@@ -606,4 +760,7 @@ if (require.main === module) {
 module.exports = {
   wrongCheckoutVitestReason,
   isContainerized,
+  parseCompileErrorFiles,
+  compileErrorNamesPath,
+  classifyCompileFailure,
 };
