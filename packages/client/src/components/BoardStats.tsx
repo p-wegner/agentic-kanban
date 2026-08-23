@@ -4,6 +4,7 @@ import { apiFetch } from "../lib/api.js";
 import { computeBoardStats } from "../lib/boardStats.js";
 import { useBoardFilterStore } from "../stores/boardFilterStore.js";
 import { useDismissable } from "../hooks/useDismissable.js";
+import { Icon } from "./Icon.js";
 
 interface BoardStatsProps {
   activeColumns: StatusWithIssues[];
@@ -162,9 +163,7 @@ export function BoardStats({
               <span className="text-xs font-medium text-gray-600 dark:text-gray-400">open</span>{/* done count + % live in the ring popover */}
             </>
           )}
-          <svg className={`w-2.5 h-2.5 text-gray-400 transition-transform ${showBreakdown ? "rotate-180" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
-          </svg>
+          <Icon className={`w-2.5 h-2.5 text-gray-400 transition-transform ${showBreakdown ? "rotate-180" : ""}`} d="m19.5 8.25-7.5 7.5-7.5-7.5" />
         </button>
 
         {showBreakdown && (
@@ -228,9 +227,9 @@ export function BoardStats({
                   className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400"
                   title={commitBranch ? `Commits on ${commitBranch}` : "Commits on default branch"}
                 >
-                  <svg className="w-3 h-3 text-gray-400 dark:text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <Icon className="w-3 h-3 text-gray-400 dark:text-gray-500">
                     <circle cx="12" cy="12" r="3" /><line x1="12" y1="3" x2="12" y2="9" /><line x1="12" y1="15" x2="12" y2="21" />
-                  </svg>
+                  </Icon>
                   {commitCount.toLocaleString('en-US')} commits
                 </span>
               </div>

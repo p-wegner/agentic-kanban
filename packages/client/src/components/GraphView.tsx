@@ -26,6 +26,7 @@ import { CriticalPathSidePanel } from "./CriticalPathSidePanel.js";
 import { EdgeEditPanel } from "./EdgeEditPanel.js";
 import { GraphEdges } from "./GraphEdges.js";
 import { GraphNodes } from "./GraphNodes.js";
+import { Icon } from "./Icon.js";
 
 interface GraphData {
   nodes: IssueWithStatus[];
@@ -436,12 +437,12 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery, focus
   if (graphData && graphData.edges.length === 0) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-4 bg-gray-50 dark:bg-gray-950 text-gray-500 dark:text-gray-400">
-        <svg className="w-12 h-12 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <Icon className="w-12 h-12 opacity-30" strokeWidth={1.5}>
           <circle cx="5" cy="12" r="2" />
           <circle cx="19" cy="5" r="2" />
           <circle cx="19" cy="19" r="2" />
           <path d="M7 12h6M15 6.5l-4 4M15 17.5l-4-4" />
-        </svg>
+        </Icon>
         <div className="text-center">
           <p className="text-sm font-medium text-gray-600 dark:text-gray-400">No dependencies defined</p>
           <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Add dependencies between issues to visualize relationships here.</p>
@@ -522,9 +523,9 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery, focus
               : "bg-white dark:bg-gray-900 border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
           }`}
         >
-          <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2.5}>
+          <Icon className="w-3.5 h-3.5" strokeWidth={2.5}>
             <path d="M12 5v14M5 12h14" />
-          </svg>
+          </Icon>
         </button>
         <button
           onClick={() => setZoom((z) => Math.min(3, z * 1.2))}
@@ -539,10 +540,10 @@ export function GraphView({ columns, projectId, onIssueClick, searchQuery, focus
           className="w-7 h-7 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-center shadow-sm"
           title="Fit to view"
         >
-          <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2}>
+          <Icon className="w-3.5 h-3.5">
             <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
             <path d="M3 3v5h5" />
-          </svg>
+          </Icon>
         </button>
       </div>
       {/* Legend */}

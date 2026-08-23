@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ActiveAgentsBadge } from "./ProjectSelector.js";
+import { Icon } from "./Icon.js";
 
 export interface ProjectTabProject {
   id: string;
@@ -173,9 +174,7 @@ export function ProjectTabs({ projects, activeProjectId, onProjectChange }: Proj
                   title={project.pinned ? `Unpin ${project.name}` : `Pin ${project.name}`}
                   aria-label={project.pinned ? `Unpin ${project.name}` : `Pin ${project.name}`}
                 >
-                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill={project.pinned ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 3.5l2.6 5.3 5.9.9-4.3 4.2 1 5.9L12 17l-5.2 2.8 1-5.9-4.3-4.2 5.9-.9L12 3.5z" />
-                  </svg>
+                  <Icon className="h-3.5 w-3.5" fill={project.pinned ? "currentColor" : "none"} d="M12 3.5l2.6 5.3 5.9.9-4.3 4.2 1 5.9L12 17l-5.2 2.8 1-5.9-4.3-4.2 5.9-.9L12 3.5z" />
                 </button>
               </div>
             );

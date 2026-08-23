@@ -10,6 +10,7 @@ import type { SegmentKind, Provider, ProviderPolicyMode, StrategySegment, Provid
 import { MonitorPolicyPresets } from "./MonitorPolicyPresets.js";
 import { ProviderPolicyProfileField } from "./ProviderPolicyProfileField.js";
 import { StrategyBoard } from "./StrategyBoard.js";
+import { Icon } from "./Icon.js";
 
 interface StrategyTargetsViewProps {
   columns: StatusWithIssues[];
@@ -250,10 +251,10 @@ export function StrategyTargetsView({ columns, projectId, onIssueClick, searchQu
             </div>
             <div className="flex items-center gap-1">
               <button type="button" onClick={addSegment} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-600 shadow-sm transition-colors hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800" title="Add segment">
-                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.3}><path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12h14" /></svg>
+                <Icon className="h-4 w-4" strokeWidth={2.3} d="M12 5v14M5 12h14" />
               </button>
               <button type="button" onClick={resetBullseye} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-600 shadow-sm transition-colors hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800" title="Reset bullseye">
-                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path strokeLinecap="round" strokeLinejoin="round" d="M3 3v5h5" /></svg>
+                <Icon className="h-4 w-4"><path strokeLinecap="round" strokeLinejoin="round" d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path strokeLinecap="round" strokeLinejoin="round" d="M3 3v5h5" /></Icon>
               </button>
             </div>
           </div>
@@ -341,7 +342,7 @@ export function StrategyTargetsView({ columns, projectId, onIssueClick, searchQu
                 <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-100">Edit segment</h2>
                 {config.segments.length > 1 && (
                   <button type="button" onClick={() => removeSegment(selectedSegment.id)} className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950" title="Remove segment">
-                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 7h12M9 7V5h6v2m-7 3v8m4-8v8m4-8v8M8 7l1 13h6l1-13" /></svg>
+                    <Icon className="h-4 w-4" d="M6 7h12M9 7V5h6v2m-7 3v8m4-8v8m4-8v8M8 7l1 13h6l1-13" />
                   </button>
                 )}
               </div>
@@ -395,7 +396,7 @@ export function StrategyTargetsView({ columns, projectId, onIssueClick, searchQu
                 <p className="text-xs text-gray-500 dark:text-gray-400">Define rate-limit strategy per provider profile. Steers which harness the orchestrator uses for new workspaces.</p>
               </div>
               <button type="button" onClick={addProviderPolicy} className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-600 shadow-sm transition-colors hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800" title="Add provider policy">
-                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.3}><path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12h14" /></svg>
+                <Icon className="h-4 w-4" strokeWidth={2.3} d="M12 5v14M5 12h14" />
               </button>
             </div>
             {config.providerPolicies.length === 0 ? (
@@ -482,7 +483,7 @@ export function StrategyTargetsView({ columns, projectId, onIssueClick, searchQu
                         </label>
                       </div>
                       <button type="button" onClick={() => removeProviderPolicy(policy.id)} className="mt-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950" title="Remove policy">
-                        <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                        <Icon className="h-3.5 w-3.5" d="M6 18L18 6M6 6l12 12" />
                       </button>
                     </div>
                     <div className="flex items-center gap-2">
@@ -503,7 +504,7 @@ export function StrategyTargetsView({ columns, projectId, onIssueClick, searchQu
             <div className="mb-2 flex items-center justify-between gap-3">
               <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-100">Monitor brief</h2>
               <button type="button" onClick={copyBrief} className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 text-gray-500 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800" title={copied ? "Copied" : "Copy brief"}>
-                {copied ? <svg className="h-4 w-4 text-accent-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg> : <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8 8h10v12H8zM6 16H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>}
+                {copied ? <Icon className="h-4 w-4 text-accent-600" d="M5 13l4 4L19 7" /> : <Icon className="h-4 w-4" d="M8 8h10v12H8zM6 16H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />}
               </button>
             </div>
             <pre className="max-h-44 overflow-auto whitespace-pre-wrap rounded-md bg-gray-50 p-3 text-xs leading-relaxed text-gray-600 dark:bg-gray-950 dark:text-gray-300">{agentBrief}</pre>

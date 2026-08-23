@@ -34,6 +34,7 @@ import {
 import { buildCreateWorkspaceBody } from "../lib/createWorkspaceBody.js";
 import { defaultModelForProvider } from "../lib/settings-shared.js";
 import { isPlanModePriority } from "../lib/priorityTraits.js";
+import { Icon } from "./Icon.js";
 
 interface CreateWorkspaceFormProps {
   issue: IssueWithStatus;
@@ -405,9 +406,7 @@ export function CreateWorkspaceForm({ issue, project, prefs, actionLoading, onCr
               aria-label="Delete template"
               title="Delete selected template"
             >
-              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
-              </svg>
+              <Icon className="h-4 w-4" d="M6 18 18 6M6 6l12 12" />
             </button>
           )}
         </div>

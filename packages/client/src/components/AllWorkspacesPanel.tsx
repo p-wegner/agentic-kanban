@@ -27,6 +27,7 @@ import {
   formatContextTokens,
   searchPlaceholder,
 } from "../lib/allWorkspacesStatus.js";
+import { Icon } from "./Icon.js";
 
 interface AllWorkspacesPanelProps {
   columns: StatusWithIssues[];
@@ -129,12 +130,12 @@ export function AllWorkspacesPanel({ columns, activeProjectId, onClose, onIssueC
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center gap-2">
-            <svg className="h-5 w-5 text-gray-600 dark:text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <Icon className="h-5 w-5 text-gray-600 dark:text-gray-400">
               <rect x="3" y="3" width="7" height="7" rx="1" />
               <rect x="14" y="3" width="7" height="7" rx="1" />
               <rect x="3" y="14" width="7" height="7" rx="1" />
               <rect x="14" y="14" width="7" height="7" rx="1" />
-            </svg>
+            </Icon>
             <h2 className="text-lg font-semibold text-ink dark:text-stone-100 heading-serif">All Workspaces</h2>
             {showingStale ? (
               <span className="text-sm text-gray-500 dark:text-gray-400">

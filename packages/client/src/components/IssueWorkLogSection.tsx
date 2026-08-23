@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { apiPost, apiDelete } from "../lib/api.js";
 import { formatRelativeTime, formatAbsoluteTime } from "../lib/formatRelativeTime.js";
 import { showToast } from "../lib/toast.js";
+import { Icon } from "./Icon.js";
 
 
 export function formatMinutes(totalMinutes: number): string {
@@ -159,9 +160,7 @@ export function IssueWorkLogSection({ issueId, initial, loading }: IssueWorkLogS
                 className="text-gray-300 hover:text-red-500 dark:text-gray-600 dark:hover:text-red-400 disabled:opacity-50 transition-colors shrink-0"
                 title="Delete entry"
               >
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                <Icon className="w-3 h-3" d="M6 18L18 6M6 6l12 12" />
               </button>
             </li>
           ))}

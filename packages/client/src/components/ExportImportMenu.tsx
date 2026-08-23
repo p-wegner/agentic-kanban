@@ -5,6 +5,7 @@ import { showToast } from "../lib/toast.js";
 import { apiPost } from "../lib/api.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { useDismissable } from "../hooks/useDismissable.js";
+import { Icon } from "./Icon.js";
 
 interface ExportImportMenuProps {
   projectId: string | null;
@@ -88,9 +89,7 @@ export function ExportImportMenu({ projectId }: ExportImportMenuProps) {
           title="Export / Import issues"
           className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
-          </svg>
+          <Icon className="w-3 h-3" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
           <span className="hidden sm:inline">Export</span>
         </button>
         {open && (
@@ -107,9 +106,10 @@ export function ExportImportMenu({ projectId }: ExportImportMenuProps) {
               onClick={() => handleExport("json")}
               className="w-full text-left px-2.5 py-1.5 text-xs rounded hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-900 dark:text-gray-100 flex items-center gap-2"
             >
-              <svg className="w-3 h-3 shrink-0 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-              </svg>
+              <Icon
+                className="w-3 h-3 shrink-0 text-gray-400"
+                d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"
+              />
               Download as JSON
             </button>
             <button
@@ -118,9 +118,10 @@ export function ExportImportMenu({ projectId }: ExportImportMenuProps) {
               onClick={() => handleExport("csv")}
               className="w-full text-left px-2.5 py-1.5 text-xs rounded hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-900 dark:text-gray-100 flex items-center gap-2"
             >
-              <svg className="w-3 h-3 shrink-0 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7" />
-              </svg>
+              <Icon
+                className="w-3 h-3 shrink-0 text-gray-400"
+                d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7"
+              />
               Download as CSV
             </button>
             <button
@@ -130,9 +131,7 @@ export function ExportImportMenu({ projectId }: ExportImportMenuProps) {
               title="Lossless snapshot (issues, statuses, tags, milestones, dependencies) for moving a project between devices"
               className="w-full text-left px-2.5 py-1.5 text-xs rounded hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-900 dark:text-gray-100 flex items-center gap-2"
             >
-              <svg className="w-3 h-3 shrink-0 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-              </svg>
+              <Icon className="w-3 h-3 shrink-0 text-gray-400" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
               Full backlog snapshot
             </button>
             <button
@@ -143,9 +142,7 @@ export function ExportImportMenu({ projectId }: ExportImportMenuProps) {
               className="w-full text-left px-2.5 py-1.5 text-xs rounded hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-900 dark:text-gray-100 flex items-center gap-2"
               data-testid="export-backlog-md"
             >
-              <svg className="w-3 h-3 shrink-0 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h10M4 18h7" />
-              </svg>
+              <Icon className="w-3 h-3 shrink-0 text-gray-400" d="M4 6h16M4 12h10M4 18h7" />
               Backlog as Markdown…
             </button>
             <div className="my-1 border-t border-gray-100 dark:border-gray-800" />
@@ -158,9 +155,7 @@ export function ExportImportMenu({ projectId }: ExportImportMenuProps) {
               onClick={handleImportClick}
               className="w-full text-left px-2.5 py-1.5 text-xs rounded hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-900 dark:text-gray-100 flex items-center gap-2"
             >
-              <svg className="w-3 h-3 shrink-0 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 8l5-5 5 5M12 3v12" />
-              </svg>
+              <Icon className="w-3 h-3 shrink-0 text-gray-400" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 8l5-5 5 5M12 3v12" />
               Import issues…
             </button>
             <button
@@ -174,9 +169,7 @@ export function ExportImportMenu({ projectId }: ExportImportMenuProps) {
               title="Import a full backlog snapshot exported from another device"
               className="w-full text-left px-2.5 py-1.5 text-xs rounded hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-900 dark:text-gray-100 flex items-center gap-2 disabled:opacity-50"
             >
-              <svg className="w-3 h-3 shrink-0 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-              </svg>
+              <Icon className="w-3 h-3 shrink-0 text-gray-400" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
               {importingSnapshot ? "Importing snapshot…" : "Import backlog snapshot…"}
             </button>
             <button
@@ -187,9 +180,7 @@ export function ExportImportMenu({ projectId }: ExportImportMenuProps) {
               className="w-full text-left px-2.5 py-1.5 text-xs rounded hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-900 dark:text-gray-100 flex items-center gap-2"
               data-testid="import-backlog-md"
             >
-              <svg className="w-3 h-3 shrink-0 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h10M4 18h7" />
-              </svg>
+              <Icon className="w-3 h-3 shrink-0 text-gray-400" d="M4 6h16M4 12h10M4 18h7" />
               Import backlog Markdown…
             </button>
           </div>

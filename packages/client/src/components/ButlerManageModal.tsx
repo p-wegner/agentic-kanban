@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { modelOptionsForBackend } from "../lib/butler-format.js";
+import { Icon } from "./Icon.js";
 
 export interface ButlerDef { id: string; name: string; model: string; provider?: "claude" | "codex" | null; }
 
@@ -95,7 +96,7 @@ export function ButlerManageModal({ globalBackend, onClose, onChanged }: { globa
                   title={b.id === "default" ? "The default butler can't be removed" : "Remove this butler"}
                   className="text-gray-400 hover:text-red-500 disabled:opacity-30 disabled:hover:text-gray-400 px-1"
                 >
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z" /></svg>
+                  <Icon className="w-4 h-4" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z" /></Icon>
                 </button>
               </div>
             );

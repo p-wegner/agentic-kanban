@@ -1,4 +1,5 @@
 import React from "react";
+import { Icon } from "./Icon.js";
 
 interface ToolbarAction {
   label: string;
@@ -30,9 +31,10 @@ const ACTIONS: ToolbarAction[] = [
     label: "link",
     title: "Link",
     icon: (
-      <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-      </svg>
+      <Icon
+        className="w-3.5 h-3.5"
+        d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"
+      />
     ),
     action: (sel) => ({
       prefix: "[",
@@ -44,9 +46,7 @@ const ACTIONS: ToolbarAction[] = [
     label: "ul",
     title: "Bullet list",
     icon: (
-      <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-      </svg>
+      <Icon className="w-3.5 h-3.5" d="M4 6h16M4 12h16M4 18h16" />
     ),
     action: (sel) => ({ prefix: "- ", suffix: "", placeholder: sel || "list item" }),
   },
@@ -54,9 +54,7 @@ const ACTIONS: ToolbarAction[] = [
     label: "cl",
     title: "Checklist",
     icon: (
-      <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-      </svg>
+      <Icon className="w-3.5 h-3.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
     ),
     action: (sel) => ({ prefix: "- [ ] ", suffix: "", placeholder: sel || "task" }),
   },

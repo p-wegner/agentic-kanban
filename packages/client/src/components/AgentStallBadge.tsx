@@ -9,6 +9,7 @@ import {
 import { useAgentActivityStore } from "../stores/agentActivityStore.js";
 import { useNow } from "../hooks/usePoll.js";
 import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-liveness";
+import { Icon } from "./Icon.js";
 
 /** How often the badge re-evaluates so idle time can cross the threshold live. */
 const STALL_TICK_MS = 5_000;
@@ -76,10 +77,10 @@ export function AgentStallBadge({ signal, className }: { signal: AgentStallSigna
         title={`No agent activity for ${formatIdle(signal.idleSec)} — possibly stalled`}
         className={`inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300 ${className ?? ""}`}
       >
-        <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+        <Icon className="w-3 h-3">
           <circle cx="12" cy="12" r="10" />
           <path d="M12 8v4l2 2" />
-        </svg>
+        </Icon>
         stalled {formatIdle(signal.idleSec)}
       </span>
     );
@@ -90,12 +91,12 @@ export function AgentStallBadge({ signal, className }: { signal: AgentStallSigna
         title={`Repeated ${signal.repeatedTool} ×${signal.repeatCount} — possible loop`}
         className={`inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 ${className ?? ""}`}
       >
-        <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+        <Icon className="w-3 h-3">
           <path d="M17 2l4 4-4 4" />
           <path d="M3 11v-1a4 4 0 0 1 4-4h14" />
           <path d="M7 22l-4-4 4-4" />
           <path d="M21 13v1a4 4 0 0 1-4 4H3" />
-        </svg>
+        </Icon>
         looping ×{signal.repeatCount}
       </span>
     );

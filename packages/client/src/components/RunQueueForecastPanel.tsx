@@ -1,5 +1,6 @@
 import type { IssueWithStatus, MainWorkspaceInfo, StatusWithIssues } from "@agentic-kanban/shared";
 import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-liveness";
+import { Icon } from "./Icon.js";
 
 export interface RunQueueForecastStart {
   issue: IssueWithStatus;
@@ -175,9 +176,7 @@ export function RunQueueForecastPanel({ columns, activeTarget, onClose, onIssueC
       <div className="relative w-[min(560px,100vw)] bg-surface-raised dark:bg-surface-raised-dark shadow-xl flex flex-col animate-slide-in-right">
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center gap-2 min-w-0">
-            <svg className="w-5 h-5 text-sky-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 18V6m4 12V9m4 9v-5m4 5V4m4 14v-7" />
-            </svg>
+            <Icon className="w-5 h-5 text-sky-600 shrink-0" d="M4 18V6m4 12V9m4 9v-5m4 5V4m4 14v-7" />
             <div className="min-w-0">
               <h2 className="text-lg font-semibold text-ink dark:text-stone-100 heading-serif">Run Queue Forecast</h2>
               <p className="text-xs text-gray-500 dark:text-gray-400 truncate">Read-only capacity from current board workspaces</p>
@@ -251,10 +250,10 @@ export function RunQueueForecastPanel({ columns, activeTarget, onClose, onIssueC
                         }}
                         className="shrink-0 px-3 border-l border-gray-100 dark:border-gray-800 text-gray-400 dark:text-gray-500 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center"
                       >
-                        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <Icon className="h-4 w-4">
                           <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
                           <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7Z" />
-                        </svg>
+                        </Icon>
                       </button>
                     )}
                   </div>

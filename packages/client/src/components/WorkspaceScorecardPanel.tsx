@@ -1,6 +1,7 @@
 import React from "react";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import type { ScorecardResult } from "./WorkspaceCard.js";
+import { Icon } from "./Icon.js";
 
 export interface WorkspaceScorecardPanelProps {
   wsId: string;
@@ -25,9 +26,10 @@ export function WorkspaceScorecardPanel({
             className="flex items-center justify-between gap-3 w-full text-left"
           >
             <div className="flex items-center gap-1.5">
-              <svg className={`w-3 h-3 text-gray-400 dark:text-gray-500 shrink-0 transition-transform ${expandedScorecards[wsId] ? "rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-              </svg>
+              <Icon
+                className={`w-3 h-3 text-gray-400 dark:text-gray-500 shrink-0 transition-transform ${expandedScorecards[wsId] ? "rotate-90" : ""}`}
+                d="M9 5l7 7-7 7"
+              />
               <div>
                 <div className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">Scorecard</div>
                 <div className="text-xs text-gray-400 dark:text-gray-500">Updated {formatRelativeTime(scorecard.computedAt)}</div>

@@ -2,6 +2,7 @@ import { useRef, useState, useCallback } from "react";
 import { priorityColors } from "../lib/issueCardColorMap.js";
 import type { ProjectTag, TagBadge } from "./IssueCard.js";
 import { useDismissable } from "../hooks/useDismissable.js";
+import { Icon } from "./Icon.js";
 
 const PRIORITIES = ["critical", "high", "medium", "low"] as const;
 
@@ -36,9 +37,7 @@ export function PriorityDropdown({ priority, onChange }: { priority: string; onC
         title="Change priority"
       >
         {current}
-        <svg className="w-2.5 h-2.5 shrink-0 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-        </svg>
+        <Icon className="w-2.5 h-2.5 shrink-0 opacity-60" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
       </button>
       {open && (
         <span className="absolute left-0 top-full z-30 mt-1 min-w-[7rem] rounded-md border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900">
@@ -52,9 +51,7 @@ export function PriorityDropdown({ priority, onChange }: { priority: string; onC
               <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${p === "critical" ? "bg-red-500" : p === "high" ? "bg-orange-500" : p === "medium" ? "bg-yellow-400" : "bg-gray-400"}`} />
               {p}
               {p === current && (
-                <svg className="ml-auto w-3 h-3 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                </svg>
+                <Icon className="ml-auto w-3 h-3 text-brand-500" strokeWidth={3} d="M5 13l4 4L19 7" />
               )}
             </button>
           ))}
@@ -129,9 +126,7 @@ export function InlineTagEditor({
             title={`Remove tag: ${tag.name}`}
             aria-label={`Remove tag ${tag.name}`}
           >
-            <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <Icon className="w-2.5 h-2.5" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
           </button>
         </span>
       ))}
@@ -144,9 +139,7 @@ export function InlineTagEditor({
             title="Add tag"
             aria-label="Add tag"
           >
-            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-            </svg>
+            <Icon className="w-3 h-3" strokeWidth={2.5} d="M12 4v16m8-8H4" />
           </button>
           {addOpen && (
             <span className="absolute left-0 top-full z-30 mt-1 min-w-[9rem] max-h-40 overflow-y-auto rounded-md border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900">

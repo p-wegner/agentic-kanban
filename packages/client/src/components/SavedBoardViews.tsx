@@ -15,6 +15,7 @@ import { getSettings, setSettings } from "../lib/settingsStore.js";
 import { showToast } from "../lib/toast.js";
 import { useBoardFilterStore } from "../stores/boardFilterStore.js";
 import { useDismissable } from "../hooks/useDismissable.js";
+import { Icon } from "./Icon.js";
 
 interface SavedBoardViewsProps {
   projectId: string;
@@ -145,18 +146,14 @@ export function SavedBoardViews({
         title="Saved board views"
         className="shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"
       >
-        <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M5 5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16l-7-4-7 4V5z" />
-        </svg>
+        <Icon className="w-3 h-3" d="M5 5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16l-7-4-7 4V5z" />
         <span className="hidden sm:inline max-w-[9rem] truncate">{selectedView?.name ?? "Views"}</span>
         {hasViews && !selectedView && (
           <span className="inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-violet-100 px-1 text-[10px] font-semibold leading-none text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">
             {views.length}
           </span>
         )}
-        <svg className={`w-2.5 h-2.5 transition-transform ${open ? "rotate-180" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
-        </svg>
+        <Icon className={`w-2.5 h-2.5 transition-transform ${open ? "rotate-180" : ""}`} d="M6 9l6 6 6-6" />
       </button>
       {open && (
         <div role="menu" className="absolute left-0 top-full z-30 mt-1 w-64 rounded-md border border-gray-200 bg-white p-2 shadow-lg dark:border-gray-700 dark:bg-gray-900 flex flex-col gap-2">
@@ -185,10 +182,10 @@ export function SavedBoardViews({
                       aria-label={`Rename ${view.name}`}
                       title="Rename"
                     >
-                      <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <Icon className="h-3.5 w-3.5">
                         <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Z" />
                         <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 7.125 16.875 4.5" />
-                      </svg>
+                      </Icon>
                     </button>
                     <button
                       type="button"
@@ -198,9 +195,10 @@ export function SavedBoardViews({
                       aria-label={`Delete ${view.name}`}
                       title="Delete"
                     >
-                      <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 7 18.133 19.142A2 2 0 0 1 16.138 21H7.862A2 2 0 0 1 5.867 19.142L5 7m5 4v6m4-6v6M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3M4 7h16" />
-                      </svg>
+                      <Icon
+                        className="h-3.5 w-3.5"
+                        d="M19 7 18.133 19.142A2 2 0 0 1 16.138 21H7.862A2 2 0 0 1 5.867 19.142L5 7m5 4v6m4-6v6M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3M4 7h16"
+                      />
                     </button>
                   </div>
                 );

@@ -7,6 +7,7 @@ import { groupConflictsByRepo, formatConflictSummary } from "../lib/groupConflic
 import { MultirepoHealthPill } from "./MultirepoHealthPill.js";
 import { useNow } from "../hooks/usePoll.js";
 import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-liveness";
+import { Icon } from "./Icon.js";
 
 function RelativeTime({ timestamp, prefix = "" }: { timestamp: string; prefix?: string }) {
   useNow(30_000);
@@ -187,9 +188,10 @@ export function WorkspaceSummarySection(props: {
           {ws.total > 1 && (
             <span className="order-last text-gray-400 dark:text-gray-500 shrink-0">+{ws.total - 1} more</span>
           )}
-          <svg className="w-3 h-3 shrink-0 text-gray-300 dark:text-gray-600 group-hover/ws:text-brand-400 transition-colors ml-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-          </svg>
+          <Icon
+            className="w-3 h-3 shrink-0 text-gray-300 dark:text-gray-600 group-hover/ws:text-brand-400 transition-colors ml-auto"
+            d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"
+          />
         </div>
       )}
       {!compact && isAgentRunningStatus(ws?.main?.status) && liveActivity && liveActivity !== "Delegating to agent" && (
@@ -209,9 +211,10 @@ export function WorkspaceSummarySection(props: {
           )}
           {liveStats.subagentCount > 0 && (
             <span className="inline-flex items-center gap-0.5 px-1 rounded bg-brand-50 text-brand-600 dark:bg-brand-900/40 dark:text-brand-400 font-medium">
-              <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
+              <Icon
+                className="w-2.5 h-2.5"
+                d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"
+              />
               {liveStats.subagentCount}
             </span>
           )}

@@ -9,23 +9,21 @@ import {
   type ButlerQuestionPrompt,
 } from "../lib/butler-event-reducer.js";
 import { toolHint, formatRelativeTs } from "../lib/butler-format.js";
+import { Icon, Spinner } from "./Icon.js";
 
 const toolIcon = (status: ToolCall["status"]) => {
   if (status === "pending") {
     return (
-      <svg className="w-3 h-3 animate-spin shrink-0 text-gray-400" viewBox="0 0 24 24" fill="none">
-        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-      </svg>
+      <Spinner className="w-3 h-3 animate-spin shrink-0 text-gray-400" />
     );
   }
   if (status === "error") {
     return (
-      <svg className="w-3 h-3 shrink-0 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
+      <Icon className="w-3 h-3 shrink-0 text-red-500" strokeWidth={2.5} strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12" /></Icon>
     );
   }
   return (
-    <svg className="w-3 h-3 shrink-0 text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+    <Icon className="w-3 h-3 shrink-0 text-green-500" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></Icon>
   );
 };
 
@@ -50,7 +48,7 @@ function ToolCallCard({ tool }: { tool: ToolCall }) {
           <span className="font-medium text-gray-600 dark:text-gray-300 shrink-0">{formatToolLabel(tool.name)}</span>
           {hint && <span className="truncate font-mono text-gray-400 dark:text-gray-500">{hint}</span>}
           {hasDetail && (
-            <svg className={`w-3 h-3 ml-auto shrink-0 text-gray-400 transition-transform ${open ? "rotate-90" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
+            <Icon className={`w-3 h-3 ml-auto shrink-0 text-gray-400 transition-transform ${open ? "rotate-90" : ""}`} strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></Icon>
           )}
         </button>
         {open && (
@@ -131,7 +129,7 @@ export function QuestionCard({
     <div className="flex justify-start mb-3" data-testid="butler-question-card">
       <div className="w-full max-w-[80%] rounded-2xl rounded-tl-md border border-amber-300 dark:border-amber-700/60 bg-amber-50 dark:bg-amber-900/20 px-4 py-3 shadow-sm">
         <div className="flex items-center gap-1.5 mb-2">
-          <svg className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /><path d="M12 17h.01" /></svg>
+          <Icon className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /><path d="M12 17h.01" /></Icon>
           <span className="text-[11px] font-medium uppercase tracking-wide text-amber-700 dark:text-amber-400">
             {resolved ? (resolved.answers ? "Answered" : "Question closed") : "Butler is asking"}
           </span>

@@ -3,6 +3,7 @@ import type { FailurePattern, PatternMatch } from "@agentic-kanban/shared";
 export type { FailurePattern, PatternMatch };
 import React, { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
+import { Icon } from "./Icon.js";
 
 
 
@@ -61,9 +62,7 @@ export function FailurePatternHint({ workspaceId: _workspaceId, sessionId }: Fai
         onClick={() => setExpanded((e) => !e)}
         className="w-full flex items-center gap-2 px-2 py-1.5 text-left font-medium text-amber-800 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900 rounded"
       >
-        <svg className={`w-3 h-3 transition-transform shrink-0 ${expanded ? "rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-        </svg>
+        <Icon className={`w-3 h-3 transition-transform shrink-0 ${expanded ? "rotate-90" : ""}`} strokeWidth={2.5} d="M9 5l7 7-7 7" />
         <span>🔍 Failure pattern memory: {matches.length} similar past incident{matches.length > 1 ? "s" : ""} found</span>
       </button>
 

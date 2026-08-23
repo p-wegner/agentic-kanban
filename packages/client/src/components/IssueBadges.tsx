@@ -8,6 +8,7 @@ import {
   workflowStateClasses,
   type WorkflowSnapshot,
 } from "../lib/issueCardColorMap.js";
+import { Icon } from "./Icon.js";
 
 export function HighlightedText({ text, query }: { text: string; query: string }) {
   if (!query) return <>{text}</>;
@@ -156,12 +157,12 @@ export function TodoProgress({ todos }: { todos: TodoItem[] }) {
         className="w-full text-left"
       >
         <div className="flex items-center gap-1.5 mb-0.5">
-          <svg
+          <Icon
+            solid
             className={`w-2.5 h-2.5 text-gray-400 dark:text-gray-500 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`}
-            fill="currentColor" viewBox="0 0 16 16"
-          >
-            <path d="M6 12l4-4-4-4v8z" />
-          </svg>
+            viewBox="0 0 16 16"
+            d="M6 12l4-4-4-4v8z"
+          />
           <span className="text-[10px] text-gray-400 dark:text-gray-500">{completed}/{total} tasks</span>
           {inProgress > 0 && (
             <span className="text-[10px] text-blue-500 font-medium">{inProgress} active</span>
@@ -184,11 +185,21 @@ export function TodoProgress({ todos }: { todos: TodoItem[] }) {
             <div key={i} className="flex items-start gap-1 text-[10px]">
               <span className="shrink-0 mt-0.5">
                 {t.status === "completed" ? (
-                  <svg className="w-2.5 h-2.5 text-green-500" fill="currentColor" viewBox="0 0 16 16"><path d="M13.854 3.646a.5.5 0 010 .708l-7 7a.5.5 0 01-.708 0l-3.5-3.5a.5.5 0 11.708-.708L6.5 10.293l6.646-6.647a.5.5 0 01.708 0z"/></svg>
+                  <Icon
+                    solid
+                    className="w-2.5 h-2.5 text-green-500"
+                    viewBox="0 0 16 16"
+                    d="M13.854 3.646a.5.5 0 010 .708l-7 7a.5.5 0 01-.708 0l-3.5-3.5a.5.5 0 11.708-.708L6.5 10.293l6.646-6.647a.5.5 0 01.708 0z"
+                  />
                 ) : t.status === "in_progress" ? (
-                  <svg className="w-2.5 h-2.5 text-blue-500" fill="currentColor" viewBox="0 0 16 16"><path d="M8 1a2 2 0 012 2v4H6V3a2 2 0 012-2zm3 6V3a3 3 0 00-6 0v4a2 2 0 002 2v2.5a.5.5 0 001 0V9a2 2 0 002-2z"/></svg>
+                  <Icon
+                    solid
+                    className="w-2.5 h-2.5 text-blue-500"
+                    viewBox="0 0 16 16"
+                    d="M8 1a2 2 0 012 2v4H6V3a2 2 0 012-2zm3 6V3a3 3 0 00-6 0v4a2 2 0 002 2v2.5a.5.5 0 001 0V9a2 2 0 002-2z"
+                  />
                 ) : (
-                  <svg className="w-2.5 h-2.5 text-gray-300 dark:text-gray-600" fill="currentColor" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/></svg>
+                  <Icon solid className="w-2.5 h-2.5 text-gray-300 dark:text-gray-600" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/></Icon>
                 )}
               </span>
               <span className={t.status === "completed" ? "text-gray-400 dark:text-gray-500 line-through" : "text-gray-600 dark:text-gray-400"}>

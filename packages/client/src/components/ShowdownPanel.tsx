@@ -3,6 +3,7 @@ import { apiFetch, apiPost } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
 import type { ShowdownResponse, ShowdownContestantResult, DiffResponse } from "@agentic-kanban/shared";
 import { DiffViewer } from "./DiffViewer.js";
+import { Spinner } from "./Icon.js";
 
 interface ShowdownPanelProps {
   showdownId: string;
@@ -123,10 +124,7 @@ export function ShowdownPanel({ showdownId, onClose, onWinnerPicked }: ShowdownP
         <div className="flex-1 overflow-y-auto p-4">
           {loading ? (
             <div className="flex items-center justify-center py-8 text-gray-400">
-              <svg className="animate-spin h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-              </svg>
+              <Spinner className="animate-spin h-6 w-6 mr-2" />
               Loading showdown…
             </div>
           ) : showdown ? (
@@ -191,10 +189,7 @@ export function ShowdownPanel({ showdownId, onClose, onWinnerPicked }: ShowdownP
                     {isDone && <ContestantDiff contestant={contestant} />}
                     {!isDone && contestant.status === "active" && (
                       <div className="text-xs text-gray-400 italic flex items-center gap-1">
-                        <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                        </svg>
+                        <Spinner className="animate-spin h-3 w-3" />
                         Agent running…
                       </div>
                     )}
@@ -207,10 +202,7 @@ export function ShowdownPanel({ showdownId, onClose, onWinnerPicked }: ShowdownP
                         className="mt-auto w-full text-xs font-medium px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-1"
                       >
                         {isPicking ? (
-                          <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                          </svg>
+                          <Spinner className="animate-spin h-3 w-3" />
                         ) : "🏆"}
                         {isPicking ? "Merging…" : "Pick as winner"}
                       </button>

@@ -6,6 +6,7 @@ import { ColumnMinimap } from "./ColumnMinimap.js";
 import { useIsNarrow } from "../hooks/useMediaQuery.js";
 import { useBoardFilterStore } from "../stores/boardFilterStore.js";
 import { useBoardBulkSelectionStore } from "../stores/boardBulkSelectionStore.js";
+import { Icon } from "./Icon.js";
 
 const MINIMAP_THRESHOLD = 20;
 
@@ -69,15 +70,7 @@ export function CompletedGrid({
         onClick={onToggle}
         className="shrink-0 w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-3 flex items-center gap-3 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-left"
       >
-        <svg
-          className="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth={2}
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-        </svg>
+        <Icon className="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0" d="M9 5l7 7-7 7" />
         <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Completed</span>
         <span className="text-xs text-gray-400 dark:text-gray-500 flex items-center gap-1.5 min-w-0">
           <span className="bg-gray-200 dark:bg-gray-700 rounded-full px-1.5 py-0.5 shrink-0">{totalIssues}</span>
@@ -163,9 +156,7 @@ export function CompletedGrid({
                 aria-label="Close completed"
                 className="shrink-0 rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-300"
               >
-                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                <Icon className="h-5 w-5" d="M6 18L18 6M6 6l12 12" />
               </button>
             </div>
             <div className="overflow-y-auto p-3">{cardsGrid}</div>
@@ -272,15 +263,7 @@ function VirtualizedCompletedGrid({
         onClick={onToggle}
         className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 mb-2 transition-colors shrink-0"
       >
-        <svg
-          className="w-4 h-4"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth={2}
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-        </svg>
+        <Icon className="w-4 h-4" d="M19 9l-7 7-7-7" />
         <span className="font-medium">Completed</span>
         <span className="text-xs text-gray-400 dark:text-gray-500">{totalIssues}</span>
       </button>

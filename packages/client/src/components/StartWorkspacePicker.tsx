@@ -5,6 +5,7 @@ import { getSettings } from "../lib/settingsStore.js";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { showToast } from "../lib/toast.js";
 import { resolveWorkspaceLaunchDefaults } from "../lib/workspaceLaunchDefaults.js";
+import { Icon } from "./Icon.js";
 
 interface StartWorkspacePickerProps {
   issues: IssueWithStatus[];
@@ -111,9 +112,7 @@ export function StartWorkspacePicker({ issues, onClose, onStarted }: StartWorksp
       <div className="fixed inset-0 bg-black/40 z-50" onClick={onClose} />
       <div className="fixed top-[15%] left-1/2 -translate-x-1/2 w-full max-w-lg bg-white dark:bg-gray-900 rounded-xl shadow-2xl z-50 border border-gray-200 dark:border-gray-700 overflow-hidden">
         <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100 dark:border-gray-800">
-          <svg className="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-          </svg>
+          <Icon className="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
           <input
             ref={inputRef}
             type="text"

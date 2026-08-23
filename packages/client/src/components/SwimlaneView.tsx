@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { STATUS_COLORS } from "../lib/chartColors";
 import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-liveness";
+import { Icon } from "./Icon.js";
 
 const COMPLETED_STATUS_NAMES = new Set(["Done", "Cancelled"]);
 const HIDDEN_STATUS_NAMES = new Set(["Backlog"]);
@@ -213,9 +214,11 @@ export function SwimlaneView({ columns, onIssueClick, searchQuery = "" }: Swimla
           {completedToggle}
         </div>
         <div className="flex flex-col items-center justify-center flex-1 gap-3 px-4 text-center text-gray-500 dark:text-gray-400">
-          <svg className="w-12 h-12 opacity-25" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
-          </svg>
+          <Icon
+            className="w-12 h-12 opacity-25"
+            strokeWidth={1}
+            d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"
+          />
           <div>
             <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
               {hasSearch ? "No issues match this search" : "No issues to show in Swimlane"}
@@ -294,15 +297,7 @@ export function SwimlaneView({ columns, onIssueClick, searchQuery = "" }: Swimla
                   <span className={`ml-auto text-[10px] font-mono ${lane.headerText} opacity-70`}>
                     {count}
                   </span>
-                  <svg
-                    className={`w-3 h-3 ${lane.headerText} transition-transform shrink-0 ${collapsed ? "" : "rotate-180"}`}
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2.5}
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                  </svg>
+                  <Icon className={`w-3 h-3 ${lane.headerText} transition-transform shrink-0 ${collapsed ? "" : "rotate-180"}`} strokeWidth={2.5} d="M19 9l-7 7-7-7" />
                 </button>
 
                 {/* Cells row */}

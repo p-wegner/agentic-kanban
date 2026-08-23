@@ -4,6 +4,7 @@ import { Field, Toggle } from "./SettingsPrimitives.js";
 import { SlowRequestsPanel } from "./SlowRequestsPanel.js";
 import type { Settings, MonitorTunables } from "../lib/settings-shared.js";
 import type { MonitorAction } from "./MonitorPopover.js";
+import { Icon, Spinner } from "./Icon.js";
 
 export type WorkflowSectionProps = {
   settings: Settings;
@@ -442,7 +443,7 @@ export function WorkflowBoardMonitorSection({
       {/* Which monitor decision guide */}
       <details className="pt-4 border-t border-gray-200 dark:border-gray-700 group">
         <summary className="cursor-pointer list-none flex items-center gap-1.5 text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider select-none">
-          <svg className="w-3 h-3 transition-transform group-open:rotate-90 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+          <Icon className="w-3 h-3 transition-transform group-open:rotate-90 shrink-0" strokeWidth="2.5" d="M9 5l7 7-7 7" />
           Which monitor to use?
         </summary>
         <div className="mt-2 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden text-[11px] leading-snug">
@@ -501,9 +502,13 @@ export function WorkflowBoardMonitorSection({
             title="Run a monitor cycle now and restart the interval timer"
           >
             {monitorRunning ? (
-              <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+              <Spinner className="w-3 h-3 animate-spin" />
             ) : (
-              <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z"/></svg>
+              <Icon
+                className="w-3 h-3"
+                strokeWidth="2.5"
+                d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z"
+              />
             )}
             {monitorRunning ? "Running…" : "Run now"}
           </button>

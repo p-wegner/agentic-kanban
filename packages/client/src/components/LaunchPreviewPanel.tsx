@@ -3,6 +3,7 @@ import type { BudgetEstimate, BudgetRisk } from "@agentic-kanban/shared";
 export type { BudgetEstimate, BudgetRisk };
 import { useEffect, useState, useRef } from "react";
 import { apiFetch } from "../lib/api.js";
+import { Icon } from "./Icon.js";
 
 
 
@@ -220,10 +221,10 @@ export function LaunchPreviewPanel({
   return (
     <div className="border border-gray-200 dark:border-gray-700 rounded p-2 space-y-1.5 bg-gray-50 dark:bg-gray-800/50">
       <div className="flex items-center gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
-        <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <Icon className="h-3.5 w-3.5">
           <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
           <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7Z" />
-        </svg>
+        </Icon>
         <span>Launch Preview</span>
         {loading && (
           <span className="text-gray-400 dark:text-gray-500 animate-pulse">computing…</span>
@@ -329,9 +330,7 @@ export function LaunchPreviewPanel({
             <div className="space-y-1 pt-1">
               {preview.blockedBy.map((dep) => (
                 <div key={dep.issueNumber} className="flex gap-1.5 items-start text-xs text-red-600 dark:text-red-400">
-                  <svg className="h-3.5 w-3.5 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 0 0 5.636 5.636m12.728 12.728A9 9 0 0 1 5.636 5.636m12.728 12.728L5.636 5.636" />
-                  </svg>
+                  <Icon className="h-3.5 w-3.5 shrink-0 mt-0.5" d="M18.364 18.364A9 9 0 0 0 5.636 5.636m12.728 12.728A9 9 0 0 1 5.636 5.636m12.728 12.728L5.636 5.636" />
                   <span>Blocked by #{dep.issueNumber}: {dep.title} — resolve this issue before launching.</span>
                 </div>
               ))}
@@ -342,9 +341,10 @@ export function LaunchPreviewPanel({
             <div className="space-y-1 pt-1">
               {preview.warnings.map((w, i) => (
                 <div key={i} className="flex gap-1.5 items-start text-xs text-amber-600 dark:text-amber-400">
-                  <svg className="h-3.5 w-3.5 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
-                  </svg>
+                  <Icon
+                    className="h-3.5 w-3.5 shrink-0 mt-0.5"
+                    d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"
+                  />
                   <span>{w}</span>
                 </div>
               ))}

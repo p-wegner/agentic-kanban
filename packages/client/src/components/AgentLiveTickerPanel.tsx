@@ -3,6 +3,7 @@ import type { TickerEntry } from "../hooks/useAgentLiveTicker.js";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { openSessionTranscript } from "../lib/sessionTranscriptEvents.js";
 import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-liveness";
+import { Icon } from "./Icon.js";
 
 interface AgentLiveTickerPanelProps {
   entries: TickerEntry[];
@@ -61,15 +62,7 @@ export function AgentLiveTickerPanel({
           title={collapsed ? "Expand" : "Collapse"}
           aria-expanded={!collapsed}
         >
-          <svg
-            className={`w-3 h-3 transition-transform ${collapsed ? "rotate-180" : ""}`}
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2.5}
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
-          </svg>
+          <Icon className={`w-3 h-3 transition-transform ${collapsed ? "rotate-180" : ""}`} strokeWidth={2.5} d="M6 9l6 6 6-6" />
         </button>
         <button
           onClick={onClose}
@@ -77,9 +70,7 @@ export function AgentLiveTickerPanel({
           title="Close live activity panel"
           aria-label="Close"
         >
-          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
+          <Icon className="w-3 h-3" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
         </button>
       </div>
 
@@ -130,15 +121,10 @@ export function AgentLiveTickerPanel({
                         <span className="text-[11px] font-semibold text-ink dark:text-gray-200 truncate flex-1">
                           {entry.issueTitle}
                         </span>
-                        <svg
+                        <Icon
                           className="w-3 h-3 shrink-0 text-ink-faint dark:text-gray-600 opacity-0 group-hover:opacity-100 transition-opacity"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth={2}
-                        >
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                        </svg>
+                          d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+                        />
                       </div>
                       {/* Output lines */}
                       {entry.lines.length > 0 ? (

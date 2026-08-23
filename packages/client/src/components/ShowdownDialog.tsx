@@ -3,6 +3,7 @@ import { apiPost } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
 import type { IssueWithStatus, ShowdownResponse } from "@agentic-kanban/shared";
 import { CLAUDE_MODEL_OPTIONS } from "@agentic-kanban/shared";
+import { Spinner } from "./Icon.js";
 
 interface Contestant {
   skillId: string;
@@ -170,10 +171,7 @@ export function ShowdownDialog({ issue, skills, onCreated, onCancel }: ShowdownD
             className="px-4 py-1.5 text-sm font-medium bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5"
           >
             {loading ? (
-              <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-              </svg>
+              <Spinner className="animate-spin h-3.5 w-3.5" />
             ) : (
               <span>⚔️</span>
             )}

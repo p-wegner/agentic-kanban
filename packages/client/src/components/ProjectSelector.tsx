@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Icon } from "./Icon.js";
 
 export interface ProjectSelectorProject {
   id: string;
@@ -180,9 +181,7 @@ export function ProjectSelector({ projects, activeProjectId, onProjectChange, wa
             this button, so the trigger counts the OTHER projects — that is the number an
             operator cannot otherwise get without opening the list. */}
         <WaitingBadge count={otherProjectsWaiting} compact scope="other projects" />
-        <svg className="h-4 w-4 shrink-0 text-gray-400 dark:text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path strokeLinecap="round" strokeLinejoin="round" d="m6 9 6 6 6-6" />
-        </svg>
+        <Icon className="h-4 w-4 shrink-0 text-gray-400 dark:text-gray-500" d="m6 9 6 6 6-6" />
       </button>
 
       {open && (
@@ -192,17 +191,10 @@ export function ProjectSelector({ projects, activeProjectId, onProjectChange, wa
           className="absolute left-0 top-full z-50 mt-2 w-[min(22rem,calc(100vw-1.5rem))] rounded-md border border-gray-200 bg-white p-2 shadow-xl dark:border-gray-700 dark:bg-gray-900"
         >
           <div className="relative mb-2">
-            <svg
-              className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              aria-hidden="true"
-            >
+            <Icon className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" aria-hidden="true">
               <circle cx="11" cy="11" r="8" />
               <path d="m21 21-4.3-4.3" />
-            </svg>
+            </Icon>
             <input
               ref={searchRef}
               value={query}
@@ -251,9 +243,7 @@ export function ProjectSelector({ projects, activeProjectId, onProjectChange, wa
                       <ActiveAgentsBadge count={project.activeWorkspaceCount ?? 0} />
                       <WaitingBadge count={waitingCounts?.get(project.id) ?? 0} />
                       {active && (
-                        <svg className="h-4 w-4 shrink-0 text-brand-600 dark:text-brand-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                        </svg>
+                        <Icon className="h-4 w-4 shrink-0 text-brand-600 dark:text-brand-300" strokeWidth="2.5" d="M5 13l4 4L19 7" />
                       )}
                     </button>
                   );

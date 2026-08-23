@@ -6,6 +6,7 @@ import {
   PRIORITY_LANE_STYLES,
 } from "../lib/columnHelpers.js";
 import type { CardDensity } from "../hooks/useBoardPreferences.js";
+import { Icon } from "./Icon.js";
 
 interface SwimlaneRendererProps {
   dimension: "priority" | "tag";
@@ -159,12 +160,7 @@ function SwimLaneGroup({
         )}
         <span className={`text-[10px] font-bold uppercase tracking-wider ${headerText}`}>{label}</span>
         <span className={`ml-auto text-[10px] font-mono ${headerText} opacity-70`}>{count}</span>
-        <svg
-          className={`w-3 h-3 ${headerText} transition-transform shrink-0 ${laneExpanded ? "rotate-180" : ""}`}
-          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-        </svg>
+        <Icon className={`w-3 h-3 ${headerText} transition-transform shrink-0 ${laneExpanded ? "rotate-180" : ""}`} strokeWidth={2.5} d="M19 9l-7 7-7-7" />
       </button>
       {laneExpanded && (
         <div className="p-1.5 space-y-1.5">

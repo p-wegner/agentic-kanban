@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import type { OrchestratorStatus } from "../hooks/useOrchestrator.js";
+import { Icon } from "./Icon.js";
 
 export interface MonitorCycleSummary {
   cycleId: string;
@@ -151,9 +152,10 @@ export function MonitorCycleTimeline({ projectId, onSelectIssue, onSwitchToEvent
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-800 shrink-0">
         <div className="flex items-center gap-2">
-          <svg className="w-4 h-4 text-indigo-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5" />
-          </svg>
+          <Icon
+            className="w-4 h-4 text-indigo-500"
+            d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5"
+          />
           <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Cycle Health Timeline</h2>
           {!isOrchestratorTab && cycles.length > 0 && (
             <span className="text-xs bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300 px-2 py-0.5 rounded-full font-medium">
@@ -212,9 +214,10 @@ export function MonitorCycleTimeline({ projectId, onSelectIssue, onSwitchToEvent
             className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400 disabled:opacity-40"
             title="Refresh"
           >
-            <svg className={`w-3.5 h-3.5 ${currentLoading ? "animate-spin" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
+            <Icon
+              className={`w-3.5 h-3.5 ${currentLoading ? "animate-spin" : ""}`}
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+            />
           </button>
         </div>
       </div>
@@ -239,9 +242,11 @@ export function MonitorCycleTimeline({ projectId, onSelectIssue, onSwitchToEvent
 
         {!isOrchestratorTab && !loading && !error && cycles.length === 0 && (
           <div className="flex flex-col items-center justify-center h-48 text-gray-400 dark:text-gray-600 text-sm gap-2">
-            <svg className="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5" />
-            </svg>
+            <Icon
+              className="w-8 h-8"
+              strokeWidth={1.5}
+              d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5"
+            />
             <p>No monitor cycles recorded yet</p>
             <p className="text-xs text-center max-w-xs">
               Cycles appear here once the monitor runs. Enable auto-monitor in the Monitor sidebar to start recording.
@@ -315,15 +320,7 @@ export function MonitorCycleTimeline({ projectId, onSelectIssue, onSwitchToEvent
                       </span>
 
                       {/* Expand chevron */}
-                      <svg
-                        className={`w-3 h-3 text-gray-400 shrink-0 transition-transform ${isExpanded ? "rotate-180" : ""}`}
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth={2}
-                      >
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                      </svg>
+                      <Icon className={`w-3 h-3 text-gray-400 shrink-0 transition-transform ${isExpanded ? "rotate-180" : ""}`} d="M19 9l-7 7-7-7" />
                     </div>
                   </div>
 
@@ -429,9 +426,11 @@ function OrchestratorCycleList({
   if (!orchestrator || !orchestrator.available) {
     return (
       <div className="flex flex-col items-center justify-center h-48 text-gray-400 dark:text-gray-600 text-sm gap-2">
-        <svg className="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25zm.75-12h9v9h-9v-9z" />
-        </svg>
+        <Icon
+          className="w-8 h-8"
+          strokeWidth={1.5}
+          d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25zm.75-12h9v9h-9v-9z"
+        />
         <p>No orchestrator loop detected</p>
         <p className="text-xs text-center max-w-xs">
           The out-of-process board monitor (scripts/board-monitor/loop.sh) is not present for this project. Only projects with this dogfooding setup show orchestrator cycles here.

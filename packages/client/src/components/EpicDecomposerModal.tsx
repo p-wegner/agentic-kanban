@@ -3,6 +3,7 @@ import type { IssueWithStatus } from "@agentic-kanban/shared";
 import { apiPost } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
 import { priorityLabel, priorityTraits, type IssuePriority } from "../lib/priorityTraits.js";
+import { Icon, Spinner } from "./Icon.js";
 
 interface ChildProposal {
   tempId: string;
@@ -125,9 +126,7 @@ export function EpicDecomposerModal({ issue, onClose, onConfirmed }: EpicDecompo
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 dark:border-gray-700">
           <div>
             <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h8m-8 4h8" />
-              </svg>
+              <Icon className="h-4 w-4 text-purple-500" d="M4 6h16M4 10h16M4 14h8m-8 4h8" />
               Decompose Epic
             </h2>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate max-w-md">
@@ -159,9 +158,7 @@ export function EpicDecomposerModal({ issue, onClose, onConfirmed }: EpicDecompo
                 onClick={fetchProposal}
                 className="inline-flex items-center gap-2 px-4 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 transition-colors"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 3l1.5 3.5L10 8l-3.5 1.5L5 13l-1.5-3.5L0 8l3.5-1.5L5 3zM19 11l1 2.5L22.5 14l-2.5 1L19 17.5l-1-2.5L15.5 14l2.5-1L19 11z" />
-                </svg>
+                <Icon className="h-4 w-4" d="M5 3l1.5 3.5L10 8l-3.5 1.5L5 13l-1.5-3.5L0 8l3.5-1.5L5 3zM19 11l1 2.5L22.5 14l-2.5 1L19 17.5l-1-2.5L15.5 14l2.5-1L19 11z" />
                 Generate Decomposition
               </button>
               {error && <p className="text-sm text-red-600">{error}</p>}
@@ -170,10 +167,7 @@ export function EpicDecomposerModal({ issue, onClose, onConfirmed }: EpicDecompo
 
           {stage === "loading" && (
             <div className="text-center py-10 space-y-3">
-              <svg className="animate-spin h-8 w-8 text-purple-500 mx-auto" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-              </svg>
+              <Spinner className="animate-spin h-8 w-8 text-purple-500 mx-auto" />
               <p className="text-sm text-gray-500 dark:text-gray-400">AI is analyzing your epic…</p>
             </div>
           )}
@@ -217,14 +211,9 @@ export function EpicDecomposerModal({ issue, onClose, onConfirmed }: EpicDecompo
                     title="Regenerate proposal"
                   >
                     {regenerating ? (
-                      <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                      </svg>
+                      <Spinner className="animate-spin h-3 w-3" />
                     ) : (
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
+                      <Icon className="h-3 w-3" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                     )}
                     Regenerate
                   </button>
@@ -254,9 +243,7 @@ export function EpicDecomposerModal({ issue, onClose, onConfirmed }: EpicDecompo
                         )}
                         {repos.length > 0 && (
                           <div className="mt-1.5 flex items-center gap-1.5">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-sky-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                            </svg>
+                            <Icon className="h-3 w-3 text-sky-500 shrink-0" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
                             <select
                               value={child.targetRepo ?? ""}
                               onChange={(e) => handleRepoChange(child.tempId, e.target.value)}
@@ -281,9 +268,7 @@ export function EpicDecomposerModal({ issue, onClose, onConfirmed }: EpicDecompo
                         className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 disabled:hidden transition-opacity shrink-0"
                         title="Remove this child ticket"
                       >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                        </svg>
+                        <Icon className="h-3.5 w-3.5" d="M6 18L18 6M6 6l12 12" />
                       </button>
                     </div>
                   ))}
@@ -336,17 +321,12 @@ export function EpicDecomposerModal({ issue, onClose, onConfirmed }: EpicDecompo
             >
               {stage === "confirming" ? (
                 <>
-                  <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                  </svg>
+                  <Spinner className="animate-spin h-3.5 w-3.5" />
                   Creating…
                 </>
               ) : (
                 <>
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                  </svg>
+                  <Icon className="h-3.5 w-3.5" d="M5 13l4 4L19 7" />
                   Create {children.filter(c => c.title.trim()).length} Tickets
                 </>
               )}

@@ -3,6 +3,7 @@ import type { MilestoneResponse } from "@agentic-kanban/shared";
 import { PRIORITY_META } from "../lib/chartColors.js";
 import { useBoardFilterStore } from "../stores/boardFilterStore.js";
 import { useDismissable } from "../hooks/useDismissable.js";
+import { Icon } from "./Icon.js";
 
 interface BoardFilterMenuProps {
   statuses: { id: string; name: string }[];
@@ -78,18 +79,14 @@ export function BoardFilterMenu({
             : "bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"
         }`}
       >
-        <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M3 4.5h18l-7 8v6l-4 2v-8z" />
-        </svg>
+        <Icon className="w-3 h-3" d="M3 4.5h18l-7 8v6l-4 2v-8z" />
         <span className="hidden sm:inline">Filter</span>
         {activeCount > 0 && (
           <span className="inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-white/25 px-1 text-[10px] font-semibold leading-none">
             {activeCount}
           </span>
         )}
-        <svg className={`w-2.5 h-2.5 transition-transform ${open ? "rotate-180" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
-        </svg>
+        <Icon className={`w-2.5 h-2.5 transition-transform ${open ? "rotate-180" : ""}`} d="M6 9l6 6 6-6" />
       </button>
       {open && (
         <div role="menu" className="absolute left-0 top-full z-30 mt-1 w-64 rounded-md border border-gray-200 bg-white p-3 shadow-lg dark:border-gray-700 dark:bg-gray-900 flex flex-col gap-3">

@@ -25,6 +25,7 @@ export { formatBoardActivitySummary };
 export type { ViewMode } from "../lib/viewRegistry.js";
 import type { ViewMode } from "../lib/viewRegistry.js";
 import { useDismissable } from "../hooks/useDismissable.js";
+import { Icon, Spinner } from "./Icon.js";
 
 const ACTIVE_DEFAULT = "bg-brand-600 text-white hover:bg-brand-700";
 const INACTIVE = "text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-700";
@@ -401,9 +402,9 @@ export function BoardToolbar({
             : "bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"
         }`}
       >
-        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+        <Icon solid className="w-4 h-4">
           <circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" />
-        </svg>
+        </Icon>
       </button>
       <div className={`${showActions ? "flex" : "hidden"} sm:flex items-start gap-2 flex-wrap`}>
       <button
@@ -416,9 +417,9 @@ export function BoardToolbar({
             : "bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"
         }`}
       >
-        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+        <Icon solid className="w-4 h-4">
           <circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" />
-        </svg>
+        </Icon>
         <span className="hidden sm:inline">More</span>
       </button>
       {showMoreActions && (
@@ -428,9 +429,9 @@ export function BoardToolbar({
             title="Quick Tasks - run a skill directly on the current checkout (q)"
             className="shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800"
           >
-            <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <Icon className="w-3 h-3">
               <polygon points="5,3 19,12 5,21" />
-            </svg>
+            </Icon>
             <span className="hidden sm:inline">Tasks</span>
           </button>
           <ProjectScriptsMenu projectId={projectId} />
@@ -456,18 +457,16 @@ export function BoardToolbar({
           }
         >
           {hasMonitorWarnings ? (
-            <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
-            </svg>
+            <Icon className="w-3 h-3" strokeWidth={2.5} d="M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
           ) : (
             <>
               {/* Base monitor icon always renders so the button isn't empty on
                   small screens (the label is hidden < sm and the active dots are
                   null when no monitor mechanism is running). */}
-              <svg className="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <Icon className="w-3 h-3 shrink-0">
                 <rect x="3" y="4" width="18" height="12" rx="2" />
                 <path strokeLinecap="round" strokeLinejoin="round" d="M8 20h8M12 16v4" />
-              </svg>
+              </Icon>
               <ActiveMonitorDots
                 autoMonitor={autoMonitor}
                 butlerEnabled={monitorButlerEnabled}
@@ -489,8 +488,12 @@ export function BoardToolbar({
           title="Run monitor now and reset timer"
         >
           {monitorRunning
-            ? <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
-            : <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z"/></svg>
+            ? <Spinner className="w-3 h-3 animate-spin" />
+            : <Icon
+              className="w-3 h-3"
+              strokeWidth="2.5"
+              d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z"
+            />
           }
         </button>
         {showMonitorPopover && (
@@ -541,9 +544,7 @@ export function BoardToolbar({
               {butlerBadgeCount > 99 ? "99+" : butlerBadgeCount}
             </span>
           )}
-          <svg className={`h-3 w-3 transition-transform ${showAllViews ? "rotate-180" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
-          </svg>
+          <Icon className={`h-3 w-3 transition-transform ${showAllViews ? "rotate-180" : ""}`} d="M6 9l6 6 6-6" />
         </button>
         {showAllViews && (
           <div role="menu" className="absolute left-0 top-full z-30 mt-1 max-h-[70vh] w-52 overflow-y-auto rounded-md border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-900">
@@ -611,9 +612,7 @@ export function BoardToolbar({
                 ) : (
                   "More"
                 )}
-                <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
-                </svg>
+                <Icon className="w-3 h-3" d="M6 9l6 6 6-6" />
               </button>
               {showMoreViews && (
                 <div
@@ -661,9 +660,7 @@ export function BoardToolbar({
           {pluginTabView && renderViewTab(pluginTabView, true)}
           <button tabIndex={-1} className="px-2.5 py-1 text-xs rounded flex items-center gap-1.5 whitespace-nowrap">
             More
-            <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
-            </svg>
+            <Icon className="w-3 h-3" d="M6 9l6 6 6-6" />
           </button>
         </div>
       </div>

@@ -4,6 +4,7 @@ import { setSettings } from "../lib/settingsStore.js";
 import { showToast } from "../lib/toast.js";
 import { BUILTIN_PRESETS, deriveRefillFocus, presetMatchesConfig, presetsKey } from "../lib/strategy-targets.js";
 import type { MonitorPolicyPreset, StrategyConfig } from "../lib/strategy-targets.js";
+import { Icon } from "./Icon.js";
 
 export function MonitorPolicyPresets({
   projectId,
@@ -94,18 +95,22 @@ export function MonitorPolicyPresets({
           className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-600 shadow-sm transition-colors hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
           title="Save current values as preset"
         >
-          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.3}><path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12h14" /></svg>
+          <Icon className="h-4 w-4" strokeWidth={2.3} d="M12 5v14M5 12h14" />
         </button>
       </div>
 
       {activePreset ? (
         <div className="mb-2 flex items-center gap-1.5 rounded-md bg-green-50 px-2.5 py-1.5 text-xs font-medium text-green-700 dark:bg-green-950/40 dark:text-green-300">
-          <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+          <Icon className="h-3.5 w-3.5 shrink-0" strokeWidth={2.5} d="M5 13l4 4L19 7" />
           Active: <span className="font-semibold">{activePreset.name}</span>
         </div>
       ) : hasDrift ? (
         <div className="mb-2 flex items-center gap-1.5 rounded-md bg-amber-50 px-2.5 py-1.5 text-xs font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
-          <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
+          <Icon
+            className="h-3.5 w-3.5 shrink-0"
+            strokeWidth={2.5}
+            d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"
+          />
           Custom values (drift from any preset)
         </div>
       ) : (
@@ -149,7 +154,7 @@ export function MonitorPolicyPresets({
                     className="inline-flex h-5 w-5 items-center justify-center rounded text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950 transition-colors"
                     title="Delete preset"
                   >
-                    <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                    <Icon className="h-3 w-3" d="M6 18L18 6M6 6l12 12" />
                   </button>
                 )}
               </div>

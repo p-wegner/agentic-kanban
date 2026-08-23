@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import type { BoardHealthEventCategory, BoardHealthEventDto } from "@agentic-kanban/shared";
+import { Icon } from "./Icon.js";
 
 // Vocabulary and DTO come from shared (#568) — this file used to declare both.
 type BoardHealthEvent = BoardHealthEventDto;
@@ -97,9 +98,10 @@ export function BoardHealthNotificationCenter({ projectId, onOpenIssue }: BoardH
       {/* Header */}
       <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2">
-          <svg className="w-4 h-4 text-gray-500 dark:text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-          </svg>
+          <Icon
+            className="w-4 h-4 text-gray-500 dark:text-gray-400"
+            d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
+          />
           <h2 className="text-sm font-semibold text-gray-800 dark:text-gray-200">Board Health Events</h2>
           {!loading && events.length > 0 && (
             <span className="inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 text-[11px] font-medium">
@@ -113,9 +115,10 @@ export function BoardHealthNotificationCenter({ projectId, onOpenIssue }: BoardH
           className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50 transition-colors"
           title="Refresh"
         >
-          <svg className={`w-3 h-3 ${loading ? "animate-spin" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
+          <Icon
+            className={`w-3 h-3 ${loading ? "animate-spin" : ""}`}
+            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+          />
           Refresh
         </button>
       </div>
@@ -147,9 +150,11 @@ export function BoardHealthNotificationCenter({ projectId, onOpenIssue }: BoardH
           <div className="px-4 py-3 text-red-600 dark:text-red-400 text-sm">{error}</div>
         ) : events.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-32 text-gray-400 dark:text-gray-500">
-            <svg className="w-8 h-8 mb-2 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-            </svg>
+            <Icon
+              className="w-8 h-8 mb-2 opacity-40"
+              strokeWidth={1.5}
+              d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
+            />
             <span className="text-sm">No events{categoryFilter !== "all" ? ` in "${categoryFilter}" category` : ""}</span>
           </div>
         ) : (

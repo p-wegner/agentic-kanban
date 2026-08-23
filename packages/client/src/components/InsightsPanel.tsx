@@ -4,6 +4,7 @@ import { PRIMARY_SERIES, BRAND } from "../lib/chartColors";
 
 import { formatCurrency, formatSuccessRate, formatTokens, formatDuration, formatCompactDate, formatStartedAt, formatClockTime, formatCountdown, getAvgCost, getAvgTokens, getAvgTurns, sortMetricRows, utcDateKey, buildSparklineSeries, RANGE_OPTIONS } from "../lib/insights-format.js";
 import type { ProviderFilter, InsightsRange, SortDirection, MetricSortKey, MetricRowBase, InsightsData, QuotaMetric, QuotaProviderEntry, QuotaUsageResult, InsightsPanelProps, SortState } from "../lib/insights-format.js";
+import { Icon } from "./Icon.js";
 
 function SummaryCard({ label, value, subtext }: { label: string; value: string; subtext?: string }) {
   return (
@@ -497,9 +498,7 @@ function QuotaUsageBlock() {
           title="Refresh quota"
           className="flex items-center justify-center w-7 h-7 rounded-md border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-40 transition-colors"
         >
-          <svg className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h5M20 20v-5h-5M20 9a8 8 0 0 0-14.9-2M4 15a8 8 0 0 0 14.9 2" />
-          </svg>
+          <Icon className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} d="M4 4v5h5M20 20v-5h-5M20 9a8 8 0 0 0-14.9-2M4 15a8 8 0 0 0 14.9 2" />
         </button>
       </div>
       <div className="p-4">

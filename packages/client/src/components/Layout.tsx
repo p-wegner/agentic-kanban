@@ -22,6 +22,7 @@ import { useDismissable } from "../hooks/useDismissable.js";
 // #610: Layout's shape is the LOOSE list-item one, not the full record — kept as a
 // distinct type rather than merged, since its callers pass partial rows.
 import type { ProjectListItem as Project } from "../lib/projectTypes.js";
+import { Icon } from "./Icon.js";
 export type { Project };
 
 interface LayoutProps {
@@ -274,10 +275,10 @@ export function Layout({
         {mobileSearchOpen && (
           <div className="sm:hidden flex items-center gap-2">
             <div className="relative flex-1 min-w-0">
-              <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <Icon className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-gray-500" aria-hidden="true">
                 <circle cx="11" cy="11" r="8" />
                 <path d="m21 21-4.3-4.3" />
-              </svg>
+              </Icon>
               <input
                 type="text"
                 autoFocus
@@ -327,9 +328,7 @@ export function Layout({
                 className="hidden sm:inline-flex p-2.5 sm:p-1 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 items-center justify-center text-gray-400 dark:text-gray-500 hover:text-amber-500 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
                 title="Archive project"
               >
-                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 8v13H3V8M1 3h22v5H1zM10 12h4" />
-                </svg>
+                <Icon className="h-4 w-4" d="M21 8v13H3V8M1 3h22v5H1zM10 12h4" />
               </button>
             )}
             {projects.length > 0 && onUnregisterProject && (
@@ -341,9 +340,10 @@ export function Layout({
                 className="hidden sm:inline-flex p-2.5 sm:p-1 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 items-center justify-center text-gray-400 dark:text-gray-500 hover:text-red-500 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
                 title="Unregister project"
               >
-                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
+                <Icon
+                  className="h-4 w-4"
+                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                />
               </button>
             )}
             <button
@@ -351,9 +351,9 @@ export function Layout({
               className="hidden sm:inline-flex p-2.5 sm:p-1 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 items-center justify-center text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
               title="Register project"
             >
-              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <Icon className="h-4 w-4" strokeWidth="2.5">
                 <path d="M12 5v14M5 12h14" />
-              </svg>
+              </Icon>
             </button>
             {activeProjectId && (
               <button
@@ -364,9 +364,9 @@ export function Layout({
                   : "Add a repository to this project (multi-repo)"}
               >
                 {/* two overlapped plus glyphs → "++" = add another repo to the current project */}
-                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <Icon className="h-4 w-4" strokeWidth="2.5">
                   <path d="M8 5v9M4 9.5h8M16 10v9M12 14.5h8" />
-                </svg>
+                </Icon>
                 {projectRepos.length > 0 && (
                   <span
                     className="absolute -top-0.5 -right-0.5 min-w-[1rem] h-4 px-1 flex items-center justify-center rounded-full bg-brand-600 text-white text-[10px] font-semibold leading-none"
@@ -392,22 +392,16 @@ export function Layout({
               title="Search issues"
               aria-label="Search issues"
             >
-              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <Icon className="h-5 w-5" aria-hidden="true">
                 <circle cx="11" cy="11" r="8" />
                 <path d="m21 21-4.3-4.3" />
-              </svg>
+              </Icon>
             </button>
             <div className="relative hidden sm:block">
-              <svg
-                className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-gray-500"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
+              <Icon className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 dark:text-gray-500">
                 <circle cx="11" cy="11" r="8" />
                 <path d="m21 21-4.3-4.3" />
-              </svg>
+              </Icon>
               <input
                 id="search-input"
                 type="text"
@@ -431,44 +425,42 @@ export function Layout({
               className="p-2.5 sm:p-1.5 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 inline-flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
               title="All Workspaces"
             >
-              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <Icon className="h-5 w-5">
                 <rect x="3" y="3" width="7" height="7" rx="1" />
                 <rect x="14" y="3" width="7" height="7" rx="1" />
                 <rect x="3" y="14" width="7" height="7" rx="1" />
                 <rect x="14" y="14" width="7" height="7" rx="1" />
-              </svg>
+              </Icon>
             </button>
             <button
               onClick={onLaunchFailuresClick}
               className="p-2.5 sm:p-1.5 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 inline-flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
               title="Launch Failures"
             >
-              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <Icon className="h-5 w-5">
                 <circle cx="12" cy="12" r="10" />
                 <line x1="12" y1="8" x2="12" y2="12" />
                 <line x1="12" y1="16" x2="12.01" y2="16" />
-              </svg>
+              </Icon>
             </button>
             <button
               onClick={onWorktreeOverviewClick}
               className="p-2.5 sm:p-1.5 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 inline-flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
               title="Worktrees"
             >
-              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <Icon className="h-5 w-5">
                 <line x1="6" y1="3" x2="6" y2="15" />
                 <circle cx="18" cy="6" r="3" />
                 <circle cx="6" cy="18" r="3" />
                 <path d="M18 9a9 9 0 0 1-9 9" />
-              </svg>
+              </Icon>
             </button>
             <button
               onClick={onProjectHealthClick}
               className="p-2.5 sm:p-1.5 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 inline-flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
               title="Project Health (p)"
             >
-              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
+              <Icon className="h-5 w-5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
             </button>
             <button
               onClick={onThemeToggle}
@@ -476,14 +468,14 @@ export function Layout({
               title={isDark ? "Switch to light mode" : "Switch to dark mode"}
             >
               {isDark ? (
-                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <Icon className="h-5 w-5">
                   <circle cx="12" cy="12" r="5" />
                   <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
-                </svg>
+                </Icon>
               ) : (
-                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <Icon className="h-5 w-5">
                   <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-                </svg>
+                </Icon>
               )}
             </button>
             <button
@@ -491,10 +483,10 @@ export function Layout({
               className="p-2.5 sm:p-1.5 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 inline-flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
               title="Settings"
             >
-              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <Icon className="h-5 w-5">
                 <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
                 <circle cx="12" cy="12" r="3" />
-              </svg>
+              </Icon>
             </button>
             </div>
             {/* The bell is the ONLY cross-project list of gates waiting on a human
@@ -521,9 +513,9 @@ export function Layout({
                 className="p-2.5 sm:p-1.5 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 inline-flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
                 title="More"
               >
-                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+                <Icon solid className="h-5 w-5">
                   <circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" />
-                </svg>
+                </Icon>
               </button>
               {showUtilMenu && (
                 <div role="menu" className="absolute right-0 top-full z-40 mt-1 w-48 rounded-md border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-900">

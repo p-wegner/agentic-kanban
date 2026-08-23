@@ -13,6 +13,7 @@ import {
 } from "./PluginActionPanes.js";
 import { PluginSkillPane } from "./PluginSkillPane.js";
 import { PluginScaffoldPane, type ScaffoldForm } from "./PluginScaffoldPane.js";
+import { Icon } from "./Icon.js";
 
 /**
  * Who a rail entry is for (#456). Mirrors `PluginAudience` in the manifest contract; the
@@ -589,9 +590,9 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
             aria-label="Hide plugin menu"
             data-testid="plugin-rail-close"
           >
-            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <Icon className="h-4 w-4" aria-hidden="true">
               <path d="M15 18l-6-6 6-6" />
-            </svg>
+            </Icon>
           </button>
         </div>
         {/* #442: what the board RUNS is the cached manifest; edits on disk do nothing until
@@ -689,9 +690,9 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
               aria-label="Show plugin menu"
               data-testid="plugin-rail-open"
             >
-              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <Icon className="h-4 w-4" aria-hidden="true">
                 <path d="M3 6h18M3 12h18M3 18h18" />
-              </svg>
+              </Icon>
               <span className="truncate">🧩 {pluginName}</span>
             </button>
           </div>
@@ -711,10 +712,10 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
                     title="Refresh view"
                     aria-label="Refresh view"
                   >
-                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                    <Icon className="h-4 w-4" aria-hidden="true">
                       <path d="M21 12a9 9 0 1 1-2.64-6.36" />
                       <path d="M21 3v6h-6" />
-                    </svg>
+                    </Icon>
                   </button>
                   <button
                     type="button"
@@ -723,11 +724,11 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
                     title="Open in new tab"
                     aria-label="Open in new tab"
                   >
-                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                    <Icon className="h-4 w-4" aria-hidden="true">
                       <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
                       <path d="M15 3h6v6" />
                       <path d="M10 14 21 3" />
-                    </svg>
+                    </Icon>
                   </button>
                   <button
                     type="button"

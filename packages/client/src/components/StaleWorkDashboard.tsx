@@ -3,6 +3,7 @@ import { apiPost } from "../lib/api.js";
 import { getSettings, setSettings } from "../lib/settingsStore.js";
 import type { StatusWithIssues, IssueWithStatus } from "@agentic-kanban/shared";
 import { useApiResource } from "../hooks/useApiResource.js";
+import { Icon, Spinner } from "./Icon.js";
 
 interface StaleWorkDashboardProps {
   projectId: string;
@@ -98,10 +99,7 @@ export function StaleWorkDashboard({ projectId, onIssueClick }: StaleWorkDashboa
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64 text-gray-500 dark:text-gray-400">
-        <svg className="w-5 h-5 animate-spin mr-2" fill="none" viewBox="0 0 24 24">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-        </svg>
+        <Spinner className="w-5 h-5 animate-spin mr-2" d="M4 12a8 8 0 018-8v8H4z" />
         Loading stale issues...
       </div>
     );
@@ -125,9 +123,7 @@ export function StaleWorkDashboard({ projectId, onIssueClick }: StaleWorkDashboa
     <div className="flex flex-col gap-4 p-4 h-full overflow-auto">
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-2">
-          <svg className="w-5 h-5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
+          <Icon className="w-5 h-5 text-amber-500" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
           <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">Stale Work</h2>
         </div>
         <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
@@ -153,18 +149,14 @@ export function StaleWorkDashboard({ projectId, onIssueClick }: StaleWorkDashboa
             title="Refresh"
             className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
+            <Icon className="w-4 h-4" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
           </button>
         </div>
       </div>
 
       {staleIssues.length === 0 ? (
         <div className="flex flex-col items-center justify-center flex-1 gap-2 text-gray-400 dark:text-gray-500">
-          <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
+          <Icon className="w-10 h-10" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
           <span className="text-sm">No issues stuck longer than {threshold} day(s)</span>
         </div>
       ) : (

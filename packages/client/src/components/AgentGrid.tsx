@@ -22,6 +22,7 @@ import {
   computeGridSizing,
   type AttentionKind,
 } from "../lib/agentGridView.js";
+import { Icon } from "./Icon.js";
 
 function ElapsedTimer({ since }: { since: string }) {
   const now = useNow(1000);
@@ -79,9 +80,9 @@ function TodoBanner({ inProgress, pending }: { inProgress: TodoItem | undefined;
     return (
       <div className="px-3 pt-1.5 pb-0">
         <div className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 rounded px-2 py-1">
-          <svg className="w-3 h-3 shrink-0 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+          <Icon className="w-3 h-3 shrink-0 animate-spin" strokeWidth={2.5}>
             <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
-          </svg>
+          </Icon>
           <span className="truncate">{inProgress.content}</span>
         </div>
       </div>
@@ -111,26 +112,26 @@ function FeaturedFooterStats({
     <div className="px-3 py-1.5 mt-auto border-t border-gray-100 dark:border-gray-800 flex items-center gap-3 flex-wrap text-xs text-gray-500 dark:text-gray-400">
       {tokens > 0 && (
         <span className="flex items-center gap-1" title="Context tokens">
-          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="10" /><path d="M12 8v4l2 2" /></svg>
+          <Icon className="w-3 h-3"><circle cx="12" cy="12" r="10" /><path d="M12 8v4l2 2" /></Icon>
           {formatTokens(tokens)}
         </span>
       )}
       {toolUses !== undefined && toolUses > 0 && (
         <span className="flex items-center gap-1" title="Tool uses">
-          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" /></svg>
+          <Icon className="w-3 h-3"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" /></Icon>
           {toolUses}
         </span>
       )}
       {diff && (
         <span className="flex items-center gap-1" title={`${diff.filesChanged} file${diff.filesChanged !== 1 ? "s" : ""} changed`}>
-          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
+          <Icon className="w-3 h-3"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></Icon>
           <span className="text-emerald-600 dark:text-emerald-400">+{diff.insertions}</span>
           <span className="text-red-500 dark:text-red-400">-{diff.deletions}</span>
         </span>
       )}
       {totalTodos > 0 && (
         <span className="flex items-center gap-1 ml-auto" title="Todo progress">
-          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>
+          <Icon className="w-3 h-3"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></Icon>
           <span className={doneTodos === totalTodos ? "text-green-600 dark:text-green-400 font-medium" : ""}>
             {doneTodos}/{totalTodos}
           </span>
@@ -141,7 +142,7 @@ function FeaturedFooterStats({
       )}
       {subagentCount != null && subagentCount > 0 && (
         <span className="flex items-center gap-1" title="Subagents">
-          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx="9" cy="7" r="4" /><path d="M3 21v-2a4 4 0 0 1 4-4h4" /><circle cx="17" cy="17" r="3" /><path d="M17 14v6M14 17h6" /></svg>
+          <Icon className="w-3 h-3"><circle cx="9" cy="7" r="4" /><path d="M3 21v-2a4 4 0 0 1 4-4h4" /><circle cx="17" cy="17" r="3" /><path d="M17 14v6M14 17h6" /></Icon>
           {subagentCount}
         </span>
       )}
@@ -203,26 +204,26 @@ function FeaturedCard({ issue, activityHistory, liveStats, todos, attention, sta
           className="shrink-0 p-1 rounded text-gray-400 dark:text-gray-500 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-950 transition-colors"
           title="Open full transcript"
         >
-          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <Icon className="w-4 h-4">
             <path d="M4 6h16M4 12h16M4 18h10" />
-          </svg>
+          </Icon>
         </button>
         <button
           onClick={() => onWorkspaceClick(issue, ws.id)}
           className="shrink-0 p-1 rounded text-gray-400 dark:text-gray-500 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-950 transition-colors"
           title="Open workspace"
         >
-          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <Icon className="w-4 h-4">
             <rect x="3" y="3" width="18" height="18" rx="2" />
             <path d="M3 9h18M9 21V9" />
-          </svg>
+          </Icon>
         </button>
       </div>
 
       <div className="px-3 py-1 flex items-center gap-1.5 text-xs text-gray-400 dark:text-gray-500 border-b border-gray-100 dark:border-gray-800 font-mono">
-        <svg className="w-3 h-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+        <Icon className="w-3 h-3 shrink-0">
           <line x1="6" y1="3" x2="6" y2="15" /><circle cx="18" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M18 9a9 9 0 0 1-9 9" />
-        </svg>
+        </Icon>
         <span className="truncate">{ws.branch}</span>
       </div>
 
@@ -282,7 +283,7 @@ function CompactFooterStats({
       )}
       {readyForMerge && (
         <span className="ml-auto flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium" title="Ready to merge">
-          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path d="M20 6L9 17l-5-5" /></svg>
+          <Icon className="w-3 h-3" strokeWidth={2.5}><path d="M20 6L9 17l-5-5" /></Icon>
           Merge
         </span>
       )}
@@ -329,18 +330,18 @@ function CompactCard({ issue, currentActivity, liveStats, todos, stallThresholdS
           className="shrink-0 p-0.5 rounded text-gray-300 dark:text-gray-600 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-950 transition-colors"
           title="Open full transcript"
         >
-          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <Icon className="w-3.5 h-3.5">
             <path d="M4 6h16M4 12h16M4 18h10" />
-          </svg>
+          </Icon>
         </button>
         <button
           onClick={(e) => { e.stopPropagation(); onWorkspaceClick(issue, ws.id); }}
           className="shrink-0 p-0.5 rounded text-gray-300 dark:text-gray-600 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-950 transition-colors"
           title="Open workspace"
         >
-          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <Icon className="w-3.5 h-3.5">
             <rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18M9 21V9" />
-          </svg>
+          </Icon>
         </button>
       </div>
 
@@ -415,16 +416,10 @@ function EmptySlot({ onDropIssue, columns }: EmptySlotProps) {
           : "border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/20"
       }`}
     >
-      <svg
-        className={`w-6 h-6 mb-1.5 transition-colors ${isDragOver ? "text-brand-500" : "text-gray-300 dark:text-gray-600"}`}
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={1.5}
-      >
+      <Icon className={`w-6 h-6 mb-1.5 transition-colors ${isDragOver ? "text-brand-500" : "text-gray-300 dark:text-gray-600"}`} strokeWidth={1.5}>
         <circle cx="12" cy="12" r="10" />
         <path d="M12 8v8M8 12h8" />
-      </svg>
+      </Icon>
       <p className={`text-xs font-medium transition-colors ${isDragOver ? "text-brand-600 dark:text-brand-400" : "text-gray-400 dark:text-gray-500"}`}>
         {isDragOver ? "Drop to start workspace" : "Drop issue here"}
       </p>
@@ -493,9 +488,9 @@ function EmptyState({ onGoToBoard }: { onGoToBoard?: () => void }) {
   return (
     <div className="flex flex-1 items-center justify-center h-full text-gray-400 dark:text-gray-500">
       <div className="text-center">
-        <svg className="w-12 h-12 mx-auto mb-3 opacity-30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+        <Icon className="w-12 h-12 mx-auto mb-3 opacity-30" strokeWidth={1.5}>
           <circle cx="12" cy="12" r="10" /><path d="M8 12h.01M12 12h.01M16 12h.01" />
-        </svg>
+        </Icon>
         <p className="text-sm font-medium">No active agents</p>
         <p className="text-xs mt-1 mb-3">Create an issue and start a workspace to see agents here</p>
         {onGoToBoard && (

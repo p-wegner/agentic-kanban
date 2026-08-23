@@ -3,6 +3,7 @@ import type { IssueWithStatus } from "@agentic-kanban/shared";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { LaunchPreviewPanel } from "./LaunchPreviewPanel.js";
 import { Button } from "./Button.js";
+import { Icon } from "./Icon.js";
 
 interface AgentStartDryRunModalProps {
   issue: IssueWithStatus;
@@ -38,10 +39,10 @@ export function AgentStartDryRunModal({ issue, onClose, onStartWorkspace }: Agen
       <div className="relative w-[min(480px,95vw)] bg-surface-raised dark:bg-surface-raised-dark rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 flex flex-col max-h-[90vh] overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700 shrink-0">
           <div className="flex items-center gap-2 min-w-0">
-            <svg className="h-4 w-4 text-gray-500 dark:text-gray-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <Icon className="h-4 w-4 text-gray-500 dark:text-gray-400 shrink-0">
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
               <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7Z" />
-            </svg>
+            </Icon>
             <h2 className="text-sm font-semibold text-ink dark:text-stone-100 truncate">
               Dry Run Preview
             </h2>

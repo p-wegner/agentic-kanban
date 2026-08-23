@@ -3,6 +3,7 @@ import { apiFetch } from "../lib/api.js";
 import { type AgentOutputFormat } from "../lib/agent-output-parser.js";
 import { parseMessagesIntoTurns, type ReplayTurn } from "../lib/session-replay-turns.js";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
+import { Icon } from "./Icon.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -138,12 +139,7 @@ function LeftPane({
             onClick={() => setThinkingExpanded((v) => !v)}
             className="flex items-center gap-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wide hover:text-gray-300"
           >
-            <svg
-              className={`w-3 h-3 transition-transform ${thinkingExpanded ? "rotate-90" : ""}`}
-              fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-            </svg>
+            <Icon className={`w-3 h-3 transition-transform ${thinkingExpanded ? "rotate-90" : ""}`} d="M9 5l7 7-7 7" />
             Thinking
           </button>
           {thinkingExpanded && (
@@ -214,12 +210,7 @@ function LeftPane({
                 onClick={() => setInputExpanded((v) => !v)}
                 className="flex items-center gap-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wide hover:text-gray-300 mb-1.5"
               >
-                <svg
-                  className={`w-3 h-3 transition-transform ${inputExpanded ? "rotate-90" : ""}`}
-                  fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                </svg>
+                <Icon className={`w-3 h-3 transition-transform ${inputExpanded ? "rotate-90" : ""}`} d="M9 5l7 7-7 7" />
                 Input
               </button>
               {inputExpanded && (
@@ -417,9 +408,7 @@ export function SessionReplay({
           onClick={onClose}
           className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-white transition-colors"
         >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-          </svg>
+          <Icon className="w-4 h-4" d="M15 19l-7-7 7-7" />
           Back
         </button>
         <div className="text-sm font-semibold text-white flex-1 min-w-0 truncate">
@@ -468,9 +457,7 @@ export function SessionReplay({
                 className="text-gray-500 hover:text-white disabled:opacity-30 transition-colors"
                 title="First turn (g)"
               >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M11 19l-7-7 7-7M18 19l-7-7 7-7" />
-                </svg>
+                <Icon className="w-4 h-4" d="M11 19l-7-7 7-7M18 19l-7-7 7-7" />
               </button>
               <button
                 onClick={() => goTo(currentTurnIdx - 1)}
@@ -478,9 +465,7 @@ export function SessionReplay({
                 className="text-gray-500 hover:text-white disabled:opacity-30 transition-colors"
                 title="Previous turn (k / ←)"
               >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-                </svg>
+                <Icon className="w-4 h-4" d="M15 19l-7-7 7-7" />
               </button>
 
               <div className="flex-1 relative">
@@ -516,9 +501,7 @@ export function SessionReplay({
                 className="text-gray-500 hover:text-white disabled:opacity-30 transition-colors"
                 title="Next turn (j / →)"
               >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                </svg>
+                <Icon className="w-4 h-4" d="M9 5l7 7-7 7" />
               </button>
               <button
                 onClick={() => goTo(turns.length - 1)}
@@ -526,9 +509,7 @@ export function SessionReplay({
                 className="text-gray-500 hover:text-white disabled:opacity-30 transition-colors"
                 title="Last turn (G)"
               >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 5l7 7-7 7M6 5l7 7-7 7" />
-                </svg>
+                <Icon className="w-4 h-4" d="M13 5l7 7-7 7M6 5l7 7-7 7" />
               </button>
             </div>
           </div>

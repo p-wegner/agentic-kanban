@@ -4,6 +4,7 @@ import type { LiveSessionStats } from "../lib/useBoardEvents.js";
 import { useFleetLiveStats } from "../hooks/useFleetLiveStats.js";
 import type { FleetProvider } from "../lib/fleetLiveStats.js";
 import { useDismissable } from "../hooks/useDismissable.js";
+import { Icon } from "./Icon.js";
 
 interface FleetTokenMeterProps {
   liveStats: Record<string, LiveSessionStats>;
@@ -90,9 +91,7 @@ export function FleetTokenMeter({ liveStats, columns, sessionActivity }: FleetTo
         <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300" data-testid="fleet-cost">
           ~{formatCost(fleet.estimatedCostUsd)}
         </span>
-        <svg className={`w-2.5 h-2.5 text-emerald-500 transition-transform ${expanded ? "rotate-180" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
-        </svg>
+        <Icon className={`w-2.5 h-2.5 text-emerald-500 transition-transform ${expanded ? "rotate-180" : ""}`} d="m19.5 8.25-7.5 7.5-7.5-7.5" />
       </button>
 
       {expanded && (

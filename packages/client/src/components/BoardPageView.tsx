@@ -67,6 +67,7 @@ import type { useBoardPageRoute } from "../routes/useBoardPageRoute.js";
 import type { useColumnResize } from "../lib/columnResizeHandler.js";
 import type { createQuickUpdateHandlers } from "../lib/issueQuickUpdates.js";
 import type { buildRunQueueForecast } from "./RunQueueForecastPanel.js";
+import { Spinner } from "./Icon.js";
 
 type PanelNav = ReturnType<typeof useBoardPanelNavigation>;
 type ProjectMgmt = ReturnType<typeof useProjectManagement>;
@@ -387,10 +388,7 @@ export function BoardPageView({ board, chrome, commands, filters, project, realt
       {mutating && (
         <div className="fixed bottom-4 right-4 z-50">
           <div className="bg-brand-600 text-white rounded-lg px-4 py-2 flex items-center gap-2 shadow-lg">
-            <svg className="animate-spin h-4 w-4 text-white" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
+            <Spinner className="animate-spin h-4 w-4 text-white" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
             <span className="text-sm font-medium">Saving...</span>
           </div>
         </div>

@@ -3,6 +3,7 @@ import { apiFetch } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { CollapsibleSection } from "./CollapsibleSection.js";
 import { issueStatusToneClass } from "../lib/badgeTones.js";
+import { Icon } from "./Icon.js";
 
 interface SearchResult {
   messageId: number;
@@ -128,10 +129,10 @@ export function TranscriptSearchPanel({ projectId, onClose, onNavigateToWorkspac
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center gap-2">
-            <svg className="h-5 w-5 text-gray-600 dark:text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <Icon className="h-5 w-5 text-gray-600 dark:text-gray-400">
               <circle cx="11" cy="11" r="8" />
               <line x1="21" y1="21" x2="16.65" y2="16.65" />
-            </svg>
+            </Icon>
             <h2 className="text-lg font-semibold text-ink dark:text-stone-100 heading-serif">Transcript Search</h2>
             <span className="text-sm text-gray-500 dark:text-gray-400">
               {searched && !loading ? `${results.length} result${results.length !== 1 ? "s" : ""}` : ""}
@@ -232,10 +233,10 @@ export function TranscriptSearchPanel({ projectId, onClose, onNavigateToWorkspac
 
           {!loading && !searched && (
             <div className="px-4 py-12 text-center text-sm text-gray-400 dark:text-gray-500">
-              <svg className="w-12 h-12 mx-auto mb-3 opacity-25" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1">
+              <Icon className="w-12 h-12 mx-auto mb-3 opacity-25" strokeWidth="1">
                 <circle cx="11" cy="11" r="8" />
                 <line x1="21" y1="21" x2="16.65" y2="16.65" />
-              </svg>
+              </Icon>
               Search across all agent session transcripts to find errors, decisions, file references, and commands.
             </div>
           )}

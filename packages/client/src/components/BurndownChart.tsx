@@ -4,6 +4,7 @@ export type { BurndownBucket };
 import { useMemo, useState } from "react";
 import { BRAND } from "../lib/chartColors.js";
 import { useApiResource } from "../hooks/useApiResource.js";
+import { Icon } from "./Icon.js";
 
 
 
@@ -227,10 +228,10 @@ export function BurndownChart({ projectId }: { projectId: string }) {
 
         {!loading && !error && !stats && (
           <div className="flex h-64 flex-col items-center justify-center gap-2 rounded-md border border-dashed border-gray-200 text-sm text-gray-400 dark:border-gray-700 dark:text-gray-500">
-            <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <Icon className="w-10 h-10" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M3 13l4-3 4 2 4-5 4 3" />
               <path strokeLinecap="round" strokeLinejoin="round" d="M3 19h18" />
-            </svg>
+            </Icon>
             <span>No open issues in the last {days} days</span>
           </div>
         )}

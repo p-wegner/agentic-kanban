@@ -16,6 +16,7 @@ import {
   type SearchFilter,
 } from "../lib/terminal-transcript.js";
 import { renderParsedEvent, highlightText, type RenderContext } from "./TerminalEventRenderer.js";
+import { Icon } from "./Icon.js";
 
 interface TerminalViewProps {
   messages: AgentOutputMessage[];
@@ -360,9 +361,9 @@ export function TerminalView({ messages, connectionState, parseOutput = "minimal
       className="absolute bottom-2 right-4 z-10 p-1.5 rounded-full bg-gray-700 hover:bg-gray-600 text-white shadow-lg transition-opacity"
       title="Scroll to bottom"
     >
-      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <Icon className="w-4 h-4">
         <path d="M12 5v14M5 12l7 7 7-7" />
-      </svg>
+      </Icon>
     </button>
   );
 
@@ -378,18 +379,18 @@ export function TerminalView({ messages, connectionState, parseOutput = "minimal
             className="ml-auto p-1 text-gray-400 hover:text-white rounded hover:bg-gray-700"
             title="Download session output"
           >
-            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <Icon className="w-4 h-4">
               <path d="M12 15V3m0 12l-4-4m4 4l4-4M2 17l.621 2.485A2 2 0 0 0 4.561 21h14.878a2 2 0 0 0 1.94-1.515L22 17" />
-            </svg>
+            </Icon>
           </button>
           <button
             onClick={toggleMaximize}
             className="p-1 text-gray-400 hover:text-white rounded hover:bg-gray-700"
             title="Restore (Esc)"
           >
-            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <Icon className="w-4 h-4">
               <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3" />
-            </svg>
+            </Icon>
           </button>
         </div>
         {searchControls}
@@ -422,18 +423,18 @@ export function TerminalView({ messages, connectionState, parseOutput = "minimal
             className={`${isParsed ? "" : "ml-auto"} p-0.5 text-gray-400 hover:text-white rounded hover:bg-gray-700`}
             title="Download session output"
           >
-            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <Icon className="w-3.5 h-3.5">
               <path d="M12 15V3m0 12l-4-4m4 4l4-4M2 17l.621 2.485A2 2 0 0 0 4.561 21h14.878a2 2 0 0 0 1.94-1.515L22 17" />
-            </svg>
+            </Icon>
           </button>
           <button
             onClick={toggleMaximize}
             className="p-0.5 text-gray-400 hover:text-white rounded hover:bg-gray-700"
             title="Maximize"
           >
-            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <Icon className="w-3.5 h-3.5">
               <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
-            </svg>
+            </Icon>
           </button>
         </div>
         {searchControls}

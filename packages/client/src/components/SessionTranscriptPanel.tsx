@@ -16,6 +16,7 @@ import {
 } from "../lib/sessionTranscriptEvents.js";
 import type { SessionInfo } from "./WorkspaceCard.js";
 import { usePoll } from "../hooks/usePoll.js";
+import { Icon } from "./Icon.js";
 
 /** Tool output longer than this (chars) collapses behind an expand toggle. */
 const COLLAPSE_THRESHOLD = 400;
@@ -318,9 +319,9 @@ export function SessionTranscriptPanel() {
       {/* Header */}
       <div className="flex items-center gap-3 px-4 py-2.5 border-b border-white/10 bg-gray-900">
         <div className="flex items-center gap-2 min-w-0 flex-1">
-          <svg className="w-4 h-4 shrink-0 text-brand-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <Icon className="w-4 h-4 shrink-0 text-brand-400">
             <path d="M4 6h16M4 12h16M4 18h10" />
-          </svg>
+          </Icon>
           <h2 className="text-sm font-semibold truncate">{resolved.title}</h2>
           {running && (
             <span className="shrink-0 inline-flex items-center gap-1 text-[10px] font-medium text-emerald-400">
@@ -350,9 +351,9 @@ export function SessionTranscriptPanel() {
           className="shrink-0 flex items-center justify-center w-6 h-6 rounded hover:bg-white/10 transition-colors"
           aria-label="Close transcript"
         >
-          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <Icon className="w-4 h-4">
             <path strokeLinecap="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
+          </Icon>
         </button>
       </div>
 

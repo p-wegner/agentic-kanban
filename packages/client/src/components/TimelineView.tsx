@@ -19,6 +19,7 @@ import {
   type DateRange,
   type Lane,
 } from "../lib/timelineView.js";
+import { Icon } from "./Icon.js";
 
 interface TimelineViewProps {
   columns: StatusWithIssues[];
@@ -282,9 +283,7 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
   if (allIssues.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center flex-1 gap-3 text-gray-400 dark:text-gray-500">
-        <svg className="w-14 h-14 opacity-25" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M6 6h12M6 10h8M6 14h5M6 18h3" />
-        </svg>
+        <Icon className="w-14 h-14 opacity-25" strokeWidth={1} d="M6 6h12M6 10h8M6 14h5M6 18h3" />
         <p className="text-sm">No issues to display on the timeline</p>
       </div>
     );

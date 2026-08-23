@@ -7,6 +7,7 @@ import { MergeReadinessBoard } from "./MergeReadinessBoard.js";
 import { FleetServiceStackMap } from "./FleetServiceStackMap.js";
 import { CrossRepoImpactHeatmap } from "./CrossRepoImpactHeatmap.js";
 import { useNow } from "../hooks/usePoll.js";
+import { Icon } from "./Icon.js";
 
 interface MultiRepoMonitorPanelProps {
   activeProjectId: string | null;
@@ -91,12 +92,12 @@ function MatrixCellBadge({ cell, flash }: { cell: MatrixCell | null; flash: bool
 
 function GridIcon() {
   return (
-    <svg className="h-5 w-5 text-gray-600 dark:text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <Icon className="h-5 w-5 text-gray-600 dark:text-gray-400">
       <rect x="3" y="3" width="7" height="7" rx="1" />
       <rect x="14" y="3" width="7" height="7" rx="1" />
       <rect x="3" y="14" width="7" height="7" rx="1" />
       <rect x="14" y="14" width="7" height="7" rx="1" />
-    </svg>
+    </Icon>
   );
 }
 

@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { BRAND, ACCENT } from "../lib/chartColors";
 import { ISSUE_PRIORITIES, PRIORITY_TRAITS } from "../lib/priorityTraits.js";
+import { Icon } from "./Icon.js";
 
 
 
@@ -182,9 +183,7 @@ export function FocusView({ projectId, onIssueClick }: FocusViewProps) {
 
             {data.ready.length === 0 && (
               <div className="flex flex-col items-center justify-center py-16 gap-3 text-gray-400 dark:text-gray-500">
-                <svg className="w-12 h-12 opacity-25" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
+                <Icon className="w-12 h-12 opacity-25" strokeWidth={1} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                 <p className="text-sm">Nothing ready to start — everything open is blocked or in flight.</p>
               </div>
             )}

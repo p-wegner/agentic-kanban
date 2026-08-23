@@ -2,6 +2,7 @@ import type { TouchedFile } from "../lib/issueDetailTypes.js";
 import { useEffect, useState } from "react";
 import { apiPost } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
+import { Spinner } from "./Icon.js";
 
 
 interface IssueTouchedFilesSectionProps {
@@ -83,10 +84,7 @@ export function IssueTouchedFilesSection({ issueId, initialFiles, onAppendToDesc
             title="Predict files this issue will touch"
           >
             {analyzing && (
-              <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-              </svg>
+              <Spinner className="animate-spin h-3 w-3" />
             )}
             {analyzing ? "Analyzing..." : "Predict Files"}
           </button>
