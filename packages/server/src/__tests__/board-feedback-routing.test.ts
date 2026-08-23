@@ -50,10 +50,27 @@ describe("detectBoardDeployment", () => {
 });
 
 describe("isSameRepoPath", () => {
-  it("matches paths that differ only by separator, trailing slash, or drive-letter case", () => {
-    expect(isSameRepoPath("C:\\projects\\board", "C:/projects/board")).toBe(true);
-    expect(isSameRepoPath("C:/projects/board/", "C:/projects/board")).toBe(true);
-    expect(isSameRepoPath("c:/projects/board", "C:/PROJECTS/Board")).toBe(true);
+  // Separator direction and case-folding are WINDOWS semantics, and `pathKey` implements
+  // them only there — off Windows a backslash is an ordinary filename character and
+  // `/srv/Repo` is a different directory from `/srv/repo`, so folding either would be a
+  // silent false positive. #828: this assertion had never run off Windows, where it fails.
+  it.runIf(process.platform === "win32")(
+    "matches paths that differ only by separator, trailing slash, or drive-letter case (win32)",
+    () => {
+      expect(isSameRepoPath("C:\\projects\\board", "C:/projects/board")).toBe(true);
+      expect(isSameRepoPath("C:/projects/board/", "C:/projects/board")).toBe(true);
+      expect(isSameRepoPath("c:/projects/board", "C:/PROJECTS/Board")).toBe(true);
+    },
+  );
+
+  it("matches paths that differ only by a trailing separator, on every platform", () => {
+    const board = process.platform === "win32" ? "C:/projects/board" : "/projects/board";
+    expect(isSameRepoPath(`${board}/`, board)).toBe(true);
+    expect(isSameRepoPath(`${board}//`, board)).toBe(true);
+  });
+
+  it.runIf(process.platform !== "win32")("does NOT case-fold off win32", () => {
+    expect(isSameRepoPath("/projects/board", "/projects/BOARD")).toBe(false);
   });
 
   it("does not match different repos or missing values", () => {
