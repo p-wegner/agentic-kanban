@@ -11,7 +11,10 @@
  * These tests pin the three fixes, and the property that ties them together: a real fix
  * must still resume a workspace immediately, even past the ceiling.
  */
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { workspaceMergeBackoff } from "@agentic-kanban/shared/schema";
+import { createTestDb, type TestDb } from "./helpers/test-db.js";
+import { seedProject, seedIssue, seedWorkspace } from "./helpers/workflow-test-helpers.js";
 import {
   classifyMergeFailure,
   nextRetryDelayMs,
@@ -23,16 +26,60 @@ import {
   MERGE_BACKOFF_CAP_MS,
 } from "../services/merge-backoff.service.js";
 
-const WS = { wsId: "ws-1", projectId: "proj-1", workingDir: "C:/repo/.worktrees/ak-1", issueNumber: 42 };
 const RECORDED_SHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const MOVED_SHA = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
-/** A `database` stand-in whose only job is to answer the backoff state read. */
-function dbWith(row: Record<string, unknown> | undefined) {
-  return {
-    select: () => ({ from: () => ({ where: () => ({ limit: () => (row ? [row] : []) }) }) }),
-    update: () => ({ set: () => ({ where: () => Promise.resolve() }) }),
-  } as never;
+/**
+ * A REAL migrated database, not a chainable stand-in.
+ *
+ * This file used to hand-roll a `{ select: () => ({ from: () => ({ where: … }) }) }` fake.
+ * It went stale the moment #781 moved the backoff columns off `workspaces` into their own
+ * table and the repository read grew a `.leftJoin(…)` — the fake had no `leftJoin`, so all
+ * seven behavioural tests died on `TypeError: … .leftJoin is not a function`. It was also
+ * already lying in a quieter way: `clearMergeBackoff` calls `database.delete(…)`, which the
+ * fake never had; the call threw into `clearMergeBackoff`'s catch and the "backoff cleared"
+ * tests passed without anything being cleared.
+ *
+ * `createTestDb()` applies the real migrations, so the query shape can no longer drift away
+ * from what the test exercises.
+ */
+let db: TestDb;
+let dispose: () => void;
+let WS: { wsId: string; projectId: string; workingDir: string; issueNumber: number };
+
+beforeEach(async () => {
+  const created = createTestDb();
+  db = created.db;
+  dispose = created.dispose;
+  const { projectId, statusId } = await seedProject(db, `merge-backoff-${Date.now()}`);
+  const issueId = await seedIssue(db, projectId, statusId, 42, "backoff fixture");
+  const wsId = await seedWorkspace(db, issueId, "feature/ak-42-backoff", null, "C:/repo/.worktrees/ak-1");
+  WS = { wsId, projectId, workingDir: "C:/repo/.worktrees/ak-1", issueNumber: 42 };
+});
+
+afterEach(() => {
+  dispose?.();
+});
+
+/** Give the seeded workspace a live backoff row, and hand back the real `database`. */
+async function dbWith(row: {
+  failures: number;
+  signature: string;
+  branchSha: string | null;
+  verifyHash: string | null;
+  nextRetryAt: string;
+}): Promise<TestDb> {
+  await db.insert(workspaceMergeBackoff).values({
+    workspaceId: WS.wsId,
+    failures: row.failures,
+    signature: row.signature,
+    error: "pre-merge gate failed",
+    branchSha: row.branchSha,
+    verifyHash: row.verifyHash,
+    nextRetryAt: row.nextRetryAt,
+    since: new Date(Date.now() - 60 * 60_000).toISOString(),
+  });
+  return db;
 }
 
 const FUTURE = new Date(Date.now() + 60 * 60_000).toISOString();
@@ -68,7 +115,7 @@ describe("an empty commit no longer voids the breaker (#649)", () => {
 
   it("keeps the block when the tip moved but the tree is identical", async () => {
     const decision = await shouldSkipMergeForBackoff(WS, {
-      database: dbWith(row),
+      database: await dbWith(row),
       getBranchHeadSha: async () => MOVED_SHA,
       hasSubstantiveChangeSince: async () => false,
     });
@@ -77,17 +124,20 @@ describe("an empty commit no longer voids the breaker (#649)", () => {
 
   it("clears the block when the branch actually gained work", async () => {
     const decision = await shouldSkipMergeForBackoff(WS, {
-      database: dbWith(row),
+      database: await dbWith(row),
       getBranchHeadSha: async () => MOVED_SHA,
       hasSubstantiveChangeSince: async () => true,
     });
     expect(decision.skip).toBe(false);
     expect(decision.reason).toMatch(/new work/);
+    // The block is really GONE, not just reported gone — the old fake had no `delete`, so
+    // this half of "backoff cleared" was never actually exercised.
+    expect(await db.select().from(workspaceMergeBackoff)).toEqual([]);
   });
 
   it("treats an undiffable sha as changed — a rebased branch IS a rewritten branch", async () => {
     const decision = await shouldSkipMergeForBackoff(WS, {
-      database: dbWith(row),
+      database: await dbWith(row),
       getBranchHeadSha: async () => MOVED_SHA,
       hasSubstantiveChangeSince: async () => null,
     });
@@ -97,7 +147,7 @@ describe("an empty commit no longer voids the breaker (#649)", () => {
   it("does not probe for substance at all when the tip has not moved", async () => {
     const probe = vi.fn(async () => true);
     const decision = await shouldSkipMergeForBackoff(WS, {
-      database: dbWith(row),
+      database: await dbWith(row),
       getBranchHeadSha: async () => RECORDED_SHA,
       hasSubstantiveChangeSince: probe,
     });
@@ -115,7 +165,7 @@ describe("the retry ceiling (#649)", () => {
 
   it("keeps skipping after the window expires, which it never used to", async () => {
     const decision = await shouldSkipMergeForBackoff(WS, {
-      database: dbWith({
+      database: await dbWith({
         failures: MERGE_BACKOFF_MAX_ATTEMPTS,
         signature: "generic|abc",
         branchSha: RECORDED_SHA,
@@ -130,7 +180,7 @@ describe("the retry ceiling (#649)", () => {
 
   it("below the ceiling, an expired window still allows the retry", async () => {
     const decision = await shouldSkipMergeForBackoff(WS, {
-      database: dbWith({
+      database: await dbWith({
         failures: MERGE_BACKOFF_MAX_ATTEMPTS - 1,
         signature: "generic|abc",
         branchSha: RECORDED_SHA,
@@ -144,7 +194,7 @@ describe("the retry ceiling (#649)", () => {
 
   it("a real fix resumes an exhausted workspace — the ceiling is not a dead end", async () => {
     const decision = await shouldSkipMergeForBackoff(WS, {
-      database: dbWith({
+      database: await dbWith({
         failures: MERGE_BACKOFF_MAX_ATTEMPTS + 3,
         signature: "generic|abc",
         branchSha: RECORDED_SHA,
