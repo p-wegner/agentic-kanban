@@ -203,7 +203,7 @@ describe("fleet MCP bridge — token scoping and lifetime", () => {
   it("expires, and dies with its session or its worker", () => {
     bridge.setEndpointPort(9100);
     bridge.noteWorkerBoardHost("w-1", "board:9100");
-    bridge.issueToken({ ...SCOPE, ttlMs: 1000, now: 0 });
+    bridge.issueToken({ ...SCOPE, ttlMs: 1000, nowMs: 0 });
     expect(bridge.tokenCount()).toBe(1);
 
     bridge.issueToken({ ...SCOPE, sessionId: "sess-2" });

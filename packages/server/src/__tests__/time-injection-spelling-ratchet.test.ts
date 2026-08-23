@@ -123,7 +123,7 @@ const SANCTIONED = new Set(["now: string", "nowMs: number"]);
  */
 const BASELINE: Record<string, number> = {
   "now: Date": 32,
-  "now: number": 17,
+  "now: number": 15,
   "nowIso: string": 9,
   "nowOverride: string": 6,
   "now: () => Date": 4,

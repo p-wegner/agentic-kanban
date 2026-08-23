@@ -126,8 +126,8 @@ export interface IssueGitTokenInput {
    */
   incomingRef?: string;
   ttlMs?: number;
-  /** Test seam for expiry. */
-  now?: number;
+  /** Test seam for expiry. Epoch ms (#614: `nowMs` for arithmetic). */
+  nowMs?: number;
 }
 
 interface GitTokenScope {
@@ -199,14 +199,14 @@ function createGitTokenStore(database: Database) {
 
   return {
     issue: (input: IssueGitTokenInput): string => {
-      const issuedAtMs = input.now ?? Date.now();
+      const issuedAtMs = input.nowMs ?? Date.now();
       const scope: GitTokenScope = {
         workerId: input.workerId,
         projectId: input.projectId,
         incomingRef: input.incomingRef,
         issuedAtMs,
       };
-      const token = store.issue(scope, { now: input.now, ttlMs: input.ttlMs });
+      const token = store.issue(scope, { nowMs: input.nowMs, ttlMs: input.ttlMs });
       // The DIGEST, never the token: the row is a scope record, not a credential store.
       track(
         insertGitToken(
