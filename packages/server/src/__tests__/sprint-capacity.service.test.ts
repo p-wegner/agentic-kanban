@@ -68,7 +68,6 @@ async function insertWorkspace(db: TestDb, input: {
   await db.insert(workspaces).values({
     id,
     issueId: input.issueId,
-    projectId: input.projectId,
     branch: `feature/ws-${id.slice(0, 8)}`,
     status: input.status,
     createdAt: now,
@@ -85,7 +84,7 @@ async function setStrategyConfig(db: TestDb, projectId: string, config: {
   const key = `board_strategy_${projectId}`;
   const value = JSON.stringify({ version: 1, segments: [], providerPolicies: [], ...config });
   const now = new Date().toISOString();
-  await db.insert(preferences).values({ key, value, createdAt: now, updatedAt: now });
+  await db.insert(preferences).values({ key, value, updatedAt: now });
 }
 
 describe("sprint capacity planner", () => {

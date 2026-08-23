@@ -117,7 +117,7 @@ async function seedInReviewWorkspace(db: ReturnType<typeof createTestDb>["db"]) 
   await db.insert(sessions).values({
     id: sessionId, workspaceId,
     status: "running",
-    createdAt: now, updatedAt: now,
+    startedAt: now,
   });
 
   return { projectId, issueId, workspaceId, sessionId };
@@ -197,7 +197,7 @@ describe("exit-workflow: zero-diff In Review → Done (issue #603)", () => {
     await db.insert(sessions).values({
       id: sessionId, workspaceId,
       status: "running",
-      createdAt: now, updatedAt: now,
+      startedAt: now,
     });
 
     const boardEvents = makeBoardEvents();

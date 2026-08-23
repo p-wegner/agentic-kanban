@@ -160,7 +160,7 @@ function makeQuota(providers: Array<{ id: string; percent: number; status?: "ok"
       transport: "browser" as const,
       hasCreds: true,
       status,
-      metrics: [{ label: "Messages", percent, detail: null, resetAt: null, resetIso: null, resetInSeconds: null }],
+      metrics: [{ label: "Messages", percent, detail: null, resetAt: null, resetIso: null, resetInSeconds: null, periodMs: null }],
     })),
   };
 }

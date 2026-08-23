@@ -34,9 +34,16 @@ import { createRequire } from "node:module";
  *
  * To shrink it: fix a file's type errors, then delete its line from `tsconfig.json`'s
  * `exclude` and lower `BASELINE_GRANDFATHERED_FILES` to match. Follow-up: #808.
+ *
+ * #808 batch 1 (2026-08-23): 61 files fixed, 132 -> 71 grandfathered and 1044 -> 962 errors.
+ * The bulk of that batch was one bug class the exclude had been hiding — fixtures writing
+ * columns their table does not have (`sessions.createdAt/updatedAt`, `project_statuses.position`
+ * and `.updatedAt`, `issues.position`, `workspaces.projectId/worktreePath/mergeCommitSha`,
+ * `preferences.createdAt`, `workflow_nodes.updatedAt`), silently dropped on insert. The
+ * remaining 71 are dominated by four files and by `await res.json()` returning `unknown`.
  */
 
-const BASELINE_GRANDFATHERED_FILES = 132;
+const BASELINE_GRANDFATHERED_FILES = 71;
 
 const serverRoot = path.join(import.meta.dirname!, "..", "..");
 const tsconfigPath = path.join(serverRoot, "tsconfig.json");

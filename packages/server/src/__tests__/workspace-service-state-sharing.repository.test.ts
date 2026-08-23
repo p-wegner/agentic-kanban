@@ -123,6 +123,18 @@ describe("workspace-service-state repository — shared-worktree queries", () =>
     });
   });
 
+/**
+ * The `ComposeRunner` members this suite never exercises. Present so each fixture below is a
+ * REAL ComposeRunner rather than a partial one — and loud rather than silently absent if the
+ * engine ever starts reaching for them from these paths.
+ */
+const unexercisedRunnerMembers = {
+  restart: async () => { throw new Error("ComposeRunner.restart is not exercised by this suite"); },
+  logs: async () => { throw new Error("ComposeRunner.logs is not exercised by this suite"); },
+  listResidualProjects: async () => { throw new Error("ComposeRunner.listResidualProjects is not exercised by this suite"); },
+  removeResidualProjectResources: async () => { throw new Error("ComposeRunner.removeResidualProjectResources is not exercised by this suite"); },
+};
+
   it("engine + repository integration: the down runs only for the LAST live sharer", async () => {
     // Two live sharers reference the same stack; releasing one skips the down, closing
     // it and releasing the other runs the down — the full last-reference lifecycle
@@ -137,6 +149,7 @@ describe("workspace-service-state repository — shared-worktree queries", () =>
           return { ok: true, stderr: "" };
         },
         list: async () => [],
+        ...unexercisedRunnerMembers,
       },
       getInstanceId: async () => "testinst",
       markServiceStateDown: async () => {},
@@ -172,6 +185,7 @@ describe("workspace-service-state repository — shared-worktree queries", () =>
           return { ok: true, stderr: "" };
         },
         list: async () => [],
+        ...unexercisedRunnerMembers,
       },
       getInstanceId: async () => "testinst",
       markServiceStateDown: (name) => markWorkspaceServiceStateDown(name, undefined, database),

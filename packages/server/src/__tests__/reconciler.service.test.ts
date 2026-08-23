@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildReconcilerPrompt, buildStrandedBatch, pickIntegrationWorkspace } from "../services/reconciler.service.js";
+import { classifyReconcileStrategies } from "../services/merge-queue.service.js";
 import type { MergeQueuePlan } from "../services/merge-queue.service.js";
 import { makeTempRepo } from "./helpers/temp-repo.js";
 
@@ -10,29 +11,38 @@ import { makeTempRepo } from "./helpers/temp-repo.js";
  */
 const REPO_PATH = makeTempRepo();
 
-const plan: MergeQueuePlan = {
-  order: [
+const order: MergeQueuePlan["order"] = [
     { id: "a", branch: "feature/a", workingDir: "/wt/a", baseBranch: "master", repoPath: REPO_PATH, issueId: "ia", issueNumber: 1, issueTitle: "A", changedFiles: ["x.ts"], status: "idle", isDirect: false },
     { id: "b", branch: "feature/b", workingDir: "/wt/b", baseBranch: "master", repoPath: REPO_PATH, issueId: "ib", issueNumber: 2, issueTitle: "B", changedFiles: ["x.ts", "y.ts"], status: "idle", isDirect: false },
     { id: "c", branch: "feature/c", workingDir: null, baseBranch: "master", repoPath: REPO_PATH, issueId: "ic", issueNumber: 3, issueTitle: "C", changedFiles: ["z.ts"], status: "idle", isDirect: true },
-  ],
-  overlaps: [
-    { workspaceIdA: "a", workspaceIdB: "b", overlapCount: 1, files: ["x.ts"] },
-    { workspaceIdA: "a", workspaceIdB: "c", overlapCount: 0, files: [] },
-    { workspaceIdA: "b", workspaceIdB: "c", overlapCount: 0, files: [] },
-  ],
+];
+const overlaps: MergeQueuePlan["overlaps"] = [
+  { workspaceIdA: "a", workspaceIdB: "b", overlapCount: 1, files: ["x.ts"] },
+  { workspaceIdA: "a", workspaceIdB: "c", overlapCount: 0, files: [] },
+  { workspaceIdA: "b", workspaceIdB: "c", overlapCount: 0, files: [] },
+];
+const migrationCollisions: MergeQueuePlan["migrationCollisions"] = [
+  { migrationNumber: "0061", workspaces: [
+    { workspaceId: "a", issueNumber: 1, issueTitle: "A", files: ["packages/shared/drizzle/0061_a.sql"] },
+    { workspaceId: "b", issueNumber: 2, issueTitle: "B", files: ["packages/shared/drizzle/0061_b.sql"] },
+  ] },
+];
+const conflictPreviews: MergeQueuePlan["conflictPreviews"] = [
+  { workspaceId: "a", hasConflicts: true, conflictingFiles: ["x.ts"], isStale: false },
+  { workspaceId: "b", hasConflicts: true, conflictingFiles: ["x.ts"], isStale: false },
+  { workspaceId: "c", hasConflicts: false, conflictingFiles: [], isStale: false },
+];
+
+const plan: MergeQueuePlan = {
+  order,
+  overlaps,
   totalOverlapScore: 1,
-  migrationCollisions: [
-    { migrationNumber: "0061", workspaces: [
-      { workspaceId: "a", issueNumber: 1, issueTitle: "A", files: ["packages/shared/drizzle/0061_a.sql"] },
-      { workspaceId: "b", issueNumber: 2, issueTitle: "B", files: ["packages/shared/drizzle/0061_b.sql"] },
-    ] },
-  ],
-  conflictPreviews: [
-    { workspaceId: "a", hasConflicts: true, conflictingFiles: ["x.ts"], isStale: false },
-    { workspaceId: "b", hasConflicts: true, conflictingFiles: ["x.ts"], isStale: false },
-    { workspaceId: "c", hasConflicts: false, conflictingFiles: [], isStale: false },
-  ],
+  migrationCollisions,
+  conflictPreviews,
+  // #808: the clustering half of the plan is DERIVED from the same signals rather than
+  // hand-written, so the fixture stays a real MergeQueuePlan as the classifier evolves
+  // instead of drifting into a shape production never produces.
+  ...classifyReconcileStrategies(order, overlaps, conflictPreviews, migrationCollisions),
 };
 
 describe("buildStrandedBatch", () => {

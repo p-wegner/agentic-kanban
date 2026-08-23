@@ -182,7 +182,7 @@ describe("Drive preflight", () => {
 
     const getRes = await app.request(`/api/projects/${projectId}/drive/preflight`);
     expect(getRes.status).toBe(200);
-    expect((await getRes.json()).checks.length).toBeGreaterThan(0);
+    expect((await getRes.json() as { checks: unknown[] }).checks.length).toBeGreaterThan(0);
 
     const postRes = await app.request(`/api/projects/${projectId}/drive/preflight`, {
       method: "POST",
@@ -190,6 +190,6 @@ describe("Drive preflight", () => {
       body: JSON.stringify({ autoRepair: false }),
     });
     expect(postRes.status).toBe(200);
-    expect((await postRes.json()).repaired).toBe(false);
+    expect((await postRes.json() as { repaired: boolean }).repaired).toBe(false);
   });
 });

@@ -5,6 +5,7 @@ import { createTestDb } from "./helpers/test-db.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
 import { activeMerges } from "../services/workspace-internals.js";
 import { makeTempRepo } from "./helpers/temp-repo.js";
+import type { MergeWorkspaceResponse } from "./helpers/merge-result.js";
 
 /**
  * A REAL repo path (#273). This suite drives the actual merge path, whose repo lock
@@ -22,7 +23,7 @@ const REPO_PATH = makeTempRepo();
  * to see a 'connection reset' with no response body even though the merge landed.
  */
 
-function makeGitService(overrides: Partial<Record<string, (...args: unknown[]) => unknown>> = {}) {
+function makeGitService(overrides: Partial<Record<string, (...args: never[]) => unknown>> = {}) {
   return {
     detectConflicts: vi.fn(async () => ({ hasConflicts: false, conflictingFiles: [] })),
     syncBranchToHead: vi.fn(async () => false),
@@ -130,7 +131,7 @@ describe("merge endpoint response before cleanup", () => {
     });
 
     // Must resolve without throwing — the response is returned before cleanup
-    const result = await svc.mergeWorkspace(workspaceId);
+    const result = await svc.mergeWorkspace(workspaceId) as MergeWorkspaceResponse;
 
     expect(result).toMatchObject({
       id: workspaceId,
@@ -154,7 +155,7 @@ describe("merge endpoint response before cleanup", () => {
       createBackup: async () => {},
     });
 
-    const result = await svc.mergeWorkspace(workspaceId);
+    const result = await svc.mergeWorkspace(workspaceId) as MergeWorkspaceResponse;
 
     expect(result).toMatchObject({
       id: workspaceId,
@@ -178,7 +179,7 @@ describe("merge endpoint response before cleanup", () => {
       processKiller,
     });
 
-    const result = await svc.mergeWorkspace(workspaceId);
+    const result = await svc.mergeWorkspace(workspaceId) as MergeWorkspaceResponse;
 
     expect(result).toMatchObject({
       id: workspaceId,
@@ -207,7 +208,7 @@ describe("merge endpoint response before cleanup", () => {
     });
 
     const mergePromise = svc.mergeWorkspace(workspaceId);
-    const result = await mergePromise;
+    const result = await mergePromise as MergeWorkspaceResponse;
     mergeResolved = true;
 
     // Give the background task a tick to run
@@ -245,7 +246,7 @@ describe("merge endpoint response before cleanup", () => {
       processKiller,
     });
 
-    const result = await svc.mergeWorkspace(workspaceId);
+    const result = await svc.mergeWorkspace(workspaceId) as MergeWorkspaceResponse;
     mergeResolved = true;
 
     // Allow the background post-merge task to run.
@@ -422,7 +423,7 @@ describe("merge endpoint response before cleanup", () => {
       processKiller,
     });
 
-    const result = await svc.mergeWorkspace(workspaceId);
+    const result = await svc.mergeWorkspace(workspaceId) as MergeWorkspaceResponse;
     mergeResolved = true;
 
     // Allow the background post-merge task to run.

@@ -52,7 +52,7 @@ describe("startup readiness gate (#282)", () => {
     const app = appWithGate();
     const handled = vi.fn();
 
-    const pending = app.request("/api/workspaces", { method: "POST" }).then((res) => {
+    const pending = Promise.resolve(app.request("/api/workspaces", { method: "POST" })).then((res) => {
       handled();
       return res;
     });

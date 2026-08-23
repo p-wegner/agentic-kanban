@@ -52,6 +52,7 @@ function baseRow(over: Partial<WorkspaceDetailsRow> = {}): WorkspaceDetailsRow {
     latestSymlinkLinked: null, latestSymlinkSkipped: null, latestSymlinkFailed: null, latestSymlinkError: null,
     createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-02T00:00:00Z",
     issueTitle: "Title", issuePriority: "high", skillName: null,
+    serviceState: null, isolationDowngraded: false, isolationDowngradeReason: null,
     ...over,
   };
 }

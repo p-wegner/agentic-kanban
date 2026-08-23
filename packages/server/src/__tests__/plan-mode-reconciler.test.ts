@@ -67,7 +67,7 @@ describe("reconcileStrandedPlanModeWorkspaces (#924)", () => {
   it("recovers a stranded plan-mode workspace: writes PLAN.md, clears planMode, auto-continues", async () => {
     const { workspaceId, sessionId, dir } = await seedStrandedPlan(db, { writePlanOut: true });
     cleanupFiles.push(sessionOutputPath(sessionId), dir);
-    const startSession = vi.fn(async () => randomUUID());
+    const startSession = vi.fn(async (_opts: Parameters<SessionManager["startSession"]>[0]) => randomUUID());
     const getSessionManager = () => ({ startSession } as unknown as SessionManager);
 
     const recovered = await reconcileStrandedPlanModeWorkspaces({ database: db, getSessionManager, boardEvents: fakeBoardEvents(), enabled: true });
@@ -86,7 +86,7 @@ describe("reconcileStrandedPlanModeWorkspaces (#924)", () => {
     const { workspaceId, sessionId, dir } = await seedStrandedPlan(db, { writePlanOut: true });
     cleanupFiles.push(sessionOutputPath(sessionId), dir);
     await db.insert(preferences).values({ key: "plan_auto_continue", value: "false", updatedAt: new Date().toISOString() });
-    const startSession = vi.fn(async () => randomUUID());
+    const startSession = vi.fn(async (_opts: Parameters<SessionManager["startSession"]>[0]) => randomUUID());
     const getSessionManager = () => ({ startSession } as unknown as SessionManager);
 
     await reconcileStrandedPlanModeWorkspaces({ database: db, getSessionManager, boardEvents: fakeBoardEvents(), enabled: true });
@@ -102,7 +102,7 @@ describe("reconcileStrandedPlanModeWorkspaces (#924)", () => {
     const { workspaceId, dir } = await seedStrandedPlan(db, { writePlanOut: false });
     cleanupFiles.push(dir);
     // No .out file written → nothing to recover.
-    const startSession = vi.fn(async () => randomUUID());
+    const startSession = vi.fn(async (_opts: Parameters<SessionManager["startSession"]>[0]) => randomUUID());
     const getSessionManager = () => ({ startSession } as unknown as SessionManager);
 
     const recovered = await reconcileStrandedPlanModeWorkspaces({ database: db, getSessionManager, boardEvents: fakeBoardEvents(), enabled: true });
@@ -118,7 +118,7 @@ describe("reconcileStrandedPlanModeWorkspaces (#924)", () => {
     const { workspaceId, sessionId, dir } = await seedStrandedPlan(db, { writePlanOut: true });
     cleanupFiles.push(sessionOutputPath(sessionId), dir);
     await db.update(workspaces).set({ pendingPlanPath: "PLAN.md" }).where(eq(workspaces.id, workspaceId));
-    const startSession = vi.fn(async () => randomUUID());
+    const startSession = vi.fn(async (_opts: Parameters<SessionManager["startSession"]>[0]) => randomUUID());
 
     const recovered = await reconcileStrandedPlanModeWorkspaces({
       database: db, getSessionManager: () => ({ startSession } as unknown as SessionManager), boardEvents: fakeBoardEvents(), enabled: true,

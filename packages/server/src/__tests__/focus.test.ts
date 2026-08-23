@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { eq } from "drizzle-orm";
 import { createFocusRoute } from "../routes/focus.js";
 import * as schema from "@agentic-kanban/shared/schema";
+import type { DependencyType } from "@agentic-kanban/shared/schema";
 import { randomUUID } from "node:crypto";
 import { createTestApp as _createTestApp } from "./helpers/test-app.js";
 import type { TestDb } from "./helpers/test-db.js";
@@ -53,7 +54,7 @@ async function seedIssue(
   return id;
 }
 
-async function seedDependency(db: TestDb, issueId: string, dependsOnId: string, type = "depends_on") {
+async function seedDependency(db: TestDb, issueId: string, dependsOnId: string, type: DependencyType = "depends_on") {
   await db.insert(schema.issueDependencies).values({
     id: randomUUID(),
     issueId,

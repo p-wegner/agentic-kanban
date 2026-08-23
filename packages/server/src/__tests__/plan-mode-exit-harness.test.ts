@@ -16,6 +16,7 @@ import { preferences, projects, projectStatuses, issues, workspaces } from "@age
 import { createTestDb } from "./helpers/test-db.js";
 import { finalizePlanModeExit } from "../services/session-manager/plan-mode-exit.js";
 import type { Database } from "../db/index.js";
+import type { ProviderId } from "../services/agent-provider/types.js";
 
 
 const PLAN = "<!-- PLAN:START -->\n# Plan\n- step one\n<!-- PLAN:END -->";
@@ -65,7 +66,12 @@ describe("finalizePlanModeExit — harness resolution (#544)", () => {
   });
 
   it("still resolves claude (including the legacy claude-code id) to claude", async () => {
-    for (const provider of ["claude", "claude-code"] as const) {
+    // `ProviderId` names only the legacy "claude-code" spelling, but every workspace row
+    // stores the modern "claude" and `narrowProviderName` accepts both — so the value this
+    // loop feeds is wider than `PlanModeExitRelaunch.provider` declares. The cast is the
+    // test recording that gap rather than hiding it; widening the production type is #808's
+    // reported follow-up, not a change a test may make.
+    for (const provider of ["claude", "claude-code"] as unknown as readonly ProviderId[]) {
       const { projectId, workspaceId } = await seed(db, null);
       const startSession = vi.fn(async () => "sess");
       const [ws] = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId));

@@ -52,7 +52,7 @@ describe("static serving does not smuggle past prefix-mounted middleware (#761, 
     // serve-static resolves `root` against process.cwd(), so hand it a relative path.
     const root = relative(process.cwd(), join(tmp, "public")).replaceAll("\\", "/");
     app = new Hono();
-    app.use("/protected/*", (c) => c.text("forbidden", 403));
+    app.use("/protected/*", async (c) => c.text("forbidden", 403));
     app.use("/*", serveStatic({ root }));
   });
 

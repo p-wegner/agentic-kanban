@@ -5,6 +5,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { walkPackageSources } from "../../../shared/__tests__/helpers/guard-scan.js";
 import { resolvePublicBoardUrl } from "../runtime-port.js";
+// @ts-expect-error — `scripts/` is plain .mjs with no type declarations and is not part
+// of any package tsconfig, so this import is implicitly `any`. Suppressed rather than
+// typed because the suite's whole point is to read the REAL script the runner uses; a
+// hand-written .d.ts beside it would be one more thing that can drift from it.
 import { resolvePublicServerPort } from "../../../../scripts/server-dev-proxy.mjs";
 
 /**

@@ -491,7 +491,10 @@ describe("scanDoneUnmergedWorkspaces", () => {
     const checkAncestor = makeCheckAncestor(false);
     const countCommits = makeCountCommits(2);
 
-    const { timer, interval } = startDoneUnmergedSweep(
+    // `PeriodicSweepHandle.stop()` clears BOTH the boot timeout and the interval. The old
+    // `const { timer, interval }` destructured a `timer` the handle has never had, so the
+    // `clearTimeout(timer)` below was a no-op on `undefined` and leaked the boot timeout.
+    const sweep = startDoneUnmergedSweep(
       {
         database: db, checkAncestor, countCommits,
         detectConflicts: makeDetectConflicts(false),
@@ -516,8 +519,7 @@ describe("scanDoneUnmergedWorkspaces", () => {
     const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses).where(eq(projectStatuses.id, issue.statusId));
     expect(status.name).toBe("Done");
 
-    clearTimeout(timer);
-    clearInterval(interval);
+    sweep.stop();
     vi.useRealTimers();
   });
 

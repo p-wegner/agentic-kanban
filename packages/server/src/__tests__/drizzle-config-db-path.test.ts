@@ -11,7 +11,8 @@ import { getDbUrl } from "../db/data-dir.js";
  */
 describe("drizzle.config.ts DB target", () => {
   it("resolves its DB url through the shared resolver, not a hardcoded relative path", () => {
-    expect(drizzleConfig.dbCredentials).toBeDefined();
+    expect("dbCredentials" in drizzleConfig).toBe(true);
+    if (!("dbCredentials" in drizzleConfig)) throw new Error("drizzle.config.ts declares no dbCredentials");
     const url = (drizzleConfig.dbCredentials as { url: string }).url;
     expect(url).toBe(getDbUrl());
     // A relative `file:kanban.db` is exactly the shape that minted the shadow DB.

@@ -42,7 +42,7 @@ const CANNED_LLM_JSON = JSON.stringify({
 const invokeClaudePrompt = vi.fn(async () => CANNED_LLM_JSON);
 
 vi.mock("../services/claude-cli.service.js", () => ({
-  invokeClaudePrompt: (...args: unknown[]) => invokeClaudePrompt(...args),
+  invokeClaudePrompt: (...args: Parameters<typeof invokeClaudePrompt>) => invokeClaudePrompt(...args),
 }));
 
 import { createTestDb } from "./helpers/test-db.js";

@@ -9,6 +9,7 @@ import { createTestDb } from "./helpers/test-db.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
 import { insertWorkspaceRepo, listWorkspaceRepos, setWorkspaceRepoMergedSha } from "../repositories/repo.repository.js";
 import { makeTempRepo } from "./helpers/temp-repo.js";
+import type { MergeWorkspaceResponse } from "./helpers/merge-result.js";
 
 /**
  * A REAL repo path (#273). This suite drives the actual merge path, whose repo lock
@@ -428,7 +429,7 @@ describe("doMerge ancestry check", () => {
       createBackup: async () => {},
       processKiller: async () => 0,
     });
-    const result = await svc.mergeWorkspace(workspaceId);
+    const result = await svc.mergeWorkspace(workspaceId) as MergeWorkspaceResponse;
 
     expect(result.mergeOutput).toMatch(/already.*merged|no-op/i);
     expect(detectConflicts).not.toHaveBeenCalled();

@@ -134,7 +134,7 @@ describe("GET /api/sessions/:id/output ETag / conditional-GET", () => {
 
     const res = await app.request("/api/sessions/sess-5/output");
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as unknown[];
     expect(Array.isArray(body)).toBe(true);
     expect(body[0]).toHaveProperty("type");
   });

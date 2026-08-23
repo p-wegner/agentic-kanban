@@ -115,7 +115,7 @@ async function seedRestartScenario(
     id: sessionId, workspaceId,
     status: "running",
     triggerType: opts.triggerType,
-    createdAt: now, updatedAt: now,
+    startedAt: now,
   });
 
   return { projectId, issueId, workspaceId, sessionId, inProgressId, inReviewId };

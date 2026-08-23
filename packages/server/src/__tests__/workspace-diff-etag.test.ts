@@ -35,7 +35,7 @@ describe("GET /api/workspaces/:id/diff ETag / conditional-GET", () => {
     expect(res1.status).toBe(200);
     const etag1 = res1.headers.get("ETag");
     expect(etag1).toBeTruthy();
-    const body1 = await res1.json();
+    const body1 = await res1.json() as { diff: string };
     expect(body1.diff).toContain("added line");
 
     // Second request with matching ETag — 304 with empty body
@@ -66,7 +66,7 @@ describe("GET /api/workspaces/:id/diff ETag / conditional-GET", () => {
     const etag2 = res2.headers.get("ETag");
     expect(etag2).toBeTruthy();
     expect(etag2).not.toBe(etag1);
-    const body2 = await res2.json();
+    const body2 = await res2.json() as { diff: string };
     expect(body2.diff).toContain("another line");
   });
 });

@@ -47,7 +47,8 @@ describe("POST /api/workspaces?async=1 (#269)", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title, statusId, projectId }),
     });
-    return (await res.json()).id;
+    const body = await res.json() as { id: string };
+    return body.id;
   }
 
   it("returns 202 + jobId immediately and the job converges to the created workspace", { timeout: GIT_HEAVY_TEST_TIMEOUT_MS }, async () => {

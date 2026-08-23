@@ -173,7 +173,7 @@ describe("#801 — the placement reason is recorded AT DISPATCH", () => {
     await db.insert(projectStatuses).values({ id: statusId, projectId, name: "Done", sortOrder: 1 });
     await db.insert(issues).values({ id: issueId, projectId, statusId, title: "t", issueNumber: 1 });
     await db.insert(workspaces).values({
-      id: workspaceId, issueId, branch: "feature/ak-1", worktreePath: "/tmp/p/wt", status: "active",
+      id: workspaceId, issueId, branch: "feature/ak-1", workingDir: "/tmp/p/wt", status: "active",
     });
     await db.insert(sessions).values({ id: sessionId, workspaceId, status: "completed" });
 

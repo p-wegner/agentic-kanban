@@ -24,6 +24,10 @@ const GATE: PluginLoopGate = {
     { id: "approve", label: "Approve" },
     { id: "revise", label: "Needs revision", input: "text" },
   ],
+  // Required by PluginLoopGate: the deterministic command that applies a chosen action.
+  // Nothing here ever runs it — this suite only exercises the recommendation trace — but a
+  // fixture that omits it is not the shape a plugin manifest actually produces.
+  resolve: { command: "node plan.mjs resolve-gate" },
 };
 
 /**

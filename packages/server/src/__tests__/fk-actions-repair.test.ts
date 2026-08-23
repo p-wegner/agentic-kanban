@@ -105,7 +105,7 @@ describe("alignForeignKeyActions", () => {
     // Row survived the rebuild.
     const rows = await client.execute("SELECT id, issue_id, type FROM issue_dependencies");
     expect(rows.rows.length).toBe(1);
-    expect((rows.rows[0] as { id: string }).id).toBe("d1");
+    expect(rows.rows[0].id).toBe("d1");
 
     // Index survived.
     const idx = await client.execute(

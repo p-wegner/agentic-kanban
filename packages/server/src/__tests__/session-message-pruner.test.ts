@@ -11,7 +11,7 @@ async function seedBase(db: ReturnType<typeof createTestDb>["db"]) {
   const issueId = randomUUID();
 
   await db.insert(projects).values({ id: projectId, name: "P", repoPath: "/tmp/p", repoName: "p", defaultBranch: "main", createdAt: now, updatedAt: now });
-  await db.insert(projectStatuses).values({ id: statusId, projectId, name: "In Progress", sortOrder: 0, createdAt: now, updatedAt: now });
+  await db.insert(projectStatuses).values({ id: statusId, projectId, name: "In Progress", sortOrder: 0, createdAt: now });
   await db.insert(issues).values({ id: issueId, projectId, statusId, title: "T", sortOrder: 0, createdAt: now, updatedAt: now });
 
   return { projectId, statusId, issueId, now };
@@ -40,7 +40,6 @@ async function insertSession(db: ReturnType<typeof createTestDb>["db"], workspac
     status: "stopped",
     startedAt,
     endedAt: startedAt,
-    createdAt: startedAt,
   });
   return id;
 }

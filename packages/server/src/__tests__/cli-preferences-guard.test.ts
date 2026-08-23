@@ -56,6 +56,9 @@ describe("CLI preferences set — provider-key divergence guard (#973)", () => {
   it("rejects a claude_profile write that would diverge from the active project's Bullseye", async () => {
     const result = await setPreferenceGuarded("claude_profile", "work", database);
     expect(result.ok).toBe(false);
+    // Narrow the result union so `error` is reachable — `expect(...).toBe(false)` is not a
+    // type guard, and the guard's whole contract is that a rejection CARRIES a reason.
+    if (result.ok) throw new Error("expected the guard to reject the write");
     expect(result.error).toMatch(/Bullseye/i);
     // Nothing persisted.
     expect(await getPreference("claude_profile", database)).toBe("anth");

@@ -177,7 +177,7 @@ describe("agent-remote service (worker fleet phase 1c)", () => {
   describe("a reconnecting worker's unknown sessions", () => {
     async function seedSession(sessionId: string, status: string, workerId: string | null) {
       await db.insert(projects).values({ id: "p1", name: "p" }).onConflictDoNothing();
-      await db.insert(projectStatuses).values({ id: "st1", projectId: "p1", name: "Todo", position: 0 }).onConflictDoNothing();
+      await db.insert(projectStatuses).values({ id: "st1", projectId: "p1", name: "Todo", sortOrder: 0 }).onConflictDoNothing();
       await db.insert(issues).values({ id: "i1", title: "t", statusId: "st1", projectId: "p1" }).onConflictDoNothing();
       await db.insert(workspaces).values({ id: "ws1", issueId: "i1", branch: "feature/x" }).onConflictDoNothing();
       await db.insert(sessions).values({ id: sessionId, workspaceId: "ws1", status, workerId });

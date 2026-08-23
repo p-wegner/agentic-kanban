@@ -181,7 +181,7 @@ describe("closeWorkspace: lifecycle status transition (independent)", () => {
     await closeWorkspace({ database: db, workspaceId });
 
     const [ws] = await db.select({ workingDir: workspaces.workingDir })
-      .from(workspaces).where(eq(workspaceId, workspaces.id));
+      .from(workspaces).where(eq(workspaces.id, workspaceId));
     expect(ws.workingDir).toBe("/repo/.worktrees/ak-637");
   });
 
