@@ -7,7 +7,7 @@ import { COPILOT_PLAN_PROMPT_PREFIX,
   getMcpConfigPath,
   spliceAgentArgs,
   mapCopilotProfile,
-  nodeFileSystem, resolveMockLaunch } from "./helpers.js";
+  nodeFileSystem, resolveMockLaunch, commandCarriesArgs } from "./helpers.js";
 
 export class CopilotProvider implements AgentProvider {
   readonly name = "copilot";
@@ -27,7 +27,7 @@ export class CopilotProvider implements AgentProvider {
       "copilot",
     );
     let command = resolvedCommand;
-    let useShell = isWindows;
+    let useShell = isWindows || commandCarriesArgs(command);
     const argsPrefix: string[] = [];
 
     const args: string[] = [];
