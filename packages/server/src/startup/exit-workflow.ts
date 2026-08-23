@@ -40,6 +40,7 @@ import { isAutomaticMergeEnabled } from "./merge-strategy.js";
 import type { Database } from "../db/index.js";
 import { classifySessionExit, resolveSessionRoleFlags } from "./session-exit-classification.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
+import { setMergeGateEvidence } from "../repositories/merge-gate.repository.js";
 import { workspaceHasCommittedWork } from "../services/workspace-commits.js";
 import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.service.js";
 import { isFoundationalBlocker } from "../services/foundational-merge.service.js";
@@ -331,12 +332,16 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
     await db.update(workspaces).set({
       readyForMerge: true,
       updatedAt: evidence.ranAt,
-      mergeGateRanAt: evidence.trustworthy ? evidence.ranAt : null,
-      mergeGateStage: evidence.trustworthy ? evidence.stage : null,
-      mergeGateSource: evidence.trustworthy ? evidence.source : null,
-      mergeGateBranchSha: evidence.branchSha,
-      mergeGateBaseSha: evidence.baseSha,
     }).where(eq(workspaces.id, workspaceId));
+    // #815: the five `merge_gate_*` columns moved to `workspace_merge_gate`. Same values,
+    // same trustworthiness rule — an upsert, because a workspace can be re-gated.
+    await setMergeGateEvidence(workspaceId, {
+      ranAt: evidence.trustworthy ? evidence.ranAt : null,
+      stage: evidence.trustworthy ? evidence.stage : null,
+      source: evidence.trustworthy ? evidence.source : null,
+      branchSha: evidence.branchSha,
+      baseSha: evidence.baseSha,
+    }, db);
     boardEvents.broadcast(projectId, "workspace_ready_for_merge");
   }
 

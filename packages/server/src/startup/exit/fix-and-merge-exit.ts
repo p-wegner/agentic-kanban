@@ -17,6 +17,7 @@
  * `getWorkspaceById` / `getProjectRepoPath`.
  */
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { clearMergeGateEvidence } from "../../repositories/merge-gate.repository.js";
 import { getProjectRepoPath } from "../../repositories/project.repository.js";
 import { getWorkspaceById } from "../../repositories/workspace-reads.repository.js";
 import { setWorkspaceStatus } from "../../repositories/workspace-status.repository.js";
@@ -81,7 +82,11 @@ export function createFixAndMergeExitHandler({ database: db, gitService, boardEv
       // Not landed: keep the workspace OPEN + idle and retryable. Clear readyForMerge so a
       // conflicted branch is not silently re-queued as "ready". Surface a clear signal.
       const now = new Date().toISOString();
-      await setWorkspaceStatus(db, workspace.id, "idle", { now, set: { readyForMerge: false, mergeGateRanAt: null, mergeGateStage: null, mergeGateSource: null } });
+      await setWorkspaceStatus(db, workspace.id, "idle", { now, set: { readyForMerge: false } });
+      // #815: the gate evidence moved to `workspace_merge_gate`. Nulling three of the five
+      // columns was how this path said "the proof is void"; DELETING the row says the same
+      // thing and cannot leave a half-cleared quartet behind.
+      await clearMergeGateEvidence(workspace.id, db);
       boardEvents.broadcast(projectId, "workspace_idle");
       boardEvents.broadcast(projectId, "workflow_error");
       emitButlerSystemEvent({

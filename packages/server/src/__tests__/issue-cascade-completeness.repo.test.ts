@@ -183,6 +183,14 @@ const SUBTREE_SEEDERS: Record<string, (c: SeedCtx) => Promise<void>> = {
       error: null,
     });
   },
+  // #815: the fifth column family extracted out of `workspaces` — the pre-merge gate's
+  // evidence. Same `onDelete: cascade` shape, so seeding it proves the cascade fires.
+  workspace_merge_gate: async (c) => {
+    await c.db.insert(schema.workspaceMergeGate).values({
+      workspaceId: c.workspaceId, ranAt: c.now, stage: "verify", source: "review-exit gate",
+      branchSha: "abc1234", baseSha: "def5678",
+    });
+  },
   sessions: async (c) => {
     await c.db.insert(schema.sessions).values({
       id: c.sessionId, workspaceId: c.workspaceId, status: "running", startedAt: c.now,
