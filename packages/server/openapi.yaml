@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: agentic-kanban REST API
   version: 0.1.9
-  description: "Auto-generated from Hono route source via scripts/generate-openapi.ts. Schemas are inferred statically (best-effort) — request bodies come from the parseJsonBody<T> type argument; response bodies are untyped. Coverage is audited: see x-coverage for what is scanned and what is deliberately not described here."
+  description: "Auto-generated from Hono route source via scripts/generate-openapi.ts. Schemas are inferred statically (best-effort) — a request body comes from the zod schema passed to `parseJsonBody(c, schema)` where there is one, otherwise from the `parseJsonBody<T>` type argument; response bodies are untyped. Coverage is audited: see x-coverage for what is scanned and what is deliberately not described here."
 servers:
   - url: /
     description: "Same-origin (default dev: http://localhost:3001)"
@@ -16,6 +16,12 @@ x-coverage:
       reason: SPA fallback - serves the client bundle for any path the API did not match. Not an API operation, and `*` is not expressible as an OpenAPI path.
     - where: src/services/fleet-listener.service.ts
       reason: A SEPARATE Hono app on KANBAN_FLEET_PORT (worker register/heartbeat/ws + the fleet MCP bridge), never mounted on the board API. It has its own bearer-token auth and its own surface; documenting its paths here would claim they exist on the board port, where they do not.
+  requestBodies:
+    mechanism: "A route validating its body calls `parseJsonBody(c, schema)` with a zod schema from the sibling `routes/*-body-schemas.ts` (#512/#806). That schema is read statically: each field's primitive, whether it is required, a length bound, and whether unknown keys are kept (`x-unknown-keys`) or stripped."
+    limitations:
+      - "An operation described only as `additionalProperties: true` with NO property list parses its body WITHOUT a schema (`parseJsonBody(c)` / `parseOptionalJsonBody(c)`) or does not parse one at all. That is an omission the route has not closed yet, not a claim that the endpoint accepts any object."
+      - "`x-unknown-keys: stripped` means zod DROPS unknown keys before the handler sees them; the request itself is still accepted, which is why additionalProperties stays true."
+      - A zod predicate is deliberately weaker than the type it carries (`arrayOnly` is `Array.isArray` and nothing more), so an array's ITEM schema is the declared type, not something the server enforces.
   errorResponses:
     mechanism: Routes built on `createRouter()` install `domainErrorHandler`, which maps a thrown error's domain code to a status (DOMAIN_CODE_STATUS) and echoes the code in the body as `{ error, code }`.
     derivedFrom: Statuses are attributed by statically following `throw new ...` from each handler up to 2 call(s) deep, mapping the code through the tables parsed from `middleware/error-handler.ts` and `errors/index.ts`.
@@ -100,7 +106,17 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                prompt:
+                  type: string
+              required:
+                - name
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -535,7 +551,22 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                script:
+                  type: string
+                projectId:
+                  type: string
+                  nullable: true
+              required:
+                - name
+                - description
+                - script
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "201":
           description: Success
@@ -570,7 +601,30 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                projectId:
+                  type: string
+                changes:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      filePath:
+                        type: string
+                      modified:
+                        type: string
+                    required:
+                      - filePath
+                      - modified
+                selectedFiles:
+                  type: array
+                  items:
+                    type: string
+              required:
+                - projectId
+                - changes
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -597,7 +651,20 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                description:
+                  type: string
+                projectId:
+                  type: string
+                overrideLimit:
+                  type: boolean
+                script:
+                  type: string
+              required:
+                - description
+                - projectId
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -695,7 +762,25 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                title:
+                  type: string
+                errorClass:
+                  type: string
+                description:
+                  type: string
+                rootCause:
+                  type: string
+                fix:
+                  type: string
+                sourceType:
+                  type: string
+                sourceRef:
+                  type: string
+              required:
+                - title
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "201":
           description: Success
@@ -719,7 +804,13 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                filePath:
+                  type: string
+              required:
+                - filePath
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -807,7 +898,25 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                sessionId:
+                  type: string
+                  minLength: 1
+                commitSha:
+                  type: string
+                output:
+                  type: string
+                  minLength: 1
+                runner:
+                  type: string
+                  enum:
+                    - vitest
+                    - playwright
+              required:
+                - sessionId
+                - output
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -847,7 +956,16 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                testName:
+                  type: string
+                  minLength: 1
+                file:
+                  type: string
+              required:
+                - testName
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -1122,7 +1240,45 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                projectId:
+                  type: string
+                  minLength: 1
+                title:
+                  type: string
+                description:
+                  type: string
+                priority:
+                  type: string
+                issueType:
+                  type: string
+                skipAutoReview:
+                  type: boolean
+                estimate:
+                  type: string
+                  nullable: true
+                sortOrder:
+                  type: number
+                statusId:
+                  type: string
+                workflowTemplateId:
+                  type: string
+                  nullable: true
+                externalKey:
+                  type: string
+                  nullable: true
+                externalUrl:
+                  type: string
+                  nullable: true
+                reposTouched:
+                  type: array
+                  items:
+                    type: string
+              required:
+                - projectId
+                - title
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "201":
           description: Success
@@ -1151,7 +1307,14 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                issueId:
+                  type: string
+                  minLength: 1
+              required:
+                - issueId
               additionalProperties: true
+              x-unknown-keys: stripped
       responses:
         "200":
           description: Success
@@ -1185,7 +1348,18 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                issueId:
+                  type: string
+                  minLength: 1
+                projectId:
+                  type: string
+                  minLength: 1
+              required:
+                - issueId
+                - projectId
               additionalProperties: true
+              x-unknown-keys: stripped
       responses:
         "200":
           description: Success
@@ -1219,7 +1393,18 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                projectId:
+                  type: string
+                  minLength: 1
+                olderThanDays:
+                  type: number
+                nowOverride:
+                  type: string
+              required:
+                - projectId
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -1248,7 +1433,25 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                projectId:
+                  type: string
+                  minLength: 1
+                issues:
+                  type: array
+                  items: {}
+                parentIssueId:
+                  type: string
+                driveTarget:
+                  type: string
+                dependencies:
+                  type: array
+                  items: {}
+              required:
+                - projectId
+                - issues
               additionalProperties: true
+              x-unknown-keys: stripped
       responses:
         "201":
           description: Success
@@ -1277,7 +1480,17 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                issueIds:
+                  type: array
+                  items:
+                    type: string
+                updates: {}
+              required:
+                - issueIds
+                - updates
               additionalProperties: true
+              x-unknown-keys: stripped
       responses:
         "200":
           description: Success
@@ -1367,7 +1580,14 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                projectId:
+                  type: string
+                  minLength: 1
+              required:
+                - projectId
               additionalProperties: true
+              x-unknown-keys: stripped
       responses:
         "200":
           description: Success
@@ -1396,7 +1616,17 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                issueIds:
+                  type: array
+                  items:
+                    type: string
+                leadIssueId:
+                  type: string
+              required:
+                - issueIds
               additionalProperties: true
+              x-unknown-keys: stripped
       responses:
         "200":
           description: Success
@@ -1430,7 +1660,28 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                projectId:
+                  type: string
+                  minLength: 1
+                survivorId:
+                  type: string
+                  minLength: 1
+                memberIds:
+                  type: array
+                  items:
+                    type: string
+                mergedTitle:
+                  type: string
+                mergedDescription:
+                  type: string
+              required:
+                - projectId
+                - survivorId
+                - memberIds
+                - mergedTitle
               additionalProperties: true
+              x-unknown-keys: stripped
       responses:
         "200":
           description: Success
@@ -1459,7 +1710,14 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                edges:
+                  type: array
+                  items: {}
+              required:
+                - edges
               additionalProperties: true
+              x-unknown-keys: stripped
       responses:
         "200":
           description: Success
@@ -1483,7 +1741,17 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                title:
+                  type: string
+                description:
+                  type: string
+                projectId:
+                  type: string
+              required:
+                - title
               additionalProperties: true
+              x-unknown-keys: stripped
       responses:
         "200":
           description: Success
@@ -1512,7 +1780,16 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                projectId:
+                  type: string
+                  minLength: 1
+                apply:
+                  type: boolean
+              required:
+                - projectId
               additionalProperties: true
+              x-unknown-keys: stripped
       responses:
         "200":
           description: Success
@@ -1705,7 +1982,11 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                refresh:
+                  type: boolean
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -1762,7 +2043,24 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                type:
+                  type: string
+                  minLength: 1
+                mimeType:
+                  type: string
+                content:
+                  type: string
+                  minLength: 1
+                caption:
+                  type: string
+                workspaceId:
+                  type: string
+              required:
+                - type
+                - content
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "201":
           description: Success
@@ -1842,7 +2140,18 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                kind: {}
+                author: {}
+                body:
+                  type: string
+                payload: {}
+                workspaceId:
+                  type: string
+              required:
+                - body
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "201":
           description: Success
@@ -1918,7 +2227,14 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                projectId:
+                  type: string
+                  minLength: 1
+              required:
+                - projectId
               additionalProperties: true
+              x-unknown-keys: stripped
       responses:
         "200":
           description: Success
@@ -1958,7 +2274,24 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                projectId:
+                  type: string
+                  minLength: 1
+                children:
+                  type: array
+                  items: {}
+                dependencies:
+                  type: array
+                  items: {}
+                driveTarget:
+                  type: string
+              required:
+                - projectId
+                - children
+                - dependencies
               additionalProperties: true
+              x-unknown-keys: stripped
       responses:
         "201":
           description: Success
@@ -2010,7 +2343,16 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                dependsOnId:
+                  type: string
+                  minLength: 1
+                type:
+                  type: string
+              required:
+                - dependsOnId
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "201":
           description: Success
@@ -2149,7 +2491,17 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                projectId:
+                  type: string
+                  minLength: 1
+                clarifications:
+                  type: array
+                  items: {}
+              required:
+                - projectId
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -2212,7 +2564,15 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                reposTouched:
+                  type: array
+                  items:
+                    type: string
+              required:
+                - reposTouched
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -2264,7 +2624,14 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                contestants:
+                  type: array
+                  items: {}
+              required:
+                - contestants
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "201":
           description: Success
@@ -2344,7 +2711,14 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                tagId:
+                  type: string
+                  minLength: 1
+              required:
+                - tagId
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "201":
           description: Success
@@ -2512,7 +2886,19 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                workspaceIds:
+                  type: array
+                  items:
+                    type: string
+                dryRun:
+                  type: boolean
+                skipOnConflict:
+                  type: boolean
+              required:
+                - workspaceIds
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -2914,7 +3300,22 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                projectId:
+                  type: string
+                gateId:
+                  type: string
+                path:
+                  type: string
+                content:
+                  type: string
+              required:
+                - projectId
+                - gateId
+                - path
+                - content
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -2987,7 +3388,18 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                projectId:
+                  type: string
+                gateId:
+                  type: string
+                notes:
+                  type: string
+              required:
+                - projectId
+                - gateId
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -3022,7 +3434,21 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                projectId:
+                  type: string
+                gateId:
+                  type: string
+                actionId:
+                  type: string
+                input:
+                  type: string
+              required:
+                - projectId
+                - gateId
+                - actionId
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -3057,7 +3483,16 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                projectId:
+                  type: string
+                gateId:
+                  type: string
+              required:
+                - projectId
+                - gateId
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -3198,7 +3633,15 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                projectId:
+                  type: string
+                location:
+                  type: string
+              required:
+                - projectId
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -3255,7 +3698,23 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                projectId:
+                  type: string
+                values:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      index:
+                        type: number
+                      value:
+                        type: string
+              required:
+                - projectId
+                - values
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -3284,7 +3743,16 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                projectId:
+                  type: string
+                content:
+                  type: string
+              required:
+                - projectId
+                - content
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -3970,7 +4438,14 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                projectId:
+                  type: string
+                  minLength: 1
+              required:
+                - projectId
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -4004,7 +4479,14 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                projectId:
+                  type: string
+                  minLength: 1
+              required:
+                - projectId
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -4038,7 +4520,14 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                projectId:
+                  type: string
+                  minLength: 1
+              required:
+                - projectId
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -4239,7 +4728,32 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                workspaceId:
+                  type: string
+                  minLength: 1
+                questions:
+                  type: array
+                  items: {}
+                answers:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      selectedLabels:
+                        type: array
+                        items:
+                          type: string
+                      freeText:
+                        type: string
+                    required:
+                      - selectedLabels
+              required:
+                - workspaceId
+                - questions
+                - answers
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -5071,7 +5585,15 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                issueIds:
+                  type: array
+                  items:
+                    type: string
+              required:
+                - issueIds
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -5402,7 +5924,15 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                stepId:
+                  type: string
+                  minLength: 1
+                input: {}
+              required:
+                - stepId
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -5467,7 +5997,14 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                stepId:
+                  type: string
+                  minLength: 1
+              required:
+                - stepId
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -5635,7 +6172,25 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                path:
+                  type: string
+                cloneUrl:
+                  type: string
+                createName:
+                  type: string
+                name:
+                  type: string
+                generateReadme:
+                  type: boolean
+                setupScript:
+                  type: string
+                  nullable: true
+                composeFile:
+                  type: string
+                  nullable: true
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "201":
           description: Success
@@ -5707,7 +6262,17 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                name:
+                  type: string
+                setupScript:
+                  type: string
+                  nullable: true
+                composeFile:
+                  type: string
+                  nullable: true
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -5941,7 +6506,15 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                name:
+                  type: string
+                sortOrder:
+                  type: number
+              required:
+                - name
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "201":
           description: Success
@@ -5998,7 +6571,13 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                sortOrder:
+                  type: number
+              required:
+                - sortOrder
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -6081,7 +6660,19 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                transcript:
+                  type: string
+                speechLanguage:
+                  type: string
+                  nullable: true
+                speechLanguageLabel:
+                  type: string
+                  nullable: true
+              required:
+                - transcript
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "201":
           description: Success
@@ -6230,7 +6821,14 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                path:
+                  type: string
+                  minLength: 1
+              required:
+                - path
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -6511,7 +7109,13 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                enabled:
+                  type: boolean
+              required:
+                - enabled
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -6573,7 +7177,23 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                driveId:
+                  type: string
+                  nullable: true
+                kind: {}
+                severity: {}
+                issueNumber:
+                  type: number
+                  nullable: true
+                summary:
+                  type: string
+                details: {}
+              required:
+                - kind
+                - summary
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "201":
           description: Success
@@ -6884,6 +7504,7 @@ paths:
                   type: string
                   enum:
                     - completed
+                    - abandoned
       responses:
         "200":
           description: Success
@@ -7690,7 +8311,14 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                winnerWorkspaceId:
+                  type: string
+                  minLength: 1
+              required:
+                - winnerWorkspaceId
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -7730,7 +8358,17 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                color:
+                  type: string
+                  nullable: true
+              required:
+                - name
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "201":
           description: Success
@@ -7759,7 +8397,19 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                targetId:
+                  type: string
+                  minLength: 1
+                sourceIds:
+                  type: array
+                  items:
+                    type: string
+              required:
+                - targetId
+                - sourceIds
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -8615,6 +9265,8 @@ paths:
                   type: string
                   enum:
                     - sequential
+                    - parallel
+                    - background
                 customPrompt:
                   type: string
                 clarifications:
@@ -8770,6 +9422,8 @@ paths:
                   type: string
                   enum:
                     - sequential
+                    - parallel
+                    - background
                 customPrompt:
                   type: string
                 clarifications:
@@ -9144,7 +9798,26 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                filePath:
+                  type: string
+                  minLength: 1
+                body:
+                  type: string
+                  minLength: 1
+                lineNumOld:
+                  type: number
+                  nullable: true
+                lineNumNew:
+                  type: number
+                  nullable: true
+                side:
+                  type: string
+              required:
+                - filePath
+                - body
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "201":
           description: Success
@@ -9201,7 +9874,14 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                body:
+                  type: string
+                  minLength: 1
+              required:
+                - body
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -9236,7 +9916,13 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                resolved:
+                  type: boolean
+              required:
+                - resolved
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -9683,7 +10369,14 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                feedback:
+                  type: string
+                  minLength: 1
+              required:
+                - feedback
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "201":
           description: Success
@@ -10213,7 +10906,14 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                content:
+                  type: string
+                  minLength: 1
+              required:
+                - content
               additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success

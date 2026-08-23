@@ -410,11 +410,30 @@ function localFunctionCalled(call: Node, sf: SourceFile): Node | undefined {
   return findFunctionNamed(sf, expr.getText());
 }
 
-function analyseHandler(handler: Node, info: RouteInfo, depth = 0, seen = new Set<string>()) {
+/**
+ * The zod schema a WRAPPER's caller supplied, carried one hop down.
+ *
+ * `routes/plugins.ts` calls `parsePluginBody(c, updatePluginBody)`, whose body is
+ * `parseJsonBody(c, schema)` — where `schema` is a PARAMETER and resolves to nothing. The
+ * schema is at the outer call site, so it travels with the hop; without this, the twelve
+ * plugin write routes are exactly the operations that keep no property list (#838).
+ */
+interface SchemaArgOverride {
+  node: Node;
+  sf: SourceFile;
+}
+
+function analyseHandler(
+  handler: Node,
+  info: RouteInfo,
+  depth = 0,
+  seen = new Set<string>(),
+  schemaOverride?: SchemaArgOverride,
+) {
   for (const call of handler.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     const expr = call.getExpression();
 
-    // parseJsonBody<T>(c) / parseOptionalJsonBody<T>(c)
+    // parseJsonBody<T>(c) / parseJsonBody(c, zodSchema) / parseOptionalJsonBody<T>(c)
     const calleeName = Node.isIdentifier(expr)
       ? expr.getText()
       : Node.isPropertyAccessExpression(expr)
@@ -423,8 +442,25 @@ function analyseHandler(handler: Node, info: RouteInfo, depth = 0, seen = new Se
     if (calleeName === "parseJsonBody" || calleeName === "parseOptionalJsonBody") {
       info.requestBodyOptional = calleeName === "parseOptionalJsonBody";
       const typeArg = call.getTypeArguments()[0];
+      const schemaArg = call.getArguments()[1];
       if (typeArg) {
         info.requestBody = typeNodeToSchema(typeArg);
+      } else if (schemaArg || schemaOverride) {
+        // #838 — the runtime schema, which carries MORE than the type argument did: which
+        // fields are required, each one's primitive, and the `.passthrough()` decision.
+        const sf = call.getSourceFile();
+        const read = (schemaArg ? zodExprToSchema(schemaArg, sf, new Map()) : undefined)
+          ?? (schemaOverride ? zodExprToSchema(schemaOverride.node, schemaOverride.sf, new Map()) : undefined);
+        if (read) {
+          info.requestBody = read.schema;
+          bodySchemaStats.read++;
+        } else {
+          info.requestBodyUnknown = true;
+          bodySchemaStats.unreadable.push({
+            where: `${info.method.toUpperCase()} ${info.path}`,
+            expression: (schemaArg ?? schemaOverride!.node).getText().replace(/\s+/g, " ").slice(0, 80),
+          });
+        }
       } else {
         info.requestBodyUnknown = true;
       }
@@ -441,7 +477,14 @@ function analyseHandler(handler: Node, info: RouteInfo, depth = 0, seen = new Se
         const key = `${sf.getFilePath()}:${target.getStart()}`;
         if (!seen.has(key)) {
           seen.add(key);
-          analyseHandler(target, info, depth + 1, seen);
+          const wrapperSchemaArg = call.getArguments()[1];
+          analyseHandler(
+            target,
+            info,
+            depth + 1,
+            seen,
+            wrapperSchemaArg ? { node: wrapperSchemaArg, sf } : schemaOverride,
+          );
         }
       }
     }
@@ -841,8 +884,15 @@ function thrownStatusesForHandler(handler: Node): ThrownStatus[] {
 // TypeNode -> JSON Schema (syntactic, best-effort)
 // ---------------------------------------------------------------------------
 
-function typeNodeToSchema(node: TypeNode): Schema {
-  // Union: strip null/undefined, mark nullable, take first concrete member.
+/**
+ * `typeParams` substitutes a generic helper's type parameters for the arguments its CALL
+ * site supplied — `arrayOnly<string>(…)` returns `z.custom<T[]>(…)`, and reading `T[]` as an
+ * array of nothing would throw away the one piece of shape that call carries (#838). Empty
+ * for every non-generic read, which is all of the pre-#838 callers.
+ */
+function typeNodeToSchema(node: TypeNode, typeParams: Map<string, TypeNode> = new Map()): Schema {
+  // Union: strip null/undefined, mark nullable. A union of nothing but string literals is a
+  // closed enum and is emitted whole; anything else takes the first concrete member.
   if (Node.isUnionTypeNode(node)) {
     const members = node.getTypeNodes();
     const nonNull = members.filter((m) => {
@@ -850,13 +900,26 @@ function typeNodeToSchema(node: TypeNode): Schema {
       return t !== "null" && t !== "undefined";
     });
     const nullable = nonNull.length !== members.length;
-    const base = nonNull[0] ? typeNodeToSchema(nonNull[0]) : {};
+    // `"vitest" | "playwright"` used to document only `enum: [vitest]`, which is a FALSE
+    // statement about the endpoint (it accepts both) rather than a gap. Taking the first
+    // member is only defensible when the members are not all enumerable.
+    const literals = nonNull.map((m) => {
+      if (!Node.isLiteralTypeNode(m)) return undefined;
+      const lit = m.getLiteral();
+      return Node.isStringLiteral(lit) ? lit.getLiteralValue() : undefined;
+    });
+    if (nonNull.length > 1 && literals.every((v) => v !== undefined)) {
+      const base: Schema = { type: "string", enum: literals as string[] };
+      if (nullable) base.nullable = true;
+      return base;
+    }
+    const base = nonNull[0] ? typeNodeToSchema(nonNull[0], typeParams) : {};
     if (nullable) (base as Schema).nullable = true;
     return base;
   }
 
   if (Node.isArrayTypeNode(node)) {
-    return { type: "array", items: typeNodeToSchema(node.getElementTypeNode()) };
+    return { type: "array", items: typeNodeToSchema(node.getElementTypeNode(), typeParams) };
   }
 
   if (Node.isTypeLiteral(node)) {
@@ -866,12 +929,19 @@ function typeNodeToSchema(node: TypeNode): Schema {
       if (!Node.isPropertySignature(member)) continue;
       const name = member.getName();
       const t = member.getTypeNode();
-      properties[name] = t ? typeNodeToSchema(t) : {};
+      properties[name] = t ? typeNodeToSchema(t, typeParams) : {};
       if (!member.hasQuestionToken()) required.push(name);
     }
     const schema: Schema = { type: "object", properties };
     if (required.length) schema.required = required;
     return schema;
+  }
+
+  if (Node.isTypeReference(node)) {
+    // The substitution above. The argument comes from the CALL site, so it is read with an
+    // empty map — a helper's parameter never resolves through another helper's.
+    const mapped = typeParams.get(node.getTypeName().getText());
+    if (mapped) return typeNodeToSchema(mapped);
   }
 
   switch (node.getKind()) {
@@ -890,6 +960,291 @@ function typeNodeToSchema(node: TypeNode): Schema {
       return {};
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// zod schema -> JSON Schema (#838)
+// ---------------------------------------------------------------------------
+
+/**
+ * #838 — why this exists, and why it is the BETTER source of a request schema.
+ *
+ * The generator used to read a body's shape from the TYPE ARGUMENT of `parseJsonBody<T>(c)`.
+ * #806's conversions replace that with `parseJsonBody(c, schema)` — runtime zod, no type
+ * argument — so every converted route fell through to `requestBodyUnknown` and the spec
+ * documented `additionalProperties: true` with no property list: "any object", for an endpoint
+ * that rejects most objects. The count was CLIMBING with each batch (95 -> 118), and nothing
+ * failed when a property list disappeared, which is how it got there.
+ *
+ * The zod schema carries strictly more than the type argument ever did: which fields are
+ * REQUIRED (a `.optional()` is visible where a TS `?` on an inline literal was too, but a
+ * `required("…")` predicate on a declared-optional field was not), the primitive each field
+ * must be, a `.min(1)`, and the `.passthrough()` decision.
+ *
+ * The surface is narrow and uniform by construction: every schema is a top-level `z.object({…})`
+ * in a sibling `*-body-schemas.ts`, built from the predicate vocabulary in
+ * `body-schema-helpers.ts`. Those helpers are NOT hardcoded here — a hardcoded table is a second
+ * place the vocabulary lives and the first to go stale. Each helper call is resolved to its own
+ * declaration and its single `return` expression is read as zod, with the call's type arguments
+ * substituted for the helper's type parameters. A helper added tomorrow is read for free; one
+ * whose body this walk cannot read falls back, LOUDLY (see `bodySchemaStats`).
+ */
+const MAX_ZOD_DEPTH = 10;
+
+/** A read zod expression: the JSON Schema it describes, plus whether the FIELD is optional. */
+interface ZodRead {
+  schema: Schema;
+  optional: boolean;
+}
+
+/**
+ * What the zod walk read and what it could NOT, counted so the report says so out loud —
+ * the same honesty rule the throw walk follows. An unreadable schema is not silently mixed in
+ * with the routes that genuinely parse no body: it is named, with the expression that defeated
+ * the walk.
+ */
+const bodySchemaStats = {
+  read: 0,
+  unreadable: [] as Array<{ where: string; expression: string }>,
+};
+
+/** The top-level `export const x = …` initializer in `sf`, if there is one. */
+function findVariableInitializer(sf: SourceFile, name: string): Node | undefined {
+  for (const decl of sf.getVariableDeclarations()) {
+    if (decl.getName() === name) return decl.getInitializer();
+  }
+  return undefined;
+}
+
+function zodObjectLiteral(
+  call: CallExpression,
+  sf: SourceFile,
+  typeParams: Map<string, TypeNode>,
+  depth: number,
+): ZodRead | undefined {
+  const arg = call.getArguments()[0];
+  if (!arg || !Node.isObjectLiteralExpression(arg)) return undefined;
+  const properties: Record<string, Schema> = {};
+  const required: string[] = [];
+  for (const prop of arg.getProperties()) {
+    // A SPREAD means the field list is not fully readable here, and a partial property list
+    // would claim a field set the endpoint does not have — fall back whole. A SHORTHAND is
+    // readable: `{ projectId, gateId: … }` names a schema constant declared beside it, which
+    // is how `plugin-body-schemas.ts` shares one `projectId` predicate across seven schemas.
+    let value: ZodRead | undefined;
+    let rawName: string | undefined;
+    if (Node.isShorthandPropertyAssignment(prop)) {
+      rawName = prop.getName();
+      value = resolveSchemaIdentifier(rawName, sf, depth + 1);
+    } else if (Node.isPropertyAssignment(prop)) {
+      rawName = prop.getName();
+      const init = prop.getInitializer();
+      value = init ? zodExprToSchema(init, sf, typeParams, depth + 1) : undefined;
+    }
+    if (!value || rawName === undefined) return undefined;
+    const name = rawName.replace(/^["']|["']$/g, "");
+    properties[name] = value.schema;
+    if (!value.optional) required.push(name);
+  }
+  const schema: Schema = { type: "object", properties };
+  if (required.length) schema.required = required;
+  // zod's DEFAULT is to strip unknown keys, `.passthrough()` keeps them — but either way the
+  // REQUEST is accepted, so `additionalProperties` is true for both and saying `false` would
+  // claim a rejection that never happens. The difference (whether the handler still sees the
+  // extra keys) is real and is recorded as `x-unknown-keys` instead of being flattened away.
+  schema.additionalProperties = true;
+  schema["x-unknown-keys"] = "stripped";
+  return { schema, optional: false };
+}
+
+/** `z.<name>(…)` — the zod constructors this repo's schemas actually use. */
+function zodFactoryToSchema(
+  name: string,
+  call: CallExpression,
+  sf: SourceFile,
+  typeParams: Map<string, TypeNode>,
+  depth: number,
+): ZodRead | undefined {
+  const typeArg = call.getTypeArguments()[0];
+  switch (name) {
+    case "object":
+      return zodObjectLiteral(call, sf, typeParams, depth);
+    case "string":
+      return { schema: { type: "string" }, optional: false };
+    case "number":
+      return { schema: { type: "number" }, optional: false };
+    case "boolean":
+      return { schema: { type: "boolean" }, optional: false };
+    case "null":
+      return { schema: { type: "null" }, optional: false };
+    case "unknown":
+    case "any":
+      return { schema: {}, optional: false };
+    // `z.custom<T>(predicate)` is the vocabulary's workhorse: the PREDICATE is deliberately
+    // weaker than the type (rule 3 in `body-schema-helpers.ts` — `Array.isArray` stays
+    // `Array.isArray`), so the declared type is what describes the wire, and it is what the
+    // route already claimed.
+    case "custom":
+      return { schema: typeArg ? typeNodeToSchema(typeArg, typeParams) : {}, optional: false };
+    case "array": {
+      const inner = call.getArguments()[0];
+      const items = inner ? zodExprToSchema(inner, sf, typeParams, depth + 1) : undefined;
+      return { schema: { type: "array", items: items?.schema ?? {} }, optional: false };
+    }
+    case "record":
+      return { schema: { type: "object", additionalProperties: true }, optional: false };
+    case "enum": {
+      const arg = call.getArguments()[0];
+      if (!arg || !Node.isArrayLiteralExpression(arg)) return undefined;
+      const elements = arg.getElements();
+      const values = elements.map((e) => literalString(e));
+      if (values.some((v) => v === undefined)) return undefined;
+      return { schema: { type: "string", enum: values as string[] }, optional: false };
+    }
+    case "literal": {
+      const value = literalString(call.getArguments()[0]);
+      return value === undefined ? undefined : { schema: { type: "string", enum: [value] }, optional: false };
+    }
+    default:
+      return undefined;
+  }
+}
+
+/** `<inner>.<name>(…)` — a chained zod refinement/modifier. */
+function applyZodModifier(name: string, call: CallExpression, inner: ZodRead): ZodRead | undefined {
+  const schema = inner.schema;
+  switch (name) {
+    case "optional":
+    case "nullish":
+      return { schema, optional: true };
+    // A default makes the field omissible from the REQUEST, which is what `required` documents.
+    case "default":
+      return { schema, optional: true };
+    case "nullable":
+      return { schema: { ...schema, nullable: true }, optional: inner.optional };
+    case "passthrough":
+      return { schema: { ...schema, "x-unknown-keys": "passthrough" }, optional: inner.optional };
+    case "strict":
+      return {
+        schema: { ...schema, additionalProperties: false, "x-unknown-keys": "rejected" },
+        optional: inner.optional,
+      };
+    case "strip":
+      return inner;
+    case "min":
+    case "max": {
+      const arg = call.getArguments()[0];
+      if (!arg || !Node.isNumericLiteral(arg)) return inner;
+      const value = Number(arg.getLiteralValue());
+      const key = schema.type === "string"
+        ? (name === "min" ? "minLength" : "maxLength")
+        : schema.type === "array"
+          ? (name === "min" ? "minItems" : "maxItems")
+          : schema.type === "number"
+            ? (name === "min" ? "minimum" : "maximum")
+            : undefined;
+      return key ? { schema: { ...schema, [key]: value }, optional: inner.optional } : inner;
+    }
+    // Predicates and reshapes that do NOT change what the client may send: `.refine` /
+    // `.superRefine` carry the guard's own message and are not expressible in JSON Schema,
+    // and `.transform` changes what the HANDLER receives, not what the wire accepts.
+    case "refine":
+    case "superRefine":
+    case "transform":
+    case "describe":
+    case "catch":
+    case "brand":
+    case "readonly":
+    case "trim":
+    case "regex":
+    case "pipe":
+      return inner;
+    default:
+      // An unrecognised modifier could reshape the object (`.partial()`, `.omit(…)`), so the
+      // whole schema falls back rather than being described as its pre-modifier self.
+      return undefined;
+  }
+}
+
+/**
+ * A call to a predicate helper (`required("…")`, `arrayOnly<string>("…")`), read by resolving
+ * the helper's own declaration and interpreting its single `return` expression as zod.
+ *
+ * This is what keeps the vocabulary in ONE place. A table mapping `requiredRaw -> string` here
+ * would be a second declaration of `body-schema-helpers.ts`, and the first to drift from it.
+ */
+function resolveSchemaHelperCall(
+  call: CallExpression,
+  sf: SourceFile,
+  depth: number,
+): ZodRead | undefined {
+  const expr = call.getExpression();
+  if (!Node.isIdentifier(expr)) return undefined;
+  const name = expr.getText();
+  let targetSf: SourceFile | undefined = sf;
+  let target = sf.getFunction(name);
+  if (!target) {
+    targetSf = moduleOfImport(sf, name);
+    target = targetSf?.getFunction(name);
+  }
+  if (!target || !targetSf) return undefined;
+  const returns = target.getDescendantsOfKind(SyntaxKind.ReturnStatement);
+  if (returns.length !== 1) return undefined;
+  const returnExpr = returns[0]!.getExpression();
+  if (!returnExpr) return undefined;
+
+  const map = new Map<string, TypeNode>();
+  const params = target.getTypeParameters();
+  const args = call.getTypeArguments();
+  for (let i = 0; i < params.length; i++) {
+    const arg = args[i];
+    if (arg) map.set(params[i]!.getName(), arg);
+  }
+  return zodExprToSchema(returnExpr, targetSf, map, depth + 1);
+}
+
+/**
+ * A schema constant by NAME — declared in `sf` itself or imported from one sibling module.
+ *
+ * Both the `parseJsonBody(c, createIssueBody)` argument and a shorthand object property
+ * (`{ projectId, … }`) reach a schema this way, so the lookup is one function rather than two.
+ */
+function resolveSchemaIdentifier(name: string, sf: SourceFile, depth: number): ZodRead | undefined {
+  const local = findVariableInitializer(sf, name);
+  if (local) return zodExprToSchema(local, sf, new Map(), depth + 1);
+  const module = moduleOfImport(sf, name);
+  const init = module ? findVariableInitializer(module, name) : undefined;
+  return init && module ? zodExprToSchema(init, module, new Map(), depth + 1) : undefined;
+}
+
+/** The JSON Schema a zod expression describes, or undefined when the walk cannot read it. */
+function zodExprToSchema(
+  node: Node,
+  sf: SourceFile,
+  typeParams: Map<string, TypeNode>,
+  depth = 0,
+): ZodRead | undefined {
+  if (depth > MAX_ZOD_DEPTH) return undefined;
+  if (Node.isParenthesizedExpression(node)) {
+    return zodExprToSchema(node.getExpression(), sf, typeParams, depth + 1);
+  }
+  if (Node.isAsExpression(node) || Node.isSatisfiesExpression(node)) {
+    return zodExprToSchema(node.getExpression(), sf, typeParams, depth + 1);
+  }
+  // A bare identifier is a reference to a schema constant — the shape every route uses
+  // (`parseJsonBody(c, createIssueBody)`), resolved locally or through one import hop.
+  if (Node.isIdentifier(node)) return resolveSchemaIdentifier(node.getText(), sf, depth);
+  if (!Node.isCallExpression(node)) return undefined;
+  const expr = node.getExpression();
+  if (Node.isIdentifier(expr)) return resolveSchemaHelperCall(node, sf, depth);
+  if (!Node.isPropertyAccessExpression(expr)) return undefined;
+  const receiver = expr.getExpression();
+  if (Node.isIdentifier(receiver) && receiver.getText() === "z") {
+    return zodFactoryToSchema(expr.getName(), node, sf, typeParams, depth);
+  }
+  const inner = zodExprToSchema(receiver, sf, typeParams, depth + 1);
+  if (!inner) return undefined;
+  return applyZodModifier(expr.getName(), node, inner);
 }
 
 // ---------------------------------------------------------------------------
@@ -1127,8 +1482,9 @@ function buildOpenApi(routes: RouteInfo[]): Schema {
       version: readVersion(),
       description:
         "Auto-generated from Hono route source via scripts/generate-openapi.ts. " +
-        "Schemas are inferred statically (best-effort) — request bodies come from the " +
-        "parseJsonBody<T> type argument; response bodies are untyped. Coverage is audited: " +
+        "Schemas are inferred statically (best-effort) — a request body comes from the zod " +
+        "schema passed to `parseJsonBody(c, schema)` where there is one, otherwise from the " +
+        "`parseJsonBody<T>` type argument; response bodies are untyped. Coverage is audited: " +
         "see x-coverage for what is scanned and what is deliberately not described here.",
     },
     servers: [{ url: "/", description: "Same-origin (default dev: http://localhost:3001)" }],
@@ -1141,6 +1497,27 @@ function buildOpenApi(routes: RouteInfo[]): Schema {
         where: b.pathLiteral === undefined ? b.file : `${b.file} (\`${b.pathLiteral}\`)`,
         reason: b.reason,
       })),
+      // #838 - a request body's property list is derivable for a route that VALIDATES its
+      // body and not for one that does not, and the artifact says which is which rather than
+      // rendering both as `additionalProperties: true`.
+      requestBodies: {
+        mechanism:
+          "A route validating its body calls `parseJsonBody(c, schema)` with a zod schema from "
+          + "the sibling `routes/*-body-schemas.ts` (#512/#806). That schema is read statically: "
+          + "each field's primitive, whether it is required, a length bound, and whether unknown "
+          + "keys are kept (`x-unknown-keys`) or stripped.",
+        limitations: [
+          "An operation described only as `additionalProperties: true` with NO property list "
+          + "parses its body WITHOUT a schema (`parseJsonBody(c)` / `parseOptionalJsonBody(c)`) "
+          + "or does not parse one at all. That is an omission the route has not closed yet, not "
+          + "a claim that the endpoint accepts any object.",
+          "`x-unknown-keys: stripped` means zod DROPS unknown keys before the handler sees them; "
+          + "the request itself is still accepted, which is why additionalProperties stays true.",
+          "A zod predicate is deliberately weaker than the type it carries (`arrayOnly` is "
+          + "`Array.isArray` and nothing more), so an array's ITEM schema is the declared type, "
+          + "not something the server enforces.",
+        ],
+      },
       // #826 - error responses are only PARTLY derivable, and the artifact says which part.
       // Before this, an operation's statuses came from literal `c.json(body, status)` sites
       // alone, so a route that answers 404 by THROWING documented no 404 at all - and moving
@@ -1253,6 +1630,34 @@ function printThrowAttribution(routes: RouteInfo[]) {
     + `${throwWalkStats.depthTruncatedCalls} beyond the depth bound — any status they throw is absent `
     + "from the spec (an upper bound: most of those calls throw nothing).",
   );
+}
+
+/**
+ * What the request-body walk read and what it did NOT (#838), printed for the same reason as
+ * the coverage and throw-attribution reports: a generator that lists what it found and stays
+ * quiet about what it skipped reads as complete.
+ *
+ * The `no property list` number is the one that mattered: nothing failed when it grew from 95
+ * to 118 across #806's batches, which is how a spec came to describe 118 request bodies as
+ * "any object" for endpoints that reject most objects. `openapi-request-body-ratchet.test.ts`
+ * is what now makes it shrink-only.
+ */
+function printBodySchemaAttribution(routes: RouteInfo[]) {
+  const withBody = routes.filter((r) => r.method !== "get" && r.method !== "delete");
+  const described = withBody.filter((r) => r.requestBody !== undefined).length;
+  console.log(
+    `  request bodies: ${withBody.length} operation(s) accept one — ${described} with a property `
+    + `list (${bodySchemaStats.read} of them read from a zod schema), ${withBody.length - described} `
+    + "described only as `additionalProperties: true`",
+  );
+  if (bodySchemaStats.unreadable.length) {
+    console.log(
+      `    ${bodySchemaStats.unreadable.length} zod schema(s) passed to parseJsonBody could NOT be read:`,
+    );
+    for (const item of bodySchemaStats.unreadable) {
+      console.log(`      ${item.where} — ${item.expression}`);
+    }
+  }
 }
 
 function main() {
@@ -1427,6 +1832,7 @@ function main() {
     if (committed === yaml) {
       console.log(`✓ ${path.relative(serverRoot, outputPath)} is up to date (${uniqueRoutes.length} operations across ${pathCount} paths)`);
       printCoverage(coverage);
+      printBodySchemaAttribution(uniqueRoutes);
       printThrowAttribution(uniqueRoutes);
       return;
     }
@@ -1448,6 +1854,7 @@ function main() {
   console.log(`✓ Wrote ${path.relative(serverRoot, outputPath)}`);
   console.log(`  ${uniqueRoutes.length} operations across ${pathCount} paths`);
   printCoverage(coverage);
+  printBodySchemaAttribution(uniqueRoutes);
   printThrowAttribution(uniqueRoutes);
   if (unresolved.length) {
     console.warn(`\n⚠ ${unresolved.length} item(s) could not be resolved:`);
