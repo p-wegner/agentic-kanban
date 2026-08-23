@@ -9,6 +9,7 @@ import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { createNodeWebSocket } from "@hono/node-ws";
 import { mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { rmOrReportHolder } from "./helpers/rm-or-report-holder.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -50,8 +51,8 @@ describe("worker git transport e2e (phase 2)", () => {
     fleet = getWorkerFleet(db);
     dispatch = createAgentDispatch({ host: hostStub, remote: fleet.remoteAgentService });
 
-    repoDir = mkdtempSync(join(tmpdir(), "fleet-board-repo-"));
-    workerRoot = mkdtempSync(join(tmpdir(), "fleet-worker-root-"));
+    repoDir = mkdtempSync(join(tmpdir(), "ak-fleet-board-repo-"));
+    workerRoot = mkdtempSync(join(tmpdir(), "ak-fleet-worker-root-"));
 
     await gitExecOrThrow(["init", "-b", "master", repoDir], {});
     writeFileSync(join(repoDir, "README.md"), "board repo\n");
@@ -104,10 +105,18 @@ describe("worker git transport e2e (phase 2)", () => {
   });
 
   afterAll(async () => {
-    daemon?.stop({ killAgents: true });
+    // `stop()` is ASYNC and DRAINS (#754). Not awaiting it — as this teardown did — deletes the
+    // worker's work root while the daemon is still signalling kills, finishing result pushes and
+    // closing its socket, which is precisely how a Windows `EPERM` in an `afterAll` is
+    // manufactured. It also left the returned promise unhandled, so a rejection in shutdown
+    // surfaced as a failure in whatever file vitest ran next (#680's misattribution, produced
+    // here rather than merely suffered here).
+    await daemon?.stop({ killAgents: true });
     await git?.close();
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    for (const p of [repoDir, workerRoot]) rmSync(p, { recursive: true, force: true });
+    // Not a retry loop around `rm` (#777): a retry hides which handle leaked. If a removal
+    // fails, the helper names the surviving subtree and the processes that plausibly hold it.
+    for (const p of [repoDir, workerRoot]) await rmOrReportHolder(p);
     for (const f of [stateFile, agentScript]) rmSync(f, { force: true });
   });
 
@@ -139,7 +148,16 @@ describe("worker git transport e2e (phase 2)", () => {
     const stdout = events.filter((e) => e.type === "stdout").map((e) => e.data).join("");
     expect(stdout).toContain("AGENT-DONE:");
     // The agent ran in the WORKER's checkout, not in the board's repo.
-    expect(stdout).not.toContain(repoDir.replace(/\\/g, "/").slice(0, 20) + "\n");
+    // #777: the line that used to stand here asserted stdout did NOT contain a forward-slashed,
+    // newline-terminated 20-char prefix of repoDir — a string this stdout prints with BACKSLASHES
+    // and no newline at that position, so no outcome of this test could ever contain it. The
+    // assertion passed whether or not the agent had run in the board's own repo: the #743 pattern
+    // again (a check that cannot observe the thing it names). Asserted positively now, against the
+    // one path only the worker can produce.
+    const agentCwd = /AGENT-DONE:(.*)/.exec(stdout)?.[1]?.trim() ?? "";
+    expect(agentCwd).not.toBe("");
+    expect(agentCwd.toLowerCase()).toContain(join("checkouts", sessionId).toLowerCase());
+    expect(agentCwd.toLowerCase().startsWith(repoDir.toLowerCase())).toBe(false);
     expect(existsSync(join(repoDir, "worker-output.txt"))).toBe(false);
 
     // The board now has the real branch, fast-forwarded from the incoming ref.

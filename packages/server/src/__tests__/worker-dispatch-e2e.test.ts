@@ -63,13 +63,20 @@ describe("worker dispatch e2e (phase 1c)", () => {
 
     const { pairingToken } = fleet.registry.mintPairingToken();
     daemon = await startWorkerDaemon({
-      boardUrl, pairingToken, name: "e2e-worker", providers: ["claude"], stateFile, log: () => {},
+      // maxConcurrency: 1 is the runner's default already; stated explicitly because the
+      // slot-release case below only means something against a KNOWN ceiling — with a
+      // ceiling of 2 a leaked slot from the previous case would still be tolerated (#777).
+      boardUrl, pairingToken, name: "e2e-worker", providers: ["claude"], stateFile,
+      maxConcurrency: 1, log: () => {},
     });
     await daemon.connected;
   });
 
   afterAll(async () => {
-    daemon.stop({ killAgents: true });
+    // `stop()` is ASYNC and DRAINS (#754) — awaited now: the unawaited call left its promise
+    // unhandled (a rejection here would have been reported against whatever file vitest ran
+    // next) and let the teardown delete the daemon's state file while it was still writing it.
+    await daemon.stop({ killAgents: true });
     await new Promise<void>((resolve) => server.close(() => resolve()));
     rmSync(stateFile, { force: true });
     rmSync(scriptPath, { force: true });
@@ -103,5 +110,24 @@ describe("worker dispatch e2e (phase 1c)", () => {
 
     expect(dispatch.kill(sessionId)).toBe(true);
     await vi.waitFor(() => expect(events.some((e) => e.type === "exit")).toBe(true), { timeout: 20000 });
+  });
+
+  // #777 — case ORDER must not matter. The worker's capacity is one slot (see beforeAll), and a
+  // slot is only given back by `emitExit` deleting the session from the runner's `processes` /
+  // `provisioning` sets. If either survived a session — especially a KILLED one, which reaches
+  // exit through taskkill rather than a clean end — this third case would be refused with
+  // `assign_failed: worker at capacity` and never see an exit event. A leak that only shows in a
+  // later case is a defect in slot release, not test hygiene, so it is asserted rather than
+  // assumed. Verified to be load-bearing: with `processes.delete(sessionId)` removed from
+  // `emitExit`, this case fails (refused at capacity) while the two above still pass.
+  it("frees the worker slot after a killed session, so a later session still runs", async () => {
+    const events: AgentOutputEvent[] = [];
+    launchRemote(`sess-${randomUUID()}`, (e) => events.push(e));
+
+    await vi.waitFor(() => expect(events.some((e) => e.type === "exit")).toBe(true), { timeout: 20000 });
+    const stderr = events.filter((e) => e.type === "stderr").map((e) => e.data).join("");
+    expect(stderr).not.toContain("capacity");
+    expect(events.find((e) => e.type === "exit")!.exitCode).toBe(0);
+    expect(events.filter((e) => e.type === "stdout").map((e) => e.data).join("")).toContain("MOCK-RAN:the-prompt");
   });
 }, 60000);
