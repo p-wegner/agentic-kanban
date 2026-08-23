@@ -12,6 +12,18 @@ export interface PlanModeExitRelaunch {
   agentCommand: string | undefined;
   agentArgs: string | undefined;
   permissionPromptTool: string | undefined;
+  /**
+   * The LAUNCH id, not the stored name (#835). A workspace row stores a
+   * `ProviderName` ("claude"); a launch takes a `ProviderId` ("claude-code"),
+   * and `toExecutorProvider` is the single conversion between the two. Both
+   * callers already supply a `ProviderId` — `session-lifecycle` forwards
+   * `StartSessionOptions.provider`, and `plan-mode-reconciler` converts the
+   * stored value with `toExecutorProvider(narrowProviderName(...))` — so this
+   * is deliberately narrower than the column, and widening it would erase the
+   * distinction rather than fix anything. (`narrowProviderName` below maps it
+   * back, and accepts the "claude" spelling too, which is what made it look
+   * like the declaration was too tight.)
+   */
   provider: ProviderId | undefined;
   profile: { provider: ProviderName; name: string } | undefined;
 }

@@ -5,7 +5,6 @@ import { createTestDb } from "./helpers/test-db.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
 import { activeMerges } from "../services/workspace-internals.js";
 import { makeTempRepo } from "./helpers/temp-repo.js";
-import type { MergeWorkspaceResponse } from "./helpers/merge-result.js";
 
 /**
  * A REAL repo path (#273). This suite drives the actual merge path, whose repo lock
@@ -131,7 +130,7 @@ describe("merge endpoint response before cleanup", () => {
     });
 
     // Must resolve without throwing — the response is returned before cleanup
-    const result = await svc.mergeWorkspace(workspaceId) as MergeWorkspaceResponse;
+    const result = await svc.mergeWorkspace(workspaceId);
 
     expect(result).toMatchObject({
       id: workspaceId,
@@ -155,7 +154,7 @@ describe("merge endpoint response before cleanup", () => {
       createBackup: async () => {},
     });
 
-    const result = await svc.mergeWorkspace(workspaceId) as MergeWorkspaceResponse;
+    const result = await svc.mergeWorkspace(workspaceId);
 
     expect(result).toMatchObject({
       id: workspaceId,
@@ -179,7 +178,7 @@ describe("merge endpoint response before cleanup", () => {
       processKiller,
     });
 
-    const result = await svc.mergeWorkspace(workspaceId) as MergeWorkspaceResponse;
+    const result = await svc.mergeWorkspace(workspaceId);
 
     expect(result).toMatchObject({
       id: workspaceId,
@@ -208,7 +207,7 @@ describe("merge endpoint response before cleanup", () => {
     });
 
     const mergePromise = svc.mergeWorkspace(workspaceId);
-    const result = await mergePromise as MergeWorkspaceResponse;
+    const result = await mergePromise;
     mergeResolved = true;
 
     // Give the background task a tick to run
@@ -246,7 +245,7 @@ describe("merge endpoint response before cleanup", () => {
       processKiller,
     });
 
-    const result = await svc.mergeWorkspace(workspaceId) as MergeWorkspaceResponse;
+    const result = await svc.mergeWorkspace(workspaceId);
     mergeResolved = true;
 
     // Allow the background post-merge task to run.
@@ -423,7 +422,7 @@ describe("merge endpoint response before cleanup", () => {
       processKiller,
     });
 
-    const result = await svc.mergeWorkspace(workspaceId) as MergeWorkspaceResponse;
+    const result = await svc.mergeWorkspace(workspaceId);
     mergeResolved = true;
 
     // Allow the background post-merge task to run.

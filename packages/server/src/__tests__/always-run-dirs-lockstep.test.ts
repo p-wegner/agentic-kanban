@@ -18,10 +18,6 @@
 import { describe, it, expect } from "vitest";
 import { resolve } from "node:path";
 import { existsSync } from "node:fs";
-// @ts-expect-error — `scripts/` is plain .mjs with no type declarations and is not part
-// of any package tsconfig, so this import is implicitly `any`. Suppressed rather than
-// typed because the suite's whole point is to read the REAL script the runner uses; a
-// hand-written .d.ts beside it would be one more thing that can drift from it.
 import { ALWAYS_RUN_TESTS_DIR, PACKAGES, scanAlwaysRunTests } from "../../../../scripts/test-mine.mjs";
 import { ALWAYS_RUN_TESTS_DIRS } from "../services/pre-merge-gate-tier.js";
 import { SCAN_PACKAGES } from "./always-run-marker-ratchet.test.js";

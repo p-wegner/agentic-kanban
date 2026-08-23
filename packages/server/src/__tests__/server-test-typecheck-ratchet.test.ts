@@ -41,9 +41,17 @@ import { createRequire } from "node:module";
  * and `.updatedAt`, `issues.position`, `workspaces.projectId/worktreePath/mergeCommitSha`,
  * `preferences.createdAt`, `workflow_nodes.updatedAt`), silently dropped on insert. The
  * remaining 71 are dominated by four files and by `await res.json()` returning `unknown`.
+ *
+ * #835 (2026-08-23): 71 -> 65 grandfathered and 962 -> 898 errors, from ONE declaration.
+ * `RepoMergeLock.resultPromise` was `Promise<unknown>` and `PreMergeResolutionOutcome.result`
+ * was `Record<string, unknown>`, between them widening `mergeWorkspace`'s inferred return to
+ * `unknown` for every caller — 298 of the 962 were TS18046 and 25 TS2571, concentrated in the
+ * merge-family suites. Both now name `MergeWorkspaceResult`, the union those five paths
+ * actually produce, and the six-file `helpers/merge-result.ts` workaround alias that existed
+ * only because the production type was `unknown` is gone.
  */
 
-const BASELINE_GRANDFATHERED_FILES = 71;
+const BASELINE_GRANDFATHERED_FILES = 65;
 
 const serverRoot = path.join(import.meta.dirname!, "..", "..");
 const tsconfigPath = path.join(serverRoot, "tsconfig.json");

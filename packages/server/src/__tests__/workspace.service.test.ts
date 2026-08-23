@@ -959,6 +959,11 @@ describe("workspace.service", () => {
       });
       activeMerges.set("/tmp/test-repo", {
         promise: inFlight,
+        // #835: the reuse path reads `resultPromise`, the merge's OWN result — not
+        // `promise`, which is the lock-lifetime promise and always settles as
+        // `undefined`. Only a mergeWorkspace acquirer publishes it, so a hand-built
+        // entry standing in for one has to publish it too.
+        resultPromise: inFlight,
         workspaceId: wsId,
         repoPath: "/tmp/test-repo",
         startedAt: new Date(Date.now() - 250).toISOString(),
@@ -979,6 +984,33 @@ describe("workspace.service", () => {
       const result = await mergePromise;
 
       expect(result).toEqual(expect.objectContaining({ id: wsId, mergeOutput: "already merged" }));
+      expect(gitService.mergeBranch).not.toHaveBeenCalled();
+    });
+
+    it("refuses instead of reusing a lock this workspace holds via a NON-merge acquirer (#835)", async () => {
+      const { projectId, issueId } = await seedProjectAndIssue(db);
+      const wsId = await seedWorkspaceForMerge(projectId, issueId);
+      const gitService = createFakeGitService({ getCurrentBranch: vi.fn(async () => "main") });
+      // autoMerge / the startup done-unmerged sweep hold the repo lock under THIS
+      // workspace's id, but their work produces no merge response: `resultPromise`
+      // is undefined. The old `?? existingLock.promise` fallback resolved to the
+      // lock-lifetime promise, i.e. it handed the HTTP caller `undefined` as a
+      // successful merge body. Refusing is the honest answer.
+      activeMerges.set("/tmp/test-repo", {
+        promise: new Promise<void>(() => {}),
+        workspaceId: wsId,
+        repoPath: "/tmp/test-repo",
+        startedAt: new Date(Date.now() - 250).toISOString(),
+        startedAtMs: Date.now() - 250,
+      });
+
+      const service = createWorkspaceService({
+        database: db,
+        gitService,
+        processKiller: vi.fn(async () => 0),
+      });
+
+      await expect(service.mergeWorkspace(wsId)).rejects.toMatchObject({ code: "CONFLICT" });
       expect(gitService.mergeBranch).not.toHaveBeenCalled();
     });
 
