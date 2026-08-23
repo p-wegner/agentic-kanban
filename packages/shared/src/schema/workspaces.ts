@@ -4,17 +4,18 @@ import { issues } from "./issues.js";
 import { agentSkills } from "./agent-skills.js";
 
 /**
- * 75 columns, and it should not become 76 (#739, #781, #798).
+ * 67 columns, and it should not become 68 (#739, #781, #798).
  *
  * The next widest table in this schema has 23 (`issues`, `repos`); the median across 44
- * tables is 9. What is here is not one entity but eight remaining concerns flattened into one row by
- * prefix — `latest_setup_*` (8), `latest_symlink_*` (8), `merge_gate_*` (5), `summary_*` (5),
+ * tables is 9. What is here is not one entity but seven remaining concerns flattened into one row by
+ * prefix — `latest_setup_*` (8), `merge_gate_*` (5), `summary_*` (5),
  * `diff_stat_cache_*` (5), `conflict_cache_*` (3), `scorecard_*` (3),
- * `fork_*`/`showdown_*` (5). Three families are no longer among them:
+ * `fork_*`/`showdown_*` (5). Four families are no longer among them:
  * #781 extracted `merge_backoff_*` (7) to `workspace_merge_backoff`, and #798 extracted
- * `review_preflight_*` (4) to `workspace_review_preflight` and `code_metrics_*` (2) to
- * `workspace_code_metrics`. The remaining order, by re-derived coupling, is `merge_gate_*` →
- * `latest_symlink_*` → `summary_*` → `conflict_cache_*` →
+ * `review_preflight_*` (4), `code_metrics_*` (2) and `latest_symlink_*` (8) to
+ * `workspace_review_preflight`, `workspace_code_metrics` and `workspace_symlink_run`.
+ * The remaining order, by re-derived coupling, is `merge_gate_*` →
+ * `summary_*` → `conflict_cache_*` →
  * `latest_setup_*` → `diff_stat_cache_*` → `scorecard_*` (highest fan-out, last).
  * Each `latest_*` / `*_cache_*` / `*_gate_*` group is a one-to-many relationship collapsed
  * to its last row: there is one setup run per column set, so its history is unrecoverable by
@@ -27,9 +28,10 @@ import { agentSkills } from "./agent-skills.js";
  *
  * Twelve columns are NULL in all 659 rows of the live DB — `agent_command`,
  * `pending_plan_path`, `parent_workspace_id`, `fork_node_id`, `fork_join_node_id`,
- * `fork_status`, `showdown_id`, `showdown_label`, `latest_symlink_error`, `service_state`,
- * `isolation_downgrade_reason` (and `review_preflight_blocked_at`, which #798 moved to
- * `workspace_review_preflight.blocked_at` — eleven left here). **None of them is dead.**
+ * `fork_status`, `showdown_id`, `showdown_label`, `service_state`,
+ * `isolation_downgrade_reason` — ten left here, after #798 moved
+ * `review_preflight_blocked_at` and `latest_symlink_error` into their families' own tables.
+ * **None of them is dead.**
  * #739 checked every one: each has a real writer and a real reader (fork via
  * `workflow-fork.service`, showdown via `POST /api/issues/:id/showdown`, service_state via
  * the Docker service-stack repository, and so on). They are NULL because no row on that
@@ -134,14 +136,6 @@ export const workspaces = sqliteTable("workspaces", {
   latestSetupDurationMs: integer("latest_setup_duration_ms"),
   latestSetupStdoutTail: text("latest_setup_stdout_tail"),
   latestSetupStderrTail: text("latest_setup_stderr_tail"),
-  latestSymlinkState: text("latest_symlink_state"),
-  latestSymlinkStartedAt: text("latest_symlink_started_at"),
-  latestSymlinkEndedAt: text("latest_symlink_ended_at"),
-  latestSymlinkDirs: text("latest_symlink_dirs"),
-  latestSymlinkLinked: text("latest_symlink_linked"),
-  latestSymlinkSkipped: text("latest_symlink_skipped"),
-  latestSymlinkFailed: text("latest_symlink_failed"),
-  latestSymlinkError: text("latest_symlink_error"),
   /** Latest pre-session agent launch failure, e.g. safety-policy preflight refusal. */
   latestLaunchError: text("latest_launch_error"),
   /** Context primer assembled by the context-packer at workspace creation. Injected into CLAUDE.local.md. */

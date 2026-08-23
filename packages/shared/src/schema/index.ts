@@ -72,3 +72,5 @@ export { workspaceMergeBackoff, workspaceMergeBackoffRelations } from "./workspa
 export { workspaceReviewPreflight, workspaceReviewPreflightRelations } from "./workspace-review-preflight.js";
 // #798: the third — the computed code-metrics artifact.
 export { workspaceCodeMetrics, workspaceCodeMetricsRelations } from "./workspace-code-metrics.js";
+// #798: the fourth — the dependency-symlink bootstrap run.
+export { workspaceSymlinkRun, workspaceSymlinkRunRelations } from "./workspace-symlink-run.js";

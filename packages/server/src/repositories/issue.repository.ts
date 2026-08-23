@@ -1,4 +1,4 @@
-import { issues, workspaces, projectStatuses, workflowNodes, tags, issueTags, issueDependencies, issueArtifacts, agentSkills } from "@agentic-kanban/shared/schema";
+import { issues, workspaces, projectStatuses, workflowNodes, tags, issueTags, issueDependencies, issueArtifacts, agentSkills, workspaceSymlinkRun } from "@agentic-kanban/shared/schema";
 import { loadIssueSummary, type IssueSummaryResult } from "@agentic-kanban/shared/lib/issue-summary";
 import { parseIssueRef } from "@agentic-kanban/shared/lib/issue-ref";
 import { DEFAULT_PROJECT_STATUSES, buildProjectStatusRows, statusIdsByName } from "@agentic-kanban/shared/lib/project-statuses";
@@ -488,14 +488,16 @@ export async function getIssueWorkspaces(
       latestSetupDurationMs: workspaces.latestSetupDurationMs,
       latestSetupStdoutTail: workspaces.latestSetupStdoutTail,
       latestSetupStderrTail: workspaces.latestSetupStderrTail,
-      latestSymlinkState: workspaces.latestSymlinkState,
-      latestSymlinkStartedAt: workspaces.latestSymlinkStartedAt,
-      latestSymlinkEndedAt: workspaces.latestSymlinkEndedAt,
-      latestSymlinkDirs: workspaces.latestSymlinkDirs,
-      latestSymlinkLinked: workspaces.latestSymlinkLinked,
-      latestSymlinkSkipped: workspaces.latestSymlinkSkipped,
-      latestSymlinkFailed: workspaces.latestSymlinkFailed,
-      latestSymlinkError: workspaces.latestSymlinkError,
+      // #798: the symlink run moved to `workspace_symlink_run`. Aliased back to the same
+      // eight field names, so the projection and the DTO it builds are untouched.
+      latestSymlinkState: workspaceSymlinkRun.state,
+      latestSymlinkStartedAt: workspaceSymlinkRun.startedAt,
+      latestSymlinkEndedAt: workspaceSymlinkRun.endedAt,
+      latestSymlinkDirs: workspaceSymlinkRun.dirs,
+      latestSymlinkLinked: workspaceSymlinkRun.linked,
+      latestSymlinkSkipped: workspaceSymlinkRun.skipped,
+      latestSymlinkFailed: workspaceSymlinkRun.failed,
+      latestSymlinkError: workspaceSymlinkRun.error,
       conflictCacheHasConflicts: workspaces.conflictCacheHasConflicts,
       conflictCacheFiles: workspaces.conflictCacheFiles,
       diffStatCacheFilesChanged: workspaces.diffStatCacheFilesChanged,
@@ -506,6 +508,7 @@ export async function getIssueWorkspaces(
     })
     .from(workspaces)
     .leftJoin(agentSkills, eq(workspaces.skillId, agentSkills.id))
+    .leftJoin(workspaceSymlinkRun, eq(workspaceSymlinkRun.workspaceId, workspaces.id))
     .where(eq(workspaces.issueId, issueId));
 }
 
