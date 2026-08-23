@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ButlerViewBody, historyMessageKeys } from "../components/ButlerViewBody.js";
+import { ButlerViewBody } from "../components/ButlerViewBody.js";
+import { historyMessageKeys } from "../components/ButlerHistoryTranscript.js";
 import { butlerChatMessageFixture, butlerTabStateFixture, butlerViewBodyPropsFixture } from "./fixtures/butlerViewBody.js";
 
 /**

@@ -3,7 +3,7 @@
 // container's locals (passed by shorthand spread, so mis-pairing is impossible),
 // making the JSX below a verbatim, behaviour-preserving move.
 import type { Dispatch, SetStateAction, RefObject, KeyboardEvent as ReactKeyboardEvent } from "react";
-import type { ButlerSessionMessage, IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
+import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import type { LiveSessionStats } from "../lib/useBoardEvents.js";
 import type { ButlerCommand, ButlerSessionSummary, ButlerListItem, TabState } from "../lib/butler-types.js";
 import type { ButlerVoiceButtonHandle } from "./ButlerVoiceButton.js";
@@ -11,6 +11,7 @@ import { AgentQuestionsPanel } from "./AgentQuestionsPanel.js";
 import { ButlerVoiceButton } from "./ButlerVoiceButton.js";
 import { ButlerManageModal } from "./ButlerManageModal.js";
 import { ChatBubble } from "./ButlerChatParts.js";
+import { HistoryTranscriptMessages } from "./ButlerHistoryTranscript.js";
 import type { ButlerQuestionAnswer } from "../lib/butler-event-reducer.js";
 import { ActivityStrip } from "./ButlerChrome.js";
 import { ButlerTabBar } from "./ButlerTabBar.js";
@@ -80,23 +81,6 @@ interface ButlerViewBodyProps {
   voiceInterimRef: RefObject<string>;
 }
 
-/**
- * Stable identity for a history-transcript row (#792). `ButlerSessionMessage` carries no id of
- * its own, so the key is the composite the ticket prescribes — author + created-at + a counter
- * scoped to that (role, ts) pair — never the array index. It does not shift when a row is
- * prepended or dropped, and it does not change while a message's text streams in (unlike a
- * text-derived key). Exported for the render test.
- */
-export function historyMessageKeys(messages: readonly ButlerSessionMessage[]): string[] {
-  const seen = new Map<string, number>();
-  return messages.map((msg) => {
-    const identity = `${msg.role}:${msg.ts}`;
-    const nth = seen.get(identity) ?? 0;
-    seen.set(identity, nth + 1);
-    return `hist-${identity}#${nth}`;
-  });
-}
-
 export function ButlerViewBody({
     activeModelOptions,   activeTabId,   addTabOpen,   addTabRef,   appendVoiceTranscript,   
   applyCommand,   availableToOpen,   backendLabel,   canOpenMore,   closeTab,   columns,   
@@ -109,8 +93,6 @@ export function ButlerViewBody({
   renamingTabId,   sanitizeSpeechText,   saveCustomize,   setActiveTabId,   setAddTabOpen,   
   setCommandIndex,   setInterimVoiceText,   setIsDictating,   setManageOpen,   setRenamingTabId,   
   setTabInput,   tab,   tabStates,   updateTab,   voiceButtonRef,   voiceInterimRef, }: ButlerViewBodyProps) {
-  // Identity keys for the history transcript, computed once per render (#792).
-  const historyKeys = historyMessageKeys(tab?.historyTranscript?.messages ?? []);
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
       <ActivityStrip columns={columns} liveActivity={liveActivity} liveStats={liveStats} onIssueClick={onIssueClick} />
@@ -363,11 +345,7 @@ export function ButlerViewBody({
                     {tab.historyTranscript.messages.length === 0 ? (
                       <p className="text-xs text-gray-400 dark:text-gray-500 text-center py-4">No messages found in this session.</p>
                     ) : (
-                      <div className="max-w-3xl mx-auto">
-                        {tab.historyTranscript.messages.map((msg, i) => (
-                          <ChatBubble key={historyKeys[i]} msg={{ id: historyKeys[i]!, role: msg.role, text: msg.text, ts: msg.ts }} />
-                        ))}
-                      </div>
+                      <HistoryTranscriptMessages messages={tab.historyTranscript.messages} />
                     )}
                   </div>
                 </div>

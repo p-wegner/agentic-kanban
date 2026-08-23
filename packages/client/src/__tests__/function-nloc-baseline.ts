@@ -28,7 +28,7 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "components/settings/ProjectSettings.tsx::ProjectSettings": 481,
   "components/AllWorkspacesPanel.tsx::AllWorkspacesPanel": 438,
   "components/CreateIssuePanel.tsx::CreateIssuePanel": 435,
-  "components/ButlerViewBody.tsx::ButlerViewBody": 425,
+  "components/ButlerViewBody.tsx::ButlerViewBody": 421,
   "components/BoardPageView.tsx::BoardPageView": 417,
   "components/TableView.tsx::TableView": 416,
   "components/AddProjectModal.tsx::AddProjectModal": 408,
