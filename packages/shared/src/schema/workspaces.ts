@@ -4,19 +4,20 @@ import { issues } from "./issues.js";
 import { agentSkills } from "./agent-skills.js";
 
 /**
- * 62 columns, and it should not become 63 (#739, #781, #798, #815).
+ * 59 columns, and it should not become 60 (#739, #781, #798, #815).
  *
  * The next widest table in this schema has 23 (`issues`, `repos`); the median across 44
- * tables is 9. What is here is not one entity but six remaining concerns flattened into one row by
+ * tables is 9. What is here is not one entity but five remaining concerns flattened into one row by
  * prefix — `latest_setup_*` (8), `summary_*` (5),
- * `diff_stat_cache_*` (5), `conflict_cache_*` (3), `scorecard_*` (3),
- * `fork_*`/`showdown_*` (5). Five families are no longer among them:
+ * `diff_stat_cache_*` (5), `scorecard_*` (3),
+ * `fork_*`/`showdown_*` (5). Six families are no longer among them:
  * #781 extracted `merge_backoff_*` (7) to `workspace_merge_backoff`, #798 extracted
  * `review_preflight_*` (4), `code_metrics_*` (2) and `latest_symlink_*` (8) to
  * `workspace_review_preflight`, `workspace_code_metrics` and `workspace_symlink_run`, and
- * #815 extracted `merge_gate_*` (5) to `workspace_merge_gate`.
+ * #815 extracted `merge_gate_*` (5) to `workspace_merge_gate` and `conflict_cache_*` (3) to
+ * `workspace_conflict_cache`.
  * The remaining order, by re-derived coupling, is
- * `conflict_cache_*` → `latest_setup_*` → `summary_*` →
+ * `latest_setup_*` → `summary_*` →
  * `diff_stat_cache_*` → `scorecard_*` (highest fan-out, last).
  * Each `latest_*` / `*_cache_*` / `*_gate_*` group is a one-to-many relationship collapsed
  * to its last row: there is one setup run per column set, so its history is unrecoverable by
@@ -98,9 +99,6 @@ export const workspaces = sqliteTable("workspaces", {
   summaryCommitCount: integer("summary_commit_count"),
   summaryGitRefreshedAt: text("summary_git_refreshed_at"),
   summaryDirty: integer("summary_dirty", { mode: "boolean" }).notNull().default(true),
-  conflictCacheCheckedAt: text("conflict_cache_checked_at"),
-  conflictCacheHasConflicts: integer("conflict_cache_has_conflicts", { mode: "boolean" }),
-  conflictCacheFiles: text("conflict_cache_files"),
   diffStatCacheCheckedAt: text("diff_stat_cache_checked_at"),
   diffStatCacheHeadSha: text("diff_stat_cache_head_sha"),
   diffStatCacheFilesChanged: integer("diff_stat_cache_files_changed"),

@@ -208,6 +208,13 @@ const SUBTREE_SEEDERS: Record<string, (c: SeedCtx) => Promise<void>> = {
       branchSha: "abc1234", baseSha: "def5678",
     });
   },
+  // #815: the sixth column family extracted out of `workspaces` — the cached merge-tree
+  // conflict probe. Same `onDelete: cascade` shape, so seeding it proves the cascade fires.
+  workspace_conflict_cache: async (c) => {
+    await c.db.insert(schema.workspaceConflictCache).values({
+      workspaceId: c.workspaceId, checkedAt: c.now, hasConflicts: true, files: '["src/a.ts"]',
+    });
+  },
   sessions: async (c) => {
     await c.db.insert(schema.sessions).values({
       id: c.sessionId, workspaceId: c.workspaceId, status: "running", startedAt: c.now,

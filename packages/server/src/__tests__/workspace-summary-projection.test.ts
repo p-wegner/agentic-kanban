@@ -22,7 +22,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi, beforeEach, afterAll } from "vitest";
 import { eq } from "drizzle-orm";
-import { issues, projects, projectStatuses, workspaceCodeMetrics, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, projects, projectStatuses, workspaceCodeMetrics, workspaceConflictCache, workspaces } from "@agentic-kanban/shared/schema";
 import { setWorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
 import { createTestDb } from "./helpers/test-db.js";
 import { makeTempRepo } from "./helpers/temp-repo.js";
@@ -152,11 +152,6 @@ async function seed(db: ReturnType<typeof createTestDb>["db"], opts: SeedOpts = 
       diffStatCacheInsertions: 8,
       diffStatCacheDeletions: 1,
     } : {}),
-    ...(opts.conflictCache !== false ? {
-      conflictCacheCheckedAt: now,
-      conflictCacheHasConflicts: false,
-      conflictCacheFiles: "[]",
-    } : {}),
     summaryHeadSha: "abc123",
     summaryHeadMessage: "feat: seeded head",
     summaryCommitCount: 3,
@@ -170,6 +165,13 @@ async function seed(db: ReturnType<typeof createTestDb>["db"], opts: SeedOpts = 
   await db.insert(workspaceCodeMetrics).values({
     workspaceId, metricsJson: null, computedAt: now,
   });
+  // #815: fresh conflict memo so no background probe is scheduled — in its own table now.
+  // `conflictCache: false` leaves NO row, which is the "never probed" case.
+  if (opts.conflictCache !== false) {
+    await db.insert(workspaceConflictCache).values({
+      workspaceId, checkedAt: now, hasConflicts: false, files: "[]",
+    });
+  }
   return { projectId, statusId, doneStatusId, issueId, workspaceId };
 }
 

@@ -76,3 +76,5 @@ export { workspaceCodeMetrics, workspaceCodeMetricsRelations } from "./workspace
 export { workspaceSymlinkRun, workspaceSymlinkRunRelations } from "./workspace-symlink-run.js";
 // #815: the fifth — the pre-merge gate's evidence quartet-plus-source.
 export { workspaceMergeGate, workspaceMergeGateRelations } from "./workspace-merge-gate.js";
+// #815: the sixth — the cached merge-tree conflict probe.
+export { workspaceConflictCache, workspaceConflictCacheRelations } from "./workspace-conflict-cache.js";
