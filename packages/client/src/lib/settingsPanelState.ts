@@ -14,16 +14,17 @@ import { buildServicesConfig, type ServicesConfigFormFields } from "./services-c
  */
 
 /**
- * The panel's project-settings form state.
+ * The panel's project-settings form state — the SINGLE declaration (#791).
  *
- * Declared here rather than imported from `components/SettingsPanel.shared.tsx`: `lib/` may not
- * import upward into `components/`, even type-only (#694), and a DTO belongs in `lib/` anyway
- * (#610). `SettingsPanel.shared.tsx` still declares the identical `ProjectSettingsState` for the
- * child tabs; the two are checked against each other by the typechecker at every call site here,
- * so a renamed or dropped field fails the build rather than drifting. Collapsing them to one
- * declaration means editing that file, which #782 deliberately keeps out of scope.
+ * It lives here, not in `components/SettingsPanel.shared.tsx`: `lib/` may not import upward into
+ * `components/`, even type-only (#694), and a DTO belongs in `lib/` anyway (#610). So the only
+ * direction that can carry one declaration is this one, and `SettingsPanel.shared.tsx` re-exports
+ * it — leaving the child tabs' imports untouched. #782 left a structurally identical twin behind
+ * (this type as `ProjectSettingsState`, plus `ProjectSettingsState` in the shared module),
+ * which tsc could catch only for a RENAMED or DROPPED field; a field ADDED to one side was
+ * invisible to the other. There is now nothing to add a field to twice.
  */
-export type ProjectSettingsFormState = {
+export type ProjectSettingsState = {
   defaultBranch: string;
   setupScript: string;
   setupBlocking: boolean;
@@ -59,7 +60,7 @@ export type SettingsProjectRow = {
  * so a row from an older server does not silently flip a project's behaviour. Nullable
  * text columns become `""` because they are bound to controlled inputs.
  */
-export function buildProjectSettingsState(project: SettingsProjectRow, verifyScript: string): ProjectSettingsFormState {
+export function buildProjectSettingsState(project: SettingsProjectRow, verifyScript: string): ProjectSettingsState {
   const svc = project.servicesConfig ?? null;
   return {
     defaultBranch: project.defaultBranch || "",
@@ -90,7 +91,7 @@ export function buildProjectSettingsState(project: SettingsProjectRow, verifyScr
  * `verifyScript` is deliberately absent: it is a PREFERENCE, saved with the settings blob
  * (see `buildSettingsToSave`), not a project column.
  */
-export function buildProjectPatchBody(p: ProjectSettingsFormState) {
+export function buildProjectPatchBody(p: ProjectSettingsState) {
   return {
     setupScript: p.setupScript || null,
     setupBlocking: p.setupBlocking,
@@ -131,7 +132,7 @@ export function verifyScriptKey(projectId: string): string {
  */
 export function buildSettingsToSave<S extends Record<string, unknown>>(
   settings: S,
-  projectSettings: Pick<ProjectSettingsFormState, "verifyScript">,
+  projectSettings: Pick<ProjectSettingsState, "verifyScript">,
   activeProjectId: string | null | undefined,
 ): S {
   const out = { ...settings };
