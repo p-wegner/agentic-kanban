@@ -1,19 +1,23 @@
 import type { CreateIssueFormState } from "../lib/boardTypes.js";
 import { useRef, useEffect, useState } from "react";
 import type { CreateIssueRequest, IssueEstimate } from "@agentic-kanban/shared";
-import { apiFetch, apiPost } from "../lib/api.js";
+import { apiFetch } from "../lib/api.js";
 import { isHttpUrl } from "../lib/url.js";
 import { showToast } from "../lib/toast.js";
 import TicketMentionInput from "./TicketMentionInput.js";
 import { useIssueTemplates } from "../hooks/useIssueTemplates.js";
+import { useIssueEnhance } from "../hooks/useIssueEnhance.js";
 import { handleImagePaste, mergeDescriptionWithImages } from "../lib/pastedImages.js";
-import { ISSUE_TYPES, issueTypeLabel } from "@agentic-kanban/shared";
-
-interface Skill {
-  id: string;
-  name: string;
-  description: string | null;
-}
+import { EnhanceButton, UndoEnhanceButton } from "./EnhanceActions.js";
+import type { AgentSkillOption } from "./IssueFormFields.js";
+import {
+  AgentOptionCheckbox,
+  IssueEstimateSelect,
+  IssueTemplateSelect,
+  IssueTypeSelect,
+  PastedImageStrip,
+  SkillSelect,
+} from "./IssueFormFields.js";
 
 interface WorkflowTemplate {
   id: string;
@@ -32,6 +36,8 @@ interface CreateIssueFormProps {
   onExpand?: (state: CreateIssueFormState) => void;
   initialState?: Partial<CreateIssueFormState>;
 }
+
+const CHECKBOX_CLASS = "flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 cursor-pointer";
 
 export function CreateIssueForm({
   projectId,
@@ -54,7 +60,7 @@ export function CreateIssueForm({
   const [externalKey, setExternalKey] = useState("");
   const [externalUrl, setExternalUrl] = useState("");
   const [skillId, setSkillId] = useState<string>(initialState?.skillId ?? "");
-  const [skills, setSkills] = useState<Skill[]>([]);
+  const [skills, setSkills] = useState<AgentSkillOption[]>([]);
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
   const [workflowTemplateId, setWorkflowTemplateId] = useState<string>("");
   const [autoTemplateId, setAutoTemplateId] = useState<string>("");
@@ -62,8 +68,9 @@ export function CreateIssueForm({
   const titleRef = useRef<HTMLTextAreaElement>(null);
   const descRef = useRef<HTMLTextAreaElement>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [enhancing, setEnhancing] = useState(false);
-  const [preEnhanceSnapshot, setPreEnhanceSnapshot] = useState<{ title: string; description: string } | null>(null);
+  const { enhancing, preEnhanceSnapshot, enhance, undoEnhance } = useIssueEnhance({
+    projectId, title, description, setTitle, setDescription,
+  });
 
   function autoResize(el: HTMLTextAreaElement | null) {
     if (!el) return;
@@ -76,7 +83,7 @@ export function CreateIssueForm({
 
   useEffect(() => {
     if (!startWorkspace || !projectId) return;
-    apiFetch<Skill[]>(`/api/agent-skills?projectId=${projectId}`)
+    apiFetch<AgentSkillOption[]>(`/api/agent-skills?projectId=${projectId}`)
       .then(setSkills)
       .catch(() => {});
   }, [startWorkspace, projectId]);
@@ -104,29 +111,6 @@ export function CreateIssueForm({
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, issueType]);
-
-  async function handleEnhance() {
-    if (!title.trim() || enhancing) return;
-    setEnhancing(true);
-    try {
-      setPreEnhanceSnapshot({ title, description });
-      const result = await apiPost<{ title: string; description: string }>("/api/issues/enhance", { title, description, projectId });
-      setTitle(result.title);
-      setDescription(result.description);
-    } catch (err) {
-      setPreEnhanceSnapshot(null);
-      showToast(err instanceof Error ? err.message : "Enhancement failed", "error");
-    } finally {
-      setEnhancing(false);
-    }
-  }
-
-  function handleUndoEnhance() {
-    if (!preEnhanceSnapshot) return;
-    setTitle(preEnhanceSnapshot.title);
-    setDescription(preEnhanceSnapshot.description);
-    setPreEnhanceSnapshot(null);
-  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -216,61 +200,29 @@ export function CreateIssueForm({
         rows={2}
         className="w-full text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 resize-none overflow-y-hidden dark:bg-gray-900 dark:text-gray-100"
       />
-      {pastedImages.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {pastedImages.map((url, i) => (
-            <div key={i} className="relative group">
-              <img src={url} alt={`screenshot-${i + 1}`} className="h-12 w-auto rounded border border-gray-200 dark:border-gray-700 object-cover" />
-              <button
-                type="button"
-                onClick={() => setPastedImages((prev) => prev.filter((_, j) => j !== i))}
-                className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 text-white rounded-full text-xs leading-none flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-              >×</button>
-            </div>
-          ))}
-        </div>
-      )}
-      {issueTemplates.length > 0 && (
-        <select
-          value=""
-          onChange={(e) => {
-            const tpl = issueTemplates.find((t) => t.id === e.target.value);
-            if (!tpl) return;
-            if (description.trim() && !window.confirm("Replace current description with the template?")) return;
-            setDescription(tpl.body);
-          }}
-          className="w-full text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
-          title="Apply a template to the description"
-        >
-          <option value="">Template...</option>
-          {issueTemplates.map((t) => (
-            <option key={t.id} value={t.id}>{t.name}</option>
-          ))}
-        </select>
-      )}
+      <PastedImageStrip
+        images={pastedImages}
+        onRemove={(i) => setPastedImages((prev) => prev.filter((_, j) => j !== i))}
+      />
+      <IssueTemplateSelect
+        templates={issueTemplates}
+        description={description}
+        onApply={setDescription}
+        className="w-full text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
+      />
       <div className="flex gap-2">
-        <select
+        <IssueTypeSelect
           value={issueType}
-          onChange={(e) => setIssueType(e.target.value as CreateIssueRequest["issueType"])}
+          onChange={setIssueType}
           className="flex-1 text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
-        >
-          {ISSUE_TYPES.map((t) => (
-            <option key={t} value={t}>{issueTypeLabel(t)}</option>
-          ))}
-        </select>
-        <select
+        />
+        <IssueEstimateSelect
           value={estimate}
-          onChange={(e) => setEstimate(e.target.value as IssueEstimate | "")}
-          className="text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
+          onChange={setEstimate}
+          emptyLabel="Est."
           title="Effort estimate"
-        >
-          <option value="">Est.</option>
-          <option value="XS">XS</option>
-          <option value="S">S</option>
-          <option value="M">M</option>
-          <option value="L">L</option>
-          <option value="XL">XL</option>
-        </select>
+          className="text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
+        />
       </div>
       <div className="flex gap-2">
         <input
@@ -307,58 +259,42 @@ export function CreateIssueForm({
         </div>
       )}
       {canStartWorkspace && (
-        <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={startWorkspace}
-            onChange={(e) => setStartWorkspace(e.target.checked)}
-            className="rounded border-gray-300 text-brand-600 focus:ring-brand-500"
-          />
-          Start workspace
-        </label>
+        <AgentOptionCheckbox
+          checked={startWorkspace}
+          onChange={setStartWorkspace}
+          label="Start workspace"
+          className={CHECKBOX_CLASS}
+        />
       )}
       {canStartWorkspace && startWorkspace && (
         <div className="pl-4 space-y-1 border-l-2 border-brand-100 dark:border-brand-700">
-          <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={planMode}
-              onChange={(e) => setPlanMode(e.target.checked)}
-              className="rounded border-gray-300 text-brand-600 focus:ring-brand-500"
-            />
-            Plan mode (agent plans before implementing)
-          </label>
-          <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={skipAutoReview}
-              onChange={(e) => setSkipAutoReview(e.target.checked)}
-              className="rounded border-gray-300 text-brand-600 focus:ring-brand-500"
-            />
-            Skip auto AI code review
-          </label>
-          <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={isDirect}
-              onChange={(e) => setIsDirect(e.target.checked)}
-              className="rounded border-gray-300 text-brand-600 focus:ring-brand-500"
-            />
-            Work directly on current checkout (no worktree)
-          </label>
+          <AgentOptionCheckbox
+            checked={planMode}
+            onChange={setPlanMode}
+            label="Plan mode (agent plans before implementing)"
+            className={CHECKBOX_CLASS}
+          />
+          <AgentOptionCheckbox
+            checked={skipAutoReview}
+            onChange={setSkipAutoReview}
+            label="Skip auto AI code review"
+            className={CHECKBOX_CLASS}
+          />
+          <AgentOptionCheckbox
+            checked={isDirect}
+            onChange={setIsDirect}
+            label="Work directly on current checkout (no worktree)"
+            className={CHECKBOX_CLASS}
+          />
           {skills.length > 0 && (
             <div className="flex items-center gap-2">
               <label className="text-xs text-gray-600 dark:text-gray-400 shrink-0">Skill:</label>
-              <select
+              <SkillSelect
+                skills={skills}
                 value={skillId}
-                onChange={(e) => setSkillId(e.target.value)}
+                onChange={setSkillId}
                 className="flex-1 text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:bg-gray-900 dark:text-gray-100"
-              >
-                <option value="">None</option>
-                {skills.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
+              />
             </div>
           )}
         </div>
@@ -381,37 +317,17 @@ export function CreateIssueForm({
         >
           Cancel
         </button>
-        <button
-          type="button"
-          onClick={handleEnhance}
+        <EnhanceButton
+          enhancing={enhancing}
           disabled={!title.trim() || enhancing}
-          title="Enhance with AI"
+          onClick={() => void enhance()}
           className="text-xs text-brand-600 dark:text-brand-400 px-2 py-1.5 hover:text-brand-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
-        >
-          {enhancing ? (
-            <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-            </svg>
-          ) : (
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M5 3l1.5 3.5L10 8l-3.5 1.5L5 13l-1.5-3.5L0 8l3.5-1.5L5 3zM19 11l1 2.5L22.5 14l-2.5 1L19 17.5l-1-2.5L15.5 14l2.5-1L19 11z" />
-            </svg>
-          )}
-          {enhancing ? "Enhancing..." : "Enhance"}
-        </button>
+        />
         {preEnhanceSnapshot && (
-          <button
-            type="button"
-            onClick={handleUndoEnhance}
-            title="Undo enhancement"
+          <UndoEnhanceButton
+            onClick={undoEnhance}
             className="text-xs text-gray-500 dark:text-gray-400 px-2 py-1.5 hover:text-gray-700 dark:hover:text-gray-200 flex items-center gap-1"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
-            </svg>
-            Undo
-          </button>
+          />
         )}
         {onExpand && (
           <button
