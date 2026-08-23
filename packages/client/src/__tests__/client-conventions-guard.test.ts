@@ -192,6 +192,14 @@ describe("client conventions (#601)", () => {
    * `invalidateSettings()`, so the store and the server disagree until something else
    * refetches. 15 files still do it; frozen and shrink-only rather than allow-listed,
    * because a 15-entry list is a count wearing a disguise.
+   *
+   * #774 landed two more against the frozen 15 (#811): `WorkerDispatchPrefs` read AND WROTE
+   * the settings map raw, which is the invariant hole rather than a style nit — its PUT
+   * skipped `invalidateSettings()`, so every other consumer kept the pre-write dispatch
+   * preferences for up to the store's 30s TTL. Both are now migrated (`getSettings`/
+   * `setSettings`, and `useActiveProjectPreferenceQuery` for the fleet panel's
+   * active-project read), so the count is back AT the baseline rather than the baseline
+   * being raised to meet it. The number below has never moved and must not.
    */
   const PREFERENCES_BYPASS_BASELINE = 15;
   const preferenceBypasses = () =>
