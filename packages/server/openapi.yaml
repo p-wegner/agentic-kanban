@@ -616,6 +616,121 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/failure-patterns:
+    get:
+      summary: GET /api/failure-patterns — list all stored patterns
+      tags:
+        - failure-patterns
+      operationId: get_api_failure-patterns
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    post:
+      summary: POST /api/failure-patterns — create a pattern manually
+      tags:
+        - failure-patterns
+      operationId: post_api_failure-patterns
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                errorClass:
+                  type: string
+                description:
+                  type: string
+                rootCause:
+                  type: string
+                fix:
+                  type: string
+                sourceType:
+                  type: string
+                sourceRef:
+                  type: string
+              required:
+                - title
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/failure-patterns/ingest:
+    post:
+      summary: POST /api/failure-patterns/ingest — ingest a markdown file
+      tags:
+        - failure-patterns
+      operationId: post_api_failure-patterns_ingest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                filePath:
+                  type: string
+              required:
+                - filePath
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/failure-patterns/search:
+    get:
+      summary: GET /api/failure-patterns/search?q=<text>&limit=<n> — find similar failures
+      tags:
+        - failure-patterns
+      operationId: get_api_failure-patterns_search
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/failure-patterns/{id}:
+    delete:
+      summary: DELETE /api/failure-patterns/:id
+      tags:
+        - failure-patterns
+      operationId: delete_api_failure-patterns_id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
   /api/flaky-tests:
     get:
       summary: GET /api/flaky-tests — list flaky tests
