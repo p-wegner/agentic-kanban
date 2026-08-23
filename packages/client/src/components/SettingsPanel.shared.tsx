@@ -20,7 +20,6 @@ export * from "./SettingsPrimitives.js";
 export * from "./WorkflowSections.js";
 import { CAPABILITY_DEFS, getProviderCapabilities } from "../lib/settings-shared.js";
 import type { Settings, AgentProvider } from "../lib/settings-shared.js";
-import type { ServicesConfigFormFields } from "../lib/services-config.js";
 
 const ARCHIVE_THRESHOLDS = [
   { label: "14 days", value: 14 },
@@ -272,7 +271,12 @@ export function formatNextFire(value: string | null | undefined): string {
 
 export type SettingsTextSetter = (key: keyof Settings) => (value: string) => void;
 export type SettingsBoolSetter = (key: keyof Settings) => (checked: boolean) => void;
-export type ProjectSettingsState = { defaultBranch: string; setupScript: string; setupBlocking: boolean; setupEnabled: boolean; teardownScript: string; verifyScript: string; color: string | null; symlinkEnabled: boolean; symlinkDirs: string; defaultSkillId: string | null } & ServicesConfigFormFields;
+/**
+ * #791 — re-exported, not declared. The single declaration is in `lib/settingsPanelState.ts`,
+ * beside the functions that consume it; `lib/` cannot import upward into `components/` (#694),
+ * so this is the only direction a re-export can go. Importers of this module are unchanged.
+ */
+export type { ProjectSettingsState } from "../lib/settingsPanelState.js";
 
 /** #610 — re-exported so this panel's existing importers are unchanged. */
 export type { SkillSetting, TagSetting } from "../lib/settingsTypes.js";

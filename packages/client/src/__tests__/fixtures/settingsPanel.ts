@@ -1,4 +1,4 @@
-import type { ProjectSettingsFormState, SettingsProjectRow } from "../../lib/settingsPanelState.js";
+import type { ProjectSettingsState, SettingsProjectRow } from "../../lib/settingsPanelState.js";
 
 /**
  * Fixture builders for the settings surface (#782). See `fixtures/issue.ts` for why these
@@ -25,7 +25,7 @@ export function projectRowFixture(overrides: Partial<SettingsProjectRow> = {}): 
 }
 
 /** The panel's project-settings form state, as the Project tab edits it. */
-export function projectSettingsFixture(overrides: Partial<ProjectSettingsFormState> = {}): ProjectSettingsFormState {
+export function projectSettingsFixture(overrides: Partial<ProjectSettingsState> = {}): ProjectSettingsState {
   return {
     defaultBranch: "master",
     setupScript: "pnpm install -r",
