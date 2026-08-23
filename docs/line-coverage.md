@@ -104,6 +104,22 @@ The two genuinely worst-protected complex files in the repo were invisible to th
 and the file it pointed at was well covered. `scripts/analyze-claude-session.mjs` stays 3rd on
 `test_cochange` — see below.
 
+## Two costs, measured
+
+- **Client**: 165 files / 1,541 tests, **54s** warm with coverage.
+- **Server**: 401 files / 3,338 tests, **20m49s** with coverage (`VITEST_MAX_WORKERS=4`, on a
+  machine running seven concurrent agents). That is the number the arch-gate job's
+  `if: github.event_name != 'pull_request'` exists for — a full-repo run is this plus three more
+  packages, and it is not worth putting in front of every merge until it has been timed on a CI
+  runner.
+
+**A run with any failing test produces no coverage report at all.** That server run had 6 failing
+files (unrelated in-flight work in a shared checkout) and wrote nothing — not in-tree, not at an
+absolute `--coverage.reportsDirectory` (an absolute path was separately verified to work on a
+passing run). So a red suite yields no coverage, and `scripts/coverage-report.mjs` will say so
+loudly; the workflow's artifact upload uses `if-no-files-found: warn` so the reader stays the single
+clear failure.
+
 ## What coverage can never tell you here
 
 Root `scripts/*.mjs`, `packages/e2e` and `packages/desktop` are owned by no vitest project, so a v8
