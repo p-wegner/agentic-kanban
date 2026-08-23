@@ -6,12 +6,14 @@
  * a bridge between clusters AND internally heavy, and every one of them UNDER the 1000-line
  * god-module ceiling, so none is visible to `scripts/check-god-modules.mjs`. That
  * invisibility is the ticket's whole point, and it is also what makes a partial fix
- * dangerous: three files were split (see below), the other 92 were not, and nothing would
- * stop the split three from re-absorbing their halves or the named remainder from growing.
+ * dangerous: nothing would stop a split file from re-absorbing its halves, or the named
+ * remainder from growing.
  *
  * This is that stop. It counts TOP-LEVEL DECLARATIONS — the load-bearing number, since the
  * ticket's subject is how many distinct things one module declares, not how long it is — for
- * the five files #728 named as its top candidates, and fails when one grows.
+ * the five files #728 named as its top candidates plus the modules they were split into, and
+ * fails when one grows. All five are now split: three in #728 batch 1, and
+ * `devcontainer-workspace` + `butler-definitions` in #819 batch 2.
  *
  * ## What it does NOT cover, said plainly
  *
@@ -42,9 +44,11 @@ const SERVER_SRC = join(dirname(fileURLToPath(import.meta.url)), "..");
 /**
  * Top-level declaration counts, keyed by path relative to `packages/server/src`.
  *
- * The three SPLIT files (#728 batch 1) are pinned at their post-split counts so the halves
- * cannot drift back in. The two UNSPLIT ones are pinned where the ticket found them — their
- * verdicts, and why they were left, are in the ticket and in `CONTINUE.md`.
+ * Every entry is a post-split count, pinned so a half cannot drift back into the module it
+ * came from. Each split carries, beside its entry, the CONSUMER argument that justified the
+ * seam — because that is what a future agent needs before cutting the next candidate, and
+ * because #728 found that 2 of 3 tool-computed seams were clustering artifacts of identifier
+ * vocabulary rather than responsibilities.
  */
 const BASELINE: Record<string, number> = {
   // --- split in #728 batch 1: pinned so the extracted halves cannot return ---
@@ -67,9 +71,22 @@ const BASELINE: Record<string, number> = {
   // the file had no module-level mutable state to tear.
   "services/devcontainer-workspace.service.ts": 17,
   "services/devcontainer-workspace/container-inventory.ts": 5,
-
-  // --- named by #728, NOT split: the remainder this ratchet holds in place ---
-  "services/butler-definitions.service.ts": 21,
+  // butler-definitions: 21 -> 0 (facade) + 12 + 9. #728 called this seam real but
+  // DEFERRED the cut ("the smallest of the five and the cheapest to read as-is"). The
+  // consumer check that reopened it: the CRUD route (routes/butler-definitions.ts)
+  // imports only the store half, the two headless warm-up callers
+  // (services/agent-questions/recommendation.ts, services/plugin-gate-butler.service.ts)
+  // import only resolveButlerLaunchConfig, and the sets overlap in exactly one module
+  // (routes/butler.ts) which legitimately does both. The decisive argument is import
+  // weight, not line count: launch-config pulls in agent settings, the Strategy Bullseye
+  // reader, the shared provider resolver, the preference service and the codex license
+  // ring; the store needs a preference read/write and a slugifier. Keeping them together
+  // made a four-endpoint CRUD route transitively depend on the whole provider-resolution
+  // stack. The edge runs one way (launch-config reads a definition; the store calls
+  // nothing back), so the service file is now a pure facade and scores 0.
+  "services/butler-definitions.service.ts": 0,
+  "services/butler-definitions/definitions-store.ts": 12,
+  "services/butler-definitions/launch-config.ts": 9,
 };
 
 /**
