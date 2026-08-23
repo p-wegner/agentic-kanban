@@ -25,7 +25,7 @@ used as evidence". It has two halves and they are in very different states.
 **Verified, and by what:** the drift report named a probe file created 8 s into a real
 `pnpm test:mine` run and named NONE of the four paths another agent had already dirtied
 beforehand; a second run with no probe printed nothing. The static guard's bite test
-reconstructs the pre-#814 shape in `os.tmpdir()` and requires exactly 2 offenders, and the FIXED
+reconstructs the pre-#814 shape in `os.tmpdir()` and requires exactly 2 offenders, then the FIXED
 shape and requires 0 — so neither an always-true nor an always-false guard passes it.
 
 **What is NOT verified, and the honest gap:** the `zz-adversarial-tmp.test.ts` writer #680
