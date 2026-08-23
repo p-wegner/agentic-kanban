@@ -1,4 +1,4 @@
-import { workspaces, sessions, sessionMessages, showdowns, workflowEdges, workflowNodes, repos, issues } from "@agentic-kanban/shared/schema";
+import { workspaces, sessions, sessionMessages, showdowns, workflowEdges, workflowNodes, repos, issues, workspaceCodeMetrics } from "@agentic-kanban/shared/schema";
 import { and, eq, inArray, sql, desc } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import { db } from "../db/index.js";
@@ -64,14 +64,17 @@ export async function fetchWorkspaceDetailRows(issueIds: string[], database: Dat
       diffStatCacheInsertions: workspaces.diffStatCacheInsertions,
       diffStatCacheDeletions: workspaces.diffStatCacheDeletions,
       scorecardScore: workspaces.scorecardScore,
-      codeMetricsJson: workspaces.codeMetricsJson,
-      codeMetricsComputedAt: workspaces.codeMetricsComputedAt,
+      // #798: the artifact moved to `workspace_code_metrics`. Aliased back to the same two
+      // field names, so every consumer of this projected row is untouched by the move.
+      codeMetricsJson: workspaceCodeMetrics.metricsJson,
+      codeMetricsComputedAt: workspaceCodeMetrics.computedAt,
       currentNodeId: workspaces.currentNodeId,
       showdownId: workspaces.showdownId,
       mergedAt: workspaces.mergedAt,
     })
     .from(workspaces)
     .leftJoin(leadingRepo, onLeadingRepo)
+    .leftJoin(workspaceCodeMetrics, eq(workspaceCodeMetrics.workspaceId, workspaces.id))
     .where(inArray(workspaces.issueId, issueIds));
 }
 

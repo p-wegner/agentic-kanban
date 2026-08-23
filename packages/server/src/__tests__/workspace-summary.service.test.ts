@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi, beforeEach, afterAll } from "vitest";
 import { sessionOutputPath } from "@agentic-kanban/shared/lib/session-files";
-import { issues, projects, projectStatuses, sessions, workflowEdges, workflowNodes, workflowTemplates, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, projects, projectStatuses, sessions, workflowEdges, workflowNodes, workflowTemplates, workspaceCodeMetrics, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 
 // The summary service skips git work for a workingDir that does not EXIST on disk
@@ -106,10 +106,12 @@ describe("workspace-summary.service", () => {
       issueId,
       branch: "feature/metrics",
       status: "idle",
-      codeMetricsJson: JSON.stringify(metrics),
-      codeMetricsComputedAt: now,
       createdAt: now,
       updatedAt: now,
+    });
+    // #798: the metrics artifact lives in `workspace_code_metrics`, not on the workspace row.
+    await db.insert(workspaceCodeMetrics).values({
+      workspaceId, metricsJson: JSON.stringify(metrics), computedAt: now,
     });
 
     const summaryMap = await buildWorkspaceSummaryMap([issueId], "main", db);

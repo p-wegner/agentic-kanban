@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { workspaces } from "@agentic-kanban/shared/schema";
+import { workspaceCodeMetrics, workspaces } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { firstRow } from "../lib/first-row.js";
@@ -17,14 +17,23 @@ export async function getWorkspaceWorkingDir(
   ))?.workingDir ?? null;
 }
 
+/**
+ * Store the computed artifact (#798: in `workspace_code_metrics`, not two columns on
+ * `workspaces`). Upsert, because there is exactly one current artifact per workspace and a
+ * recompute replaces it.
+ */
 export async function updateWorkspaceCodeMetrics(
   workspaceId: string,
   codeMetricsJson: string,
   codeMetricsComputedAt: string,
   database: Database = db,
 ): Promise<void> {
-  await database.update(workspaces).set({
-    codeMetricsJson,
-    codeMetricsComputedAt,
-  }).where(eq(workspaces.id, workspaceId));
+  await database.insert(workspaceCodeMetrics).values({
+    workspaceId,
+    metricsJson: codeMetricsJson,
+    computedAt: codeMetricsComputedAt,
+  }).onConflictDoUpdate({
+    target: workspaceCodeMetrics.workspaceId,
+    set: { metricsJson: codeMetricsJson, computedAt: codeMetricsComputedAt },
+  });
 }

@@ -121,8 +121,12 @@ describe("activity feed column narrowing (#346)", () => {
       createdAt: now,
       updatedAt: now,
       mergedAt: now,
-      // A fat column the feed must not need.
-      codeMetricsJson: JSON.stringify({ padding: "x".repeat(5000) }),
+    });
+    // #798: the fat column the feed must not need now lives in its own table.
+    await db.insert(schema.workspaceCodeMetrics).values({
+      workspaceId: wsId,
+      metricsJson: JSON.stringify({ padding: "x".repeat(5000) }),
+      computedAt: now,
     });
     await db.insert(schema.sessions).values({
       id: randomUUID(),

@@ -184,6 +184,13 @@ const SUBTREE_SEEDERS: Record<string, (c: SeedCtx) => Promise<void>> = {
       signature: "head1..base1", blockedAt: c.now,
     });
   },
+  // #798: the third column family extracted out of `workspaces` — the computed metrics
+  // artifact. Same `onDelete: cascade` shape, so seeding it proves the cascade fires.
+  workspace_code_metrics: async (c) => {
+    await c.db.insert(schema.workspaceCodeMetrics).values({
+      workspaceId: c.workspaceId, metricsJson: '{"files":3}', computedAt: c.now,
+    });
+  },
   sessions: async (c) => {
     await c.db.insert(schema.sessions).values({
       id: c.sessionId, workspaceId: c.workspaceId, status: "running", startedAt: c.now,

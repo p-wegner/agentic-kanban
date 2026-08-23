@@ -590,8 +590,6 @@ function makeWorkspace(overrides: Partial<typeof workspaces.$inferSelect> = {}):
     scorecardScore: null,
     scorecardJson: null,
     scorecardComputedAt: null,
-    codeMetricsJson: null,
-    codeMetricsComputedAt: null,
     latestSetupCommand: null,
     latestSetupState: null,
     latestSetupStartedAt: null,

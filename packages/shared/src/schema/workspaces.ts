@@ -4,17 +4,17 @@ import { issues } from "./issues.js";
 import { agentSkills } from "./agent-skills.js";
 
 /**
- * 77 columns, and it should not become 78 (#739, #781, #798).
+ * 75 columns, and it should not become 76 (#739, #781, #798).
  *
  * The next widest table in this schema has 23 (`issues`, `repos`); the median across 44
- * tables is 9. What is here is not one entity but nine remaining concerns flattened into one row by
+ * tables is 9. What is here is not one entity but eight remaining concerns flattened into one row by
  * prefix — `latest_setup_*` (8), `latest_symlink_*` (8), `merge_gate_*` (5), `summary_*` (5),
  * `diff_stat_cache_*` (5), `conflict_cache_*` (3), `scorecard_*` (3),
- * `fork_*`/`showdown_*` (5), `code_metrics_*` (2). Two families are no longer among them:
- * #781 extracted `merge_backoff_*` (7) to `workspace_merge_backoff` and #798 extracted
- * `review_preflight_*` (4) to `workspace_review_preflight`. The remaining order (cheapest
- * coupling first) is `summary_*` →
- * `merge_gate_*` → `latest_symlink_*` → `conflict_cache_*` → `code_metrics_*` →
+ * `fork_*`/`showdown_*` (5). Three families are no longer among them:
+ * #781 extracted `merge_backoff_*` (7) to `workspace_merge_backoff`, and #798 extracted
+ * `review_preflight_*` (4) to `workspace_review_preflight` and `code_metrics_*` (2) to
+ * `workspace_code_metrics`. The remaining order, by re-derived coupling, is `merge_gate_*` →
+ * `latest_symlink_*` → `summary_*` → `conflict_cache_*` →
  * `latest_setup_*` → `diff_stat_cache_*` → `scorecard_*` (highest fan-out, last).
  * Each `latest_*` / `*_cache_*` / `*_gate_*` group is a one-to-many relationship collapsed
  * to its last row: there is one setup run per column set, so its history is unrecoverable by
@@ -126,8 +126,6 @@ export const workspaces = sqliteTable("workspaces", {
   scorecardScore: integer("scorecard_score"),
   scorecardJson: text("scorecard_json"),
   scorecardComputedAt: text("scorecard_computed_at"),
-  codeMetricsJson: text("code_metrics_json"),
-  codeMetricsComputedAt: text("code_metrics_computed_at"),
   latestSetupCommand: text("latest_setup_command"),
   latestSetupState: text("latest_setup_state"),
   latestSetupStartedAt: text("latest_setup_started_at"),
