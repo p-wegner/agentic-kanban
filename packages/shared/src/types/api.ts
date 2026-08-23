@@ -10,9 +10,18 @@
 // full surface is re-exported here. `export type *` keeps the barrel purely type-only so
 // client-bundle safety is preserved.
 //
-// NOTE (deferred, out of scope): the zod-inferred / ts-rest route-contract migration that
-// would make DTO drift fail loud at runtime (lib/api.ts:19 still casts `res.json() as T`;
-// zero `zValidator` routes) is a separate, wide-blast-radius follow-up — see review §1.4.
+// RUNTIME CHECKING (#780) — partly closed, and the remainder is named:
+//   - OUTBOUND (server -> client) is checked at the choke point. `res.json() as T` is gone;
+//     `packages/client/src/lib/api.ts` now PARSES through the registry in
+//     `packages/client/src/lib/apiResponseSchemas.ts` (17 method+path pairs — the mutating ones for
+//     issues/workspaces/projects — of 352 operations; the rest go through one named
+//     `unvalidatedResponse` seam instead of a cast at every call site).
+//   - INBOUND (client -> server) is still UNCHECKED: 0 `zValidator` routes across 48 route
+//     files, request bodies are trusted. That is the wide-blast-radius half and stays
+//     deferred — see #780 step 3 and review §1.4.
+// The artifact that DESCRIBES this contract, `packages/server/openapi.yaml`, is regenerated
+// and gated now (`pnpm openapi:check`, arch-gate.yml, openapi-drift.test.ts), so it can no
+// longer be quoted as coverage while two months stale.
 export type * from "./api/common.js";
 export type * from "./api/butler.js";
 export type * from "./api/project.js";
