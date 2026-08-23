@@ -88,12 +88,68 @@ frontend before acting on the full list.
 Full list with edge-level evidence: `code-metrics-out/structure.md` § "Refactoring
 Opportunities".
 
+## Module cuts: cut at the package, not at its `src/` (#795)
+
+**Every module-scoped number recorded ABOVE this section predates this fix and was computed
+over the wrong file sets.** `.codemetricsrc` cut each package at `packages/<pkg>/src`, and
+`shared` is the one package whose tests do not live under `src/` — they are at
+`packages/shared/__tests__/`. Those 102 files therefore fell into the unassigned `root`
+bucket, which the analyzer then treats as a pseudo-module. `server` had the same miss,
+smaller: its bundled skill, plugin, bin-shim, tooling and generator files sit beside `src/`.
+Root `scripts/` (56 files of real build/dev/analysis tooling, including the two session
+analyzers at CC 46/45) was never named at all.
+
+The fix is `.codemetricsrc` only — no source moved. Both runs below are
+`code-metrics analyze . --changeset-strategy pr` on this checkout, before at `ae295022e1`
+(2,810 files) and after ~40 minutes later (2,817 — other agents committed to master between
+the runs, so a handful of files differ; every delta below is far larger than that noise).
+Each run took ~13 min. Note `lizard` failed in both (`Complexity FAILED — no output`), so the
+complexity-derived channels read zero in both; the structural channels (`depcruiser`: 7,708
+edges) ran clean and are what the table measures.
+
+| | before | after |
+|---|---|---|
+| files in `shared` | 219 | **327** (+108) |
+| files in `server` | 1,437 | **1,472** (+35) |
+| files in `client` | 641 | 647 (+6) |
+| files in `mcp-server` | 148 | 151 (+3) |
+| files in `scripts` | — (unassigned) | **56** (new module) |
+| files in `root` | 246 | **45** (−201) |
+| `entanglement_index` | 0.2055 | **0.1145** |
+| `modularity` | 0.6397 | **0.7069** |
+| `mean_module_distance` | 0.378 | 0.443 |
+| `shared` containment | 0.613 | 0.599 |
+| DIP `modules_measured` | 2 of 5 | 1 of 4 |
+| `module_cycles` | `[["root", "server"]]` | **`[]`** |
+| top refactoring opportunity | `break_cycle root ↔ server`, priority **1.0** | (gone) — now `introduce_event`, 0.7 |
+
+**The headline result is the cycle.** `root ↔ server` had been the #1 refactoring
+recommendation of every pass this repo has ever run, at priority 1.0, and the tool itself
+labelled it a `cycle_artifact` — *"this cycle only exists because it routes through the
+catch-all `root` bucket"*. Naming `scripts` and folding the package files back into their
+packages shrank `root` by 82% and the cycle disappeared. Five passes of "break the
+root ↔ server cycle" were work on an artifact of the config.
+
+**#795's own prediction did not reproduce, and the direction is the opposite one.** The
+ticket measured the `shared`-only edit at `5c15ab7a93` and found `entanglement_index` rising
+0.0925 → 0.1319 (+43%), correctly reasoning that shared's tests cluster with `server`, so
+while they sat in `root` their cross-module pull was invisible. This run bundles that edit
+with the `server`/`client`/`mcp-server` cuts **and** the new `scripts` module, and the net
+is 0.2055 → 0.1145. The two are not in conflict — a large `root` inflates or deflates
+entanglement depending on what is left in it — but the `shared`-only component was **not
+re-measured in isolation here**, so treat the +43% as unverified at this commit.
+
+Anything quoting a module-scoped metric from before this commit (#730 was argued and closed
+on containment and entanglement; #762, #728 and #742 are all module-scoped) is quoting a
+`shared` missing a third of itself beside a `root` that was 41% one package's test suite.
+
 ## Structure / bounded contexts
 
 Louvain clustering (auto-resolution 0.5) finds **19 natural clusters** with modularity 0.702
 and entanglement 0.06 — a well-separated import/co-change graph overall, but this is computed
 against the file-level coupling graph, not the 6 module boundaries declared in
-`.codemetricsrc` (`client`, `server`, `shared`, `mcp-server`, `e2e`, `desktop`). The gap
+`.codemetricsrc` (`client`, `server`, `shared`, `mcp-server`, `e2e`, `desktop` — plus
+`scripts` since #795, see the section above). The gap
 between 19 natural clusters and 6 declared modules suggests some of the declared modules
 (particularly `server`, 637 files) bundle several cohesive sub-clusters that aren't
 individually named — consistent with the god-file/split-responsibility findings above.
@@ -136,9 +192,10 @@ Low-impact (7 files) — not acted on here; note left for whoever next tunes
    CC 25) into its constituent phases (loop-lag monitor, session restore, WS wiring,
    shutdown handlers) — each is already a distinct concern per the split-responsibility
    evidence.
-2. File a ticket to break the `root ↔ server` module cycle — likely a composition-root file
-   under `packages/server/src/` importing back from something `server` depends on; needs the
-   edge-level detail in `structure.md` to name the exact pair.
+2. ~~File a ticket to break the `root ↔ server` module cycle~~ — **retired by #795.** It was
+   a `cycle_artifact` of the module cut, not a cycle in the code: it routed through the
+   catch-all `root` bucket, and it disappears once `root` stops being 82% misfiled package
+   files and unnamed `scripts/`. Do not re-file it.
 3. Investigate whether `packages/server` (637 files, 111 refactor-first, avg risk 0.406)
    should be re-cut along the 19 natural clusters this run found, rather than treated as one
    module — would sharpen both future `code-metrics` runs and the dependency-cruiser layering

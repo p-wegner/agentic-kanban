@@ -35,24 +35,49 @@ top_findings = 30
 
 [[modules]]
 name = "client"
-path = "packages/client/src"
+path = "packages/client"
 
+# #795 — CUT A PACKAGE AT THE PACKAGE, NOT AT ITS src/.
+#
+# `shared` was cut at `packages/shared/src`, and it is the ONE package whose tests do not
+# live under src/ — they are at `packages/shared/__tests__/`. So 102 of its files fell into
+# the unassigned `root` bucket, and every module-scoped number this repo has ever produced
+# (containment, entanglement, module distance, the DIP ratios, `relocate_file`) was computed
+# over a `shared` missing a third of itself, next to a `root` pseudo-module that was 41% one
+# package's test suite. Measured at ae295022e1: shared 219 files / root 246.
+#
+# `server` had the same class of miss, smaller: its bundled skill, plugin, bin-shim, tooling
+# and generator files sit beside src/ (22 files), not in it.
+#
+# Cutting at the package directory is the rule now, for every package. The tool's built-in
+# excludes plus the [exclude] block above already drop node_modules/, dist/, coverage/ and
+# drizzle/, so "the package" means the package's own tracked source and tests.
 [[modules]]
 name = "server"
-path = "packages/server/src"
+path = "packages/server"
 
 [[modules]]
 name = "shared"
-path = "packages/shared/src"
+path = "packages/shared"
 
 [[modules]]
 name = "mcp-server"
-path = "packages/mcp-server/src"
+path = "packages/mcp-server"
 
 [[modules]]
 name = "e2e"
 path = "packages/e2e"
 
+# `desktop` deliberately stays at src-tauri: that subdirectory IS the Rust crate, and the
+# rest of the package is a Tauri shell with no source of its own.
 [[modules]]
 name = "desktop"
 path = "packages/desktop/src-tauri"
+
+# #795 — root `scripts/` is 56 files of real build/dev/analysis tooling, and while it was
+# unnamed it was aggregated into the `root` pseudo-module. The analyzer itself flags the
+# root <-> server module cycle as an artifact of aggregating unassigned files, so anything
+# that shrinks that bucket makes the cycle finding less fabricated.
+[[modules]]
+name = "scripts"
+path = "scripts"
