@@ -27,7 +27,7 @@
  * Four entries moved after the first measurement, within hours of the ring landing at
  * `086a41b6bc`. One was a shrink and is simply banked:
  *
- *   createWorkspaceCreateService  674 -> 621  (`65f09038b5` #798, `d56c598163`)
+ *   createWorkspaceCreateService  674 -> 621 -> 623  (`65f09038b5` #798, `d56c598163`; +2 #815)
  *
  * The other three are GROWTH, and raising a number in a shrink-only ring is exactly what this
  * file forbids — so it is written down here rather than folded in silently:
@@ -51,7 +51,13 @@
  */
 export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "cli/commands/issue.ts::registerIssueCommand": 718,
-  "services/workspace-create.service.ts::createWorkspaceCreateService": 621,
+  // 621 -> 623, a DELIBERATE raise (#815). The eight `latest_setup_*` columns moved off
+  // `workspaces` into `workspace_setup_run`, and writing a child row costs an
+  // `insertWorkspaceSetupRun(...)` call where eight inline field assignments used to sit.
+  // Raised rather than worked around: the ring exists to stop unmanaged growth, not to make a
+  // sanctioned extraction unlandable, and 2 nloc here bought 8 columns off the hottest table
+  // in the board. It is still the largest entry in this ring and still wants splitting.
+  "services/workspace-create.service.ts::createWorkspaceCreateService": 623,
   "services/issue.service.ts::createIssueService": 615,
   "services/session-manager/session-lifecycle.ts::createSessionLifecycle": 615,
   "services/workflow-fork.service.ts::createWorkflowForkService": 581,
@@ -64,7 +70,8 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "routes/issues.ts::createIssuesRoute": 506,
   "services/workflow.service.ts::createWorkflowService": 456,
   "services/workspace-provision.service.ts::createWorkspaceProvisionService": 418,
-  "routes/workspace-actions.ts::createWorkspaceActionsRoute": 404,
+  // 404 -> 399, banked (#806): five hand-written body guards became one schema parse each.
+  "routes/workspace-actions.ts::createWorkspaceActionsRoute": 399,
   "worker/worker-agent-runner.ts::createWorkerAgentRunner": 410,
 };
 
