@@ -4,19 +4,20 @@ import { issues } from "./issues.js";
 import { agentSkills } from "./agent-skills.js";
 
 /**
- * 67 columns, and it should not become 68 (#739, #781, #798).
+ * 62 columns, and it should not become 63 (#739, #781, #798, #815).
  *
  * The next widest table in this schema has 23 (`issues`, `repos`); the median across 44
- * tables is 9. What is here is not one entity but seven remaining concerns flattened into one row by
- * prefix — `latest_setup_*` (8), `merge_gate_*` (5), `summary_*` (5),
+ * tables is 9. What is here is not one entity but six remaining concerns flattened into one row by
+ * prefix — `latest_setup_*` (8), `summary_*` (5),
  * `diff_stat_cache_*` (5), `conflict_cache_*` (3), `scorecard_*` (3),
- * `fork_*`/`showdown_*` (5). Four families are no longer among them:
- * #781 extracted `merge_backoff_*` (7) to `workspace_merge_backoff`, and #798 extracted
+ * `fork_*`/`showdown_*` (5). Five families are no longer among them:
+ * #781 extracted `merge_backoff_*` (7) to `workspace_merge_backoff`, #798 extracted
  * `review_preflight_*` (4), `code_metrics_*` (2) and `latest_symlink_*` (8) to
- * `workspace_review_preflight`, `workspace_code_metrics` and `workspace_symlink_run`.
- * The remaining order, by re-derived coupling, is `merge_gate_*` →
- * `summary_*` → `conflict_cache_*` →
- * `latest_setup_*` → `diff_stat_cache_*` → `scorecard_*` (highest fan-out, last).
+ * `workspace_review_preflight`, `workspace_code_metrics` and `workspace_symlink_run`, and
+ * #815 extracted `merge_gate_*` (5) to `workspace_merge_gate`.
+ * The remaining order, by re-derived coupling, is
+ * `conflict_cache_*` → `latest_setup_*` → `summary_*` →
+ * `diff_stat_cache_*` → `scorecard_*` (highest fan-out, last).
  * Each `latest_*` / `*_cache_*` / `*_gate_*` group is a one-to-many relationship collapsed
  * to its last row: there is one setup run per column set, so its history is unrecoverable by
  * construction, and any new field on any of those concerns is another `ALTER TABLE` on the
@@ -50,26 +51,6 @@ export const workspaces = sqliteTable("workspaces", {
   requiresReview: integer("requires_review", { mode: "boolean" }).notNull().default(false),
   thoroughReview: integer("thorough_review", { mode: "boolean" }).notNull().default(false),
   readyForMerge: integer("ready_for_merge", { mode: "boolean" }).notNull().default(false),
-  /**
-   * Real evidence of when/how the pre-merge gate last ACTUALLY ran and passed for this
-   * workspace, persisted at the moment `readyForMerge` is set from a real gate run
-   * (review-exit). Distinct from `updatedAt`/`readyForMerge` themselves, which say nothing
-   * about whether or when a gate ran — a monitor merge trigger reads THESE to build honest
-   * `MergeGateEvidence` instead of fabricating `ranAt: new Date()` (#182). Null when
-   * `readyForMerge` was set with no gate run (e.g. manual `POST .../ready-for-merge`), which
-   * correctly forces `resolveMergeGate` to re-run the gate before merging.
-   */
-  mergeGateRanAt: text("merge_gate_ran_at"),
-  mergeGateStage: text("merge_gate_stage"),
-  mergeGateSource: text("merge_gate_source"),
-  /**
-   * The branch/base tips the gate actually ran against (0108). These make the evidence above
-   * verifiable by CONTENT rather than by age: when both still match, a long queue wait no
-   * longer forces a pointless re-gate, and when either has moved the proof is void however
-   * fresh it looks. Nullable for back-compat — rows written before 0108 validate on age only.
-   */
-  mergeGateBranchSha: text("merge_gate_branch_sha"),
-  mergeGateBaseSha: text("merge_gate_base_sha"),
   planMode: integer("plan_mode", { mode: "boolean" }).notNull().default(false),
   tddMode: integer("tdd_mode", { mode: "boolean" }).notNull().default(false),
   status: text("status").notNull().default("active"),

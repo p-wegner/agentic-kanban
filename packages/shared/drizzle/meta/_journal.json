@@ -967,6 +967,13 @@
       "when": 1787490000000,
       "tag": "0137_drop_redundant_prefix_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 138,
+      "version": "6",
+      "when": 1787490151824,
+      "tag": "0138_workspace_merge_gate",
+      "breakpoints": true
     }
   ]
 }

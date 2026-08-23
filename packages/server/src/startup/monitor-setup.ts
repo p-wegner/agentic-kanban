@@ -1,5 +1,5 @@
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
-import { issues, preferences, projectStatuses, projects, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, preferences, projectStatuses, projects, workflowNodes, workspaceMergeGate, workspaces } from "@agentic-kanban/shared/schema";
 import { getBool, getNumber } from "@agentic-kanban/shared/lib/settings-registry";
 import { eq, inArray, sql } from "drizzle-orm";
 import type { Hono } from "hono";
@@ -400,8 +400,13 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
       const activeStatuses = await db.select({ id: projectStatuses.id }).from(projectStatuses).where(sql`${projectStatuses.name} NOT IN ('Done', 'Cancelled')`);
       const activeStatusIds = activeStatuses.map((s) => s.id);
       if (activeStatusIds.length === 0) return;
-      const candidates = await db.select({ wsId: workspaces.id, wsStatus: workspaces.status, workingDir: workspaces.workingDir, isDirect: workspaces.isDirect, projectId: issues.projectId, issueId: issues.id, issueTitle: issues.title, issueNumber: issues.issueNumber, issueStatusName: projectStatuses.name, baseBranch: workspaces.baseBranch, readyForMerge: workspaces.readyForMerge, diffStatCacheFilesChanged: workspaces.diffStatCacheFilesChanged, diffStatCacheInsertions: workspaces.diffStatCacheInsertions, diffStatCacheDeletions: workspaces.diffStatCacheDeletions, mergeGateRanAt: workspaces.mergeGateRanAt, mergeGateStage: workspaces.mergeGateStage, mergeGateSource: workspaces.mergeGateSource, mergeGateBranchSha: workspaces.mergeGateBranchSha, mergeGateBaseSha: workspaces.mergeGateBaseSha }).from(workspaces)
-        .innerJoin(issues, eq(workspaces.issueId, issues.id)).innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+      const candidates = await db.select({ wsId: workspaces.id, wsStatus: workspaces.status, workingDir: workspaces.workingDir, isDirect: workspaces.isDirect, projectId: issues.projectId, issueId: issues.id, issueTitle: issues.title, issueNumber: issues.issueNumber, issueStatusName: projectStatuses.name, baseBranch: workspaces.baseBranch, readyForMerge: workspaces.readyForMerge, diffStatCacheFilesChanged: workspaces.diffStatCacheFilesChanged, diffStatCacheInsertions: workspaces.diffStatCacheInsertions, diffStatCacheDeletions: workspaces.diffStatCacheDeletions, mergeGateRanAt: workspaceMergeGate.ranAt, mergeGateStage: workspaceMergeGate.stage, mergeGateSource: workspaceMergeGate.source, mergeGateBranchSha: workspaceMergeGate.branchSha, mergeGateBaseSha: workspaceMergeGate.baseSha }).from(workspaces)
+        .innerJoin(issues, eq(workspaces.issueId, issues.id))
+        // #815: the gate evidence moved to `workspace_merge_gate`, aliased back to the same
+        // five field names so `monitor-cycle.ts` — which reads them off this projected ROW —
+        // is untouched. LEFT, not inner: a never-gated workspace has NO row and must still be
+        // a candidate, or no first merge ever happens.
+        .leftJoin(workspaceMergeGate, eq(workspaceMergeGate.workspaceId, workspaces.id)).innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
         .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
         // #395 — the second arm used to require `currentNodeId IS NULL`, so an issue whose node
         // was an `end` node left the walk ENTIRELY, whatever its status said and whatever state
