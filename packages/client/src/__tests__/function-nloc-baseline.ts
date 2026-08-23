@@ -40,7 +40,9 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
  * red for a shrink they should be credited for, not blamed for. GROWTH is still forbidden for
  * these, and so is disappearing — only the "your number is stale, lower it" half is waived.
  *
- * This set is temporary scaffolding. Delete an entry as soon as the file is no longer being
+ * This set is temporary scaffolding, and #800 owns emptying it (together with extending the
+ * ring to the server tree, which this baseline deliberately does not cover).
+ * Delete an entry as soon as the file is no longer being
  * concurrently edited; the ratchet checks that every name here exists in the baseline, so a
  * ghost entry fails rather than silently excusing nothing.
  */
