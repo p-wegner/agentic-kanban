@@ -16,16 +16,22 @@ type TestDb = ReturnType<typeof drizzle<typeof schema>>;
 // (mirrors issues-batch.test.ts) so the unique-index enforcement is exercised on
 // a real on-disk SQLite database.
 const tempDirs: string[] = [];
+const openClients: Array<{ close: () => void }> = [];
 
 function createTestDb(): TestDb {
   const dir = mkdtempSync(join(tmpdir(), "ak-unique-issuenum-"));
   tempDirs.push(dir);
   const client = createClient({ url: `file:${join(dir, "test.db")}` });
+  openClients.push(client);
   applyMigrationsToClient(client);
   return drizzle(client, { schema }) as TestDb;
 }
 
 afterAll(() => {
+  // Close every libsql handle BEFORE removing its directory (#828): on Linux an
+  // unlink under a live connection makes the next write fail with
+  // SQLITE_READONLY_DBMOVED, a race Windows cannot expose because the unlink fails.
+  for (const c of openClients) { try { c.close(); } catch { /* already closed */ } }
   for (const d of tempDirs) {
     try { rmSync(d, { recursive: true, force: true }); } catch {}
   }
