@@ -696,6 +696,38 @@ its ticket's numbers first, and that instruction paid off three times out of fou
   `merge_backoff_*` named as the trivially-isolated first candidate. Also recorded so nobody
   re-opens it: the drop WOULD have been mechanically safe (SQLite 3.45.1, in-place, 0 FK
   violations).
+- **#798 (`ff7b0d2a5d`, `981434dd3c`, `65f09038b5`) — three more families out; six remain, and
+  the remainder is #815.** #781 landed `merge_backoff_*`; this pass landed the next three by
+  measured coupling, each as its own migration + repository + `@gate:always-run` extraction
+  test: `review_preflight_*` (4 cols → `workspace_review_preflight`, **0134**),
+  `code_metrics_*` (2 cols → `workspace_code_metrics`, **0135**), `latest_symlink_*` (8 cols →
+  `workspace_symlink_run`, **0136**). **`workspaces` is 81 → 67 columns**, and
+  `workspaces-table-width-ratchet.test.ts` was lowered to 67 with those three family entries
+  REMOVED (not zeroed) — it asserts equality, so the six remaining families cannot regrow.
+  Per-family coupling was RE-DERIVED rather than trusted, and #739 was wrong twice more:
+  `code_metrics_*` was published as 14 non-test files (really **3** — the rest are prose
+  comments naming `code_metrics_json` as a fat column their query skips) and `latest_symlink_*`
+  as 9 (really **5**). `review_preflight_*`'s 2 was correct. The pattern is #781's and is
+  load-bearing: every read LEFT JOINs *from* `workspaces` and aliases back to the old field
+  names, so "no row" (defaults) stays distinguishable from "no such workspace", and no
+  projection, DTO or client file was touched.
+  - **#798's open question — extract or RETIRE `latest_symlink_*`? — is answered: EXTRACT.**
+    Dependency Symlinks is off by default, but it is live: `projects.symlinkEnabled`/
+    `symlinkDirs` is a per-project setting with UI, `workspace-provision.service.ts` calls
+    `bootstrapSymlinks` when it is on, and `WorkspaceDiagnosticsPanel.tsx` renders exactly this
+    run record. "Off by default" is a fact about configuration — the same class of evidence
+    #739 already refused to read as dead code.
+  - **Remainder, with the reason work stopped: #815.** `merge_gate_` (5 cols/7 files),
+    `summary_` (5/5), `conflict_cache_` (3/11), `latest_setup_` (8/10), `diff_stat_cache_`
+    (5/26), `scorecard_` (3/15); `fork_`/`showdown_` deliberately excluded. `summary_*` is the
+    trap worth knowing before starting it: `repos` carries a parallel summary projection with
+    identical field names, `summaryDirty` is written on every status transition by
+    `shared/lib/workspace-status.ts` so one UPDATE becomes UPDATE + upsert on the hottest write
+    path, and it defaults to TRUE — so "absence = defaults", the convention all four landed
+    families rely on, INVERTS there.
+  - Side effect, repaired rather than caused: `drizzle-snapshot-baseline.test.ts` was already
+    red on master because `0133_session_placement_reason` landed without refreshing `meta/`.
+    Generating 0134 with `db:generate` restored the chain.
 - **#730 (`1d012a22b3`) — premise REJECTED on the ticket's own measurement, closed.** Every
   figure reproduced (27.4% vs 29.3% crossings, `shared` containment 17% vs 14%). Then: half of
   all genuine crossings contain no `shared` file at all (`client ↔ server`, two processes over
