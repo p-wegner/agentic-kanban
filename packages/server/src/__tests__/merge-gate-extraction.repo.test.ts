@@ -182,7 +182,6 @@ describe("migration 0138 backfills the extracted family (#815)", () => {
     expect(names.filter((n) => n.startsWith("merge_gate_"))).toEqual([]);
     // The neighbouring families are untouched.
     expect(names).toContain("summary_head_sha");
-    expect(names.filter((n) => n.startsWith("latest_setup_"))).toHaveLength(8);
     expect(names).toContain("ready_for_merge");
     // And left the rows whole.
     const both = await client.execute("SELECT id FROM workspaces ORDER BY branch");

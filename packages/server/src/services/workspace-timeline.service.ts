@@ -8,6 +8,7 @@ import {
   getWorkspaceSessions,
   getAssistantMessagesForSessions,
 } from "../repositories/workspace-timeline.repository.js";
+import { getWorkspaceSetupRun } from "../repositories/workspace-setup-run.repository.js";
 
 function isZeroOutputSession(session: { startedAt: string; endedAt: string | null; stats: string | null }): boolean {
   if (!session.endedAt) return false;
@@ -104,6 +105,11 @@ export async function getWorkspaceTimeline(
   if (!ws) throw new NotFoundError(`Workspace ${workspaceId} not found`);
 
   const sessionRows = await getWorkspaceSessions(workspaceId, database);
+  // #815: the eight `latest_setup_*` columns moved to `workspace_setup_run`. `getWorkspaceById`
+  // returns the workspace row and nothing else, so the run record is fetched alongside it
+  // rather than aliased into a projection. `undefined` = no setup run recorded, which is what
+  // a NULL `latest_setup_state` meant and which the guards below already handle.
+  const setupRun = await getWorkspaceSetupRun(workspaceId, database);
 
   const events: WorkspaceTimelineEvent[] = [];
   let idCounter = 0;
@@ -119,25 +125,25 @@ export async function getWorkspaceTimeline(
   });
 
   // Setup events
-  if (ws.latestSetupStartedAt) {
+  if (setupRun?.startedAt) {
     events.push({
       id: nextId(),
       type: "setup_started",
-      timestamp: ws.latestSetupStartedAt,
+      timestamp: setupRun.startedAt,
       label: "Setup script started",
       severity: "info",
     });
 
-    if (ws.latestSetupEndedAt) {
-      const failed = ws.latestSetupState === "failed";
+    if (setupRun.endedAt) {
+      const failed = setupRun.state === "failed";
       events.push({
         id: nextId(),
         type: failed ? "setup_failed" : "setup_completed",
-        timestamp: ws.latestSetupEndedAt,
+        timestamp: setupRun.endedAt,
         label: failed
-          ? `Setup script failed (exit ${ws.latestSetupExitCode ?? "?"})`
+          ? `Setup script failed (exit ${setupRun.exitCode ?? "?"})`
           : "Setup script completed",
-        detail: failed ? (ws.latestSetupStderrTail?.slice(-300).trim() || null) : null,
+        detail: failed ? (setupRun.stderrTail?.slice(-300).trim() || null) : null,
         severity: failed ? "error" : "success",
       });
     }

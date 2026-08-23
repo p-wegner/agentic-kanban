@@ -6,6 +6,7 @@ import {
   repos,
   workspaceSymlinkRun,
   workspaceConflictCache,
+  workspaceSetupRun,
 } from "@agentic-kanban/shared/schema";
 import { desc, eq, inArray, notInArray, and, isNotNull, ne, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
@@ -152,14 +153,16 @@ export async function getWorkspaceDetails(
       diffStatCacheInsertions: workspaces.diffStatCacheInsertions,
       diffStatCacheDeletions: workspaces.diffStatCacheDeletions,
       scorecardScore: workspaces.scorecardScore,
-      latestSetupCommand: workspaces.latestSetupCommand,
-      latestSetupState: workspaces.latestSetupState,
-      latestSetupStartedAt: workspaces.latestSetupStartedAt,
-      latestSetupEndedAt: workspaces.latestSetupEndedAt,
-      latestSetupExitCode: workspaces.latestSetupExitCode,
-      latestSetupDurationMs: workspaces.latestSetupDurationMs,
-      latestSetupStdoutTail: workspaces.latestSetupStdoutTail,
-      latestSetupStderrTail: workspaces.latestSetupStderrTail,
+      // #815: the setup run moved to `workspace_setup_run`. Aliased back to the same eight
+      // field names, so the projection and the DTO it builds are untouched.
+      latestSetupCommand: workspaceSetupRun.command,
+      latestSetupState: workspaceSetupRun.state,
+      latestSetupStartedAt: workspaceSetupRun.startedAt,
+      latestSetupEndedAt: workspaceSetupRun.endedAt,
+      latestSetupExitCode: workspaceSetupRun.exitCode,
+      latestSetupDurationMs: workspaceSetupRun.durationMs,
+      latestSetupStdoutTail: workspaceSetupRun.stdoutTail,
+      latestSetupStderrTail: workspaceSetupRun.stderrTail,
       // #798: the symlink run moved to `workspace_symlink_run`. Aliased back to the same
       // eight field names, so the projection and the DTO it builds are untouched.
       latestSymlinkState: workspaceSymlinkRun.state,
@@ -186,6 +189,8 @@ export async function getWorkspaceDetails(
     .leftJoin(workspaceSymlinkRun, eq(workspaceSymlinkRun.workspaceId, workspaces.id))
     // #815: LEFT, not inner — a never-probed workspace has no memo row and must still read.
     .leftJoin(workspaceConflictCache, eq(workspaceConflictCache.workspaceId, workspaces.id))
+    // #815: LEFT, not inner — a workspace with no setup record must still read.
+    .leftJoin(workspaceSetupRun, eq(workspaceSetupRun.workspaceId, workspaces.id))
     .where(eq(workspaces.id, workspaceId));
 
   if (result.length === 0) return null;

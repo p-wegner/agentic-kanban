@@ -14,7 +14,7 @@ vi.mock("../db/index.js", async () => {
 });
 
 import { eq } from "drizzle-orm";
-import { issues, projectStatuses, projects, sessions, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, projectStatuses, projects, sessions, workspaceSetupRun, workspaces } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import { listBornBlockedWorkspaces, reconcileBornBlockedWorkspaces } from "../startup/born-blocked-reconciler.js";
 
@@ -45,8 +45,14 @@ async function seed(opts: {
   await db.insert(workspaces).values({
     id: workspaceId, issueId, branch: `feature/ak-92-${workspaceId.slice(0, 8)}`, workingDir: `/repo/.worktrees/${workspaceId.slice(0, 8)}`, baseBranch: "main",
     isDirect: false, status: opts.workspaceStatus ?? "blocked", provider: "claude",
-    latestSetupState: opts.setupState === undefined ? "failed" : opts.setupState,
-    latestSetupEndedAt: OLD, createdAt: now, updatedAt: now,
+    createdAt: now, updatedAt: now,
+  });
+  // #815: the setup verdict lives in `workspace_setup_run`. Dated OLD on purpose — the sweep's
+  // whole point is to restamp a verdict that is five days stale.
+  await db.insert(workspaceSetupRun).values({
+    workspaceId,
+    state: opts.setupState === undefined ? "failed" : opts.setupState,
+    endedAt: OLD,
   });
   if (opts.withSession) {
     await db.insert(sessions).values({
@@ -105,8 +111,8 @@ describe("reconcileBornBlockedWorkspaces (#394)", () => {
     expect(result.held).toContain(workspaceId);
     expect(await statusOf(workspaceId)).toBe("blocked");
     const rows = await db.select({
-      state: workspaces.latestSetupState, endedAt: workspaces.latestSetupEndedAt, tail: workspaces.latestSetupStderrTail,
-    }).from(workspaces).where(eq(workspaces.id, workspaceId));
+      state: workspaceSetupRun.state, endedAt: workspaceSetupRun.endedAt, tail: workspaceSetupRun.stderrTail,
+    }).from(workspaceSetupRun).where(eq(workspaceSetupRun.workspaceId, workspaceId));
     expect(rows[0].state).toBe("failed");
     expect(rows[0].endedAt).not.toBe(OLD);
     expect(rows[0].tail).toContain("ERR_PNPM_FETCH_404");

@@ -1,5 +1,5 @@
-import { projectStatuses, issues, workspaces, sessions } from "@agentic-kanban/shared/schema";
-import { eq, inArray, desc, and, ne } from "drizzle-orm";
+import { projectStatuses, issues, workspaces, sessions, workspaceSetupRun } from "@agentic-kanban/shared/schema";
+import { eq, inArray, desc, and, ne, getTableColumns } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getProjectById } from "./project.repository.js";
@@ -38,8 +38,23 @@ export async function getNonClosedWorkspacesForIssues(
   database: Database = db,
 ) {
   return database
-    .select()
+    // #815: the eight `latest_setup_*` columns moved to `workspace_setup_run`. The whole
+    // workspace row is still spread here — only the setup fields come from the join, aliased
+    // back to their old names, so the classifier downstream is untouched.
+    .select({
+      ...getTableColumns(workspaces),
+      latestSetupCommand: workspaceSetupRun.command,
+      latestSetupState: workspaceSetupRun.state,
+      latestSetupStartedAt: workspaceSetupRun.startedAt,
+      latestSetupEndedAt: workspaceSetupRun.endedAt,
+      latestSetupExitCode: workspaceSetupRun.exitCode,
+      latestSetupDurationMs: workspaceSetupRun.durationMs,
+      latestSetupStdoutTail: workspaceSetupRun.stdoutTail,
+      latestSetupStderrTail: workspaceSetupRun.stderrTail,
+    })
     .from(workspaces)
+    // LEFT, not inner — a workspace with no setup record must still be classifiable.
+    .leftJoin(workspaceSetupRun, eq(workspaceSetupRun.workspaceId, workspaces.id))
     .where(and(
       inArray(workspaces.issueId, issueIds),
       ne(workspaces.status, "closed"),

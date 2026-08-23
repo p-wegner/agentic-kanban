@@ -174,7 +174,6 @@ describe("migration 0139 backfills the extracted family (#815)", () => {
     expect(names.filter((n) => n.startsWith("conflict_cache_"))).toEqual([]);
     // The neighbouring families are untouched — `diff_stat_cache_` is one char class away.
     expect(names.filter((n) => n.startsWith("diff_stat_cache_"))).toHaveLength(5);
-    expect(names.filter((n) => n.startsWith("latest_setup_"))).toHaveLength(8);
     expect(names).toContain("scorecard_score");
     // And left the rows whole.
     const both = await client.execute("SELECT id FROM workspaces ORDER BY branch");

@@ -50,11 +50,12 @@
  * that had finished.
  */
 import { and, eq, inArray, notExists, sql } from "drizzle-orm";
-import { issues, projectStatuses, projects, sessions, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, projectStatuses, projects, sessions, workspaceSetupRun, workspaces } from "@agentic-kanban/shared/schema";
 import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
+import { restampWorkspaceSetupRun } from "../repositories/workspace-setup-run.repository.js";
 import { emptyPassReport, formatPassReportBody, recordActed, recordSkipped, type PassReport } from "../lib/pass-report.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
@@ -119,10 +120,14 @@ export async function listBornBlockedWorkspaces(database: Database = db): Promis
       projectId: issues.projectId,
       workingDir: workspaces.workingDir,
       setupScript: projects.setupScript,
-      setupState: workspaces.latestSetupState,
-      setupEndedAt: workspaces.latestSetupEndedAt,
+      // #815: the setup run moved to `workspace_setup_run`, aliased back to the same two
+      // field names the sweep reads.
+      setupState: workspaceSetupRun.state,
+      setupEndedAt: workspaceSetupRun.endedAt,
     })
     .from(workspaces)
+    // LEFT, not inner — a blocked workspace with no setup record must still be swept.
+    .leftJoin(workspaceSetupRun, eq(workspaceSetupRun.workspaceId, workspaces.id))
     .innerJoin(issues, eq(workspaces.issueId, issues.id))
     .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
     .innerJoin(projects, eq(issues.projectId, projects.id))
@@ -203,13 +208,17 @@ export async function reconcileBornBlockedWorkspaces(
     }
     // Restamp either way: a repeat failure dated today is a usable report, one dated five days ago
     // is what made this state look untouched.
-    await database.update(workspaces).set({
-      latestSetupState: exitCode === 0 ? "succeeded" : "failed",
-      latestSetupEndedAt: now,
-      latestSetupExitCode: exitCode,
-      latestSetupStderrTail: stderr.slice(-2000),
-      updatedAt: now,
-    }).where(eq(workspaces.id, row.workspaceId));
+    // #815: the verdict lives in `workspace_setup_run` now. Still a PARTIAL write — the four
+    // fields that make the verdict dated and readable — and an upsert, because the old
+    // four-column UPDATE could never miss a row and this must not start missing one.
+    await restampWorkspaceSetupRun(row.workspaceId, {
+      state: exitCode === 0 ? "succeeded" : "failed",
+      endedAt: now,
+      exitCode,
+      stderrTail: stderr.slice(-2000),
+    }, database);
+    await database.update(workspaces).set({ updatedAt: now })
+      .where(eq(workspaces.id, row.workspaceId));
     if (exitCode === 0) {
       await setWorkspaceStatus(database, row.workspaceId, "idle", { now });
       result.retriedAndReleased.push(row.workspaceId);

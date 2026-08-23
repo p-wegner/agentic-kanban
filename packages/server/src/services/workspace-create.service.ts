@@ -74,6 +74,7 @@ import {
   rollbackSiblingWorktrees,
   type SiblingWorktree,
 } from "./workspace-repos.service.js";
+import { insertWorkspaceSetupRun } from "../repositories/workspace-setup-run.repository.js";
 import { insertWorkspaceSymlinkRun } from "../repositories/workspace-symlink-run.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
@@ -188,18 +189,24 @@ export function createWorkspaceCreateService(deps: {
       agentCommand: params.agentCommand ?? null,
       provider: params.resolvedProvider,
       model: params.model ?? null,
-      latestSetupCommand: params.latestSetup.command,
-      latestSetupState: params.latestSetup.state,
-      latestSetupStartedAt: params.latestSetup.startedAt,
-      latestSetupEndedAt: params.latestSetup.endedAt,
-      latestSetupExitCode: params.latestSetup.exitCode,
-      latestSetupDurationMs: params.latestSetup.durationMs,
-      latestSetupStdoutTail: params.latestSetup.stdoutTail,
-      latestSetupStderrTail: params.latestSetup.stderrTail,
       contextPrimer: params.contextPrimer,
       serviceState: params.serviceState,
       createdAt: params.now,
       updatedAt: params.now,
+    }, params.database ?? database);
+    // #815: the setup run is its own table now — same handle, so it lands in the same
+    // transaction as the workspace row. Written even for the `state: "skipped"` run a
+    // project with no setup script produces: that is what the eight columns held, and the
+    // projection distinguishes it from "no record at all".
+    await insertWorkspaceSetupRun(params.id, {
+      command: params.latestSetup.command,
+      state: params.latestSetup.state,
+      startedAt: params.latestSetup.startedAt,
+      endedAt: params.latestSetup.endedAt,
+      exitCode: params.latestSetup.exitCode,
+      durationMs: params.latestSetup.durationMs,
+      stdoutTail: params.latestSetup.stdoutTail,
+      stderrTail: params.latestSetup.stderrTail,
     }, params.database ?? database);
     // #798: the symlink run is its own table now — written with the same handle, so it is
     // in the same transaction as the workspace row when the caller passes one. Written even

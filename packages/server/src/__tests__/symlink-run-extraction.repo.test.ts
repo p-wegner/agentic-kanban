@@ -81,8 +81,9 @@ describe("symlink-run extraction (#798)", () => {
     const { client } = createTestDb();
     const info = await client.execute('PRAGMA table_info("workspaces")');
     expect(columnNames(info.rows).filter((n) => n.startsWith("latest_symlink_"))).toEqual([]);
-    // `latest_setup_*` is a DIFFERENT family and stays — the prefixes are one character apart.
-    expect(columnNames(info.rows).filter((n) => n.startsWith("latest_setup_"))).toHaveLength(8);
+    // `latest_setup_*` was a DIFFERENT family, one character apart — and #815 extracted it
+    // too, to `workspace_setup_run`. `latest_launch_error` is the nearest survivor.
+    expect(columnNames(info.rows)).toContain("latest_launch_error");
     const moved = await client.execute('PRAGMA table_info("workspace_symlink_run")');
     expect(columnNames(moved.rows).sort()).toEqual([
       "dirs", "ended_at", "error", "failed", "linked", "skipped", "started_at", "state", "workspace_id",

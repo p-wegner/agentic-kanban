@@ -6,10 +6,10 @@ import { createTestDb } from "./helpers/test-db.js";
 /**
  * Shrink-only ratchet on the width of `workspaces`, and on its prefix column FAMILIES (#739).
  *
- * `workspaces` has 59 columns (88 before #781 extracted the first family; #798 took it from
- * 81 to 77 to 75 to 67, and #815 to 62 to 59). The next widest
+ * `workspaces` has 51 columns (88 before #781 extracted the first family; #798 took it from
+ * 81 to 77 to 75 to 67, and #815 to 62 to 59 to 51). The next widest
  * table in the schema has 23 (`issues`, `repos`) and the median across 44 tables is 9, so this
- * is not "a wide table" — it is five remaining separate concerns flattened into one row by
+ * is not "a wide table" — it is four remaining separate concerns flattened into one row by
  * prefix. Each `latest_*` / `*_cache_*` / `*_gate_*` group
  * is a one-to-many relationship collapsed to its last row: there is exactly one setup run per
  * column set, so history is unrecoverable by construction, and every new field on any of those
@@ -26,14 +26,15 @@ import { createTestDb } from "./helpers/test-db.js";
  * does REMOVING one without lowering the number here, so the budgets cannot rot into a
  * permanent exemption that no longer describes the schema. #781 lowered 88 → 81 and dropped
  * the `merge_backoff_` entry; #798 lowered 81 → 67 and dropped `review_preflight_`,
- * `code_metrics_` and `latest_symlink_`; #815 lowered 67 → 62 → 59 and dropped `merge_gate_` and `conflict_cache_`. That is exactly the shape a successful extraction takes.
+ * `code_metrics_` and `latest_symlink_`; #815 lowered 67 → 62 → 59 → 51 and dropped `merge_gate_`, `conflict_cache_` and
+ * `latest_setup_`. That is exactly the shape a successful extraction takes.
  */
 
 /** Total column count of every table wide enough to be worth governing. */
 const WIDE_TABLE_BUDGETS: Record<string, number> = {
   // The god table itself. Do not raise this. A new field on one of the families below
   // belongs in that family's own table, keyed by workspace_id.
-  workspaces: 59,
+  workspaces: 51,
 };
 
 /**
@@ -49,19 +50,20 @@ const GOVERNED_WIDTH_THRESHOLD = 30;
  * stop — extract the family to `workspace_<concern>` instead of widening the god table.
  *
  * `merge_backoff_` (7), `review_preflight_` (4), `code_metrics_` (2), `latest_symlink_`
- * (8), `merge_gate_` (5) and `conflict_cache_` (3) are deliberately ABSENT, not zeroed: #781
- * extracted the first to `workspace_merge_backoff`, #798 the next three to
- * `workspace_review_preflight`, `workspace_code_metrics` and `workspace_symlink_run`, and
- * #815 `merge_gate_` to `workspace_merge_gate` and `conflict_cache_` to
- * `workspace_conflict_cache`. There is no such prefix on this table
+ * (8), `merge_gate_` (5), `conflict_cache_` (3) and `latest_setup_` (8) are deliberately
+ * ABSENT, not zeroed: #781 extracted the first to `workspace_merge_backoff`, #798 the next
+ * three to `workspace_review_preflight`, `workspace_code_metrics` and
+ * `workspace_symlink_run`, and #815 the last three to `workspace_merge_gate`,
+ * `workspace_conflict_cache` and `workspace_setup_run`. There is no such prefix on this table
  * any more, and an entry of 0 would be a claim about a family that no longer exists here.
  * Remaining order, cheapest coupling first, with the counts RE-DERIVED per family at cut time
  * (#798 and #815 both found the published estimates prose-inflated — `merge_gate_` was listed
- * at ~7 files and is 4, `conflict_cache_` at 11 and is 5): `latest_setup_` → `summary_` →
- * `diff_stat_cache_` → `scorecard_`. Carried by #815.
+ * at ~7 files and is 4, `conflict_cache_` at 11 and is 5, `latest_setup_` at 10 and is 8):
+ * `summary_` → `diff_stat_cache_` → `scorecard_`. `fork_` and `showdown_` are permanently out
+ * of scope — both index-encumbered and all-NULL on this instance, so no local data can prove
+ * a backfill.
  */
 const COLUMN_FAMILIES: Record<string, number> = {
-  latest_setup_: 8,
   summary_: 5,
   diff_stat_cache_: 5,
   scorecard_: 3,

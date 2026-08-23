@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { issues, projects, projectStatuses, sessions, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, projects, projectStatuses, sessions, workspaceSetupRun, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { getWorkspaceLaunchFailures } from "../services/workspace-launch-failures.service.js";
 
@@ -236,12 +236,12 @@ describe("getWorkspaceLaunchFailures", () => {
     await db.insert(projects).values(baseProject(projectId, now));
     await db.insert(projectStatuses).values(baseStatus(statusId, projectId, "In Progress", now));
     await db.insert(issues).values(baseIssue(issueId, projectId, statusId, now));
-    await db.insert(workspaces).values(baseWorkspace(wsId, issueId, now, {
-      latestSetupState: "failed",
-      latestSetupExitCode: 1,
-      latestSetupStderrTail: "npm install failed: ENOENT",
-      latestSetupEndedAt: now,
-    }));
+    await db.insert(workspaces).values(baseWorkspace(wsId, issueId, now));
+    // #815: the setup run lives in `workspace_setup_run` now.
+    await db.insert(workspaceSetupRun).values({
+      workspaceId: wsId, state: "failed", exitCode: 1,
+      stderrTail: "npm install failed: ENOENT", endedAt: now,
+    });
 
     const result = await getWorkspaceLaunchFailures(projectId, db);
     expect(result.failures).toHaveLength(1);
@@ -624,11 +624,11 @@ describe("getWorkspaceLaunchFailures", () => {
       await db.insert(projects).values(baseProject(projectId, now));
       await db.insert(projectStatuses).values(baseStatus(statusId, projectId, "In Progress", now));
       await db.insert(issues).values(baseIssue(issueId, projectId, statusId, now));
-      await db.insert(workspaces).values(baseWorkspace(wsId, issueId, now, {
-        latestSetupState: "failed",
-        latestSetupStderrTail: "npm install failed",
-        latestSetupEndedAt: now,
-      }));
+      await db.insert(workspaces).values(baseWorkspace(wsId, issueId, now));
+      // #815: the setup run lives in `workspace_setup_run` now.
+      await db.insert(workspaceSetupRun).values({
+        workspaceId: wsId, state: "failed", stderrTail: "npm install failed", endedAt: now,
+      });
 
       const result = await getWorkspaceLaunchFailures(projectId, db, fakeGitDeps());
       expect(result.failures).toHaveLength(1);
