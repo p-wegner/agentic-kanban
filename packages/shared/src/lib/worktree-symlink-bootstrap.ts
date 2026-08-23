@@ -14,10 +14,20 @@ export type SymlinkBootstrapResult = {
 
 /**
  * Validate that a directory name is safe to symlink — no path traversal, no absolute paths.
+ *
+ * BOTH separators are rejected on EVERY platform (#828). The check used to be
+ * `sep` + `"/"`, which off Windows accepts `sub\dir`, `..\etc` and `C:\path` — a
+ * backslash is an ordinary filename character on POSIX, so `resolve`/`relative` see one
+ * harmless segment and wave it through. The value comes from a DB column (`symlinkDirs`),
+ * and a board on Linux can hand it to a Windows worker, where the same string IS a path.
+ * A name is either a single directory component on every platform or it is refused.
  */
 export function isValidDirName(name: string): boolean {
-  if (!name || name.includes(sep) || name.includes("/")) return false;
+  if (!name || name.includes(sep) || name.includes("/") || name.includes("\\")) return false;
   if (name === "." || name === "..") return false;
+  // The backslash rule above is what rejects `..\etc` and `C:\path` off Windows — the
+  // traversal check below cannot see them there, because `relative()` hands the name back
+  // unchanged and so calls it valid.
   // Reject names that resolve outside their parent (path traversal)
   const resolved = resolve("dummy", name);
   if (relative("dummy", resolved) !== name) return false;
