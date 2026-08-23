@@ -385,3 +385,65 @@ describe("sqliteHasBoardContent", () => {
     expect(existsSync(missing)).toBe(false);
   });
 });
+
+// #803 — a DB location that is the STRINGIFIED form of a missing value.
+//
+// Found as a real artifact: `packages/shared/undefined`, a 12 KB / 3-page SQLite
+// database sitting untracked in the checkout. Nothing "wrote a bad path" on
+// purpose — a shell or JS template interpolated an unset variable, producing the
+// literal text "undefined", and the layer below happily accepted it: a `file:`
+// open CREATES its target. So the failure is silent and inverted — instead of an
+// error you get a working, empty database, and every read reports an empty board.
+//
+// The resolver is the only place that can notice, because `DB_URL` is used
+// VERBATIM (see precedence rule 1). These pin the rejection.
+describe("placeholder env values (#803)", () => {
+  const PLACEHOLDERS = ["undefined", "null", "NaN", "[object Object]"];
+
+  for (const value of PLACEHOLDERS) {
+    it(`refuses DB_URL="${value}" instead of opening (and creating) it`, () => {
+      expect(() => resolveDbLocation(base({ env: { DB_URL: value } })))
+        .toThrow(/stringified form of a missing value/);
+    });
+
+    it(`refuses KANBAN_DB_URL="${value}"`, () => {
+      expect(() => resolveDbLocation(base({ env: { KANBAN_DB_URL: value } })))
+        .toThrow(/KANBAN_DB_URL/);
+    });
+
+    it(`refuses AGENTIC_KANBAN_DIR="${value}"`, () => {
+      expect(() => resolveDbLocation(base({ env: { AGENTIC_KANBAN_DIR: value } })))
+        .toThrow(/AGENTIC_KANBAN_DIR/);
+    });
+  }
+
+  it("names the offending variable so the message is actionable", () => {
+    expect(() => resolveDbLocation(base({ env: { DB_URL: "undefined" } })))
+      .toThrow(/^DB_URL is set to the literal string "undefined"/);
+  });
+
+  it("tolerates surrounding whitespace, which a shell interpolation leaves behind", () => {
+    expect(() => resolveDbLocation(base({ env: { DB_URL: "  undefined  " } })))
+      .toThrow(/stringified form of a missing value/);
+  });
+
+  // The rejection must be narrow: these are all legitimate locations that merely
+  // CONTAIN a placeholder word, and turning them away would be a worse bug than
+  // the one being fixed.
+  it("does not reject a real path that merely contains the word", () => {
+    const loc = resolveDbLocation(base({ env: { DB_URL: "file:/data/undefined-board/kanban.db" } }));
+    expect(loc.source).toBe("DB_URL");
+    expect(loc.path).toContain("undefined-board");
+  });
+
+  it("does not reject a remote libsql URL", () => {
+    const loc = resolveDbLocation(base({ env: { DB_URL: "libsql://board.example.com" } }));
+    expect(loc.source).toBe("DB_URL");
+    expect(loc.path).toBeNull();
+  });
+
+  it("an UNSET variable still falls through to the normal precedence", () => {
+    const loc = resolveDbLocation(base({ env: {} }));
+    expect(loc.source).not.toBe("DB_URL");
+  });
+});

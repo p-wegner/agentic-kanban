@@ -160,6 +160,39 @@ function fileUrl(path: string): DbLocation {
   return { url: `file:${abs}`, path: abs, dir: dirname(abs), source: "AGENTIC_KANBAN_DIR", rejectedLocalCandidates: [] };
 }
 
+/**
+ * Env values that are the *stringified* form of a missing value. A shell or JS
+ * template that interpolated an unset variable produces these verbatim, and the
+ * resolver's job is to notice — because the layer below does NOT: a `file:` open
+ * CREATES its target, so `DB_URL=undefined` silently mints an empty stub database
+ * named `undefined` in the process's CWD and every read then reports an empty
+ * board instead of failing. One such stub was found at `packages/shared/undefined`
+ * (#803). A DB location is never legitimately the text "undefined"/"null", so this
+ * is a safe rejection with no real configuration behind it.
+ */
+const PLACEHOLDER_ENV_VALUES = new Set(["undefined", "null", "NaN", "[object Object]"]);
+
+export class InvalidDbLocationEnvError extends Error {
+  constructor(readonly variable: string, readonly value: string) {
+    super(
+      `${variable} is set to the literal string "${value}", which is the stringified form of a missing value, ` +
+        `not a database location. Something interpolated an unset variable. Unset ${variable} to fall back to ` +
+        `the normal precedence, or set it to a real path/URL. ` +
+        `(Refusing rather than opening it: a file: open would CREATE an empty stub database and every read ` +
+        `would then report an empty board instead of failing.)`,
+    );
+    this.name = "InvalidDbLocationEnvError";
+  }
+}
+
+/** Throws on a placeholder value; returns the value unchanged (or undefined) otherwise. */
+function rejectPlaceholder(variable: string, value: string | undefined): string | undefined {
+  if (value !== undefined && PLACEHOLDER_ENV_VALUES.has(value.trim())) {
+    throw new InvalidDbLocationEnvError(variable, value.trim());
+  }
+  return value;
+}
+
 export function resolveDbLocation(opts: ResolveDbLocationOptions = {}): DbLocation {
   const env = opts.env ?? process.env;
   const exists = opts.existsSync ?? fsExistsSync;
@@ -173,7 +206,9 @@ export function resolveDbLocation(opts: ResolveDbLocationOptions = {}): DbLocati
   // #615 — canonical name first, the pre-rename `DB_URL` still honoured. This resolver is
   // pure and lives in `shared`, so it cannot use the server's `readBoardEnv`; the precedence
   // is the same and `env-registry-doc-parity.test.ts` pins the pair.
-  const dbUrl = env.KANBAN_DB_URL || env.DB_URL;
+  // #803 — reject a stringified-missing value BEFORE it is used verbatim below.
+  const dbUrl = rejectPlaceholder("KANBAN_DB_URL", env.KANBAN_DB_URL)
+    || rejectPlaceholder("DB_URL", env.DB_URL);
   if (dbUrl) {
     const path = dbUrl.startsWith("file:") ? filePathFromFileUrl(dbUrl) : null;
     return { url: dbUrl, path, dir: path ? dirname(path) : null, source: "DB_URL", rejectedLocalCandidates: [] };
@@ -181,7 +216,7 @@ export function resolveDbLocation(opts: ResolveDbLocationOptions = {}): DbLocati
 
   // 2. AGENTIC_KANBAN_DIR — explicit data dir. Env ALWAYS wins over the
   //    in-checkout dev-DB probe below (the #962 split-brain fix).
-  const envDir = env.AGENTIC_KANBAN_DIR;
+  const envDir = rejectPlaceholder("AGENTIC_KANBAN_DIR", env.AGENTIC_KANBAN_DIR);
   if (envDir) {
     return { ...fileUrl(resolve(envDir, "kanban.db")), source: "AGENTIC_KANBAN_DIR" };
   }
