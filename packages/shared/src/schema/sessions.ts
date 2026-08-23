@@ -41,6 +41,8 @@ export const sessions = sqliteTable("sessions", {
   statusIdx: index("idx_sessions_status").on(table.status),
   workspaceIdStatusIdx: index("idx_sessions_workspace_id_status").on(table.workspaceId, table.status),
   startedAtIdx: index("idx_sessions_started_at").on(table.startedAt),
+  // Migration-only until #812: "this workspace's sessions, newest first".
+  workspaceIdStartedAtIdx: index("idx_sessions_workspace_id_started_at").on(table.workspaceId, table.startedAt),
 }));
 
 export const sessionsRelations = relations(sessions, ({ one, many }) => ({

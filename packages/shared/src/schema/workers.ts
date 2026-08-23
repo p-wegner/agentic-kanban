@@ -69,6 +69,9 @@ export const workerGitTokens = sqliteTable("worker_git_tokens", {
 }, (table) => ({
   workerIdx: index("idx_worker_git_tokens_worker_id").on(table.workerId),
   expiresIdx: index("idx_worker_git_tokens_expires_at_ms").on(table.expiresAtMs),
+  // Migration-only until #812: created by 0130 alongside the FK it supports (#740's rule),
+  // but never declared here — which is why #812 read this FK as unindexed.
+  projectIdx: index("idx_worker_git_tokens_project_id").on(table.projectId),
 }));
 
 /**

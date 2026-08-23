@@ -53,6 +53,8 @@ export const issues = sqliteTable("issues", {
   // Board/graph list shape "WHERE project_id = ? ORDER BY sort_order" — served
   // index-ordered, no temp B-tree sort (migration 0116, 2026-08-11 perf audit G14e).
   projectIdSortOrderIdx: index("idx_issues_project_sort_order").on(table.projectId, table.sortOrder),
+  // Migration-only until #812: project-scoped issue lists ordered by creation.
+  projectIdCreatedAtIdx: index("idx_issues_project_id_created_at").on(table.projectId, table.createdAt),
 }));
 
 export const issuesRelations = relations(issues, ({ one, many }) => ({

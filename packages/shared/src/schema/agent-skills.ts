@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, index, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { projects } from "./projects.js";
 
 export const agentSkills = sqliteTable("agent_skills", {
@@ -24,4 +24,8 @@ export const agentSkills = sqliteTable("agent_skills", {
 }, (table) => ({
   // FK-supporting index (#740); also the hot path for project-scoped skill lookups.
   projectIdIdx: index("idx_agent_skills_project_id").on(table.projectId),
+  // Declared in a migration but absent here until #812. A skill NAME is UNIQUE per
+  // scope, and the DB enforces it; leaving the constraint undeclared made this file an
+  // incomplete picture of the table.
+  nameScopeUnique: uniqueIndex("agent_skills_name_scope_unique").on(table.name, table.projectId),
 }));
