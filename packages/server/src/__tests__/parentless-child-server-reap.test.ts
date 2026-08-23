@@ -18,11 +18,15 @@ vi.mock("../services/workspace-repos.service.js", () => ({ cleanupSiblingWorktre
 vi.mock("../services/process-exec.js", () => ({
   listOsProcesses: vi.fn(async () => []),
   taskkillTree: vi.fn(async () => {}),
+  // The ONE kill seam (#828). The suite used to mock only `taskkillTree`, so on POSIX the
+  // sweep took an unmocked `process.kill` path and asked the OS to SIGKILL a fabricated
+  // pid — ESRCH, zero kills, a green suite on Windows and a red one everywhere else.
+  killProcessTree: vi.fn(async () => {}),
   execCommand: vi.fn(async () => ({ stdout: "", stderr: "" })),
 }));
 
 import { reapParentlessChildServers } from "../startup/startup-tasks.js";
-import { listOsProcesses, taskkillTree } from "../services/process-exec.js";
+import { listOsProcesses, killProcessTree } from "../services/process-exec.js";
 
 /** Build an OS process record; `ppid` defaults to a pid that is never in the list. */
 function proc(pid: number, commandLine: string, ppid = 99999) {
@@ -31,7 +35,7 @@ function proc(pid: number, commandLine: string, ppid = 99999) {
 
 describe("reapParentlessChildServers (#281)", () => {
   beforeEach(() => {
-    vi.mocked(taskkillTree).mockClear();
+    vi.mocked(killProcessTree).mockClear();
     vi.mocked(listOsProcesses).mockReset();
   });
 
@@ -43,7 +47,7 @@ describe("reapParentlessChildServers (#281)", () => {
     const killed = await reapParentlessChildServers();
 
     expect(killed).toBe(1);
-    expect(vi.mocked(taskkillTree)).toHaveBeenCalledWith(1000);
+    expect(vi.mocked(killProcessTree)).toHaveBeenCalledWith(1000);
   });
 
   it("leaves a serve.mjs alone when its parent is still alive", async () => {
@@ -57,7 +61,7 @@ describe("reapParentlessChildServers (#281)", () => {
     const killed = await reapParentlessChildServers();
 
     expect(killed).toBe(0);
-    expect(vi.mocked(taskkillTree)).not.toHaveBeenCalled();
+    expect(vi.mocked(killProcessTree)).not.toHaveBeenCalled();
   });
 
   it("never reaps a dev.mjs supervisor, even when parentless", async () => {
@@ -70,7 +74,7 @@ describe("reapParentlessChildServers (#281)", () => {
     const killed = await reapParentlessChildServers();
 
     expect(killed).toBe(0);
-    expect(vi.mocked(taskkillTree)).not.toHaveBeenCalled();
+    expect(vi.mocked(killProcessTree)).not.toHaveBeenCalled();
   });
 
   it("never reaps an agent or backend process", async () => {
@@ -80,7 +84,7 @@ describe("reapParentlessChildServers (#281)", () => {
     ]);
 
     expect(await reapParentlessChildServers()).toBe(0);
-    expect(vi.mocked(taskkillTree)).not.toHaveBeenCalled();
+    expect(vi.mocked(killProcessTree)).not.toHaveBeenCalled();
   });
 
   it("treats ppid 0 as unknown rather than orphaned", async () => {
@@ -91,7 +95,7 @@ describe("reapParentlessChildServers (#281)", () => {
     ]);
 
     expect(await reapParentlessChildServers()).toBe(0);
-    expect(vi.mocked(taskkillTree)).not.toHaveBeenCalled();
+    expect(vi.mocked(killProcessTree)).not.toHaveBeenCalled();
   });
 
   it("never reaps itself", async () => {
@@ -100,7 +104,7 @@ describe("reapParentlessChildServers (#281)", () => {
     ]);
 
     expect(await reapParentlessChildServers()).toBe(0);
-    expect(vi.mocked(taskkillTree)).not.toHaveBeenCalled();
+    expect(vi.mocked(killProcessTree)).not.toHaveBeenCalled();
   });
 
   it("reaps review-server.mjs and ui-map-serve.mjs too", async () => {
@@ -116,6 +120,6 @@ describe("reapParentlessChildServers (#281)", () => {
     vi.mocked(listOsProcesses).mockRejectedValue(new Error("wmic unavailable"));
 
     await expect(reapParentlessChildServers()).resolves.toBe(0);
-    expect(vi.mocked(taskkillTree)).not.toHaveBeenCalled();
+    expect(vi.mocked(killProcessTree)).not.toHaveBeenCalled();
   });
 });

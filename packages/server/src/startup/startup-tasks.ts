@@ -28,7 +28,7 @@ import { modelBelongsToProvider } from "@agentic-kanban/shared";
 import { PREF_DEFAULT_MODEL, PREF_PROVIDER } from "../constants/preference-keys.js";
 import { MODEL_PREF_KEYS_BY_PROVIDER } from "../services/effective-config.service.js";
 import { narrowProviderName } from "../services/agent-provider.js";
-import { listOsProcesses, taskkillTree } from "../services/process-exec.js";
+import { listOsProcesses, killProcessTree } from "../services/process-exec.js";
 import { refreshContainerMcpConfig } from "../services/devcontainer-workspace.service.js";
 import { insertIssueComment } from "../repositories/issue-comments.repository.js";
 import { clearWorkspaceWorkingDir } from "../repositories/workspace-crud.repository.js";
@@ -469,11 +469,7 @@ export async function reapOrphanedPluginViewProcesses(database: Database = db): 
     const stillTheSameProcess = liveCommandLine !== undefined && liveCommandLine.includes(row.command);
     if (stillTheSameProcess) {
       try {
-        if (process.platform === "win32") {
-          await taskkillTree(row.pid);
-        } else {
-          process.kill(row.pid, "SIGKILL");
-        }
+        await killProcessTree(row.pid);
         reaped++;
       } catch (err) {
         console.warn(`[startup] failed to kill orphaned plugin view server PID ${row.pid} (non-fatal):`, errorMessage(err));
@@ -547,11 +543,7 @@ export async function reapParentlessChildServers(): Promise<number> {
   let killed = 0;
   for (const orphan of orphans) {
     try {
-      if (process.platform === "win32") {
-        await taskkillTree(orphan.pid);
-      } else {
-        process.kill(orphan.pid, "SIGKILL");
-      }
+      await killProcessTree(orphan.pid);
       killed++;
     } catch (err) {
       console.warn(`[startup] failed to reap parentless child server PID ${orphan.pid} (non-fatal):`, errorMessage(err));
