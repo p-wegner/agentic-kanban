@@ -3,7 +3,7 @@ import { workspaces } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { mirrorWorkspaceColumnsToLeadingRepo } from "./repo.repository.js";
-import { markWorkspaceRepoSummariesDirty } from "./workspace-summary-projection.repository.js";
+import { markWorkspaceSummaryDirty } from "./workspace-summary-projection.repository.js";
 
 /**
  * Stamp mergedAt/mergedHeadSha/updatedAt on a workspace row.
@@ -16,10 +16,13 @@ export async function stampWorkspaceMergedAt(
   mergedHeadSha: string | null,
   database: Database = db,
 ): Promise<void> {
-  await database.update(workspaces).set({ mergedAt: now, mergedHeadSha, updatedAt: now, summaryDirty: true }).where(eq(workspaces.id, id));
+  await database.update(workspaces).set({ mergedAt: now, mergedHeadSha, updatedAt: now }).where(eq(workspaces.id, id));
   await mirrorWorkspaceColumnsToLeadingRepo(id, { mergedHeadSha }, database);
+  // #815: the dirty flag left `workspaces` for `workspace_summary`, so the stamp that used to
+  // ride along in the UPDATE above is now its own write. `markWorkspaceSummaryDirty` also
+  // covers the per-repo half below, which is why the direct repos call is gone.
   // #415 — a landed merge moves every repo's ahead/merged facts, not just the leading's.
-  await markWorkspaceRepoSummariesDirty(id, database);
+  await markWorkspaceSummaryDirty(id, database);
 }
 
 /**

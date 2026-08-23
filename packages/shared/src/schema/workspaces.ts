@@ -4,20 +4,19 @@ import { issues } from "./issues.js";
 import { agentSkills } from "./agent-skills.js";
 
 /**
- * 51 columns, and it should not become 52 (#739, #781, #798, #815).
+ * 46 columns, and it should not become 47 (#739, #781, #798, #815).
  *
  * The next widest table in this schema has 23 (`issues`, `repos`); the median across 44
- * tables is 9. What is here is not one entity but four remaining concerns flattened into one row by
- * prefix — `summary_*` (5),
- * `diff_stat_cache_*` (5), `scorecard_*` (3),
- * `fork_*`/`showdown_*` (5). Seven families are no longer among them:
+ * tables is 9. What is here is not one entity but three remaining concerns flattened into one row by
+ * prefix — `diff_stat_cache_*` (5), `scorecard_*` (3),
+ * `fork_*`/`showdown_*` (5). Eight families are no longer among them:
  * #781 extracted `merge_backoff_*` (7) to `workspace_merge_backoff`, #798 extracted
  * `review_preflight_*` (4), `code_metrics_*` (2) and `latest_symlink_*` (8) to
  * `workspace_review_preflight`, `workspace_code_metrics` and `workspace_symlink_run`, and
- * #815 extracted `merge_gate_*` (5), `conflict_cache_*` (3) and `latest_setup_*` (8) to
- * `workspace_merge_gate`, `workspace_conflict_cache` and `workspace_setup_run`.
+ * #815 extracted `merge_gate_*` (5), `conflict_cache_*` (3), `latest_setup_*` (8) and
+ * `summary_*` (5) to `workspace_merge_gate`, `workspace_conflict_cache`,
+ * `workspace_setup_run` and `workspace_summary`.
  * The remaining order, by re-derived coupling, is
- * `summary_*` →
  * `diff_stat_cache_*` → `scorecard_*` (highest fan-out, last).
  * Each `latest_*` / `*_cache_*` / `*_gate_*` group is a one-to-many relationship collapsed
  * to its last row: there is one setup run per column set, so its history is unrecoverable by
@@ -87,18 +86,6 @@ export const workspaces = sqliteTable("workspaces", {
    * the feature branch ref is gone.
    */
   mergedHeadSha: text("merged_head_sha"),
-  /**
-   * #399 (decision 014) — the workspace-summary GIT PROJECTION. The two phase-4 git facts
-   * (`git log -1` sha+subject, `git rev-list --count base..HEAD`) persisted per row so board
-   * reads never spawn git on the hot path. `summaryGitRefreshedAt` is the per-row staleness
-   * stamp; `summaryDirty` is set by board events (status transitions via setWorkspaceStatus,
-   * merge stamps, update-base) and cleared by the write-through refresh / heal pass.
-   */
-  summaryHeadSha: text("summary_head_sha"),
-  summaryHeadMessage: text("summary_head_message"),
-  summaryCommitCount: integer("summary_commit_count"),
-  summaryGitRefreshedAt: text("summary_git_refreshed_at"),
-  summaryDirty: integer("summary_dirty", { mode: "boolean" }).notNull().default(true),
   diffStatCacheCheckedAt: text("diff_stat_cache_checked_at"),
   diffStatCacheHeadSha: text("diff_stat_cache_head_sha"),
   diffStatCacheFilesChanged: integer("diff_stat_cache_files_changed"),

@@ -1,6 +1,6 @@
 import { and, eq, isNull, ne, or } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
-import { repos, workspaces } from "../schema/index.js";
+import { repos, workspaceSummary, workspaces } from "../schema/index.js";
 import type * as schema from "../schema/index.js";
 import {
   checkWorkspaceTransition,
@@ -186,12 +186,7 @@ export async function setWorkspaceStatus(
       : undefined;
     const result = await database
       .update(workspaces)
-      // summaryDirty (#399, decision 014): every status transition is a board event that
-      // can change the workspace-summary git facts (session start/exit, review, merge
-      // close, ...). Stamping the dirty flag atomically here — the single status-write
-      // authority — is what keeps the persisted summary projection incremental without
-      // hooks in every caller. `opts.set` may deliberately override it.
-      .set({ status, updatedAt: now, summaryDirty: true, ...(opts.set ?? {}) })
+      .set({ status, updatedAt: now, ...(opts.set ?? {}) })
       .where(and(eq(workspaces.id, workspaceId), casGuard, terminalGuard));
     const affected = result.rowsAffected ?? (result as { changes?: number }).changes ?? 0;
     if (affected === 0) {
@@ -205,10 +200,29 @@ export async function setWorkspaceStatus(
       }
       return false;
     }
-    // #415 — the per-repo merge-status projection (repos.summary_*, decision 014
-    // extension): a status transition is the same board event that dirties the
-    // workspace projection above, so the workspace's repos rows are dirtied in the
-    // same authority. Best-effort: a failure here only delays a projection refresh.
+    // The summary projections (#399/#415, decision 014). Every status transition is a board
+    // event that can change the workspace-summary git facts (session start/exit, review, merge
+    // close, ...), and the same event moves the per-repo ahead/merged facts. Dirtying both from
+    // the single status-write authority is what keeps those projections incremental without a
+    // hook in every caller.
+    //
+    // #815 moved the workspace half off `workspaces` into `workspace_summary`, so its flag is
+    // no longer a column this UPDATE can carry. Three consequences worth stating, because they
+    // are the trap this family carried:
+    //  - it is a plain UPDATE, never an upsert: a workspace with no row is ALREADY dirty by
+    //    absence (the dropped column was NOT NULL DEFAULT TRUE and every read coalesces to it),
+    //    so the no-op is the correct outcome;
+    //  - it runs AFTER the `affected === 0` return above, so a CAS miss or the #966 terminal
+    //    guard still dirties nothing — the property the atomic column write gave for free;
+    //  - it is best-effort, exactly like the repos half has always been. A lost stamp costs a
+    //    delayed refresh, not a wrong answer: the heal pass also picks a row up on
+    //    `git_refreshed_at` age, and the freshness TTL bounds how long it can be served stale.
+    try {
+      await database
+        .update(workspaceSummary)
+        .set({ dirty: true })
+        .where(eq(workspaceSummary.workspaceId, workspaceId));
+    } catch { /* projection staleness heals via TTL + the 5-min pass */ }
     try {
       await database
         .update(repos)
