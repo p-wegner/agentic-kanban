@@ -218,3 +218,54 @@ export function calleeName(call: ts.CallExpression): string | null {
   if (ts.isPropertyAccessExpression(target)) return target.name.text;
   return null;
 }
+
+/**
+ * The text of the full-line comments that sit immediately ABOVE a node, or `""` when the
+ * line above it is code (#794).
+ *
+ * Several guards grant a per-call opt-out through a comment on the preceding line — an
+ * `eslint-disable-next-line no-restricted-syntax -- <reason>`, a `SELF-HTTP OK: <why>`. A
+ * comment is not an AST node, so an AST guard cannot see one by walking the tree, and
+ * `ts.getLeadingCommentRanges` answers for the node it is asked about — which for
+ * `const r = await fetch(u)` is the STATEMENT, not the call this guard matched. Scanning
+ * backwards from the start of the node's own LINE answers the question the guards actually
+ * ask ("is the opt-out written directly above this call?") at any nesting depth, without
+ * needing parent pointers that {@link parseGuardSource} deliberately does not store.
+ *
+ * Only comments that occupy a whole line count. A `//` inside a string on a code line is
+ * not an opt-out, and the whitespace-only-prefix check is what tells the two apart — the
+ * text-scanning versions of these guards could not, which is how a `//` inside a string
+ * literal used to delete the rest of a line before the pattern ever ran.
+ *
+ * The two-line lookback these replaced was also wrong in the other direction: it excused
+ * ANY call whose second-preceding line held the marker, so one exempted call granted its
+ * unexempted NEIGHBOUR the same pass. Contiguity from the node's own line fixes that.
+ */
+export function leadingCommentText(sf: ts.SourceFile, node: ts.Node): string {
+  const full = sf.getFullText();
+  // Start at the beginning of the node's own line: the opt-out sits ABOVE the call, and the
+  // call is usually preceded on its line by `const x = await `, which is not whitespace.
+  let pos = full.lastIndexOf("\n", Math.max(0, node.getStart(sf) - 1)) + 1;
+  const parts: string[] = [];
+  for (;;) {
+    let i = pos - 1;
+    while (i >= 0 && /\s/.test(full[i]!)) i -= 1;
+    if (i < 0) break;
+    if (full[i] === "/" && i >= 1 && full[i - 1] === "*") {
+      const start = full.lastIndexOf("/*", i - 1);
+      if (start < 0) break;
+      parts.unshift(full.slice(start, i + 1));
+      pos = start;
+      continue;
+    }
+    const lineStart = full.lastIndexOf("\n", i) + 1;
+    const lineText = full.slice(lineStart, i + 1);
+    const marker = lineText.indexOf("//");
+    // Whitespace-only before the `//` — otherwise this is a trailing comment on a code line
+    // (or a `//` inside a string), and neither is an opt-out written above the call.
+    if (marker < 0 || lineText.slice(0, marker).trim() !== "") break;
+    parts.unshift(full.slice(lineStart + marker, i + 1));
+    pos = lineStart + marker;
+  }
+  return parts.join("\n");
+}
