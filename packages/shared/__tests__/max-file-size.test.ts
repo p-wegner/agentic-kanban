@@ -196,7 +196,7 @@ function isExcluded(absPath: string): boolean {
 }
 
 function collectSourceFiles(dir: string, out: string[]): void {
-  let entries: ReturnType<typeof readdirSync>;
+  let entries: string[];
   try {
     entries = readdirSync(dir);
   } catch {

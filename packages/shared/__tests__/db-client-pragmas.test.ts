@@ -12,7 +12,7 @@ import {
   applyPragmas,
   createClientWithPragmas,
   CONNECTION_PRAGMAS,
-} from "../src/lib/db-client.ts";
+} from "../src/lib/db-client.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "../../..");

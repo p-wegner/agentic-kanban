@@ -39,7 +39,7 @@
   },
   "scripts": {
     "prepare": "pnpm build",
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "typecheck": "tsc --noEmit"
