@@ -20,6 +20,9 @@ on:
     branches: [master]
   push:
     branches: [master]
+  # #765: lets anyone produce the lcov artifact on demand without waiting for a push
+  # to master — the coverage job below is the only consumer of this trigger.
+  workflow_dispatch:
 
 jobs:
   god-module-gate:
@@ -37,3 +40,54 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: arch gates (god-module + depcruise layering + mcp-catalog parity)
         run: pnpm check:arch
+
+  # #765 — the CONSUMER for the coverage reports #688 wired up and nobody read.
+  #
+  # Until this job existed, `code-metrics` could not find a Cobertura/LCOV/JaCoCo report
+  # anywhere in the tree (`provenance.scanners.coverage = "skipped:no_report"`), so it fell
+  # back to its co-change proxy for 1375 of 1375 production files — every "is this file
+  # protected" number the repo produced meant "was it ever committed alongside a test file".
+  # That proxy is measurably wrong in the direction that matters: GraphEdges.tsx scored
+  # safety_net 0.00 on it and measures 88% line coverage.
+  #
+  # DELIBERATELY NOT on pull_request. A full-repo coverage run is the whole test suite
+  # (~4,100 server tests that spawn real git/node children, plus the client's 1,541), and
+  # this repo's vitest configs exist mostly to document how badly that suite fails under
+  # load (#206, #680: timeouts turning a green tree into a red merge gate board-wide). A
+  # coverage number is worth having; it is not worth withholding every merge for. On push
+  # to master and on workflow_dispatch its redness is informational, never merge-blocking.
+  # Flipping it to PRs is a one-line change once someone has MEASURED the run on a CI
+  # runner — do not do it on the strength of a local timing.
+  coverage:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: build shared (the other packages import its dist)
+        run: pnpm build:shared
+      - name: coverage run (all four test packages)
+        # `pnpm <pkg> test -- --coverage` does NOT work: pnpm swallows everything after
+        # `--`, so the old script ran the plain suite four times and emitted no report at
+        # all. `exec vitest run --coverage` is the form that reaches vitest.
+        run: pnpm test:coverage
+      - name: read the reports (fails if any package emitted none)
+        run: pnpm coverage:report
+      - name: upload lcov + summaries
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-lcov
+          # code-metrics eats lcov.info; coverage-summary.json is what
+          # scripts/coverage-report.mjs reads. The HTML lcov-report/ is deliberately
+          # excluded — it is ~10x the size and nothing automated reads it.
+          path: |
+            packages/*/coverage/lcov.info
+            packages/*/coverage/coverage-summary.json
+          if-no-files-found: error
+          retention-days: 14
