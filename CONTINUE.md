@@ -3,6 +3,51 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## Gate hermeticity (#680) — what is true today (2026-08-23)
+
+#680 is "a gate that goes red under load and green in isolation, so a full-suite run cannot be
+used as evidence". It has two halves and they are in very different states.
+
+**(b) cross-suite tree mutation — the mechanism is now covered, in two layers:**
+
+- `packages/shared/__tests__/test-tree-write-hermeticity.test.ts` (`@gate:always-run`,
+  `a4e91a1af5` + `63f8e5c3cf`) — a zero-tolerance AST guard failing any `fs` write in a test
+  file OR a `__tests__` helper whose destination is anchored to this checkout. Measured 0
+  offenders across all packages, so the baseline of zero IS the ratchet. Opt-out is an explicit
+  `// REPO-TREE-WRITE OK: <reason>` on the line above the call.
+- `scripts/test-mine.mjs` (`aae24b0f0e`) — snapshots `git status --porcelain -z` around the run
+  and NAMES every path whose status changed. Reports by default; fails under
+  `KANBAN_TEST_HERMETIC=strict`. Default is report because several agents share this checkout
+  and a neighbour's edit is not this run's leak.
+- `7ab99cab7a` — the one real offender (`openapi-drift.test.ts`, the #814 leak) now perturbs a
+  copy in `os.tmpdir()`; `scripts/generate-openapi.ts` takes `--spec <path>`. **#814 is closed.**
+
+**Verified, and by what:** the drift report named a probe file created 8 s into a real
+`pnpm test:mine` run and named NONE of the four paths another agent had already dirtied
+beforehand; a second run with no probe printed nothing. The static guard's bite test
+reconstructs the pre-#814 shape in `os.tmpdir()` and requires exactly 2 offenders, and the FIXED
+shape and requires 0 — so neither an always-true nor an always-false guard passes it.
+
+**What is NOT verified, and the honest gap:** the `zz-adversarial-tmp.test.ts` writer #680
+recorded was never identified. It is ruled out as an `fs` call in test code (the static guard
+measures 0 tree-wide). It is either a spawned subprocess — which only the runtime drift report
+can catch — or it was never a suite at all and was an adversarial reviewer's own probe file.
+**The next full `test:mine` on a loaded machine settles it.** No such run was launched this
+session: the machine had another agent working and 5.5 GB usable RAM, and #680 explicitly says a
+single green run under low load proves nothing anyway.
+
+**(a) timing fragility — largely done before this session, and now needs measurement, not more
+widening.** Config default 20s -> 60s (#206) -> 120s (#680); `GIT_HEAVY_TEST_TIMEOUT_MS` 90s ->
+240s; `git-heavy-budget-ratchet.test.ts` pins six named suites onto the shared constant and fails
+a hand-typed number in any of them. Residual: the config default (120s) is below the shared
+git-heavy budget (240s), and the two suites #680 measured blowing 60s
+(`merge-overlap-cluster-landing`, `get-context-boundary`) ride the CONFIG default, not the
+constant. Whether 120s now suffices for them under load is UNMEASURED — do not raise it again
+without a measured run; the fix if they still time out is to add them to `MUST_USE_SHARED_BUDGET`.
+
+The remainder is filed as **#816**, which also names the un-swept unawaited-async-teardown shape
+(#777's `2e789968ac` found two suites manufacturing cross-file misattribution that way).
+
 ## Declared "batch 1" refactors — true state (#691)
 
 Three commits declared themselves a partial pass ("batch 1", "N remain") with no follow-up
