@@ -87,6 +87,45 @@ reality with the causing commit named in
 `packages/server/src/__tests__/function-nloc-baseline.ts`; the enforcement gap is **#817**.
 Leaving them red was the alternative, and it blocks every other merge on the board.
 
+## #728 — batch 1 of 95: three files split, and the computed seams are a hypothesis (2026-08-23)
+
+**Done and verified.** Three of the 95 split-responsibility candidates were split; `tsc
+--noEmit` (server, tests included), `node scripts/check-god-modules.mjs` and
+`depcruise packages/server/src/services` green after each, plus the affected suites
+(56 + 19 + 31 tests).
+
+| File | Before | After |
+|---|---|---|
+| `services/workspace-services.service.ts` | 785 | 591 + `workspace-services/compose-runner.ts` (224) |
+| `repositories/issue.repository.ts` | 626 | 504 + `issue/analytics.repository.ts` (108) + `issue/touched-files.repository.ts` (76) |
+| `services/git-info.service.ts` | 405 | 24 (facade) + `git-info/repo-detect.ts` (97) + `git-info/project-stats.ts` (353) |
+
+**92 remain. Disclosed both ways** per #691: ratchet
+`packages/server/src/__tests__/split-responsibility-ratchet.test.ts` (`@gate:always-run`)
+pins the top-level DECLARATION count of #728's five named candidates, shrink-only — it
+covers only those five and says so — and **#819** carries the rest.
+
+**The finding worth keeping: #728's seams are computed, and 2 of the 3 inspected were
+clustering artifacts of identifier vocabulary.** `issue.repository.ts`'s `issueid` seam is
+exactly the functions whose first parameter is named `issueId`; its `projectstatuses` seam
+is exactly those joining `project_statuses` (15 of 31) — in a file with no instance state
+at all. `git-info.service.ts`'s five seams are constant and type NAMES. Only
+`workspace-services.service.ts`'s `dockeravailable` seam was real (it is the compose-CLI
+adapter, and it is what was extracted).
+
+In both artifact cases a real seam existed and was found the other way: **read the
+CONSUMERS, not the identifiers.** Disjoint consumer sets (focus/analytics/digest vs. the
+CRUD path) and genuinely shared mutable state (the stats engine's three cache maps, which
+repo detection never touches) are what separate a seam from a naming coincidence. Anyone
+picking up #819 should treat the computed group list as *which files to look at* and
+re-verify each cut by hand.
+
+**Not split, and why:** `services/butler-definitions.service.ts` (353 lines) does hold two
+things — preference CRUD and launch-config resolution — but is the smallest of the five and
+cheap to read whole; deferred, pinned by the ratchet.
+`services/devcontainer-workspace.service.ts` (708) was not inspected in depth; a *hypothesis*
+(provisioning vs. container inventory/reaping) is recorded on #819, unverified.
+
 ## Declared "batch 1" refactors — true state (#691)
 
 Three commits declared themselves a partial pass ("batch 1", "N remain") with no follow-up
