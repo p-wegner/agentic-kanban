@@ -19,6 +19,7 @@
 export {
   clearSessionProviderSessionId,
   updateSessionWorkerId,
+  updateSessionPlacementReason,
   getSessionWorkspaceId,
   findRunningSession,
   findResumableSession,

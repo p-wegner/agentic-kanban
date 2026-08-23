@@ -9,6 +9,7 @@ import { issues, sessions, workers, workspaces } from "@agentic-kanban/shared/sc
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { firstRow } from "../lib/first-row.js";
+import { updateSessionPlacementReason as updateSessionPlacementReasonForSession } from "./session/lifecycle.js";
 
 export interface SessionPlacementRow {
   sessionId: string;
@@ -96,11 +97,12 @@ export async function getWorkerNamesByIds(
 /**
  * Stamp the resolver's verdict onto the session row (#801).
  *
- * A WRITE in an otherwise read-only module, and it belongs here rather than in the general
- * session repository for the reason the header gives: this is the placement-observability
- * aggregate, and the column exists only so `listSessionPlacementRows` can answer WHY beside
- * WHERE. Splitting the write from the read it serves would put two halves of one fact in
- * two files.
+ * A DELEGATION, kept exported here so the write stays discoverable beside the read it
+ * serves. The body lives in the `sessions` aggregate (`session/lifecycle.ts`, behind the
+ * session.repository facade) because the table-ownership ratchet (#957) overruled the
+ * earlier argument for issuing the update here: "the read and the write are one fact" is a
+ * weaker claim than single query authority over a table, and re-exporting the accessor
+ * costs nothing while a second writer costs the invariant.
  *
  * Best-effort by contract, exactly like `updateSessionContainerId`: a diagnostic that can
  * fail a launch is worse than a missing diagnostic. Callers do not await it into their
@@ -111,10 +113,7 @@ export async function updateSessionPlacementReason(
   reason: { id: string; detail: string },
   database: Database = db,
 ): Promise<void> {
-  await database
-    .update(sessions)
-    .set({ placementReason: reason.id, placementDetail: reason.detail })
-    .where(eq(sessions.id, sessionId));
+  await updateSessionPlacementReasonForSession(sessionId, reason, database);
 }
 
 export interface IssueIdentity {
