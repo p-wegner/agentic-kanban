@@ -317,6 +317,481 @@ async function resolveAutoStartGroupMembers(args: {
   return members;
 }
 
+/**
+ * The per-cycle collaborators BOTH auto-start loops need: the injected deps, the
+ * cycle-scoped tallies (skips per project, starts per project), and the resolved
+ * tunables. Threading ONE context instead of a dozen parameters is what lets
+ * `runAutoStart` be the short orchestrator it now is (#802) — before that split it
+ * was a single 59-branch function and the god-module gate's complexity ratchet was
+ * red on master.
+ */
+interface AutoStartCycle {
+  prefMap: Map<string, string>;
+  baseUrl: string;
+  boardEvents: ReturnType<typeof createBoardEvents>;
+  logMonitorAction: AutoStartDeps["logMonitorAction"];
+  isAutoDrivenProject: (projectId: string) => boolean;
+  buildContentionGate: BuildFileContentionGate;
+  canDispatch: typeof projectCanDispatch;
+  skipInfo: Map<string, AutoStartSkipInfo>;
+  noteSkip: (projectId: string, issueNumber: number | null | undefined, reason: AutoStartSkipReason, count?: number) => void;
+  tunablesFor: (projectId: string) => ReturnType<typeof resolveMonitorTunables>["tunables"];
+  startsRemaining: (projectId: string) => number;
+  noteStart: (projectId: string) => void;
+}
+
+type ContentionGate = Awaited<ReturnType<BuildFileContentionGate>>;
+
+/** The rows both loops select as start candidates — the shared subset the gates below read. */
+interface AutoStartCandidate {
+  id: string;
+  title: string;
+  description: string | null;
+  issueType: string | null;
+  issueNumber: number | null;
+  externalKey: string | null;
+}
+
+/**
+ * The per-issue gate chain shared by BOTH loops (#802): open workspace → already-merged
+ * reconcile → plugin-loop reopen guard → monitor eligibility → `no-auto-start` tag →
+ * file-contention gate. It was duplicated line-for-line inside the two loops, which is
+ * why guarding only one of them (as #361 originally did) left the defect reachable by
+ * the other; one function now IS both copies.
+ *
+ * The only difference between the call sites was whether the last three gates are tallied
+ * as skip reasons — the Todo pull loop reports them, the In-Progress backfill loop does
+ * not — so that is passed in as `noteGateSkip` (a no-op for the backfill loop) rather than
+ * as a flag, keeping the two behaviours identical to what they were.
+ */
+async function evaluateStartCandidate(args: {
+  issue: AutoStartCandidate;
+  /** Project the already-merged reconcile is attributed to (the issue's own project). */
+  reconcileProjectId: string;
+  /** Project the skip tallies are recorded against (the In Progress status's project). */
+  skipProjectId: string;
+  allowFeatureTypes: boolean;
+  contentionGate: ContentionGate;
+  boardEvents: ReturnType<typeof createBoardEvents>;
+  noteSkip: AutoStartCycle["noteSkip"];
+  noteGateSkip: (reason: AutoStartSkipReason) => void;
+}): Promise<{ start: false } | { start: true; isReopenRetry: boolean; priorWorkspaceCount: number }> {
+  const { issue, contentionGate, allowFeatureTypes, noteSkip, noteGateSkip } = args;
+  // Ticket group (#661): the membership subquery makes a MEMBER issue (with no workspace
+  // row of its own — the group workspace is keyed by the lead) look exactly like an issue
+  // with its own workspaces, so the open-workspace skip AND the already-merged reconcile
+  // below cover group members with no extra query.
+  const issueWorkspaces = await db.select({ id: workspaces.id, status: workspaces.status, mergedAt: workspaces.mergedAt }).from(workspaces)
+    .where(sql`${workspaces.issueId} = ${issue.id} OR ${workspaces.id} IN (SELECT workspace_id FROM workspace_issue_members WHERE issue_id = ${issue.id})`);
+  if (issueWorkspaces.some((w) => w.status !== "closed")) return { start: false };
+  const mergedWs = issueWorkspaces.find((w) => w.mergedAt != null);
+  let isReopenRetry = false;
+  if (mergedWs) {
+    // #265: only a DELIBERATE reopen falls through to start again; a merged issue whose
+    // status simply had not caught up is still reconciled and skipped as before.
+    ({ reopenedAfterMerge: isReopenRetry } = await reconcileStaleMergedIssue(args.reconcileProjectId, issue.id, issue.issueNumber, args.boardEvents, noteSkip, mergedWs.mergedAt));
+    if (!isReopenRetry) return { start: false };
+    // #361 — but never for a plugin-loop unit. See `loop_unit_reopen_declined`.
+    if (parsePluginLoopUnitKey(issue.externalKey)) {
+      console.log(`[monitor] Declining reopen-retry for plugin-loop unit issue #${issue.issueNumber} — its workspace already merged and the loop cannot represent a second one (#361)`);
+      noteSkip(args.skipProjectId, issue.issueNumber, "loop_unit_reopen_declined");
+      return { start: false };
+    }
+  }
+  if (!isMonitorEligibleIssue(issue, allowFeatureTypes)) { noteGateSkip("feature_type_excluded"); return { start: false }; }
+  if (await hasSkipAutoStartTag(issue.id)) { noteGateSkip("no_auto_start_tag"); return { start: false }; }
+  if (shouldDeferForContention(contentionGate, issue.id, issue.issueNumber)) { noteGateSkip("contention_gate"); return { start: false }; }
+  return { start: true, isReopenRetry, priorWorkspaceCount: issueWorkspaces.length };
+}
+
+/**
+ * Record a strict-fleet hold, WITH the shape of the fleet behind it (#774). Best-effort:
+ * a hold must still be recorded (and the cycle must still skip the project) if the fleet
+ * snapshot itself fails.
+ */
+async function recordFleetHold(ctx: AutoStartCycle, projectId: string, dispatchReason: string): Promise<void> {
+  let fleetHold: FleetHoldDetail | undefined;
+  try {
+    const snapshot = await describeFleet({
+      database: db,
+      projectId,
+      providerName: narrowProviderName(ctx.prefMap.get("provider")),
+    });
+    fleetHold = {
+      reason: dispatchReason,
+      registered: snapshot.registered,
+      online: snapshot.online,
+      connected: snapshot.connected,
+      eligible: snapshot.eligible,
+      freeSlots: snapshot.freeSlots,
+      explain: `/api/workers/explain?projectId=${projectId}&issue=<N>`,
+    };
+  } catch (err) {
+    console.warn(`[monitor] could not describe the fleet behind the hold: ${String(err)}`);
+  }
+  console.log(
+    `[monitor] auto-start held for project ${projectId}: ${dispatchReason}` +
+      (fleetHold
+        ? ` (${fleetHold.connected}/${fleetHold.registered} connected, ${fleetHold.eligible} eligible, ` +
+          `${fleetHold.freeSlots} free slots; why for one ticket: ${fleetHold.explain})`
+        : ""),
+  );
+  ctx.noteSkip(projectId, null, "no_available_worker");
+  if (fleetHold) {
+    const info = ctx.skipInfo.get(projectId);
+    if (info) info.fleetHold = fleetHold;
+  }
+}
+
+/**
+ * The Todo (and, for auto-driven projects, Backlog) status ids a project pulls candidates
+ * from (#536). Returned as one list so the WIP-cap tally and the candidate query cannot
+ * disagree about what "queued work" means.
+ */
+async function resolveCandidateStatusIds(projectId: string, todoStatusId: string, allowFeatureTypes: boolean): Promise<string[]> {
+  const ids = [todoStatusId];
+  if (allowFeatureTypes) {
+    const backlogStatus = await db.select({ id: projectStatuses.id }).from(projectStatuses)
+      .where(sql`${projectStatuses.name} = 'Backlog' AND ${projectStatuses.projectId} = ${projectId}`).limit(1);
+    if (backlogStatus.length > 0) ids.push(backlogStatus[0].id);
+  }
+  return ids;
+}
+
+/**
+ * #179: WIP is full — but only worth surfacing as a "skipped" cause if there is actually
+ * queued Todo/Backlog work waiting behind it, not on every idle project.
+ */
+async function noteWipCapSkip(ctx: AutoStartCycle, projectId: string, allowFeatureTypes: boolean): Promise<void> {
+  const waitingTodoStatus = await db.select({ id: projectStatuses.id }).from(projectStatuses)
+    .where(sql`${projectStatuses.name} = 'Todo' AND ${projectStatuses.projectId} = ${projectId}`).limit(1);
+  if (waitingTodoStatus.length === 0) return;
+  const waitingStatusIds = await resolveCandidateStatusIds(projectId, waitingTodoStatus[0].id, allowFeatureTypes);
+  const waitingCount = await db.select({ count: sql<number>`count(*)` }).from(issues)
+    .where(and(inArray(issues.statusId, waitingStatusIds), monitorEligibleIssueSql(allowFeatureTypes), notDriveOrEpicMetaSql()));
+  const waiting = Number(waitingCount[0]?.count ?? 0);
+  if (waiting > 0) ctx.noteSkip(projectId, null, "wip_cap", waiting);
+}
+
+/**
+ * The dependency gate for a project's pull loop: a blocker unblocks only when terminal AND
+ * landed (#535/#537/#782/#784). Built once per project cycle so the lead candidate and the
+ * group-member vetting share one implementation.
+ */
+function buildDependencyGate(doneStatusIds: Set<string>): (issueId: string) => Promise<boolean> {
+  return async (issueId: string): Promise<boolean> => {
+    const deps = await db.select({ dependsOnId: issueDependencies.dependsOnId }).from(issueDependencies)
+      .where(sql`${issueDependencies.issueId} = ${issueId} AND (${issueDependencies.type} = 'depends_on' OR ${issueDependencies.type} = 'blocked_by')`);
+    if (deps.length === 0) return true;
+    const blockerIds = [...new Set(deps.map((d) => d.dependsOnId))];
+    const blockerIssues = await db
+      .select({
+        id: issues.id,
+        statusId: issues.statusId,
+        currentNodeId: issues.currentNodeId,
+        currentNodeType: workflowNodes.nodeType,
+      })
+      .from(issues)
+      .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
+      .where(inArray(issues.id, blockerIds));
+    if (blockerIssues.length !== blockerIds.length) return false;
+    const blockerWorkspaces = await db
+      .select({ issueId: workspaces.issueId, mergedAt: workspaces.mergedAt, isDirect: workspaces.isDirect })
+      .from(workspaces)
+      .where(inArray(workspaces.issueId, blockerIds));
+    const wsByBlocker = new Map<string, BlockerWorkspaceLanding[]>();
+    for (const w of blockerWorkspaces) {
+      const list = wsByBlocker.get(w.issueId) ?? [];
+      list.push({ mergedAt: w.mergedAt, isDirect: w.isDirect });
+      wsByBlocker.set(w.issueId, list);
+    }
+    return blockerIssues.every((b) => computeBlockerReadiness({
+      isTerminal: isTerminalStatusIdView(b, doneStatusIds),
+      workspaces: wsByBlocker.get(b.id) ?? [],
+    }));
+  };
+}
+
+/**
+ * Interpret the `POST /api/workspaces?async=1&autoStart=1` response for the Todo pull loop.
+ * Returns whether the launch was ACCEPTED; the caller owns the counters so their order is
+ * unchanged.
+ */
+async function handleTodoLaunchOutcome(
+  ctx: AutoStartCycle,
+  resp: Response | null,
+  issue: { id: string; title: string; projectId: string; issueNumber: number | null },
+  skipProjectId: string,
+  memberCount: number,
+): Promise<boolean> {
+  if (resp?.ok) {
+    // Async launch (#269): the 202 body carries a create-job id, not a workspace id;
+    // record whichever is available so the action stays traceable.
+    const wsData = await resp.json().catch(() => null) as { id?: string; jobId?: string } | null;
+    ctx.logMonitorAction("auto_start", wsData?.id ?? wsData?.jobId ?? "unknown", issue.id);
+    // #358 — say what the 202 actually means. "Auto-started workspace" was logged here at the
+    // moment the create JOB was accepted: at that instant no workspace row exists, the issue is
+    // still in its pre-start lane, and no agent has been launched. Provisioning (worktree +
+    // AWAITED blocking setup script + context packer) then runs for 84s-8min before the row and
+    // the issue transition land in one transaction. That log line is the reason a working board
+    // read as "an agent has been running for over a minute while the ticket says Backlog".
+    console.log(`[monitor] Auto-start ACCEPTED for unblocked issue "${issue.title}" (${issue.id})${memberCount > 0 ? ` as a ticket group with ${memberCount} member(s)` : ""} — provisioning a workspace (minutes); the issue moves to In Progress when it completes`);
+    ctx.boardEvents.broadcast(issue.projectId, "board_changed");
+    return true;
+  }
+  if (resp?.status === 409) {
+    // #366: another automatic starter already holds the claim for this issue.
+    console.log(`[monitor] Auto-start declined for unblocked issue "${issue.title}" (${issue.id}) — a workspace creation is already in flight for it (#366)`);
+    ctx.noteSkip(skipProjectId, issue.issueNumber, "create_in_flight");
+    return false;
+  }
+  if (resp) {
+    // #775: a non-ok response (e.g. HTTP 400 "No default branch") was previously
+    // invisible — no log, no recorded action. Warn with the status + body and record
+    // an auto_start action against the issue so the failure surfaces in recentActions.
+    const body = await resp.text().catch(() => "");
+    console.warn(`[monitor] Auto-start FAILED for issue "${issue.title}" (${issue.id}): HTTP ${resp.status} ${body.slice(0, 500)}`);
+    ctx.logMonitorAction("auto_start", "failed", issue.id);
+  }
+  return false;
+}
+
+/**
+ * BACKFILL loop: an issue already In Progress but with no open workspace gets one, up to
+ * the project's WIP target. (The Todo pull loop below is the other half — it promotes
+ * queued work INTO In Progress.)
+ */
+async function runInProgressBackfill(ctx: AutoStartCycle, inProgressSt: { id: string; projectId: string }): Promise<void> {
+  const allowFeatureTypes = ctx.isAutoDrivenProject(inProgressSt.projectId);
+  const wipLimit = ctx.tunablesFor(inProgressSt.projectId).activeAgentsTarget;
+  const capacity = await countWipCapacity(db, inProgressSt.id);
+  let currentWip = capacity.active;
+  if (capacity.inactiveStale > 0) {
+    console.log(`[monitor] Auto-start capacity for project ${inProgressSt.projectId}: active=${capacity.active}/${wipLimit} inactiveStale=${capacity.inactiveStale}`);
+  }
+  if (currentWip >= wipLimit) return;
+
+  // Fleet gate (epic #184): a strict worker-dispatch project must not start
+  // work the fleet cannot take — one check per project per cycle.
+  const dispatch = await ctx.canDispatch({
+    database: db,
+    projectId: inProgressSt.projectId,
+    providerName: narrowProviderName(ctx.prefMap.get("provider")),
+  });
+  if (!dispatch.available) {
+    // #774 — record the fleet's SHAPE alongside the collapsed reason, so the monitor
+    // status carries what the console line used to be the only source of.
+    await recordFleetHold(ctx, inProgressSt.projectId, dispatch.reason);
+    return;
+  }
+
+  // #119: one snapshot per project per loop, then a cheap synchronous check per candidate.
+  const contentionGate = await ctx.buildContentionGate(ctx.prefMap, inProgressSt.projectId);
+
+  const inProgressIssues = await db.select({ id: issues.id, title: issues.title, description: issues.description, issueType: issues.issueType, issueNumber: issues.issueNumber, externalKey: issues.externalKey }).from(issues)
+    .where(and(eq(issues.statusId, inProgressSt.id), notDriveOrEpicMetaSql())); // #824: don't backfill a builder onto a meta created directly In Progress
+  for (const issue of inProgressIssues) {
+    if (currentWip >= wipLimit) break;
+    if (ctx.startsRemaining(inProgressSt.projectId) <= 0) break;
+    const decision = await evaluateStartCandidate({
+      issue,
+      reconcileProjectId: inProgressSt.projectId,
+      skipProjectId: inProgressSt.projectId,
+      allowFeatureTypes,
+      contentionGate,
+      boardEvents: ctx.boardEvents,
+      noteSkip: ctx.noteSkip,
+      // This loop never tallied the eligibility/tag/contention gates as skip reasons.
+      noteGateSkip: () => {},
+    });
+    if (!decision.start) continue;
+    // #366: ONE branch-name producer for the whole board (`suggestBranchName`). This site had
+    // its own inline slug expression, and the Todo-pull loop below had a THIRD one that
+    // stripped punctuation instead of turning it into `-` — that is where the observed
+    // `8-9-ci-cd` vs `89-cicd` pair came from.
+    const baseBranchName = suggestBranchName({ issueNumber: issue.issueNumber, title: issue.title });
+    const branch = decision.isReopenRetry ? reopenRetryBranch(baseBranchName, decision.priorWorkspaceCount) : baseBranchName;
+    const prompt = issue.description ? `${issue.title}\n\n${issue.description}` : issue.title;
+    const launchBody: Record<string, unknown> = { issueId: issue.id, branch, customPrompt: prompt };
+    // Auto-driven projects must not stall in plan-only mode (#666).
+    if (ctx.isAutoDrivenProject(inProgressSt.projectId)) launchBody.planMode = false;
+    // #269: `?async=1` — provisioning is minutes-long (measured 8+ min); a synchronous
+    // launch blocked the whole monitor cycle for the duration. 202 + create-job instead.
+    // #366: `&autoStart=1` — declare this an automatic starter so the route claims the issue
+    // atomically and answers 409 when another starter is already provisioning it.
+    const resp = await fetch(`${ctx.baseUrl}/api/workspaces?async=1&autoStart=1`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(launchBody) }).catch((err) => {
+      // #775: surface a thrown launch instead of swallowing it.
+      console.warn(`[monitor] Auto-start launch threw for In Progress issue #${issue.issueNumber} (${issue.id}): ${errorMessage(err)}`);
+      return null;
+    });
+    // #366: 409 means another automatic starter holds the claim and is provisioning this very
+    // issue right now. That is not a failure and not a consumed slot — the other starter's
+    // launch is the one that counts. Recorded as a skip so it stays visible.
+    if (resp?.status === 409) {
+      console.log(`[monitor] Auto-start declined for In Progress issue #${issue.issueNumber} — a workspace creation is already in flight for it (#366)`);
+      ctx.noteSkip(inProgressSt.projectId, issue.issueNumber, "create_in_flight");
+      continue;
+    }
+    // Count the slot as consumed regardless (we attempted a launch this cycle), but
+    // only record SUCCESS as an auto_start action; a failed launch records a failure
+    // (#775) so it is no longer invisible in the monitor logs / recentActions.
+    currentWip++;
+    ctx.noteStart(inProgressSt.projectId);
+    contentionGate.noteStarted(issue.id);
+    if (!resp || !resp.ok) {
+      const body = resp ? await resp.text().catch(() => "") : "";
+      console.warn(`[monitor] Auto-start FAILED for In Progress issue #${issue.issueNumber} (${issue.id}): ${resp ? `HTTP ${resp.status} ${body.slice(0, 500)}` : "no response"}`);
+      ctx.logMonitorAction("auto_start", "failed", issue.id);
+      continue;
+    }
+    ctx.logMonitorAction("auto_start", "", issue.id);
+    ctx.boardEvents.broadcast(inProgressSt.projectId, "board_changed");
+    // Same correction as below (#358): this is the 202 for an async create job, not a workspace.
+    console.log(`[monitor] Auto-start ACCEPTED for In Progress issue #${issue.issueNumber} (no open workspace) — provisioning takes minutes`);
+  }
+}
+
+/**
+ * PULL loop: promote unblocked Todo (and, for auto-driven projects, Backlog) work into a
+ * fresh workspace, up to the project's free WIP slots and this cycle's start cap.
+ */
+async function runTodoPull(ctx: AutoStartCycle, inProgressSt: { id: string; projectId: string }): Promise<void> {
+  const allowFeatureTypes = ctx.isAutoDrivenProject(inProgressSt.projectId);
+  const wipLimit = ctx.tunablesFor(inProgressSt.projectId).activeAgentsTarget;
+  const capacity = await countWipCapacity(db, inProgressSt.id);
+  const currentWip = capacity.active;
+  if (capacity.inactiveStale > 0) {
+    console.log(`[monitor] Auto-start pull capacity for project ${inProgressSt.projectId}: active=${capacity.active}/${wipLimit} inactiveStale=${capacity.inactiveStale}`);
+  }
+
+  // #581: hold new starts while a gate holds the build semaphore. Checked per project so
+  // a project can opt out, but the resource being protected is the BOX — one project's
+  // builder saturates another project's gate just as well.
+  if (await shouldQuiesceBuildersForGate(inProgressSt.projectId, db)) {
+    ctx.noteSkip(inProgressSt.projectId, null, "verify_gate_running");
+    return;
+  }
+
+  if (currentWip >= wipLimit) {
+    await noteWipCapSkip(ctx, inProgressSt.projectId, allowFeatureTypes);
+    return;
+  }
+
+  const todoStatus = await db.select({ id: projectStatuses.id }).from(projectStatuses)
+    .where(sql`${projectStatuses.name} = 'Todo' AND ${projectStatuses.projectId} = ${inProgressSt.projectId}`).limit(1);
+  if (todoStatus.length === 0) return;
+
+  const slotsAvailable = wipLimit - currentWip;
+  // #119: snapshot once, then gate each candidate; launches this cycle feed back
+  // via noteStarted so two backlog tickets sharing a registration file don't both
+  // start in the SAME cycle.
+  const contentionGate = await ctx.buildContentionGate(ctx.prefMap, inProgressSt.projectId);
+
+  // For auto-driven projects, also pull Backlog issues so newly-created tickets
+  // start without requiring a manual Backlog→Todo promotion (#536).
+  const candidateStatusIds = await resolveCandidateStatusIds(inProgressSt.projectId, todoStatus[0].id, allowFeatureTypes);
+
+  // #774: do NOT pre-truncate the candidate set with an UNORDERED `limit(fetchLimit)`.
+  // SQLite returns rows in an arbitrary order, so a small fetchLimit could return only
+  // dep-blocked / already-workspaced candidates and silently DROP the one ticket whose
+  // blockers are all Done+merged — exactly the ticket `dependency-waves/start-next`
+  // launches correctly (it scans ALL issues, orders them, then filters). Fetch all
+  // eligible candidates ordered by issue number (deterministic, FIFO-ish) and let the
+  // per-issue gates below decide; the slotsAvailable / startsRemaining caps still bound
+  // how many actually launch this cycle.
+  // #773: skip the feature/enhancement type-exclusion for auto-driven projects.
+  const todoIssues = await db.select({ id: issues.id, title: issues.title, description: issues.description, issueType: issues.issueType, projectId: issues.projectId, issueNumber: issues.issueNumber, externalKey: issues.externalKey }).from(issues)
+    .where(and(inArray(issues.statusId, candidateStatusIds), monitorEligibleIssueSql(allowFeatureTypes), notDriveOrEpicMetaSql()))
+    .orderBy(issues.issueNumber);
+  const doneStatuses = await db.select({ id: projectStatuses.id }).from(projectStatuses)
+    .where(sql`${projectStatuses.name} IN ('Done', 'Cancelled')`);
+  const doneStatusIds = new Set(doneStatuses.map((s) => s.id));
+
+  // Candidates consumed as GROUP MEMBERS this cycle: their workspace row is minutes
+  // away (async provisioning), so only this in-cycle set stops the loop from also
+  // starting them individually.
+  const startedAsMember = new Set<string>();
+
+  // Dependency gate, shared by the lead candidate below and the group-member vetting —
+  // a blocker unblocks only when terminal AND landed (#535/#537/#782/#784).
+  const passesDependencyGate = buildDependencyGate(doneStatusIds);
+
+  let started = 0;
+  for (const issue of todoIssues) {
+    if (started >= slotsAvailable) break;
+    if (ctx.startsRemaining(inProgressSt.projectId) <= 0) {
+      ctx.noteSkip(inProgressSt.projectId, issue.issueNumber, "cycle_start_cap");
+      break;
+    }
+    if (startedAsMember.has(issue.id)) continue;
+    const decision = await evaluateStartCandidate({
+      issue,
+      reconcileProjectId: issue.projectId,
+      skipProjectId: inProgressSt.projectId,
+      allowFeatureTypes,
+      contentionGate,
+      boardEvents: ctx.boardEvents,
+      noteSkip: ctx.noteSkip,
+      noteGateSkip: (reason) => ctx.noteSkip(inProgressSt.projectId, issue.issueNumber, reason),
+    });
+    if (!decision.start) continue;
+
+    if (!(await passesDependencyGate(issue.id))) continue;
+
+    // #366: the THIRD slug producer used to live here — it stripped punctuation instead of
+    // turning it into `-`, which is exactly what turned `PM pipeline 8/9: CI/CD & Deployment`
+    // into `...-89-cicd-deployment` while `suggestBranchName` produced `...-8-9-ci-cd-deployment`
+    // for the same issue. Both names were observed on duplicate workspaces of one issue.
+    const baseBranchName = suggestBranchName({ issueNumber: issue.issueNumber, title: issue.title });
+    const branch = decision.isReopenRetry ? reopenRetryBranch(baseBranchName, decision.priorWorkspaceCount) : baseBranchName;
+
+    // Ticket group (#661): expand the candidate into a group along its explicit
+    // `coupled_with` edges — one workspace, one agent, one review, one gate for the
+    // whole set. Only members that are themselves independently startable join; a
+    // reopen-retry never groups (its branch/workspace history is its own).
+    let memberIssueIds: string[] = [];
+    if (!decision.isReopenRetry && isAutoGroupEnabled(ctx.prefMap, issue.projectId)) {
+      // Best-effort: grouping must never break the start it decorates.
+      memberIssueIds = await resolveAutoStartGroupMembers({
+        lead: issue,
+        candidates: todoIssues,
+        startedAsMember,
+        contentionGate,
+        allowFeatureTypes,
+        passesDependencyGate,
+      }).catch((err) => {
+        console.warn(`[monitor] ticket-group expansion failed for #${issue.issueNumber} (starting it solo): ${errorMessage(err)}`);
+        return [] as string[];
+      });
+    }
+
+    const launchBody: Record<string, unknown> = { issueId: issue.id, branch };
+    if (memberIssueIds.length > 0) launchBody.memberIssueIds = memberIssueIds;
+    // Auto-driven projects must not stall in plan-only mode (#666).
+    if (ctx.isAutoDrivenProject(issue.projectId)) launchBody.planMode = false;
+    // #269: `?async=1` — same as the backfill loop above; the cycle must not block
+    // ~8 minutes per launch while the worktree provisions.
+    // #366: `&autoStart=1` — claim the issue atomically; 409 = another starter has it.
+    const resp = await fetch(`${ctx.baseUrl}/api/workspaces?async=1&autoStart=1`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(launchBody) }).catch((err) => {
+      // #775: surface a thrown launch (network/connection error) instead of silently
+      // dropping it — record a failure action so it shows in the monitor logs.
+      console.warn(`[monitor] Auto-start launch threw for issue "${issue.title}" (${issue.id}): ${errorMessage(err)}`);
+      return null;
+    });
+    const accepted = await handleTodoLaunchOutcome(ctx, resp, issue, inProgressSt.projectId, memberIssueIds.length);
+    if (!accepted) continue;
+    started++;
+    ctx.noteStart(inProgressSt.projectId);
+    contentionGate.noteStarted(issue.id);
+    // Group members are consumed by THIS start: keep the rest of the cycle (and the
+    // contention snapshot) from starting them individually.
+    for (const memberId of memberIssueIds) {
+      startedAsMember.add(memberId);
+      contentionGate.noteStarted(memberId);
+    }
+  }
+}
+
 export async function runAutoStart(prefMap: Map<string, string>, { serverPort, boardEvents, logMonitorAction, allowProject, isAutoDrivenProject = () => false, buildContentionGate = buildFileContentionGate, canDispatch = projectCanDispatch }: AutoStartDeps): Promise<Map<string, AutoStartSkipInfo>> {
   const skipInfo = new Map<string, AutoStartSkipInfo>();
   const noteSkip = (projectId: string, issueNumber: number | null | undefined, reason: AutoStartSkipReason, count = 1) => {
@@ -346,357 +821,19 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
   const startsRemaining = (projectId: string) => tunablesFor(projectId).maxNewStartsPerCycle - (startedByProject.get(projectId) ?? 0);
   const noteStart = (projectId: string) => startedByProject.set(projectId, (startedByProject.get(projectId) ?? 0) + 1);
 
+  const ctx: AutoStartCycle = {
+    prefMap, baseUrl, boardEvents, logMonitorAction, isAutoDrivenProject,
+    buildContentionGate, canDispatch, skipInfo, noteSkip, tunablesFor, startsRemaining, noteStart,
+  };
+
+  // Two passes, in this order and NOT interleaved — unchanged from when both loop bodies
+  // were inlined here: every project is backfilled before any project pulls new work.
   for (const inProgressSt of inProgressStatuses) {
-    const allowFeatureTypes = isAutoDrivenProject(inProgressSt.projectId);
-    const wipLimit = tunablesFor(inProgressSt.projectId).activeAgentsTarget;
-    const capacity = await countWipCapacity(db, inProgressSt.id);
-    let currentWip = capacity.active;
-    if (capacity.inactiveStale > 0) {
-      console.log(`[monitor] Auto-start capacity for project ${inProgressSt.projectId}: active=${capacity.active}/${wipLimit} inactiveStale=${capacity.inactiveStale}`);
-    }
-    if (currentWip >= wipLimit) continue;
-
-    // Fleet gate (epic #184): a strict worker-dispatch project must not start
-    // work the fleet cannot take — one check per project per cycle.
-    const dispatch = await canDispatch({
-      database: db,
-      projectId: inProgressSt.projectId,
-      providerName: narrowProviderName(prefMap.get("provider")),
-    });
-    if (!dispatch.available) {
-      // #774 — record the fleet's SHAPE alongside the collapsed reason, so the monitor
-      // status carries what the console line used to be the only source of. Best-effort:
-      // a hold must still be recorded if the fleet snapshot itself fails.
-      let fleetHold: FleetHoldDetail | undefined;
-      try {
-        const snapshot = await describeFleet({
-          database: db,
-          projectId: inProgressSt.projectId,
-          providerName: narrowProviderName(prefMap.get("provider")),
-        });
-        fleetHold = {
-          reason: dispatch.reason,
-          registered: snapshot.registered,
-          online: snapshot.online,
-          connected: snapshot.connected,
-          eligible: snapshot.eligible,
-          freeSlots: snapshot.freeSlots,
-          explain: `/api/workers/explain?projectId=${inProgressSt.projectId}&issue=<N>`,
-        };
-      } catch (err) {
-        console.warn(`[monitor] could not describe the fleet behind the hold: ${String(err)}`);
-      }
-      console.log(
-        `[monitor] auto-start held for project ${inProgressSt.projectId}: ${dispatch.reason}` +
-          (fleetHold
-            ? ` (${fleetHold.connected}/${fleetHold.registered} connected, ${fleetHold.eligible} eligible, ` +
-              `${fleetHold.freeSlots} free slots; why for one ticket: ${fleetHold.explain})`
-            : ""),
-      );
-      noteSkip(inProgressSt.projectId, null, "no_available_worker");
-      if (fleetHold) {
-        const info = skipInfo.get(inProgressSt.projectId);
-        if (info) info.fleetHold = fleetHold;
-      }
-      continue;
-    }
-
-    // #119: one snapshot per project per loop, then a cheap synchronous check per candidate.
-    const contentionGate = await buildContentionGate(prefMap, inProgressSt.projectId);
-
-    const inProgressIssues = await db.select({ id: issues.id, title: issues.title, description: issues.description, issueType: issues.issueType, issueNumber: issues.issueNumber, externalKey: issues.externalKey }).from(issues)
-      .where(and(eq(issues.statusId, inProgressSt.id), notDriveOrEpicMetaSql())); // #824: don't backfill a builder onto a meta created directly In Progress
-    for (const issue of inProgressIssues) {
-      if (currentWip >= wipLimit) break;
-      if (startsRemaining(inProgressSt.projectId) <= 0) break;
-      // Ticket group (#661): the membership subquery makes a MEMBER issue (In Progress
-      // with no workspace row of its own — the group workspace is keyed by the lead)
-      // look exactly like an issue with its own workspaces, so the open-workspace skip
-      // AND the already-merged reconcile below cover group members with no extra query.
-      const issueWorkspaces = await db.select({ id: workspaces.id, status: workspaces.status, mergedAt: workspaces.mergedAt }).from(workspaces)
-        .where(sql`${workspaces.issueId} = ${issue.id} OR ${workspaces.id} IN (SELECT workspace_id FROM workspace_issue_members WHERE issue_id = ${issue.id})`);
-      if (issueWorkspaces.some((w) => w.status !== "closed")) continue;
-      const mergedWs = issueWorkspaces.find((w) => w.mergedAt != null);
-      let isReopenRetry = false;
-      if (mergedWs) {
-        // #265: only a DELIBERATE reopen falls through to start again; a merged issue whose
-        // status simply had not caught up is still reconciled and skipped as before.
-        ({ reopenedAfterMerge: isReopenRetry } = await reconcileStaleMergedIssue(inProgressSt.projectId, issue.id, issue.issueNumber, boardEvents, noteSkip, mergedWs.mergedAt));
-        if (!isReopenRetry) continue;
-        // #361 — but never for a plugin-loop unit. See `loop_unit_reopen_declined`.
-        if (parsePluginLoopUnitKey(issue.externalKey)) {
-          console.log(`[monitor] Declining reopen-retry for plugin-loop unit issue #${issue.issueNumber} — its workspace already merged and the loop cannot represent a second one (#361)`);
-          noteSkip(inProgressSt.projectId, issue.issueNumber, "loop_unit_reopen_declined");
-          continue;
-        }
-      }
-      if (!isMonitorEligibleIssue(issue, allowFeatureTypes)) continue;
-      if (await hasSkipAutoStartTag(issue.id)) continue;
-      if (shouldDeferForContention(contentionGate, issue.id, issue.issueNumber)) continue;
-      // #366: ONE branch-name producer for the whole board (`suggestBranchName`). This site had
-      // its own inline slug expression, and the Todo-pull loop below had a THIRD one that
-      // stripped punctuation instead of turning it into `-` — that is where the observed
-      // `8-9-ci-cd` vs `89-cicd` pair came from.
-      const baseBranchName = suggestBranchName({ issueNumber: issue.issueNumber, title: issue.title });
-      const branch = isReopenRetry ? reopenRetryBranch(baseBranchName, issueWorkspaces.length) : baseBranchName;
-      const prompt = issue.description ? `${issue.title}\n\n${issue.description}` : issue.title;
-      const launchBody: Record<string, unknown> = { issueId: issue.id, branch, customPrompt: prompt };
-      // Auto-driven projects must not stall in plan-only mode (#666).
-      if (isAutoDrivenProject(inProgressSt.projectId)) launchBody.planMode = false;
-      // #269: `?async=1` — provisioning is minutes-long (measured 8+ min); a synchronous
-      // launch blocked the whole monitor cycle for the duration. 202 + create-job instead.
-      // #366: `&autoStart=1` — declare this an automatic starter so the route claims the issue
-      // atomically and answers 409 when another starter is already provisioning it.
-      const resp = await fetch(`${baseUrl}/api/workspaces?async=1&autoStart=1`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(launchBody) }).catch((err) => {
-        // #775: surface a thrown launch instead of swallowing it.
-        console.warn(`[monitor] Auto-start launch threw for In Progress issue #${issue.issueNumber} (${issue.id}): ${errorMessage(err)}`);
-        return null;
-      });
-      // #366: 409 means another automatic starter holds the claim and is provisioning this very
-      // issue right now. That is not a failure and not a consumed slot — the other starter's
-      // launch is the one that counts. Recorded as a skip so it stays visible.
-      if (resp?.status === 409) {
-        console.log(`[monitor] Auto-start declined for In Progress issue #${issue.issueNumber} — a workspace creation is already in flight for it (#366)`);
-        noteSkip(inProgressSt.projectId, issue.issueNumber, "create_in_flight");
-        continue;
-      }
-      // Count the slot as consumed regardless (we attempted a launch this cycle), but
-      // only record SUCCESS as an auto_start action; a failed launch records a failure
-      // (#775) so it is no longer invisible in the monitor logs / recentActions.
-      currentWip++;
-      noteStart(inProgressSt.projectId);
-      contentionGate.noteStarted(issue.id);
-      if (!resp || !resp.ok) {
-        const body = resp ? await resp.text().catch(() => "") : "";
-        console.warn(`[monitor] Auto-start FAILED for In Progress issue #${issue.issueNumber} (${issue.id}): ${resp ? `HTTP ${resp.status} ${body.slice(0, 500)}` : "no response"}`);
-        logMonitorAction("auto_start", "failed", issue.id);
-        continue;
-      }
-      logMonitorAction("auto_start", "", issue.id);
-      boardEvents.broadcast(inProgressSt.projectId, "board_changed");
-      // Same correction as below (#358): this is the 202 for an async create job, not a workspace.
-      console.log(`[monitor] Auto-start ACCEPTED for In Progress issue #${issue.issueNumber} (no open workspace) — provisioning takes minutes`);
-    }
+    await runInProgressBackfill(ctx, inProgressSt);
   }
 
   for (const inProgressSt of inProgressStatuses) {
-    const allowFeatureTypes = isAutoDrivenProject(inProgressSt.projectId);
-    const wipLimit = tunablesFor(inProgressSt.projectId).activeAgentsTarget;
-    const capacity = await countWipCapacity(db, inProgressSt.id);
-    const currentWip = capacity.active;
-    if (capacity.inactiveStale > 0) {
-      console.log(`[monitor] Auto-start pull capacity for project ${inProgressSt.projectId}: active=${capacity.active}/${wipLimit} inactiveStale=${capacity.inactiveStale}`);
-    }
-
-    // #581: hold new starts while a gate holds the build semaphore. Checked per project so
-    // a project can opt out, but the resource being protected is the BOX — one project's
-    // builder saturates another project's gate just as well.
-    if (await shouldQuiesceBuildersForGate(inProgressSt.projectId, db)) {
-      noteSkip(inProgressSt.projectId, null, "verify_gate_running");
-      continue;
-    }
-
-    if (currentWip >= wipLimit) {
-      // #179: WIP is full — but only worth surfacing as a "skipped" cause if there is
-      // actually queued Todo/Backlog work waiting behind it, not on every idle project.
-      const waitingTodoStatus = await db.select({ id: projectStatuses.id }).from(projectStatuses)
-        .where(sql`${projectStatuses.name} = 'Todo' AND ${projectStatuses.projectId} = ${inProgressSt.projectId}`).limit(1);
-      if (waitingTodoStatus.length > 0) {
-        const waitingStatusIds = [waitingTodoStatus[0].id];
-        if (allowFeatureTypes) {
-          const backlogStatus = await db.select({ id: projectStatuses.id }).from(projectStatuses)
-            .where(sql`${projectStatuses.name} = 'Backlog' AND ${projectStatuses.projectId} = ${inProgressSt.projectId}`).limit(1);
-          if (backlogStatus.length > 0) waitingStatusIds.push(backlogStatus[0].id);
-        }
-        const waitingCount = await db.select({ count: sql<number>`count(*)` }).from(issues)
-          .where(and(inArray(issues.statusId, waitingStatusIds), monitorEligibleIssueSql(allowFeatureTypes), notDriveOrEpicMetaSql()));
-        const waiting = Number(waitingCount[0]?.count ?? 0);
-        if (waiting > 0) noteSkip(inProgressSt.projectId, null, "wip_cap", waiting);
-      }
-      continue;
-    }
-
-    const todoStatus = await db.select({ id: projectStatuses.id }).from(projectStatuses)
-      .where(sql`${projectStatuses.name} = 'Todo' AND ${projectStatuses.projectId} = ${inProgressSt.projectId}`).limit(1);
-    if (todoStatus.length === 0) continue;
-
-    const slotsAvailable = wipLimit - currentWip;
-    // #119: snapshot once, then gate each candidate; launches this cycle feed back
-    // via noteStarted so two backlog tickets sharing a registration file don't both
-    // start in the SAME cycle.
-    const contentionGate = await buildContentionGate(prefMap, inProgressSt.projectId);
-
-    // For auto-driven projects, also pull Backlog issues so newly-created tickets
-    // start without requiring a manual Backlog→Todo promotion (#536).
-    const candidateStatusIds = [todoStatus[0].id];
-    if (allowFeatureTypes) {
-      const backlogStatus = await db.select({ id: projectStatuses.id }).from(projectStatuses)
-        .where(sql`${projectStatuses.name} = 'Backlog' AND ${projectStatuses.projectId} = ${inProgressSt.projectId}`).limit(1);
-      if (backlogStatus.length > 0) candidateStatusIds.push(backlogStatus[0].id);
-    }
-
-    // #774: do NOT pre-truncate the candidate set with an UNORDERED `limit(fetchLimit)`.
-    // SQLite returns rows in an arbitrary order, so a small fetchLimit could return only
-    // dep-blocked / already-workspaced candidates and silently DROP the one ticket whose
-    // blockers are all Done+merged — exactly the ticket `dependency-waves/start-next`
-    // launches correctly (it scans ALL issues, orders them, then filters). Fetch all
-    // eligible candidates ordered by issue number (deterministic, FIFO-ish) and let the
-    // per-issue gates below decide; the slotsAvailable / startsRemaining caps still bound
-    // how many actually launch this cycle.
-    // #773: skip the feature/enhancement type-exclusion for auto-driven projects.
-    const todoIssues = await db.select({ id: issues.id, title: issues.title, description: issues.description, issueType: issues.issueType, projectId: issues.projectId, issueNumber: issues.issueNumber, externalKey: issues.externalKey }).from(issues)
-      .where(and(inArray(issues.statusId, candidateStatusIds), monitorEligibleIssueSql(allowFeatureTypes), notDriveOrEpicMetaSql()))
-      .orderBy(issues.issueNumber);
-    const doneStatuses = await db.select({ id: projectStatuses.id }).from(projectStatuses)
-      .where(sql`${projectStatuses.name} IN ('Done', 'Cancelled')`);
-    const doneStatusIds = new Set(doneStatuses.map((s) => s.id));
-
-    // Candidates consumed as GROUP MEMBERS this cycle: their workspace row is minutes
-    // away (async provisioning), so only this in-cycle set stops the loop from also
-    // starting them individually.
-    const startedAsMember = new Set<string>();
-
-    // Dependency gate, shared by the lead candidate below and the group-member vetting —
-    // a blocker unblocks only when terminal AND landed (#535/#537/#782/#784).
-    const passesDependencyGate = async (issueId: string): Promise<boolean> => {
-      const deps = await db.select({ dependsOnId: issueDependencies.dependsOnId }).from(issueDependencies)
-        .where(sql`${issueDependencies.issueId} = ${issueId} AND (${issueDependencies.type} = 'depends_on' OR ${issueDependencies.type} = 'blocked_by')`);
-      if (deps.length === 0) return true;
-      const blockerIds = [...new Set(deps.map((d) => d.dependsOnId))];
-      const blockerIssues = await db
-        .select({
-          id: issues.id,
-          statusId: issues.statusId,
-          currentNodeId: issues.currentNodeId,
-          currentNodeType: workflowNodes.nodeType,
-        })
-        .from(issues)
-        .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
-        .where(inArray(issues.id, blockerIds));
-      if (blockerIssues.length !== blockerIds.length) return false;
-      const blockerWorkspaces = await db
-        .select({ issueId: workspaces.issueId, mergedAt: workspaces.mergedAt, isDirect: workspaces.isDirect })
-        .from(workspaces)
-        .where(inArray(workspaces.issueId, blockerIds));
-      const wsByBlocker = new Map<string, BlockerWorkspaceLanding[]>();
-      for (const w of blockerWorkspaces) {
-        const list = wsByBlocker.get(w.issueId) ?? [];
-        list.push({ mergedAt: w.mergedAt, isDirect: w.isDirect });
-        wsByBlocker.set(w.issueId, list);
-      }
-      return blockerIssues.every((b) => computeBlockerReadiness({
-        isTerminal: isTerminalStatusIdView(b, doneStatusIds),
-        workspaces: wsByBlocker.get(b.id) ?? [],
-      }));
-    };
-
-    let started = 0;
-    for (const issue of todoIssues) {
-      if (started >= slotsAvailable) break;
-      if (startsRemaining(inProgressSt.projectId) <= 0) {
-        noteSkip(inProgressSt.projectId, issue.issueNumber, "cycle_start_cap");
-        break;
-      }
-      if (startedAsMember.has(issue.id)) continue;
-      // Ticket group (#661): same membership-aware query as the backfill loop above.
-      const issueWorkspaces = await db.select({ id: workspaces.id, status: workspaces.status, mergedAt: workspaces.mergedAt }).from(workspaces)
-        .where(sql`${workspaces.issueId} = ${issue.id} OR ${workspaces.id} IN (SELECT workspace_id FROM workspace_issue_members WHERE issue_id = ${issue.id})`);
-      if (issueWorkspaces.some((w) => w.status !== "closed")) continue;
-      const mergedWs = issueWorkspaces.find((w) => w.mergedAt != null);
-      let isReopenRetry = false;
-      if (mergedWs) {
-        // #265: a deliberate reopen starts fresh work; a stale status is reconciled and skipped.
-        ({ reopenedAfterMerge: isReopenRetry } = await reconcileStaleMergedIssue(issue.projectId, issue.id, issue.issueNumber, boardEvents, noteSkip, mergedWs.mergedAt));
-        if (!isReopenRetry) continue;
-        // #361 — same guard as the In-Progress backfill loop above. Both loops reach the reopen
-        // retry, so guarding only one of them would leave the defect reachable by the other.
-        if (parsePluginLoopUnitKey(issue.externalKey)) {
-          console.log(`[monitor] Declining reopen-retry for plugin-loop unit issue #${issue.issueNumber} — its workspace already merged and the loop cannot represent a second one (#361)`);
-          noteSkip(inProgressSt.projectId, issue.issueNumber, "loop_unit_reopen_declined");
-          continue;
-        }
-      }
-      if (!isMonitorEligibleIssue(issue, allowFeatureTypes)) { noteSkip(inProgressSt.projectId, issue.issueNumber, "feature_type_excluded"); continue; }
-      if (await hasSkipAutoStartTag(issue.id)) { noteSkip(inProgressSt.projectId, issue.issueNumber, "no_auto_start_tag"); continue; }
-      if (shouldDeferForContention(contentionGate, issue.id, issue.issueNumber)) { noteSkip(inProgressSt.projectId, issue.issueNumber, "contention_gate"); continue; }
-
-      if (!(await passesDependencyGate(issue.id))) continue;
-
-      // #366: the THIRD slug producer used to live here — `[^a-z0-9\s] -> ""` instead of
-      // `[^a-z0-9]+ -> "-"`, which is exactly what turned `PM pipeline 8/9: CI/CD & Deployment`
-      // into `...-89-cicd-deployment` while `suggestBranchName` produced `...-8-9-ci-cd-deployment`
-      // for the same issue. Both names were observed on duplicate workspaces of one issue.
-      const baseBranchName = suggestBranchName({ issueNumber: issue.issueNumber, title: issue.title });
-      const branch = isReopenRetry ? reopenRetryBranch(baseBranchName, issueWorkspaces.length) : baseBranchName;
-
-      // Ticket group (#661): expand the candidate into a group along its explicit
-      // `coupled_with` edges — one workspace, one agent, one review, one gate for the
-      // whole set. Only members that are themselves independently startable join; a
-      // reopen-retry never groups (its branch/workspace history is its own).
-      let memberIssueIds: string[] = [];
-      if (!isReopenRetry && isAutoGroupEnabled(prefMap, issue.projectId)) {
-        // Best-effort: grouping must never break the start it decorates.
-        memberIssueIds = await resolveAutoStartGroupMembers({
-          lead: issue,
-          candidates: todoIssues,
-          startedAsMember,
-          contentionGate,
-          allowFeatureTypes,
-          passesDependencyGate,
-        }).catch((err) => {
-          console.warn(`[monitor] ticket-group expansion failed for #${issue.issueNumber} (starting it solo): ${errorMessage(err)}`);
-          return [] as string[];
-        });
-      }
-
-      const launchBody: Record<string, unknown> = { issueId: issue.id, branch };
-      if (memberIssueIds.length > 0) launchBody.memberIssueIds = memberIssueIds;
-      // Auto-driven projects must not stall in plan-only mode (#666).
-      if (isAutoDrivenProject(issue.projectId)) launchBody.planMode = false;
-      // #269: `?async=1` — same as the backfill loop above; the cycle must not block
-      // ~8 minutes per launch while the worktree provisions.
-      // #366: `&autoStart=1` — claim the issue atomically; 409 = another starter has it.
-      const resp = await fetch(`${baseUrl}/api/workspaces?async=1&autoStart=1`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(launchBody) }).catch((err) => {
-        // #775: surface a thrown launch (network/connection error) instead of silently
-        // dropping it — record a failure action so it shows in the monitor logs.
-        console.warn(`[monitor] Auto-start launch threw for issue "${issue.title}" (${issue.id}): ${errorMessage(err)}`);
-        return null;
-      });
-      if (resp?.ok) {
-        // Async launch (#269): the 202 body carries a create-job id, not a workspace id;
-        // record whichever is available so the action stays traceable.
-        const wsData = await resp.json().catch(() => null) as { id?: string; jobId?: string } | null;
-        logMonitorAction("auto_start", wsData?.id ?? wsData?.jobId ?? "unknown", issue.id);
-        // #358 — say what the 202 actually means. "Auto-started workspace" was logged here at the
-        // moment the create JOB was accepted: at that instant no workspace row exists, the issue is
-        // still in its pre-start lane, and no agent has been launched. Provisioning (worktree +
-        // AWAITED blocking setup script + context packer) then runs for 84s-8min before the row and
-        // the issue transition land in one transaction. That log line is the reason a working board
-        // read as "an agent has been running for over a minute while the ticket says Backlog".
-        console.log(`[monitor] Auto-start ACCEPTED for unblocked issue "${issue.title}" (${issue.id})${memberIssueIds.length > 0 ? ` as a ticket group with ${memberIssueIds.length} member(s)` : ""} — provisioning a workspace (minutes); the issue moves to In Progress when it completes`);
-        boardEvents.broadcast(issue.projectId, "board_changed");
-        started++;
-        noteStart(inProgressSt.projectId);
-        contentionGate.noteStarted(issue.id);
-        // Group members are consumed by THIS start: keep the rest of the cycle (and the
-        // contention snapshot) from starting them individually.
-        for (const memberId of memberIssueIds) {
-          startedAsMember.add(memberId);
-          contentionGate.noteStarted(memberId);
-        }
-      } else if (resp?.status === 409) {
-        // #366: another automatic starter already holds the claim for this issue.
-        console.log(`[monitor] Auto-start declined for unblocked issue "${issue.title}" (${issue.id}) — a workspace creation is already in flight for it (#366)`);
-        noteSkip(inProgressSt.projectId, issue.issueNumber, "create_in_flight");
-      } else if (resp) {
-        // #775: a non-ok response (e.g. HTTP 400 "No default branch") was previously
-        // invisible — no log, no recorded action. Warn with the status + body and record
-        // an auto_start action against the issue so the failure surfaces in recentActions.
-        const body = await resp.text().catch(() => "");
-        console.warn(`[monitor] Auto-start FAILED for issue "${issue.title}" (${issue.id}): HTTP ${resp.status} ${body.slice(0, 500)}`);
-        logMonitorAction("auto_start", "failed", issue.id);
-      }
-    }
+    await runTodoPull(ctx, inProgressSt);
   }
 
   return skipInfo;
