@@ -2,11 +2,12 @@
  * Baseline for function-nloc-ratchet.test.ts (#763).
  *
  * Every client function whose own extent is >= LIST_THRESHOLD (400) non-blank, non-comment
- * lines, MEASURED on 2026-08-23 by the scanner in that test file. Nothing here was copied
+ * lines, MEASURED on 2026-08-23 by the shared scanner (packages/shared/__tests__/helpers/
+ * function-nloc.ts, lifted out of that test file by #800). Nothing here was copied
  * from a metrics report — see the test's header for why that matters.
  *
  * Only ever LOWER a number or delete a line. The ratchet fails on growth, on a listed
- * function that has vanished, and (outside SHRINK_GRACE) on a number that has become stale.
+ * function that has vanished, and on a number that has become stale.
  */
 export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "components/Layout.tsx::Layout": 717,
@@ -35,24 +36,22 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
 };
 
 /**
- * Entries whose exact number is NOT enforced downward yet, because another agent in the
- * 2026-08-23 wave holds the file and a landing edit of theirs would otherwise turn this gate
- * red for a shrink they should be credited for, not blamed for. GROWTH is still forbidden for
- * these, and so is disappearing — only the "your number is stale, lower it" half is waived.
+ * There is deliberately NO `SHRINK_GRACE` here any more.
  *
- * This set is temporary scaffolding, and #800 owns emptying it (together with extending the
- * ring to the server tree, which this baseline deliberately does not cover).
- * Delete an entry as soon as the file is no longer being
- * concurrently edited; the ratchet checks that every name here exists in the baseline, so a
- * ghost entry fails rather than silently excusing nothing.
+ * #763 shipped one — five entries (`Layout`, `IssueDetailPanel`, `WorkspacePanel`,
+ * `SettingsPanel`, `CreateIssuePanel`) whose DOWNWARD enforcement was waived because other
+ * agents held those files during the 2026-08-23 wave, so a landing shrink of theirs would have
+ * turned this gate red for work they should be credited for. Growth and disappearance were
+ * never waived; only the "your number is stale, lower it" half was.
+ *
+ * #800 emptied it. All five were re-measured on 2026-08-23 with the (now shared) scanner and
+ * came back at exactly their baseline numbers — 717 / 561 / 512 / 496 / 435 — so the waiver
+ * was excusing nothing, and no number needed lowering. The set is deleted rather than left
+ * empty: an empty escape hatch still reads as one that may be filled in passing, and the
+ * server ring (#800) never had one. The waiver SEMANTICS remain in the shared
+ * `compareNlocRatchet`, proven by the synthetic cases in the test, so re-introducing a grace
+ * is a deliberate act rather than an existing habit.
  */
-export const SHRINK_GRACE: readonly string[] = [
-  "components/Layout.tsx::Layout",
-  "components/IssueDetailPanel.tsx::IssueDetailPanel",
-  "components/WorkspacePanel.tsx::WorkspacePanel",
-  "components/SettingsPanel.tsx::SettingsPanel",
-  "components/CreateIssuePanel.tsx::CreateIssuePanel",
-];
 
 /**
  * A function at or above this many nloc must be in the baseline. 400 is chosen, and stated
