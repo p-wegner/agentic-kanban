@@ -40,13 +40,16 @@ const DOMAIN_CODE_STATUS: Record<DomainErrorCode, StatusCode> = {
   AI_ERROR: 500,
 };
 
-function domainCodeStatus(err: unknown): StatusCode | null {
+function domainCodeStatus(err: unknown): { code: DomainErrorCode; status: StatusCode } | null {
   if (err && typeof err === "object" && "code" in err) {
     const code = (err as { code?: unknown }).code;
     // The narrowing is the point: an arbitrary string is NOT a DomainErrorCode, and the
     // `in` check is what proves it is one before the lookup.
     if (typeof code === "string" && code in DOMAIN_CODE_STATUS) {
-      return DOMAIN_CODE_STATUS[code as DomainErrorCode];
+      // #823 — the CODE is returned alongside the status because the body needs it too.
+      // Returning only the status is what made the recognised code unrecoverable at the
+      // call site, so the generic branch could not echo it even though it had proved it.
+      return { code: code as DomainErrorCode, status: DOMAIN_CODE_STATUS[code as DomainErrorCode] };
     }
   }
   return null;
@@ -104,21 +107,33 @@ export function domainErrorHandler(err: Error, c: Context): Response {
     return c.json({ error: err.message, code: standalone }, status as StatusCode);
   }
 
+  // #823 — `code` is echoed here for the same reason as in the generic branch below:
+  // `AppError` has always CARRIED a code (`NotFoundError` -> "NOT_FOUND", `ConflictError`
+  // -> "CONFLICT", …) and the body dropped it, so a client could only recover the reason
+  // by string-matching the prose message or re-deriving it from the status — which is
+  // lossy (400 is VALIDATION_ERROR, BAD_REQUEST or INVALID_DATA).
   if (err instanceof AppError) {
-    return c.json({ error: err.message }, err.statusCode as StatusCode);
+    return c.json({ error: err.message, code: err.code }, err.statusCode as StatusCode);
   }
 
   // Any error carrying a recognized domain code — every service-local *Error class,
   // registered or not — maps here, once.
-  const status = domainCodeStatus(err);
-  if (status) {
+  const domain = domainCodeStatus(err);
+  if (domain) {
     // #510: batch routes report WHICH entry failed. That field was the only reason those
     // routes kept hand-written try/catch blocks, so it is emitted here — omitted entirely
     // when absent, leaving every single-item response shape unchanged.
     const index = (err as { index?: unknown }).index;
+    // #823 — echo the code that decided the status. Without it this branch answered a
+    // machine-readable refusal with prose only: `POST /api/workspaces/:id/review` measured
+    // `404 {"error":"Workspace not found"}` here against `404 {"error":"Workspace not
+    // found","code":"NOT_FOUND"}` from the route's own inline body, which is why the three
+    // inline review bodies could not be converted onto this mapper (#821). The code is the
+    // one already PROVEN to be in `DOMAIN_CODE_STATUS`, never an arbitrary `err.code`, so a
+    // Node system error (ENOENT) still cannot leak its code into a response body.
     return c.json(
-      { error: err.message, ...(typeof index === "number" ? { index } : {}) },
-      status,
+      { error: err.message, code: domain.code, ...(typeof index === "number" ? { index } : {}) },
+      domain.status,
     );
   }
 

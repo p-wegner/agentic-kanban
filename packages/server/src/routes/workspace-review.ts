@@ -46,6 +46,18 @@ export function createWorkspaceReviewRoute(
       return c.json({ sessionId });
     } catch (err) {
       if (err instanceof ReviewError) {
+        // #823 measured the middleware's body against these three and they now MATCH: the
+        // generic branch echoes `code`, so `return domainErrorHandler(err, c)` here would be
+        // byte-identical for NOT_FOUND and BAD_REQUEST (`error-handler-code-echo.test.ts` and
+        // `review-route-code-echo.test.ts` both assert the pair). They are deliberately NOT
+        // converted anyway, and the reason is the OpenAPI generator: it derives an operation's
+        // responses from literal `c.json(body, status)` call sites and cannot see a status the
+        // middleware decides, so delegating here DELETES the documented `404` and `400` from
+        // `POST /api/workspaces/{id}/review` in `openapi.yaml` (measured: `pnpm
+        // openapi:generate` drops 10 lines). #805 moved this handler into `routes/` precisely
+        // so the busiest workflow endpoint would be in the spec; trading two documented
+        // statuses for two points of the `INLINE_ROUTE_ERROR_CAP` ratchet is the wrong way
+        // round. See that ratchet's comment for the full note.
         if (err.code === "NOT_FOUND") return c.json({ error: err.message, code: err.code }, 404);
         if (err.code === "CONFLICT") {
           const body: Record<string, unknown> = { error: err.message, code: err.code };
