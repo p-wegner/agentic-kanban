@@ -49,10 +49,10 @@ const POLICY = {
   // GHSA-7p8r-x3mc-p8w7 fast-uri, GHSA-mwp4-54f8-5fhr ip-address) were all
   // cleared by raising the override floors in pnpm-workspace.yaml, so keeping
   // them would now be exactly the stale exemption the ratchet exists to catch.
-  // Measured after that change: production 287 packages, 0 critical / 0 high /
-  // 0 moderate / 1 low, 1 advisory (body-parser GHSA-v422-hmwv-36x6, a `low`
-  // and therefore not gating). Nothing in the production graph is currently
-  // unfixable, which is why nothing is accepted.
+  // The one `low` that survived that round (body-parser GHSA-v422-hmwv-36x6)
+  // was cleared the same way in #786. Measured 2026-08-23: production 289
+  // packages, ZERO advisories of any severity. Nothing in the production graph
+  // is currently unfixable, which is why nothing is accepted.
   acceptedProdAdvisories: {},
 
   // Licences. The board ships to npm, so the production graph is what matters
