@@ -37,7 +37,6 @@ export const baseBranchHealth = sqliteTable("base_branch_health", {
   failedSuites: text("failed_suites"),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
 }, (table) => ({
-  projectIdIdx: index("idx_base_branch_health_project_id").on(table.projectId),
   projectShaIdx: index("idx_base_branch_health_project_sha").on(table.projectId, table.sha),
   createdAtIdx: index("idx_base_branch_health_created_at").on(table.createdAt),
 }));

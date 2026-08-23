@@ -47,10 +47,6 @@ export const issueDependencies = sqliteTable("issue_dependencies", {
   // FK-supporting index (#740): dependsOnId is only the SECOND column of the unique
   // index above, so reverse-edge lookups and the cascade check were full scans.
   index("idx_issue_dependencies_depends_on_id").on(t.dependsOnId),
-  // Migration-only until #812. Note the non-conforming NAME (no `idx_issue_dependencies_`
-  // prefix) — it predates the convention, and renaming an index is a drop+create that buys
-  // nothing, so the declaration matches the DB rather than the convention.
-  index("idx_issue_deps_issue_id").on(t.issueId),
 ]);
 
 export const issueDependenciesRelations = relations(issueDependencies, ({ one }) => ({

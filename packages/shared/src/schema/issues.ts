@@ -40,9 +40,6 @@ export const issues = sqliteTable("issues", {
   pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
   milestoneId: text("milestone_id").references(() => milestones.id),
 }, (table) => ({
-  projectIdIdx: index("idx_issues_project_id").on(table.projectId),
-  statusIdIdx: index("idx_issues_status_id").on(table.statusId),
-  projectIdStatusIdIdx: index("idx_issues_project_id_status_id").on(table.projectId, table.statusId),
   milestoneIdIdx: index("idx_issues_milestone_id").on(table.milestoneId),
   statusIdStatusChangedAtIdx: index("idx_issues_status_id_status_changed_at").on(table.statusId, table.statusChangedAt),
   projectIdStatusIdStatusChangedAtIdx: index("idx_issues_project_id_status_id_status_changed_at").on(table.projectId, table.statusId, table.statusChangedAt),
