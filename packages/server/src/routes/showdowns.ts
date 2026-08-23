@@ -4,6 +4,7 @@ import type { BoardEventSink } from "../services/board-events.js";
 import { createShowdownService } from "../services/showdown.service.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
+import { pickWinnerBody } from "./showdown-body-schemas.js";
 
 export function createShowdownsRoute(
   database: Database,
@@ -28,8 +29,7 @@ export function createShowdownsRoute(
   // POST /api/showdowns/:id/pick-winner
   router.post("/:id/pick-winner", async (c) => {
     const id = c.req.param("id");
-    const body = await parseJsonBody<{ winnerWorkspaceId: string }>(c);
-    if (!body.winnerWorkspaceId) return c.json({ error: "winnerWorkspaceId is required" }, 400);
+    const body = await parseJsonBody(c, pickWinnerBody);
     const result = await showdownService.pickWinner(id, body.winnerWorkspaceId);
     return c.json(result);
   });

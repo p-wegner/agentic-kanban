@@ -1,6 +1,7 @@
 import type { Database } from "../db/index.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
+import { failurePatternBody, failurePatternIngestBody } from "./failure-pattern-body-schemas.js";
 import { queryInt } from "../middleware/query-params.js";
 import {
   findSimilarFailures,
@@ -33,16 +34,7 @@ export function createFailurePatternsRoute(database: Database) {
 
   // POST /api/failure-patterns — create a pattern manually
   router.post("/", async (c) => {
-    const body = await parseJsonBody<{
-      title: string;
-      errorClass?: string;
-      description?: string;
-      rootCause?: string;
-      fix?: string;
-      sourceType?: string;
-      sourceRef?: string;
-    }>(c);
-    if (!body.title?.trim()) return c.json({ error: "title is required" }, 400);
+    const body = await parseJsonBody(c, failurePatternBody);
     const pattern = await createPattern({
       title: body.title,
       errorClass: body.errorClass ?? null,
@@ -57,8 +49,7 @@ export function createFailurePatternsRoute(database: Database) {
 
   // POST /api/failure-patterns/ingest — ingest a markdown file
   router.post("/ingest", async (c) => {
-    const body = await parseJsonBody<{ filePath: string }>(c);
-    if (!body.filePath?.trim()) return c.json({ error: "filePath is required" }, 400);
+    const body = await parseJsonBody(c, failurePatternIngestBody);
     const ingested = await ingestLearningFile(body.filePath, database);
     return c.json({ ingested });
   });

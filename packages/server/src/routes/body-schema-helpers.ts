@@ -141,3 +141,17 @@ export function requiredTrimmed(message: string) {
     .refine((v) => v.trim().length > 0, message)
     .transform((v) => v.trim());
 }
+
+/**
+ * `typeof v === "boolean"`, REQUIRED — the schema form of
+ * `if (typeof body.x !== "boolean") return c.json({ error: message }, 400)`.
+ *
+ * Not `z.boolean()`: that is the same predicate today, but the `custom` form carries the
+ * guard's message for BOTH the missing and the wrong-type case, where `z.boolean()` would
+ * need `required_error`/`invalid_type_error` spelled out to say the same thing. The sibling
+ * of {@link numberOnly} and {@link stringOnly}, and the only one of the three whose guards
+ * were phrased as a positive type test rather than a falsy check.
+ */
+export function booleanOnly(message: string) {
+  return z.custom<boolean>((v) => typeof v === "boolean", { message });
+}

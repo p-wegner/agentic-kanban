@@ -45,8 +45,35 @@ import {
  * Landed in #806's batch 1 (19 handlers, 120 → 101): `codemods.ts` (3, and `POST /apply` WRITES
  * FILES using `projectId` as its security boundary), `projects.ts` (9), `workspace-actions.ts`
  * (5), `tags.ts` (2). Batch 2 took 101 → 92 by working the cases batch 1 had declared
- * non-mechanical: `plugins.ts` (12 → 5) and `projects.ts` (6 → 4). The remainder is the
- * disclosed one, per CLAUDE.md's partial-refactor rule — this file IS that disclosure.
+ * non-mechanical: `plugins.ts` (12 → 5) and `projects.ts` (6 → 4). Batch 3 took 92 → 70
+ * across eleven route files — `issues.ts` (12 → 2), `failure-patterns.ts` (2 → 0), `flaky-tests.ts` (3 → 1),
+ * `agent-questions.ts`, `drive-obstacles.ts`, `merge-queue.ts`, `project-analytics.ts`,
+ * `showdowns.ts`, `voice-capture.ts` (each 1 → 0), `drive.ts` (2 → 1) and `agent-skills.ts`
+ * (4 → 3) — and REJECTED seven more handlers, each recorded on its entry below. The remainder
+ * is the disclosed one, per CLAUDE.md's partial-refactor rule — this file IS that disclosure.
+ *
+ * **The rejection FAMILIES, after three batches.** Every entry left below is one of these, so a
+ * fourth batch can argue with the family rather than rediscover the case:
+ *
+ *   1. **Coercion, not check.** The handler reads the field through a conversion that accepts
+ *      the "wrong" type on purpose (`Number(body.minutes)`, `body.autoRepair === true`,
+ *      `typeof body.source === "string" ? body.source : ""`). A schema would 400 a request that
+ *      succeeds today. `issues.ts POST /:id/time-entries`, `drive.ts POST …/preflight`,
+ *      `plugins.ts POST /` and `/validate`.
+ *   2. **No declared body to tighten TO.** The body is untyped (or `Record<string, unknown>`) and
+ *      forwarded whole to a service that decides field by field what it recognises. A schema must
+ *      either invent a field list — and 400 the fields it forgot — or check nothing and merely
+ *      look validated. `issues.ts PATCH /:id`, `projects.ts PATCH /:id`, all three unconverted
+ *      `agent-skills.ts` reads.
+ *   3. **A different STATUS or error BODY.** `workers.ts` — 422, and the fleet protocol's
+ *      `{ error, boardProtocolVersion }` that the worker daemon branches on (#754).
+ *   4. **`parseOptionalJsonBody` by contract.** A missing body is a valid request the handler
+ *      answers itself, so `parseJsonBody` would replace its message with `invalid JSON body`.
+ *      `flaky-tests.ts DELETE /pin` is the explicit case; the rest are counted-but-correct.
+ *
+ * Family 3 and family 4 can still fall the way `plugins.ts`'s error CLASS did — by restoring the
+ * identity around the schema. Families 1 and 2 cannot: there is nothing left to check that would
+ * not narrow what the endpoint accepts today.
  *
  * **What batch 2 learned about the two families batch 1 flagged**, since the flags were half
  * right and a later batch should inherit the corrected version:
@@ -124,8 +151,10 @@ function findUnvalidatedBodyReads(): Offender[] {
  * **Only ever lower a number here** — raising one re-opens the gap this file measures.
  */
 const BASELINE: Readonly<Record<string, number>> = {
-  "agent-questions.ts": 1,
-  "agent-skills.ts": 4,
+  // 3 = `POST /`, `PUT /:id`, `POST /:id/install`. REJECTED, not deferred: none of the three
+  // has a guard — each forwards the WHOLE body to `agentSkillService`, which owns the field
+  // rules. `POST /enhance`, the one with a real `name is required` guard, converted in batch 3.
+  "agent-skills.ts": 3,
   "approvals.ts": 2,
   "backlog-markdown.ts": 1,
   "backlog-snapshot.ts": 1,
@@ -133,15 +162,25 @@ const BASELINE: Readonly<Record<string, number>> = {
   "butler-definitions.ts": 2,
   "butler.ts": 6,
   "config-export-import.ts": 1,
-  "drive-obstacles.ts": 1,
-  "drive.ts": 2,
+  // 1 = `POST /:projectId/drive/preflight`. REJECTED: `autoRepair` is read as
+  // `body.autoRepair === true` with no guard, so `{ autoRepair: "yes" }` is a valid request
+  // today that means "no"; a schema would turn it into a 400. `PUT /:projectId/drive`
+  // converted in batch 3.
+  "drive.ts": 1,
   "drives.ts": 3,
-  "failure-patterns.ts": 2,
-  "flaky-tests.ts": 3,
+  // 1 = `DELETE /pin`. REJECTED: it is a `parseOptionalJsonBody` site whose contract is that
+  // an absent body still reaches its own `testName is required` 400; `parseJsonBody` would
+  // answer `invalid JSON body` for that same request.
+  "flaky-tests.ts": 1,
   "index.ts": 2,
   "issue-export-import.ts": 2,
-  "issues.ts": 12,
-  "merge-queue.ts": 1,
+  // 2 = `PATCH /:id` and `POST /:id/time-entries`, both REJECTED with reasons at the call
+  // sites. `PATCH /:id` forwards an UNTYPED body whole to `updateIssue(id, Record<string,
+  // unknown>)` — there is nothing to tighten to (the `PATCH /projects/:id` argument).
+  // `POST /:id/time-entries`'s only guard is a coercion (`Number(body.minutes)` then
+  // `Number.isInteger`), so `{"minutes":"30"}` succeeds today and a schema would 400 it;
+  // nothing else in that body is checked, so a schema would be decoration.
+  "issues.ts": 2,
   "milestones.ts": 2,
   // 5 = 2 install-side reads + 3 `parseOptionalJsonBody`. The other seven converted in batch 2.
   // `POST /api/plugins` and `POST /api/plugins/validate` are REJECTED, not deferred: their
@@ -151,7 +190,6 @@ const BASELINE: Readonly<Record<string, number>> = {
   // request broken to gain a type check the endpoint deliberately does not perform.
   "plugins.ts": 5,
   "preferences.ts": 5,
-  "project-analytics.ts": 1,
   "project-scripts.ts": 2,
   "project-stack-profile.ts": 1,
   // 4 = `POST /`, `POST /create`, `PATCH /:id`, and one `parseOptionalJsonBody`. All three
@@ -162,9 +200,7 @@ const BASELINE: Readonly<Record<string, number>> = {
   "projects.ts": 4,
   "quality-metrics.ts": 1,
   "scheduled-runs.ts": 2,
-  "showdowns.ts": 1,
   "tags.ts": 1,
-  "voice-capture.ts": 1,
   // REJECTED, all four — this is the family that genuinely cannot use `parseJsonBody(c, schema)`:
   //   - `POST /incoming/land` and `/incoming/discard` throw `UnprocessableError` → **422**. A
   //     schema answers 400. Changing a documented status is not a hardening.
@@ -181,7 +217,7 @@ const BASELINE: Readonly<Record<string, number>> = {
 };
 
 /** The total the baseline encodes — asserted separately so a mass edit cannot drift it silently. */
-const BASELINE_TOTAL = 92;
+const BASELINE_TOTAL = 70;
 
 describe("route request-body validation (#806)", () => {
   it("scans the real routes directory", () => {

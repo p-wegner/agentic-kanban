@@ -1,7 +1,6 @@
 import type { Database } from "../db/index.js";
 import type { BoardEventSink } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
-import type { ShowdownContestant } from "@agentic-kanban/shared";
 import { analyzeDependencies, enhanceIssue, aiEstimateIssue, decomposeEpic, confirmEpicDecomposition, contractCoupledComponent, confirmContractComponent, analyzeTouchedFiles } from "../services/issue-ai.service.js";
 import { scanForTicketGroups } from "../services/ticket-group-scan.service.js";
 import type { DecomposeChildProposal, DecomposeDependencyProposal } from "../services/issue-ai.service.js";
@@ -37,10 +36,12 @@ import {
   enhanceIssueBody, analyzeDependenciesBody, aiEstimateBody, projectIdBody,
   decomposeConfirmBody, contractConfirmBody, groupScanBody, batchIssuesBody, dependenciesBatchBody,
   contractCoupledBody, bulkUpdateBody,
+  archiveDoneBody, createIssueBody, analyzeTouchedFilesBody, preflightBody, reposTouchedBody,
+  issueTagBody, issueDependencyBody, issueArtifactBody, issueCommentBody, showdownBody,
 } from "./issue-body-schemas.js";
 import { createRouter } from "../middleware/create-router.js";
 import { wrapAiOperation } from "../lib/ai-operation.js";
-import { runTicketPreflight, formatClarificationsBlock, type PreflightClarification, type PreflightVerdict } from "../services/ticket-preflight.service.js";
+import { runTicketPreflight, formatClarificationsBlock, type PreflightVerdict } from "../services/ticket-preflight.service.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { getIssueActivity } from "../services/issue-activity.service.js";
@@ -215,8 +216,8 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
 
   // POST /api/issues/archive-done — move Done issues older than N days to Archived
   router.post("/archive-done", async (c) => {
-    const body = await parseJsonBody<{ projectId?: string; olderThanDays?: number; nowOverride?: string }>(c);
-    if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
+    const body = await parseJsonBody(c, archiveDoneBody);
+    // `olderThanDays` stays a COERCION, not a schema field — see `archiveDoneBody`.
     const days = Number(body.olderThanDays);
     if (!Number.isFinite(days) || days <= 0) {
       return c.json({ error: "olderThanDays must be a positive number" }, 400);
@@ -234,23 +235,7 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
 
   // POST /api/issues
   router.post("/", async (c) => {
-    const body = await parseJsonBody<{
-      projectId: string;
-      title: string;
-      description?: string;
-      priority?: string;
-      issueType?: string;
-      skipAutoReview?: boolean;
-      estimate?: string | null;
-      sortOrder?: number;
-      statusId?: string;
-      workflowTemplateId?: string | null;
-      externalKey?: string | null;
-      externalUrl?: string | null;
-      reposTouched?: string[];
-    }>(c);
-    if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
-    if (!body.title?.trim()) return c.json({ error: "title is required" }, 400);
+    const body = await parseJsonBody(c, createIssueBody);
 
     const result = await issueService.createIssue({
       projectId: body.projectId,
@@ -325,7 +310,7 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
   // POST /api/issues/:id/analyze-touched-files — run (or re-run) AI prediction
   router.post("/:id/analyze-touched-files", async (c) => {
     const issueId = c.req.param("id");
-    const body = await parseJsonBody<{ refresh?: boolean }>(c).catch(() => ({ refresh: false }));
+    const body = await parseJsonBody(c, analyzeTouchedFilesBody).catch(() => ({ refresh: false }));
     return c.json(await wrapAiOperation("analyze-touched-files", () => analyzeTouchedFiles(issueId, database, body?.refresh === true)));
   });
 
@@ -345,8 +330,7 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
   // prepend to the launching agent's context.
   router.post("/:id/preflight", async (c) => {
     const issueId = c.req.param("id");
-    const body = await parseJsonBody<{ projectId: string; clarifications?: PreflightClarification[] }>(c);
-    if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
+    const body = await parseJsonBody(c, preflightBody);
 
     // `skip_preflight` is enforced HERE, not only in the client. The launch form was the
     // sole gate, so every other caller (CLI, MCP, butler, a second tab) still paid for the
@@ -542,6 +526,11 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
 
   // PATCH /api/issues/:id
   router.patch("/:id", async (c) => {
+    // #806 batch 3 REJECTED this read, deliberately: the body has no declared type and is
+    // forwarded WHOLE to `updateIssue(id, body: Record<string, unknown>)`, which decides field
+    // by field what it recognises. There is nothing to tighten TO — a schema here would have to
+    // invent a field list (and 400 the fields it forgot) or check nothing and merely look
+    // validated. Same argument as `PATCH /api/projects/:id` in batch 2.
     const id = c.req.param("id");
     const body = await parseJsonBody(c);
     const result = await issueService.updateIssue(id, body);
@@ -557,8 +546,7 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
   // is echoed back, so a client can render what actually stuck.
   router.put("/:id/repos-touched", async (c) => {
     const id = c.req.param("id");
-    const body = await parseJsonBody<{ reposTouched?: string[] }>(c);
-    if (!Array.isArray(body.reposTouched)) return c.json({ error: "reposTouched (array) is required" }, 400);
+    const body = await parseJsonBody(c, reposTouchedBody);
     const [issue] = await getIssueById(id, database);
     if (!issue) return c.json({ error: "Issue not found" }, 404);
     const applied = await setIssueReposTouched(id, issue.projectId, body.reposTouched, database);
@@ -595,8 +583,7 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
   // POST /api/issues/:id/tags
   router.post("/:id/tags", async (c) => {
     const issueId = c.req.param("id");
-    const body = await parseJsonBody<{ tagId: string }>(c);
-    if (!body.tagId) return c.json({ error: "tagId is required" }, 400);
+    const body = await parseJsonBody(c, issueTagBody);
     const result = await issueService.assignTag(issueId, body.tagId);
     return c.json(result, 201);
   });
@@ -618,8 +605,7 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
   // POST /api/issues/:id/dependencies
   router.post("/:id/dependencies", async (c) => {
     const issueId = c.req.param("id");
-    const body = await parseJsonBody<{ dependsOnId: string; type?: string }>(c);
-    if (!body.dependsOnId) return c.json({ error: "dependsOnId is required" }, 400);
+    const body = await parseJsonBody(c, issueDependencyBody);
 
     const result = await issueService.addDependency(issueId, body.dependsOnId, body.type);
     return c.json({ id: result.id, type: result.type }, 201);
@@ -642,8 +628,7 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
   // POST /api/issues/:id/artifacts
   router.post("/:id/artifacts", async (c) => {
     const issueId = c.req.param("id");
-    const body = await parseJsonBody<{ type: string; mimeType?: string; content: string; caption?: string; workspaceId?: string }>(c);
-    if (!body.type || !body.content) return c.json({ error: "type and content are required" }, 400);
+    const body = await parseJsonBody(c, issueArtifactBody);
 
     const result = await issueService.addArtifact(issueId, body);
     return c.json({ id: result.id }, 201);
@@ -674,13 +659,7 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
   // POST /api/issues/:id/comments
   router.post("/:id/comments", async (c) => {
     const issueId = c.req.param("id");
-    const body = await parseJsonBody<{
-      kind?: IssueCommentKind;
-      author?: IssueCommentAuthor;
-      body?: string;
-      payload?: unknown;
-      workspaceId?: string;
-    }>(c);
+    const body = await parseJsonBody(c, issueCommentBody);
     /**
      * Deliberately NARROWER than ISSUE_COMMENT_KINDS (#569). `preflight-verdict` and
      * `gate-decision` are written by the server itself (routes/issues.ts:469 and
@@ -690,7 +669,6 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
      */
     const userPostableKinds: IssueCommentKind[] = ["preflight-clarification", "agent-question", "merge-attempt", "note"];
     const validAuthors: IssueCommentAuthor[] = ["user", "butler", "agent", "preflight", "system"];
-    if (!body.body?.trim()) return c.json({ error: "body is required" }, 400);
     const kind = body.kind && userPostableKinds.includes(body.kind) ? body.kind : "note";
     const author = body.author && validAuthors.includes(body.author) ? body.author : "user";
     const comment = await issueCommentsService.addComment({
@@ -723,6 +701,10 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
   // POST /api/issues/:id/time-entries
   router.post("/:id/time-entries", async (c) => {
     const issueId = c.req.param("id");
+    // #806 batch 3 REJECTED this one: the only guard is a COERCION — `Number(body.minutes)`
+    // then `Number.isInteger`, so the string `"30"` is a valid request today and a schema
+    // that checked `minutes` would 400 it. Nothing else in the body is checked, so the
+    // schema would be decoration that lowers a count without checking anything.
     const body = await parseJsonBody<{ minutes?: number; note?: string }>(c);
     const minutes = Number(body.minutes);
     if (!Number.isInteger(minutes) || minutes <= 0) {
@@ -742,10 +724,7 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
   // POST /api/issues/:id/showdown — start a showdown with N contestants
   router.post("/:id/showdown", async (c) => {
     const issueId = c.req.param("id");
-    const body = await parseJsonBody<{ contestants: ShowdownContestant[] }>(c);
-    if (!Array.isArray(body.contestants) || body.contestants.length < 2) {
-      return c.json({ error: "contestants must be an array with at least 2 entries" }, 400);
-    }
+    const body = await parseJsonBody(c, showdownBody);
     const result = await showdownService.createShowdown(issueId, body.contestants);
     return c.json(result, 201);
   });

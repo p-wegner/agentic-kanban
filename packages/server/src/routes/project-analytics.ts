@@ -1,6 +1,7 @@
 import type { Database } from "../db/index.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
+import { checkOverlapBody } from "./project-analytics-body-schemas.js";
 import type { BoardEventSink } from "../services/board-events.js";
 import type { SessionLauncher } from "../services/session.manager.js";
 import { computeThroughputByProvider } from "../services/dashboard-analytics.service.js";
@@ -60,10 +61,7 @@ export function createProjectAnalyticsRoute(
 
   // POST /api/projects/:id/check-overlap — check for file overlap between issues using cached predictions
   router.post("/:id/check-overlap", async (c) => {
-    const body = await parseJsonBody<{ issueIds: string[] }>(c);
-    if (!Array.isArray(body.issueIds) || body.issueIds.length === 0) {
-      return c.json({ error: "issueIds array is required" }, 400);
-    }
+    const body = await parseJsonBody(c, checkOverlapBody);
     return c.json(await checkIssueOverlap(body.issueIds, database));
   });
 

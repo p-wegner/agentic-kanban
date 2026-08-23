@@ -67,7 +67,9 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "services/project.service.ts::createProjectService": 564,
   "services/workspace-merge.service.ts::createWorkspaceMergeService": 529,
   "services/merge-queue.service.ts::createMergeQueueService": 521,
-  "routes/issues.ts::createIssuesRoute": 506,
+  // 506 -> 474 in #806 batch 3: ten handlers dropped their inline type literal and guard
+  // ladder for a `parseJsonBody(c, schema)` call.
+  "routes/issues.ts::createIssuesRoute": 474,
   "services/workflow.service.ts::createWorkflowService": 456,
   "services/workspace-provision.service.ts::createWorkspaceProvisionService": 418,
   // 404 -> 399, banked (#806): five hand-written body guards became one schema parse each.

@@ -1,5 +1,6 @@
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
+import { voiceCaptureBody } from "./voice-capture-body-schemas.js";
 import type { Database } from "../db/index.js";
 import type { BoardEventSink } from "../services/board-events.js";
 import { createVoiceCaptureIssue, VoiceCaptureCommandError } from "../services/voice-capture.service.js";
@@ -19,21 +20,14 @@ export function createVoiceCaptureRoute(
   // Creates a Backlog issue from a voice transcript using Claude to structure it.
   router.post("/:id/voice-capture", async (c) => {
     const projectId = c.req.param("id");
-    const body = await parseJsonBody<{
-      transcript: string;
-      speechLanguage?: string | null;
-      speechLanguageLabel?: string | null;
-    }>(c);
-
-    if (!body.transcript?.trim()) {
-      return c.json({ error: "transcript is required" }, 400);
-    }
+    const body = await parseJsonBody(c, voiceCaptureBody);
 
     try {
       const result = await createVoiceCaptureIssue(
         {
           projectId,
-          transcript: body.transcript.trim(),
+          // `voiceCaptureBody` already trims, exactly as the old `.trim()` here did.
+          transcript: body.transcript,
           speechLanguage: body.speechLanguage ?? null,
           speechLanguageLabel: body.speechLanguageLabel ?? null,
         },

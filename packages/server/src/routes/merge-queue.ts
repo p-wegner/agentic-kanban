@@ -1,6 +1,7 @@
 import { streamSSE } from "hono/streaming";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
+import { mergeQueueBody } from "./merge-queue-body-schemas.js";
 import { createMergeQueueService } from "../services/merge-queue.service.js";
 import type { Database } from "../db/index.js";
 import type { BoardEventSink } from "../services/board-events.js";
@@ -46,15 +47,7 @@ export function createMergeQueueRoute(
    * - dryRun: false → streams SSE events while executing the queue
    */
   router.post("/", async (c) => {
-    const body = await parseJsonBody<{
-      workspaceIds?: string[];
-      dryRun?: boolean;
-      skipOnConflict?: boolean;
-    }>(c);
-
-    if (!Array.isArray(body.workspaceIds) || body.workspaceIds.length === 0) {
-      return c.json({ error: "workspaceIds is required and must be a non-empty array" }, 400);
-    }
+    const body = await parseJsonBody(c, mergeQueueBody);
 
     if (body.dryRun) {
       const plan = await queueService.computePlan(body.workspaceIds);
@@ -64,7 +57,7 @@ export function createMergeQueueRoute(
     // Execute the queue and stream SSE events
     return streamSSE(c, async (stream) => {
       try {
-        for await (const event of queueService.executeQueue(body.workspaceIds!, {
+        for await (const event of queueService.executeQueue(body.workspaceIds, {
           skipOnConflict: body.skipOnConflict ?? false,
         })) {
           await stream.writeSSE({ data: JSON.stringify(event) });
