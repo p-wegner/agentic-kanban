@@ -51,34 +51,45 @@ const SUCCESS_SPELLING_CAP = 35;
  * lines 43/57/71 vs 49/63/79 today), so the population grew by relocation and not by new
  * code. Raising a ratchet is otherwise forbidden.
  *
- * These three LOOK convertible to the central `error-handler.ts` mapping — they hand-map
- * NOT_FOUND/BAD_REQUEST/INTERNAL, which is precisely what the middleware exists to do.
- * #821 tried it and the conversion is NOT behaviour-preserving, so they stay, and this
- * comment records why rather than leaving a plan that was disproven.
+ * STAYS AT 170 through #823, and the reason CHANGED — read this before trying the
+ * conversion a third time.
  *
- * The middleware is correctly in the chain and gives the right STATUS (`createRouter()`
- * sets `onError(domainErrorHandler)`; `ReviewError` carries a top-level `code`, so
- * `DOMAIN_CODE_STATUS` maps NOT_FOUND -> 404 and BAD_REQUEST -> 400). What it does NOT do
- * is echo `code` into the BODY: the generic domain-code branch emits `{ error: message }`
- * and only the `WorkspaceError` / standalone-refusal branches add `code`. Measured against
- * the live endpoint:
+ * #821's blocker is GONE: `error-handler.ts` now echoes the domain `code` into the body
+ * (generic branch and `AppError` branch alike), so delegating the review route's NOT_FOUND
+ * and BAD_REQUEST bodies to it is byte-identical. Measured live on the running dev server,
+ * with the handler swapped between HEAD and the fix:
  *
- *     before:  404  {"error":"Workspace not found","code":"NOT_FOUND"}
- *     after:   404  {"error":"Workspace not found"}
+ *     pre-#823 middleware:   404  {"error":"Workspace not found"}
+ *     post-#823 middleware:  404  {"error":"Workspace not found","code":"NOT_FOUND"}
+ *     the inline body:       404  {"error":"Workspace not found","code":"NOT_FOUND"}
  *
- * A second, narrower break: deleting the `c.json({ error: String(err), code: "INTERNAL" },
- * 500)` catch-all changes behaviour for a NON-`Error` throw, which Hono's `compose`
- * rethrows past `onError` entirely.
+ * `review-route-code-echo.test.ts` pins that equivalence by driving the real route handler.
  *
- * Read this before trusting a green suite here: `review-route-error-mapping.test.ts` stays
- * GREEN through that regression. It exercises only the delegation path (`WorkspaceError`,
- * `WorkerDispatchUnavailableError`, plain `Error`) and never the two `ReviewError`
- * branches, so it is not the proof it looks like. A live probe caught this; the test did
- * not.
+ * What blocks it NOW is `openapi.yaml`. `scripts/generate-openapi.ts` derives an operation's
+ * responses from literal `c.json(body, status)` call sites and cannot see a status the
+ * middleware decides. Converting the two bodies was tried and measured: `pnpm
+ * openapi:generate` then DELETES the `404` and the `400` from
+ * `POST /api/workspaces/{id}/review` (10 lines). #805 moved this handler into `routes/`
+ * precisely so the busiest workflow endpoint would appear in the spec at all — trading two
+ * documented statuses for two points of this ratchet is the wrong way round, so the two
+ * inline bodies stay and the cap stays at 170.
  *
- * Unblocking it means echoing the recognised `code` from the generic branch — a wire
- * contract change touching every route that throws an `AppError` or a coded service error,
- * which is #823, not a side effect to smuggle in here.
+ * That is a property of the ratchet's own goal, not of this endpoint: EVERY conversion of an
+ * inline error body onto the middleware silently removes that status from the spec. Teaching
+ * the generator about thrown domain errors is what unblocks both this cap and #821.
+ *
+ * The third match here is `c.json({ error: String(err), code: "INTERNAL" }, 500)`, the
+ * catch-all for a NON-`Error` throw, which Hono's `compose` rethrows PAST `onError`. It
+ * never reaches the middleware and is not redundant with it — asserted in
+ * `error-handler-code-echo.test.ts`. So even a successful conversion would reach 168, not
+ * the 167 #823's ticket text predicted.
+ *
+ * Read this before trusting a green suite here: `review-route-error-mapping.test.ts` stayed
+ * GREEN through the whole regression #821 found. It exercises only the delegation path
+ * (`WorkspaceError`, `WorkerDispatchUnavailableError`, plain `Error`) and never the
+ * `ReviewError` branches, so it was not the proof it looked like. A live probe caught it;
+ * the missing test half is `error-handler-code-echo.test.ts` (#823), 19 of whose 26 cases
+ * fail against the pre-#823 handler.
  */
 const INLINE_ROUTE_ERROR_CAP = 170;
 
