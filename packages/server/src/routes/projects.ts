@@ -3,6 +3,10 @@ import { createProjectService } from "../services/project.service.js";
 import { getRegistrationProgress } from "../services/registration-progress.service.js";
 import { searchGraphIssueIds } from "../repositories/graph-search.repository.js";
 import { parseJsonBody, parseOptionalJsonBody } from "../middleware/parse-body.js";
+import {
+  generateScriptBody, updateStatusSortOrderBody, updateProjectRepoBody,
+  removeWorktreeBody, openWorktreeBody, onboardingApplyBody, onboardingSkipBody,
+} from "./project-body-schemas.js";
 import { createRouter } from "../middleware/create-router.js";
 import { wrapAiOperation } from "../lib/ai-operation.js";
 import { getProjectActivity } from "../services/project-activity.service.js";
@@ -333,24 +337,21 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
 
   // POST /api/projects/generate-setup-script
   router.post("/generate-setup-script", async (c) => {
-    const body = await parseJsonBody<{ projectId?: string }>(c);
-    if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
+    const body = await parseJsonBody(c, generateScriptBody);
     const setupScript = await wrapAiOperation("generate-setup-script", () => projectService.generateSetupScript(body.projectId!));
     return c.json({ setupScript });
   });
 
   // POST /api/projects/generate-verify-script
   router.post("/generate-verify-script", async (c) => {
-    const body = await parseJsonBody<{ projectId?: string }>(c);
-    if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
+    const body = await parseJsonBody(c, generateScriptBody);
     const verifyScript = await wrapAiOperation("generate-verify-script", () => projectService.generateVerifyScript(body.projectId!));
     return c.json({ verifyScript });
   });
 
   // POST /api/projects/generate-teardown-script
   router.post("/generate-teardown-script", async (c) => {
-    const body = await parseJsonBody<{ projectId?: string }>(c);
-    if (!body.projectId) return c.json({ error: "projectId is required" }, 400);
+    const body = await parseJsonBody(c, generateScriptBody);
     const teardownScript = await wrapAiOperation("generate-teardown-script", () => projectService.generateTeardownScript(body.projectId!));
     return c.json({ teardownScript });
   });
@@ -374,8 +375,7 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
   router.patch("/:id/statuses/:statusId", async (c) => {
     const projectId = c.req.param("id");
     const statusId = c.req.param("statusId");
-    const body = await parseJsonBody(c);
-    if (typeof body.sortOrder !== "number") return c.json({ error: "sortOrder must be a number" }, 400);
+    const body = await parseJsonBody(c, updateStatusSortOrderBody);
     await projectService.updateStatusSortOrder(projectId, statusId, body.sortOrder);
     return c.json({ success: true });
   });
@@ -463,19 +463,7 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
   router.patch("/:id/repos/:repoId", async (c) => {
     const projectId = c.req.param("id");
     const repoId = c.req.param("repoId");
-    const body = await parseJsonBody<{ name?: string; setupScript?: string | null; composeFile?: string | null }>(c);
-    if (body.name !== undefined && typeof body.name !== "string") {
-      return c.json({ error: "name must be a string" }, 400);
-    }
-    if (body.setupScript !== undefined && body.setupScript !== null && typeof body.setupScript !== "string") {
-      return c.json({ error: "setupScript must be a string or null" }, 400);
-    }
-    if (body.composeFile !== undefined && body.composeFile !== null && typeof body.composeFile !== "string") {
-      return c.json({ error: "composeFile must be a string or null" }, 400);
-    }
-    if (body.composeFile && /[\r\n]/.test(body.composeFile)) {
-      return c.json({ error: "composeFile must not contain newlines" }, 400);
-    }
+    const body = await parseJsonBody(c, updateProjectRepoBody);
     const existing = await listProjectRepos(projectId, database);
     if (!existing.some((r) => r.id === repoId)) return c.json({ error: "Repo not found" }, 404);
     // `name` is validated here (route-level) since it must be unique among the project's repos (#90).
@@ -533,8 +521,7 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
   // DELETE /api/projects/:id/worktrees
   router.delete("/:id/worktrees", async (c) => {
     const projectId = c.req.param("id");
-    const body = await parseJsonBody<{ path?: string; workspaceId?: string }>(c);
-    if (!body.path && !body.workspaceId) return c.json({ error: "path or workspaceId is required" }, 400);
+    const body = await parseJsonBody(c, removeWorktreeBody);
 
     await projectService.removeWorktreeById(projectId, body);
     return c.json({ success: true });
@@ -542,8 +529,7 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
 
   // POST /api/projects/:id/worktrees/open — open a worktree folder in the OS file explorer
   router.post("/:id/worktrees/open", async (c) => {
-    const body = await parseJsonBody<{ path: string }>(c);
-    if (!body.path) return c.json({ error: "path is required" }, 400);
+    const body = await parseJsonBody(c, openWorktreeBody);
 
     projectService.openInExplorer(body.path);
     return c.json({ success: true });
@@ -646,8 +632,7 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
   // write, plugin enable, or ticket filing) and returns the RECOMPUTED plan.
   router.post("/:id/onboarding/apply", async (c) => {
     const projectId = c.req.param("id");
-    const body = await parseJsonBody<{ stepId?: string; input?: Record<string, unknown> }>(c);
-    if (!body.stepId) return c.json({ error: "stepId is required" }, 400);
+    const body = await parseJsonBody(c, onboardingApplyBody);
     const result = await onboardingService.applyOnboardingStep(projectId, body.stepId, body.input);
     options?.boardEvents?.broadcastProjectsChanged(projectId, "project_updated");
     return c.json(result);
@@ -657,8 +642,7 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
   // applied by an issue/plugin/config write.
   router.post("/:id/onboarding/skip", async (c) => {
     const projectId = c.req.param("id");
-    const body = await parseJsonBody<{ stepId?: string }>(c);
-    if (!body.stepId) return c.json({ error: "stepId is required" }, 400);
+    const body = await parseJsonBody(c, onboardingSkipBody);
     return c.json(await onboardingService.skipOnboardingStep(projectId, body.stepId));
   });
 

@@ -22,28 +22,11 @@
  * type the route already claimed.
  */
 import { z } from "zod";
-
-/** A required, non-blank string carrying the guard's exact message. */
-function required(message: string) {
-  return z
-    .string({ required_error: message, invalid_type_error: message })
-    // `.refine`, not `.trim()`: the guards tested `!body.x?.trim()` but passed the
-    // ORIGINAL value on, so trimming here would change what the service receives.
-    .refine((v) => v.trim().length > 0, message);
-}
-
-/** A present, non-blank string with no trim test (the guard was a bare falsy check). */
-function requiredRaw(message: string) {
-  return z.string({ required_error: message, invalid_type_error: message }).min(1, message);
-}
-
-/**
- * `Array.isArray` and nothing more, preserving the element type the route declared.
- * Deliberately NOT `z.array(elementSchema)` — see rule 3 above.
- */
-function arrayOnly<T>(message: string, extra?: (v: unknown[]) => boolean) {
-  return z.custom<T[]>((v) => Array.isArray(v) && (extra ? extra(v) : true), { message });
-}
+// The `required` / `requiredRaw` / `arrayOnly` predicates, and the three rules that make a
+// guard-to-schema swap behaviour-preserving, now live in the shared vocabulary every
+// `*-body-schemas.ts` is written against (#806). They are unchanged — only relocated, so the
+// second schema file did not have to copy them.
+import { required, requiredRaw, arrayOnly } from "./body-schema-helpers.js";
 
 export const enhanceIssueBody = z.object({
   title: required("title is required"),

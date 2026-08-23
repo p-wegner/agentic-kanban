@@ -1,5 +1,6 @@
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
+import { codemodPreviewBody, codemodApplyBody, codemodCreateBody } from "./codemod-body-schemas.js";
 import { wrapAiOperation } from "../lib/ai-operation.js";
 import { createCodemodService } from "../services/codemod.service.js";
 import {
@@ -21,19 +22,7 @@ export function createCodemodsRoute(database: Database) {
    * Returns: { script, description, files: [{filePath, relativePath, diff}], totalTsFiles, limitReached }
    */
   router.post("/preview", async (c) => {
-    const body = await parseJsonBody<{
-      description: string;
-      projectId: string;
-      overrideLimit?: boolean;
-      script?: string;
-    }>(c);
-
-    if (!body.description?.trim()) {
-      return c.json({ error: "description is required" }, 400);
-    }
-    if (!body.projectId?.trim()) {
-      return c.json({ error: "projectId is required" }, 400);
-    }
+    const body = await parseJsonBody(c, codemodPreviewBody);
 
     const result = await wrapAiOperation("codemod-preview", () =>
       codemodService.preview(body.description, body.projectId, {
@@ -66,18 +55,7 @@ export function createCodemodsRoute(database: Database) {
    * security boundary and refuses to write to any path outside it.
    */
   router.post("/apply", async (c) => {
-    const body = await parseJsonBody<{
-      projectId: string;
-      changes: Array<{ filePath: string; modified: string }>;
-      selectedFiles?: string[];
-    }>(c);
-
-    if (!body.projectId?.trim()) {
-      return c.json({ error: "projectId is required" }, 400);
-    }
-    if (!Array.isArray(body.changes) || body.changes.length === 0) {
-      return c.json({ error: "changes array is required and must not be empty" }, 400);
-    }
+    const body = await parseJsonBody(c, codemodApplyBody);
 
     const result = await codemodService.apply(
       body.projectId,
@@ -105,16 +83,7 @@ export function createCodemodsRoute(database: Database) {
    * Save a codemod to agent_skills with type='codemod'.
    */
   router.post("/", async (c) => {
-    const body = await parseJsonBody<{
-      name: string;
-      description: string;
-      script: string;
-      projectId?: string | null;
-    }>(c);
-
-    if (!body.name?.trim()) return c.json({ error: "name is required" }, 400);
-    if (!body.description?.trim()) return c.json({ error: "description is required" }, 400);
-    if (!body.script?.trim()) return c.json({ error: "script is required" }, 400);
+    const body = await parseJsonBody(c, codemodCreateBody);
 
     const projectId = body.projectId ?? null;
     const existing = await findSkillByName(body.name, projectId, database);
