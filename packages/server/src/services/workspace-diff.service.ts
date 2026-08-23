@@ -6,6 +6,7 @@ import { getDiffComments } from "../repositories/session.repository.js";
 import { parseDiffStats } from "./board-aggregation.service.js";
 import { WorkspaceError, requireBaseBranch, type GitService } from "./workspace-internals.js";
 import { listWorkspaceRepos } from "../repositories/repo.repository.js";
+import { getWorkspaceDiffStatCache } from "../repositories/diff-stat-cache.repository.js";
 import { readHandoffMeta, type HandoffMeta } from "./handoff.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { DIRECT_WORKSPACE_DIFF_REF, resolveDiffRef } from "@agentic-kanban/shared/lib/git-service";
@@ -107,7 +108,7 @@ export function createWorkspaceDiffService(deps: {
    * #415 — the `?stats=1` diff variant: per-repo shortstat numbers only, no diff bodies.
    * One `git diff --shortstat` per repo (M spawns) instead of the full diff + conflict
    * probe + untracked-content inlining (3M spawns) the heatmap used to pay to read three
-   * integers. The leading repo is served from the persisted `diff_stat_cache_*` columns
+   * integers. The leading repo is served from the persisted `workspace_diff_stat_cache` memo
    * when their stamp is fresh (the same 30s SWR cadence the summary projection chains),
    * dropping to M-1 spawns on a warm row.
    */
@@ -124,15 +125,19 @@ export function createWorkspaceDiffService(deps: {
     const baseBranch = diffRef === DIRECT_WORKSPACE_DIFF_REF ? diffRef : requireBaseBranch(diffRef);
 
     const zero = { filesChanged: 0, insertions: 0, deletions: 0 };
+    // #815: the memo moved off `workspaces` into `workspace_diff_stat_cache`, so it is a
+    // second read rather than five more columns on the row above. An ABSENT row is exactly
+    // what five NULL columns were — never diffed, therefore not fresh, therefore respawn git.
+    const diffStatCache = await getWorkspaceDiffStatCache(id, database);
     const cacheFresh =
-      workspace.diffStatCacheCheckedAt !== null &&
-      Date.now() - new Date(workspace.diffStatCacheCheckedAt).getTime() < DIFF_STAT_CACHE_TTL_MS;
+      !!diffStatCache?.checkedAt &&
+      Date.now() - new Date(diffStatCache.checkedAt).getTime() < DIFF_STAT_CACHE_TTL_MS;
     let leadingStats: { filesChanged: number; insertions: number; deletions: number };
     if (cacheFresh) {
       leadingStats = {
-        filesChanged: workspace.diffStatCacheFilesChanged ?? 0,
-        insertions: workspace.diffStatCacheInsertions ?? 0,
-        deletions: workspace.diffStatCacheDeletions ?? 0,
+        filesChanged: diffStatCache!.filesChanged ?? 0,
+        insertions: diffStatCache!.insertions ?? 0,
+        deletions: diffStatCache!.deletions ?? 0,
       };
     } else if (workspace.workingDir) {
       leadingStats = await gitService.getDiffShortstat(workspace.workingDir, baseBranch).catch(() => zero);

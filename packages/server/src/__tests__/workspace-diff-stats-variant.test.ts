@@ -11,7 +11,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
-import { projects, workspaces, issues, projectStatuses } from "@agentic-kanban/shared/schema";
+import { projects, workspaces, issues, projectStatuses, workspaceDiffStatCache } from "@agentic-kanban/shared/schema";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { insertWorkspaceRepo } from "../repositories/repo.repository.js";
 import { createWorkspaceDiffService } from "../services/workspace-diff.service.js";
@@ -47,16 +47,19 @@ async function seed(opts: { diffCacheFresh?: boolean } = {}) {
     branch: "feature/x",
     workingDir: "/lead/.worktrees/feature-x",
     baseBranch: "main",
-    ...(opts.diffCacheFresh
-      ? {
-          diffStatCacheCheckedAt: new Date().toISOString(),
-          diffStatCacheHeadSha: "cachedsha",
-          diffStatCacheFilesChanged: 4,
-          diffStatCacheInsertions: 40,
-          diffStatCacheDeletions: 4,
-        }
-      : {}),
   });
+  // #815: the memo moved to `workspace_diff_stat_cache`. Absence of a row is exactly what
+  // five NULL columns were — never diffed, therefore not fresh, therefore respawn git.
+  if (opts.diffCacheFresh) {
+    await db.insert(workspaceDiffStatCache).values({
+      workspaceId,
+      checkedAt: new Date().toISOString(),
+      headSha: "cachedsha",
+      filesChanged: 4,
+      insertions: 40,
+      deletions: 4,
+    });
+  }
 }
 
 function shortstatGit(calls: string[]): GitService {

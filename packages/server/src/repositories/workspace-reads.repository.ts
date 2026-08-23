@@ -7,6 +7,7 @@ import {
   workspaceSymlinkRun,
   workspaceConflictCache,
   workspaceSetupRun,
+  workspaceDiffStatCache,
 } from "@agentic-kanban/shared/schema";
 import { desc, eq, inArray, notInArray, and, isNotNull, ne, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
@@ -149,9 +150,11 @@ export async function getWorkspaceDetails(
       // field names, so every consumer of this projected row is untouched by the move.
       conflictCacheHasConflicts: workspaceConflictCache.hasConflicts,
       conflictCacheFiles: workspaceConflictCache.files,
-      diffStatCacheFilesChanged: workspaces.diffStatCacheFilesChanged,
-      diffStatCacheInsertions: workspaces.diffStatCacheInsertions,
-      diffStatCacheDeletions: workspaces.diffStatCacheDeletions,
+      // #815: the diff-stat memo moved to `workspace_diff_stat_cache`. Aliased back to the
+      // same field names, so every consumer of this projected row is untouched by the move.
+      diffStatCacheFilesChanged: workspaceDiffStatCache.filesChanged,
+      diffStatCacheInsertions: workspaceDiffStatCache.insertions,
+      diffStatCacheDeletions: workspaceDiffStatCache.deletions,
       scorecardScore: workspaces.scorecardScore,
       // #815: the setup run moved to `workspace_setup_run`. Aliased back to the same eight
       // field names, so the projection and the DTO it builds are untouched.
@@ -191,6 +194,8 @@ export async function getWorkspaceDetails(
     .leftJoin(workspaceConflictCache, eq(workspaceConflictCache.workspaceId, workspaces.id))
     // #815: LEFT, not inner — a workspace with no setup record must still read.
     .leftJoin(workspaceSetupRun, eq(workspaceSetupRun.workspaceId, workspaces.id))
+    // #815: LEFT, not inner — a never-diffed workspace has no memo row and must still read.
+    .leftJoin(workspaceDiffStatCache, eq(workspaceDiffStatCache.workspaceId, workspaces.id))
     .where(eq(workspaces.id, workspaceId));
 
   if (result.length === 0) return null;

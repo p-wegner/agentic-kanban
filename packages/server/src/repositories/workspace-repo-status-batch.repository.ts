@@ -1,5 +1,5 @@
 import { and, eq, inArray, ne } from "drizzle-orm";
-import { issues, repos, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, repos, workspaces, workspaceDiffStatCache } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 
@@ -35,13 +35,18 @@ export async function listBatchWorkspaceRows(
       baseBranch: workspaces.baseBranch,
       baseCommitSha: workspaces.baseCommitSha,
       mergedHeadSha: workspaces.mergedHeadSha,
-      diffStatCacheCheckedAt: workspaces.diffStatCacheCheckedAt,
-      diffStatCacheFilesChanged: workspaces.diffStatCacheFilesChanged,
-      diffStatCacheInsertions: workspaces.diffStatCacheInsertions,
-      diffStatCacheDeletions: workspaces.diffStatCacheDeletions,
+      // #815: the diff-stat memo moved to `workspace_diff_stat_cache`. Aliased back to the
+      // same field names, so every consumer of this projected row is untouched by the move.
+      diffStatCacheCheckedAt: workspaceDiffStatCache.checkedAt,
+      diffStatCacheFilesChanged: workspaceDiffStatCache.filesChanged,
+      diffStatCacheInsertions: workspaceDiffStatCache.insertions,
+      diffStatCacheDeletions: workspaceDiffStatCache.deletions,
     })
     .from(workspaces)
     .innerJoin(issues, eq(issues.id, workspaces.issueId))
+    // #815: LEFT, not inner — a never-diffed workspace has no memo row and must still be
+    // returned, or the batch silently drops every workspace it has not yet diffed.
+    .leftJoin(workspaceDiffStatCache, eq(workspaceDiffStatCache.workspaceId, workspaces.id))
     .where(and(
       eq(issues.projectId, projectId),
       ne(workspaces.status, "closed"),

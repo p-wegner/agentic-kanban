@@ -232,6 +232,15 @@ const SUBTREE_SEEDERS: Record<string, (c: SeedCtx) => Promise<void>> = {
       commitCount: 3, gitRefreshedAt: c.now, dirty: false,
     });
   },
+  // #815: the ninth column family extracted out of `workspaces` — the cached
+  // `git diff --shortstat` memo. Same `onDelete: cascade` shape, so seeding it proves the
+  // cascade fires.
+  workspace_diff_stat_cache: async (c) => {
+    await c.db.insert(schema.workspaceDiffStatCache).values({
+      workspaceId: c.workspaceId, checkedAt: c.now, headSha: "abc1234",
+      filesChanged: 4, insertions: 120, deletions: 7,
+    });
+  },
   sessions: async (c) => {
     await c.db.insert(schema.sessions).values({
       id: c.sessionId, workspaceId: c.workspaceId, status: "running", startedAt: c.now,

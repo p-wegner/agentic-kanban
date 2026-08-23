@@ -71,8 +71,11 @@ describe("conflict-cache extraction (#815)", () => {
     const { client } = createTestDb();
     const info = await client.execute('PRAGMA table_info("workspaces")');
     expect(columnNames(info.rows).filter((n) => n.startsWith("conflict_cache_"))).toEqual([]);
-    // `diff_stat_cache_*` is a DIFFERENT family and stays — both end in `_cache_`.
-    expect(columnNames(info.rows).filter((n) => n.startsWith("diff_stat_cache_"))).toHaveLength(5);
+    // `diff_stat_cache_*` was a DIFFERENT family — both end in `_cache_` — and it has since
+    // been extracted in its own right (migration 0142), so on the FULLY migrated schema it is
+    // gone too. The 0139 backfill test below still asserts it had its five columns at that
+    // point in the sequence, which is what keeps the two claims from being confused.
+    expect(columnNames(info.rows).filter((n) => n.startsWith("diff_stat_cache_"))).toEqual([]);
     const moved = await client.execute('PRAGMA table_info("workspace_conflict_cache")');
     expect(columnNames(moved.rows).sort()).toEqual([
       "checked_at", "files", "has_conflicts", "workspace_id",
@@ -172,7 +175,9 @@ describe("migration 0139 backfills the extracted family (#815)", () => {
     expect(await db.select().from(workspaceConflictCache)).toEqual([{ workspaceId: probed, ...MEMO }]);
     const names = columnNames((await client.execute('PRAGMA table_info("workspaces")')).rows);
     expect(names.filter((n) => n.startsWith("conflict_cache_"))).toEqual([]);
-    // The neighbouring families are untouched — `diff_stat_cache_` is one char class away.
+    // The neighbouring families are untouched AT THIS POINT IN THE SEQUENCE —
+    // `diff_stat_cache_` is one char class away, and 0139 must not have taken it. (0142 does,
+    // three migrations later; this client has only replayed up to 0139.)
     expect(names.filter((n) => n.startsWith("diff_stat_cache_"))).toHaveLength(5);
     expect(names).toContain("scorecard_score");
     // And left the rows whole.

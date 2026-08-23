@@ -80,15 +80,13 @@ const BASELINE: Record<string, number> = {
   // `persistScorecard` — values type is `{scorecardScore, scorecardJson, scorecardComputedAt}`,
   // no `status` field. Provable non-status write caught only by the opaque-set heuristic.
   "server/src/repositories/workspace-scorecard.repository.ts::workspaces-opaque-set": 1,
-  // `updateWorkspaceDiffStatCache` — cache-column-only value type, no `status` field. Same
-  // opaque-set false positive as the scorecard repo.
-  //
-  // Was 2: the second was `updateWorkspaceConflictCache`, which #815 moved to
-  // `workspace_conflict_cache` (migration 0139) and out of `update(workspaces)` entirely. The
-  // baseline was not lowered in that commit, so this ratchet's staleness half has been RED on
-  // master since — caught here by the #815 summary extraction's own run, and lowered rather
-  // than left as a budget nobody owns.
-  "server/src/repositories/workspace-summary.repository.ts::workspaces-opaque-set": 1,
+  // `workspace-summary.repository.ts::workspaces-opaque-set` is GONE, not zeroed. It was 2
+  // (`updateWorkspaceConflictCache` + `updateWorkspaceDiffStatCache`), then 1 when #815's
+  // migration 0139 moved the conflict memo to its own table, and now 0: migration 0142 moved
+  // the diff-stat memo to `workspace_diff_stat_cache`, so that file writes `workspaces`
+  // nowhere at all and holds reads only. An entry of 0 would be a claim about a writer that
+  // no longer exists there — and this ratchet fails on stale entries, which is what forces
+  // the removal to happen in the same commit as the extraction.
 };
 
 /** #583 — the tree walk every guard suite needs, from the one shared helper. */

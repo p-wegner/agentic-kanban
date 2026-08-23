@@ -1,4 +1,4 @@
-import { issues, workspaces, projectStatuses, tags, issueTags, issueDependencies, issueArtifacts, agentSkills, workspaceSymlinkRun, workspaceConflictCache, workspaceSetupRun } from "@agentic-kanban/shared/schema";
+import { issues, workspaces, projectStatuses, tags, issueTags, issueDependencies, issueArtifacts, agentSkills, workspaceSymlinkRun, workspaceConflictCache, workspaceSetupRun, workspaceDiffStatCache } from "@agentic-kanban/shared/schema";
 import { loadIssueSummary, type IssueSummaryResult } from "@agentic-kanban/shared/lib/issue-summary";
 import { parseIssueRef } from "@agentic-kanban/shared/lib/issue-ref";
 import { DEFAULT_PROJECT_STATUSES, buildProjectStatusRows, statusIdsByName } from "@agentic-kanban/shared/lib/project-statuses";
@@ -400,9 +400,11 @@ export async function getIssueWorkspaces(
       // field names, so every consumer of this projected row is untouched by the move.
       conflictCacheHasConflicts: workspaceConflictCache.hasConflicts,
       conflictCacheFiles: workspaceConflictCache.files,
-      diffStatCacheFilesChanged: workspaces.diffStatCacheFilesChanged,
-      diffStatCacheInsertions: workspaces.diffStatCacheInsertions,
-      diffStatCacheDeletions: workspaces.diffStatCacheDeletions,
+      // #815: the diff-stat memo moved to `workspace_diff_stat_cache`. Aliased back to the
+      // same field names, so every consumer of this projected row is untouched by the move.
+      diffStatCacheFilesChanged: workspaceDiffStatCache.filesChanged,
+      diffStatCacheInsertions: workspaceDiffStatCache.insertions,
+      diffStatCacheDeletions: workspaceDiffStatCache.deletions,
       scorecardScore: workspaces.scorecardScore,
       serviceState: workspaces.serviceState,
     })
@@ -413,6 +415,9 @@ export async function getIssueWorkspaces(
     .leftJoin(workspaceConflictCache, eq(workspaceConflictCache.workspaceId, workspaces.id))
     // #815: LEFT, not inner — a workspace with no setup record must still read.
     .leftJoin(workspaceSetupRun, eq(workspaceSetupRun.workspaceId, workspaces.id))
+    // #815: LEFT, not inner — a never-diffed workspace has no memo row and must still be
+    // returned, or every read below silently loses it.
+    .leftJoin(workspaceDiffStatCache, eq(workspaceDiffStatCache.workspaceId, workspaces.id))
     .where(eq(workspaces.issueId, issueId));
 }
 

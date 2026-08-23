@@ -995,6 +995,13 @@
       "when": 1787497974195,
       "tag": "0141_workspace_summary",
       "breakpoints": true
+    },
+    {
+      "idx": 142,
+      "version": "6",
+      "when": 1787500331664,
+      "tag": "0142_workspace_diff_stat_cache",
+      "breakpoints": true
     }
   ]
 }

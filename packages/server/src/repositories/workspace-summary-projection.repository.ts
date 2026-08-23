@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
-import { issues, projects, repos, workspaceSummary, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, projects, repos, workspaceDiffStatCache, workspaceSummary, workspaces } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 
@@ -210,7 +210,9 @@ export async function selectSummaryHealCandidates(
       isDirect: workspaces.isDirect,
       workingDir: sql<string | null>`coalesce(${leadingRepo.worktreePath}, ${workspaces.workingDir})`,
       baseBranch: sql<string | null>`coalesce(${leadingRepo.baseBranch}, ${workspaces.baseBranch})`,
-      diffStatCacheHeadSha: workspaces.diffStatCacheHeadSha,
+      // #815: the diff-stat memo moved to `workspace_diff_stat_cache`. Aliased back to the
+      // same field name, so the chained diff-stat refresh below is untouched by the move.
+      diffStatCacheHeadSha: workspaceDiffStatCache.headSha,
       // #815: aliased back to the old field names, and COALESCED — a workspace with no
       // `workspace_summary` row is dirty, not clean (the dropped column was NOT NULL DEFAULT
       // TRUE). See the ORDER BY below for why the coalesce is load-bearing there too.
@@ -228,6 +230,9 @@ export async function selectSummaryHealCandidates(
     // LEFT, not inner — a never-projected workspace has no row and is exactly the row this
     // pass exists to find; an inner join would make it permanently unhealable.
     .leftJoin(workspaceSummary, eq(workspaceSummary.workspaceId, workspaces.id))
+    // LEFT, not inner — a never-diffed workspace has no memo row, and its NULL head sha is
+    // exactly what makes the chained diff-stat refresh fire on the first pass.
+    .leftJoin(workspaceDiffStatCache, eq(workspaceDiffStatCache.workspaceId, workspaces.id))
     .where(and(
       ne(workspaces.status, "closed"),
       or(

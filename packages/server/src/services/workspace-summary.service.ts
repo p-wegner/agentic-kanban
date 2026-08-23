@@ -12,11 +12,11 @@ import { extractAssistantMessage, extractToolName, safeParseStringArray } from "
 import { selectLatestSessionsByWorkspace, parseContextTokensFromStats } from "../lib/workspace-summary-session.js";
 import { selectCachedDiffStats, isPlanOnlySession, isDiffCacheStale } from "../lib/workspace-diff-cache.js";
 import { updateWorkspaceConflictCache } from "../repositories/conflict-cache.repository.js";
+import { updateWorkspaceDiffStatCache } from "../repositories/diff-stat-cache.repository.js";
 import {
   aggregateWorkspaceCountRows,
   fetchWorkspaceDetailRows,
   getShowdownStatuses,
-  updateWorkspaceDiffStatCache,
   getWorkflowNodesByIds,
   getOutgoingWorkflowEdges,
   getWorkflowNodeNamesByIds,
@@ -376,11 +376,11 @@ function applyDiffStats(
             stats.insertions !== mainWs.diffStatCacheInsertions ||
             stats.deletions !== mainWs.diffStatCacheDeletions;
           updateWorkspaceDiffStatCache(wsId, {
-            diffStatCacheCheckedAt: new Date().toISOString(),
-            diffStatCacheHeadSha: headShaAtRefresh,
-            diffStatCacheFilesChanged: stats.filesChanged,
-            diffStatCacheInsertions: stats.insertions,
-            diffStatCacheDeletions: stats.deletions,
+            checkedAt: new Date().toISOString(),
+            headSha: headShaAtRefresh,
+            filesChanged: stats.filesChanged,
+            insertions: stats.insertions,
+            deletions: stats.deletions,
           }, database)
             .then(() => { if (changed) notifySummaryWriteThrough(wsId); })
             .catch(() => {});

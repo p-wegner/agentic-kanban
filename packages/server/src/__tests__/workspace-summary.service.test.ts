@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi, beforeEach, afterAll } from "vitest";
 import { sessionOutputPath } from "@agentic-kanban/shared/lib/session-files";
-import { issues, projects, projectStatuses, sessions, workflowEdges, workflowNodes, workflowTemplates, workspaceCodeMetrics, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, projects, projectStatuses, sessions, workflowEdges, workflowNodes, workflowTemplates, workspaceCodeMetrics, workspaceDiffStatCache, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 
 // The summary service skips git work for a workingDir that does not EXIST on disk
@@ -450,14 +450,13 @@ describe("workspace-summary.service", () => {
       workingDir: makeTempWorktree("cached"),
       baseBranch: "main",
       status: "idle",
-      // Cache is fresh and HEAD SHA matches
-      diffStatCacheCheckedAt: recentCheckedAt,
-      diffStatCacheHeadSha: headSha,
-      diffStatCacheFilesChanged: 3,
-      diffStatCacheInsertions: 42,
-      diffStatCacheDeletions: 7,
       createdAt: now,
       updatedAt: now,
+    });
+    // #815: the memo lives in `workspace_diff_stat_cache`. Fresh, and HEAD SHA matches.
+    await db.insert(workspaceDiffStatCache).values({
+      workspaceId, checkedAt: recentCheckedAt, headSha,
+      filesChanged: 3, insertions: 42, deletions: 7,
     });
 
     const summaryMap = await buildWorkspaceSummaryMap([issueId], "main", db);
@@ -515,14 +514,13 @@ describe("workspace-summary.service", () => {
       workingDir: headChangedWorktree,
       baseBranch: "main",
       status: "idle",
-      // Cache is within TTL but HEAD SHA is outdated
-      diffStatCacheCheckedAt: recentCheckedAt,
-      diffStatCacheHeadSha: oldHeadSha,
-      diffStatCacheFilesChanged: 3,
-      diffStatCacheInsertions: 42,
-      diffStatCacheDeletions: 7,
       createdAt: now,
       updatedAt: now,
+    });
+    // #815: the memo lives in `workspace_diff_stat_cache`. Within TTL, but HEAD SHA outdated.
+    await db.insert(workspaceDiffStatCache).values({
+      workspaceId, checkedAt: recentCheckedAt, headSha: oldHeadSha,
+      filesChanged: 3, insertions: 42, deletions: 7,
     });
 
     await buildWorkspaceSummaryMap([issueId], "main", db);

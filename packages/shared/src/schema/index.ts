@@ -82,3 +82,5 @@ export { workspaceConflictCache, workspaceConflictCacheRelations } from "./works
 export { workspaceSetupRun, workspaceSetupRunRelations } from "./workspace-setup-run.js";
 // #815: the eighth — the persisted workspace-summary git projection.
 export { workspaceSummary, workspaceSummaryRelations } from "./workspace-summary.js";
+// #815: the ninth — the cached `git diff --shortstat` memo.
+export { workspaceDiffStatCache, workspaceDiffStatCacheRelations } from "./workspace-diff-stat-cache.js";
