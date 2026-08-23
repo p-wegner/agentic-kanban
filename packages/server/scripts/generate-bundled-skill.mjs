@@ -18,8 +18,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
-const SCRIPT_DIR = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
+const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const SERVER_PKG = path.resolve(SCRIPT_DIR, "..");
 const REPO_ROOT = path.resolve(SERVER_PKG, "../..");
 const SKILL_DIR = path.join(SERVER_PKG, "skills", "agentic-kanban");

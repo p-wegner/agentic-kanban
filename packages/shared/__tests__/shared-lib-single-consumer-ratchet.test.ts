@@ -70,7 +70,13 @@ import path from "node:path";
 import ts from "typescript";
 import { parseGuardSource, walkPackageSources, packagesRootFrom } from "./helpers/guard-scan.js";
 
-const PACKAGES_ROOT = packagesRootFrom(path.dirname(new URL(import.meta.url).pathname.slice(1)), 2);
+// `import.meta.dirname`, NOT a hand-sliced URL pathname (#828). This used to slice the
+// leading character off the module URL's path, which is right on Windows (`/C:/...`)
+// and wrong everywhere else: on POSIX it turns an ABSOLUTE `/home/runner/...` into a
+// relative one, which `path.join` then hangs off the process cwd, and the scan below
+// walked `<cwd>/home/runner/...` and ENOENTed the first time CI ran it on Linux.
+// The rule is enforced by `module-path-derivation.test.ts`.
+const PACKAGES_ROOT = packagesRootFrom(import.meta.dirname!, 2);
 const LIB_DIR = path.join(PACKAGES_ROOT, "shared", "src", "lib");
 const SHARED_SRC = path.join(PACKAGES_ROOT, "shared", "src");
 const REPO_ROOT = path.resolve(PACKAGES_ROOT, "..");
