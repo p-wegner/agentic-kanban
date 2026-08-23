@@ -118,6 +118,26 @@ export async function taskkillTree(pid: number, options: { timeout?: number } = 
   await execCommand("taskkill", ["/pid", String(pid), "/T", "/F"], { timeout: options.timeout ?? 5000 });
 }
 
+/**
+ * Kill one process (and, on Windows, its tree) — the ONE platform decision (#828).
+ *
+ * It lives here, beside `listOsProcesses`/`taskkillTree`, so a caller does not have to
+ * branch on `process.platform` itself. That branch is why the parentless-child-server
+ * sweep was only ever TESTED on Windows: the win32 half called this module (mockable),
+ * while the POSIX half called `process.kill` directly, so on Linux the test asked the OS
+ * to SIGKILL a made-up pid, got ESRCH, and counted zero kills.
+ *
+ * POSIX kills the pid itself, not its group — same reach as before; making it a group
+ * kill would be a behaviour change, not a portability fix.
+ */
+export async function killProcessTree(pid: number, options: { timeout?: number } = {}): Promise<void> {
+  if (process.platform === "win32") {
+    await taskkillTree(pid, options);
+    return;
+  }
+  process.kill(pid, "SIGKILL");
+}
+
 export function parseNetstatListeners(stdout: string): OsPortListener[] {
   const listeners: OsPortListener[] = [];
   for (const line of stdout.split("\n")) {
