@@ -135,6 +135,16 @@ const ALLOWLIST = new Map<string, string>([
       ".test.ts/.spec.ts exclusion simply does not name it.",
   ],
   [
+    join("scripts", "test-mine.mjs"),
+    "The test runner itself, run as bare `node scripts/test-mine.mjs` with no bundler and no tsx " +
+      "— so it cannot import the adapter, which is TypeScript under packages/shared/src, and it " +
+      "must keep working while packages/shared is mid-change, since running the tests is how you " +
+      "find out. One read-only `git status --porcelain -z` snapshotted before and after the run " +
+      "(#680): a suite that writes into the checkout is what makes the repo-scanning guard suites " +
+      "see a moving tree under parallelism, and the runner is the only place that can observe it. " +
+      "windowsHide, stderr ignored, returns null on any failure rather than throwing.",
+  ],
+  [
     join("scripts", "measure-package-coupling.mjs"),
     "Standalone measurement script (#730) run as bare `node scripts/measure-package-coupling.mjs`, " +
       "with no bundler and no tsx — so it cannot import the adapter, which is TypeScript under " +

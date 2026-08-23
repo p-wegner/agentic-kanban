@@ -128,6 +128,7 @@ Set by the board on an agent subprocess; read by hooks and skills inside a workt
 | `KANBAN_TEST_MAX_WORKERS` | Cap vitest workers. |
 | `KANBAN_TEST_GUARDS_ONLY` | Set to 1 to make `test:mine` run ONLY the `@gate:always-run` guard suites — the narrowest verify tier. |
 | `KANBAN_TEST_NO_COVERAGE_PROBE` | Set to 1 to skip `test:mine`'s per-file coverage probe (#762), which forces a package's full suite when a changed source file is imported by no suite. See [gate-test-selection.md](gate-test-selection.md). |
+| `KANBAN_TEST_HERMETIC` | `report` (default) or `strict`. `test:mine` snapshots `git status` around the run and names any path whose status changed (#680) — a test that writes into the checkout is what makes the repo-scanning guard suites go red under load. `strict` FAILS the run on that drift; the default only reports it, because several agents share this checkout and a neighbour's edit is not this run's leak. Use `strict` on a dedicated runner. |
 | `KANBAN_VERIFY_CONCURRENCY` | Cap concurrent verify-gate runs. |
 
 ## `AGENTIC_KANBAN_*` — the npm package's own surface

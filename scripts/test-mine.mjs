@@ -81,7 +81,7 @@
 // NOTE: vitest 4 removed the --related flag. Use `pnpm exec vitest related <file>`
 // from inside the package dir to run tests that cover a specific source file.
 
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -658,11 +658,86 @@ if (scopeLabels && toRun !== PACKAGES) {
   console.log(`[test:mine] scoped to: ${toRun.map((p) => p.label).join(", ")} (KANBAN_TEST_PACKAGES)`);
 }
 
+/* ---------------------------------------------------------------------------
+ * Working-tree hermeticity (#680)
+ *
+ * The static half of this lives in `packages/shared/__tests__/test-tree-write-hermeticity.test.ts`,
+ * which fails any `fs` write in a TEST whose destination is anchored to this checkout. That
+ * cannot see the other door: a suite that SPAWNS something which writes — a generator, a hook
+ * script, a scaffolded runner given `cwd: REPO_ROOT`. #814's leak came out of exactly such a
+ * subprocess, and the symptom is #680's: the repo-scanning `@gate:always-run` suites walk the
+ * tree while another suite mutates it, so the gate goes red under load and green in isolation.
+ * It also silently withholds every board-wide merge, because auto-merge refuses to land while
+ * the main checkout has a dirty tracked file.
+ *
+ * So: snapshot `git status` around the run and NAME what changed.
+ *
+ * Reporting, not failing, by default — and that is deliberate rather than timid. Several agents
+ * share this checkout, so a path that changed during the run is not proof the run changed it,
+ * and a gate that fails on a neighbour's edit is a worse version of the flakiness this ticket
+ * exists to remove. On a dedicated runner set `KANBAN_TEST_HERMETIC=strict`, where the
+ * attribution IS sound and the drift should fail the run.
+ * ------------------------------------------------------------------------- */
+
+const hermeticMode = (process.env.KANBAN_TEST_HERMETIC || "report").trim().toLowerCase();
+
+/** `path -> status code`, or `null` when git cannot answer (not a checkout, no git on PATH). */
+export function treeSnapshot() {
+  try {
+    // Raw `git` on purpose: this script runs as bare `node scripts/test-mine.mjs` with no
+    // guarantee that packages/shared is built, so it cannot import the git-exec adapter.
+    const out = execFileSync("git", ["status", "--porcelain", "-z"], {
+      cwd: ROOT, encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "ignore"],
+    });
+    const entries = new Map();
+    for (const record of out.split("\0")) {
+      if (record.length < 4) continue;
+      entries.set(record.slice(3), record.slice(0, 2));
+    }
+    return entries;
+  } catch {
+    return null;
+  }
+}
+
+/** Paths whose git status is not what it was before the run. Empty when nothing drifted. */
+export function treeDrift(before, after) {
+  if (!before || !after) return [];
+  const drifted = [];
+  for (const [file, status] of after) {
+    const was = before.get(file);
+    if (was !== status) drifted.push(`${status} ${file}${was ? `  (was "${was}")` : ""}`);
+  }
+  for (const [file, status] of before) {
+    if (!after.has(file)) drifted.push(`   ${file}  (was "${status}", now clean)`);
+  }
+  return drifted.sort();
+}
+
+/** Print the drift; returns true when the run should be failed for it. */
+function reportTreeDrift(before) {
+  const drifted = treeDrift(before, treeSnapshot());
+  if (drifted.length === 0) return false;
+  const strict = /^(1|true|yes|strict)$/i.test(hermeticMode);
+  const how = strict ? "error" : "warn";
+  console[how](`\n[test:mine] the working tree changed during this run (${drifted.length} path(s)):`);
+  for (const line of drifted) console[how](`  ${line}`);
+  console[how](
+    "  A test that writes into this checkout makes the repo-scanning guard suites see a moving\n" +
+    "  tree under parallelism (#680), and a dirty tracked file withholds every auto-merge (#814).\n" +
+    "  If this run owns those paths, write into os.tmpdir() instead. If another agent sharing this\n" +
+    "  checkout owns them, this line is noise — set KANBAN_TEST_HERMETIC=strict on a dedicated\n" +
+    "  runner to make it fail there, where the attribution is sound.",
+  );
+  return strict;
+}
+
 // Guarded so this file can be `import`ed (e.g. by unit tests exercising the pure functions
 // above) without spawning real vitest processes. `pnpm test:mine` runs this file directly, so
 // `process.argv[1]` is its own path in that case.
 if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
   let failed = false;
+  const treeBefore = treeSnapshot();
   if (guardsOnly) {
     // Every package's guard suites, and only those. A package with no marked suite is skipped
     // rather than falling through to its full suite.
@@ -681,6 +756,7 @@ if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
     for (const { pkg, guards } of planned) {
       if ((await runPackage(pkg, { kind: "guards", files: guards })).code !== 0) failed = true;
     }
+    if (reportTreeDrift(treeBefore)) failed = true;
     if (failed) {
       console.error("\n[test:mine] One or more guard suites failed.");
       process.exit(1);
@@ -715,6 +791,7 @@ if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
     if (guards.length > 0 && (await runPackage(pkg, { kind: "guards", files: guards })).code !== 0) failed = true;
   }
 
+  if (reportTreeDrift(treeBefore)) failed = true;
   if (failed) {
     console.error("\n[test:mine] One or more packages had failing tests.");
     process.exit(1);
