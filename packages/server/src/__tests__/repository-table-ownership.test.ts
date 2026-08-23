@@ -15,9 +15,10 @@ import path from "node:path";
  *  - `projects`  → repositories/project.repository.ts  (getProjectById,
  *    getProjectRepoPath, getProjectsByIds, getAllProjects, …)
  *  - `sessions`  → repositories/session.repository.ts  (getSessionStatus,
- *    getSessionStatsRaw, getSessionStats, …)
+ *    getSessionStatsRaw, getSessionStats, …) — and, since #822, the `repositories/session/`
+ *    subtree that facade re-exports, because ownership is a SUBTREE, not a filename.
  *
- * This test scans packages/server/src/repositories/ for PRIMARY queries on those
+ * This test scans packages/server/src/repositories/ RECURSIVELY for PRIMARY queries on those
  * tables — `from(<table>)` selects and `.insert/.update/.delete(<table>)` writes —
  * outside the owning file. JOINs are deliberately NOT counted: enriching another
  * aggregate's query with a join (`from(issues).innerJoin(projects, …)`) is a
@@ -30,17 +31,43 @@ import path from "node:path";
 
 const repositoriesRoot = path.join(import.meta.dirname!, "..", "repositories");
 
-/** table → the one repository file allowed to query it directly. */
-const OWNERS: Record<string, string> = {
-  projects: "project.repository.ts",
-  sessions: "session.repository.ts",
+/**
+ * table → the owning SUBTREE allowed to query it directly (#822).
+ *
+ * Ownership is a subtree, not a filename. `session.repository.ts` is a FACADE barrel: the
+ * implementation behind it was split into `repositories/session/*` by the god-module gate
+ * (#875/#888/#889), so `session/lifecycle.ts` writing `sessions` is the OWNER writing its own
+ * table — correct by construction, not drift. Before #822 the scan was non-recursive and never
+ * saw those files at all; making it recursive without teaching it subtree ownership would have
+ * grandfathered 19 legitimate owner sites as permanent debt.
+ *
+ * An entry ending in `/` is a directory prefix (matched against the forward-slash path relative
+ * to `repositories/`); anything else is an exact relative path. `projects` has no subtree today
+ * — `project.repository.ts` is also a facade, but the split it re-exports
+ * (`project-status.repository.ts`) is a top-level sibling that queries `project_statuses`, not
+ * `projects`, so there is nothing to own. Add `"project/"` here if that ever changes.
+ */
+const OWNERS: Record<string, string[]> = {
+  projects: ["project.repository.ts"],
+  sessions: ["session.repository.ts", "session/"],
 };
+
+/** Is `file` (a forward-slash path relative to repositories/) inside `table`'s owning subtree? */
+function isOwnedBy(file: string, owners: string[]): boolean {
+  return owners.some((owner) => (owner.endsWith("/") ? file.startsWith(owner) : file === owner));
+}
 
 /**
  * Grandfathered primary table touches outside the owner, `<file>::<table>-<kind>`
  * → count (kind: `read` = from(table), `write` = insert/update/delete(table)).
  * Only SHRINK this list — migrate the helper into the owning repository (or make
  * it delegate) and lower/remove the entry.
+ *
+ * `<file>` is the path RELATIVE to `repositories/`, forward-slashed, so a nested module reads
+ * `issue/analytics.repository.ts` and collides with nothing at the top level (#822). Every
+ * entry below is top-level and therefore unchanged by that spelling; the recursive scan added
+ * zero new entries, because all 19 nested touches it newly sees are inside `session/**`, which
+ * OWNERS now recognises as the owner.
  */
 const BASELINE: Record<string, number> = {
   // sessions reads — narrow per-consumer selects that predate #957. Each is a
@@ -119,16 +146,30 @@ function isCrossAggregateJoinRead(text: string, fromIndex: number): boolean {
   return /\.(?:inner|left|right|full)Join\(/.test(statement);
 }
 
+/**
+ * Every `.ts` under `repositories/`, RECURSIVELY, as forward-slash paths relative to that root
+ * (#822). The old `readdirSync` was non-recursive, so `repositories/issue/` and
+ * `repositories/session/` — both born of god-module splits — were entirely invisible to the
+ * ratchet, and every future split widened the hole.
+ */
+function listRepositoryFiles(dir: string, prefix = ""): string[] {
+  const out: string[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) out.push(...listRepositoryFiles(path.join(dir, entry.name), rel));
+    else if (entry.name.endsWith(".ts") && !entry.name.endsWith(".d.ts")) out.push(rel);
+  }
+  return out;
+}
+
 function scanActual(): Map<string, { count: number; sites: string[] }> {
   const actual = new Map<string, { count: number; sites: string[] }>();
-  const files = fs
-    .readdirSync(repositoriesRoot)
-    .filter((f) => f.endsWith(".ts") && !f.endsWith(".d.ts"));
+  const files = listRepositoryFiles(repositoriesRoot);
 
   for (const file of files) {
     const text = fs.readFileSync(path.join(repositoriesRoot, file), "utf-8");
-    for (const [table, owner] of Object.entries(OWNERS)) {
-      if (file === owner) continue;
+    for (const [table, owners] of Object.entries(OWNERS)) {
+      if (isOwnedBy(file, owners)) continue;
       const patterns: Array<[kind: string, re: RegExp]> = [
         ["read", new RegExp(String.raw`\bfrom\(\s*${table}\s*\)`, "g")],
         ["write", new RegExp(String.raw`\.(?:insert|update|delete)\(\s*${table}\s*\)`, "g")],
