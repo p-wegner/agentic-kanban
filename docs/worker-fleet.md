@@ -671,13 +671,14 @@ dispatch path needs to know about versions.
 A version column on `workers` (and the panel showing it) is **not implemented**; the values
 live in board memory and are re-learned within 30 s of a restart.
 
-## 11. Board tools on a worker — what a remote agent CAN and CANNOT do (#769)
+## 11. Board tools on a worker — what a remote agent CAN and CANNOT do (#769, #799)
 
 A remote builder used to have no `mcp__agentic-kanban__*` tools at all: the board's own
 `--mcp-config` names a file in the board's tmpdir describing a stdio server that would open the
 board's natively-compiled sqlite binding, so a true-remote launch spec strips the flag (#747).
-#749 made the shipped brief HONEST about the absence. #769 removes it for the two providers that
-can be pointed at a config file.
+#749 made the shipped brief HONEST about the absence. #769 removed it for the two providers that
+can be pointed at a config file; **#799 added codex, the comment tool, and the per-request
+assignment check that a write surface makes mandatory**.
 
 **What is served.** `ALL /mcp` on the fleet listener, proxying the board's existing MCP HTTP
 listener (#136) over loopback. Every request needs a **per-assignment** bearer token scoped to
@@ -691,16 +692,35 @@ token here.
 
 | Allowed | Refused (examples) |
 |---|---|
-| `get_issue`, `list_issues`, `get_board_status`, `create_issue` | `merge_workspace`, `mark_ready_for_merge`, `close_workspace`, `set_preference`, `delete_*`, `start_workspace`, `relaunch_workspace`, every session/transcript reader |
+| `get_issue`, `list_issues`, `get_board_status`, `create_issue`, `add_comment` | `merge_workspace`, `mark_ready_for_merge`, `close_workspace`, `set_preference`, `delete_*`, `start_workspace`, `relaunch_workspace`, every session/transcript reader |
 
 `create_issue` is **pinned** to the assignment's project: a call with no `projectId` gets it
 filled in (the default is the board's ACTIVE project, i.e. the classic misfile), and a call
 naming another project is refused. The allowlist lives in one place —
 `REMOTE_BOARD_TOOLS` in `services/fleet-mcp-bridge.service.ts` — and every deny case has a test.
 
-**There is no `add_comment` tool on this board**, so progress reflection is unchanged: it goes in
-the agent's final output, which the board reads. `list_issues` is in the allowlist in its place,
-so a builder can check whether a finding is already filed before filing it.
+**`add_comment` (#799)** is how a remote builder reflects progress onto the ticket instead of
+leaving it in output nobody sees until the session ends. It is pinned twice over:
+
+- **to the assignment's ISSUE.** The id comes from the DB per request, not from the token — an
+  omitted `issueId` is filled in, a different one is refused with a pointer at `create_issue`.
+- **to two KINDS**, `note` and `agent-question` (`REMOTE_COMMENT_KINDS`). The board's own route
+  already refuses `preflight-verdict` and `gate-decision` because they are records of a MACHINE
+  decision that a caller posting one would be forging; this narrows further, dropping
+  `merge-attempt` and `preflight-clarification` as the board's own workflow bookkeeping.
+
+The tool posts through `POST /api/issues/:id/comments` rather than inserting, because
+`issue_comments` has exactly one write path (`insertIssueComment`) and that is where the #738
+identical-repeat collapse lives — the rule that keeps a chatty writer from growing the table.
+
+**The assignment is re-derived from the DB on every request (#799).** The git transport has done
+this since #753; the MCP path used to rely on the token being dropped at `finishSession` /
+`revokeWorker` plus a 24h TTL, so a board that crashed mid-session left a token valid for up to a
+day with no assignment behind it. That was tolerable while the surface was read-only and stopped
+being tolerable the moment a write joined it. Same predicate as the git side
+(`isWorkerAssignmentCurrent`): running, or ended recently enough that the result is still
+expected. Fails CLOSED — a lookup that throws is a 503, not a pass — and a token found to stand
+for nothing is dropped so the next call is a plain 401.
 
 **When the bridge is NOT offered** the brief keeps saying "no board tools", which stays true:
 
@@ -709,11 +729,31 @@ so a builder can check whether a finding is already filed before filing it.
   dialed (the bridge URL is derived from that request's `Host` header, precisely so the board
   never has to know its own external hostname — the same reasoning that has the WORKER compose the
   git URL);
-- the provider is **codex or pi**. Codex reads MCP servers from `~/.codex/config.toml` on the
-  machine it runs on and pi from its own extension flags, so neither can be pointed at the bridge
-  from argv. A remote codex/pi builder still has no board tools — tracked as **#799**, which also
-  carries the missing progress-comment tool and the MCP path's lack of a DB-derived
-  assignment-liveness check.
+- the provider is **pi**. Not a plumbing gap: pi 0.73.1 has no MCP client at all (decision 007),
+  so there is no configuration that would help, and a flag pi ignores would be worse than the
+  honest brief. Closing it needs a pi EXTENSION that speaks MCP — upstream work, not board work.
+
+**Three channels, one per provider family, and the difference is about where the TOKEN ends up:**
+
+| Provider | How it is pointed at the bridge | Where the token rides |
+|---|---|---|
+| claude | `--mcp-config .mcp-kanban.json` | the config file in the checkout |
+| copilot | `--additional-mcp-config @.mcp-kanban.json` | the config file in the checkout |
+| codex (#799) | `-c mcp_servers.agentic-kanban.url=…` + `-c mcp_servers.agentic-kanban.bearer_token_env_var=AGENTIC_KANBAN_MCP_TOKEN` | `WorkerRepoTransport.boardMcpToken`, exported by the WORKER into the agent's env |
+| pi | nothing — no MCP client | — |
+
+Codex has no config-file flag, but it does take dotted `-c` overrides, and an HTTP MCP entry can
+name an **env var** to read its bearer token from rather than carrying the token. So the argv
+carries the URL and a variable NAME, never the secret — the same rule that took the git token out
+of the clone URL. The token itself travels in its own field on the assignment (like `gitToken`)
+and **not** in `spec.env`, which is projected through an allowlist that deliberately drops
+anything token-shaped (`lib/remote-spec-env.ts`); widening that would weaken the exact guard that
+keeps board credentials off a worker. The worker merges it into the child's environment just
+before spawn.
+
+Pointing `CODEX_HOME` at the checkout was the obvious alternative and is wrong: that variable
+also selects the auth directory, so it would take the worker's own codex login away — decision
+012 in reverse.
 
 ### What credentials-never-cross makes genuinely impossible
 

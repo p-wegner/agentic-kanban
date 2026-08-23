@@ -245,10 +245,12 @@ describe("the board's side of the handshake (#754)", () => {
     // --max-concurrency 4` changed nothing on the board while the local runner enforced
     // the NEW ceiling. Board and worker disagreed about the same machine.
     const listed = await (await app.request("/api/workers")).json() as {
-      workers: Array<{ labels: string | null; providers: string | null; maxConcurrency: number }>;
+      // #774 moved this route onto `describeFleet`, which PARSES the stored JSON — so the
+      // wire shape is an array now, not the raw column text these assertions used to read.
+      workers: Array<{ labels: string[]; providers: string[]; maxConcurrency: number }>;
     };
-    expect(JSON.parse(listed.workers[0]!.labels!)).toEqual(["linux", "docker"]);
-    expect(JSON.parse(listed.workers[0]!.providers!)).toEqual(["claude"]);
+    expect(listed.workers[0]!.labels).toEqual(["linux", "docker"]);
+    expect(listed.workers[0]!.providers).toEqual(["claude"]);
     expect(listed.workers[0]!.maxConcurrency).toBe(4);
   });
 
@@ -268,9 +270,9 @@ describe("the board's side of the handshake (#754)", () => {
       body: JSON.stringify({ protocolVersion: WORKER_PROTOCOL_VERSION, capabilities: { maxConcurrency: 2 } }),
     });
     const listed = await (await app.request("/api/workers")).json() as {
-      workers: Array<{ labels: string | null; maxConcurrency: number }>;
+      workers: Array<{ labels: string[]; maxConcurrency: number }>;
     };
-    expect(JSON.parse(listed.workers[0]!.labels!)).toEqual(["gpu"]);
+    expect(listed.workers[0]!.labels).toEqual(["gpu"]);
     expect(listed.workers[0]!.maxConcurrency).toBe(2);
   });
 });

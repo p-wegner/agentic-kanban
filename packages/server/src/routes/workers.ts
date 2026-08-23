@@ -91,7 +91,9 @@ function registerOwnerRoutes(router: Hono, reg: WorkerRegistry, database: Databa
   router.get("/", async (c) => {
     const projectId = c.req.query("projectId") || undefined;
     const provider = (c.req.query("provider") as ProviderName | undefined) ?? undefined;
-    const fleet = await describeFleet({ database, projectId, providerName: provider });
+    // `reg` and not the singleton: this route takes an injectable registry, and #774 moved the
+    // listing onto `describeFleet`, which reached past the injection (#799).
+    const fleet = await describeFleet({ database, projectId, providerName: provider, registry: reg });
     return c.json({
       workers: fleet.workers.map((w) => ({
         // `id` as well as `workerId`: the panel needs an id to revoke by, and every existing

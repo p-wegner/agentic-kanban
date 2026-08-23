@@ -77,6 +77,16 @@ export interface WorkerLaunchSpec {
  * host it already dials plus `gitPort`/`gitToken` — the board never needs to
  * know its own externally-visible hostname.
  */
+/**
+ * The environment variable a worker exports {@link WorkerRepoTransport.boardMcpToken} as (#799).
+ *
+ * Lives in the PROTOCOL rather than in the board's bridge service because both ends need it and
+ * they may not import each other: the worker binary is deliberately isolated from `services/`
+ * (the `worker-cli-isolation` guard), so a shared constant is the only honest home for a name
+ * that appears in the board's argv AND in the worker's spawn env.
+ */
+export const FLEET_MCP_TOKEN_ENV_VAR = "AGENTIC_KANBAN_MCP_TOKEN";
+
 export interface WorkerRepoTransport {
   projectId: string;
   gitPort: number;
@@ -100,6 +110,25 @@ export interface WorkerRepoTransport {
    * `name` is a bare filename; anything with a path separator is dropped on parse.
    */
   contextFiles?: Array<{ name: string; content: string }>;
+  /**
+   * Bearer token for the board's MCP bridge, for a provider that takes it through the
+   * ENVIRONMENT rather than a config file (#799 — today that is codex).
+   *
+   * WHY A DEDICATED FIELD AND NOT `spec.env`. The launch spec's env is projected through
+   * `REMOTE_SPEC_ENV_ALLOWLIST` plus a `looksSecretEnvKey` check that drops anything containing
+   * `TOKEN` — the rule that keeps the BOARD's credentials off a worker (decision 012, #244).
+   * Widening it for this would weaken exactly the guard it exists to be. So this rides its own
+   * purpose-named field, the same way `gitToken` does, and the WORKER puts it into its child's
+   * environment (`CODEX_MCP_TOKEN_ENV_VAR`). The board's env projection stays credential-free.
+   *
+   * WHY NOT ARGV. A token in argv is visible in any process listing on the worker; that is why
+   * the git token left the clone URL and why the claude/copilot config travels as a file. The
+   * codex flags carry the bridge URL and the NAME of this variable, never its value.
+   *
+   * Absent for claude/copilot (their token is in `.mcp-kanban.json`) and for pi, which has no
+   * MCP client to configure at all.
+   */
+  boardMcpToken?: string;
 }
 
 /**
@@ -506,6 +535,9 @@ function parseRepoTransport(raw: unknown): WorkerRepoTransport | null {
     setupScript: typeof repo.setupScript === "string" ? repo.setupScript : undefined,
     ...(skills && skills.length > 0 ? { skills } : {}),
     ...(contextFiles && contextFiles.length > 0 ? { contextFiles } : {}),
+    ...(typeof repo.boardMcpToken === "string" && repo.boardMcpToken.length > 0
+      ? { boardMcpToken: repo.boardMcpToken }
+      : {}),
   };
 }
 

@@ -44,6 +44,8 @@ import type { Database } from "../db/index.js";
 import { createExpiringDigestStore, extractBearer } from "../lib/bearer-token.js";
 import { ensureMcpHttpBridge } from "./mcp-http-bridge.service.js";
 import { getWorkerRegistry } from "./worker-registry.service.js";
+import { findFleetMcpAssignment, isWorkerAssignmentCurrent } from "../repositories/worker.repository.js";
+import { FLEET_MCP_TOKEN_ENV_VAR } from "@agentic-kanban/shared/lib/worker-protocol";
 
 /** Path the bridge is mounted at on the fleet listener. */
 export const FLEET_MCP_PATH = "/mcp";
@@ -65,12 +67,14 @@ export const REMOTE_MCP_CONFIG_FILENAME = ".mcp-kanban.json";
 /**
  * The tools a remote builder may call. Everything else is refused by the proxy.
  *
- * DELIBERATELY NOT the four names #769 asked for: there is no `add_comment` tool on this board
- * (the registry in `packages/mcp-server/src/index.ts` has `create_diff_comment`, which needs a
- * workspace plus a file and line, and `update_issue`, which can also move status). `list_issues`
- * takes its place — a builder about to file a finding needs to see whether it is already on the
- * board. Progress reflection stays where #749 put it: the session's own output, which the board
- * reads.
+ * #769 asked for `add_comment` and there was no such tool on this board, so `list_issues` took
+ * its place and progress reflection stayed in the session's own output. #799 built the tool
+ * (`packages/mcp-server/src/tools/add-comment.ts`), so it is here now — and it is the only WRITE
+ * on this list besides `create_issue`, which is why it is pinned twice over: to the assignment's
+ * ISSUE (a remote builder may not comment on an arbitrary ticket) and to the two comment kinds a
+ * caller is allowed to author. `preflight-verdict` and `gate-decision` are records of a MACHINE
+ * decision; a caller posting one would be forging it, which is why the board's own route refuses
+ * them too and why this proxy does not widen that.
  *
  * What is kept OUT is the point: no `merge_workspace`, `mark_ready_for_merge` or
  * `close_workspace` (the merge gate is the board's decision, not a builder's), no
@@ -83,6 +87,8 @@ export const REMOTE_BOARD_TOOLS: readonly string[] = [
   "list_issues",
   "create_issue",
   "get_board_status",
+  // #799 — the one WRITE that is a builder's own voice rather than a board decision.
+  "add_comment",
 ];
 
 /** How long a per-assignment token lives. Matches `DEFAULT_GIT_TOKEN_TTL_MS`: same assignment. */
@@ -96,6 +102,39 @@ export interface FleetMcpScope {
   /** The assignment. Its token dies when the session is finalized. */
   sessionId: string;
 }
+
+/**
+ * The comment kinds a remote builder may author (#799).
+ *
+ * A STRICT SUBSET of the board route's own `userPostableKinds`. That whitelist already refuses
+ * `preflight-verdict` and `gate-decision` because they are records of a MACHINE decision and a
+ * caller posting one would be forging it. This narrows further: `merge-attempt` and
+ * `preflight-clarification` are the board's own workflow bookkeeping, and a builder on another
+ * machine has no standing to write either. What is left is exactly the two things a builder
+ * legitimately has to say — a note about its own progress, and a question it needs answered.
+ */
+export const REMOTE_COMMENT_KINDS: readonly string[] = ["note", "agent-question"];
+
+/**
+ * What the DB says about an assignment RIGHT NOW, re-derived per request (#799 gap 3).
+ *
+ * The git transport already re-derives its dispatch on every request (`authorizeAssignment`,
+ * #753); the MCP path did not, relying on the token being dropped at `finishSession` /
+ * `revokeWorker` plus a 24h TTL. That is fine while the surface is read-only, and it stops being
+ * fine the moment a WRITE is on it: a board that crashed mid-session leaves a token valid for up
+ * to a day with no assignment behind it. `null` means "no such session", which fails closed.
+ */
+export interface FleetMcpAssignment {
+  /** Session status, as the DB has it. */
+  status: string;
+  /** The ticket this assignment is for — the only one `add_comment` may write to. */
+  issueId: string | null;
+  /** When the session ended, if it has. Feeds the shared liveness predicate. */
+  endedAt: string | null;
+}
+
+/** A scope plus the facts a per-request lookup added to it. */
+export type ResolvedFleetMcpScope = FleetMcpScope & { issueId?: string | null };
 
 export interface IssueFleetMcpTokenInput extends FleetMcpScope {
   ttlMs?: number;
@@ -147,29 +186,94 @@ export function buildRemoteMcpConfigFile(opts: { url: string; token: string }): 
 }
 
 /**
- * The launch args that make a provider load that file — relative, because the agent's cwd IS the
- * checkout root the worker wrote it into (same reasoning as #749's relativized `--attachment`).
+ * The env var a codex builder reads its bearer token from (#799).
  *
- * Only claude and copilot have a config-file channel. Codex reads MCP servers from
- * `~/.codex/config.toml` on the machine it runs on, and pi from its own extension flags, so
- * neither can be pointed at the bridge from argv — a remote codex/pi builder still has no board
- * tools, and its ticket-context file must keep saying so. Disclosed in docs/worker-fleet.md and
- * tracked as #799 (which also carries the missing comment tool and the liveness gap).
+ * It is NOT in `REMOTE_SPEC_ENV_ALLOWLIST` and it never will be: `looksSecretEnvKey` drops any
+ * key containing `TOKEN` from the launch spec's env by design, which is exactly the rule that
+ * keeps board credentials off a worker. So this value does not travel in `spec.env` — it rides
+ * `WorkerRepoTransport.boardMcpToken`, the same dedicated, purpose-named field the git token
+ * uses, and the WORKER puts it into its own child's environment. The board's env projection
+ * stays credential-free and the guard stays un-widened.
  */
-export function remoteMcpConfigArgs(provider: string | undefined, filename = REMOTE_MCP_CONFIG_FILENAME): string[] {
+export const CODEX_MCP_TOKEN_ENV_VAR = FLEET_MCP_TOKEN_ENV_VAR;
+
+/** The `mcp_servers` entry name a codex builder sees. Matches the claude/copilot config file. */
+export const REMOTE_MCP_SERVER_NAME = "agentic-kanban";
+
+export interface RemoteMcpConfigArgsOptions {
+  /** Bare filename of the config file, for the providers that read one. */
+  filename?: string;
+  /** The bridge URL, for the providers configured through argv instead of a file. */
+  url?: string;
+}
+
+/**
+ * The launch args that point a provider at the bridge.
+ *
+ * THREE CHANNELS, one per provider family, and the difference is not cosmetic — it is about
+ * where the TOKEN ends up:
+ *
+ *  - claude (`--mcp-config <file>`) and copilot (`--additional-mcp-config @<file>`) read a config
+ *    FILE. The path is relative because the agent's cwd IS the checkout root the worker wrote it
+ *    into (same reasoning as #749's relativized `--attachment`). Token lives in the file.
+ *  - codex (#799) has no such flag — it reads `~/.codex/config.toml` on the machine it runs on —
+ *    but it does take `-c <dotted.key>=<toml value>` overrides, and an HTTP MCP server entry can
+ *    name an ENV VAR to read its bearer token from rather than carrying the token itself. So the
+ *    argv carries the URL and the NAME of a variable, never the secret. Pointing `CODEX_HOME` at
+ *    the checkout was the obvious alternative and is wrong: that variable also selects the auth
+ *    directory, so it would take the worker's own codex login away — decision 012 in reverse.
+ *  - pi returns `[]` and still has no channel, which is a fact about pi rather than a gap here:
+ *    pi 0.73.1 has no MCP client at all (decision 007 §"no Claude-style MCP config support"), so
+ *    there is no configuration that would help. A pi builder's ticket context must keep saying it
+ *    has no board tools, and it does. Closing it needs a pi EXTENSION that speaks MCP, which is
+ *    upstream work, not board work.
+ */
+export function remoteMcpConfigArgs(
+  provider: string | undefined,
+  opts: RemoteMcpConfigArgsOptions | string = {},
+): string[] {
+  // Back-compat with the #769 call shape `remoteMcpConfigArgs(provider, filename)`.
+  const options: RemoteMcpConfigArgsOptions = typeof opts === "string" ? { filename: opts } : opts;
+  const filename = options.filename ?? REMOTE_MCP_CONFIG_FILENAME;
   switch (provider ?? "claude") {
     case "claude":
       return ["--mcp-config", filename];
     case "copilot":
       return ["--additional-mcp-config", `@${filename}`];
+    case "codex": {
+      if (!options.url) return [];
+      // TOML values, so the strings are quoted. `-c` parses the right-hand side as TOML and
+      // falls back to a raw literal, but relying on that fallback would break the moment a URL
+      // contained a character TOML reads as syntax.
+      return [
+        "-c",
+        `mcp_servers.${REMOTE_MCP_SERVER_NAME}.url=${JSON.stringify(options.url)}`,
+        "-c",
+        `mcp_servers.${REMOTE_MCP_SERVER_NAME}.bearer_token_env_var=${JSON.stringify(CODEX_MCP_TOKEN_ENV_VAR)}`,
+      ];
+    }
     default:
       return [];
   }
 }
 
-/** Can this provider be pointed at the bridge at all? */
+/**
+ * Can this provider be pointed at the bridge at all?
+ *
+ * Asked BEFORE a URL is known (the board decides whether to mint a token at all), so codex is
+ * answered from the provider name rather than by calling {@link remoteMcpConfigArgs} with no URL.
+ */
 export function providerSupportsRemoteMcp(provider: string | undefined): boolean {
-  return remoteMcpConfigArgs(provider).length > 0;
+  const name = provider ?? "claude";
+  return name === "claude" || name === "copilot" || name === "codex";
+}
+
+/**
+ * Does this provider take its token through the WORKER's env rather than through a file in the
+ * checkout? Decides whether `WorkerRepoTransport.boardMcpToken` is populated for an assignment.
+ */
+export function providerNeedsMcpTokenEnv(provider: string | undefined): boolean {
+  return (provider ?? "claude") === "codex";
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -195,7 +299,7 @@ function denial(id: unknown, message: string): unknown {
  * client that has seen the full surface once (or guessed a name) can still call it. The allowlist
  * is the control; the list filtering only keeps the agent from being shown tools it cannot use.
  */
-export function guardMcpMessage(message: unknown, scope: FleetMcpScope): McpGuardOutcome {
+export function guardMcpMessage(message: unknown, scope: ResolvedFleetMcpScope): McpGuardOutcome {
   if (!isRecord(message)) return { kind: "forward", payload: message };
   if (message.method !== "tools/call") return { kind: "forward", payload: message };
   const params = isRecord(message.params) ? message.params : {};
@@ -235,11 +339,69 @@ export function guardMcpMessage(message: unknown, scope: FleetMcpScope): McpGuar
       payload: { ...message, params: { ...params, arguments: { ...args, projectId: scope.projectId } } },
     };
   }
+  if (name === "add_comment") return guardAddComment(message, params, scope);
   return { kind: "forward", payload: message };
 }
 
+/**
+ * `add_comment` is pinned to the assignment's ISSUE and to {@link REMOTE_COMMENT_KINDS} (#799).
+ *
+ * Pinned rather than merely checked, for the same reason `create_issue`'s project is: a remote
+ * builder has no reliable way to name the right id, and the failure mode of guessing is writing
+ * onto someone else's ticket. The issue comes from the DB per request, not from the token, so a
+ * finalized session cannot comment at all — the caller resolves it and passes it in.
+ */
+function guardAddComment(message: JsonRecord, params: JsonRecord, scope: ResolvedFleetMcpScope): McpGuardOutcome {
+  if (!scope.issueId) {
+    const reason = "add_comment refused: this assignment has no live ticket on the board";
+    return {
+      kind: "deny",
+      reason,
+      response: denial(
+        message.id,
+        `${reason} (session ${scope.sessionId}). Either the session has been finalized or its ` +
+          "workspace is gone. Put what you wanted to say in your final summary — the board reads it.",
+      ),
+    };
+  }
+  const args = isRecord(params.arguments) ? params.arguments : {};
+  const requestedIssue = typeof args.issueId === "string" ? args.issueId : undefined;
+  if (requestedIssue && requestedIssue !== scope.issueId) {
+    const reason = `add_comment refused: issueId ${requestedIssue} is not this assignment's ticket`;
+    return {
+      kind: "deny",
+      reason,
+      response: denial(
+        message.id,
+        `${reason} (${scope.issueId}). A remote worker may only comment on the ticket it was ` +
+          "dispatched for. To raise something about ANOTHER ticket, use create_issue and reference it.",
+      ),
+    };
+  }
+  const requestedKind = typeof args.kind === "string" ? args.kind : undefined;
+  if (requestedKind && !REMOTE_COMMENT_KINDS.includes(requestedKind)) {
+    const reason = `add_comment refused: kind "${requestedKind}" is not a remote builder's to write`;
+    return {
+      kind: "deny",
+      reason,
+      response: denial(
+        message.id,
+        `${reason}. A remote worker may post ${REMOTE_COMMENT_KINDS.join(" or ")} — the other kinds are ` +
+          "records of a decision the BOARD made, and writing one would be forging it.",
+      ),
+    };
+  }
+  return {
+    kind: "forward",
+    payload: {
+      ...message,
+      params: { ...params, arguments: { ...args, issueId: scope.issueId, kind: requestedKind ?? "note" } },
+    },
+  };
+}
+
 /** Apply {@link guardMcpMessage} to a single message or a JSON-RPC batch. */
-export function guardMcpRequest(body: unknown, scope: FleetMcpScope): McpGuardOutcome {
+export function guardMcpRequest(body: unknown, scope: ResolvedFleetMcpScope): McpGuardOutcome {
   if (!Array.isArray(body)) return guardMcpMessage(body, scope);
   const out: unknown[] = [];
   for (const message of body) {
@@ -288,12 +450,32 @@ export interface FleetMcpBridge {
   route(): Hono;
   /** Test seam. */
   tokenCount(): number;
+  /** Test seam — replace the per-request DB assignment lookup (#799). */
+  __setAssignmentLookupForTests(lookup: FleetMcpAssignmentLookup): void;
+}
+
+/**
+ * Per-request assignment resolution (#799 gap 3). Injectable so a test can drive the refusal
+ * paths without a `sessions` row, and so the production lookup stays one DB round trip.
+ */
+export type FleetMcpAssignmentLookup = (scope: FleetMcpScope) => Promise<FleetMcpAssignment | null>;
+
+export function createFleetMcpAssignmentLookup(database: Database): FleetMcpAssignmentLookup {
+  return async (scope) => {
+    const row = await findFleetMcpAssignment(scope.sessionId, database);
+    if (!row) return null;
+    // The dispatch must still be THIS worker's. A token outliving a handover to another
+    // machine is exactly the shape #753 closed on the git side.
+    if (row.workerId !== null && row.workerId !== scope.workerId) return null;
+    return { status: row.status, issueId: row.issueId, endedAt: row.endedAt };
+  };
 }
 
 function createFleetMcpBridge(database: Database): FleetMcpBridge {
   const tokens = createExpiringDigestStore<FleetMcpScope>({ ttlMs: DEFAULT_FLEET_MCP_TOKEN_TTL_MS });
   const boardHostByWorker = new Map<string, string>();
   let endpointPort: number | null = null;
+  let lookupAssignment: FleetMcpAssignmentLookup = createFleetMcpAssignmentLookup(database);
 
   const bridge: FleetMcpBridge = {
     issueToken: (input) =>
@@ -321,12 +503,38 @@ function createFleetMcpBridge(database: Database): FleetMcpBridge {
       return { url, token: bridge.issueToken(input) };
     },
     tokenCount: () => tokens.size(),
+    __setAssignmentLookupForTests: (lookup) => {
+      lookupAssignment = lookup;
+    },
     route: () => {
       const app = new Hono();
       app.all("/*", async (c) => {
         const token = extractBearer(c.req.header("authorization"));
         const scope = token ? tokens.resolve(token) : null;
         if (!scope) return c.json({ error: "unauthorized" }, 401);
+
+        // #799 gap 3 — re-derive the assignment from the DB per request, the way the git
+        // transport has since #753. Fails CLOSED: a lookup that throws leaves us unable to tell
+        // a live builder from a token holder whose session ended, and this surface now carries a
+        // write.
+        let assignment: FleetMcpAssignment | null;
+        try {
+          assignment = await lookupAssignment(scope);
+        } catch (err) {
+          console.error(`[fleet-mcp] assignment lookup failed for session ${scope.sessionId}:`, err);
+          return c.json({ error: "assignment lookup failed" }, 503);
+        }
+        if (!assignment || !isWorkerAssignmentCurrent(assignment, Date.now())) {
+          console.log(
+            `[fleet-mcp] refused worker ${scope.workerId}: no current dispatch behind session ${scope.sessionId}` +
+              `${assignment ? ` (status=${assignment.status})` : " (no such session)"}`,
+          );
+          // The token is now known to stand for nothing. Dropping it turns every later call into
+          // a plain 401 instead of another DB round trip.
+          tokens.revokeWhere((s) => s.sessionId === scope.sessionId);
+          return c.json({ error: "assignment is no longer current" }, 401);
+        }
+        const resolved: ResolvedFleetMcpScope = { ...scope, issueId: assignment.issueId };
 
         const upstream = await ensureMcpHttpBridge();
         if (!upstream) {
@@ -343,7 +551,7 @@ function createFleetMcpBridge(database: Database): FleetMcpBridge {
           } catch {
             return c.json({ error: "malformed json-rpc body" }, 400);
           }
-          const guarded = guardMcpRequest(payload, scope);
+          const guarded = guardMcpRequest(payload, resolved);
           if (guarded.kind === "deny") {
             console.log(
               `[fleet-mcp] denied for worker ${scope.workerId} session ${scope.sessionId}: ${guarded.reason}`,
@@ -368,6 +576,15 @@ function createFleetMcpBridge(database: Database): FleetMcpBridge {
 
         let response: Response;
         try {
+          // WHY A LOOPBACK HTTP HOP AND NOT AN INJECTED SERVICE CALL. `no-self-http-in-services`
+          // exists to stop a service calling its OWN REST API instead of the function behind it.
+          // This is the other thing: the target is the #136 MCP StreamableHTTP listener, and MCP's
+          // seam IS an HTTP transport — there is no in-process function to inject, only a protocol
+          // whose session/`mcp-session-id`/SSE semantics live in the transport. Calling "directly"
+          // would mean reimplementing an MCP client, and the inspection this proxy performs
+          // (allowlist, project pinning, tools/list filtering) is only possible because the wire
+          // format is plain JSON on that hop. The guard currently records this as a grandfathered
+          // entry rather than an inline opt-out marker; either form is fine, the reason is here.
           response = await fetch(`http://127.0.0.1:${upstream.port}${FLEET_MCP_PATH}`, {
             method: c.req.method,
             headers,

@@ -17,10 +17,14 @@ import {
   filterToolListResponse,
   guardMcpRequest,
   getFleetMcpBridge,
+  providerNeedsMcpTokenEnv,
   providerSupportsRemoteMcp,
   remoteMcpConfigArgs,
   __resetFleetMcpBridgeForTests,
+  CODEX_MCP_TOKEN_ENV_VAR,
+  REMOTE_COMMENT_KINDS,
   type FleetMcpScope,
+  type ResolvedFleetMcpScope,
 } from "../services/fleet-mcp-bridge.service.js";
 import { isBareFileName } from "@agentic-kanban/shared/lib/worker-protocol";
 import {
@@ -65,6 +69,8 @@ afterAll(async () => {
 });
 
 const SCOPE: FleetMcpScope = { workerId: "w-1", projectId: "proj-a", sessionId: "sess-1" };
+/** What the route hands the guard once it has re-derived the assignment from the DB (#799). */
+const RESOLVED: ResolvedFleetMcpScope = { ...SCOPE, issueId: "issue-a" };
 
 function call(name: string, args?: Record<string, unknown>, id = 7): unknown {
   return { jsonrpc: "2.0", id, method: "tools/call", params: { name, ...(args ? { arguments: args } : {}) } };
@@ -72,7 +78,7 @@ function call(name: string, args?: Record<string, unknown>, id = 7): unknown {
 
 describe("fleet MCP bridge — the allowlist (#769)", () => {
   it("forwards a permitted tool", () => {
-    const outcome = guardMcpRequest(call("get_issue", { issueNumber: 12 }), SCOPE);
+    const outcome = guardMcpRequest(call("get_issue", { issueNumber: 12 }), RESOLVED);
     expect(outcome.kind).toBe("forward");
   });
 
@@ -80,7 +86,7 @@ describe("fleet MCP bridge — the allowlist (#769)", () => {
   it.each(["merge_workspace", "set_preference", "delete_issue", "update_issue", "start_workspace", "relaunch_workspace"])(
     "denies %s",
     (tool) => {
-      const outcome = guardMcpRequest(call(tool), SCOPE);
+      const outcome = guardMcpRequest(call(tool), RESOLVED);
       expect(outcome.kind).toBe("deny");
       if (outcome.kind !== "deny") return;
       expect(outcome.reason).toContain(tool);
@@ -98,7 +104,7 @@ describe("fleet MCP bridge — the allowlist (#769)", () => {
   });
 
   it("pins create_issue to the assignment's project when the caller omits it", () => {
-    const outcome = guardMcpRequest(call("create_issue", { title: "found a thing" }), SCOPE);
+    const outcome = guardMcpRequest(call("create_issue", { title: "found a thing" }), RESOLVED);
     expect(outcome.kind).toBe("forward");
     if (outcome.kind !== "forward") return;
     const payload = outcome.payload as { params: { arguments: { projectId: string } } };
@@ -106,20 +112,20 @@ describe("fleet MCP bridge — the allowlist (#769)", () => {
   });
 
   it("refuses create_issue aimed at another project", () => {
-    const outcome = guardMcpRequest(call("create_issue", { title: "x", projectId: "proj-b" }), SCOPE);
+    const outcome = guardMcpRequest(call("create_issue", { title: "x", projectId: "proj-b" }), RESOLVED);
     expect(outcome.kind).toBe("deny");
     if (outcome.kind !== "deny") return;
     expect(outcome.reason).toContain("proj-b");
   });
 
   it("refuses a batch whole when any member is denied", () => {
-    const outcome = guardMcpRequest([call("get_issue"), call("merge_workspace")], SCOPE);
+    const outcome = guardMcpRequest([call("get_issue"), call("merge_workspace")], RESOLVED);
     expect(outcome.kind).toBe("deny");
   });
 
   it("passes non-tools/call traffic through untouched", () => {
     const initialize = { jsonrpc: "2.0", id: 1, method: "initialize", params: {} };
-    expect(guardMcpRequest(initialize, SCOPE)).toEqual({ kind: "forward", payload: initialize });
+    expect(guardMcpRequest(initialize, RESOLVED)).toEqual({ kind: "forward", payload: initialize });
   });
 
   it("hides denied tools from tools/list", () => {
@@ -160,10 +166,33 @@ describe("fleet MCP bridge — the config the worker receives", () => {
     expect(remoteMcpConfigArgs("copilot")).toEqual(["--additional-mcp-config", `@${REMOTE_MCP_CONFIG_FILENAME}`]);
   });
 
-  it("has no channel for codex or pi, and says so rather than shipping a broken flag", () => {
+  it("configures codex through argv and its token through the WORKER's env (#799)", () => {
+    const url = "http://board:9100/mcp";
+    const args = remoteMcpConfigArgs("codex", { url });
+    // The URL and the NAME of an env var — never the secret. A token in argv is visible in
+    // any process listing on the worker, which is the whole reason the file channel exists.
+    expect(args).toEqual([
+      "-c",
+      `mcp_servers.agentic-kanban.url=${JSON.stringify(url)}`,
+      "-c",
+      `mcp_servers.agentic-kanban.bearer_token_env_var=${JSON.stringify(CODEX_MCP_TOKEN_ENV_VAR)}`,
+    ]);
+    expect(args.join(" ")).not.toContain("Bearer");
+    expect(providerSupportsRemoteMcp("codex")).toBe(true);
+    expect(providerNeedsMcpTokenEnv("codex")).toBe(true);
+    // No URL yet (the fleet listener has not bound) = no half-configured flag.
     expect(remoteMcpConfigArgs("codex")).toEqual([]);
-    expect(remoteMcpConfigArgs("pi")).toEqual([]);
-    expect(providerSupportsRemoteMcp("codex")).toBe(false);
+    // claude/copilot keep the FILE channel, so no env token for them.
+    expect(providerNeedsMcpTokenEnv("claude")).toBe(false);
+    expect(providerNeedsMcpTokenEnv("copilot")).toBe(false);
+  });
+
+  it("still has no channel for pi, because pi has no MCP client (#799)", () => {
+    // Not a gap in the bridge: pi 0.73.1 has no MCP support at all (decision 007), so there
+    // is no configuration that would help. A pi builder's brief must keep saying it has no
+    // board tools — asserted here so a future "fix" cannot quietly ship a flag pi ignores.
+    expect(remoteMcpConfigArgs("pi", { url: "http://board:9100/mcp" })).toEqual([]);
+    expect(providerSupportsRemoteMcp("pi")).toBe(false);
     expect(providerSupportsRemoteMcp("claude")).toBe(true);
   });
 
@@ -231,6 +260,10 @@ describe("fleet MCP bridge — the proxy end to end", () => {
     db = createTestDb().db as unknown as Database;
     __resetFleetMcpBridgeForTests(db);
     bridge = getFleetMcpBridge(db);
+    // #799 gap 3 — the route re-derives the assignment from the DB per request. These tests
+    // drive the proxy, not the query, so the lookup is stubbed to a live assignment; the
+    // refusal paths get their own block below.
+    bridge.__setAssignmentLookupForTests(async () => ({ status: "running", issueId: "issue-a", endedAt: null }));
     bridge.setEndpointPort(9100);
     token = bridge.issueToken(SCOPE);
     app = new Hono();
@@ -337,5 +370,124 @@ describe("the brief a remote worker reads (#749 text, #769 correction)", () => {
 
   it("leaves a file with no remote-worker section alone", () => {
     expect(announceRemoteBoardTools("# just a ticket\n", { boardTools: REMOTE_BOARD_TOOLS })).toBe("# just a ticket\n");
+  });
+});
+
+/**
+ * #799 — the two gaps #769 disclosed, plus the liveness check that widening the surface made
+ * mandatory.
+ *
+ * The through-line: `add_comment` is the FIRST write on this bridge that is not `create_issue`,
+ * and a write is what turns "the token is dropped when the session ends" from adequate into a
+ * 24-hour hole. So the pinning and the per-request re-derivation are tested together — they are
+ * one change, not two.
+ */
+describe("fleet MCP bridge — add_comment is pinned to the assignment (#799)", () => {
+  it("pins the issue when the caller omits it, and defaults the kind to a note", () => {
+    const outcome = guardMcpRequest(call("add_comment", { body: "halfway through the refactor" }), RESOLVED);
+    expect(outcome.kind).toBe("forward");
+    if (outcome.kind !== "forward") return;
+    const payload = outcome.payload as { params: { arguments: { issueId: string; kind: string } } };
+    expect(payload.params.arguments.issueId).toBe("issue-a");
+    expect(payload.params.arguments.kind).toBe("note");
+  });
+
+  it("refuses a comment aimed at ANOTHER ticket", () => {
+    const outcome = guardMcpRequest(call("add_comment", { issueId: "issue-b", body: "x" }), RESOLVED);
+    expect(outcome.kind).toBe("deny");
+    if (outcome.kind !== "deny") return;
+    expect(outcome.reason).toContain("issue-b");
+    // The refusal has to say what to do instead, or an agent just retries it.
+    const response = outcome.response as { error: { message: string } };
+    expect(response.error.message).toContain("create_issue");
+  });
+
+  it("refuses a kind that records a MACHINE decision", () => {
+    for (const kind of ["preflight-verdict", "gate-decision", "merge-attempt", "preflight-clarification"]) {
+      const outcome = guardMcpRequest(call("add_comment", { body: "x", kind }), RESOLVED);
+      expect(outcome.kind, `${kind} must be refused`).toBe("deny");
+    }
+    for (const kind of REMOTE_COMMENT_KINDS) {
+      expect(guardMcpRequest(call("add_comment", { body: "x", kind }), RESOLVED).kind).toBe("forward");
+    }
+  });
+
+  it("refuses entirely when the assignment has no live ticket", () => {
+    const outcome = guardMcpRequest(call("add_comment", { body: "x" }), { ...SCOPE, issueId: null });
+    expect(outcome.kind).toBe("deny");
+    if (outcome.kind !== "deny") return;
+    expect(outcome.reason).toContain("no live ticket");
+  });
+
+  it("is on the allowlist, and is the only write there besides create_issue", () => {
+    expect(REMOTE_BOARD_TOOLS).toContain("add_comment");
+    // A reader should be able to see the write surface at a glance; this fails if one grows.
+    expect(REMOTE_BOARD_TOOLS.filter((t) => t.startsWith("create_") || t.startsWith("add_"))).toEqual([
+      "create_issue",
+      "add_comment",
+    ]);
+  });
+});
+
+describe("fleet MCP bridge — the assignment is re-derived per request (#799 gap 3)", () => {
+  let db: Database;
+  let bridge: ReturnType<typeof getFleetMcpBridge>;
+  let app: Hono;
+  let token: string;
+
+  beforeEach(async () => {
+    if (!stub) await startStub();
+    upstream.received = [];
+    upstream.reply = null;
+    db = createTestDb().db as unknown as Database;
+    __resetFleetMcpBridgeForTests(db);
+    bridge = getFleetMcpBridge(db);
+    bridge.setEndpointPort(9100);
+    token = bridge.issueToken(SCOPE);
+    app = new Hono();
+    app.route("/mcp", bridge.route());
+  });
+
+  const post = async (): Promise<Response> =>
+    app.request("/mcp", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify(call("get_issue", { issueNumber: 1 })),
+    });
+
+  it("refuses when the DB has no such session — the board-crash hole #769 disclosed", async () => {
+    bridge.__setAssignmentLookupForTests(async () => null);
+    expect((await post()).status).toBe(401);
+    expect(upstream.received).toHaveLength(0);
+  });
+
+  it("refuses once the session is finalized, even inside the token's 24h TTL", async () => {
+    // Ended long enough ago that `isWorkerAssignmentCurrent`'s landable window has closed.
+    const longAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+    bridge.__setAssignmentLookupForTests(async () => ({ status: "completed", issueId: "issue-a", endedAt: longAgo }));
+    expect((await post()).status).toBe(401);
+    expect(upstream.received).toHaveLength(0);
+  });
+
+  it("drops the token once it is known to stand for nothing", async () => {
+    bridge.__setAssignmentLookupForTests(async () => null);
+    expect((await post()).status).toBe(401);
+    // The second call is a plain unauthorized: no second DB round trip for a dead token.
+    expect(bridge.tokenCount()).toBe(0);
+  });
+
+  it("fails CLOSED when the lookup throws", async () => {
+    bridge.__setAssignmentLookupForTests(async () => {
+      throw new Error("db is gone");
+    });
+    expect((await post()).status).toBe(503);
+    expect(upstream.received).toHaveLength(0);
+  });
+
+  it("allows a session that ended within the result window, like the git transport does", async () => {
+    const justNow = new Date(Date.now() - 60_000).toISOString();
+    bridge.__setAssignmentLookupForTests(async () => ({ status: "completed", issueId: "issue-a", endedAt: justNow }));
+    expect((await post()).status).toBe(200);
+    expect(upstream.received).toHaveLength(1);
   });
 });

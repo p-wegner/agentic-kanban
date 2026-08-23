@@ -41,6 +41,7 @@ import {
 } from "./tools/worker-fleet.js";
 import { registerGetDiffComments } from "./tools/get-diff-comments.js";
 import { registerCreateDiffComment } from "./tools/create-diff-comment.js";
+import { registerAddComment } from "./tools/add-comment.js";
 import { registerAddDependency } from "./tools/add-dependency.js";
 import { registerAnalyzeDependencies } from "./tools/analyze-dependencies.js";
 import { registerRemoveDependency } from "./tools/remove-dependency.js";
@@ -151,6 +152,7 @@ const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   list_incoming_refs: registerListIncomingRefs,
   get_diff_comments: registerGetDiffComments,
   create_diff_comment: registerCreateDiffComment,
+  add_comment: registerAddComment,
   add_dependency: registerAddDependency,
   analyze_dependencies: registerAnalyzeDependencies,
   remove_dependency: registerRemoveDependency,
