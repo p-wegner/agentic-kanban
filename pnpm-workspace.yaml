@@ -11,6 +11,7 @@ packages:
 #   ip-address    high + 2 moderates — leading-zero octet decoding, XSS in the Address6
 #                 HTML methods (via @modelcontextprotocol/sdk>express-rate-limit)
 #   qs            moderate — remotely-triggerable stringify DoS
+#   body-parser   low  — GHSA-v422-hmwv-36x6 (via @modelcontextprotocol/sdk>express)
 # Each entry names the GHSA ids it clears, so a version here that stops being needed
 # is visible rather than inherited. Measured with `pnpm security` (#741).
 overrides:
@@ -60,6 +61,15 @@ overrides:
   # starts depending on 10.1-specific behaviour.
   ip-address: "^10.3.1"
   qs: "^6.15.2"
+  # 2.3.0 fixes GHSA-v422-hmwv-36x6 (>=2.0.0 <2.3.0), the LAST advisory of any
+  # severity in the production graph, under @modelcontextprotocol/sdk>express.
+  # A `low`, so it was never gating — this is here to take production to zero
+  # advisories, which is a statement worth being able to make (#786).
+  #
+  # Unlike the ip-address entry, this one does NOT force past a declared range:
+  # express@5.2.1 declares `body-parser: "^2.2.1"` (verified in the installed
+  # manifest), so 2.3.0 is in range and this merely raises a floor.
+  body-parser: "^2.3.0"
 
 # Always fetch the win32-x64 native binaries (rollup/esbuild/swc) in addition to
 # the host platform's, so a lockfile produced on one OS installs cleanly on

@@ -46,6 +46,31 @@ Reasons:
   by algorithmic-complexity DoS in libraries we do not expose to untrusted input.
   A moderate worth acting on gets a ticket, not a global threshold change.
 
+### Dev-only advisories are accepted as a class (#786)
+
+Not "ignored" and not "unmeasured" — **accepted, as a class, with a reason**.
+They are printed on every run (the whole-tree line), so the number is always
+visible; what the policy says is that a `high` reachable only from a
+devDependency does not block a merge and does not need a per-advisory
+exemption entry.
+
+The reason is the production/dev line above: `vite`, `vitest`, `postcss`,
+`nanoid`, `js-yaml` via `@changesets/cli`, and the 1.x/5.x `brace-expansion`
+lines under `eslint` / `typescript-eslint` execute on a developer's machine,
+against a checkout that machine already trusts, and none of them ship in the
+npm tarball. The classic exploit text — "any website you visit can reach your
+dev server" — describes a risk we take by running a dev server at all, not one
+this package distributes.
+
+What this buys is that the count is a *decision* rather than a drifting
+remainder. Two things keep it honest:
+
+- The **production** graph is not accepted as a class. It is gated, ratcheted,
+  and currently at zero — see below.
+- A dev-only advisory still gets fixed when the fix is cheap (a devDep bump, an
+  override floor). Class acceptance is what happens to the ones left over, not
+  a reason to stop bumping.
+
 ### The acceptance list makes the gate a ratchet
 
 Four high-severity advisories already existed in the production graph when the
