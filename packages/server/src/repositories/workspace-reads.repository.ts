@@ -4,6 +4,7 @@ import {
   sessions,
   agentSkills,
   repos,
+  workspaceSymlinkRun,
 } from "@agentic-kanban/shared/schema";
 import { desc, eq, inArray, notInArray, and, isNotNull, ne, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
@@ -156,14 +157,16 @@ export async function getWorkspaceDetails(
       latestSetupDurationMs: workspaces.latestSetupDurationMs,
       latestSetupStdoutTail: workspaces.latestSetupStdoutTail,
       latestSetupStderrTail: workspaces.latestSetupStderrTail,
-      latestSymlinkState: workspaces.latestSymlinkState,
-      latestSymlinkStartedAt: workspaces.latestSymlinkStartedAt,
-      latestSymlinkEndedAt: workspaces.latestSymlinkEndedAt,
-      latestSymlinkDirs: workspaces.latestSymlinkDirs,
-      latestSymlinkLinked: workspaces.latestSymlinkLinked,
-      latestSymlinkSkipped: workspaces.latestSymlinkSkipped,
-      latestSymlinkFailed: workspaces.latestSymlinkFailed,
-      latestSymlinkError: workspaces.latestSymlinkError,
+      // #798: the symlink run moved to `workspace_symlink_run`. Aliased back to the same
+      // eight field names, so the projection and the DTO it builds are untouched.
+      latestSymlinkState: workspaceSymlinkRun.state,
+      latestSymlinkStartedAt: workspaceSymlinkRun.startedAt,
+      latestSymlinkEndedAt: workspaceSymlinkRun.endedAt,
+      latestSymlinkDirs: workspaceSymlinkRun.dirs,
+      latestSymlinkLinked: workspaceSymlinkRun.linked,
+      latestSymlinkSkipped: workspaceSymlinkRun.skipped,
+      latestSymlinkFailed: workspaceSymlinkRun.failed,
+      latestSymlinkError: workspaceSymlinkRun.error,
       serviceState: workspaces.serviceState,
       isolationDowngraded: workspaces.isolationDowngraded,
       isolationDowngradeReason: workspaces.isolationDowngradeReason,
@@ -177,6 +180,7 @@ export async function getWorkspaceDetails(
     .innerJoin(issues, eq(workspaces.issueId, issues.id))
     .leftJoin(agentSkills, eq(workspaces.skillId, agentSkills.id))
     .leftJoin(leadingRepo, and(eq(leadingRepo.workspaceId, workspaces.id), eq(leadingRepo.isLeading, true)))
+    .leftJoin(workspaceSymlinkRun, eq(workspaceSymlinkRun.workspaceId, workspaces.id))
     .where(eq(workspaces.id, workspaceId));
 
   if (result.length === 0) return null;

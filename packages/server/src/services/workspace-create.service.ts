@@ -73,6 +73,7 @@ import {
   rollbackSiblingWorktrees,
   type SiblingWorktree,
 } from "./workspace-repos.service.js";
+import { insertWorkspaceSymlinkRun } from "../repositories/workspace-symlink-run.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export function createWorkspaceCreateService(deps: {
@@ -194,18 +195,24 @@ export function createWorkspaceCreateService(deps: {
       latestSetupDurationMs: params.latestSetup.durationMs,
       latestSetupStdoutTail: params.latestSetup.stdoutTail,
       latestSetupStderrTail: params.latestSetup.stderrTail,
-      latestSymlinkState: params.latestSymlink.state,
-      latestSymlinkStartedAt: params.latestSymlink.startedAt,
-      latestSymlinkEndedAt: params.latestSymlink.endedAt,
-      latestSymlinkDirs: stringifyJson(params.latestSymlink.dirs),
-      latestSymlinkLinked: stringifyJson(params.latestSymlink.linked),
-      latestSymlinkSkipped: stringifyJson(params.latestSymlink.skipped),
-      latestSymlinkFailed: stringifyJson(params.latestSymlink.failed),
-      latestSymlinkError: params.latestSymlink.error,
       contextPrimer: params.contextPrimer,
       serviceState: params.serviceState,
       createdAt: params.now,
       updatedAt: params.now,
+    }, params.database ?? database);
+    // #798: the symlink run is its own table now — written with the same handle, so it is
+    // in the same transaction as the workspace row when the caller passes one. Written even
+    // for the `state: "disabled"` run a project with the feature off produces: the columns
+    // always carried it, and the diagnostics panel distinguishes "disabled" from "pending".
+    await insertWorkspaceSymlinkRun(params.id, {
+      state: params.latestSymlink.state,
+      startedAt: params.latestSymlink.startedAt,
+      endedAt: params.latestSymlink.endedAt,
+      dirs: stringifyJson(params.latestSymlink.dirs),
+      linked: stringifyJson(params.latestSymlink.linked),
+      skipped: stringifyJson(params.latestSymlink.skipped),
+      failed: stringifyJson(params.latestSymlink.failed),
+      error: params.latestSymlink.error,
     }, params.database ?? database);
   }
 

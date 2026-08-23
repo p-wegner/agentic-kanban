@@ -953,6 +953,13 @@
       "when": 1787481450627,
       "tag": "0135_workspace_code_metrics",
       "breakpoints": true
+    },
+    {
+      "idx": 136,
+      "version": "6",
+      "when": 1787482647571,
+      "tag": "0136_workspace_symlink_run",
+      "breakpoints": true
     }
   ]
 }

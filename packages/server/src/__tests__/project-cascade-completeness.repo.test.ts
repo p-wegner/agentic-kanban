@@ -191,6 +191,15 @@ const SUBTREE_SEEDERS: Record<string, (c: SeedCtx) => Promise<void>> = {
       workspaceId: c.workspaceId, metricsJson: '{"files":3}', computedAt: c.now,
     });
   },
+  // #798: the fourth column family extracted out of `workspaces` — the dependency-symlink
+  // bootstrap run. Same `onDelete: cascade` shape, so seeding it proves the cascade fires.
+  workspace_symlink_run: async (c) => {
+    await c.db.insert(schema.workspaceSymlinkRun).values({
+      workspaceId: c.workspaceId, state: "success", startedAt: c.now, endedAt: c.now,
+      dirs: '["node_modules"]', linked: '["node_modules"]', skipped: "[]", failed: "[]",
+      error: null,
+    });
+  },
   sessions: async (c) => {
     await c.db.insert(schema.sessions).values({
       id: c.sessionId, workspaceId: c.workspaceId, status: "running", startedAt: c.now,
