@@ -23,8 +23,9 @@
 //   node scripts/coverage-report.mjs --min 35      # also fail below N% total lines
 //   node scripts/coverage-report.mjs --lcov-paths  # just the lcov files, one per line
 //   node scripts/coverage-report.mjs --allow-missing   # report what is there, never fail on absence
+//   node scripts/coverage-report.mjs --merge [out]  # ONE repo-root-relative lcov for the analyzer
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -75,6 +76,37 @@ export function readPackageCoverage(repoRoot, pkg) {
   return out;
 }
 
+/**
+ * #797 — `code-metrics analyze --coverage <path>` takes exactly ONE report, and each package's
+ * lcov names its files relative to that package with Windows separators (`SF:src\lib\x.ts`).
+ * Feeding it one package's report leaves the other three on the co-change proxy; feeding it a
+ * naive `cat` of all four makes `src/lib/x.ts` ambiguous across packages and the analyzer
+ * matches the wrong file or none.
+ *
+ * lcov IS just concatenated records, so merging is legitimate — it only needs every `SF:`
+ * re-anchored to the repo root and normalised to forward slashes. That is what this does.
+ */
+export function mergeLcov(repoRoot, reports) {
+  const out = [];
+  const seen = new Set();
+  for (const r of reports) {
+    if (!r.lcovPresent) continue;
+    const prefix = `packages/${r.pkg}/`;
+    for (const line of readFileSync(r.lcov, "utf8").split(/\r?\n/)) {
+      if (line.startsWith("SF:")) {
+        const rel = line.slice(3).split("\\").join("/").replace(/^\.\//, "");
+        // Already repo-anchored (a future reporter change) — do not double-prefix.
+        const full = rel.startsWith("packages/") ? rel : prefix + rel;
+        seen.add(full);
+        out.push(`SF:${full}`);
+      } else {
+        out.push(line);
+      }
+    }
+  }
+  return { text: out.join("\n"), fileCount: seen.size };
+}
+
 function pct(covered, total) {
   if (!total) return 0;
   return Math.round((covered / total) * 10000) / 100;
@@ -110,11 +142,40 @@ function main() {
   const asJson = argv.includes("--json");
   const lcovOnly = argv.includes("--lcov-paths");
   const allowMissing = argv.includes("--allow-missing");
+  const mergeIdx = argv.indexOf("--merge");
   const min = numArg(argv, "--min");
 
   const reports = COVERED_PACKAGES.map((pkg) => readPackageCoverage(REPO_ROOT, pkg));
   const totals = aggregate(reports);
   const missing = reports.filter((r) => !r.present);
+
+  if (mergeIdx !== -1) {
+    const outPath = resolve(
+      argv[mergeIdx + 1] && !argv[mergeIdx + 1].startsWith("--")
+        ? argv[mergeIdx + 1]
+        : join(REPO_ROOT, "coverage", "lcov.info"),
+    );
+    const { text, fileCount } = mergeLcov(REPO_ROOT, reports);
+    mkdirSync(dirname(outPath), { recursive: true });
+    writeFileSync(outPath, text, "utf8");
+    const from = reports.filter((r) => r.lcovPresent).map((r) => r.pkg);
+    console.log(`merged ${fileCount} files from ${from.length} package(s) (${from.join(", ")}) -> ${outPath}`);
+    console.log(`
+Feed it to the analyzer:
+  code-metrics analyze . --changeset-strategy pr --coverage ${outPath}`);
+    if (missing.length && !allowMissing) {
+      console.error(
+        `
+FAIL: ${missing.length} package(s) contributed nothing: ${missing.map((r) => r.pkg).join(", ")}.
+` +
+          `A partial merge silently leaves those files on the co-change proxy — run \`pnpm test:coverage\` first,
+` +
+          `or pass --allow-missing if a partial report is what you meant.`,
+      );
+      process.exit(1);
+    }
+    process.exit(0);
+  }
 
   if (lcovOnly) {
     for (const r of reports) if (r.lcovPresent) console.log(r.lcov);

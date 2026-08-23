@@ -58,9 +58,11 @@ package** (or `pnpm -r --filter … exec vitest run --coverage` from the root, w
 - `scripts/coverage-report.mjs` — the consumer of record. Prints a per-package and repo-wide table,
   names the lcov paths to feed the analyzer, and **exits non-zero when a package that runs tests
   emitted no report**, because #688's failure mode was silence. `--json`, `--min <pct>`,
-  `--lcov-paths`, `--allow-missing`.
+  `--lcov-paths`, `--allow-missing`, `--merge [out]` (#797 — one repo-anchored lcov for the
+  analyzer, since it accepts only one report; `pnpm coverage:merge`).
 - `.github/workflows/arch-gate.yml`, job `coverage` — runs the suite with coverage, runs the reader,
-  and uploads `lcov.info` + `coverage-summary.json` as the `coverage-lcov` artifact (14 days).
+  runs the merge, and uploads the per-package `lcov.info` + `coverage-summary.json` and the
+  merged `coverage/lcov.info` as the `coverage-lcov` artifact (14 days).
   **It does not run on pull requests** (`if: github.event_name != 'pull_request'`) — only on pushes
   to master and on `workflow_dispatch`. A full-repo coverage run is the entire suite (~4,100 server
   tests that spawn real git/node children, plus 1,541 client tests), and the vitest configs in this
@@ -82,7 +84,7 @@ becomes a measurement. Files the report does **not** cover keep the co-change pr
 report yields a mixed basis — `safety_net_basis_counts` says which files got which, and that field
 is the thing to read before believing any exposure ranking.
 
-### The measurement, made (2026-08-23, client lcov only, 11m22s)
+### The first measurement (2026-08-23, client lcov only, 11m22s) — superseded, kept for the delta
 
 `provenance.scanners.coverage` went from `skipped:no_report` to `ok`, and the basis split:
 
@@ -104,21 +106,112 @@ The two genuinely worst-protected complex files in the repo were invisible to th
 and the file it pointed at was well covered. `scripts/analyze-claude-session.mjs` stays 3rd on
 `test_cochange` — see below.
 
-## Two costs, measured
+### The full measurement (2026-08-23, #797, merged four-package lcov, 11m55s)
 
-- **Client**: 165 files / 1,541 tests, **54s** warm with coverage.
-- **Server**: 401 files / 3,338 tests, **20m49s** with coverage (`VITEST_MAX_WORKERS=4`, on a
-  machine running seven concurrent agents). That is the number the arch-gate job's
-  `if: github.event_name != 'pull_request'` exists for — a full-repo run is this plus three more
-  packages, and it is not worth putting in front of every merge until it has been timed on a CI
-  runner.
+`provenance.scanners.coverage = ok`, and the basis is now mostly measurement:
 
-**A run with any failing test produces no coverage report at all.** That server run had 6 failing
-files (unrelated in-flight work in a shared checkout) and wrote nothing — not in-tree, not at an
-absolute `--coverage.reportsDirectory` (an absolute path was separately verified to work on a
-passing run). So a red suite yields no coverage, and `scripts/coverage-report.mjs` will say so
-loudly; the workflow's artifact upload uses `if-no-files-found: warn` so the reader stays the single
-clear failure.
+```
+safety_net_basis_counts  { coverage: 997, test_cochange: 434 }
+   #765, client lcov only  { coverage: 225, test_cochange: 1191 }
+   #688 era, no report     {               test_cochange: 1375 }
+```
+
+997 of 1,431 scored files are measured; `exposure.safety_net_basis` reads `coverage`, and
+`safety_net_mean` is 0.6728. The 434 still on the co-change proxy are the files no vitest
+project instruments — test files themselves (excluded by every package's `coverage.exclude`),
+plus root `scripts/` (46), `packages/e2e` (4), and the markdown/yaml/py/sh files the analyzer
+scores but v8 can never see. By module: client 211, shared 72, server 71, scripts 46, root 26,
+mcp-server 4, e2e 4.
+
+Run cost: 11m55s for `analyze` on top of the ~28m coverage run.
+
+## The numbers (2026-08-23, #797 — all four packages, this machine)
+
+The first time every package has been measured. `code-metrics analyze --coverage` had been
+falling back to the `test_cochange` proxy for everything outside `packages/client`; it no
+longer has to.
+
+| package | test files | tests | wall time | files | lines | branches | funcs | files at 0% |
+|---|---|---|---|---|---|---|---|---|
+| `shared` | 100 | 960 | **2m16s** | 127 | **76.37%** (3214/4208) | 69.63% | 65.18% | 3 |
+| `server` | 735 | 6892 | **22m55s** | 652 | **79.14%** (24933/31503) | 68.30% | 74.60% | 34 |
+| `mcp-server` | 44 | 206 | **2m03s** | 99 | **48.85%** (979/2004) | 40.90% | 54.97% | 4 |
+| `client` | 169 | 1592 | **1m14s** | 257 | **48.98%** (4328/8835) | 43.41% | 39.90% | 29 |
+| **TOTAL** | | | **~28m30s** | 1,135 | **71.87%** (33454/46550) | 61.34% | 63.47% | 70 |
+
+`VITEST_MAX_WORKERS=4` for `server`, defaults elsewhere, on a machine running several
+concurrent agent sessions. `server` is the whole cost: it is 80% of the wall clock and 68% of
+the measured lines. **Time it on a CI runner before moving the arch-gate `coverage` job onto
+`pull_request`** — a 23-minute merge gate is a different decision from a 23-minute
+informational job, and none of the numbers above are CI timings.
+
+Every one of those four runs had failing tests (`shared` 5 files, `server` 11, `mcp-server` 0,
+`client` 2) — unrelated in-flight work from other agents in this shared checkout — and every
+one still produced its report. That is new; see below.
+
+### The reason these numbers did not exist before
+
+**`coverage.reportOnFailure` defaults to `false`.** A vitest run with any failing test writes
+no coverage report at all. This repo's guard/ratchet suites scan the whole source tree, so in
+a checkout where several agents work at once they are red for reasons that have nothing to do
+with the package under measurement — which means every attempt to measure `shared`, `server`
+or `mcp-server` had silently emitted nothing. #765 burned a 20m49s server run on exactly this
+and concluded the package was unmeasurable.
+
+All four packages now set `reportOnFailure: true`. Coverage is a MEASUREMENT, not a gate: a
+red suite must still yield its numbers, and the provenance (how many suites failed) belongs
+next to the number, which is what the table above does.
+`packages/server/src/__tests__/coverage-wiring.test.ts` asserts the flag in all four configs
+and is red on a config that omits it.
+
+**Caveat, measured once and unexplained.** The first full `server` run (26m29s, 12 failing
+files) still produced no report *with* `reportOnFailure: true`: vitest printed its summary and
+exited without running the coverage-reporting phase or the `globalSetup` teardown. The
+identical re-run (22m55s, 11 failing files) reported normally, and a deliberate single-file
+failing run reported too. So `reportOnFailure` demonstrably works and something else can
+occasionally kill the run after the summary. If a server run yields nothing, re-run it before
+concluding anything.
+
+### Feeding all four to the analyzer: `pnpm coverage:merge`
+
+`code-metrics analyze --coverage <path>` takes exactly **one** report, and each package's lcov
+names its files relative to that package, with Windows separators. A naive `cat` of the four
+makes `src/index.ts` ambiguous across packages. lcov is just concatenated records, so merging
+is legitimate — it only needs each `SF:` re-anchored to the repo root:
+
+```bash
+pnpm test:coverage     # ~28m, all four packages
+pnpm coverage:report   # the table; fails if a package emitted nothing
+pnpm coverage:merge    # -> coverage/lcov.info, 1,135 files, repo-anchored
+code-metrics analyze . --changeset-strategy pr --coverage coverage/lcov.info
+```
+
+`mergeLcov` lives in `scripts/coverage-report.mjs` and is unit-tested for the collision case.
+The arch-gate `coverage` job runs the merge and uploads `coverage/lcov.info` alongside the
+per-package artifacts.
+
+### Measured coverage of the files three refactoring tickets name
+
+The sequencing question #765 asked and could not answer. All ten are in `packages/server`:
+
+| ticket | file | lines | branches | funcs |
+|---|---|---|---|---|
+| #728 | `services/workspace-services.service.ts` | **65.25%** (139/213) | 52.07% | 48.97% |
+| #728 | `repositories/issue.repository.ts` | 82.81% (53/64) | 73.33% | 74.19% |
+| #728 | `services/devcontainer-workspace.service.ts` | **67.76%** (82/121) | 61.36% | 73.33% |
+| #728 | `services/git-info.service.ts` | 97.54% (159/163) | 79.16% | 89.28% |
+| #728 | `services/butler-definitions.service.ts` | 93.10% (81/87) | 73.73% | 96.00% |
+| #726 | `services/plugin.service.ts` | 90.38% (47/52) | 85.18% | 88.88% |
+| #726 | `services/plugin-loop.service.ts` | 88.88% (40/45) | 82.81% | 75.00% |
+| #726 | `services/monitor-cycle.ts` | 78.14% (236/302) | 67.91% | 62.79% |
+| #726 | `services/workspace-merge.service.ts` | 85.08% (194/228) | 63.54% | 82.05% |
+| #700 | `startup/exit-workflow.ts` | **70.47%** (148/210) | 56.46% | 88.23% |
+
+**None of them is unprotected.** The lowest is 65%, the median 84%, and eight of ten are above
+the repo-wide 71.87%. The "cover it before you refactor it" precondition #765 raised for these
+three tickets does not bind — they can be started on the tests as they stand. The two worth a
+second look are `workspace-services.service.ts` (49% of its functions never called by a test)
+and `exit-workflow.ts` (56% branches), where the line number overstates the protection.
 
 ## What coverage can never tell you here
 
@@ -140,8 +233,10 @@ services/repositories) and #700 (`startup/exit-workflow.ts`). Every file those t
 `packages/server`, so the useful move before starting any of them is a server coverage run and a
 look at the per-file numbers — not another pass over the co-change ranking.
 
-**That run has not happened.** Only `packages/client` has ever been measured, so every server file
-— including all of #726's, #728's and #700's — is still scored on the proxy that was just shown to
-reorder the worklist. #797 tracks it: run all four packages, record the wall time, and report the
-measured coverage of those files so the refactoring tickets can be sequenced behind test-writing
-where the number is low.
+**That run has happened (#797) — see § The numbers above.** All four packages are measured,
+and the answer is that none of the ten files those tickets name is unprotected: 65% lines at
+the worst, 84% median. The precondition does not bind; the tickets can start. What the run did
+NOT settle is whether the arch-gate `coverage` job belongs on `pull_request` (23 minutes of
+`server` on a loaded dev box is not a CI timing) or whether `coverage-report.mjs --min <pct>`
+should become a floor. There is now a baseline — 71.87% repo-wide — so setting one is a
+decision someone can make, but it has not been made.

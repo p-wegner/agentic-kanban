@@ -57,6 +57,14 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "lcov", "json-summary"],
       reportsDirectory: "coverage",
+      // #797: WITHOUT this, a run with ANY failing test writes no coverage report at all —
+      // vitest's default is `reportOnFailure: false`. That is how #765 burned a 20m49s server
+      // run for nothing (6 unrelated in-flight failures in a shared checkout) and why `shared`
+      // had never been measured: its four tree-scanning guard suites go red whenever a
+      // neighbour's uncommitted work is in the tree. Coverage is a MEASUREMENT, not a gate —
+      // it must survive a red suite, and the number's provenance (how many suites failed) is
+      // recorded in docs/line-coverage.md alongside it.
+      reportOnFailure: true,
       exclude: ["**/dist/**", "**/node_modules/**", "**/__tests__/**", "**/*.test.ts", "**/*.test.tsx", "drizzle/**"],
     },
   },
