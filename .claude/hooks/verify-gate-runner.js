@@ -243,6 +243,25 @@ function collectTreePids(rootPid, childrenMap, seen) {
   return seen;
 }
 
+/**
+ * Is this process orphaned — i.e. did the parent that launched it already exit?
+ *
+ * Windows leaves the dead parent's pid in place, so "its ppid is not in the snapshot"
+ * answers it. POSIX does NOT: when the parent exits the kernel RE-PARENTS the child to
+ * init (pid 1, or a container's subreaper), and pid 1 is very much alive — so the
+ * Windows-shaped check called every orphan "still supervised" and the sweep never
+ * reaped anything off Windows (#828: the zombie-sweep test failed on the first Linux CI
+ * run for exactly this reason).
+ *
+ * A ppid of 0/1 is therefore ALSO an orphan here. That is not a licence to kill
+ * daemons: a candidate must additionally have this cwd in its command line and own no
+ * listening port, which is what protects a deliberately detached dev server.
+ */
+function isOrphanedProcess(proc, byPid) {
+  if (process.platform !== "win32" && proc.ppid <= 1) return true;
+  return !byPid.has(proc.ppid);
+}
+
 function killDirDescendants(cwd) {
   if (!cwd) return;
   const processes = listProcessesForSweep();
@@ -273,7 +292,7 @@ function killDirDescendants(cwd) {
     // shell has already exited (execFileSync is synchronous) — so a genuine leaked
     // worker is always an ORPHAN: its recorded parent PID is no longer alive. A live
     // dev server or agent session still has a live parent and is skipped.
-    if (byPid.has(proc.ppid)) continue;
+    if (!isOrphanedProcess(proc, byPid)) continue;
     const cmdNormalized = proc.commandLine.replace(/\\/g, "/").toLowerCase();
     if (!commandReferencesDir(cmdNormalized, dirNormalized)) continue;
     const treePids = collectTreePids(proc.pid, childrenMap, new Set());
