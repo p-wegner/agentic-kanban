@@ -59,10 +59,11 @@ const GOVERNED_WIDTH_THRESHOLD = 30;
  * `workspace_conflict_cache`, `workspace_setup_run`, `workspace_summary`,
  * `workspace_diff_stat_cache` and `workspace_scorecard`. There is no such
  * prefix on this table any more, and an entry of 0 would be a claim about a family that no
- * longer exists here. (Be aware of what this test does and does not enforce: the family
- * assertion compares COUNTS, so a leftover entry of 0 still passes. Removal is a convention
- * for honest bookkeeping; what is mechanically enforced is the TOTAL below, and any family
- * that GROWS.)
+ * longer exists here. Removal is now ENFORCED rather than a convention: the third assertion
+ * below fails any declared family that matches zero live columns (#830). Until that landed,
+ * the family assertion compared COUNTS only, so a leftover entry of `0` passed and read to a
+ * future maintainer as "this family still exists and is empty" — the same stale-baseline
+ * shape as #483, and the reason `status-write-ratchet.test.ts` grew its own staleness half.
  * The counts were RE-DERIVED per family at cut time, and the published estimates were wrong
  * in both directions (#798 and #815) — `merge_gate_` was listed at ~7 files and is 4,
  * `conflict_cache_` at 11 and is 5, `latest_setup_` at 10 and is 8; `summary_` was published
@@ -132,5 +133,28 @@ describe("workspaces column-count ratchet (#739)", () => {
     // Equality, so a family that shrinks (because it was extracted) also forces this
     // list to be updated rather than leaving a stale, over-generous budget behind.
     expect(counted).toEqual(COLUMN_FAMILIES);
+  });
+
+  // The staleness half (#830). The assertion above compares counts, so it catches a family
+  // that GROWS and one that SHRINKS to a non-zero number — but a family declared at exactly
+  // `0` matches its own live count of 0 and passes forever. That is precisely the state an
+  // extracted family is left in if its entry is zeroed instead of deleted, and ten families
+  // have now been extracted through this ratchet relying on nothing but an agent reading the
+  // convention above. A prefix that matches nothing is either an extraction whose bookkeeping
+  // was left half-done or a typo, and neither should pass.
+  it("no declared column family is stale (remove the entry once it is extracted)", async () => {
+    const widths = await tableWidths();
+    const cols = widths.get("workspaces");
+    expect(cols).toBeDefined();
+
+    const stale = Object.keys(COLUMN_FAMILIES)
+      .filter((prefix) => cols!.every((c) => !c.startsWith(prefix)))
+      .map((prefix) => `${prefix}: declared, but no column on \`workspaces\` starts with it — remove the entry`)
+      .sort();
+
+    expect(
+      stale,
+      "Stale COLUMN_FAMILIES entries (an extracted family is DELETED, not zeroed): " + stale.join("; "),
+    ).toEqual([]);
   });
 });
