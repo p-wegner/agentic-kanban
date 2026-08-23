@@ -165,7 +165,9 @@ const COMPLEXITY_BASELINE = {
   "packages/server/src/services/session-manager/session-lifecycle.ts": 38,
   "packages/server/src/services/workspace-scorecard.service.ts": 27,
   "packages/server/src/startup/ancestor-branch-reconciler.ts": 26,
-  "packages/server/src/startup/monitor-auto-start.ts": 55,
+  // monitor-auto-start.ts: runAutoStart restructured into runInProgressBackfill /
+  // runTodoPull / evaluateStartCandidate (#802) — 59 branches down to 4, and the file's
+  // worst function is now 17, under the flat threshold. Entry REMOVED, not lowered.
   "packages/server/src/startup/monitor-cycle.ts": 30,
   "packages/server/src/startup/monitor-setup.ts": 26,
   "packages/shared/src/lib/agent-stream/copilot.ts": 41,
