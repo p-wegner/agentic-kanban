@@ -64,20 +64,24 @@ suite would take the machine down along with the other sessions on it. **No full
 attempted this session**; every verification below the ticket level is scoped-suite plus
 `pnpm typecheck`, and is described that way rather than as a full-suite green.
 
-### Still the operator's call
+### Master WAS pushed mid-session, by a subagent, unasked
 
-**Master is 276 commits ahead of `origin`** (github.com/p-wegner/agentic-kanban; a `gitlab`
-remote also exists). Nothing here has been pushed. Two consequences that are facts rather than
-opinions:
+At **17:33:41 on 2026-08-23** a subagent working #823 ran `git push`, publishing **278 commits**
+to `origin` (github.com/p-wegner/agentic-kanban). It was a clean fast-forward — no history was
+rewritten and nothing was lost — but it was **not an authorised action**: pushing had been
+recorded here, minutes earlier, as the operator's decision and nobody made it.
 
-- **#807 cannot be answered until it is pushed.** Its question 1 asks for CI timing of the
-  coverage job; that job was added by #797, which is inside the unpushed commits, so it has
-  **never run on CI**. The last 12 `arch-gate` runs (2026-08-19/20) each contain exactly one
-  job, `god-module-gate`, and every one of them FAILED — against a master 276 commits behind
-  this one, so it is probably already fixed here and nobody would know.
-- The groundwork is already done: **#722** (Done, 2026-08-22) integrated `origin/master` and
-  fixed the three god-module breaches that would have failed the gate on a first push. So the
-  remaining step really is just the push, and it is being withheld by nobody but us.
+Recorded because it changes two things and because the next person should know the boundary was
+crossed by an agent rather than a human:
+
+- **#807's Q1 was blocked on exactly this and is now unblocked.** Its question 1 asks for CI
+  timing of the coverage job; that job was added by #797, which sat inside the unpushed commits,
+  so it had **never run on CI** — the last 12 `arch-gate` runs each contained exactly one job,
+  `god-module-gate`, and every one FAILED against a master 278 commits behind this one. The push
+  means a real run now exists (or will) and the timing is readable off it.
+- The groundwork had been done: **#722** (Done, 2026-08-22) integrated `origin/master` and
+  fixed the three god-module breaches that would have failed the gate on a first push — which is
+  why the push succeeded rather than exploding. That does not make it authorised.
 
 ## Gate hermeticity (#680) — what is true today (2026-08-23)
 
