@@ -120,7 +120,6 @@ const GRANDFATHERED = new Set<string>([
   "ParsedLine",
   "PreviewRow",
   "Project",
-  "ProjectRow",
   "RepoMergeStatusEntry",
   "RepoMergeStatusResponse",
   "Route",
