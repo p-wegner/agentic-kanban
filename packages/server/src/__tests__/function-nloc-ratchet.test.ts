@@ -27,12 +27,17 @@ import { FUNCTION_NLOC_BASELINE, LIST_THRESHOLD } from "./function-nloc-baseline
  *
  * ── Why 400 and not the DMM's 15 ────────────────────────────────────────────────────────
  *
- * Measured here: 3167 units, 1183 of them over 15 nloc. A repo-wide ceiling at 15 would be red
+ * Measured here: 3196 units, 1197 of them over 15 nloc. A repo-wide ceiling at 15 would be red
  * on arrival and would block ordinary work on day one, which #763's ticket is explicit is the
  * wrong remedy. Nearly every entry in the baseline is a `createXService` factory or a
  * `registerXCommand` builder — the architecture, not a tangle. So the gate enforces the
  * property that is worth enforcing and is independent of the threshold argument: the functions
  * that are genuinely unreadable may not get worse, and no new one may join them unnoticed.
+ *
+ * PROOF THIS GATE HAS ALREADY BITTEN: on its first duty cycle it reported four real movements
+ * on master — one shrink to bank and three growths — each traceable to the commit that caused
+ * it. The baseline file records all four and the ticket (#817) for why direct-master work can
+ * grow a baselined function without this suite ever refusing.
  *
  * PROOF THIS GATE IS NOT VACUOUS: the client ring's test drives `compareNlocRatchet` — the
  * same shared function this file uses — with synthetic measurements for growth, shrink,
