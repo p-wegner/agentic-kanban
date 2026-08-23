@@ -42,18 +42,31 @@ import {
  * number is a regression, and a file UNDER it is a stale entry that must be lowered — which is
  * what stops a ceiling from decaying into a budget that the next regression hides inside.
  *
- * Landed in #806's batch (19 handlers, 120 → 101): `codemods.ts` (3, and `POST /apply` WRITES
+ * Landed in #806's batch 1 (19 handlers, 120 → 101): `codemods.ts` (3, and `POST /apply` WRITES
  * FILES using `projectId` as its security boundary), `projects.ts` (9), `workspace-actions.ts`
- * (5), `tags.ts` (2). The remaining 101 are the disclosed remainder, per CLAUDE.md's
- * partial-refactor rule — this file IS that disclosure.
+ * (5), `tags.ts` (2). Batch 2 took 101 → 92 by working the cases batch 1 had declared
+ * non-mechanical: `plugins.ts` (12 → 5) and `projects.ts` (6 → 4). The remainder is the
+ * disclosed one, per CLAUDE.md's partial-refactor rule — this file IS that disclosure.
  *
- * **Two families in the remainder are NOT mechanical**, and a later batch should not assume
- * they are:
- *   - `plugins.ts` (12) and `workers.ts` (4) throw `PluginError` / `UnprocessableError`, not the
- *     `c.json({error}, 400)` that `parseJsonBody`'s `HTTPException` reproduces. `workers.ts`
- *     answers **422**. Routing those through a schema changes the status code.
- *   - Many `plugins.ts` guards read `body.projectId ?? c.req.query("projectId")` — a field that
- *     is optional in the BODY but required overall. No body schema can express that.
+ * **What batch 2 learned about the two families batch 1 flagged**, since the flags were half
+ * right and a later batch should inherit the corrected version:
+ *
+ *   - **The error CLASS is a real obstacle, but a surmountable one.** `PluginError(msg,
+ *     "BAD_REQUEST")` renders as `{ error, code: "BAD_REQUEST" }` at 400 (#823) while
+ *     `parseJsonBody`'s `HTTPException` renders as `{ error }` alone — so a bare swap drops a
+ *     field, which is a wire change. `plugins.ts` keeps its error identity by re-throwing the
+ *     schema's `HTTPException` as a `PluginError` (`parsePluginBody`), and converts. Any route
+ *     file with its own error class can do the same.
+ *   - **A different STATUS is not surmountable that way, and `workers.ts` is the case.** All four
+ *     of its reads answer **422** (`UnprocessableError`) or a bespoke 401/409/422 protocol body;
+ *     see the per-entry note below. Those stay.
+ *   - **The `body.projectId ?? c.req.query("projectId")` claim was WRONG.** No POST/PUT handler in
+ *     `plugins.ts` falls back to the query string — the fallback exists only on its GET routes,
+ *     which read no body at all. Nothing in the remainder is blocked by "optional in the body,
+ *     required overall". Verified by reading every handler in that file, not by grep.
+ *
+ * **A rejection is a valid outcome and is recorded as a comment on the entry**, so the next batch
+ * argues with the reason instead of rediscovering it.
  */
 
 const packagesRoot = packagesRootFrom(import.meta.dirname!, 3);
@@ -130,17 +143,36 @@ const BASELINE: Readonly<Record<string, number>> = {
   "issues.ts": 12,
   "merge-queue.ts": 1,
   "milestones.ts": 2,
-  "plugins.ts": 12,
+  // 5 = 2 install-side reads + 3 `parseOptionalJsonBody`. The other seven converted in batch 2.
+  // `POST /api/plugins` and `POST /api/plugins/validate` are REJECTED, not deferred: their
+  // `source` handling is a COERCION (`typeof body.source === "string" ? body.source : ""`), not a
+  // check, and `validatePluginSource("")` answers **200** with `{ok:false, errors:["source is
+  // required"]}`. A schema would turn `{source: 123}` from a 200 report into a 400 — a live
+  // request broken to gain a type check the endpoint deliberately does not perform.
+  "plugins.ts": 5,
   "preferences.ts": 5,
   "project-analytics.ts": 1,
   "project-scripts.ts": 2,
   "project-stack-profile.ts": 1,
-  "projects.ts": 6,
+  // 4 = `POST /`, `POST /create`, `PATCH /:id`, and one `parseOptionalJsonBody`. All three
+  // rejected with reasons in `project-body-schemas.ts`'s header; the short version is that
+  // `PATCH /:id` has no declared body type to tighten TO and its only real check answers 422,
+  // and the two POSTs forward the whole body to a service with its own guards, where a
+  // declared-type tightening risks 400-ing a body (a `null` optional) that succeeds today.
+  "projects.ts": 4,
   "quality-metrics.ts": 1,
   "scheduled-runs.ts": 2,
   "showdowns.ts": 1,
   "tags.ts": 1,
   "voice-capture.ts": 1,
+  // REJECTED, all four — this is the family that genuinely cannot use `parseJsonBody(c, schema)`:
+  //   - `POST /incoming/land` and `/incoming/discard` throw `UnprocessableError` → **422**. A
+  //     schema answers 400. Changing a documented status is not a hardening.
+  //   - `POST /register` and `POST /:id/heartbeat` are the FLEET PROTOCOL. A malformed body is
+  //     answered by the registry with `{ error, boardProtocolVersion }` at 401 / 409 / 422, and
+  //     the worker daemon branches on that status to decide retry-vs-stop (#754). A 400 with a
+  //     bare `{ error }` is invisible to that logic. They are also `parseOptionalJsonBody` sites
+  //     whose contract really is "a body may be absent".
   "workers.ts": 4,
   "workflows.ts": 4,
   "workspace-actions.ts": 6,
@@ -149,7 +181,7 @@ const BASELINE: Readonly<Record<string, number>> = {
 };
 
 /** The total the baseline encodes — asserted separately so a mass edit cannot drift it silently. */
-const BASELINE_TOTAL = 101;
+const BASELINE_TOTAL = 92;
 
 describe("route request-body validation (#806)", () => {
   it("scans the real routes directory", () => {
