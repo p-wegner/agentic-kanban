@@ -81,3 +81,37 @@ path = "packages/desktop/src-tauri"
 [[modules]]
 name = "scripts"
 path = "scripts"
+
+# #796 (follow-up to #742) — ARCHITECTURAL ROLE OVERRIDE FOR THE CLIENT'S PURE-LOGIC LAYER.
+#
+# The layer-fit signal infers a file's role from path convention, and its `frontend`
+# rule matches `(?:^|/)client/` BEFORE any `service`/`model`/`domain` rule is tried
+# (`_ROLE_RULES` in code-metrics `runners/layerfit_runner.py`, ordered
+# view → frontend → controller → service → domain → model). So every one of the 633
+# files under `packages/client/` scored role `frontend` = axis position 0.0, and the
+# client's centre of gravity was pinned at exactly 0.000 by the package's NAME.
+#
+# That is a naming artifact, not a structural absence, and no refactor could move it:
+# #742 was filed against the 0.000 and set "client CoG off 0.000" as its target, which
+# was unattainable. Recording it here is what stops it being re-filed a fourth time.
+#
+# `packages/client/src/lib/` IS this client's domain layer, by an explicit repo decision
+# (#589, enforced by `client-module-placement.test.ts` — "client/src grows no second home
+# for pure logic"). Its branching mass is genuinely pure modules — transcript parsing,
+# diff highlighting, route derivation, reducers, policies — not transport: `api.ts`, the
+# one HTTP-shaped file, is not in the directory's top 20 by decision points.
+#
+# `infer_role()` consults these config patterns BEFORE the built-in conventions
+# (fnmatch against the whole repo-relative path), so this override wins. Measured effect
+# at 05b9e685e8 over 2,778 files, by re-running the runner with and without the block:
+#
+#   client centre of gravity   0.0000 -> 0.2041   (frontend 12,892 -> frontend 10,261 + domain 2,631)
+#   overall centre of gravity  0.3481 -> 0.4342
+#   logic_in_adapter_ratio     0.4628 -> 0.3766
+#   layer leaks                1 -> 1   (unchanged: the lone `query_in_adapter` is
+#                                        `ref.current?.select()` in ButlerChrome.tsx)
+#
+# The client CoG is now a number a refactor can actually move: extracting a testable rule
+# out of `components/` into `lib/` raises it. Before this block it could not.
+[roles]
+domain = ["packages/client/src/lib/**"]
