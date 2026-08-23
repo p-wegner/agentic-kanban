@@ -33,6 +33,13 @@ export interface BoardStatusIssue {
     agentSummary?: string;
   } | null;
   diffStats: { filesChanged: number; insertions: number; deletions: number } | null;
+  /**
+   * Set when this workspace's branch has committed work that exists only on a fleet worker
+   * right now (#790), so `diffStats` above is the BASE TIP rather than what the agent has
+   * done. The card renders `label` beside the numbers; the diff endpoint lands the work on
+   * demand (#784) and shows the real thing.
+   */
+  remoteUnlanded?: { workerId: string; sessionId: string; label: string } | null;
   conflicts: { hasConflicts: boolean; conflictingFiles: string[] } | null;
   lastActivity: string | null;
   lastOutput: string[];

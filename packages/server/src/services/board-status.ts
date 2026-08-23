@@ -12,6 +12,8 @@ import {
   type BoardStatusClassificationOptions,
 } from "./board-status-classifiers.js";
 import { collectBoardStatusEntryWork, type ConflictCacheEntry } from "./board-status-enrichment.js";
+import { unlandedRemoteBranches } from "./worker-remote-sync.service.js";
+import { resolveRemoteUnlandedPort } from "./remote-unlanded-port.js";
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import {
   getActiveProjectIdPref,
@@ -152,6 +154,10 @@ export async function getBoardStatus(
   // 6. For each issue, assemble the overview
   const result: BoardStatusIssue[] = [];
   const asyncWork: Promise<void>[] = [];
+  // #790 — one synchronous read of this process's remote-session map for the whole build.
+  const remoteUnlandedByBranch = unlandedRemoteBranches(resolveRemoteUnlandedPort(database), {
+    repoPath: project.repoPath,
+  });
 
   for (const issue of projectIssues) {
     const { mainWs, effectiveStatusName } = selectMainWorkspace(
@@ -174,6 +180,7 @@ export async function getBoardStatus(
         tailLines,
         conflictCache,
         conflictCacheTtl: CONFLICT_CACHE_TTL,
+        remoteUnlandedByBranch,
       }));
     }
 

@@ -27,6 +27,8 @@ import {
 import { listLiveGroupWorkspacesForIssues } from "../repositories/workspace-issue-members.repository.js";
 import { notifySummaryWriteThrough } from "./summary-write-through-notifier.js";
 import { resolveDiffRef } from "@agentic-kanban/shared/lib/git-service";
+import { unlandedRemoteBranches } from "./worker-remote-sync.service.js";
+import { resolveRemoteUnlandedPort } from "./remote-unlanded-port.js";
 
 // Bounded fan-out for background git-backed refresh tasks. The REAL git concurrency
 // control is the process-wide semaphore inside the git-exec adapter (#398) — this
@@ -120,6 +122,12 @@ export async function buildWorkspaceSummaryMap(
   // (#399, decision 014) — zero git spawns on this path; stale rows get a bg refresh.
   const { commitCountByIssue, latestCommitByIssue } = readGitProjection(mainWorkspaceMap, defaultBranch, database, dirExists, archivedIssueIds);
 
+  // #790 — one synchronous read of this process's remote-session map for the whole build.
+  // No repoPath is available here (this map is keyed by ISSUE, across whatever projects the
+  // caller asked for), so the lookup is branch-only; see `unlandedRemoteBranches` for why the
+  // worst case of that is an over-warning rather than a wrong number.
+  const remoteUnlandedByBranch = unlandedRemoteBranches(resolveRemoteUnlandedPort(database));
+
   // Phase 5: attach main workspace summary and schedule stale-while-revalidate cache refreshes
   for (const [issueId, summary] of workspaceSummaryMap) {
     const mainWs = mainWorkspaceMap.get(issueId);
@@ -140,6 +148,8 @@ export async function buildWorkspaceSummaryMap(
       planMode: mainWs.planMode,
       pendingPlanPath: mainWs.pendingPlanPath,
       planOnlyWarning: false,
+      // #790 — set below, once the remote map has been consulted.
+      remoteUnlanded: null,
       scorecard: mainWs.scorecardScore !== null ? { score: mainWs.scorecardScore } : null,
       commitCount: commitCountByIssue.get(issueId) ?? null,
       latestCommit: latestCommitByIssue.get(issueId) ?? null,
@@ -148,6 +158,15 @@ export async function buildWorkspaceSummaryMap(
       workflow: null,
       mergedAt: mainWs.mergedAt,
     };
+
+    // #790 — the git projection this summary serves is the BOARD's worktree, and for a
+    // running git-transport session that is still the base tip: `commitCount` and
+    // `diffStats` read zero while the agent commits on the worker, and the
+    // "HEAD advanced -> refresh diff-stat" trigger never fires because board-side HEAD does
+    // not move until exit. A board CARD is not worth a git push per refresh (see
+    // `unlandedRemoteBranches`), so the card is told instead of being silently wrong.
+    const unlanded = remoteUnlandedByBranch.get(mainWs.branch);
+    if (unlanded) summary.main.remoteUnlanded = unlanded;
 
     // Skip background git/metrics refreshes for archived issues — CompletedCard shows none of these fields.
     // The existsSync is the same point as in prefetchGitData: a set-but-vanished

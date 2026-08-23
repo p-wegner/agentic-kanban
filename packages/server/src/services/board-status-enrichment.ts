@@ -8,6 +8,7 @@ import { readSessionStdoutFile } from "../lib/session-output-reader.js";
 import { getRecentSessionMessages } from "../repositories/board-status-enrichment.repository.js";
 import { parseAgentMessageFromJsonLine, parseLastAgentMessage } from "./session-message-parser.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import type { RemoteUnlandedWork } from "./worker-remote-sync.service.js";
 
 /**
  * The workspace fields the enrichment actually consumes — structural on purpose
@@ -34,6 +35,11 @@ export interface BoardStatusEnrichmentContext {
   tailLines: number;
   conflictCache: Map<string, ConflictCacheEntry>;
   conflictCacheTtl: number;
+  /**
+   * Branches whose committed work is still only on a fleet worker (#790), keyed by branch.
+   * Built once per board build by `unlandedRemoteBranches` — synchronous, no git, no push.
+   */
+  remoteUnlandedByBranch?: Map<string, RemoteUnlandedWork>;
 }
 
 /**
@@ -56,6 +62,13 @@ export function collectBoardStatusEntryWork(
 
   const work: Promise<void>[] = [];
   const baseBranch = mainWs.baseBranch || defaultBranch;
+
+  // #790 — the numbers below come from the BOARD's worktree, which for a running
+  // git-transport session is still the base tip. Set BEFORE the diff work is queued, and
+  // synchronously, so the flag and the numbers it qualifies always travel together: a
+  // reader must never see a zero without the sentence that explains it.
+  const unlanded = context.remoteUnlandedByBranch?.get(mainWs.branch);
+  if (unlanded) entry.remoteUnlanded = unlanded;
 
   work.push(
     getWorkspaceDiffStats(mainWs, defaultBranch)
