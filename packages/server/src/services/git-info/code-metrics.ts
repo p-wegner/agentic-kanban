@@ -1,11 +1,12 @@
 // Source-tree LOC metrics: path classification, the per-file tally, and the two
 // repo walks (sync + bounded async) behind `GET /api/projects/:id/stats`.
 //
-// Split out of git-info.service.ts (#340): that module holds git-history scanning,
-// repo detection AND this walk, and had grown past the cohesion gate's top-level
-// declaration ceiling. Nothing here spawns git or touches the cache — it is pure
-// filesystem + arithmetic, which also makes the walk bounds directly unit-testable.
-// git-info.service.ts re-exports what its history parsing still needs.
+// Split out of git-info.service.ts (#340), which then held git-history scanning, repo
+// detection AND this walk, and had grown past the cohesion gate's top-level declaration
+// ceiling. Nothing here spawns git or touches the cache — it is pure filesystem +
+// arithmetic, which also makes the walk bounds directly unit-testable. The other two
+// halves were split from each other in turn (#728): see `project-stats.ts`, which
+// imports what its history parsing needs from here, and `repo-detect.ts`.
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
