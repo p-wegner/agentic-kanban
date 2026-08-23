@@ -153,6 +153,18 @@ const ALLOWLIST = new Map<string, string>([
       "point of keeping it. Same rationale as the .claude/hooks entries above: dependency-free by " +
       "necessity, not by accident.",
   ],
+  [
+    join("scripts", "rework-loop-analysis.mjs"),
+    "Standalone measurement script (#804) run as bare `node scripts/rework-loop-analysis.mjs`, " +
+      "with no bundler and no tsx — so it cannot import the adapter, which is TypeScript under " +
+      "packages/shared/src. Exactly two read-only `git log` reads of the whole history, both " +
+      "pinned to one revision because several agents commit into this checkout at once and " +
+      "re-resolving HEAD per call silently empties the branch grouping. It shells out ONCE per " +
+      "log rather than once per commit on purpose: a per-file `git` call costs ~80ms of fork " +
+      "overhead and has produced confidently wrong numbers in this repo before, which is the " +
+      "failure mode the script exists to avoid. Committed so the rework/gate-exposure verdict " +
+      "behind #804 is REBUILDABLE against a later HEAD rather than a frozen number in a doc.",
+  ],
 ]);
 
 /** Source file extensions the gate parses. `.js`/`.mjs`/`.cjs` added in #17 so scaffold hook scripts are visible. */
