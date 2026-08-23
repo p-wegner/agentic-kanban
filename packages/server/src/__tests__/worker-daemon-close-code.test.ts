@@ -68,7 +68,10 @@ describe("worker daemon disconnect log", () => {
   }, 30000);
 
   afterAll(async () => {
-    daemon?.stop({ killAgents: true });
+    // `stop()` is ASYNC and DRAINS (#754). Unawaited it both races the teardown below and
+    // leaves its promise unhandled, so a rejection in shutdown is reported against whatever
+    // file vitest runs NEXT — the cross-file misattribution of #680 (#777, #816).
+    await daemon?.stop({ killAgents: true });
     await new Promise<void>((resolve) => server.close(() => resolve()));
     rmSync(stateFile, { force: true });
   });

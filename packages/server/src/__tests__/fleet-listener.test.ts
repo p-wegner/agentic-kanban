@@ -118,8 +118,11 @@ describe("fleet listener", () => {
     let daemon: WorkerDaemonHandle;
     const stateFile = join(tmpdir(), `fleet-listener-${randomUUID()}.json`);
 
-    afterAll(() => {
-      daemon?.stop({ killAgents: true });
+    afterAll(async () => {
+      // `stop()` is ASYNC and DRAINS (#754). Unawaited it both races the `rmSync` below and
+      // leaves its promise unhandled, so a rejection in shutdown is reported against whatever
+      // file vitest runs NEXT — the cross-file misattribution of #680 (#777, #816).
+      await daemon?.stop({ killAgents: true });
       rmSync(stateFile, { force: true });
     });
 
