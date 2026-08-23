@@ -207,6 +207,14 @@ const SUBTREE_SEEDERS: Record<string, (c: SeedCtx) => Promise<void>> = {
       stdoutTail: "done", stderrTail: null,
     });
   },
+  // #815: the eighth column family extracted out of `workspaces` — the persisted summary
+  // git projection. Same `onDelete: cascade` shape, so seeding it proves the cascade fires.
+  workspace_summary: async (c) => {
+    await c.db.insert(schema.workspaceSummary).values({
+      workspaceId: c.workspaceId, headSha: "abc1234", headMessage: "feat: seeded head",
+      commitCount: 3, gitRefreshedAt: c.now, dirty: false,
+    });
+  },
   sessions: async (c) => {
     await c.db.insert(schema.sessions).values({
       id: c.sessionId, workspaceId: c.workspaceId, status: "running", startedAt: c.now,

@@ -17,7 +17,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
-import { projects, projectStatuses, issues, workspaces, repos } from "@agentic-kanban/shared/schema";
+import { projects, projectStatuses, issues, workspaces, repos, workspaceSummary } from "@agentic-kanban/shared/schema";
 import { setWorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import type { Database } from "../db/index.js";
@@ -95,10 +95,14 @@ async function seed(leadProj: ProjSeed, sibProj: ProjSeed) {
   await db.insert(workspaces).values({
     id: workspaceId, issueId, branch: "feature/ak-1", workingDir: join(leadRepoPath, ".worktrees", "ak-1"),
     baseBranch: "main", isDirect: false, status: "idle",
-    // Keep the WORKSPACE summary projection fresh so its SWR machinery never spawns here.
-    summaryHeadSha: "abc", summaryHeadMessage: "m", summaryCommitCount: 1,
-    summaryGitRefreshedAt: now, summaryDirty: false,
     createdAt: now, updatedAt: now,
+  });
+  // Keep the WORKSPACE summary projection fresh so its SWR machinery never spawns here.
+  // #815: it lives in `workspace_summary` now, not in five columns above — and it has to be
+  // written explicitly, because an ABSENT row reads as DIRTY, not as clean.
+  await db.insert(workspaceSummary).values({
+    workspaceId, headSha: "abc", headMessage: "m", commitCount: 1,
+    gitRefreshedAt: now, dirty: false,
   });
   await db.insert(repos).values({
     id: `leading-${workspaceId}`, workspaceId, path: leadRepoPath, name: null,

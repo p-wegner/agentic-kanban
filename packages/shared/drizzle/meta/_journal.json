@@ -988,6 +988,13 @@
       "when": 1787492737179,
       "tag": "0140_workspace_setup_run",
       "breakpoints": true
+    },
+    {
+      "idx": 141,
+      "version": "6",
+      "when": 1787497974195,
+      "tag": "0141_workspace_summary",
+      "breakpoints": true
     }
   ]
 }

@@ -80,3 +80,5 @@ export { workspaceMergeGate, workspaceMergeGateRelations } from "./workspace-mer
 export { workspaceConflictCache, workspaceConflictCacheRelations } from "./workspace-conflict-cache.js";
 // #815: the seventh — the setup-script run record.
 export { workspaceSetupRun, workspaceSetupRunRelations } from "./workspace-setup-run.js";
+// #815: the eighth — the persisted workspace-summary git projection.
+export { workspaceSummary, workspaceSummaryRelations } from "./workspace-summary.js";

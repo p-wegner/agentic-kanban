@@ -1,4 +1,4 @@
-import { workspaces, sessions, sessionMessages, showdowns, workflowEdges, workflowNodes, repos, issues, workspaceCodeMetrics, workspaceConflictCache } from "@agentic-kanban/shared/schema";
+import { workspaces, sessions, sessionMessages, showdowns, workflowEdges, workflowNodes, repos, issues, workspaceCodeMetrics, workspaceConflictCache, workspaceSummary } from "@agentic-kanban/shared/schema";
 import { and, eq, inArray, sql, desc } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import { db } from "../db/index.js";
@@ -49,11 +49,18 @@ export async function fetchWorkspaceDetailRows(issueIds: string[], database: Dat
       baseBranch: sql<string | null>`coalesce(${leadingRepo.baseBranch}, ${workspaces.baseBranch})`,
       isDirect: workspaces.isDirect,
       // #399 (decision 014) — the persisted git projection, served on the hot path.
-      summaryHeadSha: workspaces.summaryHeadSha,
-      summaryHeadMessage: workspaces.summaryHeadMessage,
-      summaryCommitCount: workspaces.summaryCommitCount,
-      summaryGitRefreshedAt: workspaces.summaryGitRefreshedAt,
-      summaryDirty: workspaces.summaryDirty,
+      // #815: it moved to `workspace_summary`. Aliased back to the same five field names, so
+      // every consumer of this projected row is untouched by the move. `summaryDirty` is
+      // COALESCED because a workspace with no row is DIRTY, not clean — the dropped column
+      // was NOT NULL DEFAULT TRUE, which inverts the absence-is-neutral convention the other
+      // extracted families use. `.mapWith(Boolean)` is load-bearing: a raw `sql` expression
+      // bypasses the column's `{ mode: "boolean" }` mapping and would hand every consumer
+      // SQLite's 1/0 under a `boolean` type — a `=== false` check away from a silent bug.
+      summaryHeadSha: workspaceSummary.headSha,
+      summaryHeadMessage: workspaceSummary.headMessage,
+      summaryCommitCount: workspaceSummary.commitCount,
+      summaryGitRefreshedAt: workspaceSummary.gitRefreshedAt,
+      summaryDirty: sql<boolean>`coalesce(${workspaceSummary.dirty}, 1)`.mapWith(Boolean),
       // #815: the conflict memo moved to `workspace_conflict_cache`. Aliased back to the same
       // field names, so every consumer of this projected row is untouched by the move.
       conflictCacheCheckedAt: workspaceConflictCache.checkedAt,
@@ -80,6 +87,9 @@ export async function fetchWorkspaceDetailRows(issueIds: string[], database: Dat
     // #815: LEFT, not inner — a never-probed workspace has no memo row and must still be
     // returned, or the board silently loses every workspace it has not yet gitted.
     .leftJoin(workspaceConflictCache, eq(workspaceConflictCache.workspaceId, workspaces.id))
+    // #815: LEFT, not inner — a never-projected workspace has no summary row and must still be
+    // returned (dirty by absence), or the board silently loses every brand-new workspace.
+    .leftJoin(workspaceSummary, eq(workspaceSummary.workspaceId, workspaces.id))
     .where(inArray(workspaces.issueId, issueIds));
 }
 

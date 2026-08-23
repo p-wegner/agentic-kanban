@@ -22,7 +22,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi, beforeEach, afterAll } from "vitest";
 import { eq } from "drizzle-orm";
-import { issues, projects, projectStatuses, workspaceCodeMetrics, workspaceConflictCache, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, projects, projectStatuses, workspaceCodeMetrics, workspaceConflictCache, workspaceSummary, workspaces } from "@agentic-kanban/shared/schema";
 import { setWorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
 import { createTestDb } from "./helpers/test-db.js";
 import { makeTempRepo } from "./helpers/temp-repo.js";
@@ -152,15 +152,23 @@ async function seed(db: ReturnType<typeof createTestDb>["db"], opts: SeedOpts = 
       diffStatCacheInsertions: 8,
       diffStatCacheDeletions: 1,
     } : {}),
-    summaryHeadSha: "abc123",
-    summaryHeadMessage: "feat: seeded head",
-    summaryCommitCount: 3,
-    summaryGitRefreshedAt: now,
-    summaryDirty: false,
-    ...(opts.projection ?? {}),
     createdAt: now,
     updatedAt: now,
   });
+  // #815: the git projection lives in `workspace_summary`, not in five `summary_*` columns.
+  // It is seeded EXPLICITLY and by default CLEAN, because an absent row reads as DIRTY —
+  // that inversion is the whole trap this family carried.
+  {
+    const p = opts.projection ?? {};
+    await db.insert(workspaceSummary).values({
+      workspaceId,
+      headSha: p.summaryHeadSha !== undefined ? p.summaryHeadSha : "abc123",
+      headMessage: p.summaryHeadMessage !== undefined ? p.summaryHeadMessage : "feat: seeded head",
+      commitCount: p.summaryCommitCount !== undefined ? p.summaryCommitCount : 3,
+      gitRefreshedAt: p.summaryGitRefreshedAt !== undefined ? p.summaryGitRefreshedAt : now,
+      dirty: p.summaryDirty !== undefined ? p.summaryDirty : false,
+    });
+  }
   // #798: fresh code-metrics stamp so no metrics recompute is scheduled — in its own table now.
   await db.insert(workspaceCodeMetrics).values({
     workspaceId, metricsJson: null, computedAt: now,
@@ -217,13 +225,14 @@ describe("workspace-summary projection — hot path (#399)", () => {
     await vi.waitFor(async () => {
       const [row] = await db
         .select({
-          summaryHeadSha: workspaces.summaryHeadSha,
-          summaryHeadMessage: workspaces.summaryHeadMessage,
-          summaryCommitCount: workspaces.summaryCommitCount,
-          summaryDirty: workspaces.summaryDirty,
+          summaryHeadSha: workspaceSummary.headSha,
+          summaryHeadMessage: workspaceSummary.headMessage,
+          summaryCommitCount: workspaceSummary.commitCount,
+          summaryDirty: workspaceSummary.dirty,
           diffStatCacheHeadSha: workspaces.diffStatCacheHeadSha,
         })
         .from(workspaces)
+        .leftJoin(workspaceSummary, eq(workspaceSummary.workspaceId, workspaces.id))
         .where(eq(workspaces.id, workspaceId));
       expect(row.summaryHeadSha).toBe("abc999");
       expect(row.summaryHeadMessage).toBe("projected message");
@@ -267,16 +276,38 @@ describe("workspace-summary projection — freshness rule", () => {
 });
 
 describe("workspace-summary projection — board events mark dirty", () => {
-  it("setWorkspaceStatus stamps summaryDirty atomically with every status write", async () => {
+  it("setWorkspaceStatus stamps the projection dirty on every status write", async () => {
     const { db } = createTestDb();
     const { workspaceId } = await seed(db, { status: "active" });
 
     const ok = await setWorkspaceStatus(db, workspaceId, "reviewing", { caller: "test" });
     expect(ok).toBe(true);
 
-    const [row] = await db.select({ summaryDirty: workspaces.summaryDirty })
-      .from(workspaces).where(eq(workspaces.id, workspaceId));
-    expect(row.summaryDirty).toBe(true);
+    // #815: the flag moved to `workspace_summary`, so this is no longer the same UPDATE as
+    // the status write. The guarantee that survives is the one that mattered — the SAME
+    // authority stamps it, and only when the status write actually matched a row.
+    const [row] = await db.select({ dirty: workspaceSummary.dirty })
+      .from(workspaceSummary).where(eq(workspaceSummary.workspaceId, workspaceId));
+    expect(row.dirty).toBe(true);
+  });
+
+  it("a status write that matches no row (#966 terminal guard) dirties nothing", async () => {
+    const { db } = createTestDb();
+    const { workspaceId } = await seed(db, { status: "active" });
+    // Land the workspace in the closed+merged terminal state, then clear the flag the close
+    // itself set, so the only thing that could re-dirty it is the refused transition below.
+    await db.update(workspaces)
+      .set({ status: "closed", mergedAt: new Date().toISOString() })
+      .where(eq(workspaces.id, workspaceId));
+    await db.update(workspaceSummary).set({ dirty: false })
+      .where(eq(workspaceSummary.workspaceId, workspaceId));
+
+    const ok = await setWorkspaceStatus(db, workspaceId, "active", { caller: "test" });
+    expect(ok).toBe(false);
+
+    const [row] = await db.select({ dirty: workspaceSummary.dirty })
+      .from(workspaceSummary).where(eq(workspaceSummary.workspaceId, workspaceId));
+    expect(row.dirty).toBe(false);
   });
 
   it("a merge through the board's merge service dirties the projection and the merged state is served without any git spawn", async () => {
@@ -331,8 +362,10 @@ describe("workspace-summary projection — board events mark dirty", () => {
     // The merge stamped mergedAt AND marked the projection dirty — incrementally, with
     // no summary rebuild involved.
     const [row] = await db
-      .select({ status: workspaces.status, mergedAt: workspaces.mergedAt, summaryDirty: workspaces.summaryDirty })
-      .from(workspaces).where(eq(workspaces.id, workspaceId));
+      .select({ status: workspaces.status, mergedAt: workspaces.mergedAt, summaryDirty: workspaceSummary.dirty })
+      .from(workspaces)
+      .leftJoin(workspaceSummary, eq(workspaceSummary.workspaceId, workspaces.id))
+      .where(eq(workspaces.id, workspaceId));
     expect(row.status).toBe("closed");
     expect(row.mergedAt).toBeTruthy();
     expect(row.summaryDirty).toBe(true);
@@ -361,12 +394,12 @@ describe("workspace-summary projection — heal pass (external drift)", () => {
 
     const [row] = await db
       .select({
-        summaryHeadSha: workspaces.summaryHeadSha,
-        summaryCommitCount: workspaces.summaryCommitCount,
-        summaryDirty: workspaces.summaryDirty,
-        summaryGitRefreshedAt: workspaces.summaryGitRefreshedAt,
+        summaryHeadSha: workspaceSummary.headSha,
+        summaryCommitCount: workspaceSummary.commitCount,
+        summaryDirty: workspaceSummary.dirty,
+        summaryGitRefreshedAt: workspaceSummary.gitRefreshedAt,
       })
-      .from(workspaces).where(eq(workspaces.id, workspaceId));
+      .from(workspaceSummary).where(eq(workspaceSummary.workspaceId, workspaceId));
     expect(row.summaryHeadSha).toBe("abc999");
     expect(row.summaryCommitCount).toBe(5);
     expect(row.summaryDirty).toBe(false);
@@ -384,11 +417,11 @@ describe("workspace-summary projection — heal pass (external drift)", () => {
 
     const [row] = await db
       .select({
-        summaryHeadSha: workspaces.summaryHeadSha,
-        summaryDirty: workspaces.summaryDirty,
-        summaryGitRefreshedAt: workspaces.summaryGitRefreshedAt,
+        summaryHeadSha: workspaceSummary.headSha,
+        summaryDirty: workspaceSummary.dirty,
+        summaryGitRefreshedAt: workspaceSummary.gitRefreshedAt,
       })
-      .from(workspaces).where(eq(workspaces.id, workspaceId));
+      .from(workspaceSummary).where(eq(workspaceSummary.workspaceId, workspaceId));
     expect(row.summaryHeadSha).toBeNull();
     expect(row.summaryDirty).toBe(false);
     expect(row.summaryGitRefreshedAt).toBeTruthy();

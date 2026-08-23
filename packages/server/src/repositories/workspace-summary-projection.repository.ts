@@ -1,14 +1,29 @@
 import { and, asc, desc, eq, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
-import { issues, projects, repos, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, projects, repos, workspaceSummary, workspaces } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 
 /**
  * #399 (decision 014) — persistence for the workspace-summary git projection.
- * The projection lives on the `workspaces` row itself (`summary_*` columns, migration
- * 0114); this repository owns its three writes/reads: write-through after a git refresh,
- * dirty-marking from board events, and the heal pass's candidate selection.
+ *
+ * #815: the projection moved off the `workspaces` row (five `summary_*` columns, migration
+ * 0114) into its own `workspace_summary` table, migration 0141. This repository still owns its
+ * three writes/reads — write-through after a git refresh, dirty-marking from board events, and
+ * the heal pass's candidate selection — and every read ALIASES the new columns back to the old
+ * `summary*` field names, so the freshness predicates, the projected row types and the whole
+ * client are untouched by the move.
+ *
+ * ABSENT ROW == DIRTY, which is the one place this family departs from the seven landed before
+ * it: the dropped `summary_dirty` was `NOT NULL DEFAULT TRUE`, so a never-projected workspace
+ * is dirty, not clean. Reads coalesce accordingly; the dirty MARKS stay plain UPDATEs, because
+ * a workspace with no row is a no-op that is already dirty by absence. Only the write-through
+ * — the sole writer that can make a projection CLEAN — upserts.
+ *
+ * The `repos` half below is deliberately NOT extracted: it keeps its own inline `summary_*`
+ * block (migration 0118). The two share a naming convention, not a mechanism — different
+ * columns, different freshness predicate, separate heal pass — and `repos` is 23 columns wide
+ * with no width ratchet on it.
  */
 
 /** Same leading-repo aliasing as workspace-summary.repository (#222): the workspace's
@@ -24,16 +39,29 @@ export interface SummaryGitProjectionValues {
   summaryGitRefreshedAt: string;
 }
 
-/** Write-through after a git refresh: store the facts, stamp freshness, clear dirty. */
+/**
+ * Write-through after a git refresh: store the facts, stamp freshness, clear dirty.
+ *
+ * UPSERT, not update (#815). This is the only writer that makes a projection CLEAN, and a
+ * workspace that has never been projected has no row — an UPDATE would no-op and leave it
+ * dirty forever, re-spawning git on every heal tick.
+ */
 export async function updateWorkspaceSummaryGitProjection(
   workspaceId: string,
   values: SummaryGitProjectionValues,
   database: Database = db,
 ): Promise<void> {
+  const row = {
+    headSha: values.summaryHeadSha,
+    headMessage: values.summaryHeadMessage,
+    commitCount: values.summaryCommitCount,
+    gitRefreshedAt: values.summaryGitRefreshedAt,
+    dirty: false,
+  };
   await database
-    .update(workspaces)
-    .set({ ...values, summaryDirty: false })
-    .where(eq(workspaces.id, workspaceId));
+    .insert(workspaceSummary)
+    .values({ workspaceId, ...row })
+    .onConflictDoUpdate({ target: workspaceSummary.workspaceId, set: row });
 }
 
 /** Board-event hook: mark one workspace's projection as needing a refresh.
@@ -44,10 +72,12 @@ export async function markWorkspaceSummaryDirty(
   workspaceId: string,
   database: Database = db,
 ): Promise<void> {
+  // #815: a plain UPDATE, deliberately not an upsert — a workspace with no `workspace_summary`
+  // row is ALREADY dirty by absence, so the no-op is the correct outcome and not a lost write.
   await database
-    .update(workspaces)
-    .set({ summaryDirty: true })
-    .where(eq(workspaces.id, workspaceId));
+    .update(workspaceSummary)
+    .set({ dirty: true })
+    .where(eq(workspaceSummary.workspaceId, workspaceId));
   await markWorkspaceRepoSummariesDirty(workspaceId, database);
 }
 
@@ -181,23 +211,34 @@ export async function selectSummaryHealCandidates(
       workingDir: sql<string | null>`coalesce(${leadingRepo.worktreePath}, ${workspaces.workingDir})`,
       baseBranch: sql<string | null>`coalesce(${leadingRepo.baseBranch}, ${workspaces.baseBranch})`,
       diffStatCacheHeadSha: workspaces.diffStatCacheHeadSha,
-      summaryDirty: workspaces.summaryDirty,
-      summaryHeadSha: workspaces.summaryHeadSha,
-      summaryCommitCount: workspaces.summaryCommitCount,
+      // #815: aliased back to the old field names, and COALESCED — a workspace with no
+      // `workspace_summary` row is dirty, not clean (the dropped column was NOT NULL DEFAULT
+      // TRUE). See the ORDER BY below for why the coalesce is load-bearing there too.
+      // `.mapWith(Boolean)`: a raw `sql` expression bypasses the column's boolean mode and
+      // would otherwise hand the caller SQLite's 1/0 under a `boolean` type.
+      summaryDirty: sql<boolean>`coalesce(${workspaceSummary.dirty}, 1)`.mapWith(Boolean),
+      summaryHeadSha: workspaceSummary.headSha,
+      summaryCommitCount: workspaceSummary.commitCount,
       defaultBranch: projects.defaultBranch,
     })
     .from(workspaces)
     .innerJoin(issues, eq(issues.id, workspaces.issueId))
     .innerJoin(projects, eq(projects.id, issues.projectId))
     .leftJoin(leadingRepo, onLeadingRepo)
+    // LEFT, not inner — a never-projected workspace has no row and is exactly the row this
+    // pass exists to find; an inner join would make it permanently unhealable.
+    .leftJoin(workspaceSummary, eq(workspaceSummary.workspaceId, workspaces.id))
     .where(and(
       ne(workspaces.status, "closed"),
       or(
-        eq(workspaces.summaryDirty, true),
-        isNull(workspaces.summaryGitRefreshedAt),
-        lt(workspaces.summaryGitRefreshedAt, staleBefore),
+        eq(workspaceSummary.dirty, true),
+        isNull(workspaceSummary.gitRefreshedAt),
+        lt(workspaceSummary.gitRefreshedAt, staleBefore),
       ),
     ))
-    .orderBy(desc(workspaces.summaryDirty), asc(workspaces.summaryGitRefreshedAt))
+    // The coalesce here is NOT cosmetic: SQLite sorts NULL LAST under DESC, so ordering on the
+    // raw column would rank never-projected workspaces (row absent -> NULL -> dirty) BELOW
+    // dirty ones, i.e. last in a `limit`-bounded worklist.
+    .orderBy(desc(sql`coalesce(${workspaceSummary.dirty}, 1)`), asc(workspaceSummary.gitRefreshedAt))
     .limit(limit);
 }

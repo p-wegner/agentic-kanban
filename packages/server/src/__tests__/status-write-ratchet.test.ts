@@ -80,9 +80,15 @@ const BASELINE: Record<string, number> = {
   // `persistScorecard` — values type is `{scorecardScore, scorecardJson, scorecardComputedAt}`,
   // no `status` field. Provable non-status write caught only by the opaque-set heuristic.
   "server/src/repositories/workspace-scorecard.repository.ts::workspaces-opaque-set": 1,
-  // `updateWorkspaceDiffStatCache` + `updateWorkspaceConflictCache` — both cache-column-only
-  // value types, no `status` field. Same opaque-set false positive as the scorecard repo.
-  "server/src/repositories/workspace-summary.repository.ts::workspaces-opaque-set": 2,
+  // `updateWorkspaceDiffStatCache` — cache-column-only value type, no `status` field. Same
+  // opaque-set false positive as the scorecard repo.
+  //
+  // Was 2: the second was `updateWorkspaceConflictCache`, which #815 moved to
+  // `workspace_conflict_cache` (migration 0139) and out of `update(workspaces)` entirely. The
+  // baseline was not lowered in that commit, so this ratchet's staleness half has been RED on
+  // master since — caught here by the #815 summary extraction's own run, and lowered rather
+  // than left as a budget nobody owns.
+  "server/src/repositories/workspace-summary.repository.ts::workspaces-opaque-set": 1,
 };
 
 /** #583 — the tree walk every guard suite needs, from the one shared helper. */
