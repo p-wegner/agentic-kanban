@@ -34,9 +34,10 @@ Rules of thumb: board = slow but safe and best traceable; worktree subagents nex
 
 The dominant cost of landing tickets this way is not writing the code — it is re-running
 the same expensive gates for each ticket. Measured in this repo: `pnpm check:arch` ~1 min,
-the full client suite ~35–95 s, a full `pnpm typecheck` ~30–60 s, and `pnpm test:mine`
-26–42 min. Eight tickets landed one-at-a-time pay all of that eight times over, and the
-runs are near-identical because the tickets touch the same packages.
+`pnpm gate:always-run` ~2 min, the full client suite ~35–95 s, a full `pnpm typecheck`
+~30–60 s, and `pnpm test:mine` 26–42 min. Eight tickets landed one-at-a-time pay all of
+that eight times over, and the runs are near-identical because the tickets touch the same
+packages.
 
 So when you have several tickets in hand — including ones still sitting in **Backlog** —
 **batch them into groups that share a gate surface, and run the full gates once per group.**
@@ -83,10 +84,38 @@ deferring the *expensive* gates safe.
 
 **Sequence for a group:**
 1. Implement ticket A → commit A (pathspec) → implement ticket B → commit B → …
-2. Run the full gates ONCE for the group: `pnpm check:arch`, the relevant suite(s), `pnpm typecheck`.
+2. Run the full gates ONCE for the group: **`pnpm gate:always-run`** (see below — not
+   optional, this is the one gate the direct-master path otherwise skips entirely),
+   `pnpm check:arch`, the relevant suite(s), `pnpm typecheck`.
 3. Green → close all the group's tickets with evidence, naming the shared gate run.
 4. Red → the per-ticket commits are what make this cheap: the failure is attributable by
    inspection, and you fix FORWARD with another commit. Never uncommit to isolate.
+
+### `pnpm gate:always-run` — the guard set the merge path runs and this path does not
+
+The `@gate:always-run` suites (~131 of them, ~2 min at `--maxWorkers=4`) are the ratchets and
+tree scanners that assert a property of the whole repo without importing what they check: the
+nloc rings, the spelling ratchets, the parity and single-source guards, the skill/doc
+invariants. They are forced to run by `pre-merge-gate.service.ts` — **on a merge**. A commit
+made directly on master passes through no merge, so on this path they run nowhere.
+
+That is not theoretical. Within one day of the server nloc ring landing (#800), three
+baselined functions grew past their entries on plain master commits — the ring was in their
+history and caught all three, but retroactively, as a red suite the next person to merge
+*anything* had to deal with. #817's decision was a **named command plus this step**, not a
+`pre-commit` hook: several agents commit into this checkout concurrently, so a hook that runs
+a suite would serialise them, fire on doc-only commits, and get `--no-verify`'d the first time
+it cost someone a minute — which is worse than no hook, because then nobody knows whether it
+ran.
+
+So: **run it once per group, before you close the tickets.** If it is red, fix it before the
+commits land. A guard left red on master is not a private problem — it fails the pre-merge
+gate of every workspace that merges next, and the usual outcome is that someone else
+re-baselines your growth to unblock themselves.
+
+Skip it only when the group touched nothing under `packages/`, `scripts/`, `.claude/`,
+`.codex/` or the root docs the guards read as input — and say so when you report, rather than
+implying it ran.
 
 **Don't group when** a ticket changes behaviour in a way you want isolated evidence for, when
 it touches a migration or the DB, or when it's the first use of a new pattern. Land those
