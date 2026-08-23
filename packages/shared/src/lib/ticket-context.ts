@@ -380,28 +380,91 @@ export function buildBoardFeedbackSection(
  *
  * A builder dispatched to a fleet worker reads a ticket-context file the BOARD rendered, so
  * without this it is told to reflect progress and file findings through
- * `mcp__agentic-kanban__*` — tools that do not exist on that machine. There is no MCP
- * server configured in the remote launch spec (the board's `--mcp-config` names a file in
- * the board's own tmpdir and is stripped), and the board API it would talk to is bound to
- * loopback by design. So the honest instruction is: the board reads your OUTPUT, not your
- * tool calls.
+ * `mcp__agentic-kanban__*` — tools that may not exist on that machine. The board's own
+ * `--mcp-config` names a file in the board's tmpdir and is stripped, and the board API it
+ * would talk to is bound to loopback by design.
+ *
+ * #769 made that conditional rather than absolute: when the fleet listener is up and the
+ * provider has a config-file channel, the board ships a per-assignment MCP config pointed at
+ * an ALLOWLISTED bridge, and the section is rewritten to name exactly the tools that work
+ * (`boardTools`, applied later by {@link announceRemoteBoardTools}). With no bridge — no fleet
+ * listener, or a codex/pi builder, which cannot be pointed at one from argv — the #749 text
+ * stands unchanged: the board reads your OUTPUT, not your tool calls.
  */
-export function buildRemoteWorkerSection(): string {
+export const REMOTE_WORKER_HEADING = "## You are running on a REMOTE FLEET WORKER";
+
+export interface RemoteWorkerSectionOptions {
+  /**
+   * The board tools this worker CAN call, when the fleet MCP bridge is reachable for this
+   * assignment (#769). Absent/empty = the #749 truth: no board tools at all.
+   */
+  boardTools?: readonly string[];
+}
+
+export function buildRemoteWorkerSection(opts: RemoteWorkerSectionOptions = {}): string {
+  const tools = opts.boardTools ?? [];
+  const toolBullet =
+    tools.length > 0
+      ? [
+          "- **A NARROW set of board tools is available.** The board serves an allowlisted MCP bridge",
+          "  for this one assignment, so exactly these tools work here and nothing else does:",
+          "",
+          ...tools.map((name) => `    - \`mcp__agentic-kanban__${name}\``),
+          "",
+          "  `create_issue` is PINNED to this assignment's project — you cannot misfile, and you do",
+          "  not need to pass `projectId`. Every other board tool (merging, marking ready, moving",
+          "  status, preferences, starting or deleting work) is REFUSED by the bridge: a refusal is",
+          "  the expected answer, not a broken environment. Those decisions belong to the board.",
+          "  There is still no route to the board's HTTP API from this machine.",
+          "- **Progress still travels in your OUTPUT.** There is no comment tool on this bridge, so",
+          "  anything you would have recorded as progress — findings, work you could not finish, why",
+          "  you stopped — goes in your FINAL SUMMARY. That summary is what reaches the board.",
+        ]
+      : [
+          "- **No board tools.** The `mcp__agentic-kanban__*` tools are NOT available here, and the",
+          "  board's HTTP API is not reachable from this machine. Do not try to call them, and do not",
+          "  treat their absence as a broken environment. Anything you would have recorded on the",
+          "  board — progress, findings, follow-up work, a ticket you could not finish — goes in your",
+          "  FINAL SUMMARY instead. That summary is what reaches the board.",
+        ];
   return [
-    "## You are running on a REMOTE FLEET WORKER",
+    REMOTE_WORKER_HEADING,
     "",
     "This checkout is NOT a board worktree — it is a clone on a different machine, made for",
-    "this one assignment. Two consequences you must plan around:",
+    "this one assignment. Consequences you must plan around:",
     "",
-    "- **No board tools.** The `mcp__agentic-kanban__*` tools are NOT available here, and the",
-    "  board's HTTP API is not reachable from this machine. Do not try to call them, and do not",
-    "  treat their absence as a broken environment. Anything you would have recorded on the",
-    "  board — progress, findings, follow-up work, a ticket you could not finish — goes in your",
-    "  FINAL SUMMARY instead. That summary is what reaches the board.",
+    ...toolBullet,
     "- **Your work travels as commits.** Commit everything you want kept; the worker pushes your",
     "  branch back to the board when the session ends, and anything uncommitted is discarded",
     "  with this checkout.",
   ].join("\n");
+}
+
+/**
+ * Rewrite an already-retargeted file to say that board tools ARE available (#769).
+ *
+ * A second pass rather than a parameter on {@link retargetTicketContextForRemoteWorker}, because
+ * the two facts are known at different moments: the file is retargeted while the assignment is
+ * being composed, and whether the MCP bridge can be offered depends on the fleet listener and on
+ * the authority THIS worker dialed — resolved later, on the dispatch path.
+ *
+ * Section-delimited, like the board-feedback cut it sits above: the remote-worker section runs
+ * from {@link REMOTE_WORKER_HEADING} to {@link BOARD_FEEDBACK_HEADING}, so replacing that span
+ * leaves both neighbours untouched. A file without the heading is returned unchanged — never
+ * appended to, since that would state both truths at once.
+ *
+ * The board-feedback section is deliberately NOT rewritten. `create_issue` is allowlisted, but
+ * the retargeted file no longer carries the board's own project id (that is what the gh-issue
+ * rewrite removed), and the bridge pins `create_issue` to the project being BUILT — so a board
+ * bug still goes to the issues URL.
+ */
+export function announceRemoteBoardTools(markdown: string, opts: { boardTools: readonly string[] }): string {
+  const start = markdown.indexOf(REMOTE_WORKER_HEADING);
+  if (start === -1 || opts.boardTools.length === 0) return markdown;
+  const feedbackAt = markdown.indexOf(BOARD_FEEDBACK_HEADING, start);
+  const tail = feedbackAt === -1 ? "" : markdown.slice(feedbackAt);
+  const head = markdown.slice(0, start);
+  return [head + buildRemoteWorkerSection({ boardTools: opts.boardTools }), "", tail].join("\n");
 }
 
 /**
