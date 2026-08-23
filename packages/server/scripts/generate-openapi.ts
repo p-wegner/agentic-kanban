@@ -388,7 +388,29 @@ function parseRouteCall(
   return info;
 }
 
-function analyseHandler(handler: Node, info: RouteInfo) {
+/**
+ * How many hops `analyseHandler` will follow to find the body parse.
+ *
+ * A route file may wrap `parseJsonBody` in a local helper so it can re-shape the rejection
+ * without losing the route's error identity -- `parsePluginBody` in `routes/plugins.ts` is the
+ * case that forced this (#806): it catches `parseJsonBody`'s `HTTPException` and re-throws it
+ * as a `PluginError` so the response keeps its machine-readable `code`. Scanning only the
+ * handler's own descendants sees no `parseJsonBody` there and silently downgrades the
+ * operation to "body optional, shape unknown" -- so hardening a route DELETED its request
+ * schema and its 400 from the spec. One hop is what that pattern needs; it is bounded for the
+ * same reason MAX_THROW_FOLLOW_DEPTH is, and a wrapper-of-a-wrapper is left unattributed
+ * rather than chased.
+ */
+const MAX_BODY_FOLLOW_DEPTH = 1;
+
+/** A same-file function called as a bare identifier -- the only shape this walk follows. */
+function localFunctionCalled(call: Node, sf: SourceFile): Node | undefined {
+  const expr = (call as CallExpression).getExpression();
+  if (!Node.isIdentifier(expr)) return undefined;
+  return findFunctionNamed(sf, expr.getText());
+}
+
+function analyseHandler(handler: Node, info: RouteInfo, depth = 0, seen = new Set<string>()) {
   for (const call of handler.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     const expr = call.getExpression();
 
@@ -407,6 +429,21 @@ function analyseHandler(handler: Node, info: RouteInfo) {
         info.requestBodyUnknown = true;
       }
       continue;
+    }
+
+    // A local wrapper around the body parse (see MAX_BODY_FOLLOW_DEPTH). Only descend when the
+    // handler has not already yielded a body: a direct parse in the handler is the stronger
+    // signal and must not be overwritten by one found further down.
+    if (depth < MAX_BODY_FOLLOW_DEPTH && info.requestBody === undefined && !info.requestBodyUnknown) {
+      const sf = call.getSourceFile();
+      const target = localFunctionCalled(call, sf);
+      if (target) {
+        const key = `${sf.getFilePath()}:${target.getStart()}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          analyseHandler(target, info, depth + 1, seen);
+        }
+      }
     }
 
     if (!Node.isPropertyAccessExpression(expr)) continue;
@@ -568,6 +605,29 @@ function moduleOfImport(sf: SourceFile, name: string): SourceFile | undefined {
   return undefined;
 }
 
+/**
+ * `name` as re-exported by `sf`, following `export { name } from "./x.js"` and `export * from`.
+ *
+ * A split-responsibility refactor leaves the original module a pure facade that re-exports its
+ * halves -- that is the mandated shape (#728/#819: "facade re-export from the original module
+ * so no call site changes in the same commit"). A facade holds no function declarations, so
+ * resolution stops dead there and every status thrown behind it silently leaves the spec. This
+ * follows one re-export hop so the two refactorings compose instead of quietly cancelling.
+ */
+function followReExport(sf: SourceFile, name: string): { fn: Node; sf: SourceFile } | undefined {
+  for (const exp of sf.getExportDeclarations()) {
+    const specifier = exp.getModuleSpecifierValue();
+    if (!specifier || !specifier.startsWith(".")) continue;
+    const named = exp.getNamedExports().map((n) => (n.getAliasNode() ?? n.getNameNode()).getText());
+    if (named.length && !named.includes(name)) continue; // a named re-export that is not this one
+    const target = loadRelativeModule(sf.getFilePath(), specifier);
+    if (!target) continue;
+    const fn = findFunctionNamed(target, name);
+    if (fn) return { fn, sf: target };
+  }
+  return undefined;
+}
+
 /** A function/method named `name` anywhere in `sf` — service factories nest theirs, so search deep. */
 function findFunctionNamed(sf: SourceFile, name: string): Node | undefined {
   for (const fn of sf.getDescendantsOfKind(SyntaxKind.FunctionDeclaration)) {
@@ -620,8 +680,9 @@ function resolveCallTarget(call: CallExpression, sf: SourceFile): { fn: Node; sf
     const local = findFunctionNamed(sf, name);
     if (local) return { fn: local, sf };
     const module = moduleOfImport(sf, name);
-    const fn = module ? findFunctionNamed(module, name) : undefined;
-    return fn && module ? { fn, sf: module } : undefined;
+    if (!module) return undefined;
+    const fn = findFunctionNamed(module, name);
+    return fn ? { fn, sf: module } : followReExport(module, name);
   }
   if (!Node.isPropertyAccessExpression(expr)) return undefined;
   const receiverNode = expr.getExpression();
@@ -629,8 +690,9 @@ function resolveCallTarget(call: CallExpression, sf: SourceFile): { fn: Node; sf
   const receiver = receiverNode.getText();
   if (OPAQUE_RECEIVERS.has(receiver)) return undefined;
   const module = moduleOfReceiver(sf, receiver);
-  const fn = module ? findFunctionNamed(module, expr.getName()) : undefined;
-  return fn && module ? { fn, sf: module } : undefined;
+  if (!module) return undefined;
+  const fn = findFunctionNamed(module, expr.getName());
+  return fn ? { fn, sf: module } : followReExport(module, expr.getName());
 }
 
 /**
@@ -720,6 +782,19 @@ function collectThrownStatuses(
     if (isSwallowed(stmt, scope)) continue;
     const status = statusOfThrow(stmt, sf, maps);
     if (status) found.push(status);
+  }
+
+  // A schema-validated body rejects with `HTTPException(400)` raised INSIDE `parseJsonBody`,
+  // not with a `throw` the handler owns -- so #806's hardening deleted 21 documented 400s from
+  // this spec by replacing hand-written `if (!x) throw new SomeError(...)` guards it could
+  // read. The endpoints still answer 400; only the evidence moved. Two-argument form only:
+  // `parseJsonBody(c)` with no schema parses without validating and cannot reject on shape.
+  for (const call of scope.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    if (isSwallowed(call, scope)) continue;
+    const callee = call.getExpression();
+    if (!Node.isIdentifier(callee) || callee.getText() !== "parseJsonBody") continue;
+    if (call.getArguments().length < 2) continue;
+    found.push({ status: 400 });
   }
 
   for (const call of scope.getDescendantsOfKind(SyntaxKind.CallExpression)) {
@@ -1000,8 +1075,14 @@ function buildOpenApi(routes: RouteInfo[]): Schema {
 
     if (route.method !== "get" && route.method !== "delete") {
       const schema: Schema = route.requestBody ?? { type: "object", additionalProperties: true };
+      // `required` follows WHETHER a body is parsed, not whether its SHAPE could be read.
+      // `parseJsonBody(c, zodSchema)` (#806) carries no type argument, so the shape is unknown
+      // while the body is still mandatory -- keying off `requestBody` alone documented those
+      // operations as `required: false`, which is a false statement about the endpoint rather
+      // than a gap in the spec. An unknown shape is an omission; "optional" is a lie.
+      const parsesBody = route.requestBody !== undefined || route.requestBodyUnknown === true;
       operation.requestBody = {
-        required: route.requestBody ? !route.requestBodyOptional : false,
+        required: parsesBody ? !route.requestBodyOptional : false,
         content: { "application/json": { schema } },
       };
     }

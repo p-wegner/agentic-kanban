@@ -543,20 +543,7 @@ paths:
           application/json:
             schema:
               type: object
-              properties:
-                name:
-                  type: string
-                description:
-                  type: string
-                script:
-                  type: string
-                projectId:
-                  type: string
-                  nullable: true
-              required:
-                - name
-                - description
-                - script
+              additionalProperties: true
       responses:
         "201":
           description: Success
@@ -564,7 +551,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error
+          description: Error (thrown HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -591,17 +578,7 @@ paths:
           application/json:
             schema:
               type: object
-              properties:
-                projectId:
-                  type: string
-                changes: {}
-                selectedFiles:
-                  type: array
-                  items:
-                    type: string
-              required:
-                - projectId
-                - changes
+              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -609,7 +586,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error
+          description: Error (thrown HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -628,18 +605,7 @@ paths:
           application/json:
             schema:
               type: object
-              properties:
-                description:
-                  type: string
-                projectId:
-                  type: string
-                overrideLimit:
-                  type: boolean
-                script:
-                  type: string
-              required:
-                - description
-                - projectId
+              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -647,7 +613,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error
+          description: Error (thrown HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -864,7 +830,7 @@ paths:
         - flaky-tests
       operationId: post_api_flaky-tests_parse
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -904,7 +870,7 @@ paths:
         - flaky-tests
       operationId: post_api_flaky-tests_pin
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -1243,7 +1209,7 @@ paths:
         - issues
       operationId: post_api_issues_ai-estimate
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -1252,6 +1218,11 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -1272,7 +1243,7 @@ paths:
         - issues
       operationId: post_api_issues_analyze-dependencies
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -1281,6 +1252,11 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -1336,7 +1312,7 @@ paths:
         - issues
       operationId: post_api_issues_batch
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -1349,7 +1325,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          description: Error (thrown BAD_REQUEST, HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -1365,7 +1341,7 @@ paths:
         - issues
       operationId: patch_api_issues_bulk
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -1378,7 +1354,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          description: Error (thrown BAD_REQUEST, HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -1455,7 +1431,7 @@ paths:
         - issues
       operationId: post_api_issues_contract
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -1464,6 +1440,11 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -1479,7 +1460,7 @@ paths:
         - issues
       operationId: post_api_issues_contract-coupled
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -1492,7 +1473,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          description: Error (thrown BAD_REQUEST, HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -1513,7 +1494,7 @@ paths:
         - issues
       operationId: post_api_issues_contract_confirm
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -1522,6 +1503,11 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -1537,7 +1523,7 @@ paths:
         - issues
       operationId: post_api_issues_dependencies_batch
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -1549,6 +1535,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "400":
+          description: Error (thrown HTTPException, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/issues/enhance:
     post:
       summary: POST /api/issues/enhance — AI-enhance a ticket title and description
@@ -1556,7 +1547,7 @@ paths:
         - issues
       operationId: post_api_issues_enhance
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -1565,6 +1556,11 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -1580,7 +1576,7 @@ paths:
         - issues
       operationId: post_api_issues_group-scan
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -1589,6 +1585,11 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -1710,7 +1711,7 @@ paths:
           schema:
             type: string
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -1998,7 +1999,7 @@ paths:
           schema:
             type: string
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -2007,6 +2008,11 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -2033,7 +2039,7 @@ paths:
           schema:
             type: string
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -2042,6 +2048,11 @@ paths:
       responses:
         "201":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -2720,7 +2731,7 @@ paths:
         - plugins
       operationId: post_api_plugins
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -2769,7 +2780,7 @@ paths:
         - plugins
       operationId: post_api_plugins_validate
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -2817,7 +2828,9 @@ paths:
           application/json:
             schema:
               type: object
-              additionalProperties: true
+              properties:
+                projectId:
+                  type: string
       responses:
         "200":
           description: Success
@@ -2947,7 +2960,9 @@ paths:
           application/json:
             schema:
               type: object
-              additionalProperties: true
+              properties:
+                projectId:
+                  type: string
       responses:
         "200":
           description: Success
@@ -3019,15 +3034,7 @@ paths:
           application/json:
             schema:
               type: object
-              properties:
-                projectId:
-                  type: string
-                gateId:
-                  type: string
-                path:
-                  type: string
-                content:
-                  type: string
+              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -3035,7 +3042,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          description: Error (thrown BAD_REQUEST, HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -3100,13 +3107,7 @@ paths:
           application/json:
             schema:
               type: object
-              properties:
-                projectId:
-                  type: string
-                gateId:
-                  type: string
-                notes:
-                  type: string
+              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -3114,7 +3115,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          description: Error (thrown BAD_REQUEST, HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -3141,15 +3142,7 @@ paths:
           application/json:
             schema:
               type: object
-              properties:
-                projectId:
-                  type: string
-                gateId:
-                  type: string
-                actionId:
-                  type: string
-                input:
-                  type: string
+              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -3157,7 +3150,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          description: Error (thrown BAD_REQUEST, HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -3184,11 +3177,7 @@ paths:
           application/json:
             schema:
               type: object
-              properties:
-                projectId:
-                  type: string
-                gateId:
-                  type: string
+              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -3196,7 +3185,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          description: Error (thrown BAD_REQUEST, HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -3223,7 +3212,9 @@ paths:
           application/json:
             schema:
               type: object
-              additionalProperties: true
+              properties:
+                projectId:
+                  type: string
       responses:
         "200":
           description: Success
@@ -3263,7 +3254,9 @@ paths:
           application/json:
             schema:
               type: object
-              additionalProperties: true
+              properties:
+                projectId:
+                  type: string
       responses:
         "200":
           description: Success
@@ -3325,11 +3318,7 @@ paths:
           application/json:
             schema:
               type: object
-              properties:
-                projectId:
-                  type: string
-                location:
-                  type: string
+              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -3337,7 +3326,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          description: Error (thrown BAD_REQUEST, HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -3386,10 +3375,7 @@ paths:
           application/json:
             schema:
               type: object
-              properties:
-                projectId:
-                  type: string
-                values: {}
+              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -3397,7 +3383,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          description: Error (thrown BAD_REQUEST, HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -3418,11 +3404,7 @@ paths:
           application/json:
             schema:
               type: object
-              properties:
-                projectId:
-                  type: string
-                content:
-                  type: string
+              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -3430,7 +3412,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          description: Error (thrown BAD_REQUEST, HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -3457,7 +3439,9 @@ paths:
           application/json:
             schema:
               type: object
-              additionalProperties: true
+              properties:
+                projectId:
+                  type: string
       responses:
         "200":
           description: Success
@@ -3601,7 +3585,9 @@ paths:
           application/json:
             schema:
               type: object
-              additionalProperties: true
+              properties:
+                projectId:
+                  type: string
       responses:
         "200":
           description: Success
@@ -3636,7 +3622,9 @@ paths:
           application/json:
             schema:
               type: object
-              additionalProperties: true
+              properties:
+                projectId:
+                  type: string
       responses:
         "200":
           description: Success
@@ -4102,9 +4090,7 @@ paths:
           application/json:
             schema:
               type: object
-              properties:
-                projectId:
-                  type: string
+              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -4112,7 +4098,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error
+          description: Error (thrown HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -4138,9 +4124,7 @@ paths:
           application/json:
             schema:
               type: object
-              properties:
-                projectId:
-                  type: string
+              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -4148,7 +4132,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error
+          description: Error (thrown HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -4174,9 +4158,7 @@ paths:
           application/json:
             schema:
               type: object
-              properties:
-                projectId:
-                  type: string
+              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -4184,7 +4166,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error
+          description: Error (thrown HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -4268,7 +4250,7 @@ paths:
           schema:
             type: string
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -4679,6 +4661,11 @@ paths:
           required: true
           schema:
             type: string
+        - name: butler
+          in: query
+          required: false
+          schema:
+            type: string
       responses:
         "200":
           description: Success
@@ -4694,6 +4681,11 @@ paths:
         - name: id
           in: path
           required: true
+          schema:
+            type: string
+        - name: butler
+          in: query
+          required: false
           schema:
             type: string
       responses:
@@ -4712,6 +4704,11 @@ paths:
         - name: id
           in: path
           required: true
+          schema:
+            type: string
+        - name: butler
+          in: query
+          required: false
           schema:
             type: string
       requestBody:
@@ -4752,6 +4749,11 @@ paths:
         - name: id
           in: path
           required: true
+          schema:
+            type: string
+        - name: butler
+          in: query
+          required: false
           schema:
             type: string
       requestBody:
@@ -4800,6 +4802,11 @@ paths:
           required: true
           schema:
             type: string
+        - name: butler
+          in: query
+          required: false
+          schema:
+            type: string
       responses:
         "200":
           description: Success
@@ -4816,6 +4823,11 @@ paths:
         - name: id
           in: path
           required: true
+          schema:
+            type: string
+        - name: butler
+          in: query
+          required: false
           schema:
             type: string
       requestBody:
@@ -4848,6 +4860,11 @@ paths:
           required: true
           schema:
             type: string
+        - name: butler
+          in: query
+          required: false
+          schema:
+            type: string
       requestBody:
         required: false
         content:
@@ -4871,6 +4888,11 @@ paths:
         - name: id
           in: path
           required: true
+          schema:
+            type: string
+        - name: butler
+          in: query
+          required: false
           schema:
             type: string
       requestBody:
@@ -4917,6 +4939,11 @@ paths:
           required: true
           schema:
             type: string
+        - name: butler
+          in: query
+          required: false
+          schema:
+            type: string
       responses:
         "200":
           description: Success
@@ -4933,6 +4960,11 @@ paths:
         - name: id
           in: path
           required: true
+          schema:
+            type: string
+        - name: butler
+          in: query
+          required: false
           schema:
             type: string
       requestBody:
@@ -4967,6 +4999,11 @@ paths:
           required: true
           schema:
             type: string
+        - name: butler
+          in: query
+          required: false
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -4999,6 +5036,11 @@ paths:
           required: true
           schema:
             type: string
+        - name: butler
+          in: query
+          required: false
+          schema:
+            type: string
       responses:
         "200":
           description: Success
@@ -5015,6 +5057,11 @@ paths:
         - name: id
           in: path
           required: true
+          schema:
+            type: string
+        - name: butler
+          in: query
+          required: false
           schema:
             type: string
       responses:
@@ -5043,6 +5090,11 @@ paths:
         - name: sid
           in: path
           required: true
+          schema:
+            type: string
+        - name: butler
+          in: query
+          required: false
           schema:
             type: string
       responses:
@@ -5112,6 +5164,11 @@ paths:
         - name: id
           in: path
           required: true
+          schema:
+            type: string
+        - name: butler
+          in: query
+          required: false
           schema:
             type: string
       responses:
@@ -5493,10 +5550,7 @@ paths:
           application/json:
             schema:
               type: object
-              properties:
-                stepId:
-                  type: string
-                input: {}
+              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -5504,7 +5558,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error
+          description: Error (thrown BAD_REQUEST, HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -5561,9 +5615,7 @@ paths:
           application/json:
             schema:
               type: object
-              properties:
-                stepId:
-                  type: string
+              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -5571,7 +5623,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error
+          description: Error (thrown HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -5731,23 +5783,7 @@ paths:
           application/json:
             schema:
               type: object
-              properties:
-                path:
-                  type: string
-                cloneUrl:
-                  type: string
-                createName:
-                  type: string
-                name:
-                  type: string
-                generateReadme:
-                  type: boolean
-                setupScript:
-                  type: string
-                  nullable: true
-                composeFile:
-                  type: string
-                  nullable: true
+              additionalProperties: true
       responses:
         "201":
           description: Success
@@ -5819,15 +5855,7 @@ paths:
           application/json:
             schema:
               type: object
-              properties:
-                name:
-                  type: string
-                setupScript:
-                  type: string
-                  nullable: true
-                composeFile:
-                  type: string
-                  nullable: true
+              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -6061,16 +6089,15 @@ paths:
           application/json:
             schema:
               type: object
-              properties:
-                name:
-                  type: string
-                sortOrder:
-                  type: number
-              required:
-                - name
+              additionalProperties: true
       responses:
         "201":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -6114,7 +6141,7 @@ paths:
           schema:
             type: string
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -6127,7 +6154,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error
+          description: Error (thrown HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -6322,7 +6349,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error
+          description: Error (thrown HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -6361,11 +6388,7 @@ paths:
           application/json:
             schema:
               type: object
-              properties:
-                path:
-                  type: string
-              required:
-                - path
+              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -6373,7 +6396,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error
+          description: Error (thrown HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -6412,6 +6435,16 @@ paths:
           required: true
           schema:
             type: string
+        - name: mode
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: matchBy
+          in: query
+          required: false
+          schema:
+            type: string
       requestBody:
         required: false
         content:
@@ -6420,6 +6453,11 @@ paths:
               type: object
               additionalProperties: true
       responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
         "201":
           description: Success
           content:
@@ -6450,6 +6488,16 @@ paths:
         - name: projectId
           in: path
           required: true
+          schema:
+            type: string
+        - name: mode
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: matchBy
+          in: query
+          required: false
           schema:
             type: string
       requestBody:
@@ -6921,7 +6969,7 @@ paths:
           schema:
             type: string
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -7371,7 +7419,7 @@ paths:
           schema:
             type: string
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -7443,7 +7491,7 @@ paths:
           schema:
             type: string
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -7605,7 +7653,7 @@ paths:
           schema:
             type: string
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -7859,12 +7907,7 @@ paths:
           application/json:
             schema:
               type: object
-              properties:
-                name:
-                  type: string
-                color:
-                  type: string
-                  nullable: true
+              additionalProperties: true
       responses:
         "201":
           description: Success
@@ -7872,7 +7915,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error
+          description: Error (thrown HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -7888,7 +7931,7 @@ paths:
         - tags
       operationId: post_api_tags_merge
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -7901,7 +7944,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error
+          description: Error (thrown HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -8643,7 +8686,7 @@ paths:
           schema:
             type: string
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -9061,7 +9104,7 @@ paths:
           schema:
             type: string
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -9278,22 +9321,7 @@ paths:
           application/json:
             schema:
               type: object
-              properties:
-                filePath:
-                  type: string
-                body:
-                  type: string
-                lineNumOld:
-                  type: number
-                  nullable: true
-                lineNumNew:
-                  type: number
-                  nullable: true
-                side:
-                  type: string
-              required:
-                - filePath
-                - body
+              additionalProperties: true
       responses:
         "201":
           description: Success
@@ -9301,7 +9329,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error
+          description: Error (thrown HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -9350,9 +9378,7 @@ paths:
           application/json:
             schema:
               type: object
-              properties:
-                body:
-                  type: string
+              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -9360,7 +9386,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error
+          description: Error (thrown HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -9382,7 +9408,7 @@ paths:
           schema:
             type: string
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -9395,7 +9421,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error
+          description: Error (thrown HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -9829,7 +9855,7 @@ paths:
           schema:
             type: string
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -9842,7 +9868,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error
+          description: Error (thrown HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -10364,9 +10390,7 @@ paths:
           application/json:
             schema:
               type: object
-              properties:
-                content:
-                  type: string
+              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -10379,7 +10403,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error
+          description: Error (thrown HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -10396,7 +10420,7 @@ paths:
           schema:
             type: string
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
