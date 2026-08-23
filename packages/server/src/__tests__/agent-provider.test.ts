@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { join } from "node:path";
 
 // Mock node:child_process before importing
 vi.mock("node:child_process", () => ({
@@ -1069,14 +1070,19 @@ describe("PiProvider", () => {
     const originalAppData = process.env.APPDATA;
     Object.defineProperty(process, "platform", { value: "win32" });
     process.env.APPDATA = "C:\\Users\\test\\AppData\\Roaming";
+    // The expected candidate is built with the HOST's `join`, not a hardcoded backslash
+    // literal (#828). `resolvePiExecutable` joins with `node:path`, which stays POSIX even
+    // when `process.platform` is stubbed to "win32" — so a `...\npm\pi.cmd` literal never
+    // matched off Windows and the resolution fell through to the bare "pi".
+    const expected = join(process.env.APPDATA, "npm", "pi.cmd");
     const fs = {
-      existsSync: (path: string) => path === "C:\\Users\\test\\AppData\\Roaming\\npm\\pi.cmd",
+      existsSync: (path: string) => path === expected,
       readFileSync: vi.fn(),
       writeFileSync: vi.fn(),
     };
 
     const config = new PiProvider(fs).buildLaunchConfig({ prompt: "Run" });
-    expect(config.command).toBe("C:\\Users\\test\\AppData\\Roaming\\npm\\pi.cmd");
+    expect(config.command).toBe(expected);
     expect(config.useShell).toBe(true);
 
     Object.defineProperty(process, "platform", { value: originalPlatform });
