@@ -1,4 +1,4 @@
-import { issues, projectStatuses, sessions, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, projectStatuses, sessions, workflowNodes, workspaceReviewPreflight, workspaces } from "@agentic-kanban/shared/schema";
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import { graphOwnsPostExitReview } from "./exit/workflow-ownership.js";
@@ -16,6 +16,7 @@ import { recordDriveObstacle } from "../services/drive-obstacles.service.js";
 import { PREF_RECONCILER_STRANDED_REVIEW_ENABLED } from "../constants/preference-keys.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
+import { clearReviewPreflightBlockRow, setReviewPreflightBlock } from "../repositories/review-preflight.repository.js";
 
 /**
  * How many times the reconciler may attempt a review preflight for the SAME pair of
@@ -81,12 +82,9 @@ export interface StrandedReviewReconcilerDeps {
  */
 export async function clearReviewPreflightBlock(database: Database, workspaceId: string): Promise<void> {
   try {
-    await database.update(workspaces).set({
-      reviewPreflightFailures: 0,
-      reviewPreflightError: null,
-      reviewPreflightSignature: null,
-      reviewPreflightBlockedAt: null,
-    }).where(eq(workspaces.id, workspaceId));
+    // #798: deleting the row IS the cleared state — the reads reconstruct `failures: 0`
+    // with everything else null from a missing row, which is what the four columns held.
+    await clearReviewPreflightBlockRow(workspaceId, database);
   } catch (err) {
     console.warn(`[reconcile] could not clear review-preflight block for ${workspaceId}:`, err instanceof Error ? err.message : err);
   }
@@ -144,13 +142,17 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
       currentNodeStatusName: workflowNodes.statusName,
       parentWorkspaceId: workspaces.parentWorkspaceId,
       forkStatus: workspaces.forkStatus,
-      preflightFailures: workspaces.reviewPreflightFailures,
-      preflightSignature: workspaces.reviewPreflightSignature,
+      // #798: the backoff moved off the row into `workspace_review_preflight`. LEFT JOIN,
+      // so a workspace with no block still appears as a candidate with `null` failures —
+      // exactly the shape the all-defaults columns used to produce.
+      preflightFailures: workspaceReviewPreflight.failures,
+      preflightSignature: workspaceReviewPreflight.signature,
     })
     .from(workspaces)
     .innerJoin(issues, eq(workspaces.issueId, issues.id))
     .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
     .leftJoin(workflowNodes, eq(workspaces.currentNodeId, workflowNodes.id))
+    .leftJoin(workspaceReviewPreflight, eq(workspaceReviewPreflight.workspaceId, workspaces.id))
     .where(and(
       eq(workspaces.status, "idle"),
       eq(workspaces.isDirect, false),
@@ -236,13 +238,18 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
       signature ??= await computePreflightSignature(c.workingDir, c.baseBranch, gitService);
       const failures = (c.preflightSignature === signature ? priorFailures : 0) + 1;
       const exhausted = failures >= MAX_REVIEW_PREFLIGHT_ATTEMPTS;
-      await database.update(workspaces).set({
-        reviewPreflightFailures: failures,
-        reviewPreflightError: message.slice(0, 2000),
-        reviewPreflightSignature: signature,
-        reviewPreflightBlockedAt: exhausted ? new Date().toISOString() : null,
-        updatedAt: new Date().toISOString(),
-      }).where(eq(workspaces.id, c.wsId)).catch((writeErr) => {
+      // The old inline write also bumped `workspaces.updatedAt` because it was one `set({...})`.
+      // Kept as a separate statement rather than dropped: nothing in this repo asserts it, but
+      // `updatedAt` is read as an activity signal elsewhere, and an extraction is the wrong
+      // place to change what the board believes about a workspace's last activity.
+      await database.update(workspaces).set({ updatedAt: new Date().toISOString() })
+        .where(eq(workspaces.id, c.wsId)).catch(() => {});
+      await setReviewPreflightBlock(c.wsId, {
+        failures,
+        error: message.slice(0, 2000),
+        signature,
+        blockedAt: exhausted ? new Date().toISOString() : null,
+      }, database).catch((writeErr) => {
         console.warn(`[reconcile] could not persist review-preflight failure for ${c.wsId}:`, writeErr instanceof Error ? writeErr.message : writeErr);
       });
       if (exhausted) {

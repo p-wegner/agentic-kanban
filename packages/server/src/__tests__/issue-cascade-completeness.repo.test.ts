@@ -158,6 +158,15 @@ const SUBTREE_SEEDERS: Record<string, (c: SeedCtx) => Promise<void>> = {
       nextRetryAt: c.now, since: c.now,
     });
   },
+  // #798: the second column family extracted out of `workspaces`. Same shape as
+  // `workspace_merge_backoff` above — `onDelete: cascade` on its `workspace_id` PK, so
+  // seeding it proves the cascade fires rather than orphaning a review-preflight block.
+  workspace_review_preflight: async (c) => {
+    await c.db.insert(schema.workspaceReviewPreflight).values({
+      workspaceId: c.workspaceId, failures: 3, error: "Rebase conflict during review preflight",
+      signature: "head1..base1", blockedAt: c.now,
+    });
+  },
   sessions: async (c) => {
     await c.db.insert(schema.sessions).values({
       id: c.sessionId, workspaceId: c.workspaceId, status: "running", startedAt: c.now,

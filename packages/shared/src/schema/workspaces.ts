@@ -4,17 +4,18 @@ import { issues } from "./issues.js";
 import { agentSkills } from "./agent-skills.js";
 
 /**
- * 81 columns, and it should not become 82 (#739, #781).
+ * 77 columns, and it should not become 78 (#739, #781, #798).
  *
  * The next widest table in this schema has 23 (`issues`, `repos`); the median across 44
- * tables is 9. What is here is not one entity but ten remaining concerns flattened into one row by
+ * tables is 9. What is here is not one entity but nine remaining concerns flattened into one row by
  * prefix — `latest_setup_*` (8), `latest_symlink_*` (8), `merge_gate_*` (5), `summary_*` (5),
- * `diff_stat_cache_*` (5), `review_preflight_*` (4), `conflict_cache_*` (3), `scorecard_*` (3),
- * `fork_*`/`showdown_*` (5), `code_metrics_*` (2). `merge_backoff_*` (7) is no longer among
- * them: #781 extracted it to `workspace_merge_backoff`, the first family to go, and the
- * remaining order (cheapest coupling first) is `review_preflight_*` → `summary_*` →
+ * `diff_stat_cache_*` (5), `conflict_cache_*` (3), `scorecard_*` (3),
+ * `fork_*`/`showdown_*` (5), `code_metrics_*` (2). Two families are no longer among them:
+ * #781 extracted `merge_backoff_*` (7) to `workspace_merge_backoff` and #798 extracted
+ * `review_preflight_*` (4) to `workspace_review_preflight`. The remaining order (cheapest
+ * coupling first) is `summary_*` →
  * `merge_gate_*` → `latest_symlink_*` → `conflict_cache_*` → `code_metrics_*` →
- * `latest_setup_*` → `diff_stat_cache_*` → `scorecard_*` (43 referencing files, last).
+ * `latest_setup_*` → `diff_stat_cache_*` → `scorecard_*` (highest fan-out, last).
  * Each `latest_*` / `*_cache_*` / `*_gate_*` group is a one-to-many relationship collapsed
  * to its last row: there is one setup run per column set, so its history is unrecoverable by
  * construction, and any new field on any of those concerns is another `ALTER TABLE` on the
@@ -27,13 +28,14 @@ import { agentSkills } from "./agent-skills.js";
  * Twelve columns are NULL in all 659 rows of the live DB — `agent_command`,
  * `pending_plan_path`, `parent_workspace_id`, `fork_node_id`, `fork_join_node_id`,
  * `fork_status`, `showdown_id`, `showdown_label`, `latest_symlink_error`, `service_state`,
- * `isolation_downgrade_reason`, `review_preflight_blocked_at`. **None of them is dead.**
+ * `isolation_downgrade_reason` (and `review_preflight_blocked_at`, which #798 moved to
+ * `workspace_review_preflight.blocked_at` — eleven left here). **None of them is dead.**
  * #739 checked every one: each has a real writer and a real reader (fork via
  * `workflow-fork.service`, showdown via `POST /api/issues/:id/showdown`, service_state via
  * the Docker service-stack repository, and so on). They are NULL because no row on that
  * instance has reached that state, which is a usage fact, not a schema fact — so dropping
  * them would delete working features. The remedy for this table is extraction, not deletion —
- * sequenced, with the coupling of each family counted, in #781.
+ * sequenced, with the coupling of each family counted, in #781 and #798.
  */
 export const workspaces = sqliteTable("workspaces", {
   id: text("id").primaryKey(),
@@ -144,23 +146,6 @@ export const workspaces = sqliteTable("workspaces", {
   latestSymlinkError: text("latest_symlink_error"),
   /** Latest pre-session agent launch failure, e.g. safety-policy preflight refusal. */
   latestLaunchError: text("latest_launch_error"),
-  /**
-   * Backoff state for the stranded-review reconciler's rebase preflight (#283). A rebase
-   * conflict is DETERMINISTIC given the same branch tip and base tip, so retrying it every
-   * 60s cycle can never succeed — it just re-spawns the most expensive git operation the
-   * board runs and blocks the event loop. `reviewPreflightSignature` records the
-   * `<headSha>..<baseSha>` pair the failures were observed against: when either tip moves
-   * the block clears itself (new commits deserve a fresh attempt), and while it holds the
-   * reconciler stops after `MAX_REVIEW_PREFLIGHT_ATTEMPTS` and surfaces a drive obstacle
-   * instead of looping.
-   */
-  reviewPreflightFailures: integer("review_preflight_failures").notNull().default(0),
-  /** The last rebase-preflight error message, so the block is explainable without the log. */
-  reviewPreflightError: text("review_preflight_error"),
-  /** `<branchHeadSha>..<baseHeadSha>` the failures above were observed against. */
-  reviewPreflightSignature: text("review_preflight_signature"),
-  /** Set when the attempt budget was exhausted for the current signature. */
-  reviewPreflightBlockedAt: text("review_preflight_blocked_at"),
   /** Context primer assembled by the context-packer at workspace creation. Injected into CLAUDE.local.md. */
   contextPrimer: text("context_primer"),
   /** Set when worktree removal fails post-merge (e.g. EBUSY). Cleared on successful retry cleanup. */
