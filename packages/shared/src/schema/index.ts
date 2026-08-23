@@ -66,3 +66,5 @@ export {
 export type { DriveObstacleKind, DriveObstacleSeverity } from "./drive-obstacles.js";
 export { workspaceProvisioning } from "./workspace-provisioning.js";
 export { workspaceIssueMembers, workspaceIssueMembersRelations } from "./workspace-issue-members.js";
+// #781: the first column family extracted out of the 88-column `workspaces` table.
+export { workspaceMergeBackoff, workspaceMergeBackoffRelations } from "./workspace-merge-backoff.js";

@@ -148,6 +148,16 @@ const SUBTREE_SEEDERS: Record<string, (c: SeedCtx) => Promise<void>> = {
       phase: "worktree", startedAt: c.now,
     });
   },
+  // #781: the first column family extracted out of the 88-column `workspaces` table.
+  // `onDelete: cascade` on its `workspace_id` PK, so SQLite removes it with the workspace —
+  // seeding it proves that cascade actually fires rather than orphaning a merge block.
+  workspace_merge_backoff: async (c) => {
+    await c.db.insert(schema.workspaceMergeBackoff).values({
+      workspaceId: c.workspaceId, failures: 2, signature: "generic|abc123",
+      error: "merge conflicts", branchSha: "head1", verifyHash: "vh1",
+      nextRetryAt: c.now, since: c.now,
+    });
+  },
   sessions: async (c) => {
     await c.db.insert(schema.sessions).values({
       id: c.sessionId, workspaceId: c.workspaceId, status: "running", startedAt: c.now,
