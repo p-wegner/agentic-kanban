@@ -29,13 +29,16 @@ import { compareRatchet, forEachNode, lineOf, parseGuardSource } from "../../../
  * and frozen. `strokeWidth` is the signal because it is the one attribute the wrapper cannot
  * do without and a chart axis has no reason to set.
  *
- * The remainder below is real and disclosed rather than implied away (CLAUDE.md #691): of the
- * 441 SVG elements in the client, 396 now go through the primitive and 45 do not — 40 of them
- * stroked, which is what this baseline holds, and 5 unstroked (filled marks) which this ring
- * does not claim to cover. 27 of the 40 are one file, `lib/viewRegistry.tsx`, blocked by a
- * layering rule and NOT by anything about icons; the other 13 are charts and bespoke
- * connectors that are not icons at all. Each is listed below with its reason. They may
- * SHRINK — converting one is a one-line baseline edit — and they may never grow.
+ * The remainder below is real and disclosed rather than implied away (CLAUDE.md #691). #810
+ * left 40 stroked `<svg>` sites outside the primitive, 27 of them in ONE file —
+ * `lib/viewRegistry.tsx`, blocked by a layering rule and NOT by anything about icons. #829
+ * unblocked those: the JSX table moved DOWN into `components/viewIcons.tsx` (the registry DATA
+ * stays in `lib/`, because `lib/` routers import `ViewMode` and moving the whole file would
+ * only have flipped the same upward edge around), and all 27 now go through the primitive — so
+ * that key is GONE from the baseline rather than zeroed. **13 stroked sites remain**, plus 5
+ * unstroked (filled marks) this ring does not claim to cover: charts and bespoke connectors
+ * that are not icons at all. Each is listed below with its reason. They may SHRINK — converting
+ * one is a one-line baseline edit — and they may never grow.
  *
  * ## Where the counts come from
  *
@@ -79,14 +82,6 @@ const RAW_STROKED_SVG: Record<string, number> = {
   "components/BoardStats.tsx": 1,
   "components/MetricsView.tsx": 1,
   "components/StrategyBoard.tsx": 1,
-  // The board-view icon table — 27 genuine heroicons glyphs, and the ONE entry here that is a
-  // real remainder rather than "not an icon". It cannot import the primitive: `lib/` may not
-  // import `components/`, and `client-upward-type-edge-ratchet.test.ts` (#694) is zero-tolerance
-  // about that direction, type-only included. Adopting `Icon` here was tried and reverted for
-  // exactly that reason. The fix is to move this JSX table DOWN into `components/` — it is
-  // presentation, and it is the only `.tsx` in `lib/` that renders anything — which is a
-  // separate change with its own importer churn, deliberately not folded into #810.
-  "lib/viewRegistry.tsx": 27,
   // Tiny bespoke connector glyphs drawn on their own px grid (12×12, 24×16) with a 1.5 stroke,
   // one of them stroked with a computed edge colour. Convertible in principle — `Icon` takes a
   // `viewBox` and a `stroke` — but they are not heroicons paths and pretending otherwise would
