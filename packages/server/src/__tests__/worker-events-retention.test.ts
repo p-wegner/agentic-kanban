@@ -142,3 +142,35 @@ describe("worker_events retention", () => {
     expect((await listWorkerEventRows({ workerId, limit: 10_000 }, db)).length).toBeLessThanOrEqual(500);
   });
 });
+
+describe("worker_events ordering (#828)", () => {
+  let db: TestDb;
+
+  beforeEach(() => {
+    ({ db } = createTestDb());
+  });
+
+  it("orders same-millisecond events by insertion, newest first", async () => {
+    const workerId = randomUUID();
+    // A connect immediately followed by a close — the #699/#706 flap this timeline exists
+    // to make readable. Both carry the SAME timestamp, which is what a 1ms-resolution
+    // clock produces and a ~15ms Windows clock hid: with a random-UUID tiebreak the
+    // panel could render the disconnect BEFORE its own connect.
+    const now = new Date(1_700_000_000_000).toISOString();
+    await insertWorkerEvent({ workerId, type: "connected", summary: "open", now }, db as never);
+    await insertWorkerEvent({ workerId, type: "disconnected", summary: "close", now }, db as never);
+
+    const types = (await listWorkerEvents({ workerId, database: db as never })).map((e) => e.type);
+    expect(types).toEqual(["disconnected", "connected"]);
+  });
+
+  it("is stable over many same-millisecond events, not merely lucky once", async () => {
+    const workerId = randomUUID();
+    const now = new Date(1_700_000_000_000).toISOString();
+    for (let i = 0; i < 20; i++) {
+      await insertWorkerEvent({ workerId, type: "registered", summary: `e${i}`, now }, db as never);
+    }
+    const summaries = (await listWorkerEvents({ workerId, database: db as never })).map((e) => e.summary);
+    expect(summaries).toEqual(Array.from({ length: 20 }, (_, i) => `e${19 - i}`));
+  });
+});
