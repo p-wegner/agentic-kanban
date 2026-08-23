@@ -14,6 +14,7 @@ import { db } from "../../db/index.js";
 import type { Database } from "../../db/index.js";
 import { isIssueNumberUniqueConstraintError, nextIssueNumber } from "../issue-number.repository.js";
 import { issueIdentityColumns, issueTextColumns } from "../projections.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 type Issue = typeof issues.$inferSelect;
 const ISSUE_NUMBER_INSERT_ATTEMPTS = 3;
@@ -46,20 +47,21 @@ export async function getIssueListForProject(projectId: string, database: Databa
  * matches `issue get --json` exactly.
  */
 export async function getIssueHeaderByNumber(projectId: string, issueNumber: number, database: Database = db) {
-  const rows = await database
-    .select({
-      ...issueTextColumns,
-      priority: issues.priority,
-      issueType: issues.issueType,
-      statusName: projectStatuses.name,
-      createdAt: issues.createdAt,
-      updatedAt: issues.updatedAt,
-    })
-    .from(issues)
-    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-    .where(and(eq(issues.issueNumber, issueNumber), eq(issues.projectId, projectId)))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({
+        ...issueTextColumns,
+        priority: issues.priority,
+        issueType: issues.issueType,
+        statusName: projectStatuses.name,
+        createdAt: issues.createdAt,
+        updatedAt: issues.updatedAt,
+      })
+      .from(issues)
+      .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+      .where(and(eq(issues.issueNumber, issueNumber), eq(issues.projectId, projectId)))
+      .limit(1)
+  );
 }
 
 /**
@@ -104,24 +106,24 @@ export async function getIssueByNumberOrId(
   const whereClause = ref.kind === "number"
     ? and(eq(issues.issueNumber, ref.issueNumber), eq(issues.projectId, projectId as string))
     : eq(issues.id, ref.issueId);
-  const rows = await database.select().from(issues).where(whereClause).limit(1);
-  return rows[0] ?? null;
+  return firstRow(database.select().from(issues).where(whereClause).limit(1));
 }
 
 /** Issue identity + status name by issue id (CLI `session analyze` context), or null. */
 export async function getIssueWithStatusById(issueId: string, database: Database = db) {
-  const rows = await database
-    .select({
-      ...issueIdentityColumns,
-      statusName: projectStatuses.name,
-      priority: issues.priority,
-      issueType: issues.issueType,
-    })
-    .from(issues)
-    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-    .where(eq(issues.id, issueId))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({
+        ...issueIdentityColumns,
+        statusName: projectStatuses.name,
+        priority: issues.priority,
+        issueType: issues.issueType,
+      })
+      .from(issues)
+      .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+      .where(eq(issues.id, issueId))
+      .limit(1)
+  );
 }
 
 /**
@@ -140,14 +142,15 @@ export async function getIssueTitleDescriptionByNumber(
   projectId?: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select({ title: issues.title, description: issues.description })
-    .from(issues)
-    .where(projectId
-      ? and(eq(issues.issueNumber, issueNumber), eq(issues.projectId, projectId))
-      : eq(issues.issueNumber, issueNumber))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({ title: issues.title, description: issues.description })
+      .from(issues)
+      .where(projectId
+        ? and(eq(issues.issueNumber, issueNumber), eq(issues.projectId, projectId))
+        : eq(issues.issueNumber, issueNumber))
+      .limit(1)
+  );
 }
 
 /**

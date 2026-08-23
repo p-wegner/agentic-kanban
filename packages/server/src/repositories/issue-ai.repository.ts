@@ -8,17 +8,19 @@ import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engin
 import { getStatusIdsByName } from "./project-status.repository.js";
 import { getPreference as canonicalGetPreference } from "./preferences.repository.js";
 import { issueTextColumns } from "./projections.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 export async function getIssueBasics(
   issueId: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, description: issues.description })
-    .from(issues)
-    .where(eq(issues.id, issueId))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, description: issues.description })
+      .from(issues)
+      .where(eq(issues.id, issueId))
+      .limit(1)
+  );
 }
 
 /** #502: one query, in project-status.repository. Kept as a named re-export so callers are unchanged. */
@@ -113,18 +115,19 @@ export async function getIssueForTouchedFiles(
   issueId: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select({
-      id: issues.id,
-      title: issues.title,
-      description: issues.description,
-      projectId: issues.projectId,
-      touchedFilesJson: issues.touchedFilesJson,
-    })
-    .from(issues)
-    .where(eq(issues.id, issueId))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({
+        id: issues.id,
+        title: issues.title,
+        description: issues.description,
+        projectId: issues.projectId,
+        touchedFilesJson: issues.touchedFilesJson,
+      })
+      .from(issues)
+      .where(eq(issues.id, issueId))
+      .limit(1)
+  );
 }
 
 export async function updateIssueTouchedFiles(
@@ -152,12 +155,13 @@ export async function getIssueTitleDescription(
   issueId: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select({ title: issues.title, description: issues.description })
-    .from(issues)
-    .where(eq(issues.id, issueId))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({ title: issues.title, description: issues.description })
+      .from(issues)
+      .where(eq(issues.id, issueId))
+      .limit(1)
+  );
 }
 
 export async function getParentOfDependency(

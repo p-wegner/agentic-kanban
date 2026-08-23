@@ -3,6 +3,7 @@ import { issues, sessionMessages, sessions, workspaces } from "@agentic-kanban/s
 import { sanitizeUtf8 } from "@agentic-kanban/shared/lib/sanitize-utf8";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 /** Persist a single session message row (fallback when no live session manager). */
 export async function insertSessionMessage(
@@ -20,17 +21,18 @@ export async function getBisectRunContext(
   workspaceId: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select({
-      workingDir: workspaces.workingDir,
-      baseCommitSha: workspaces.baseCommitSha,
-      projectId: issues.projectId,
-    })
-    .from(workspaces)
-    .innerJoin(issues, eq(workspaces.issueId, issues.id))
-    .where(eq(workspaces.id, workspaceId))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({
+        workingDir: workspaces.workingDir,
+        baseCommitSha: workspaces.baseCommitSha,
+        projectId: issues.projectId,
+      })
+      .from(workspaces)
+      .innerJoin(issues, eq(workspaces.issueId, issues.id))
+      .where(eq(workspaces.id, workspaceId))
+      .limit(1)
+  );
 }
 
 /** Workspace working-dir + owning project, for starting a bisect session. */
@@ -38,13 +40,14 @@ export async function getBisectStartContext(
   workspaceId: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select({ workingDir: workspaces.workingDir, projectId: issues.projectId })
-    .from(workspaces)
-    .innerJoin(issues, eq(workspaces.issueId, issues.id))
-    .where(eq(workspaces.id, workspaceId))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({ workingDir: workspaces.workingDir, projectId: issues.projectId })
+      .from(workspaces)
+      .innerJoin(issues, eq(workspaces.issueId, issues.id))
+      .where(eq(workspaces.id, workspaceId))
+      .limit(1)
+  );
 }
 
 /** All sessions (id + status) for a workspace — used to reject overlapping runs. */

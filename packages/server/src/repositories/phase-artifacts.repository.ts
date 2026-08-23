@@ -2,23 +2,25 @@ import { and, eq, like, sql } from "drizzle-orm";
 import { issueArtifacts, issues, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 export async function getWorkspaceArtifactTarget(
   workspaceId: string,
   issueId: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select({
-      issueNumber: issues.issueNumber,
-      title: issues.title,
-      workingDir: workspaces.workingDir,
-    })
-    .from(workspaces)
-    .innerJoin(issues, eq(workspaces.issueId, issues.id))
-    .where(and(eq(workspaces.id, workspaceId), eq(workspaces.issueId, issueId)))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({
+        issueNumber: issues.issueNumber,
+        title: issues.title,
+        workingDir: workspaces.workingDir,
+      })
+      .from(workspaces)
+      .innerJoin(issues, eq(workspaces.issueId, issues.id))
+      .where(and(eq(workspaces.id, workspaceId), eq(workspaces.issueId, issueId)))
+      .limit(1)
+  );
 }
 
 export async function getWorkspaceIssueId(
@@ -39,22 +41,23 @@ export async function getLatestPhaseArtifact(
   caption: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select({
-      id: issueArtifacts.id,
-      content: issueArtifacts.content,
-      caption: issueArtifacts.caption,
-    })
-    .from(issueArtifacts)
-    .where(and(
-      eq(issueArtifacts.issueId, issueId),
-      eq(issueArtifacts.workspaceId, workspaceId),
-      eq(issueArtifacts.type, "text"),
-      eq(issueArtifacts.caption, caption),
-    ))
-    .orderBy(sql`${issueArtifacts.createdAt} DESC`)
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({
+        id: issueArtifacts.id,
+        content: issueArtifacts.content,
+        caption: issueArtifacts.caption,
+      })
+      .from(issueArtifacts)
+      .where(and(
+        eq(issueArtifacts.issueId, issueId),
+        eq(issueArtifacts.workspaceId, workspaceId),
+        eq(issueArtifacts.type, "text"),
+        eq(issueArtifacts.caption, caption),
+      ))
+      .orderBy(sql`${issueArtifacts.createdAt} DESC`)
+      .limit(1)
+  );
 }
 
 export async function getPhaseArtifactRows(

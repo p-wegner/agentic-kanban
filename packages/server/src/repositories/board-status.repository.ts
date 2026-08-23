@@ -5,17 +5,20 @@ import type { Database } from "../db/index.js";
 import { getProjectById } from "./project.repository.js";
 import { issueTriageColumns, preferenceKeyValueColumns, projectStatusIdName, sessionLifecycleColumns } from "./projections.js";
 import { listProjectStatusIdNames } from "./project-status.repository.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 /** Resolve the active project id from the `activeProjectId` preference. */
 export async function getActiveProjectIdPref(
   database: Database = db,
 ): Promise<string | null> {
-  const pref = await database
-    .select({ value: preferences.value })
-    .from(preferences)
-    .where(eq(preferences.key, "activeProjectId"))
-    .limit(1);
-  return pref.length === 0 ? null : pref[0].value;
+  const pref = await firstRow(
+    database
+      .select({ value: preferences.value })
+      .from(preferences)
+      .where(eq(preferences.key, "activeProjectId"))
+      .limit(1)
+  );
+  return pref?.value ?? null;
 }
 
 /** Project header row (id/name/repoPath/defaultBranch). */

@@ -9,6 +9,7 @@ import {
 import { and, eq, asc, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 /** Load a template's nodes + edges as a graph payload. */
 export async function loadGraph(database: Database, templateId: string) {
@@ -225,12 +226,13 @@ export async function getWorkflowNodeById(
   nodeId: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select()
-    .from(workflowNodes)
-    .where(eq(workflowNodes.id, nodeId))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select()
+      .from(workflowNodes)
+      .where(eq(workflowNodes.id, nodeId))
+      .limit(1)
+  );
 }
 
 /**
@@ -246,18 +248,19 @@ export async function getWorkspaceCurrentWorkflowNode(
   workspaceId: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select({
-      id: workflowNodes.id,
-      name: workflowNodes.name,
-      nodeType: workflowNodes.nodeType,
-      statusName: workflowNodes.statusName,
-    })
-    .from(workspaces)
-    .innerJoin(workflowNodes, eq(workspaces.currentNodeId, workflowNodes.id))
-    .where(eq(workspaces.id, workspaceId))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({
+        id: workflowNodes.id,
+        name: workflowNodes.name,
+        nodeType: workflowNodes.nodeType,
+        statusName: workflowNodes.statusName,
+      })
+      .from(workspaces)
+      .innerJoin(workflowNodes, eq(workspaces.currentNodeId, workflowNodes.id))
+      .where(eq(workspaces.id, workspaceId))
+      .limit(1)
+  );
 }
 
 export async function getWorkspaceProjectRow(

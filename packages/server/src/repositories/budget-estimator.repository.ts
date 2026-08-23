@@ -2,17 +2,19 @@ import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import { issues, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 export async function getIssueDescriptionAndProject(
   issueId: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select({ description: issues.description, projectId: issues.projectId })
-    .from(issues)
-    .where(eq(issues.id, issueId))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({ description: issues.description, projectId: issues.projectId })
+      .from(issues)
+      .where(eq(issues.id, issueId))
+      .limit(1)
+  );
 }
 
 export async function getOtherProjectWorkspaceIds(

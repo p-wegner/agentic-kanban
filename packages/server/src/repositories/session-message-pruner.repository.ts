@@ -2,6 +2,7 @@ import { sessionMessages, sessions, workspaces } from "@agentic-kanban/shared/sc
 import { desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 /**
  * Extract the affected-row count from a drizzle delete/update result. The libsql
@@ -63,14 +64,16 @@ export async function getSessionMessageThresholdId(
   keepCount: number,
   database: Database = db,
 ): Promise<number | null> {
-  const rows = await database
-    .select({ id: sessionMessages.id })
-    .from(sessionMessages)
-    .where(eq(sessionMessages.sessionId, sessionId))
-    .orderBy(desc(sessionMessages.id))
-    .limit(1)
-    .offset(keepCount);
-  return rows.length === 0 ? null : rows[0].id;
+  const row = await firstRow(
+    database
+      .select({ id: sessionMessages.id })
+      .from(sessionMessages)
+      .where(eq(sessionMessages.sessionId, sessionId))
+      .orderBy(desc(sessionMessages.id))
+      .limit(1)
+      .offset(keepCount)
+  );
+  return row?.id ?? null;
 }
 
 export async function deleteSessionMessagesUpToId(

@@ -2,6 +2,7 @@ import { scheduledRunHistory, scheduledRuns } from "@agentic-kanban/shared/schem
 import { desc, eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 export async function getScheduledRunsByProject(
   projectId: string,
@@ -17,12 +18,13 @@ export async function getScheduledRunById(
   id: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select()
-    .from(scheduledRuns)
-    .where(eq(scheduledRuns.id, id))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select()
+      .from(scheduledRuns)
+      .where(eq(scheduledRuns.id, id))
+      .limit(1)
+  );
 }
 
 export async function createScheduledRun(
@@ -111,12 +113,13 @@ export async function getScheduledRunHistoryById(
   id: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select()
-    .from(scheduledRunHistory)
-    .where(eq(scheduledRunHistory.id, id))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select()
+      .from(scheduledRunHistory)
+      .where(eq(scheduledRunHistory.id, id))
+      .limit(1)
+  );
 }
 
 export async function getScheduledRunHistoryByProject(

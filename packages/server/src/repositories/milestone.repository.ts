@@ -2,14 +2,14 @@ import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { milestones } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 export async function listMilestonesByProject(projectId: string, database: Database) {
   return database.select().from(milestones).where(eq(milestones.projectId, projectId));
 }
 
 export async function getMilestoneById(id: string, database: Database) {
-  const rows = await database.select().from(milestones).where(eq(milestones.id, id)).limit(1);
-  return rows[0] ?? null;
+  return firstRow(database.select().from(milestones).where(eq(milestones.id, id)).limit(1));
 }
 
 export async function createMilestone(

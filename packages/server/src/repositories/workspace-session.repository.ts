@@ -4,17 +4,19 @@ import { setWorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status"
 import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 export async function getIssueTitleAndDescription(
   issueId: string,
   database: Database = db,
 ): Promise<{ title: string; description: string | null } | null> {
-  const rows = await database
-    .select({ title: issues.title, description: issues.description })
-    .from(issues)
-    .where(eq(issues.id, issueId))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({ title: issues.title, description: issues.description })
+      .from(issues)
+      .where(eq(issues.id, issueId))
+      .limit(1)
+  );
 }
 
 export async function getSessionsForWorkspace(

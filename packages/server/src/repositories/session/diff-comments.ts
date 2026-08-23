@@ -3,6 +3,7 @@ import { eq, and } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../../db/index.js";
 import type { Database } from "../../db/index.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 export async function getDiffComments(
   workspaceId: string,
@@ -71,12 +72,13 @@ export async function findDiffComment(
   workspaceId: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select()
-    .from(diffComments)
-    .where(and(eq(diffComments.id, commentId), eq(diffComments.workspaceId, workspaceId)))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select()
+      .from(diffComments)
+      .where(and(eq(diffComments.id, commentId), eq(diffComments.workspaceId, workspaceId)))
+      .limit(1)
+  );
 }
 
 export async function deleteDiffComment(commentId: string, database: Database = db) {

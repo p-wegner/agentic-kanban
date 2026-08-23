@@ -13,6 +13,7 @@ import {
   getSessionStatus as getSessionStatusCanonical,
   getSessionWorkspaceId as getSessionWorkspaceIdCanonical,
 } from "./session.repository.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 // #502: one definition, in workspace-reads (this copy already had its shape, untyped).
 export { getWorkspaceById } from "./workspace-reads.repository.js";
@@ -35,12 +36,13 @@ export async function getPrevSessionResumeInfo(
   resumeFromId: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select({ providerSessionId: sessions.providerSessionId, executor: sessions.executor })
-    .from(sessions)
-    .where(eq(sessions.id, resumeFromId))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({ providerSessionId: sessions.providerSessionId, executor: sessions.executor })
+      .from(sessions)
+      .where(eq(sessions.id, resumeFromId))
+      .limit(1)
+  );
 }
 
 /**

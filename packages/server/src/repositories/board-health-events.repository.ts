@@ -4,6 +4,7 @@ import { and, desc, eq, inArray, lt } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import type { BoardHealthEventType, BoardHealthEventCategory } from "@agentic-kanban/shared/lib/board-health-events";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 // The vocabulary itself lives in shared (#568) so the route whitelists and the client
 // filter maps derive from it instead of re-listing the literals. Re-exported here
@@ -57,12 +58,13 @@ export async function getBoardHealthEvent(
   id: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select()
-    .from(boardHealthEvents)
-    .where(eq(boardHealthEvents.id, id))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select()
+      .from(boardHealthEvents)
+      .where(eq(boardHealthEvents.id, id))
+      .limit(1)
+  );
 }
 
 /** Most-recent-first events for a project, optionally filtered by cycle, event types, or categories, capped by limit. */

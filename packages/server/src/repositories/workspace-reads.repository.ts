@@ -20,6 +20,7 @@ import type { Database } from "../db/index.js";
 import { TERMINAL_WORKSPACE_STATUSES } from "@agentic-kanban/shared/lib/workspace-liveness";
 import { mapWorkspaceDetailsRow } from "../lib/workspace-details-projection.js";
 import type { WorkspaceDetails } from "../lib/workspace-details-projection.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 type Workspace = typeof workspaces.$inferSelect;
 
@@ -27,8 +28,7 @@ export async function getWorkspaceById(
   workspaceId: string,
   database: Database = db,
 ): Promise<Workspace | null> {
-  const rows = await database.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
-  return rows[0] ?? null;
+  return firstRow(database.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1));
 }
 
 /** All workspaces (full rows) for an issue (CLI `issue status` / `issue summary`). */
@@ -183,19 +183,20 @@ export async function getWorkspaceDetails(
 
   const row = result[0];
 
-  const sessRows = await database
-    .select({
-      status: sessions.status,
-      startedAt: sessions.startedAt,
-      endedAt: sessions.endedAt,
-      triggerType: sessions.triggerType,
-      stats: sessions.stats,
-    })
-    .from(sessions)
-    .where(eq(sessions.workspaceId, workspaceId))
-    .orderBy(desc(sessions.startedAt))
-    .limit(1);
-  const sess = sessRows[0] ?? null;
+  const sess = await firstRow(
+    database
+      .select({
+        status: sessions.status,
+        startedAt: sessions.startedAt,
+        endedAt: sessions.endedAt,
+        triggerType: sessions.triggerType,
+        stats: sessions.stats,
+      })
+      .from(sessions)
+      .where(eq(sessions.workspaceId, workspaceId))
+      .orderBy(desc(sessions.startedAt))
+      .limit(1)
+  );
 
   return mapWorkspaceDetailsRow(row, sess);
 }
@@ -205,13 +206,14 @@ export async function getLatestWorkspaceForIssue(
   issueId: string,
   database: Database = db,
 ): Promise<Workspace | null> {
-  const rows = await database
-    .select()
-    .from(workspaces)
-    .where(eq(workspaces.issueId, issueId))
-    .orderBy(desc(workspaces.updatedAt))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select()
+      .from(workspaces)
+      .where(eq(workspaces.issueId, issueId))
+      .orderBy(desc(workspaces.updatedAt))
+      .limit(1)
+  );
 }
 
 /** Count of globally-active workspaces (status = "active"), across all projects. */
@@ -227,13 +229,14 @@ export async function getClosedWorkspaces(database: Database = db) {
 
 /** {issueId, projectId, issueNumber} for a workspace (joined to its issue), or null. */
 export async function getWorkspaceIssueContext(workspaceId: string, database: Database = db) {
-  const rows = await database
-    .select({ issueId: workspaces.issueId, projectId: issues.projectId, issueNumber: issues.issueNumber })
-    .from(workspaces)
-    .innerJoin(issues, eq(workspaces.issueId, issues.id))
-    .where(eq(workspaces.id, workspaceId))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({ issueId: workspaces.issueId, projectId: issues.projectId, issueNumber: issues.issueNumber })
+      .from(workspaces)
+      .innerJoin(issues, eq(workspaces.issueId, issues.id))
+      .where(eq(workspaces.id, workspaceId))
+      .limit(1)
+  );
 }
 
 /**

@@ -2,6 +2,7 @@ import { sessions, agentSkills, workspaces, issues, projects } from "@agentic-ka
 import { eq, desc } from "drizzle-orm";
 import { db } from "../../db/index.js";
 import type { Database } from "../../db/index.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 /** Clear a session's stored provider session id (#26 missing-transcript fallback). */
 export async function clearSessionProviderSessionId(
@@ -94,8 +95,7 @@ export async function getWorkspaceSkillName(
 
 /** A full session row by id, or null. (CLI `session analyze` / `session stats`.) */
 export async function getSessionById(sessionId: string, database: Database = db) {
-  const rows = await database.select().from(sessions).where(eq(sessions.id, sessionId)).limit(1);
-  return rows[0] ?? null;
+  return firstRow(database.select().from(sessions).where(eq(sessions.id, sessionId)).limit(1));
 }
 
 /**
@@ -124,34 +124,34 @@ export async function getSessionLiveness(
 
 /** Full session metadata for the transcript view: session + workspace + issue + project. */
 export async function getSessionTranscriptContext(sessionId: string, database: Database = db) {
-  const rows = await database
-    .select({
-      sessionId: sessions.id,
-      providerSessionId: sessions.providerSessionId,
-      executor: sessions.executor,
-      sessionStatus: sessions.status,
-      startedAt: sessions.startedAt,
-      endedAt: sessions.endedAt,
-      exitCode: sessions.exitCode,
-      triggerType: sessions.triggerType,
-      skillId: sessions.skillId,
-      skillName: sessions.skillName,
-      workspaceId: workspaces.id,
-      branch: workspaces.branch,
-      workspaceStatus: workspaces.status,
-      issueId: issues.id,
-      issueNumber: issues.issueNumber,
-      issueTitle: issues.title,
-      projectId: projects.id,
-      projectName: projects.name,
-    })
-    .from(sessions)
-    .innerJoin(workspaces, eq(sessions.workspaceId, workspaces.id))
-    .innerJoin(issues, eq(workspaces.issueId, issues.id))
-    .innerJoin(projects, eq(issues.projectId, projects.id))
-    .where(eq(sessions.id, sessionId))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({
+        sessionId: sessions.id,
+        providerSessionId: sessions.providerSessionId,
+        executor: sessions.executor,
+        sessionStatus: sessions.status,
+        startedAt: sessions.startedAt,
+        endedAt: sessions.endedAt,
+        exitCode: sessions.exitCode,
+        triggerType: sessions.triggerType,
+        skillId: sessions.skillId,
+        skillName: sessions.skillName,
+        workspaceId: workspaces.id,
+        branch: workspaces.branch,
+        workspaceStatus: workspaces.status,
+        issueId: issues.id,
+        issueNumber: issues.issueNumber,
+        issueTitle: issues.title,
+        projectId: projects.id,
+        projectName: projects.name,
+      })
+      .from(sessions)
+      .innerJoin(workspaces, eq(sessions.workspaceId, workspaces.id))
+      .innerJoin(issues, eq(workspaces.issueId, issues.id))
+      .innerJoin(projects, eq(issues.projectId, projects.id))
+      .where(eq(sessions.id, sessionId))
+  );
 }
 
 /** The id of the most recently started session for a workspace, or null. */

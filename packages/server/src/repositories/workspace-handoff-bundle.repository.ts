@@ -2,34 +2,36 @@ import { and, desc, eq } from "drizzle-orm";
 import { diffComments, issues, projects, projectStatuses, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 export async function getHandoffBundleRow(workspaceId: string, database: Database = db) {
-  const rows = await database
-    .select({
-      issueNumber: issues.issueNumber,
-      issueTitle: issues.title,
-      issueDescription: issues.description,
-      statusName: projectStatuses.name,
-      repoPath: projects.repoPath,
-      defaultBranch: projects.defaultBranch,
-      wsId: workspaces.id,
-      branch: workspaces.branch,
-      baseBranch: workspaces.baseBranch,
-      baseCommitSha: workspaces.baseCommitSha,
-      status: workspaces.status,
-      isDirect: workspaces.isDirect,
-      workingDir: workspaces.workingDir,
-      createdAt: workspaces.createdAt,
-      closedAt: workspaces.closedAt,
-      mergedAt: workspaces.mergedAt,
-    })
-    .from(workspaces)
-    .innerJoin(issues, eq(workspaces.issueId, issues.id))
-    .innerJoin(projects, eq(issues.projectId, projects.id))
-    .leftJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-    .where(eq(workspaces.id, workspaceId))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({
+        issueNumber: issues.issueNumber,
+        issueTitle: issues.title,
+        issueDescription: issues.description,
+        statusName: projectStatuses.name,
+        repoPath: projects.repoPath,
+        defaultBranch: projects.defaultBranch,
+        wsId: workspaces.id,
+        branch: workspaces.branch,
+        baseBranch: workspaces.baseBranch,
+        baseCommitSha: workspaces.baseCommitSha,
+        status: workspaces.status,
+        isDirect: workspaces.isDirect,
+        workingDir: workspaces.workingDir,
+        createdAt: workspaces.createdAt,
+        closedAt: workspaces.closedAt,
+        mergedAt: workspaces.mergedAt,
+      })
+      .from(workspaces)
+      .innerJoin(issues, eq(workspaces.issueId, issues.id))
+      .innerJoin(projects, eq(issues.projectId, projects.id))
+      .leftJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+      .where(eq(workspaces.id, workspaceId))
+      .limit(1)
+  );
 }
 
 export async function getHandoffBundleSessions(workspaceId: string, database: Database = db) {

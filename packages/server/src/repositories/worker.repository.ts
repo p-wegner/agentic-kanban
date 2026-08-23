@@ -2,6 +2,7 @@ import { workers, sessions, workspaces, issues } from "@agentic-kanban/shared/sc
 import { and, eq, isNotNull } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 export type WorkerRow = typeof workers.$inferSelect;
 export type NewWorkerRow = typeof workers.$inferInsert;
@@ -11,8 +12,7 @@ export async function insertWorker(row: NewWorkerRow, database: Database = db): 
 }
 
 export async function getWorkerById(id: string, database: Database = db): Promise<WorkerRow | null> {
-  const rows = await database.select().from(workers).where(eq(workers.id, id)).limit(1);
-  return rows[0] ?? null;
+  return firstRow(database.select().from(workers).where(eq(workers.id, id)).limit(1));
 }
 
 export async function listWorkers(database: Database = db): Promise<WorkerRow[]> {
