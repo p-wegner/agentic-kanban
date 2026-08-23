@@ -48,6 +48,45 @@ without a measured run; the fix if they still time out is to add them to `MUST_U
 The remainder is filed as **#816**, which also names the un-swept unawaited-async-teardown shape
 (#777's `2e789968ac` found two suites manufacturing cross-file misattribution that way).
 
+## Function-nloc rings (#763 client, #800 server) — both live, #800 closed (2026-08-23)
+
+Two shrink-only ratchets over function size, both `@gate:always-run`, both measuring with ONE
+scanner: `packages/shared/__tests__/helpers/function-nloc.ts` (lifted out of #763's client test
+by #800 — the client tsconfig has no node types outside `*.test.ts`, `shared/__tests__` does).
+Extraction verified by measuring the client tree with the old inline scanner and the new shared
+one and diffing: 1434 units, 0 differences.
+
+| ring | units | over 15 nloc | at/over 400 (the baseline) | threshold |
+|---|---|---|---|---|
+| client (`packages/client/src/__tests__/`) | 1465 | 617 | 22 | 400 |
+| server (`packages/server/src/__tests__/`) | 3196 | 1197 | 16 | 400 |
+
+Re-measured 2026-08-23 at `d56c598163`. **400 is stated, not derived** — the DMM's own 15-nloc
+threshold classifies this repo's ordinary architectural units (a React component, a
+`createXService` factory, a `registerXCommand` builder) as oversized, so a gate at 15 would be
+red on arrival on 1197 server units and would block ordinary work on day one, which #763's
+ticket is explicit is the wrong remedy. The two rings share the number on purpose.
+
+**#800 is done, both halves:**
+- Server ring added (`086a41b6bc`), scanner shared, no `SHRINK_GRACE` on it.
+- #763's `SHRINK_GRACE` is **gone** (`b6b7456872`). Four of the five graced entries measured
+  exactly their baseline (Layout 717, IssueDetailPanel 561, WorkspacePanel 512, SettingsPanel
+  496); `CreateIssuePanel` had genuinely shrunk 435 -> 355 (`a116dd63de`, #772) and that shrink
+  is banked, which is the one case the waiver would have hidden.
+
+**Verified by:** both rings run green; and the server ring was watched failing in BOTH
+directions on real master state — growth (`createWorkerAgentRunner: 410 > baseline 404`) and
+stale (`createWorkspaceCreateService: 621 < baseline 674 — lower it to 621`) — plus a deliberate
+perturbation of one baseline entry in each direction.
+
+**One retroactive re-baseline, disclosed in the baseline file.** Within hours of the ring
+landing, three baselined server functions grew past their entries via **plain commits on
+master**, and the pre-merge gate only runs on a merge — so for direct-master work an
+always-run ratchet reports after the fact instead of refusing. The three were re-baselined to
+reality with the causing commit named in
+`packages/server/src/__tests__/function-nloc-baseline.ts`; the enforcement gap is **#817**.
+Leaving them red was the alternative, and it blocks every other merge on the board.
+
 ## Declared "batch 1" refactors — true state (#691)
 
 Three commits declared themselves a partial pass ("batch 1", "N remain") with no follow-up

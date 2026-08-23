@@ -45,8 +45,10 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
  * never waived; only the "your number is stale, lower it" half was.
  *
  * #800 emptied it. All five were re-measured on 2026-08-23 with the (now shared) scanner and
- * came back at exactly their baseline numbers — 717 / 561 / 512 / 496 / 435 — so the waiver
- * was excusing nothing, and no number needed lowering. The set is deleted rather than left
+ * came back at 717 / 561 / 512 / 496 / 355. Four were exactly their baseline numbers, so the
+ * waiver was excusing nothing for them; `CreateIssuePanel` had genuinely shrunk 435 -> 355
+ * (`a116dd63de`, #772) and that shrink is banked in the entry above rather than left as
+ * budget — which is the one case the waiver would have hidden. The set is deleted rather than left
  * empty: an empty escape hatch still reads as one that may be filled in passing, and the
  * server ring (#800) never had one. The waiver SEMANTICS remain in the shared
  * `compareNlocRatchet`, proven by the synthetic cases in the test, so re-introducing a grace
