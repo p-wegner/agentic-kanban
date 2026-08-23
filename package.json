@@ -26,7 +26,7 @@
     "build:client": "pnpm --filter client build",
     "build:mcp": "node scripts/build-mcp.mjs",
     "build:desktop": "pnpm --filter @agentic-kanban/desktop build",
-    "typecheck": "node scripts/ensure-shared-fresh.mjs && pnpm --filter shared typecheck && pnpm --filter agentic-kanban exec tsc --noEmit && pnpm --filter @agentic-kanban/mcp-server exec tsc --noEmit && pnpm --filter @agentic-kanban/client exec tsc --noEmit",
+    "typecheck": "node scripts/ensure-shared-fresh.mjs && pnpm --filter shared typecheck && pnpm --filter agentic-kanban exec tsc --noEmit && pnpm --filter @agentic-kanban/mcp-server exec tsc --noEmit && pnpm --filter @agentic-kanban/client exec tsc --noEmit && pnpm --filter @agentic-kanban/e2e exec tsc --noEmit",
     "typecheck:shared": "pnpm --filter shared typecheck",
     "typecheck:server": "pnpm --filter agentic-kanban exec tsc --noEmit",
     "typecheck:mcp": "pnpm --filter @agentic-kanban/mcp-server typecheck",

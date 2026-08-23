@@ -5,7 +5,7 @@
  * The profile emits a sequence of TodoWrite events that transition tasks through
  * pending → in_progress → completed, letting us verify each UI state.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect, type PlaywrightTestArgs } from "@playwright/test";
 import { SERVER_URL } from "../helpers/port.js";
 
 test.describe("Agent task progress bar on issue cards", () => {
@@ -43,7 +43,7 @@ test.describe("Agent task progress bar on issue cards", () => {
   });
 
   async function enableTodoProgressAgent(
-    request: Parameters<Parameters<typeof test>[1]>[0]["request"],
+    request: PlaywrightTestArgs["request"],
   ) {
     await request.put(`${SERVER_URL}/api/preferences/settings`, {
       data: { claude_profile: "mock", mock_agent_profile: "todo-progress" },
@@ -52,7 +52,7 @@ test.describe("Agent task progress bar on issue cards", () => {
 
   async function createIssue(
     title: string,
-    request: Parameters<Parameters<typeof test>[1]>[0]["request"],
+    request: PlaywrightTestArgs["request"],
   ) {
     const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
       data: { title, statusId: todoStatusId, projectId, skipAutoReview: true },
@@ -65,7 +65,7 @@ test.describe("Agent task progress bar on issue cards", () => {
   async function createWorkspace(
     issueId: string,
     branchSuffix: string,
-    request: Parameters<Parameters<typeof test>[1]>[0]["request"],
+    request: PlaywrightTestArgs["request"],
   ) {
     const wsRes = await request.post(`${SERVER_URL}/api/workspaces`, {
       data: {
@@ -81,7 +81,7 @@ test.describe("Agent task progress bar on issue cards", () => {
   }
 
   async function waitForSessionExit(
-    request: Parameters<Parameters<typeof test>[1]>[0]["request"],
+    request: PlaywrightTestArgs["request"],
     workspaceId: string,
     timeoutMs = 30000,
   ) {
@@ -110,7 +110,7 @@ test.describe("Agent task progress bar on issue cards", () => {
 
   /** Locate the issue card for a given title and return its root div. */
   function getIssueCard(
-    page: Parameters<Parameters<typeof test>[1]>[0]["page"],
+    page: PlaywrightTestArgs["page"],
     issueTitle: string,
   ) {
     const titleP = page.locator("p", { hasText: issueTitle }).first();

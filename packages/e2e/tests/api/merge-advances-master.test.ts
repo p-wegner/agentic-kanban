@@ -14,7 +14,7 @@
  * error the test (covers the already-merged-ancestor reconcile path).
  */
 
-import { test, expect } from "@playwright/test";
+import { test, expect, type PlaywrightTestArgs } from "@playwright/test";
 import { execSync } from "node:child_process";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
@@ -141,7 +141,7 @@ test.describe("merge endpoint advances master and moves issue to Done", () => {
 
   async function createCommittedWorkspace(
     label: string,
-    request: Parameters<Parameters<typeof test>[1]>[0]["request"],
+    request: PlaywrightTestArgs["request"],
   ) {
     const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
       data: {

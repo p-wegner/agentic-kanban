@@ -5,7 +5,7 @@
  * click the issue card → open IssueDetailPanel → click "View Workspaces" →
  * assert data-testid badges appear in the WorkspacePanel.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect, type PlaywrightTestArgs } from "@playwright/test";
 import { SERVER_URL } from "../helpers/port.js";
 
 test.describe("baseBranch and skill name display in workspace panel", () => {
@@ -49,7 +49,7 @@ test.describe("baseBranch and skill name display in workspace panel", () => {
 
   async function createIssue(
     title: string,
-    request: Parameters<Parameters<typeof test>[1]>[0]["request"],
+    request: PlaywrightTestArgs["request"],
   ) {
     const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
       data: {
@@ -69,7 +69,7 @@ test.describe("baseBranch and skill name display in workspace panel", () => {
     issueId: string,
     branchSuffix: string,
     opts: { baseBranch?: string; skillId?: string } = {},
-    request: Parameters<Parameters<typeof test>[1]>[0]["request"],
+    request: PlaywrightTestArgs["request"],
   ) {
     const body: Record<string, unknown> = {
       issueId,
@@ -89,7 +89,7 @@ test.describe("baseBranch and skill name display in workspace panel", () => {
 
   /** Hover over the issue card and click the "Resume" button to open WorkspacePanel directly. */
   async function openWorkspacePanel(
-    page: Parameters<Parameters<typeof test>[1]>[0]["page"],
+    page: PlaywrightTestArgs["page"],
     issueTitle: string,
     _branchSuffix: string,
   ) {

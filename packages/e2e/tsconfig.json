@@ -5,5 +5,5 @@
     "rootDir": ".",
     "lib": ["ES2022", "DOM"]
   },
-  "include": ["tests"]
+  "include": ["tests", "playwright.config.ts", "global-setup.ts", "global-teardown.ts", "ports.ts"]
 }

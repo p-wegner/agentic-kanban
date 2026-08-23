@@ -133,7 +133,7 @@ test.describe("Issue tag assignment from detail panel", () => {
     );
     const issueTagsLoaded = page.waitForResponse(
       (resp) =>
-        resp.url().match(/\/api\/issues\/[^/]+\/tags$/) &&
+        resp.url().match(/\/api\/issues\/[^/]+\/tags$/) !== null &&
         resp.request().method() === "GET" &&
         resp.ok(),
     );
@@ -265,7 +265,7 @@ test.describe("Issue tag assignment from detail panel", () => {
 
     const issueTagsLoaded = page.waitForResponse(
       (resp) =>
-        resp.url().match(/\/api\/issues\/[^/]+\/tags$/) &&
+        resp.url().match(/\/api\/issues\/[^/]+\/tags$/) !== null &&
         resp.request().method() === "GET" &&
         resp.ok(),
     );

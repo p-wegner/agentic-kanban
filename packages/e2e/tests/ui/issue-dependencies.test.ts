@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type PlaywrightTestArgs } from "@playwright/test";
 import { SERVER_URL } from "../helpers/port.js";
 
 test.describe("Issue dependencies UI", () => {
@@ -23,7 +23,7 @@ test.describe("Issue dependencies UI", () => {
     }
   });
 
-  async function createIssue(request: Parameters<Parameters<typeof test>[1]>[0]["request"], title: string) {
+  async function createIssue(request: PlaywrightTestArgs["request"], title: string) {
     const res = await request.post(`${SERVER_URL}/api/issues`, {
       data: { title, statusId: todoStatusId, projectId },
     });
@@ -32,7 +32,7 @@ test.describe("Issue dependencies UI", () => {
     return id as string;
   }
 
-  async function openIssueDetailPanel(page: Parameters<Parameters<typeof test>[1]>[0]["page"], title: string) {
+  async function openIssueDetailPanel(page: PlaywrightTestArgs["page"], title: string) {
     await page.goto("/");
     await page.waitForSelector("[data-testid='board-stats-bar']", { timeout: 10000 });
     // Click the issue card to open the detail panel

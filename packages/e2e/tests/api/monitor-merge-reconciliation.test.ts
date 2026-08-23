@@ -17,7 +17,7 @@
  *   checkAlreadyMerged returns isAlreadyMerged: true immediately.
  */
 
-import { test, expect } from "@playwright/test";
+import { test, expect, type PlaywrightTestArgs } from "@playwright/test";
 import { SERVER_URL } from "../helpers/port.js";
 import { getE2EProject } from "../helpers/e2e-project.js";
 
@@ -76,7 +76,7 @@ test.describe("Monitor merge reconciliation states", () => {
 
   async function createIssue(
     title: string,
-    request: Parameters<Parameters<typeof test>[1]>[0]["request"],
+    request: PlaywrightTestArgs["request"],
   ): Promise<{ id: string; issueNumber: number }> {
     const res = await request.post(`${SERVER_URL}/api/issues`, {
       data: { title, statusId: todoStatusId, projectId, skipAutoReview: true },
@@ -91,7 +91,7 @@ test.describe("Monitor merge reconciliation states", () => {
   async function createWorkspace(
     issueId: string,
     branchSuffix: string,
-    request: Parameters<Parameters<typeof test>[1]>[0]["request"],
+    request: PlaywrightTestArgs["request"],
   ): Promise<string> {
     const res = await request.post(`${SERVER_URL}/api/workspaces`, {
       data: { issueId, branch: `feature/reconcile-test-${branchSuffix}-${suffix}` },
@@ -105,7 +105,7 @@ test.describe("Monitor merge reconciliation states", () => {
   /** Fetch a single issue by issueNumber and return it. */
   async function getIssue(
     issueNumber: number,
-    request: Parameters<Parameters<typeof test>[1]>[0]["request"],
+    request: PlaywrightTestArgs["request"],
   ): Promise<{ id: string; statusId: string; statusName: string; [key: string]: unknown }> {
     const res = await request.get(
       `${SERVER_URL}/api/issues?projectId=${projectId}&issueNumber=${issueNumber}`,

@@ -5,7 +5,7 @@
  * uses the mock agent. The page is loaded first, then the session launch is triggered,
  * and the board receives live stats via WebSocket in real-time.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect, type PlaywrightTestArgs } from "@playwright/test";
 import { SERVER_URL } from "../helpers/port.js";
 import { getE2EProjectId } from "../helpers/e2e-project.js";
 
@@ -53,7 +53,7 @@ test.describe("Live session stats on issue cards", () => {
   });
 
   /** Enable mock profile globally so workspace creation auto-launches mock agent. */
-  async function enableMockAgent(request: Parameters<Parameters<typeof test>[1]>[0]["request"]) {
+  async function enableMockAgent(request: PlaywrightTestArgs["request"]) {
     await request.put(`${SERVER_URL}/api/preferences/settings`, {
       data: { claude_profile: "mock" },
     });
@@ -62,7 +62,7 @@ test.describe("Live session stats on issue cards", () => {
   /** Create an issue (no workspace yet). */
   async function createIssue(
     title: string,
-    request: Parameters<Parameters<typeof test>[1]>[0]["request"],
+    request: PlaywrightTestArgs["request"],
   ) {
     const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
       data: {
@@ -81,7 +81,7 @@ test.describe("Live session stats on issue cards", () => {
   async function createWorkspace(
     issueId: string,
     branchSuffix: string,
-    request: Parameters<Parameters<typeof test>[1]>[0]["request"],
+    request: PlaywrightTestArgs["request"],
   ) {
     const wsRes = await request.post(`${SERVER_URL}/api/workspaces`, {
       data: {
@@ -97,7 +97,7 @@ test.describe("Live session stats on issue cards", () => {
   }
 
   async function waitForSessionExit(
-    request: Parameters<Parameters<typeof test>[1]>[0]["request"],
+    request: PlaywrightTestArgs["request"],
     workspaceId: string,
     timeoutMs = 30000,
   ) {

@@ -20,7 +20,7 @@
  * file a linked follow-up rather than fixing inline here.
  */
 
-import { test, expect } from "@playwright/test";
+import { test, expect, type PlaywrightTestArgs } from "@playwright/test";
 import { execSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -142,7 +142,7 @@ test.describe("merge cascade: board endpoint must stay responsive", () => {
 
   /** Assert the board endpoint returns 200 with a valid array shape. */
   async function assertBoardHealthy(
-    request: Parameters<Parameters<typeof test>[1]>[0]["request"],
+    request: PlaywrightTestArgs["request"],
     label: string,
   ): Promise<void> {
     const res = await request.get(`${SERVER_URL}/api/projects/${projectId}/board`);
