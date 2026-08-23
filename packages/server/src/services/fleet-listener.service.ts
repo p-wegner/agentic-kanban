@@ -11,6 +11,7 @@
 //   POST /api/workers/register        (pairing token -> per-worker token)
 //   POST /api/workers/:id/heartbeat   (per-worker bearer token)
 //   GET  /ws/workers/:id              (per-worker bearer token, checked pre-upgrade)
+//   ALL  /mcp                         (per-ASSIGNMENT token, allowlisted board tools — #769)
 //   GET  /health, /api/health         (unauthenticated liveness, like the others)
 // Every one of them authenticates for itself, so this surface is safe to expose
 // while the main app stays on loopback permanently. The owner-only endpoints
@@ -28,6 +29,7 @@ import { createWorkerWsRoute } from "./worker-connection.service.js";
 import { getWorkerFleet } from "./worker-fleet.service.js";
 import type { WorkerRegistry } from "./worker-registry.service.js";
 import { resolveConfiguredFleetPort, resolveListenHost } from "../lib/bearer-token.js";
+import { FLEET_MCP_PATH, getFleetMcpBridge } from "./fleet-mcp-bridge.service.js";
 
 /**
  * Factory for the owner+worker-facing `/api/workers` router. Injected by the
@@ -93,6 +95,7 @@ export async function startFleetListener(opts: {
 }): Promise<FleetListenerHandle> {
   const { database, port, createWorkersRoute, host = resolveFleetHost() } = opts;
   const fleet = getWorkerFleet(database);
+  const mcp = getFleetMcpBridge(database);
 
   const app = new Hono();
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
@@ -102,7 +105,20 @@ export async function startFleetListener(opts: {
   app.get("/health", (c) => c.json({ ok: true }));
   app.get("/api/health", (c) => c.json({ ok: true }));
   app.route("/api/workers", createWorkersRoute(database, fleet.registry));
+  // #769: the authority the worker DIALED, learned from its own request rather than guessed by
+  // the board. `Host` on the websocket upgrade is exactly the `--board` host:port the worker was
+  // started with, which is what makes the MCP bridge URL composable without the board ever
+  // knowing its own external hostname (see `composeFleetMcpUrl`). Registered before the route so
+  // it runs on the upgrade request itself.
+  app.use("/ws/workers/:id", async (c, next) => {
+    mcp.noteWorkerBoardHost(c.req.param("id"), c.req.header("host"));
+    await next();
+  });
   app.get("/ws/workers/:id", createWorkerWsRoute(upgradeWebSocket, fleet.registry, fleet.connections));
+  // The board's TOOL surface, narrowed to an allowlist and scoped to one assignment (#769). It
+  // belongs here and nowhere else: this is the only listener that authenticates every request,
+  // and the board API port must stay loopback-only and unauthenticated.
+  app.route(FLEET_MCP_PATH, mcp.route());
 
   const listening = await new Promise<{ port: number; server: ReturnType<typeof serve> }>((resolve, reject) => {
     try {
@@ -115,14 +131,24 @@ export async function startFleetListener(opts: {
     }
   });
   injectWebSocket(listening.server);
+  // The ACTUAL bound port (which differs from `port` when 0 was requested). The dispatch path
+  // refuses to offer board tools until this is known, so a board with no fleet listener in this
+  // process still ships the honest "no board tools" brief (#769).
+  mcp.setEndpointPort(listening.port);
 
   console.log(
     `[fleet-listener] worker endpoints exposed on ${host}:${listening.port} ` +
-      "(register/heartbeat/ws only — the board API stays on loopback)",
+      `(register/heartbeat/ws + allowlisted board MCP at ${FLEET_MCP_PATH} — the board API stays on loopback)`,
   );
 
   return {
     port: listening.port,
-    close: () => new Promise<void>((resolve) => listening.server.close(() => resolve())),
+    close: () =>
+      new Promise<void>((resolve) =>
+        listening.server.close(() => {
+          mcp.setEndpointPort(null);
+          resolve();
+        }),
+      ),
   };
 }

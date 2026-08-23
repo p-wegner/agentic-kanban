@@ -2,6 +2,14 @@ import type { AgentLaunchRequest } from "./agent-dispatch.service.js";
 import { resolveEffectivePrompt } from "./agent-provider/context-files-prompt.js";
 import { buildRemoteLaunchSpec } from "./remote-launch-spec.js";
 import { buildRemoteContextFiles } from "./remote-context-files.js";
+import {
+  REMOTE_BOARD_TOOLS,
+  buildRemoteMcpConfigFile,
+  getFleetMcpBridge,
+  providerSupportsRemoteMcp,
+  remoteMcpConfigArgs,
+} from "./fleet-mcp-bridge.service.js";
+import { TICKET_CONTEXT_FILENAME, announceRemoteBoardTools } from "@agentic-kanban/shared/lib/ticket-context";
 // Remote agent execution over a fleet worker's WebSocket (epic #1, phase 1c #5).
 //
 // Implements the AgentExecutionService seam (phase 0): `launch` builds the SAME
@@ -179,6 +187,9 @@ export function createRemoteAgentService(
   const graceMs = opts?.reconnectGraceMs ?? WORKER_RECONNECT_GRACE_MS;
   const abandonMs = Math.max(opts?.abandonMs ?? REMOTE_SESSION_ABANDON_MS, graceMs);
   const assignSettleMs = opts?.assignSettleMs ?? WORKER_ASSIGN_SETTLE_MS;
+  // #769: the board-tool bridge for remote builders. Shared per database with the fleet
+  // listener that serves it, so the token this path mints is the one that listener resolves.
+  const fleetMcp = getFleetMcpBridge(database);
   /**
    * Repo operations awaiting a worker's answer, by `requestId` (#783, #784).
    *
@@ -194,6 +205,9 @@ export function createRemoteAgentService(
 
   function finishSession(sessionId: string, session: RemoteSession, stderr: string, exitCode: number | null): void {
     sessions.delete(sessionId);
+    // #769: the board-tool token dies with its assignment. Unlike the git token it is NOT
+    // persisted, so this (and revokeWorker) is the whole of its revocation story.
+    fleetMcp.revokeSessionTokens(sessionId);
     try {
       session.onOutput({ type: "stderr", sessionId, data: stderr });
       session.onOutput({ type: "exit", sessionId, exitCode });
@@ -218,6 +232,7 @@ export function createRemoteAgentService(
     reportedExitCode: number | null,
   ): Promise<void> {
     sessions.delete(sessionId);
+    fleetMcp.revokeSessionTokens(sessionId);
     let exitCode = reportedExitCode;
     if (session.repo) {
       try {
@@ -652,10 +667,38 @@ export function createRemoteAgentService(
           // incoming ref — not a board-wide credential for every repo — and it is
           // dropped when the worker is revoked.
           const gitToken = git.issueToken({ workerId, projectId: repo.projectId, incomingRef });
+          // #769: board TOOLS for a remote builder — the second half of #749. A per-assignment
+          // token on the fleet listener's allowlisted MCP bridge, delivered as a config file in
+          // the checkout (never in argv, where a process listing would show it) plus the provider
+          // flag that loads it. Same scoping rules as the git token above: one worker, one
+          // project, one session; expiring; dropped on revoke and when the session ends.
+          const remoteContextFiles = buildRemoteContextFiles(contextFiles);
+          const mcpArgs: string[] = [];
+          const mcpAssignment = providerSupportsRemoteMcp(provider)
+            ? fleetMcp.prepareAssignment({ workerId, projectId: repo.projectId, sessionId })
+            : null;
+          if (mcpAssignment) {
+            remoteContextFiles.push(buildRemoteMcpConfigFile(mcpAssignment));
+            mcpArgs.push(...remoteMcpConfigArgs(provider));
+            // The brief was retargeted to "no board tools here" while it was read (#749). That is
+            // now false for this assignment, so the section is rewritten to name the tools that
+            // actually work — instructions that describe the wrong environment are how an agent
+            // wastes a session.
+            for (const file of remoteContextFiles) {
+              if (file.name !== TICKET_CONTEXT_FILENAME) continue;
+              file.content = announceRemoteBoardTools(file.content, { boardTools: REMOTE_BOARD_TOOLS });
+            }
+          } else {
+            console.log(
+              `[agent-remote] no board MCP bridge for session ${sessionId} ` +
+                `(provider=${provider ?? "claude"}, fleet listener ${fleetMcp.endpointPort() === null ? "not running" : "up"}) — ` +
+                "the worker's brief keeps saying it has no board tools",
+            );
+          }
           const delivered = manager.send(workerId, {
             type: "assign",
             sessionId,
-            spec,
+            spec: mcpArgs.length > 0 ? { ...spec, args: [...spec.args, ...mcpArgs] } : spec,
             repo: {
               projectId: repo.projectId,
               gitPort: git.port,
@@ -666,7 +709,8 @@ export function createRemoteAgentService(
               setupScript: repo.setupScript,
               // #749: the ticket-context file travels as CONTENT (the board's path names
               // nothing on the worker) and is retargeted for a machine with no board MCP.
-              contextFiles: buildRemoteContextFiles(contextFiles),
+              // #769 appends the MCP config file to the same channel when a bridge is offered.
+              contextFiles: remoteContextFiles,
               skills: skillRows
                 .filter((s) => typeof s.prompt === "string" && s.prompt.trim().length > 0)
                 .map((s) => ({ name: s.name, description: s.description ?? "", content: s.prompt })),

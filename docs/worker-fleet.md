@@ -29,6 +29,9 @@ verbs talk to the board's *owner* surface and only work on the board machine.**
 | `worker list` | **board machine only** | `GET /api/workers` | Same — an owner route. |
 | Revoke (`DELETE /api/workers/:id`) | **board machine only** | — | Same. |
 | `worker start` | worker machine | `POST /api/workers/register`, `POST /api/workers/:id/heartbeat`, `GET /ws/workers/:id` | Worker-facing routes; each authenticates for itself, so these are the only ones exposed off-loopback. |
+| `worker explain` / `worker placements` / `worker events` | **board machine only** | `GET /api/workers/explain`, `/placements`, `/:id/events` | Owner routes. |
+| `worker doctor-board` | **board machine only** | `GET /api/workers` | Owner route — that is exactly why it is a separate command from `worker doctor`. |
+| `worker doctor` | worker machine | `/health`, `POST /api/workers/:id/heartbeat`, `GET /ws/workers/:id` | Worker-facing routes plus local checks (git, provider CLI, provider login). |
 | `worker instructions` | anywhere | none | Pure text generation. |
 | `--version` | anywhere | none | Reads the installed `package.json`. |
 
@@ -42,9 +45,22 @@ board's API port it cannot connect at all from another machine, because that app
 
 **What a worker-side operator can actually check**, in order of usefulness:
 
+0. **`agentic-kanban worker doctor --board <fleet-url>`** (#774) — the whole chain this
+   side can prove, in one command: fleet port reachable, the SAVED PAIRING still
+   authenticates (a `worker list` cannot tell you this from here), the WebSocket upgrade
+   survives whatever sits between the machines, the git transport port answers
+   (`--git-port`), git on PATH, and each provider CLI installed **and logged in here**.
+   Exits non-zero on any failure, so it is usable from the Windows scheduled task.
+   Add `--json` for the report as data.
+   It reports `pass` / `fail` / `skip` / `unknown` and never dresses an indeterminate
+   result as a pass — a provider login can be inferred from its auth files but not proven
+   without spending a request, and an API key in the environment is invisible to it.
+   The board-side half is a SEPARATE command, `worker doctor-board`, run on the board:
+   see the constraint this whole section is about.
 1. **Reachability** — `curl -s -o /dev/null -w "%{http_code}\n" <fleet-url>/health`.
    The fleet listener answers both `/health` and `/api/health` unauthenticated, on
-   purpose, so one instruction works against either port.
+   purpose, so one instruction works against either port. (`worker doctor` runs this as
+   its first check, so the raw curl is now the fallback rather than the instruction.)
 2. **The daemon's own log.** On a successful connect it prints
    `[worker] connected to <board-url>`; at registration it prints
    `[worker] registered with <board-url> as '<name>' (id=<workerId>)`, and on a later
@@ -98,9 +114,18 @@ claude --version        # or codex / copilot
 agentic-kanban-worker start --board http://<board-host>:3003 --token <pairing-token> \
   --name "$(hostname)" --labels docker,linux --providers claude --max-concurrency 2
 
-# 4. Board machine — confirm the board sees it
+# 4. Worker machine — self-test the whole chain from here (#774)
+agentic-kanban worker doctor --board http://<board-host>:3003 --providers claude
+
+# 5. Board machine — confirm the board sees it, and that it is actually PICKABLE
 agentic-kanban worker list
+agentic-kanban worker doctor-board
 ```
+
+Step 4 and step 5 are deliberately two commands: §1 explains why neither machine can
+answer for the other. The state they exist to separate is a worker whose heartbeat is
+fresh but whose WebSocket the board does not hold — it looks online in `worker list`, is
+never picked, and only `doctor-board` names it.
 
 The pairing token is exchanged for a per-worker bearer token stored in
 `~/.agentic-kanban/worker-state.json`, so later runs need no `--token`. Do not hand-edit that
@@ -151,6 +176,13 @@ process started (the values are held in memory, not in a column), not that it is
 
 ## 5. Opting a project in, and strict dispatch
 
+> **There is a UI for this now (#774).** Command palette → **Worker Fleet** → *Remote
+> dispatch* sets `worker_dispatch_<projectId>`, `worker_dispatch_strict_<projectId>` and
+> `worker_labels_<projectId>` for the board's active project. Before that, the three keys
+> were declared in `dynamic-preference-keys.ts` and referenced by no client code, so
+> opting a project in was a curl — while the panel's "Pair a new worker" button implied
+> the flow was complete.
+
 Registration alone routes nothing. Per project:
 
 ```bash
@@ -197,7 +229,7 @@ VITE_HOST=127.0.0.1 pnpm dev
 
 | Variable | Serves | Default |
 |---|---|---|
-| `KANBAN_FLEET_PORT` | Worker register / heartbeat / WebSocket, plus `/health` and `/api/health`. Nothing else | **Unset = disabled.** No port is opened |
+| `KANBAN_FLEET_PORT` | Worker register / heartbeat / WebSocket, the allowlisted board-MCP bridge at `/mcp` (section 11), plus `/health` and `/api/health`. Nothing else | **Unset = disabled.** No port is opened |
 | `KANBAN_GIT_HTTP_PORT` | The git smart-HTTP transport only | **Unset = an OS-assigned port**, i.e. a different one every board boot. **Required once `KANBAN_FLEET_PORT` is set** — see the invariant below |
 | `KANBAN_FLEET_HOST` / `KANBAN_GIT_HTTP_HOST` | Which interface each binds | **Unset = `127.0.0.1`** (#753). Naming the interface is how a listener leaves this machine |
 | `KANBAN_FLEET_INSECURE` | Nothing on its own. `=1` lets an unset host mean every interface again | Unset. Only the exact value `1` counts — `true` does not |
@@ -277,6 +309,13 @@ defend against it, because the leak is the dev *client*, not the API bind. Makin
 client refuse a non-loopback bind while a fleet listener is configured is not implemented —
 today it is an env var an operator has to remember.
 
+### The board-MCP bridge shares this listener (#769)
+
+`/mcp` on the fleet port is the board's own tool surface, narrowed to an allowlist and scoped
+to one assignment. It is on this listener for the same reason everything else here is: it is
+the only one that authenticates every request, and the board API must stay loopback-only. See
+section 11 for what it grants and what it cannot.
+
 ## 7. Nothing dispatches — what to check
 
 In the order the code decides it (`resolveWorkerPlacement`,
@@ -313,6 +352,60 @@ names the one that decided, with the values it read (#755). The chain it walks i
 `resolveWorkerPlacement`'s source order and to this section's numbering by
 `placement-chain-parity.test.ts`, and every answer carries `agreesWithResolver` — so if the
 explanation and the resolver ever disagree, the payload says so rather than guessing.
+
+### 7a. What the board REMEMBERS about a worker (#774)
+
+§7 answers "why is nothing dispatching **now**". It is evaluated when asked, so it is a
+weak answer to "why did that session three days ago run on the host" — and the board used
+to keep no history at all: a connect, a registration, a protocol mismatch and an
+incoming-ref decision existed only as a `console.*` line on the board's stdout (and, on
+Windows, the daemon's `-Log`). A restart discarded all of it, which is what made a
+#699/#706-class failure a scrollback-archaeology exercise.
+
+The board now keeps a per-worker timeline:
+
+```bash
+agentic-kanban worker events <workerId>          # newest first; --limit, --json
+```
+
+- REST: `GET /api/workers/:id/events` (owner route; `?limit=`, `?types=a,b`).
+- UI: the **History** button on each row of the Worker Fleet panel.
+- MCP: not exposed as its own tool — `list_workers` gives the ids, and the timeline is a
+  read for an operator rather than something an agent decides on.
+
+**What is recorded today, and what is not.** Honest list, because a declared-but-unwritten
+event type reads like a promise: `registered`, `protocol_mismatch`, `ref_landed` and
+`ref_discarded` are written. `connected`, `disconnected`, `assigned`, `session_exit`,
+`ref_held` and `status_change` are declared in the vocabulary and **not yet emitted** —
+their call sites are in `fleet-listener.service.ts`, `agent-remote.service.ts`,
+`worker-incoming-refs.service.ts` and the registry, none of which #774 owned. The split is
+data (`EMITTED_TYPES` / `UNEMITTED_TYPES` in `services/worker-events.service.ts`) and
+pinned by `worker-events-emitter-coverage.test.ts`, which fails in BOTH directions — so it
+cannot rot into a false claim either way.
+
+There is no `revoked` event, deliberately: revoking a worker DELETES its whole timeline, so
+such a row would be written and dropped in the same breath.
+
+**Retention.** Capped per worker at 300 rows, pruned oldest-first on the write path — so
+the table's ceiling is `registered workers x 300` and does not grow with fleet traffic. The
+bound is on the write path rather than in a sweep because #738 happened with a retention
+service already in the codebase (99,140 issue comments, 127 MB of a 186 MB database).
+
+### 7b. The fleet from MCP (#774)
+
+Five tools, each a thin pass-through to the REST endpoints above, so an agent asked to
+diagnose the fleet does not hand-roll curl against a port it has to guess:
+
+| Tool | Answers |
+|---|---|
+| `list_workers` | the fleet with LIVE state — connected, load, real free slots, per-worker eligibility and why not |
+| `explain_worker_placement` | §7's ordered chain for one issue (or the project), with `agreesWithResolver` |
+| `mint_worker_pairing_token` | a single-use pairing token plus the command to run on the other machine |
+| `revoke_worker` | revoke by id |
+| `list_incoming_refs` | the held-ref staging inventory of §9 |
+
+`get_fleet_friction` is an **unrelated** tool whose name collides — it aggregates agent
+tool-call friction and has nothing to do with worker machines.
 
 ## 8. Two traps that fail with no visible cause
 
@@ -532,14 +625,80 @@ dispatch path needs to know about versions.
 A version column on `workers` (and the panel showing it) is **not implemented**; the values
 live in board memory and are re-learned within 30 s of a restart.
 
+## 11. Board tools on a worker — what a remote agent CAN and CANNOT do (#769)
+
+A remote builder used to have no `mcp__agentic-kanban__*` tools at all: the board's own
+`--mcp-config` names a file in the board's tmpdir describing a stdio server that would open the
+board's natively-compiled sqlite binding, so a true-remote launch spec strips the flag (#747).
+#749 made the shipped brief HONEST about the absence. #769 removes it for the two providers that
+can be pointed at a config file.
+
+**What is served.** `ALL /mcp` on the fleet listener, proxying the board's existing MCP HTTP
+listener (#136) over loopback. Every request needs a **per-assignment** bearer token scoped to
+`{workerId, projectId, sessionId}` — minted at dispatch, expiring, dropped when the session is
+finalized and when the worker is revoked. It travels in a config file written into the worker's
+checkout (`.mcp-kanban.json`, via the same `contextFiles` channel as the ticket brief), never in
+argv, so no process listing on the worker shows it. Digest-only board-side, like every other
+token here.
+
+**The allowlist**, enforced by the proxy — not merely hidden from `tools/list`:
+
+| Allowed | Refused (examples) |
+|---|---|
+| `get_issue`, `list_issues`, `get_board_status`, `create_issue` | `merge_workspace`, `mark_ready_for_merge`, `close_workspace`, `set_preference`, `delete_*`, `start_workspace`, `relaunch_workspace`, every session/transcript reader |
+
+`create_issue` is **pinned** to the assignment's project: a call with no `projectId` gets it
+filled in (the default is the board's ACTIVE project, i.e. the classic misfile), and a call
+naming another project is refused. The allowlist lives in one place —
+`REMOTE_BOARD_TOOLS` in `services/fleet-mcp-bridge.service.ts` — and every deny case has a test.
+
+**There is no `add_comment` tool on this board**, so progress reflection is unchanged: it goes in
+the agent's final output, which the board reads. `list_issues` is in the allowlist in its place,
+so a builder can check whether a finding is already filed before filing it.
+
+**When the bridge is NOT offered** the brief keeps saying "no board tools", which stays true:
+
+- no fleet listener in this board process (`KANBAN_FLEET_PORT` unset) — there is nowhere to serve it;
+- the worker never opened a websocket to this process, so the board does not know the authority it
+  dialed (the bridge URL is derived from that request's `Host` header, precisely so the board
+  never has to know its own external hostname — the same reasoning that has the WORKER compose the
+  git URL);
+- the provider is **codex or pi**. Codex reads MCP servers from `~/.codex/config.toml` on the
+  machine it runs on and pi from its own extension flags, so neither can be pointed at the bridge
+  from argv. A remote codex/pi builder still has no board tools — tracked as **#799**, which also
+  carries the missing progress-comment tool and the MCP path's lack of a DB-derived
+  assignment-liveness check.
+
+### What credentials-never-cross makes genuinely impossible
+
+Not a bug, not fixable by more plumbing — write it down so it is not re-opened as one:
+
+- **Profile selection cannot be honoured remotely.** `--settings ~/.claude/settings_<profile>.json`
+  is both a board-host path and a credential selector, and a true-remote spec drops it (#747). So
+  the Strategy Bullseye's profile choice and the auth-rotation ring's quota-based rotation **do not
+  reach a worker** — the worker authenticates with its own local login, whatever that is. This is
+  the same boundary that already makes `resolveWorkerPlacement` refuse remote placement for an
+  allowlist-restricted project (#651). **Worker-side ATTESTATION** — a worker declaring which
+  profiles it can authenticate as, the way it already declares `--providers`/`--labels` — is the
+  only thing that narrows it.
+- **`ANTHROPIC_MODEL` / `ANTHROPIC_BASE_URL` from a board profile never cross**, by design
+  (`lib/remote-spec-env.ts`). Model selection travels in argv; the endpoint is the worker's.
+- **The bridge does not change either of those.** A capability token authorises board TOOL CALLS.
+  It is not an agent credential and cannot stand in for one.
+
 ## 10. Reference
 
 - Design record: [decisions/012-worker-fleet-compute-model.md](decisions/012-worker-fleet-compute-model.md)
 - Environment variables: [env-vars.md](env-vars.md)
 - Generated runbook: `agentic-kanban-worker instructions --board <fleet-url>` (add `--json`
   for the same steps machine-readable)
+- Observability (#755, #774): `services/placement-explain.service.ts` (the §7 chain,
+  `describeFleet`), `services/worker-events.service.ts` +
+  `repositories/worker-events.repository.ts` (§7a), `cli/commands/worker-doctor.ts`,
+  `mcp-server/src/tools/worker-fleet.ts`
 - Board-side modules: `services/worker-{registry,connection,fleet}.service.ts`,
   `services/agent-{dispatch,remote}.service.ts`, `services/git-http.service.ts`,
-  `services/fleet-listener.service.ts`, `startup/worker-incoming-sweep.ts`
+  `services/fleet-listener.service.ts`, `services/fleet-mcp-bridge.service.ts`,
+  `startup/worker-incoming-sweep.ts`
 - Worker-side modules: `worker/worker-{cli,daemon,agent-runner,repo,command-resolver}.ts`
 - Wire protocol (both sides): `packages/shared/src/lib/worker-protocol.ts`
