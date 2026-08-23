@@ -42,6 +42,7 @@ vi.mock("../services/git.service.js", () => ({
 const { reconcileStrandedReviews, MAX_REVIEW_PREFLIGHT_ATTEMPTS, clearReviewPreflightBlock } =
   await import("../startup/stranded-review-reconciler.js");
 const { resetMergeJobs } = await import("../services/merge-job.service.js");
+const { getReviewPreflightBlock } = await import("../repositories/review-preflight.repository.js");
 
 type Db = ReturnType<typeof createTestDb>["db"];
 
@@ -85,13 +86,14 @@ async function seedCandidate(db: Db, issueNumber: number) {
   return { projectId, workspaceId };
 }
 
+/**
+ * #798: the block moved off `workspaces` into `workspace_review_preflight`, so this reads
+ * through the repository that now owns it. The assertions below are unchanged — a cleared
+ * block still reads as `failures: 0` with everything else null, which is the whole point of
+ * the LEFT JOIN there (a missing row is the cleared state, not an unknown workspace).
+ */
 function readBlock(db: Db, workspaceId: string) {
-  return db.select({
-    failures: workspaces.reviewPreflightFailures,
-    signature: workspaces.reviewPreflightSignature,
-    error: workspaces.reviewPreflightError,
-    blockedAt: workspaces.reviewPreflightBlockedAt,
-  }).from(workspaces).where(eq(workspaces.id, workspaceId)).then((r) => r[0]);
+  return getReviewPreflightBlock(workspaceId, db).then((b) => b!);
 }
 
 /** Make the preflight conflict, the way a real rebase conflict surfaces. */
