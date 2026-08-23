@@ -2,10 +2,20 @@ openapi: 3.1.0
 info:
   title: agentic-kanban REST API
   version: 0.1.9
-  description: Auto-generated from Hono route source via scripts/generate-openapi.ts. Schemas are inferred statically (best-effort) — request bodies come from the parseJsonBody<T> type argument; response bodies are untyped.
+  description: "Auto-generated from Hono route source via scripts/generate-openapi.ts. Schemas are inferred statically (best-effort) — request bodies come from the parseJsonBody<T> type argument; response bodies are untyped. Coverage is audited: see x-coverage for what is scanned and what is deliberately not described here."
 servers:
   - url: /
     description: "Same-origin (default dev: http://localhost:3001)"
+x-coverage:
+  scanned:
+    - src/routes/*.ts
+    - src/startup/route-setup.ts
+    - src/server-start.ts
+  notDocumented:
+    - where: src/startup/route-setup.ts (`*`)
+      reason: SPA fallback - serves the client bundle for any path the API did not match. Not an API operation, and `*` is not expressible as an OpenAPI path.
+    - where: src/services/fleet-listener.service.ts
+      reason: A SEPARATE Hono app on KANBAN_FLEET_PORT (worker register/heartbeat/ws + the fleet MCP bridge), never mounted on the board API. It has its own bearer-token auth and its own surface; documenting its paths here would claim they exist on the board port, where they do not.
 paths:
   /api/agent-skills:
     get:
@@ -827,6 +837,67 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/internal/monitor-run:
+    post:
+      summary: POST /api/internal/monitor-run
+      tags:
+        - internal-monitor
+      operationId: post_api_internal_monitor-run
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/internal/monitor-status:
+    get:
+      summary: GET /api/internal/monitor-status
+      tags:
+        - internal-monitor
+      operationId: get_api_internal_monitor-status
+      parameters:
+        - name: verbose
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/internal/resource-sweep:
+    post:
+      summary: reclaim resources on demand.
+      tags:
+        - internal-monitor
+      operationId: post_api_internal_resource-sweep
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "503":
+          description: Error
           content:
             application/json:
               schema: {}
@@ -2380,14 +2451,19 @@ paths:
           content:
             application/json:
               schema: {}
-  /api/plugins/{id}/docs/*:
+  /api/plugins/{id}/docs/{wildcard}:
     get:
       summary: GET /api/plugins/:id/docs/*?theme=dark|light — serve one declared doc from the plugin checkout.
       tags:
         - plugins
-      operationId: get_api_plugins_id_docs_*
+      operationId: get_api_plugins_id_docs_wildcard
       parameters:
         - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: wildcard
           in: path
           required: true
           schema:
@@ -6922,6 +6998,323 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/workers:
+    get:
+      summary: existing CLI (`worker list`) and panel keep working against the enriched shape.
+      tags:
+        - workers
+      operationId: get_api_workers
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: provider
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workers/explain:
+    get:
+      summary: reports preference values and the whole fleet's shape.
+      tags:
+        - workers
+      operationId: get_api_workers_explain
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: provider
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: issue
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: branch
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/workers/incoming:
+    get:
+      summary: a branch, and discarding one drops commits. Never on the fleet listener.
+      tags:
+        - workers
+      operationId: get_api_workers_incoming
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workers/incoming/discard:
+    post:
+      summary: POST /api/workers/incoming/discard
+      tags:
+        - workers
+      operationId: post_api_workers_incoming_discard
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+                branch:
+                  type: string
+                force:
+                  type: boolean
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workers/incoming/land:
+    post:
+      summary: POST /api/workers/incoming/land
+      tags:
+        - workers
+      operationId: post_api_workers_incoming_land
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+                branch:
+                  type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workers/pairing-token:
+    post:
+      summary: POST /api/workers/pairing-token
+      tags:
+        - workers
+      operationId: post_api_workers_pairing-token
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workers/placements:
+    get:
+      summary: and read by nothing, so "which machine ran this" was unanswerable after the fact.
+      tags:
+        - workers
+      operationId: get_api_workers_placements
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: issueId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: workspaceId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: workerId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: remoteOnly
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workers/register:
+    post:
+      summary: POST /api/workers/register
+      tags:
+        - workers
+      operationId: post_api_workers_register
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pairingToken:
+                  type: string
+                name:
+                  type: string
+                os:
+                  type: string
+                arch:
+                  type: string
+                labels:
+                  type: array
+                  items:
+                    type: string
+                providers:
+                  type: array
+                  items:
+                    type: string
+                maxConcurrency:
+                  type: number
+                protocolVersion:
+                  type: number
+                workerVersion:
+                  type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workers/{id}:
+    delete:
+      summary: DELETE /api/workers/{id}
+      tags:
+        - workers
+      operationId: delete_api_workers_id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/workers/{id}/events:
+    get:
+      summary: "Owner-only, like the rest of this block: an event summary names sessions and branches."
+      tags:
+        - workers
+      operationId: get_api_workers_id_events
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: types
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workers/{id}/heartbeat:
+    post:
+      summary: POST /api/workers/{id}/heartbeat
+      tags:
+        - workers
+      operationId: post_api_workers_id_heartbeat
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status: {}
+                capabilities: {}
+                protocolVersion:
+                  type: number
+                workerVersion:
+                  type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
   /api/workflows/analytics:
     get:
       summary: GET /api/workflows/analytics?projectId=
@@ -8518,6 +8911,53 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/workspaces/{id}/review:
+    post:
+      summary: Trigger a manual review session for a workspace.
+      tags:
+        - workspace-review
+      operationId: post_api_workspaces_id_review
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                thoroughReview:
+                  type: boolean
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+        "409":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+        "500":
+          description: Error
+          content:
+            application/json:
+              schema: {}
   /api/workspaces/{id}/scorecard:
     get:
       summary: GET /api/workspaces/:id/scorecard
@@ -8888,3 +9328,60 @@ paths:
           content:
             application/json:
               schema: {}
+  /health:
+    get:
+      summary: (notably shared dist) is absent.
+      tags:
+        - server-start
+      operationId: get_health
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /ws/board/{projectId}:
+    get:
+      summary: GET /ws/board/{projectId}
+      tags:
+        - route-setup
+      operationId: get_ws_board_projectId
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "101":
+          description: Switching Protocols (WebSocket upgrade)
+  /ws/sessions/{sessionId}:
+    get:
+      summary: GET /ws/sessions/{sessionId}
+      tags:
+        - route-setup
+      operationId: get_ws_sessions_sessionId
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "101":
+          description: Switching Protocols (WebSocket upgrade)
+  /ws/workers/{id}:
+    get:
+      summary: GET /ws/workers/{id}
+      tags:
+        - route-setup
+      operationId: get_ws_workers_id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "101":
+          description: Switching Protocols (WebSocket upgrade)

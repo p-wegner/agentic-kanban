@@ -8,9 +8,8 @@ import type { Database } from "../db/index.js";
 import { createBoardWsRoute } from "../routes/board-ws.js";
 import { createRoutes } from "../routes/index.js";
 import { createSessionsRoute } from "../routes/sessions.js";
+import { createWorkspaceReviewRoute } from "../routes/workspace-review.js";
 import type { createBoardEvents } from "../services/board-events.js";
-import { domainErrorHandler } from "../middleware/error-handler.js";
-import { ReviewError, startManualReview } from "../services/review.service.js";
 import { createSessionManager } from "../services/session.manager.js";
 import { createWorkerWsRoute } from "../services/worker-connection.service.js";
 import { getWorkerFleet } from "../services/worker-fleet.service.js";
@@ -30,47 +29,11 @@ export interface RouteSetupDeps {
 }
 
 export function setupRoutes(app: Hono, { sessionManager, boardEvents, reviewSessionIds, fixAndMergeSessionIds, db, upgradeWebSocket, forkService }: RouteSetupDeps) {
-  app.post("/api/workspaces/:id/review", async (c) => {
-    const workspaceId = c.req.param("id");
-    try {
-      const body = await c.req.json<{ thoroughReview?: boolean }>().catch(() => ({}) as { thoroughReview?: boolean });
-      const thoroughReview = body.thoroughReview === true;
-      const { sessionId } = await startManualReview(db, () => sessionManager, boardEvents, reviewSessionIds, workspaceId, thoroughReview);
-      console.log(`[workflow] manual review session ${sessionId} for workspace ${workspaceId}`);
-      return c.json({ sessionId });
-    } catch (err) {
-      if (err instanceof ReviewError) {
-        if (err.code === "NOT_FOUND") return c.json({ error: err.message, code: err.code }, 404);
-        if (err.code === "CONFLICT") {
-          const body: Record<string, unknown> = { error: err.message, code: err.code };
-          if (err.details?.workspaceStatus) body.workspaceStatus = err.details.workspaceStatus;
-          if (err.details?.retryable !== undefined) body.retryable = err.details.retryable;
-          if (err.details?.reason) body.reason = err.details.reason;
-          if (err.details?.activeSessionId) body.activeSessionId = err.details.activeSessionId;
-          if (err.details?.activeTriggerType !== undefined) body.activeTriggerType = err.details.activeTriggerType;
-          if (err.details?.latestSessionId) body.latestSessionId = err.details.latestSessionId;
-          if (err.details?.latestTriggerType !== undefined) body.latestTriggerType = err.details.latestTriggerType;
-          if (err.details?.conflictFiles?.length) body.conflictFiles = err.details.conflictFiles;
-          if (err.details?.uncommittedChanges?.length) body.uncommittedChanges = err.details.uncommittedChanges;
-          return c.json(body, 409);
-        }
-        if (err.code === "BAD_REQUEST") return c.json({ error: err.message, code: err.code }, 400);
-      }
-      console.error("[workflow] manual review trigger failed:", err);
-      // #683 — this handler is registered BEFORE `app.route("/api", createRoutes(...))`, so
-      // Hono resolves it first and `domainErrorHandler` never saw its errors. Everything that
-      // is not a ReviewError reached the client as 500 `{code:"INTERNAL"}`: `startManualReview`
-      // rethrows `startSession`'s errors unchanged, so a stale safety policy lost its 409 AND
-      // its `staleFiles` payload (which the UI and monitor branch on), and strict worker
-      // dispatch with no live worker reported an internal error rather than 503.
-      //
-      // Delegate to the ONE mapper instead of rivaling it. The ReviewError branch above stays:
-      // it carries a request-shaped payload (activeSessionId, latestTriggerType, …) that is
-      // this endpoint's own contract, not a domain-error concern.
-      if (err instanceof Error) return domainErrorHandler(err, c);
-      return c.json({ error: String(err), code: "INTERNAL" }, 500);
-    }
-  });
+  // #805 — the review endpoint's DEFINITION now lives in `routes/workspace-review.ts`,
+  // where `scripts/generate-openapi.ts` can see it; this file only MOUNTS it, which is the
+  // composition root's job. Registered ahead of `app.route("/api", createRoutes(...))`, as
+  // the inline handler was, so Hono's resolution order is unchanged.
+  app.route("/api/workspaces", createWorkspaceReviewRoute(db, () => sessionManager, { boardEvents, reviewSessionIds }));
 
   app.get("/ws/sessions/:sessionId", sessionManager.wsRoute());
   app.get("/ws/board/:projectId", createBoardWsRoute(upgradeWebSocket, boardEvents));

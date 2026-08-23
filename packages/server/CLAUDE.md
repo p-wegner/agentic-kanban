@@ -244,9 +244,14 @@ into `services/start-policy.service.ts`, which already owned that decision.
   `services-bypass-repositories` rule that drained from 76 to 0. Warn rather than error per
   this file's own severity policy: a rule that cannot go green today belongs at warn with its
   count written down. Tighten per slice and lower the number.
-- **No route DEFINITIONS in `startup/`.** `route-setup.ts` is the sanctioned exception — it is
-  the composition root, and mounting is its job. (It still defines one handler inline,
-  `POST /api/workspaces/:id/review`; that is the remaining item, not a licence for more.)
+- **No route DEFINITIONS in `startup/`.** `route-setup.ts` mounts, and mounting is the
+  composition root's job — it defines nothing. The last inline handler,
+  `POST /api/workspaces/:id/review`, moved to `routes/workspace-review.ts` in #805, because
+  the OpenAPI generator scans `src/routes/` and the exception had made the busiest workflow
+  endpoint absent from a spec that reported its own coverage. The rule is now ENFORCED rather
+  than remembered: `scripts/generate-openapi.ts` audits every route-definition site in
+  `packages/server/src` and fails on one that is neither in the spec nor in its
+  `DECLARED_BLIND_SPOTS` list (guard: `openapi-route-coverage.test.ts`).
 - A new sweep is a **background sweep** (registered in `BACKGROUND_SERVICES`) and should reach
   the DB through a repository, not drizzle.
 
