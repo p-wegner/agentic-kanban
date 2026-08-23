@@ -1,14 +1,14 @@
-import { issues, workspaces, projectStatuses, workflowNodes, tags, issueTags, issueDependencies, issueArtifacts, agentSkills, workspaceSymlinkRun } from "@agentic-kanban/shared/schema";
+import { issues, workspaces, projectStatuses, tags, issueTags, issueDependencies, issueArtifacts, agentSkills, workspaceSymlinkRun } from "@agentic-kanban/shared/schema";
 import { loadIssueSummary, type IssueSummaryResult } from "@agentic-kanban/shared/lib/issue-summary";
 import { parseIssueRef } from "@agentic-kanban/shared/lib/issue-ref";
 import { DEFAULT_PROJECT_STATUSES, buildProjectStatusRows, statusIdsByName } from "@agentic-kanban/shared/lib/project-statuses";
-import { eq, inArray, and, gte, count, asc, desc } from "drizzle-orm";
+import { eq, inArray, and, count, asc, desc } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { ValidationError } from "../errors/index.js";
 import { nextIssueNumber } from "./issue-number.repository.js";
-import { issueDependencyColumns, issueIdentityColumns, issueTextColumns, projectStatusIdName } from "./projections.js";
+import { issueDependencyColumns, issueTextColumns, projectStatusIdName } from "./projections.js";
 import { listProjectStatusIdNames } from "./project-status.repository.js";
 import { firstRow } from "../lib/first-row.js";
 
@@ -312,131 +312,27 @@ export async function getIncomingDependencies(
     .where(eq(issueDependencies.dependsOnId, issueId));
 }
 
-/**
- * Issue rows projected for the Focus ranking ("what should I work on next?"):
- * status name + the current workflow node's type (so isTerminalStatusView can tell
- * done-ness), priority/estimate for scoring. One per-project read, no I/O beyond the DB.
- */
-export async function getFocusIssueRows(projectId: string, database: Database = db) {
-  return database
-    .select({
-      ...issueIdentityColumns,
-      statusId: issues.statusId,
-      statusName: projectStatuses.name,
-      currentNodeId: issues.currentNodeId,
-      currentNodeType: workflowNodes.nodeType,
-      priority: issues.priority,
-      issueType: issues.issueType,
-      estimate: issues.estimate,
-    })
-    .from(issues)
-    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-    .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
-    .where(eq(issues.projectId, projectId));
-}
+// --- Reporting read models (#728). Four whole-project projections backing Focus, the
+// cumulative-flow/throughput charts and the standup digest — extracted because their
+// consumers (focus.service, issue-analytics, digest.service) are disjoint from every
+// other reader in this file. Re-exported so no call site changed. ---
+export {
+  getFocusIssueRows,
+  getIssueStatusTimelineRows,
+  getDoneIssuesSince,
+  getDigestIssueRows,
+} from "./issue/analytics.repository.js";
 
-/** The cached touched-files prediction JSON for one issue, or null when the issue is absent. */
-export async function getIssueTouchedFiles(
-  issueId: string,
-  database: Database = db,
-): Promise<{ touchedFilesJson: string | null } | null> {
-  return firstRow(
-    database
-      .select({ touchedFilesJson: issues.touchedFilesJson })
-      .from(issues)
-      .where(eq(issues.id, issueId))
-      .limit(1)
-  );
-}
+// --- The touched-files read model (#728): four scopes over the `touched_files_json`
+// prediction CACHE, which every reader must treat as possibly-absent. Re-exported so
+// routes/issues.ts and the CLI's check-overlap keep the same import specifier. ---
+export {
+  getIssueTouchedFiles,
+  getIssueTouchedFilesWithProject,
+  getProjectIssuesTouchedFiles,
+  getIssuesTouchedFilesByNumbers,
+} from "./issue/touched-files.repository.js";
 
-/** Touched-files JSON + projectId for one issue (related-issues lookup), or null when absent. */
-export async function getIssueTouchedFilesWithProject(
-  issueId: string,
-  database: Database = db,
-): Promise<{ touchedFilesJson: string | null; projectId: string } | null> {
-  return firstRow(
-    database
-      .select({ touchedFilesJson: issues.touchedFilesJson, projectId: issues.projectId })
-      .from(issues)
-      .where(eq(issues.id, issueId))
-      .limit(1)
-  );
-}
-
-/** All issues in a project with their touched-files JSON (related-issues file-overlap scan). */
-export async function getProjectIssuesTouchedFiles(projectId: string, database: Database = db) {
-  return database
-    .select({
-      ...issueIdentityColumns,
-      touchedFilesJson: issues.touchedFilesJson,
-    })
-    .from(issues)
-    .where(eq(issues.projectId, projectId));
-}
-
-/**
- * All issues in a project with status name + sort order + the create/move
- * timestamps, for the cumulative-flow and status-distribution charts. Pure read;
- * the route builds the day axis and per-status counts.
- */
-export async function getIssueStatusTimelineRows(projectId: string, database: Database = db) {
-  return database
-    .select({
-      issueId: issues.id,
-      createdAt: issues.createdAt,
-      statusChangedAt: issues.statusChangedAt,
-      statusName: projectStatuses.name,
-      statusSortOrder: projectStatuses.sortOrder,
-    })
-    .from(issues)
-    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-    .where(eq(issues.projectId, projectId));
-}
-
-/**
- * Issues currently in "Done" whose statusChangedAt falls on/after `cutoffDay`,
- * with their create/move timestamps — backs the throughput and lead-time charts.
- */
-export async function getDoneIssuesSince(projectId: string, cutoffDay: string, database: Database = db) {
-  return database
-    .select({
-      createdAt: issues.createdAt,
-      statusChangedAt: issues.statusChangedAt,
-    })
-    .from(issues)
-    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-    .where(
-      and(
-        eq(issues.projectId, projectId),
-        eq(projectStatuses.name, "Done"),
-        gte(issues.statusChangedAt, cutoffDay),
-      ),
-    );
-}
-
-/**
- * Issue rows for the standup digest: every issue in a project with its status
- * name, workflow node type, and the timestamps the digest windows on
- * (createdAt / statusChangedAt). Pure read; the route buckets these in JS.
- */
-export async function getDigestIssueRows(projectId: string, database: Database = db) {
-  return database
-    .select({
-      ...issueIdentityColumns,
-      statusId: issues.statusId,
-      statusName: projectStatuses.name,
-      currentNodeId: issues.currentNodeId,
-      currentNodeType: workflowNodes.nodeType,
-      priority: issues.priority,
-      issueType: issues.issueType,
-      createdAt: issues.createdAt,
-      statusChangedAt: issues.statusChangedAt,
-    })
-    .from(issues)
-    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-    .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
-    .where(eq(issues.projectId, projectId));
-}
 
 /** All dependency edges whose dependent (issueId) is in the given set — for graph building. */
 export async function getDependenciesForIssues(issueIds: string[], database: Database = db) {
@@ -608,19 +504,4 @@ export async function getFirstIssueIdWithStatus(statusId: string, database: Data
   return (await firstRow(
     database.select({ id: issues.id }).from(issues).where(eq(issues.statusId, statusId)).limit(1),
   ))?.id ?? null;
-}
-
-/**
- * id + issueNumber + touchedFilesJson for a set of issue numbers in a project
- * (CLI `issue check-overlap`). The found-set + overlap-building stays in the CLI.
- */
-export async function getIssuesTouchedFilesByNumbers(
-  projectId: string,
-  issueNumbers: number[],
-  database: Database = db,
-) {
-  return database
-    .select({ id: issues.id, issueNumber: issues.issueNumber, touchedFilesJson: issues.touchedFilesJson })
-    .from(issues)
-    .where(and(inArray(issues.issueNumber, issueNumbers), eq(issues.projectId, projectId)));
 }
