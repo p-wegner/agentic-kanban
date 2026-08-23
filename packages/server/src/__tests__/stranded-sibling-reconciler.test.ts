@@ -213,6 +213,63 @@ describe("reconcileStrandedSiblingMerges (#18)", () => {
     // Same real-git-under-load reasoning as the cases above (four reconciler passes).
   }, 240000);
 
+  // #793: the residue #778 left behind. The guard MESSAGE names only the first five
+  // conflicting files and elides the rest into "…", so two conflict sets agreeing on their
+  // first five render byte-identically. Deriving the signature from the message alone
+  // therefore suppresses a genuine change of blocker whenever the movement is confined to
+  // the sixth-and-beyond file.
+  //
+  // The confounder this case has to remove is `uniqueCommits`: in the #737 case above the
+  // new blocker arrives as a NEW branch commit, which moves `strandPendingParts` and would
+  // change the signature regardless. Here the branch commit is AMENDED, so the branch stays
+  // exactly one commit ahead of main across both ticks and the ONLY thing that moves is the
+  // identity of the seventh conflicting file — which the elided message cannot express.
+  it("reports a change confined to the SEVENTH conflicting file, which the elided message hides (#793)", async () => {
+    const worktreePath = await insertStrandedSibling();
+    const files = ["c1.txt", "c2.txt", "c3.txt", "c4.txt", "c5.txt", "c6.txt", "c7.txt"];
+
+    // main's side of every conflict, including the two candidate seventh files.
+    for (const f of [...files, "c8.txt"]) await writeFile(join(siblingRepo, f), `main ${f}\n`);
+    await exec("git", ["add", "."], siblingRepo);
+    await exec("git", ["commit", "-m", "feat: main side of the conflicts"], siblingRepo);
+    __resetGitExecSchedulerForTests();
+
+    // The branch's side: seven add/add conflicts, in ONE commit on top of the strand.
+    for (const f of files) await writeFile(join(worktreePath, f), `branch ${f}\n`);
+    await exec("git", ["add", "."], worktreePath);
+    await exec("git", ["commit", "-m", "feat: branch side of the conflicts"], worktreePath);
+    __resetGitExecSchedulerForTests();
+
+    await reconcileStrandedSiblingMerges(db as unknown as Database);
+    const first = await commentsForIssue();
+    expect(first.filter((c) => /Multi-repo merge INCOMPLETE/.test(c.body))).toHaveLength(1);
+    const firstBlocker = first[first.length - 1].body;
+    // The message really is elided — this is the property that makes the case bite.
+    expect(firstBlocker).toContain("c1.txt");
+    expect(firstBlocker).toContain("…");
+    expect(firstBlocker).not.toContain("c7.txt");
+
+    // AMEND the branch commit so the seventh conflicting file becomes c8.txt instead of
+    // c7.txt: same commit count, same first five files, same rendered message.
+    await rm(join(worktreePath, "c7.txt"));
+    await writeFile(join(worktreePath, "c8.txt"), "branch c8.txt\n");
+    await exec("git", ["add", "-A"], worktreePath);
+    await exec("git", ["commit", "--amend", "--no-edit"], worktreePath);
+    __resetGitExecSchedulerForTests();
+
+    await reconcileStrandedSiblingMerges(db as unknown as Database);
+    const second = await commentsForIssue();
+    expect(second.filter((c) => /Multi-repo merge INCOMPLETE/.test(c.body))).toHaveLength(2);
+    // ...and the elision is exactly why the two bodies are indistinguishable: the timeline
+    // entry exists because the SIGNATURE moved, not because the text did.
+    expect(second[second.length - 1].body).toBe(firstBlocker);
+
+    // The new blocker state is itself announced only once (#737 stays closed).
+    await reconcileStrandedSiblingMerges(db as unknown as Database);
+    expect((await commentsForIssue()).filter((c) => /Multi-repo merge INCOMPLETE/.test(c.body))).toHaveLength(2);
+    // Same real-git-under-load reasoning as the cases above (three reconciler passes).
+  }, 240000);
+
   it("is a no-op when the sibling merge already landed (mergedHeadSha stamped)", async () => {
     await insertStrandedSibling();
     const [row] = await listWorkspaceRepos(workspaceId, db);

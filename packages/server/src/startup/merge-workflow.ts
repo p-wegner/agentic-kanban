@@ -14,7 +14,8 @@ import * as gitService from "../services/git.service.js";
 import {
   acquireRepoMergeLock,
   listPendingSiblingMerges,
-  checkPendingSiblingMergeGuards,
+  checkPendingSiblingMergeGuardsDetailed,
+  type SiblingMergeGuardFailure,
 } from "../services/workspace-internals.js";
 import { cleanupMergedWorktreeAndBranch, runMergeCore } from "../services/merge-executor.service.js";
 import { cleanupSiblingWorktrees, prevalidateSiblingMerges, executeSiblingMerges } from "../services/workspace-repos.service.js";
@@ -147,7 +148,8 @@ export async function reconcileStrandedSiblingMerges(database: Database = db): P
             `but ${pending.length} sibling repo(s) still have unmerged commits — reconciling`,
         );
 
-        const guardFailures = await checkPendingSiblingMergeGuards(gitService, pending);
+        const guards = await checkPendingSiblingMergeGuardsDetailed(gitService, pending);
+        const guardFailures = guards.map((g) => g.message);
         if (guardFailures.length > 0) {
           result.preserved += pending.length;
           console.warn(`[stranded-siblings] cannot land stranded sibling merge(s) for workspace ${ws.workspaceId}:\n- ${guardFailures.join("\n- ")}`);
@@ -157,7 +159,7 @@ export async function reconcileStrandedSiblingMerges(database: Database = db): P
               guardFailures.join("; ") +
               ". The sibling branches were preserved — fix the blockers and retry the workspace merge, or merge them manually.",
             { mergeReason: "sibling_merge_pending", failures: guardFailures, detectedAt: now },
-            ["guard", ...guardFailures, ...strandPendingParts(pending)]);
+            ["guard", ...guardFailures, ...strandGuardConflictParts(guards), ...strandPendingParts(pending)]);
           continue;
         }
 
@@ -218,6 +220,23 @@ export function strandPendingParts(pending: { repo: { id: string; path: string; 
     .sort();
 }
 
+/**
+ * The FULL conflicting-file set behind each guard failure, as signature parts (#793).
+ *
+ * The guard MESSAGE names only the first GUARD_CONFLICT_FILES_SHOWN (5) files and elides
+ * the rest into "…" so the timeline comment stays readable — which means two different
+ * conflict sets agreeing on their first five files render byte-identically, and deriving the
+ * signature from the message alone would suppress a genuine change of blocker. Rendering and
+ * identity are different concerns: the message keeps its cap, the signature keys on the whole
+ * sorted list.
+ */
+export function strandGuardConflictParts(failures: SiblingMergeGuardFailure[]): string[] {
+  return failures
+    .filter((f) => f.conflictingFiles && f.conflictingFiles.length > 0)
+    .map((f) => `conflicting:${[...f.conflictingFiles!].sort().join("|")}`)
+    .sort();
+}
+
 const STRAND_SIGNATURE_KEY = "strandSignature";
 
 /**
@@ -245,8 +264,11 @@ const STRAND_SIGNATURE_KEY = "strandSignature";
  * FAILURE STRINGS, and `checkPendingSiblingMergeGuards` renders the conflicting files into
  * them (`<repo>: merge conflicts in a.txt, b.txt`, first 5) — so a second conflicting file
  * IS a different signature, on top of the changed `uniqueCommits` in `strandPendingParts`.
- * Residual blind spot: conflicting files beyond the 5th are elided into "…", so a change
- * only there is invisible unless the commit count also moved.
+ * Those messages are ELIDED past the fifth file, so they alone cannot distinguish two
+ * conflict sets that agree on their first five; the parts therefore also carry
+ * `strandGuardConflictParts`, the full sorted file list per repo, straight from the guard's
+ * structured result (#793). A change confined to the sixth-and-beyond conflicting file moves
+ * the signature even when the commit count did not.
  *
  * The `merged` path's parts are the landed repo names, which is enough because it is not a
  * repeating event: landing stamps `repos.mergedHeadSha`, and the candidate query above
