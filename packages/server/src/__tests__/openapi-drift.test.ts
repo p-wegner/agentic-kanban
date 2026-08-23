@@ -14,7 +14,8 @@
 import { describe, it, expect } from "vitest";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 const REPO_ROOT = resolve(import.meta.dirname, "../../../..");
@@ -30,12 +31,17 @@ const TSX_CLI = join(
   "dist/cli.mjs",
 );
 
-/** Run the generator in --check mode; never throws, so the assertion carries the output. */
-function runCheck(): { ok: boolean; output: string } {
+/**
+ * Run the generator in --check mode; never throws, so the assertion carries the output.
+ * `specPath` selects WHICH spec is compared against — the committed one by default, a
+ * throwaway copy for the negative control (#814).
+ */
+function runCheck(specPath?: string): { ok: boolean; output: string } {
+  const args = [TSX_CLI, GENERATOR, "--check", ...(specPath ? ["--spec", specPath] : [])];
   try {
     const out = execFileSync(
       process.execPath,
-      [TSX_CLI, GENERATOR, "--check"],
+      args,
       { cwd: SERVER_ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
     );
     return { ok: true, output: out };
@@ -58,19 +64,29 @@ describe("openapi.yaml drift gate (#780)", () => {
   }, 180_000);
 
   it("--check actually FAILS on a stale spec (the gate is proven, not assumed)", () => {
-    // A gate nobody has seen fail is indistinguishable from a no-op, so prove it bites:
-    // perturb the committed spec (one line), assert --check reports OUT OF DATE, restore.
-    // The restore is in a `finally`, so even a crashed assertion cannot leave the working
-    // tree dirty — which matters because several agents share this checkout.
+    // A gate nobody has seen fail is indistinguishable from a no-op, so prove it bites.
+    //
+    // #814/#680: this used to perturb the COMMITTED spec and restore it in a `finally`, and
+    // the restore did not always happen — the checkout was found holding `version:
+    // 0.0.0-drifted`. A `finally` is not a guarantee: a killed worker, a suite-level timeout
+    // or a crashed vitest pool never runs it, and this checkout is shared, where any dirty
+    // tracked file withholds every auto-merge board-wide. So the perturbation now happens on
+    // a THROWAWAY COPY in os.tmpdir(); the real file is never opened for writing at all, which
+    // is a property of the code rather than a promise about control flow.
     const original = readFileSync(SPEC, "utf8");
+    const dir = mkdtempSync(join(tmpdir(), "openapi-drift-"));
     try {
-      writeFileSync(SPEC, original.replace(/^  version: .*$/m, "  version: 0.0.0-drifted"), "utf8");
-      const { ok, output } = runCheck();
+      const copy = join(dir, "openapi.yaml");
+      writeFileSync(copy, original.replace(/^  version: .*$/m, "  version: 0.0.0-drifted"), "utf8");
+      const { ok, output } = runCheck(copy);
       expect(ok, "the drift gate PASSED against a spec we deliberately broke — it is a no-op").toBe(false);
       expect(output).toMatch(/OUT OF DATE/);
       expect(output).toMatch(/pnpm openapi:generate/);
     } finally {
-      writeFileSync(SPEC, original, "utf8");
+      rmSync(dir, { recursive: true, force: true });
     }
+    // Belt and braces: a future edit that reaches for the real path again fails HERE rather
+    // than silently leaking into the working tree the way #814 did.
+    expect(readFileSync(SPEC, "utf8")).toBe(original);
   }, 180_000);
 });
