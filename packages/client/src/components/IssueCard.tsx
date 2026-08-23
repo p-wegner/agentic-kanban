@@ -16,6 +16,7 @@ import { deriveAgingBucket, deriveIssueCardActions } from "../lib/issueCardDispl
 import { HighlightedText, TodoProgress } from "./IssueBadges.js";
 import { Badge } from "./Badge.js";
 import { badgeDotClass, badgeToneClass } from "../lib/badgeTones.js";
+import { arePropsEqualIgnoring } from "../lib/propsEqualIgnoring.js";
 import { InlineTagEditor, PriorityDropdown } from "./BadgeEditors.js";
 import { IssueCardContextMenu } from "./IssueCardContextMenu.js";
 import { WorkspaceSummarySection } from "./WorkspaceSummarySection.js";
@@ -708,16 +709,10 @@ const ISSUE_CARD_HANDLER_PROPS = new Set<keyof IssueCardProps>([
   "onDragStart", "onDuplicate", "onMoveToNext", "onDeleteIssue", "quickUpdate",
 ]);
 
+// The comparison RULE lives in lib/ and is unit-tested there (#796); the handler-prop
+// SET stays here, typed `keyof IssueCardProps`, so renaming a prop is a compile error.
 function areIssueCardPropsEqual(prev: IssueCardProps, next: IssueCardProps): boolean {
-  const keys = new Set<keyof IssueCardProps>([
-    ...(Object.keys(prev) as (keyof IssueCardProps)[]),
-    ...(Object.keys(next) as (keyof IssueCardProps)[]),
-  ]);
-  for (const key of keys) {
-    if (ISSUE_CARD_HANDLER_PROPS.has(key)) continue;
-    if (!Object.is(prev[key], next[key])) return false;
-  }
-  return true;
+  return arePropsEqualIgnoring(prev, next, ISSUE_CARD_HANDLER_PROPS);
 }
 
 /**
