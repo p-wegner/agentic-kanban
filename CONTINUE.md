@@ -3,6 +3,82 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## Session 2026-08-23 (later): driving the 13 open tickets to Done
+
+State at the time of writing, and the `## Next steps` section far below is STALE where it says
+the board has no open issues — it had 13 when this session started.
+
+**Closed with evidence:** #817, #818, #820, #821, #822, #824, #825.
+**Partially landed, ticket still open:** #810 (parts 2 and 3), #815 (three of six families).
+**Open with findings recorded but deliberately not closed:** #804, #807.
+**In flight** at the time of writing: #810 part 1, #815's last three families, #823 — three
+agents in this one checkout, on disjoint file sets.
+**Untouched:** #806, #808, #816, #819.
+
+### #821 was closed as REFUTED, which is the outcome worth knowing about
+
+Its own acceptance test — `review-route-error-mapping.test.ts` — stays GREEN through the
+regression the ticket would have introduced: it never exercises the two `ReviewError` branches.
+A live probe caught what the pinned test could not. The one-line unblock (echo `code` from
+`domainErrorHandler`'s generic branch) is a wire-contract change across the whole API and was
+filed as #823 rather than smuggled in.
+
+### The board would not boot mid-session — cause and recovery (#825)
+
+`0140_workspace_setup_run` failed with `SQLITE_ERROR: table workspace_setup_run already exists`,
+and the server crash-looped while its proxy kept port 3001 bound with a dead backend behind it,
+so the board answered nothing while looking like it was listening.
+
+Cause: `__drizzle_migrations` held `0140_mature_firebird` (drizzle-kit's generated name) while
+the journal held `0140_workspace_setup_run`. The migration was applied by the running dev server
+and only THEN renamed to a descriptive tag before being committed. `applyMigrations` matches by
+tag STRING, so the rename made an applied migration look pending — and since the tag is the only
+key, every later boot failed identically.
+
+Recovered by confirming 0140 had applied in full (`workspace_setup_run` present with all 9
+columns, all 8 `latest_setup_*` columns already dropped from `workspaces`), backing up
+db+wal+shm, and correcting ONE bookkeeping row. Nothing deleted, nothing reset. The failure path
+now diagnoses this case by name (`1939c241d4`) — it does not tolerate it, because swallowing
+`already exists` on a modern migration would mask genuinely non-idempotent DDL.
+
+**Generalisable: renaming a migration `.sql` after it has run locally requires updating the
+tracking row too.** Renaming is encouraged here — `0140_mature_firebird` tells a reader nothing —
+so the workflow invites exactly the thing that breaks it.
+
+### Two traps found the hard way, both cheap to re-hit
+
+- **`node.parent` is ALWAYS `undefined` in this repo's guard scanners.** The shared
+  `parseGuardSource` parses without parent pointers, so a guard that excludes property-name
+  positions via `node.parent` silently passes EVERYTHING. Collect excluded nodes in a pre-pass
+  `Set` instead. Found because the new scanner's own proof cases failed — a guard that has only
+  ever been run against a clean tree is not verified.
+- **In SQL `LIKE`, `_` is a single-character wildcard.** `hash LIKE '0140_%'` also matches
+  `01405_...`. Caught by writing the test for it.
+
+### #816 is deferred, not forgotten — and the reason is the machine
+
+It needs a strict full-suite run at `--maxWorkers=6+` on an idle box to identify the subprocess
+writer. The box has **3.7 GB usable RAM** (a kernel-pool leak in `mssecflt.sys`, flagged by
+`fleet status` as needing a reboot / an IT ticket, not a local change). Starting a full parallel
+suite would take the machine down along with the other sessions on it. **No full-suite run was
+attempted this session**; every verification below the ticket level is scoped-suite plus
+`pnpm typecheck`, and is described that way rather than as a full-suite green.
+
+### Still the operator's call
+
+**Master is 276 commits ahead of `origin`** (github.com/p-wegner/agentic-kanban; a `gitlab`
+remote also exists). Nothing here has been pushed. Two consequences that are facts rather than
+opinions:
+
+- **#807 cannot be answered until it is pushed.** Its question 1 asks for CI timing of the
+  coverage job; that job was added by #797, which is inside the unpushed commits, so it has
+  **never run on CI**. The last 12 `arch-gate` runs (2026-08-19/20) each contain exactly one
+  job, `god-module-gate`, and every one of them FAILED — against a master 276 commits behind
+  this one, so it is probably already fixed here and nobody would know.
+- The groundwork is already done: **#722** (Done, 2026-08-22) integrated `origin/master` and
+  fixed the three god-module breaches that would have failed the gate on a first push. So the
+  remaining step really is just the push, and it is being withheld by nobody but us.
+
 ## Gate hermeticity (#680) — what is true today (2026-08-23)
 
 #680 is "a gate that goes red under load and green in isolation, so a full-suite run cannot be
