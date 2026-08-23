@@ -2,7 +2,7 @@ import { sessionMessages, sessions, workspaces } from "@agentic-kanban/shared/sc
 import { desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
-import { firstRow } from "@agentic-kanban/shared/lib/first-row";
+import { firstRow } from "../lib/first-row.js";
 
 /**
  * Extract the affected-row count from a drizzle delete/update result. The libsql

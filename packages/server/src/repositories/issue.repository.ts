@@ -10,7 +10,7 @@ import { ValidationError } from "../errors/index.js";
 import { nextIssueNumber } from "./issue-number.repository.js";
 import { issueDependencyColumns, issueIdentityColumns, issueTextColumns, projectStatusIdName } from "./projections.js";
 import { listProjectStatusIdNames } from "./project-status.repository.js";
-import { firstRow } from "@agentic-kanban/shared/lib/first-row";
+import { firstRow } from "../lib/first-row.js";
 
 // --- CLI-command-specific queries/mutations (#465 decomposition — the blanket
 // /repositories/ cohesion exemption was removed by #957, so this facade ships its
@@ -256,12 +256,13 @@ export async function getIssueProjectId(
   issueId: string,
   database: Database = db,
 ): Promise<string | null> {
-  const rows = await database
-    .select({ projectId: issues.projectId })
-    .from(issues)
-    .where(eq(issues.id, issueId))
-    .limit(1);
-  return rows[0]?.projectId ?? null;
+  return (await firstRow(
+    database
+      .select({ projectId: issues.projectId })
+      .from(issues)
+      .where(eq(issues.id, issueId))
+      .limit(1)
+  ))?.projectId ?? null;
 }
 
 export async function getIssueTags(
@@ -581,12 +582,13 @@ export async function getIssueIdByNumberInProject(
   projectId: string,
   database: Database = db,
 ): Promise<string | null> {
-  const rows = await database
-    .select({ id: issues.id })
-    .from(issues)
-    .where(and(eq(issues.issueNumber, issueNumber), eq(issues.projectId, projectId)))
-    .limit(1);
-  return rows[0]?.id ?? null;
+  return (await firstRow(
+    database
+      .select({ id: issues.id })
+      .from(issues)
+      .where(and(eq(issues.issueNumber, issueNumber), eq(issues.projectId, projectId)))
+      .limit(1)
+  ))?.id ?? null;
 }
 
 /** {statusId, statusName} for every issue in a project (board status-count source). */
@@ -600,8 +602,9 @@ export async function getIssueStatusNameRowsForProject(projectId: string, databa
 
 /** The first issue id linked to a status (used to block status deletion), or null. */
 export async function getFirstIssueIdWithStatus(statusId: string, database: Database = db): Promise<string | null> {
-  const rows = await database.select({ id: issues.id }).from(issues).where(eq(issues.statusId, statusId)).limit(1);
-  return rows[0]?.id ?? null;
+  return (await firstRow(
+    database.select({ id: issues.id }).from(issues).where(eq(issues.statusId, statusId)).limit(1),
+  ))?.id ?? null;
 }
 
 /**

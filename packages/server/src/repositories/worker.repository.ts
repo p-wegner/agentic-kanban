@@ -2,7 +2,7 @@ import { workers, sessions, workspaces, issues } from "@agentic-kanban/shared/sc
 import { and, eq, isNotNull } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
-import { firstRow } from "@agentic-kanban/shared/lib/first-row";
+import { firstRow } from "../lib/first-row.js";
 
 export type WorkerRow = typeof workers.$inferSelect;
 export type NewWorkerRow = typeof workers.$inferInsert;

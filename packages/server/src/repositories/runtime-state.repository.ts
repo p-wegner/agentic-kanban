@@ -2,6 +2,7 @@ import { runtimeState } from "@agentic-kanban/shared/schema";
 import { and, eq, inArray, isNotNull, like, lt } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { firstRow } from "../lib/first-row.js";
 
 /**
  * Persistence for the `runtime_state` table — ephemeral / unbounded runtime state
@@ -19,12 +20,13 @@ export async function getRuntimeState(
   key: string,
   database: Database = db,
 ): Promise<string | null> {
-  const rows = await database
-    .select()
-    .from(runtimeState)
-    .where(eq(runtimeState.key, key))
-    .limit(1);
-  return rows[0]?.value ?? null;
+  return (await firstRow(
+    database
+      .select()
+      .from(runtimeState)
+      .where(eq(runtimeState.key, key))
+      .limit(1)
+  ))?.value ?? null;
 }
 
 /**

@@ -20,7 +20,7 @@ import type { Database } from "../db/index.js";
 import { TERMINAL_WORKSPACE_STATUSES } from "@agentic-kanban/shared/lib/workspace-liveness";
 import { mapWorkspaceDetailsRow } from "../lib/workspace-details-projection.js";
 import type { WorkspaceDetails } from "../lib/workspace-details-projection.js";
-import { firstRow } from "@agentic-kanban/shared/lib/first-row";
+import { firstRow } from "../lib/first-row.js";
 
 type Workspace = typeof workspaces.$inferSelect;
 

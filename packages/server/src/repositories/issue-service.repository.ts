@@ -8,7 +8,7 @@ import type { Database, TransactionClient } from "../db/index.js";
 import { hasPath } from "../lib/dependency-graph.js";
 import type { BatchIssueInput, BatchDependencyInput } from "../lib/batch-create-issues.js";
 import { issueDependencyColumns } from "./projections.js";
-import { firstRow } from "@agentic-kanban/shared/lib/first-row";
+import { firstRow } from "../lib/first-row.js";
 
 /** A drizzle connection that is either the base db or an open transaction. */
 type DbOrTx = Database | TransactionClient;
@@ -152,12 +152,13 @@ export async function getProjectStatusName(
   statusId: string,
   database: DbOrTx = db,
 ): Promise<string | null> {
-  const statusRow = await database
-    .select({ name: projectStatuses.name })
-    .from(projectStatuses)
-    .where(eq(projectStatuses.id, statusId))
-    .limit(1);
-  return statusRow[0]?.name ?? null;
+  return (await firstRow(
+    database
+      .select({ name: projectStatuses.name })
+      .from(projectStatuses)
+      .where(eq(projectStatuses.id, statusId))
+      .limit(1)
+  ))?.name ?? null;
 }
 
 export async function getIssueCurrentNodeInfo(

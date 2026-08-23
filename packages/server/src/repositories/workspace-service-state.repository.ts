@@ -12,7 +12,7 @@ import { TERMINAL_WORKSPACE_STATUSES } from "@agentic-kanban/shared/lib/workspac
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getProjectsWithServicesConfig } from "./project.repository.js";
-import { firstRow } from "@agentic-kanban/shared/lib/first-row";
+import { firstRow } from "../lib/first-row.js";
 
 /**
  * Workspace statuses that no longer OWN a service stack: their teardown already ran

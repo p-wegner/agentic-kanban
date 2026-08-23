@@ -5,7 +5,7 @@ import type { Database } from "../db/index.js";
 import { getProjectById } from "./project.repository.js";
 import { issueTriageColumns, preferenceKeyValueColumns, projectStatusIdName, sessionLifecycleColumns } from "./projections.js";
 import { listProjectStatusIdNames } from "./project-status.repository.js";
-import { firstRow } from "@agentic-kanban/shared/lib/first-row";
+import { firstRow } from "../lib/first-row.js";
 
 /** Resolve the active project id from the `activeProjectId` preference. */
 export async function getActiveProjectIdPref(

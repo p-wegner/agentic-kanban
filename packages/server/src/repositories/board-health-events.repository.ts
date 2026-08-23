@@ -4,7 +4,7 @@ import { and, desc, eq, inArray, lt } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import type { BoardHealthEventType, BoardHealthEventCategory } from "@agentic-kanban/shared/lib/board-health-events";
-import { firstRow } from "@agentic-kanban/shared/lib/first-row";
+import { firstRow } from "../lib/first-row.js";
 
 // The vocabulary itself lives in shared (#568) so the route whitelists and the client
 // filter maps derive from it instead of re-listing the literals. Re-exported here

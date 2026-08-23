@@ -13,7 +13,7 @@ import {
   getSessionStatus as getSessionStatusCanonical,
   getSessionWorkspaceId as getSessionWorkspaceIdCanonical,
 } from "./session.repository.js";
-import { firstRow } from "@agentic-kanban/shared/lib/first-row";
+import { firstRow } from "../lib/first-row.js";
 
 // #502: one definition, in workspace-reads (this copy already had its shape, untyped).
 export { getWorkspaceById } from "./workspace-reads.repository.js";

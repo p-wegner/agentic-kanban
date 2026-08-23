@@ -3,7 +3,7 @@ import { issues, sessionMessages, sessions, workspaces } from "@agentic-kanban/s
 import { sanitizeUtf8 } from "@agentic-kanban/shared/lib/sanitize-utf8";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
-import { firstRow } from "@agentic-kanban/shared/lib/first-row";
+import { firstRow } from "../lib/first-row.js";
 
 /** Persist a single session message row (fallback when no live session manager). */
 export async function insertSessionMessage(

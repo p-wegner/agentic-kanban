@@ -4,7 +4,7 @@ import { eq, sql, and, isNull, isNotNull, gte, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { initializeProjectStatuses } from "./issue.repository.js";
-import { firstRow } from "@agentic-kanban/shared/lib/first-row";
+import { firstRow } from "../lib/first-row.js";
 
 /**
  * Facade barrel (#889 god-module gate). The `project_statuses` lifecycle — list, create,

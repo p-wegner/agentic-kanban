@@ -7,17 +7,19 @@ import { ACTIVE_WORKSPACE_STATUSES } from "@agentic-kanban/shared";
 import { strategyPrefKey } from "@agentic-kanban/shared/lib/strategy-policy";
 import { issueTriageColumns, projectStatusIdName } from "./projections.js";
 import { listProjectStatusIdNames } from "./project-status.repository.js";
+import { firstRow } from "../lib/first-row.js";
 /** Raw value of the `board_strategy_<projectId>` preference, if any. */
 export async function getStrategyBullseyePref(
   projectId: string,
   database: Database = db,
 ): Promise<string | null> {
-  const rows = await database
-    .select({ value: preferences.value })
-    .from(preferences)
-    .where(eq(preferences.key, strategyPrefKey(projectId)))
-    .limit(1);
-  return rows[0]?.value ?? null;
+  return (await firstRow(
+    database
+      .select({ value: preferences.value })
+      .from(preferences)
+      .where(eq(preferences.key, strategyPrefKey(projectId)))
+      .limit(1)
+  ))?.value ?? null;
 }
 
 /** Count of distinct issues with an active workspace in a project. */

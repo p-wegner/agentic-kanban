@@ -11,7 +11,11 @@ import { nextIssueNumber as sharedNextIssueNumber } from "@agentic-kanban/shared
 export { readSessionStdoutFile } from "@agentic-kanban/shared/lib/session-files";
 
 export type McpResponse = { content: Array<{ type: "text"; text: string }> };
-export { isIssueNumberUniqueConstraintError } from "@agentic-kanban/shared/lib/issue-number";
+export {
+  isIssueNumberUniqueConstraintError,
+  ISSUE_NUMBER_INSERT_ATTEMPTS,
+  withUniqueIssueNumber,
+} from "@agentic-kanban/shared/lib/issue-number";
 
 /** Standardized MCP error response factory. */
 /**

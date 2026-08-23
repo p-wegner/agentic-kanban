@@ -3,9 +3,7 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { isIssueNumberUniqueConstraintError, mcpError, mcpJson, nextIssueNumber, resolveActiveProjectId, resolveProjectName, resolveStatusByName } from "../db-utils.js";
-
-const ISSUE_NUMBER_INSERT_ATTEMPTS = 3;
+import { mcpJson, nextIssueNumber, resolveActiveProjectId, resolveProjectName, resolveStatusByName, withUniqueIssueNumber } from "../db-utils.js";
 
 export function registerCreateIssue(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema, notifyBoard } = deps;
@@ -39,17 +37,14 @@ export function registerCreateIssue(server: McpServer, deps: ToolDeps = prodDeps
         statusId = statuses[0].id;
       }
 
-      let id: string | null = null;
-      let issueNumber: number | null = null;
-      for (let attempt = 1; attempt <= ISSUE_NUMBER_INSERT_ATTEMPTS; attempt++) {
-        issueNumber = await nextIssueNumber(db, schema, pid);
-        id = randomUUID();
-        const now = new Date().toISOString();
-
-        try {
+      const { id, issueNumber } = await withUniqueIssueNumber(
+        () => nextIssueNumber(db, schema, pid),
+        async (allocatedNumber) => {
+          const newId = randomUUID();
+          const now = new Date().toISOString();
           await db.insert(schema.issues).values({
-            id,
-            issueNumber,
+            id: newId,
+            issueNumber: allocatedNumber,
             title,
             description: description ?? null,
             priority: priority ?? "medium",
@@ -59,20 +54,9 @@ export function registerCreateIssue(server: McpServer, deps: ToolDeps = prodDeps
             createdAt: now,
             updatedAt: now,
           });
-          break;
-        } catch (err: unknown) {
-          id = null;
-          issueNumber = null;
-          if (attempt < ISSUE_NUMBER_INSERT_ATTEMPTS && isIssueNumberUniqueConstraintError(err)) {
-            continue;
-          }
-          throw err;
-        }
-      }
-
-      if (id === null || issueNumber === null) {
-        return mcpError("Error: could not allocate a unique issue number");
-      }
+          return { id: newId, issueNumber: allocatedNumber };
+        },
+      );
 
       notifyBoard(pid, "mcp_create_issue");
 

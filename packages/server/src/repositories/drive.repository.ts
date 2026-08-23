@@ -4,7 +4,7 @@ import { drives } from "@agentic-kanban/shared/schema";
 import type { DriveStatus } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
-import { firstRow } from "@agentic-kanban/shared/lib/first-row";
+import { firstRow } from "../lib/first-row.js";
 
 export type DriveRow = typeof drives.$inferSelect;
 

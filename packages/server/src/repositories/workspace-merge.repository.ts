@@ -2,6 +2,7 @@ import { count, desc, eq } from "drizzle-orm";
 import { sessions, sessionMessages, issues } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { firstRow } from "../lib/first-row.js";
 
 export type LatestSessionRow = typeof sessions.$inferSelect;
 
@@ -57,10 +58,11 @@ export async function getIssueNumberById(
   issueId: string,
   database: Database = db,
 ): Promise<number | null> {
-  const rows = await database
-    .select({ issueNumber: issues.issueNumber })
-    .from(issues)
-    .where(eq(issues.id, issueId))
-    .limit(1);
-  return rows[0]?.issueNumber ?? null;
+  return (await firstRow(
+    database
+      .select({ issueNumber: issues.issueNumber })
+      .from(issues)
+      .where(eq(issues.id, issueId))
+      .limit(1)
+  ))?.issueNumber ?? null;
 }

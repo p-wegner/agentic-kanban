@@ -14,7 +14,7 @@ import { db } from "../../db/index.js";
 import type { Database } from "../../db/index.js";
 import { isIssueNumberUniqueConstraintError, nextIssueNumber } from "../issue-number.repository.js";
 import { issueIdentityColumns, issueTextColumns } from "../projections.js";
-import { firstRow } from "@agentic-kanban/shared/lib/first-row";
+import { firstRow } from "../../lib/first-row.js";
 
 type Issue = typeof issues.$inferSelect;
 const ISSUE_NUMBER_INSERT_ATTEMPTS = 3;

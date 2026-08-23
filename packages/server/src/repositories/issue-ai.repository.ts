@@ -8,7 +8,7 @@ import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engin
 import { getStatusIdsByName } from "./project-status.repository.js";
 import { getPreference as canonicalGetPreference } from "./preferences.repository.js";
 import { issueTextColumns } from "./projections.js";
-import { firstRow } from "@agentic-kanban/shared/lib/first-row";
+import { firstRow } from "../lib/first-row.js";
 
 export async function getIssueBasics(
   issueId: string,
@@ -54,16 +54,17 @@ export async function getSkillPrompt(
   projectId: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select({ prompt: agentSkills.prompt })
-    .from(agentSkills)
-    .where(and(
-      eq(agentSkills.name, skillName),
-      sql`(${agentSkills.projectId} = ${projectId} OR ${agentSkills.projectId} IS NULL)`,
-    ))
-    .orderBy(sql`${agentSkills.projectId} IS NULL`)
-    .limit(1);
-  return rows[0]?.prompt ?? null;
+  return (await firstRow(
+    database
+      .select({ prompt: agentSkills.prompt })
+      .from(agentSkills)
+      .where(and(
+        eq(agentSkills.name, skillName),
+        sql`(${agentSkills.projectId} = ${projectId} OR ${agentSkills.projectId} IS NULL)`,
+      ))
+      .orderBy(sql`${agentSkills.projectId} IS NULL`)
+      .limit(1)
+  ))?.prompt ?? null;
 }
 
 export async function insertIssueDependency(
@@ -207,12 +208,13 @@ export async function getStatusIdByName(
   name: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select({ id: projectStatuses.id })
-    .from(projectStatuses)
-    .where(and(eq(projectStatuses.projectId, projectId), eq(projectStatuses.name, name)))
-    .limit(1);
-  return rows[0]?.id ?? null;
+  return (await firstRow(
+    database
+      .select({ id: projectStatuses.id })
+      .from(projectStatuses)
+      .where(and(eq(projectStatuses.projectId, projectId), eq(projectStatuses.name, name)))
+      .limit(1)
+  ))?.id ?? null;
 }
 
 export async function getTagByName(
@@ -243,13 +245,14 @@ export async function getDefaultStatusId(
   projectId: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select({ id: projectStatuses.id })
-    .from(projectStatuses)
-    .where(eq(projectStatuses.projectId, projectId))
-    .orderBy(projectStatuses.sortOrder)
-    .limit(1);
-  return rows[0]?.id ?? null;
+  return (await firstRow(
+    database
+      .select({ id: projectStatuses.id })
+      .from(projectStatuses)
+      .where(eq(projectStatuses.projectId, projectId))
+      .orderBy(projectStatuses.sortOrder)
+      .limit(1)
+  ))?.id ?? null;
 }
 
 export async function insertChildIssue(

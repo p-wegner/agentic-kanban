@@ -2,7 +2,7 @@ import { and, eq, or, sql } from "drizzle-orm";
 import { issueArtifacts, issueDependencies, issues, projectStatuses, workspaces, workflowNodes } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database, TransactionClient } from "../db/index.js";
-import { firstRow } from "@agentic-kanban/shared/lib/first-row";
+import { firstRow } from "../lib/first-row.js";
 
 /** Accepts either the top-level db handle or a transaction handle. */
 type DbOrTx = Database | TransactionClient;
