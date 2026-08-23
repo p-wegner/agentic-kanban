@@ -127,6 +127,7 @@ Set by the board on an agent subprocess; read by hooks and skills inside a workt
 | `KANBAN_TEST_FILES` | Restrict it to these files. |
 | `KANBAN_TEST_MAX_WORKERS` | Cap vitest workers. |
 | `KANBAN_TEST_GUARDS_ONLY` | Set to 1 to make `test:mine` run ONLY the `@gate:always-run` guard suites — the narrowest verify tier. |
+| `KANBAN_TEST_NO_COVERAGE_PROBE` | Set to 1 to skip `test:mine`'s per-file coverage probe (#762), which forces a package's full suite when a changed source file is imported by no suite. See [gate-test-selection.md](gate-test-selection.md). |
 | `KANBAN_VERIFY_CONCURRENCY` | Cap concurrent verify-gate runs. |
 
 ## `AGENTIC_KANBAN_*` — the npm package's own surface

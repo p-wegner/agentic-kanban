@@ -5,6 +5,8 @@ import {
   upstreamChangedFiles,
   UPSTREAM_DEPENDENCIES,
   scanAlwaysRunTests,
+  relatedCoverageByFile,
+  uncoveredSourceFiles,
 } from "../../../../scripts/test-mine.mjs";
 
 /**
@@ -109,5 +111,117 @@ describe("scanAlwaysRunTests", () => {
     expect(scanAlwaysRunTests("/repo/packages/shared", "__tests__", listDir, readText)).toEqual([
       "__tests__/a.test.ts",
     ]);
+  });
+});
+
+
+/**
+ * #762 — the file-scoped tier's emptiness check used to be per RUN, not per FILE.
+ *
+ * Measured on this repo 2026-08-23: `packages/shared/src/types/api.ts` (59/59 rework, the
+ * worst file in the worst module on that metric) is selected by ZERO suites in `shared` and
+ * ZERO in `server`, because `vitest related` walks the TRANSFORMED module graph and a
+ * type-only module is erased before that graph exists. A two-file diff of `types/api.ts` +
+ * `lib/changed-packages.ts` selects exactly one suite, so #643's whole-run fallback never
+ * fired and the gate passed having asserted nothing about `types/api.ts`.
+ *
+ * These tests pin the rule that replaced it: ANY changed source file that no suite imports
+ * forces the package's full suite. They inject a fake vitest loader, so no vitest boots.
+ */
+const SHARED_PKG = resolve(import.meta.dirname, "../../../shared");
+const abs = (rel) => resolve(SHARED_PKG, rel).split(String.fromCharCode(92)).join("/");
+
+/** A stand-in for vitest's node API: `specs` is [testFile, [imported source files]] pairs. */
+function fakeVitestLoader(specs, onDeps = () => {}) {
+  return () => ({
+    createVitest: async () => ({
+      specifications: {
+        globTestSpecifications: async () => specs.map(([moduleId]) => ({ moduleId })),
+        getTestDependencies: async (spec) => {
+          onDeps(spec.moduleId);
+          return new Set((specs.find(([id]) => id === spec.moduleId) ?? [null, []])[1]);
+        },
+      },
+      close: async () => {},
+    }),
+  });
+}
+
+describe("relatedCoverageByFile (#762)", () => {
+  it("reports a changed file that no suite imports as uncovered, even when others are covered", async () => {
+    const loader = fakeVitestLoader([
+      [abs("__tests__/changed-packages.test.ts"), [abs("src/lib/changed-packages.ts")]],
+    ]);
+    const coverage = await relatedCoverageByFile(
+      SHARED_PKG,
+      ["src/types/api.ts", "src/lib/changed-packages.ts"],
+      loader,
+    );
+    expect(coverage).toEqual({
+      [abs("src/types/api.ts")]: false,
+      [abs("src/lib/changed-packages.ts")]: true,
+    });
+  });
+
+  it("counts a changed file that IS a test file as covered by itself", async () => {
+    const loader = fakeVitestLoader([[abs("__tests__/a.test.ts"), []]]);
+    const coverage = await relatedCoverageByFile(SHARED_PKG, ["__tests__/a.test.ts"], loader);
+    expect(coverage).toEqual({ [abs("__tests__/a.test.ts")]: true });
+  });
+
+  it("stops walking dependency graphs once every changed file is accounted for", async () => {
+    const walked = [];
+    const loader = fakeVitestLoader(
+      [
+        [abs("__tests__/one.test.ts"), [abs("src/lib/a.ts")]],
+        [abs("__tests__/two.test.ts"), [abs("src/lib/a.ts")]],
+        [abs("__tests__/three.test.ts"), [abs("src/lib/a.ts")]],
+      ],
+      (id) => walked.push(id),
+    );
+    await relatedCoverageByFile(SHARED_PKG, ["src/lib/a.ts"], loader);
+    expect(walked).toEqual([abs("__tests__/one.test.ts")]);
+  });
+
+  it("fails OPEN — a probe that throws returns null, never a narrower gate", async () => {
+    const loader = () => {
+      throw new Error("vitest is not installed here");
+    };
+    expect(await relatedCoverageByFile(SHARED_PKG, ["src/lib/a.ts"], loader)).toBeNull();
+  });
+
+  it("returns an empty map (not null) when there is nothing to check", async () => {
+    const loader = () => {
+      throw new Error("must not boot vitest for an empty file list");
+    };
+    expect(await relatedCoverageByFile(SHARED_PKG, [], loader)).toEqual({});
+  });
+});
+
+describe("uncoveredSourceFiles (#762)", () => {
+  it("names the uncovered SOURCE files — those are what a file-scoped green would not assert", () => {
+    expect(
+      uncoveredSourceFiles({
+        "/repo/packages/shared/src/types/api.ts": false,
+        "/repo/packages/shared/src/lib/git-service.ts": true,
+      }),
+    ).toEqual(["/repo/packages/shared/src/types/api.ts"]);
+  });
+
+  it("ignores a non-source file — a .sql or .json selecting nothing is expected, not a hole", () => {
+    expect(
+      uncoveredSourceFiles({
+        "/repo/packages/shared/drizzle/0123_thing.sql": false,
+        "/repo/packages/shared/package-lock.json": false,
+      }),
+    ).toEqual([]);
+  });
+
+  it("propagates an undetermined probe as undetermined — null in, null out", () => {
+    expect(uncoveredSourceFiles(null)).toBeNull();
+  });
+
+  it("returns an empty list when every changed source file is covered", () => {
+    expect(uncoveredSourceFiles({ "/repo/a.ts": true, "/repo/b.tsx": true })).toEqual([]);
   });
 });

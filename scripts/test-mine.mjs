@@ -83,7 +83,8 @@
 
 import { spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -475,6 +476,118 @@ function runPackage({ dir, label, exclude }, mode = null) {
 /** Extensions whose change SHOULD be covered by some test — the ones worth falling back for. */
 const SOURCE_EXTENSIONS = /\.(ts|tsx|js|jsx|mjs|cjs)$/i;
 
+/** Normalise a path for comparison — vitest reports Windows paths with backslashes. */
+const slash = (p) => p.replace(/\\/g, "/");
+
+/** Load vitest's node API from the package's own resolution root. */
+function defaultVitestLoader(pkgDir) {
+  const req = createRequire(resolve(pkgDir, "package.json"));
+  return import(pathToFileURL(req.resolve("vitest/node")).href);
+}
+
+/**
+ * Opt-out for the per-file coverage probe below (`KANBAN_TEST_NO_COVERAGE_PROBE=1`). The probe
+ * fails open on its own, so this exists for the case where it works but is not wanted — e.g.
+ * a caller that has already decided to run the full suite anyway.
+ */
+const coverageProbeDisabled = /^(1|true|yes)$/i.test(
+  (process.env.KANBAN_TEST_NO_COVERAGE_PROBE || "").trim(),
+);
+
+/**
+ * Which of the changed files at least one test suite in this package actually imports (#762).
+ *
+ * WHY this exists, measured 2026-08-23 (the #762 investigation asked what the gate verifies for
+ * `shared` and `mcp-server`, both at 98% rework):
+ *
+ *   packages/shared/src/types/api.ts        -> 0 suites, in shared AND in server
+ *   packages/shared/src/lib/ticket-context.ts -> 0 suites in shared
+ *   packages/shared/src/lib/changed-packages.ts -> 1 suite
+ *   packages/shared/src/lib/git-service.ts  -> 9 in shared, 429 in server
+ *
+ * `vitest related` walks the TRANSFORMED module graph, so a type-only module (`export interface
+ * ...`) is erased before the graph is built and can never be selected. #643's fallback caught
+ * that only when the WHOLE run selected nothing — so a two-file diff of `types/api.ts` +
+ * `lib/changed-packages.ts` selects exactly one suite (`changed-packages.test.ts`), the run is
+ * not empty, no fallback fires, and the gate reports "passed (tier: file-scoped, 2 changed
+ * file(s))" having asserted nothing whatsoever about `types/api.ts`. Verified by measurement,
+ * not by reading: that diff really does select 1.
+ *
+ * The fix is to apply #643's own rule PER FILE instead of per run. This computes the mapping
+ * with vitest's OWN machinery (`globTestSpecifications` + `getTestDependencies`, the two calls
+ * `related` itself is built from), so it cannot disagree with what the subsequent `related`
+ * spawn will select.
+ *
+ * Fails OPEN: any error returns `null`, which leaves the pre-existing whole-run fallback as the
+ * only check — a narrower gate must never be the consequence of this probe breaking.
+ *
+ * Stops as soon as every target is accounted for, so the common case (every changed file is
+ * imported by some suite) costs a handful of dependency walks rather than the whole graph. The
+ * expensive case is the one that then runs the full suite anyway.
+ *
+ * @returns `{ [absolutePath]: boolean }`, or `null` when it could not be determined.
+ */
+export async function relatedCoverageByFile(pkgDir, files, loadVitest = defaultVitestLoader) {
+  const targets = files.map((f) => slash(resolve(pkgDir, f)));
+  if (targets.length === 0) return {};
+  /** @type {Record<string, boolean>} */
+  const covered = Object.fromEntries(targets.map((t) => [t, false]));
+  const cwd = process.cwd();
+  let vitest;
+  try {
+    const { createVitest } = await loadVitest(pkgDir);
+    // vitest resolves its config relative to cwd, the same way the `related` spawn does.
+    process.chdir(pkgDir);
+    vitest = await createVitest("test", {
+      watch: false,
+      run: true,
+      passWithNoTests: true,
+      reporters: [],
+    });
+    const specs = await vitest.specifications.globTestSpecifications();
+    let remaining = targets.length;
+    for (const spec of specs) {
+      const id = slash(spec.moduleId);
+      const deps = new Set([...(await vitest.specifications.getTestDependencies(spec))].map(slash));
+      for (const target of targets) {
+        if (covered[target]) continue;
+        if (target === id || deps.has(target)) {
+          covered[target] = true;
+          remaining -= 1;
+        }
+      }
+      if (remaining === 0) break;
+    }
+    return covered;
+  } catch (err) {
+    console.warn(
+      `[test:mine] could not derive per-file test coverage for ${pkgDir} (${err?.message ?? err}) — ` +
+        `falling back to the whole-run emptiness check only.`,
+    );
+    return null;
+  } finally {
+    process.chdir(cwd);
+    try {
+      await vitest?.close?.();
+    } catch {
+      /* a probe that cannot shut down cleanly must not fail the run */
+    }
+  }
+}
+
+/**
+ * The changed SOURCE files that no suite imports — the ones a file-scoped green would say
+ * nothing about. `null` in means `null` out (coverage undetermined, so no claim either way).
+ *
+ * Pure function of its argument so the rule is unit-testable without booting vitest.
+ */
+export function uncoveredSourceFiles(coverage) {
+  if (!coverage) return null;
+  return Object.entries(coverage)
+    .filter(([file, isCovered]) => !isCovered && SOURCE_EXTENSIONS.test(file))
+    .map(([file]) => file);
+}
+
 /**
  * Run a package's file-scoped `related` selection, falling back to its FULL suite when that
  * selection turned out to be empty for a real source change (#643).
@@ -486,6 +599,25 @@ const SOURCE_EXTENSIONS = /\.(ts|tsx|js|jsx|mjs|cjs)$/i;
  * from a run that asserted nothing about code.
  */
 async function runRelatedWithFallback(pkg, files) {
+  // #762: per-FILE emptiness first — see `relatedCoverageByFile`. A run that selects some
+  // suites can still be selecting none for one of the changed files.
+  const uncovered = coverageProbeDisabled
+    ? null
+    : uncoveredSourceFiles(await relatedCoverageByFile(resolve(ROOT, pkg.dir), files));
+  if (uncovered && uncovered.length > 0) {
+    console.warn(
+      `[test:mine] ${pkg.label}: ${uncovered.length} of ${files.length} changed file(s) are imported by NO ` +
+        `suite in this package, so a file-scoped run would assert nothing about them:\n` +
+        uncovered.map((f) => `  - ${f}`).join("\n") +
+        `\n[test:mine] ${pkg.label}: running the package's full suite instead.`,
+    );
+    return runPackage(pkg).then((r) => r.code);
+  }
+  if (uncovered) {
+    console.log(
+      `[test:mine] ${pkg.label}: every changed file (${files.length}) is imported by at least one suite — file-scoping is safe here.`,
+    );
+  }
   const { code, selectedNothing } = await runPackage(pkg, { kind: "related", files });
   if (!selectedNothing) return code;
   const sourceChanges = files.filter((f) => SOURCE_EXTENSIONS.test(f));
