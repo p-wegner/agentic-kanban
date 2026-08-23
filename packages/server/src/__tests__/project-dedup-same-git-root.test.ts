@@ -296,7 +296,7 @@ describe("deduplicateProjects — lossless across the FULL project-child FK grap
       obstacleId: randomUUID(), templateId: randomUUID(), healthId: randomUUID(),
       flakyId: randomUUID(), shortcutId: randomUUID(), metricId: randomUUID(),
       viewProcessId: randomUUID(), baseBranchHealthId: randomUUID(),
-      provisioningId: randomUUID(),
+      provisioningId: randomUUID(), gitTokenHash: randomUUID(),
     };
     const earlier = new Date(Date.now() - 60_000).toISOString();
     const later = new Date().toISOString();
@@ -336,6 +336,15 @@ describe("deduplicateProjects — lossless across the FULL project-child FK grap
     await d.insert(schema.pluginViewProcesses).values({ id: ids.viewProcessId, pluginRowId: randomUUID(), viewId: "dashboard", projectId: ids.dupId, pid: 4242, port: 51234, command: "npm run serve", createdAt: earlier });
     // #491 — base_branch_health joined the project-child FK graph.
     await d.insert(schema.baseBranchHealth).values({ id: ids.baseBranchHealthId, projectId: ids.dupId, sha: "deadbeef", branch: "master", outcome: "green", createdAt: earlier });
+    // #775/#781 — worker_git_tokens joined the project-child FK graph when 0130 gave its
+    // project_id a cascading FK, which enrolled it here too. A git token is a CAPABILITY, so on
+    // a dedup it must follow the surviving project rather than be stranded pointing at a row
+    // that is about to be deleted. workerId is deliberately FK-less (migration 0129), so no
+    // worker row is needed to seed one.
+    await d.insert(schema.workerGitTokens).values({
+      tokenHash: ids.gitTokenHash, workerId: randomUUID(), projectId: ids.dupId,
+      incomingRef: "refs/kanban/incoming/feature/dedup", issuedAtMs: 1, expiresAtMs: 2,
+    });
     // #666 — workspace_provisioning joined the project-child FK graph and was never seeded
     // here, so the reassignment path was unexercised for it. Its FKs declare no `onDelete`
     // action, which is what made the omission matter rather than merely be untidy.
@@ -365,6 +374,11 @@ describe("deduplicateProjects — lossless across the FULL project-child FK grap
       "base_branch_health",
       // #666 — in the FK graph all along; seeding it is what makes the reassignment tested.
       "workspace_provisioning",
+      // #775 — git-transport token scopes. Joined the FK graph with migration 0130, which gave
+      // project_id the cascading FK 0129 shipped without. A token is a capability scoped to one
+      // project, so on a dedup it must follow the survivor rather than be stranded on a row
+      // about to be deleted.
+      "worker_git_tokens",
     ]);
     expect(exercised).toEqual(schemaChildren);
   });
