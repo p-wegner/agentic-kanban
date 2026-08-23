@@ -573,40 +573,73 @@ export async function listDirtySiblingWorktrees(
   return dirty;
 }
 
+/** How many conflicting files the human-readable guard message names before eliding (#793). */
+export const GUARD_CONFLICT_FILES_SHOWN = 5;
+
+/**
+ * One guard failure: the human-readable message PLUS the structured state behind it.
+ *
+ * The message is deliberately capped ({@link GUARD_CONFLICT_FILES_SHOWN} files + "…") so a
+ * timeline comment stays readable. Anything that needs to detect a CHANGE of blocker must
+ * key on {@link SiblingMergeGuardFailure.conflictingFiles} instead — the FULL list — because
+ * two different conflict sets that agree on their first five files render identically (#793).
+ */
+export interface SiblingMergeGuardFailure {
+  /** Human-readable failure, conflicting-file list elided past the cap. */
+  message: string;
+  /** Every conflicting file, unelided — present only for the merge-conflict guard. */
+  conflictingFiles?: string[];
+}
+
 /**
  * The same per-repo guards `prevalidateSiblingMerges` runs (dirty main checkout,
  * HEAD-on-baseBranch, read-only conflict check), applied to an already-detected
  * PENDING set. Returns human-readable failures; empty means the pending merges are
  * safe to land via `executeSiblingMerges`. Conflict detection uses the branch-name
  * variant so it works even when the sibling worktree was already removed.
+ *
+ * Callers that only display the failures can keep using this; callers that must notice a
+ * CHANGED blocker need {@link checkPendingSiblingMergeGuardsDetailed} (#793).
  */
 export async function checkPendingSiblingMergeGuards(
   gitService: GitService,
   pending: PendingSiblingMerge[],
 ): Promise<string[]> {
-  const failures: string[] = [];
+  return (await checkPendingSiblingMergeGuardsDetailed(gitService, pending)).map((f) => f.message);
+}
+
+/** {@link checkPendingSiblingMergeGuards}, keeping the structured state behind each message (#793). */
+export async function checkPendingSiblingMergeGuardsDetailed(
+  gitService: GitService,
+  pending: PendingSiblingMerge[],
+): Promise<SiblingMergeGuardFailure[]> {
+  const failures: SiblingMergeGuardFailure[] = [];
   for (const { repo, unverifiable, unverifiableReason } of pending) {
     const label = repo.name ?? repo.path;
     if (unverifiable) {
-      failures.push(unverifiableReason ?? `${label} (${repo.path}): sibling repo pendency could not be verified`);
+      failures.push({ message: unverifiableReason ?? `${label} (${repo.path}): sibling repo pendency could not be verified` });
       continue;
     }
     const dirty = await gitService.getUncommittedTrackedChanges(repo.path).catch(() => [] as string[]);
     if (dirty.length > 0) {
-      failures.push(`${label}: main checkout has ${dirty.length} uncommitted tracked change(s)`);
+      failures.push({ message: `${label}: main checkout has ${dirty.length} uncommitted tracked change(s)` });
       continue;
     }
     const head = await gitService.getCurrentBranch(repo.path).catch(() => "");
     if (head !== repo.baseBranch) {
-      failures.push(`${label}: main checkout HEAD is on '${head}' but the workspace targets '${repo.baseBranch}'`);
+      failures.push({ message: `${label}: main checkout HEAD is on '${head}' but the workspace targets '${repo.baseBranch}'` });
       continue;
     }
     if (typeof gitService.detectConflictsByBranch === "function") {
       const conflicts = await gitService.detectConflictsByBranch(repo.path, repo.branch!, repo.baseBranch!).catch(() => null);
       if (conflicts?.hasConflicts) {
-        failures.push(
-          `${label}: merge conflicts in ${conflicts.conflictingFiles.slice(0, 5).join(", ")}${conflicts.conflictingFiles.length > 5 ? ", …" : ""}`,
-        );
+        const files = conflicts.conflictingFiles;
+        failures.push({
+          message:
+            `${label}: merge conflicts in ${files.slice(0, GUARD_CONFLICT_FILES_SHOWN).join(", ")}` +
+            `${files.length > GUARD_CONFLICT_FILES_SHOWN ? ", …" : ""}`,
+          conflictingFiles: [...files],
+        });
       }
     }
   }
