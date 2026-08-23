@@ -946,6 +946,13 @@
       "when": 1787480297435,
       "tag": "0134_workspace_review_preflight",
       "breakpoints": true
+    },
+    {
+      "idx": 135,
+      "version": "6",
+      "when": 1787481450627,
+      "tag": "0135_workspace_code_metrics",
+      "breakpoints": true
     }
   ]
 }

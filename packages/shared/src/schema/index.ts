@@ -70,3 +70,5 @@ export { workspaceIssueMembers, workspaceIssueMembersRelations } from "./workspa
 export { workspaceMergeBackoff, workspaceMergeBackoffRelations } from "./workspace-merge-backoff.js";
 // #798: the second, extracted the same way (#283 review-preflight backoff).
 export { workspaceReviewPreflight, workspaceReviewPreflightRelations } from "./workspace-review-preflight.js";
+// #798: the third — the computed code-metrics artifact.
+export { workspaceCodeMetrics, workspaceCodeMetricsRelations } from "./workspace-code-metrics.js";

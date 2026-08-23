@@ -22,7 +22,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi, beforeEach, afterAll } from "vitest";
 import { eq } from "drizzle-orm";
-import { issues, projects, projectStatuses, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, projects, projectStatuses, workspaceCodeMetrics, workspaces } from "@agentic-kanban/shared/schema";
 import { setWorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
 import { createTestDb } from "./helpers/test-db.js";
 import { makeTempRepo } from "./helpers/temp-repo.js";
@@ -145,9 +145,6 @@ async function seed(db: ReturnType<typeof createTestDb>["db"], opts: SeedOpts = 
     baseBranch: "main",
     status: opts.status ?? "idle",
     readyForMerge: opts.readyForMerge ?? false,
-    // Fresh code-metrics stamp so no metrics recompute is scheduled.
-    codeMetricsJson: null,
-    codeMetricsComputedAt: now,
     ...(opts.diffCache !== false ? {
       diffStatCacheCheckedAt: now,
       diffStatCacheHeadSha: opts.projection?.summaryHeadSha ?? "abc123",
@@ -168,6 +165,10 @@ async function seed(db: ReturnType<typeof createTestDb>["db"], opts: SeedOpts = 
     ...(opts.projection ?? {}),
     createdAt: now,
     updatedAt: now,
+  });
+  // #798: fresh code-metrics stamp so no metrics recompute is scheduled — in its own table now.
+  await db.insert(workspaceCodeMetrics).values({
+    workspaceId, metricsJson: null, computedAt: now,
   });
   return { projectId, statusId, doneStatusId, issueId, workspaceId };
 }
