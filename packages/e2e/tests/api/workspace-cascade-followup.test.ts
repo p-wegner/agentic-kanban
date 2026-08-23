@@ -35,7 +35,7 @@
  * race its pref reads/writes. The describe block is configured `mode: "serial"`.
  */
 
-import { test, expect } from "@playwright/test";
+import { test, expect, type PlaywrightTestArgs } from "@playwright/test";
 import { execSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -74,7 +74,7 @@ test.describe("post-merge follow-up cascade: dependent issue gets a workspace + 
     throw new Error(`[${label}] failed after 3 attempts: ${String(lastErr)}`);
   }
 
-  type RequestCtx = Parameters<Parameters<typeof test>[1]>[0]["request"];
+  type RequestCtx = PlaywrightTestArgs["request"];
 
   async function createIssue(request: RequestCtx, title: string): Promise<string> {
     return withRetry(async () => {
@@ -139,7 +139,7 @@ test.describe("post-merge follow-up cascade: dependent issue gets a workspace + 
     return res.json();
   }
 
-  const nonClosed = (ws: Array<{ status: string }>) => ws.filter((w) => w.status !== "closed");
+  const nonClosed = <T extends { status: string }>(ws: T[]) => ws.filter((w) => w.status !== "closed");
 
   /**
    * Merge a workspace, retrying on the per-repo merge-lock 409 CONFLICT / 5xx. The single

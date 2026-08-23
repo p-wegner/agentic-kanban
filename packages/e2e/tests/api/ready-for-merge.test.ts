@@ -85,7 +85,9 @@ test.describe("@system: Ready for Merge — API", () => {
     const allIssues = (Array.isArray(columns) ? columns : []).flatMap(
       (c: { issues?: unknown[] }) => c.issues ?? [],
     );
-    const issue = allIssues.find((i: { id: string }) => i.id === issueId) as {
+    const issue = allIssues.find(
+      (i) => (i as { id?: string }).id === issueId,
+    ) as {
       workspaceSummary?: { main?: { readyForMerge?: boolean } };
     };
     expect(issue).toBeDefined();

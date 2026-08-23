@@ -7,7 +7,7 @@
  *
  * Warning path covered: existing active workspace on the same issue.
  */
-import { test, expect } from "@playwright/test";
+import { test, expect, type PlaywrightTestArgs } from "@playwright/test";
 import { SERVER_URL } from "../helpers/port.js";
 import { getE2EProject } from "../helpers/e2e-project.js";
 
@@ -50,7 +50,7 @@ test.describe("Workspace launch preview panel", () => {
 
   async function createIssue(
     title: string,
-    request: Parameters<Parameters<typeof test>[1]>[0]["request"],
+    request: PlaywrightTestArgs["request"],
   ): Promise<string> {
     const issueRes = await request.post(`${SERVER_URL}/api/issues`, {
       data: { title, statusId: todoStatusId, projectId, skipAutoReview: true },
@@ -70,7 +70,7 @@ test.describe("Workspace launch preview panel", () => {
    *   3. Click "New Workspace" button in the WorkspacePanel → CreateWorkspaceForm appears
    */
   async function openNewWorkspaceForm(
-    page: Parameters<Parameters<typeof test>[1]>[0]["page"],
+    page: PlaywrightTestArgs["page"],
     issueTitle: string,
   ) {
     // Click the issue card title to open the detail panel
