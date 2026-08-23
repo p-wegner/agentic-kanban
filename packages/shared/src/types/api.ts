@@ -20,6 +20,7 @@ export type * from "./api/flake.js";
 export type * from "./api/issue.js";
 export type * from "./api/workspace.js";
 export type * from "./api/session.js";
+export type * from "./api/worker.js";
 export type * from "./api/diff.js";
 export type * from "./api/dependency.js";
 export type * from "./api/drive.js";

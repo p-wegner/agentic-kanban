@@ -74,7 +74,7 @@ describe("worker fleet scheduling (phase 3)", () => {
       const partial = await connectWorker({ name: "partial", labels: ["docker"] });
       expect(await selectWorkerForLaunch(fleet, "claude", ["docker", "gpu"])).toBeNull();
       expect(await resolveWorkerPlacement({ database: db, projectId: PROJECT_ID, providerName: "claude" }))
-        .toEqual({ kind: "host" });
+        .toEqual({ kind: "host", reason: { id: "eligible_worker", detail: expect.any(String) } });
 
       const full = await connectWorker({ name: "full", labels: ["docker", "gpu", "extra"] });
       expect(await selectWorkerForLaunch(fleet, "claude", ["docker", "gpu"])).toBe(full);
@@ -210,7 +210,7 @@ describe("worker fleet scheduling (phase 3)", () => {
       expect(await projectCanDispatch({ database: db, projectId: PROJECT_ID, providerName: "claude" }))
         .toEqual({ available: true });
       expect(await resolveWorkerPlacement({ database: db, projectId: PROJECT_ID, providerName: "claude" }))
-        .toEqual({ kind: "host" });
+        .toEqual({ kind: "host", reason: { id: "eligible_worker", detail: expect.any(String) } });
     });
   });
 

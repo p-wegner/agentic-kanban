@@ -18,13 +18,68 @@
 // depend only on this file. Keep this module free of anything that reaches the db.
 import type { ProviderName } from "../services/agent-provider/types.js";
 
-export type PlacementCheckId =
-  | "dispatch_opt_in"
-  | "profile_allowlist"
-  | "eligible_worker"
-  | "branch_for_transport"
-  | "project_repo_path"
-  | "repo_transport_shape";
+/**
+ * The chain's check ids, as DATA so the union and the runtime list cannot drift (#801).
+ *
+ * It was a hand-written union; recording a placement reason needs the same names at
+ * runtime to narrow a free-text database column back to the vocabulary, and a second
+ * hand-written list would be the drift this file's own guard neighbours exist to stop.
+ * The ordering here is the chain's order, and `placement-chain-parity.test.ts` pins the
+ * chain itself to `resolveWorkerPlacement`'s source order.
+ */
+export const PLACEMENT_CHECK_IDS = [
+  "dispatch_opt_in",
+  "profile_allowlist",
+  "eligible_worker",
+  "branch_for_transport",
+  "project_repo_path",
+  "repo_transport_shape",
+] as const;
+
+export type PlacementCheckId = (typeof PLACEMENT_CHECK_IDS)[number];
+
+/**
+ * What a recorded placement DECISION can name (#801).
+ *
+ * Every id is a check in the chain above, plus one that is not a check at all:
+ * `resolver_error`, the catch-all host fallback `resolveWorkerPlacement` takes when the
+ * resolution itself threw. Folding that into a check id would file a crash under whichever
+ * step happened to be nearby, which is the kind of confidently-wrong record that sends the
+ * next reader after the wrong bug.
+ */
+export type PlacementReasonId = PlacementCheckId | "resolver_error";
+
+export const PLACEMENT_REASON_IDS: readonly PlacementReasonId[] = [
+  ...PLACEMENT_CHECK_IDS,
+  "resolver_error",
+];
+
+/**
+ * Narrow a persisted `placement_reason` back to the vocabulary.
+ *
+ * The column is free text to SQLite, so a row written by an older build — or edited by
+ * hand — must not be able to claim a reason id that does not exist. An unrecognised value
+ * reads as "not recorded", which is the same thing a null means and the only honest answer.
+ */
+export function isPlacementReasonId(value: string | null | undefined): value is PlacementReasonId {
+  return typeof value === "string" && (PLACEMENT_REASON_IDS as readonly string[]).includes(value);
+}
+
+/**
+ * WHY a session was placed where it was, captured AT DISPATCH (#801).
+ *
+ * #755 answers "why is #N not dispatching right now" by re-running the chain against LIVE
+ * state, and #774 records what the fleet looked like at the time — but neither captures the
+ * resolver's own reasoning at the moment it decided, so "why did THAT session run on the
+ * host three days ago" stayed unanswerable. A re-derivation cannot answer it: the prefs, the
+ * fleet and the repo shape have all moved since. This is the one thing that has to be
+ * WRITTEN when the decision is made rather than reconstructed afterwards.
+ */
+export interface PlacementReason {
+  id: PlacementReasonId;
+  /** One line an operator can act on, in the resolver's own wording. */
+  detail: string;
+}
 
 export type PlacementCheckOutcome = "pass" | "skipped" | "decided" | "not-reached";
 
@@ -142,6 +197,14 @@ export interface SessionPlacementRecord {
   workerId: string | null;
   /** Null with a non-null workerId = the worker was revoked or removed since. */
   workerName: string | null;
+  /**
+   * The deciding check, as the resolver recorded it at dispatch (#801). Null for a session
+   * placed before this was persisted, or one whose placement was passed in explicitly
+   * rather than resolved — "not recorded" and "host by default" must stay distinguishable.
+   */
+  placementReason: PlacementReasonId | null;
+  /** The resolver's wording for that decision. Null whenever `placementReason` is. */
+  placementDetail: string | null;
 }
 
 export interface IssuePlacementReport {

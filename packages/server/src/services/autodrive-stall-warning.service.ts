@@ -178,7 +178,47 @@ const SKIP_REASON_LABEL: Record<string, string> = {
   contention_gate: "deferred by file-contention gate",
   cycle_start_cap: "hit this cycle's max-new-starts cap",
   feature_type_excluded: "excluded by feature/enhancement type filter",
+  // #801 — this one was rendering as the raw token. It is also the reason with the most
+  // remedies behind it (nobody paired a worker / every worker is busy / the labels do not
+  // match / the profile allowlist forbids remote), which is exactly why `fleetHold` below
+  // has to be appended: the label alone tells an operator nothing actionable.
+  no_available_worker: "no fleet worker could take the work",
 };
+
+/**
+ * The fleet's SHAPE behind a `no_available_worker` hold, as `runAutoStart` recorded it.
+ *
+ * Declared structurally rather than imported from `startup/monitor-auto-start.ts`: a
+ * service must not depend on the monitor engine (see the server CLAUDE.md's `startup/` note),
+ * and the producer's `FleetHoldDetail` satisfies this shape at the call site.
+ */
+export interface AutoStartFleetHold {
+  reason: string;
+  registered: number;
+  online: number;
+  connected: number;
+  eligible: number;
+  freeSlots: number;
+  explain: string;
+}
+
+/**
+ * #801 — the consumer `fleetHold` did not have. #774 populated it and nothing read it, so
+ * an operator watching a held project still saw only the collapsed `no_available_worker`
+ * token and had to go and run `worker doctor-board` to learn WHICH of the four causes it was.
+ *
+ * The four numbers are what separate them: `registered 0` means nobody ever paired;
+ * `connected 0` of N means the workers are paired but not dialled in; `eligible 0` with
+ * connected>0 means the labels/provider filter excludes all of them; and `freeSlots 0` with
+ * eligible>0 means the fleet is simply busy. The explain URL is the drill-down for one ticket.
+ */
+function describeFleetHold(hold: AutoStartFleetHold): string {
+  return (
+    ` Fleet: ${hold.connected}/${hold.registered} connected, ${hold.online} online, ` +
+    `${hold.eligible} eligible, ${hold.freeSlots} free slot(s) — ${hold.reason}. ` +
+    `Why for one ticket: ${hold.explain}.`
+  );
+}
 
 /**
  * Turns the per-project skip tallies `runAutoStart` collects while declining to start
@@ -189,7 +229,15 @@ const SKIP_REASON_LABEL: Record<string, string> = {
  * one, per the existing "Monitor warnings" rendering.
  */
 export function buildAutoStartSkipWarnings(
-  skipByProject: Map<string, { issueNumbers: number[]; reasonCounts: Partial<Record<string, number>> }>,
+  skipByProject: Map<
+    string,
+    {
+      issueNumbers: number[];
+      reasonCounts: Partial<Record<string, number>>;
+      /** Present only when the fleet gate held this project this cycle (#774, consumed by #801). */
+      fleetHold?: AutoStartFleetHold;
+    }
+  >,
   projectNames: Map<string, string>,
   now: Date,
 ): AutodriveStallWarning[] {
@@ -214,7 +262,10 @@ export function buildAutoStartSkipWarnings(
       workspaceIds: [],
       issueNumbers,
       cause: "unblocked_backlog_not_started",
-      message: `Monitor-mode project "${projectName}" had unblocked work not auto-started this cycle for${issuePreview}: ${reasonParts.join(", ")}.`,
+      message:
+        `Monitor-mode project "${projectName}" had unblocked work not auto-started this cycle for${issuePreview}: ` +
+        `${reasonParts.join(", ")}.` +
+        (info.fleetHold ? describeFleetHold(info.fleetHold) : ""),
     });
   }
   return warnings;

@@ -29,6 +29,13 @@ export const sessions = sqliteTable("sessions", {
   // was dispatched remotely instead of spawned on the board host. Mirrors
   // containerId's role: "the pid isn't the whole story" for stop/reattach.
   workerId: text("worker_id"),
+  // WHY this session was placed where it was, stamped by `resolveWorkerPlacement` at
+  // dispatch (#801). `workerId` records WHERE; the live placement explanation re-derives
+  // the chain against state that has since moved, so it can never answer the historical
+  // question. Null for a session dispatched before this existed, or one whose placement was
+  // passed in rather than resolved — "not recorded" must stay distinct from "host by default".
+  placementReason: text("placement_reason"),
+  placementDetail: text("placement_detail"),
 }, (table) => ({
   workspaceIdIdx: index("idx_sessions_workspace_id").on(table.workspaceId),
   statusIdx: index("idx_sessions_status").on(table.status),

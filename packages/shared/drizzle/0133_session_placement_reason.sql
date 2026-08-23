@@ -1,0 +1,21 @@
+-- #801 item 4: WHY a session was placed where it was, recorded AT DISPATCH.
+--
+-- `sessions.worker_id` already records WHERE a session ran, and #755's `explainPlacement`
+-- answers "why is #N not dispatching right now" by re-running the decision chain against
+-- LIVE state. Neither answers "why did THAT session run on the board host last Tuesday",
+-- and a re-derivation never can: the preferences, the fleet's membership and the project's
+-- repo shape have all moved since. The resolver's own verdict has to be WRITTEN at the
+-- moment it decides, which is what these two columns are for.
+--
+-- `placement_reason` holds a `PlacementReasonId` — the same vocabulary
+-- `services/placement-explain.service.ts` uses for the live chain, deliberately, so a
+-- historical record and a live explanation cannot disagree about what to call a step —
+-- plus `resolver_error` for the catch-all host fallback, which is not a check at all.
+-- `placement_detail` is the resolver's own wording for that decision.
+--
+-- Both are NULLABLE and stay null for every session dispatched before this landed, and for
+-- one whose placement was passed in explicitly rather than resolved. "Not recorded" and
+-- "host by default" must stay distinguishable; a backfilled default would erase exactly the
+-- distinction the columns exist to make.
+ALTER TABLE `sessions` ADD `placement_reason` text;--> statement-breakpoint
+ALTER TABLE `sessions` ADD `placement_detail` text;

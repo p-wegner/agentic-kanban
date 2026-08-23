@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import type { WorkerEvent } from "@agentic-kanban/shared/types";
 
 /**
  * One worker's event timeline (#774), from `GET /api/workers/:id/events`.
@@ -13,16 +14,12 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
  *
  * Loaded ON EXPAND, not with the panel: a fleet of ten workers would otherwise mean ten
  * extra queries on every 15-second poll for a timeline nobody has opened.
+ *
+ * The row SHAPE is imported, not re-declared (#801): this component and the server service
+ * each held their own copy of it, which is the two-hand-maintained-copies drift
+ * `wire-dto-single-declaration.test.ts` exists to stop.
  */
-export interface WorkerEvent {
-  id: string;
-  workerId: string;
-  type: string;
-  sessionId: string | null;
-  summary: string;
-  payload: Record<string, unknown> | null;
-  createdAt: string;
-}
+export type { WorkerEvent };
 
 const TYPE_COLORS: Record<string, string> = {
   registered: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",

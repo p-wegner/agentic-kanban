@@ -1,10 +1,10 @@
 // @gate:always-run — reads route/service SOURCE TEXT outside its own import graph (#774).
 //
-// The point of this guard: `worker-events.service.ts` declares eleven event types but #774
-// can only EMIT six of them, because the call sites for the other five live in files it does
-// not own (`fleet-listener.service.ts` for the WebSocket lifecycle, `agent-remote.service.ts`
-// for assignment and exit, `worker-incoming-refs.service.ts` for the held-ref sweep, and the
-// registry for an effective-status transition).
+// The point of this guard: the event VOCABULARY and the set of types the board actually
+// writes are two different lists, and they drift apart silently. #774 could emit only four
+// of ten because the other six belonged in files it did not own; #801 wired those six, so
+// `UNEMITTED_TYPES` is empty today. The guard is worth exactly as much now as it was then —
+// it is what makes the NEXT declared-but-unwired type a failure rather than a false claim.
 //
 // A comment saying so would rot the day someone wires one up, and the failure mode is
 // specific and bad: a declared-but-unemitted type reads to a reader (and to the panel's
@@ -27,7 +27,15 @@ import {
 const SERVER_SRC = resolve(__dirname, "..");
 
 /** Every file that is allowed to write a worker event today. */
-const EMITTER_FILES = ["routes/workers.ts"];
+const EMITTER_FILES = [
+  "routes/workers.ts",
+  "services/worker-fleet.service.ts",
+  // The two an assignment leaves behind live in their own module (#801) — see its header
+  // for why they were lifted out of the 1000-line launch service.
+  "services/agent-remote-events.ts",
+  "services/worker-incoming-refs.service.ts",
+  "services/worker-registry.service.ts",
+];
 
 /**
  * Which types a source text actually writes, matched on the `type:` property of a
@@ -88,7 +96,9 @@ describe("worker event emitter coverage", () => {
     `;
     const found = emittedTypesIn(violating);
     expect(found.has("disconnected")).toBe(true);
-    expect(UNEMITTED_TYPES.includes("disconnected" as WorkerEventType)).toBe(true);
+    // With UNEMITTED_TYPES empty (#801) the detector is exercised against the OTHER
+    // direction: a type this file claims is emitted must be findable in this exact form.
+    expect(EMITTED_TYPES.includes("disconnected" as WorkerEventType)).toBe(true);
     // And it does not invent types that are not in the vocabulary.
     expect(emittedTypesIn(`type: "not_a_worker_event"`).size).toBe(0);
   });

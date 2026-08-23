@@ -29,6 +29,8 @@ import {
   reservedSlotCount,
 } from "./worker-slot-reservation.service.js";
 import { remoteDispatchBlockedByRepoShape } from "./worker-transport-support.service.js";
+import { recordWorkerEvent } from "./worker-events.service.js";
+import type { PlacementReason, PlacementReasonId } from "../lib/placement-explain.types.js";
 import { resolveResumeWorkerAffinity } from "./worker-resume-affinity.service.js";
 export { SHARES_FILESYSTEM_LABEL };
 
@@ -57,6 +59,33 @@ export function getWorkerFleet(database: Database = realDb): WorkerFleet {
       await revokeGitTokensForWorker(workerId, database).catch((err) =>
         console.error(`[worker-fleet] could not revoke git tokens for worker ${workerId}`, err),
       );
+    });
+    // #801 — the WebSocket lifecycle, made durable. Wired HERE and not in
+    // `fleet-listener.service.ts` (which the ticket named) because the listener is only
+    // ONE of the two ways a worker connects: a same-machine worker dials the board's main
+    // port, whose WS route is built from this same manager. Subscribing at the composition
+    // root is the only place that sees both, and it is also the only place that holds the
+    // `database` the event write needs.
+    //
+    // "In what order did that worker connect, take work and go away?" is the #699/#706
+    // question, and a connect/disconnect pair is the spine of the answer. Fire-and-forget
+    // by contract (`recordWorkerEvent` never throws), so a diagnostic can never break a
+    // socket callback.
+    connections.onConnect((workerId) => {
+      void recordWorkerEvent({
+        database,
+        workerId,
+        type: "connected",
+        summary: "worker opened a board WebSocket",
+      });
+    });
+    connections.onDisconnect((workerId) => {
+      void recordWorkerEvent({
+        database,
+        workerId,
+        type: "disconnected",
+        summary: "worker's board WebSocket closed",
+      });
     });
     fleet = {
       registry,
@@ -286,6 +315,25 @@ export async function resolveWorkerPlacement(params: {
   }
 }
 
+/**
+ * #801 — the recording seam the placement explanation could never have.
+ *
+ * `explainPlacement` re-derives the chain against LIVE state, which answers "why is this not
+ * dispatching now" and cannot answer "why did that session run on the host last Tuesday":
+ * the prefs, the fleet and the repo shape have all moved. So the deciding step is stamped
+ * onto the decision HERE, where it is actually made, and the caller persists it on the
+ * session row. The ids are the same `PlacementCheckId`s the explanation uses, deliberately —
+ * a historical record and a live explanation that disagreed on vocabulary would be two
+ * answers to one question.
+ */
+function because(id: PlacementReasonId, detail: string): PlacementReason {
+  return { id, detail };
+}
+
+function hostBecause(id: PlacementReasonId, detail: string): Placement {
+  return { kind: "host", reason: because(id, detail) };
+}
+
 async function resolvePlacementWithReservation(
   params: Parameters<typeof resolveWorkerPlacement>[0],
   reservation: { id?: string },
@@ -293,7 +341,9 @@ async function resolvePlacementWithReservation(
   const { database, projectId, providerName, branch, baseBranch, resumeProviderSessionId, now, nowMs } = params;
   try {
     const pref = await getPreferenceValue(workerDispatchPrefKey(projectId), database);
-    if (pref !== "true") return { kind: "host" };
+    if (pref !== "true") {
+      return hostBecause("dispatch_opt_in", `worker_dispatch is not enabled for project ${projectId}`);
+    }
     const fleet = getWorkerFleet(database);
     // Read strictness ONCE and carry it on the placement (#245): every
     // host-fallback path below — and the dispatch proxy's own catch, which runs
@@ -313,7 +363,7 @@ async function resolvePlacementWithReservation(
       console.warn(
         `[worker-fleet] project ${projectId} wants worker dispatch but ${allowlistBlock.reason}; launching on host`,
       );
-      return { kind: "host" };
+      return hostBecause("profile_allowlist", allowlistBlock.reason);
     }
     const requiredLabels = parseRequiredLabels(await getPreferenceValue(workerLabelsPrefKey(projectId), database));
     // #751: select AND reserve atomically. Reading the load and then reserving after
@@ -334,7 +384,7 @@ async function resolvePlacementWithReservation(
       console.warn(
         `[worker-fleet] project ${projectId} wants worker dispatch but no eligible ${providerName} worker${detail} is available; launching on host`,
       );
-      return { kind: "host" };
+      return hostBecause("eligible_worker", `no eligible ${providerName} worker${detail} is available`);
     }
     const { workerId } = placed;
     reservation.id = placed.reservationId;
@@ -349,7 +399,13 @@ async function resolvePlacementWithReservation(
       );
     }
     if (await workerSharesFilesystem(fleet, workerId, now)) {
-      return { kind: "remote", workerId, strict, reservationId: reservation.id };
+      return {
+        kind: "remote",
+        workerId,
+        strict,
+        reservationId: reservation.id,
+        reason: because("eligible_worker", `worker ${workerId} shares this filesystem — no git transport needed`),
+      };
     }
 
     // True remote worker: it needs the repo over git transport. Without a
@@ -359,13 +415,13 @@ async function resolvePlacementWithReservation(
     if (!branch) {
       if (strict) refuseHost(`remote worker ${workerId} needs a branch for git transport`);
       console.warn(`[worker-fleet] remote worker ${workerId} needs a branch for git transport; launching on host`);
-      return { kind: "host" };
+      return hostBecause("branch_for_transport", `remote worker ${workerId} needs a branch for git transport`);
     }
     const project = await getProjectById(projectId, database);
     if (!project?.repoPath) {
       if (strict) refuseHost(`project ${projectId} has no repoPath to serve over git transport`);
       console.warn(`[worker-fleet] project ${projectId} has no repoPath; launching on host`);
-      return { kind: "host" };
+      return hostBecause("project_repo_path", `project ${projectId} has no repoPath to serve over git transport`);
     }
     // #748: the git transport carries ONE repository, without LFS and without
     // submodules. A project that needs more than that was dispatched anyway — the
@@ -386,13 +442,14 @@ async function resolvePlacementWithReservation(
       console.warn(
         `[worker-fleet] project ${projectId} wants worker dispatch but ${repoShape.reason}; launching on host`,
       );
-      return { kind: "host" };
+      return hostBecause("repo_transport_shape", repoShape.reason);
     }
     return {
       kind: "remote",
       workerId,
       strict,
       reservationId: reservation.id,
+      reason: because("eligible_worker", `worker ${workerId} took it over git transport on ${branch}`),
       repo: {
         projectId,
         repoPath: project.repoPath,
@@ -406,7 +463,7 @@ async function resolvePlacementWithReservation(
     // so the caller surfaces "no worker" instead of silently running on the host.
     if (err instanceof DispatchUnavailable) throw err;
     console.error(`[worker-fleet] placement resolution failed; launching on host`, err);
-    return { kind: "host" };
+    return hostBecause("resolver_error", `placement resolution threw: ${String(err)}`);
   }
 }
 

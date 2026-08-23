@@ -581,6 +581,10 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         const where = p.placement === "remote" ? `worker ${p.workerName ?? `${p.workerId} (revoked)`}` : "host";
         const issue = p.issueNumber === null ? "" : ` #${p.issueNumber}`;
         console.log(`  ${p.startedAt}${issue} ${p.executor} [${p.status}] on ${where}`);
+        // #801 — WHY, beside WHERE. Absent for a session dispatched before the resolver
+        // started stamping its verdict, and absent for an explicit placement that was never
+        // resolved; printing nothing in those cases is the honest answer, not a default.
+        if (p.placementReason) console.log(`      why: ${p.placementReason} — ${p.placementDetail ?? ""}`);
       }
     });
   // #774 (remaining #755 item 4) — TWO commands, not one, and the split is forced rather

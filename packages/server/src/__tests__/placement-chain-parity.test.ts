@@ -113,19 +113,27 @@ describe("placement explanation chain parity (#755)", () => {
    */
   it("declares one check per host-fallback exit in the resolver — a NEW guard cannot go unlisted", () => {
     const body = resolverBody();
-    // The trailing `;` matters: the resolver's own comment quotes the expression
-    // without one, and counting prose as an exit is how a guard reports 8 for 7.
-    const hostExits = body.match(/return \{ kind: "host" \};/g) ?? [];
-    // +1: the trailing `catch` returns host for an unexpected FAILURE, which is not
-    // one of the checks (nothing decided it — the resolution broke).
+    // #801 made this guard STRONGER by accident of its own change: every host exit now
+    // names the check that decided it (`hostBecause("<id>", …)`, so the session record can
+    // say WHY), which means this test can compare the ID SET rather than just a count. A
+    // seventh guard that reused an existing id would have passed the old count check.
+    const hostExitIds = [...body.matchAll(/return hostBecause\("([a-z_]+)"/g)].map((m) => m[1]!);
+    const declared = PLACEMENT_CHECK_CHAIN.map((c) => c.id);
+    // The catch block's exit is `resolver_error`: an unexpected FAILURE is not one of the
+    // checks — nothing decided it, the resolution broke — so it is excluded here and
+    // asserted separately rather than being folded in as an anonymous "+1".
     expect(
-      hostExits.length,
-      `resolveWorkerPlacement has ${hostExits.length} 'return { kind: "host" }' sites (one of which is the ` +
-        `error fallback in its catch block), so it applies ${hostExits.length - 1} checks, but ` +
-        `PLACEMENT_CHECK_CHAIN declares ${PLACEMENT_CHECK_CHAIN.length}. A guard was added to or removed from the ` +
-        `resolver without updating the chain — the explanation an operator gets is now incomplete. Add the check ` +
-        `(with its resolverMarker and a matching numbered item in docs/worker-fleet.md §7) or remove it.`,
-    ).toBe(PLACEMENT_CHECK_CHAIN.length + 1);
+      hostExitIds.filter((id) => id === "resolver_error").length,
+      "the resolver's catch block must take exactly one host exit, tagged resolver_error",
+    ).toBe(1);
+    expect(
+      hostExitIds.filter((id) => id !== "resolver_error").sort(),
+      `resolveWorkerPlacement's host exits name [${hostExitIds.join(", ")}], but PLACEMENT_CHECK_CHAIN ` +
+        `declares [${declared.join(", ")}]. A guard was added to or removed from the resolver without updating ` +
+        `the chain — the explanation an operator gets is now incomplete, and a session recorded under an ` +
+        `undeclared id would name a check nothing can explain. Add the check (with its resolverMarker and a ` +
+        `matching numbered item in docs/worker-fleet.md §7) or remove it.`,
+    ).toEqual([...declared].sort());
   });
 
   it("gives every check a distinct docStep covering 1..N with no gaps", () => {

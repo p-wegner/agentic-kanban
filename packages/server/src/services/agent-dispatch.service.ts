@@ -15,6 +15,7 @@
 // true when phase 1c #5 landed — corrected in #756.)
 
 import type { AgentOutputCallback } from "./agent.service.js";
+import type { PlacementReason } from "../lib/placement-explain.types.js";
 import type { ProviderId, ProviderName } from "./agent-provider.js";
 import type { ContainerProvision } from "./devcontainer-workspace.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -47,11 +48,18 @@ export class WorkerDispatchUnavailableError extends Error {
 }
 
 export type Placement =
-  | { kind: "host" }
-  | { kind: "container" }
+  /**
+   * `reason` (#801) is the resolver's own verdict, carried on the decision so the caller can
+   * PERSIST it. It is optional because an explicit placement — a test's, or a caller that
+   * decided for itself — was never resolved and therefore has no reasoning to record; a
+   * fabricated one would be worse than the null.
+   */
+  | { kind: "host"; reason?: PlacementReason }
+  | { kind: "container"; reason?: PlacementReason }
   | {
       kind: "remote";
       workerId: string;
+      reason?: PlacementReason;
       /**
        * The project set `worker_dispatch_strict_<projectId>` — host execution is
        * FORBIDDEN for this session (#245). Carried on the placement because

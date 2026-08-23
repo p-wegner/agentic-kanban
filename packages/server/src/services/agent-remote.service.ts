@@ -60,6 +60,7 @@ import { REMOTE_SESSION_ABANDON_MS } from "./remote-session-liveness.js";
 import { WORKER_HEARTBEAT_STALE_MS } from "./worker-registry.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { getProjectByRepoPath } from "../repositories/project.repository.js";
+import { createRemoteSessionEventRecorder } from "./agent-remote-events.js";
 import type { WorkerRepoOpKind, WorkerRepoOpResult } from "@agentic-kanban/shared/lib/worker-protocol";
 
 /**
@@ -203,8 +204,12 @@ export function createRemoteAgentService(
   >();
   let repoOpSeq = 0;
 
+  // #801 — the assignment's opening and closing rows. A separate module: see its header.
+  const { noteAssigned, noteSessionExit } = createRemoteSessionEventRecorder(database);
+
   function finishSession(sessionId: string, session: RemoteSession, stderr: string, exitCode: number | null): void {
     sessions.delete(sessionId);
+    noteSessionExit(sessionId, session, exitCode, "finalized without landing");
     // #769: the board-tool token dies with its assignment. Unlike the git token it is NOT
     // persisted, so this (and revokeWorker) is the whole of its revocation story.
     fleetMcp.revokeSessionTokens(sessionId);
@@ -256,6 +261,7 @@ export function createRemoteAgentService(
         exitCode = exitCode === 0 || exitCode === null ? 1 : exitCode;
       }
     }
+    noteSessionExit(sessionId, session, exitCode, "landed and finalized");
     try {
       session.onOutput({ type: "exit", sessionId, exitCode });
     } catch (err) {
@@ -656,6 +662,11 @@ export function createRemoteAgentService(
       if (!manager.send(workerId, { type: "assign", sessionId, spec })) {
         throw new Error(`fleet worker ${workerId} is not connected`);
       }
+      // #801 — recorded only once the assign is actually ON THE WIRE. An event written
+      // before the send would claim an assignment that a `false` return means never
+      // happened, and a timeline that lies about what a worker was given is worse than
+      // no timeline.
+      noteAssigned(sessionId, workerId, { transport: "shared-filesystem" });
     } else {
       const repo = placement.repo;
       void (async () => {
@@ -717,6 +728,13 @@ export function createRemoteAgentService(
             },
           });
           if (!delivered) throw new Error(`fleet worker ${workerId} is not connected`);
+          noteAssigned(sessionId, workerId, {
+            transport: "git",
+            branch: repo.branch,
+            baseBranch: repo.baseBranch,
+            projectId: repo.projectId,
+            boardTools: mcpAssignment !== null,
+          });
           console.log(`[agent-remote] git-transport assignment sent: sessionId=${sessionId} branch=${repo.branch}`);
         } catch (err) {
           const message = errorMessage(err);
