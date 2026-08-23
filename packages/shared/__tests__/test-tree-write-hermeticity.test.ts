@@ -12,7 +12,7 @@ import {
   packagesRootFrom,
   parseGuardSource,
   unwrapExpression,
-  walkTestFiles,
+  walkPackageSources,
 } from "./helpers/guard-scan.js";
 
 /**
@@ -190,6 +190,25 @@ function scanFile(absFile: string): Offender[] {
   return out;
 }
 
+/**
+ * Every file that runs as part of a test: the `*.test.*` files anywhere in the package, PLUS
+ * everything else under a `__tests__` directory.
+ *
+ * `walkTestFiles` alone would scan only the former, and the helpers are where a write is most
+ * likely to be hidden and least likely to be reviewed — a fixture builder called from twelve
+ * suites is exactly the shape that leaks into the tree twelve times a run.
+ */
+function testScopeFiles(packageDir: string): string[] {
+  return walkPackageSources(packageDir, {
+    extensions: [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"],
+    includeTests: true,
+    skipDirs: new Set(["node_modules", "dist", "coverage", ".git"]),
+  }).filter((f) => {
+    const rel = f.split(path.sep).join("/");
+    return rel.includes("/__tests__/") || /\.test\.[a-z]+$/.test(path.basename(f));
+  });
+}
+
 /** Every package that actually holds tests, so adding a package cannot silently escape the scan. */
 function testRoots(): string[] {
   return fs
@@ -206,12 +225,16 @@ describe("tests never write into the real repo tree (#680)", () => {
     // A guard that silently scans nothing passes forever. Pin both halves: the packages are
     // found, and the walk over them yields the order of magnitude of test files this repo has.
     expect(roots.length).toBeGreaterThanOrEqual(4);
-    const files = roots.flatMap((r) => walkTestFiles(r));
+    const files = roots.flatMap((r) => testScopeFiles(r));
     expect(files.length).toBeGreaterThan(300);
+    // ...and the widening past `*.test.*` is not vacuous: the helpers a suite calls are where
+    // a write hides best, so at least one non-test file under a `__tests__` tree must be in.
+    const helpers = files.filter((f) => !/\.test\.[a-z]+$/.test(path.basename(f)));
+    expect(helpers.length, "no __tests__ helper files in scope").toBeGreaterThan(0);
   });
 
   it("no test writes to a repo-anchored path", () => {
-    const offenders = roots.flatMap((r) => walkTestFiles(r)).flatMap(scanFile);
+    const offenders = roots.flatMap((r) => testScopeFiles(r)).flatMap(scanFile);
     expect(
       offenders.map((o) => `${o.file}:${o.line} -> ${o.text}`),
       "A test wrote into this checkout. Under `pnpm test:mine` the repo-scanning guard suites " +
