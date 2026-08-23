@@ -14,12 +14,18 @@ export function registerGetWorkspaceScorecard(server: McpServer, deps: ToolDeps 
       workspaceId: z.string().describe("The workspace ID"),
     },
     async ({ workspaceId }) => {
+      // #815: the scorecard artifact moved off `workspaces` into `workspace_scorecard`.
+      // Aliased back to the same three field names, so everything below is untouched.
+      // LEFT, not inner, and written inline because mcp-server cannot import server code: an
+      // inner join would turn "not yet computed" into "Workspace not found", which is a
+      // different (and wrong) answer — the not-computed message below is the right one.
       const wsRows = await db.select({
         id: schema.workspaces.id,
-        scorecardScore: schema.workspaces.scorecardScore,
-        scorecardJson: schema.workspaces.scorecardJson,
-        scorecardComputedAt: schema.workspaces.scorecardComputedAt,
+        scorecardScore: schema.workspaceScorecard.score,
+        scorecardJson: schema.workspaceScorecard.json,
+        scorecardComputedAt: schema.workspaceScorecard.computedAt,
       }).from(schema.workspaces)
+        .leftJoin(schema.workspaceScorecard, eq(schema.workspaceScorecard.workspaceId, schema.workspaces.id))
         .where(eq(schema.workspaces.id, workspaceId))
         .limit(1);
 

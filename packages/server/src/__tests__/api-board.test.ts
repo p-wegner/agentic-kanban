@@ -321,8 +321,7 @@ describe("Board API", () => {
       issueId,
       branch: "feature/ak-324-null-summary",
       status: "closed",
-      // scorecardScore null
-      scorecardScore: null,
+      // #815: scorecard moved to `workspace_scorecard`; NO row is what a null score was.
       createdAt: now,
       updatedAt: now,
     });

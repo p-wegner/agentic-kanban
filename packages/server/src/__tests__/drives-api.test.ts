@@ -175,8 +175,10 @@ describe("Drives API", () => {
     const ws = randomUUID();
     await db.insert(schema.workspaces).values({
       id: ws, issueId: child, branch: "feature/child", status: "merged",
-      provider: "claude", readyForMerge: true, mergedAt: reviewAt, scorecardScore: 77, createdAt: now, updatedAt: now,
+      provider: "claude", readyForMerge: true, mergedAt: reviewAt, createdAt: now, updatedAt: now,
     });
+    // #815: the scorecard moved to `workspace_scorecard`.
+    await db.insert(schema.workspaceScorecard).values({ workspaceId: ws, score: 77, computedAt: now });
     await db.insert(schema.sessions).values([
       { id: randomUUID(), workspaceId: ws, executor: "claude-code", status: "stopped", startedAt: buildAt, endedAt: buildAt, triggerType: "agent" },
       { id: randomUUID(), workspaceId: ws, executor: "claude-code", status: "stopped", startedAt: reviewAt, endedAt: reviewAt, triggerType: "review" },

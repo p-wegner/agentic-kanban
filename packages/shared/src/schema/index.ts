@@ -84,3 +84,5 @@ export { workspaceSetupRun, workspaceSetupRunRelations } from "./workspace-setup
 export { workspaceSummary, workspaceSummaryRelations } from "./workspace-summary.js";
 // #815: the ninth — the cached `git diff --shortstat` memo.
 export { workspaceDiffStatCache, workspaceDiffStatCacheRelations } from "./workspace-diff-stat-cache.js";
+// #815: the tenth — the computed PR-quality scorecard artifact.
+export { workspaceScorecard, workspaceScorecardRelations } from "./workspace-scorecard.js";

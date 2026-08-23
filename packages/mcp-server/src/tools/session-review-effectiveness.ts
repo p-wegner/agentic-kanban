@@ -52,13 +52,18 @@ export function registerSessionReviewEffectiveness(server: McpServer, deps: Tool
           wsStatus: schema.workspaces.status,
           provider: schema.workspaces.provider,
           mergedAt: schema.workspaces.mergedAt,
-          scorecardScore: schema.workspaces.scorecardScore,
+          // #815: the scorecard artifact moved to `workspace_scorecard`, aliased back to the
+          // same field name. Joined inline — mcp-server cannot import server code.
+          scorecardScore: schema.workspaceScorecard.score,
           issueNumber: schema.issues.issueNumber,
           issueTitle: schema.issues.title,
         })
         .from(schema.sessions)
         .innerJoin(schema.workspaces, eq(schema.sessions.workspaceId, schema.workspaces.id))
         .innerJoin(schema.issues, eq(schema.workspaces.issueId, schema.issues.id))
+        // LEFT, not inner — an unscored workspace's sessions must still be counted, or the
+        // report silently omits every ticket that has not been scored yet.
+        .leftJoin(schema.workspaceScorecard, eq(schema.workspaceScorecard.workspaceId, schema.workspaces.id))
         .where(and(eq(schema.issues.projectId, pid), gte(schema.sessions.startedAt, sinceIso)))
         .orderBy(schema.sessions.startedAt);
 
