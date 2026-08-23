@@ -1,10 +1,9 @@
 import type { Database } from "../db/index.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
+import { driveObstacleBody } from "./drive-obstacle-body-schemas.js";
 import {
   createDriveObstacleService,
-  isDriveObstacleKind,
-  isDriveObstacleSeverity,
   DRIVE_OBSTACLE_KINDS,
   DRIVE_OBSTACLE_SEVERITIES,
 } from "../services/drive-obstacles.service.js";
@@ -85,24 +84,7 @@ export function createDriveObstaclesRoute(
   // POST /api/projects/:projectId/drive-obstacles — record one obstacle
   router.post("/:projectId/drive-obstacles", async (c) => {
     const projectId = c.req.param("projectId");
-    const body = await parseJsonBody<{
-      driveId?: string | null;
-      kind?: string;
-      severity?: string;
-      issueNumber?: number | null;
-      summary?: string;
-      details?: unknown;
-    }>(c);
-
-    if (!isDriveObstacleKind(body.kind)) {
-      return c.json({ error: `kind must be one of: ${DRIVE_OBSTACLE_KINDS.join(", ")}` }, 400);
-    }
-    if (body.severity !== undefined && !isDriveObstacleSeverity(body.severity)) {
-      return c.json({ error: `severity must be one of: ${DRIVE_OBSTACLE_SEVERITIES.join(", ")}` }, 400);
-    }
-    if (!body.summary?.trim()) {
-      return c.json({ error: "summary is required" }, 400);
-    }
+    const body = await parseJsonBody(c, driveObstacleBody);
 
     const id = await service.record({
       projectId,
@@ -110,7 +92,8 @@ export function createDriveObstaclesRoute(
       kind: body.kind,
       severity: body.severity,
       issueNumber: body.issueNumber ?? null,
-      summary: body.summary.trim(),
+      // `driveObstacleBody` already trims, exactly as the old `body.summary.trim()` did.
+      summary: body.summary,
       details: body.details,
     });
     if (id === null) {

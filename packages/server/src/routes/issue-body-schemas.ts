@@ -26,7 +26,10 @@ import { z } from "zod";
 // guard-to-schema swap behaviour-preserving, now live in the shared vocabulary every
 // `*-body-schemas.ts` is written against (#806). They are unchanged — only relocated, so the
 // second schema file did not have to copy them.
-import { required, requiredRaw, arrayOnly } from "./body-schema-helpers.js";
+import { required, requiredRaw, arrayOnly, unchecked } from "./body-schema-helpers.js";
+import type { ShowdownContestant } from "@agentic-kanban/shared";
+import type { IssueCommentKind, IssueCommentAuthor } from "../repositories/issue-comments.repository.js";
+import type { PreflightClarification } from "../services/ticket-preflight.service.js";
 
 export const enhanceIssueBody = z.object({
   title: required("title is required"),
@@ -96,3 +99,139 @@ export const bulkUpdateBody = z.object({
     { message: "updates is required" },
   ),
 });
+
+/* ------------------------------------------------------------------------------------------
+ * #806 batch 3 — the rest of `/api/issues`.
+ *
+ * Everything below is `.passthrough()`, which the #512 schemas above predate: a bare
+ * `z.object()` STRIPS unknown keys from `result.data`, so any handler forwarding the whole
+ * body onward (`addArtifact(issueId, body)`) would silently start receiving fewer fields.
+ * The #512 schemas' missing `.passthrough()` is a separate, disclosed finding — none of them
+ * forwards a whole body today, so it is latent rather than live.
+ *
+ * Two handlers in this file are REJECTED rather than deferred; the argument is in the
+ * ratchet's entry for `issues.ts`.
+ * ---------------------------------------------------------------------------------------- */
+
+/**
+ * `POST /api/issues/archive-done`.
+ *
+ * Only `projectId` gets a predicate. `olderThanDays` is COERCED, not checked — the handler
+ * runs `Number(body.olderThanDays)` and then `Number.isFinite(days) && days > 0`, so the
+ * string `"30"` is a valid request today. A `z.number()` here would 400 it. The coercion test
+ * therefore stays in the handler, where it can keep accepting what it accepts.
+ */
+export const archiveDoneBody = z.object({
+  projectId: requiredRaw("projectId is required"),
+  olderThanDays: unchecked<number>(),
+  nowOverride: unchecked<string>(),
+}).passthrough();
+
+/**
+ * `POST /api/issues`.
+ *
+ * `projectId` then `title`, in the order the two guards ran. `title` uses {@link required}
+ * (not `requiredTrimmed`): the guard tested `body.title?.trim()` but passed the ORIGINAL
+ * value to `createIssue`, and trimming here would change what the service stores.
+ *
+ * Every other field keeps its declared type and NO predicate. They were never checked, and
+ * #512's sanctioned declared-type tightening is optional — taking it here would 400 requests
+ * that succeed today (`estimate: 5`, `sortOrder: "3"`), which is the one thing the swap rule
+ * forbids. The declared type is documentation; the guard never enforced it and neither does
+ * this.
+ */
+export const createIssueBody = z.object({
+  projectId: requiredRaw("projectId is required"),
+  title: required("title is required"),
+  description: unchecked<string>(),
+  priority: unchecked<string>(),
+  issueType: unchecked<string>(),
+  skipAutoReview: unchecked<boolean>(),
+  estimate: unchecked<string | null>(),
+  sortOrder: unchecked<number>(),
+  statusId: unchecked<string>(),
+  workflowTemplateId: unchecked<string | null>(),
+  externalKey: unchecked<string | null>(),
+  externalUrl: unchecked<string | null>(),
+  reposTouched: unchecked<string[]>(),
+}).passthrough();
+
+/**
+ * `POST /api/issues/:id/analyze-touched-files`.
+ *
+ * The call site is `parseJsonBody(...).catch(() => ({ refresh: false }))`, so a rejection here
+ * never reaches the client — and that is exactly why the check is safe: the handler's only use
+ * is `body?.refresh === true`, so a non-boolean produced `false` before and produces `false`
+ * now, by the catch instead of by the comparison. Nothing observable moves; the body is
+ * nevertheless checked rather than asserted.
+ */
+export const analyzeTouchedFilesBody = z.object({
+  refresh: z.custom<boolean>((v) => typeof v === "boolean", { message: "refresh must be a boolean" }).optional(),
+}).passthrough();
+
+/** `POST /api/issues/:id/preflight`. `clarifications` was never checked and keeps its type. */
+export const preflightBody = z.object({
+  projectId: requiredRaw("projectId is required"),
+  clarifications: unchecked<PreflightClarification[]>(),
+}).passthrough();
+
+/**
+ * `PUT /api/issues/:id/repos-touched`.
+ *
+ * `Array.isArray` and nothing more — the route drops unknown repo names itself and echoes the
+ * applied set back, so element validation here would refuse a request the endpoint is designed
+ * to accept partially.
+ */
+export const reposTouchedBody = z.object({
+  reposTouched: arrayOnly<string>("reposTouched (array) is required"),
+}).passthrough();
+
+/** `POST /api/issues/:id/tags`. */
+export const issueTagBody = z.object({
+  tagId: requiredRaw("tagId is required"),
+}).passthrough();
+
+/** `POST /api/issues/:id/dependencies`. `type` was never checked; the service defaults it. */
+export const issueDependencyBody = z.object({
+  dependsOnId: requiredRaw("dependsOnId is required"),
+  type: unchecked<string>(),
+}).passthrough();
+
+/**
+ * `POST /api/issues/:id/artifacts`.
+ *
+ * `type` and `content` share ONE message because the guard was a single
+ * `if (!body.type || !body.content)` — splitting it would change what a caller missing only
+ * `content` is told. The whole body is handed to `addArtifact`, hence `.passthrough()`.
+ */
+export const issueArtifactBody = z.object({
+  type: requiredRaw("type and content are required"),
+  mimeType: unchecked<string>(),
+  content: requiredRaw("type and content are required"),
+  caption: unchecked<string>(),
+  workspaceId: unchecked<string>(),
+}).passthrough();
+
+/**
+ * `POST /api/issues/:id/comments`.
+ *
+ * `body` is {@link required}, not `requiredTrimmed`: the guard tested the trimmed value and
+ * stored the original. `kind` and `author` keep no predicate — the handler runs them through
+ * its own deliberate whitelists and FALLS BACK to `"note"` / `"user"` rather than rejecting,
+ * so a schema enum would turn an accepted request into a 400.
+ */
+export const issueCommentBody = z.object({
+  kind: unchecked<IssueCommentKind>(),
+  author: unchecked<IssueCommentAuthor>(),
+  body: required("body is required"),
+  payload: unchecked<unknown>(),
+  workspaceId: unchecked<string>(),
+}).passthrough();
+
+/** `POST /api/issues/:id/showdown`. One combined guard, therefore one combined message. */
+export const showdownBody = z.object({
+  contestants: arrayOnly<ShowdownContestant>(
+    "contestants must be an array with at least 2 entries",
+    (v) => v.length >= 2,
+  ),
+}).passthrough();

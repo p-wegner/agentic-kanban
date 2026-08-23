@@ -1,6 +1,7 @@
 import type { Database } from "../db/index.js";
 import { createAgentSkillService } from "../services/agent-skill.service.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
+import { enhanceSkillBody } from "./agent-skill-body-schemas.js";
 import { createRouter } from "../middleware/create-router.js";
 import { wrapAiOperation } from "../lib/ai-operation.js";
 
@@ -19,10 +20,7 @@ export function createAgentSkillsRoute(database: Database) {
 
   // POST /api/agent-skills/enhance — AI-enhance a skill name, description, and prompt
   router.post("/enhance", async (c) => {
-    const body = await parseJsonBody<{ name: string; description?: string; prompt?: string }>(c);
-    if (!body.name?.trim()) {
-      return c.json({ error: "name is required" }, 400);
-    }
+    const body = await parseJsonBody(c, enhanceSkillBody);
     return c.json(await wrapAiOperation("skill-enhance", () => agentSkillService.enhanceSkill(body.name, body.description, body.prompt)));
   });
 

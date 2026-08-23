@@ -14,6 +14,7 @@ import { getIssueDescription } from "../repositories/issue.repository.js";
 import { getWorkspaceById } from "../repositories/workspace.repository.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
+import { answerAgentQuestionBody } from "./agent-question-body-schemas.js";
 import { createWorkspaceService } from "../services/workspace.service.js";
 import {
   listPendingQuestionsForProject,
@@ -23,7 +24,6 @@ import {
   writeAgentQuestionComment,
   recommendQuestionsForSet,
   setCachedRecommendations,
-  type AgentQuestion,
 } from "../services/agent-questions.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
@@ -53,14 +53,7 @@ export function createAgentQuestionsRoute(
   router.post("/:id/agent-questions/:toolUseId/answer", async (c) => {
     const projectId = c.req.param("id");
     const toolUseId = c.req.param("toolUseId");
-    const body = await parseJsonBody<{
-      questions: AgentQuestion[];
-      answers: { selectedLabels: string[]; freeText?: string }[];
-      workspaceId: string;
-    }>(c);
-    if (!body.workspaceId || !Array.isArray(body.questions) || !Array.isArray(body.answers)) {
-      return c.json({ error: "workspaceId, questions[], and answers[] are required" }, 400);
-    }
+    const body = await parseJsonBody(c, answerAgentQuestionBody);
     // Dead workspace (seen on issue #656): refuse early when the asking workspace can no
     // longer take a turn. A closed workspace (or one whose worktree is gone) makes
     // sendTurn fail deep inside the session manager with the bare

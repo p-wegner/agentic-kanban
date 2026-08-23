@@ -1,6 +1,7 @@
 import type { Database } from "../db/index.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
+import { driveEnabledBody } from "./drive-body-schemas.js";
 import { getDriveStatus, setDriveEnabled } from "../services/drive.service.js";
 import { runDrivePreflight } from "../services/drive-preflight.service.js";
 
@@ -35,10 +36,7 @@ export function createDriveRoute(database: Database) {
   });
 
   router.put("/:projectId/drive", async (c) => {
-    const body = await parseJsonBody<{ enabled?: boolean }>(c);
-    if (typeof body.enabled !== "boolean") {
-      return c.json({ error: "enabled (boolean) is required" }, 400);
-    }
+    const body = await parseJsonBody(c, driveEnabledBody);
     return c.json(await setDriveEnabled(c.req.param("projectId"), body.enabled, database));
   });
 
