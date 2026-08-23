@@ -17,6 +17,9 @@ import { loadProjectRuntimeConfig } from "./project-runtime-config.service.js";
 import * as realGitService from "./git.service.js";
 import { detectWorkspaceMergeConflicts } from "./workspace-merge-conflict.service.js";
 import { getDirtyMainFiles } from "./merge-executor.service.js";
+// Type-only (erased at emit), so the fact that workspace-merge-prevalidation
+// imports back from this module creates no runtime cycle.
+import type { MergeWarning } from "./workspace-merge-prevalidation.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 export class WorkspaceError extends Error {
@@ -648,6 +651,33 @@ export async function checkPendingSiblingMergeGuardsDetailed(
 
 export const MERGE_LOCK_STALE_MS = 15 * 60 * 1000;
 
+/**
+ * The body EVERY `mergeWorkspace` path resolves to — the union of the five
+ * shapes the merge family produces, written out once instead of being inferred
+ * five ways (#835).
+ *
+ * Four of them come from the pre-merge resolution short-circuits
+ * (already-merged reconcile, direct-workspace close, ancestor reconcile, clean-
+ * ancestor skip) and one from `executeWorkspaceMerge` when git actually merges.
+ * `id` and `mergeOutput` are the two every path sets; the rest are optional
+ * BECAUSE the union genuinely is optional in them — a reconcile has no
+ * `mergeCommitSha`, a direct close has no `baseBranch`, and only the reconcile
+ * paths report `reconciled`. This is the union, not a widening of any one arm.
+ */
+export type MergeWorkspaceResult = {
+  id: string;
+  mergeOutput: string;
+  /** `true` only when git actually merged; the reconcile/skip paths report `false`, the close paths omit it. */
+  merged?: boolean;
+  /** Set by the two reconcile paths (`true`) and the clean-ancestor skip (`false`). */
+  reconciled?: boolean;
+  baseBranch?: string;
+  mergeCommitSha?: string;
+  baseHeadShaBefore?: string;
+  baseHeadShaAfter?: string;
+  warnings?: MergeWarning[];
+};
+
 export interface ActiveMergeLock {
   /**
    * Lock-lifetime promise: settles only when the merge AND every registered
@@ -658,10 +688,18 @@ export interface ActiveMergeLock {
   /**
    * The merge's own result promise (the value the HTTP caller receives).
    * Settles as soon as the merge response is ready — possibly BEFORE the lock
-   * is released. Used by the manual-merge reuse path; falls back to `promise`
-   * for entries created without it (tests, legacy).
+   * is released. Used by the manual-merge reuse path.
+   *
+   * OPTIONAL because the lock is genuinely heterogeneous (#835): four different
+   * acquirers install into `activeMerges`, and only ONE of them —
+   * `WorkspaceMergeService.mergeWorkspace` — does work that resolves to a merge
+   * response. `executeSiblingMerges` resolves to a merge-core result, and the
+   * startup done-unmerged sweep and `autoMerge` resolve to nothing at all. Those
+   * acquirers leave this undefined (see `publishMergeResponse` on
+   * {@link acquireRepoMergeLock}), which is precisely what stops the reuse path
+   * from handing an HTTP caller a foreign shape as its merge response.
    */
-  resultPromise?: Promise<unknown>;
+  resultPromise?: Promise<MergeWorkspaceResult>;
   workspaceId: string;
   repoPath: string;
   startedAt: string;
@@ -850,6 +888,18 @@ export async function acquireRepoMergeLock<T>(
   workspaceId: string,
   work: (extendHold: (p: Promise<unknown>) => void) => Promise<T>,
   onWait?: (holder: ActiveMergeLock) => void,
+  /**
+   * Publish this acquirer's result on the lock entry as the repo's in-flight
+   * MERGE RESPONSE, so the manual-merge reuse path can hand it back (#835).
+   *
+   * Only an acquirer whose `work` actually resolves to a
+   * {@link MergeWorkspaceResult} can supply this: pass the identity `(p) => p`,
+   * which typechecks only when `T` is assignable to `MergeWorkspaceResult`.
+   * Every other acquirer omits it and its result stays private, which is what
+   * makes `ActiveMergeLock.resultPromise` a typed field rather than an
+   * `unknown` that widens every caller of `mergeWorkspace`.
+   */
+  publishMergeResponse?: (result: Promise<T>) => Promise<MergeWorkspaceResult>,
 ): Promise<T> {
   for (;;) {
     const existing = activeMerges.get(repoPath);
@@ -878,7 +928,7 @@ export async function acquireRepoMergeLock<T>(
   const resultPromise = work(extendHold);
   const lock: ActiveMergeLock = {
     promise: Promise.resolve(), // replaced with the real hold promise just below
-    resultPromise,
+    resultPromise: publishMergeResponse?.(resultPromise),
     workspaceId,
     repoPath,
     startedAt: new Date().toISOString(),

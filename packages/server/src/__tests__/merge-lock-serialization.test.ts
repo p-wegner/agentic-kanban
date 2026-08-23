@@ -243,15 +243,42 @@ describe("acquireRepoMergeLock serialization (#944)", () => {
 
     it("exposes resultPromise on the lock entry for the manual-merge reuse path", async () => {
       const cleanupGate = deferred();
-      const a = acquireRepoMergeLock(REPO, "ws-a", async (extendHold) => {
-        extendHold(cleanupGate.promise);
-        return "the-response";
-      });
+      const response = { id: "ws-a", mergeOutput: "the-response" };
+      // #835: only an acquirer whose work resolves to a merge response publishes
+      // it — that is what the identity `(p) => p` argument says, and it is the
+      // only way `resultPromise` is ever populated.
+      const a = acquireRepoMergeLock(
+        REPO,
+        "ws-a",
+        async (extendHold) => {
+          extendHold(cleanupGate.promise);
+          return response;
+        },
+        undefined,
+        (result) => result,
+      );
       await a;
       // Lock still held by the pending cleanup; reuse must see the result.
       const lock = activeMerges.get(REPO);
       expect(lock?.workspaceId).toBe("ws-a");
-      await expect(lock!.resultPromise).resolves.toBe("the-response");
+      await expect(lock!.resultPromise).resolves.toBe(response);
+      cleanupGate.resolve();
+      await lock!.promise;
+      expect(activeMerges.has(REPO)).toBe(false);
+    });
+
+    it("leaves resultPromise unset for an acquirer that produces no merge response (#835)", async () => {
+      const cleanupGate = deferred();
+      // The sibling-merge / startup-sweep / autoMerge acquirers: their work
+      // resolves to a merge-core result or to nothing, so there is no response
+      // to hand a reusing HTTP caller and the field stays undefined.
+      const a = acquireRepoMergeLock(REPO, "ws-sweep", async (extendHold) => {
+        extendHold(cleanupGate.promise);
+      });
+      await a;
+      const lock = activeMerges.get(REPO);
+      expect(lock?.workspaceId).toBe("ws-sweep");
+      expect(lock!.resultPromise).toBeUndefined();
       cleanupGate.resolve();
       await lock!.promise;
       expect(activeMerges.has(REPO)).toBe(false);

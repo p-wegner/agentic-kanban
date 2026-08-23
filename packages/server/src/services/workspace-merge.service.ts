@@ -38,6 +38,7 @@ import {
   describeMergeLock,
   resolveMergeState,
   type GitService,
+  type MergeWorkspaceResult,
 } from "./workspace-internals.js";
 import { buildReconcilerPrompt } from "./reconciler.service.js";
 import {
@@ -195,11 +196,18 @@ export function createWorkspaceMergeService(deps: {
       // is still alive, in which case we fall through to refuse/reuse below.
       const recovered = diagnostic.isStale && tryRecoverStaleMergeLock(repoPath, existingLock);
       if (!recovered) {
-        if (existingLock.workspaceId === id) {
+        if (existingLock.workspaceId === id && existingLock.resultPromise) {
           console.log(`[workspace-merge] reusing in-flight merge result for workspace ${id} on repo ${repoPath}`);
           // resultPromise settles as soon as the merge response is ready; the
           // lock itself may stay held longer for post-merge cleanup (#970).
-          return await (existingLock.resultPromise ?? existingLock.promise);
+          // It is present only when the holder is a mergeWorkspace call (#835) —
+          // a lock this workspace holds via autoMerge, the startup done-unmerged
+          // sweep or a sibling merge produces no merge response, so those fall
+          // through to the refusal below instead. That is not a regression: the
+          // old `?? existingLock.promise` fallback resolved to the LOCK-LIFETIME
+          // promise, which always settles as `undefined`, so reusing it handed
+          // the HTTP caller `undefined` as its merge body.
+          return await existingLock.resultPromise;
         }
         throw new WorkspaceError(
           `A merge is already in progress for this repository ` +
@@ -267,21 +275,30 @@ export function createWorkspaceMergeService(deps: {
 
     // Install the lock and run the merge via the shared primitive (#944) so the
     // entry can never be overwritten by a concurrent acquirer.
-    return await acquireRepoMergeLock(repoPath, id, (extendHold) =>
-      // #943: thread `opts` (e.g. skipPreMergeGate from the monitor auto-merge path) through.
-      doMerge(id, workspace, project, repoPath, defaultBranch, extendHold, { ...opts, gate: gateToken }).catch((err) => {
-        // A TypeError (e.g. "gitService.X is not a function") means shared/dist is stale —
-        // a deploy/build issue, NOT a merge conflict. Return a distinct 503 so the board
-        // monitor can rebuild rather than attempting a wasted fix-and-merge.
-        if (err instanceof TypeError && !(err instanceof WorkspaceError)) {
-          throw new WorkspaceError(
-            `Merge helper unavailable — the server build may be stale. Rebuild shared/dist and restart. (${err.message})`,
-            "CONFLICT",
-            { mergeReason: "server_build_stale", originalMessage: err.message },
-          );
-        }
-        throw err;
-      }),
+    return await acquireRepoMergeLock(
+      repoPath,
+      id,
+      (extendHold) =>
+        // #943: thread `opts` (e.g. skipPreMergeGate from the monitor auto-merge path) through.
+        doMerge(id, workspace, project, repoPath, defaultBranch, extendHold, { ...opts, gate: gateToken }).catch((err) => {
+          // A TypeError (e.g. "gitService.X is not a function") means shared/dist is stale —
+          // a deploy/build issue, NOT a merge conflict. Return a distinct 503 so the board
+          // monitor can rebuild rather than attempting a wasted fix-and-merge.
+          if (err instanceof TypeError && !(err instanceof WorkspaceError)) {
+            throw new WorkspaceError(
+              `Merge helper unavailable — the server build may be stale. Rebuild shared/dist and restart. (${err.message})`,
+              "CONFLICT",
+              { mergeReason: "server_build_stale", originalMessage: err.message },
+            );
+          }
+          throw err;
+        }),
+      undefined,
+      // #835: this is the ONE acquirer whose work resolves to a merge response,
+      // so it is the only one that publishes it for the reuse path above. The
+      // identity function compiles only because `doMerge` really does return a
+      // `MergeWorkspaceResult` — no cast, no widening.
+      (result) => result,
     );
   }
 
@@ -293,7 +310,13 @@ export function createWorkspaceMergeService(deps: {
     defaultBranch: string | null,
     extendHold: (p: Promise<unknown>) => void = () => {},
     opts: MergeOptions = {},
-  ) {
+    // #835: DECLARED, not inferred. Inference produced the raw union of the
+    // pre-merge short-circuits and the executed-merge response, and a union is
+    // only readable on the properties ALL arms share — so `result.reconciled`
+    // was a type error for every caller even though the reconcile arms set it.
+    // `MergeWorkspaceResult` is that union written once, so the whole family
+    // reads as one shape.
+  ): Promise<MergeWorkspaceResult> {
     const baseBranch = requireBaseBranch(workspace.baseBranch || defaultBranch);
     console.log(`[workspace-merge] doMerge phase=start workspaceId=${id} repoPath=${repoPath} baseBranch=${baseBranch}`);
     const prefMap = await loadMergePreferences(database);

@@ -16,7 +16,8 @@ import { preferences, projects, projectStatuses, issues, workspaces } from "@age
 import { createTestDb } from "./helpers/test-db.js";
 import { finalizePlanModeExit } from "../services/session-manager/plan-mode-exit.js";
 import type { Database } from "../db/index.js";
-import type { ProviderId } from "../services/agent-provider/types.js";
+import { narrowProviderName } from "../services/agent-provider.js";
+import { toExecutorProvider } from "../services/agent-settings.service.js";
 
 
 const PLAN = "<!-- PLAN:START -->\n# Plan\n- step one\n<!-- PLAN:END -->";
@@ -66,12 +67,18 @@ describe("finalizePlanModeExit — harness resolution (#544)", () => {
   });
 
   it("still resolves claude (including the legacy claude-code id) to claude", async () => {
-    // `ProviderId` names only the legacy "claude-code" spelling, but every workspace row
-    // stores the modern "claude" and `narrowProviderName` accepts both — so the value this
-    // loop feeds is wider than `PlanModeExitRelaunch.provider` declares. The cast is the
-    // test recording that gap rather than hiding it; widening the production type is #808's
-    // reported follow-up, not a change a test may make.
-    for (const provider of ["claude", "claude-code"] as unknown as readonly ProviderId[]) {
+    // #835: this loop used to feed the STORED spelling ("claude") through an
+    // `as unknown as ProviderId` cast, on the theory that `PlanModeExitRelaunch.provider`
+    // was declared too narrow. It is not. There are two vocabularies and they are
+    // deliberately different: a workspace row stores a `ProviderName` ("claude"), and a
+    // LAUNCH takes a `ProviderId` ("claude-code"). `toExecutorProvider` is the one
+    // conversion between them, and EVERY production producer of this field goes through
+    // it (`session-lifecycle` passes `StartSessionOptions.provider`, already a
+    // `ProviderId`; `plan-mode-reconciler` passes `toExecutorProvider(narrowProviderName(...))`).
+    // So the cast was not recording a production gap — it was inventing one. The loop now
+    // makes the conversion explicit, which is what the production callers do.
+    const stored: readonly (string | null)[] = ["claude", "claude-code"];
+    for (const provider of stored.map((v) => toExecutorProvider(narrowProviderName(v)))) {
       const { projectId, workspaceId } = await seed(db, null);
       const startSession = vi.fn(async () => "sess");
       const [ws] = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId));

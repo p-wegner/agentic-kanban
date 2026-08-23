@@ -14,6 +14,7 @@ import {
   checkPendingSiblingMergeGuards,
   type GitService,
   type MergeResolutionState,
+  type MergeWorkspaceResult,
 } from "./workspace-internals.js";
 import { finalizeMergeCleanup } from "./merge-cleanup.service.js";
 import { cleanupSiblingWorktrees, executeSiblingMerges, type SiblingMergeResult } from "./workspace-repos.service.js";
@@ -35,7 +36,11 @@ export type AddRecoverableWarning = (warnings: MergeWarning[], step: string, err
 export type KillWorktreeProcesses = (workingDir: string | null | undefined, label: string) => Promise<void>;
 
 export type PreMergeResolutionOutcome =
-  | { kind: "completed"; result: Record<string, unknown> }
+  // #835: `Record<string, unknown>` here was the second half of the merge
+  // family's `unknown` problem — it re-widened `mergeWorkspace`'s return even
+  // after `RepoMergeLock.resultPromise` was typed. The four short-circuit paths
+  // below all produce a `MergeWorkspaceResult`, and now say so.
+  | { kind: "completed"; result: MergeWorkspaceResult }
   | { kind: "proceed" };
 
 export async function handleWorkspaceMergeResolution(args: {

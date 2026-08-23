@@ -21,10 +21,6 @@
 import { describe, it, expect } from "vitest";
 import { resolve, join } from "node:path";
 import { readdirSync, readFileSync } from "node:fs";
-// @ts-expect-error — `scripts/` is plain .mjs with no type declarations and is not part
-// of any package tsconfig, so this import is implicitly `any`. Suppressed rather than
-// typed because the suite's whole point is to read the REAL script the runner uses; a
-// hand-written .d.ts beside it would be one more thing that can drift from it.
 import { PACKAGES } from "../../../../scripts/test-mine.mjs";
 
 const REPO_ROOT = resolve(__dirname, "../../../..");
