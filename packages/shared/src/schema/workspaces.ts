@@ -162,6 +162,8 @@ export const workspaces = sqliteTable("workspaces", {
   showdownIdIdx: index("idx_workspaces_showdown_id").on(table.showdownId),
   // FK-supporting index (#740).
   skillIdIdx: index("idx_workspaces_skill_id").on(table.skillId),
+  // Migration-only until #812: "this issue's workspaces, newest first".
+  issueIdCreatedAtIdx: index("idx_workspaces_issue_id_created_at").on(table.issueId, table.createdAt),
 }));
 
 export const workspacesRelations = relations(workspaces, ({ one, many }) => ({

@@ -32,6 +32,8 @@ export const issueComments = sqliteTable(
     // FK-supporting index (#740): foreign_keys is ON, so every workspace delete had to
     // scan the whole (very large) comments table to check this reference.
     workspaceIdIdx: index("idx_issue_comments_workspace_id").on(table.workspaceId),
+    // Migration-only until #812: the issue timeline read, served index-ordered.
+    issueIdCreatedAtIdx: index("idx_issue_comments_issue_id_created_at").on(table.issueId, table.createdAt),
   }),
 );
 
