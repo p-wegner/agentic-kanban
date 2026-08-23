@@ -120,8 +120,16 @@ const IMPORTS_A_REPO_SCRIPT = /from\s+["'][^"']*\/scripts\/[^"']+["']/;
  * Measured when added: all 21 suites that import the helper already carry the marker, so this
  * signature introduced no new offenders — it defends the marker they already have, and asks
  * for one from the next suite of that shape.
+ *
+ * #800 added `function-nloc` (`measureFunctionNloc`), the second shared test-only scanner in
+ * `shared/__tests__/helpers`. It sits on top of `guard-scan` and walks a whole package tree on
+ * the caller's behalf, so a suite that uses it writes no `readdirSync` and no `..` segment of
+ * its own — precisely the hole #734 documents, reopened by a NEW helper rather than by a new
+ * caller. Both nloc rings (client #763, server #800) went undefended the moment the scanner was
+ * lifted out of the client test, which is how this was found.
  */
-const USES_SHARED_GUARD_HELPER = /guard-scan|walkPackageSources|walkTestFiles|packagesRootFrom|parseGuardSource/;
+const USES_SHARED_GUARD_HELPER =
+  /guard-scan|walkPackageSources|walkTestFiles|packagesRootFrom|parseGuardSource|function-nloc|measureFunctionNloc/;
 
 const UNSOUND_SIGNATURES: Array<{ name: string; test: (source: string) => boolean }> = [
   { name: "reaches-tree-via-shared-guard-helper", test: (s) => USES_SHARED_GUARD_HELPER.test(s) },
