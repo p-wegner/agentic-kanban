@@ -41,7 +41,21 @@ const SUCCESS_SPELLING_CAP = 35;
  * a population that grew by relocation, and the guard is unchanged for new code.
  */
 // 169 -> 167, same reason: two of those were comments about the pattern, not instances of it.
-const INLINE_ROUTE_ERROR_CAP = 167;
+/**
+ * 167 -> 170 (#805): the SAME relocation case as #595 above, and verified as one rather
+ * than assumed. #805 moved `POST /api/workspaces/:id/review` out of
+ * `startup/route-setup.ts` — which this scan does not cover — into
+ * `routes/workspace-review.ts`, which it does. Its three inline bodies are byte-identical
+ * to the pre-move ones (`git show 009771c859^:packages/server/src/startup/route-setup.ts`,
+ * lines 43/57/71 vs 49/63/79 today), so the population grew by relocation and not by new
+ * code. Raising a ratchet is otherwise forbidden.
+ *
+ * These three ARE convertible to the central `error-handler.ts` mapping — they hand-map
+ * NOT_FOUND/BAD_REQUEST/INTERNAL, which is precisely what the middleware exists to do.
+ * That conversion is filed rather than done here, so this stays an accounting correction
+ * and not a silently-accepted three-site budget.
+ */
+const INLINE_ROUTE_ERROR_CAP = 170;
 
 function tsFiles(dir: string, skip: (name: string, full: string) => boolean = () => false): string[] {
   if (!fs.existsSync(dir)) return [];
