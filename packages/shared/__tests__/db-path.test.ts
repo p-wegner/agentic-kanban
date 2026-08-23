@@ -54,12 +54,29 @@ describe("resolveDbLocation precedence", () => {
     expect(loc.path).toBe("/explicit/custom.db");
   });
 
-  it("a Windows file:///C:/... DB_URL resolves to the real drive path, not a bogus <drive>:/C:/... nesting", () => {
-    const loc = resolveDbLocation(base({ env: { DB_URL: "file:///C:/Users/pete/kanban.db" } }));
-    expect(loc.source).toBe("DB_URL");
-    expect(loc.path).toBe("C:\\Users\\pete\\kanban.db");
-    expect(loc.dir).toBe("C:\\Users\\pete");
-  });
+  // Win32-only: a drive-letter `file://` URL only HAS a drive path on Windows. Off it,
+  // `fileURLToPath` correctly answers `/C:/Users/pete/kanban.db` — that string names no
+  // real location there, and there is nothing for the resolver to do about it (#828: this
+  // had never run off Windows, where the Windows-shaped assertion fails).
+  it.runIf(process.platform === "win32")(
+    "a Windows file:///C:/... DB_URL resolves to the real drive path, not a bogus <drive>:/C:/... nesting",
+    () => {
+      const loc = resolveDbLocation(base({ env: { DB_URL: "file:///C:/Users/pete/kanban.db" } }));
+      expect(loc.source).toBe("DB_URL");
+      expect(loc.path).toBe("C:\\Users\\pete\\kanban.db");
+      expect(loc.dir).toBe("C:\\Users\\pete");
+    },
+  );
+
+  it.runIf(process.platform !== "win32")(
+    "a POSIX file:///abs DB_URL resolves to the absolute path, with no leading-slash damage",
+    () => {
+      const loc = resolveDbLocation(base({ env: { DB_URL: "file:///var/lib/kanban.db" } }));
+      expect(loc.source).toBe("DB_URL");
+      expect(loc.path).toBe("/var/lib/kanban.db");
+      expect(loc.dir).toBe("/var/lib");
+    },
+  );
 
   it("a non-file DB_URL has no on-disk path/dir", () => {
     const loc = resolveDbLocation(base({ env: { DB_URL: "libsql://remote.example/db" } }));
