@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { apiPost } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import type { IssueWithStatus, MainWorkspaceInfo, StatusWithIssues } from "@agentic-kanban/shared";
+import { Icon } from "./Icon.js";
 
 interface ConflictPreview {
   workspaceId: string;
@@ -176,10 +177,10 @@ export function MergeQueuePanel({ columns, projectId: _projectId, onClose, onIss
       <div className="relative w-[min(720px,100vw)] bg-surface-raised dark:bg-surface-raised-dark shadow-xl flex flex-col animate-slide-in-right">
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center gap-2">
-            <svg className="w-5 h-5 text-orange-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <Icon className="w-5 h-5 text-orange-600">
               <path strokeLinecap="round" strokeLinejoin="round" d="M3 7h18M3 12h12M3 17h6" />
               <path strokeLinecap="round" strokeLinejoin="round" d="M17 14l3 3-3 3" />
-            </svg>
+            </Icon>
             <h2 className="text-lg font-semibold text-ink dark:text-stone-100 heading-serif">Merge Queue</h2>
             <span className="text-sm text-gray-500 dark:text-gray-400">({items.length})</span>
           </div>

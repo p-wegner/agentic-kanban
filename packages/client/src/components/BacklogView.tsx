@@ -10,6 +10,7 @@ import { showToast } from "../lib/toast.js";
 import { useBoardFilterStore } from "../stores/boardFilterStore.js";
 import { useBoardBulkSelectionStore } from "../stores/boardBulkSelectionStore.js";
 import { normalizeIssuePriority, priorityLabel, priorityOrder } from "../lib/priorityTraits.js";
+import { Icon } from "./Icon.js";
 
 type SortMode = "rank" | "newest" | "oldest" | "priority" | "type" | "due";
 type GroupMode = "none" | "priority" | "type";
@@ -541,9 +542,7 @@ export function BacklogView({
               {presets.length > 0 && (
                 <span className="rounded-full bg-gray-100 px-1.5 text-[10px] font-medium leading-none text-gray-600 dark:bg-gray-800 dark:text-gray-300">{presets.length}</span>
               )}
-              <svg className={`h-2.5 w-2.5 transition-transform ${showPresets ? "rotate-180" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
-              </svg>
+              <Icon className={`h-2.5 w-2.5 transition-transform ${showPresets ? "rotate-180" : ""}`} d="M6 9l6 6 6-6" />
             </button>
             {showPresets && (
               <div role="menu" className="absolute left-0 top-full z-20 mt-1 flex w-64 max-w-[calc(100vw-2rem)] flex-col gap-2 rounded-md border border-gray-200 bg-white p-2 shadow-lg dark:border-gray-700 dark:bg-gray-900">
@@ -613,9 +612,7 @@ export function BacklogView({
             {waveSlots > 0 && (
               <span className="rounded-full bg-green-100 px-1.5 text-[10px] font-semibold leading-none text-green-700 dark:bg-green-950 dark:text-green-300">{waveSlots}</span>
             )}
-            <svg className={`h-2.5 w-2.5 transition-transform ${showWaves ? "rotate-180" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
-            </svg>
+            <Icon className={`h-2.5 w-2.5 transition-transform ${showWaves ? "rotate-180" : ""}`} d="M6 9l6 6 6-6" />
           </button>
 
           {/* Right-aligned primary actions. */}
@@ -722,9 +719,7 @@ export function BacklogView({
                         title={selectedIds.has(issue.id) ? "Deselect issue" : "Select issue"}
                       >
                         {selectedIds.has(issue.id) && (
-                          <svg className="m-auto h-2.5 w-2.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-                            <path d="M13.5 4.5 6.25 11.75 2.5 8" strokeLinecap="round" strokeLinejoin="round" />
-                          </svg>
+                          <Icon className="m-auto h-2.5 w-2.5" viewBox="0 0 16 16" aria-hidden="true" d="M13.5 4.5 6.25 11.75 2.5 8" />
                         )}
                       </button>
                       <div className="min-w-0 flex-1">

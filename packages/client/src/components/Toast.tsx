@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { type Toast, subscribeToasts, showToast, dismissToast } from "../lib/toast.js";
+import { Icon } from "./Icon.js";
 
 // #612 — the `export { showToast }` re-export is GONE. It existed so component-side call
 // sites could import a lib function from a component, which is backwards under #589's rule
@@ -16,26 +17,26 @@ const TOAST_TONE: Record<Toast["type"], string> = {
 function ToastIcon({ type }: { type: Toast["type"] }) {
   if (type === "error") {
     return (
-      <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <Icon className="w-4 h-4 shrink-0">
         <circle cx="12" cy="12" r="10" />
         <path d="m15 9-6 6M9 9l6 6" />
-      </svg>
+      </Icon>
     );
   }
   if (type === "warning") {
     return (
-      <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <Icon className="w-4 h-4 shrink-0">
         <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
         <line x1="12" y1="9" x2="12" y2="13" />
         <line x1="12" y1="17" x2="12.01" y2="17" />
-      </svg>
+      </Icon>
     );
   }
   return (
-    <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <Icon className="w-4 h-4 shrink-0">
       <circle cx="12" cy="12" r="10" />
       <path d="m9 12 2 2 4-4" />
-    </svg>
+    </Icon>
   );
 }
 

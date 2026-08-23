@@ -5,6 +5,7 @@ import { STATUS_COLORS, ACCENT, BRAND } from "../lib/chartColors.js";
 import { showToast } from "../lib/toast.js";
 import type { DriveDashboard as DriveDashboardData } from "@agentic-kanban/shared";
 import { startStaggeredPoll } from "../lib/pollScheduler.js";
+import { Icon, Spinner } from "./Icon.js";
 
 /**
  * Drive dashboard (#800) — an at-a-glance view of a running drive: N/N progress,
@@ -148,9 +149,7 @@ export function DriveDashboard({ projectId, onIssueClick }: DriveDashboardProps)
           </div>
         ) : (
           <>
-            <svg className="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
+            <Icon className="w-10 h-10" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
             <span className="text-sm">No drives yet for this project.</span>
             <button
               onClick={() => setShowStartForm(true)}
@@ -168,10 +167,7 @@ export function DriveDashboard({ projectId, onIssueClick }: DriveDashboardProps)
   if (loading && !data) {
     return (
       <div className="flex items-center justify-center h-64 text-gray-500 dark:text-gray-400">
-        <svg className="w-5 h-5 animate-spin mr-2" fill="none" viewBox="0 0 24 24">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-        </svg>
+        <Spinner className="w-5 h-5 animate-spin mr-2" d="M4 12a8 8 0 018-8v8H4z" />
         Loading drive…
       </div>
     );
@@ -192,9 +188,7 @@ export function DriveDashboard({ projectId, onIssueClick }: DriveDashboardProps)
       {/* Header: drive selector + target + status */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-2">
-          <svg className="w-5 h-5 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: BRAND }}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-          </svg>
+          <Icon className="w-5 h-5 text-brand-500" style={{ color: BRAND }} d="M13 10V3L4 14h7v7l9-11h-7z" />
           <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">Drive Dashboard</h2>
         </div>
         {drives.length > 1 && (
@@ -228,9 +222,7 @@ export function DriveDashboard({ projectId, onIssueClick }: DriveDashboardProps)
             title="Refresh"
             className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
+            <Icon className="w-4 h-4" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
           </button>
         </div>
       </div>
@@ -492,9 +484,7 @@ function StartDriveForm({
       className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/40 p-4 flex flex-col gap-3"
     >
       <div className="flex items-center gap-2">
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: BRAND }}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-        </svg>
+        <Icon className="w-4 h-4" style={{ color: BRAND }} d="M13 10V3L4 14h7v7l9-11h-7z" />
         <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">Start a drive</span>
       </div>
 

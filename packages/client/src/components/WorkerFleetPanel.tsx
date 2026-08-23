@@ -6,6 +6,7 @@ import { startStaggeredPoll } from "../lib/pollScheduler.js";
 import { WorkerEventTimeline } from "./WorkerEventTimeline.js";
 import { WorkerDispatchPrefs } from "./WorkerDispatchPrefs.js";
 import { useActiveProjectPreferenceQuery, useProjectsQuery } from "../hooks/useBoardDataQueries.js";
+import { Icon } from "./Icon.js";
 
 /**
  * Mirrors one row of the enriched `GET /api/workers` response (#774).
@@ -73,11 +74,11 @@ const STATUS_COLORS: Record<string, string> = {
 
 function FleetIcon() {
   return (
-    <svg className="h-5 w-5 text-gray-600 dark:text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <Icon className="h-5 w-5 text-gray-600 dark:text-gray-400">
       <rect x="2" y="3" width="20" height="6" rx="1" />
       <rect x="2" y="15" width="20" height="6" rx="1" />
       <path d="M6 6h.01M6 18h.01" />
-    </svg>
+    </Icon>
   );
 }
 

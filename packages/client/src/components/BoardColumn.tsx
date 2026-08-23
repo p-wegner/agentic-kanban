@@ -18,6 +18,7 @@ import {
 } from "../lib/boardColumnSort.js";
 import type { CardDensity } from "../hooks/useBoardPreferences.js";
 import { useBoardCursorStore } from "../stores/boardCursorStore.js";
+import { Icon } from "./Icon.js";
 import "./BoardColumn.css";
 
 export type SwimlaneDimension = "none" | "priority" | "tag";
@@ -307,11 +308,11 @@ export function BoardColumn({
               className="mt-0.5 cursor-grab active:cursor-grabbing text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400 transition-colors shrink-0"
               title="Drag to reorder column"
             >
-              <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 16 16">
+              <Icon solid className="w-3.5 h-3.5" viewBox="0 0 16 16">
                 <circle cx="5" cy="4" r="1.2"/><circle cx="11" cy="4" r="1.2"/>
                 <circle cx="5" cy="8" r="1.2"/><circle cx="11" cy="8" r="1.2"/>
                 <circle cx="5" cy="12" r="1.2"/><circle cx="11" cy="12" r="1.2"/>
-              </svg>
+              </Icon>
             </div>
           )}
         <div className="flex flex-col gap-0.5">

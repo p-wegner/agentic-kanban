@@ -6,6 +6,7 @@ import { WorkflowProgress } from "./WorkflowProgress.js";
 import { isSpecPlanningPhase, SpecPhasePanel } from "./SpecPhasePanel.js";
 import { groupConflictsByRepo, formatConflictSummary } from "../lib/groupConflictsByRepo.js";
 import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-liveness";
+import { Icon } from "./Icon.js";
 
 /** The non-null main workspace summary carried on an issue. */
 type MainWorkspace = NonNullable<NonNullable<IssueWithStatus["workspaceSummary"]>["main"]>;
@@ -132,9 +133,7 @@ export function IssueWorkspacesSection({
               onClick={() => onManageWorkspaces(issue, main.id)}
               className="flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded bg-red-600 text-white hover:bg-red-700 transition-colors self-start"
             >
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-              </svg>
+              <Icon className="w-3 h-3" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
               Fix with AI
             </button>
           )}
@@ -158,9 +157,7 @@ export function IssueWorkspacesSection({
               onClick={() => onStartWorkspace(issue)}
               className="flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 rounded bg-brand-600 text-white hover:bg-brand-700 transition-colors"
             >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
+              <Icon className="w-3.5 h-3.5" d="M13 10V3L4 14h7v7l9-11h-7z" />
               Start Workspace
             </button>
           )}

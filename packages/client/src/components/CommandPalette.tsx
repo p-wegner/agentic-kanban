@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getActions, type Action, type ActionCategory } from "../lib/actions.js";
+import { Icon } from "./Icon.js";
 
 interface CommandPaletteProps {
   onClose: () => void;
@@ -154,9 +155,7 @@ export function CommandPalette({ onClose }: CommandPaletteProps) {
       <div className="fixed top-[15%] left-1/2 -translate-x-1/2 w-full max-w-lg bg-white dark:bg-gray-900 rounded-xl shadow-2xl z-50 border border-gray-200 dark:border-gray-700 overflow-hidden">
         {/* Header */}
         <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100 dark:border-gray-800">
-          <svg className="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
+          <Icon className="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           <input
             ref={inputRef}
             type="text"

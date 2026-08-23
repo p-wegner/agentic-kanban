@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch, apiPost, apiDelete } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
+import { Icon } from "./Icon.js";
 
 interface FlakyTestEntry {
   testName: string;
@@ -145,9 +146,10 @@ export function FlakyTestsPanel({ projectId }: FlakyTestsPanelProps) {
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-800 shrink-0">
         <div className="flex items-center gap-2">
-          <svg className="w-4 h-4 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-          </svg>
+          <Icon
+            className="w-4 h-4 text-amber-500"
+            d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"
+          />
           <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Flaky Tests Radar</h2>
           {tests.length > 0 && (
             <span className="text-xs bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300 px-2 py-0.5 rounded-full font-medium">
@@ -189,9 +191,10 @@ export function FlakyTestsPanel({ projectId }: FlakyTestsPanelProps) {
             className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400 disabled:opacity-40"
             title="Refresh"
           >
-            <svg className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
+            <Icon
+              className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`}
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+            />
           </button>
         </div>
       </div>
@@ -206,9 +209,7 @@ export function FlakyTestsPanel({ projectId }: FlakyTestsPanelProps) {
 
         {!loading && !error && filtered.length === 0 && (
           <div className="flex flex-col items-center justify-center h-48 text-gray-400 dark:text-gray-600 text-sm gap-2">
-            <svg className="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
+            <Icon className="w-8 h-8" strokeWidth={1.5} d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             <p>No flaky tests detected</p>
             <p className="text-xs text-center max-w-xs">
               Tests appear here when they pass in some sessions and fail in others within the same window.

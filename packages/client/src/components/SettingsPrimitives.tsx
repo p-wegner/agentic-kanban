@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { Icon } from "./Icon.js";
 
 export function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
@@ -54,12 +55,7 @@ export function CollapsibleSection({ title, configured, defaultOpen, children }:
             <span className="text-[10px] px-1.5 py-0.5 bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300 rounded">configured</span>
           )}
         </span>
-        <svg
-          className={`w-4 h-4 text-gray-400 dark:text-gray-500 transition-transform ${open ? "rotate-90" : ""}`}
-          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-        </svg>
+        <Icon className={`w-4 h-4 text-gray-400 dark:text-gray-500 transition-transform ${open ? "rotate-90" : ""}`} d="M9 5l7 7-7 7" />
       </button>
       {open && (
         <div className="px-3 pb-3 pt-2 space-y-2 border-t border-gray-100 dark:border-gray-800">

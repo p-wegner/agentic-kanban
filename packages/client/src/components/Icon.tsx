@@ -6,8 +6,9 @@ import type { SVGProps } from "react";
  * Before this existed, every icon in the client was hand-written heroicons boilerplate —
  * `<svg xmlns=… className=… fill="none" viewBox="0 0 24 24" stroke="currentColor"
  * strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d=… /></svg>` — repeated
- * at ~350 sites. That wrapper is ~15 tokens of pure ceremony, which is exactly the window the
- * duplication scanner measures, so it is why files like `WorkspacePanelHeader.tsx` measured
+ * at 387 sites (plus 36 spinners, see `Spinner` below). That wrapper is ~15 tokens of pure
+ * ceremony, which is exactly the window the duplication scanner measures — which is why files
+ * like `WorkspacePanelHeader.tsx` measured
  * 62 % duplicated while sharing no actual behaviour with anything. The only part of an icon
  * that carries information is its `d` path; everything else is this component.
  *
@@ -53,6 +54,33 @@ export function Icon({
     >
       {d !== undefined && (stroked ? <path strokeLinecap="round" strokeLinejoin="round" d={d} /> : <path d={d} />)}
       {children}
+    </svg>
+  );
+}
+
+/**
+ * The busy spinner, which was the SECOND copy-pasted SVG in this client: 35 sites, all of
+ * them `<svg className="animate-spin …" fill="none" viewBox="0 0 24 24">` wrapping the same
+ * quarter-arc `circle` + `path` pair, in seven variants that differ ONLY in the arc's `d`.
+ *
+ * It cannot go through `Icon` because its wrapper carries no `stroke` — the circle strokes
+ * itself and the arc is filled, so hoisting a `stroke` onto the wrapper would paint an
+ * outline around the arc. Hence a sibling component rather than another `Icon` flag.
+ *
+ * `d` defaults to the majority arc and is passed explicitly by the minority sites, so
+ * collapsing the boilerplate changed no pixels anywhere. Unifying the seven arcs is a
+ * separate, visual decision and was deliberately NOT taken here.
+ */
+export interface SpinnerProps extends Omit<SVGProps<SVGSVGElement>, "d"> {
+  /** The rotating arc. Defaults to the variant used by most call sites. */
+  d?: string;
+}
+
+export function Spinner({ d = "M4 12a8 8 0 018-8v8z", className = "animate-spin h-4 w-4", ...rest }: SpinnerProps) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" {...rest}>
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d={d} />
     </svg>
   );
 }

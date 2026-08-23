@@ -25,6 +25,7 @@ import {
 import { useBoardWsRefresh } from "../hooks/useBoardWsRefresh.js";
 import { useNow } from "../hooks/usePoll.js";
 import { WORKSPACE_LIFECYCLE_REASONS, SESSION_LIFECYCLE_REASONS, WORKFLOW_REASONS, DRIVE_REASONS, type ClientRefreshReason } from "@agentic-kanban/shared/lib/board-events-contract";
+import { Icon } from "./Icon.js";
 
 /** Severity → dot colour + label for the row and the filter chips. */
 const SEVERITY_META: Record<FlightRecorderSeverity, { dot: string; label: string; text: string }> = {
@@ -323,9 +324,7 @@ export function AgentFlightRecorderView({
 
       {events.length === 0 ? (
         <div className="flex flex-col items-center justify-center flex-1 gap-2 text-center" data-testid="flight-recorder-empty">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-gray-300 dark:text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-          </svg>
+          <Icon className="h-8 w-8 text-gray-300 dark:text-gray-600" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
           <p className="text-sm text-gray-400 dark:text-gray-500">
             {totalCount === 0 ? "No runtime events yet." : "No events match the current filters."}
           </p>

@@ -3,6 +3,7 @@ import type { DiffComment, CreateDiffCommentRequest } from "@agentic-kanban/shar
 import { getLanguage, highlightLine } from "../lib/diff-highlight.js";
 import { parseUnifiedDiff, computeFileStats, buildFileTree, commentKey, buildCommentMap, computeCollapsibleRegions } from "../lib/diff-parse.js";
 import type { DiffLine, DiffFile, FileTreeNode, CollapsibleRegion } from "../lib/diff-parse.js";
+import { Icon } from "./Icon.js";
 
 interface DiffViewerProps {
   diff: string;
@@ -40,9 +41,10 @@ function FileTreeNodeView({
         style={{ paddingLeft: `${indentPx}px`, paddingRight: "6px" }}
         title={node.fullPath}
       >
-        <svg className="w-3 h-3 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-        </svg>
+        <Icon
+          className="w-3 h-3 text-gray-400 shrink-0"
+          d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+        />
         <span className="text-xs font-mono truncate flex-1 min-w-0 text-gray-700 dark:text-gray-300">{node.name}</span>
         <span className="text-[10px] text-green-600 shrink-0 ml-1">+{node.additions}</span>
         <span className="text-[10px] text-red-600 shrink-0">-{node.deletions}</span>
@@ -57,12 +59,7 @@ function FileTreeNodeView({
         className="w-full flex items-center gap-1 py-0.5 text-left hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
         style={{ paddingLeft: `${indentPx}px`, paddingRight: "6px" }}
       >
-        <svg
-          className={`w-3 h-3 text-gray-400 shrink-0 transition-transform duration-100 ${open ? "rotate-90" : ""}`}
-          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-        </svg>
+        <Icon className={`w-3 h-3 text-gray-400 shrink-0 transition-transform duration-100 ${open ? "rotate-90" : ""}`} d="M9 5l7 7-7 7" />
         <span className="text-xs font-mono truncate flex-1 min-w-0 text-gray-500 dark:text-gray-400">{node.name}</span>
         <span className="text-[10px] text-green-600 shrink-0 ml-1">+{node.additions}</span>
         <span className="text-[10px] text-red-600 shrink-0">-{node.deletions}</span>
@@ -154,9 +151,7 @@ function CommentBlock({
       <div className="flex items-center gap-2 mb-0.5">
         {resolved && (
           <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-green-700 dark:text-green-400">
-            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-            </svg>
+            <Icon className="w-3 h-3" strokeWidth={2.5} d="M5 13l4 4L19 7" />
             Resolved
           </span>
         )}
@@ -249,9 +244,7 @@ function CollapsedHunk({ count, onExpand }: { count: number; onExpand: () => voi
       className="flex items-center gap-2 px-3 py-1 bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-950 hover:text-blue-600 dark:hover:text-blue-400 select-none transition-colors text-xs"
       onClick={onExpand}
     >
-      <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14M12 5l7 7-7 7" />
-      </svg>
+      <Icon className="w-3 h-3 shrink-0" d="M5 12h14M12 5l7 7-7 7" />
       <span>... {count} unchanged line{count !== 1 ? "s" : ""}</span>
     </div>
   );
@@ -593,15 +586,7 @@ function FileDiffAccordion({
         onClick={onToggle}
         className="w-full flex items-center gap-2 px-3 py-2 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 cursor-pointer select-none transition-colors text-left"
       >
-        <svg
-          className={`w-3.5 h-3.5 text-gray-500 dark:text-gray-400 shrink-0 transition-transform duration-150 ${expanded ? "rotate-90" : ""}`}
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth={2}
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-        </svg>
+        <Icon className={`w-3.5 h-3.5 text-gray-500 dark:text-gray-400 shrink-0 transition-transform duration-150 ${expanded ? "rotate-90" : ""}`} d="M9 5l7 7-7 7" />
         <span className="text-xs font-mono text-gray-700 dark:text-gray-300 truncate flex-1 min-w-0" title={file.filePath}>
           {file.filePath}
         </span>
@@ -680,10 +665,10 @@ export function DiffViewer({ diff, stats, comments = [], onCreateComment, onEdit
             className={`p-0.5 rounded transition-colors ${sidebarOpen ? "text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-900/30" : "text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"}`}
             title={sidebarOpen ? "Hide file tree" : "Show file tree"}
           >
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <Icon className="w-3.5 h-3.5">
               <path strokeLinecap="round" strokeLinejoin="round" d="M3 7h18M3 12h18M3 17h18" />
               <path strokeLinecap="round" strokeLinejoin="round" d="M7 7v10" />
-            </svg>
+            </Icon>
           </button>
           {files.length > 1 && (
             <button

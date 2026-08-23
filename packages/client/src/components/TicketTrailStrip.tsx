@@ -1,5 +1,6 @@
 import React from "react";
 import type { TrailEntry } from "../hooks/useTicketTrail.js";
+import { Icon } from "./Icon.js";
 
 // The breadcrumb-style strip that surfaces the multi-ticket navigation trail
 // (#383) at the top of the issue detail panel. It gives the single-panel UI a
@@ -49,9 +50,7 @@ export function TicketTrailStrip({
         aria-label="Back to previous ticket"
         className="shrink-0 p-0.5 rounded text-gray-400 dark:text-gray-500 enabled:hover:text-gray-700 enabled:hover:bg-gray-200 dark:enabled:hover:text-gray-200 dark:enabled:hover:bg-gray-700 disabled:opacity-30 transition-colors"
       >
-        <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-        </svg>
+        <Icon className="h-3.5 w-3.5" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
       </button>
       <button
         onClick={onForward}
@@ -60,9 +59,7 @@ export function TicketTrailStrip({
         aria-label="Forward to next ticket"
         className="shrink-0 p-0.5 rounded text-gray-400 dark:text-gray-500 enabled:hover:text-gray-700 enabled:hover:bg-gray-200 dark:enabled:hover:text-gray-200 dark:enabled:hover:bg-gray-700 disabled:opacity-30 transition-colors"
       >
-        <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-        </svg>
+        <Icon className="h-3.5 w-3.5" strokeWidth={2.5} d="M9 5l7 7-7 7" />
       </button>
       <div className="w-px self-stretch my-0.5 bg-gray-200 dark:bg-gray-700 shrink-0" />
       <div className="flex items-center gap-1">
@@ -94,9 +91,7 @@ export function TicketTrailStrip({
                 aria-label={`Remove ${entryLabel(entry)} from trail`}
                 className="rounded-full p-0.5 text-gray-300 dark:text-gray-600 opacity-0 group-hover:opacity-100 hover:text-red-500 hover:bg-red-100 dark:hover:bg-red-900/40 transition-all"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                <Icon className="h-3 w-3" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
               </button>
             </span>
           );

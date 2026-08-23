@@ -48,6 +48,7 @@ import type {
 
 import type { Project } from "../lib/projectTypes.js";
 import type { ScorecardResult } from "@agentic-kanban/shared";
+import { Icon, Spinner } from "./Icon.js";
 export type { Project };
 
 export interface SessionInfo {
@@ -115,9 +116,7 @@ export function WorkspaceQuickActions({
         onClick={() => setExpandedQuickActions((prev) => ({ ...prev, [quickActionsKey]: !prev[quickActionsKey] }))}
         className="flex items-center gap-1 text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide hover:text-gray-600 dark:hover:text-gray-300 w-full text-left"
       >
-        <svg className={`w-3 h-3 transition-transform ${qaExpanded ? "rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-        </svg>
+        <Icon className={`w-3 h-3 transition-transform ${qaExpanded ? "rotate-90" : ""}`} d="M9 5l7 7-7 7" />
         Quick Actions
       </button>
       {qaExpanded && (
@@ -589,10 +588,7 @@ export function WorkspaceCard({
 
       {isSelected && launchingFix?.wsId === ws.id && (
         <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-          <svg className="w-4 h-4 text-blue-600 dark:text-blue-400 animate-spin shrink-0" viewBox="0 0 24 24" fill="none">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z" />
-          </svg>
+          <Spinner className="w-4 h-4 text-blue-600 dark:text-blue-400 animate-spin shrink-0" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z" />
           <div className="text-xs text-blue-700 dark:text-blue-300">
             <span className="font-medium">
               {launchingFix.kind === "resolve" ? "Launching conflict resolution…" : "Launching fix &amp; merge…"}

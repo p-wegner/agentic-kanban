@@ -3,6 +3,7 @@ import { getWorkspacePreviewUrl } from "../lib/workspace-preview.js";
 import { WorkspaceActionButton } from "./WorkspaceActionButton.js";
 import type { WorkspaceResponse, DiffResponse, DiffComment } from "@agentic-kanban/shared";
 import type { SessionInfo } from "./WorkspaceCard.js";
+import { Icon } from "./Icon.js";
 
 export interface WorkspaceActionBarProps {
   ws: WorkspaceResponse;
@@ -213,10 +214,10 @@ export function WorkspaceActionBar({
                     disabled={actionLoading}
                     title={`Copy ${preview.url}`}
                   >
-                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                    <Icon className="h-4 w-4" aria-hidden="true">
                       <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
                       <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                    </svg>
+                    </Icon>
                     <span className="sr-only">Copy preview URL</span>
                   </WorkspaceActionButton>
                 </div>

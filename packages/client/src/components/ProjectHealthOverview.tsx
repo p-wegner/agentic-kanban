@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { sortProjectHealth } from "../lib/projectHealthOrder.js";
+import { Icon, Spinner } from "./Icon.js";
 
 interface ProjectHealth {
   id: string;
@@ -76,9 +77,14 @@ export function ProjectHealthOverview({ activeProjectId, onProjectChange, onClos
               className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
               aria-label="Close project health overview"
             >
-              <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-              </svg>
+              <Icon
+                solid
+                className="h-5 w-5"
+                viewBox="0 0 20 20"
+                fillRule="evenodd"
+                clipRule="evenodd"
+                d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+              />
             </button>
           </div>
         </div>
@@ -86,10 +92,7 @@ export function ProjectHealthOverview({ activeProjectId, onProjectChange, onClos
         <div className="overflow-y-auto flex-1 p-4">
           {loading && (
             <div className="flex items-center justify-center py-12 text-gray-400">
-              <svg className="animate-spin h-5 w-5 mr-2" viewBox="0 0 24 24" fill="none">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
+              <Spinner className="animate-spin h-5 w-5 mr-2" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
               Loading...
             </div>
           )}
@@ -156,9 +159,10 @@ export function ProjectHealthOverview({ activeProjectId, onProjectChange, onClos
                           <div className="mt-2 space-y-1">
                             {project.warnings.map((warning, i) => (
                               <div key={i} className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
-                                <svg className="h-3.5 w-3.5 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                                </svg>
+                                <Icon
+                                  className="h-3.5 w-3.5 shrink-0 mt-0.5"
+                                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                                />
                                 <span>{warning}</span>
                               </div>
                             ))}

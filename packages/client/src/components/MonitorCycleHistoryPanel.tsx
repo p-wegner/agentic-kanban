@@ -3,6 +3,7 @@ import { apiFetch } from "../lib/api.js";
 import type { BoardHealthEventDto } from "@agentic-kanban/shared";
 import { MonitorActionReplayDrawer, type ReplayTarget } from "./MonitorActionReplayDrawer.js";
 import { MonitorCycleTimeline } from "./MonitorCycleTimeline.js";
+import { Icon } from "./Icon.js";
 
 // Shape returned by GET /api/projects/:id/board-health-events, from shared (#568).
 // The local copy had lost `category` to a bare `string`.
@@ -147,19 +148,7 @@ export function MonitorCycleHistoryPanel({ projectId }: MonitorCycleHistoryPanel
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-800 shrink-0">
         <div className="flex items-center gap-2">
-          <svg
-            className="w-4 h-4 text-indigo-500"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"
-            />
-          </svg>
+          <Icon className="w-4 h-4 text-indigo-500" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
           <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
             Monitor Cycle History
           </h2>
@@ -210,19 +199,10 @@ export function MonitorCycleHistoryPanel({ projectId }: MonitorCycleHistoryPanel
             className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400 disabled:opacity-40"
             title="Refresh"
           >
-            <svg
+            <Icon
               className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`}
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-              />
-            </svg>
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+            />
           </button>
         </div>
       </div>
@@ -237,19 +217,7 @@ export function MonitorCycleHistoryPanel({ projectId }: MonitorCycleHistoryPanel
 
         {!loading && !error && filtered.length === 0 && (
           <div className="flex flex-col items-center justify-center h-48 text-gray-400 dark:text-gray-600 text-sm gap-2">
-            <svg
-              className="w-8 h-8"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={1.5}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"
-              />
-            </svg>
+            <Icon className="w-8 h-8" strokeWidth={1.5} d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
             <p>No monitor cycle events</p>
             <p className="text-xs text-center max-w-xs">
               Events appear here when the board monitor completes cycles. Enable auto-monitor
@@ -341,9 +309,10 @@ export function MonitorCycleHistoryPanel({ projectId }: MonitorCycleHistoryPanel
                               setReplayTarget({ kind: "event", event, projectId });
                             }}
                           >
-                            <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z" />
-                            </svg>
+                            <Icon
+                              className="w-3 h-3"
+                              d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z"
+                            />
                           </button>
                         )}
                       </td>

@@ -3,6 +3,7 @@ import { apiFetch, apiPost } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import type { WorkspaceLaunchFailure, WorkspaceLaunchFailuresResponse } from "@agentic-kanban/shared";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { Icon } from "./Icon.js";
 
 interface WorkspaceLaunchFailuresPanelProps {
   projectId: string | null;
@@ -211,11 +212,11 @@ export function WorkspaceLaunchFailuresPanel({ projectId, onClose, onIssueClick 
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center gap-2">
-            <svg className="h-5 w-5 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <Icon className="h-5 w-5 text-red-500">
               <circle cx="12" cy="12" r="10" />
               <line x1="12" y1="8" x2="12" y2="12" />
               <line x1="12" y1="16" x2="12.01" y2="16" />
-            </svg>
+            </Icon>
             <h2 className="text-lg font-semibold text-ink dark:text-stone-100 heading-serif">Launch Failures</h2>
             {!loading && (
               <span className="text-sm text-gray-500 dark:text-gray-400">
@@ -230,20 +231,20 @@ export function WorkspaceLaunchFailuresPanel({ projectId, onClose, onIssueClick 
               className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50"
               title="Refresh"
             >
-              <svg className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <Icon className={`h-4 w-4 ${loading ? "animate-spin" : ""}`}>
                 <polyline points="23 4 23 10 17 10" />
                 <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-              </svg>
+              </Icon>
             </button>
             <button
               onClick={onClose}
               className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
               title="Close"
             >
-              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <Icon className="h-4 w-4">
                 <line x1="18" y1="6" x2="6" y2="18" />
                 <line x1="6" y1="6" x2="18" y2="18" />
-              </svg>
+              </Icon>
             </button>
           </div>
         </div>

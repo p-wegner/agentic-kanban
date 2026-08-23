@@ -11,8 +11,9 @@ import path from "node:path";
  * OTHER half of that ticket's >= 50 %-duplicated list — the two create-issue forms, the edit
  * footer, the two workspace-launch surfaces and the workspace panel header — had no floor
  * under it. #772 collapsed what those six genuinely shared (`useIssueEnhance`,
- * `EnhanceActions`, `IssueFormFields`, `WorkspaceQuickLaunchMenu`) and #810 migrated the third
- * enhance copy in `useIssueEditForm` onto the hook; this is what stops any of it drifting back.
+ * `EnhanceActions`, `IssueFormFields`, `WorkspaceQuickLaunchMenu`), #810 part 2 migrated the
+ * third enhance copy in `useIssueEditForm` onto the hook, and #810 part 1 retired the
+ * heroicons wrapper into `components/Icon.tsx`; this is what stops any of it drifting back.
  *
  * The measurement is the SAME scanner as the chart ring — an exact 15-token window over
  * comment-stripped, string-normalised source, counted as the share of a file's windows that
@@ -52,25 +53,21 @@ const SCOPE = [
  * Each cap sits ~5 points above the measured value so an unrelated edit elsewhere in the
  * client (which can make a window newly shared) does not fail the gate spuriously.
  *
- * Two entries are deliberately NOT "well under 50 %", and saying so is the point of a ratchet
+ * ONE entry is deliberately NOT "well under 50 %", and saying so is the point of a ratchet
  * rather than a threshold:
- *  - `WorkspacePanelHeader.tsx` (62 %) is not a twin component — it is heroicons
- *    `<svg xmlns … stroke="currentColor" strokeWidth={2}><path strokeLinecap …>` boilerplate,
- *    which matches ~100 other client components at a 15-token window. Removing it needs the
- *    `<Icon>` primitive (#810 part 1), not a line-shave here.
  *  - `CreateIssuePanel.tsx` (50 %) is the slide-over shell. #772 checked and REFUTED the
  *    premise that it and `CreateIssueForm` are "the same form twice" — inline board card vs
  *    slide-over, ~9 mode flags apart, different submit payloads. Merging them is worse than
  *    the remaining duplication; their shared PARTS are already extracted. Do not re-attempt it.
  */
 const MAX_DUP_PERCENT: Record<string, number> = {
-  "components/CreateIssueForm.tsx": 40, // measured 35
+  "components/CreateIssueForm.tsx": 39, // measured 34
   "components/CreateIssuePanel.tsx": 55, // measured 50
   "components/IssueEditFooter.tsx": 40, // measured 35
   "components/WorkspaceEmptyState.tsx": 44, // measured 39
-  "components/WorkspacePanelHeader.tsx": 67, // measured 62 — see the <Icon> note above
+  "components/WorkspacePanelHeader.tsx": 46, // measured 41 — was 62/cap 67 before <Icon>
   "components/WorkspaceQuickLaunch.tsx": 54, // measured 49
-  "components/EnhanceActions.tsx": 32, // measured 27
+  "components/EnhanceActions.tsx": 5, // measured 0
   "components/IssueFormFields.tsx": 24, // measured 19
   "components/WorkspaceQuickLaunchMenu.tsx": 26, // measured 21
   "hooks/useIssueEnhance.ts": 19, // measured 14
@@ -191,10 +188,12 @@ describe("issue-form duplication is down-only (#810)", () => {
     expect(slack, slack.join("\n")).toEqual([]);
   }, SCAN_TIMEOUT_MS);
 
-  it("no scoped file has climbed back to #732's 50% threshold, bar the two named exceptions", () => {
-    // `CreateIssuePanel` sits exactly at 50 % and `WorkspacePanelHeader` above it, both for
-    // reasons recorded on MAX_DUP_PERCENT. Everything else must stay clear of the line.
-    const EXPECTED_AT_OR_OVER = ["components/CreateIssuePanel.tsx", "components/WorkspacePanelHeader.tsx"];
+  it("no scoped file has climbed back to #732's 50% threshold, bar the one named exception", () => {
+    // `CreateIssuePanel` sits exactly at 50 %, for the reason recorded on MAX_DUP_PERCENT.
+    // Everything else must stay clear of the line — `WorkspacePanelHeader` graduated off this
+    // list in #810 part 1 (62 % -> 41 %) when the `<Icon>` primitive retired the heroicons
+    // wrapper it was sharing with ~100 other components.
+    const EXPECTED_AT_OR_OVER = ["components/CreateIssuePanel.tsx"];
     const offenders = SCOPE.filter((f) => dup[f] >= 50 && !EXPECTED_AT_OR_OVER.includes(f)).map(
       (f) => `${f}: ${dup[f]}%`,
     );

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { apiPost, apiPatch, apiDelete } from "../lib/api.js";
 import { DiffViewer } from "./DiffViewer.js";
 import type { DiffResponse, DiffComment, CreateDiffCommentRequest } from "@agentic-kanban/shared";
+import { Icon } from "./Icon.js";
 
 interface WorkspaceDiffPanelProps {
   diff: DiffResponse;
@@ -56,15 +57,7 @@ function RepoDiffSection({
         onClick={onToggle}
         className="w-full flex items-center gap-2 px-3 py-2 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 cursor-pointer select-none transition-colors text-left border-b border-gray-200 dark:border-gray-700"
       >
-        <svg
-          className={`w-3.5 h-3.5 text-gray-500 dark:text-gray-400 shrink-0 transition-transform duration-150 ${expanded ? "rotate-90" : ""}`}
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth={2}
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-        </svg>
+        <Icon className={`w-3.5 h-3.5 text-gray-500 dark:text-gray-400 shrink-0 transition-transform duration-150 ${expanded ? "rotate-90" : ""}`} d="M9 5l7 7-7 7" />
         <span className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate" title={repo.path}>
           {repoDisplayName(repo)}
         </span>

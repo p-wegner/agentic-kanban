@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getIssueTimeEntries } from "../lib/timeEntriesCache.js";
 import { formatMinutes } from "./IssueWorkLogSection.js";
+import { Icon } from "./Icon.js";
 
 interface IssueWorkLogBadgeProps {
   issueId: string;
@@ -25,9 +26,7 @@ export function IssueWorkLogBadge({ issueId }: IssueWorkLogBadgeProps) {
       className="inline-flex items-center gap-0.5 text-xs font-medium px-1.5 py-0.5 rounded bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300"
       title={`Time logged: ${formatMinutes(totalMinutes)}`}
     >
-      <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-      </svg>
+      <Icon className="w-3 h-3 shrink-0" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
       {formatMinutes(totalMinutes)}
     </span>
   );

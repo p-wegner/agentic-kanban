@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { Icon } from "./Icon.js";
 
 interface Props {
   children: ReactNode;
@@ -32,9 +33,11 @@ export class BoardErrorBoundary extends Component<Props, State> {
     if (this.state.hasError) {
       return (
         <div className="flex flex-col items-center justify-center min-h-[200px] p-4 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg text-center gap-2">
-          <svg className="w-6 h-6 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-          </svg>
+          <Icon
+            className="w-6 h-6 text-red-400"
+            strokeWidth={1.5}
+            d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"
+          />
           <p className="text-sm font-medium text-red-700 dark:text-red-300">
             {this.props.columnName ? `"${this.props.columnName}" column crashed` : "Column error"}
           </p>

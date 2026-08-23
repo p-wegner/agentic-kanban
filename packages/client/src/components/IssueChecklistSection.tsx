@@ -8,6 +8,7 @@ import {
   checklistProgress,
   type ChecklistItem,
 } from "../lib/checklist.js";
+import { Icon } from "./Icon.js";
 
 interface IssueChecklistSectionProps {
   issueId: string;
@@ -102,9 +103,7 @@ export function IssueChecklistSection({ issueId, initialChecklist }: IssueCheckl
                 }`}
               >
                 {item.completed && (
-                  <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                  </svg>
+                  <Icon className="h-3 w-3" strokeWidth={3} d="M5 13l4 4L19 7" />
                 )}
               </button>
               <span className={`flex-1 text-sm leading-tight ${item.completed ? "line-through text-gray-400 dark:text-gray-500" : "text-gray-700 dark:text-gray-300"}`}>

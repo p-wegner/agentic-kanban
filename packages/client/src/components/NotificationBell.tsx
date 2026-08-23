@@ -3,6 +3,7 @@ import type { NotificationEvent, NotificationEventType } from "../hooks/useActiv
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { INBOX_KIND_MARK, openInboxItem, refreshInbox, useInbox, type InboxItem } from "../hooks/useInbox.js";
 import { useDismissable } from "../hooks/useDismissable.js";
+import { Icon } from "./Icon.js";
 
 function eventLabel(type: NotificationEventType): string {
   switch (type) {
@@ -75,58 +76,54 @@ function EventIcon({ type }: { type: NotificationEventType }) {
   switch (type) {
     case "workspace_merged":
       return (
-        <svg className="h-4 w-4 text-green-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
+        <Icon className="h-4 w-4 text-green-500 shrink-0" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
       );
     case "workspace_ready_for_merge":
       return (
-        <svg className="h-4 w-4 text-violet-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <Icon className="h-4 w-4 text-violet-500 shrink-0">
           <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
           <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v1m0 16v1m-8-9H3m18 0h-1m-2.636-6.364l-.707.707M6.343 17.657l-.707.707m0-12.728l.707.707m11.314 11.314l.707.707" />
-        </svg>
+        </Icon>
       );
     case "session_completed":
       return (
-        <svg className="h-4 w-4 text-blue-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <Icon className="h-4 w-4 text-blue-500 shrink-0">
           <circle cx="12" cy="12" r="10" />
           <polyline points="12 6 12 12 16 14" />
-        </svg>
+        </Icon>
       );
     case "session_launched":
       return (
-        <svg className="h-4 w-4 text-sky-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-        </svg>
+        <Icon className="h-4 w-4 text-sky-500 shrink-0" d="M13 10V3L4 14h7v7l9-11h-7z" />
       );
     case "session_failed":
     case "workflow_error":
       return (
-        <svg className="h-4 w-4 text-red-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <Icon className="h-4 w-4 text-red-500 shrink-0">
           <circle cx="12" cy="12" r="10" />
           <line x1="12" y1="8" x2="12" y2="12" />
           <line x1="12" y1="16" x2="12.01" y2="16" />
-        </svg>
+        </Icon>
       );
     case "workflow_transition":
       return (
-        <svg className="h-4 w-4 text-indigo-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
-        </svg>
+        <Icon className="h-4 w-4 text-indigo-500 shrink-0" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
       );
     case "approval_requested":
       return (
-        <svg className="h-4 w-4 text-amber-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
+        <Icon
+          className="h-4 w-4 text-amber-500 shrink-0"
+          d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+        />
       );
     case "plugin_gate":
       return <span className="text-sm shrink-0" aria-hidden="true">✋</span>;
     case "project_completed":
       return (
-        <svg className="h-4 w-4 text-emerald-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L23 12l-6.714 2.143L14 21l-2.286-6.857L5 12l6.714-2.143L14 3z" />
-        </svg>
+        <Icon
+          className="h-4 w-4 text-emerald-500 shrink-0"
+          d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L23 12l-6.714 2.143L14 21l-2.286-6.857L5 12l6.714-2.143L14 3z"
+        />
       );
   }
 }
@@ -186,9 +183,10 @@ export function NotificationBell({
           (inboxCount > 0 ? ` — ${inboxCount} waiting on you` : "")
         }
       >
-        <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-        </svg>
+        <Icon
+          className="h-5 w-5"
+          d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
+        />
         {badgeCount > 0 && (
           /* Amber when something is BLOCKED ON A HUMAN, red for mere activity (#411):
              a decision-blocked pipeline is a different urgency class from an event feed,

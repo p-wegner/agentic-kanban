@@ -3,6 +3,7 @@ import type { KeyboardEvent } from "react";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
 import { STATUS_COLORS } from "../lib/chartColors";
 import { getLocalDateKey } from "../lib/dateKey";
+import { Icon } from "./Icon.js";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -81,18 +82,14 @@ function CalendarHeader({
           className="p-1.5 rounded hover:bg-ink-faint/10 text-ink-faint hover:text-ink transition-colors"
           aria-label="Previous month"
         >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-          </svg>
+          <Icon className="w-4 h-4" d="M15 19l-7-7 7-7" />
         </button>
         <button
           onClick={onNext}
           className="p-1.5 rounded hover:bg-ink-faint/10 text-ink-faint hover:text-ink transition-colors"
           aria-label="Next month"
         >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-          </svg>
+          <Icon className="w-4 h-4" d="M9 5l7 7-7 7" />
         </button>
         <button
           onClick={onToday}

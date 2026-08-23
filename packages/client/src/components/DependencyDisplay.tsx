@@ -2,6 +2,7 @@ import React, { useRef, useState } from "react";
 import type { DependencyInfo, IssueWithStatus } from "@agentic-kanban/shared";
 import { apiFetch, apiPost, apiDelete } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
+import { Icon, Spinner } from "./Icon.js";
 
 interface DependencyDisplayProps {
   issue: IssueWithStatus;
@@ -112,12 +113,12 @@ export function DependencyDisplay({
               className="text-[10px] text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 font-medium px-1.5 py-0.5 rounded border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center gap-1"
               title="View in dependency graph"
             >
-              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <Icon className="h-3 w-3">
                 <circle cx="5" cy="12" r="2" />
                 <circle cx="19" cy="5" r="2" />
                 <circle cx="19" cy="19" r="2" />
                 <path d="M7 12h6M15 6.5l-4 4M15 17.5l-4-4" />
-              </svg>
+              </Icon>
               Graph
             </button>
           )}
@@ -128,10 +129,7 @@ export function DependencyDisplay({
             title="Analyze dependencies with AI"
           >
             {analyzingDeps && (
-              <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-              </svg>
+              <Spinner className="animate-spin h-3 w-3" />
             )}
             {analyzingDeps ? "Analyzing..." : "Analyze Deps"}
           </button>

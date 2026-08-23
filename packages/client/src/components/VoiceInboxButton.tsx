@@ -7,6 +7,7 @@ import {
 } from "../lib/voice-language.js";
 import { showToast } from "../lib/toast.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { Icon, Spinner } from "./Icon.js";
 
 interface VoiceInboxButtonProps {
   projectId: string | null;
@@ -288,10 +289,7 @@ export function VoiceInboxButton({ projectId, onIssueCreated }: VoiceInboxButton
         ].join(" ")}
       >
         {isProcessing ? (
-          <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-          </svg>
+          <Spinner className="w-3 h-3 animate-spin" />
         ) : isRecording ? (
           /* Animated waveform bars */
           <span className="flex items-end gap-px h-3.5">
@@ -305,12 +303,12 @@ export function VoiceInboxButton({ projectId, onIssueCreated }: VoiceInboxButton
           </span>
         ) : (
           /* Mic icon */
-          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <Icon className="w-3 h-3">
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
             <path strokeLinecap="round" strokeLinejoin="round" d="M19 10v2a7 7 0 0 1-14 0v-2" />
             <line x1="12" y1="19" x2="12" y2="23" strokeLinecap="round" />
             <line x1="8" y1="23" x2="16" y2="23" strokeLinecap="round" />
-          </svg>
+          </Icon>
         )}
         <span className="hidden sm:inline">{isProcessing ? "Processing…" : isRecording ? "Stop" : "Voice"}</span>
       </button>
@@ -324,10 +322,10 @@ export function VoiceInboxButton({ projectId, onIssueCreated }: VoiceInboxButton
           aria-label="Cancel recording"
           className="ml-1 inline-flex items-center justify-center w-6 h-6 rounded-md border border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark text-gray-500 dark:text-gray-400 hover:text-red-600 hover:border-red-300 dark:hover:text-red-400 dark:hover:border-red-700 transition-colors align-middle"
         >
-          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+          <Icon className="w-3 h-3" strokeWidth={2.5}>
             <line x1="6" y1="6" x2="18" y2="18" strokeLinecap="round" />
             <line x1="18" y1="6" x2="6" y2="18" strokeLinecap="round" />
-          </svg>
+          </Icon>
         </button>
       )}
 

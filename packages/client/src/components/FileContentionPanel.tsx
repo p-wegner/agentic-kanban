@@ -5,6 +5,7 @@ import { useState, useEffect, useCallback } from "react";
 import { apiFetch } from "../lib/api.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { issueStatusToneClass, workspaceStatusToneClass } from "../lib/badgeTones.js";
+import { Icon } from "./Icon.js";
 
 
 
@@ -24,19 +25,19 @@ interface FileContentionPanelProps {
 
 function FileIcon() {
   return (
-    <svg className="h-4 w-4 text-gray-500 dark:text-gray-400 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <Icon className="h-4 w-4 text-gray-500 dark:text-gray-400 shrink-0 mt-0.5">
       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
       <polyline points="14 2 14 8 20 8" />
-    </svg>
+    </Icon>
   );
 }
 
 function HeatIcon() {
   return (
-    <svg className="h-5 w-5 text-gray-600 dark:text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <Icon className="h-5 w-5 text-gray-600 dark:text-gray-400">
       <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" />
       <path d="M12 6v6l4 2" />
-    </svg>
+    </Icon>
   );
 }
 
@@ -150,10 +151,10 @@ export function FileContentionPanel({ activeProjectId, onClose }: FileContention
 
           {activeProjectId && !loading && !error && data && data.contested.length === 0 && (
             <div className="flex flex-col items-center justify-center h-48 text-gray-400 dark:text-gray-500 gap-3 px-6 text-center">
-              <svg className="h-10 w-10 text-gray-300 dark:text-gray-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <Icon className="h-10 w-10 text-gray-300 dark:text-gray-600" strokeWidth="1.5">
                 <path d="M9 12l2 2 4-4" />
                 <circle cx="12" cy="12" r="10" />
-              </svg>
+              </Icon>
               <div>
                 <p className="text-sm font-medium">No file contention</p>
                 <p className="text-xs mt-1">Active and In Review workspaces touch distinct files.</p>

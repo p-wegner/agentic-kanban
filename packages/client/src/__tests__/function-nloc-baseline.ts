@@ -2,7 +2,7 @@
  * Baseline for function-nloc-ratchet.test.ts (#763).
  *
  * Every client function whose own extent is >= LIST_THRESHOLD (400) non-blank, non-comment
- * lines, MEASURED on 2026-08-23 by the shared scanner (packages/shared/__tests__/helpers/
+ * lines, MEASURED on 2026-08-23 by the shared scanner (ten entries re-banked the same day, after #810's <Icon> adoption shortened their render) (packages/shared/__tests__/helpers/
  * function-nloc.ts, lifted out of that test file by #800). Nothing here was copied
  * from a metrics report — see the test's header for why that matters.
  *
@@ -10,12 +10,12 @@
  * function that has vanished, and on a number that has become stale.
  */
 export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
-  "components/Layout.tsx::Layout": 717,
-  "components/ButlerView.tsx::ButlerView": 696,
-  "components/CreateWorkspaceForm.tsx::CreateWorkspaceForm": 696,
+  "components/Layout.tsx::Layout": 708,
+  "components/ButlerView.tsx::ButlerView": 693,
+  "components/CreateWorkspaceForm.tsx::CreateWorkspaceForm": 694,
   "routes/BoardPage.tsx::BoardPage": 627,
-  "components/WorkspaceCard.tsx::WorkspaceCard": 619,
-  "components/BacklogView.tsx::BacklogView": 613,
+  "components/WorkspaceCard.tsx::WorkspaceCard": 616,
+  "components/BacklogView.tsx::BacklogView": 607,
   "components/IssueDetailPanel.tsx::IssueDetailPanel": 561,
   "components/PluginViewsPanel.tsx::PluginViewsPanel": 551,
   "components/GraphView.tsx::GraphView": 548,
@@ -24,12 +24,12 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "components/WorkspacePanel.tsx::WorkspacePanel": 512,
   "components/StrategyTargetsView.tsx::StrategyTargetsView": 509,
   "components/SettingsPanel.tsx::SettingsPanel": 496,
-  "components/BoardToolbar.tsx::BoardToolbar": 495,
-  "components/settings/ProjectSettings.tsx::ProjectSettings": 481,
+  "components/BoardToolbar.tsx::BoardToolbar": 491,
+  "components/settings/ProjectSettings.tsx::ProjectSettings": 468,
   "components/AllWorkspacesPanel.tsx::AllWorkspacesPanel": 438,
-  "components/CreateIssuePanel.tsx::CreateIssuePanel": 355,
-  "components/ButlerViewBody.tsx::ButlerViewBody": 421,
-  "components/BoardPageView.tsx::BoardPageView": 417,
+  "components/CreateIssuePanel.tsx::CreateIssuePanel": 353,
+  "components/ButlerViewBody.tsx::ButlerViewBody": 415,
+  "components/BoardPageView.tsx::BoardPageView": 414,
   "components/TableView.tsx::TableView": 416,
   "components/AddProjectModal.tsx::AddProjectModal": 408,
   "components/PluginActionPanes.tsx::PluginLoopPane": 406,

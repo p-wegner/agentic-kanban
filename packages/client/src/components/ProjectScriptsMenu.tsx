@@ -3,6 +3,7 @@ import type { ProjectScriptLastRunStatus, ProjectScriptShortcutResponse } from "
 import { apiFetch } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
 import { useDismissable } from "../hooks/useDismissable.js";
+import { Icon } from "./Icon.js";
 
 interface ProjectScriptsMenuProps {
   projectId: string | null;
@@ -131,10 +132,10 @@ export function ProjectScriptsMenu({ projectId }: ProjectScriptsMenuProps) {
           title="Project scripts"
           className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors bg-surface-raised dark:bg-surface-raised-dark border-black/[0.07] dark:border-white/10 text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <Icon className="w-3 h-3">
             <path strokeLinecap="round" strokeLinejoin="round" d="M4 7h16M4 12h10M4 17h7" />
             <path strokeLinecap="round" strokeLinejoin="round" d="M17 14l3 3-3 3" />
-          </svg>
+          </Icon>
           <span className="hidden sm:inline">Scripts</span>
         </button>
         {open && (

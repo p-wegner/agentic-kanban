@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { apiPost } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
+import { Icon, Spinner } from "./Icon.js";
 
 type ImportFormat = "auto" | "csv" | "markdown";
 
@@ -186,9 +187,7 @@ export function ImportIssuesModal({ projectId, onClose }: ImportIssuesModalProps
                   onClick={() => fileInputRef.current?.click()}
                   className="text-xs px-2.5 py-1.5 rounded-md border border-gray-200 dark:border-gray-700 bg-surface-raised dark:bg-surface-raised-dark text-ink-soft dark:text-gray-400 hover:bg-surface-sunken dark:hover:bg-gray-800 flex items-center gap-1.5"
                 >
-                  <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 8l5-5 5 5M12 3v12" />
-                  </svg>
+                  <Icon className="w-3 h-3" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 8l5-5 5 5M12 3v12" />
                   Upload file (.csv, .md, .json)
                 </button>
                 <input
@@ -200,10 +199,7 @@ export function ImportIssuesModal({ projectId, onClose }: ImportIssuesModalProps
                 />
                 {previewing && (
                   <span className="text-[11px] text-gray-400 dark:text-gray-500 flex items-center gap-1">
-                    <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                    </svg>
+                    <Spinner className="w-3 h-3 animate-spin" />
                     Parsing…
                   </span>
                 )}
@@ -323,10 +319,7 @@ export function ImportIssuesModal({ projectId, onClose }: ImportIssuesModalProps
                   className="px-3 py-1.5 text-xs font-medium rounded-md bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
                 >
                   {committing && (
-                    <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                    </svg>
+                    <Spinner className="w-3 h-3 animate-spin" />
                   )}
                   {committing ? "Creating…" : `Create ${validCount} issue${validCount === 1 ? "" : "s"}`}
                 </button>

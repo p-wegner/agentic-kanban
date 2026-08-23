@@ -1,5 +1,6 @@
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
+import { Icon } from "./Icon.js";
 
 const MAX_RECENT = 8;
 
@@ -33,16 +34,8 @@ export function RecentlyMergedStrip({ columns, collapsed, onToggleCollapsed, onO
           aria-expanded={!collapsed}
           aria-label={collapsed ? "Expand recently merged" : "Collapse recently merged"}
         >
-          <svg
-            className={`w-3 h-3 shrink-0 transition-transform ${collapsed ? "" : "rotate-90"}`}
-            fill="currentColor"
-            viewBox="0 0 16 16"
-          >
-            <path d="M6 12l4-4-4-4v8z" />
-          </svg>
-          <svg className="w-3.5 h-3.5 shrink-0 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-          </svg>
+          <Icon solid className={`w-3 h-3 shrink-0 transition-transform ${collapsed ? "" : "rotate-90"}`} viewBox="0 0 16 16" d="M6 12l4-4-4-4v8z" />
+          <Icon className="w-3.5 h-3.5 shrink-0 text-emerald-400" d="M5 13l4 4L19 7" />
           Recently merged
           <span className="ml-0.5 text-emerald-500 dark:text-emerald-400 font-normal">({recentMerges.length})</span>
         </button>
@@ -67,9 +60,10 @@ export function RecentlyMergedStrip({ columns, collapsed, onToggleCollapsed, onO
                 <span className="shrink-0 text-[10px] text-emerald-600 dark:text-emerald-400 font-medium whitespace-nowrap">
                   {formatRelativeTime(ws.mergedAt!)}
                 </span>
-                <svg className="w-3 h-3 shrink-0 text-emerald-400 dark:text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                </svg>
+                <Icon
+                  className="w-3 h-3 shrink-0 text-emerald-400 dark:text-emerald-500"
+                  d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+                />
               </button>
             );
           })}

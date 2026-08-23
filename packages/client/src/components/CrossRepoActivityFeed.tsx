@@ -3,6 +3,7 @@ import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { LEADING_REPO_LABEL } from "../lib/groupConflictsByRepo.js";
 import { useCrossRepoActivity } from "../hooks/useCrossRepoActivity.js";
 import type { CrossRepoActivityKind } from "../lib/crossRepoActivity.js";
+import { Icon } from "./Icon.js";
 
 interface CrossRepoActivityFeedProps {
   projectId: string;
@@ -70,9 +71,7 @@ export function CrossRepoActivityFeed({ projectId, resolveIssue, onIssueClick }:
 
       {entries.length === 0 && (
         <div className="flex flex-col items-center justify-center flex-1 gap-2 text-center">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-gray-300 dark:text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-          </svg>
+          <Icon className="h-8 w-8 text-gray-300 dark:text-gray-600" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
           <p className="text-sm text-gray-400 dark:text-gray-500">
             {multiRepo ? "No cross-repo activity yet." : "No multi-repo workspaces."}
           </p>

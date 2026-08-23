@@ -4,6 +4,7 @@ import { apiFetch, apiPut } from "../lib/api.js";
 import type { OrchestratorStatus } from "../hooks/useOrchestrator.js";
 import { parseCycleLine, isAutodriveStallWarning, START_MODE_LABEL, START_MODE_HINT } from "../lib/monitor-popover.js";
 import type { BoardHealthEvent, ConductorSchedule, MonitorStatus, MonitorAction, ResolvedTunables, StartMode } from "../lib/monitor-popover.js";
+import { Icon, Spinner } from "./Icon.js";
 
 const ACTION_LABELS: Record<MonitorAction["action"], { label: string; color: string }> = {
   relaunch:         { label: "Relaunched agent",   color: "text-blue-600" },
@@ -331,9 +332,10 @@ export function RecentBoardHealthEventsSection({
                 )}
               </div>
               {projectId && onOpenReplay && (
-                <svg className="w-2.5 h-2.5 text-gray-300 dark:text-gray-600 group-hover:text-gray-500 dark:group-hover:text-gray-400 shrink-0 mt-1 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z" />
-                </svg>
+                <Icon
+                  className="w-2.5 h-2.5 text-gray-300 dark:text-gray-600 group-hover:text-gray-500 dark:group-hover:text-gray-400 shrink-0 mt-1 transition-colors"
+                  d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z"
+                />
               )}
             </div>
           ))}
@@ -377,14 +379,18 @@ export function MonitorHeader({
           title="Run monitor cycle now"
         >
           {running ? (
-            <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+            <Spinner className="w-3 h-3 animate-spin" />
           ) : (
-            <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z"/></svg>
+            <Icon
+              className="w-3 h-3"
+              strokeWidth="2.5"
+              d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z"
+            />
           )}
           {running ? "Running" : "Run now"}
         </button>
         <button onClick={onClose} className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700" title="Close">
-          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+          <Icon className="w-3.5 h-3.5" d="M6 18L18 6M6 6l12 12" />
         </button>
       </div>
     </div>
@@ -550,7 +556,10 @@ export function ActiveAgentsSection({
                 </div>
                 <p className="text-gray-400 dark:text-gray-500 leading-snug line-clamp-1 text-[10px]">{iss.workspaceSummary!.main!.lastAssistantMessage}</p>
               </div>
-              <svg className="w-3 h-3 text-gray-300 dark:text-gray-600 group-hover:text-gray-500 dark:group-hover:text-gray-400 shrink-0 mt-1 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/></svg>
+              <Icon
+                className="w-3 h-3 text-gray-300 dark:text-gray-600 group-hover:text-gray-500 dark:group-hover:text-gray-400 shrink-0 mt-1 transition-colors"
+                d="M9 5l7 7-7 7"
+              />
             </div>
           </div>
         ))}
@@ -783,9 +792,10 @@ export function RecentActionsSection({
               <span className={`${meta.color} font-medium truncate flex-1 text-[11px]`}>{meta.label}</span>
               {issue && <span className="text-gray-500 dark:text-gray-400 shrink-0 text-[11px]">#{issue.issueNumber}</span>}
               <span className="text-gray-400 dark:text-gray-500 shrink-0 text-[10px] font-mono">{formatAge(a.at)}</span>
-              <svg className="w-2.5 h-2.5 text-gray-300 dark:text-gray-600 group-hover:text-gray-500 dark:group-hover:text-gray-400 shrink-0 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z" />
-              </svg>
+              <Icon
+                className="w-2.5 h-2.5 text-gray-300 dark:text-gray-600 group-hover:text-gray-500 dark:group-hover:text-gray-400 shrink-0 transition-colors"
+                d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 010 1.972l-11.54 6.347a1.125 1.125 0 01-1.667-.986V5.653z"
+              />
             </div>
           );
         })}

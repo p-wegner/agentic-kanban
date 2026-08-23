@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { MilestoneResponse } from "@agentic-kanban/shared";
 import { apiFetch } from "../lib/api.js";
 import { ACCENT, BRAND } from "../lib/chartColors.js";
+import { Icon } from "./Icon.js";
 
 interface MilestonesOverviewProps {
   projectId: string;
@@ -215,9 +216,7 @@ export function MilestonesOverview({ projectId, onMilestoneClick }: MilestonesOv
 
         {!loading && !error && milestones.length === 0 && (
           <div className="flex h-64 flex-col items-center justify-center gap-2 rounded-md border border-dashed border-gray-200 text-sm text-gray-400 dark:border-gray-700 dark:text-gray-500">
-            <svg className="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3 21V3l18 9-18 9z" />
-            </svg>
+            <Icon className="h-10 w-10" strokeWidth={1.5} d="M3 21V3l18 9-18 9z" />
             <span>No milestones yet</span>
           </div>
         )}

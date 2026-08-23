@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { Icon } from "./Icon.js";
 
 interface CollapsibleSectionProps {
   title: ReactNode;
@@ -49,15 +50,7 @@ export function CollapsibleSection({
           className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
           title={open ? "Collapse" : "Expand"}
         >
-          <svg
-            className={`h-3 w-3 shrink-0 text-gray-400 transition-transform ${open ? "rotate-90" : ""}`}
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 6l6 6-6 6" />
-          </svg>
+          <Icon className={`h-3 w-3 shrink-0 text-gray-400 transition-transform ${open ? "rotate-90" : ""}`} d="M9 6l6 6-6 6" />
           <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
             {title}
           </span>
