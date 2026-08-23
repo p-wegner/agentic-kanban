@@ -2,6 +2,7 @@ import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { qualityMetrics } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 export type QualityMetricRow = typeof qualityMetrics.$inferSelect;
 export type QualityMetricInsert = typeof qualityMetrics.$inferInsert;
@@ -48,15 +49,16 @@ export async function getPreviousQualityMetricSnapshot(
   collectedAt: string,
   database: Database = db,
 ): Promise<QualityMetricRow | null> {
-  const rows = await database
-    .select()
-    .from(qualityMetrics)
-    .where(and(
-      eq(qualityMetrics.projectId, projectId),
-      eq(qualityMetrics.metricKey, metricKey),
-      sql`${qualityMetrics.collectedAt} < ${collectedAt}`,
-    ))
-    .orderBy(desc(qualityMetrics.collectedAt))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select()
+      .from(qualityMetrics)
+      .where(and(
+        eq(qualityMetrics.projectId, projectId),
+        eq(qualityMetrics.metricKey, metricKey),
+        sql`${qualityMetrics.collectedAt} < ${collectedAt}`,
+      ))
+      .orderBy(desc(qualityMetrics.collectedAt))
+      .limit(1)
+  );
 }

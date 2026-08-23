@@ -4,19 +4,21 @@ import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getStatusIdsByName } from "./project-status.repository.js";
 import { issueTextColumns } from "./projections.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 export async function getPreflightTargetIssue(
   issueId: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select({
-      ...issueTextColumns,
-    })
-    .from(issues)
-    .where(eq(issues.id, issueId))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({
+        ...issueTextColumns,
+      })
+      .from(issues)
+      .where(eq(issues.id, issueId))
+      .limit(1)
+  );
 }
 
 /** #502: one query, in project-status.repository. Kept as a named re-export so callers are unchanged. */

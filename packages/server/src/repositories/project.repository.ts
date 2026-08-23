@@ -4,6 +4,7 @@ import { eq, sql, and, isNull, isNotNull, gte, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { initializeProjectStatuses } from "./issue.repository.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 /**
  * Facade barrel (#889 god-module gate). The `project_statuses` lifecycle — list, create,
@@ -24,8 +25,7 @@ export async function getProjectById(
   projectId: string,
   database: Database = db,
 ) {
-  const rows = await database.select().from(projects).where(eq(projects.id, projectId)).limit(1);
-  return rows[0] ?? null;
+  return firstRow(database.select().from(projects).where(eq(projects.id, projectId)).limit(1));
 }
 
 /**
@@ -54,12 +54,13 @@ export async function getProjectByRepoPath(
   repoPath: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select({ id: projects.id, name: projects.name })
-    .from(projects)
-    .where(eq(projects.repoPath, repoPath))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({ id: projects.id, name: projects.name })
+      .from(projects)
+      .where(eq(projects.repoPath, repoPath))
+      .limit(1)
+  );
 }
 
 /**
@@ -216,8 +217,7 @@ export async function getDoneIssueProviderAttribution(
 
 /** A project by its exact name (first match), or null. */
 export async function getProjectByName(name: string, database: Database = db) {
-  const rows = await database.select().from(projects).where(eq(projects.name, name)).limit(1);
-  return rows[0] ?? null;
+  return firstRow(database.select().from(projects).where(eq(projects.name, name)).limit(1));
 }
 
 /**

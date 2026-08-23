@@ -4,6 +4,7 @@ import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { ACTIVE_WORKSPACE_STATUSES } from "@agentic-kanban/shared/lib/workspace-activity-state";
 import { preferenceKeyValueColumns } from "./projections.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 export type PluginRow = typeof plugins.$inferSelect;
 
@@ -12,13 +13,11 @@ export async function listPluginRows(database: Database = db): Promise<PluginRow
 }
 
 export async function getPluginRowById(id: string, database: Database = db): Promise<PluginRow | null> {
-  const rows = await database.select().from(plugins).where(eq(plugins.id, id)).limit(1);
-  return rows[0] ?? null;
+  return firstRow(database.select().from(plugins).where(eq(plugins.id, id)).limit(1));
 }
 
 export async function getPluginRowBySlug(pluginId: string, database: Database = db): Promise<PluginRow | null> {
-  const rows = await database.select().from(plugins).where(eq(plugins.pluginId, pluginId)).limit(1);
-  return rows[0] ?? null;
+  return firstRow(database.select().from(plugins).where(eq(plugins.pluginId, pluginId)).limit(1));
 }
 
 /** Insert-or-update keyed on the manifest slug (`plugin_id` unique index). */
@@ -142,10 +141,11 @@ export async function getIssueExternalKeyInfo(
   issueId: string,
   database: Database = db,
 ): Promise<{ externalKey: string | null; projectId: string } | null> {
-  const rows = await database
-    .select({ externalKey: issues.externalKey, projectId: issues.projectId })
-    .from(issues).where(eq(issues.id, issueId)).limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({ externalKey: issues.externalKey, projectId: issues.projectId })
+      .from(issues).where(eq(issues.id, issueId)).limit(1)
+  );
 }
 
 export interface LoopUnmergedWorkspaceRow {
@@ -289,12 +289,13 @@ export async function getWorkspaceGitCoordinates(
   workspaceId: string,
   database: Database = db,
 ): Promise<{ id: string; workingDir: string | null; baseBranch: string | null } | null> {
-  const rows = await database
-    .select({ id: workspaces.id, workingDir: workspaces.workingDir, baseBranch: workspaces.baseBranch })
-    .from(workspaces)
-    .where(eq(workspaces.id, workspaceId))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({ id: workspaces.id, workingDir: workspaces.workingDir, baseBranch: workspaces.baseBranch })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId))
+      .limit(1)
+  );
 }
 
 /**

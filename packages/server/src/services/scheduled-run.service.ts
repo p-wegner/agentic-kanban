@@ -54,12 +54,12 @@ export function createScheduledRunService(deps: {
 
     return Promise.all(runs.map(async (run) => {
       const runHistory = historyByRun.get(run.id) ?? [];
-      const [issue] = run.systemIssueId
+      const issue = run.systemIssueId
         ? await getScheduledRunSystemIssueSummary(run.systemIssueId, database)
-        : [];
-      const [workspace] = run.lastRunWorkspaceId
+        : null;
+      const workspace = run.lastRunWorkspaceId
         ? await getScheduledRunWorkspaceSummary(run.lastRunWorkspaceId, database)
-        : [];
+        : null;
       return {
         ...run,
         nextFireAt: computeNextFireAt(run),
@@ -140,8 +140,11 @@ export function createScheduledRunService(deps: {
   }
 
   async function run(id: string, triggeredBy = "manual") {
-    const run = await getScheduledRunById(id, database);
-    if (!run) throw new ScheduledRunError("Not found", "NOT_FOUND");
+    const found = await getScheduledRunById(id, database);
+    if (!found) throw new ScheduledRunError("Not found", "NOT_FOUND");
+    // Re-bound to a non-nullable const: the hoisted `fail` declaration below captures `run`,
+    // and TS does not carry the narrowing above into a function declaration.
+    const run = found;
     // Cron (automatic) triggers respect the project's Start Mode — `manual` mode halts them so
     // "nothing auto-starts" holds. An explicit user "run now" (triggeredBy=manual) always runs.
     if (triggeredBy !== "manual") {
@@ -168,9 +171,9 @@ export function createScheduledRunService(deps: {
     // Resolve effective prompt (skill overrides custom prompt)
     let effectivePrompt = run.prompt ?? "";
     if (run.skillId) {
-      const skillRows = await getScheduledRunSkill(run.skillId, database);
-      if (skillRows.length > 0) {
-        effectivePrompt = `/${skillRows[0].name}\n\n${skillRows[0].prompt}`;
+      const skill = await getScheduledRunSkill(run.skillId, database);
+      if (skill) {
+        effectivePrompt = `/${skill.name}\n\n${skill.prompt}`;
       }
     }
 
@@ -178,8 +181,8 @@ export function createScheduledRunService(deps: {
       return fail("No prompt or skill configured for this scheduled run");
     }
 
-    const projectRows = await getScheduledRunProjectId(run.projectId, database);
-    if (projectRows.length === 0) {
+    const projectRow = await getScheduledRunProjectId(run.projectId, database);
+    if (!projectRow) {
       return fail("Project not found or disabled", "NOT_FOUND");
     }
 
@@ -196,8 +199,8 @@ export function createScheduledRunService(deps: {
       return fail("Could not create system issue for this scheduled run");
     }
 
-    const issueRows = await getScheduledRunIssueId(systemIssueId, database);
-    if (issueRows.length === 0) {
+    const issueRow = await getScheduledRunIssueId(systemIssueId, database);
+    if (!issueRow) {
       const completedAt = new Date().toISOString();
       await recordRunFailure(run.id, run.projectId, null, null, triggeredBy, startedAt, "Missing system issue for this scheduled run");
       await updateScheduledRun(run.id, {

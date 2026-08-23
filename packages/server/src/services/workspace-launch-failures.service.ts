@@ -111,8 +111,11 @@ export async function getWorkspaceLaunchFailures(
   gitDeps: WorkspaceLaunchFailureGitDeps = defaultGitDeps,
 ): Promise<WorkspaceLaunchFailuresResponse> {
   // Resolve project
-  const project = await getProjectById(projectId, database);
-  if (!project) throw new NotFoundError(`Project ${projectId} not found`);
+  const found = await getProjectById(projectId, database);
+  if (!found) throw new NotFoundError(`Project ${projectId} not found`);
+  // Re-bound to a non-nullable const: the nested helpers below capture `project`, and TS does
+  // not carry the narrowing above into a hoisted function declaration.
+  const project = found;
 
   // Get non-terminal issue statuses
   const statusRows = await getProjectStatusRows(projectId, database);

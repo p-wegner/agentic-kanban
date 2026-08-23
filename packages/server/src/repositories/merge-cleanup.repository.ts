@@ -5,25 +5,28 @@ import type { Database } from "../db/index.js";
 import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { projectStatusIdName } from "./projections.js";
 import { listProjectStatusIdNames } from "./project-status.repository.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 export async function getIssueStatusAndProject(issueId: string, database: Database = db) {
-  const rows = await database
-    // statusChangedAt lets reconcileMergedIssue tell "the status never caught up with the
-    // merge" apart from "a human deliberately moved this issue AFTER the merge".
-    .select({ statusId: issues.statusId, projectId: issues.projectId, statusChangedAt: issues.statusChangedAt })
-    .from(issues)
-    .where(eq(issues.id, issueId))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      // statusChangedAt lets reconcileMergedIssue tell "the status never caught up with the
+      // merge" apart from "a human deliberately moved this issue AFTER the merge".
+      .select({ statusId: issues.statusId, projectId: issues.projectId, statusChangedAt: issues.statusChangedAt })
+      .from(issues)
+      .where(eq(issues.id, issueId))
+      .limit(1)
+  );
 }
 
 export async function getIssueProject(issueId: string, database: Database = db) {
-  const rows = await database
-    .select({ projectId: issues.projectId })
-    .from(issues)
-    .where(eq(issues.id, issueId))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({ projectId: issues.projectId })
+      .from(issues)
+      .where(eq(issues.id, issueId))
+      .limit(1)
+  );
 }
 
 // Order-INDEPENDENT (#773): reconcileMergedIssue only `find`s by exact name ("Done" /

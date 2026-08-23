@@ -2,17 +2,19 @@ import { eq, inArray } from "drizzle-orm";
 import { showdowns, workspaces, issues, agentSkills } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 export async function getIssueForShowdown(
   issueId: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select({ id: issues.id, projectId: issues.projectId, issueNumber: issues.issueNumber, title: issues.title })
-    .from(issues)
-    .where(eq(issues.id, issueId))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({ id: issues.id, projectId: issues.projectId, issueNumber: issues.issueNumber, title: issues.title })
+      .from(issues)
+      .where(eq(issues.id, issueId))
+      .limit(1)
+  );
 }
 
 // #502: one definition, in project.repository (this copy already had its shape).
@@ -67,25 +69,27 @@ export async function getShowdownById(
   showdownId: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select()
-    .from(showdowns)
-    .where(eq(showdowns.id, showdownId))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select()
+      .from(showdowns)
+      .where(eq(showdowns.id, showdownId))
+      .limit(1)
+  );
 }
 
 export async function getShowdownByIssueId(
   issueId: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select()
-    .from(showdowns)
-    .where(eq(showdowns.issueId, issueId))
-    .orderBy(showdowns.createdAt)
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select()
+      .from(showdowns)
+      .where(eq(showdowns.issueId, issueId))
+      .orderBy(showdowns.createdAt)
+      .limit(1)
+  );
 }
 
 export async function getShowdownWorkspaces(
@@ -122,12 +126,13 @@ export async function getShowdownWorkspaceMembership(
   workspaceId: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select({ id: workspaces.id, showdownId: workspaces.showdownId, issueId: workspaces.issueId })
-    .from(workspaces)
-    .where(eq(workspaces.id, workspaceId))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({ id: workspaces.id, showdownId: workspaces.showdownId, issueId: workspaces.issueId })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId))
+      .limit(1)
+  );
 }
 
 export async function setShowdownWinner(

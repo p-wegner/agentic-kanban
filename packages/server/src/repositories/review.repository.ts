@@ -2,43 +2,47 @@ import { agentSkills, issues, preferences, sessions } from "@agentic-kanban/shar
 import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 export async function getProjectScopedReviewSkill(
   skillName: string,
   projectId: string,
   database: Database = db,
 ) {
-  const rows = await database.select({ prompt: agentSkills.prompt, model: agentSkills.model }).from(agentSkills)
-    .where(sql`${agentSkills.name} = ${skillName} AND (${agentSkills.projectId} = ${projectId} OR ${agentSkills.projectId} IS NULL)`)
-    .orderBy(desc(agentSkills.projectId))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database.select({ prompt: agentSkills.prompt, model: agentSkills.model }).from(agentSkills)
+      .where(sql`${agentSkills.name} = ${skillName} AND (${agentSkills.projectId} = ${projectId} OR ${agentSkills.projectId} IS NULL)`)
+      .orderBy(desc(agentSkills.projectId))
+      .limit(1)
+  );
 }
 
 export async function getGlobalReviewSkill(
   skillName: string,
   database: Database = db,
 ) {
-  const rows = await database.select({ prompt: agentSkills.prompt, model: agentSkills.model }).from(agentSkills)
-    .where(sql`${agentSkills.name} = ${skillName} AND ${agentSkills.projectId} IS NULL`)
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database.select({ prompt: agentSkills.prompt, model: agentSkills.model }).from(agentSkills)
+      .where(sql`${agentSkills.name} = ${skillName} AND ${agentSkills.projectId} IS NULL`)
+      .limit(1)
+  );
 }
 
 export async function getMonitorNudgeSkill(
   projectId: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select({ prompt: agentSkills.prompt })
-    .from(agentSkills)
-    .where(sql`
-      ${agentSkills.name} = 'monitor-nudge'
-      AND (${agentSkills.projectId} = ${projectId} OR ${agentSkills.projectId} IS NULL)
-    `)
-    .orderBy(sql`${agentSkills.projectId} IS NULL`)
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({ prompt: agentSkills.prompt })
+      .from(agentSkills)
+      .where(sql`
+        ${agentSkills.name} = 'monitor-nudge'
+        AND (${agentSkills.projectId} = ${projectId} OR ${agentSkills.projectId} IS NULL)
+      `)
+      .orderBy(sql`${agentSkills.projectId} IS NULL`)
+      .limit(1)
+  );
 }
 
 // #502: one definition, in workspace-reads. This copy returned the raw ROW ARRAY, so

@@ -3,6 +3,7 @@ import { issueComments } from "@agentic-kanban/shared/schema";
 import { and, desc, eq, isNull, lt, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 export type IssueCommentKind = "preflight-verdict" | "preflight-clarification" | "agent-question" | "merge-attempt" | "note" | "gate-decision";
 export type IssueCommentAuthor = "user" | "butler" | "agent" | "preflight" | "system";
@@ -132,13 +133,14 @@ export async function getLatestIssueCommentByKind(
   kind: IssueCommentKind,
   database: Database = db,
 ): Promise<IssueCommentRow | null> {
-  const rows = await database
-    .select()
-    .from(issueComments)
-    .where(and(eq(issueComments.issueId, issueId), eq(issueComments.kind, kind)))
-    .orderBy(desc(issueComments.createdAt))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select()
+      .from(issueComments)
+      .where(and(eq(issueComments.issueId, issueId), eq(issueComments.kind, kind)))
+      .orderBy(desc(issueComments.createdAt))
+      .limit(1)
+  );
 }
 
 /**

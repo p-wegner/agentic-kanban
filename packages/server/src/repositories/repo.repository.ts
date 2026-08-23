@@ -6,6 +6,7 @@ import { db } from "../db/index.js";
 import type { Database, TransactionClient } from "../db/index.js";
 import { getProjectById } from "./project.repository.js";
 import type { RepoInstallState } from "@agentic-kanban/shared/lib/repo-install-state";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 export type RepoDb = Database | TransactionClient;
 
@@ -36,12 +37,13 @@ export async function listWorkspaceRepos(workspaceId: string, database: RepoDb =
 
 /** The workspace's physical leading-repo row (#222 stage 1), or null when not yet backfilled. */
 export async function getLeadingRepoRow(workspaceId: string, database: RepoDb = db): Promise<RepoRow | null> {
-  const rows = await database
-    .select()
-    .from(repos)
-    .where(and(eq(repos.workspaceId, workspaceId), eq(repos.isLeading, true)))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select()
+      .from(repos)
+      .where(and(eq(repos.workspaceId, workspaceId), eq(repos.isLeading, true)))
+      .limit(1)
+  );
 }
 
 /**
@@ -133,8 +135,7 @@ export async function updateProjectRepo(
   if (Object.keys(set).length > 0) {
     await database.update(repos).set(set).where(eq(repos.id, repoId));
   }
-  const rows = await database.select().from(repos).where(eq(repos.id, repoId)).limit(1);
-  return rows[0] ?? null;
+  return firstRow(database.select().from(repos).where(eq(repos.id, repoId)).limit(1));
 }
 
 export async function insertWorkspaceRepo(

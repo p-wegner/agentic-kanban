@@ -2,16 +2,18 @@ import { workspaces, issueArtifacts } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 export async function getWorkspaceWorkingDirAndBase(
   workspaceId: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select({ workingDir: workspaces.workingDir, baseBranch: workspaces.baseBranch })
-    .from(workspaces)
-    .where(eq(workspaces.id, workspaceId));
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({ workingDir: workspaces.workingDir, baseBranch: workspaces.baseBranch })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId))
+  );
 }
 
 export async function workspaceExists(

@@ -4,6 +4,7 @@ import type { DriveObstacleKind, DriveObstacleSeverity } from "@agentic-kanban/s
 import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 export type DriveObstacleRow = typeof driveObstacles.$inferSelect;
 
@@ -60,12 +61,13 @@ export async function getDriveObstacle(
   id: string,
   database: Database = db,
 ): Promise<DriveObstacleRow | null> {
-  const rows = await database
-    .select()
-    .from(driveObstacles)
-    .where(eq(driveObstacles.id, id))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select()
+      .from(driveObstacles)
+      .where(eq(driveObstacles.id, id))
+      .limit(1)
+  );
 }
 
 /**

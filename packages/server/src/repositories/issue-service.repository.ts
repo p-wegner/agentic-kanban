@@ -8,6 +8,7 @@ import type { Database, TransactionClient } from "../db/index.js";
 import { hasPath } from "../lib/dependency-graph.js";
 import type { BatchIssueInput, BatchDependencyInput } from "../lib/batch-create-issues.js";
 import { issueDependencyColumns } from "./projections.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 /** A drizzle connection that is either the base db or an open transaction. */
 type DbOrTx = Database | TransactionClient;
@@ -41,24 +42,27 @@ export async function getWorkflowTemplateForProject(
   templateId: string,
   database: DbOrTx = db,
 ) {
-  const rows = await database
-    .select({ id: workflowTemplates.id, projectId: workflowTemplates.projectId })
-    .from(workflowTemplates)
-    .where(eq(workflowTemplates.id, templateId))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({ id: workflowTemplates.id, projectId: workflowTemplates.projectId })
+      .from(workflowTemplates)
+      .where(eq(workflowTemplates.id, templateId))
+      .limit(1)
+  );
 }
 
 export async function getFirstProjectStatusId(
   projectId: string,
   database: DbOrTx = db,
 ): Promise<string | null> {
-  const rows = await database
-    .select({ id: projectStatuses.id })
-    .from(projectStatuses)
-    .where(eq(projectStatuses.projectId, projectId))
-    .limit(1);
-  return rows.length === 0 ? null : rows[0].id;
+  const row = await firstRow(
+    database
+      .select({ id: projectStatuses.id })
+      .from(projectStatuses)
+      .where(eq(projectStatuses.projectId, projectId))
+      .limit(1)
+  );
+  return row?.id ?? null;
 }
 
 export async function insertBatchIssue(
@@ -103,35 +107,37 @@ export async function getDependencyEdge(
   type: DependencyType,
   database: DbOrTx = db,
 ): Promise<{ id: string } | null> {
-  const rows = await database
-    .select({ id: issueDependencies.id })
-    .from(issueDependencies)
-    .where(and(
-      eq(issueDependencies.issueId, issueId),
-      eq(issueDependencies.dependsOnId, dependsOnId),
-      eq(issueDependencies.type, type),
-    ))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({ id: issueDependencies.id })
+      .from(issueDependencies)
+      .where(and(
+        eq(issueDependencies.issueId, issueId),
+        eq(issueDependencies.dependsOnId, dependsOnId),
+        eq(issueDependencies.type, type),
+      ))
+      .limit(1)
+  );
 }
 
 export async function getIssueWebhookSnapshot(
   id: string,
   database: DbOrTx = db,
 ) {
-  const rows = await database
-    .select({
-      issueNumber: issues.issueNumber,
-      title: issues.title,
-      statusId: issues.statusId,
-      statusName: projectStatuses.name,
-      currentNodeId: issues.currentNodeId,
-    })
-    .from(issues)
-    .leftJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-    .where(eq(issues.id, id))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({
+        issueNumber: issues.issueNumber,
+        title: issues.title,
+        statusId: issues.statusId,
+        statusName: projectStatuses.name,
+        currentNodeId: issues.currentNodeId,
+      })
+      .from(issues)
+      .leftJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+      .where(eq(issues.id, id))
+      .limit(1)
+  );
 }
 
 export async function updateIssueById(
@@ -158,13 +164,14 @@ export async function getIssueCurrentNodeInfo(
   id: string,
   database: DbOrTx = db,
 ) {
-  const rows = await database
-    .select({ currentNodeId: issues.currentNodeId, currentNodeType: workflowNodes.nodeType })
-    .from(issues)
-    .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
-    .where(eq(issues.id, id))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({ currentNodeId: issues.currentNodeId, currentNodeType: workflowNodes.nodeType })
+      .from(issues)
+      .leftJoin(workflowNodes, eq(issues.currentNodeId, workflowNodes.id))
+      .where(eq(issues.id, id))
+      .limit(1)
+  );
 }
 
 export async function closeOpenWorkspacesForIssue(
@@ -305,30 +312,33 @@ export async function getDuplicateSourceIssue(
   sourceId: string,
   database: DbOrTx = db,
 ) {
-  const rows = await database
-    .select({
-      projectId: issues.projectId,
-      title: issues.title,
-      description: issues.description,
-      priority: issues.priority,
-      issueType: issues.issueType,
-    })
-    .from(issues)
-    .where(eq(issues.id, sourceId))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({
+        projectId: issues.projectId,
+        title: issues.title,
+        description: issues.description,
+        priority: issues.priority,
+        issueType: issues.issueType,
+      })
+      .from(issues)
+      .where(eq(issues.id, sourceId))
+      .limit(1)
+  );
 }
 
 export async function getArchivedStatusId(
   projectId: string,
   database: DbOrTx = db,
 ): Promise<string | null> {
-  const rows = await database
-    .select({ id: projectStatuses.id })
-    .from(projectStatuses)
-    .where(and(eq(projectStatuses.projectId, projectId), eq(projectStatuses.name, "Archived")))
-    .limit(1);
-  return rows.length === 0 ? null : rows[0].id;
+  const row = await firstRow(
+    database
+      .select({ id: projectStatuses.id })
+      .from(projectStatuses)
+      .where(and(eq(projectStatuses.projectId, projectId), eq(projectStatuses.name, "Archived")))
+      .limit(1)
+  );
+  return row?.id ?? null;
 }
 
 export async function getDoneStatusIds(

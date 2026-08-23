@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getProjectById } from "./project.repository.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 export async function listAgentSkills(
   projectId: string | undefined,
@@ -35,8 +36,7 @@ export async function getAgentSkillById(
   id: string,
   database: Database = db,
 ) {
-  const rows = await database.select().from(agentSkills).where(eq(agentSkills.id, id)).limit(1);
-  return rows[0] ?? null;
+  return firstRow(database.select().from(agentSkills).where(eq(agentSkills.id, id)).limit(1));
 }
 
 export async function findSkillByName(
@@ -47,8 +47,7 @@ export async function findSkillByName(
   const scopeCondition = projectId
     ? and(eq(agentSkills.name, name), eq(agentSkills.projectId, projectId))
     : and(eq(agentSkills.name, name), isNull(agentSkills.projectId));
-  const rows = await database.select().from(agentSkills).where(scopeCondition).limit(1);
-  return rows[0] ?? null;
+  return firstRow(database.select().from(agentSkills).where(scopeCondition).limit(1));
 }
 
 export async function createAgentSkill(
@@ -86,8 +85,7 @@ export async function updateAgentSkill(
   database: Database = db,
 ) {
   await database.update(agentSkills).set(updates).where(eq(agentSkills.id, id));
-  const rows = await database.select().from(agentSkills).where(eq(agentSkills.id, id)).limit(1);
-  return rows[0] ?? null;
+  return firstRow(database.select().from(agentSkills).where(eq(agentSkills.id, id)).limit(1));
 }
 
 export async function deleteAgentSkill(
@@ -136,12 +134,13 @@ export async function getButlerOverride(
   projectId: string,
   database: Database = db,
 ): Promise<{ id: string; prompt: string } | null> {
-  const rows = await database
-    .select({ id: agentSkills.id, prompt: agentSkills.prompt })
-    .from(agentSkills)
-    .where(sql`${agentSkills.name} = 'butler' AND ${agentSkills.projectId} = ${projectId}`)
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({ id: agentSkills.id, prompt: agentSkills.prompt })
+      .from(agentSkills)
+      .where(sql`${agentSkills.name} = 'butler' AND ${agentSkills.projectId} = ${projectId}`)
+      .limit(1)
+  );
 }
 
 /** The global (unscoped) butler prompt, or null. */
@@ -192,6 +191,5 @@ export async function deleteButlerOverride(
 
 /** Find a skill by name in ANY scope (global or any project), first match. */
 export async function getAgentSkillByName(name: string, database: Database = db) {
-  const rows = await database.select().from(agentSkills).where(eq(agentSkills.name, name)).limit(1);
-  return rows[0] ?? null;
+  return firstRow(database.select().from(agentSkills).where(eq(agentSkills.name, name)).limit(1));
 }

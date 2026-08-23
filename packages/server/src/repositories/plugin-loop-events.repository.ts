@@ -3,6 +3,7 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { pluginLoopEvents } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 /**
  * Persisted loop timeline (#292). Append-only with a per-loop cap enforced at
@@ -111,18 +112,19 @@ export async function latestPluginLoopEvent(
   type: PluginLoopEventType,
   database: Database = db,
 ): Promise<PluginLoopEventRow | null> {
-  const rows = await database
-    .select()
-    .from(pluginLoopEvents)
-    .where(and(
-      eq(pluginLoopEvents.pluginSlug, key.pluginSlug),
-      eq(pluginLoopEvents.loopName, key.loopName),
-      eq(pluginLoopEvents.projectId, key.projectId),
-      eq(pluginLoopEvents.type, type),
-    ))
-    .orderBy(desc(pluginLoopEvents.createdAt), desc(pluginLoopEvents.id))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select()
+      .from(pluginLoopEvents)
+      .where(and(
+        eq(pluginLoopEvents.pluginSlug, key.pluginSlug),
+        eq(pluginLoopEvents.loopName, key.loopName),
+        eq(pluginLoopEvents.projectId, key.projectId),
+        eq(pluginLoopEvents.type, type),
+      ))
+      .orderBy(desc(pluginLoopEvents.createdAt), desc(pluginLoopEvents.id))
+      .limit(1)
+  );
 }
 
 /**

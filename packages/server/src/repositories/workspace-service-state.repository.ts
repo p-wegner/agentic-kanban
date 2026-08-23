@@ -12,6 +12,7 @@ import { TERMINAL_WORKSPACE_STATUSES } from "@agentic-kanban/shared/lib/workspac
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getProjectsWithServicesConfig } from "./project.repository.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 /**
  * Workspace statuses that no longer OWN a service stack: their teardown already ran
@@ -83,12 +84,13 @@ export async function getWorkspaceLifecycleStatus(
   workspaceId: string,
   database: Database = db,
 ): Promise<{ status: string } | null> {
-  const rows = await database
-    .select({ status: workspaces.status })
-    .from(workspaces)
-    .where(eq(workspaces.id, workspaceId))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({ status: workspaces.status })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId))
+      .limit(1)
+  );
 }
 
 /**

@@ -2,6 +2,7 @@ import { and, eq, or, sql } from "drizzle-orm";
 import { issueArtifacts, issueDependencies, issues, projectStatuses, workspaces, workflowNodes } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database, TransactionClient } from "../db/index.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 /** Accepts either the top-level db handle or a transaction handle. */
 type DbOrTx = Database | TransactionClient;
@@ -10,19 +11,20 @@ export async function getWorkspaceMaterializationContext(
   workspaceId: string,
   database: DbOrTx = db,
 ) {
-  const rows = await database
-    .select({
-      issueId: workspaces.issueId,
-      currentNodeId: workspaces.currentNodeId,
-      nodeName: workflowNodes.name,
-      projectId: issues.projectId,
-    })
-    .from(workspaces)
-    .innerJoin(issues, eq(workspaces.issueId, issues.id))
-    .leftJoin(workflowNodes, eq(workspaces.currentNodeId, workflowNodes.id))
-    .where(eq(workspaces.id, workspaceId))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({
+        issueId: workspaces.issueId,
+        currentNodeId: workspaces.currentNodeId,
+        nodeName: workflowNodes.name,
+        projectId: issues.projectId,
+      })
+      .from(workspaces)
+      .innerJoin(issues, eq(workspaces.issueId, issues.id))
+      .leftJoin(workflowNodes, eq(workspaces.currentNodeId, workflowNodes.id))
+      .where(eq(workspaces.id, workspaceId))
+      .limit(1)
+  );
 }
 
 export async function getExistingChildLinks(
@@ -44,17 +46,18 @@ export async function getLatestTasksArtifact(
   workspaceId: string,
   database: DbOrTx = db,
 ) {
-  const rows = await database
-    .select({ content: issueArtifacts.content, createdAt: issueArtifacts.createdAt })
-    .from(issueArtifacts)
-    .where(and(
-      eq(issueArtifacts.issueId, issueId),
-      eq(issueArtifacts.workspaceId, workspaceId),
-      eq(issueArtifacts.caption, "phase-artifact:tasks"),
-    ))
-    .orderBy(sql`${issueArtifacts.createdAt} DESC`)
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({ content: issueArtifacts.content, createdAt: issueArtifacts.createdAt })
+      .from(issueArtifacts)
+      .where(and(
+        eq(issueArtifacts.issueId, issueId),
+        eq(issueArtifacts.workspaceId, workspaceId),
+        eq(issueArtifacts.caption, "phase-artifact:tasks"),
+      ))
+      .orderBy(sql`${issueArtifacts.createdAt} DESC`)
+      .limit(1)
+  );
 }
 
 export async function getBacklogStatusId(

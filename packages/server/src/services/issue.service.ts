@@ -300,7 +300,7 @@ export function createIssueService(deps: {
 
     if (input.projectId) boardEvents?.broadcast(input.projectId, "issue_created");
 
-    return (await getIssueDescription(createdId, database));
+    return (await getIssueDescription(createdId, database))!;
   }
 
   async function resolveInitialWorkflowState(
@@ -422,7 +422,7 @@ export function createIssueService(deps: {
 
     const out: CreateIssueResult[] = [];
     for (const id of results) {
-      out.push((await getIssueDescription(id, database)));
+      out.push((await getIssueDescription(id, database))!);
     }
     boardEvents?.broadcast(projectId, "issue_created");
 
@@ -532,7 +532,7 @@ export function createIssueService(deps: {
 
     boardEvents?.broadcast(projectId, "issue_updated");
 
-    return (await getIssueDescription(id, database));
+    return (await getIssueDescription(id, database))!;
   }
 
   async function updateIssuesBulk(

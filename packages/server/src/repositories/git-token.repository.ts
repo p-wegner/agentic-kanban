@@ -15,6 +15,7 @@ import { workerGitTokens } from "@agentic-kanban/shared/schema";
 import { eq, lte } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 export type GitTokenRow = typeof workerGitTokens.$inferSelect;
 
@@ -58,12 +59,13 @@ export async function findGitTokenByHash(
   tokenHash: string,
   database: Database = db,
 ): Promise<GitTokenRow | null> {
-  const rows = await database
-    .select()
-    .from(workerGitTokens)
-    .where(eq(workerGitTokens.tokenHash, tokenHash))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select()
+      .from(workerGitTokens)
+      .where(eq(workerGitTokens.tokenHash, tokenHash))
+      .limit(1)
+  );
 }
 
 /** Forget one digest. Returns nothing: the caller's in-memory drop already said whether it existed. */

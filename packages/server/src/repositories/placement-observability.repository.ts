@@ -8,6 +8,7 @@ import { issues, sessions, workers, workspaces } from "@agentic-kanban/shared/sc
 
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 export interface SessionPlacementRow {
   sessionId: string;
@@ -121,11 +122,12 @@ export async function getLatestWorkspaceBranchForIssue(
   issueId: string,
   database: Database = db,
 ): Promise<IssueBranchInfo | null> {
-  const rows = await database
-    .select({ branch: workspaces.branch, baseBranch: workspaces.baseBranch, isDirect: workspaces.isDirect })
-    .from(workspaces)
-    .where(eq(workspaces.issueId, issueId))
-    .orderBy(desc(workspaces.createdAt))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({ branch: workspaces.branch, baseBranch: workspaces.baseBranch, isDirect: workspaces.isDirect })
+      .from(workspaces)
+      .where(eq(workspaces.issueId, issueId))
+      .orderBy(desc(workspaces.createdAt))
+      .limit(1)
+  );
 }

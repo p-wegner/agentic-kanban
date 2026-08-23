@@ -2,20 +2,22 @@ import { eq, asc, desc } from "drizzle-orm";
 import { workspaces, sessions, issueComments, issues, projectStatuses } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 export async function getIssueActivityRow(issueId: string, database: Database = db) {
-  const issueRows = await database
-    .select({
-      id: issues.id,
-      createdAt: issues.createdAt,
-      statusChangedAt: issues.statusChangedAt,
-      statusName: projectStatuses.name,
-    })
-    .from(issues)
-    .leftJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-    .where(eq(issues.id, issueId))
-    .limit(1);
-  return issueRows[0] ?? null;
+  return firstRow(
+    database
+      .select({
+        id: issues.id,
+        createdAt: issues.createdAt,
+        statusChangedAt: issues.statusChangedAt,
+        statusName: projectStatuses.name,
+      })
+      .from(issues)
+      .leftJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+      .where(eq(issues.id, issueId))
+      .limit(1)
+  );
 }
 
 export async function getIssueActivityWorkspaces(issueId: string, database: Database = db) {

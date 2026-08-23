@@ -10,6 +10,7 @@ import { ValidationError } from "../errors/index.js";
 import { nextIssueNumber } from "./issue-number.repository.js";
 import { issueDependencyColumns, issueIdentityColumns, issueTextColumns, projectStatusIdName } from "./projections.js";
 import { listProjectStatusIdNames } from "./project-status.repository.js";
+import { firstRow } from "@agentic-kanban/shared/lib/first-row";
 
 // --- CLI-command-specific queries/mutations (#465 decomposition — the blanket
 // /repositories/ cohesion exemption was removed by #957, so this facade ships its
@@ -223,31 +224,32 @@ export async function getIssueDescription(
   issueId: string,
   database: Database = db,
 ) {
-  const rows = await database
-    .select({
-      ...issueTextColumns,
-      priority: issues.priority,
-      issueType: issues.issueType,
-      sortOrder: issues.sortOrder,
-      statusId: issues.statusId,
-      projectId: issues.projectId,
-      createdAt: issues.createdAt,
-      updatedAt: issues.updatedAt,
-      statusChangedAt: issues.statusChangedAt,
-      skipAutoReview: issues.skipAutoReview,
-      estimate: issues.estimate,
-      dueDate: issues.dueDate,
-      externalKey: issues.externalKey,
-      externalUrl: issues.externalUrl,
-      pinned: issues.pinned,
-      milestoneId: issues.milestoneId,
-      statusName: projectStatuses.name,
-    })
-    .from(issues)
-    .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
-    .where(eq(issues.id, issueId))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({
+        ...issueTextColumns,
+        priority: issues.priority,
+        issueType: issues.issueType,
+        sortOrder: issues.sortOrder,
+        statusId: issues.statusId,
+        projectId: issues.projectId,
+        createdAt: issues.createdAt,
+        updatedAt: issues.updatedAt,
+        statusChangedAt: issues.statusChangedAt,
+        skipAutoReview: issues.skipAutoReview,
+        estimate: issues.estimate,
+        dueDate: issues.dueDate,
+        externalKey: issues.externalKey,
+        externalUrl: issues.externalUrl,
+        pinned: issues.pinned,
+        milestoneId: issues.milestoneId,
+        statusName: projectStatuses.name,
+      })
+      .from(issues)
+      .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))
+      .where(eq(issues.id, issueId))
+      .limit(1)
+  );
 }
 
 export async function getIssueProjectId(
@@ -337,12 +339,13 @@ export async function getIssueTouchedFiles(
   issueId: string,
   database: Database = db,
 ): Promise<{ touchedFilesJson: string | null } | null> {
-  const rows = await database
-    .select({ touchedFilesJson: issues.touchedFilesJson })
-    .from(issues)
-    .where(eq(issues.id, issueId))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({ touchedFilesJson: issues.touchedFilesJson })
+      .from(issues)
+      .where(eq(issues.id, issueId))
+      .limit(1)
+  );
 }
 
 /** Touched-files JSON + projectId for one issue (related-issues lookup), or null when absent. */
@@ -350,12 +353,13 @@ export async function getIssueTouchedFilesWithProject(
   issueId: string,
   database: Database = db,
 ): Promise<{ touchedFilesJson: string | null; projectId: string } | null> {
-  const rows = await database
-    .select({ touchedFilesJson: issues.touchedFilesJson, projectId: issues.projectId })
-    .from(issues)
-    .where(eq(issues.id, issueId))
-    .limit(1);
-  return rows[0] ?? null;
+  return firstRow(
+    database
+      .select({ touchedFilesJson: issues.touchedFilesJson, projectId: issues.projectId })
+      .from(issues)
+      .where(eq(issues.id, issueId))
+      .limit(1)
+  );
 }
 
 /** All issues in a project with their touched-files JSON (related-issues file-overlap scan). */
