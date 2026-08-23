@@ -62,7 +62,14 @@ async function service(workingDirClaims: { id: string; status: string; workingDi
     database: {
       select: () => ({
         from: () => ({
-          innerJoin: () => ({ where: async () => [] }),
+          // #815 made this read a LEFT join onto the diff-stat memo. The chain mock has to
+          // grow the same link or every call through it dies with "leftJoin is not a
+          // function" — `where` stays reachable directly so a caller that stops at the
+          // inner join still works.
+          innerJoin: () => ({
+            where: async () => [],
+            leftJoin: () => ({ where: async () => [] }),
+          }),
           where: async () => workingDirClaims,
         }),
       }),
@@ -188,7 +195,14 @@ describe("worktree deletion reaches siblings (#631)", () => {
       database: {
         select: () => ({
           from: () => ({
-            innerJoin: () => ({ where: async () => [] }),
+            // #815 made this read a LEFT join onto the diff-stat memo. The chain mock has to
+          // grow the same link or every call through it dies with "leftJoin is not a
+          // function" — `where` stays reachable directly so a caller that stops at the
+          // inner join still works.
+          innerJoin: () => ({
+            where: async () => [],
+            leftJoin: () => ({ where: async () => [] }),
+          }),
             where: async () => { throw new Error("database is locked"); },
           }),
         }),
