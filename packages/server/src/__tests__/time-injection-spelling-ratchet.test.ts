@@ -125,7 +125,10 @@ const BASELINE: Record<string, number> = {
   "now: Date": 32,
   "now: number": 15,
   "nowIso: string": 9,
-  "nowOverride: string": 6,
+  // 6 -> 5: one grandfathered `nowOverride` went away with this session's server-test
+  // typecheck work. Banked because the ring is a ceiling, not a budget — a count left
+  // above the live one is exactly the staleness the second assertion exists to catch.
+  "nowOverride: string": 5,
   "now: () => Date": 4,
   "now: () => number": 4,
   "endNow: string": 4,
