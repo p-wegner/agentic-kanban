@@ -2,7 +2,7 @@ import { extname } from "node:path";
 import { parseAgentProviderStreamLine, parseAgentProviderStreamLineObserved } from "@agentic-kanban/shared/lib/agent-stream-parser";
 import type { AgentLaunchConfig, AgentProvider, FileSystem, ParsedStreamEvent, ProviderLaunchOptions } from "./types.js";
 import { PLAN_BEGIN_MARKER, PLAN_END_MARKER } from "./types.js";
-import { nodeFileSystem, resolvePiExecutable, spliceAgentArgs, resolveMockLaunch } from "./helpers.js";
+import { nodeFileSystem, resolvePiExecutable, spliceAgentArgs, resolveMockLaunch, commandCarriesArgs } from "./helpers.js";
 
 function extractPiProfile(profile: ProviderLaunchOptions["profile"]): { provider?: string; model?: string } {
   if (profile?.provider !== "pi") return {};
@@ -39,7 +39,7 @@ export class PiProvider implements AgentProvider {
       "pi",
     );
     let command = resolvedCommand;
-    let useShell = isWindows;
+    let useShell = isWindows || commandCarriesArgs(command);
 
     const args: string[] = [];
     let promptPrefix: string | undefined;

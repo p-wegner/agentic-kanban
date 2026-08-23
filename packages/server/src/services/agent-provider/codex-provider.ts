@@ -1,7 +1,7 @@
 import { parseAgentProviderStreamLine, parseAgentProviderStreamLineObserved } from "@agentic-kanban/shared/lib/agent-stream-parser";
 import type { AgentLaunchConfig, AgentProvider, FileSystem, ParsedStreamEvent, ProviderLaunchOptions } from "./types.js";
 import { PLAN_BEGIN_MARKER, PLAN_END_MARKER } from "./types.js";
-import { resolveCodexDirect, spliceAgentArgs, nodeFileSystem, resolveMockLaunch } from "./helpers.js";
+import { resolveCodexDirect, spliceAgentArgs, nodeFileSystem, resolveMockLaunch, commandCarriesArgs } from "./helpers.js";
 
 export class CodexProvider implements AgentProvider {
   readonly name = "codex";
@@ -21,7 +21,7 @@ export class CodexProvider implements AgentProvider {
       "codex",
     );
     let command = resolvedCommand;
-    let useShell = isWindows;
+    let useShell = isWindows || commandCarriesArgs(command);
 
     const args: string[] = [];
     let promptPrefix: string | undefined;

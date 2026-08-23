@@ -19,6 +19,7 @@ vi.mock("node:fs", () => ({
 }));
 
 import { ClaudeProvider, CodexProvider, CopilotProvider, PiProvider, getProvider, buildAgentLaunchConfig } from "../services/agent-provider.js";
+import { commandCarriesArgs } from "../services/agent-provider/helpers.js";
 import type { ProviderId, ProviderName } from "../services/agent-provider.js";
 import { execSync as execSyncMock } from "node:child_process";
 import { existsSync as existsSyncMock, readFileSync as readFileSyncMock } from "node:fs";
@@ -1147,5 +1148,25 @@ describe("PiProvider", () => {
   it("returns undefined for unrecognized and non-JSON lines", () => {
     expect(provider.parseStreamEvent("AK diagnostic stderr")).toBeUndefined();
     expect(provider.parseStreamEvent(JSON.stringify({ type: "agent_start" }))).toBeUndefined();
+  });
+});
+
+describe("commandCarriesArgs (#828)", () => {
+  // `agentCommand` / KANBAN_AGENT_COMMAND is a COMMAND LINE, not an executable path.
+  // Only a shell can run one, and the providers used to ask for a shell on Windows
+  // ALONE — so off Windows `spawn("node /tmp/x.cjs")` looked for an executable whose
+  // filename contains a space and failed with ENOENT. This predicate is the
+  // platform-free half of that decision, so it is assertable from either OS; that the
+  // providers OR it into `useShell` is only observable where the Windows term is false,
+  // i.e. under CI.
+  it("is true for a command line that carries its own arguments", () => {
+    expect(commandCarriesArgs("node /tmp/fleet-mock-agent.cjs")).toBe(true);
+    expect(commandCarriesArgs("node --import file:///loader.mjs mock-agent.ts")).toBe(true);
+  });
+
+  it("is false for a bare executable, so no provider gains a shell it did not need", () => {
+    expect(commandCarriesArgs("claude")).toBe(false);
+    expect(commandCarriesArgs("/usr/local/bin/codex")).toBe(false);
+    expect(commandCarriesArgs("  claude  ")).toBe(false);
   });
 });

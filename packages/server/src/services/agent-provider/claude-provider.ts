@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { parseAgentProviderStreamLine, parseAgentProviderStreamLineObserved } from "@agentic-kanban/shared/lib/agent-stream-parser";
 import type { AgentLaunchConfig, AgentProvider, FileSystem, ParsedStreamEvent, ProviderLaunchOptions } from "./types.js";
-import { getMcpConfigPath, buildSpawnEnv, spliceAgentArgs, nodeFileSystem, profileDefinesCustomEndpoint, resolveMockLaunch } from "./helpers.js";
+import { getMcpConfigPath, buildSpawnEnv, spliceAgentArgs, nodeFileSystem, profileDefinesCustomEndpoint, resolveMockLaunch, commandCarriesArgs } from "./helpers.js";
 
 export class ClaudeProvider implements AgentProvider {
   readonly name = "claude";
@@ -68,7 +68,7 @@ export class ClaudeProvider implements AgentProvider {
       return {
         command,
         args: textArgs,
-        useShell: isWindows && !!agentCommand,
+        useShell: (isWindows && !!agentCommand) || commandCarriesArgs(command),
         isMockAgent: false,
         env: buildSpawnEnv(effectiveProfileName, this.fs),
         keepStdinOpen: false,
@@ -122,7 +122,7 @@ export class ClaudeProvider implements AgentProvider {
     return {
       command,
       args,
-      useShell: isWindows && (isMockAgent || !!agentCommand),
+      useShell: (isWindows && (isMockAgent || !!agentCommand)) || commandCarriesArgs(command),
       isMockAgent,
       env: buildSpawnEnv(effectiveProfileName, this.fs),
       keepStdinOpen,

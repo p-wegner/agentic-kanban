@@ -492,6 +492,23 @@ export interface MockLaunchResolution {
  * E2E harness substitutes the agent — which is why the check is an OR and not just a
  * name sniff.
  */
+/**
+ * Does this command string carry its own arguments, so that only a shell can run it?
+ *
+ * `agentCommand` / `KANBAN_AGENT_COMMAND` (and every mock-agent command) is a COMMAND
+ * LINE, not an executable path — `node --import ... mock-agent.ts`. Windows got away with
+ * spawning it because the providers set `useShell` there; off Windows they did not, and
+ * `spawn("node /tmp/x.cjs", ...)` with no shell looks for an executable whose FILENAME
+ * contains a space and fails with ENOENT (#828 — this is why the worker-dispatch e2e saw
+ * an exit with no output on the first Linux CI run).
+ *
+ * A single-token command (a resolved `claude` binary, `process.execPath`) is unaffected,
+ * so no provider gains a shell it did not need.
+ */
+export function commandCarriesArgs(command: string): boolean {
+  return /\s/.test(command.trim());
+}
+
 export function resolveMockLaunch(
   options: { agentCommand?: string | null; providerSessionId?: string | null; keepAlive?: boolean },
   defaultBinary: string,
