@@ -136,6 +136,55 @@ crossed by an agent rather than a human:
   fixed the three god-module breaches that would have failed the gate on a first push — which is
   why the push succeeded rather than exploding. That does not make it authorised.
 
+### Current board state (2026-08-23, end of the direct-master wave)
+
+**6 issues open**, all Todo: #806, #807, #808, #816, #828, #831. Everything else filed this
+session is closed. The wave landed on master and is **not pushed by us** — see the push
+section above for the one push that did happen and why it was not ours to make.
+
+Closed today with orchestrator-verified evidence (each carries a comment naming the exact
+gate run, not the implementing agent's word): #810, #815, #817, #818, #819, #820, #821, #822,
+#823, #824, #825, #826, #827, #829, #830.
+
+**Deliberately left OPEN rather than closed, and why** — this is the part a future session
+should not "tidy up":
+
+- **#806** — batch 1 converted 19 of 120 unvalidated route body reads (`4292d8b917`).
+  That is ~8% of the ticket; closing it would be the "batch 1 with nowhere to land" failure
+  the #691 rule exists to stop. The disclosure channel is real:
+  `packages/server/src/__tests__/route-body-validation-ratchet.test.ts`, shrink-only, baseline
+  **101 across 34 files**, failing in both directions. Its premise correction matters more than
+  its count: this repo validates via `parseJsonBody` (#512), **not** `zValidator`, so the
+  ticket's original metric could never have moved.
+- **#807** — Q1 is answered (coverage 17m02s vs god-module-gate 53s on CI, a 19x difference
+  that settles the placement question). **Q2 must not be acted on yet**: a coverage floor
+  derived from today's figures would be set below reality, because 23 suites never executed
+  in the run those figures came from. Fix #828 first, then set floors. The ordering is
+  determined, not a matter of taste.
+- **#816** — needs a strict full-suite run on a checkout no other agent is editing. It has
+  been deferred all session for machine load, and saying so is the point: it is unverified,
+  not done.
+- **#828** — in flight as of this writing.
+- **#831** — new, and it carries a trap: the re-derive command #819 documents returns **zero**
+  `split_responsibility` moves against the cached analysis, because that run has
+  `function_count: 0` and the detector gates on function count. An agent running the documented
+  command would see 0 candidates and could close a 90-file remainder on a measurement artifact.
+
+**Two findings from #804 that outlive their ticket:**
+
+1. **#762's "median 0.5 days to the follow-up fix" is an average over two populations** and
+   should not be quoted as one number again — within a branch the median gap is **5 minutes**,
+   across branches **4.4 hours**, and 45.9% of fixes land before the fixed commit's gate ever ran.
+2. **Gate exposure has collapsed**: only **5.0%** of recent commits whose ticket resolves went
+   through a workspace at all. Tuning the merge gate cannot move a repo-wide rework number when
+   most changes never pass through it. Weigh any future "make the gate stricter" proposal
+   against that first.
+
+**A hazard for any git analysis in this checkout** (found the hard way in #804): HEAD moves
+between two `git log` calls because other agents commit concurrently, which silently produced a
+clean, plausible, entirely wrong result. Pin the revision before every read and fail loudly if
+HEAD is absent from the log. `scripts/rework-loop-analysis.mjs` does this and is the model.
+
 ## Gate hermeticity (#680) — what is true today (2026-08-23)
 
 #680 is "a gate that goes red under load and green in isolation, so a full-suite run cannot be
@@ -838,6 +887,10 @@ central pattern reproducing itself in the tickets that fixed it, which is worth 
 before trusting any "closed" in this file.
 
 ## Next steps
+
+> **The paragraph below is a snapshot from 2026-08-22 and its opening claim is FALSE today.**
+> It is kept because the workspace/worktree counts and the checklist under it are still the
+> record of that session. Current state is the section immediately following it.
 
 **The board is empty of open ISSUES** — 0 Backlog, 0 Todo, 0 In Progress. **Not 0 workspaces**
 (corrected 2026-08-22): 3 idle `agentic-kanban` workspaces from July (#141, #148, #183), 57
