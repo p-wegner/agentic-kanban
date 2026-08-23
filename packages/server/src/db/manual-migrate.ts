@@ -155,6 +155,45 @@ async function applyMigrationOutsideTransaction(
 }
 
 /**
+ * A migration recorded as applied under a DIFFERENT tag but the SAME index (#825).
+ *
+ * `applyMigrations` decides applied-ness by tag STRING, so renaming a `.sql` after it has run
+ * locally makes an already-applied migration look pending. Re-running its DDL then fails with
+ * `table ... already exists`, and — because the tag is the only key — it fails identically on
+ * every subsequent boot. The dev board was bricked exactly this way: `__drizzle_migrations`
+ * held `0140_mature_firebird` (drizzle-kit's generated name) while the journal had been
+ * renamed to `0140_workspace_setup_run` before the commit.
+ *
+ * Renaming is not the mistake — every recent migration here is renamed to something
+ * descriptive, because `0140_mature_firebird` tells a reader nothing. The mistake is that the
+ * error blamed the DDL, when the DB already held the one fact that explains it.
+ *
+ * This DIAGNOSES only. It deliberately does not reconcile the row or tolerate the failure:
+ * silently accepting `already exists` on a modern migration would mask genuinely
+ * non-idempotent DDL, which is the failure `LEGACY_IDEMPOTENCY_CUTOFF_IDX` exists to keep
+ * visible. Best-effort — any error here yields no hint rather than replacing the real one.
+ */
+export async function findRenamedSiblingTag(client: Client, tag: string): Promise<string | null> {
+  const idx = /^(\d+)_/.exec(tag)?.[1];
+  if (!idx) return null;
+  try {
+    // Filtered in JS rather than with `LIKE '<idx>_%'`: in SQL LIKE, `_` is a single-character
+    // WILDCARD, so that pattern also matches a longer index (`01405_foo` for idx `0140`). The
+    // tracking table holds one row per migration, so reading it whole costs nothing and the
+    // comparison is then exact.
+    const result = await client.execute("SELECT hash FROM __drizzle_migrations");
+    for (const row of result.rows as Array<{ hash?: unknown }>) {
+      if (row.hash === undefined || row.hash === null) continue;
+      const hash = String(row.hash);
+      if (hash !== tag && /^(\d+)_/.exec(hash)?.[1] === idx) return hash;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Apply a normal migration inside ONE write transaction: its statements and the
  * `__drizzle_migrations` bookkeeping row commit together, or the whole file rolls
  * back and the run aborts (later migrations are never attempted).
@@ -186,7 +225,22 @@ async function applyMigrationInTransaction(
       `[migrate] Migration ${entry.tag} FAILED and was rolled back. ` +
       `Failing statement: ${stmtSnippet(failingStmt)}. Aborting — later migrations were NOT attempted.`,
     );
-    throw new Error(`Migration ${entry.tag} failed: ${message}`, { cause: err });
+    // `already exists` / `duplicate column` on a modern migration is usually a RENAME, not
+    // broken DDL — say so, because the message alone points at the wrong thing (#825).
+    let hint = "";
+    if (message.includes("already exists") || message.includes("duplicate column name")) {
+      const sibling = await findRenamedSiblingTag(client, entry.tag);
+      if (sibling) {
+        hint =
+          ` NOTE: ${sibling} is already recorded as applied and shares this migration's index. ` +
+          `This looks like a migration that was applied and then RENAMED, so its DDL has already run. ` +
+          `Verify the schema really is in the post-migration state, then reconcile the tracking row ` +
+          `(UPDATE __drizzle_migrations SET hash='${entry.tag}' WHERE hash='${sibling}') — do NOT ` +
+          `re-run the migration, and do NOT reset the database.`;
+        console.error(`[migrate]${hint}`);
+      }
+    }
+    throw new Error(`Migration ${entry.tag} failed: ${message}${hint}`, { cause: err });
   } finally {
     tx.close();
   }
