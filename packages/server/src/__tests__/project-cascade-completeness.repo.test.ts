@@ -303,6 +303,15 @@ const SUBTREE_SEEDERS: Record<string, (c: SeedCtx) => Promise<void>> = {
       outcome: "green", createdAt: c.now,
     });
   },
+  // #775's git-token scopes. A token is a CAPABILITY, not history, so it cascades — a row
+  // outliving its project would be an authorisation outliving its subject. workerId is
+  // deliberately FK-less (see migration 0129), so no worker row is needed to seed one.
+  worker_git_tokens: async (c) => {
+    await c.db.insert(schema.workerGitTokens).values({
+      tokenHash: randomUUID(), workerId: randomUUID(), projectId: c.projectId,
+      incomingRef: "refs/kanban/incoming/feature/ak-1", issuedAtMs: 1, expiresAtMs: 2,
+    });
+  },
   workflow_templates: async (c) => {
     await c.db.insert(schema.workflowTemplates).values({
       id: c.templateId, projectId: c.projectId, name: "Custom Flow", createdAt: c.now, updatedAt: c.now,

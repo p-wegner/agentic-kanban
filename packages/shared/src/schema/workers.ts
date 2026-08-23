@@ -1,4 +1,5 @@
 import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
+import { projects } from "./projects.js";
 
 /**
  * Connected worker machines for the worker-fleet compute model (epic #1).
@@ -51,7 +52,13 @@ export const workerGitTokens = sqliteTable("worker_git_tokens", {
   /** sha-256 hex of the clear token. The primary key: lookup is BY DIGEST, never by compare. */
   tokenHash: text("token_hash").primaryKey(),
   workerId: text("worker_id").notNull(),
-  projectId: text("project_id").notNull(),
+  /**
+   * Cascades: a git token is a CAPABILITY scoped to one project, not history — a row
+   * outliving its project is an authorisation that outlives its subject. (No FK to
+   * `workers`, deliberately: see the migration header. That argument does not apply
+   * here, because a token is only ever issued for an already-committed project row.)
+   */
+  projectId: text("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
   /** The one ref a receive-pack under this token may update. NULL = read-only in practice. */
   incomingRef: text("incoming_ref"),
   /** Epoch ms — the clock the assignment-settle window is measured from. */
