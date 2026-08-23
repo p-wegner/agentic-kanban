@@ -53,6 +53,7 @@ import {
   type TypeNode,
   type ArrowFunction,
   type FunctionExpression,
+  type SourceFile,
 } from "ts-morph";
 import YAML from "yaml";
 
@@ -141,6 +142,10 @@ interface RouteInfo {
   requestBodyUnknown?: boolean;
   requestBodyOptional?: boolean;
   responseStatuses: number[];
+  /** Statuses seen at a literal `c.json(body, status)` call site (plus the default fill). */
+  inlineStatuses: number[];
+  /** Statuses `domainErrorHandler` decides from an error the handler can throw (#826). */
+  thrownStatuses: ThrownStatus[];
   summary: string;
 }
 
@@ -359,6 +364,8 @@ function parseRouteCall(
     pathParams,
     queryParams: [],
     responseStatuses: [],
+    inlineStatuses: [],
+    thrownStatuses: [],
     summary: leadingComment(call) ?? `${method.toUpperCase()} ${openapiPath}`,
   };
 
@@ -369,6 +376,13 @@ function parseRouteCall(
     // small lie inside the artifact this ticket exists to make honest.
     info.responseStatuses = [openapiPath.startsWith("/ws/") ? 101 : 200];
   }
+  info.inlineStatuses = [...new Set(info.responseStatuses)].sort((a, b) => a - b);
+  // #826 — the statuses the ERROR MIDDLEWARE decides. A route that answers 404 by throwing
+  // `NotFoundError` has no literal `c.json(…, 404)` for the walk above to see, so before this
+  // the spec said nothing about it — and converting an inline error body onto the central
+  // mapper (which `INLINE_ROUTE_ERROR_CAP` exists to encourage) DELETED the documented status.
+  if (handler) info.thrownStatuses = thrownStatusesForHandler(handler);
+  for (const thrown of info.thrownStatuses) info.responseStatuses.push(thrown.status);
   info.responseStatuses = [...new Set(info.responseStatuses)].sort((a, b) => a - b);
   info.queryParams = [...new Set(info.queryParams)];
   return info;
@@ -416,6 +430,336 @@ function analyseHandler(handler: Node, info: RouteInfo) {
       continue;
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Middleware-decided error statuses (#826)
+// ---------------------------------------------------------------------------
+
+/**
+ * How far past the handler body a thrown-error walk follows calls.
+ *
+ * Depth 2 = the handler itself, the functions it calls (a service method, `requireProject`,
+ * `parseJsonBody`), and THOSE functions' callees. It is a precision choice, not a technical
+ * limit: full transitive closure is easy and wrong — a git/exec helper five hops down that
+ * throws NOT_FOUND for its own reasons would attach a 404 to every route that can reach it.
+ * Two hops is where this codebase actually puts its existence checks; anything deeper is
+ * counted as unfollowed and reported, rather than guessed at.
+ */
+const MAX_THROW_FOLLOW_DEPTH = 2;
+
+/** A status the ERROR MIDDLEWARE decides, plus the domain code that decided it. */
+export interface ThrownStatus {
+  status: number;
+  /** The `DomainErrorCode` / refusal code; absent for a bare `HTTPException(status)`. */
+  code?: string;
+}
+
+export interface ErrorStatusMaps {
+  /** `DomainErrorCode` -> HTTP status, parsed from `middleware/error-handler.ts`. */
+  domainCodeStatus: Record<string, number>;
+  /** Standalone refusal code -> status, parsed from `errors/index.ts`. */
+  standaloneStatus: Record<string, number>;
+  /** `NotFoundError` -> `{ status: 404, code: "NOT_FOUND" }`, parsed from `errors/index.ts`. */
+  appErrorClasses: Record<string, { status: number; code: string }>;
+}
+
+function statusObjectLiteral(sf: SourceFile, name: string): Record<string, number> {
+  const decl = sf.getVariableDeclaration(name);
+  // `as const satisfies Record<string, number>` and a plain annotated literal both reduce to
+  // the first object literal under the declaration — cheaper and more robust than unwrapping
+  // every assertion wrapper the TS grammar allows.
+  const obj = decl?.getFirstDescendantByKind(SyntaxKind.ObjectLiteralExpression);
+  const out: Record<string, number> = {};
+  for (const prop of obj?.getProperties() ?? []) {
+    if (!Node.isPropertyAssignment(prop)) continue;
+    const value = prop.getInitializer();
+    if (value && Node.isNumericLiteral(value)) {
+      out[prop.getName().replace(/^["']|["']$/g, "")] = Number(value.getLiteralValue());
+    }
+  }
+  return out;
+}
+
+/**
+ * The status vocabulary, READ FROM THE MIDDLEWARE'S OWN SOURCE rather than restated here.
+ *
+ * A second copy of `DOMAIN_CODE_STATUS` in this generator would be a third place the mapping
+ * lives (`errors/index.ts` declares the codes, the middleware maps them) and the first to go
+ * stale — the exact drift #587 collapsed. `openapi-thrown-status.test.ts` compares what this
+ * parses against the middleware's runtime export, so a rename or a moved table fails a test
+ * instead of silently emptying the map and quietly deleting statuses from the spec.
+ */
+export function loadErrorStatusMaps(srcRoot: string = srcDir): ErrorStatusMaps {
+  const reader = new Project({ skipAddingFilesFromTsConfig: true, compilerOptions: { allowJs: false } });
+  const handlerSf = reader.addSourceFileAtPath(path.join(srcRoot, "middleware/error-handler.ts"));
+  const errorsSf = reader.addSourceFileAtPath(path.join(srcRoot, "errors/index.ts"));
+
+  const appErrorClasses: ErrorStatusMaps["appErrorClasses"] = {};
+  for (const cls of errorsSf.getClasses()) {
+    const name = cls.getName();
+    if (!name || cls.getExtends()?.getExpression().getText() !== "AppError") continue;
+    const ctor = cls.getConstructors()[0];
+    if (!ctor) continue;
+    for (const call of ctor.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+      if (call.getExpression().getKind() !== SyntaxKind.SuperKeyword) continue;
+      const args = call.getArguments();
+      const status = args.find((a) => Node.isNumericLiteral(a));
+      const code = args.find((a) => Node.isStringLiteral(a));
+      if (status && code && Node.isNumericLiteral(status) && Node.isStringLiteral(code)) {
+        appErrorClasses[name] = { status: Number(status.getLiteralValue()), code: code.getLiteralValue() };
+      }
+      break;
+    }
+  }
+
+  return {
+    domainCodeStatus: statusObjectLiteral(handlerSf, "DOMAIN_CODE_STATUS"),
+    standaloneStatus: statusObjectLiteral(errorsSf, "STANDALONE_REFUSAL_STATUS"),
+    appErrorClasses,
+  };
+}
+
+/**
+ * What the throw walk could NOT see, counted so the report says so out loud.
+ *
+ * `unfollowedCalls` is an UPPER BOUND on hidden throws, not a defect count: most of those
+ * calls throw nothing. It exists because printing only the statuses that WERE found reads as
+ * completeness — the #824 failure this generator has already made once.
+ */
+const throwWalkStats = { unfollowedCalls: 0, depthTruncatedCalls: 0, resolvedCalls: 0 };
+
+/** Receivers whose methods are platform/library surface, never a domain throw worth following. */
+const OPAQUE_RECEIVERS = new Set([
+  "c", "console", "JSON", "Math", "Object", "Array", "Promise", "Number", "String",
+  "Date", "process", "path", "fs", "Buffer", "Boolean", "Set", "Map", "res", "req",
+]);
+
+const moduleCache = new Map<string, SourceFile | null>();
+
+/** Resolve a relative import specifier (`../services/x.js`) to a source file in this tree. */
+function loadRelativeModule(fromFile: string, specifier: string): SourceFile | undefined {
+  const key = `${fromFile} ${specifier}`;
+  const cached = moduleCache.get(key);
+  if (cached !== undefined) return cached ?? undefined;
+  const base = path.resolve(path.dirname(fromFile), specifier).replace(/\.js$/, "");
+  let resolved: SourceFile | null = null;
+  for (const candidate of [`${base}.ts`, path.join(base, "index.ts")]) {
+    if (!fs.existsSync(candidate)) continue;
+    // Stay inside `packages/server/src`: a hop into `@agentic-kanban/shared` or node_modules
+    // is exactly the plumbing depth this walk deliberately does not attribute.
+    if (!candidate.startsWith(srcDir)) continue;
+    resolved = project.getSourceFile(candidate) ?? project.addSourceFileAtPath(candidate);
+    break;
+  }
+  moduleCache.set(key, resolved);
+  return resolved ?? undefined;
+}
+
+/** The module a named import (value OR type) comes from, if it is a relative one. */
+function moduleOfImport(sf: SourceFile, name: string): SourceFile | undefined {
+  for (const imp of sf.getImportDeclarations()) {
+    const specifier = imp.getModuleSpecifierValue();
+    if (!specifier.startsWith(".")) continue;
+    const names = imp.getNamedImports().map((n) => (n.getAliasNode() ?? n.getNameNode()).getText());
+    if (!names.includes(name) && imp.getDefaultImport()?.getText() !== name) continue;
+    return loadRelativeModule(sf.getFilePath(), specifier);
+  }
+  return undefined;
+}
+
+/** A function/method named `name` anywhere in `sf` — service factories nest theirs, so search deep. */
+function findFunctionNamed(sf: SourceFile, name: string): Node | undefined {
+  for (const fn of sf.getDescendantsOfKind(SyntaxKind.FunctionDeclaration)) {
+    if (fn.getName() === name) return fn;
+  }
+  for (const decl of sf.getDescendantsOfKind(SyntaxKind.VariableDeclaration)) {
+    if (decl.getName() !== name) continue;
+    const init = decl.getInitializer();
+    if (init && (Node.isArrowFunction(init) || Node.isFunctionExpression(init))) return init;
+  }
+  for (const cls of sf.getClasses()) {
+    const method = cls.getMethod(name);
+    if (method) return method;
+  }
+  return undefined;
+}
+
+/**
+ * The module behind `recv` in `recv.method(...)`.
+ *
+ * Two shapes cover the services this API is built from, and both are purely syntactic — no
+ * type checker, so no full program to load:
+ *   `const projectService = createProjectService({…})` -> the module `createProjectService`
+ *      is imported from;
+ *   `function createXRoute(projectService: ProjectService, …)` -> the module the TYPE
+ *      `ProjectService` is imported from.
+ */
+function moduleOfReceiver(sf: SourceFile, receiver: string): SourceFile | undefined {
+  for (const decl of sf.getDescendantsOfKind(SyntaxKind.VariableDeclaration)) {
+    if (decl.getName() !== receiver) continue;
+    const init = decl.getInitializer();
+    if (init && Node.isCallExpression(init)) {
+      const factory = init.getExpression().getText();
+      return moduleOfImport(sf, factory) ?? (findFunctionNamed(sf, factory) ? sf : undefined);
+    }
+  }
+  for (const param of sf.getDescendantsOfKind(SyntaxKind.Parameter)) {
+    if (param.getName() !== receiver) continue;
+    const typeName = param.getTypeNode()?.getText().replace(/<[\s\S]*$/, "").trim();
+    if (typeName) return moduleOfImport(sf, typeName);
+  }
+  return undefined;
+}
+
+/** The function a call expression targets, when it can be resolved syntactically. */
+function resolveCallTarget(call: CallExpression, sf: SourceFile): { fn: Node; sf: SourceFile } | undefined {
+  const expr = call.getExpression();
+  if (Node.isIdentifier(expr)) {
+    const name = expr.getText();
+    const local = findFunctionNamed(sf, name);
+    if (local) return { fn: local, sf };
+    const module = moduleOfImport(sf, name);
+    const fn = module ? findFunctionNamed(module, name) : undefined;
+    return fn && module ? { fn, sf: module } : undefined;
+  }
+  if (!Node.isPropertyAccessExpression(expr)) return undefined;
+  const receiverNode = expr.getExpression();
+  if (!Node.isIdentifier(receiverNode)) return undefined;
+  const receiver = receiverNode.getText();
+  if (OPAQUE_RECEIVERS.has(receiver)) return undefined;
+  const module = moduleOfReceiver(sf, receiver);
+  const fn = module ? findFunctionNamed(module, expr.getName()) : undefined;
+  return fn && module ? { fn, sf: module } : undefined;
+}
+
+/**
+ * True when `node` sits in a `try` block whose `catch` cannot rethrow.
+ *
+ * The cheapest honest guard against OVER-documenting: a throw the handler swallows never
+ * reaches the middleware, so claiming its status would be a fresh untruth in the artifact
+ * this ticket exists to make honest. A catch containing any `throw` is treated as
+ * propagating, which is what every catch in this tree does.
+ */
+function isSwallowed(node: Node, scope: Node): boolean {
+  let cur: Node | undefined = node.getParent();
+  while (cur && cur.getStart() >= scope.getStart() && cur.getEnd() <= scope.getEnd()) {
+    if (Node.isTryStatement(cur)) {
+      const block = cur.getTryBlock();
+      const inTry = node.getStart() >= block.getStart() && node.getEnd() <= block.getEnd();
+      const catchClause = cur.getCatchClause();
+      if (inTry && catchClause && catchClause.getDescendantsOfKind(SyntaxKind.ThrowStatement).length === 0) {
+        return true;
+      }
+    }
+    cur = cur.getParent();
+  }
+  return false;
+}
+
+/** A class declared in this tree whose instances carry a literal `code` field. */
+function classFieldCode(sf: SourceFile, className: string): string | undefined {
+  const module = moduleOfImport(sf, className) ?? sf;
+  const cls = module.getClass(className);
+  const init = cls?.getProperty("code")?.getInitializer();
+  return init && Node.isStringLiteral(init) ? init.getLiteralValue() : undefined;
+}
+
+/** The status a `throw new …` produces once `domainErrorHandler` has seen it. */
+function statusOfThrow(stmt: Node, sf: SourceFile, maps: ErrorStatusMaps): ThrownStatus | undefined {
+  if (!Node.isThrowStatement(stmt)) return undefined;
+  const expr = stmt.getExpression();
+  if (!expr || !Node.isNewExpression(expr)) return undefined;
+  const className = expr.getExpression().getText();
+  const args = expr.getArguments();
+
+  if (className === "HTTPException") {
+    const first = args[0];
+    return first && Node.isNumericLiteral(first) ? { status: Number(first.getLiteralValue()) } : undefined;
+  }
+
+  const known = maps.appErrorClasses[className];
+  if (known) return { status: known.status, code: known.code };
+
+  // `new ProjectError("Project not found", "NOT_FOUND")` — the code travels as a literal
+  // argument, the shape every service-local error class uses (#587).
+  for (const arg of args) {
+    if (!Node.isStringLiteral(arg)) continue;
+    const value = arg.getLiteralValue();
+    if (value in maps.domainCodeStatus) return { status: maps.domainCodeStatus[value]!, code: value };
+    if (value in maps.standaloneStatus) return { status: maps.standaloneStatus[value]!, code: value };
+  }
+
+  // `readonly code = "NO_AVAILABLE_WORKER"` — a field initializer, never an argument (#692).
+  const fieldCode = classFieldCode(sf, className);
+  if (fieldCode) {
+    if (fieldCode in maps.domainCodeStatus) return { status: maps.domainCodeStatus[fieldCode]!, code: fieldCode };
+    if (fieldCode in maps.standaloneStatus) return { status: maps.standaloneStatus[fieldCode]!, code: fieldCode };
+  }
+  return undefined;
+}
+
+const throwWalkCache = new Map<string, ThrownStatus[]>();
+
+/** Every middleware-decided status reachable from `scope`, following calls to `MAX_THROW_FOLLOW_DEPTH`. */
+function collectThrownStatuses(
+  scope: Node,
+  sf: SourceFile,
+  maps: ErrorStatusMaps,
+  depth: number,
+  active: Set<string>,
+): ThrownStatus[] {
+  const cacheKey = `${sf.getFilePath()}:${scope.getStart()}:${depth}`;
+  const cached = throwWalkCache.get(cacheKey);
+  if (cached) return cached;
+  if (active.has(cacheKey)) return []; // recursion — the cycle contributes nothing new
+  active.add(cacheKey);
+
+  const found: ThrownStatus[] = [];
+  for (const stmt of scope.getDescendantsOfKind(SyntaxKind.ThrowStatement)) {
+    if (isSwallowed(stmt, scope)) continue;
+    const status = statusOfThrow(stmt, sf, maps);
+    if (status) found.push(status);
+  }
+
+  for (const call of scope.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    if (isSwallowed(call, scope)) continue;
+    const expr = call.getExpression();
+    // A method call on an opaque receiver (`c.json`, `console.error`) is not an "unfollowed
+    // domain call" and must not inflate the honesty counter into meaninglessness.
+    if (Node.isPropertyAccessExpression(expr)) {
+      const receiver = expr.getExpression();
+      if (!Node.isIdentifier(receiver) || OPAQUE_RECEIVERS.has(receiver.getText())) continue;
+    } else if (!Node.isIdentifier(expr)) {
+      continue;
+    }
+    if (depth >= MAX_THROW_FOLLOW_DEPTH) {
+      throwWalkStats.depthTruncatedCalls++;
+      continue;
+    }
+    const target = resolveCallTarget(call, sf);
+    if (!target) {
+      throwWalkStats.unfollowedCalls++;
+      continue;
+    }
+    throwWalkStats.resolvedCalls++;
+    found.push(...collectThrownStatuses(target.fn, target.sf, maps, depth + 1, active));
+  }
+
+  active.delete(cacheKey);
+  const deduped: ThrownStatus[] = [];
+  for (const s of found) {
+    if (!deduped.some((d) => d.status === s.status && d.code === s.code)) deduped.push(s);
+  }
+  throwWalkCache.set(cacheKey, deduped);
+  return deduped;
+}
+
+/** Lazily loaded once — the maps are read from source, so every route walk shares them. */
+let errorStatusMaps: ErrorStatusMaps | undefined;
+function thrownStatusesForHandler(handler: Node): ThrownStatus[] {
+  errorStatusMaps ??= loadErrorStatusMaps();
+  return collectThrownStatuses(handler, handler.getSourceFile(), errorStatusMaps, 0, new Set());
 }
 
 // ---------------------------------------------------------------------------
@@ -662,16 +1006,29 @@ function buildOpenApi(routes: RouteInfo[]): Schema {
       };
     }
 
+    // #826 — a status ONLY the error middleware produces says so, and names the domain code
+    // that decided it. Provenance in the artifact is the point: a reader can tell a status the
+    // handler returns itself from one `domainErrorHandler` maps out of a thrown error, and the
+    // codes are the same vocabulary the response body now echoes (#823).
+    const thrownOnly = new Map<number, Set<string>>();
+    for (const thrown of route.thrownStatuses) {
+      if (route.inlineStatuses.includes(thrown.status)) continue;
+      const codes = thrownOnly.get(thrown.status) ?? new Set<string>();
+      codes.add(thrown.code ?? "HTTPException");
+      thrownOnly.set(thrown.status, codes);
+    }
+
     const responses: Record<string, unknown> = {};
     for (const status of route.responseStatuses) {
+      const codes = thrownOnly.get(status);
+      const description = codes
+        ? `Error (thrown ${[...codes].sort().join(", ")}, status from domainErrorHandler)`
+        : status >= 400 ? "Error" : "Success";
       // A 101 carries no body at all — claiming an application/json response for a WebSocket
       // upgrade would be a fresh small untruth in the artifact this ticket exists to fix.
       responses[String(status)] = status === 101
         ? { description: "Switching Protocols (WebSocket upgrade)" }
-        : {
-            description: status >= 400 ? "Error" : "Success",
-            content: { "application/json": { schema: {} } },
-          };
+        : { description, content: { "application/json": { schema: {} } } };
     }
     operation.responses = responses;
 
@@ -703,6 +1060,34 @@ function buildOpenApi(routes: RouteInfo[]): Schema {
         where: b.pathLiteral === undefined ? b.file : `${b.file} (\`${b.pathLiteral}\`)`,
         reason: b.reason,
       })),
+      // #826 - error responses are only PARTLY derivable, and the artifact says which part.
+      // Before this, an operation's statuses came from literal `c.json(body, status)` sites
+      // alone, so a route that answers 404 by THROWING documented no 404 at all - and moving
+      // an inline error body onto the central mapper silently deleted a documented status.
+      errorResponses: {
+        mechanism:
+          "Routes built on `createRouter()` install `domainErrorHandler`, which maps a thrown "
+          + "error's domain code to a status (DOMAIN_CODE_STATUS) and echoes the code in the "
+          + "body as `{ error, code }`.",
+        derivedFrom:
+          "Statuses are attributed by statically following `throw new ...` from each handler up "
+          + `to ${MAX_THROW_FOLLOW_DEPTH} call(s) deep, mapping the code through the tables `
+          + "parsed from `middleware/error-handler.ts` and `errors/index.ts`.",
+        limitations: [
+          `Attribution stops at ${MAX_THROW_FOLLOW_DEPTH} hops from the handler: an error thrown `
+          + "deeper in a service call chain is NOT documented here. The bound is deliberate - "
+          + "unbounded following would attach a plumbing helper's 404 to every route that can "
+          + "reach it.",
+          "A call whose target cannot be resolved syntactically (a callback parameter, a "
+          + "dynamically dispatched method, anything imported from another package) is not "
+          + "followed, so statuses it can throw are absent.",
+          "Every operation may additionally answer 500: domainErrorHandler's final branch "
+          + "renders any unrecognised error as `{ error }` with status 500. That is not listed "
+          + "per-operation because it is true of all of them.",
+          "A throw inside a `try` whose `catch` contains no `throw` is treated as swallowed and "
+          + "is not attributed.",
+        ],
+      },
     },
     paths: orderedPaths,
   };
@@ -763,6 +1148,30 @@ function printCoverage(coverage: CoverageReport) {
   for (const site of coverage.unmounted) {
     console.log(`    never mounted: ${site.rel}:${site.line} ${site.method.toUpperCase()} ${site.pathLiteral}`);
   }
+}
+
+/**
+ * What the thrown-status attribution saw and what it did NOT (#826).
+ *
+ * Printed on every run for the same reason as the coverage report above: a generator that
+ * lists what it found and stays quiet about what it skipped reads as complete. These two
+ * numbers are the honest bound - each is a call site whose throws are simply not in the spec.
+ */
+function printThrowAttribution(routes: RouteInfo[]) {
+  const withDerived = routes.filter((r) => r.thrownStatuses.some((t) => !r.inlineStatuses.includes(t.status)));
+  const derivedStatuses = withDerived.reduce(
+    (n, r) => n + new Set(r.thrownStatuses.filter((t) => !r.inlineStatuses.includes(t.status)).map((t) => t.status)).size,
+    0,
+  );
+  console.log(
+    `  error attribution: ${withDerived.length} operation(s) document ${derivedStatuses} middleware-decided `
+    + `status(es) (walk depth ${MAX_THROW_FOLLOW_DEPTH}, ${throwWalkStats.resolvedCalls} call(s) followed)`,
+  );
+  console.log(
+    `    NOT attributed: ${throwWalkStats.unfollowedCalls} unresolvable call(s) + `
+    + `${throwWalkStats.depthTruncatedCalls} beyond the depth bound — any status they throw is absent `
+    + "from the spec (an upper bound: most of those calls throw nothing).",
+  );
 }
 
 function main() {
@@ -937,6 +1346,7 @@ function main() {
     if (committed === yaml) {
       console.log(`✓ ${path.relative(serverRoot, outputPath)} is up to date (${uniqueRoutes.length} operations across ${pathCount} paths)`);
       printCoverage(coverage);
+      printThrowAttribution(uniqueRoutes);
       return;
     }
     console.error(`✗ ${path.relative(serverRoot, outputPath)} is OUT OF DATE with the route sources.`);
@@ -957,6 +1367,7 @@ function main() {
   console.log(`✓ Wrote ${path.relative(serverRoot, outputPath)}`);
   console.log(`  ${uniqueRoutes.length} operations across ${pathCount} paths`);
   printCoverage(coverage);
+  printThrowAttribution(uniqueRoutes);
   if (unresolved.length) {
     console.warn(`\n⚠ ${unresolved.length} item(s) could not be resolved:`);
     for (const u of unresolved) console.warn(`  - ${u}`);
