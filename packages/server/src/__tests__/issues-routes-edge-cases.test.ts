@@ -7,7 +7,7 @@
  * new connection per transaction — which is a new empty database. Tests exercising
  * transactional endpoints (batch, import) use a temp-file DB instead.
  */
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterAll } from "vitest";
 import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import { eq } from "drizzle-orm";
@@ -59,7 +59,21 @@ function fileSetup(): DbAndApp {
   app.route("/api/preferences", createPreferencesRoute(db));
   return {
     app, db,
-    cleanup: () => { try { unlinkSync(dbPath); } catch {} },
+    // CLOSE BEFORE UNLINK, and only once the whole describe is done (#828).
+    //
+    // This used to unlink the file while `client` was still open, from an `afterEach`
+    // — so every test after the first wrote through a connection whose file no longer
+    // existed. On Windows the unlink simply FAILS (an open file cannot be deleted), the
+    // `catch {}` swallowed it, and the suite was green forever. On Linux the unlink
+    // SUCCEEDS and SQLite then answers the next write with SQLITE_READONLY_DBMOVED
+    // ("attempt to write a readonly database") — 28 of the 23 suites that failed the
+    // first time CI ever ran this suite on Linux.
+    cleanup: () => {
+      try { client.close(); } catch { /* already closed */ }
+      for (const suffix of ["", "-wal", "-shm"]) {
+        try { unlinkSync(`${dbPath}${suffix}`); } catch { /* best-effort temp cleanup */ }
+      }
+    },
   };
 }
 
@@ -332,7 +346,7 @@ describe("Issues route — DELETE cascade includes time entries", () => {
   let ids: Awaited<ReturnType<typeof fullSeed>>;
 
   beforeEach(async () => { ids = await fullSeed(db); });
-  afterEach(() => { cleanup?.(); });
+  afterAll(() => { cleanup?.(); });
 
   it("DELETE /:id removes issue_time_entries (regression: forked cascade missed them)", async () => {
     // Seed a time entry via the HTTP endpoint so it lands like a real one.
@@ -412,7 +426,7 @@ describe("Issues route — CRUD edge cases", () => {
   let ids: Awaited<ReturnType<typeof fullSeed>>;
 
   beforeEach(async () => { ids = await fullSeed(db); });
-  afterEach(() => { cleanup?.(); });
+  afterAll(() => { cleanup?.(); });
 
   it("GET / requires projectId", async () => {
     expect((await app.request("/api/issues")).status).toBe(400);
@@ -488,7 +502,7 @@ describe("Issues route — export/import edge cases", () => {
   let ids: Awaited<ReturnType<typeof fullSeed>>;
 
   beforeEach(async () => { ids = await fullSeed(db); });
-  afterEach(() => { cleanup?.(); });
+  afterAll(() => { cleanup?.(); });
 
   it("GET export returns JSON array", async () => {
     const res = await app.request(`/api/projects/${ids.projectId}/issues/export`);
@@ -584,7 +598,7 @@ describe("Markdown + preview import", () => {
   let ids: Awaited<ReturnType<typeof fullSeed>>;
 
   beforeEach(async () => { ids = await fullSeed(db); });
-  afterEach(() => { cleanup?.(); });
+  afterAll(() => { cleanup?.(); });
 
   it("parses Markdown: one issue per top-level bullet, sub-bullets as description", async () => {
     const md = [

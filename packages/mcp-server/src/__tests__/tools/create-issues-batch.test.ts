@@ -13,10 +13,12 @@ import { seedProject } from "../helpers/seed.js";
 import type { ToolDeps } from "../../tools/deps.js";
 
 const tempDirs: string[] = [];
+const openClients: Array<{ close: () => void }> = [];
 function setupTool(register: (server: any, deps: ToolDeps) => void) {
   const dir = mkdtempSync(join(tmpdir(), "ak-mcp-batch-"));
   tempDirs.push(dir);
   const client = createClient({ url: `file:${join(dir, "test.db")}` });
+  openClients.push(client);
   applyMigrationsToClient(client);
   const db = drizzle(client, { schema }) as TestDb;
   const deps: ToolDeps = {
@@ -32,6 +34,10 @@ function setupTool(register: (server: any, deps: ToolDeps) => void) {
 }
 
 afterAll(() => {
+  // Close every libsql handle BEFORE removing its directory (#828): on Linux an unlink
+  // under a live connection makes the next write fail with SQLITE_READONLY_DBMOVED, a
+  // race Windows cannot expose because the unlink simply fails there.
+  for (const c of openClients) { try { c.close(); } catch { /* already closed */ } }
   for (const d of tempDirs) {
     try { rmSync(d, { recursive: true, force: true }); } catch {}
   }

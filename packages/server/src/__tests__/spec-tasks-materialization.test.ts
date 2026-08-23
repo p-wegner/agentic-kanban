@@ -11,16 +11,22 @@ import { applyMigrationsToClient, type TestDb } from "./helpers/test-db.js";
 import { materializeSpecTasksForWorkspace, parseTasksArtifact } from "../services/spec-tasks-materialization.service.js";
 
 const tempDirs: string[] = [];
+const openClients: Array<{ close: () => void }> = [];
 
 function createFileTestDb() {
   const dir = mkdtempSync(join(tmpdir(), "ak-spec-tasks-"));
   tempDirs.push(dir);
   const client = createClient({ url: `file:${join(dir, "test.db")}` });
+  openClients.push(client);
   applyMigrationsToClient(client);
   return drizzle(client, { schema }) as TestDb;
 }
 
 afterAll(() => {
+  // Close every libsql handle BEFORE removing its directory (#828): on Linux an
+  // unlink under a live connection makes the next write fail with
+  // SQLITE_READONLY_DBMOVED, a race Windows cannot expose because the unlink fails.
+  for (const c of openClients) { try { c.close(); } catch { /* already closed */ } }
   for (const dir of tempDirs) {
     try { rmSync(dir, { recursive: true, force: true }); } catch {}
   }
