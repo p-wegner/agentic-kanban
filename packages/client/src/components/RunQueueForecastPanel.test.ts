@@ -22,7 +22,6 @@ function issue(overrides: Partial<IssueWithStatus> & { title: string }): IssueWi
   return {
     id: `issue-${overrides.title}`,
     issueNumber: Number(overrides.title.match(/\d+/)?.[0] ?? 1),
-    title: overrides.title,
     description: null,
     priority: "medium",
     issueType: "feature",
@@ -53,10 +52,10 @@ function withWorkspace(base: IssueWithStatus, workspaceInfo: MainWorkspaceInfo):
 
 function columns(issues: IssueWithStatus[]): StatusWithIssues[] {
   return [
-    { id: "backlog", name: "Backlog", projectId: "project-1", sortOrder: 0, issues: issues.filter((i) => i.statusName === "Backlog") },
-    { id: "todo", name: "Todo", projectId: "project-1", sortOrder: 1, issues: issues.filter((i) => i.statusName === "Todo") },
-    { id: "progress", name: "In Progress", projectId: "project-1", sortOrder: 2, issues: issues.filter((i) => i.statusName === "In Progress") },
-    { id: "review", name: "In Review", projectId: "project-1", sortOrder: 3, issues: issues.filter((i) => i.statusName === "In Review") },
+    { id: "backlog", name: "Backlog", projectId: "project-1", sortOrder: 0, issues: issues.filter((i) => i.statusName === "Backlog"), count: issues.filter((i) => i.statusName === "Backlog").length },
+    { id: "todo", name: "Todo", projectId: "project-1", sortOrder: 1, issues: issues.filter((i) => i.statusName === "Todo"), count: issues.filter((i) => i.statusName === "Todo").length },
+    { id: "progress", name: "In Progress", projectId: "project-1", sortOrder: 2, issues: issues.filter((i) => i.statusName === "In Progress"), count: issues.filter((i) => i.statusName === "In Progress").length },
+    { id: "review", name: "In Review", projectId: "project-1", sortOrder: 3, issues: issues.filter((i) => i.statusName === "In Review"), count: issues.filter((i) => i.statusName === "In Review").length },
   ];
 }
 

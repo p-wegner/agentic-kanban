@@ -11,6 +11,8 @@ describe("RecentBoardHealthEventsSection", () => {
       timestamp: "2026-05-31T10:00:00.000Z",
       level: "info",
       type: "action",
+      category: null,
+      issueNumber: null,
       summary: "Invoked tool: merge_workspace",
       details: "tool: merge_workspace",
     }];

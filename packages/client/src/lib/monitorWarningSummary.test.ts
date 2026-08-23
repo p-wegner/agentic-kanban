@@ -4,7 +4,7 @@ import type { MonitorWarning } from "./monitor-popover.js";
 import { sortProjectHealth } from "./projectHealthOrder.js";
 
 const dirty = (projectId: string, projectName = projectId): MonitorWarning => ({
-  projectId, projectName, repoPath: `/repo/${projectId}`, detectedAt: "2026-08-18T10:00:00.000Z",
+  type: "dirty_main_checkout", projectId, projectName, repoPath: `/repo/${projectId}`, detectedAt: "2026-08-18T10:00:00.000Z",
   fileCount: 4, files: ["a.ts"], message: `${projectName}: dirty main checkout — 4 tracked source changes`,
 });
 

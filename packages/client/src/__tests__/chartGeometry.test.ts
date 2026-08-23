@@ -7,6 +7,7 @@ import {
   stackSegments,
   stackTotal,
   summarizeStacks,
+  type StackPoint,
 } from "../lib/chartGeometry.js";
 import { windowedChartPath } from "../hooks/useWindowedChartData.js";
 
@@ -35,7 +36,7 @@ describe("chartBox", () => {
 
 describe("summarizeStacks", () => {
   const series = ["claude", "codex"];
-  const points = [
+  const points: StackPoint[] = [
     { date: "2026-08-20", values: { claude: 2, codex: 1 } },
     { date: "2026-08-21", values: { claude: 4 } },
   ];

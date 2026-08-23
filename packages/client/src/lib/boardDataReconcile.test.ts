@@ -20,7 +20,9 @@ function issue(id: string, over: Partial<IssueWithStatus> = {}): IssueWithStatus
 }
 
 function col(name: string, issues: IssueWithStatus[]): StatusWithIssues {
-  return { id: name, name, position: 0, issues } as StatusWithIssues;
+  // `position` is not a field of `StatusWithIssues` (it is `sortOrder`), and `projectId`/
+  // `count` were missing — the cast hid a fixture that had drifted from the DTO.
+  return { id: name, name, projectId: "project-1", sortOrder: 0, issues, count: issues.length };
 }
 
 function withMain(id: string, status: string | undefined): IssueWithStatus {

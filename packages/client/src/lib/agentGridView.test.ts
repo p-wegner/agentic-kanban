@@ -157,7 +157,7 @@ describe("computeEmptySlotCount", () => {
 });
 
 describe("computeGridSizing", () => {
-  const mk = (n: number, status: string) => Array.from({ length: n }, (_, i) => agent(`${status}${i}`, { status }));
+  const mk = (n: number, status: NonNullable<WsMain["status"]>) => Array.from({ length: n }, (_, i) => agent(`${status}${i}`, { status }));
   it("scales featured/compact min px by counts", () => {
     const s1 = computeGridSizing({ attention: [], live: mk(2, "active"), background: [] }, 0);
     expect(s1).toMatchObject({ featuredCount: 2, featuredMinPx: 320 });

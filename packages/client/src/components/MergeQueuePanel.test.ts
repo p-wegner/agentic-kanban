@@ -45,8 +45,8 @@ function issue(title: string, workspaceInfo: MainWorkspaceInfo, updatedAt: strin
 
 function columns(issues: IssueWithStatus[]): StatusWithIssues[] {
   return [
-    { id: "todo", name: "Todo", projectId: "project-1", sortOrder: 0, issues: [] },
-    { id: "review", name: "In Review", projectId: "project-1", sortOrder: 1, issues },
+    { id: "todo", name: "Todo", projectId: "project-1", sortOrder: 0, issues: [], count: 0 },
+    { id: "review", name: "In Review", projectId: "project-1", sortOrder: 1, issues, count: issues.length },
   ];
 }
 
