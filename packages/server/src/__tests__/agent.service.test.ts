@@ -4,6 +4,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 vi.mock("node:child_process", () => ({
   spawn: vi.fn(),
   execSync: vi.fn(),
+  // agent.service reaches the kill seam in process-exec (#833), which promisifies
+  // `execFile` at module load — a missing export here fails the whole file at import.
+  // Callback-style so `promisify` resolves; the stop path is fire-and-forget anyway.
+  execFile: vi.fn((_cmd: string, _args: string[], _opts: unknown, cb?: (e: Error | null, o: string, r: string) => void) => {
+    if (typeof cb === "function") cb(null, "", "");
+  }),
 }));
 
 // Mock node:fs to prevent MCP config writes from failing

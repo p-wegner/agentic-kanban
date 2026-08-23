@@ -7,6 +7,11 @@ import { appendFileSync, existsSync, unlinkSync } from "node:fs";
 vi.mock("node:child_process", () => ({
   spawn: vi.fn(),
   execSync: vi.fn(),
+  // agent.service reaches the kill seam in process-exec (#833), which promisifies
+  // `execFile` at module load — a missing export here fails the whole file at import.
+  execFile: vi.fn((_cmd: string, _args: string[], _opts: unknown, cb?: (e: Error | null, o: string, r: string) => void) => {
+    if (typeof cb === "function") cb(null, "", "");
+  }),
 }));
 
 import { launch, agentState } from "../services/agent.service.js";

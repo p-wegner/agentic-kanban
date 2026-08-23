@@ -128,7 +128,23 @@ export async function taskkillTree(pid: number, options: { timeout?: number } = 
  * to SIGKILL a made-up pid, got ESRCH, and counted zero kills.
  *
  * POSIX kills the pid itself, not its group — same reach as before; making it a group
- * kill would be a behaviour change, not a portability fix.
+ * kill would be a behaviour change, not a portability fix. Callers that NEED the group
+ * opt in with `group: true` (#833), so the default reach of every #832 call site is
+ * unchanged.
+ *
+ * `group` is POSIX-ONLY and off by default. It exists for children spawned with
+ * `detached: true` AND `shell: true`: there the pid is `/bin/sh`, and a shell only
+ * `exec`s through to the agent when the command is a single simple command. Give it a
+ * pipeline, an `&&`, or a trailing redirect and `sh` stays a real parent — signalling
+ * the bare pid then kills the shell and leaves the agent running while the board
+ * believes the session is stopped (#833, follow-up to #828). `detached: true` makes the
+ * child a process-group leader (`pgid === pid`), so `process.kill(-pid, sig)` reaches
+ * the shell AND everything it forked. It falls back to the bare pid when the group
+ * does not exist (ESRCH — the child was not detached, so it shares OUR group and
+ * `-pid` names no group), which is exactly the pre-#833 behaviour.
+ *
+ * Windows needs no equivalent: `taskkill /T /F` is already a whole-tree kill, so `group`
+ * is inert there rather than a second code path that could disagree.
  *
  * `signal` is POSIX-ONLY and defaults to SIGKILL (#832). Windows has no signals: `taskkill
  * /T /F` is always a forced tree kill, so passing SIGTERM does not make the Windows half
@@ -138,13 +154,25 @@ export async function taskkillTree(pid: number, options: { timeout?: number } = 
  */
 export async function killProcessTree(
   pid: number,
-  options: { timeout?: number; signal?: NodeJS.Signals } = {},
+  options: { timeout?: number; signal?: NodeJS.Signals; group?: boolean } = {},
 ): Promise<void> {
   if (process.platform === "win32") {
     await taskkillTree(pid, options);
     return;
   }
-  process.kill(pid, options.signal ?? "SIGKILL");
+  const signal = options.signal ?? "SIGKILL";
+  if (options.group) {
+    try {
+      process.kill(-pid, signal);
+      return;
+    } catch (err) {
+      // Not a group leader (never detached) — fall through to the bare pid, which is
+      // what this seam did before `group` existed. Any other failure is the caller's
+      // to see, so it is re-thrown by the bare-pid call below.
+      if ((err as NodeJS.ErrnoException)?.code !== "ESRCH") throw err;
+    }
+  }
+  process.kill(pid, signal);
 }
 
 export function parseNetstatListeners(stdout: string): OsPortListener[] {
