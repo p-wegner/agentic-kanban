@@ -53,6 +53,7 @@ import { createUsageLimitExitHandler, findUsageLimitProvider } from "./exit/usag
 import { launchLearningStep } from "./exit/learning-step.js";
 import type { AutoMergeFn, ExitContext, WorkspaceRow } from "./exit/exit-context.js";
 import { graphOwnsPostExitReview } from "./exit/workflow-ownership.js";
+import { isWorkspaceTerminalOnExit, terminalGuardCasStatus } from "./exit/workspace-terminal-guard.js";
 import { getWorkflowNodeById, getWorkspaceCurrentWorkflowNode } from "../repositories/workflow.repository.js";
 
 const autoMergeDisabledPref = projectPref("auto_merge_disabled");
@@ -160,8 +161,10 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
       // condition, the child's own CLI process exiting after the join already closed it
       // raced setWorkspaceStatus(..., "idle") past the terminal guard (which only protects
       // closed+mergedAt), leaving status="idle" with closedAt still stamped from the join.
-      const forkTerminalStatuses = new Set(["joined", "cancelled", "failed"]);
-      if (workspace.status === "closed" && (workspace.mergedAt || (workspace.forkStatus && forkTerminalStatuses.has(workspace.forkStatus)))) {
+      // #764: the predicate now lives in ONE place (./exit/workspace-terminal-guard.js)
+      // together with the CAS status that enforces it atomically at the idle write below —
+      // #966 and #1003 each hardened one of those two halves and left the other blind.
+      if (isWorkspaceTerminalOnExit(workspace)) {
         console.log(`[workflow] session ${sessionId} exited but workspace ${workspaceId} is already closed (mergedAt=${workspace.mergedAt}, forkStatus=${workspace.forkStatus}) — skipping exit workflow`);
         boardEvents.broadcastActivity(projectId, { issueId, sessionId, activity: "" });
         boardEvents.broadcast(projectId, "session_completed");
@@ -204,7 +207,16 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
       // enforces the terminal invariant atomically in its UPDATE's WHERE clause, so a
       // `false` here means a concurrent terminal transition (or vanished row) won the
       // race: stop the exit workflow instead of running it against a merged workspace.
-      const wentIdle = await setWorkspaceStatus(db, workspaceId, "idle", { now });
+      //
+      // #764: that atomic guard only covers closed+mergedAt, so it is BLIND to a fork child
+      // closed by its join (forkStatus joined/cancelled/failed, mergedAt null) — #1003's
+      // defect in its concurrent form. `terminalGuardCasStatus` returns the observed status
+      // for a fork child, turning any transition that lands in this window into a CAS miss
+      // that falls into the same `!wentIdle` path below.
+      const wentIdle = await setWorkspaceStatus(db, workspaceId, "idle", {
+        now,
+        onlyIfCurrentStatus: terminalGuardCasStatus(workspace),
+      });
       boardEvents.broadcastActivity(projectId, { issueId, sessionId, activity: "" });
       boardEvents.broadcast(projectId, "session_completed");
       if (!wentIdle) {
