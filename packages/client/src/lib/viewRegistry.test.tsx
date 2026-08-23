@@ -7,6 +7,7 @@ import {
   SECONDARY_VIEWS,
   type ViewMode,
 } from "./viewRegistry";
+import { VIEW_ICONS } from "../components/viewIcons.js";
 
 describe("VIEW_REGISTRY", () => {
   it("has no duplicate view ids", () => {
@@ -88,7 +89,9 @@ describe("VIEW_REGISTRY", () => {
       expect(v.toolbarLabel).toBeTruthy();
       expect(v.label).toBeTruthy();
       expect(v.tooltip).toBeTruthy();
-      expect(v.icon).toBeTruthy();
+      // The glyph moved to components/viewIcons.tsx (#829) — lib/ may not render JSX. A test
+      // file MAY reach up (the #694 scan exempts them), which is how this stays asserted.
+      expect(VIEW_ICONS[v.id]).toBeTruthy();
       expect(v.paletteIcon).toBeTruthy();
       expect(v.paletteDescription).toBeTruthy();
     }

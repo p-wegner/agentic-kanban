@@ -8,6 +8,7 @@ import { ProjectScriptsMenu } from "./ProjectScriptsMenu.js";
 import { PRIMARY_VIEWS, VIEW_REGISTRY, visibleViews, type ViewDescriptor } from "../lib/viewRegistry.js";
 import { useHiddenViews } from "../hooks/useHiddenViews.js";
 import { PluginViewsTab } from "./PluginViewsTab.js";
+import { VIEW_ICONS } from "./viewIcons.js";
 import type { StatusWithIssues } from "@agentic-kanban/shared";
 import type { CardDensity } from "../hooks/useBoardPreferences.js";
 import { PRIORITY_META } from "../lib/chartColors.js";
@@ -345,7 +346,7 @@ export function BoardToolbar({
         className={`relative px-2.5 py-1 text-xs rounded flex items-center gap-1.5 whitespace-nowrap transition-colors ${isActive ? activeClass : INACTIVE}`}
         title={measuring ? undefined : title}
       >
-        {view.icon}
+        {VIEW_ICONS[view.id]}
         {view.toolbarLabel}
         {view.id === "kanban" && boardActivitySummary && (
           <span
@@ -537,7 +538,7 @@ export function BoardToolbar({
           className={`relative flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors ${activeView?.activeClass ?? ACTIVE_DEFAULT}`}
           title={activeView ? `${activeView.tooltip} — switch view` : "Switch view"}
         >
-          {activeView?.icon}
+          {activeView && VIEW_ICONS[activeView.id]}
           <span>{activeView?.toolbarLabel ?? "View"}</span>
           {butlerBadgeCount > 0 && (
             <span className="ml-0.5 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-semibold leading-none text-white" aria-label={`${butlerBadgeCount} pending agent questions`}>
@@ -563,7 +564,7 @@ export function BoardToolbar({
                   className={`flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs transition-colors ${isActive ? activeClass : INACTIVE}`}
                   title={view.tooltip}
                 >
-                  {view.icon}
+                  {VIEW_ICONS[view.id]}
                   <span className="flex-1">{view.label}</span>
                   {showBadge && (
                     <span className="inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-semibold leading-none text-white">
@@ -606,7 +607,7 @@ export function BoardToolbar({
               >
                 {activeMoreView ? (
                   <>
-                    {activeMoreView.icon}
+                    {VIEW_ICONS[activeMoreView.id]}
                     {activeMoreView.toolbarLabel}
                   </>
                 ) : (
@@ -634,7 +635,7 @@ export function BoardToolbar({
                         className={`w-full text-left px-2.5 py-1.5 text-xs rounded flex items-center gap-2 transition-colors ${isActive ? activeClass : INACTIVE}`}
                         title={`${view.tooltip}${shortcutHint}`}
                       >
-                        {view.icon}
+                        {VIEW_ICONS[view.id]}
                         <span className="flex-1">{view.label}</span>
                         {view.shortcut && (
                           <kbd className="text-[10px] font-mono opacity-60">{view.shortcut}</kbd>

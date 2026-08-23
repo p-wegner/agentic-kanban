@@ -5,6 +5,7 @@ import { usePluginViewStore } from "../stores/pluginViewStore.js";
 import type { ViewDescriptor, ViewMode } from "../lib/viewRegistry.js";
 import { useDismissable } from "../hooks/useDismissable.js";
 import { Icon } from "./Icon.js";
+import { VIEW_ICONS } from "./viewIcons.js";
 
 // Mirrors BoardToolbar's tab styling constants (kept local — BoardToolbar imports us).
 const ACTIVE_DEFAULT = "bg-brand-600 text-white hover:bg-brand-700";
@@ -75,7 +76,7 @@ export function PluginViewsTab({ view, viewMode, onViewModeChange, projectId, me
       title={measuring ? undefined : view.tooltip}
       data-testid={measuring ? undefined : "plugin-views-tab"}
     >
-      {view.icon}
+      {VIEW_ICONS[view.id]}
       {view.toolbarLabel}
       <Icon className={`w-3 h-3 transition-transform ${open ? "rotate-180" : ""}`} d="M6 9l6 6 6-6" />
     </button>
