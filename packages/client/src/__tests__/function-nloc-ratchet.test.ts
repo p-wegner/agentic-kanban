@@ -1,8 +1,7 @@
 // @gate:always-run — walks the client src tree with the TS compiler; imports nothing it measures.
 import { describe, expect, it } from "vitest";
-import fs from "node:fs";
 import path from "node:path";
-import ts from "typescript";
+import { compareNlocRatchet, measureFunctionNloc } from "../../../shared/__tests__/helpers/function-nloc.js";
 import { FUNCTION_NLOC_BASELINE, SHRINK_GRACE, LIST_THRESHOLD } from "./function-nloc-baseline.js";
 
 /**
@@ -66,138 +65,17 @@ import { FUNCTION_NLOC_BASELINE, SHRINK_GRACE, LIST_THRESHOLD } from "./function
  */
 const CLIENT_SRC = path.join(import.meta.dirname!, "..");
 
-function sourceFiles(dir: string): string[] {
-  const out: string[] = [];
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, e.name);
-    if (e.isDirectory()) {
-      if (!["__tests__", "node_modules", "dist"].includes(e.name)) out.push(...sourceFiles(full));
-      continue;
-    }
-    if (/\.tsx?$/.test(e.name) && !e.name.includes(".test.") && !e.name.endsWith(".d.ts")) out.push(full);
-  }
-  return out;
-}
-
-function isFunctionLike(node: ts.Node): boolean {
-  return (
-    ts.isFunctionDeclaration(node) ||
-    ts.isFunctionExpression(node) ||
-    ts.isArrowFunction(node) ||
-    ts.isMethodDeclaration(node)
-  );
-}
-
 /**
- * The name a function is FOUND BY: its own for a declaration or method, otherwise the
- * `const`/property it is assigned to — which is how every handler in these files is written.
- */
-function nameOf(node: ts.Node): string {
-  if ((ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node)) && node.name) return node.name.getText();
-  const parent = node.parent;
-  if (parent && ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)) return parent.name.getText();
-  if (parent && ts.isPropertyAssignment(parent) && parent.name) return parent.name.getText();
-  return "(anonymous)";
-}
-
-/**
- * Lines in `[startLine, endLine]` that are neither blank nor comment-only.
+ * #800 lifted the scanner and the comparison into
+ * `packages/shared/__tests__/helpers/function-nloc.ts`, unchanged, so the client ring and the
+ * server ring measure with ONE definition. They lived inline here because the client tsconfig
+ * has no node types outside `*.test.ts`; a test-only helper in `shared/__tests__` has them and
+ * is imported by relative path, which is how every other guard suite reaches that machinery.
  *
- * This is the definition the baseline was measured under, so the comparison is self
- * consistent; it is deliberately not an attempt to reproduce any particular tool's counter.
+ * The extraction was verified by measuring this tree with both scanners and diffing:
+ * 1434 units, 0 differences, so no number in the baseline moved because of the move.
  */
-function countNloc(source: string, startLine: number, endLine: number): number {
-  const lines = source.split(/\r?\n/).slice(startLine, endLine + 1);
-  let n = 0;
-  let inBlock = false;
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (inBlock) {
-      const close = line.indexOf("*/");
-      if (close < 0) continue;
-      inBlock = false;
-      if (!line.slice(close + 2).trim()) continue;
-      n++;
-      continue;
-    }
-    if (!line) continue;
-    if (line.startsWith("//")) continue;
-    if (line.startsWith("/*")) {
-      if (!line.includes("*/")) inBlock = true;
-      if (!line.replace(/\/\*[\s\S]*?\*\//g, "").trim()) continue;
-    }
-    n++;
-  }
-  return n;
-}
-
-/**
- * `path::name` -> nloc, for every OUTERMOST function in the client tree.
- *
- * Outermost only: counting a component AND each handler inside it would double-count the same
- * lines, and would let a component be "shrunk" by hoisting a handler that still sits in the
- * same file.
- */
-function measureClient(): Record<string, number> {
-  const measured: Record<string, number> = {};
-  for (const file of sourceFiles(CLIENT_SRC)) {
-    const source = fs.readFileSync(file, "utf8");
-    const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-    const rel = path.relative(CLIENT_SRC, file).replaceAll("\\", "/");
-    const visit = (node: ts.Node, inside: boolean): void => {
-      let nowInside = inside;
-      if (isFunctionLike(node) && !inside) {
-        const startLine = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line;
-        const endLine = sf.getLineAndCharacterOfPosition(node.getEnd()).line;
-        const key = `${rel}::${nameOf(node)}`;
-        const nloc = countNloc(source, startLine, endLine);
-        // Same key twice in one file (several `(anonymous)`): keep the largest, so a second
-        // tiny declaration cannot make the measurement drop and read as progress.
-        measured[key] = Math.max(measured[key] ?? 0, nloc);
-        nowInside = true;
-      }
-      ts.forEachChild(node, (child) => visit(child, nowInside));
-    };
-    ts.forEachChild(sf, (child) => visit(child, false));
-  }
-  return measured;
-}
-
-interface Verdict {
-  grew: string[];
-  vanished: string[];
-  stale: string[];
-  unlisted: string[];
-}
-
-/**
- * The four ways this ring can be violated. Separated from the measurement so the last
- * describe block can drive it with synthetic input and prove each one actually reports.
- */
-export function compareNlocRatchet(
-  baseline: Readonly<Record<string, number>>,
-  measured: Readonly<Record<string, number>>,
-  grace: readonly string[],
-  threshold: number,
-): Verdict {
-  const grew: string[] = [];
-  const vanished: string[] = [];
-  const stale: string[] = [];
-  const unlisted: string[] = [];
-  for (const [key, allowed] of Object.entries(baseline)) {
-    const found = measured[key];
-    if (found === undefined) {
-      vanished.push(`${key}: no longer declared — delete this baseline entry`);
-      continue;
-    }
-    if (found > allowed) grew.push(`${key}: ${found} > baseline ${allowed}`);
-    else if (found < allowed && !grace.includes(key)) stale.push(`${key}: ${found} < baseline ${allowed} — lower it to ${found}`);
-  }
-  for (const [key, found] of Object.entries(measured)) {
-    if (found >= threshold && !(key in baseline)) unlisted.push(`${key}: ${found} (NEW offender — not in the baseline)`);
-  }
-  return { grew, vanished, stale, unlisted };
-}
+const measureClient = (): Record<string, number> => measureFunctionNloc(CLIENT_SRC);
 
 describe("client function nloc is a shrink-only ring (#763)", () => {
   const measured = measureClient();
@@ -236,6 +114,7 @@ describe("client function nloc is a shrink-only ring (#763)", () => {
     const ghosts = SHRINK_GRACE.filter((k) => !(k in FUNCTION_NLOC_BASELINE));
     expect(ghosts).toEqual([]);
   });
+
 });
 
 describe("compareNlocRatchet reports each violation (the proof this gate can fail)", () => {
