@@ -77,9 +77,11 @@ const BASELINE: Record<string, number> = {
   // `setWorkspaceStatus`) — both provably carry no `status` column; the opaque-`.set(var)`
   // heuristic can't see that statically, so they stay grandfathered rather than migrated.
   "server/src/repositories/workspace-crud.repository.ts::workspaces-opaque-set": 2,
-  // `persistScorecard` — values type is `{scorecardScore, scorecardJson, scorecardComputedAt}`,
-  // no `status` field. Provable non-status write caught only by the opaque-set heuristic.
-  "server/src/repositories/workspace-scorecard.repository.ts::workspaces-opaque-set": 1,
+  // `workspace-scorecard.repository.ts::workspaces-opaque-set` is GONE, not zeroed.
+  // `persistScorecard` was a provable non-status write (`{scorecardScore, scorecardJson,
+  // scorecardComputedAt}`) that only the opaque-`.set(var)` heuristic flagged; #815's
+  // migration 0143 moved those three columns to `workspace_scorecard`, so it no longer
+  // writes `workspaces` at all. Same story as the summary repo above.
   // `workspace-summary.repository.ts::workspaces-opaque-set` is GONE, not zeroed. It was 2
   // (`updateWorkspaceConflictCache` + `updateWorkspaceDiffStatCache`), then 1 when #815's
   // migration 0139 moved the conflict memo to its own table, and now 0: migration 0142 moved

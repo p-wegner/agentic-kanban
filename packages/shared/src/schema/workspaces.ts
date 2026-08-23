@@ -4,20 +4,21 @@ import { issues } from "./issues.js";
 import { agentSkills } from "./agent-skills.js";
 
 /**
- * 41 columns, and it should not become 42 (#739, #781, #798, #815).
+ * 38 columns, and it should not become 39 (#739, #781, #798, #815).
  *
  * The next widest table in this schema has 23 (`issues`, `repos`); the median across 44
- * tables is 9. What is here is not one entity but two remaining concerns flattened into one row by
- * prefix — `scorecard_*` (3) and `fork_*`/`showdown_*` (5). Nine families are no longer
- * among them:
+ * tables is 9. ONE prefix-family is left — `fork_*`/`showdown_*` (5) — and it is permanently
+ * out of scope: both halves are index-encumbered and all-NULL on the live instance, so no
+ * local data can prove a backfill. Ten families are gone:
  * #781 extracted `merge_backoff_*` (7) to `workspace_merge_backoff`, #798 extracted
  * `review_preflight_*` (4), `code_metrics_*` (2) and `latest_symlink_*` (8) to
  * `workspace_review_preflight`, `workspace_code_metrics` and `workspace_symlink_run`, and
  * #815 extracted `merge_gate_*` (5), `conflict_cache_*` (3), `latest_setup_*` (8),
- * `summary_*` (5) and `diff_stat_cache_*` (5) to `workspace_merge_gate`,
- * `workspace_conflict_cache`, `workspace_setup_run`, `workspace_summary` and
- * `workspace_diff_stat_cache`.
- * The one family still queued for extraction is `scorecard_*` (highest fan-out, last).
+ * `summary_*` (5), `diff_stat_cache_*` (5) and `scorecard_*` (3) to `workspace_merge_gate`,
+ * `workspace_conflict_cache`, `workspace_setup_run`, `workspace_summary`,
+ * `workspace_diff_stat_cache` and `workspace_scorecard`.
+ * The extraction sequence #781 opened and #798/#815 carried is therefore COMPLETE for every
+ * family that had a provable backfill.
  * Each `latest_*` / `*_cache_*` / `*_gate_*` group is a one-to-many relationship collapsed
  * to its last row: there is one setup run per column set, so its history is unrecoverable by
  * construction, and any new field on any of those concerns is another `ALTER TABLE` on the
@@ -86,9 +87,6 @@ export const workspaces = sqliteTable("workspaces", {
    * the feature branch ref is gone.
    */
   mergedHeadSha: text("merged_head_sha"),
-  scorecardScore: integer("scorecard_score"),
-  scorecardJson: text("scorecard_json"),
-  scorecardComputedAt: text("scorecard_computed_at"),
   /** Latest pre-session agent launch failure, e.g. safety-policy preflight refusal. */
   latestLaunchError: text("latest_launch_error"),
   /** Context primer assembled by the context-packer at workspace creation. Injected into CLAUDE.local.md. */

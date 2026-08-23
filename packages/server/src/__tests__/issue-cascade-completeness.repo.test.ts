@@ -224,6 +224,14 @@ const SUBTREE_SEEDERS: Record<string, (c: SeedCtx) => Promise<void>> = {
       filesChanged: 4, insertions: 120, deletions: 7,
     });
   },
+  // #815: the tenth column family extracted out of `workspaces` — the computed PR-quality
+  // scorecard. Same `onDelete: cascade` shape, so seeding it proves the cascade fires.
+  workspace_scorecard: async (c) => {
+    await c.db.insert(schema.workspaceScorecard).values({
+      workspaceId: c.workspaceId, score: 88,
+      json: '[{"name":"Tests","score":10,"maxScore":10,"signal":"green"}]', computedAt: c.now,
+    });
+  },
   sessions: async (c) => {
     await c.db.insert(schema.sessions).values({
       id: c.sessionId, workspaceId: c.workspaceId, status: "running", startedAt: c.now,

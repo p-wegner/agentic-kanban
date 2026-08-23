@@ -1,5 +1,5 @@
 import { eq, inArray, gte, lte, and } from "drizzle-orm";
-import { issues, workspaces, sessions, diffComments, issueDependencies } from "@agentic-kanban/shared/schema";
+import { issues, workspaces, sessions, diffComments, issueDependencies, workspaceScorecard } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 
@@ -65,7 +65,9 @@ export async function getReviewEffectivenessSessionRows(
       readyForMerge: workspaces.readyForMerge,
       requiresReview: workspaces.requiresReview,
       thoroughReview: workspaces.thoroughReview,
-      scorecardScore: workspaces.scorecardScore,
+      // #815: the scorecard artifact moved to `workspace_scorecard`. Aliased back to the same
+      // field name, so the aggregation shapes downstream are untouched by the move.
+      scorecardScore: workspaceScorecard.score,
       issueNumber: issues.issueNumber,
       issueTitle: issues.title,
       issueType: issues.issueType,
@@ -73,6 +75,9 @@ export async function getReviewEffectivenessSessionRows(
     .from(sessions)
     .innerJoin(workspaces, eq(sessions.workspaceId, workspaces.id))
     .innerJoin(issues, eq(workspaces.issueId, issues.id))
+    // #815: LEFT, not inner — an unscored workspace's sessions must still be counted, or the
+    // effectiveness report silently omits every ticket that has not been scored yet.
+    .leftJoin(workspaceScorecard, eq(workspaceScorecard.workspaceId, workspaces.id))
     .where(and(...conditions))
     .orderBy(sessions.startedAt);
 }

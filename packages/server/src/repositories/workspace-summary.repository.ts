@@ -1,4 +1,4 @@
-import { workspaces, sessions, sessionMessages, showdowns, workflowEdges, workflowNodes, repos, issues, workspaceCodeMetrics, workspaceConflictCache, workspaceSummary, workspaceDiffStatCache } from "@agentic-kanban/shared/schema";
+import { workspaces, sessions, sessionMessages, showdowns, workflowEdges, workflowNodes, repos, issues, workspaceCodeMetrics, workspaceConflictCache, workspaceSummary, workspaceDiffStatCache, workspaceScorecard } from "@agentic-kanban/shared/schema";
 import { and, eq, inArray, sql, desc } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import { db } from "../db/index.js";
@@ -76,7 +76,9 @@ export async function fetchWorkspaceDetailRows(issueIds: string[], database: Dat
       diffStatCacheFilesChanged: workspaceDiffStatCache.filesChanged,
       diffStatCacheInsertions: workspaceDiffStatCache.insertions,
       diffStatCacheDeletions: workspaceDiffStatCache.deletions,
-      scorecardScore: workspaces.scorecardScore,
+      // #815: the scorecard artifact moved to `workspace_scorecard`. Aliased back to the same
+      // field name, so every consumer of this projected row is untouched by the move.
+      scorecardScore: workspaceScorecard.score,
       // #798: the artifact moved to `workspace_code_metrics`. Aliased back to the same two
       // field names, so every consumer of this projected row is untouched by the move.
       codeMetricsJson: workspaceCodeMetrics.metricsJson,
@@ -97,6 +99,9 @@ export async function fetchWorkspaceDetailRows(issueIds: string[], database: Dat
     // #815: LEFT, not inner — a never-diffed workspace has no memo row and must still be
     // returned, or the board silently loses every workspace it has not yet diffed.
     .leftJoin(workspaceDiffStatCache, eq(workspaceDiffStatCache.workspaceId, workspaces.id))
+    // #815: LEFT, not inner — a workspace whose first session has not ended yet has no
+    // scorecard row and must still be returned, which is most of the board at any moment.
+    .leftJoin(workspaceScorecard, eq(workspaceScorecard.workspaceId, workspaces.id))
     .where(inArray(workspaces.issueId, issueIds));
 }
 

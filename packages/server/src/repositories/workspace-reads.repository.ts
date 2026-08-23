@@ -8,6 +8,7 @@ import {
   workspaceConflictCache,
   workspaceSetupRun,
   workspaceDiffStatCache,
+  workspaceScorecard,
 } from "@agentic-kanban/shared/schema";
 import { desc, eq, inArray, notInArray, and, isNotNull, ne, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
@@ -155,7 +156,9 @@ export async function getWorkspaceDetails(
       diffStatCacheFilesChanged: workspaceDiffStatCache.filesChanged,
       diffStatCacheInsertions: workspaceDiffStatCache.insertions,
       diffStatCacheDeletions: workspaceDiffStatCache.deletions,
-      scorecardScore: workspaces.scorecardScore,
+      // #815: the scorecard artifact moved to `workspace_scorecard`. Aliased back to the same
+      // field name, so every consumer of this projected row is untouched by the move.
+      scorecardScore: workspaceScorecard.score,
       // #815: the setup run moved to `workspace_setup_run`. Aliased back to the same eight
       // field names, so the projection and the DTO it builds are untouched.
       latestSetupCommand: workspaceSetupRun.command,
@@ -196,6 +199,8 @@ export async function getWorkspaceDetails(
     .leftJoin(workspaceSetupRun, eq(workspaceSetupRun.workspaceId, workspaces.id))
     // #815: LEFT, not inner — a never-diffed workspace has no memo row and must still read.
     .leftJoin(workspaceDiffStatCache, eq(workspaceDiffStatCache.workspaceId, workspaces.id))
+    // #815: LEFT, not inner — an unscored workspace must still read.
+    .leftJoin(workspaceScorecard, eq(workspaceScorecard.workspaceId, workspaces.id))
     .where(eq(workspaces.id, workspaceId));
 
   if (result.length === 0) return null;

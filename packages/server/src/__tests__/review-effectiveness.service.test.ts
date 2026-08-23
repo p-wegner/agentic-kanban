@@ -48,10 +48,16 @@ async function makeWorkspace(
     provider: opts.provider ?? "claude",
     readyForMerge: !!opts.merged,
     mergedAt: opts.merged ? (opts.mergedAt ?? at(60)) : null,
-    scorecardScore: opts.scorecard ?? null,
     createdAt: at(0),
     updatedAt: at(0),
   });
+  // #815: the scorecard moved to `workspace_scorecard`. No row at all is exactly what a NULL
+  // `scorecard_score` was — never scored — so the default case seeds nothing.
+  if (opts.scorecard !== undefined && opts.scorecard !== null) {
+    await db.insert(schema.workspaceScorecard).values({
+      workspaceId: id, score: opts.scorecard, computedAt: at(0),
+    });
+  }
   return id;
 }
 

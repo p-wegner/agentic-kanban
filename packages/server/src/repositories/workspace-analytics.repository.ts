@@ -2,7 +2,7 @@
 // Pure aggregation-source reads for the dashboard routes; the route owns the
 // date-axis / bucketing / rollup computation over the returned rows.
 
-import { workspaces, issues, sessions } from "@agentic-kanban/shared/schema";
+import { workspaces, issues, sessions, workspaceScorecard } from "@agentic-kanban/shared/schema";
 import { eq, and, gte, inArray, isNotNull, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -74,14 +74,18 @@ export async function getActiveWorkspacesForProject(projectId: string, database:
 /** Non-null scorecard scores for workspaces created since `cutoffDay` (scorecard histogram). */
 export async function getScorecardScores(projectId: string, cutoffDay: string, database: Database = db) {
   return database
-    .select({ score: workspaces.scorecardScore })
+    // #815: the scorecard artifact moved to `workspace_scorecard`. INNER, not left, and that
+    // is not an oversight: this query already filtered `IS NOT NULL`, so a workspace with no
+    // row has no score — exactly what the filter meant before the move.
+    .select({ score: workspaceScorecard.score })
     .from(workspaces)
     .innerJoin(issues, eq(workspaces.issueId, issues.id))
+    .innerJoin(workspaceScorecard, eq(workspaceScorecard.workspaceId, workspaces.id))
     .where(
       and(
         eq(issues.projectId, projectId),
         gte(workspaces.createdAt, cutoffDay),
-        isNotNull(workspaces.scorecardScore),
+        isNotNull(workspaceScorecard.score),
       ),
     );
 }

@@ -1,4 +1,4 @@
-import { issues, workspaces, projectStatuses, tags, issueTags, issueDependencies, issueArtifacts, agentSkills, workspaceSymlinkRun, workspaceConflictCache, workspaceSetupRun, workspaceDiffStatCache } from "@agentic-kanban/shared/schema";
+import { issues, workspaces, projectStatuses, tags, issueTags, issueDependencies, issueArtifacts, agentSkills, workspaceSymlinkRun, workspaceConflictCache, workspaceSetupRun, workspaceDiffStatCache, workspaceScorecard } from "@agentic-kanban/shared/schema";
 import { loadIssueSummary, type IssueSummaryResult } from "@agentic-kanban/shared/lib/issue-summary";
 import { parseIssueRef } from "@agentic-kanban/shared/lib/issue-ref";
 import { DEFAULT_PROJECT_STATUSES, buildProjectStatusRows, statusIdsByName } from "@agentic-kanban/shared/lib/project-statuses";
@@ -405,7 +405,9 @@ export async function getIssueWorkspaces(
       diffStatCacheFilesChanged: workspaceDiffStatCache.filesChanged,
       diffStatCacheInsertions: workspaceDiffStatCache.insertions,
       diffStatCacheDeletions: workspaceDiffStatCache.deletions,
-      scorecardScore: workspaces.scorecardScore,
+      // #815: the scorecard artifact moved to `workspace_scorecard`. Aliased back to the same
+      // field name, so every consumer of this projected row is untouched by the move.
+      scorecardScore: workspaceScorecard.score,
       serviceState: workspaces.serviceState,
     })
     .from(workspaces)
@@ -418,6 +420,9 @@ export async function getIssueWorkspaces(
     // #815: LEFT, not inner — a never-diffed workspace has no memo row and must still be
     // returned, or every read below silently loses it.
     .leftJoin(workspaceDiffStatCache, eq(workspaceDiffStatCache.workspaceId, workspaces.id))
+    // #815: LEFT, not inner — a workspace whose first session has not ended has no
+    // scorecard row and must still read.
+    .leftJoin(workspaceScorecard, eq(workspaceScorecard.workspaceId, workspaces.id))
     .where(eq(workspaces.issueId, issueId));
 }
 
