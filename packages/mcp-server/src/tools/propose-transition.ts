@@ -1,24 +1,20 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { and, eq, ne } from "drizzle-orm";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { notifyWorkflowAdvanced } from "../notify.js";
 import { mcpText } from "../db-utils.js";
-import {
-  proposeTransition,
-  getOutgoingTransitions,
-  computeWorkspaceSignals,
-} from "@agentic-kanban/shared/lib/workflow-engine";
+import { advanceWorkflow, resolveWorkflowWorkspaceId } from "./workflow-transition-support.js";
+import { getOutgoingTransitions } from "@agentic-kanban/shared/lib/workflow-engine";
 
 /**
  * Advance a workspace to the next stage of its configurable workflow graph.
  * The agent calls this when a stage's work is complete; the engine validates
  * the transition against the graph's edges, enforces the per-node visit budget,
  * records the transition (history → analytics), and syncs the board status.
+ *
+ * The resolve/advance body is shared with `clarify_or_propose` (#772) — see
+ * `workflow-transition-support.ts`.
  */
 export function registerProposeTransition(server: McpServer, deps: ToolDeps = prodDeps) {
-  const { db, schema, notifyBoard } = deps;
-
   server.tool(
     "propose_transition",
     "Advance the current issue's workflow to the next stage. Call this when the work for the current stage is done. Pass the workspaceId from your workflow instructions (or the issueId), the target stage name (toNodeName), and a short summary of what you completed.",
@@ -33,59 +29,32 @@ export function registerProposeTransition(server: McpServer, deps: ToolDeps = pr
     async ({ workspaceId, issueId, toNodeName, toNodeId, summary, testsPassed }) => {
 
       // Resolve the workspace: explicit id, else the active workspace for the issue.
-      let resolvedWorkspaceId = workspaceId;
-      if (!resolvedWorkspaceId && issueId) {
-        const rows = await db
-          .select({ id: schema.workspaces.id, status: schema.workspaces.status })
-          .from(schema.workspaces)
-          .where(and(eq(schema.workspaces.issueId, issueId), ne(schema.workspaces.status, "closed")))
-          .orderBy(schema.workspaces.createdAt);
-        if (rows.length > 0) resolvedWorkspaceId = rows[rows.length - 1].id;
-      }
+      const resolvedWorkspaceId = await resolveWorkflowWorkspaceId(deps, { workspaceId, issueId });
       if (!resolvedWorkspaceId) {
         return mcpText("Provide a workspaceId (from your workflow instructions) or an issueId with an active workspace.");
       }
 
-      const signals = await computeWorkspaceSignals(db, resolvedWorkspaceId, { testsPassed });
-
-      const result = await proposeTransition(db, {
+      const advanced = await advanceWorkflow(deps, {
         workspaceId: resolvedWorkspaceId,
         toNodeId,
         toNodeName,
         summary,
-        triggeredBy: "agent",
-        signals,
+        testsPassed,
+        reason: "mcp_propose_transition",
       });
+      if (!advanced.ok) return advanced.error;
 
-      if (!result.ok) {
-        return mcpText(result.error ?? "Transition failed.");
-      }
-
-      // Notify the board so the UI reflects the new stage/status.
-      const issueRows = await db
-        .select({ projectId: schema.issues.projectId })
-        .from(schema.workspaces)
-        .innerJoin(schema.issues, eq(schema.workspaces.issueId, schema.issues.id))
-        .where(eq(schema.workspaces.id, resolvedWorkspaceId))
-        .limit(1);
-      if (issueRows[0]?.projectId) {
-        notifyBoard(issueRows[0].projectId, "mcp_propose_transition");
-      }
-      // Trigger fork/join orchestration in the main server (separate process).
-      notifyWorkflowAdvanced(resolvedWorkspaceId);
-
-      const next = (result.nextTransitions ?? []).map((t) => t.toNodeName);
       return mcpText(
         JSON.stringify(
           {
             ok: true,
-            movedTo: result.toNode?.name,
-            autoRouted: result.autoResolved ?? false,
-            status: result.statusName,
-            terminal: next.length === 0,
-            nextStages: next,
+            movedTo: advanced.movedTo,
+            autoRouted: advanced.autoRouted,
+            status: advanced.status,
+            terminal: advanced.terminal,
+            nextStages: advanced.nextStages,
             guidance:
-              next.length === 0
+              advanced.terminal
                 ? "This is a terminal stage — the workflow is complete."
                 : "Continue working; when ready, call propose_transition again toward one of nextStages.",
           },

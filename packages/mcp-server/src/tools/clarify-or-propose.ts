@@ -1,14 +1,10 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { and, eq, ne } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { notifyWorkflowAdvanced } from "../notify.js";
 import { mcpText } from "../db-utils.js";
-import {
-  computeWorkspaceSignals,
-  proposeTransition,
-} from "@agentic-kanban/shared/lib/workflow-engine";
+import { advanceWorkflow, resolveWorkflowWorkspaceId } from "./workflow-transition-support.js";
 
 const questionSchema = z.object({
   question: z.string().describe("The question to show the user"),
@@ -38,15 +34,7 @@ export function registerClarifyOrPropose(server: McpServer, deps: ToolDeps = pro
     },
     async ({ action, workspaceId, issueId, questions, toNodeName, toNodeId, summary, testsPassed }) => {
 
-      let resolvedWorkspaceId = workspaceId;
-      if (!resolvedWorkspaceId && issueId) {
-        const rows = await db
-          .select({ id: schema.workspaces.id })
-          .from(schema.workspaces)
-          .where(and(eq(schema.workspaces.issueId, issueId), ne(schema.workspaces.status, "closed")))
-          .orderBy(schema.workspaces.createdAt);
-        if (rows.length > 0) resolvedWorkspaceId = rows[rows.length - 1].id;
-      }
+      const resolvedWorkspaceId = await resolveWorkflowWorkspaceId(deps, { workspaceId, issueId });
       if (!resolvedWorkspaceId) {
         return mcpText("Provide a workspaceId (from workflow instructions) or an issueId with an active workspace.");
       }
@@ -104,29 +92,25 @@ export function registerClarifyOrPropose(server: McpServer, deps: ToolDeps = pro
         }, null, 2));
       }
 
-      const signals = await computeWorkspaceSignals(db, resolvedWorkspaceId, { testsPassed });
-      const result = await proposeTransition(db, {
+      const advanced = await advanceWorkflow(deps, {
         workspaceId: resolvedWorkspaceId,
         toNodeId,
         toNodeName,
         summary,
-        triggeredBy: "agent",
-        signals,
+        testsPassed,
+        reason: "mcp_clarify_or_propose_transition",
+        projectId: ws.projectId,
       });
-      if (!result.ok) return mcpText(result.error ?? "Transition failed.");
+      if (!advanced.ok) return advanced.error;
 
-      notifyBoard(ws.projectId, "mcp_clarify_or_propose_transition");
-      notifyWorkflowAdvanced(resolvedWorkspaceId);
-
-      const next = (result.nextTransitions ?? []).map((t) => t.toNodeName);
       return mcpText(JSON.stringify({
         ok: true,
         action: "propose",
-        movedTo: result.toNode?.name,
-        autoRouted: result.autoResolved ?? false,
-        status: result.statusName,
-        terminal: next.length === 0,
-        nextStages: next,
+        movedTo: advanced.movedTo,
+        autoRouted: advanced.autoRouted,
+        status: advanced.status,
+        terminal: advanced.terminal,
+        nextStages: advanced.nextStages,
       }, null, 2));
     },
   );
