@@ -57,8 +57,18 @@ const BASELINE: Record<string, number> = {
   "services/git-info/repo-detect.ts": 6,
   "services/git-info/project-stats.ts": 32,
 
+  // --- split in #819 batch 2 ---
+  // devcontainer-workspace: 22 -> 17 + 5. Cut along CONSUMERS, not the tool's computed
+  // seams (`dockerexec` / `worktreepath` / `source` — an imported function, a parameter
+  // name and a JSON field). The teardown paths (workspace-cleanup, workspace-create,
+  // workspace-resource-release) import only `reapWorkspaceContainer`; the provisioning
+  // consumers (workspace-provision, session-manager/devcontainer-launch, startup-tasks,
+  // agent-dispatch) import nothing from the inventory half. One-way edge, no cycle, and
+  // the file had no module-level mutable state to tear.
+  "services/devcontainer-workspace.service.ts": 17,
+  "services/devcontainer-workspace/container-inventory.ts": 5,
+
   // --- named by #728, NOT split: the remainder this ratchet holds in place ---
-  "services/devcontainer-workspace.service.ts": 22,
   "services/butler-definitions.service.ts": 21,
 };
 
