@@ -258,6 +258,14 @@ describe("Butler provider selection", () => {
     const projectId = await createProject(db);
     sessionsToStop.push(projectId);
 
+    // The profile this test switches to must EXIST for the butler's profile resolution
+    // (`launch-config.ts` keeps a per-project override only when it is in
+    // `listProfilesForProvider`). That list is read from the machine's home dir, so
+    // relying on a `~/.claude/settings_anth.json` being present made the test pass on a
+    // dev box and fail on a clean CI runner (#828). Seed it through the rotation ring —
+    // a DB preference — so the fixture owns its own precondition.
+    await setPreference("claude_subscription_ring", JSON.stringify([{ profile: "anth", settingsProfile: "anth" }]), db);
+
     const ensureRes = await app.request(`/api/projects/${projectId}/butler/ensure`, {
       method: "POST",
       body: "{}",
