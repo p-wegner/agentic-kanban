@@ -37,7 +37,8 @@ import {
   type SyncOutcome,
 } from "./worker-remote-sync.service.js";
 import { getAllProjects } from "../repositories/project.repository.js";
-import { listWorkerAssignedBranches } from "../repositories/worker.repository.js";
+import { listWorkerAssignedBranches, listWorkerBranchAssignments } from "../repositories/worker.repository.js";
+import { recordWorkerEvent } from "./worker-events.service.js";
 import { db as realDb } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { emptyPassReport, recordActed, recordSkipped, type PassReport } from "../lib/pass-report.js";
@@ -284,6 +285,19 @@ export async function discardIncomingRef(
   return { ok: true, sha: view.sha };
 }
 
+/**
+ * Which worker+session pushed this branch, from the newest dispatch that names it.
+ * `listWorkerBranchAssignments` already sorts newest-first, so the head is the dispatch
+ * that could have produced today's ref — an older, recycled `ak-<N>` must not be credited.
+ */
+function ownerFor(
+  assignments: Array<{ workerId: string; sessionId: string; branch: string }>,
+  branch: string,
+): { workerId: string; sessionId: string } | null {
+  const match = assignments.find((a) => a.branch === branch);
+  return match ? { workerId: match.workerId, sessionId: match.sessionId } : null;
+}
+
 export interface IncomingReclaimResult extends PassReport {
   reclaimed: Array<{ projectId: string; branch: string; sha: string; reason: string }>;
   /** Held refs left in place, with the reason — the visible half of "reported and held". */
@@ -300,6 +314,17 @@ export async function reclaimLandedIncomingRefs(
   opts: { nowMs?: number; projectId?: string } = {},
 ): Promise<IncomingReclaimResult> {
   const { refs } = await listIncomingRefs(database, opts);
+  // One assignment read per PROJECT per pass, memoized — a sweep over a namespace with
+  // twenty held refs must not become twenty identical joins.
+  const assignmentsByProject = new Map<string, Promise<Awaited<ReturnType<typeof listWorkerBranchAssignments>>>>();
+  const assignmentsFor = (projectId: string) => {
+    let pending = assignmentsByProject.get(projectId);
+    if (!pending) {
+      pending = listWorkerBranchAssignments(projectId, database).catch(() => []);
+      assignmentsByProject.set(projectId, pending);
+    }
+    return pending;
+  };
   const result: IncomingReclaimResult = { ...emptyPassReport(refs.length), reclaimed: [], held: [] };
   const repoByProject = new Map<string, string>();
   for (const project of await loadProjectRepos(database, opts.projectId)) {
@@ -320,14 +345,42 @@ export async function reclaimLandedIncomingRefs(
       console.log(`[worker-incoming] reclaimed ${view.ref} — ${view.heldReason}`);
       continue;
     }
+    const reason = view.heldReason ?? "landable, not yet landed";
     result.held.push({
       projectId: view.projectId,
       branch: view.branch,
-      reason: view.heldReason ?? "landable, not yet landed",
+      reason,
       ageMs: view.ageMs,
       stale: view.stale,
     });
-    recordSkipped(result, view.branch, view.heldReason ?? "landable");
+    // #801 — "reported and held" now leaves a durable row on the worker that pushed it,
+    // beside the `ref_landed`/`ref_discarded` rows the operator actions already write.
+    // A held ref is the shape of the worst fleet failure there is (an hour of an agent's
+    // work sitting in a namespace nobody enumerates), and until now the only record of it
+    // was the return value of this pass plus a boot log line.
+    //
+    // Attribution is best-effort and DELIBERATELY not a reason to skip the pass: a ref
+    // with no dispatch behind it (`heldReason` = "no worker assignment") has no worker to
+    // hang the event on, and inventing one would be worse than the gap.
+    const owner = ownerFor(await assignmentsFor(view.projectId), view.branch);
+    if (owner) {
+      void recordWorkerEvent({
+        database,
+        workerId: owner.workerId,
+        sessionId: owner.sessionId,
+        type: "ref_held",
+        summary: `incoming ref for ${view.branch} is held: ${reason}`,
+        payload: {
+          projectId: view.projectId,
+          branch: view.branch,
+          sha: view.sha,
+          reason,
+          ageMs: view.ageMs,
+          stale: view.stale,
+        },
+      });
+    }
+    recordSkipped(result, view.branch, reason);
   }
   return result;
 }

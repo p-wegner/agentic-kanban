@@ -373,16 +373,36 @@ agentic-kanban worker events <workerId>          # newest first; --limit, --json
 - MCP: not exposed as its own tool — `list_workers` gives the ids, and the timeline is a
   read for an operator rather than something an agent decides on.
 
-**What is recorded today, and what is not.** Honest list, because a declared-but-unwritten
-event type reads like a promise: `registered`, `protocol_mismatch`, `ref_landed` and
-`ref_discarded` are written. `connected`, `disconnected`, `assigned`, `session_exit`,
-`ref_held` and `status_change` are declared in the vocabulary and **not yet emitted** —
-their call sites are in `fleet-listener.service.ts`, `agent-remote.service.ts`,
-`worker-incoming-refs.service.ts` and the registry, none of which #774 owned. The split is
-data (`EMITTED_TYPES` / `UNEMITTED_TYPES` in `services/worker-events.service.ts`) and
-pinned by `worker-events-emitter-coverage.test.ts`, which fails in BOTH directions — so it
-cannot rot into a false claim either way. Wiring the rest is **#801**, which names the file
-each missing emitter belongs in.
+**What is recorded, and where each one is written.** #774 could emit four of the ten types;
+#801 wired the other six, so the vocabulary and what the board actually writes are now the
+same list:
+
+| Type(s) | Written by |
+|---|---|
+| `registered`, `protocol_mismatch`, `ref_landed`, `ref_discarded` | `routes/workers.ts` |
+| `connected`, `disconnected` | `services/worker-fleet.service.ts` |
+| `assigned`, `session_exit` | `services/agent-remote-events.ts` |
+| `ref_held` | `services/worker-incoming-refs.service.ts` |
+| `status_change` | `services/worker-registry.service.ts` |
+
+Two of those placements differ from the ones #801's ticket text predicted, for reasons worth
+knowing. `connected`/`disconnected` are wired at the fleet's composition root rather than in
+`fleet-listener.service.ts`, because the listener is only one of the two ways a worker
+connects — a same-machine worker dials the board's main port, whose WebSocket route is built
+from the same connection manager — and the composition root is the only place that sees both.
+`status_change` is observed where the board COMPUTES effective status (`listWorkersView`)
+rather than on the heartbeat, because the transition that matters after a failure is
+`online -> offline`, which happens when a heartbeat STOPS arriving and so has no event of its
+own. Only transitions are recorded, and a worker's first sighting seeds silently: a row per
+30 s heartbeat would spend the whole per-worker retention budget on noise, and "the board
+rebooted" is not a fact about the worker.
+
+The split is still data (`EMITTED_TYPES` / `UNEMITTED_TYPES` in
+`services/worker-events.service.ts`) and still pinned by
+`worker-events-emitter-coverage.test.ts`, which fails in BOTH directions. `UNEMITTED_TYPES`
+is empty today and is kept rather than deleted: an empty list plus the guard is what makes
+the NEXT declared-but-unwired type a test failure instead of a silent false claim in the
+panel's legend.
 
 There is no `revoked` event, deliberately: revoking a worker DELETES its whole timeline, so
 such a row would be written and dropped in the same breath.
@@ -407,6 +427,31 @@ diagnose the fleet does not hand-roll curl against a port it has to guess:
 
 `get_fleet_friction` is an **unrelated** tool whose name collides — it aggregates agent
 tool-call friction and has nothing to do with worker machines.
+
+### 7c. Why did THAT session run where it did? (#801)
+
+§7 re-derives the chain against LIVE state and §7a records what the FLEET looked like at the
+time. Neither answers "why did that session run on the board host last Tuesday", and a
+re-derivation never can: the preferences, the fleet's membership and the project's repo shape
+have all moved since.
+
+So `resolveWorkerPlacement` now stamps its own verdict onto the decision it returns, and the
+session lifecycle persists it on the session row (`sessions.placement_reason` +
+`placement_detail`, migration 0133). The id is the same `PlacementCheckId` vocabulary §7 uses
+— deliberately, so a historical record and a live explanation cannot disagree about what to
+call a step — plus `resolver_error` for the catch-all host fallback, which is not a check.
+
+```bash
+agentic-kanban worker placements --limit 20
+#   2026-08-23T09:12:04Z #801 claude [completed] on host
+#       why: repo_transport_shape — project ... has submodules
+```
+
+Also on `GET /api/workers/placements` and in `explain_worker_placement`'s `sessions` array.
+
+Both columns are NULLABLE and stay null for a session dispatched before this landed, and for
+one whose placement was passed in explicitly rather than resolved — "not recorded" and "host
+by default" have to stay distinguishable, so nothing is backfilled and nothing is defaulted.
 
 ## 8. Two traps that fail with no visible cause
 

@@ -21,6 +21,9 @@ export interface SessionPlacementRow {
   startedAt: string;
   endedAt: string | null;
   workerId: string | null;
+  /** The deciding check the resolver stamped at dispatch (#801). Null = not recorded. */
+  placementReason: string | null;
+  placementDetail: string | null;
 }
 
 export interface SessionPlacementQuery {
@@ -59,6 +62,8 @@ export async function listSessionPlacementRows(
       startedAt: sessions.startedAt,
       endedAt: sessions.endedAt,
       workerId: sessions.workerId,
+      placementReason: sessions.placementReason,
+      placementDetail: sessions.placementDetail,
     })
     .from(sessions)
     .leftJoin(workspaces, eq(sessions.workspaceId, workspaces.id))
@@ -86,6 +91,30 @@ export async function getWorkerNamesByIds(
     .from(workers)
     .where(inArray(workers.id, unique));
   return new Map(rows.map((r) => [r.id, r.name]));
+}
+
+/**
+ * Stamp the resolver's verdict onto the session row (#801).
+ *
+ * A WRITE in an otherwise read-only module, and it belongs here rather than in the general
+ * session repository for the reason the header gives: this is the placement-observability
+ * aggregate, and the column exists only so `listSessionPlacementRows` can answer WHY beside
+ * WHERE. Splitting the write from the read it serves would put two halves of one fact in
+ * two files.
+ *
+ * Best-effort by contract, exactly like `updateSessionContainerId`: a diagnostic that can
+ * fail a launch is worse than a missing diagnostic. Callers do not await it into their
+ * critical path.
+ */
+export async function updateSessionPlacementReason(
+  sessionId: string,
+  reason: { id: string; detail: string },
+  database: Database = db,
+): Promise<void> {
+  await database
+    .update(sessions)
+    .set({ placementReason: reason.id, placementDetail: reason.detail })
+    .where(eq(sessions.id, sessionId));
 }
 
 export interface IssueIdentity {

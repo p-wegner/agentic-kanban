@@ -6,6 +6,35 @@ import * as agentSkillRepo from "../../repositories/agent-skill.repository.js";
 import * as realAgentService from "../agent.service.js";
 import { createAgentDispatch, type AgentExecutionService } from "../agent-dispatch.service.js";
 import { getWorkerFleet, resolveWorkerPlacement, WorkerDispatchUnavailableError } from "../worker-fleet.service.js";
+import { updateSessionPlacementReason } from "../../repositories/placement-observability.repository.js";
+import type { Placement } from "../agent-dispatch.service.js";
+
+/**
+ * #801 — the recording seam for "why did THAT session run on the host".
+ *
+ * `resolveWorkerPlacement` stamps its deciding check onto the placement it returns; this is
+ * where that becomes durable. A live re-derivation can never answer the historical question,
+ * because the preferences, the fleet and the repo shape have all moved since.
+ *
+ * Written only for a RESOLVED placement: an explicit `placement` argument was never
+ * resolved, so it carries no reasoning, and stamping a fabricated one would destroy the
+ * distinction the nullable column exists to keep. Best-effort and un-awaited, exactly like
+ * the containerId write — an observability record must never be able to fail a launch.
+ *
+ * A free function rather than an `if` inside `startSession`: that function's branch count is
+ * ratcheted (#726), and a diagnostic write has no business spending one of its budget.
+ */
+function recordPlacementReason(
+  sessionId: string,
+  placement: Placement | undefined,
+  database: Database,
+): void {
+  const reason = placement?.reason;
+  if (!reason) return;
+  updateSessionPlacementReason(sessionId, reason, database).catch((err) =>
+    console.error(`[session] Failed to store session placement reason: sessionId=${sessionId}`, err),
+  );
+}
 import { extractPlanFromMessages } from "../plan-mode.service.js";
 import { computeScorecard } from "../workspace-scorecard.service.js";
 import { computeWorkspaceCodeMetrics } from "../workspace-code-metrics.service.js";
@@ -592,6 +621,7 @@ export function createSessionLifecycle(
         }
         throw err;
       });
+      recordPlacementReason(sessionId, effectivePlacement, db);
     }
 
     try {

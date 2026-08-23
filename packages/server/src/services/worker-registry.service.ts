@@ -27,6 +27,7 @@ import {
   WORKER_PROTOCOL_VERSION,
   type WorkerCapabilities,
 } from "@agentic-kanban/shared/lib/worker-protocol";
+import { recordWorkerEvent } from "./worker-events.service.js";
 
 export const PAIRING_TOKEN_TTL_MS = 10 * 60 * 1000;
 /** A worker whose last heartbeat is older than this reads as offline. */
@@ -111,6 +112,37 @@ export function createWorkerRegistry(database: Database = realDb) {
 
   /** What each worker last told us about itself (#754). See WorkerView for why not a column. */
   const reportedVersions = new Map<string, { protocolVersion?: number; workerVersion?: string }>();
+
+  /**
+   * Last EFFECTIVE status observed per worker, so `status_change` can be emitted on a
+   * TRANSITION and only on a transition (#801).
+   *
+   * Why the observation happens in `listWorkersView` rather than in `heartbeat`: the
+   * transition an operator actually needs after a #699/#706 failure is
+   * `online -> offline`, and that one has no event to hang off — it happens when a
+   * heartbeat STOPS arriving, i.e. when nobody calls anything. `effectiveStatus` is the
+   * only place the board ever computes it, so this is the only honest seam. A row per
+   * 30 s heartbeat would spend the whole per-worker retention budget on noise, which is
+   * exactly what #774 warned about.
+   *
+   * The first sighting of a worker SEEDS silently: after a board restart every worker
+   * would otherwise announce a transition from nothing, and "the board rebooted" is not a
+   * fact about the worker.
+   */
+  const lastEffectiveStatus = new Map<string, WorkerStatus>();
+
+  function noteEffectiveStatus(row: WorkerRow, current: WorkerStatus): void {
+    const previous = lastEffectiveStatus.get(row.id);
+    lastEffectiveStatus.set(row.id, current);
+    if (previous === undefined || previous === current) return;
+    void recordWorkerEvent({
+      database,
+      workerId: row.id,
+      type: "status_change",
+      summary: `worker ${row.name} went ${previous} -> ${current}`,
+      payload: { from: previous, to: current, storedStatus: row.status, lastHeartbeatAt: row.lastHeartbeatAt },
+    });
+  }
 
   function mintPairingToken(now?: string): { pairingToken: string; expiresAt: string } {
     const nowMs = now ? new Date(now).getTime() : Date.now();
@@ -230,9 +262,11 @@ export function createWorkerRegistry(database: Database = realDb) {
     return rows.map((row) => {
       const { tokenHash: _tokenHash, ...safe } = row;
       const reported = reportedVersions.get(row.id);
+      const current = effectiveStatus(row, nowMs);
+      noteEffectiveStatus(row, current);
       return {
         ...safe,
-        effectiveStatus: effectiveStatus(row, nowMs),
+        effectiveStatus: current,
         ...(reported?.protocolVersion !== undefined ? { protocolVersion: reported.protocolVersion } : {}),
         ...(reported?.workerVersion !== undefined ? { workerVersion: reported.workerVersion } : {}),
       };
@@ -265,6 +299,7 @@ export function createWorkerRegistry(database: Database = realDb) {
     if (!row) return false;
     await workerRepo.deleteWorker(workerId, database);
     reportedVersions.delete(workerId);
+    lastEffectiveStatus.delete(workerId);
     // Deleting the row only stops NEW authentications. A revoked worker also
     // holds a live socket and (for git transport) working git tokens — both must
     // die now, or "revoked" is a claim the code does not honour (#247).

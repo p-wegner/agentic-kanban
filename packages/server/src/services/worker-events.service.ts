@@ -14,6 +14,10 @@
  * latter is inside `resolveWorkerPlacement`'s callers. An event log is the observer-side
  * shape of the same answer: it does not capture the resolver's reasoning, but it does
  * record what the fleet looked like at the time, which is the input that reasoning read.
+ * The reasoning itself is now recorded too, but NOT here — #801 stamps the deciding check
+ * onto `sessions.placement_reason` at dispatch, because it is a property of ONE decision
+ * about ONE session, whereas this table is a property of a WORKER over time. Two questions,
+ * two records; `listSessionPlacements` joins them for an operator.
  *
  * TWO RULES:
  *
@@ -38,17 +42,18 @@ import {
 } from "../repositories/worker-events.repository.js";
 import { db as realDb } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import type { WorkerEvent } from "@agentic-kanban/shared/types";
 
 /**
  * The event vocabulary. Kept HERE rather than in shared because nothing outside the server
  * writes one, and the worker binary's leaf modules must not gain a db-graph import
  * (worker-cli-isolation guard).
  *
- * Several types are declared but NOT yet emitted, because their only honest call sites are
- * in files #774 does not own (`fleet-listener.service.ts` for the WebSocket lifecycle,
- * `agent-remote.service.ts` for assignment and exit, `worker-incoming-refs.service.ts` for
- * the held-ref sweep, and the registry for an effective-status transition). The split is
- * declared in code below rather than left for a reader to notice, and pinned by a test.
+ * #801 wired the six that #774 declared but could not emit, so the vocabulary and what the
+ * board actually writes are now the same list. `UNEMITTED_TYPES` stays — as an EMPTY list
+ * with a guard that pins it in both directions — because the honest-split mechanism is the
+ * thing worth keeping: the next type someone declares has to be either wired or listed here
+ * with a reason, and cannot quietly read to the panel as a thing the board records.
  */
 export const WORKER_EVENT_TYPES = [
   "registered",
@@ -70,40 +75,43 @@ export const WORKER_EVENT_TYPES = [
 export type WorkerEventType = (typeof WORKER_EVENT_TYPES)[number];
 
 /**
- * The subset this change actually emits, and therefore the honest scope of the timeline
- * today. `worker-events-emitter-coverage.test.ts` pins it, so the day a WS lifecycle event
- * starts being written the list has to move with it instead of the docs quietly aging.
+ * What the board actually writes, and therefore the honest scope of the timeline.
+ * `worker-events-emitter-coverage.test.ts` pins it against the emitter files in both
+ * directions, so neither half can drift from the other.
+ *
+ * Where each one is written (#801):
+ *   registered, protocol_mismatch, ref_landed, ref_discarded -> `routes/workers.ts`
+ *   connected, disconnected                                  -> `services/worker-fleet.service.ts`
+ *   assigned, session_exit                                   -> `services/agent-remote-events.ts`
+ *   ref_held                                                 -> `services/worker-incoming-refs.service.ts`
+ *   status_change                                            -> `services/worker-registry.service.ts`
  */
 export const EMITTED_TYPES: readonly WorkerEventType[] = [
   "registered",
-  "protocol_mismatch",
-  "ref_landed",
-  "ref_discarded",
-] as const;
-
-/**
- * Types whose emitters live in files #774 does not own. Named so the gap is greppable, and
- * tracked as **#801**, which names the file each missing emitter belongs in.
- */
-export const UNEMITTED_TYPES: readonly WorkerEventType[] = [
   "status_change",
+  "protocol_mismatch",
   "connected",
   "disconnected",
   "assigned",
   "session_exit",
   "ref_held",
+  "ref_landed",
+  "ref_discarded",
 ] as const;
 
-export interface WorkerEvent {
-  id: string;
-  workerId: string;
-  type: string;
-  sessionId: string | null;
-  summary: string;
-  /** Parsed `payload_json`, or null. Parsed HERE so no consumer re-implements the try/catch. */
-  payload: Record<string, unknown> | null;
-  createdAt: string;
-}
+/**
+ * Types declared with no emitter. EMPTY since #801 — and kept, rather than deleted, because
+ * an empty list plus the guard is what makes the next declared-but-unwired type a test
+ * failure instead of a silent false claim in the panel's legend.
+ */
+export const UNEMITTED_TYPES: readonly WorkerEventType[] = [] as const;
+
+/**
+ * The wire shape lives in shared (#801) — the client's timeline component declared its own
+ * copy, which is the duplicate `wire-dto-single-declaration.test.ts` exists to catch.
+ * Re-exported here because this service is where every server-side consumer already looks.
+ */
+export type { WorkerEvent };
 
 export interface RecordWorkerEventInput {
   workerId: string;

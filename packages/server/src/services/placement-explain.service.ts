@@ -55,6 +55,8 @@ import type {
   PlacementCheckResult,
   PlacementExplanation,
   PlacementOutcome,
+  PlacementReason,
+  PlacementReasonId,
   SessionPlacementRecord,
   WorkerEligibility,
 } from "../lib/placement-explain.types.js";
@@ -71,9 +73,12 @@ export type {
   PlacementCheckResult,
   PlacementExplanation,
   PlacementOutcome,
+  PlacementReason,
+  PlacementReasonId,
   SessionPlacementRecord,
   WorkerEligibility,
 };
+import { isPlacementReasonId } from "../lib/placement-explain.types.js";
 import { WorkerDispatchUnavailableError } from "./agent-dispatch.service.js";
 import { releaseWorkerSlot } from "./worker-slot-reservation.service.js";
 import {
@@ -686,6 +691,11 @@ export async function listSessionPlacements(
   );
   return filtered.map((r) => ({
     ...r,
+    // #801: WHY, beside WHERE. Narrowed back to the id union here rather than in the
+    // repository — the column is free text to SQLite, and a row written by an older build
+    // (or hand-edited) must not silently claim to be a valid reason id.
+    placementReason: isPlacementReasonId(r.placementReason) ? r.placementReason : null,
+    placementDetail: isPlacementReasonId(r.placementReason) ? r.placementDetail : null,
     branch: r.branch ?? null,
     issueNumber: r.issueNumber ?? null,
     issueTitle: r.issueTitle ?? null,

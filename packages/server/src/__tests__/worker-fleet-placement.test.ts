@@ -78,16 +78,19 @@ describe("worker-fleet placement (phase 1c)", () => {
     } as typeof projectsTable.$inferInsert);
   }
 
+  // #801: every placement now carries the check that DECIDED it, so these cases assert
+  // WHICH host fallback this is. Three of them used to be the same `{ kind: "host" }` —
+  // indistinguishable in a session record, which is the gap #801 closed.
   it("defaults to host when the project has not opted in", async () => {
     const placement = await resolveWorkerPlacement({ database: db, projectId: PROJECT_ID, providerName: "claude" });
-    expect(placement).toEqual({ kind: "host" });
+    expect(placement).toEqual({ kind: "host", reason: { id: "dispatch_opt_in", detail: expect.any(String) } });
   });
 
   it("falls back to host when opted in but no worker is connected", async () => {
     await optIn();
     await registerWorker(); // registered but never connected a socket
     const placement = await resolveWorkerPlacement({ database: db, projectId: PROJECT_ID, providerName: "claude" });
-    expect(placement).toEqual({ kind: "host" });
+    expect(placement).toEqual({ kind: "host", reason: { id: "eligible_worker", detail: expect.any(String) } });
   });
 
   it("places a filesystem-sharing worker without git transport", async () => {
@@ -97,7 +100,10 @@ describe("worker-fleet placement (phase 1c)", () => {
     const placement = await resolveWorkerPlacement({ database: db, projectId: PROJECT_ID, providerName: "claude" });
     // #751: a remote placement also carries the capacity slot it claimed, so a
     // concurrent placement cannot be handed the same one.
-    expect(placement).toEqual({ kind: "remote", workerId, strict: false, reservationId: expect.any(String) });
+    expect(placement).toEqual({
+      kind: "remote", workerId, strict: false, reservationId: expect.any(String),
+      reason: { id: "eligible_worker", detail: expect.stringContaining("shares this filesystem") },
+    });
   });
 
   it("gives a TRUE remote worker git transport with the branch and repo", async () => {
@@ -114,6 +120,7 @@ describe("worker-fleet placement (phase 1c)", () => {
       workerId,
       strict: false,
       reservationId: expect.any(String),
+      reason: { id: "eligible_worker", detail: expect.stringContaining("git transport") },
       repo: {
         projectId: PROJECT_ID,
         repoPath: "C:/repos/fixture",
@@ -130,7 +137,7 @@ describe("worker-fleet placement (phase 1c)", () => {
     const workerId = await registerWorker({ providers: ["claude"] });
     fleet.connections.handleOpen(workerId, fakeWs());
     const placement = await resolveWorkerPlacement({ database: db, projectId: PROJECT_ID, providerName: "claude" });
-    expect(placement).toEqual({ kind: "host" });
+    expect(placement).toEqual({ kind: "host", reason: { id: "branch_for_transport", detail: expect.any(String) } });
   });
 
   it("filters by provider", async () => {
@@ -138,7 +145,7 @@ describe("worker-fleet placement (phase 1c)", () => {
     const codexOnly = await registerLocalWorker({ providers: ["codex"] });
     fleet.connections.handleOpen(codexOnly, fakeWs());
     const placement = await resolveWorkerPlacement({ database: db, projectId: PROJECT_ID, providerName: "claude" });
-    expect(placement).toEqual({ kind: "host" });
+    expect(placement).toEqual({ kind: "host", reason: { id: "eligible_worker", detail: expect.any(String) } });
   });
 
   it("respects capacity and prefers the least-loaded worker", async () => {
