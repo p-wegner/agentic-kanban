@@ -27,8 +27,10 @@
  * pre-#765 input it exists to catch — see the "proven to fail" block at the bottom.
  */
 import { describe, expect, it } from "vitest";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import YAML from "yaml";
 
 const REPO_ROOT = path.resolve(__dirname, "../../../..");
@@ -99,6 +101,18 @@ export function configDeclaresLcovCoverage(configSource: string): { ok: boolean;
   if (!/["']json-summary["']/.test(configSource)) {
     return { ok: false, reason: "no json-summary reporter — scripts/coverage-report.mjs reads coverage-summary.json" };
   }
+  // #797: vitest's `coverage.reportOnFailure` defaults to FALSE, so a run with any failing
+  // test writes no report at all. That is not a corner case in this repo — every package's
+  // tree-scanning guard suites go red whenever a neighbour's uncommitted work is in the
+  // shared checkout, which is why `shared`, `server` and `mcp-server` had never once been
+  // measured while the wiring above was already correct. Coverage is a MEASUREMENT, not a
+  // gate; it must survive a red suite.
+  if (!/reportOnFailure\s*:\s*true/.test(configSource)) {
+    return {
+      ok: false,
+      reason: "no `reportOnFailure: true` — a run with any failing test would silently emit no report (#797)",
+    };
+  }
   return { ok: true };
 }
 
@@ -113,6 +127,33 @@ describe("coverage wiring (#765)", () => {
     const verdict = coverageScriptReachesVitest(script);
     expect(verdict.reason ?? "ok").toBe("ok");
     expect(verdict.ok).toBe(true);
+  });
+
+  it("a `coverage:merge` script exists — the analyzer takes ONE report, not four (#797)", () => {
+    expect(rootPkg.scripts["coverage:merge"]).toContain("--merge");
+  });
+
+  it("mergeLcov re-anchors every SF: to the repo root, so four packages cannot collide (#797)", async () => {
+    const { mergeLcov } = (await import(
+      pathToFileURL(path.join(REPO_ROOT, "scripts/coverage-report.mjs")).href
+    )) as { mergeLcov: (root: string, reports: unknown[]) => { text: string; fileCount: number } };
+    // Both packages have a `src/index.ts`. Package-relative SF: lines make them the same
+    // file to the analyzer — which is exactly why a naive `cat` of the four lcovs is wrong.
+    const dir = mkdtempSync(path.join(tmpdir(), "lcov-merge-"));
+    const a = path.join(dir, "a.info");
+    const b = path.join(dir, "b.info");
+    writeFileSync(a, ["TN:", "SF:src\\index.ts", "DA:1,1", "end_of_record"].join("\n"));
+    writeFileSync(b, ["TN:", "SF:src/index.ts", "DA:1,0", "end_of_record"].join("\n"));
+    const merged = mergeLcov(REPO_ROOT, [
+      { pkg: "shared", lcov: a, lcovPresent: true },
+      { pkg: "client", lcov: b, lcovPresent: true },
+      { pkg: "server", lcov: path.join(dir, "missing.info"), lcovPresent: false },
+    ]);
+    expect(merged.fileCount).toBe(2);
+    expect(merged.text).toContain("SF:packages/shared/src/index.ts");
+    expect(merged.text).toContain("SF:packages/client/src/index.ts");
+    expect(merged.text).not.toMatch(/SF:src[\\/]/);
+    rmSync(dir, { recursive: true, force: true });
   });
 
   it("a `coverage:report` script exists and points at the reader", () => {
@@ -184,6 +225,15 @@ describe("coverage wiring (#765)", () => {
         "      - run: pnpm test:coverage",
       ].join("\n");
       expect(workflowConsumesCoverage(halfWired).ok).toBe(false);
+    });
+
+    it("rejects a config that would emit nothing on a red suite (the #797 default)", () => {
+      const noReportOnFailure =
+        `export default defineConfig({ test: { coverage: { provider: "v8", ` +
+        `reporter: ["text", "lcov", "json-summary"], reportsDirectory: "coverage" } } });`;
+      const verdict = configDeclaresLcovCoverage(noReportOnFailure);
+      expect(verdict.ok).toBe(false);
+      expect(verdict.reason).toMatch(/reportOnFailure/);
     });
 
     it("rejects a package config with no coverage block, and one that emits no lcov", () => {

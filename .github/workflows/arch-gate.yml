@@ -87,6 +87,13 @@ jobs:
         run: pnpm test:coverage
       - name: read the reports (fails if any package emitted none)
         run: pnpm coverage:report
+      - name: merge the four lcovs into one repo-anchored report (#797)
+        # `code-metrics analyze --coverage <path>` takes exactly ONE report, and each
+        # package's lcov is package-relative, so a naive `cat` makes `src/lib/x.ts`
+        # ambiguous across four packages. `--merge` re-anchors every SF: to the repo root.
+        # Without this the analyzer can only ever measure one package and leaves the other
+        # three on the co-change proxy — which is the state #797 existed to end.
+        run: pnpm coverage:merge
       - name: upload lcov + summaries
         if: always()
         uses: actions/upload-artifact@v4
@@ -98,10 +105,12 @@ jobs:
           path: |
             packages/*/coverage/lcov.info
             packages/*/coverage/coverage-summary.json
-          # `warn`, not `error`: a vitest run with ANY failing test writes no coverage
-          # report at all (measured — a 401-file server run with 6 failing files produced
-          # no coverage/ directory, in-tree or at an absolute --coverage.reportsDirectory).
-          # The reader step above is already the loud, specific failure for a missing
-          # report; making the upload a second red would just obscure it.
+            coverage/lcov.info
+          # `warn`, not `error`: the reader step above is already the loud, specific
+          # failure for a missing report; making the upload a second red would obscure it.
+          # (#797 removed the main cause of a missing report — every package now sets
+          # `coverage.reportOnFailure: true`, so a red suite still emits its numbers. A
+          # report can still be absent if the run dies before the reporting phase, which
+          # was observed once on a 732-file server run.)
           if-no-files-found: warn
           retention-days: 14
