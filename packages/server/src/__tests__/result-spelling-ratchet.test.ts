@@ -39,8 +39,9 @@ const SUCCESS_SPELLING_CAP = 35;
  * and `startup/` sat outside it — the same blind spot #595 found in depcruise, showing up
  * here too. Raising a ratchet is otherwise forbidden; this is an accounting correction for
  * a population that grew by relocation, and the guard is unchanged for new code.
+ *
+ * 169 -> 167, same reason: two of those were comments about the pattern, not instances of it.
  */
-// 169 -> 167, same reason: two of those were comments about the pattern, not instances of it.
 /**
  * 167 -> 170 (#805): the SAME relocation case as #595 above, and verified as one rather
  * than assumed. #805 moved `POST /api/workspaces/:id/review` out of
@@ -50,10 +51,34 @@ const SUCCESS_SPELLING_CAP = 35;
  * lines 43/57/71 vs 49/63/79 today), so the population grew by relocation and not by new
  * code. Raising a ratchet is otherwise forbidden.
  *
- * These three ARE convertible to the central `error-handler.ts` mapping — they hand-map
+ * These three LOOK convertible to the central `error-handler.ts` mapping — they hand-map
  * NOT_FOUND/BAD_REQUEST/INTERNAL, which is precisely what the middleware exists to do.
- * That conversion is filed rather than done here, so this stays an accounting correction
- * and not a silently-accepted three-site budget.
+ * #821 tried it and the conversion is NOT behaviour-preserving, so they stay, and this
+ * comment records why rather than leaving a plan that was disproven.
+ *
+ * The middleware is correctly in the chain and gives the right STATUS (`createRouter()`
+ * sets `onError(domainErrorHandler)`; `ReviewError` carries a top-level `code`, so
+ * `DOMAIN_CODE_STATUS` maps NOT_FOUND -> 404 and BAD_REQUEST -> 400). What it does NOT do
+ * is echo `code` into the BODY: the generic domain-code branch emits `{ error: message }`
+ * and only the `WorkspaceError` / standalone-refusal branches add `code`. Measured against
+ * the live endpoint:
+ *
+ *     before:  404  {"error":"Workspace not found","code":"NOT_FOUND"}
+ *     after:   404  {"error":"Workspace not found"}
+ *
+ * A second, narrower break: deleting the `c.json({ error: String(err), code: "INTERNAL" },
+ * 500)` catch-all changes behaviour for a NON-`Error` throw, which Hono's `compose`
+ * rethrows past `onError` entirely.
+ *
+ * Read this before trusting a green suite here: `review-route-error-mapping.test.ts` stays
+ * GREEN through that regression. It exercises only the delegation path (`WorkspaceError`,
+ * `WorkerDispatchUnavailableError`, plain `Error`) and never the two `ReviewError`
+ * branches, so it is not the proof it looks like. A live probe caught this; the test did
+ * not.
+ *
+ * Unblocking it means echoing the recognised `code` from the generic branch — a wire
+ * contract change touching every route that throws an `AppError` or a coded service error,
+ * which is #823, not a side effect to smuggle in here.
  */
 const INLINE_ROUTE_ERROR_CAP = 170;
 
