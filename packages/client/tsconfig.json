@@ -2,7 +2,11 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "jsx": "react-jsx",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "noEmit": true,
     "declaration": false,
     "declarationMap": false,
@@ -11,17 +15,5 @@
   "include": [
     "src"
   ],
-  "exclude": [
-    "src/__tests__/boardPageStateGate.test.ts",
-    "src/__tests__/chart-duplication-ratchet.test.ts",
-    "src/__tests__/client-conventions-guard.test.ts",
-    "src/__tests__/client-module-placement.test.ts",
-    "src/__tests__/client-upward-type-edge-ratchet.test.ts",
-    "src/__tests__/fetch-in-effect-ratchet.test.ts",
-    "src/__tests__/function-nloc-ratchet.test.ts",
-    "src/__tests__/issue-form-duplication-ratchet.test.ts",
-    "src/__tests__/panel-registry.test.ts",
-    "src/__tests__/theme-tokens.test.ts",
-    "src/lib/apiContract.test.ts"
-  ]
+  "exclude": []
 }
