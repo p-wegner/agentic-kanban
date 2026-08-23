@@ -1,5 +1,5 @@
 import { auditProcessEvent, guardProcessKill } from "./process-guard.js";
-import { execCommand, listOsProcesses, listenerPidsForPort, parseLsofPids, taskkillTree } from "./process-exec.js";
+import { execCommand, killProcessTree, listOsProcesses, listenerPidsForPort, parseLsofPids } from "./process-exec.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
@@ -27,11 +27,11 @@ export async function killProcessesOnPorts(ports: number[]): Promise<number> {
       if (!guardProcessKill(pid, { reason: "process-cleanup-port-match", port })) continue;
       auditProcessEvent({ action: "process-cleanup-candidate", pid, port });
       try {
-        if (process.platform === "win32") {
-          await taskkillTree(pid, { timeout: 5000 });
-        } else {
-          process.kill(pid, "SIGTERM");
-        }
+        // ONE kill seam (#832, same shape as #828): the platform decision lives in
+        // `killProcessTree`, so this call site is mockable — and therefore assertable —
+        // on both platforms instead of only on the one the branch happened to cover.
+        // SIGTERM is preserved deliberately: a port squatter is asked to exit, not shot.
+        await killProcessTree(pid, { timeout: 5000, signal: "SIGTERM" });
         console.log(`[process-cleanup] killed PID ${pid} (listening on port ${port})`);
         auditProcessEvent({ action: "process-cleanup-killed", pid, port });
         killed++;
@@ -94,11 +94,9 @@ export async function killDevServerSupervisorOnPorts(ports: number[]): Promise<n
     if (!guardProcessKill(pid, { reason: "dev-server-supervisor-port-match" })) continue;
     auditProcessEvent({ action: "dev-server-supervisor-candidate", pid });
     try {
-      if (process.platform === "win32") {
-        await taskkillTree(pid, { timeout: 5000 });
-      } else {
-        process.kill(pid, "SIGTERM");
-      }
+      // ONE kill seam (#832) — see `killProcessesOnPorts`. SIGTERM preserved: dev.mjs
+      // is a supervisor, and `/T` (Windows) / its own children (POSIX) is the cascade.
+      await killProcessTree(pid, { timeout: 5000, signal: "SIGTERM" });
       console.log(`[process-cleanup] killed dev.mjs supervisor PID ${pid} (cascades to its dev-server children)`);
       auditProcessEvent({ action: "dev-server-supervisor-killed", pid });
       killed++;
@@ -139,7 +137,10 @@ export async function killProcessesInDir(dir: string): Promise<number> {
           auditProcessEvent({ action: "process-cleanup-candidate", pid: proc.pid, ppid: proc.ppid, dir, commandLine: proc.cmd });
           if (!guardProcessKill(proc.pid, { reason: "process-cleanup-dir-match", dir, commandLine: proc.cmd })) continue;
           try {
-            await taskkillTree(proc.pid, { timeout: 5000 });
+            // Reached only on win32 (this whole branch is), where `killProcessTree`
+            // delegates straight to `taskkillTree` — routed through the seam anyway so
+            // every kill in this module is assertable through one mock (#832).
+            await killProcessTree(proc.pid, { timeout: 5000 });
             console.log(`[process-cleanup] killed PID ${proc.pid} (CWD match: ${dir})`);
             auditProcessEvent({ action: "process-cleanup-killed", pid: proc.pid, dir });
             killed++;
@@ -157,7 +158,11 @@ export async function killProcessesInDir(dir: string): Promise<number> {
           const numericPid = pid;
           if (!guardProcessKill(numericPid, { reason: "process-cleanup-dir-match", dir })) continue;
           try {
-            process.kill(numericPid, "SIGTERM");
+            // The DISCOVERY half of this function is genuinely platform-split (lsof vs
+            // Get-CimInstance); the KILL half need not be, and routing it through the seam
+            // is what makes this branch assertable at all rather than only on a Linux box
+            // with a real lsof (#832). SIGTERM preserved.
+            await killProcessTree(numericPid, { signal: "SIGTERM" });
             console.log(`[process-cleanup] killed PID ${numericPid} (CWD: ${dir})`);
             auditProcessEvent({ action: "process-cleanup-killed", pid: numericPid, dir });
             killed++;

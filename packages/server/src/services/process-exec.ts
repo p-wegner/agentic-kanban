@@ -129,13 +129,22 @@ export async function taskkillTree(pid: number, options: { timeout?: number } = 
  *
  * POSIX kills the pid itself, not its group — same reach as before; making it a group
  * kill would be a behaviour change, not a portability fix.
+ *
+ * `signal` is POSIX-ONLY and defaults to SIGKILL (#832). Windows has no signals: `taskkill
+ * /T /F` is always a forced tree kill, so passing SIGTERM does not make the Windows half
+ * gentler and must not be read as if it did. It exists because the two dev-server sweeps in
+ * `process-cleanup.ts` deliberately send SIGTERM — a dev supervisor is asked to shut down,
+ * not shot — and moving them onto this seam must not silently escalate that to SIGKILL.
  */
-export async function killProcessTree(pid: number, options: { timeout?: number } = {}): Promise<void> {
+export async function killProcessTree(
+  pid: number,
+  options: { timeout?: number; signal?: NodeJS.Signals } = {},
+): Promise<void> {
   if (process.platform === "win32") {
     await taskkillTree(pid, options);
     return;
   }
-  process.kill(pid, "SIGKILL");
+  process.kill(pid, options.signal ?? "SIGKILL");
 }
 
 export function parseNetstatListeners(stdout: string): OsPortListener[] {
