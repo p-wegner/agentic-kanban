@@ -20,7 +20,7 @@
  * The process enumeration only runs on the failure path — it spawns PowerShell and costs ~1s,
  * which is fine for a teardown that is already failing and unacceptable for one that is not.
  */
-import { readdirSync, rmSync } from "node:fs";
+import { readdirSync, rmSync, type Dirent } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { listOsProcesses } from "../../services/process-exec.js";
 
@@ -31,7 +31,7 @@ function surviving(root: string, limit = 20): string[] {
   const found: string[] = [];
   const walk = (dir: string): void => {
     if (found.length >= limit) return;
-    let entries: ReturnType<typeof readdirSync>;
+    let entries: Dirent[];
     try {
       entries = readdirSync(dir, { withFileTypes: true });
     } catch {
