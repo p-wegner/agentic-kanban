@@ -33,7 +33,7 @@
   "scripts": {
     "dev": "node ../../scripts/server-dev-proxy.mjs",
     "dev:e2e": "tsx --conditions development src/index.ts",
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "start": "node dist/cli/index.js dev",
     "db:migrate": "tsx src/scripts/db-migrate.ts",
     "db:seed": "tsx src/db/seed.ts",

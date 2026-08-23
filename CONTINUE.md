@@ -38,6 +38,26 @@ Recorded here so the next session doesn't have to re-derive it:
   itself is sound (down-only, fails on any new ladder or a stale/lowered baseline entry not
   updated) — the gap was only the commit message's stated count, not a missing enforcement
   mechanism. No further action beyond what #690 already tracks for the related ladder work.
+- **#788 (server tests were never typechecked, 2026-08-23)** — `packages/server/tsconfig.json`
+  carried `"exclude": ["src/__tests__"]`, so `pnpm typecheck` and every `tsc --noEmit` in that
+  package skipped the largest test suite in the repo. **Measured with tests included: 1047
+  `error TS…` lines across 133 server test files, and ZERO in production code.** The hole is
+  closed — `tsconfig.json` is now the typecheck config with tests in it, emit moved to
+  `tsconfig.build.json`, and ~578 server test files are checked that never were. The 132
+  remaining broken files are named one by one in that file's `exclude` array (one of the 133,
+  `helpers/rm-or-report-holder.ts`, was fixed on the spot because a checked test imports it).
+  **Ratchet exists**: `packages/server/src/__tests__/server-test-typecheck-ratchet.test.ts`
+  (`@gate:always-run`) enforces both halves — the list may only shrink, AND every entry must
+  still fail `tsc`, so fixing a file without delisting it goes red. Follow-up ticket for the
+  remainder: **#808**. **Verified by watching it fail**: a deliberate `getProfilePrefKey(42)`
+  in a non-grandfathered test made `pnpm typecheck` exit 1 with
+  `src/__tests__/agent-provider-registry.test.ts(61,38): error TS2345`, while the OLD config
+  exited 0 on the identical tree.
+- **The same hole exists in `client` (82 errors / 28 files) and `shared` (7 errors / 4 files)**
+  — client by an explicit `*.test.ts` exclude, shared because its `__tests__` dir sits outside
+  `"include": ["src"]`. Neither is fixed; `mcp-server` was always clean. Tracked as **#809**.
+  Shared's 7 were small enough to fix inline but its test files were being edited concurrently
+  by another agent, so they were deferred rather than swept into this ticket's commit.
 
 ## Process fix adopted
 
