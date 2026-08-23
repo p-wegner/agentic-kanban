@@ -24,6 +24,7 @@ import { preferences, projects as projectsTable } from "@agentic-kanban/shared/s
 import type { WSContext } from "hono/ws";
 import { createTestDb } from "./helpers/test-db.js";
 import type { Database } from "../db/index.js";
+import type { PlacementReasonId } from "../lib/placement-explain.types.js";
 import {
   getWorkerFleet,
   resolveWorkerPlacement,
@@ -178,7 +179,13 @@ describe("#751 double assignment — placement claims the capacity slot", () => 
       projectId: PROJECT_ID,
       providerName: "claude",
     });
-    expect(placement).toEqual({ kind: "host" });
+    // #801: the host fallback names WHY, and "no branch to push back" is exactly the
+    // decision this test is about — so pin the id, not just the kind.
+    expect(placement).toEqual({
+      kind: "host",
+      reason: { id: "branch_for_transport" satisfies PlacementReasonId, detail: expect.any(String) },
+    });
+    expect(placement.reason?.detail).toContain("git transport");
     expect(__reservationCount(workerId)).toBe(0);
 
     // ...and the worker is therefore still placeable.
