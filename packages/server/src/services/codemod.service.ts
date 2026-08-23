@@ -303,7 +303,11 @@ export async function previewCodemod(
     const modified = sourceFile.getFullText();
 
     if (original !== modified) {
-      const rel = relative(repoPath, filePath.replace(/\//g, "\\")).replace(/\\/g, "/");
+      // ts-morph always reports forward slashes. Let `resolve` re-native them (a no-op off
+      // Windows) instead of hand-swapping separators — the old `replace(/\//g, "\\")` turned
+      // an absolute POSIX path into a RELATIVE one-segment name off Windows, so `relative()`
+      // answered `../../<cwd-ish>/\tmp\...` and the preview reported nonsense paths (#828).
+      const rel = relative(resolve(repoPath), resolve(filePath)).split(sep).join("/");
       fileDiffs.push({
         filePath,
         relativePath: rel,
