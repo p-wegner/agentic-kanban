@@ -154,7 +154,6 @@ export const workspaces = sqliteTable("workspaces", {
   /** Human-readable reason for the isolation downgrade (CLI missing, provisioning failed, ...). */
   isolationDowngradeReason: text("isolation_downgrade_reason"),
 }, (table) => ({
-  issueIdIdx: index("idx_workspaces_issue_id").on(table.issueId),
   statusIdx: index("idx_workspaces_status").on(table.status),
   issueIdStatusIdx: index("idx_workspaces_issue_id_status").on(table.issueId, table.status),
   createdAtIdx: index("idx_workspaces_created_at").on(table.createdAt),

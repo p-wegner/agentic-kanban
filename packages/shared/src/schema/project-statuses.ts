@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, index, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { relations } from "drizzle-orm";
 import { projects } from "./projects.js";
 
@@ -10,8 +10,6 @@ export const projectStatuses = sqliteTable("project_statuses", {
   isDefault: integer("is_default", { mode: "boolean" }).notNull().default(false),
   createdAt: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
 }, (table) => ({
-  // Inner-joined on every board load and the 30s auto-merge tick (0113).
-  projectIdIdx: index("idx_project_statuses_project_id").on(table.projectId),
   // #668 — two statuses with the same name meant two columns called "Todo" (one holding the
   // issues, one permanently empty), and every by-name lookup — the merge path, the monitor,
   // the E2E specs — silently picked whichever came first. A name is how a status is

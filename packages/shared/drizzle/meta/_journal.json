@@ -960,6 +960,13 @@
       "when": 1787482647571,
       "tag": "0136_workspace_symlink_run",
       "breakpoints": true
+    },
+    {
+      "idx": 137,
+      "version": "6",
+      "when": 1787490000000,
+      "tag": "0137_drop_redundant_prefix_indexes",
+      "breakpoints": true
     }
   ]
 }
