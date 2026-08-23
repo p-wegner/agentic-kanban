@@ -1,3 +1,5 @@
+import { EnhanceButton, UndoEnhanceButton } from "./EnhanceActions.js";
+
 interface IssueEditFooterProps {
   title: string;
   saving: boolean;
@@ -38,37 +40,17 @@ export function IssueEditFooter({
       >
         Cancel
       </button>
-      <button
-        type="button"
-        onClick={onEnhance}
+      <EnhanceButton
+        enhancing={enhancing}
         disabled={!title.trim() || enhancing}
-        title="Enhance with AI"
+        onClick={onEnhance}
         className="ml-auto text-sm text-brand-600 dark:text-brand-400 px-2 py-1.5 hover:text-brand-700 dark:hover:text-brand-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
-      >
-        {enhancing ? (
-          <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-          </svg>
-        ) : (
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M5 3l1.5 3.5L10 8l-3.5 1.5L5 13l-1.5-3.5L0 8l3.5-1.5L5 3zM19 11l1 2.5L22.5 14l-2.5 1L19 17.5l-1-2.5L15.5 14l2.5-1L19 11z" />
-          </svg>
-        )}
-        {enhancing ? "Enhancing..." : "Enhance"}
-      </button>
+      />
       {preEnhanceSnapshot ? (
-        <button
-          type="button"
+        <UndoEnhanceButton
           onClick={onUndoEnhance}
-          title="Undo enhancement"
           className="text-sm text-gray-500 dark:text-gray-400 px-2 py-1.5 hover:text-gray-700 dark:hover:text-gray-300 flex items-center gap-1"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
-          </svg>
-          Undo
-        </button>
+        />
       ) : null}
     </div>
   );
