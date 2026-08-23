@@ -9,6 +9,10 @@ import { createSessionArtifactsService } from "../services/session-artifacts.ser
 import { getWorkspaceTimeline } from "../services/workspace-timeline.service.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody, parseOptionalJsonBody } from "../middleware/parse-body.js";
+import {
+  workspaceTurnBody, rejectPlanBody, createWorkspaceCommentBody,
+  updateWorkspaceCommentBody, resolveWorkspaceCommentBody,
+} from "./workspace-action-body-schemas.js";
 import { completeMergeJob, failMergeJob, getMergeJob, startMergeJob } from "../services/merge-job.service.js";
 
 import { queryFlag } from "../middleware/query-params.js";
@@ -158,8 +162,7 @@ export function createWorkspaceActionsRoute(
   // is indistinguishable afterwards from the agent deciding to revert the board's work.
   router.post("/:id/turn", async (c) => {
     const id = c.req.param("id");
-    const body = await parseJsonBody<{ content?: string }>(c);
-    if (!body.content) return c.json({ error: "content is required" }, 400);
+    const body = await parseJsonBody(c, workspaceTurnBody);
     const fleet = resolveRemoteFleet();
     if (fleet) {
       const session = await findRunningSession(id, database);
@@ -214,9 +217,8 @@ export function createWorkspaceActionsRoute(
   // POST /api/workspaces/:id/reject-plan
   router.post("/:id/reject-plan", async (c) => {
     const id = c.req.param("id");
-    const body = await parseJsonBody(c);
-    if (!body.feedback) return c.json({ error: "feedback is required" }, 400);
-    return c.json(await workspaceService.rejectPlan(id, body.feedback as string), 201);
+    const body = await parseJsonBody(c, rejectPlanBody);
+    return c.json(await workspaceService.rejectPlan(id, body.feedback), 201);
   });
 
   // POST /api/workspaces/:id/bisect
@@ -462,8 +464,7 @@ export function createWorkspaceActionsRoute(
   // POST /api/workspaces/:id/comments
   router.post("/:id/comments", async (c) => {
     const id = c.req.param("id");
-    const body = await parseJsonBody<{ filePath: string; body: string; lineNumOld?: number | null; lineNumNew?: number | null; side?: string }>(c);
-    if (!body.filePath || !body.body) return c.json({ error: "filePath and body are required" }, 400);
+    const body = await parseJsonBody(c, createWorkspaceCommentBody);
     return c.json(await workspaceService.createComment(id, body), 201);
   });
 
@@ -471,8 +472,7 @@ export function createWorkspaceActionsRoute(
   router.patch("/:id/comments/:commentId", async (c) => {
     const id = c.req.param("id");
     const commentId = c.req.param("commentId");
-    const body = await parseJsonBody<{ body?: string }>(c);
-    if (!body.body) return c.json({ error: "body is required" }, 400);
+    const body = await parseJsonBody(c, updateWorkspaceCommentBody);
     return c.json(await workspaceService.updateComment(id, commentId, body.body));
   });
 
@@ -480,8 +480,7 @@ export function createWorkspaceActionsRoute(
   router.patch("/:id/comments/:commentId/resolve", async (c) => {
     const id = c.req.param("id");
     const commentId = c.req.param("commentId");
-    const body = await parseJsonBody(c);
-    if (typeof body.resolved !== "boolean") return c.json({ error: "resolved (boolean) is required" }, 400);
+    const body = await parseJsonBody(c, resolveWorkspaceCommentBody);
     return c.json(await workspaceService.resolveComment(id, commentId, body.resolved));
   });
 

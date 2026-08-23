@@ -2,6 +2,7 @@ import type { Database } from "../db/index.js";
 import { createTagService } from "../services/tag.service.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
+import { createTagBody, mergeTagsBody } from "./tag-body-schemas.js";
 
 export function createTagsRoute(database: Database) {
   const router = createRouter();
@@ -14,10 +15,7 @@ export function createTagsRoute(database: Database) {
 
   // POST /api/tags
   router.post("/", async (c) => {
-    const body = await parseJsonBody<{ name?: string; color?: string | null }>(c);
-    if (!body.name) {
-      return c.json({ error: "name is required" }, 400);
-    }
+    const body = await parseJsonBody(c, createTagBody);
     const result = await tagService.createNewTag(body.name, body.color ?? null);
     return c.json(result, 201);
   });
@@ -37,11 +35,7 @@ export function createTagsRoute(database: Database) {
 
   // POST /api/tags/merge — merge sourceIds into targetId, then delete sources
   router.post("/merge", async (c) => {
-    const body = await parseJsonBody(c);
-    const { targetId, sourceIds } = body as { targetId: string; sourceIds: string[] };
-    if (!targetId || !Array.isArray(sourceIds) || sourceIds.length === 0) {
-      return c.json({ error: "targetId and sourceIds are required" }, 400);
-    }
+    const { targetId, sourceIds } = await parseJsonBody(c, mergeTagsBody);
     const result = await tagService.mergeTags(targetId, sourceIds);
     return c.json({ success: true, ...result });
   });
