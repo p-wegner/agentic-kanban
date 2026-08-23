@@ -16,6 +16,14 @@ x-coverage:
       reason: SPA fallback - serves the client bundle for any path the API did not match. Not an API operation, and `*` is not expressible as an OpenAPI path.
     - where: src/services/fleet-listener.service.ts
       reason: A SEPARATE Hono app on KANBAN_FLEET_PORT (worker register/heartbeat/ws + the fleet MCP bridge), never mounted on the board API. It has its own bearer-token auth and its own surface; documenting its paths here would claim they exist on the board port, where they do not.
+  errorResponses:
+    mechanism: Routes built on `createRouter()` install `domainErrorHandler`, which maps a thrown error's domain code to a status (DOMAIN_CODE_STATUS) and echoes the code in the body as `{ error, code }`.
+    derivedFrom: Statuses are attributed by statically following `throw new ...` from each handler up to 2 call(s) deep, mapping the code through the tables parsed from `middleware/error-handler.ts` and `errors/index.ts`.
+    limitations:
+      - "Attribution stops at 2 hops from the handler: an error thrown deeper in a service call chain is NOT documented here. The bound is deliberate - unbounded following would attach a plumbing helper's 404 to every route that can reach it."
+      - A call whose target cannot be resolved syntactically (a callback parameter, a dynamically dispatched method, anything imported from another package) is not followed, so statuses it can throw are absent.
+      - "Every operation may additionally answer 500: domainErrorHandler's final branch renders any unrecognised error as `{ error }` with status 500. That is not listed per-operation because it is true of all of them."
+      - A throw inside a `try` whose `catch` contains no `throw` is treated as swallowed and is not attributed.
 paths:
   /api/agent-skills:
     get:
@@ -70,6 +78,16 @@ paths:
           content:
             application/json:
               schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "409":
+          description: Error (thrown CONFLICT, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/agent-skills/enhance:
     post:
       summary: POST /api/agent-skills/enhance — AI-enhance a skill name, description, and prompt
@@ -99,6 +117,11 @@ paths:
               schema: {}
         "400":
           description: Error
+          content:
+            application/json:
+              schema: {}
+        "500":
+          description: Error (thrown AI_ERROR, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -132,6 +155,16 @@ paths:
           content:
             application/json:
               schema: {}
+        "403":
+          description: Error (thrown FORBIDDEN, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
     get:
       summary: GET /api/agent-skills/:id — get a single skill
       tags:
@@ -146,6 +179,11 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -186,6 +224,26 @@ paths:
           content:
             application/json:
               schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "403":
+          description: Error (thrown FORBIDDEN, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "409":
+          description: Error (thrown CONFLICT, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/agent-skills/{id}/install:
     post:
       summary: POST /api/agent-skills/:id/install
@@ -213,6 +271,16 @@ paths:
           content:
             application/json:
               schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/agent-skills/{id}/install-status:
     get:
       summary: GET /api/agent-skills/:id/install-status
@@ -228,6 +296,11 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -367,6 +440,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/butler-definitions/{bid}:
     delete:
       summary: DELETE /api/butler-definitions/:bid — remove a named butler ("default" is protected).
@@ -382,6 +460,16 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -413,6 +501,11 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -555,6 +648,11 @@ paths:
               schema: {}
         "400":
           description: Error
+          content:
+            application/json:
+              schema: {}
+        "500":
+          description: Error (thrown AI_ERROR, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -1133,6 +1231,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "409":
+          description: Error (thrown CONFLICT, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/issues/ai-estimate:
     post:
       summary: POST /api/issues/ai-estimate — AI-suggest a T-shirt size estimate for an issue
@@ -1152,6 +1255,16 @@ paths:
           content:
             application/json:
               schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "500":
+          description: Error (thrown AI_ERROR, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/issues/analyze-dependencies:
     post:
       summary: POST /api/issues/analyze-dependencies — AI-analyze dependencies for an issue
@@ -1168,6 +1281,16 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "500":
+          description: Error (thrown AI_ERROR, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -1201,6 +1324,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/issues/batch:
     post:
       summary: "Optional: parentIssueId wires child_of edges; driveTarget (requires parentIssueId) auto-creates a Drive record."
@@ -1220,6 +1348,16 @@ paths:
           content:
             application/json:
               schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "409":
+          description: Error (thrown CONFLICT, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/issues/bulk:
     patch:
       summary: PATCH /api/issues/bulk - update N issues in one request
@@ -1236,6 +1374,21 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "409":
+          description: Error (thrown CONFLICT, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -1314,6 +1467,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "500":
+          description: Error (thrown AI_ERROR, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/issues/contract-coupled:
     post:
       summary: POST /api/issues/contract-coupled — contract a full coupled_with component onto one lead.
@@ -1333,6 +1491,21 @@ paths:
           content:
             application/json:
               schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "409":
+          description: Error (thrown CONFLICT, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/issues/contract/confirm:
     post:
       summary: POST /api/issues/contract/confirm — apply a contract proposal (keep survivor, absorb the rest).
@@ -1349,6 +1522,11 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -1390,6 +1568,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "500":
+          description: Error (thrown AI_ERROR, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/issues/group-scan:
     post:
       summary: "group as ONE workspace. Preview by default; `apply: true` creates the edges."
@@ -1406,6 +1589,11 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "500":
+          description: Error (thrown AI_ERROR, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -1483,6 +1671,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
     get:
       summary: GET /api/issues/{id}
       tags:
@@ -1526,6 +1719,16 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "409":
+          description: Error (thrown CONFLICT, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -1576,6 +1779,16 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "500":
+          description: Error (thrown AI_ERROR, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -1797,6 +2010,16 @@ paths:
           content:
             application/json:
               schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "500":
+          description: Error (thrown AI_ERROR, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/issues/{id}/decompose/confirm:
     post:
       summary: POST /api/issues/:id/decompose/confirm — confirm epic decomposition and create child issues
@@ -1819,6 +2042,11 @@ paths:
       responses:
         "201":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -1946,6 +2174,21 @@ paths:
           content:
             application/json:
               schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "409":
+          description: Error (thrown CONFLICT, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/issues/{id}/merged-commits:
     get:
       summary: GET /api/issues/:id/merged-commits — commits that landed on the default branch for this issue
@@ -2003,6 +2246,16 @@ paths:
               schema: {}
         "400":
           description: Error
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "500":
+          description: Error (thrown AI_ERROR, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -2117,6 +2370,11 @@ paths:
               schema: {}
         "400":
           description: Error
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -2566,6 +2824,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/plugins/{id}/docs/{wildcard}:
     get:
       summary: GET /api/plugins/:id/docs/*?theme=dark|light — serve one declared doc from the plugin checkout.
@@ -2623,6 +2886,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/plugins/{id}/loops:
     get:
       summary: GET /api/plugins/{id}/loops
@@ -2643,6 +2911,16 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -2676,6 +2954,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/plugins/{id}/loops/{name}/artifact:
     get:
       summary: Rendered/Raw open, which is the overwhelming majority of reads.
@@ -2706,6 +2989,11 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -2746,6 +3034,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/plugins/{id}/loops/{name}/events:
     get:
       summary: "Audit timeline + per-unit cost rollup for one loop (#292, #294)."
@@ -2776,6 +3069,11 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -2812,6 +3110,11 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -2853,6 +3156,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/plugins/{id}/loops/{name}/gate/summarize:
     post:
       summary: "Summarize-for-me (#330): decision-ready butler digest of the current gate's artifacts."
@@ -2887,6 +3195,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/plugins/{id}/loops/{name}/pause:
     post:
       summary: POST /api/plugins/{id}/loops/{name}/pause
@@ -2914,6 +3227,16 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -2947,6 +3270,16 @@ paths:
           content:
             application/json:
               schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/plugins/{id}/output-location:
     get:
       summary: GET /api/plugins/{id}/output-location
@@ -2967,6 +3300,11 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -2998,6 +3336,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/plugins/{id}/scaffold:
     get:
       summary: The scaffold's unresolved TODO markers as a form (#291).
@@ -3018,6 +3361,11 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -3045,6 +3393,11 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -3076,6 +3429,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/plugins/{id}/scripts/{name}/run:
     post:
       summary: POST /api/plugins/{id}/scripts/{name}/run
@@ -3103,6 +3461,16 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -3144,6 +3512,16 @@ paths:
       responses:
         "201":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -3195,6 +3573,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/plugins/{id}/views/{viewId}/start:
     post:
       summary: POST /api/plugins/{id}/views/{viewId}/start
@@ -3225,6 +3608,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/plugins/{id}/views/{viewId}/stop:
     post:
       summary: POST /api/plugins/{id}/views/{viewId}/stop
@@ -3252,6 +3640,11 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -3632,6 +4025,16 @@ paths:
           content:
             application/json:
               schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "409":
+          description: Error (thrown CONFLICT, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/projects/all/workspaces:
     get:
       summary: GET /api/projects/all/workspaces — cross-project workspace summary (all projects)
@@ -3677,6 +4080,16 @@ paths:
           content:
             application/json:
               schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "409":
+          description: Error (thrown CONFLICT, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/projects/generate-setup-script:
     post:
       summary: POST /api/projects/generate-setup-script
@@ -3700,6 +4113,16 @@ paths:
               schema: {}
         "400":
           description: Error
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "500":
+          description: Error (thrown AI_ERROR, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -3729,6 +4152,16 @@ paths:
           content:
             application/json:
               schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "500":
+          description: Error (thrown AI_ERROR, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/projects/generate-verify-script:
     post:
       summary: POST /api/projects/generate-verify-script
@@ -3752,6 +4185,16 @@ paths:
               schema: {}
         "400":
           description: Error
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "500":
+          description: Error (thrown AI_ERROR, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -3808,6 +4251,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
     patch:
       summary: PATCH /api/projects/:id — update project fields
       tags:
@@ -3829,6 +4277,16 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -4033,6 +4491,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/projects/{id}/base-branch-health:
     get:
       summary: GET /api/projects/:id/base-branch-health — latest + recent history of base-branch verify runs (#491)
@@ -4066,6 +4529,11 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -4148,6 +4616,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/projects/{id}/board/summary:
     get:
       summary: GET /api/projects/:id/board/summary — column counts only, no issue bodies
@@ -4166,6 +4639,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/projects/{id}/branches:
     get:
       summary: GET /api/projects/:id/branches
@@ -4181,6 +4659,11 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -4721,6 +5204,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/projects/{id}/conductor-schedule:
     get:
       summary: single per-project JSON preference; the minute scheduler (scheduled-tasks.ts) fires it.
@@ -4736,6 +5224,11 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -4765,6 +5258,11 @@ paths:
               schema: {}
         "400":
           description: Error
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -4834,6 +5332,16 @@ paths:
           content:
             application/json:
               schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/projects/{id}/file-contention:
     get:
       summary: GET /api/projects/:id/file-contention — live file contention heatmap for active/reviewing workspaces
@@ -4852,6 +5360,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/projects/{id}/graph:
     get:
       summary: GET /api/projects/:id/graph
@@ -4867,6 +5380,11 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -4929,6 +5447,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/projects/{id}/onboarding:
     get:
       summary: GET /api/projects/:id/onboarding
@@ -4944,6 +5467,11 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -4980,6 +5508,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/projects/{id}/onboarding/dismiss:
     post:
       summary: wizard"); the plan itself stays queryable, just carries a dismissedAt.
@@ -5002,6 +5535,11 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -5034,6 +5572,11 @@ paths:
               schema: {}
         "400":
           description: Error
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -5088,6 +5631,16 @@ paths:
           content:
             application/json:
               schema: {}
+        "400":
+          description: Error (thrown VALIDATION_ERROR, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
     post:
       summary: POST /api/projects/:id/quality-metrics
       tags:
@@ -5110,6 +5663,16 @@ paths:
           content:
             application/json:
               schema: {}
+        "400":
+          description: Error (thrown VALIDATION_ERROR, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/projects/{id}/quality-metrics/latest:
     get:
       summary: GET /api/projects/:id/quality-metrics/latest
@@ -5125,6 +5688,11 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -5188,6 +5756,11 @@ paths:
               schema: {}
         "400":
           description: Error
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -5324,6 +5897,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/projects/{id}/runbooks/content:
     get:
       summary: GET /api/projects/:id/runbooks/content?path=<relative-path> — read file content
@@ -5393,6 +5971,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
     put:
       summary: tracked file in the user's main checkout and block auto-merge on `dirty_main`.
       tags:
@@ -5415,6 +5998,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/projects/{id}/stats:
     get:
       summary: GET /api/projects/:id/stats — lightweight project stats
@@ -5430,6 +6018,11 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -5586,6 +6179,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/projects/{id}/voice-capture:
     post:
       summary: Creates a Backlog issue from a voice transcript using Claude to structure it.
@@ -5654,6 +6252,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/projects/{id}/workspace-repo-status:
     get:
       summary: Body is memoized ~10s server-side; unchanged content answers 304 via the ETag.
@@ -5692,6 +6295,11 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -5787,6 +6395,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/projects/{projectId}/backlog.md/import:
     post:
       summary: POST /api/projects/{projectId}/backlog.md/import
@@ -5814,6 +6427,16 @@ paths:
               schema: {}
         "400":
           description: Error
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "409":
+          description: Error (thrown CONFLICT, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -5847,6 +6470,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/projects/{projectId}/backlog/export:
     get:
       summary: GET /api/projects/:projectId/backlog/export → downloadable JSON snapshot.
@@ -5862,6 +6490,11 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -5897,6 +6530,11 @@ paths:
               schema: {}
         "400":
           description: Error
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -6196,6 +6834,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/projects/{projectId}/drives/{id}:
     delete:
       summary: DELETE /api/projects/:projectId/drives/:id
@@ -6219,6 +6862,16 @@ paths:
           content:
             application/json:
               schema: {}
+        "403":
+          description: Error (thrown FORBIDDEN, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
     get:
       summary: GET /api/projects/:projectId/drives/:id
       tags:
@@ -6238,6 +6891,16 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "403":
+          description: Error (thrown FORBIDDEN, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -6270,6 +6933,21 @@ paths:
           content:
             application/json:
               schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "403":
+          description: Error (thrown FORBIDDEN, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/projects/{projectId}/drives/{id}/dashboard:
     get:
       summary: GET /api/projects/:projectId/drives/:id/dashboard — aggregated drive view (#800)
@@ -6290,6 +6968,16 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "403":
+          description: Error (thrown FORBIDDEN, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -6327,6 +7015,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/projects/{projectId}/drives/{id}/review-effectiveness:
     get:
       summary: time window and (unless ?wholeProject=true) the meta-issue's dependency subtree.
@@ -6347,6 +7040,16 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "403":
+          description: Error (thrown FORBIDDEN, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -6405,6 +7108,11 @@ paths:
               schema: {}
         "400":
           description: Error
+          content:
+            application/json:
+              schema: {}
+        "409":
+          description: Error (thrown CONFLICT, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -6487,6 +7195,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/projects/{projectId}/milestones/summary:
     get:
       summary: GET /api/projects/:projectId/milestones/summary
@@ -6528,6 +7241,16 @@ paths:
           content:
             application/json:
               schema: {}
+        "403":
+          description: Error (thrown FORBIDDEN, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
     put:
       summary: PUT /api/projects/:projectId/milestones/:id
       tags:
@@ -6559,6 +7282,21 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "403":
+          description: Error (thrown FORBIDDEN, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -6616,6 +7354,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
     post:
       summary: POST /api/projects/{projectId}/scripts
       tags:
@@ -6640,6 +7383,21 @@ paths:
           content:
             application/json:
               schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "409":
+          description: Error (thrown CONFLICT, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/projects/{projectId}/scripts/{scriptId}:
     delete:
       summary: DELETE /api/projects/{projectId}/scripts/{scriptId}
@@ -6660,6 +7418,11 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -6692,6 +7455,16 @@ paths:
           content:
             application/json:
               schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/projects/{projectId}/scripts/{scriptId}/run:
     post:
       summary: POST /api/projects/{projectId}/scripts/{scriptId}/run
@@ -6719,6 +7492,16 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -6782,6 +7565,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/scheduled-runs/{id}:
     delete:
       summary: DELETE /api/scheduled-runs/:id
@@ -6797,6 +7585,11 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -6821,6 +7614,16 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -6851,6 +7654,16 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -6910,6 +7723,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/sessions/{sessionId}/stats:
     get:
       summary: GET /api/sessions/:sessionId/stats
@@ -6928,6 +7746,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/sessions/{sessionId}/summary:
     get:
       summary: GET /api/sessions/:sessionId/summary
@@ -6943,6 +7766,11 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -7003,6 +7831,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/tags:
     get:
       summary: GET /api/tags
@@ -7043,6 +7876,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "409":
+          description: Error (thrown CONFLICT, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/tags/merge:
     post:
       summary: POST /api/tags/merge — merge sourceIds into targetId, then delete sources
@@ -7067,6 +7905,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "403":
+          description: Error (thrown FORBIDDEN, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/tags/{id}:
     delete:
       summary: DELETE /api/tags/:id
@@ -7082,6 +7925,16 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "403":
+          description: Error (thrown FORBIDDEN, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -7110,6 +7963,21 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "403":
+          description: Error (thrown FORBIDDEN, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -7174,6 +8042,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "422":
+          description: Error (thrown UNPROCESSABLE, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/workers/incoming:
     get:
       summary: a branch, and discarding one drops commits. Never on the fleet listener.
@@ -7217,6 +8090,16 @@ paths:
           content:
             application/json:
               schema: {}
+        "409":
+          description: Error (thrown CONFLICT, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "422":
+          description: Error (thrown UNPROCESSABLE, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/workers/incoming/land:
     post:
       summary: POST /api/workers/incoming/land
@@ -7237,6 +8120,16 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "409":
+          description: Error (thrown CONFLICT, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "422":
+          description: Error (thrown UNPROCESSABLE, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -7396,6 +8289,11 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "422":
+          description: Error (thrown UNPROCESSABLE, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -8236,6 +9134,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/workspaces/{id}/artifacts-file:
     get:
       summary: GET /api/workspaces/:id/artifacts-file — read a single artifact by ?path= query param
@@ -8264,6 +9167,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/workspaces/{id}/bisect:
     post:
       summary: POST /api/workspaces/:id/bisect
@@ -8287,6 +9195,21 @@ paths:
       responses:
         "201":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "409":
+          description: Error (thrown CONFLICT, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -9151,6 +10074,21 @@ paths:
           content:
             application/json:
               schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "409":
+          description: Error (thrown CONFLICT, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/workspaces/{id}/services/logs:
     get:
       summary: GET /api/workspaces/:id/services/logs?tail=N — a bounded, non-following log tail.
@@ -9171,6 +10109,21 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "409":
+          description: Error (thrown CONFLICT, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -9199,6 +10152,21 @@ paths:
           content:
             application/json:
               schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "409":
+          description: Error (thrown CONFLICT, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/workspaces/{id}/services/up:
     post:
       summary: stack; (re)provisions a deferred/errored/never-run stack (the "Retry" control).
@@ -9221,6 +10189,21 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "409":
+          description: Error (thrown CONFLICT, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -9355,6 +10338,11 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}

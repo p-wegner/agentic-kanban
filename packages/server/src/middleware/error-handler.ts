@@ -28,7 +28,11 @@ type StatusCode = 400 | 403 | 404 | 409 | 422 | 500 | 503;
  */
 // #587 — keyed by `DomainErrorCode`, so the union in `errors/` and this mapping cannot
 // drift: adding a code without a status (or a status without a code) is a type error.
-const DOMAIN_CODE_STATUS: Record<DomainErrorCode, StatusCode> = {
+// #826 - EXPORTED so `openapi-thrown-status.test.ts` can compare this table against the copy
+// `scripts/generate-openapi.ts` parses out of this file. The generator must not restate the
+// mapping (a third copy would be the first to go stale); the test is what proves its parse
+// still finds the real one instead of silently returning an empty map.
+export const DOMAIN_CODE_STATUS: Record<DomainErrorCode, StatusCode> = {
   NOT_FOUND: 404,
   CONFLICT: 409,
   FORBIDDEN: 403,
