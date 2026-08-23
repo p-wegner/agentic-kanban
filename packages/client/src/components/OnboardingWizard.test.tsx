@@ -19,7 +19,10 @@ import {
 } from "./OnboardingWizard.js";
 import { useOnboardingStore } from "../stores/onboardingStore.js";
 
-function configStep(id: string, configKey: OnboardingStep extends { configKey: infer K } ? K : never): OnboardingStep {
+// `OnboardingStep extends { configKey: infer K } ? K : never` resolved to `never` — the
+// union as a whole does not extend that shape, and a conditional over a concrete union is
+// not distributive. Every call was therefore passing a string to a `never` parameter.
+function configStep(id: string, configKey: Extract<OnboardingStep, { kind: "config" }>["configKey"]): OnboardingStep {
   return { id, kind: "config", configKey, title: id, rationale: "", status: "pending", optional: true } as OnboardingStep;
 }
 
@@ -129,7 +132,7 @@ describe("onboardingStepInput — steps that apply with no input", () => {
 
   it("applies init-skill / ticket steps with no input", () => {
     const steps: OnboardingStep[] = [
-      { id: "init-skill:y", kind: "init-skill", skillId: "y", skillName: "y", title: "", rationale: "", status: "pending", optional: true },
+      { id: "init-skill:y", kind: "init-skill", source: "db", skillId: "y", skillName: "y", title: "", rationale: "", status: "pending", optional: true },
       { id: "ticket:z", kind: "ticket", catalogId: "z", title: "", rationale: "", status: "pending", optional: true },
     ];
     for (const step of steps) expect(onboardingStepInput(step, {})).toEqual({});

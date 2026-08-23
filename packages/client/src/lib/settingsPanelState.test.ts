@@ -175,7 +175,7 @@ describe("verifyScriptKey", () => {
 
 describe("buildSettingsToSave", () => {
   it("adds the active project's verify script under its per-project key", () => {
-    const out = buildSettingsToSave({ theme: "dark" }, { verifyScript: "pnpm test:mine" }, "proj-1");
+    const out = buildSettingsToSave<Record<string, unknown>>({ theme: "dark" }, { verifyScript: "pnpm test:mine" }, "proj-1");
     expect(out["verify_script_proj-1"]).toBe("pnpm test:mine");
     expect(out.theme).toBe("dark");
   });
@@ -183,7 +183,7 @@ describe("buildSettingsToSave", () => {
   it("stores an emptied verify script rather than skipping it", () => {
     // Mutation: `if (activeProjectId && projectSettings.verifyScript)` — clearing the verify
     // script in the UI would silently leave the old one in place.
-    expect(buildSettingsToSave({}, { verifyScript: "" }, "proj-1")["verify_script_proj-1"]).toBe("");
+    expect(buildSettingsToSave<Record<string, unknown>>({}, { verifyScript: "" }, "proj-1")["verify_script_proj-1"]).toBe("");
   });
 
   it("writes no verify-script key when there is no active project", () => {

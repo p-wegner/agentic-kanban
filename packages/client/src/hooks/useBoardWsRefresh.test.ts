@@ -61,7 +61,7 @@ describe("createBoardWsRefreshController (#514)", () => {
     const t = fakeTimers();
     const refresh = vi.fn();
     const c = createBoardWsRefreshController(
-      { projectId: "p1", shouldRefetch: (r) => r === "wanted", refresh },
+      { projectId: "p1", shouldRefetch: (r) => (r as string) === "wanted", refresh },
       t.timers,
     );
     expect(c.handleEvent(detail("p1", "unwanted"))).toBe(false);

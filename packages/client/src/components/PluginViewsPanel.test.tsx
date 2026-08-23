@@ -58,7 +58,7 @@ describe("createStartLatch (#251 staleness guard)", () => {
 
 describe("splitByAudience (#456 rail weighting)", () => {
   it("treats an unmarked entry as operator — a pre-#456 manifest renders unchanged", () => {
-    const items = [{ name: "a" }, { name: "b" }, { name: "c" }];
+    const items = [{ name: "a", audience: undefined }, { name: "b", audience: undefined }, { name: "c", audience: undefined }];
     const { operator, developer } = splitByAudience(items);
     expect(operator.map((i) => i.name)).toEqual(["a", "b", "c"]);
     expect(developer).toEqual([]);

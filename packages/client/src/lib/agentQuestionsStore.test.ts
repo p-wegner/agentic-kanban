@@ -21,6 +21,7 @@ function makeQuestions(n: number): PendingQuestionSet[] {
     issueTitle: `Issue ${i}`,
     questions: [],
     askedAt: null,
+    staleness: null,
   }));
 }
 

@@ -4,7 +4,7 @@ import { bulkContractCoupled, type BulkOpDeps } from "./tableView-bulk-ops.js";
 function createDeps(overrides: Partial<BulkOpDeps> = {}): BulkOpDeps {
   return {
     ids: ["issue-a", "issue-b"],
-    api: vi.fn(async () => ({ memberIssueIds: ["issue-a", "issue-b"] })),
+    api: vi.fn(async () => ({ memberIssueIds: ["issue-a", "issue-b"] })) as unknown as BulkOpDeps["api"],
     toast: vi.fn(),
     setSelectedIds: vi.fn(),
     setBulkLoading: vi.fn(),
