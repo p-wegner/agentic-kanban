@@ -108,9 +108,6 @@ async function seedWorkspace(
     workingDir: opts?.workingDir === undefined ? `/tmp/${branch}` : opts.workingDir,
     baseBranch: opts?.baseBranch === undefined ? "main" : opts.baseBranch,
     isDirect: opts?.isDirect ?? false,
-    conflictCacheCheckedAt: opts?.conflictCacheCheckedAt ?? null,
-    conflictCacheHasConflicts: opts?.conflictCacheHasConflicts ?? null,
-    conflictCacheFiles: opts?.conflictCacheFiles ?? null,
     diffStatCacheCheckedAt: opts?.diffStatCacheCheckedAt ?? null,
     diffStatCacheFilesChanged: opts?.diffStatCacheFilesChanged ?? null,
     diffStatCacheInsertions: opts?.diffStatCacheInsertions ?? null,
@@ -118,6 +115,18 @@ async function seedWorkspace(
     createdAt: now,
     updatedAt: now,
   } as any);
+  // #815: the conflict memo lives in `workspace_conflict_cache`, so the fixture seeds it
+  // there. No row at all is the "never probed" case the risk read must still handle.
+  if (opts?.conflictCacheCheckedAt !== undefined
+    || opts?.conflictCacheHasConflicts !== undefined
+    || opts?.conflictCacheFiles !== undefined) {
+    await db.insert(schema.workspaceConflictCache).values({
+      workspaceId,
+      checkedAt: opts?.conflictCacheCheckedAt ?? null,
+      hasConflicts: opts?.conflictCacheHasConflicts ?? null,
+      files: opts?.conflictCacheFiles ?? null,
+    });
+  }
   return workspaceId;
 }
 

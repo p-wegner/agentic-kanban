@@ -5,6 +5,7 @@ import {
   agentSkills,
   repos,
   workspaceSymlinkRun,
+  workspaceConflictCache,
 } from "@agentic-kanban/shared/schema";
 import { desc, eq, inArray, notInArray, and, isNotNull, ne, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
@@ -143,8 +144,10 @@ export async function getWorkspaceDetails(
       contextPrimer: workspaces.contextPrimer,
       closedAt: workspaces.closedAt,
       mergedAt: workspaces.mergedAt,
-      conflictCacheHasConflicts: workspaces.conflictCacheHasConflicts,
-      conflictCacheFiles: workspaces.conflictCacheFiles,
+      // #815: the conflict memo moved to `workspace_conflict_cache`. Aliased back to the same
+      // field names, so every consumer of this projected row is untouched by the move.
+      conflictCacheHasConflicts: workspaceConflictCache.hasConflicts,
+      conflictCacheFiles: workspaceConflictCache.files,
       diffStatCacheFilesChanged: workspaces.diffStatCacheFilesChanged,
       diffStatCacheInsertions: workspaces.diffStatCacheInsertions,
       diffStatCacheDeletions: workspaces.diffStatCacheDeletions,
@@ -181,6 +184,8 @@ export async function getWorkspaceDetails(
     .leftJoin(agentSkills, eq(workspaces.skillId, agentSkills.id))
     .leftJoin(leadingRepo, and(eq(leadingRepo.workspaceId, workspaces.id), eq(leadingRepo.isLeading, true)))
     .leftJoin(workspaceSymlinkRun, eq(workspaceSymlinkRun.workspaceId, workspaces.id))
+    // #815: LEFT, not inner — a never-probed workspace has no memo row and must still read.
+    .leftJoin(workspaceConflictCache, eq(workspaceConflictCache.workspaceId, workspaces.id))
     .where(eq(workspaces.id, workspaceId));
 
   if (result.length === 0) return null;

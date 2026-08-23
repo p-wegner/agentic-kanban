@@ -321,10 +321,6 @@ describe("Board API", () => {
       issueId,
       branch: "feature/ak-324-null-summary",
       status: "closed",
-      // conflictCacheFiles stored as JSON-encoded null ("null") — the bug scenario
-      conflictCacheHasConflicts: false,
-      conflictCacheFiles: "null",
-      conflictCacheCheckedAt: now,
       // diffStat all zeros/null
       diffStatCacheCheckedAt: now,
       diffStatCacheFilesChanged: 0,
@@ -334,6 +330,11 @@ describe("Board API", () => {
       scorecardScore: null,
       createdAt: now,
       updatedAt: now,
+    });
+    // #815: the conflict memo moved to its own table. `files` stored as the JSON-encoded
+    // string "null" is the bug scenario this test exists for — it survives the move.
+    await database.insert(schema.workspaceConflictCache).values({
+      workspaceId, checkedAt: now, hasConflicts: false, files: "null",
     });
 
     // Session with stats stored as JSON-encoded null
@@ -573,10 +574,13 @@ describe("Board API", () => {
       issueId,
       branch: "feature/ak-324-null-summary-list",
       status: "closed",
-      conflictCacheHasConflicts: null,
-      conflictCacheFiles: null,
       createdAt: now,
       updatedAt: now,
+    });
+    // #815: the memo has its own table. All-null is what a probe that found nothing wrote;
+    // here it is seeded explicitly rather than left absent, to keep the row shape the same.
+    await database.insert(schema.workspaceConflictCache).values({
+      workspaceId, checkedAt: null, hasConflicts: null, files: null,
     });
 
     const res = await app.request(`/api/issues?projectId=${p}&issueNumber=324`);

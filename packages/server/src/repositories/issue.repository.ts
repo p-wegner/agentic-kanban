@@ -1,4 +1,4 @@
-import { issues, workspaces, projectStatuses, tags, issueTags, issueDependencies, issueArtifacts, agentSkills, workspaceSymlinkRun } from "@agentic-kanban/shared/schema";
+import { issues, workspaces, projectStatuses, tags, issueTags, issueDependencies, issueArtifacts, agentSkills, workspaceSymlinkRun, workspaceConflictCache } from "@agentic-kanban/shared/schema";
 import { loadIssueSummary, type IssueSummaryResult } from "@agentic-kanban/shared/lib/issue-summary";
 import { parseIssueRef } from "@agentic-kanban/shared/lib/issue-ref";
 import { DEFAULT_PROJECT_STATUSES, buildProjectStatusRows, statusIdsByName } from "@agentic-kanban/shared/lib/project-statuses";
@@ -394,8 +394,10 @@ export async function getIssueWorkspaces(
       latestSymlinkSkipped: workspaceSymlinkRun.skipped,
       latestSymlinkFailed: workspaceSymlinkRun.failed,
       latestSymlinkError: workspaceSymlinkRun.error,
-      conflictCacheHasConflicts: workspaces.conflictCacheHasConflicts,
-      conflictCacheFiles: workspaces.conflictCacheFiles,
+      // #815: the conflict memo moved to `workspace_conflict_cache`. Aliased back to the same
+      // field names, so every consumer of this projected row is untouched by the move.
+      conflictCacheHasConflicts: workspaceConflictCache.hasConflicts,
+      conflictCacheFiles: workspaceConflictCache.files,
       diffStatCacheFilesChanged: workspaces.diffStatCacheFilesChanged,
       diffStatCacheInsertions: workspaces.diffStatCacheInsertions,
       diffStatCacheDeletions: workspaces.diffStatCacheDeletions,
@@ -405,6 +407,8 @@ export async function getIssueWorkspaces(
     .from(workspaces)
     .leftJoin(agentSkills, eq(workspaces.skillId, agentSkills.id))
     .leftJoin(workspaceSymlinkRun, eq(workspaceSymlinkRun.workspaceId, workspaces.id))
+    // #815: LEFT, not inner — a never-probed workspace has no memo row and must still read.
+    .leftJoin(workspaceConflictCache, eq(workspaceConflictCache.workspaceId, workspaces.id))
     .where(eq(workspaces.issueId, issueId));
 }
 

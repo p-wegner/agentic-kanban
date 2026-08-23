@@ -11,12 +11,12 @@ import { readSessionStdoutFileTailAsync } from "../lib/session-output-reader.js"
 import { extractAssistantMessage, extractToolName, safeParseStringArray } from "../lib/session-message-extraction.js";
 import { selectLatestSessionsByWorkspace, parseContextTokensFromStats } from "../lib/workspace-summary-session.js";
 import { selectCachedDiffStats, isPlanOnlySession, isDiffCacheStale } from "../lib/workspace-diff-cache.js";
+import { updateWorkspaceConflictCache } from "../repositories/conflict-cache.repository.js";
 import {
   aggregateWorkspaceCountRows,
   fetchWorkspaceDetailRows,
   getShowdownStatuses,
   updateWorkspaceDiffStatCache,
-  updateWorkspaceConflictCache,
   getWorkflowNodesByIds,
   getOutgoingWorkflowEdges,
   getWorkflowNodeNamesByIds,
@@ -471,10 +471,12 @@ function applyConflicts(
             const changed =
               result.hasConflicts !== mainWs.conflictCacheHasConflicts ||
               files !== mainWs.conflictCacheFiles;
+            // #815: the memo moved to `workspace_conflict_cache` — same three values under
+            // their unprefixed names, now owned by `conflict-cache.repository.ts`.
             updateWorkspaceConflictCache(wsId, {
-              conflictCacheCheckedAt: new Date().toISOString(),
-              conflictCacheHasConflicts: result.hasConflicts,
-              conflictCacheFiles: files,
+              checkedAt: new Date().toISOString(),
+              hasConflicts: result.hasConflicts,
+              files,
             }, database)
               .then(() => { if (changed) notifySummaryWriteThrough(wsId); })
               .catch(() => {});

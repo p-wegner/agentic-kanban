@@ -1,4 +1,4 @@
-import { workspaces, issues, projectStatuses, sessions, sessionMessages } from "@agentic-kanban/shared/schema";
+import { workspaces, issues, projectStatuses, sessions, sessionMessages, workspaceConflictCache } from "@agentic-kanban/shared/schema";
 import { eq, inArray, and, desc } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -37,9 +37,11 @@ export async function getWorkspaceRiskRowsForIssues(
       baseBranch: workspaces.baseBranch,
       isDirect: workspaces.isDirect,
       status: workspaces.status,
-      conflictCacheCheckedAt: workspaces.conflictCacheCheckedAt,
-      conflictCacheHasConflicts: workspaces.conflictCacheHasConflicts,
-      conflictCacheFiles: workspaces.conflictCacheFiles,
+      // #815: the conflict memo moved to `workspace_conflict_cache`. Aliased back to the same
+      // field names, so every consumer of this projected row is untouched by the move.
+      conflictCacheCheckedAt: workspaceConflictCache.checkedAt,
+      conflictCacheHasConflicts: workspaceConflictCache.hasConflicts,
+      conflictCacheFiles: workspaceConflictCache.files,
       diffStatCacheCheckedAt: workspaces.diffStatCacheCheckedAt,
       diffStatCacheFilesChanged: workspaces.diffStatCacheFilesChanged,
       diffStatCacheInsertions: workspaces.diffStatCacheInsertions,
@@ -47,6 +49,9 @@ export async function getWorkspaceRiskRowsForIssues(
       updatedAt: workspaces.updatedAt,
     })
     .from(workspaces)
+    // #815: LEFT, not inner — a never-probed workspace has no memo row and must still be
+    // returned, or every risk signal on a fresh workspace disappears.
+    .leftJoin(workspaceConflictCache, eq(workspaceConflictCache.workspaceId, workspaces.id))
     .where(and(
       inArray(workspaces.issueId, issueIds),
     ));

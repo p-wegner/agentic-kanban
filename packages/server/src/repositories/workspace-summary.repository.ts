@@ -1,4 +1,4 @@
-import { workspaces, sessions, sessionMessages, showdowns, workflowEdges, workflowNodes, repos, issues, workspaceCodeMetrics } from "@agentic-kanban/shared/schema";
+import { workspaces, sessions, sessionMessages, showdowns, workflowEdges, workflowNodes, repos, issues, workspaceCodeMetrics, workspaceConflictCache } from "@agentic-kanban/shared/schema";
 import { and, eq, inArray, sql, desc } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import { db } from "../db/index.js";
@@ -54,9 +54,11 @@ export async function fetchWorkspaceDetailRows(issueIds: string[], database: Dat
       summaryCommitCount: workspaces.summaryCommitCount,
       summaryGitRefreshedAt: workspaces.summaryGitRefreshedAt,
       summaryDirty: workspaces.summaryDirty,
-      conflictCacheCheckedAt: workspaces.conflictCacheCheckedAt,
-      conflictCacheHasConflicts: workspaces.conflictCacheHasConflicts,
-      conflictCacheFiles: workspaces.conflictCacheFiles,
+      // #815: the conflict memo moved to `workspace_conflict_cache`. Aliased back to the same
+      // field names, so every consumer of this projected row is untouched by the move.
+      conflictCacheCheckedAt: workspaceConflictCache.checkedAt,
+      conflictCacheHasConflicts: workspaceConflictCache.hasConflicts,
+      conflictCacheFiles: workspaceConflictCache.files,
       readyForMerge: workspaces.readyForMerge,
       diffStatCacheCheckedAt: workspaces.diffStatCacheCheckedAt,
       diffStatCacheHeadSha: workspaces.diffStatCacheHeadSha,
@@ -75,6 +77,9 @@ export async function fetchWorkspaceDetailRows(issueIds: string[], database: Dat
     .from(workspaces)
     .leftJoin(leadingRepo, onLeadingRepo)
     .leftJoin(workspaceCodeMetrics, eq(workspaceCodeMetrics.workspaceId, workspaces.id))
+    // #815: LEFT, not inner — a never-probed workspace has no memo row and must still be
+    // returned, or the board silently loses every workspace it has not yet gitted.
+    .leftJoin(workspaceConflictCache, eq(workspaceConflictCache.workspaceId, workspaces.id))
     .where(inArray(workspaces.issueId, issueIds));
 }
 
@@ -99,17 +104,8 @@ export async function updateWorkspaceDiffStatCache(
   await database.update(workspaces).set(values).where(eq(workspaces.id, workspaceId));
 }
 
-export async function updateWorkspaceConflictCache(
-  workspaceId: string,
-  values: {
-    conflictCacheCheckedAt: string;
-    conflictCacheHasConflicts: boolean;
-    conflictCacheFiles: string;
-  },
-  database: Database = db,
-): Promise<void> {
-  await database.update(workspaces).set(values).where(eq(workspaces.id, workspaceId));
-}
+// #815: `updateWorkspaceConflictCache` moved to `repositories/conflict-cache.repository.ts`
+// together with the three columns it wrote — the memo has its own table and its own owner now.
 
 export async function getWorkflowNodesByIds(nodeIds: string[], database: Database = db) {
   return database
