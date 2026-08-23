@@ -30,6 +30,7 @@ import {
 } from "./worker-repo.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { resolveSpecCommand } from "./worker-command-resolver.js";
+import { FLEET_MCP_TOKEN_ENV_VAR } from "@agentic-kanban/shared/lib/worker-protocol";
 
 export type SendToBoard = (message: WorkerToBoardMessage) => void;
 
@@ -449,7 +450,18 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
         // Stay in `provisioning` across this call so the capacity check sees the
         // slot this session already holds and cannot refuse it to itself (#266);
         // release it only once the process exists.
-        assign(sessionId, { ...spec, cwd: checkout.cwd });
+        // #799 — the board MCP bearer token for a provider configured through the ENVIRONMENT
+        // (codex). It travels in its own field rather than in `spec.env`, which is projected
+        // through an allowlist that deliberately drops anything token-shaped; putting it into
+        // the child's environment is the WORKER's job, here, at the last moment before spawn.
+        // Merged into `spec.env` (not `process.env`) so it reaches only this agent.
+        assign(sessionId, {
+          ...spec,
+          cwd: checkout.cwd,
+          ...(repo.boardMcpToken
+            ? { env: { ...(spec.env ?? {}), [FLEET_MCP_TOKEN_ENV_VAR]: repo.boardMcpToken } }
+            : {}),
+        });
         provisioning.delete(sessionId);
       } catch (err) {
         provisioning.delete(sessionId);

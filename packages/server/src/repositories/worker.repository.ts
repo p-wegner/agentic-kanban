@@ -216,6 +216,53 @@ export async function findCurrentWorkerAssignment(
 }
 
 /**
+ * The facts the MCP bridge re-derives per request for ONE assignment (#799 gap 3).
+ *
+ * The git transport already re-derives its dispatch on every request (#753); the MCP path only
+ * had the token's own lifetime behind it, which is a 24h window with no assignment if the board
+ * crashed mid-session. `null` = no such session, which the caller treats as a refusal.
+ *
+ * `issueId` rides along because it is the SAME join, and it is what pins `add_comment` to the
+ * ticket this worker was dispatched for rather than one it names.
+ */
+export interface FleetMcpAssignmentRow {
+  status: string;
+  workerId: string | null;
+  issueId: string | null;
+  projectId: string | null;
+  endedAt: string | null;
+}
+
+export async function findFleetMcpAssignment(
+  sessionId: string,
+  database: Database = db,
+): Promise<FleetMcpAssignmentRow | null> {
+  const rows = await database
+    .select({
+      status: sessions.status,
+      workerId: sessions.workerId,
+      issueId: workspaces.issueId,
+      projectId: issues.projectId,
+      endedAt: sessions.endedAt,
+    })
+    .from(sessions)
+    .leftJoin(workspaces, eq(workspaces.id, sessions.workspaceId))
+    .leftJoin(issues, eq(issues.id, workspaces.issueId))
+    .where(eq(sessions.id, sessionId))
+    .limit(1);
+  const row = rows[0];
+  return row
+    ? {
+        status: row.status,
+        workerId: row.workerId ?? null,
+        issueId: row.issueId ?? null,
+        projectId: row.projectId ?? null,
+        endedAt: row.endedAt ?? null,
+      }
+    : null;
+}
+
+/**
  * Is this session still live on this worker, from the DB's point of view?
  *
  * Delegates to the `sessions`-owning repository (#957) rather than re-querying the table

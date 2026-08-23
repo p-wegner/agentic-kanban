@@ -93,6 +93,7 @@ import {
   type FleetCapacity,
   type WorkerFleet,
 } from "./worker-fleet.service.js";
+import type { WorkerRegistry } from "./worker-registry.service.js";
 import { loadProjectRuntimeConfig } from "./project-runtime-config.service.js";
 import { remoteDispatchBlockedByRepoShape } from "./worker-transport-support.service.js";
 
@@ -273,10 +274,23 @@ export async function describeFleet(params: {
   projectId?: string;
   providerName?: ProviderName;
   now?: string;
+  /**
+   * The registry to read, when the caller holds one that is not the per-database singleton
+   * (#799, fixing #774 fallout).
+   *
+   * `createWorkersRoute` takes an injectable registry, and #774 moved `GET /api/workers` onto
+   * this function — which reached for the singleton and so IGNORED the injection. In production
+   * both are the same object, which is why it went unnoticed; against an injected registry the
+   * route answered from a DIFFERENT instance, so everything held in the registry's own memory
+   * rather than in the DB (the reported protocol/build versions, #754) read as absent. An
+   * injection seam that only one route honours is not a seam.
+   */
+  registry?: WorkerRegistry;
 }): Promise<FleetSnapshot> {
   const database = params.database ?? realDb;
   const providerName = params.providerName ?? "claude";
-  const fleet = getWorkerFleet(database);
+  const singleton = getWorkerFleet(database);
+  const fleet: WorkerFleet = params.registry ? { ...singleton, registry: params.registry } : singleton;
   const requiredLabels = params.projectId
     ? parseRequiredLabels(await getPreferenceValue(workerLabelsPrefKey(params.projectId), database))
     : [];

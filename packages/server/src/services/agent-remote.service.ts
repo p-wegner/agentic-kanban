@@ -6,6 +6,7 @@ import {
   REMOTE_BOARD_TOOLS,
   buildRemoteMcpConfigFile,
   getFleetMcpBridge,
+  providerNeedsMcpTokenEnv,
   providerSupportsRemoteMcp,
   remoteMcpConfigArgs,
 } from "./fleet-mcp-bridge.service.js";
@@ -688,9 +689,13 @@ export function createRemoteAgentService(
           const mcpAssignment = providerSupportsRemoteMcp(provider)
             ? fleetMcp.prepareAssignment({ workerId, projectId: repo.projectId, sessionId })
             : null;
+          // #799 — codex takes its config through argv (`-c mcp_servers...`) and its TOKEN
+          // through the worker's own environment, so it gets no config file and instead sets
+          // `boardMcpToken` below. claude/copilot keep the file channel #769 built.
+          const mcpTokenViaEnv = mcpAssignment !== null && providerNeedsMcpTokenEnv(provider);
           if (mcpAssignment) {
-            remoteContextFiles.push(buildRemoteMcpConfigFile(mcpAssignment));
-            mcpArgs.push(...remoteMcpConfigArgs(provider));
+            if (!mcpTokenViaEnv) remoteContextFiles.push(buildRemoteMcpConfigFile(mcpAssignment));
+            mcpArgs.push(...remoteMcpConfigArgs(provider, { url: mcpAssignment.url }));
             // The brief was retargeted to "no board tools here" while it was read (#749). That is
             // now false for this assignment, so the section is rewritten to name the tools that
             // actually work — instructions that describe the wrong environment are how an agent
@@ -722,6 +727,7 @@ export function createRemoteAgentService(
               // nothing on the worker) and is retargeted for a machine with no board MCP.
               // #769 appends the MCP config file to the same channel when a bridge is offered.
               contextFiles: remoteContextFiles,
+              ...(mcpTokenViaEnv && mcpAssignment ? { boardMcpToken: mcpAssignment.token } : {}),
               skills: skillRows
                 .filter((s) => typeof s.prompt === "string" && s.prompt.trim().length > 0)
                 .map((s) => ({ name: s.name, description: s.description ?? "", content: s.prompt })),

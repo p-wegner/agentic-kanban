@@ -2,7 +2,7 @@
 
 # MCP tools
 
-All 111 tools exposed by the `agentic-kanban` MCP server. Call them as `mcp__agentic-kanban__<name>`.
+All 112 tools exposed by the `agentic-kanban` MCP server. Call them as `mcp__agentic-kanban__<name>`.
 
 ## Board Overview
 
@@ -80,6 +80,7 @@ All 111 tools exposed by the `agentic-kanban` MCP server. Call them as `mcp__age
 | `review_workspace` | Trigger an AI code review for an idle workspace. The workspace must be in 'idle' status. |
 | `get_diff_comments` | Get diff review comments for a workspace, optionally filtered by file path |
 | `create_diff_comment` | Add a review comment on a file in a workspace's diff |
+| `add_comment` | Append a comment to an issue's thread — a progress note, or a question you need answered. Use this to reflect what you have done or learned onto the ticket itself, instead of leaving it only in your final output. Does not change the issue's status. |
 | `approve_tool_use` | Internal tool used by Claude Code's --permission-prompt-tool flag. Routes tool approval requests to the agentic-kanban UI for user approval. Returns allow/deny/allow_session/deny_session. |
 | `session_review_effectiveness` | Measure how the ticket-implementation workflow interacts with AI code review. Reconstructs each ticket's build->review->merge lifecycle from sessions + workspaces + diff comments. Code-review agent runs are identified by triggerType 'review' or 'skill:code-review*'. Mirrors `pnpm cli -- session review-effectiveness`. |
 | `reviewer_fixes` | Measure how often the code-review agent FIXES findings itself (and commits) vs only approving. Two methods: git (commit author-time inside a review session's window) and deep transcript analysis (--deep). Mirrors `pnpm cli -- session reviewer-fixes`. |
