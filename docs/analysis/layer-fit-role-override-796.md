@@ -87,11 +87,30 @@ argument ("retaining a stale handler is sound *because* handlers are ignored and
 other prop is compared") that nothing verified. The handler-key set stays in the component
 typed `keyof IssueCardProps`, so a renamed prop is still a compile error.
 
-## Caveat on the confirming full run
+## The confirming full run agrees
 
-The measurements above come from the analyzer's own layer-fit functions. A confirming
-`code-metrics analyze . --changeset-strategy pr` was run at the same commit; on this box
-its `lizard` stage failed (`no output (exit 1)`) under memory pressure, which zeroes every
-complexity-derived metric but does **not** affect layer fit — `decision_points` are counted
-by the layer-fit runner itself, independently of lizard. Treat that run's complexity
-columns as unmeasured.
+`code-metrics analyze . --changeset-strategy pr` was then run end-to-end at the same commit
+with the committed config. Its `layer_fit` block reproduces the table above over the
+pipeline's own 2,835-file set:
+
+```
+centre_of_gravity      0.4345          (probe: 0.4342)
+logic_in_adapter_ratio 0.3763          (probe: 0.3766)
+adapter / domain mass  11,502 / 19,068 (probe: 11,504 / 19,041)
+by_module CoG          client 0.2041, server 0.6012, shared 0.8000
+client by_role         frontend 10,259, domain 2,631
+leaks                  {query_in_adapter: 1}
+```
+
+The client CoG is identical to four decimal places; the sub-0.001 differences elsewhere are
+the slightly wider file set the pipeline scans. The config change is therefore measured, not
+merely reasoned about.
+
+**One caveat on that run, unrelated to this change:** its `lizard` stage failed
+(`no output (exit 1)`) under memory pressure on this box, which the analyzer reports loudly
+and which zeroes every complexity-derived metric — `max_cyclomatic` is 0 for all 2,835 files
+in that output, and `maintainability_index`/Halstead with it. Layer fit is unaffected:
+`decision_points` are counted by the layer-fit runner itself, independently of lizard
+(`SettingsPanel.tsx` still reports 76). `lizard` runs fine standalone on the same files, so
+this is machine load, not a config or tool defect — but do not pin a complexity baseline to
+`code-metrics-out/analysis.json` as it stands.

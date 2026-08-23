@@ -875,12 +875,18 @@ change touches:
 The unchanged leak count is the check that matters — re-labelling `lib/` did not
 manufacture violations. Full write-up: `docs/analysis/layer-fit-role-override-796.md`.
 
-**Unverified:** a confirming full `code-metrics analyze . --changeset-strategy pr` was
-started at the same commit; its `lizard` stage failed on this box (`no output (exit 1)`)
-under memory pressure — the analyzer says so loudly and zeroes every complexity-derived
-metric. Layer fit is unaffected (`decision_points` are counted by the layer-fit runner
-itself), but nobody has yet seen these numbers come out of an end-to-end run. Re-run on a
-box with headroom to close that.
+**Confirmed end-to-end.** A full `code-metrics analyze . --changeset-strategy pr` at the
+same commit reproduces it over the pipeline's own 2,835-file set: client CoG **0.2041**
+(identical to four decimals), overall 0.4345, ratio 0.3763, `client by_role`
+`frontend 10,259 / domain 2,631`, leaks 1. Sub-0.001 differences elsewhere are the slightly
+wider file set the pipeline scans.
+
+**One caveat on that run, unrelated to this change:** its `lizard` stage failed
+(`no output (exit 1)`) under memory pressure, which zeroes every complexity-derived metric
+— `max_cyclomatic` is 0 for all 2,835 files in `code-metrics-out/analysis.json`, and
+`maintainability_index`/Halstead with it. Layer fit is unaffected. `lizard` runs fine
+standalone on the same files, so this is machine load, not a tool defect — but **do not pin
+a complexity baseline to that output as it stands.**
 
 **One Option-A extraction landed** alongside: `arePropsEqualIgnoring` out of
 `IssueCard.tsx` (#5 highest-churn component) into `lib/propsEqualIgnoring.ts` with 10 pure
