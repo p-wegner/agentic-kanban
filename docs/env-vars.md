@@ -12,13 +12,27 @@ read under `packages/*/src` is checked by `env-read-ownership.test.ts`: a board-
 (`KANBAN_*` or `AGENTIC_KANBAN_*`) must have a row on this page, and every other name must be
 declared FOREIGN in that suite with a note saying whose it is. So a new variable cannot reach
 master undocumented, and an unlisted `KANBAN_*` in code is a bug in one of the two, not a var
-nobody wrote down. **One hole is real and pinned rather than closed**: a name read through a
-helper that takes it as an ARGUMENT — `envPort("KANBAN_FLEET_PORT", …)` — is a
-`process.env[<expression>]` read at the scan's eyes, so no name-based rule can judge it. The
-suite caps those at a baseline of 5 instead of naming them, which is why `KANBAN_FLEET_PORT`
-and `KANBAN_GIT_HTTP_PORT` reached master with no row here until #756 added them. A new
-board-owned variable introduced that way still needs its row by hand. (The caveat this replaces was true when #690 filed it: 84 reads across 42
+nobody wrote down. (The caveat this replaces was true when #690 filed it: 84 reads across 42
 names were unforbidden and roughly a third undocumented.)
+
+**The helper-argument hole is closed (#768).** A name read through a helper that takes it as
+an ARGUMENT — `envPort("KANBAN_FLEET_PORT", …)` — used to be invisible: the read itself happens
+inside the helper as `process.env[<expression>]`, and the suite merely *capped* those at a count
+of 5 rather than naming them. A count says how many reads cannot be seen and never which
+variable, which is exactly how `KANBAN_FLEET_PORT` and `KANBAN_GIT_HTTP_PORT` reached master with
+no row here until #756 added them by hand. The suite now resolves the literal name argument of
+every enumerated env-reader helper (`ENV_READER_HELPERS`: `envPort`, `readBoardEnv`) into a named
+read and checks it against this page like a direct one — so a new `envPort("KANBAN_…")` with no
+row here fails the gate.
+
+What remains is **named, not counted**: the genuinely dynamic reads live in `DYNAMIC_ENV_READS`,
+one entry per call site, each stating which variables that site can resolve to and why the
+indirection belongs there (`envPort`'s own body, `readBoardEnv`'s canonical/legacy pair, the mock
+agent's `MOCK_<FLAG>` derivation, and the Pi API-key sweep). The list is shrink-only in both
+directions — a new dynamic site fails until it is declared, and a declared site that disappears
+must have its entry deleted. It was deliberately not driven to zero: `env[name]` inside a helper
+is the correct implementation of that helper, and forcing it out would push the pattern into a
+shape the scanner also cannot see.
 
 The renamed vars in the first table are **data**, in
 `packages/server/src/lib/env-registry.ts` (`KANBAN_ENV`), and this page is checked against
