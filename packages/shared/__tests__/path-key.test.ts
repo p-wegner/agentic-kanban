@@ -5,11 +5,19 @@ import { pathKey, samePath, isPathInside, normalizeSlashes } from "../src/lib/pa
 const WIN = process.platform === "win32";
 
 describe("pathKey (#532)", () => {
-  it("is stable across separator direction and trailing separators", () => {
+  it("is stable across trailing separators", () => {
     const base = resolve("a/b/c");
     expect(pathKey(base)).toBe(pathKey(base + "/"));
-    expect(pathKey(base)).toBe(pathKey(base.replace(/\//g, "\\")));
     expect(pathKey(base)).toBe(pathKey(base + "//"));
+  });
+
+  // Separator direction is a WINDOWS equivalence. Off Windows a backslash is an ordinary
+  // filename character, so `resolve()` reads `\a\b\c` as a single RELATIVE segment and
+  // folding it onto `/a/b/c` would be a silent false positive (#828: this assertion had
+  // never run off Windows, where it fails).
+  it.runIf(WIN)("is stable across separator direction (win32)", () => {
+    const base = resolve("a/b/c");
+    expect(pathKey(base)).toBe(pathKey(base.replace(/\//g, "\\")));
   });
 
   it("resolves relative paths, so an unresolved recipe cannot disagree with a resolved one", () => {
