@@ -13,7 +13,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { randomUUID } from "node:crypto";
-import { driveObstacles, issues, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
+import { driveObstacles, issues, projectStatuses, projects, workspaceMergeBackoff, workspaces } from "@agentic-kanban/shared/schema";
 import { eq } from "drizzle-orm";
 import { createTestDb } from "./helpers/test-db.js";
 
@@ -73,16 +73,26 @@ async function seedWorkspace(db: Db, issueNumber: number) {
   };
 }
 
+/**
+ * Reads the persisted backoff. Since #781 this lives in `workspace_merge_backoff`, not in
+ * seven `merge_backoff_*` columns on `workspaces` — LEFT JOINed so a workspace with no
+ * block still yields a row (`failures: 0`, everything else null), which is the state the
+ * columns held after a clear and which several assertions below depend on.
+ */
 function readBackoff(db: Db, workspaceId: string) {
   return db.select({
-    failures: workspaces.mergeBackoffFailures,
-    signature: workspaces.mergeBackoffSignature,
-    error: workspaces.mergeBackoffError,
-    branchSha: workspaces.mergeBackoffBranchSha,
-    verifyHash: workspaces.mergeBackoffVerifyHash,
-    nextRetryAt: workspaces.mergeBackoffNextRetryAt,
-    since: workspaces.mergeBackoffSince,
-  }).from(workspaces).where(eq(workspaces.id, workspaceId)).then((r) => r[0]);
+    failures: workspaceMergeBackoff.failures,
+    signature: workspaceMergeBackoff.signature,
+    error: workspaceMergeBackoff.error,
+    branchSha: workspaceMergeBackoff.branchSha,
+    verifyHash: workspaceMergeBackoff.verifyHash,
+    nextRetryAt: workspaceMergeBackoff.nextRetryAt,
+    since: workspaceMergeBackoff.since,
+  })
+    .from(workspaces)
+    .leftJoin(workspaceMergeBackoff, eq(workspaceMergeBackoff.workspaceId, workspaces.id))
+    .where(eq(workspaces.id, workspaceId))
+    .then((r) => (r[0] ? { ...r[0], failures: r[0].failures ?? 0 } : r[0]));
 }
 
 /** Deterministic deps: injected clock + probes, no real git/prefs. */

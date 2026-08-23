@@ -4,13 +4,17 @@ import { issues } from "./issues.js";
 import { agentSkills } from "./agent-skills.js";
 
 /**
- * 88 columns, and it should not become 89 (#739).
+ * 81 columns, and it should not become 82 (#739, #781).
  *
  * The next widest table in this schema has 23 (`issues`, `repos`); the median across 44
- * tables is 9. What is here is not one entity but ten concerns flattened into one row by
- * prefix — `latest_setup_*` (8), `latest_symlink_*` (8), `merge_backoff_*` (7),
- * `merge_gate_*` (5), `summary_*` (5), `diff_stat_cache_*` (5), `review_preflight_*` (4),
- * `conflict_cache_*` (3), `scorecard_*` (3), `fork_*`/`showdown_*` (5), `code_metrics_*` (2).
+ * tables is 9. What is here is not one entity but ten remaining concerns flattened into one row by
+ * prefix — `latest_setup_*` (8), `latest_symlink_*` (8), `merge_gate_*` (5), `summary_*` (5),
+ * `diff_stat_cache_*` (5), `review_preflight_*` (4), `conflict_cache_*` (3), `scorecard_*` (3),
+ * `fork_*`/`showdown_*` (5), `code_metrics_*` (2). `merge_backoff_*` (7) is no longer among
+ * them: #781 extracted it to `workspace_merge_backoff`, the first family to go, and the
+ * remaining order (cheapest coupling first) is `review_preflight_*` → `summary_*` →
+ * `merge_gate_*` → `latest_symlink_*` → `conflict_cache_*` → `code_metrics_*` →
+ * `latest_setup_*` → `diff_stat_cache_*` → `scorecard_*` (43 referencing files, last).
  * Each `latest_*` / `*_cache_*` / `*_gate_*` group is a one-to-many relationship collapsed
  * to its last row: there is one setup run per column set, so its history is unrecoverable by
  * construction, and any new field on any of those concerns is another `ALTER TABLE` on the
@@ -157,32 +161,6 @@ export const workspaces = sqliteTable("workspaces", {
   reviewPreflightSignature: text("review_preflight_signature"),
   /** Set when the attempt budget was exhausted for the current signature. */
   reviewPreflightBlockedAt: text("review_preflight_blocked_at"),
-  /**
-   * Backoff state for monitor-driven merge / fix-and-merge retries (#417). A merge that
-   * fails on a STATIC, human-only blocker — a dirty main checkout, missing verify-script
-   * infrastructure — is deterministic: retrying every monitor cycle can never succeed, it
-   * just burns a main-checkout git check plus (via the fix-and-merge session) a full
-   * verify run per retry, silently and forever. When the failure signature is IDENTICAL
-   * to the previous attempt the retry interval doubles per repeat (capped at ~2h;
-   * non-retryable-without-change classes go straight to the cap), and the block clears
-   * itself the moment relevant state changes: a new commit on the branch
-   * (`mergeBackoffBranchSha` moved), the main checkout became clean, or the verify script
-   * content changed (`mergeBackoffVerifyHash` moved). Persisted so a server restart does
-   * not reset the backoff. See merge-backoff.service.ts.
-   */
-  mergeBackoffFailures: integer("merge_backoff_failures").notNull().default(0),
-  /** `<failureClass>|<messageDigest>` — identity of the failing attempt. */
-  mergeBackoffSignature: text("merge_backoff_signature"),
-  /** The last merge failure message, so the block is explainable without the log. */
-  mergeBackoffError: text("merge_backoff_error"),
-  /** Branch tip observed at the last failure — a moved tip voids the block. */
-  mergeBackoffBranchSha: text("merge_backoff_branch_sha"),
-  /** Hash of the project's verify_script at the last failure — changed content voids the block. */
-  mergeBackoffVerifyHash: text("merge_backoff_verify_hash"),
-  /** No merge retry for this workspace before this instant (ISO). */
-  mergeBackoffNextRetryAt: text("merge_backoff_next_retry_at"),
-  /** When the CURRENT failure signature was first observed — the "blocked since" for warnings. */
-  mergeBackoffSince: text("merge_backoff_since"),
   /** Context primer assembled by the context-packer at workspace creation. Injected into CLAUDE.local.md. */
   contextPrimer: text("context_primer"),
   /** Set when worktree removal fails post-merge (e.g. EBUSY). Cleared on successful retry cleanup. */
