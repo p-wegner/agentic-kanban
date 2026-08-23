@@ -21,7 +21,7 @@ The same run answers the licence question. Note that the earlier "40 of 50
 dependencies have no readable licence" figure was an artefact of an *offline*
 reader that could not resolve metadata — it was not a property of this tree.
 `pnpm licenses list` reads the licence field of the actually-installed packages;
-measured, the number is **3 unknown out of 558** in the whole tree and **2 out of
+measured, the number is **3 unknown out of 557** in the whole tree and **2 out of
 265** in the production graph.
 
 ## Failure policy
@@ -71,22 +71,63 @@ remainder. Two things keep it honest:
   override floor). Class acceptance is what happens to the ones left over, not
   a reason to stop bumping.
 
-### The acceptance list makes the gate a ratchet
+### The acceptance list makes the gate a ratchet — and it is now EMPTY
 
-Four high-severity advisories already existed in the production graph when the
-gate was introduced. They are enumerated in `POLICY.acceptedProdAdvisories`,
-keyed by **GHSA id** (stable across pnpm's numeric re-issues), each with a reason
-and the date it was accepted. The effective rule is therefore **"no NEW
-high/critical in production"**.
+`POLICY.acceptedProdAdvisories` enumerates the production-graph advisories that
+are knowingly tolerated, keyed by **GHSA id** (stable across pnpm's own numeric
+re-issues), each with a reason and the date it was accepted. Its effect is to
+turn the threshold into a ratchet: **"no NEW high/critical in production"**.
 
-The list is **shrink-only**: an entry whose advisory is no longer reported *fails
-the scan*, so a fixed advisory cannot leave a stale exemption behind for the next
-one to hide inside. Both failure modes — an unaccepted advisory and a stale
-acceptance — are verified to exit non-zero.
+**Today that list is empty, and an empty list is the healthy state.** It is not
+a gap in the policy — it is the policy having nothing left to excuse. The gate
+still fails on any high/critical in the production graph; there is simply
+nothing currently reported for it to fail on.
+
+The gate was born with four entries (`GHSA-mh99-v99m-4gvg` and
+`GHSA-rgw5-rvv9-x895` brace-expansion, `GHSA-7p8r-x3mc-p8w7` fast-uri,
+`GHSA-mwp4-54f8-5fhr` ip-address). All four were cleared in **#760** by raising
+override floors rather than by accepting them, and #786 then cleared the last
+remaining production advisory of any severity (`GHSA-v422-hmwv-36x6`
+body-parser, a `low`). Their entries were removed in the same commits.
+
+Removing them was not tidiness — it was **forced**. The list is **shrink-only**:
+an entry whose advisory is no longer reported *fails the scan*, so a fixed
+advisory cannot leave a stale exemption behind for the next one to hide inside.
+Both failure modes — an unaccepted advisory and a stale acceptance — are
+verified to exit non-zero. That property is what keeps the list empty by itself,
+without anyone having to remember to prune it.
 
 Adding an entry to make a red build green is not the intended use. Fix the
 dependency, or file a ticket and add the entry in the same commit that explains
 why not.
+
+### The override floors in `pnpm-workspace.yaml` are the mechanism of record
+
+Every transitive fix behind the empty acceptance list is one `overrides:` entry
+in `pnpm-workspace.yaml` (that file, not `package.json` — pnpm no longer reads
+the `pnpm` field there). Each entry carries the GHSA ids it clears, so an
+override that has stopped being needed is visible rather than silently
+inherited. Current entries: `hono`, `@hono/node-server`, `fast-uri`, `ws`,
+`brace-expansion@2`, `ip-address`, `qs`, `body-parser`.
+
+Two of them are worth knowing about specifically:
+
+- **`ip-address` deliberately forces past an exact pin.**
+  `express-rate-limit@8.4.1` pins `ip-address: "10.1.0"` exactly, so *any*
+  patched version is out of range by construction and there is no non-forcing
+  fix short of an upstream release. This is a knowingly accepted risk, recorded
+  here and in the override's own comment: ip-address 10.x is semver-minor
+  throughout and express-rate-limit uses it only to normalise the client IP for
+  keying. Re-check if it starts depending on 10.1-specific behaviour.
+- **Everything else merely raises a floor.** `body-parser: "^2.3.0"` is in range
+  of express's declared `^2.2.1`; `brace-expansion@2` is scoped on purpose
+  because 1.x and 5.x lines are also present in the dev tree and forcing all of
+  them to 2.x would break their consumers.
+
+`hono` and `@hono/node-server` are pinned EXACTLY rather than by range, and must
+stay in step with `packages/server/package.json` (#761): an override replaces the
+direct dependency's spec too, so a caret range here would outrank that manifest's
+exact pin and the manifest would stop describing what actually installs.
 
 ## Licence policy
 
@@ -107,16 +148,33 @@ Dev-only copyleft is not gated: it never leaves the developer's machine. Today
 that is `lightningcss` (MPL-2.0, via the client build) and `argparse`
 (Python-2.0).
 
-## Measured baseline — 2026-08-22
+## Measured baseline — 2026-08-23
+
+Re-measured with `pnpm security` (PASS, exit 0) after #760, #761 and #786.
 
 | | packages | critical | high | moderate | low | advisories |
 |---|---|---|---|---|---|---|
-| whole tree | 784 | 1 | 21 | 13 | 3 | 36 |
-| production | 287 | 0 | 4 | 6 | 2 | 12 |
+| whole tree | 789 | 0 | 16 | 7 | 1 | 22 |
+| production | 289 | 0 | 0 | 0 | 0 | **0** |
 
-Licences: 558 packages classified whole-tree with 3 unknown; 265 in production
+Licences: 557 packages classified whole-tree with 3 unknown; 265 in production
 with 2 unknown; 0 strong copyleft anywhere; 2 weak-copyleft (MPL-2.0) packages,
 both dev-only.
 
-The single `critical` is dev-only: `shell-quote` (GHSA-w7jw-789q-3m8p) via
-`concurrently`, a root devDependency. It is not in the production graph.
+**The production graph reports zero advisories of any severity**, and
+`POLICY.acceptedProdAdvisories` is empty — nothing is being excused to get
+there.
+
+The 16 remaining highs are all dev-only and accepted as a class (see above):
+`vite` and the `postcss`/`nanoid` that ride with it, `js-yaml` via
+`@changesets/cli`, and the 1.x/5.x `brace-expansion` lines under `eslint` and
+`typescript-eslint`. None of them appear in the production graph or in the npm
+tarball.
+
+For the record, two findings that earlier versions of this document called out
+are gone. The `shell-quote` **critical** (GHSA-w7jw-789q-3m8p, dev-only via
+`concurrently`) was cleared by bumping `concurrently` to `^10.0.5`, which ships
+shell-quote 1.9.0; and the four accepted production highs described above were
+cleared by override floors. Neither is a live finding — they are recorded here
+only so a reader comparing against an older copy of this file can see what
+happened to them.
