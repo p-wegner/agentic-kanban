@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: agentic-kanban REST API
-  version: 0.1.7
+  version: 0.1.9
   description: Auto-generated from Hono route source via scripts/generate-openapi.ts. Schemas are inferred statically (best-effort) — request bodies come from the parseJsonBody<T> type argument; response bodies are untyped.
 servers:
   - url: /
@@ -15,11 +15,6 @@ paths:
       operationId: get_api_agent-skills
       parameters:
         - name: projectId
-          in: query
-          required: false
-          schema:
-            type: string
-        - name: global
           in: query
           required: false
           schema:
@@ -53,6 +48,8 @@ paths:
                 projectId:
                   type: string
                   nullable: true
+                isInit:
+                  type: boolean
               required:
                 - name
                 - description
@@ -171,6 +168,8 @@ paths:
                 projectId:
                   type: string
                   nullable: true
+                isInit:
+                  type: boolean
       responses:
         "200":
           description: Success
@@ -190,12 +189,14 @@ paths:
           schema:
             type: string
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
               type: object
-              additionalProperties: true
+              properties:
+                projectId:
+                  type: string
       responses:
         "200":
           description: Success
@@ -356,11 +357,6 @@ paths:
           content:
             application/json:
               schema: {}
-        "400":
-          description: Error
-          content:
-            application/json:
-              schema: {}
   /api/butler-definitions/{bid}:
     delete:
       summary: DELETE /api/butler-definitions/:bid — remove a named butler ("default" is protected).
@@ -376,11 +372,6 @@ paths:
       responses:
         "200":
           description: Success
-          content:
-            application/json:
-              schema: {}
-        "400":
-          description: Error
           content:
             application/json:
               schema: {}
@@ -415,16 +406,11 @@ paths:
           content:
             application/json:
               schema: {}
-        "400":
-          description: Error
-          content:
-            application/json:
-              schema: {}
   /api/codemods:
     get:
-      summary: "* GET /api/codemods?projectId=<id>\r
-
-        \   * Returns saved codemods (agent_skills with type='codemod') for a project."
+      summary: |-
+        * GET /api/codemods?projectId=<id>
+           * Returns saved codemods (agent_skills with type='codemod') for a project.
       tags:
         - codemods
       operationId: get_api_codemods
@@ -441,11 +427,10 @@ paths:
             application/json:
               schema: {}
     post:
-      summary: "* POST /api/codemods\r
-
-        \   * Body: { name, description, script, projectId? }\r
-
-        \   * Save a codemod to agent_skills with type='codemod'."
+      summary: |-
+        * POST /api/codemods
+           * Body: { name, description, script, projectId? }
+           * Save a codemod to agent_skills with type='codemod'.
       tags:
         - codemods
       operationId: post_api_codemods
@@ -487,17 +472,13 @@ paths:
               schema: {}
   /api/codemods/apply:
     post:
-      summary: "* POST /api/codemods/apply\r
-
-        \   * Body: { projectId: string, changes: [{filePath, modified}], selectedFiles?: string[] }\r
-
-        \   * Returns: { applied: string[], skipped: string[] }\r
-
-        \   *\r
-
-        \   * `projectId` is required: the service uses the project's repo path as a\r
-
-        \   * security boundary and refuses to write to any path outside it."
+      summary: |-
+        * POST /api/codemods/apply
+           * Body: { projectId: string, changes: [{filePath, modified}], selectedFiles?: string[] }
+           * Returns: { applied: string[], skipped: string[] }
+           *
+           * `projectId` is required: the service uses the project's repo path as a
+           * security boundary and refuses to write to any path outside it.
       tags:
         - codemods
       operationId: post_api_codemods_apply
@@ -531,11 +512,10 @@ paths:
               schema: {}
   /api/codemods/preview:
     post:
-      summary: "* POST /api/codemods/preview\r
-
-        \   * Body: { description: string, projectId: string, overrideLimit?: boolean, script?: string }\r
-
-        \   * Returns: { script, description, files: [{filePath, relativePath, diff}], totalTsFiles, limitReached }"
+      summary: |-
+        * POST /api/codemods/preview
+           * Body: { description: string, projectId: string, overrideLimit?: boolean, script?: string }
+           * Returns: { script, description, files: [{filePath, relativePath, diff}], totalTsFiles, limitReached }
       tags:
         - codemods
       operationId: post_api_codemods_preview
@@ -570,9 +550,9 @@ paths:
               schema: {}
   /api/codemods/{id}:
     get:
-      summary: "* GET /api/codemods/:id\r
-
-        \   * Returns a single saved codemod."
+      summary: |-
+        * GET /api/codemods/:id
+           * Returns a single saved codemod.
       tags:
         - codemods
       operationId: get_api_codemods_id
@@ -782,6 +762,18 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/inbox:
+    get:
+      summary: GET /api/inbox
+      tags:
+        - inbox
+      operationId: get_api_inbox
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
   /api/insights:
     get:
       summary: GET /api/insights
@@ -881,17 +873,17 @@ paths:
           required: false
           schema:
             type: string
-        - name: slim
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: offset
           in: query
           required: false
           schema:
             type: string
       responses:
-        "200":
-          description: Success
-          content:
-            application/json:
-              schema: {}
         "400":
           description: Error
           content:
@@ -937,6 +929,10 @@ paths:
                 externalUrl:
                   type: string
                   nullable: true
+                reposTouched:
+                  type: array
+                  items:
+                    type: string
               required:
                 - projectId
                 - title
@@ -958,24 +954,15 @@ paths:
         - issues
       operationId: post_api_issues_ai-estimate
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema:
               type: object
-              properties:
-                issueId:
-                  type: string
-              required:
-                - issueId
+              additionalProperties: true
       responses:
         "200":
           description: Success
-          content:
-            application/json:
-              schema: {}
-        "400":
-          description: Error
           content:
             application/json:
               schema: {}
@@ -986,27 +973,15 @@ paths:
         - issues
       operationId: post_api_issues_analyze-dependencies
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema:
               type: object
-              properties:
-                issueId:
-                  type: string
-                projectId:
-                  type: string
-              required:
-                - issueId
-                - projectId
+              additionalProperties: true
       responses:
         "200":
           description: Success
-          content:
-            application/json:
-              schema: {}
-        "400":
-          description: Error
           content:
             application/json:
               schema: {}
@@ -1040,11 +1015,6 @@ paths:
           content:
             application/json:
               schema: {}
-        "404":
-          description: Error
-          content:
-            application/json:
-              schema: {}
   /api/issues/batch:
     post:
       summary: "Optional: parentIssueId wires child_of edges; driveTarget (requires parentIssueId) auto-creates a Drive record."
@@ -1052,32 +1022,15 @@ paths:
         - issues
       operationId: post_api_issues_batch
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema:
               type: object
-              properties:
-                projectId:
-                  type: string
-                issues:
-                  type: array
-                  items: {}
-                parentIssueId:
-                  type: string
-                driveTarget:
-                  type: string
-              required:
-                - projectId
-                - issues
+              additionalProperties: true
       responses:
         "201":
           description: Success
-          content:
-            application/json:
-              schema: {}
-        "400":
-          description: Error
           content:
             application/json:
               schema: {}
@@ -1088,30 +1041,15 @@ paths:
         - issues
       operationId: patch_api_issues_bulk
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema:
               type: object
-              properties:
-                issueIds:
-                  type: array
-                  items:
-                    type: string
-                updates: {}
+              additionalProperties: true
       responses:
         "200":
           description: Success
-          content:
-            application/json:
-              schema: {}
-        "400":
-          description: Error
-          content:
-            application/json:
-              schema: {}
-        "404":
-          description: Error
           content:
             application/json:
               schema: {}
@@ -1171,6 +1109,63 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/issues/contract:
+    post:
+      summary: collapses a coupled component (coupled_with peers) back into one. Propose-only.
+      tags:
+        - issues
+      operationId: post_api_issues_contract
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/issues/contract-coupled:
+    post:
+      summary: POST /api/issues/contract-coupled — contract a full coupled_with component onto one lead.
+      tags:
+        - issues
+      operationId: post_api_issues_contract-coupled
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/issues/contract/confirm:
+    post:
+      summary: POST /api/issues/contract/confirm — apply a contract proposal (keep survivor, absorb the rest).
+      tags:
+        - issues
+      operationId: post_api_issues_contract_confirm
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
   /api/issues/dependencies/batch:
     post:
       summary: POST /api/issues/dependencies/batch — add/remove N dependency edges atomically
@@ -1178,41 +1173,15 @@ paths:
         - issues
       operationId: post_api_issues_dependencies_batch
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema:
               type: object
-              properties:
-                edges:
-                  type: array
-                  items:
-                    type: object
-                    properties:
-                      issueId:
-                        type: string
-                      dependsOnId:
-                        type: string
-                      type:
-                        type: string
-                      action:
-                        type: string
-                        enum:
-                          - add
-                    required:
-                      - issueId
-                      - dependsOnId
-                      - action
-              required:
-                - edges
+              additionalProperties: true
       responses:
         "200":
           description: Success
-          content:
-            application/json:
-              schema: {}
-        "400":
-          description: Error
           content:
             application/json:
               schema: {}
@@ -1223,28 +1192,34 @@ paths:
         - issues
       operationId: post_api_issues_enhance
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema:
               type: object
-              properties:
-                title:
-                  type: string
-                description:
-                  type: string
-                projectId:
-                  type: string
-              required:
-                - title
+              additionalProperties: true
       responses:
         "200":
           description: Success
           content:
             application/json:
               schema: {}
-        "400":
-          description: Error
+  /api/issues/group-scan:
+    post:
+      summary: "group as ONE workspace. Preview by default; `apply: true` creates the edges."
+      tags:
+        - issues
+      operationId: post_api_issues_group-scan
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
           content:
             application/json:
               schema: {}
@@ -1365,16 +1340,6 @@ paths:
       responses:
         "200":
           description: Success
-          content:
-            application/json:
-              schema: {}
-        "400":
-          description: Error
-          content:
-            application/json:
-              schema: {}
-        "404":
-          description: Error
           content:
             application/json:
               schema: {}
@@ -1513,7 +1478,7 @@ paths:
               schema: {}
   /api/issues/{id}/comments:
     get:
-      summary: GET /api/issues/:id/comments — durable Q&A / activity thread for an issue
+      summary: an existing client keeps working and a paging one has what it needs.
       tags:
         - issues
       operationId: get_api_issues_id_comments
@@ -1521,6 +1486,16 @@ paths:
         - name: id
           in: path
           required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: before
+          in: query
+          required: false
           schema:
             type: string
       responses:
@@ -1624,24 +1599,15 @@ paths:
           schema:
             type: string
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema:
               type: object
-              properties:
-                projectId:
-                  type: string
-              required:
-                - projectId
+              additionalProperties: true
       responses:
         "200":
           description: Success
-          content:
-            application/json:
-              schema: {}
-        "400":
-          description: Error
           content:
             application/json:
               schema: {}
@@ -1658,34 +1624,15 @@ paths:
           schema:
             type: string
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema:
               type: object
-              properties:
-                projectId:
-                  type: string
-                children:
-                  type: array
-                  items: {}
-                dependencies:
-                  type: array
-                  items: {}
-                driveTarget:
-                  type: string
-              required:
-                - projectId
-                - children
-                - dependencies
+              additionalProperties: true
       responses:
         "201":
           description: Success
-          content:
-            application/json:
-              schema: {}
-        "400":
-          description: Error
           content:
             application/json:
               schema: {}
@@ -1767,7 +1714,7 @@ paths:
               schema: {}
   /api/issues/{id}/detail-bundle:
     get:
-      summary: "is independent: a failure degrades that field rather than failing the bundle."
+      summary: a failure degrades that field rather than failing the bundle.
       tags:
         - issues
       operationId: get_api_issues_id_detail-bundle
@@ -1810,11 +1757,6 @@ paths:
       responses:
         "201":
           description: Success
-          content:
-            application/json:
-              schema: {}
-        "404":
-          description: Error
           content:
             application/json:
               schema: {}
@@ -1901,6 +1843,45 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/issues/{id}/repos-touched:
+    put:
+      summary: is echoed back, so a client can render what actually stuck.
+      tags:
+        - issues
+      operationId: put_api_issues_id_repos-touched
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reposTouched:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
   /api/issues/{id}/showdown:
     get:
       summary: the browser console with errors every time an issue detail panel opens.)
@@ -1943,11 +1924,6 @@ paths:
               required:
                 - contestants
       responses:
-        "200":
-          description: Success
-          content:
-            application/json:
-              schema: {}
         "201":
           description: Success
           content:
@@ -1968,6 +1944,11 @@ paths:
         - name: id
           in: path
           required: true
+          schema:
+            type: string
+        - name: projectId
+          in: query
+          required: false
           schema:
             type: string
       responses:
@@ -2172,17 +2153,13 @@ paths:
               schema: {}
   /api/merge-queue:
     post:
-      summary: "* POST /api/merge-queue\r
-
-        \   *\r
-
-        \   * body: { workspaceIds: string[], dryRun?: boolean, skipOnConflict?: boolean }\r
-
-        \   *\r
-
-        \   * - dryRun: true  → returns JSON plan (sorted order + conflict matrix + per-workspace conflictPreviews)\r
-
-        \   * - dryRun: false → streams SSE events while executing the queue"
+      summary: |-
+        * POST /api/merge-queue
+           *
+           * body: { workspaceIds: string[], dryRun?: boolean, skipOnConflict?: boolean }
+           *
+           * - dryRun: true  → returns JSON plan (sorted order + conflict matrix + per-workspace conflictPreviews)
+           * - dryRun: false → streams SSE events while executing the queue
       tags:
         - merge-queue
       operationId: post_api_merge-queue
@@ -2214,13 +2191,11 @@ paths:
               schema: {}
   /api/merge-queue/preview/{workspaceId}:
     post:
-      summary: "* POST /api/merge-queue/preview/:workspaceId\r
-
-        \   *\r
-
-        \   * Dry-run conflict preview for a single workspace. Read-only — does not mutate the worktree.\r
-
-        \   * Returns: WorkspaceConflictPreview"
+      summary: |-
+        * POST /api/merge-queue/preview/:workspaceId
+           *
+           * Dry-run conflict preview for a single workspace. Read-only — does not mutate the worktree.
+           * Returns: WorkspaceConflictPreview
       tags:
         - merge-queue
       operationId: post_api_merge-queue_preview_workspaceId
@@ -2248,12 +2223,841 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/metrics/loop-lag:
+    get:
+      summary: GET /api/metrics/loop-lag
+      tags:
+        - metrics
+      operationId: get_api_metrics_loop-lag
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "503":
+          description: Error
+          content:
+            application/json:
+              schema: {}
   /api/metrics/slow-requests:
     get:
       summary: GET /api/metrics/slow-requests
       tags:
         - metrics
       operationId: get_api_metrics_slow-requests
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/plugins:
+    get:
+      summary: GET /api/plugins
+      tags:
+        - plugins
+      operationId: get_api_plugins
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    post:
+      summary: POST /api/plugins
+      tags:
+        - plugins
+      operationId: post_api_plugins
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/plugins/docs:
+    get:
+      summary: installed manifests only, so a board without a plugin never learns that plugin's name.
+      tags:
+        - plugins
+      operationId: get_api_plugins_docs
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/plugins/marketplace:
+    get:
+      summary: GET /api/plugins/marketplace
+      tags:
+        - plugins
+      operationId: get_api_plugins_marketplace
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/plugins/validate:
+    post:
+      summary: Parse + reference-check a local plugin dir WITHOUT installing (#295).
+      tags:
+        - plugins
+      operationId: post_api_plugins_validate
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/plugins/{id}:
+    delete:
+      summary: DELETE /api/plugins/{id}
+      tags:
+        - plugins
+      operationId: delete_api_plugins_id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/plugins/{id}/disable:
+    post:
+      summary: POST /api/plugins/{id}/disable
+      tags:
+        - plugins
+      operationId: post_api_plugins_id_disable
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/plugins/{id}/docs/*:
+    get:
+      summary: GET /api/plugins/:id/docs/*?theme=dark|light — serve one declared doc from the plugin checkout.
+      tags:
+        - plugins
+      operationId: get_api_plugins_id_docs_*
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: theme
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/plugins/{id}/enable:
+    post:
+      summary: scaffold in the wrong repo. Omitting it preserves the previous behaviour exactly.
+      tags:
+        - plugins
+      operationId: post_api_plugins_id_enable
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+                location:
+                  type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/plugins/{id}/loops:
+    get:
+      summary: GET /api/plugins/{id}/loops
+      tags:
+        - plugins
+      operationId: get_api_plugins_id_loops
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/plugins/{id}/loops/{name}/advance:
+    post:
+      summary: POST /api/plugins/{id}/loops/{name}/advance
+      tags:
+        - plugins
+      operationId: post_api_plugins_id_loops_name_advance
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/plugins/{id}/loops/{name}/artifact:
+    get:
+      summary: Rendered/Raw open, which is the overwhelming majority of reads.
+      tags:
+        - plugins
+      operationId: get_api_plugins_id_loops_name_artifact
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: path
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    put:
+      summary: "Edit-then-approve (#305): overwrite one of the current gate's artifacts and commit it."
+      tags:
+        - plugins
+      operationId: put_api_plugins_id_loops_name_artifact
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+                gateId:
+                  type: string
+                path:
+                  type: string
+                content:
+                  type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/plugins/{id}/loops/{name}/events:
+    get:
+      summary: "Audit timeline + per-unit cost rollup for one loop (#292, #294)."
+      tags:
+        - plugins
+      operationId: get_api_plugins_id_loops_name_events
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/plugins/{id}/loops/{name}/gate/draft:
+    post:
+      summary: "Draft-with-butler (#310): rough notes in, submit-ready revision feedback out."
+      tags:
+        - plugins
+      operationId: post_api_plugins_id_loops_name_gate_draft
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+                gateId:
+                  type: string
+                notes:
+                  type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/plugins/{id}/loops/{name}/gate/resolve:
+    post:
+      summary: "Apply a human's gate decision (#286): run the plugin's resolve command, then re-plan."
+      tags:
+        - plugins
+      operationId: post_api_plugins_id_loops_name_gate_resolve
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+                gateId:
+                  type: string
+                actionId:
+                  type: string
+                input:
+                  type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/plugins/{id}/loops/{name}/gate/summarize:
+    post:
+      summary: "Summarize-for-me (#330): decision-ready butler digest of the current gate's artifacts."
+      tags:
+        - plugins
+      operationId: post_api_plugins_id_loops_name_gate_summarize
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+                gateId:
+                  type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/plugins/{id}/loops/{name}/pause:
+    post:
+      summary: POST /api/plugins/{id}/loops/{name}/pause
+      tags:
+        - plugins
+      operationId: post_api_plugins_id_loops_name_pause
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/plugins/{id}/loops/{name}/resume:
+    post:
+      summary: POST /api/plugins/{id}/loops/{name}/resume
+      tags:
+        - plugins
+      operationId: post_api_plugins_id_loops_name_resume
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/plugins/{id}/output-location:
+    get:
+      summary: GET /api/plugins/{id}/output-location
+      tags:
+        - plugins
+      operationId: get_api_plugins_id_output-location
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    post:
+      summary: POST /api/plugins/{id}/output-location
+      tags:
+        - plugins
+      operationId: post_api_plugins_id_output-location
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+                location:
+                  type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/plugins/{id}/scaffold:
+    get:
+      summary: The scaffold's unresolved TODO markers as a form (#291).
+      tags:
+        - plugins
+      operationId: get_api_plugins_id_scaffold
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    post:
+      summary: POST /api/plugins/{id}/scaffold
+      tags:
+        - plugins
+      operationId: post_api_plugins_id_scaffold
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+                values: {}
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    put:
+      summary: so a COMPLETE profile — which has none — was uneditable from the board entirely.
+      tags:
+        - plugins
+      operationId: put_api_plugins_id_scaffold
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+                content:
+                  type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/plugins/{id}/scripts/{name}/run:
+    post:
+      summary: POST /api/plugins/{id}/scripts/{name}/run
+      tags:
+        - plugins
+      operationId: post_api_plugins_id_scripts_name_run
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/plugins/{id}/skills/{name}/run:
+    post:
+      summary: POST /api/plugins/{id}/skills/{name}/run
+      tags:
+        - plugins
+      operationId: post_api_plugins_id_skills_name_run
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                projectId:
+                  type: string
+                title:
+                  type: string
+                description:
+                  type: string
+                prompt:
+                  type: string
+                workflowTemplateId:
+                  type: string
+                  nullable: true
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/plugins/{id}/update:
+    post:
+      summary: POST /api/plugins/{id}/update
+      tags:
+        - plugins
+      operationId: post_api_plugins_id_update
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/plugins/{id}/views:
+    get:
+      summary: GET /api/plugins/{id}/views
+      tags:
+        - plugins
+      operationId: get_api_plugins_id_views
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/plugins/{id}/views/{viewId}/start:
+    post:
+      summary: POST /api/plugins/{id}/views/{viewId}/start
+      tags:
+        - plugins
+      operationId: post_api_plugins_id_views_viewId_start
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: viewId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/plugins/{id}/views/{viewId}/stop:
+    post:
+      summary: POST /api/plugins/{id}/views/{viewId}/stop
+      tags:
+        - plugins
+      operationId: post_api_plugins_id_views_viewId_stop
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: viewId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -2595,12 +3399,6 @@ paths:
       tags:
         - projects
       operationId: get_api_projects
-      parameters:
-        - name: includeArchived
-          in: query
-          required: false
-          schema:
-            type: string
       responses:
         "200":
           description: Success
@@ -2621,6 +3419,8 @@ paths:
               properties:
                 repoPath:
                   type: string
+                cloneUrl:
+                  type: string
                 name:
                   type: string
                 description:
@@ -2633,8 +3433,8 @@ paths:
                   type: boolean
                 exportSkillsOnRegistration:
                   type: boolean
-              required:
-                - repoPath
+                progressId:
+                  type: string
       responses:
         "201":
           description: Success
@@ -2768,11 +3568,34 @@ paths:
     get:
       summary: GET /api/projects/health — aggregated health overview for all registered projects
       tags:
-        - projects
+        - project-health
       operationId: get_api_projects_health
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/registration-progress/{id}:
+    get:
+      summary: BEFORE `/:id` routes that could otherwise swallow the path.
+      tags:
+        - projects
+      operationId: get_api_projects_registration-progress_id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
           content:
             application/json:
               schema: {}
@@ -2818,6 +3641,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "422":
+          description: Error
+          content:
+            application/json:
+              schema: {}
   /api/projects/{id}/activity:
     get:
       summary: GET /api/projects/:id/activity — project-wide activity feed (latest N events across all issues)
@@ -2828,11 +3656,6 @@ paths:
         - name: id
           in: path
           required: true
-          schema:
-            type: string
-        - name: limit
-          in: query
-          required: false
           schema:
             type: string
       responses:
@@ -2944,6 +3767,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "409":
+          description: Error
+          content:
+            application/json:
+              schema: {}
         "500":
           description: Error
           content:
@@ -3014,6 +3842,24 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/projects/{id}/base-branch-health:
+    get:
+      summary: GET /api/projects/:id/base-branch-health — latest + recent history of base-branch verify runs (#491)
+      tags:
+        - project-health
+      operationId: get_api_projects_id_base-branch-health
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
   /api/projects/{id}/board:
     get:
       summary: GET /api/projects/:id/board
@@ -3026,11 +3872,6 @@ paths:
           required: true
           schema:
             type: string
-        - name: includeArchived
-          in: query
-          required: false
-          schema:
-            type: string
       responses:
         "200":
           description: Success
@@ -3041,7 +3882,7 @@ paths:
     get:
       summary: GET /api/projects/:id/board-health-events
       tags:
-        - projects
+        - project-health
       operationId: get_api_projects_id_board-health-events
       parameters:
         - name: id
@@ -3074,7 +3915,7 @@ paths:
     get:
       summary: GET /api/projects/:id/board-health-events/:eventId — full event details (not compacted)
       tags:
-        - projects
+        - project-health
       operationId: get_api_projects_id_board-health-events_eventId
       parameters:
         - name: id
@@ -3102,7 +3943,7 @@ paths:
     get:
       summary: GET /api/projects/:id/board-risk-digest
       tags:
-        - projects
+        - project-analytics
       operationId: get_api_projects_id_board-risk-digest
       parameters:
         - name: id
@@ -3184,6 +4025,46 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/butler/answer:
+    post:
+      summary: it hands the model the user's choices and the turn continues.
+      tags:
+        - butler
+      operationId: post_api_projects_id_butler_answer
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                askId:
+                  type: string
+                answers:
+                  type: array
+                  items: {}
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+        "409":
+          description: Error
           content:
             application/json:
               schema: {}
@@ -3462,11 +4343,6 @@ paths:
           required: true
           schema:
             type: string
-        - name: limit
-          in: query
-          required: false
-          schema:
-            type: string
       responses:
         "200":
           description: Success
@@ -3592,7 +4468,7 @@ paths:
     post:
       summary: POST /api/projects/:id/check-overlap — check for file overlap between issues using cached predictions
       tags:
-        - projects
+        - project-analytics
       operationId: post_api_projects_id_check-overlap
       parameters:
         - name: id
@@ -3654,11 +4530,6 @@ paths:
           content:
             application/json:
               schema: {}
-        "404":
-          description: Error
-          content:
-            application/json:
-              schema: {}
   /api/projects/{id}/conductor-schedule:
     get:
       summary: single per-project JSON preference; the minute scheduler (scheduled-tasks.ts) fires it.
@@ -3674,11 +4545,6 @@ paths:
       responses:
         "200":
           description: Success
-          content:
-            application/json:
-              schema: {}
-        "404":
-          description: Error
           content:
             application/json:
               schema: {}
@@ -3711,16 +4577,11 @@ paths:
           content:
             application/json:
               schema: {}
-        "404":
-          description: Error
-          content:
-            application/json:
-              schema: {}
   /api/projects/{id}/dashboard/throughput-by-provider:
     get:
       summary: Returns count + median lead time per provider.
       tags:
-        - projects
+        - project-analytics
       operationId: get_api_projects_id_dashboard_throughput-by-provider
       parameters:
         - name: id
@@ -3743,7 +4604,7 @@ paths:
     get:
       summary: GET /api/projects/:id/dependency-waves
       tags:
-        - projects
+        - project-analytics
       operationId: get_api_projects_id_dependency-waves
       parameters:
         - name: id
@@ -3761,7 +4622,7 @@ paths:
     post:
       summary: POST /api/projects/:id/dependency-waves/start-next
       tags:
-        - projects
+        - project-analytics
       operationId: post_api_projects_id_dependency-waves_start-next
       parameters:
         - name: id
@@ -3786,7 +4647,7 @@ paths:
     get:
       summary: GET /api/projects/:id/file-contention — live file contention heatmap for active/reviewing workspaces
       tags:
-        - projects
+        - project-analytics
       operationId: get_api_projects_id_file-contention
       parameters:
         - name: id
@@ -3818,21 +4679,39 @@ paths:
           content:
             application/json:
               schema: {}
-  /api/projects/{id}/monitor-cycles:
+  /api/projects/{id}/graph/search:
     get:
-      summary: GET /api/projects/:id/monitor-cycles — aggregated cycle summaries
+      summary: shrink. An empty query returns nothing and the client does not call this at all.
       tags:
         - projects
-      operationId: get_api_projects_id_monitor-cycles
+      operationId: get_api_projects_id_graph_search
       parameters:
         - name: id
           in: path
           required: true
           schema:
             type: string
-        - name: limit
+        - name: q
           in: query
           required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/monitor-cycles:
+    get:
+      summary: GET /api/projects/:id/monitor-cycles — aggregated cycle summaries
+      tags:
+        - project-analytics
+      operationId: get_api_projects_id_monitor-cycles
+      parameters:
+        - name: id
+          in: path
+          required: true
           schema:
             type: string
       responses:
@@ -3859,7 +4738,110 @@ paths:
           content:
             application/json:
               schema: {}
-        "404":
+  /api/projects/{id}/onboarding:
+    get:
+      summary: GET /api/projects/:id/onboarding
+      tags:
+        - projects
+      operationId: get_api_projects_id_onboarding
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/onboarding/apply:
+    post:
+      summary: write, plugin enable, or ticket filing) and returns the RECOMPUTED plan.
+      tags:
+        - projects
+      operationId: post_api_projects_id_onboarding_apply
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                stepId:
+                  type: string
+                input: {}
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/onboarding/dismiss:
+    post:
+      summary: wizard"); the plan itself stays queryable, just carries a dismissedAt.
+      tags:
+        - projects
+      operationId: post_api_projects_id_onboarding_dismiss
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/onboarding/skip:
+    post:
+      summary: applied by an issue/plugin/config write.
+      tags:
+        - projects
+      operationId: post_api_projects_id_onboarding_skip
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                stepId:
+                  type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
           description: Error
           content:
             application/json:
@@ -3955,6 +4937,184 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/projects/{id}/repos:
+    get:
+      summary: GET /api/projects/:id/repos
+      tags:
+        - projects
+      operationId: get_api_projects_id_repos
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+    post:
+      summary: "{ createName } — scaffold a NEW git repo (folder created inside the project folder)"
+      tags:
+        - projects
+      operationId: post_api_projects_id_repos
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+                cloneUrl:
+                  type: string
+                createName:
+                  type: string
+                name:
+                  type: string
+                generateReadme:
+                  type: boolean
+                setupScript:
+                  type: string
+                  nullable: true
+                composeFile:
+                  type: string
+                  nullable: true
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+        "409":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/repos/{repoId}:
+    delete:
+      summary: (does not touch the checkout on disk; existing workspaces keep their worktrees)
+      tags:
+        - projects
+      operationId: delete_api_projects_id_repos_repoId
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repoId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+    patch:
+      summary: PATCH /api/projects/:id/repos/:repoId — update a registered repo's per-repo setup/compose config (#71)
+      tags:
+        - projects
+      operationId: patch_api_projects_id_repos_repoId
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repoId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                setupScript:
+                  type: string
+                  nullable: true
+                composeFile:
+                  type: string
+                  nullable: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+        "409":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/repos/{repoId}/promote:
+    post:
+      summary: the domain error handler.
+      tags:
+        - projects
+      operationId: post_api_projects_id_repos_repoId_promote
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repoId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
   /api/projects/{id}/runbooks:
     get:
       summary: GET /api/projects/:id/runbooks — list available docs
@@ -3970,11 +5130,6 @@ paths:
       responses:
         "200":
           description: Success
-          content:
-            application/json:
-              schema: {}
-        "404":
-          description: Error
           content:
             application/json:
               schema: {}
@@ -4015,7 +5170,7 @@ paths:
     get:
       summary: GET /api/projects/:id/sprint-capacity
       tags:
-        - projects
+        - project-analytics
       operationId: get_api_projects_id_sprint-capacity
       parameters:
         - name: id
@@ -4033,17 +5188,12 @@ paths:
     get:
       summary: forces a recompute). The feedback harness reads this ONE descriptor.
       tags:
-        - projects
+        - project-stack-profile
       operationId: get_api_projects_id_stack-profile
       parameters:
         - name: id
           in: path
           required: true
-          schema:
-            type: string
-        - name: refresh
-          in: query
-          required: false
           schema:
             type: string
       responses:
@@ -4052,15 +5202,10 @@ paths:
           content:
             application/json:
               schema: {}
-        "404":
-          description: Error
-          content:
-            application/json:
-              schema: {}
     put:
-      summary: Marks the saved profile source="manual" so a later auto-detect won't silently clobber it.
+      summary: tracked file in the user's main checkout and block auto-merge on `dirty_main`.
       tags:
-        - projects
+        - project-stack-profile
       operationId: put_api_projects_id_stack-profile
       parameters:
         - name: id
@@ -4076,11 +5221,6 @@ paths:
       responses:
         "200":
           description: Success
-          content:
-            application/json:
-              schema: {}
-        "404":
-          description: Error
           content:
             application/json:
               schema: {}
@@ -4309,7 +5449,7 @@ paths:
     get:
       summary: GET /api/projects/:id/workspace-launch-failures
       tags:
-        - projects
+        - project-analytics
       operationId: get_api_projects_id_workspace-launch-failures
       parameters:
         - name: id
@@ -4323,11 +5463,34 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/projects/{id}/workspace-repo-status:
+    get:
+      summary: Body is memoized ~10s server-side; unchanged content answers 304 via the ETag.
+      tags:
+        - projects
+      operationId: get_api_projects_id_workspace-repo-status
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: include
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
   /api/projects/{id}/workspace-risk:
     get:
       summary: GET /api/projects/:id/workspace-risk — risk heatmap for active/review workspaces
       tags:
-        - projects
+        - project-analytics
       operationId: get_api_projects_id_workspace-risk
       parameters:
         - name: id
@@ -4415,6 +5578,137 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/projects/{projectId}/backlog.md:
+    get:
+      summary: GET /api/projects/{projectId}/backlog.md
+      tags:
+        - backlog-markdown
+      operationId: get_api_projects_projectId_backlog.md
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{projectId}/backlog.md/import:
+    post:
+      summary: POST /api/projects/{projectId}/backlog.md/import
+      tags:
+        - backlog-markdown
+      operationId: post_api_projects_projectId_backlog.md_import
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{projectId}/backlog.md/preview:
+    post:
+      summary: POST /api/projects/{projectId}/backlog.md/preview
+      tags:
+        - backlog-markdown
+      operationId: post_api_projects_projectId_backlog.md_preview
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{projectId}/backlog/export:
+    get:
+      summary: GET /api/projects/:projectId/backlog/export → downloadable JSON snapshot.
+      tags:
+        - backlog-snapshot
+      operationId: get_api_projects_projectId_backlog_export
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{projectId}/backlog/import:
+    post:
+      summary: the snapshot object itself or { snapshot }. Returns the import result summary.
+      tags:
+        - backlog-snapshot
+      operationId: post_api_projects_projectId_backlog_import
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
   /api/projects/{projectId}/config/export:
     get:
       summary: GET /api/projects/:projectId/config/export
@@ -4443,11 +5737,6 @@ paths:
         - name: projectId
           in: path
           required: true
-          schema:
-            type: string
-        - name: dryRun
-          in: query
-          required: false
           schema:
             type: string
       requestBody:
@@ -4540,11 +5829,6 @@ paths:
           schema:
             type: string
         - name: severity
-          in: query
-          required: false
-          schema:
-            type: string
-        - name: limit
           in: query
           required: false
           schema:
@@ -4869,16 +6153,6 @@ paths:
           required: true
           schema:
             type: string
-        - name: wholeProject
-          in: query
-          required: false
-          schema:
-            type: string
-        - name: deep
-          in: query
-          required: false
-          schema:
-            type: string
       responses:
         "200":
           description: Success
@@ -5022,11 +6296,6 @@ paths:
           content:
             application/json:
               schema: {}
-        "400":
-          description: Error
-          content:
-            application/json:
-              schema: {}
   /api/projects/{projectId}/milestones/summary:
     get:
       summary: GET /api/projects/:projectId/milestones/summary
@@ -5037,11 +6306,6 @@ paths:
         - name: projectId
           in: path
           required: true
-          schema:
-            type: string
-        - name: days
-          in: query
-          required: false
           schema:
             type: string
       responses:
@@ -5101,6 +6365,42 @@ paths:
                 dueDate:
                   type: string
                   nullable: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{projectId}/plugin-surface:
+    get:
+      summary: GET /api/projects/{projectId}/plugin-surface
+      tags:
+        - plugins
+      operationId: get_api_projects_projectId_plugin-surface
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{projectId}/plugin-views:
+    get:
+      summary: GET /api/projects/{projectId}/plugin-views
+      tags:
+        - plugins
+      operationId: get_api_projects_projectId_plugin-views
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         "200":
           description: Success
@@ -5380,11 +6680,6 @@ paths:
           required: false
           schema:
             type: string
-        - name: limit
-          in: query
-          required: false
-          schema:
-            type: string
         - name: status
           in: query
           required: false
@@ -5403,7 +6698,7 @@ paths:
               schema: {}
   /api/sessions/{sessionId}/output:
     get:
-      summary: GET /api/sessions/:sessionId/output
+      summary: tail (complete JSONL lines only), which is all the live panels render.
       tags:
         - sessions
       operationId: get_api_sessions_sessionId_output
@@ -5411,6 +6706,11 @@ paths:
         - name: sessionId
           in: path
           required: true
+          schema:
+            type: string
+        - name: tail
+          in: query
+          required: false
           schema:
             type: string
       responses:
@@ -5723,11 +7023,6 @@ paths:
           required: false
           schema:
             type: string
-        - name: graph
-          in: query
-          required: false
-          schema:
-            type: string
       responses:
         "200":
           description: Success
@@ -5992,21 +7287,27 @@ paths:
           schema:
             type: string
       responses:
-        "200":
-          description: Success
-          content:
-            application/json:
-              schema: {}
         "400":
           description: Error
           content:
             application/json:
               schema: {}
     post:
-      summary: POST /api/workspaces — create workspace with worktree + auto-launch agent
+      summary: from this response body today.
       tags:
         - workspaces
       operationId: post_api_workspaces
+      parameters:
+        - name: async
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: autoStart
+          in: query
+          required: false
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -6015,6 +7316,10 @@ paths:
               type: object
               properties:
                 issueId:
+                  type: string
+                issueNumber:
+                  type: string
+                projectId:
                   type: string
                 branch:
                   type: string
@@ -6034,6 +7339,10 @@ paths:
                   type: boolean
                 skipSetup:
                   type: boolean
+                installMode:
+                  type: string
+                  enum:
+                    - sequential
                 customPrompt:
                   type: string
                 clarifications:
@@ -6055,13 +7364,31 @@ paths:
                   type: string
                 skipContextPacker:
                   type: boolean
+                repoScope:
+                  type: array
+                  items:
+                    type: string
+                memberIssueIds:
+                  type: array
+                  items:
+                    type: string
       responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
         "201":
           description: Success
           content:
             application/json:
               schema: {}
-        "400":
+        "202":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "409":
           description: Error
           content:
             application/json:
@@ -6112,6 +7439,24 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/workspaces/create-jobs/{jobId}:
+    get:
+      summary: Must be registered BEFORE /:id to avoid `create-jobs` being matched as an ID param.
+      tags:
+        - workspaces
+      operationId: get_api_workspaces_create-jobs_jobId
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
   /api/workspaces/preview:
     post:
       summary: Must be registered BEFORE /:id to avoid being matched as an ID param
@@ -6126,6 +7471,10 @@ paths:
               type: object
               properties:
                 issueId:
+                  type: string
+                issueNumber:
+                  type: string
+                projectId:
                   type: string
                 branch:
                   type: string
@@ -6145,6 +7494,10 @@ paths:
                   type: boolean
                 skipSetup:
                   type: boolean
+                installMode:
+                  type: string
+                  enum:
+                    - sequential
                 customPrompt:
                   type: string
                 clarifications:
@@ -6166,14 +7519,13 @@ paths:
                   type: string
                 skipContextPacker:
                   type: boolean
+                repoScope:
+                  type: array
+                  items:
+                    type: string
       responses:
         "200":
           description: Success
-          content:
-            application/json:
-              schema: {}
-        "400":
-          description: Error
           content:
             application/json:
               schema: {}
@@ -6342,7 +7694,7 @@ paths:
               schema: {}
   /api/workspaces/{id}/already-merged-status:
     get:
-      summary: GET /api/workspaces/:id/already-merged-status — check if branch is already merged without modifying state
+      summary: landed on the base branch out-of-band) without acting on it.
       tags:
         - workspace-actions
       operationId: get_api_workspaces_id_already-merged-status
@@ -6634,9 +7986,32 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/workspaces/{id}/dev-server-plan:
+    get:
+      summary: "ports, which are wrong for any other project (docker-compose / multi-repo, #100)."
+      tags:
+        - workspaces
+      operationId: get_api_workspaces_id_dev-server-plan
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error
+          content:
+            application/json:
+              schema: {}
   /api/workspaces/{id}/diff:
     get:
-      summary: GET /api/workspaces/:id/diff
+      summary: GET /api/workspaces/{id}/diff
       tags:
         - workspace-actions
       operationId: get_api_workspaces_id_diff
@@ -6644,6 +8019,11 @@ paths:
         - name: id
           in: path
           required: true
+          schema:
+            type: string
+        - name: stats
+          in: query
+          required: false
           schema:
             type: string
       responses:
@@ -6717,6 +8097,24 @@ paths:
               additionalProperties: true
       responses:
         "201":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/handoff:
+    get:
+      summary: GET /api/workspaces/:id/handoff — HANDOFF.md metadata (mtime + excerpt) per repo (#89)
+      tags:
+        - workspace-actions
+      operationId: get_api_workspaces_id_handoff
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
           description: Success
           content:
             application/json:
@@ -6816,7 +8214,7 @@ paths:
               schema: {}
   /api/workspaces/{id}/merge:
     post:
-      summary: POST /api/workspaces/:id/merge
+      summary: report success for a merge that had not happened yet.
       tags:
         - workspace-actions
       operationId: post_api_workspaces_id_merge
@@ -6826,6 +8224,11 @@ paths:
           required: true
           schema:
             type: string
+        - name: async
+          in: query
+          required: false
+          schema:
+            type: string
       requestBody:
         required: false
         content:
@@ -6833,6 +8236,29 @@ paths:
             schema:
               type: object
               additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "202":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/merge-status:
+    get:
+      summary: a finished one. `null` means this process has no record (never merged here, or restarted).
+      tags:
+        - workspace-actions
+      operationId: get_api_workspaces_id_merge-status
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         "200":
           description: Success
@@ -6934,7 +8360,7 @@ paths:
               schema: {}
   /api/workspaces/{id}/reconcile-as-done:
     post:
-      summary: POST /api/workspaces/:id/reconcile-as-done — close a workspace whose branch is already on master
+      summary: the diff/ancestry/pending-sibling/dirty-sibling checks.
       tags:
         - workspace-actions
       operationId: post_api_workspaces_id_reconcile-as-done
@@ -6950,7 +8376,9 @@ paths:
           application/json:
             schema:
               type: object
-              additionalProperties: true
+              properties:
+                adoptMainCheckout:
+                  type: boolean
       responses:
         "200":
           description: Success
@@ -6984,6 +8412,54 @@ paths:
               schema: {}
         "400":
           description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/repo-merge-status:
+    get:
+      summary: GET /api/workspaces/:id/repo-merge-status — per-repo (leading + siblings) merge status (#70)
+      tags:
+        - workspace-actions
+      operationId: get_api_workspaces_id_repo-merge-status
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/repos/{repoName}/rebase:
+    post:
+      summary: rebase ONE repo's worktree branch onto its base (REBASE only — never lands a repo in isolation).
+      tags:
+        - workspace-actions
+      operationId: post_api_workspaces_id_repos_repoName_rebase
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: repoName
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
           content:
             application/json:
               schema: {}
@@ -7092,6 +8568,104 @@ paths:
               schema: {}
         "404":
           description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/services/down:
+    post:
+      summary: volumes kept so a subsequent start finds its data intact).
+      tags:
+        - workspace-actions
+      operationId: post_api_workspaces_id_services_down
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/services/logs:
+    get:
+      summary: GET /api/workspaces/:id/services/logs?tail=N — a bounded, non-following log tail.
+      tags:
+        - workspace-actions
+      operationId: get_api_workspaces_id_services_logs
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: tail
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/services/restart:
+    post:
+      summary: POST /api/workspaces/:id/services/restart — bounce the running containers.
+      tags:
+        - workspace-actions
+      operationId: post_api_workspaces_id_services_restart
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/workspaces/{id}/services/up:
+    post:
+      summary: stack; (re)provisions a deferred/errored/never-run stack (the "Retry" control).
+      tags:
+        - workspace-actions
+      operationId: post_api_workspaces_id_services_up
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
           content:
             application/json:
               schema: {}
@@ -7231,7 +8805,7 @@ paths:
               schema: {}
   /api/workspaces/{id}/turn:
     post:
-      summary: POST /api/workspaces/:id/turn
+      summary: is indistinguishable afterwards from the agent deciding to revert the board's work.
       tags:
         - workspace-actions
       operationId: post_api_workspaces_id_turn

@@ -40,6 +40,15 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: arch gates (god-module + depcruise layering + mcp-catalog parity)
         run: pnpm check:arch
+      # #780 — the wire contract is compile-time only, so `openapi.yaml` was the ONE
+      # artifact that described it at all. It had not been regenerated since the commit
+      # that created it (2026-06-24) while 33 commits changed 33 distinct DTO files, and
+      # nothing in .github/, the test tree or scripts/ referenced it. A generated artifact
+      # nobody regenerates and nobody diffs is not a contract; it is a two-month-old
+      # snapshot that reads like one — worse than none, because it gets cited as coverage.
+      # This step regenerates in memory and fails when the committed spec disagrees.
+      - name: openapi drift gate (packages/server/openapi.yaml vs the route sources)
+        run: pnpm openapi:check
 
   # #765 — the CONSUMER for the coverage reports #688 wired up and nobody read.
   #
