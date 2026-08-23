@@ -34,6 +34,18 @@ describe("isValidDirName", () => {
     expect(isValidDirName("/absolute")).toBe(false);
     expect(isValidDirName("C:\\path")).toBe(false);
   });
+
+  it("rejects BOTH separators regardless of the host platform's own (#828)", () => {
+    // These two assertions are the ones that used to hold only on Windows: off it, `sep`
+    // is "/" and a backslash is an ordinary filename character, so `resolve`/`relative`
+    // saw one harmless segment. The value reaches this function from a DB column and can
+    // be handed to a worker on the other kind of machine, so neither is ever a valid name.
+    for (const name of ["sub\\dir", "..\\etc", "C:\\path", "sub/dir", "../etc", "/absolute"]) {
+      expect(isValidDirName(name), `${JSON.stringify(name)} must be rejected`).toBe(false);
+    }
+    // …and a plain component is still accepted, so the rule did not become "reject everything".
+    expect(isValidDirName("node_modules")).toBe(true);
+  });
 });
 
 describe("parseSymlinkDirs", () => {
