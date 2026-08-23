@@ -149,6 +149,10 @@ export type AutoStartSkipReason =
  * "nobody paired a worker" from "every slot is busy" from "the one worker's socket dropped",
  * and the three have completely different remedies. The console line was the only place the
  * resolver's own `reason` appeared, and console output is not part of any status payload.
+ *
+ * NOTE: nothing READS this yet. The two consumers — `monitor-setup.ts` (which assembles the
+ * status payload from `runAutoStart`'s return) and `autodrive-stall-warning.service.ts` —
+ * were not #774's files. Tracked as **#801**.
  */
 export interface FleetHoldDetail {
   /** The resolver's own refusal wording, verbatim. */

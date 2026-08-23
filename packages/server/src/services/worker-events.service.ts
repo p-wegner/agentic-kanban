@@ -81,7 +81,10 @@ export const EMITTED_TYPES: readonly WorkerEventType[] = [
   "ref_discarded",
 ] as const;
 
-/** Types whose emitters live in files #774 does not own. Named so the gap is greppable. */
+/**
+ * Types whose emitters live in files #774 does not own. Named so the gap is greppable, and
+ * tracked as **#801**, which names the file each missing emitter belongs in.
+ */
 export const UNEMITTED_TYPES: readonly WorkerEventType[] = [
   "status_change",
   "connected",

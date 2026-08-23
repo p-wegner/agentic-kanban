@@ -381,7 +381,8 @@ their call sites are in `fleet-listener.service.ts`, `agent-remote.service.ts`,
 `worker-incoming-refs.service.ts` and the registry, none of which #774 owned. The split is
 data (`EMITTED_TYPES` / `UNEMITTED_TYPES` in `services/worker-events.service.ts`) and
 pinned by `worker-events-emitter-coverage.test.ts`, which fails in BOTH directions — so it
-cannot rot into a false claim either way.
+cannot rot into a false claim either way. Wiring the rest is **#801**, which names the file
+each missing emitter belongs in.
 
 There is no `revoked` event, deliberately: revoking a worker DELETES its whole timeline, so
 such a row would be written and dropped in the same breath.
