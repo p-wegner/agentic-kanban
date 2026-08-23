@@ -114,7 +114,7 @@ export function createWorkerRegistry(database: Database = realDb) {
 
   function mintPairingToken(now?: string): { pairingToken: string; expiresAt: string } {
     const nowMs = now ? new Date(now).getTime() : Date.now();
-    const token = pendingPairings.issue(true, { now: nowMs });
+    const token = pendingPairings.issue(true, { nowMs });
     return { pairingToken: token, expiresAt: new Date(nowMs + PAIRING_TOKEN_TTL_MS).toISOString() };
   }
 

@@ -38,48 +38,48 @@ describe("extractBearer (#556)", () => {
 describe("createExpiringDigestStore (#556)", () => {
   it("resolves a live token and never keeps the plaintext", () => {
     const store = createExpiringDigestStore<{ workerId: string }>({ ttlMs: 1000 });
-    const token = store.issue({ workerId: "w1" }, { now: 0 });
+    const token = store.issue({ workerId: "w1" }, { nowMs: 0 });
     expect(store.resolve(token, 500)).toEqual({ workerId: "w1" });
     expect(store.resolve("some-other-token", 500)).toBeNull();
   });
 
   it("expires by TTL and drops the expired entry on the way out", () => {
     const store = createExpiringDigestStore<string>({ ttlMs: 100 });
-    const token = store.issue("scope", { now: 0 });
+    const token = store.issue("scope", { nowMs: 0 });
     expect(store.resolve(token, 100)).toBeNull();
     expect(store.size()).toBe(0);
   });
 
   it("prunes expired entries on every issue — the leak the pairing map had", () => {
     const store = createExpiringDigestStore<string>({ ttlMs: 10 });
-    store.issue("stale", { now: 0 });
-    store.issue("stale", { now: 0 });
+    store.issue("stale", { nowMs: 0 });
+    store.issue("stale", { nowMs: 0 });
     expect(store.size()).toBe(2);
-    store.issue("fresh", { now: 1000 });
+    store.issue("fresh", { nowMs: 1000 });
     expect(store.size()).toBe(1);
   });
 
   it("consume is single-use and refuses an expired token", () => {
     const store = createExpiringDigestStore<true>({ ttlMs: 100 });
-    const token = store.issue(true, { now: 0 });
+    const token = store.issue(true, { nowMs: 0 });
     expect(store.consume(token, 50)).toBe(true);
     expect(store.consume(token, 50)).toBeNull();
-    const stale = store.issue(true, { now: 0 });
+    const stale = store.issue(true, { nowMs: 0 });
     expect(store.consume(stale, 500)).toBeNull();
   });
 
   it("revokeWhere drops every entry matching a predicate — revoking one worker", () => {
     const store = createExpiringDigestStore<{ workerId: string }>({ ttlMs: 1000 });
-    const keep = store.issue({ workerId: "keep" }, { now: 0 });
-    store.issue({ workerId: "gone" }, { now: 0 });
-    store.issue({ workerId: "gone" }, { now: 0 });
+    const keep = store.issue({ workerId: "keep" }, { nowMs: 0 });
+    store.issue({ workerId: "gone" }, { nowMs: 0 });
+    store.issue({ workerId: "gone" }, { nowMs: 0 });
     expect(store.revokeWhere((s) => s.workerId === "gone")).toBe(2);
     expect(store.resolve(keep, 10)).toEqual({ workerId: "keep" });
   });
 
   it("a per-issue ttlMs overrides the store default", () => {
     const store = createExpiringDigestStore<string>({ ttlMs: 10 });
-    const token = store.issue("s", { now: 0, ttlMs: 1000 });
+    const token = store.issue("s", { nowMs: 0, ttlMs: 1000 });
     expect(store.resolve(token, 500)).toBe("s");
   });
 });

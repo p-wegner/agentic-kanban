@@ -259,7 +259,7 @@ describe("a git token is bound to a LIVE dispatch, not to its own TTL (#753)", (
           projectId: PROJECT_ID,
           incomingRef: `${KANBAN_INCOMING_REF_PREFIX}feature/ak-11-gone`,
           // Minted outside the settle window: this is the "hours after the merge" case.
-          now: Date.now() - ASSIGNMENT_SETTLE_MS - 60_000,
+          nowMs: Date.now() - ASSIGNMENT_SETTLE_MS - 60_000,
         });
         const url = `http://127.0.0.1:${handle.port}/git/${PROJECT_ID}/info/refs?service=git-upload-pack`;
         const auth = { authorization: `Basic ${Buffer.from(`x-token:${token}`).toString("base64")}` };
@@ -285,7 +285,7 @@ describe("a git token is bound to a LIVE dispatch, not to its own TTL (#753)", (
           workerId: WORKER,
           projectId: PROJECT_ID,
           incomingRef: `${KANBAN_INCOMING_REF_PREFIX}${branch}`,
-          now: Date.now() - ASSIGNMENT_SETTLE_MS - 60_000,
+          nowMs: Date.now() - ASSIGNMENT_SETTLE_MS - 60_000,
         });
         const res = await fetch(
           `http://127.0.0.1:${handle.port}/git/${PROJECT_ID}/info/refs?service=git-upload-pack`,

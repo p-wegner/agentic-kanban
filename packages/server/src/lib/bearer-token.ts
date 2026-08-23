@@ -67,7 +67,7 @@ export function extractBearer(header: string | string[] | undefined | null, opts
 
 export interface ExpiringDigestStore<Scope> {
   /** Mint a token, store `scope` under its digest, and return the token. The plaintext is never kept. */
-  issue(scope: Scope, opts?: { ttlMs?: number; now?: number }): string;
+  issue(scope: Scope, opts?: { ttlMs?: number; nowMs?: number }): string;
   /** The scope for a token, or null when unknown or expired. An expired hit is deleted on the way out. */
   resolve(token: string, nowMs?: number): Scope | null;
   /** Delete a token's entry (single-use tokens consume this way). Returns whether one existed. */
@@ -100,7 +100,7 @@ export function createExpiringDigestStore<Scope>(opts: { ttlMs: number }): Expir
 
   return {
     issue(scope, issueOpts = {}) {
-      const nowMs = issueOpts.now ?? Date.now();
+      const nowMs = issueOpts.nowMs ?? Date.now();
       prune(nowMs);
       const token = mintToken();
       entries.set(sha256Hex(token), { scope, expiresAtMs: nowMs + (issueOpts.ttlMs ?? opts.ttlMs) });

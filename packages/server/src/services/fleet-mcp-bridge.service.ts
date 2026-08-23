@@ -99,8 +99,8 @@ export interface FleetMcpScope {
 
 export interface IssueFleetMcpTokenInput extends FleetMcpScope {
   ttlMs?: number;
-  /** Test seam for expiry. */
-  now?: number;
+  /** Test seam for expiry. Epoch ms (#614: `nowMs` for arithmetic). */
+  nowMs?: number;
 }
 
 /** A `{ name, content }` pair in the shape `WorkerRepoTransport.contextFiles` carries. */
@@ -299,7 +299,7 @@ function createFleetMcpBridge(database: Database): FleetMcpBridge {
     issueToken: (input) =>
       tokens.issue(
         { workerId: input.workerId, projectId: input.projectId, sessionId: input.sessionId },
-        { ttlMs: input.ttlMs, now: input.now },
+        { ttlMs: input.ttlMs, nowMs: input.nowMs },
       ),
     revokeSessionTokens: (sessionId) => tokens.revokeWhere((scope) => scope.sessionId === sessionId),
     revokeWorkerTokens: (workerId) => {
