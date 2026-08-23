@@ -55,6 +55,14 @@ export function readPackageCoverage(repoRoot, pkg) {
       out.error = "coverage-summary.json has no `total` block";
       return out;
     }
+    // A report that measured NOTHING is the #688 failure mode wearing a report's clothes:
+    // vitest writes `{"total":{"lines":{"total":0,...,"pct":"Unknown"}}}` when the run
+    // matched no test file, and a naive reader prints "Unknown%" and exits 0. Observed for
+    // real on 2026-08-23. Treat it as absent.
+    if (!parsed.total.lines || (parsed.total.lines.total ?? 0) === 0) {
+      out.error = "coverage-summary.json measured 0 lines (the run matched no test files)";
+      return out;
+    }
     out.present = true;
     out.total = parsed.total;
     out.fileCount = Object.keys(parsed).filter((k) => k !== "total").length;
