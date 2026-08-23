@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import type { IssueWithStatus, UpdateIssueRequest } from "@agentic-kanban/shared";
 import { apiPost } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
+import { useIssueEnhance } from "./useIssueEnhance.js";
 import {
   buildIssueUpdatePayload,
   hasIssueEditChanges,
@@ -18,7 +19,8 @@ import {
  * its JSX and the prop-sync / keydown effects are unchanged).
  *
  * setSaving is exposed because the panel's delete flow reuses the same busy flag;
- * the other busy/snapshot setters (enhancing/estimating/preEnhance) stay internal.
+ * the other busy/snapshot setters (estimating, and the enhance state now owned by
+ * `useIssueEnhance`) stay internal.
  */
 export function useIssueEditForm(
   issue: IssueWithStatus,
@@ -38,10 +40,25 @@ export function useIssueEditForm(
   const [skipAutoReview, setSkipAutoReview] = useState(initial.skipAutoReview);
   const [saving, setSaving] = useState(false);
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
-  const [enhancing, setEnhancing] = useState(false);
-  const [preEnhanceSnapshot, setPreEnhanceSnapshot] = useState<{ title: string; description: string } | null>(null);
   const [estimating, setEstimating] = useState(false);
   const [milestoneId, setMilestoneId] = useState<string | null>(initial.milestoneId);
+
+  // The AI-enhance behaviour is one implementation shared with both create-issue forms
+  // (#772/#810). `clearSnapshot` is what the edit form needs on top of the create forms:
+  // cancelling an edit must drop a pending Undo, see handleCancelEdit.
+  const {
+    enhancing,
+    preEnhanceSnapshot,
+    enhance: handleEnhance,
+    undoEnhance: handleUndoEnhance,
+    clearSnapshot: clearEnhanceSnapshot,
+  } = useIssueEnhance({
+    projectId: issue.projectId,
+    title,
+    description,
+    setTitle,
+    setDescription,
+  });
 
   const fields: IssueEditFields = {
     title, description, issueType, estimate, dueDate,
@@ -57,7 +74,7 @@ export function useIssueEditForm(
     }
     setEditing(false);
     setDescriptionMode("edit");
-    setPreEnhanceSnapshot(null);
+    clearEnhanceSnapshot();
     const baseline = issueEditBaseline(issue);
     setTitle(baseline.title);
     setDescription(baseline.description);
@@ -68,29 +85,6 @@ export function useIssueEditForm(
     setExternalUrl(baseline.externalUrl);
     setSkipAutoReview(baseline.skipAutoReview);
     setMilestoneId(baseline.milestoneId);
-  }
-
-  async function handleEnhance() {
-    if (!title.trim() || enhancing) return;
-    setEnhancing(true);
-    try {
-      setPreEnhanceSnapshot({ title, description });
-      const result = await apiPost<{ title: string; description: string }>("/api/issues/enhance", { title, description, projectId: issue.projectId });
-      setTitle(result.title);
-      setDescription(result.description);
-    } catch (err) {
-      setPreEnhanceSnapshot(null);
-      showToast(err instanceof Error ? err.message : "Enhancement failed", "error");
-    } finally {
-      setEnhancing(false);
-    }
-  }
-
-  function handleUndoEnhance() {
-    if (!preEnhanceSnapshot) return;
-    setTitle(preEnhanceSnapshot.title);
-    setDescription(preEnhanceSnapshot.description);
-    setPreEnhanceSnapshot(null);
   }
 
   async function handleAiEstimate() {

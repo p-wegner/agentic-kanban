@@ -16,6 +16,12 @@ export interface IssueEnhanceControls {
   preEnhanceSnapshot: { title: string; description: string } | null;
   enhance: () => Promise<void>;
   undoEnhance: () => void;
+  /**
+   * Drop a pending Undo without restoring the text. The edit form needs it (cancelling an
+   * edit resets the fields from the issue, so a stale snapshot would offer to "undo" back
+   * into the abandoned draft); the create forms unmount instead and never call it.
+   */
+  clearSnapshot: () => void;
 }
 
 /**
@@ -26,6 +32,11 @@ export interface IssueEnhanceControls {
  * this (the request, the snapshot bookkeeping, the failure toast, the `finally` reset).
  * The two forms are otherwise deliberately different shells; this is the part that was
  * genuinely one behaviour written twice.
+ *
+ * #810 — `useIssueEditForm` (behind `IssueDetailPanel`) held the same behaviour a THIRD
+ * time, identical but for `projectId: issue.projectId` at the call and one extra reset in
+ * its cancel-edit path. That reset is now `clearSnapshot` below rather than a reason to
+ * keep a third copy.
  */
 export function useIssueEnhance({
   projectId,
@@ -60,5 +71,9 @@ export function useIssueEnhance({
     setPreEnhanceSnapshot(null);
   }
 
-  return { enhancing, preEnhanceSnapshot, enhance, undoEnhance };
+  function clearSnapshot() {
+    setPreEnhanceSnapshot(null);
+  }
+
+  return { enhancing, preEnhanceSnapshot, enhance, undoEnhance, clearSnapshot };
 }
