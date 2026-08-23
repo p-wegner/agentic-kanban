@@ -18,22 +18,32 @@ import { walkTestFiles, compareRatchet } from "./helpers/guard-scan.js";
  * nobody chose.
  *
  * #779 converted the two highest-value offenders to AST shape matching
- * (`pref-polarity-ratchet`, `console-tag-ratchet`). The rest are listed below. This suite is
- * the DISCLOSURE half required by CLAUDE.md's partial-refactor rule: the remainder cannot
- * regrow silently, because a tree-scanning test that splits source into lines and is not
- * listed here fails this ratchet, and an entry whose file stopped doing it must be removed.
+ * (`pref-polarity-ratchet`, `console-tag-ratchet`) and enumerated the remaining 13. This
+ * suite is the DISCLOSURE half required by CLAUDE.md's partial-refactor rule: the remainder
+ * cannot regrow silently, because a tree-scanning test that splits source into lines and is
+ * not listed here fails this ratchet, and an entry whose file stopped doing it must be
+ * removed.
  *
- * Being listed is not a verdict of "wrong". Three honest categories share the list:
+ * **#794 converted the last seven convertible ones and this list is now down to eight** —
+ * `windows-hide-spawn-guard`, `auto-merge-pref`, `auto-review-pref`,
+ * `client-conventions-guard`, `no-self-http-in-services`, `issue-number-single-source` and
+ * `repository-projections-ratchet` all match shapes on the AST now, and `guard-scan.ts`
+ * gained the `leadingCommentText` helper that the two comment-lookback opt-outs needed. Each
+ * conversion paid for itself in findings the text scan could not see: a live self-HTTP call
+ * hidden because a `"/*"` route path made `stripComments` blank 93 lines, 14 repository
+ * projections re-spelled in a reordered form, and an allowlist kept green by prose after the
+ * query it guarded had moved to another package.
+ *
+ * Being listed is not a verdict of "wrong". Two honest categories remain:
  *
  *   1. **line number for the MESSAGE only** — the match itself runs over the whole file text,
  *      so a wrap cannot hide anything; the split just turns an offset into `file:line`.
  *   2. **the subject genuinely IS lines** — a LOC ceiling, a markdown doc, a shell/JS hook
- *      script, a run of consecutive literal lines. There is no AST to match against.
- *   3. **convertible, not yet converted** — the #779 remainder, tracked as **#794**. Each says
- *      what the wrap-shaped hole is, so the next session does not have to re-derive it.
- *      `guard-scan.ts` has no leading-comment helper yet, which is what two of them (an
- *      `eslint-disable-next-line` / `SELF-HTTP OK:` lookback on the PRECEDING line) are waiting
- *      on — see #794.
+ *      script, CLAUDE.md prose. There is no AST to match against.
+ *
+ * A third category — **convertible, not yet converted** — is empty as of #794. If one comes
+ * back, say what the wrap-shaped hole is at the entry, so the next session does not have to
+ * re-derive it.
  */
 
 const testModuleDir = path.dirname(fileURLToPath(import.meta.url));
@@ -57,17 +67,6 @@ const TREE_SCAN = /walkPackageSources|walkTestFiles|readdirSync|globSync/;
  * Category (1)/(2)/(3) per the header. Only ever SHRINK this list.
  */
 const LINE_BASED_GUARDS: Record<string, string> = {
-  "client/src/__tests__/client-conventions-guard.test.ts":
-    "(3) per-line `fetch(` / `history.pushState` match, plus a two-line LOOKBACK for the " +
-    "`eslint-disable-next-line no-restricted-syntax` exemption. The match converts easily; the " +
-    "lookback is the work, because an exemption comment is not an AST node — it needs " +
-    "ts.getLeadingCommentRanges, not forEachNode.",
-  "server/src/__tests__/auto-merge-pref.test.ts":
-    "(3) zero-tolerance `get(\"auto_merge\") ===` per-line ban — wrap-evadable in exactly the way " +
-    "#947's was. Partly covered meanwhile: pref-polarity-ratchet is AST since #779 and would " +
-    "report a wrapped read as a NEW `auto_merge` key. Outside #779's file allowlist.",
-  "server/src/__tests__/auto-review-pref.test.ts":
-    "(3) same shape and same partial cover as auto-merge-pref, for `auto_review`.",
   "server/src/__tests__/claude-md-git-invariants.test.ts":
     "(2) the subject is CLAUDE.md prose and .claude/settings.json — there is no TypeScript AST " +
     "to match against, so lines are the only unit available.",
@@ -77,26 +76,12 @@ const LINE_BASED_GUARDS: Record<string, string> = {
   "server/src/__tests__/executor-id-mapping-guard.test.ts":
     "(1) the regex runs over whole file text; the split converts `m.index` into a line number " +
     "for the offender message.",
-  "server/src/__tests__/no-self-http-in-services.test.ts":
-    "(3) per-line `fetch(\"http://127.0.0.1…\")` with a preceding-line `SELF-HTTP OK:` opt-out — " +
-    "the same comment-lookback problem as client-conventions-guard.",
-  "server/src/__tests__/repository-projections-ratchet.test.ts":
-    "(2)+(3) one check matches a RUN of consecutive column lines re-spelled out of " +
-    "projections.ts, i.e. its subject really is the text layout. An AST version would compare " +
-    "object-literal member SETS, which is strictly better and strictly more work.",
   "server/src/__tests__/repository-table-ownership.test.ts":
     "(1) line number for the offender message only; the scan is over whole file text.",
   "server/src/__tests__/status-write-ratchet.test.ts":
     "(1) line number for the offender message only; the scan is over whole file text.",
-  "server/src/__tests__/windows-hide-spawn-guard.test.ts":
-    "(3) finds a spawn call on a line, then joins the NEXT 16 lines and counts parens to find " +
-    "the options object. A CallExpression's arguments are one node — this is the clearest " +
-    "conversion left, and it is outside #779's file allowlist.",
   "shared/__tests__/git-exec-single-spawn.test.ts":
     "(1) already an AST pass; the split quotes the offending source line in the message.",
-  "shared/__tests__/issue-number-single-source.test.ts":
-    "(3) per-line match for hand-rolled issue-number derivation; convertible, outside #779's " +
-    "file allowlist.",
   "shared/__tests__/max-file-size.test.ts":
     "(2) it COUNTS lines — a LOC ceiling's unit of measure is the line — and separately scans a " +
     "`.js` hook script body, which this repo's TS parser is not pointed at.",
@@ -124,8 +109,11 @@ describe("line-based guard suites are enumerated and shrink-only (#779)", () => 
   const found = detectLineBasedGuards();
 
   it("finds guard suites at all, so this ratchet cannot pass vacuously", () => {
-    // 15 at #779, after pref-polarity and console-tag were converted off lines.
-    expect(found.length).toBeGreaterThan(8);
+    // 15 at #779 (after pref-polarity and console-tag were converted off lines), 8 at #794
+    // (after the seven convertible ones went to AST shape matching). The floor stays well
+    // below the current count: it exists to catch a broken WALK, not to pin the number —
+    // the list itself does that, in both directions.
+    expect(found.length).toBeGreaterThan(4);
   });
 
   it("every line-based guard suite is listed with a reason, and no entry is stale", () => {

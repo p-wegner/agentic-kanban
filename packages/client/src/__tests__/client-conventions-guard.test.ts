@@ -2,6 +2,14 @@
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
+import ts from "typescript";
+import {
+  parseGuardSource,
+  forEachNode,
+  lineOf,
+  calleeName,
+  leadingCommentText,
+} from "../../../shared/__tests__/helpers/guard-scan.js";
 
 /**
  * The client's stated conventions, enforced (#601).
@@ -16,6 +24,23 @@ import path from "node:path";
  * Deliberately a TEST rather than only an eslint rule. `pnpm lint` is part of `pnpm check`,
  * but the pre-merge gate's `verify_script` is `test:mine` — so an eslint-only rule does not
  * gate a merge, which is exactly where these conventions need to hold.
+ *
+ * ## Why the two scanners are AST passes and not per-line regexes (#794, following #779)
+ *
+ * Both matched a regex against one LINE, which #779 proved is not evidence — the verdict
+ * depends on where a formatter wrapped:
+ *
+ *   - `history.pushState` written as `history` / `.pushState(…)` across two lines matched
+ *     nothing, and `location.pathname =` with the value on the next line failed the old
+ *     `=[^=]` (there is no character after the `=` on that line) — so the URL-writer rule
+ *     was evadable by a reflow nobody chose;
+ *   - both scanners ran on a `stripComments` copy of the text, and stripping is a guess: a
+ *     line whose string literal contains `//` lost everything after it, taking a real call
+ *     with it. Comments are not nodes, so the AST needs no stripping at all;
+ *   - the fetch exemption was read from the TWO raw lines above the match, so one exempted
+ *     call granted its unexempted NEIGHBOUR the same pass — the comment was still within
+ *     the lookback. `leadingCommentText` reads only the comment block directly above the
+ *     call, at any nesting depth.
  */
 const clientSrc = path.join(import.meta.dirname!, "..");
 
@@ -40,6 +65,7 @@ const rel = (f: string) => path.relative(clientSrc, f).split(path.sep).join("/")
  * because `test:mine` doubles as the merge verify_script, the timeout read as a FAILING
  * GATE on diffs that had nothing to do with it. Same failure mode, and same reasoning, as
  * the git suites' `GIT_IO_TIMEOUT_MS` note: the cost is I/O, not the code under test.
+ * (`parseGuardSource` is memoised per path for the same reason, one layer down.)
  */
 const readCache = new Map<string, string>();
 const read = (f: string) => {
@@ -58,17 +84,61 @@ const read = (f: string) => {
  */
 const SCAN_TIMEOUT_MS = Number(process.env.VITEST_GUARD_SCAN_TIMEOUT) || 60_000;
 
+export interface ConventionHit {
+  line: number;
+  text: string;
+}
+
+const hit = (sf: ts.SourceFile, node: ts.Node): ConventionHit => ({
+  line: lineOf(sf, node),
+  text: node.getText(sf).replace(/\s+/g, " ").slice(0, 120),
+});
+
 /**
- * Blank out comment bodies, keeping line count so reported line numbers stay true.
- *
- * Without this the fetch scanner flags six PROSE mentions of "the timeline's own fetch (…)"
- * and none of them is code. A guard that fires on comments about the thing it guards is
- * worse than none: it trains people to stop writing the comments.
+ * Raw `fetch(…)` calls with no `no-restricted-syntax` exemption above them. A bare
+ * identifier only — a `.fetch(…)` method on some object belongs to that object, which is
+ * what the old lookbehind expressed. Exported so the proof cases drive the REAL scanner.
  */
-function stripComments(text: string): string {
-  return text
-    .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "))
-    .replace(/(^|[^:])\/\/.*$/gm, (_m, p1: string) => p1);
+export function scanRawFetch(cacheKey: string, text: string): ConventionHit[] {
+  const sf = parseGuardSource(cacheKey, text);
+  const hits: ConventionHit[] = [];
+  forEachNode(sf, (node) => {
+    if (!ts.isCallExpression(node) || !ts.isIdentifier(node.expression) || node.expression.text !== "fetch") return;
+    if (leadingCommentText(sf, node).includes("no-restricted-syntax")) return;
+    hits.push(hit(sf, node));
+  });
+  return hits;
+}
+
+/** Writes to the URL: `history.pushState/replaceState(…)` and `location.pathname = …`. */
+export function scanUrlWrites(cacheKey: string, text: string): ConventionHit[] {
+  const sf = parseGuardSource(cacheKey, text);
+  const hits: ConventionHit[] = [];
+  /** `history`, `window.history`, `globalThis.history` — the receiver, not a same-named local field. */
+  const receiverIs = (expr: ts.Expression, name: string): boolean =>
+    new RegExp(`(^|\\.)${name}$`).test(expr.getText(sf).replace(/\s+/g, ""));
+  forEachNode(sf, (node) => {
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+      const method = node.expression.name.text;
+      if (
+        (method === "pushState" || method === "replaceState") &&
+        receiverIs(node.expression.expression, "history")
+      ) {
+        hits.push(hit(sf, node));
+      }
+      return;
+    }
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      ts.isPropertyAccessExpression(node.left) &&
+      node.left.name.text === "pathname" &&
+      receiverIs(node.left.expression, "location")
+    ) {
+      hits.push(hit(sf, node));
+    }
+  });
+  return hits;
 }
 
 describe("client conventions (#601)", () => {
@@ -89,19 +159,7 @@ describe("client conventions (#601)", () => {
     const offenders: string[] = [];
     for (const file of files) {
       if (rel(file) === "lib/api.ts") continue;
-      const raw = read(file);
-      // Match the CALL on stripped text so prose about "the timeline's own fetch (…)" is not
-      // a hit — but read the EXEMPTION from the raw text, because stripping removes the very
-      // comment that grants it. Two views of one file, each answering the half it can.
-      const code = stripComments(raw).split(/\r?\n/);
-      const original = raw.split(/\r?\n/);
-      code.forEach((line, i) => {
-        if (!/(^|[^\w.])fetch\s*\(/.test(line)) return;
-        // The exemption may sit on either of the two preceding lines (a wrapped comment).
-        const preceding = `${original[i - 1] ?? ""}\n${original[i - 2] ?? ""}`;
-        if (preceding.includes("no-restricted-syntax")) return;
-        offenders.push(`${rel(file)}:${i + 1}`);
-      });
+      for (const h of scanRawFetch(file, read(file))) offenders.push(`${rel(file)}:${h.line}`);
     }
     expect(
       offenders,
@@ -120,12 +178,7 @@ describe("client conventions (#601)", () => {
     for (const file of files) {
       const r = rel(file);
       if (r.startsWith("routes/")) continue;
-      const lines = stripComments(read(file)).split(/\r?\n/);
-      lines.forEach((line, i) => {
-        if (/history\.(pushState|replaceState)|location\.pathname\s*=[^=]/.test(line)) {
-          offenders.push(`${r}:${i + 1}`);
-        }
-      });
+      for (const h of scanUrlWrites(file, read(file))) offenders.push(`${r}:${h.line}`);
     }
     expect(
       offenders,
@@ -155,4 +208,81 @@ describe("client conventions (#601)", () => {
   it("the baseline is not stale — lower it when the count drops", () => {
     expect(preferenceBypasses().length).toBe(PREFERENCES_BYPASS_BASELINE);
   }, SCAN_TIMEOUT_MS);
+});
+
+/**
+ * #779's proof obligation (#794): each conversion must catch the form the old per-line
+ * version could not see, and still catch the ones it did.
+ */
+describe("the client-convention scans see forms the per-line version could not (#794)", () => {
+  const fetchScan = (name: string, lines: string[]) => scanRawFetch(`/virtual/client-fetch/${name}.ts`, lines.join("\n"));
+  const urlScan = (name: string, lines: string[]) => scanUrlWrites(`/virtual/client-url/${name}.ts`, lines.join("\n"));
+
+  it("still catches a plain raw fetch, and still honours the exemption above it", () => {
+    expect(fetchScan("plain", ['const r = await fetch("/api/x");'])).toHaveLength(1);
+    expect(
+      fetchScan("exempt", [
+        "// eslint-disable-next-line no-restricted-syntax -- streams SSE, apiFetch cannot",
+        'const r = await fetch("/api/x");',
+      ]),
+    ).toEqual([]);
+  });
+
+  it("no longer lets ONE exemption excuse the NEXT call two lines below it", () => {
+    // The old lookback joined the two preceding RAW lines, so the second call saw the first
+    // call's comment at i-2 and was silently excused — an undocumented bypass of the rule
+    // this guard exists to enforce.
+    const hits = fetchScan("neighbour", [
+      "// eslint-disable-next-line no-restricted-syntax -- streams SSE, apiFetch cannot",
+      'const a = await fetch("/api/stream");',
+      'const b = await fetch("/api/undocumented");',
+    ]);
+    expect(hits.map((h) => h.line)).toEqual([3]);
+  });
+
+  it("catches a fetch the comment-stripping pass used to delete along with a string", () => {
+    // stripComments removed everything after a `//`, including one inside a string literal,
+    // so the rest of that line — the call — disappeared before the pattern ever ran.
+    const hits = fetchScan("string-slashes", ['const r = sep === "//" ? fetch(a) : fetch(b);']);
+    expect(hits).toHaveLength(2);
+  });
+
+  it("still ignores prose and a fetch written inside a string", () => {
+    expect(
+      fetchScan("prose", [
+        "// the timeline's own fetch (…) is described here",
+        'const doc = "call fetch(url) directly";',
+        "export const noop = () => doc;",
+      ]),
+    ).toEqual([]);
+  });
+
+  it("still catches the one-line URL writes the regex caught", () => {
+    expect(urlScan("plain-push", ['history.pushState({}, "", "/p/x");'])).toHaveLength(1);
+    expect(urlScan("plain-path", ['location.pathname = "/p/x";'])).toHaveLength(1);
+    expect(urlScan("windowed", ['window.history.replaceState({}, "", "/p/x");'])).toHaveLength(1);
+  });
+
+  it("catches `history` / `.pushState()` split across lines", () => {
+    const hits = urlScan("wrapped-push", ["window.history", '  .pushState({}, "", "/p/x");']);
+    expect(hits).toHaveLength(1);
+  });
+
+  it("catches a pathname assignment whose value is on the NEXT line", () => {
+    // The old pattern required a non-`=` character after the `=` ON THAT LINE, so a wrapped
+    // assignment — where the `=` is the last thing on the line — matched nothing at all.
+    const hits = urlScan("wrapped-path", ["window.location.pathname =", '  buildAppPath(state);']);
+    expect(hits).toHaveLength(1);
+  });
+
+  it("does not count an equality comparison or prose as a URL write", () => {
+    expect(
+      urlScan("not-writes", [
+        'if (location.pathname === "/p/x") return;',
+        "// never call history.pushState from a component",
+        'const doc = "location.pathname = \\"/p/x\\"";',
+        "export const noop = () => doc;",
+      ]),
+    ).toEqual([]);
+  });
 });
