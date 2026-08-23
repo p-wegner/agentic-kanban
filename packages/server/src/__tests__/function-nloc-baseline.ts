@@ -65,7 +65,14 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "services/agent-remote.service.ts::createRemoteAgentService": 594,
   "cli/commands/session.ts::registerSessionCommand": 569,
   "services/project.service.ts::createProjectService": 564,
-  "services/workspace-merge.service.ts::createWorkspaceMergeService": 529,
+  // 529 -> 534, a DELIBERATE raise (#835). `mergeWorkspace` used to return the lock's
+  // `Promise<unknown>`; it now declares `MergeWorkspaceResult` and publishes through
+  // `publishMergeResponse`, and the lock-reuse path answers CONFLICT instead of handing back
+  // the lock-lifetime promise (which always settles as `undefined` -- that was a live bug
+  // returning an empty merge body). +5 nloc bought a typed return for every caller and took
+  // 71 -> 65 grandfathered test files with it. Raised rather than worked around: the ring
+  // exists to stop unmanaged growth, not to make a sanctioned typing fix unlandable.
+  "services/workspace-merge.service.ts::createWorkspaceMergeService": 534,
   "services/merge-queue.service.ts::createMergeQueueService": 521,
   // 506 -> 474 in #806 batch 3: ten handlers dropped their inline type literal and guard
   // ladder for a `parseJsonBody(c, schema)` call.
