@@ -1,4 +1,5 @@
 import type { ViewTabDescriptor } from "../lib/viewTabs.js";
+import { withViewTabGroupHeaders } from "../lib/viewTabGroups.js";
 
 interface ViewTabBarProps<T extends string> {
   tabs: readonly ViewTabDescriptor[];
@@ -12,15 +13,12 @@ interface ViewTabBarProps<T extends string> {
  * tab of each group.
  */
 export function ViewTabBar<T extends string>({ tabs, active, onSelect }: ViewTabBarProps<T>) {
-  let lastGroup: string | undefined;
   return (
     <div
       className="flex items-center gap-1 flex-wrap px-4 pt-3 pb-2 border-b border-gray-200 dark:border-gray-700 shrink-0"
       role="tablist"
     >
-      {tabs.map((tab) => {
-        const groupHeader = tab.group && tab.group !== lastGroup ? tab.group : undefined;
-        lastGroup = tab.group;
+      {withViewTabGroupHeaders(tabs).map(({ tab, groupHeader }) => {
         const isActive = tab.id === active;
         return (
           <span key={tab.id} className="flex items-center gap-1">
