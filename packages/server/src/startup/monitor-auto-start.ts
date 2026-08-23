@@ -11,6 +11,9 @@ import type { MonitorActionName } from "../services/monitor-nudge.js";
 import { resolveMonitorTunables } from "../services/strategy-objective.service.js";
 import { narrowProviderName } from "../services/agent-provider.js";
 import { projectCanDispatch } from "../services/worker-fleet.service.js";
+// #774 — the fleet shape behind a `no_available_worker` skip, so the reason is not a
+// single collapsed token. Same computation `GET /api/workers` serves.
+import { describeFleet } from "../services/placement-explain.service.js";
 import { shouldQuiesceBuildersForGate } from "../services/gate-quiesce.js";
 import { isMonitorEligibleIssue, monitorEligibleIssueSql } from "./monitor-eligibility.js";
 import { buildFileContentionGate, shouldDeferForContention, type BuildFileContentionGate } from "./monitor-file-contention.js";
@@ -137,9 +140,34 @@ export type AutoStartSkipReason =
    */
   | "create_in_flight";
 
+/**
+ * What the fleet looked like when a project's start was held for `no_available_worker`
+ * (#774, remaining #755 item 6).
+ *
+ * Before this, the whole answer was the token `no_available_worker` in `reasonCounts` plus
+ * a `[monitor]` console line — so an operator reading the monitor status could not tell
+ * "nobody paired a worker" from "every slot is busy" from "the one worker's socket dropped",
+ * and the three have completely different remedies. The console line was the only place the
+ * resolver's own `reason` appeared, and console output is not part of any status payload.
+ */
+export interface FleetHoldDetail {
+  /** The resolver's own refusal wording, verbatim. */
+  reason: string;
+  registered: number;
+  online: number;
+  /** Online AND holding a live WebSocket — the pair that actually makes a worker pickable. */
+  connected: number;
+  eligible: number;
+  freeSlots: number;
+  /** Where to get the full ordered decision chain for a specific ticket. */
+  explain: string;
+}
+
 export interface AutoStartSkipInfo {
   issueNumbers: number[];
   reasonCounts: Partial<Record<AutoStartSkipReason, number>>;
+  /** Present only when this project was held by the fleet gate this cycle. */
+  fleetHold?: FleetHoldDetail;
 }
 
 export interface AutoStartDeps {
@@ -332,8 +360,40 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
       providerName: narrowProviderName(prefMap.get("provider")),
     });
     if (!dispatch.available) {
-      console.log(`[monitor] auto-start held for project ${inProgressSt.projectId}: ${dispatch.reason}`);
+      // #774 — record the fleet's SHAPE alongside the collapsed reason, so the monitor
+      // status carries what the console line used to be the only source of. Best-effort:
+      // a hold must still be recorded if the fleet snapshot itself fails.
+      let fleetHold: FleetHoldDetail | undefined;
+      try {
+        const snapshot = await describeFleet({
+          database: db,
+          projectId: inProgressSt.projectId,
+          providerName: narrowProviderName(prefMap.get("provider")),
+        });
+        fleetHold = {
+          reason: dispatch.reason,
+          registered: snapshot.registered,
+          online: snapshot.online,
+          connected: snapshot.connected,
+          eligible: snapshot.eligible,
+          freeSlots: snapshot.freeSlots,
+          explain: `/api/workers/explain?projectId=${inProgressSt.projectId}&issue=<N>`,
+        };
+      } catch (err) {
+        console.warn(`[monitor] could not describe the fleet behind the hold: ${String(err)}`);
+      }
+      console.log(
+        `[monitor] auto-start held for project ${inProgressSt.projectId}: ${dispatch.reason}` +
+          (fleetHold
+            ? ` (${fleetHold.connected}/${fleetHold.registered} connected, ${fleetHold.eligible} eligible, ` +
+              `${fleetHold.freeSlots} free slots; why for one ticket: ${fleetHold.explain})`
+            : ""),
+      );
       noteSkip(inProgressSt.projectId, null, "no_available_worker");
+      if (fleetHold) {
+        const info = skipInfo.get(inProgressSt.projectId);
+        if (info) info.fleetHold = fleetHold;
+      }
       continue;
     }
 

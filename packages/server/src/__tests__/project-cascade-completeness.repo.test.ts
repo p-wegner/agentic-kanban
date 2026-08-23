@@ -185,6 +185,16 @@ const SUBTREE_SEEDERS: Record<string, (c: SeedCtx) => Promise<void>> = {
       sessionId: c.sessionId, type: "stdout", data: "hello", createdAt: c.now,
     });
   },
+  worker_events: async (c) => {
+    // #774 — the per-worker timeline. It reaches this subtree only through `session_id`
+    // (a cascading FK to `sessions`); there is deliberately NO `project_id` column, because
+    // most of its rows — register, connect, disconnect — belong to no project, and a
+    // worker's connectivity history must not be deleted by a project's lifetime.
+    await c.db.insert(schema.workerEvents).values({
+      id: randomUUID(), workerId: randomUUID(), type: "assigned",
+      sessionId: c.sessionId, summary: "assigned to a worker", createdAt: c.now,
+    });
+  },
   test_runs: async (c) => {
     await c.db.insert(schema.testRuns).values({
       sessionId: c.sessionId, testName: "passes sometimes", passed: true, recordedAt: c.now,

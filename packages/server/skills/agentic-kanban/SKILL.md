@@ -1,8 +1,8 @@
 ---
 name: agentic-kanban
 description: Operate the agentic-kanban board — a kanban board where each card is an AI coding session in its own git worktree. Use when asked to work a ticket, drive a project hands-off, review or merge agent work, inspect what agents are doing, or wire the board into another tool. Covers the MCP tools, CLI, board views, statuses, and the review/merge gate.
-commit: 11c886fd8f
-generated: 2026-08-22
+commit: 0eb243cdd9
+generated: 2026-08-23
 ---
 
 # agentic-kanban
@@ -113,7 +113,7 @@ Depth on any of these lives in `references/` — load a file only when you actua
 
 ## MCP tool index
 
-106 tools, by category. Full descriptions: `references/mcp-tools.md`.
+111 tools, by category. Full descriptions: `references/mcp-tools.md`.
 
 | Category | Tools |
 |---|---|
@@ -132,6 +132,7 @@ Depth on any of these lives in `references/` — load a file only when you actua
 | Settings | `get_preference`, `set_preference` |
 | Butler | `ask_butler`, `butler_ensure`, `butler_stop`, `butler_list`, `butler_interrupt`, `butler_state`, `butler_set_model`, `butler_set_profile`, `get_butler_skill`, `set_butler_skill` |
 | Plugin Loops & Gates | `list_plugin_gates`, `get_plugin_gate`, `resolve_plugin_gate`, `advance_plugin_loop`, `list_inbox`, `enable_plugin`, `set_plugin_output_location`, `get_plugin_scaffold`, `fill_plugin_scaffold` |
+| Worker Fleet | `list_workers`, `explain_worker_placement`, `mint_worker_pairing_token`, `revoke_worker`, `list_incoming_refs` |
 
 <!-- /GENERATED:mcp-index -->
 
@@ -158,7 +159,7 @@ Top-level: `cleanup`, `create`, `delete-status`, `dev`, `export-backlog`, `impor
 | `session` | `analyze`, `recent`, `backfill-friction`, `review-effectiveness`, `reviewer-fixes`, `transcript`, `search`, `stats`, `friction`, `find-similar` |
 | `skill` | `list`, `get`, `create`, `export`, `verify` |
 | `tag` | `list`, `create` |
-| `worker` | `pair`, `start`, `instructions`, `list`, `explain`, `placements` |
+| `worker` | `pair`, `start`, `instructions`, `list`, `explain`, `placements`, `doctor`, `doctor-board`, `events` |
 | `workflow` | `list`, `get`, `export`, `create`, `import`, `delete` |
 | `workspace` | `list`, `create`, `launch`, `resume`, `wait`, `review`, `start`, `diff`, `scorecard`, `merge`, `close`, `stop`, `delete`, `relaunch`, `mark-ready`, `propose-transition`, `clarify`, `analyze-touched`, `terminal`, `comment-list`, `comment-add`, `handoff-bundle`, `approve-tool` |
 

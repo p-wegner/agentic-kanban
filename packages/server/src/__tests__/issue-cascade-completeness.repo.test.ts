@@ -168,6 +168,16 @@ const SUBTREE_SEEDERS: Record<string, (c: SeedCtx) => Promise<void>> = {
       sessionId: c.sessionId, type: "stdout", data: "hello", createdAt: c.now,
     });
   },
+  worker_events: async (c) => {
+    // #774 — the per-worker timeline. Only `session_id` carries an FK (to `sessions`,
+    // cascading); `worker_id` is deliberately FK-less like `worker_git_tokens.worker_id`,
+    // and revocation deletes those rows explicitly. So the row is in this subtree solely
+    // through its session, which is exactly what the cascade below must prove.
+    await c.db.insert(schema.workerEvents).values({
+      id: randomUUID(), workerId: randomUUID(), type: "assigned",
+      sessionId: c.sessionId, summary: "assigned to a worker", createdAt: c.now,
+    });
+  },
   test_runs: async (c) => {
     await c.db.insert(schema.testRuns).values({
       sessionId: c.sessionId, testName: "passes sometimes", passed: true, recordedAt: c.now,
@@ -365,6 +375,9 @@ describe("deleteIssueCascade — completeness vs the schema FK graph", () => {
     expect(await db.select().from(schema.sessions).where(eq(schema.sessions.workspaceId, c.workspaceId))).toHaveLength(0);
     expect(await db.select().from(schema.sessionMessages).where(eq(schema.sessionMessages.sessionId, c.sessionId))).toHaveLength(0);
     expect(await db.select().from(schema.testRuns).where(eq(schema.testRuns.sessionId, c.sessionId))).toHaveLength(0);
+    // #774 — the worker-event row hung off the session by a cascading FK, so it must be gone
+    // too. A surviving row would name a session that no longer exists.
+    expect(await db.select().from(schema.workerEvents).where(eq(schema.workerEvents.sessionId, c.sessionId))).toHaveLength(0);
     expect(await db.select().from(schema.testRetryDecisions)).toHaveLength(0);
     expect(await db.select().from(schema.diffComments)).toHaveLength(0);
     expect(await db.select().from(schema.repos)).toHaveLength(0);

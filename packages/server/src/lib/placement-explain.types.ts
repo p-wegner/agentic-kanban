@@ -59,6 +59,47 @@ export interface WorkerEligibility {
   eligible: boolean;
   /** Why this worker is not a candidate — the first failing condition, or null. */
   ineligibleReason: string | null;
+  /**
+   * The identity fields below were added by #774 so `GET /api/workers` can be SERVED from
+   * this shape instead of the raw `workers` row. The list route used to return the DB row
+   * (no `connected`, no `load`), and the panel then computed "capacity" as the sum of
+   * `maxConcurrency` over heartbeat-online workers — which is total capacity, not free
+   * slots, and reads as free capacity even when every slot is busy. One shape, computed
+   * once, is what stops those two answers from disagreeing.
+   */
+  os: string | null;
+  arch: string | null;
+  /** Parsed, not the raw JSON text the `workers` row stores. */
+  labels: string[];
+  providers: string[];
+  status: string;
+  lastHeartbeatAt: string | null;
+  /** In-memory, from the last heartbeat (#754) — `undefined` = not heard from since boot. */
+  protocolVersion?: number;
+  workerVersion?: string;
+  /** Sessions the board currently has assigned to this worker. `load` is its length. */
+  assignedSessionIds: string[];
+  /** Free slots on THIS worker: `maxConcurrency - load`, floored at 0. */
+  freeSlots: number;
+}
+
+/**
+ * The fleet as one computed shape (#774). `GET /api/workers`, the placement explanation and
+ * the panel all read this, so "how many slots are actually free" has exactly one answer.
+ */
+export interface FleetSnapshot {
+  registered: number;
+  online: number;
+  connected: number;
+  /** Workers that pass every eligibility check for the resolved provider/labels. */
+  eligible: number;
+  /** REAL free slots across eligible workers — not the sum of `maxConcurrency`. */
+  freeSlots: number;
+  /** The provider eligibility was resolved for. */
+  provider: ProviderName;
+  /** `worker_labels_<projectId>`, when a project was named. */
+  requiredLabels: string[];
+  workers: WorkerEligibility[];
 }
 
 export interface PlacementExplanation {
@@ -82,14 +123,7 @@ export interface PlacementExplanation {
    * The resolver is the truth; treat the chain as the bug and say so loudly.
    */
   agreesWithResolver: boolean;
-  fleet: {
-    registered: number;
-    online: number;
-    connected: number;
-    eligible: number;
-    freeSlots: number;
-    workers: WorkerEligibility[];
-  };
+  fleet: FleetSnapshot;
   /** Single-sentence answer to "why was it not dispatched". */
   summary: string;
 }

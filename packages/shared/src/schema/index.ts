@@ -50,7 +50,7 @@ export { testRuns, flakyTestPins } from "./test-runs.js";
 export { boardHealthEvents, boardHealthEventsRelations } from "./board-health-events.js";
 export { baseBranchHealth, baseBranchHealthRelations } from "./base-branch-health.js";
 export { qualityMetrics } from "./quality-metrics.js";
-export { workers, workerGitTokens } from "./workers.js";
+export { workers, workerGitTokens, workerEvents } from "./workers.js";
 export { plugins, pluginViewProcesses } from "./plugins.js";
 export { pluginLoopEvents } from "./plugin-loop-events.js";
 export { milestones, milestonesRelations } from "./milestones.js";
