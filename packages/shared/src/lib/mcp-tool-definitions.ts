@@ -13,7 +13,11 @@ export type McpToolCategory =
   | "projects"
   | "settings"
   | "butler"
-  | "plugins";
+  | "plugins"
+  // #774 — the worker fleet. Deliberately its own category rather than folded into
+  // "sessions": these are about worker MACHINES, and `get_fleet_friction` (agent tool-call
+  // friction, a "sessions" tool) already collides with them by name.
+  | "fleet";
 
 export interface McpToolDefinition {
   name: string;
@@ -37,6 +41,7 @@ export const MCP_TOOL_CATEGORIES: { id: McpToolCategory; label: string }[] = [
   { id: "settings", label: "Settings" },
   { id: "butler", label: "Butler" },
   { id: "plugins", label: "Plugin Loops & Gates" },
+  { id: "fleet", label: "Worker Fleet" },
 ];
 
 export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
@@ -85,6 +90,14 @@ export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
   { name: "analyze_session", description: "Show a consolidated analysis of a session: workspace, issue, parsed summary with tool patterns, stats, and errors. Mirrors `pnpm cli -- session analyze <session-id>`.", category: "sessions" },
   { name: "get_fleet_friction", description: "Aggregate agent-session friction (failed tool calls, repeated commands, error counts) across all sessions in a recent time window. Use to find systemic, compounding improvements (skills/hooks/helper scripts). Reads persisted friction stats; run `session backfill-friction` first if coverage is low.", category: "sessions" },
   { name: "backfill_friction", description: "Populate friction stats (tool failures, repeated commands, errors) for past sessions from their stored messages, so friction analysis covers history. Idempotent — skips sessions that already have friction data unless force=true. Mirrors `pnpm cli -- session backfill-friction`.", category: "sessions" },
+  // fleet (#774) — the worker-fleet control plane, previously reachable only from a terminal
+  // on the board machine. Each tool is a thin pass-through to a REST endpoint that already
+  // exists, so eligibility, capacity and the placement chain have no second implementation.
+  { name: "list_workers", description: "List the board's registered fleet workers with LIVE state: effective status, whether the board holds a WebSocket for each one, current load, real free slots, per-worker eligibility for a provider (and why an ineligible worker is not a candidate), labels, providers, protocol version and build. Use before dispatching remote work, or when a project opted into worker dispatch and everything still runs on the board host. NOT related to get_fleet_friction (that is agent-session tool friction).", category: "fleet" },
+  { name: "explain_worker_placement", description: "Why was issue #N not dispatched to a fleet worker? Walks the SAME ordered chain resolveWorkerPlacement applies — dispatch opt-in, profile allowlist, eligible worker, branch for git transport, project repoPath, repository shape — against live state, names the check that decided, shows the values it read and the preference keys to change, and cross-checks its own answer against the real resolver (agreesWithResolver: false means the explanation has drifted and the resolver is the truth). Omit issueNumber for a project-level 'would anything dispatch right now?'.", category: "fleet" },
+  { name: "mint_worker_pairing_token", description: "Mint a single-use, expiring pairing token so another machine can register as a fleet worker. Returns the token and its expiry, plus the command to run on the worker machine. The token is the ONLY credential in the flow — the board never sends agent credentials to a worker (decision 012), so the worker authenticates its own agent with its own local login.", category: "fleet" },
+  { name: "revoke_worker", description: "Revoke a fleet worker: its bearer token stops working immediately, its live socket is closed, its per-assignment git tokens are deleted and its event timeline is dropped. Takes the worker ID from list_workers. Does NOT touch sessions that already ran on it — sessions keep their worker_id so past placements stay attributable.", category: "fleet" },
+  { name: "list_incoming_refs", description: "List the incoming-ref staging namespace: branches a fleet worker pushed to refs/kanban/incoming/* that the board has not fast-forwarded onto a real branch, each with why it is held (no worker assignment, diverged, already landed, invalid ref name) and whether it is stale. This is where a remote worker's work sits when a landing was refused — the board is fast-forward-only and never forces, so a held ref needs a deliberate land or discard.", category: "fleet" },
   { name: "session_history", description: "Inspect Claude Code session transcript files from ~/.claude/projects/ for worktrees linked to kanban issues. Shows what the agent did and why it stopped, without loading entire large files. Mirrors CLI `session-history [issue-number]`.", category: "sessions" },
   // tags
   { name: "list_tags", description: "List all available tags (labels) for categorizing issues", category: "tags" },

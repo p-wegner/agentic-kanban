@@ -48,6 +48,7 @@ import {
 import type { ProviderName } from "./agent-provider.js";
 import type {
   BranchSource,
+  FleetSnapshot,
   IssuePlacementReport,
   PlacementCheckId,
   PlacementCheckOutcome,
@@ -63,6 +64,7 @@ import type {
 // depend on the shapes without this module's db graph (worker-cli-isolation guard).
 export type {
   BranchSource,
+  FleetSnapshot,
   IssuePlacementReport,
   PlacementCheckId,
   PlacementCheckOutcome,
@@ -231,8 +233,60 @@ async function describeWorkers(
       sharesFilesystem: labels.includes(SHARES_FILESYSTEM_LABEL),
       eligible: reason === null,
       ineligibleReason: reason,
+      // #774 — the identity half. `GET /api/workers` is served from this shape now, so the
+      // route no longer hands out the raw row and the panel no longer computes a second,
+      // wrong "capacity" from it.
+      os: w.os,
+      arch: w.arch,
+      labels,
+      providers: parseJsonList(w.providers),
+      status: w.status,
+      lastHeartbeatAt: w.lastHeartbeatAt,
+      ...(w.protocolVersion === undefined ? {} : { protocolVersion: w.protocolVersion }),
+      ...(w.workerVersion === undefined ? {} : { workerVersion: w.workerVersion }),
+      assignedSessionIds: fleet.connections.assignedSessionIds(w.id),
+      freeSlots: Math.max(0, w.maxConcurrency - load),
     };
   });
+}
+
+/**
+ * The fleet as one snapshot (#774), for `GET /api/workers` and the panel.
+ *
+ * The point is that this is the SAME computation the placement explanation uses: before
+ * this, the list route returned the `workers` row untouched and `WorkerFleetPanel`
+ * derived "capacity" as the sum of `maxConcurrency` over heartbeat-online workers — a
+ * number that reads as free capacity while every slot is busy, and that counts a worker
+ * whose heartbeat is fresh but whose WebSocket the board does not hold. `freeSlots` here
+ * is the resolver's own `resolveFleetCapacity`.
+ *
+ * `projectId` is optional because the fleet exists independently of any project: without
+ * one there are no required labels, and eligibility is reported for `providerName` alone.
+ */
+export async function describeFleet(params: {
+  database?: Database;
+  projectId?: string;
+  providerName?: ProviderName;
+  now?: string;
+}): Promise<FleetSnapshot> {
+  const database = params.database ?? realDb;
+  const providerName = params.providerName ?? "claude";
+  const fleet = getWorkerFleet(database);
+  const requiredLabels = params.projectId
+    ? parseRequiredLabels(await getPreferenceValue(workerLabelsPrefKey(params.projectId), database))
+    : [];
+  const workers = await describeWorkers(fleet, providerName, requiredLabels, params.now);
+  const capacity = await resolveFleetCapacity(fleet, providerName, requiredLabels, params.now);
+  return {
+    registered: workers.length,
+    online: workers.filter((w) => w.effectiveStatus === "online").length,
+    connected: workers.filter((w) => w.connected).length,
+    eligible: capacity.eligibleWorkers,
+    freeSlots: capacity.freeSlots,
+    provider: providerName,
+    requiredLabels,
+    workers,
+  };
 }
 
 /* ------------------------------------------------------------------ *
@@ -587,6 +641,8 @@ export async function explainPlacement(params: {
       connected: ctx.workers.filter((w) => w.connected).length,
       eligible: ctx.capacity.eligibleWorkers,
       freeSlots: ctx.capacity.freeSlots,
+      provider: providerName,
+      requiredLabels: ctx.requiredLabels,
       workers: ctx.workers,
     },
     summary: summarize(decidedBy, predicted, chain),

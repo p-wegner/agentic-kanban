@@ -17,11 +17,19 @@ import {
   discardIncomingRef,
 } from "../services/worker-incoming-refs.service.js";
 import {
+  describeFleet,
   explainIssuePlacement,
   explainPlacement,
   listSessionPlacements,
 } from "../services/placement-explain.service.js";
+import {
+  WORKER_EVENT_TYPES,
+  forgetWorkerEvents,
+  listWorkerEvents,
+  recordWorkerEvent,
+} from "../services/worker-events.service.js";
 import { getPreferenceValue } from "../repositories/session-lifecycle.repository.js";
+import { listWorkerBranchAssignments } from "../repositories/worker.repository.js";
 import type { ProviderName } from "../services/agent-provider.js";
 
 function bearerFrom(c: Context): string | null {
@@ -40,6 +48,30 @@ function bearerFrom(c: Context): string | null {
  *    beyond loopback for the fleet.
  */
 /**
+ * Which worker produced an incoming ref, resolved from the persisted DISPATCH record
+ * (`sessions.workerId` + the workspace branch) rather than from the ref itself.
+ *
+ * The ref alone proves nothing about who pushed it — that is the whole point of #246, and
+ * `listIncomingRefs` reports `hasWorkerAssignment` off the same record. Neither
+ * `landIncomingRef` nor `discardIncomingRef` returns a worker id, so an event about a ref
+ * has to look the owner up; a ref whose owner cannot be resolved produces NO event rather
+ * than one attributed to a guess (an unattributable ref is exactly the #246 case, and
+ * pinning it on a worker would be the wrong answer, not a rough one).
+ *
+ * Newest dispatch wins when a branch was dispatched more than once: the ref sitting in the
+ * staging namespace now was pushed by the most recent worker to hold it.
+ */
+async function resolveRefOwner(
+  database: Database,
+  projectId: string,
+  branch: string,
+): Promise<{ workerId: string; sessionId: string } | null> {
+  const assignments = await listWorkerBranchAssignments(projectId, database);
+  const match = assignments.find((a) => a.branch === branch);
+  return match ? { workerId: match.workerId, sessionId: match.sessionId } : null;
+}
+
+/**
  * Owner-only endpoints. These stay on the LOOPBACK app forever: minting a
  * pairing token, listing the fleet and revoking a worker are administrative
  * actions with no credential of their own — they ride the board's
@@ -48,8 +80,65 @@ function bearerFrom(c: Context): string | null {
 function registerOwnerRoutes(router: Hono, reg: WorkerRegistry, database: Database): void {
   router.post("/pairing-token", (c) => c.json(reg.mintPairingToken(), 201));
 
+  // #774 - the list route used to answer the raw `workers` rows, so `connected`, `load`
+  // and free-slot count were all unavailable, and `WorkerFleetPanel` derived "capacity" as
+  // the sum of `maxConcurrency` over heartbeat-online workers: total capacity presented as
+  // free capacity. It now serves `describeFleet`, the SAME computation the placement
+  // explanation uses, so the panel and the explain endpoint cannot disagree.
+  //
+  // `workers` stays the top-level key and every previous field is still on each row, so the
+  // existing CLI (`worker list`) and panel keep working against the enriched shape.
   router.get("/", async (c) => {
-    return c.json({ workers: await reg.listWorkersView() });
+    const projectId = c.req.query("projectId") || undefined;
+    const provider = (c.req.query("provider") as ProviderName | undefined) ?? undefined;
+    const fleet = await describeFleet({ database, projectId, providerName: provider });
+    return c.json({
+      workers: fleet.workers.map((w) => ({
+        // `id` as well as `workerId`: the panel needs an id to revoke by, and every existing
+        // consumer has read `id` since epic #1. Renaming it would have been a silent break.
+        id: w.workerId,
+        ...w,
+      })),
+      fleet: {
+        registered: fleet.registered,
+        online: fleet.online,
+        connected: fleet.connected,
+        eligible: fleet.eligible,
+        freeSlots: fleet.freeSlots,
+        provider: fleet.provider,
+        requiredLabels: fleet.requiredLabels,
+      },
+    });
+  });
+
+  // #774 - the per-worker timeline. Before this the board stored nothing about what a worker
+  // did, so a #699/#706-class failure ("it vanished mid-run and the session hung") was
+  // reconstructed from server scrollback that a restart had already discarded.
+  //
+  // Owner-only, like the rest of this block: an event summary names sessions and branches.
+  router.get("/:id/events", async (c) => {
+    const limitParam = Number(c.req.query("limit"));
+    const typesParam = c.req.query("types");
+    const types = typesParam
+      ? typesParam
+          .split(",")
+          .map((t) => t.trim())
+          .filter((t) => (WORKER_EVENT_TYPES as readonly string[]).includes(t))
+      : undefined;
+    if (typesParam && (!types || types.length === 0)) {
+      throw new UnprocessableError(
+        `types must be a comma-separated subset of: ${WORKER_EVENT_TYPES.join(", ")}`,
+      );
+    }
+    return c.json({
+      workerId: c.req.param("id"),
+      events: await listWorkerEvents({
+        database,
+        workerId: c.req.param("id"),
+        limit: Number.isInteger(limitParam) && limitParam > 0 ? Math.min(limitParam, 500) : undefined,
+        types,
+      }),
+    });
   });
 
   // #752 — the incoming-ref staging namespace, made observable and reclaimable.
@@ -65,6 +154,19 @@ function registerOwnerRoutes(router: Hono, reg: WorkerRegistry, database: Databa
     if (!body.projectId || !body.branch) throw new UnprocessableError("projectId and branch are required");
     const result = await landIncomingRef(body.projectId, body.branch, database);
     if (!result.ok) throw new ConflictError(`${result.error} (outcome: ${JSON.stringify(result.outcome)})`);
+    // #774 - an incoming ref moving a real branch is exactly the kind of event that used to
+    // exist only as a console line. Attributed only when the outcome names the owning worker.
+    const landedBy = await resolveRefOwner(database, body.projectId, body.branch);
+    if (landedBy) {
+      void recordWorkerEvent({
+        database,
+        workerId: landedBy.workerId,
+        sessionId: landedBy.sessionId,
+        type: "ref_landed",
+        summary: `incoming ref for ${body.branch} was landed onto the real branch`,
+        payload: { projectId: body.projectId, branch: body.branch, outcome: result.outcome },
+      });
+    }
     return c.json({ ok: true, outcome: result.outcome });
   });
 
@@ -75,6 +177,22 @@ function registerOwnerRoutes(router: Hono, reg: WorkerRegistry, database: Databa
     // `error` is optional on the result type, so the inline body this replaced could answer a
     // bare `{}` on refusal. A refusal always says why now.
     if (!result.ok) throw new ConflictError(result.error ?? `discard refused for ${body.branch}`);
+    const discardedFrom = await resolveRefOwner(database, body.projectId, body.branch);
+    if (discardedFrom) {
+      void recordWorkerEvent({
+        database,
+        workerId: discardedFrom.workerId,
+        sessionId: discardedFrom.sessionId,
+        type: "ref_discarded",
+        summary: `incoming ref for ${body.branch} was discarded${body.force === true ? " (forced)" : ""}`,
+        payload: {
+          projectId: body.projectId,
+          branch: body.branch,
+          sha: result.sha ?? null,
+          forced: body.force === true,
+        },
+      });
+    }
     return c.json({ ok: true, sha: result.sha });
   });
 
@@ -125,9 +243,15 @@ function registerOwnerRoutes(router: Hono, reg: WorkerRegistry, database: Databa
   });
 
   router.delete("/:id", async (c) => {
-    const ok = await reg.revokeWorker(c.req.param("id"));
+    const workerId = c.req.param("id");
+    const ok = await reg.revokeWorker(workerId);
     if (!ok) return c.json({ error: "worker not found" }, 404);
-    return c.json({ ok: true });
+    // #774 - the explicit deletion that makes `worker_events.worker_id` honestly FK-less,
+    // exactly like `deleteGitTokensForWorker` inside `revokeWorker`. Awaited, not
+    // fire-and-forget: a revoke must not answer 200 while the timeline is still being
+    // dropped, or a poll arriving in between still shows a revoked worker's history.
+    const forgotten = await forgetWorkerEvents(workerId, database);
+    return c.json({ ok: true, eventsDeleted: forgotten });
   });
 }
 
@@ -137,7 +261,7 @@ function registerOwnerRoutes(router: Hono, reg: WorkerRegistry, database: Databa
  * HTTP surface safe to expose off-loopback, and the fleet listener serves
  * exactly this and nothing else.
  */
-function registerWorkerFacingRoutes(router: Hono, reg: WorkerRegistry): void {
+function registerWorkerFacingRoutes(router: Hono, reg: WorkerRegistry, database: Database): void {
   router.post("/register", async (c) => {
     const body = await parseOptionalJsonBody<{
       pairingToken?: string;
@@ -172,6 +296,21 @@ function registerWorkerFacingRoutes(router: Hono, reg: WorkerRegistry): void {
           : 422;
       return c.json({ error: result.error, boardProtocolVersion: reg.boardProtocolVersion() }, status);
     }
+    // #774 - first row of the new worker's timeline. Fire-and-forget by design: a failed
+    // diagnostic must never turn a successful registration into an error.
+    void recordWorkerEvent({
+      database,
+      workerId: result.workerId,
+      type: "registered",
+      summary: `worker ${body.name ?? "(unnamed)"} registered from ${body.os ?? "unknown OS"}/${body.arch ?? "?"}`,
+      payload: {
+        labels: body.labels ?? [],
+        providers: body.providers ?? [],
+        maxConcurrency: body.maxConcurrency ?? null,
+        protocolVersion: body.protocolVersion ?? null,
+        workerVersion: body.workerVersion ?? null,
+      },
+    });
     return c.json(result, 201);
   });
 
@@ -199,6 +338,23 @@ function registerWorkerFacingRoutes(router: Hono, reg: WorkerRegistry): void {
         : result.error?.startsWith(PROTOCOL_MISMATCH_PREFIX)
           ? 409
           : 422;
+      // #774 - a version-skew heartbeat is the one heartbeat worth a row: it repeats until
+      // someone upgrades that worker, and it is invisible in the panel otherwise. Routine
+      // heartbeats are deliberately NOT recorded - one row every 30 s per worker is noise
+      // the per-worker retention cap would then spend its whole budget on.
+      if (status === 409) {
+        void recordWorkerEvent({
+          database,
+          workerId: c.req.param("id"),
+          type: "protocol_mismatch",
+          summary: result.error ?? "protocol version mismatch on heartbeat",
+          payload: {
+            workerProtocolVersion: body.protocolVersion ?? null,
+            boardProtocolVersion: reg.boardProtocolVersion(),
+            workerVersion: body.workerVersion ?? null,
+          },
+        });
+      }
       return c.json({ error: result.error, boardProtocolVersion: reg.boardProtocolVersion() }, status);
     }
     return c.json({ ok: true });
@@ -210,7 +366,7 @@ export function createWorkersRoute(database: Database, registry?: WorkerRegistry
   const router = createRouter();
   const reg = registry ?? getWorkerRegistry(database);
   registerOwnerRoutes(router, reg, database);
-  registerWorkerFacingRoutes(router, reg);
+  registerWorkerFacingRoutes(router, reg, database);
   return router;
 }
 
@@ -224,6 +380,6 @@ export function createWorkersRoute(database: Database, registry?: WorkerRegistry
  */
 export function createFleetWorkersRoute(database: Database, registry?: WorkerRegistry) {
   const router = createRouter();
-  registerWorkerFacingRoutes(router, registry ?? getWorkerRegistry(database));
+  registerWorkerFacingRoutes(router, registry ?? getWorkerRegistry(database), database);
   return router;
 }

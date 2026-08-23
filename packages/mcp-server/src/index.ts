@@ -30,6 +30,15 @@ import { registerGetSessionTranscript } from "./tools/get-session-transcript.js"
 import { registerSearchSessions } from "./tools/search-sessions.js";
 import { registerGetSessionStats } from "./tools/get-session-stats.js";
 import { registerGetFleetFriction } from "./tools/get-fleet-friction.js";
+// #774 — the worker fleet. `get_fleet_friction` above is UNRELATED (agent-session tool
+// friction); the `worker`/`incoming_refs` names here are what keeps the two apart.
+import {
+  registerExplainWorkerPlacement,
+  registerListIncomingRefs,
+  registerListWorkers,
+  registerMintWorkerPairingToken,
+  registerRevokeWorker,
+} from "./tools/worker-fleet.js";
 import { registerGetDiffComments } from "./tools/get-diff-comments.js";
 import { registerCreateDiffComment } from "./tools/create-diff-comment.js";
 import { registerAddDependency } from "./tools/add-dependency.js";
@@ -135,6 +144,11 @@ const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   search_sessions: registerSearchSessions,
   get_session_stats: registerGetSessionStats,
   get_fleet_friction: registerGetFleetFriction,
+  list_workers: registerListWorkers,
+  explain_worker_placement: registerExplainWorkerPlacement,
+  mint_worker_pairing_token: registerMintWorkerPairingToken,
+  revoke_worker: registerRevokeWorker,
+  list_incoming_refs: registerListIncomingRefs,
   get_diff_comments: registerGetDiffComments,
   create_diff_comment: registerCreateDiffComment,
   add_dependency: registerAddDependency,

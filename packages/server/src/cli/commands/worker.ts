@@ -14,6 +14,9 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 // binary's entry point, which must never pull in the database graph.
 import { renderPlacementExplanation } from "../../lib/placement-explanation-format.js";
 import type { IssuePlacementReport, SessionPlacementRecord } from "../../lib/placement-explain.types.js";
+// #774 — the connectivity self-test. Db-free on purpose: this module is also the standalone
+// worker binary's entry point (docs/worker-fleet.md §3).
+import { renderDoctorReport, runBoardDoctor, runWorkerDoctor } from "./worker-doctor.js";
 
 const DEFAULT_BOARD_URL = "http://127.0.0.1:3001";
 
@@ -309,7 +312,7 @@ export function renderWorkerConnectMarkdown(
 export function registerWorkerCommand(program: Command) {
   const workerCmd = program
     .command("worker")
-    .description("Fleet worker: connect this machine to a board and execute assigned agent sessions.\n\nSubcommands: pair, start, instructions, list");
+    .description("Fleet worker: connect this machine to a board and execute assigned agent sessions.\n\nSubcommands: pair, start, instructions, list, explain, placements, doctor, doctor-board");
   registerWorkerSubcommands(workerCmd);
 }
 
@@ -578,6 +581,98 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         const where = p.placement === "remote" ? `worker ${p.workerName ?? `${p.workerId} (revoked)`}` : "host";
         const issue = p.issueNumber === null ? "" : ` #${p.issueNumber}`;
         console.log(`  ${p.startedAt}${issue} ${p.executor} [${p.status}] on ${where}`);
+      }
+    });
+  // #774 (remaining #755 item 4) — TWO commands, not one, and the split is forced rather
+  // than stylistic: docs/worker-fleet.md §1 says a worker machine "genuinely cannot ask the
+  // board how it looks from there", because every owner route is mounted only on the
+  // loopback board app. A single `doctor` claiming to check both ends would have to lie
+  // about one of them.
+  workerCmd
+    .command("doctor")
+    .description(
+      "Run ON THE WORKER MACHINE: self-test the whole chain to the board — fleet port reachable, " +
+        "the saved pairing still authenticates, the WebSocket upgrade survives whatever is in " +
+        "between, the git transport port answers, git on PATH, and each provider CLI installed AND " +
+        "logged in HERE (the board never sends credentials). Exits non-zero if any check fails.",
+    )
+    .option("--board <url>", "Board base URL — the FLEET port on a cross-machine setup", DEFAULT_BOARD_URL)
+    .option("--providers <csv>", "Provider CLIs to check on this machine", "claude")
+    .option("--git-port <n>", "KANBAN_GIT_HTTP_PORT, to check the git transport too", (v) => parseInt(v, 10))
+    .option("--state-file <path>", `Pairing state file (default: ${defaultWorkerStateFile()})`)
+    .option("--json", "Output the report as JSON")
+    .action(async (options: {
+      board: string;
+      providers: string;
+      gitPort?: number;
+      stateFile?: string;
+      json?: boolean;
+    }) => {
+      const report = await runWorkerDoctor({
+        boardUrl: options.board,
+        stateFile: options.stateFile ?? defaultWorkerStateFile(),
+        providers: splitList(options.providers) ?? ["claude"],
+        ...(options.gitPort === undefined || Number.isNaN(options.gitPort) ? {} : { gitPort: options.gitPort }),
+      });
+      console.log(options.json ? JSON.stringify(report, null, 2) : renderDoctorReport(report));
+      // Non-zero on failure so this is usable from the Windows scheduled task and from a
+      // pairing script, not just by eye.
+      if (!report.ok) process.exit(1);
+    });
+
+  workerCmd
+    .command("doctor-board")
+    .description(
+      "Run ON THE BOARD MACHINE: the other half of `worker doctor`. Reports what the board SEES of " +
+        "each worker — online, socket held, eligible for the resolved provider/labels, free slots — " +
+        "and names the state that is hardest to spot from either side alone: a worker whose heartbeat " +
+        "is fresh but whose WebSocket the board does not hold.",
+    )
+    .option("--board <url>", "Board API base URL (loopback only)", DEFAULT_BOARD_URL)
+    .option("--project <projectId>", "Resolve required labels from this project's worker_labels_<id>")
+    .option("--provider <name>", "Provider to judge eligibility for (default: claude)")
+    .option("--json", "Output the report as JSON")
+    .action(async (options: { board: string; project?: string; provider?: string; json?: boolean }) => {
+      const report = await runBoardDoctor({
+        boardUrl: options.board,
+        ...(options.project ? { projectId: options.project } : {}),
+        ...(options.provider ? { provider: options.provider } : {}),
+      });
+      console.log(options.json ? JSON.stringify(report, null, 2) : renderDoctorReport(report));
+      if (!report.ok) process.exit(1);
+    });
+
+  workerCmd
+    .command("events <workerId>")
+    .description(
+      "The board's recorded timeline for one worker (#774): registration, protocol mismatches and " +
+        "incoming-ref decisions, newest first. Board machine only. Before this existed a fleet " +
+        "failure had to be reconstructed from the server console, which a restart discards.",
+    )
+    .option("--board <url>", "Board base URL", DEFAULT_BOARD_URL)
+    .option("--limit <n>", "How many events to list", "50")
+    .option("--json", "Output raw JSON")
+    .action(async (workerId: string, options: { board: string; limit: string; json?: boolean }) => {
+      const url = `${options.board.replace(/\/+$/, "")}/api/workers/${workerId}/events?limit=${encodeURIComponent(options.limit)}`;
+      const res = await fetch(url);
+      if (!res.ok) {
+        console.error(`Failed to list events (${res.status}). Is the board running at ${options.board}?`);
+        process.exit(1);
+      }
+      const body = (await res.json()) as {
+        events: Array<{ createdAt: string; type: string; summary: string; sessionId: string | null }>;
+      };
+      if (options.json) {
+        console.log(JSON.stringify(body, null, 2));
+        return;
+      }
+      if (body.events.length === 0) {
+        console.log("No events recorded for this worker.");
+        return;
+      }
+      for (const e of body.events) {
+        const session = e.sessionId ? ` session=${e.sessionId}` : "";
+        console.log(`  ${e.createdAt} [${e.type}] ${e.summary}${session}`);
       }
     });
 }
