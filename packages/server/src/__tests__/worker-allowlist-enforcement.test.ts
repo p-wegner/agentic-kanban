@@ -19,6 +19,7 @@ import { preferences, projects as projectsTable } from "@agentic-kanban/shared/s
 import { allowedProfilesPrefKey, remoteDispatchBlockedByAllowlist } from "@agentic-kanban/shared/lib/profile-allowlist";
 import { createTestDb } from "./helpers/test-db.js";
 import type { Database } from "../db/index.js";
+import type { PlacementReasonId } from "../lib/placement-explain.types.js";
 import type { WSContext } from "hono/ws";
 import {
   getWorkerFleet,
@@ -112,7 +113,14 @@ describe("placement honours the allowlist (#651)", () => {
       branch: "feature/ak-1",
     });
 
-    expect(placement).toEqual({ kind: "host" });
+    // The reason id is the contract (#801): it is what gets persisted on the session row
+    // and narrowed back to the vocabulary later, so pin it exactly. The detail is prose in
+    // the resolver's own wording and may be reworded — assert only the stable fragment.
+    expect(placement).toEqual({
+      kind: "host",
+      reason: { id: "profile_allowlist" satisfies PlacementReasonId, detail: expect.any(String) },
+    });
+    expect(placement.reason?.detail).toContain("restricted");
   });
 
   it("still dispatches remotely when the project is unrestricted", async () => {

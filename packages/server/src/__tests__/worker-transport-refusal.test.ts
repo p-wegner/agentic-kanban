@@ -28,6 +28,7 @@ import { preferences, projects as projectsTable, repos } from "@agentic-kanban/s
 import type { WSContext } from "hono/ws";
 import { gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { createTestDb } from "./helpers/test-db.js";
+import type { PlacementReasonId } from "../lib/placement-explain.types.js";
 import type { Database } from "../db/index.js";
 import {
   getWorkerFleet,
@@ -215,7 +216,12 @@ describe("resolveWorkerPlacement refuses an unservable repo shape (#748)", () =>
     await connectWorker();
     // Before this, the placement was remote and the worker built against a checkout
     // that did not contain `web` at all.
-    expect(await place()).toEqual({ kind: "host" });
+    const placement = await place();
+    expect(placement).toEqual({
+      kind: "host",
+      reason: { id: "repo_transport_shape" satisfies PlacementReasonId, detail: expect.any(String) },
+    });
+    expect(placement.reason?.detail).toContain("multi-repo");
   });
 
   it("HOLDS a multi-repo project that forbids the host fallback, naming the shape", async () => {
@@ -255,7 +261,14 @@ describe("resolveWorkerPlacement refuses an unservable repo shape (#748)", () =>
     const workerId = await connectWorker(true);
     const placement = await place();
     // It reads the board's own worktrees, so every shape above is fine there.
-    expect(placement).toEqual({ kind: "remote", workerId, strict: false, reservationId: expect.any(String) });
+    expect(placement).toEqual({
+      kind: "remote",
+      workerId,
+      strict: false,
+      reservationId: expect.any(String),
+      reason: { id: "eligible_worker" satisfies PlacementReasonId, detail: expect.any(String) },
+    });
+    expect(placement.reason?.detail).toContain("shares this filesystem");
   });
 
   it("tells the monitor the real reason instead of letting it start and fall back", async () => {
