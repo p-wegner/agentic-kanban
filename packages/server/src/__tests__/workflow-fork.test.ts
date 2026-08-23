@@ -32,6 +32,11 @@ async function seedProject(db: TestDb) {
 
 describe("workflow fork/join orchestration", () => {
   let db: TestDb;
+  // A real, writable temp root (#828). The fixture used to hand the service paths under
+  // `/fake` — which on Windows resolves to a top-level dir on the current drive and is created
+  // happily, but on POSIX means the filesystem ROOT and fails with EACCES for a non-root
+  // user, so every child launch threw and no worktree/session was ever created.
+  let fakeRoot: string;
   let startSession: ReturnType<typeof vi.fn>;
   let stopSession: ReturnType<typeof vi.fn>;
   let gitMock: any;
@@ -39,12 +44,13 @@ describe("workflow fork/join orchestration", () => {
 
   beforeEach(async () => {
     ({ db } = createTestDb());
+    fakeRoot = await mkdtemp(join(tmpdir(), "ak-fork-"));
     await ensureBuiltinSkills(db as any);
     await ensureBuiltinWorkflows(db as any);
     startSession = vi.fn(async () => "sess-" + randomUUID());
     stopSession = vi.fn(async () => {});
     gitMock = {
-      createWorktree: vi.fn(async (_repo: string, branch: string) => `/fake/${branch}`),
+      createWorktree: vi.fn(async (_repo: string, branch: string) => join(fakeRoot, branch)),
       getDiff: vi.fn(async () => "diff --git a/x b/x\n+hello"),
       getDiffFromRepo: vi.fn(async () => ""),
       removeWorktree: vi.fn(async () => {}),
@@ -67,7 +73,7 @@ describe("workflow fork/join orchestration", () => {
     });
     const parentId = randomUUID();
     await db.insert(schema.workspaces).values({
-      id: parentId, issueId, branch: "feature/demo", workingDir: "/fake/feature/demo", baseBranch: "main",
+      id: parentId, issueId, branch: "feature/demo", workingDir: join(fakeRoot, "feature/demo"), baseBranch: "main",
       status: "active", createdAt: now, updatedAt: now,
     });
     await initWorkspaceWorkflow(db as any, { workspaceId: parentId, issueId });
@@ -177,7 +183,7 @@ describe("workflow fork/join orchestration", () => {
     });
     const parentId = randomUUID();
     await db.insert(schema.workspaces).values({
-      id: parentId, issueId, branch: "feature/mh", workingDir: "/fake/feature/mh", baseBranch: "main",
+      id: parentId, issueId, branch: "feature/mh", workingDir: join(fakeRoot, "feature/mh"), baseBranch: "main",
       status: "active", createdAt: now, updatedAt: now,
     });
     await initWorkspaceWorkflow(db as any, { workspaceId: parentId, issueId });
@@ -230,7 +236,7 @@ describe("workflow fork/join orchestration", () => {
     });
     const parentId = randomUUID();
     await db.insert(schema.workspaces).values({
-      id: parentId, issueId, branch: "feature/pr", workingDir: "/fake/feature/pr", baseBranch: "main",
+      id: parentId, issueId, branch: "feature/pr", workingDir: join(fakeRoot, "feature/pr"), baseBranch: "main",
       status: "active", createdAt: now, updatedAt: now,
     });
     await initWorkspaceWorkflow(db as any, { workspaceId: parentId, issueId });
