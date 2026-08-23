@@ -298,6 +298,13 @@ function leadingComment(call: CallExpression): string | undefined {
   if (!ranges.length) return undefined;
   const text = ranges[ranges.length - 1].getText();
   const cleaned = text
+    // Normalise line endings FIRST. This repo is deliberately mixed CRLF/LF
+    // (.gitattributes pins only the shebang trees), so without this the same
+    // route source yields different YAML on a CRLF checkout than on an LF one:
+    // a multi-line summary comes out as a quoted scalar carrying literal CRs
+    // instead of a block scalar. That made the generated artifact
+    // checkout-dependent, which a drift gate cannot tolerate.
+    .replace(/\r\n?/g, "\n")
     .replace(/^\/\/+/, "")
     .replace(/^\/\*+|\*+\/$/g, "")
     .trim();
@@ -400,8 +407,34 @@ function readVersion(): string {
 // Main
 // ---------------------------------------------------------------------------
 
-function main() {
-  loadIndexMounts();
+/**
+ * A short, human-readable account of where two YAML renderings diverge — enough for a
+ * CI log to say WHAT drifted without dumping a 3000-line diff.
+ */
+function firstDifference(committed: string, generated: string): string {
+  const a = committed.split("\n");
+  const b = generated.split("\n");
+  const lines: string[] = [];
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if (a[i] === b[i]) continue;
+    lines.push(`  first difference at line ${i + 1}:`);
+    lines.push(`    committed: ${a[i] === undefined ? "<end of file>" : JSON.stringify(a[i])}`);
+    lines.push(`    generated: ${b[i] === undefined ? "<end of file>" : JSON.stringify(b[i])}`);
+    break;
+  }
+  const paths = (src: string) =>
+    new Set(src.split("\n").filter((l) => /^  \/\S/.test(l)).map((l) => l.trim().replace(/:$/, "")));
+  const before = paths(committed);
+  const after = paths(generated);
+  const added = [...after].filter((p) => !before.has(p));
+  const removed = [...before].filter((p) => !after.has(p));
+  if (added.length) lines.push(`  ${added.length} path(s) missing from the committed spec, e.g. ${added.slice(0, 3).join(", ")}`);
+  if (removed.length) lines.push(`  ${removed.length} path(s) in the committed spec no longer exist, e.g. ${removed.slice(0, 3).join(", ")}`);
+  lines.push(`  (${a.length} committed lines vs ${b.length} generated)`);
+  return lines.join("\n");
+}
+
+function main() {  loadIndexMounts();
 
   const routeFiles = fs
     .readdirSync(routesDir)
@@ -440,13 +473,48 @@ function main() {
     }
   }
 
-  allRoutes.sort((a, b) => a.path.localeCompare(b.path) || a.method.localeCompare(b.method));
+  // Codepoint order, NOT localeCompare: collation depends on the runtime's ICU
+  // locale, so a de-DE dev box and an en-US CI runner can order the same routes
+  // differently and the drift gate would fail for nobody's mistake.
+  const byCodepoint = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+  allRoutes.sort((a, b) => byCodepoint(a.path, b.path) || byCodepoint(a.method, b.method));
 
   const doc = buildOpenApi(allRoutes);
-  const yaml = YAML.stringify(doc, { lineWidth: 0 });
-  fs.writeFileSync(outputPath, yaml, "utf8");
+  // Always LF. The committed blob is LF and git normalises the working tree back
+  // to LF when diffing, so the drift gate compares like with like on either kind
+  // of checkout.
+  const yaml = YAML.stringify(doc, { lineWidth: 0 }).replace(/\r\n/g, "\n");
 
   const pathCount = new Set(allRoutes.map((r) => r.path)).size;
+
+  // --check: the DRIFT GATE (#780). Regenerate in memory and compare against the
+  // committed artifact instead of writing it. Before this existed, openapi.yaml had
+  // not been regenerated since the commit that created it (2026-06-24) while 33
+  // commits changed 33 distinct DTO files — a generated artifact nobody regenerates
+  // and nobody diffs reads like a contract and is a two-month-old snapshot.
+  if (process.argv.includes("--check")) {
+    const committed = fs.existsSync(outputPath)
+      ? fs.readFileSync(outputPath, "utf8").replace(/\r\n/g, "\n")
+      : null;
+    if (committed === yaml) {
+      console.log(`✓ ${path.relative(serverRoot, outputPath)} is up to date (${allRoutes.length} operations across ${pathCount} paths)`);
+      return;
+    }
+    console.error(`✗ ${path.relative(serverRoot, outputPath)} is OUT OF DATE with the route sources.`);
+    if (committed === null) {
+      console.error("  The file does not exist at all.");
+    } else {
+      console.error(firstDifference(committed, yaml));
+    }
+    console.error("");
+    console.error("  Fix: run `pnpm openapi:generate` and commit packages/server/openapi.yaml.");
+    console.error("  (If the only difference is `info.version`, a release bump left the spec");
+    console.error("   behind — the same command fixes it.)");
+    process.exitCode = 1;
+    return;
+  }
+
+  fs.writeFileSync(outputPath, yaml, "utf8");
   console.log(`✓ Wrote ${path.relative(serverRoot, outputPath)}`);
   console.log(`  ${allRoutes.length} operations across ${pathCount} paths`);
   if (unresolved.length) {
