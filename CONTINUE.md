@@ -839,3 +839,62 @@ file between the write and the `git commit -F`, so the firstRow commit is titled
 `refactor(#802): split the rebase family out of workspace-merge.service`. #802's real code is
 `518a1f3cde`. A commit had already been built on top, so it was not rewritten; the correct
 message is the empty commit `175d183ad1`. Lesson: use a per-commit unique message filename.
+
+## #796 — the client's "no domain layer" was its package NAME (2026-08-23)
+
+Follow-up to #742, which was itself already a partial refutation. The remaining premise —
+"client centre of gravity 0.000 over 12,730 decision points" — is now **explained and
+fixed at the measurement, not at the code**.
+
+**The cause.** code-metrics infers each file's architectural role from path convention
+(`_ROLE_RULES`, `runners/layerfit_runner.py`), ordered `view → frontend → controller →
+service → domain → model`. The `frontend` rule matches `(?:^|/)client/`, so it fires on
+`packages/client/…` before any inner-layer rule is tried. `infer_role()` returns `frontend`
+for **every** client file — including a hypothetical `packages/client/src/domain/foo.ts`.
+All 633 scored axis position 0.0. The 0.000 was produced by the package's name, and no
+refactor could have moved it, including the `client/src/domain/` directory #742 proposed.
+
+**The fix — `[roles]` in `.codemetricsrc`,** mapping `packages/client/src/lib/**` to
+`domain`. Verified in the runner's source before building on it, not assumed:
+`config.py:346-350` parses the table into `Config.role_patterns`, `pipeline.py:575` passes
+it to `run_layerfit`, and `layerfit_runner.py:259-271` fnmatches config patterns **before**
+the built-in conventions. Config wins.
+
+**Measured** by re-running the analyzer's own `run_layerfit`/`summarize_layerfit` over the
+identical 2,778-file set at `05b9e685e8`, with and without the block — the only input the
+change touches:
+
+| | before | after |
+|---|---|---|
+| client centre of gravity | **0.0000** | **0.2041** |
+| overall centre of gravity | 0.3481 | 0.4342 |
+| `logic_in_adapter_ratio` | 0.4628 | 0.3766 |
+| client `by_role` | `frontend 12,892` | `frontend 10,261` + `domain 2,631` |
+| layer leaks | 1 | 1 (unchanged) |
+
+The unchanged leak count is the check that matters — re-labelling `lib/` did not
+manufacture violations. Full write-up: `docs/analysis/layer-fit-role-override-796.md`.
+
+**Unverified:** a confirming full `code-metrics analyze . --changeset-strategy pr` was
+started at the same commit; its `lizard` stage failed on this box (`no output (exit 1)`)
+under memory pressure — the analyzer says so loudly and zeroes every complexity-derived
+metric. Layer fit is unaffected (`decision_points` are counted by the layer-fit runner
+itself), but nobody has yet seen these numbers come out of an end-to-end run. Re-run on a
+box with headroom to close that.
+
+**One Option-A extraction landed** alongside: `arePropsEqualIgnoring` out of
+`IssueCard.tsx` (#5 highest-churn component) into `lib/propsEqualIgnoring.ts` with 10 pure
+tests. Its written safety argument — a stale handler is retained soundly *because* handlers
+are ignored and every other prop is compared by identity over the union of both key sets —
+was previously unverified by anything.
+
+**Deliberately NOT done, and this is the standing decision:** no campaign against the
+components/lib imbalance. It is real (69% of the client's branching in `components/` at a
+1:5.8 test-file ratio, vs 1:1.5 in `lib/`) but #762 ranks the client the *second best*
+module on rework, so it is not producing defects at a rate that justifies one. The shape is
+opportunistic — one extraction at a time, when a high-churn component is being edited
+anyway.
+
+**No new guard test.** A tree-scanning line-based guard would have to register in
+`line-based-guard-ratchet.test.ts`, which #794 just shrank 15 → 8 and which was outside
+this ticket's file scope. The `.codemetricsrc` comment carries the rationale instead.
