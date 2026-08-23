@@ -38,7 +38,17 @@ import YAML from "yaml";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const serverRoot = path.resolve(__dirname, "..");
 const routesDir = path.join(serverRoot, "src", "routes");
-const outputPath = path.join(serverRoot, "openapi.yaml");
+/**
+ * The spec to write (or, with `--check`, to compare against). Defaults to the committed
+ * artifact; `--spec <path>` points it elsewhere so the drift gate's NEGATIVE control can
+ * perturb a throwaway copy in `os.tmpdir()` instead of the real file. #814/#680: a test
+ * that mutates a tracked file to prove a gate bites leaks that mutation whenever its
+ * restore does not run, which dirties the shared checkout and blocks every auto-merge.
+ */
+const specFlagIndex = process.argv.indexOf("--spec");
+const outputPath = specFlagIndex !== -1 && process.argv[specFlagIndex + 1]
+  ? path.resolve(process.argv[specFlagIndex + 1]!)
+  : path.join(serverRoot, "openapi.yaml");
 
 const HTTP_METHODS = ["get", "post", "put", "patch", "delete"] as const;
 type HttpMethod = (typeof HTTP_METHODS)[number];
