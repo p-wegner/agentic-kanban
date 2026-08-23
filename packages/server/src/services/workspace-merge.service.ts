@@ -60,6 +60,8 @@ import { resolveMergeGate, RUN_GATE, type MergeGateToken } from "./pre-merge-gat
 import { recordGateFailureNote as recordGateFailureNoteImpl, runPreLockGate } from "./workspace-merge-gate.js";
 import { getBaseBranchHealthAtMergeBase, describeRedBaseAttribution, verifyBaseBranchHealth } from "./base-branch-health.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { inspectRepoLock } from "@agentic-kanban/shared/lib/repo-lock";
+import { describeCrossProcessMergeHolder } from "./workspace-merge-lock-precheck.js";
 
 export function createWorkspaceMergeService(deps: {
   database: Database;
@@ -209,6 +211,31 @@ export function createWorkspaceMergeService(deps: {
           diagnostic,
         );
       }
+    }
+
+    // #764: the check above sees only THIS process's merges. The on-disk repo lock (#993)
+    // is the cross-process source of truth — a Conductor-loop agent's own git, a merge in a
+    // second server process surviving a hot-reload, or a human running git by hand holds it
+    // with no `activeMerges` entry. Without this the refuse/reuse ordering below is defeated
+    // for exactly those holders: we would burn the full verify gate and only then block
+    // inside `acquireOnDiskRepoLock`, which is the cost the ordering exists to avoid.
+    // `done-unmerged-invariant-sweep` already consults it for the same reason; this is the
+    // operator-facing path getting the same treatment.
+    const crossProcessHolder = describeCrossProcessMergeHolder(inspectRepoLock(repoPath), id);
+    if (crossProcessHolder) {
+      throw new WorkspaceError(
+        `A merge or other git operation is already in progress for this repository ` +
+          `(held by ${crossProcessHolder.holder} pid=${crossProcessHolder.pid} on ${crossProcessHolder.hostname}, ` +
+          `age ${Math.round(crossProcessHolder.ageMs / 1000)}s). Please wait for it to complete.`,
+        "CONFLICT",
+        {
+          mergeReason: "repo_lock_held_cross_process",
+          holder: crossProcessHolder.holder,
+          holderPid: crossProcessHolder.pid,
+          holderHostname: crossProcessHolder.hostname,
+          ageMs: crossProcessHolder.ageMs,
+        },
+      );
     }
 
     // THROUGHPUT: run the verify gate BEFORE taking the repo lock, not inside it.

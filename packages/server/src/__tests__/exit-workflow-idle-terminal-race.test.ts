@@ -310,3 +310,152 @@ describe("setWorkspaceStatus: terminal invariant enforced at WRITE time (issue #
     expect(ok).toBe(false);
   });
 });
+
+/**
+ * #764 — the SAME race one variant deeper, and the reason this file needed a second
+ * describe block rather than a second assertion.
+ *
+ * #966 (above) made the terminal invariant atomic, but it lives in `setWorkspaceStatus`'s
+ * UPDATE ... WHERE as `NOT (status='closed' AND mergedAt IS NOT NULL)` — it has no
+ * knowledge of `forkStatus`. #1003 later found that a fork child is closed by its JOIN with
+ * `forkStatus="joined"` and `mergedAt` left NULL, and fixed only the SNAPSHOT guard at the
+ * top of `runWorkflowOnExit`.
+ *
+ * The two fixes never met. A child joined AFTER the snapshot read but BEFORE the idle write
+ * passes the snapshot guard (not closed yet) and then passes #966's atomic guard (mergedAt
+ * is null) — so it is flapped to `status="idle"` with `closedAt` still stamped from the
+ * join, which is exactly the symptom #1003 reports. `terminalGuardCasStatus` closes it by
+ * CAS-ing the idle write on the observed status for fork children.
+ *
+ * PROOF THIS TEST IS NOT VACUOUS: with `onlyIfCurrentStatus` removed from the idle write in
+ * exit-workflow.ts, the first case below fails with `status="idle"` (expected "closed") —
+ * i.e. it reproduces #1003 in its concurrent form. Verified by hand-editing that argument
+ * out and re-running.
+ */
+describe("exit-workflow: concurrent fork JOIN vs idle write (issue #764, #1003 concurrent form)", () => {
+  let db: TestDb;
+
+  beforeEach(() => {
+    ({ db } = createTestDb());
+  });
+
+  /** Turn the seeded workspace into a live fork child of `parentId`. */
+  async function makeForkChild(workspaceId: string) {
+    const parentId = randomUUID();
+    await db.update(workspaces)
+      .set({ parentWorkspaceId: parentId, forkStatus: "running" })
+      .where(eq(workspaces.id, workspaceId));
+    return parentId;
+  }
+
+  it("does NOT reopen a fork child whose JOIN closed it after the snapshot", async () => {
+    const { workspaceId, sessionId } = await seedActiveWorkspace(db);
+    await makeForkChild(workspaceId);
+    const closedAt = new Date().toISOString();
+
+    // The join lands in the same window #966's test uses: after the workspace snapshot,
+    // before the idle write. Note mergedAt stays NULL — a fork child is never individually
+    // merged, which is precisely why #966's atomic guard cannot see this transition.
+    const racingDb = hookSelect(
+      db,
+      (fields) => !!fields && "stats" in fields && "triggerType" in fields,
+      async () => {
+        await db.update(workspaces)
+          .set({ status: "closed", forkStatus: "joined", closedAt })
+          .where(eq(workspaces.id, workspaceId));
+      },
+    );
+
+    const boardEvents = makeBoardEvents();
+    const { runWorkflowOnExit } = createWorkflowEngine({
+      sessionManager: makeSessionManager() as never,
+      boardEvents: boardEvents as never,
+      autoMerge: vi.fn(async () => {}),
+      database: racingDb as never,
+    });
+
+    await runWorkflowOnExit(workspaceId, sessionId, 0);
+
+    const [ws] = await db.select({
+      status: workspaces.status, forkStatus: workspaces.forkStatus,
+      mergedAt: workspaces.mergedAt, closedAt: workspaces.closedAt,
+    }).from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.status).toBe("closed");
+    expect(ws.forkStatus).toBe("joined");
+    expect(ws.closedAt).toBe(closedAt);
+    // The #1003 symptom was status="idle" WITH closedAt stamped — a functionally-done
+    // workspace stuck showing idle/active. Assert the incoherent pair cannot occur.
+    expect(ws.mergedAt).toBeNull();
+
+    const broadcastEvents = boardEvents.broadcast.mock.calls.map((c) => c[1]);
+    expect(broadcastEvents).not.toContain("workspace_idle");
+    expect(broadcastEvents).toContain("session_completed");
+  });
+
+  it("still skips on the SNAPSHOT path when the join already landed (#1003, unchanged)", async () => {
+    const { workspaceId, sessionId } = await seedActiveWorkspace(db);
+    await makeForkChild(workspaceId);
+    const closedAt = new Date().toISOString();
+    await db.update(workspaces)
+      .set({ status: "closed", forkStatus: "cancelled", closedAt })
+      .where(eq(workspaces.id, workspaceId));
+
+    const boardEvents = makeBoardEvents();
+    const { runWorkflowOnExit } = createWorkflowEngine({
+      sessionManager: makeSessionManager() as never,
+      boardEvents: boardEvents as never,
+      autoMerge: vi.fn(async () => {}),
+      database: db as never,
+    });
+
+    await runWorkflowOnExit(workspaceId, sessionId, 0);
+
+    const [ws] = await db.select({ status: workspaces.status, forkStatus: workspaces.forkStatus })
+      .from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.status).toBe("closed");
+    expect(ws.forkStatus).toBe("cancelled");
+  });
+
+  it("control: a fork child with NO concurrent join still goes idle normally", async () => {
+    const { workspaceId, sessionId } = await seedActiveWorkspace(db);
+    await makeForkChild(workspaceId);
+
+    const boardEvents = makeBoardEvents();
+    const { runWorkflowOnExit } = createWorkflowEngine({
+      sessionManager: makeSessionManager() as never,
+      boardEvents: boardEvents as never,
+      autoMerge: vi.fn(async () => {}),
+      database: db as never,
+    });
+
+    await runWorkflowOnExit(workspaceId, sessionId, 0);
+
+    // The CAS is on the OBSERVED status, so an undisturbed fork child must still go idle —
+    // otherwise the guard would strand every fork child's exit workflow.
+    const [ws] = await db.select({ status: workspaces.status })
+      .from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.status).toBe("idle");
+    const broadcastEvents = boardEvents.broadcast.mock.calls.map((c) => c[1]);
+    expect(broadcastEvents).toContain("workspace_idle");
+  });
+
+  it("a NON-fork workspace keeps its unconditional idle write (no new CAS)", async () => {
+    const { workspaceId, sessionId } = await seedActiveWorkspace(db);
+    // No parentWorkspaceId: terminalGuardCasStatus returns undefined, so behaviour is
+    // byte-for-byte the pre-#764 path. Guards against the CAS being widened to every
+    // workspace, which would turn any benign concurrent status write into a skipped exit.
+    const boardEvents = makeBoardEvents();
+    const { runWorkflowOnExit } = createWorkflowEngine({
+      sessionManager: makeSessionManager() as never,
+      boardEvents: boardEvents as never,
+      autoMerge: vi.fn(async () => {}),
+      database: db as never,
+    });
+
+    await runWorkflowOnExit(workspaceId, sessionId, 0);
+
+    const [ws] = await db.select({ status: workspaces.status })
+      .from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.status).toBe("idle");
+  });
+});

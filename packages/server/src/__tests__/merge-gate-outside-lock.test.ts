@@ -23,6 +23,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { issues, projectStatuses, projects, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
+import { tryAcquireRepoLock } from "@agentic-kanban/shared/lib/repo-lock";
 
 /**
  * The repo lock is a real file at `<repoPath>/.git/agentic-kanban-merge.lock`, and
@@ -239,6 +240,64 @@ describe("verify gate runs outside the repo merge lock", () => {
     // merges right away rather than hitting "a merge is already in progress".
     gateBehaviour = async () => ({ passed: true, ran: true, stage: "verify", message: "ok" });
     await expect(svc.mergeWorkspace(workspaceIds[1])).resolves.toBeDefined();
+  });
+
+  /**
+   * #764 — the OTHER side of "the gate runs outside the lock".
+   *
+   * Moving the gate out of the lock is only free while the refuse/reuse pre-check above it can
+   * actually SEE that the repo is busy. That pre-check read only the in-process `activeMerges`
+   * map, so a CROSS-PROCESS holder — a Conductor-loop agent's git, a second server process
+   * surviving a hot-reload, a human running git by hand — was invisible: the merge paid the
+   * full 20-40 minute gate and only then blocked inside `acquireOnDiskRepoLock` for up to 90
+   * minutes. #993 taught `done-unmerged-invariant-sweep` to consult the on-disk lock for
+   * exactly this reason; this is the operator-facing path getting the same check.
+   *
+   * The decisive assertion is `gateEntries === 0`: refusing with a nicer message but AFTER the
+   * gate would leave the whole cost in place.
+   */
+  it("refuses immediately — without entering the gate — when another PROCESS holds the repo lock (#764)", async () => {
+    const repoPath = makeRepoPath();
+    const { workspaceIds } = await seedRepoWithWorkspaces(db, 1, repoPath);
+    const svc = makeService(db);
+
+    let gateEntries = 0;
+    gateBehaviour = async () => {
+      gateEntries++;
+      return { passed: true, ran: true, stage: "verify", message: "ok" };
+    };
+
+    // A foreign holder: a real lockfile, holder label that is not `workspace:<our id>`, and a
+    // live pid (ours) so it is neither stale nor reclaimable.
+    const foreign = tryAcquireRepoLock(repoPath, "conductor:loop");
+    expect(foreign).not.toBeNull();
+    try {
+      await expect(svc.mergeWorkspace(workspaceIds[0])).rejects.toThrow(/already in progress/i);
+      expect(gateEntries).toBe(0);
+      expect(gateCalls).toEqual([]);
+    } finally {
+      foreign!.release();
+    }
+
+    // Once the foreign holder goes away the same merge proceeds — the refusal is about the
+    // lock, not a permanent block on the workspace.
+    await expect(svc.mergeWorkspace(workspaceIds[0])).resolves.toBeDefined();
+    expect(gateEntries).toBe(1);
+  });
+
+  it("our OWN workspace's leftover on-disk lock does not permanently refuse its retry (#764)", async () => {
+    const repoPath = makeRepoPath();
+    const { workspaceIds } = await seedRepoWithWorkspaces(db, 1, repoPath);
+    const svc = makeService(db);
+
+    // A lock stamped with THIS workspace's holder label is the in-memory reuse path's case.
+    // Refusing on it would turn a retry into a dead end, so the pre-check must ignore it.
+    // (The merge then contends for the lockfile normally, which is the pre-existing behaviour.)
+    const own = tryAcquireRepoLock(repoPath, `workspace:${workspaceIds[0]}`);
+    expect(own).not.toBeNull();
+    own!.release();
+
+    await expect(svc.mergeWorkspace(workspaceIds[0])).resolves.toBeDefined();
   });
 
   it("a passing gate is paid for once — doMerge accepts the pre-lock proof", async () => {
