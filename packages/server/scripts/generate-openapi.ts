@@ -782,6 +782,30 @@ function main() {
    * undeclared blind spot and a dead factory would block every regeneration.
    */
   const unmountedKeys = new Set<string>();
+  /**
+   * Factories nothing mounts, held back until `emittedKeys` exists (#824).
+   *
+   * "This factory is not mounted" is NOT the same claim as "these routes are undocumented",
+   * and reporting the first as if it were the second is how this generator grew a permanent
+   * warning. `routes/workers.ts` exports two factories over ONE set of route definitions:
+   * `createWorkersRoute` (owner + worker-facing, mounted on the board API at `/api/workers`)
+   * and `createFleetWorkersRoute` (the worker-facing SUBSET, mounted on the off-loopback fleet
+   * app via a property — `createWorkersRoute: createFleetWorkersRoute` in `server-start.ts` —
+   * an indirection this analyser cannot follow, and the residual limit #805 disclosed).
+   *
+   * Every path the second factory serves is therefore already in the spec via the first, and
+   * the coverage audit agreed all along: it classified those sites `inSpec`, because
+   * `emittedKeys` is checked before `unmountedKeys`. Only the human-facing warning disagreed.
+   *
+   * So the decision needs `emittedKeys`, which is not built until every file has been walked.
+   * Deferring also makes the check order-independent: whether the mounted factory happens to
+   * be visited before the unmounted one, in the same file or another, no longer changes the
+   * output.
+   *
+   * A factory whose routes are genuinely nowhere still warns — that path is #820, where the
+   * report was right and a client feature had been 404-ing.
+   */
+  const unmountedFactories: Array<{ message: string; keys: string[] }> = [];
 
   for (const file of routeFiles) {
     const rel = `src/routes/${file}`;
@@ -814,8 +838,10 @@ function main() {
       const calls = collectRouteCalls(fn, routerVar, helpers);
       const mounts = factoryPrefixes.get(fnName);
       if (!mounts || mounts.length === 0) {
-        unresolved.push(`${file}: ${fnName} is not mounted in routes/index.ts or a composition root`);
-        for (const { call } of calls) unmountedKeys.add(`${rel}:${call.getStartLineNumber()}`);
+        unmountedFactories.push({
+          message: `${file}: ${fnName} is not mounted in routes/index.ts or a composition root`,
+          keys: calls.map(({ call }) => `${rel}:${call.getStartLineNumber()}`),
+        });
         continue;
       }
       for (const prefix of mounts) emit(calls, prefix);
@@ -851,6 +877,20 @@ function main() {
 
   // ---- the coverage audit (#805) --------------------------------------------------------
   const emittedKeys = new Set(allRoutes.map((r) => `${r.sourceRel}:${r.line}`));
+
+  // Now that every file has been walked, decide which unmounted factories are actually a
+  // coverage problem: one whose route definitions ALL reach the spec through some other mount
+  // documents the same paths and is silent (#824). Anything else warns and feeds the audit.
+  for (const factory of unmountedFactories) {
+    const undocumented = factory.keys.filter((key) => !emittedKeys.has(key));
+    if (undocumented.length === 0) continue;
+    unresolved.push(
+      undocumented.length === factory.keys.length
+        ? factory.message
+        : `${factory.message} (${undocumented.length} of ${factory.keys.length} of its routes reach the spec via no other mount)`,
+    );
+    for (const key of undocumented) unmountedKeys.add(key);
+  }
   const sites = findRouteDefinitionSites(srcDir, serverRoot);
   const extraIndex = process.argv.indexOf("--audit-extra-dir");
   if (extraIndex !== -1 && process.argv[extraIndex + 1]) {
