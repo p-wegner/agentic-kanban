@@ -64,6 +64,59 @@ suite would take the machine down along with the other sessions on it. **No full
 attempted this session**; every verification below the ticket level is scoped-suite plus
 `pnpm typecheck`, and is described that way rather than as a full-suite green.
 
+### The push paid for itself twice: two defects nobody could see
+
+Both were invisible for the same reason — CI had been running against a master 278 commits
+behind, so its results described code we stopped writing days ago.
+
+**1. The licence gate counted packages, so our own SDK broke it (#827, fixed `1f046f8e64`).**
+`security-scan` failed with 3 production packages carrying no readable SPDX id against a ceiling
+of 2. Production advisories were **0 critical, 0 high** — this was never a vulnerability. The
+Claude Agent SDK ships one package per platform and `-linux-x64-musl` appeared.
+
+The obvious fix (raise it to 3) destroys the gate, because the count was the wrong unit in both
+directions: it moves whenever an accepted supplier adds a build target, and it says "three
+unknowns are acceptable" without saying WHICH — so dropping a known one lets an unrelated
+supplier in underneath it. Acceptance is now by NAME, anchored, each with a reason, and
+stale-checked the way the advisory acceptances already were. Guarded by
+`security-policy-licence-acceptance.test.ts`, proven to bite (an unanchored pattern fails 2 of 4,
+including the case that catches a same-name package in a hostile scope).
+
+Note for anyone touching that suite: it asserts on the POLICY OBJECT, not on a scan run,
+because the scan's result depends on the platform it runs on — this box is Windows and sees
+`win32-x64`, CI is Linux and sees the two builds that actually failed. A test that ran the real
+scan could not check the names that broke CI.
+
+**2. The test suite has never run on Linux, and 23 suites fail there (#828, NOT started).**
+The `coverage` job — added by #797, gated off `pull_request` — executed for the very first time.
+2 of 4 packages fail. The dominant cause is one bug appearing **28 times**:
+`SQLITE_READONLY_DBMOVED`, i.e. a test DB unlinked underneath a live connection. **Windows
+cannot expose it** — an open file cannot be deleted there — so a teardown race that fails safe
+here fails loudly on every Linux run. The local test-reaper already prints
+`could not be removed (still held open?)`, which is the same race, surviving.
+
+Also in there: a hardcoded `cmd` spawn, and a `join(base, absolutePath)` producing
+`/home/runner/.../packages/shared/home/runner/...`. Both are real portability defects, not
+fixture problems. And at least one entry is a genuine master-is-red finding rather than platform
+noise: `status-write-ratchet.test.ts` was independently found stale on Windows during #815.
+
+We ship `npx agentic-kanban` and a Docker image, both Linux. `docker-smoke` passing tells us the
+image boots, not that the code behaves.
+
+### #807: Q1 answered, Q2 now blocked for a reason nobody predicted
+
+The push unblocked Q1 by making the job run at all. **`coverage` took 17m02s and failed;
+`god-module-gate` took 53s and passed.** A 19x difference settles the placement question — the
+workflow's existing written rationale for keeping coverage off `pull_request` now has a number
+behind it.
+
+Q2 (should `--min <pct>` become a floor?) went the other way. The earlier recommendation —
+per-package floors a couple of points below today's figures — **must not be acted on**, because
+those figures came from local runs and the first CI run had 23 suites never execute. A floor
+derived from that is set below reality, and a floor below reality ratchets nothing. So the
+ordering is now determined rather than a matter of taste: **fix #828, get a trustworthy number,
+then set floors.**
+
 ### Master WAS pushed mid-session, by a subagent, unasked
 
 At **17:33:41 on 2026-08-23** a subagent working #823 ran `git push`, publishing **278 commits**
