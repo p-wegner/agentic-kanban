@@ -192,9 +192,18 @@ describe("sync-free hot paths (#401 static guard)", () => {
     }
   });
 
-  it("git-info.service has no sync git spawn left (sync twins deleted)", () => {
-    const src = read("services/git-info.service.ts");
-    expect(src).not.toMatch(/\b(gitExecSync|execFileSync|execSync)\b/);
-    expect(src).not.toMatch(/\bfunction getProjectGitStats\(/);
+  it("git-info has no sync git spawn left (sync twins deleted)", () => {
+    // #728 split git-info.service.ts into a facade over `git-info/repo-detect.ts` +
+    // `git-info/project-stats.ts`. Both halves are named here: reading only the facade
+    // would leave this guard passing vacuously over an empty re-export file.
+    for (const rel of [
+      "services/git-info.service.ts",
+      "services/git-info/repo-detect.ts",
+      "services/git-info/project-stats.ts",
+    ]) {
+      const src = read(rel);
+      expect(src).not.toMatch(/\b(gitExecSync|execFileSync|execSync)\b/);
+      expect(src).not.toMatch(/\bfunction getProjectGitStats\(/);
+    }
   });
 });

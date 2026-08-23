@@ -1,5 +1,6 @@
 // Pure decision helpers for the project code/history metrics cache in
-// git-info.service.ts. No git, no fs, no clock of their own (`nowMs` is injected) —
+// services/git-info/project-stats.ts. No git, no fs, no clock of their own (`nowMs` is
+// injected) —
 // so each rule is a directly-unit-testable seam, the same shape as
 // workspace-diff-cache.ts.
 
