@@ -8,6 +8,7 @@ import { mirrorWorkspaceColumnsToLeadingRepo } from "./repo.repository.js";
 import { setWorkspaceWorkingDir as setWorkspaceWorkingDirShared } from "@agentic-kanban/shared/lib/workspace-git-state";
 import { getAllPreferences as canonicalGetAllPreferences } from "./preferences.repository.js";
 import { issueIdentityColumns } from "./projections.js";
+import { updateWorkspaceSetupRun } from "./workspace-setup-run.repository.js";
 
 export async function updateLatestSetupRunFields(
   workspaceId: string,
@@ -23,19 +24,13 @@ export async function updateLatestSetupRunFields(
   },
   database: Database = db,
 ): Promise<void> {
+  // #815: the eight `latest_setup_*` columns moved to `workspace_setup_run`, owned by
+  // `workspace-setup-run.repository.ts`. The workspace row still gets its `updatedAt` bump —
+  // that was part of the same UPDATE and is observable behaviour elsewhere.
+  await updateWorkspaceSetupRun(workspaceId, run, database);
   await database
     .update(workspaces)
-    .set({
-      latestSetupCommand: run.command,
-      latestSetupState: run.state,
-      latestSetupStartedAt: run.startedAt,
-      latestSetupEndedAt: run.endedAt,
-      latestSetupExitCode: run.exitCode,
-      latestSetupDurationMs: run.durationMs,
-      latestSetupStdoutTail: run.stdoutTail,
-      latestSetupStderrTail: run.stderrTail,
-      updatedAt: new Date().toISOString(),
-    })
+    .set({ updatedAt: new Date().toISOString() })
     .where(eq(workspaces.id, workspaceId));
 }
 

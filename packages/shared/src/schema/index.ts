@@ -78,3 +78,5 @@ export { workspaceSymlinkRun, workspaceSymlinkRunRelations } from "./workspace-s
 export { workspaceMergeGate, workspaceMergeGateRelations } from "./workspace-merge-gate.js";
 // #815: the sixth — the cached merge-tree conflict probe.
 export { workspaceConflictCache, workspaceConflictCacheRelations } from "./workspace-conflict-cache.js";
+// #815: the seventh — the setup-script run record.
+export { workspaceSetupRun, workspaceSetupRunRelations } from "./workspace-setup-run.js";

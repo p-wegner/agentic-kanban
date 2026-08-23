@@ -215,6 +215,15 @@ const SUBTREE_SEEDERS: Record<string, (c: SeedCtx) => Promise<void>> = {
       workspaceId: c.workspaceId, checkedAt: c.now, hasConflicts: true, files: '["src/a.ts"]',
     });
   },
+  // #815: the seventh column family extracted out of `workspaces` — the setup-script run.
+  // Same `onDelete: cascade` shape, so seeding it proves the cascade fires.
+  workspace_setup_run: async (c) => {
+    await c.db.insert(schema.workspaceSetupRun).values({
+      workspaceId: c.workspaceId, command: "pnpm install -r", state: "succeeded",
+      startedAt: c.now, endedAt: c.now, exitCode: 0, durationMs: 1200,
+      stdoutTail: "done", stderrTail: null,
+    });
+  },
   sessions: async (c) => {
     await c.db.insert(schema.sessions).values({
       id: c.sessionId, workspaceId: c.workspaceId, status: "running", startedAt: c.now,
