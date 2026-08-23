@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getProjectById } from "./project.repository.js";
-import { firstRow } from "@agentic-kanban/shared/lib/first-row";
+import { firstRow } from "../lib/first-row.js";
 
 export async function listAgentSkills(
   projectId: string | undefined,
@@ -120,13 +120,14 @@ export async function getButlerPrompt(
   projectId: string,
   database: Database = db,
 ): Promise<string | null> {
-  const rows = await database
-    .select({ prompt: agentSkills.prompt })
-    .from(agentSkills)
-    .where(sql`${agentSkills.name} = 'butler' AND (${agentSkills.projectId} = ${projectId} OR ${agentSkills.projectId} IS NULL)`)
-    .orderBy(desc(agentSkills.projectId))
-    .limit(1);
-  return rows[0]?.prompt ?? null;
+  return (await firstRow(
+    database
+      .select({ prompt: agentSkills.prompt })
+      .from(agentSkills)
+      .where(sql`${agentSkills.name} = 'butler' AND (${agentSkills.projectId} = ${projectId} OR ${agentSkills.projectId} IS NULL)`)
+      .orderBy(desc(agentSkills.projectId))
+      .limit(1)
+  ))?.prompt ?? null;
 }
 
 /** The project-scoped butler override row (id + prompt), or null when only the global exists. */
@@ -147,12 +148,13 @@ export async function getButlerOverride(
 export async function getGlobalButlerPrompt(
   database: Database = db,
 ): Promise<string | null> {
-  const rows = await database
-    .select({ prompt: agentSkills.prompt })
-    .from(agentSkills)
-    .where(sql`${agentSkills.name} = 'butler' AND ${agentSkills.projectId} IS NULL`)
-    .limit(1);
-  return rows[0]?.prompt ?? null;
+  return (await firstRow(
+    database
+      .select({ prompt: agentSkills.prompt })
+      .from(agentSkills)
+      .where(sql`${agentSkills.name} = 'butler' AND ${agentSkills.projectId} IS NULL`)
+      .limit(1)
+  ))?.prompt ?? null;
 }
 
 /** Create or update the project-scoped butler override. */

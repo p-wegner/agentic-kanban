@@ -5,7 +5,7 @@ import type { Database } from "../db/index.js";
 import { transitionIssueStatus } from "@agentic-kanban/shared/lib/workflow-engine";
 import { projectStatusIdName } from "./projections.js";
 import { listProjectStatusIdNames } from "./project-status.repository.js";
-import { firstRow } from "@agentic-kanban/shared/lib/first-row";
+import { firstRow } from "../lib/first-row.js";
 
 export async function getIssueStatusAndProject(issueId: string, database: Database = db) {
   return firstRow(

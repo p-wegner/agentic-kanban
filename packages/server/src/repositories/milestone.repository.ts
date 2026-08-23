@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { milestones } from "@agentic-kanban/shared/schema";
 import type { Database } from "../db/index.js";
-import { firstRow } from "@agentic-kanban/shared/lib/first-row";
+import { firstRow } from "../lib/first-row.js";
 
 export async function listMilestonesByProject(projectId: string, database: Database) {
   return database.select().from(milestones).where(eq(milestones.projectId, projectId));

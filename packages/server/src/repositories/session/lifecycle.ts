@@ -2,7 +2,7 @@ import { sessions, agentSkills, workspaces, issues, projects } from "@agentic-ka
 import { eq, desc } from "drizzle-orm";
 import { db } from "../../db/index.js";
 import type { Database } from "../../db/index.js";
-import { firstRow } from "@agentic-kanban/shared/lib/first-row";
+import { firstRow } from "../../lib/first-row.js";
 
 /** Clear a session's stored provider session id (#26 missing-transcript fallback). */
 export async function clearSessionProviderSessionId(
@@ -30,12 +30,13 @@ export async function getSessionWorkspaceId(
   sessionId: string,
   database: Database = db,
 ): Promise<string | null> {
-  const rows = await database
-    .select({ workspaceId: sessions.workspaceId })
-    .from(sessions)
-    .where(eq(sessions.id, sessionId))
-    .limit(1);
-  return rows[0]?.workspaceId ?? null;
+  return (await firstRow(
+    database
+      .select({ workspaceId: sessions.workspaceId })
+      .from(sessions)
+      .where(eq(sessions.id, sessionId))
+      .limit(1)
+  ))?.workspaceId ?? null;
 }
 
 export async function findRunningSession(
@@ -85,12 +86,13 @@ export async function getWorkspaceSkillName(
   database: Database = db,
 ): Promise<string | null> {
   if (!skillId) return null;
-  const rows = await database
-    .select({ name: agentSkills.name })
-    .from(agentSkills)
-    .where(eq(agentSkills.id, skillId))
-    .limit(1);
-  return rows[0]?.name ?? null;
+  return (await firstRow(
+    database
+      .select({ name: agentSkills.name })
+      .from(agentSkills)
+      .where(eq(agentSkills.id, skillId))
+      .limit(1)
+  ))?.name ?? null;
 }
 
 /** A full session row by id, or null. (CLI `session analyze` / `session stats`.) */
@@ -159,11 +161,12 @@ export async function getLatestSessionIdForWorkspace(
   workspaceId: string,
   database: Database = db,
 ): Promise<string | null> {
-  const rows = await database
-    .select({ id: sessions.id })
-    .from(sessions)
-    .where(eq(sessions.workspaceId, workspaceId))
-    .orderBy(desc(sessions.startedAt))
-    .limit(1);
-  return rows[0]?.id ?? null;
+  return (await firstRow(
+    database
+      .select({ id: sessions.id })
+      .from(sessions)
+      .where(eq(sessions.workspaceId, workspaceId))
+      .orderBy(desc(sessions.startedAt))
+      .limit(1)
+  ))?.id ?? null;
 }

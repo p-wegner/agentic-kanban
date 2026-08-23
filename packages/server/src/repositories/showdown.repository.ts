@@ -2,7 +2,7 @@ import { eq, inArray } from "drizzle-orm";
 import { showdowns, workspaces, issues, agentSkills } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
-import { firstRow } from "@agentic-kanban/shared/lib/first-row";
+import { firstRow } from "../lib/first-row.js";
 
 export async function getIssueForShowdown(
   issueId: string,
@@ -57,12 +57,13 @@ export async function getAgentSkillName(
   skillId: string,
   database: Database = db,
 ): Promise<string | null> {
-  const rows = await database
-    .select({ name: agentSkills.name })
-    .from(agentSkills)
-    .where(eq(agentSkills.id, skillId))
-    .limit(1);
-  return rows[0]?.name ?? null;
+  return (await firstRow(
+    database
+      .select({ name: agentSkills.name })
+      .from(agentSkills)
+      .where(eq(agentSkills.id, skillId))
+      .limit(1)
+  ))?.name ?? null;
 }
 
 export async function getShowdownById(

@@ -3,10 +3,8 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { prodDeps, type ToolDeps } from "./deps.js";
-import { isIssueNumberUniqueConstraintError, mcpError, mcpText, nextIssueNumber, resolveStatusByName } from "../db-utils.js";
+import { mcpError, mcpText, nextIssueNumber, resolveStatusByName, withUniqueIssueNumber } from "../db-utils.js";
 import { ISSUE_TYPES } from "@agentic-kanban/shared";
-
-const ISSUE_NUMBER_INSERT_ATTEMPTS = 3;
 
 export function registerCreateSubIssue(server: McpServer, deps: ToolDeps = prodDeps) {
   const { db, schema, notifyBoard } = deps;
@@ -52,20 +50,16 @@ export function registerCreateSubIssue(server: McpServer, deps: ToolDeps = prodD
         statusId = statuses[0].id;
       }
 
-      let id: string | null = null;
-      let dependencyId: string | null = null;
-      let issueNumber: number | null = null;
-      for (let attempt = 1; attempt <= ISSUE_NUMBER_INSERT_ATTEMPTS; attempt++) {
-        const now = new Date().toISOString();
-        id = randomUUID();
-        dependencyId = randomUUID();
-        issueNumber = await nextIssueNumber(db, schema, parent.projectId);
-
-        try {
+      const { id, dependencyId, issueNumber } = await withUniqueIssueNumber(
+        () => nextIssueNumber(db, schema, parent.projectId),
+        async (allocatedNumber) => {
+          const now = new Date().toISOString();
+          const newId = randomUUID();
+          const newDependencyId = randomUUID();
           await db.transaction(async (tx) => {
             await tx.insert(schema.issues).values({
-              id: id!,
-              issueNumber: issueNumber!,
+              id: newId,
+              issueNumber: allocatedNumber,
               title,
               description: description ?? null,
               priority: priority ?? "medium",
@@ -78,28 +72,16 @@ export function registerCreateSubIssue(server: McpServer, deps: ToolDeps = prodD
               updatedAt: now,
             });
             await tx.insert(schema.issueDependencies).values({
-              id: dependencyId!,
-              issueId: id!,
+              id: newDependencyId,
+              issueId: newId,
               dependsOnId: parentIssueId,
               type: "child_of",
               createdAt: now,
             });
           });
-          break;
-        } catch (err: unknown) {
-          id = null;
-          dependencyId = null;
-          issueNumber = null;
-          if (attempt < ISSUE_NUMBER_INSERT_ATTEMPTS && isIssueNumberUniqueConstraintError(err)) {
-            continue;
-          }
-          throw err;
-        }
-      }
-
-      if (id === null || dependencyId === null || issueNumber === null) {
-        return mcpError("Error: could not allocate a unique issue number");
-      }
+          return { id: newId, dependencyId: newDependencyId, issueNumber: allocatedNumber };
+        },
+      );
 
       notifyBoard(parent.projectId, "mcp_create_sub_issue");
       notifyBoard(parent.projectId, "mcp_dependency_added");

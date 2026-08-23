@@ -3,7 +3,7 @@ import { issueComments } from "@agentic-kanban/shared/schema";
 import { and, desc, eq, isNull, lt, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
-import { firstRow } from "@agentic-kanban/shared/lib/first-row";
+import { firstRow } from "../lib/first-row.js";
 
 export type IssueCommentKind = "preflight-verdict" | "preflight-clarification" | "agent-question" | "merge-attempt" | "note" | "gate-decision";
 export type IssueCommentAuthor = "user" | "butler" | "agent" | "preflight" | "system";

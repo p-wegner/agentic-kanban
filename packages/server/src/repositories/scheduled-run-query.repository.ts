@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getProjectById } from "./project.repository.js";
-import { firstRow } from "@agentic-kanban/shared/lib/first-row";
+import { firstRow } from "../lib/first-row.js";
 
 export async function getScheduledRunSystemIssueSummary(
   systemIssueId: string,

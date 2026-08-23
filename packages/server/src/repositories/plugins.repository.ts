@@ -4,7 +4,7 @@ import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { ACTIVE_WORKSPACE_STATUSES } from "@agentic-kanban/shared/lib/workspace-activity-state";
 import { preferenceKeyValueColumns } from "./projections.js";
-import { firstRow } from "@agentic-kanban/shared/lib/first-row";
+import { firstRow } from "../lib/first-row.js";
 
 export type PluginRow = typeof plugins.$inferSelect;
 
@@ -345,10 +345,11 @@ export async function getInProgressStatusId(
   projectId: string,
   database: Database = db,
 ): Promise<string | null> {
-  const rows = await database.select({ id: projectStatuses.id }).from(projectStatuses)
-    .where(and(eq(projectStatuses.projectId, projectId), eq(projectStatuses.name, "In Progress")))
-    .limit(1);
-  return rows[0]?.id ?? null;
+  return (await firstRow(
+    database.select({ id: projectStatuses.id }).from(projectStatuses)
+      .where(and(eq(projectStatuses.projectId, projectId), eq(projectStatuses.name, "In Progress")))
+      .limit(1)
+  ))?.id ?? null;
 }
 
 /**

@@ -6,7 +6,7 @@ import { db } from "../db/index.js";
 import type { Database, TransactionClient } from "../db/index.js";
 import { getProjectById } from "./project.repository.js";
 import type { RepoInstallState } from "@agentic-kanban/shared/lib/repo-install-state";
-import { firstRow } from "@agentic-kanban/shared/lib/first-row";
+import { firstRow } from "../lib/first-row.js";
 
 export type RepoDb = Database | TransactionClient;
 

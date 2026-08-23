@@ -4,7 +4,7 @@ import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getStatusIdsByName } from "./project-status.repository.js";
 import { issueTextColumns } from "./projections.js";
-import { firstRow } from "@agentic-kanban/shared/lib/first-row";
+import { firstRow } from "../lib/first-row.js";
 
 export async function getPreflightTargetIssue(
   issueId: string,

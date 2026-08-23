@@ -4,6 +4,7 @@ import { recordOperation } from "@agentic-kanban/shared/lib/operation-metrics";
 import { onPreferenceWrite } from "@agentic-kanban/shared/lib/checked-preference-write";
 import { db } from "../db/index.js";
 import type { Database, TransactionClient } from "../db/index.js";
+import { firstRow } from "../lib/first-row.js";
 
 /**
  * Every accessor also takes a drizzle transaction handle, so multi-pref writes
@@ -26,12 +27,13 @@ export async function getPreference(
 ): Promise<string | null> {
   const startedMs = Date.now();
   try {
-    const rows = await database
-      .select()
-      .from(preferences)
-      .where(eq(preferences.key, key))
-      .limit(1);
-    return rows[0]?.value ?? null;
+    return (await firstRow(
+      database
+        .select()
+        .from(preferences)
+        .where(eq(preferences.key, key))
+        .limit(1)
+    ))?.value ?? null;
   } finally {
     recordOperation("db:getPreference", Date.now() - startedMs);
   }

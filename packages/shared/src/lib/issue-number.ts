@@ -91,3 +91,41 @@ export async function nextIssueNumber(
 ): Promise<number> {
   return ((await getMaxIssueNumber(database, issuesTable, projectId)) ?? 0) + 1;
 }
+
+/**
+ * How many times a create path re-allocates an issue number after a UNIQUE collision.
+ *
+ * Was a private `const ISSUE_NUMBER_INSERT_ATTEMPTS = 3` in six modules (#772), each with
+ * its own copy of the retry loop below — the same drift risk the sniff above was pulled
+ * into shared to end.
+ */
+export const ISSUE_NUMBER_INSERT_ATTEMPTS = 3;
+
+/**
+ * Allocate an issue number and insert with it, retrying the whole pair when the
+ * (project_id, issue_number) unique index rejects it — a concurrent create took the
+ * number between the `max()` read and the insert.
+ *
+ * `allocate` and `insert` are both re-run per attempt because the retry must pick a FRESH
+ * number, and every caller also mints fresh row ids/timestamps inside the attempt.
+ *
+ * Semantics are the hand-written loop's, exactly: a non-collision error propagates
+ * immediately, and a collision on the LAST attempt propagates too. The hand-written copies
+ * each followed the loop with an `if (id === null) return "could not allocate…"` guard that
+ * was unreachable for that reason; it is not reproduced here.
+ */
+export async function withUniqueIssueNumber<T>(
+  allocate: () => Promise<number>,
+  insert: (issueNumber: number) => Promise<T>,
+  attempts: number = ISSUE_NUMBER_INSERT_ATTEMPTS,
+): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    const issueNumber = await allocate();
+    try {
+      return await insert(issueNumber);
+    } catch (err: unknown) {
+      if (attempt < attempts && isIssueNumberUniqueConstraintError(err)) continue;
+      throw err;
+    }
+  }
+}
