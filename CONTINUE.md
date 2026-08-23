@@ -28,13 +28,26 @@ beforehand; a second run with no probe printed nothing. The static guard's bite 
 reconstructs the pre-#814 shape in `os.tmpdir()` and requires exactly 2 offenders, then the FIXED
 shape and requires 0 — so neither an always-true nor an always-false guard passes it.
 
-**What is NOT verified, and the honest gap:** the `zz-adversarial-tmp.test.ts` writer #680
-recorded was never identified. It is ruled out as an `fs` call in test code (the static guard
-measures 0 tree-wide). It is either a spawned subprocess — which only the runtime drift report
-can catch — or it was never a suite at all and was an adversarial reviewer's own probe file.
-**The next full `test:mine` on a loaded machine settles it.** No such run was launched this
-session: the machine had another agent working and 5.5 GB usable RAM, and #680 explicitly says a
-single green run under low load proves nothing anyway.
+**The strict run HAS now been made (2026-08-23), and it was clean — but read the caveat.**
+`KANBAN_TEST_HERMETIC=strict pnpm test:mine -- --maxWorkers=2` from a clean tree: **1050 files /
+9612 tests passed, 6 skipped, exit 0, and NO drift block printed at all.** So no unattributed
+path was written during that run.
+
+**That is evidence, not proof, and specifically not the run #680 asked for.** #680's drift
+appeared under PARALLELISM on a LOADED machine; this run was capped at 2 workers because the box
+was swapping (an org-managed `mssecflt.sys` kernel-pool leak plus idle JVM daemons left ~4.8 GB
+usable). A writer that only fires under contention would not have shown. The `zz-adversarial-tmp.test.ts`
+writer therefore remains UNIDENTIFIED — still ruled out as an `fs` call in test code (the static
+guard measures 0 tree-wide), still either a spawned subprocess or an adversarial reviewer's own
+probe file that was never a suite. **What would settle it: the same strict command at
+`--maxWorkers=6+` on an idle box.**
+
+A prior strict run the same day DID print a drift block, naming exactly two paths — both edited
+by hand mid-run while fixing the failures below. Self-inflicted, not a finding, and recorded here
+so the log is not later mistaken for evidence of a real writer.
+
+Known wording flaw: the drift block's closing line advises setting `KANBAN_TEST_HERMETIC=strict`
+even when strict is already active, because the message is static. Cosmetic; not filed.
 
 **(a) timing fragility — largely done before this session, and now needs measurement, not more
 widening.** Config default 20s -> 60s (#206) -> 120s (#680); `GIT_HEAVY_TEST_TIMEOUT_MS` 90s ->
@@ -42,11 +55,64 @@ widening.** Config default 20s -> 60s (#206) -> 120s (#680); `GIT_HEAVY_TEST_TIM
 a hand-typed number in any of them. Residual: the config default (120s) is below the shared
 git-heavy budget (240s), and the two suites #680 measured blowing 60s
 (`merge-overlap-cluster-landing`, `get-context-boundary`) ride the CONFIG default, not the
-constant. Whether 120s now suffices for them under load is UNMEASURED — do not raise it again
-without a measured run; the fix if they still time out is to add them to `MUST_USE_SHARED_BUDGET`.
+constant. Whether 120s now suffices for them under load is still UNMEASURED — do not raise it
+again without a measured run; the fix if they still time out is to add them to
+`MUST_USE_SHARED_BUDGET`. What IS now measured: at `--maxWorkers=2` on a mostly-idle box, all
+seven suites #680 catalogued as load-dependent passed (`verify-gate-runner`,
+`merge-overlap-cluster-landing`, `workspace-merge-multirepo-retry`, `git-prepare-for-review`,
+`session-lifecycle:549`, `repo-lock-unavailable-fails-fast:82`, `get-context-boundary`). Low
+worker count is the opposite of the condition they fail under, so this does not close the
+question — it only rules out an unconditional break.
 
 The remainder is filed as **#816**, which also names the un-swept unawaited-async-teardown shape
 (#777's `2e789968ac` found two suites manufacturing cross-file misattribution that way).
+
+## The deferred full-suite run found a 16-failure tail (2026-08-23) — all fixed
+
+The ticket wave closed its tickets on SCOPED gate runs while the machine was loaded. The full
+`pnpm test:mine` that was deferred has since run and found 16 failures across 7 files that no
+scoped run could see. All are fixed and committed; a clean strict re-run is green (above).
+
+| Suite | Cause | Fix |
+|---|---|---|
+| `drizzle-snapshot-baseline` | #813's migration 0137 shipped with no `0137_snapshot.json`, so the next `drizzle-kit generate` would have diffed against the pre-#812/#813 schema | `840bb03d62` |
+| `worktree-delete-guard-ratchet` | baseline is keyed by PATH; #798's god-module split moved the call site | `95743e18ba` |
+| `merge-backoff-ceiling` (7) | hand-rolled fake DB lacked `.leftJoin`, added by #781's column extraction | `15c278554e` |
+| `worker-allowlist` / `worker-placement-race` / `worker-transport-refusal` (4) | #801's new `reason: {id, detail}` vs whole-object `toEqual` | `c68b3cd41a` |
+| `pref-polarity-ratchet` | raw `=== "true"` reads in #774's `WorkerDispatchPrefs.tsx` | `4a2a319f37` |
+| `repository-table-ownership` | #801 added a second `sessions` writer outside the owning repository | `270dd81f2a` |
+| `result-spelling-ratchet` | #805 relocated 3 inline error bodies INTO the scanned tree | `2c6be907e6` |
+
+**The generalisable lesson: a scoped gate cannot see a guard that lives in another package or
+scans another tree.** Five of the seven are ratchet/guard suites, and the two most damaging
+(the missing migration snapshot, the second table writer) were invisible precisely because they
+guard a property of the repo rather than the code under change.
+
+**Two findings worth more than their fixes:**
+
+- **Two `merge-backoff-ceiling` tests were passing VACUOUSLY.** The fake DB had no `delete()`, so
+  `clearMergeBackoff` threw into a catch that only `console.warn`s — the tests asserted a clearing
+  that never happened. They now run on the real migrated in-memory DB (`createTestDb()`) with an
+  assertion that the row is actually gone. The swallow-and-warn in `clearMergeBackoff` is the
+  shape that made it invisible and is NOT fixed.
+- **`repository-table-ownership.test.ts` is blind to `repositories/*/` subdirectories** — its
+  `scanActual()` uses a non-recursive `readdirSync`, hiding a measured 23 `sessions`/`projects`
+  touches in `repositories/issue/` and `repositories/session/`. Most are legitimate (those
+  subtrees ARE the owning implementations), so the fix is to make the scan recursive AND teach
+  `OWNERS` that ownership is a subtree. Every god-module split widens this hole, and this wave
+  created two such subdirs. Filed as **#822**. Note the honest implication: the fix in
+  `270dd81f2a` satisfies the guard and is independently correct, but the guard would have gone
+  quiet either way.
+
+**Cap raised, with the other half filed:** `INLINE_ROUTE_ERROR_CAP` 167 -> 170. Verified as a
+pure relocation (the three lines are byte-identical to the pre-move ones in
+`startup/route-setup.ts`, which the scan does not cover) — the same accounting-correction case
+#595 already documented, and the only case in which raising this ratchet is legitimate. **#821**
+converts those three to the central `error-handler.ts` mapping and lowers the cap back to 167.
+
+**Also open from this tail (reported, not fixed):** `eligible_worker` is the placement reason id
+for two different remote outcomes (filesystem-sharing and git transport), so the persisted id
+alone cannot distinguish them — only the prose detail does.
 
 ## Function-nloc rings (#763 client, #800 server) — both live, #800 closed (2026-08-23)
 
