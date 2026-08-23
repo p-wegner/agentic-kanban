@@ -98,3 +98,8 @@ list) stays valid as separate, narrower work, with one caveat this measurement a
 nothing can. It needs type-level assertions or tests on its consumers.
 
 #762 should stay open with candidates 2 and 3 as the remaining work.
+
+The candidate-3 measurement is now done, in [rework-loop-attribution.md](rework-loop-attribution.md):
+the gate turns out to run *after* the agent's own last verify in 98.6% of the cases where both are
+recorded, so "instrument the gate's timing" is refuted too — 45.9% of fix commits correct work that
+is still on its own branch and never reaches a gate at all.
