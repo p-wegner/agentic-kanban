@@ -29,8 +29,11 @@ import { walkTestFiles, compareRatchet } from "./helpers/guard-scan.js";
  *      so a wrap cannot hide anything; the split just turns an offset into `file:line`.
  *   2. **the subject genuinely IS lines** — a LOC ceiling, a markdown doc, a shell/JS hook
  *      script, a run of consecutive literal lines. There is no AST to match against.
- *   3. **convertible, not yet converted** — the #779 remainder. Each says what the wrap-shaped
- *      hole is, so the next session does not have to re-derive it.
+ *   3. **convertible, not yet converted** — the #779 remainder, tracked as **#794**. Each says
+ *      what the wrap-shaped hole is, so the next session does not have to re-derive it.
+ *      `guard-scan.ts` has no leading-comment helper yet, which is what two of them (an
+ *      `eslint-disable-next-line` / `SELF-HTTP OK:` lookback on the PRECEDING line) are waiting
+ *      on — see #794.
  */
 
 const testModuleDir = path.dirname(fileURLToPath(import.meta.url));
