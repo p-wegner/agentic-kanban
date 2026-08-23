@@ -3,27 +3,39 @@
  *
  * See `./body-schema-helpers.js` for the three rules that make this swap behaviour-preserving.
  *
- * Two handlers in this file's route are deliberately NOT covered, and both for the same reason
- * — a schema would have to invent messages the endpoint has never said:
+ * **Batch 2 (#806) resolved two of the three handlers batch 1 deferred**, and the resolution is
+ * worth recording because the deferral's reasoning was sound but its conclusion was too strong:
  *
- * - **`POST /api/projects/:id/repos`** guards `exactly one of path, cloneUrl, createName`, and
- *   that guard counts a field only when it is `typeof === "string" && .trim()`. Giving those
- *   fields a declared string type would make a `path: 123` answer "expected string" where today
- *   it answers "Provide exactly one of path, cloneUrl, or createName". The cross-field rule and
- *   the per-field types are entangled; untangling them is a contract change, not a swap.
- * - **`POST /api/projects/:id/statuses`** and **`PATCH /api/projects/:id`** have no body guard at
- *   all. `PATCH /:id` in particular forwards the entire body to `updateProject`, and its one
- *   real check (`servicesConfig`) is a 40-line validator answering **422**, not 400 — a
- *   different status, so it cannot move into `parseJsonBody` without changing the contract.
+ * - **`POST /api/projects/:id/repos`** — batch 1 read the cross-field rule and the per-field
+ *   types as entangled, and they ARE. The way out is not to untangle them but to decline the
+ *   per-field types entirely: the fields keep `unchecked` (no predicate at all, rule 3), and the
+ *   whole guard moves into a `superRefine`, which zod runs AFTER the field checks. With no field
+ *   check to fire first, `path: 123` still answers "Provide exactly one of path, cloneUrl, or
+ *   createName", exactly as today. See {@link addProjectRepoBody}.
+ * - **`POST /api/projects/:id/statuses`** — no guard, but the fields ARE declared (`name: string`,
+ *   `sortOrder?: number`), so the sanctioned declared-type tightening covers it. See
+ *   {@link addStatusBody}.
  *
- * Both stay in the countable remainder rather than being quietly half-migrated.
+ * **`PATCH /api/projects/:id` stays unconverted, and now with a stronger reason than "no guard".**
+ * Its body has no declared type at all (`parseJsonBody(c)`, i.e. `Record<string, unknown>`) and
+ * is forwarded WHOLE to `updateProject`, so there is nothing to tighten TO — a schema there would
+ * either invent a field list the endpoint has never enforced, or validate nothing and merely look
+ * validated. Its one real check (`servicesConfig`, a 40-line validator) answers **422**, not 400,
+ * so it cannot move into `parseJsonBody` at all. It stays in the countable remainder.
+ *
+ * `POST /api/projects` and `POST /api/projects/create` also stay: both forward the whole body to
+ * a service that runs its own guards, and their optional string fields have no observed null
+ * discipline — a declared-type tightening there could 400 a body that succeeds today, which is
+ * the one thing these swaps may not do.
  */
+import { isAbsolute } from "node:path";
 import { z } from "zod";
 import {
   requiredRaw,
   optionalString,
   optionalStringOrNull,
   numberOnly,
+  stringOnly,
   unchecked,
 } from "./body-schema-helpers.js";
 
@@ -100,3 +112,55 @@ export const onboardingApplyBody = z.object({
 export const onboardingSkipBody = z.object({
   stepId: requiredRaw("stepId is required"),
 }).passthrough();
+
+/**
+ * `POST /api/projects/:id/statuses` (#806, batch 2).
+ *
+ * The handler never guarded either field, so this is the sanctioned declared-type tightening and
+ * nothing more. Two knowing consequences, both on requests that cannot succeed today:
+ *   - a missing `name` reaches `body.name` as `undefined` and hits a NOT NULL column, i.e. a 500;
+ *     it is now a 400 carrying the message the sibling service guard already uses.
+ *   - `stringOnly`, NOT `requiredRaw`: `name: ""` is accepted by the column and by this endpoint
+ *     today, and `.min(1)` would start refusing it — a live request turned into a 400.
+ */
+export const addStatusBody = z.object({
+  name: stringOnly("name is required"),
+  sortOrder: numberOnly("sortOrder must be a number").optional(),
+}).passthrough();
+
+/**
+ * `POST /api/projects/:id/repos` (#806, batch 2) — the "exactly one of" mode guard.
+ *
+ * Every field is `unchecked` ON PURPOSE, and that is what makes the swap exact. The guard counts
+ * a mode field only when it is `typeof === "string" && .trim()`, so a `path: 123` is not an
+ * "expected string" error, it is a body that named ZERO modes — and the message it gets says so.
+ * Giving the fields their declared types would fire first and change that answer, which is the
+ * entanglement batch 1 correctly identified. A `superRefine` runs after the (absent) field checks
+ * and reproduces the ladder in its original order: mode count first, then the absolute-path test,
+ * which the original never reached when the mode count was wrong — hence `else if`.
+ *
+ * The rest of the ladder (clone failure, repo detection, duplicate-repo 409) stays in the
+ * handler: it needs the filesystem and the database, and two of its answers are not 400.
+ */
+export const addProjectRepoBody = z.object({
+  path: unchecked<string>(),
+  cloneUrl: unchecked<string>(),
+  createName: unchecked<string>(),
+  name: unchecked<string>(),
+  generateReadme: unchecked<boolean>(),
+  setupScript: unchecked<string | null>(),
+  composeFile: unchecked<string | null>(),
+}).passthrough().superRefine((body, ctx) => {
+  const modeCount = [body.path, body.cloneUrl, body.createName]
+    .filter((v) => typeof v === "string" && v.trim()).length;
+  if (modeCount !== 1) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Provide exactly one of path, cloneUrl, or createName",
+    });
+  } else if (body.path && !isAbsolute(body.path)) {
+    // A relative `path` would otherwise be resolved against the SERVER's CWD by detectRepoInfo,
+    // yielding a misleading "not a git repository: <server-dir>/<fragment>" error (#68).
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "repo path must be an absolute path" });
+  }
+});

@@ -6,13 +6,13 @@ import { parseJsonBody, parseOptionalJsonBody } from "../middleware/parse-body.j
 import {
   generateScriptBody, updateStatusSortOrderBody, updateProjectRepoBody,
   removeWorktreeBody, openWorktreeBody, onboardingApplyBody, onboardingSkipBody,
+  addStatusBody, addProjectRepoBody,
 } from "./project-body-schemas.js";
 import { createRouter } from "../middleware/create-router.js";
 import { wrapAiOperation } from "../lib/ai-operation.js";
 import { getProjectActivity } from "../services/project-activity.service.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { SessionLauncher } from "../services/session.manager.js";
-import { isAbsolute } from "node:path";
 import { createWorkspaceSummaryCache } from "../services/workspace-summary-cache.service.js";
 import { computeBodyEtag, conditionalJsonResponse, createBoardEtagCache } from "../services/board-etag-cache.service.js";
 import { setSummaryWriteThroughListener } from "../services/summary-write-through-notifier.js";
@@ -366,7 +366,7 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
   // POST /api/projects/:id/statuses
   router.post("/:id/statuses", async (c) => {
     const projectId = c.req.param("id");
-    const body = await parseJsonBody<{ name: string; sortOrder?: number }>(c);
+    const body = await parseJsonBody(c, addStatusBody);
     const result = await projectService.addStatus(projectId, body.name, body.sortOrder ?? 0);
     return c.json(result, 201);
   });
@@ -410,17 +410,10 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
   //   { createName } — scaffold a NEW git repo (folder created inside the project folder)
   router.post("/:id/repos", async (c) => {
     const projectId = c.req.param("id");
-    const body = await parseJsonBody<{ path?: string; cloneUrl?: string; createName?: string; name?: string; generateReadme?: boolean; setupScript?: string | null; composeFile?: string | null }>(c);
-    const modeCount = [body.path, body.cloneUrl, body.createName].filter((v) => typeof v === "string" && v.trim()).length;
-    if (modeCount !== 1) {
-      return c.json({ error: "Provide exactly one of path, cloneUrl, or createName" }, 400);
-    }
-    // A relative `path` would otherwise be resolved against the SERVER's CWD (packages/server) by
-    // detectRepoInfo, yielding a misleading "not a git repository: <server-dir>/<fragment>" error
-    // for a path the caller never supplied. Require an absolute path and fail clearly (#68).
-    if (body.path && !isAbsolute(body.path)) {
-      return c.json({ error: "repo path must be an absolute path" }, 400);
-    }
+    // The mode guard ("exactly one of path, cloneUrl, createName") and the absolute-path test
+    // both live in the schema now (#806) — see `addProjectRepoBody` for why the fields there
+    // carry no per-field type check.
+    const body = await parseJsonBody(c, addProjectRepoBody);
     const project = await requireProject(projectId, database);
 
     let localPath = body.path;

@@ -3,7 +3,18 @@ import type { Database } from "../db/index.js";
 import type { SessionManager } from "../services/session.manager.js";
 import type { BoardEvents } from "../services/board-events.js";
 import { createRouter } from "../middleware/create-router.js";
+import { HTTPException } from "hono/http-exception";
+import type { ZodType } from "zod";
 import { parseJsonBody, parseOptionalJsonBody } from "../middleware/parse-body.js";
+import {
+  pluginGateDraftBody,
+  pluginGateResolveBody,
+  pluginGateSummarizeBody,
+  pluginOutputLocationBody,
+  pluginSaveArtifactBody,
+  pluginScaffoldFillBody,
+  pluginScaffoldSaveBody,
+} from "./plugin-body-schemas.js";
 import { getPluginService, PluginError } from "../services/plugin.service.js";
 import { createIssueService } from "../services/issue.service.js";
 import { createWorkspaceService } from "../services/workspace.service.js";
@@ -115,6 +126,34 @@ export function createPluginsRoute(
     return c.json({ success: true });
   });
 
+  /**
+   * `parseJsonBody(c, schema)` with this route file's ERROR IDENTITY preserved (#806, batch 2).
+   *
+   * Every hand-written guard here threw `PluginError(msg, "BAD_REQUEST")`, which
+   * `domainErrorHandler` renders as `{ error, code: "BAD_REQUEST" }` at 400 — the `code` echo
+   * #823 added on purpose, so a client can recognise a refusal without matching prose. A plain
+   * schema swap throws `HTTPException` instead, whose body is `{ error }` alone, so the
+   * conversion would have silently dropped `code` from every rejection on this surface. That is
+   * a wire change, not a hardening, and it is why batch 1 left these twelve alone.
+   *
+   * The 400 status and the message are byte-identical either way; re-wrapping restores the
+   * third field. The ONE knowing difference: an unparseable body ("invalid JSON body", raised
+   * by `parseJsonBody` before the schema runs) now carries `code: "BAD_REQUEST"` too, where it
+   * previously did not. That is a field ADDED to a response that was already a 400 failure, on
+   * a request that could never have succeeded — and it makes this route file answer one shape
+   * rather than two.
+   */
+  async function parsePluginBody<T>(c: Context, schema: ZodType<T>): Promise<T> {
+    try {
+      return await parseJsonBody(c, schema);
+    } catch (err) {
+      if (err instanceof HTTPException && err.status === 400) {
+        throw new PluginError(err.message, "BAD_REQUEST");
+      }
+      throw err;
+    }
+  }
+
   async function requireProjectId(c: Context): Promise<string> {
     const body = await parseOptionalJsonBody<{ projectId?: string }>(c);
     const projectId = typeof body.projectId === "string" ? body.projectId.trim() : "";
@@ -145,11 +184,9 @@ export function createPluginsRoute(
   });
 
   router.post("/:id/output-location", async (c) => {
-    const body = await parseJsonBody<{ projectId?: string; location?: string }>(c);
-    const projectId = typeof body.projectId === "string" ? body.projectId.trim() : "";
-    if (!projectId) throw new PluginError("projectId is required", "BAD_REQUEST");
+    const body = await parsePluginBody(c, pluginOutputLocationBody);
     const location = typeof body.location === "string" ? body.location : "";
-    return c.json(await service.setOutputLocation(c.req.param("id"), projectId, location));
+    return c.json(await service.setOutputLocation(c.req.param("id"), body.projectId, location));
   });
 
   // GET /api/plugins/:id/docs/*?theme=dark|light — serve one declared doc from the plugin checkout.
@@ -189,15 +226,10 @@ export function createPluginsRoute(
 
   // Apply a human's gate decision (#286): run the plugin's resolve command, then re-plan.
   router.post("/:id/loops/:name/gate/resolve", async (c) => {
-    const body = await parseJsonBody<{ projectId?: string; gateId?: string; actionId?: string; input?: string }>(c);
-    const projectId = typeof body.projectId === "string" ? body.projectId.trim() : "";
-    if (!projectId) throw new PluginError("projectId is required", "BAD_REQUEST");
-    const gateId = typeof body.gateId === "string" ? body.gateId.trim() : "";
-    const actionId = typeof body.actionId === "string" ? body.actionId.trim() : "";
-    if (!gateId || !actionId) throw new PluginError("gateId and actionId are required", "BAD_REQUEST");
-    return c.json(await service.resolveLoopGate(c.req.param("id"), c.req.param("name"), projectId, {
-      gateId,
-      actionId,
+    const body = await parsePluginBody(c, pluginGateResolveBody);
+    return c.json(await service.resolveLoopGate(c.req.param("id"), c.req.param("name"), body.projectId, {
+      gateId: body.gateId,
+      actionId: body.actionId,
       input: typeof body.input === "string" ? body.input : undefined,
     }));
   });
@@ -224,38 +256,23 @@ export function createPluginsRoute(
 
   // Edit-then-approve (#305): overwrite one of the current gate's artifacts and commit it.
   router.put("/:id/loops/:name/artifact", async (c) => {
-    const body = await parseJsonBody<{ projectId?: string; gateId?: string; path?: string; content?: string }>(c);
-    const projectId = typeof body.projectId === "string" ? body.projectId.trim() : "";
-    if (!projectId) throw new PluginError("projectId is required", "BAD_REQUEST");
-    const gateId = typeof body.gateId === "string" ? body.gateId.trim() : "";
-    const path = typeof body.path === "string" ? body.path.trim() : "";
-    if (!gateId || !path || typeof body.content !== "string") {
-      throw new PluginError("gateId, path and content are required", "BAD_REQUEST");
-    }
-    return c.json(await service.saveLoopArtifact(c.req.param("id"), c.req.param("name"), projectId, {
-      gateId, path, content: body.content,
+    const body = await parsePluginBody(c, pluginSaveArtifactBody);
+    return c.json(await service.saveLoopArtifact(c.req.param("id"), c.req.param("name"), body.projectId, {
+      gateId: body.gateId, path: body.path, content: body.content,
     }));
   });
 
   // Draft-with-butler (#310): rough notes in, submit-ready revision feedback out.
   router.post("/:id/loops/:name/gate/draft", async (c) => {
-    const body = await parseJsonBody<{ projectId?: string; gateId?: string; notes?: string }>(c);
-    const projectId = typeof body.projectId === "string" ? body.projectId.trim() : "";
-    if (!projectId) throw new PluginError("projectId is required", "BAD_REQUEST");
-    const gateId = typeof body.gateId === "string" ? body.gateId.trim() : "";
+    const body = await parsePluginBody(c, pluginGateDraftBody);
     const notes = typeof body.notes === "string" ? body.notes : "";
-    if (!gateId) throw new PluginError("gateId is required", "BAD_REQUEST");
-    return c.json(await service.draftLoopGateFeedback(c.req.param("id"), c.req.param("name"), projectId, { gateId, notes }));
+    return c.json(await service.draftLoopGateFeedback(c.req.param("id"), c.req.param("name"), body.projectId, { gateId: body.gateId, notes }));
   });
 
   // Summarize-for-me (#330): decision-ready butler digest of the current gate's artifacts.
   router.post("/:id/loops/:name/gate/summarize", async (c) => {
-    const body = await parseJsonBody<{ projectId?: string; gateId?: string }>(c);
-    const projectId = typeof body.projectId === "string" ? body.projectId.trim() : "";
-    if (!projectId) throw new PluginError("projectId is required", "BAD_REQUEST");
-    const gateId = typeof body.gateId === "string" ? body.gateId.trim() : "";
-    if (!gateId) throw new PluginError("gateId is required", "BAD_REQUEST");
-    return c.json(await service.summarizeLoopGate(c.req.param("id"), c.req.param("name"), projectId, { gateId }));
+    const body = await parsePluginBody(c, pluginGateSummarizeBody);
+    return c.json(await service.summarizeLoopGate(c.req.param("id"), c.req.param("name"), body.projectId, { gateId: body.gateId }));
   });
 
   // The scaffold's unresolved TODO markers as a form (#291).
@@ -266,24 +283,18 @@ export function createPluginsRoute(
   });
 
   router.post("/:id/scaffold", async (c) => {
-    const body = await parseJsonBody<{ projectId?: string; values?: Array<{ index?: number; value?: string }> }>(c);
-    const projectId = typeof body.projectId === "string" ? body.projectId.trim() : "";
-    if (!projectId) throw new PluginError("projectId is required", "BAD_REQUEST");
-    if (!Array.isArray(body.values)) throw new PluginError("values must be an array", "BAD_REQUEST");
+    const body = await parsePluginBody(c, pluginScaffoldFillBody);
     const values = body.values
       .filter((v) => typeof v?.index === "number" && typeof v?.value === "string")
       .map((v) => ({ index: v.index as number, value: v.value as string }));
-    return c.json(await service.fillScaffoldForm(c.req.param("id"), projectId, values));
+    return c.json(await service.fillScaffoldForm(c.req.param("id"), body.projectId, values));
   });
 
   // Overwrite the whole scaffold file (#438). `POST` addresses TODO markers by index,
   // so a COMPLETE profile — which has none — was uneditable from the board entirely.
   router.put("/:id/scaffold", async (c) => {
-    const body = await parseJsonBody<{ projectId?: string; content?: string }>(c);
-    const projectId = typeof body.projectId === "string" ? body.projectId.trim() : "";
-    if (!projectId) throw new PluginError("projectId is required", "BAD_REQUEST");
-    if (typeof body.content !== "string") throw new PluginError("content must be a string", "BAD_REQUEST");
-    return c.json(await service.saveScaffoldContent(c.req.param("id"), projectId, body.content));
+    const body = await parsePluginBody(c, pluginScaffoldSaveBody);
+    return c.json(await service.saveScaffoldContent(c.req.param("id"), body.projectId, body.content));
   });
 
   router.post("/:id/loops/:name/pause", async (c) => {

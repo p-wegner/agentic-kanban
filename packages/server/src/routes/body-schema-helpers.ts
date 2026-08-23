@@ -111,3 +111,33 @@ export function numberOnly(message: string) {
 export function unchecked<T>() {
   return z.custom<T>(() => true).optional();
 }
+
+/**
+ * `typeof v === "string"` and nothing more, REQUIRED — the string analogue of
+ * {@link numberOnly}, and the type-only sibling of {@link requiredRaw}.
+ *
+ * Reach for this instead of `requiredRaw` when the route declared the field as `string` but
+ * never guarded it. `requiredRaw`'s `.min(1)` would reject the empty string, which such a
+ * route accepts today (it forwards it); this rejects only `undefined` and the wrong primitive,
+ * which is exactly the declared-type tightening rule 3's exception sanctions.
+ */
+export function stringOnly(message: string) {
+  return z.custom<string>((v) => typeof v === "string", { message });
+}
+
+/**
+ * A required, non-blank string that ALSO returns the trimmed value — the schema form of
+ * `const x = typeof body.x === "string" ? body.x.trim() : ""; if (!x) return 400`.
+ *
+ * The transform is not decoration: those guards passed the TRIMMED value on to the service,
+ * so `required` (which deliberately preserves the original, because the guards it was written
+ * for did) would silently start handing services `" abc "` where they receive `"abc"` today —
+ * a behaviour change on a request that SUCCEEDS, which is the one thing rule 1 forbids. Two
+ * spellings exist because the two guard shapes genuinely differ; pick the one your guard used.
+ */
+export function requiredTrimmed(message: string) {
+  return z
+    .string({ required_error: message, invalid_type_error: message })
+    .refine((v) => v.trim().length > 0, message)
+    .transform((v) => v.trim());
+}
