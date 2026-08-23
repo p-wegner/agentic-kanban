@@ -41,6 +41,22 @@ import { dockerExec as dockerExecMock } from "@agentic-kanban/shared/lib/docker-
 import { warnIfCliVersionRisky as warnIfCliVersionRiskyMock } from "../services/agent-cli-version.service.js";
 import { createMockProc } from "./helpers/mocks.js";
 import type { ContainerProvision } from "../services/devcontainer-workspace.service.js";
+import { join, sep } from "node:path";
+import { shouldDetachAgent } from "../lib/agent-launch-env.js";
+
+/**
+ * Whether THIS platform gives a non-shell agent real stdout/stderr PIPES (#828).
+ *
+ * A detached agent's stdio goes to the session .out/.err FILES, so
+ * `proc.stdout.on("data", ...)` is never registered. `shouldDetachAgent` keeps an agent
+ * attached ONLY when it uses a shell AND runs on Windows — and the mock/AGENT_COMMAND
+ * agent these tests launch always uses a shell. So the pipe assertions below hold on
+ * Windows and cannot hold anywhere else, which nobody had seen until CI first ran this
+ * suite on Linux. The detached wiring is asserted separately by "wires stdio per the
+ * platform's detach decision", which runs everywhere and derives the expectation from the
+ * actual launch config.
+ */
+const AGENT_STDIO_IS_PIPED = !shouldDetachAgent(true, process.platform);
 
 function makeContainerProvision(containerId: string): ContainerProvision {
   return {
@@ -173,8 +189,13 @@ describe("agent.service", () => {
         path.endsWith(".claude/skills/kanban-workflow/SKILL.md")
       );
 
+      // The worktree root takes the host's own absolute shape, and each expected argument
+      // is built with the host's `join` (#828). A `C:\repo\worktree` literal plus
+      // backslash-joined expectations only agree with `node:path` on Windows; off it the
+      // service joins with "/" and the assertions could never match.
+      const worktree = sep === "\\" ? "C:\\repo\\worktree" : "/repo/worktree";
       launch({
-        worktreePath: "C:\\repo\\worktree",
+        worktreePath: worktree,
         sessionId: "sess-pi-skills",
         prompt: "test prompt",
         agentArgs: undefined,
@@ -184,12 +205,12 @@ describe("agent.service", () => {
 
       const [, args] = (spawnMock as any).mock.calls[0];
       expect(args).toContain("--extension");
-      expect(args).toContain("C:\\repo\\worktree\\.pi\\plugin\\agentic-kanban-hooks.ts");
+      expect(args).toContain(join(worktree, ".pi", "plugin", "agentic-kanban-hooks.ts"));
       expect(args).toContain("--skill");
-      expect(args).toContain("C:\\repo\\worktree\\.claude\\skills\\kanban-workflow\\SKILL.md");
+      expect(args).toContain(join(worktree, ".claude", "skills", "kanban-workflow", "SKILL.md"));
     });
 
-    it("registers stdout/stderr/exit handlers", () => {
+    it.runIf(AGENT_STDIO_IS_PIPED)("registers stdout/stderr/exit handlers", () => {
       const mockProc = createMockProc();
       (spawnMock as any).mockReturnValue(mockProc);
 
@@ -208,7 +229,7 @@ describe("agent.service", () => {
       expect(mockProc.on).toHaveBeenCalledWith("error", expect.any(Function));
     });
 
-    it("forwards stdout data to callback", () => {
+    it.runIf(AGENT_STDIO_IS_PIPED)("forwards stdout data to callback", () => {
       const mockProc = createMockProc();
       (spawnMock as any).mockReturnValue(mockProc);
 
@@ -234,7 +255,7 @@ describe("agent.service", () => {
       });
     });
 
-    it("forwards stderr data to callback", () => {
+    it.runIf(AGENT_STDIO_IS_PIPED)("forwards stderr data to callback", () => {
       const mockProc = createMockProc();
       (spawnMock as any).mockReturnValue(mockProc);
 
@@ -257,6 +278,37 @@ describe("agent.service", () => {
         sessionId: "sess-4",
         data: "error msg",
       });
+    });
+
+    it("wires stdio per the platform's detach decision", () => {
+      // The half of the output wiring that IS platform-independent, and the only coverage
+      // the DETACHED path (every non-shell agent, i.e. the whole Linux/CI fleet) had (#828):
+      // a detached agent must be spawned detached with its stdout on a real file
+      // descriptor, an attached one with pipes.
+      const mockProc = createMockProc();
+      (spawnMock as any).mockReturnValue(mockProc);
+
+      launch({
+        worktreePath: "/tmp",
+        sessionId: "sess-stdio",
+        prompt: "prompt",
+        agentArgs: undefined,
+        onOutput: vi.fn(),
+      });
+
+      const [, , opts] = (spawnMock as any).mock.calls[0];
+      const [, out, err] = opts.stdio as unknown[];
+      // Derived from the ACTUAL launch config, not assumed — `shouldDetachAgent` is a
+      // function of `useShell` as well as the platform.
+      if (!shouldDetachAgent(Boolean(opts.shell), process.platform)) {
+        expect(opts.detached).toBe(false);
+        expect(out).toBe("pipe");
+        expect(err).toBe("pipe");
+      } else {
+        expect(opts.detached).toBe(true);
+        expect(typeof out).toBe("number");
+        expect(err === "ignore" || typeof err === "number").toBe(true);
+      }
     });
 
     it("emits exit event and cleans up tracking", () => {
@@ -285,7 +337,7 @@ describe("agent.service", () => {
       expect(getProcess("sess-5")).toBeUndefined();
     });
 
-    it("wraps callback errors in try/catch", () => {
+    it.runIf(AGENT_STDIO_IS_PIPED)("wraps callback errors in try/catch", () => {
       const mockProc = createMockProc();
       (spawnMock as any).mockReturnValue(mockProc);
 
@@ -536,7 +588,7 @@ describe("agent.service", () => {
       expect(getProcess("hang-1")).toBeUndefined();
     });
 
-    it("does NOT fire if output keeps arriving (watchdog resets on activity)", () => {
+    it.runIf(AGENT_STDIO_IS_PIPED)("does NOT fire if output keeps arriving (watchdog resets on activity)", () => {
       const mockProc = createMockProc();
       (spawnMock as any).mockReturnValue(mockProc);
       const onOutput = vi.fn();
