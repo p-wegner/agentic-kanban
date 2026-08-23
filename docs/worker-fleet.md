@@ -581,6 +581,33 @@ landing is then reported **with its real age** rather than as a fresh result.
 mid-session diff shows what the agent has committed — not its working tree. A remote
 agent that never commits until the end still shows nothing until the end.
 
+**The board CARD does not get the landing, and says so instead (#790).** Two readers
+compute the same numbers WITHOUT going through that route: the per-card diff-stat in
+`board-status-enrichment.ts`, and the workspace summary's git projection (whose "HEAD
+advanced → refresh the diff-stat" trigger never fires for a true-remote session, because
+the board-side HEAD genuinely does not move). Both therefore read the base tip, and a
+card showed a confident `+0 −0` for an agent that had been committing for twenty minutes.
+
+Giving those two #784's on-demand landing was the other available answer and was
+**rejected deliberately**: a board rebuilds every card in one pass, on a poll, including
+the ones nobody is looking at — which is precisely the timer the section above argues
+against, just reached through a different door. A card is not worth a git push per
+refresh.
+
+So the numbers stay as they are and the card gains the sentence that was missing. When a
+branch belongs to a live git-transport session, the board attaches
+`remoteUnlanded: { workerId, sessionId, label }` (`unlandedRemoteBranches`,
+`worker-remote-sync.service.ts`) and the workspace card renders it as
+**"remote — committed work not yet landed"**. The defect being fixed is not the zero —
+it is the zero being **silently** wrong. Opening the diff still lands the work and shows
+the real numbers.
+
+The lookup is synchronous and reads only the in-memory session map, so it costs a board
+build nothing; with no fleet in the process it yields an empty map and every card is
+exactly as it was. A filesystem-sharing worker is never marked — it has nothing unlanded.
+Branch names are the key, so two projects with the same branch name could over-warn; that
+is an over-warning, never a wrong number.
+
 **No new credential.** A mid-session operation carries a **fresh** token minted through
 the existing `issueToken({workerId, projectId, incomingRef})` seam, because the
 assignment's own token expires and a board restart invalidates it. It is a git

@@ -153,6 +153,19 @@ export function WorkspaceSummarySection(props: {
               Plan Mode
             </span>
           )}
+          {/* #790 — the diff numbers on this card come from the BOARD's worktree, which is
+              still the base tip while a fleet worker holds committed work. The board does not
+              push per card refresh (a card is not worth moving the board's worktree), so the
+              card says the numbers may be behind instead of showing a zero that reads as
+              "nothing happening". Opening the diff panel lands the work and shows the truth. */}
+          {ws.main.remoteUnlanded && (
+            <span
+              className="order-last inline-flex items-center px-1.5 py-0.5 rounded bg-sky-100 dark:bg-sky-950 text-sky-700 dark:text-sky-400 text-[10px] font-medium shrink-0"
+              title={`This branch has committed work that exists only on fleet worker ${ws.main.remoteUnlanded.workerId} right now, so the counts here are the base tip. Open the diff to land it and see the real changes.`}
+            >
+              {ws.main.remoteUnlanded.label}
+            </span>
+          )}
           {ws.main.planOnlyWarning && (
             <span className="order-last inline-flex items-center px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-400 text-[10px] font-medium shrink-0" title="Session completed but produced no file changes">
               No changes

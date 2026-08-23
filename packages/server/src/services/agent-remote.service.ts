@@ -155,6 +155,19 @@ export interface RemoteAgentService extends AgentExecutionService {
    */
   remoteSessionInfo(sessionId: string): { workerId: string; repo?: RemoteSessionRepo } | undefined;
   /**
+   * Every session this process is running over GIT TRANSPORT right now (#790).
+   *
+   * The board's copy of such a branch is the base tip until something lands the worker's
+   * push, so any reader computing numbers from the board-side worktree is reading a zero
+   * that is not the truth. This is the cheap, synchronous way to ASK — no git, no push, no
+   * DB — which is what makes it usable from the board's hot per-card paths, where #784's
+   * on-demand landing deliberately is not.
+   *
+   * Filesystem-sharing workers are absent by construction: they have no `repo`, because
+   * they write into the board's own worktree and there is nothing unlanded.
+   */
+  remoteGitTransportSessions(): Array<{ sessionId: string; workerId: string; branch: string; repoPath: string }>;
+  /**
    * Ask the worker to fast-forward its live checkout to the board's branch tip (#783) or
    * to push its current HEAD to the incoming ref (#784), and WAIT for the answer.
    *
@@ -869,6 +882,15 @@ export function createRemoteAgentService(
     return { workerId: session.workerId, ...(session.repo ? { repo: session.repo } : {}) };
   }
 
+  function remoteGitTransportSessions(): Array<{ sessionId: string; workerId: string; branch: string; repoPath: string }> {
+    const out: Array<{ sessionId: string; workerId: string; branch: string; repoPath: string }> = [];
+    for (const [sessionId, session] of sessions) {
+      if (!session.repo) continue;
+      out.push({ sessionId, workerId: session.workerId, branch: session.repo.branch, repoPath: session.repo.repoPath });
+    }
+    return out;
+  }
+
   /**
    * The fresh, scoped git capability the worker needs for one repo operation (#783).
    *
@@ -972,6 +994,6 @@ export function createRemoteAgentService(
 
   return {
     launch, kill, sendInput, closeStdin, isStdinOpen, getProcess, getPid, isPidAlive,
-    adoptSession, trackedSessionIds, remoteSessionInfo, requestRepoOp,
+    adoptSession, trackedSessionIds, remoteSessionInfo, remoteGitTransportSessions, requestRepoOp,
   };
 }

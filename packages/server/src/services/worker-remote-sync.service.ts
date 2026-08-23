@@ -461,3 +461,79 @@ export async function landRemoteMidSessionWork(params: {
       `the agent's uncommitted edits stay in its own checkout`,
   };
 }
+
+/* ------------------------------------------------------------------ *
+ * #790 — telling a card the truth WITHOUT a git push per refresh.
+ *
+ * #784 gave `GET /api/workspaces/:id/diff` an on-demand landing: asking for a diff makes
+ * the worker push and the board fast-forward, so the numbers a human or a CLI reads are
+ * real. Two other readers compute the same numbers without passing through that route —
+ * `board-status-enrichment.ts` (per-card diff-stat) and
+ * `workspace-summary-projection.service.ts` (its "HEAD advanced -> refresh diff-stat"
+ * trigger, which never fires because board-side HEAD does not advance until exit). For a
+ * running true-remote session both read the base tip, so a card says "no changes" while
+ * the agent is committing on the worker.
+ *
+ * THE DECISION, which the ticket asked for explicitly: those two do NOT get the landing.
+ * A board CARD is not worth a git push. The board rebuilds cards on a poll, for EVERY
+ * workspace at once, including ones nobody is looking at; giving that path #784's landing
+ * would turn one page refresh into a push-and-fast-forward per remote session, moving the
+ * board's own worktree — where the session's branch is checked out — at moments nothing
+ * asked for. That is precisely the cost #784's header argues against paying on a timer,
+ * and a poll is a timer with extra steps.
+ *
+ * What was actually wrong was never the number. It was that the number was presented as
+ * a fact. So the card gets the SAME numbers plus the missing sentence: this branch has
+ * committed work that lives only on a worker right now. A visible "may be behind" is a
+ * different object from a silent zero, and it is the one an operator can act on — the
+ * diff panel, one click away, still lands and shows the real thing.
+ * ------------------------------------------------------------------ */
+
+/** The subset of the remote agent service the card paths need. Structural on purpose. */
+export interface RemoteUnlandedPort {
+  remoteGitTransportSessions(): Array<{ sessionId: string; workerId: string; branch: string; repoPath: string }>;
+}
+
+/** What a card shows instead of trusting a base-tip zero (#790). */
+export interface RemoteUnlandedWork {
+  workerId: string;
+  sessionId: string;
+  /** Rendered as-is by the card. */
+  label: string;
+}
+
+export const REMOTE_UNLANDED_LABEL = "remote — committed work not yet landed";
+
+/**
+ * Branches whose committed work exists only on a fleet worker right now, keyed by branch.
+ *
+ * Synchronous and free: it reads this process's own session map. Nothing here spawns git,
+ * asks a worker, or touches the DB, which is what makes it safe on a per-card path.
+ *
+ * KEYED BY BRANCH, filtered by `repoPath` when the caller knows it. Two different projects
+ * could in principle carry the same branch name (`feature/ak-12` is generated from an issue
+ * number, which is per-project), and a caller with no repoPath would then mark the wrong
+ * card. The consequence of that collision is a "may be behind" hint on a card that is in
+ * fact current — a visible over-warning, never a wrong number — which is why the looser
+ * lookup is offered at all rather than refused.
+ */
+export function unlandedRemoteBranches(
+  ops: RemoteUnlandedPort | null | undefined,
+  opts: { repoPath?: string | null } = {},
+): Map<string, RemoteUnlandedWork> {
+  const out = new Map<string, RemoteUnlandedWork>();
+  if (!ops || typeof ops.remoteGitTransportSessions !== "function") return out;
+  let rows: Array<{ sessionId: string; workerId: string; branch: string; repoPath: string }>;
+  try {
+    rows = ops.remoteGitTransportSessions();
+  } catch {
+    // A board with no fleet, or a facade that does not implement it. Absence of the hint is
+    // the pre-#790 behaviour, which is wrong but not worse than failing a board build.
+    return out;
+  }
+  for (const row of rows) {
+    if (opts.repoPath && row.repoPath !== opts.repoPath) continue;
+    out.set(row.branch, { workerId: row.workerId, sessionId: row.sessionId, label: REMOTE_UNLANDED_LABEL });
+  }
+  return out;
+}

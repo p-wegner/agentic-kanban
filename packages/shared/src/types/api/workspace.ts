@@ -29,6 +29,13 @@ export interface MainWorkspaceInfo {
   lastAssistantMessage?: string | null;
   /** True when a non-plan-mode session completed (idle) but produced no file changes. */
   planOnlyWarning?: boolean;
+  /**
+   * Set when this workspace's branch has committed work that exists only on a fleet worker
+   * right now (#790). `diffStats`/`commitCount` above are then the BASE TIP, not what the
+   * agent has done — the board deliberately does not push per card refresh, so the card
+   * says so instead of showing a zero that reads as "nothing happening".
+   */
+  remoteUnlanded?: { workerId: string; sessionId: string; label: string } | null;
   pendingPlanPath?: string | null;
   scorecard?: { score: number } | null;
   codeMetrics?: WorkspaceCodeMetrics | null;
