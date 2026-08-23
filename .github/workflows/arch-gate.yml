@@ -89,5 +89,10 @@ jobs:
           path: |
             packages/*/coverage/lcov.info
             packages/*/coverage/coverage-summary.json
-          if-no-files-found: error
+          # `warn`, not `error`: a vitest run with ANY failing test writes no coverage
+          # report at all (measured — a 401-file server run with 6 failing files produced
+          # no coverage/ directory, in-tree or at an absolute --coverage.reportsDirectory).
+          # The reader step above is already the loud, specific failure for a missing
+          # report; making the upload a second red would just obscure it.
+          if-no-files-found: warn
           retention-days: 14
