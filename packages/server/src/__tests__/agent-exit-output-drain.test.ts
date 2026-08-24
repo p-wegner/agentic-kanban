@@ -73,7 +73,7 @@ describe("agent.service exit-before-output drain (#909)", () => {
       prompt: "prompt",
       agentArgs: undefined,
       onOutput: onOutput,
-      provider: "claude",
+      provider: "claude-code",
     });
 
     // The detached launch opens the .out file (openSync "w"). Spawn is mocked, so the
@@ -82,7 +82,7 @@ describe("agent.service exit-before-output drain (#909)", () => {
     appendFileSync(outPath, "real assistant output before crash");
 
     // Fire exit. The drain must apply the file tail BEFORE the exit event.
-    const exitHandler = mockProc.on.mock.calls.find((c: any[]) => c[0] === "exit")?.[1] as (...a: unknown[]) => unknown;
+    const exitHandler = vi.mocked(mockProc.on).mock.calls.find((c: any[]) => c[0] === "exit")?.[1] as (...a: unknown[]) => unknown;
     expect(exitHandler).toBeDefined();
     exitHandler(1, null);
 
@@ -107,7 +107,7 @@ describe("agent.service exit-before-output drain (#909)", () => {
       prompt: "prompt",
       agentArgs: undefined,
       onOutput: onOutput,
-      provider: "claude",
+      provider: "claude-code",
     });
 
     // First chunk consumed by a normal poll tick.
@@ -116,7 +116,7 @@ describe("agent.service exit-before-output drain (#909)", () => {
     // Second chunk arrives after the last poll, just before exit.
     appendFileSync(outPath, "second chunk");
 
-    const exitHandler = mockProc.on.mock.calls.find((c: any[]) => c[0] === "exit")?.[1] as (...a: unknown[]) => unknown;
+    const exitHandler = vi.mocked(mockProc.on).mock.calls.find((c: any[]) => c[0] === "exit")?.[1] as (...a: unknown[]) => unknown;
     exitHandler(0, null);
 
     const stdoutData = events.filter((e) => e.type === "stdout").map((e) => e.data ?? "").join("");

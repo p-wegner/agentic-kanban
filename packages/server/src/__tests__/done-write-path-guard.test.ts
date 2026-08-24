@@ -25,6 +25,7 @@ import { createTestDb } from "./helpers/test-db.js";
 import { createWorkspaceMergeService } from "../services/workspace-merge.service.js";
 import { createAutoMerge } from "../startup/merge-workflow.js";
 import { createBoardEvents } from "../services/board-events.js";
+import { gateSkipExplicit } from "../services/pre-merge-gate.service.js";
 import { makeTempRepo } from "./helpers/temp-repo.js";
 
 /**
@@ -194,7 +195,9 @@ describe("createAutoMerge: project-not-found guard (regression #588)", () => {
 
     const autoMerge = createAutoMerge({
       sessionManager: sessionManager as never,
-      boardEvents: boardEvents as ReturnType<typeof createBoardEvents>,
+      // Only `broadcast` is exercised by this path, so the double stands in for the
+      // whole 14-member BoardEvents surface.
+      boardEvents: boardEvents as unknown as ReturnType<typeof createBoardEvents>,
       learningSessionIds: new Set(),
     });
 
@@ -206,7 +209,12 @@ describe("createAutoMerge: project-not-found guard (regression #588)", () => {
     // runs when workspace.workingDir is set. The worktree is irrelevant to the project-not-found
     // guard (which fires before any worktree work), so pass a worktree-less workspace to avoid
     // a 3-minute poll against a mock session that never completes.
-    await autoMerge({ ...ws, workingDir: null }, missingProjectId, issueId, doneStatusId, new Date().toISOString());
+    // The gate token is required by autoMerge; skip-explicit keeps this test on the
+    // project-not-found guard it is about instead of running a real pre-merge gate.
+    await autoMerge(
+      { ...ws, workingDir: null }, missingProjectId, issueId, doneStatusId, new Date().toISOString(),
+      gateSkipExplicit("project-not-found guard test"),
+    );
 
     // Issue must NOT be Done — project-not-found guard threw before the git merge ran.
     const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));

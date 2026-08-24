@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { projects, projectStatuses, issues, agentSkills, scheduledRunHistory, preferences } from "@agentic-kanban/shared/schema";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createScheduledRunService } from "../services/scheduled-run.service.js";
+import type { CreateWorkspaceInput, CreateWorkspaceResult } from "../services/workspace-internals.js";
 import { createScheduledRun } from "../repositories/scheduled-run.repository.js";
 
 async function seedProject(db: TestDb): Promise<{ projectId: string; statusId: string }> {
@@ -61,8 +62,8 @@ describe("createScheduledRunService", () => {
       const { projectId, statusId } = await seedProject(db);
       const systemIssueId = await seedIssue(db, projectId, statusId);
 
-      const mockWorkspace = { id: randomUUID(), issueId: systemIssueId, branch: "direct", workingDir: null, baseBranch: null, isDirect: true, planMode: false, includeVisualProof: false, status: "running", provider: "claude" as const, createdAt: new Date().toISOString() };
-      const createWorkspace = vi.fn(async () => mockWorkspace);
+      const mockWorkspace = { id: randomUUID(), issueId: systemIssueId, branch: "direct", workingDir: null, baseBranch: null, isDirect: true, planMode: false, includeVisualProof: false, status: "running", provider: "claude" as const, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      const createWorkspace = vi.fn(async (_input: CreateWorkspaceInput): Promise<CreateWorkspaceResult> => mockWorkspace);
 
       const service = createScheduledRunService({ database: db, createWorkspace });
 
@@ -111,8 +112,8 @@ describe("createScheduledRunService", () => {
         updatedAt: now,
       });
 
-      const mockWorkspace = { id: randomUUID(), issueId: systemIssueId, branch: "direct", workingDir: null, baseBranch: null, isDirect: true, planMode: false, includeVisualProof: false, status: "running", provider: "claude" as const, createdAt: now };
-      const createWorkspace = vi.fn(async () => mockWorkspace);
+      const mockWorkspace = { id: randomUUID(), issueId: systemIssueId, branch: "direct", workingDir: null, baseBranch: null, isDirect: true, planMode: false, includeVisualProof: false, status: "running", provider: "claude" as const, createdAt: now, updatedAt: now };
+      const createWorkspace = vi.fn(async (_input: CreateWorkspaceInput): Promise<CreateWorkspaceResult> => mockWorkspace);
 
       const service = createScheduledRunService({ database: db, createWorkspace });
 

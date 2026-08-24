@@ -1,6 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createBoardEvents } from "../services/board-events.js";
 import { createBoardWsRoute } from "../routes/board-ws.js";
+import type { Context } from "hono";
+import type { UpgradeWebSocket, WSContext } from "hono/ws";
+
+/** The handler object createBoardWsRoute's callback returns. */
+type BoardWsHandlers = {
+  onOpen(event: Event, ws: WSContext): void;
+  onClose(event: CloseEvent, ws: WSContext): void;
+};
 
 function createMockWs(readyState = 1) {
   return {
@@ -186,16 +194,24 @@ describe("board-events", () => {
   describe("createBoardWsRoute", () => {
     it("subscribes on open and unsubscribes on close", () => {
       const ws = createMockWs();
-      const upgradeWebSocket = (callback: any) => callback;
-      const handler = createBoardWsRoute(upgradeWebSocket, boardEvents);
-      const ctx = { req: { param: () => "proj-1" } };
-      const result = handler(ctx);
-      result.onOpen({}, ws);
+      // The real upgradeWebSocket wraps the callback into a Hono middleware; this fake
+      // returns it verbatim so the test can drive onOpen/onClose directly. The two casts
+      // are that substitution, not a silenced error: a middleware is not callable with a
+      // bare context, and the stub context carries only the one param the route reads.
+      let callback!: (c: Context) => BoardWsHandlers;
+      const upgradeWebSocket = ((cb: (c: Context) => BoardWsHandlers) => {
+        callback = cb;
+        return cb;
+      }) as unknown as UpgradeWebSocket;
+      createBoardWsRoute(upgradeWebSocket, boardEvents);
+      const ctx = { req: { param: () => "proj-1" } } as unknown as Context;
+      const result = callback(ctx);
+      result.onOpen(new Event("open"), ws);
       // Should be subscribed now
       boardEvents.broadcast("proj-1", "issue_created");
       expect(ws.send).toHaveBeenCalledTimes(1);
 
-      result.onClose({}, ws);
+      result.onClose(new CloseEvent("close"), ws);
       // Should be unsubscribed
       boardEvents.broadcast("proj-1", "workspace_merged");
       expect(ws.send).toHaveBeenCalledTimes(1); // still 1, not 2
