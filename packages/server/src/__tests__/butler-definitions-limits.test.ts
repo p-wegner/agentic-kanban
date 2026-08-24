@@ -27,6 +27,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { createButlerDefinitionsRoute } from "../routes/butler-definitions.js";
 import { MAX_BUTLERS } from "../services/butler-definitions.service.js";
+import type { ButlerDefinition } from "../services/butler-definitions/definitions-store.js";
 import { createTestApp as _createTestApp } from "./helpers/test-app.js";
 
 function createTestApp() {
@@ -65,7 +66,7 @@ describe("Butler definitions — boundary invariants (cap + un-deletable default
   function track(app: TestApp) {
     cleanup = async () => {
       const { butlers } = (await (await listDefinitions(app)).json()) as {
-        butlers: Array<{ id: string }>;
+        butlers: ButlerDefinition[];
       };
       for (const b of butlers) {
         if (b.id !== "default") await deleteDefinition(app, b.id);
@@ -79,7 +80,7 @@ describe("Butler definitions — boundary invariants (cap + un-deletable default
 
     // The store starts with exactly the always-present "default" butler.
     const initial = (await (await listDefinitions(app)).json()) as {
-      butlers: Array<{ id: string }>;
+      butlers: ButlerDefinition[];
       max: number;
     };
     expect(initial.max).toBe(MAX_BUTLERS);
@@ -97,7 +98,7 @@ describe("Butler definitions — boundary invariants (cap + un-deletable default
 
     // We are now exactly AT the cap (default + named ones).
     const atCap = (await (await listDefinitions(app)).json()) as {
-      butlers: Array<{ id: string }>;
+      butlers: ButlerDefinition[];
     };
     expect(atCap.butlers).toHaveLength(MAX_BUTLERS);
 
@@ -105,10 +106,10 @@ describe("Butler definitions — boundary invariants (cap + un-deletable default
     // documented error — and does NOT land in the store.
     const overCap = await createDefinition(app, "One Too Many");
     expect(overCap.status).toBe(400);
-    expect((await overCap.json()).error).toMatch(/at most/i);
+    expect((await overCap.json() as { error: string }).error).toMatch(/at most/i);
 
     const afterRefusal = (await (await listDefinitions(app)).json()) as {
-      butlers: Array<{ id: string }>;
+      butlers: ButlerDefinition[];
     };
     expect(afterRefusal.butlers).toHaveLength(MAX_BUTLERS);
     expect(afterRefusal.butlers.map((b) => b.name)).not.toContain("One Too Many");
@@ -127,10 +128,10 @@ describe("Butler definitions — boundary invariants (cap + un-deletable default
     // Deleting 'default' is REFUSED — it stays present.
     const delDefault = await deleteDefinition(app, "default");
     expect(delDefault.status).toBe(400);
-    expect((await delDefault.json()).error).toMatch(/default butler cannot be deleted/i);
+    expect((await delDefault.json() as { error: string }).error).toMatch(/default butler cannot be deleted/i);
 
     const afterDefaultDelete = (await (await listDefinitions(app)).json()) as {
-      butlers: Array<{ id: string }>;
+      butlers: ButlerDefinition[];
     };
     expect(afterDefaultDelete.butlers.map((b) => b.id)).toContain("default");
 
@@ -141,7 +142,7 @@ describe("Butler definitions — boundary invariants (cap + un-deletable default
     expect(await delNamed.json()).toMatchObject({ ok: true });
 
     const afterNamedDelete = (await (await listDefinitions(app)).json()) as {
-      butlers: Array<{ id: string }>;
+      butlers: ButlerDefinition[];
     };
     const remainingIds = afterNamedDelete.butlers.map((b) => b.id);
     expect(remainingIds).toContain("default");

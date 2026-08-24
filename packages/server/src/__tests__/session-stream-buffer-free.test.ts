@@ -55,7 +55,7 @@ describe("session stream live-subscribe — buffer-free invariant", () => {
     subscribe(SID, ws1);
     subscribe(SID, ws2);
 
-    broadcast(SID, { type: "stdout", data: "live output" });
+    broadcast(SID, { sessionId: SID, type: "stdout", data: "live output" });
     expect(state.messageBuffer.has(SID)).toBe(true);
     expect(state.subscribers.get(SID)!.size).toBe(2);
 
@@ -68,7 +68,7 @@ describe("session stream live-subscribe — buffer-free invariant", () => {
   it("does NOT free the buffer when the LAST subscriber leaves but the session is still live (mutation guard A)", () => {
     const ws1 = fakeWs();
     subscribe(SID, ws1);
-    broadcast(SID, { type: "stdout", data: "still running" });
+    broadcast(SID, { sessionId: SID, type: "stdout", data: "still running" });
 
     // Last subscriber leaves, but no exit message has been buffered yet.
     unsubscribe(SID, ws1);
@@ -84,8 +84,8 @@ describe("session stream live-subscribe — buffer-free invariant", () => {
     subscribe(SID, ws1);
     subscribe(SID, ws2);
 
-    broadcast(SID, { type: "stdout", data: "work" });
-    broadcast(SID, { type: "exit", exitCode: 0 });
+    broadcast(SID, { sessionId: SID, type: "stdout", data: "work" });
+    broadcast(SID, { sessionId: SID, type: "exit", exitCode: 0 });
 
     // Session has exited, but two subscribers are still attached.
     expect(state.messageBuffer.has(SID)).toBe(true);
@@ -103,8 +103,8 @@ describe("session stream live-subscribe — buffer-free invariant", () => {
     subscribe(SID, ws1);
     subscribe(SID, ws2);
 
-    broadcast(SID, { type: "stdout", data: "work" });
-    broadcast(SID, { type: "exit", exitCode: 0 });
+    broadcast(SID, { sessionId: SID, type: "stdout", data: "work" });
+    broadcast(SID, { sessionId: SID, type: "exit", exitCode: 0 });
 
     unsubscribe(SID, ws1);
     expect(state.messageBuffer.has(SID)).toBe(true); // exited but ws2 still here
