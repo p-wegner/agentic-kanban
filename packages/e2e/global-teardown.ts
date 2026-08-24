@@ -111,7 +111,13 @@ async function fallbackCleanupProjects(apiContext: import("@playwright/test").AP
   const orphaned = projects.filter(
     (p) =>
       /^E2E Test Project /.test(p.name) ||
-      /^e2e-project-/.test(p.name) ||
+      // NOTE (#840): there was a third arm here, `/^e2e-project-/.test(p.name)`, added in
+      // c43372de1a as "the temp dir pattern". It tested the wrong FIELD and never matched
+      // anything: global-setup names the project `E2E Test Project ${runId}` (caught by the
+      // arm above) and `ak-e2e-project-*` is only ever a repoPath basename, never a name.
+      // Its intended meaning -- a project whose repo lives in a temp dir -- is exactly what
+      // the repoPath arm below already covers, so it is removed rather than resurrected:
+      // reviving it as a repoPath check would just be a narrower duplicate of that arm.
       normalize(p.repoPath).startsWith(tempPrefix),
   );
   if (orphaned.length > 0) {
