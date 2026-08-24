@@ -1,15 +1,28 @@
 import { test, expect } from "@playwright/test";
-import { writeFileSync, unlinkSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { SERVER_URL } from "./helpers/port.js";
 import { getE2EProject } from "./helpers/e2e-project.js";
 
+/**
+ * One `ak-` directory for this suite's throwaway mock-agent scripts (#840). A loose FILE in
+ * `%TEMP%` is in no swept namespace whatever it is called — the fixture reaper is gated on
+ * `statSync(...).isDirectory()` — and `afterAll` does not run when a Playwright run is killed.
+ * The script BASENAME must still start with `mock-agent` (that is what `isTestMock` in
+ * `agent.service.ts` keys off), which minting inside a directory leaves untouched.
+ */
+let mockAgentDir: string | null = null;
+function mockAgentScriptDir(): string {
+  if (mockAgentDir) return mockAgentDir;
+  mockAgentDir = mkdtempSync(join(tmpdir(), "ak-mock-agent-scripts-"));
+  return mockAgentDir;
+}
+
 test.describe("Output parser verification", () => {
   let projectId: string;
   let statusId: string;
   let previousActiveProjectId: string | null = null;
-  const tmpFiles: string[] = [];
   const createdWorkspaceIds: string[] = [];
   const createdIssueIds: string[] = [];
 
@@ -93,9 +106,8 @@ for (const line of lines) { console.log(line); }
 process.exit(0);
 `;
     // File name includes "mock-agent" so isTestMock detection in agent.service.ts works
-    const tmpPath = join(tmpdir(), `mock-agent-parser-${Date.now()}.mjs`);
+    const tmpPath = join(mockAgentScriptDir(), `mock-agent-parser-${Date.now()}.mjs`);
     writeFileSync(tmpPath, mockAgentScript);
-    tmpFiles.push(tmpPath);
     const agentCmd = `node ${tmpPath.replace(/\\/g, '/')}`;
 
     // Stop the auto-launched session (workspace creation auto-launches claude.exe)
@@ -197,8 +209,11 @@ process.exit(0);
   });
 
   test.afterAll(async ({ request }) => {
-    for (const f of tmpFiles) {
-      try { unlinkSync(f); } catch { /* ignore */ }
+    // One rmSync of the whole `ak-` scratch dir replaces the per-file unlink; whatever it
+    // misses (a killed run never reaches here) the fixture reaper reclaims later.
+    if (mockAgentDir) {
+      try { rmSync(mockAgentDir, { recursive: true, force: true }); } catch { /* ignore */ }
+      mockAgentDir = null;
     }
     for (const id of createdWorkspaceIds) {
       await request.delete(`${SERVER_URL}/api/workspaces/${id}`);

@@ -21,7 +21,7 @@ import { createProjectsRoute } from "../routes/projects.js";
 import { createMockSessionManager } from "./helpers/mocks.js";
 import { createTestApp } from "./helpers/test-app.js";
 
-const TEST_DIR = join(tmpdir(), "health-route-deps-" + process.pid);
+const TEST_DIR = join(tmpdir(), "ak-health-route-deps-" + process.pid);
 
 function touch(relPath: string) {
   const full = join(TEST_DIR, relPath);

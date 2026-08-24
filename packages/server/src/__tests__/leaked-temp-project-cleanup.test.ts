@@ -78,10 +78,13 @@ async function seed(d: TestDb): Promise<Seeded & { livePath: string; leakedTempP
   const ids: Seeded = { liveId: randomUUID(), leakedTempId: randomUUID(), missingNonTempId: randomUUID() };
   const now = new Date().toISOString();
 
-  const livePath = join(tmpdir(), `leaked-cleanup-live-${randomUUID()}`);
+  const livePath = join(tmpdir(), `ak-leaked-cleanup-live-${randomUUID()}`);
   mkdirSync(livePath, { recursive: true });
 
-  // Never created on disk — simulates a temp fixture whose dir was already cleaned up.
+  // TEMP-PREFIX OK: never created on disk — it simulates a temp fixture whose dir was already
+  // cleaned up, so there is nothing for the reaper to sweep and an `ak-` prefix would only
+  // suggest otherwise. The name must stay DISTINCT from the live path above so a failure names
+  // which of the two was mishandled.
   const leakedTempPath = join(tmpdir(), `leaked-cleanup-gone-${randomUUID()}`);
 
   // Missing, but NOT under the OS temp dir — must be reported, never auto-removed.

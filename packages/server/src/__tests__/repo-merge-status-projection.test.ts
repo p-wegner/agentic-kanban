@@ -228,6 +228,8 @@ describe("repo projection — heal pass (#415)", () => {
   it("stamps a vanished repo root as no-work instead of spawning doomed git", async () => {
     await seed({ summaryDirty: true }, { summaryDirty: true });
     // Point the sibling row at a nonexistent path.
+    // TEMP-PREFIX OK: the row is pointed at a path that must NOT exist (the "vanished repo
+    // root" case). Never created on disk, so there is nothing for the reaper to sweep.
     const gonePath = join(tmpdir(), `rms-proj-gone-${randomUUID()}`);
     await db.update(repos).set({ path: gonePath }).where(eq(repos.id, sibRowId));
 

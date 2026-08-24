@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { checkHealthDeps } from "../services/health-deps.service.js";
 
-const TEST_DIR = join(tmpdir(), "health-deps-test-" + process.pid);
+const TEST_DIR = join(tmpdir(), "ak-health-deps-test-" + process.pid);
 
 function touch(relPath: string) {
   const full = join(TEST_DIR, relPath);

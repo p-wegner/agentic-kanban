@@ -1,13 +1,26 @@
 import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
-import { writeFileSync, unlinkSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { SERVER_URL } from "../helpers/port.js";
 
+/**
+ * One `ak-` directory for this suite's throwaway mock-agent scripts (#840). A loose FILE in
+ * `%TEMP%` is in no swept namespace whatever it is called — the fixture reaper is gated on
+ * `statSync(...).isDirectory()` — and `afterAll` does not run when a Playwright run is killed.
+ * The script BASENAME must still start with `mock-agent` (that is what `isTestMock` in
+ * `agent.service.ts` keys off), which minting inside a directory leaves untouched.
+ */
+let mockAgentDir: string | null = null;
+function mockAgentScriptDir(): string {
+  if (mockAgentDir) return mockAgentDir;
+  mockAgentDir = mkdtempSync(join(tmpdir(), "ak-mock-agent-scripts-"));
+  return mockAgentDir;
+}
+
 test.describe("Session History UI", () => {
   let projectId: string;
   let statusId: string;
-  const tmpFiles: string[] = [];
   const createdWorkspaceIds: string[] = [];
   const createdIssueIds: string[] = [];
   let originalProvider = "";
@@ -222,9 +235,8 @@ test.describe("Session History UI", () => {
 
     // Launch and wait for completion (write to temp file to avoid Windows cmd.exe quoting issues)
     const script1 = buildCompletedAgentScript("history test output");
-    const tmp1 = join(tmpdir(), `mock-agent-history-${Date.now()}.mjs`);
+    const tmp1 = join(mockAgentScriptDir(), `mock-agent-history-${Date.now()}.mjs`);
     writeFileSync(tmp1, script1);
-    tmpFiles.push(tmp1);
 
     const launchRes = await request.post(
       `${SERVER_URL}/api/workspaces/${workspaceId}/launch`,
@@ -285,9 +297,8 @@ test.describe("Session History UI", () => {
 
     // Launch and wait for completion (write to temp file to avoid Windows cmd.exe quoting issues)
     const script2 = buildCompletedAgentScript("viewable output");
-    const tmp2 = join(tmpdir(), `mock-agent-output-${Date.now()}.mjs`);
+    const tmp2 = join(mockAgentScriptDir(), `mock-agent-output-${Date.now()}.mjs`);
     writeFileSync(tmp2, script2);
-    tmpFiles.push(tmp2);
 
     const launchRes = await request.post(
       `${SERVER_URL}/api/workspaces/${workspaceId}/launch`,
@@ -327,8 +338,11 @@ test.describe("Session History UI", () => {
   });
 
   test.afterAll(async ({ request }) => {
-    for (const f of tmpFiles) {
-      try { unlinkSync(f); } catch { /* ignore */ }
+    // One rmSync of the whole `ak-` scratch dir replaces the per-file unlink; whatever it
+    // misses (a killed run never reaches here) the fixture reaper reclaims later.
+    if (mockAgentDir) {
+      try { rmSync(mockAgentDir, { recursive: true, force: true }); } catch { /* ignore */ }
+      mockAgentDir = null;
     }
     for (const id of createdWorkspaceIds) {
       await request.delete(`${SERVER_URL}/api/workspaces/${id}`).catch(() => {});

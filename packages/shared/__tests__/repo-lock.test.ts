@@ -382,6 +382,8 @@ describe("repo-lock CONTENDED vs UNAVAILABLE (#230)", () => {
     // The measured #230 trigger: a synthetic repoPath (`/repo-<uuid>`), as several merge
     // tests use. Pre-fix this returned the same `null` as a busy lock, and the caller
     // polled it until vitest's 60s timeout with zero diagnostic output.
+    // TEMP-PREFIX OK: the synthetic #230 repoPath, deliberately never created — its absence
+    // IS the case under test.
     const missing = join(tmpdir(), `repo-lock-230-missing-${Date.now()}`);
     const attempt = attemptRepoLock(missing, "holder");
     expect(attempt.outcome).toBe("unavailable");
@@ -417,6 +419,7 @@ describe("repo-lock CONTENDED vs UNAVAILABLE (#230)", () => {
   });
 
   it("waitForRepoLock FAILS FAST on an unavailable path instead of polling it", async () => {
+    // TEMP-PREFIX OK: as above — a nonexistent path, never created.
     const missing = join(tmpdir(), `repo-lock-230-nowait-${Date.now()}`);
     let sleeps = 0;
     await expect(

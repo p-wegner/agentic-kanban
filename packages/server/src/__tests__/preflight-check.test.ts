@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { preflightCheck, workspaceLaunchPreflight } from "../services/preflight-check.js";
 
-const TEST_DIR = join(tmpdir(), "preflight-test-" + process.pid);
+const TEST_DIR = join(tmpdir(), "ak-preflight-test-" + process.pid);
 
 beforeEach(() => {
   if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });

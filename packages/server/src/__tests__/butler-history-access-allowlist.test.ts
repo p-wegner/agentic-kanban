@@ -91,7 +91,7 @@ const FOREIGN_SID = "foreign-session-B";
 // This is the crisp security setup: the foreign session's file is physically
 // present and readable from THIS project's repoPath, yet the endpoint must still
 // refuse it because membership — not file existence — is the gate.
-const repoPath = join(tmpdir(), `butler-hist-access-${randomUUID()}`);
+const repoPath = join(tmpdir(), `ak-butler-hist-access-${randomUUID()}`);
 const transcriptDir = resolveTranscriptDir(repoPath);
 
 describe("butler.history.access — cross-project transcript allowlist", () => {

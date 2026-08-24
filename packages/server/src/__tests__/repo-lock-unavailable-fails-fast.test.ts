@@ -27,6 +27,8 @@ describe("on-disk repo lock: UNAVAILABLE fails fast (#230)", () => {
   });
 
   it("rejects immediately for a repoPath with no .git, without waiting out the bound", async () => {
+    // TEMP-PREFIX OK: a path that must NOT exist — the assertion is that a repoPath with no
+    // `.git` fails fast instead of polling. Never created, so nothing accumulates.
     const missing = join(tmpdir(), `repo-lock-unavailable-${Date.now()}`);
     let sleeps = 0;
     const startedAt = Date.now();
@@ -48,6 +50,7 @@ describe("on-disk repo lock: UNAVAILABLE fails fast (#230)", () => {
   });
 
   it("surfaces the failure to the MERGE caller as a repo_lock_unavailable WorkspaceError", async () => {
+    // TEMP-PREFIX OK: same as above — a deliberately nonexistent repoPath, never created.
     const missing = join(tmpdir(), `repo-lock-unavailable-merge-${Date.now()}`);
     let ranWork = false;
 

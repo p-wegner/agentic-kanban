@@ -130,7 +130,7 @@ import { deduplicateProjects } from "../services/project-registration.js";
 import { projectChildEdges } from "../repositories/project-registration.repository.js";
 
 function makeGitRepo(): { root: string; sub: string; dispose: () => void } {
-  const root = join(tmpdir(), `dedup-repo-${randomUUID()}`);
+  const root = join(tmpdir(), `ak-dedup-repo-${randomUUID()}`);
   mkdirSync(root, { recursive: true });
   execFileSync("git", ["init", "-q"], { cwd: root });
   const sub = join(root, "packages", "app");
