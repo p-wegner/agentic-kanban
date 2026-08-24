@@ -126,7 +126,7 @@ $miStop    = $menu.Items.Add('Stop')
 $miRestart = $menu.Items.Add('Restart')
 $menu.Items.Add('-') | Out-Null
 $miLog     = $menu.Items.Add('Open log')
-$miStatus  = $menu.Items.Add('Status in a window')
+$miDash    = $menu.Items.Add('Open dashboard (live)')
 $menu.Items.Add('-') | Out-Null
 $miExit    = $menu.Items.Add('Exit tray (worker keeps running)')
 $tray.ContextMenuStrip = $menu
@@ -138,10 +138,16 @@ $miStart.Add_Click({   try { & $svc '-Start' }   catch { } })
 $miStop.Add_Click({    try { & $svc '-Stop' }    catch { } })
 $miRestart.Add_Click({ try { & $svc '-Restart' } catch { } })
 $miLog.Add_Click({ try { if (Test-Path $LogFile) { Start-Process notepad.exe $LogFile } } catch { } })
-$miStatus.Add_Click({
+# Was 'Status in a window', which ran the service script's -Status once in a
+# PowerShell window: correct at the instant you opened it and stale thereafter.
+# Every interesting worker state is a TRANSITION - reconnect backoff, a dispatch
+# arriving, an agent exiting - so a frozen snapshot answered the wrong question.
+# The dashboard streams the same state over SSE instead. Launched via the .vbs so
+# node never flashes a console.
+$miDash.Add_Click({
   try {
-    Start-Process powershell.exe -ArgumentList @(
-      '-NoProfile','-ExecutionPolicy','Bypass','-NoExit','-File',"`"$ServiceScript`"",'-Status')
+    $vbs = Join-Path $PSScriptRoot 'ak-worker-dashboard-launch.vbs'
+    if (Test-Path $vbs) { Start-Process wscript.exe -ArgumentList "`"$vbs`"" }
   } catch { }
 })
 $miExit.Add_Click({
