@@ -9,6 +9,7 @@ import {
   parsePsProcessList,
   parseWmicProcessList,
   safeParsePowerShellJson,
+  shellCommandSpec,
 } from "../services/process-exec.js";
 
 const NETSTAT_SAMPLE = `
@@ -94,6 +95,24 @@ describe("listOsProcesses on a runtime with no ps binary (e.g. node:*-slim Docke
       await expect(listOsProcesses()).resolves.toEqual([]);
     } finally {
       Object.defineProperty(process, "platform", { value: originalPlatform });
+    }
+  });
+});
+
+describe("shellCommandSpec", () => {
+  it("marks the cmd.exe spec verbatim so embedded quotes survive to the child (#111's sibling)", () => {
+    const spec = shellCommandSpec('node x.mjs "C:\path with spaces" --fast');
+    if (process.platform === "win32") {
+      // Without windowsVerbatimArguments, Node escapes the embedded quotes as \" -
+      // an escape cmd.exe does not understand - and every quoted argument reaches
+      // the child with LITERAL quote characters (found live: a plugin's quoted
+      // {{leadingRepoPath}} was rejected as Directory '"C:\..."' does not exist).
+      expect(spec.command).toBe("cmd.exe");
+      expect(spec.args.slice(0, 3)).toEqual(["/d", "/s", "/c"]);
+      expect(spec.windowsVerbatimArguments).toBe(true);
+    } else {
+      expect(spec.command).toBe("/bin/sh");
+      expect(spec.windowsVerbatimArguments).toBe(false);
     }
   });
 });
