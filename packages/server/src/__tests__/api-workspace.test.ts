@@ -33,7 +33,7 @@ describe("Workspaces API", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: "WS test issue", statusId, projectId }),
     });
-    issueId = (await issueRes.json()).id;
+    issueId = (await issueRes.json() as { id: string }).id;
   });
 
   it("POST /api/workspaces merge succeeds after registering a clean temporary repo", async () => {
@@ -253,7 +253,7 @@ describe("Workspaces API", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: "Direct setup test", statusId: directStatusId, projectId: directProjectId }),
     });
-    const directIssueId = (await issueRes.json()).id;
+    const directIssueId = (await issueRes.json() as { id: string }).id;
 
     const res = await app.request("/api/workspaces", {
       method: "POST",
@@ -290,7 +290,7 @@ describe("Workspaces API", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: "Setup fail test", statusId: failStatusId, projectId: failProjectId }),
     });
-    const failIssueId = (await issueRes.json()).id;
+    const failIssueId = (await issueRes.json() as { id: string }).id;
 
     const createRes = await app.request("/api/workspaces", {
       method: "POST",
@@ -334,7 +334,7 @@ describe("Workspaces API", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: "Setup status test", statusId: setupStatusId, projectId: setupProjectId }),
     });
-    const setupIssueId = (await issueRes.json()).id;
+    const setupIssueId = (await issueRes.json() as { id: string }).id;
 
     const createRes = await app.request("/api/workspaces", {
       method: "POST",
@@ -367,7 +367,7 @@ describe("Workspaces API", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ issueId, branch: "feature/get-test" }),
     });
-    const { id } = await createRes.json();
+    const { id } = await createRes.json() as { id: string };
 
     const res = await app.request(`/api/workspaces/${id}`);
     expect(res.status).toBe(200);
@@ -422,7 +422,7 @@ describe("Workspaces API", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ issueId, branch: "feature/patch-test" }),
     });
-    const { id } = await createRes.json();
+    const { id } = await createRes.json() as { id: string };
 
     const res = await app.request(`/api/workspaces/${id}`, {
       method: "PATCH",
@@ -433,7 +433,7 @@ describe("Workspaces API", () => {
 
     // Verify
     const getRes = await app.request(`/api/workspaces/${id}`);
-    const body = await getRes.json();
+    const body = await getRes.json() as { status: string };
     expect(body.status).toBe("idle");
   });
 
@@ -443,7 +443,7 @@ describe("Workspaces API", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ issueId, branch: "feature/bad-status" }),
     });
-    const { id } = await createRes.json();
+    const { id } = await createRes.json() as { id: string };
 
     const res = await app.request(`/api/workspaces/${id}`, {
       method: "PATCH",
@@ -459,7 +459,7 @@ describe("Workspaces API", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ issueId, branch: "feature/delete-test" }),
     });
-    const { id } = await createRes.json();
+    const { id } = await createRes.json() as { id: string };
 
     const res = await app.request(`/api/workspaces/${id}`, { method: "DELETE" });
     expect(res.status).toBe(200);
@@ -477,7 +477,7 @@ describe("Workspaces API", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ issueId, branch: "feature/delete-fk-children" }),
     });
-    const { id } = await createRes.json();
+    const { id } = await createRes.json() as { id: string };
     const now = new Date().toISOString();
     const sessionId = randomUUID();
 

@@ -10,6 +10,7 @@ import { projects, projectStatuses, issues, workspaces, preferences, sessions, i
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createMockSessionManager } from "./helpers/mocks.js";
 import { createWorkspaceService, type GitService } from "../services/workspace.service.js";
+import type { BranchTipAncestryResult } from "@agentic-kanban/shared/lib/git-service";
 import { workspaceServicesService } from "../services/workspace-services.service.js";
 import { activeMerges, MERGE_LOCK_STALE_MS } from "../services/workspace-internals.js";
 import { getWorkspaceDetails } from "../repositories/workspace.repository.js";
@@ -953,7 +954,7 @@ describe("workspace.service", () => {
       const gitService = createFakeGitService({
         getCurrentBranch: vi.fn(async () => "main"),
       });
-      let resolveMerge: (result: { id: string; mergeOutput: string }) => void;
+      let resolveMerge!: (result: { id: string; mergeOutput: string }) => void;
       const inFlight = new Promise<{ id: string; mergeOutput: string }>((resolve) => {
         resolveMerge = resolve;
       });
@@ -1134,7 +1135,7 @@ describe("workspace.service", () => {
       const gitService = createFakeGitService({
         deleteBranch: vi.fn(async () => {}),
         // mergedAt is set but the branch ref is gone (merged + cleaned up) — honor the flag.
-        checkBranchTipIsAncestor: vi.fn(async () => ({ isAncestor: false, branchSha: null, reason: "branch-not-found" })),
+        checkBranchTipIsAncestor: vi.fn(async (): Promise<BranchTipAncestryResult> => ({ isAncestor: false, branchSha: null, reason: "branch-not-found" })),
       });
 
       const service = createWorkspaceService({
@@ -1298,7 +1299,7 @@ describe("workspace.service", () => {
         database: db,
         gitService: createFakeGitService({
           deleteBranch: vi.fn(async () => {}),
-          checkBranchTipIsAncestor: vi.fn(async () => ({ isAncestor: false, branchSha: null, reason: "branch-not-found" })),
+          checkBranchTipIsAncestor: vi.fn(async (): Promise<BranchTipAncestryResult> => ({ isAncestor: false, branchSha: null, reason: "branch-not-found" })),
         }),
         boardEvents: boardEvents as never,
         createBackup: vi.fn(async () => ({})),
@@ -1595,8 +1596,6 @@ describe("workspace.service", () => {
         triggerType: "chat",
         startedAt: now,
         endedAt: now,
-        createdAt: now,
-        updatedAt: now,
       });
       return { wsId, sessionId };
     }
@@ -1690,8 +1689,6 @@ describe("workspace.service", () => {
         triggerType: "chat",
         startedAt: now,
         endedAt: now,
-        createdAt: now,
-        updatedAt: now,
       });
 
       await db.insert(preferences).values({ key: "auto_rebase_on_continue", value: "true", updatedAt: now })
