@@ -7,6 +7,7 @@ import * as realAgentService from "../agent.service.js";
 import { createAgentDispatch, type AgentExecutionService } from "../agent-dispatch.service.js";
 import { getWorkerFleet, resolveWorkerPlacement, WorkerDispatchUnavailableError } from "../worker-fleet.service.js";
 import { updateSessionPlacementReason } from "../../repositories/placement-observability.repository.js";
+import { insertSessionMessages } from "../../repositories/broadcast.repository.js";
 import type { Placement } from "../agent-dispatch.service.js";
 
 /**
@@ -101,8 +102,84 @@ export function createSessionLifecycle(
   const agentService = deps.agentService
     ?? createAgentDispatch({ host: realAgentService, remote: getWorkerFleet().remoteAgentService });
   const launchPreflight = deps.preflight ?? workspaceLaunchPreflight;
+  /**
+   * The launch a session row is a promise of, and the finalizer that keeps the two honest.
+   *
+   * `startSessionInner` inserts the row as `running` and then does ~380 more lines of
+   * fallible, awaited work — provider rotation, devcontainer provisioning, worker
+   * placement — before the spawn. Every throw in that stretch used to escape with the row
+   * still `running`, no pid, no process, no output and no failure record: an agent that
+   * the board believes is working and that does not exist. #876 is one — created 13:24,
+   * zero bytes of output, reaped 15 minutes later by the completion-state reconciler,
+   * which is the only thing that ever noticed and which says nothing when it does.
+   *
+   * So the trace records what the finalizer needs, and `startSession` wraps the whole body
+   * — not just the spawn — in the one failure path. `finalized` makes it idempotent: the
+   * inner catch around the spawn goes through the same finalizer, and the wrapper then
+   * leaves it alone.
+   */
+  interface LaunchTrace {
+    sessionId?: string;
+    workspaceId?: string;
+    provider?: ProviderName;
+    profileName?: string;
+    rowInserted: boolean;
+    finalized: boolean;
+  }
+
+  /**
+   * End an orphaned launch VISIBLY: the reason as a stderr message (so it lands in
+   * `session_messages` and the session output the UI reads), exit code 1 (so the row
+   * classifies as a failure rather than the indeterminate `stopped`/`exitCode=null` that
+   * carries no information), the workspace back to idle, and the profile's launch-failure
+   * record updated so the breaker can count it.
+   */
+  async function failLaunch(trace: LaunchTrace, err: unknown): Promise<void> {
+    if (!trace.rowInserted || trace.finalized || !trace.sessionId) return;
+    trace.finalized = true;
+    const sessionId = trace.sessionId;
+    const reason = errorMessage(err);
+    console.error(`[session] launch failed before the agent produced output: sessionId=${sessionId} reason=${reason}`);
+    await insertSessionMessages(
+      sessionId,
+      [{ type: "stderr", data: `Agent launch failed: ${reason}`, exitCode: null }],
+      trace.provider ?? null,
+      db,
+    ).catch(() => {});
+    await lifecycleRepo.updateSessionStoppedWithStats(
+      sessionId,
+      new Date().toISOString(),
+      "1",
+      JSON.stringify({ launchFailure: { reason, at: new Date().toISOString() } }),
+      db,
+    ).catch(() => {});
+    if (trace.workspaceId) {
+      await lifecycleRepo.updateWorkspaceStatus(trace.workspaceId, "idle", new Date().toISOString(), db)
+        .catch(() => {});
+    }
+    await recordAgentProfileLaunchFailure(db, {
+      provider: trace.provider ?? "claude",
+      profileName: trace.profileName,
+      summary: reason,
+      exitCode: 1,
+      sessionId,
+      workspaceId: trace.workspaceId,
+    }).catch(() => {});
+    teardownSessionState(state, sessionId);
+  }
+
   /** Create a session DB row and launch the agent process. */
   async function startSession(opts: StartSessionOptions): Promise<string> {
+    const trace: LaunchTrace = { rowInserted: false, finalized: false };
+    try {
+      return await startSessionInner(opts, trace);
+    } catch (err) {
+      await failLaunch(trace, err);
+      throw err;
+    }
+  }
+
+  async function startSessionInner(opts: StartSessionOptions, trace: LaunchTrace): Promise<string> {
     const {
       workspaceId, prompt, agentCommand, agentArgs, resumeFromId, multiTurn,
       permissionPromptTool, planMode, resumeWithNewModel, provider, triggerType, profile,
@@ -265,6 +342,13 @@ export function createSessionLifecycle(
       skillName: sessionSkillName,
       stats: JSON.stringify(launchDiagnostics),
     }, db);
+    // From here on a throw would strand this row as `running` with no process behind it,
+    // so the wrapper's finalizer needs enough to end it visibly (see LaunchTrace).
+    trace.sessionId = sessionId;
+    trace.workspaceId = workspaceId;
+    trace.provider = lifecycleProviderName(provider, profile);
+    trace.profileName = profile?.name;
+    trace.rowInserted = true;
     state.sessionProviders.set(sessionId, executor);
 
     // Determine skip_permissions: explicit opt takes priority over global preference.
@@ -667,28 +751,25 @@ export function createSessionLifecycle(
         },
       });
 
-      // Persist PID so hot-reload can detect surviving processes
+      // Persist PID so hot-reload can detect surviving processes.
+      //
+      // AWAITED, not fire-and-forget (#876): `classifySessionLiveness` reads `pid == null`
+      // as "dead, no process was tracked", and the completion-state reconciler then stops
+      // the session and idles the workspace — skipping its own commit-verification guard,
+      // which is written `if (pid && ...)`. Every millisecond this write is outstanding is
+      // a window in which a healthy, just-spawned agent can be reaped. The write is a
+      // single indexed UPDATE on the local DB; awaiting it costs nothing worth the race.
       if (proc.pid) {
-        lifecycleRepo.updateSessionPid(sessionId, proc.pid, db)
+        await lifecycleRepo.updateSessionPid(sessionId, proc.pid, db)
           .catch((err) => console.error("Failed to store session pid:", err));
       }
     } catch (err) {
-      await recordAgentProfileLaunchFailure(db, {
-        provider: lifecycleProviderName(provider, profile),
-        profileName: profile?.name,
-        summary: errorMessage(err),
-        exitCode: 1,
-        sessionId,
-        workspaceId,
-      }).catch(() => {});
-      // Clean up zombie session state if launch failed
-      state.sessionContexts.delete(sessionId);
-      state.turnStates.delete(sessionId);
-      state.sessionProviders.delete(sessionId);
-      state.sessionSubstantiveOutput.delete(sessionId);
-      state.sessionExitHandled.delete(sessionId);
-      await lifecycleRepo.updateSessionStoppedNoStats(sessionId, new Date().toISOString(), db)
-        .catch(() => {});
+      // One finalizer for both halves of the launch (#876). This used to do its own
+      // cleanup, and it left the same uninformative row the orphan path did: status
+      // `stopped`, `exitCode` NULL, no stderr, workspace never reset. `failLaunch` writes
+      // the reason where the UI reads it and marks the trace finalized, so the wrapper
+      // does not finalize a second time on the rethrow below.
+      await failLaunch(trace, err);
       // A strict-dispatch refusal can also surface at LAUNCH time (#245): the
       // worker vanished between placement and assign and the dispatch proxy
       // refused the host fallback. Same CONFLICT shape as the placement-time

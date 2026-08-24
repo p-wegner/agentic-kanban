@@ -6,6 +6,7 @@ import { workspaceHasCommittedWork } from "../services/workspace-commits.js";
 import { isPidAlive } from "../lib/pid.js";
 import { classifySessionLiveness, type LivenessVerdict } from "../services/remote-session-liveness.js";
 import { probeRemoteSessionLiveness } from "../services/fleet-liveness-probe.js";
+import { insertSessionMessages } from "../repositories/broadcast.repository.js";
 
 /** How long a workspace must be in 'active' with a live PID before we reconcile it (hung agent). */
 const HUNG_AGENT_THRESHOLD_MS = 30 * 60 * 1000;
@@ -201,9 +202,23 @@ export async function reconcileCompletionStates(
       `[reconciler] stale session detected: sessionId=${c.sessionId} workspaceId=${c.workspaceId} reason=${reason}`,
     );
 
+    // Say so where the session is READ, not only in the server console (#876). This sweep
+    // is frequently the only thing that ever notices a session that produced nothing — a
+    // launch that died before the spawn leaves a row with no pid, no output and no exit —
+    // and stopping it silently is what makes the workspace look like an agent ran and had
+    // nothing to say. The reason goes in as a stderr message so it reaches the session
+    // output the UI renders, and the exit code stops being NULL so the row classifies as
+    // a failure instead of an indeterminate stop.
+    await insertSessionMessages(
+      c.sessionId,
+      [{ type: "stderr", data: `Session reconciled by the board, not by the agent: ${reason}`, exitCode: null }],
+      null,
+      database,
+    ).catch(() => {});
+
     await database
       .update(sessions)
-      .set({ status: "stopped", endedAt: now })
+      .set({ status: "stopped", endedAt: now, exitCode: "1" })
       .where(eq(sessions.id, c.sessionId));
 
     await setWorkspaceStatus(database, c.workspaceId, "idle", { now });
