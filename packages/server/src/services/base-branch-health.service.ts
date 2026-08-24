@@ -17,7 +17,7 @@ import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 // listener pins the same way — and a phantom EADDRINUSE here is worse, because it is
 // recorded as "the base is red" and then withholds every branch's merge.
 import { VERIFY_NEUTRALIZED_LISTENER_ENV } from "../lib/verify-env.js";
-import { cloneBranchTo, getMergeBase, revParse } from "@agentic-kanban/shared/lib/git-service";
+import { cloneBranchTo, getMergeBase, revParse, isAncestor } from "@agentic-kanban/shared/lib/git-service";
 import type { Database } from "../db/index.js";
 import { getPreference, setPreference } from "../repositories/preferences.repository.js";
 import { getProjectById } from "../repositories/project.repository.js";
@@ -286,6 +286,14 @@ export interface BaseBranchHealthAtMergeBase {
   mergeBaseSha?: string;
   /** The recorded health row for that sha, when one was ever recorded. */
   health: Awaited<ReturnType<typeof getBaseBranchHealthForSha>> | Awaited<ReturnType<typeof getLatestBaseBranchHealth>>;
+  /**
+   * The sha `health` was actually recorded at — `health.sha` lifted to the top level so a
+   * caller can render freshness without reaching into the row (and so it's still present
+   * even if `health` itself later grows optional fields). Absent exactly when `health` is.
+   */
+  recordedSha?: string;
+  /** How old `health` was at resolution time (`Date.now() - health.createdAt`, or the injected `nowMs`). */
+  ageMs?: number;
 }
 
 /**
@@ -295,6 +303,18 @@ export interface BaseBranchHealthAtMergeBase {
  * merge-base sha itself was never verified (e.g. a scheduled/post-merge check runs less often
  * than commits land), so a caller can still say "the base was red as of the last check" rather
  * than nothing at all.
+ *
+ * The fallback is order-checked (#886): a `latest` row recorded at some sha A is only presented
+ * when A is an ANCESTOR of the branch's merge-base — i.e. the branch was built at or after A. A
+ * `latest` row can otherwise be OLDER than the branch (recorded before the base was rebased past
+ * a fix, e.g. a red row at sha A that a later fix at sha B superseded, with the branch built on
+ * B) — presenting it would put a stale, possibly-red verdict on a branch built past the fix. When
+ * ancestry can't be confirmed, the result reports the health as unknown (`health: null`) rather
+ * than risk a false red — a false red withholds every merge on the project, which is worse than
+ * no answer.
+ *
+ * `nowMs` is epoch ms for the pure age arithmetic below (not persisted), hence the `nowMs?:
+ * number` spelling rather than `now`.
  */
 export async function getBaseBranchHealthAtMergeBase(
   projectId: string,
@@ -302,14 +322,49 @@ export async function getBaseBranchHealthAtMergeBase(
   branchRef: string,
   baseRef: string,
   database: Database,
+  nowMs?: number,
 ): Promise<BaseBranchHealthAtMergeBase> {
   const mergeBaseSha = await getMergeBase(workingDir, branchRef, baseRef);
   if (mergeBaseSha) {
     const atMergeBase = await getBaseBranchHealthForSha(projectId, mergeBaseSha, database);
-    if (atMergeBase) return { mergeBaseSha, health: atMergeBase };
+    if (atMergeBase) {
+      return {
+        mergeBaseSha,
+        health: atMergeBase,
+        recordedSha: atMergeBase.sha,
+        ageMs: ageMsOf(atMergeBase.createdAt, nowMs),
+      };
+    }
   }
   const latest = await getLatestBaseBranchHealth(projectId, database);
-  return { mergeBaseSha, health: latest };
+  if (latest && mergeBaseSha) {
+    // Only present `latest` when it's actually an ancestor of (i.e. recorded at or before)
+    // the branch's merge-base. `isAncestor` never throws, but wrap defensively anyway: a
+    // git failure here must degrade to "unknown", never to presenting an unverified row as
+    // this branch's health.
+    const ancestor = await isAncestor(workingDir, latest.sha, mergeBaseSha).catch(() => false);
+    if (!ancestor) return { mergeBaseSha, health: null };
+  }
+  return {
+    mergeBaseSha,
+    health: latest,
+    recordedSha: latest?.sha,
+    ageMs: latest ? ageMsOf(latest.createdAt, nowMs) : undefined,
+  };
+}
+
+/** Pure age arithmetic (#886) — `nowMs?: number` per the repo's time-injection convention. */
+function ageMsOf(createdAtIso: string, nowMs?: number): number {
+  return (nowMs ?? Date.now()) - new Date(createdAtIso).getTime();
+}
+
+/** Render an age in ms as a short human string (`"45m"`, `"3h"`, `"2d"`). */
+function formatAge(ms: number): string {
+  const minutes = Math.max(0, Math.round(ms / 60_000));
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours}h`;
+  return `${Math.round(hours / 24)}d`;
 }
 
 /**
@@ -322,18 +377,19 @@ export async function getBaseBranchHealthAtMergeBase(
  * green — leaving the caller's own message untouched.
  */
 export function describeRedBaseAttribution(info: BaseBranchHealthAtMergeBase): string | null {
-  const { health, mergeBaseSha } = info;
+  const { health, mergeBaseSha, ageMs } = info;
   if (!health || health.outcome === "green") return null;
+  const ageNote = ageMs !== undefined ? `, checked ${formatAge(ageMs)} ago` : "";
   // "unverified" means the probe could not even prepare the clone (#674). Saying
   // "BASE BRANCH ALREADY UNVERIFIED" reads as an accusation against the base; it is
   // an admission about the probe, and the caller's own failure stands unattributed.
   if (health.outcome === "unverified") {
-    return `BASE BRANCH HEALTH UNKNOWN (${health.sha.slice(0, 8)}) — the base was never verified, so this failure is NOT attributed to it. `
+    return `BASE BRANCH HEALTH UNKNOWN (${health.sha.slice(0, 8)}${ageNote}) — the base was never verified, so this failure is NOT attributed to it. `
       + `Probe result: ${health.message ?? "unverified"}`;
   }
   const shaNote = mergeBaseSha && mergeBaseSha === health.sha
-    ? `at the branch's merge-base (${health.sha.slice(0, 8)})`
-    : `as of the last check (${health.sha.slice(0, 8)}${mergeBaseSha ? `, merge-base is ${mergeBaseSha.slice(0, 8)}` : ""})`;
+    ? `at the branch's merge-base (${health.sha.slice(0, 8)}${ageNote})`
+    : `as of the last check (${health.sha.slice(0, 8)}${ageNote}${mergeBaseSha ? `, merge-base is ${mergeBaseSha.slice(0, 8)}` : ""})`;
   return `BASE BRANCH ALREADY ${health.outcome.toUpperCase()} ${shaNote} — this failure may not be caused by this branch. `
     + `Base verify result: ${health.message ?? `outcome ${health.outcome}`}`;
 }
