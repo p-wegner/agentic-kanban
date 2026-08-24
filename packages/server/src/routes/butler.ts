@@ -8,6 +8,7 @@ import { homedir } from "node:os";
 import { streamSSE } from "hono/streaming";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
+import { butlerMessageBody, butlerAskBody, butlerAnswerBody } from "./butler-body-schemas.js";
 import { setPreference } from "../repositories/preferences.repository.js";
 import { deleteRuntimeState, getRuntimeState, setRuntimeState } from "../repositories/runtime-state.repository.js";
 import { getProjectById } from "../repositories/project.repository.js";
@@ -518,10 +519,7 @@ export function createButlerRoute(
   router.post("/:id/butler/message", async (c) => {
     const projectId = c.req.param("id");
     const butlerId = resolveButlerId(c);
-    const body = await parseJsonBody<{ content: string }>(c);
-    if (!body.content?.trim()) {
-      return c.json({ error: "content is required" }, 400);
-    }
+    const body = await parseJsonBody(c, butlerMessageBody);
     if (!getButlerSession(projectId, butlerId).active) {
       const session = await startSession(projectId, butlerId);
       if (!session) return c.json({ error: "Project not found" }, 404);
@@ -537,12 +535,8 @@ export function createButlerRoute(
   router.post("/:id/butler/answer", async (c) => {
     const projectId = c.req.param("id");
     const butlerId = resolveButlerId(c);
-    const body = await parseJsonBody<{ askId?: string; answers?: ButlerQuestionAnswer[] }>(c);
-    const askId = body.askId?.trim();
-    if (!askId) return c.json({ error: "askId is required" }, 400);
-    if (!Array.isArray(body.answers) || body.answers.length === 0) {
-      return c.json({ error: "answers is required" }, 400);
-    }
+    const body = await parseJsonBody(c, butlerAnswerBody);
+    const askId = body.askId;
     const answers: ButlerQuestionAnswer[] = body.answers
       .filter((a) => typeof a?.question === "string" && Array.isArray(a?.answers))
       .map((a) => ({
@@ -565,10 +559,7 @@ export function createButlerRoute(
   router.post("/:id/butler/ask", async (c) => {
     const projectId = c.req.param("id");
     const butlerId = resolveButlerId(c);
-    const body = await parseJsonBody<{ content: string; timeoutMs?: number }>(c);
-    if (!body.content?.trim()) {
-      return c.json({ error: "content is required" }, 400);
-    }
+    const body = await parseJsonBody(c, butlerAskBody);
     if (!getButlerSession(projectId, butlerId).active) {
       const session = await startSession(projectId, butlerId);
       if (!session) return c.json({ error: "Project not found" }, 404);

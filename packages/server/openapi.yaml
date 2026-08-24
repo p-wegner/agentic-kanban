@@ -5095,6 +5095,11 @@ paths:
                 answers:
                   type: array
                   items: {}
+              required:
+                - askId
+                - answers
+              additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -5141,6 +5146,8 @@ paths:
                   type: number
               required:
                 - content
+              additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -5148,7 +5155,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error
+          description: Error (thrown HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -5278,6 +5285,8 @@ paths:
                   type: string
               required:
                 - content
+              additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -5285,7 +5294,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error
+          description: Error (thrown HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -7323,6 +7332,8 @@ paths:
                   nullable: true
               required:
                 - target
+              additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "201":
           description: Success
@@ -7330,7 +7341,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          description: Error (thrown BAD_REQUEST, HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -7685,6 +7696,8 @@ paths:
                   nullable: true
               required:
                 - name
+              additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "201":
           description: Success
@@ -7692,7 +7705,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          description: Error (thrown BAD_REQUEST, HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -8038,8 +8051,10 @@ paths:
               properties:
                 name:
                   type: string
+                  minLength: 1
                 projectId:
                   type: string
+                  minLength: 1
                 description:
                   type: string
                 prompt:
@@ -8055,6 +8070,8 @@ paths:
               required:
                 - name
                 - projectId
+              additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "201":
           description: Success
@@ -8062,7 +8079,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          description: Error (thrown BAD_REQUEST, HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
