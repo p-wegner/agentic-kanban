@@ -3,6 +3,121 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## Master went red from the direct-master path, and the guard set's own rule was wrong (2026-08-24)
+
+**Pushed: `457b416fcf`, `5decd67cb9`, `0b343da703`, `5c82d26f35`, `a8b211c0bb`.**
+
+### What happened
+
+#846's pre-merge gate took 22 minutes and failed, and it was not #846's fault. **Master itself
+was red on six guard suites**, from three commits that landed *directly on master* the same day
+(15:08, 15:46, 17:42) — a path that runs no pre-merge gate at all. The bill lands on whoever
+merges next, which is how a branch gets blamed for a base it did not break.
+
+All six are fixed. The two most instructive:
+
+- **`stop-hook-chain-ordering.test.ts`** matched a Stop check by the exact literal
+  `"TypeScript typecheck"`. `9e60a3987c` renamed it to `"Typecheck (edited packages only)"`, so
+  `indexOf` returned -1 and an ordering guard went red while the ordering it guards was still
+  perfectly correct. Now matched on WHAT each check is (`/typecheck/i`), not its prose label.
+- **`issue-number-single-source.test.ts`** ran its exclusion segment test against the ABSOLUTE
+  path. Worktrees live under `<parent>/.worktrees/…`, so inside one *every* path contains a
+  `.worktrees` segment, the whole tree was excluded, and the anti-vacuity assertion failed. Now
+  relative to `REPO_ROOT`. Same shape as #885's CRLF: **a suite whose subject is the checkout
+  behaves differently depending on which checkout it runs in.**
+
+### The always-run guard set: the rule had six implementations and all six were wrong
+
+`@gate:always-run` decides which suites run for every diff. "Is this suite marked?" was
+`source.includes("@gate:always-run")` in **six independent places** — the runner, the gate's
+"+N guard suites" number, and four checks inside the marker ratchet. A substring match cannot
+tell a marker from a sentence about markers, or from the string held as fixture data.
+
+Two suites were force-run on that basis, and they were **the two that guard this mechanism**:
+`guard-suite-count.test.ts` (marker in a `const MARKER`) and `test-mine-scope-derivation.test.mjs`
+(fixture text that exists to assert a non-test file carrying the marker is *ignored*). The
+scanner was matching a string whose whole purpose is to describe what it should skip. Benign in
+outcome, load-bearing for the wrong reason: rewriting that constant as `"// @gate:" + "always-run"`
+would have dropped the mechanism's own guards out of every gate with nothing to fail on it.
+
+The worst instance was in the ratchet, where the exemption ran BEFORE the unsound-signature scan
+— so a tree-scanning suite that merely quoted the marker got a free pass from the ratchet built
+to catch unmarked scanners.
+
+**Fixed in `a8b211c0bb`.** Six implementations → two, plus the filename predicate (a seventh
+copy, already spelled differently on each side, harmless so far) folded in.
+
+**Two and not one, deliberately — do not "finish the job":**
+- It **cannot** live in `packages/shared`. `scripts/test-mine.mjs` runs under bare `node` with no
+  build step and imports only Node built-ins; depending on a built `shared/dist` would break it
+  in worktrees, which have none. A runner that cannot run until something is built is a bootstrap
+  problem.
+- `pre-merge-gate-tier.ts` **cannot** import the script: `packages/server` ships only `dist/`, so
+  a published install would crash on load.
+
+Two is the packaging floor. They are held to the same **rule** by fixtures in
+`always-run-dirs-lockstep.test.ts` (which previously held only the same *directories*), not to
+the same text by comment.
+
+### Verified, and by what check
+
+- **Count 152 → 150 → 152.** The 150 is the fix working *before* the pairing, and it confirmed
+  the two matched-by-mention files were exactly the predicted ones. Both counters agree at 152
+  post-fix (`scanAlwaysRunTests` and `countAlwaysRunGuardSuites`, the latter called on the real
+  repo).
+- **Matcher bite-proved in both directions**, 9 cases: plain / trailing-rationale / em-dash /
+  indented / after-block-comment match; const-fixture / fixture-data / prose-mention /
+  inside-a-block-comment do not.
+- **`pnpm gate:always-run` run in full**: the gate reports `152 @gate:always-run suite(s) across
+  4 package(s)`, workers capped at 4. **Run in full at `a8b211c0bb`: exit 0, all 152 pass (shared 25 / server 112 / mcp-server 3 / client 12; 1,002 tests), in 2m16s.** So the previously-unmeasured `~2 min` was accurate, and #889 lands in its cheapest band -- the gate is affordable enough to run per commit group, which is exactly what the skill already tells you to do.
+- `pnpm typecheck` clean.
+
+### The doc that instructed the command could not see a fifth of it
+
+`direct-master/SKILL.md` advertised the set as `~131`. That number came from
+`grep -rl "@gate:always-run" packages/*/src`, which **structurally cannot see `packages/shared`**
+— shared's suites live at `__tests__`, not `src/__tests__`, which is exactly what
+`ALWAYS_RUN_TESTS_DIR` exists to encode. 25 suites, ~20% of the set, invisible. Fixed to 152 in
+`5c82d26f35`, in both the `.claude` and `.codex` copies.
+
+The `~2 min at --maxWorkers=4` alongside it was never measured on this box; it is now labelled
+unverified rather than repeated as fact.
+
+**Lesson, and it recurred three times tonight:** *derive the set from the code that consumes it.*
+Any hand-written glob re-implements `ALWAYS_RUN_TESTS_DIR`'s mapping and gets it wrong.
+
+### Filed, not fixed
+
+- **#892** — skills are materialized into a worktree at **provisioning time only**. Nothing
+  re-materializes on resume, so `workspace resume` relaunches the agent into the stale copy: the
+  one operation whose whole purpose is "pick this back up later" guarantees the pickup uses the
+  older contract. Verified: `launchSession`'s only two `skill` references just label returned
+  session rows. Same seam as the worktree's generated `CLAUDE.local.md`.
+- **#893** — a ~5-second `tsx watch` restart discarded a **39-minute** gate run. Self-inflicted
+  and reproduced with timings: a `direct-master` edit to server source at 20:14/20:15 restarted
+  the backend, and #846's merge returned 503 after 2364s. **#144 is Done and names the same root
+  cause, but its fixes (`aa5436854b`, `8143a7f4a6`) hardened the WebSocket path only** — a merge
+  is an ordinary HTTP POST with no retry. Structural on this board: `direct-master` tells agents
+  to commit constantly, and a merge holds an HTTP request open for 20–42 minutes. The advice that
+  makes merges possible is what makes them fail.
+- **#890** — the cross-worktree guard blocks a command that only MENTIONS a worktree path. Same
+  substring-vs-semantics shape as the above.
+- **#854** (comment) — the stub-DB diagnostic ends with `Delete it`, naming the one file this
+  repo's hardest constraint forbids touching. The #165 floor works; the remediation line points
+  an agent straight at a blocked command.
+
+### Open / next
+
+- **#846 is still unmerged** (idle, `mergedAt: null`). Do not re-fire it while editing server
+  source — see #893.
+- **#889** is re-scoped from "build a cheap check" to "why was the existing one not run":
+  `pnpm gate:always-run` already existed (#817) and three commits broke master through that path
+  without it running. One established cause: **a long session holds a snapshot of its skills** —
+  the session that made those commits was created 5h43m before `bbec7e6393` added the
+  `gate:always-run` instruction, so it followed the skill faithfully and still never saw the step.
+- Board reality check: **875 issues total, 54 open** (39 Todo, 8 In Progress, 4 In Review,
+  3 Backlog) — not 875 open, which an earlier filter on a non-existent `status` field implied.
+
 ## Hook strategy: a bounded local smoke, not a correctness gate (2026-08-24)
 
 **Nothing pushed.** Follows directly from the section below — that one removed the per-edit

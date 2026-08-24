@@ -34,7 +34,7 @@ Rules of thumb: board = slow but safe and best traceable; worktree subagents nex
 
 The dominant cost of landing tickets this way is not writing the code — it is re-running
 the same expensive gates for each ticket. Measured in this repo: `pnpm check:arch` ~1 min,
-`pnpm gate:always-run` unmeasured (#889), the full client suite ~35–95 s, a full `pnpm typecheck`
+`pnpm gate:always-run` 2m16s (measured), the full client suite ~35–95 s, a full `pnpm typecheck`
 ~30–60 s, and `pnpm test:mine` 26–42 min. Eight tickets landed one-at-a-time pay all of
 that eight times over, and the runs are near-identical because the tickets touch the same
 packages.
@@ -93,9 +93,9 @@ deferring the *expensive* gates safe.
 
 ### `pnpm gate:always-run` — the guard set the merge path runs and this path does not
 
-The `@gate:always-run` suites (152 of them at `0b343da703` — counted by calling
-`scanAlwaysRunTests` itself, since a grep over `packages/*/src` undercounts by missing shared's
-25; wall-clock unmeasured, see #889) are the ratchets and
+The `@gate:always-run` suites (152 of them, and **2m16s wall-clock at `--maxWorkers=4`** —
+both measured 2026-08-24 at `a8b211c0bb`, the count by calling `scanAlwaysRunTests` itself
+since a grep over `packages/*/src` undercounts by missing shared's 25) are the ratchets and
 tree scanners that assert a property of the whole repo without importing what they check: the
 nloc rings, the spelling ratchets, the parity and single-source guards, the skill/doc
 invariants. They are forced to run by `pre-merge-gate.service.ts` — **on a merge**. A commit
