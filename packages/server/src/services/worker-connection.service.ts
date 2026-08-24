@@ -45,6 +45,20 @@ interface WorkerConnection {
   ws: WSContext;
   runningSessionIds: Set<string>;
   /**
+   * When each running session last said anything (sessionId -> epoch ms).
+   *
+   * The running half of a worker's load used to have no liveness bound at all: a
+   * session entered it on its first event and left it ONLY on an `exit` frame. So an
+   * agent that spoke once and then hung — zombied, or never reaped by the worker —
+   * kept occupying a slot for the whole life of that socket, and on a
+   * `maxConcurrency: 4` worker four of them made the worker permanently ineligible
+   * (#883). A `hello` cures it, but only on reconnect; nothing bounded it in between.
+   *
+   * This is the same reasoning #248 already applied to `pendingSessionIds` — it was
+   * simply never carried across to the set beside it.
+   */
+  lastEventAt: Map<string, number>;
+  /**
    * Sessions ASSIGNED to this worker that have not reported anything yet
    * (sessionId -> expiry epoch ms). Board-side load used to be derived purely
    * from worker events, so an `assign` counted as zero until the agent's first
@@ -61,6 +75,21 @@ interface WorkerConnection {
  * first output; short enough that a lost assignment frees the slot on its own.
  */
 export const PENDING_ASSIGN_TTL_MS = 10 * 60 * 1000;
+
+/**
+ * How long a RUNNING session may be silent before it stops counting against its
+ * worker's capacity (#883).
+ *
+ * Deliberately far longer than `PENDING_ASSIGN_TTL_MS`, and the asymmetry is the
+ * point. A pending session has produced nothing, so expiring one early costs a
+ * re-dispatch. A running session is a live agent that may legitimately say nothing
+ * for a long stretch — a cold dependency install, a full test suite, a long think —
+ * and evicting a LIVE session from the count causes OVER-dispatch, which is strictly
+ * worse than the under-dispatch this bound exists to fix. Two hours is chosen to sit
+ * above any plausible legitimate silence rather than to detect a zombie quickly:
+ * this is a backstop, not a health check.
+ */
+export const RUNNING_SESSION_SILENCE_TTL_MS = 2 * 60 * 60 * 1000;
 
 export function createWorkerConnectionManager(registry: WorkerRegistry) {
   const connections = new Map<string, WorkerConnection>();
@@ -91,7 +120,12 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
       );
       try { existing.ws.close(); } catch { /* already gone */ }
     }
-    connections.set(workerId, { ws, runningSessionIds: new Set(), pendingSessionIds: new Map() });
+    connections.set(workerId, {
+      ws,
+      runningSessionIds: new Set(),
+      lastEventAt: new Map(),
+      pendingSessionIds: new Map(),
+    });
     console.log(`[worker-connection] worker connected: id=${workerId}`);
     for (const listener of connectListeners) {
       try { listener(workerId); } catch (err) { console.error(`[worker-connection] connect-listener error`, err); }
@@ -111,10 +145,20 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
         // board-side guess, so the pending set is reconciled away entirely.
         conn.runningSessionIds = new Set(message.runningSessionIds);
         conn.pendingSessionIds.clear();
+        // The declaration is itself the freshest thing we know about each of them,
+        // so the silence clock restarts here — otherwise a reconnect would inherit
+        // an already-expired stamp and evict a session the worker just vouched for.
+        const declaredAt = Date.now();
+        conn.lastEventAt = new Map(message.runningSessionIds.map((id) => [id, declaredAt]));
       } else if (message.type === "event") {
         conn.pendingSessionIds.delete(message.event.sessionId);
-        if (message.event.type === "exit") conn.runningSessionIds.delete(message.event.sessionId);
-        else conn.runningSessionIds.add(message.event.sessionId);
+        if (message.event.type === "exit") {
+          conn.runningSessionIds.delete(message.event.sessionId);
+          conn.lastEventAt.delete(message.event.sessionId);
+        } else {
+          conn.runningSessionIds.add(message.event.sessionId);
+          conn.lastEventAt.set(message.event.sessionId, Date.now());
+        }
       } else if (message.type === "assign_failed") {
         conn.pendingSessionIds.delete(message.sessionId);
         // Say what KIND of failure this is on the line an operator actually reads
@@ -215,7 +259,26 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
     for (const [sessionId, expiresAt] of conn.pendingSessionIds) {
       if (expiresAt <= now) conn.pendingSessionIds.delete(sessionId);
     }
-    return [...new Set([...conn.runningSessionIds, ...conn.pendingSessionIds.keys()])];
+    // A running session that has said nothing for RUNNING_SESSION_SILENCE_TTL_MS stops
+    // counting (#883). It is NOT removed from `runningSessionIds`: that set is the
+    // worker's own declaration of what it holds, and the board is in no position to
+    // contradict it — this only says the board will no longer let it pin capacity.
+    const silent: string[] = [];
+    for (const sessionId of conn.runningSessionIds) {
+      const lastSeen = conn.lastEventAt.get(sessionId);
+      if (lastSeen !== undefined && now - lastSeen >= RUNNING_SESSION_SILENCE_TTL_MS) {
+        silent.push(sessionId);
+      }
+    }
+    if (silent.length > 0) {
+      console.warn(
+        `[worker-connection] not counting ${silent.length} silent session(s) against worker=${workerId} capacity: ` +
+          `${silent.join(", ")} — each has been quiet for over ${Math.round(RUNNING_SESSION_SILENCE_TTL_MS / 60000)}m ` +
+          `with no exit frame. The worker still reports holding them; if this is wrong, the agent is hung and never reaped.`,
+      );
+    }
+    const counted = [...conn.runningSessionIds].filter((id) => !silent.includes(id));
+    return [...new Set([...counted, ...conn.pendingSessionIds.keys()])];
   }
 
   /** Subscribe to all worker messages; returns an unsubscribe. */
