@@ -38,6 +38,7 @@ import { VERIFY_SCRIPT_TIMEOUT_MS } from "./verify-budget.js";
 // #221/#490's failure-message shaping lives in its own module now (this file crossed the
 // 1000-line god-module ceiling). Re-exported below so its importers are unchanged.
 import { summarizeVerifyFailure } from "./verify-failure-summary.js";
+import { VERIFY_NEUTRALIZED_LISTENER_ENV } from "../lib/verify-env.js";
 
 /**
  * Default verify-gate timeout (#192). The verify gate runs a full build+test suite in a
@@ -402,6 +403,10 @@ export async function runPreMergeGate(
       ...gradleEnv,
       AGENTIC_KANBAN_DIR: gateDataDir,
       KANBAN_TEST_MAX_WORKERS: String(gateMaxWorkers),
+      // A board with a fleet configured holds its git/fleet sockets while the gate runs;
+      // inheriting those pins makes any suite that opens a listener die with EADDRINUSE and
+      // blames the branch for it. See lib/verify-env.ts.
+      ...VERIFY_NEUTRALIZED_LISTENER_ENV,
     };
     // #278 tier 1: narrow the test half from "every suite in the touched packages" to
     // "every suite that imports the changed files". `KANBAN_TEST_PACKAGES` is
