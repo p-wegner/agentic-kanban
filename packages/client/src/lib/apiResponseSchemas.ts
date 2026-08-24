@@ -36,11 +36,19 @@
  * once — ~200 call sites did not have to be edited, and a new caller is covered the day it
  * is written.
  *
- * Scope, stated plainly: this covers the MUTATING endpoints of the three core resources
- * (issues, workspaces, projects) plus the two reads next to them: 17 method+path pairs of
- * the 352 operations the generated spec lists. It is NOT the whole surface.
- * An unregistered path is returned unchecked through the single named seam in `apiFetch`
+ * Scope, stated plainly: 36 method+path pairs. It is NOT the whole surface. An unregistered
+ * path is returned unchecked through the single named seam in `apiFetch`
  * (`unvalidatedResponse`). `API_RESPONSE_SCHEMA_COUNT` is the number to quote.
+ *
+ * The number that says how far this has to go is NOT 352 (the operations in the generated
+ * OpenAPI spec — most of which only the MCP server, the CLI or a fleet worker ever calls, and
+ * which nothing here can cover, because this registry only runs inside `apiFetch`). It is the
+ * 257 method+path pairs the CLIENT actually calls, derived from source by
+ * `__tests__/api-response-validation-ratchet.test.ts`. That suite is shrink-only: every
+ * endpoint not registered here is written down in its baseline, a new unregistered endpoint
+ * fails it, and a baseline line whose endpoint has since been registered fails it too. The
+ * registry sat at #780's original 17 for five #806 batches precisely because no such gate
+ * existed; do not add an endpoint to the client without answering to it.
  *
  * Schemas assert the INVARIANTS THE CLIENT CONSUMES, not whole DTOs: the fields a caller
  * would crash on, at the loosest type that is still meaningful (`str` for an id, not an
@@ -150,6 +158,34 @@ function looseObject(shape: Record<string, Check<unknown>>): ObjectSchema {
   return objectSchema(shape);
 }
 
+/**
+ * A response whose ROOT is a JSON array of objects (#806).
+ *
+ * `objectSchema` rejects an array outright, so before this existed the registry could not
+ * describe a list endpoint at all — and list endpoints are most of the client's reads. That
+ * limitation is a large part of why the registry stopped at the mutating endpoints of three
+ * resources: not a judgement that lists did not matter, but that there was nothing to write.
+ *
+ * Each element is checked with the element schema and reported by index, so a single bad row
+ * in a long list names its position instead of failing anonymously.
+ */
+function arrayRoot(item: ObjectSchema): ObjectSchema {
+  return {
+    fields: {},
+    validate(value, issues) {
+      if (!Array.isArray(value)) {
+        issues.push(`<root>: expected array, got ${describe(value)}`);
+        return;
+      }
+      value.forEach((element, index) => {
+        const elementIssues: string[] = [];
+        item.validate(element, elementIssues);
+        for (const issue of elementIssues) issues.push(`[${index}].${issue}`);
+      });
+    },
+  };
+}
+
 /** Accepts a value matching ANY arm; reports every arm's problems when none matches. */
 function union(...arms: ObjectSchema[]): ObjectSchema {
   return {
@@ -223,6 +259,56 @@ const projectHandle = looseObject({ id: str, name: str });
 const successFlag = looseObject({ success: bool });
 const sessionHandle = looseObject({ sessionId: str });
 
+/** `{ id }` — every service that answers a mutation with a bare handle (`archiveProject`,
+ *  `updateTagById`, …). Named rather than repeated so the registry reads as the census of
+ *  "this endpoint tells you nothing but the id" that it is. */
+const idHandle = looseObject({ id: str });
+
+// ── #806 batch 1: tags, issue tags/dependencies, workspace lifecycle, project list ──
+
+/**
+ * `GET /api/tags` — `tagService.listTags()` is `select().from(tags)`, so a row is the
+ * `tags` table (`shared/src/schema/tags.ts`): `id`, `name`, `color` nullable, `isBuiltin`,
+ * `createdAt`. The four the settings panel renders are asserted; `createdAt` is returned and
+ * read by nobody, and per this module's convention an unread field is deliberately not
+ * checked.
+ */
+const tagRow = looseObject({ id: str, name: str, color: nullable(str), isBuiltin: bool });
+
+/**
+ * `POST /api/tags` answers `createTag`'s `{ id, name, color }` — WITHOUT `isBuiltin`, which
+ * `TagsSettings` supplies itself (`{ ...created, isBuiltin: false }`). Asserting the read
+ * shape here would have been the "schema stricter than the response" mistake.
+ */
+const createdTag = looseObject({ id: str, name: str, color: nullable(str) });
+
+/** `POST /api/tags/merge` → `{ success: true, ...{ merged } }` (`routes/tags.ts`). */
+const tagMergeResult = looseObject({ success: bool, merged: num });
+
+/** `POST /api/issues/:id/dependencies` → `{ id, type }` — the route projects exactly two
+ *  fields out of the service result (`routes/issues.ts`). */
+const dependencyHandle = looseObject({ id: str, type: str });
+
+/**
+ * `POST /api/workspaces/:id/turn` answers TWO ways, and only ONE of them carries a session:
+ * `{ ok: true }` at 200 when the turn was delivered to the running agent, or
+ * `{ sessionId, resumed: true }` at 201 when a stopped agent had to be resumed
+ * (`routes/workspace-actions.ts`). The client types it as three OPTIONAL fields and then
+ * branches on `result.resumed && result.sessionId` — correct, but a shape in which "no
+ * session and not resumed" and "resumed with no session" are equally legal. The union states
+ * which pairs actually occur.
+ */
+const turnResult = union(looseObject({ ok: trueLiteral }), looseObject({ sessionId: str, resumed: trueLiteral }));
+
+/** `POST /api/workspaces/:id/stop` and `/quarantine` → `{ stopped: boolean }`
+ *  (`workspace-session.service.ts`). */
+const stoppedFlag = looseObject({ stopped: bool });
+
+/** `POST /api/workspaces/:id/close` → `{ id, status: "closed" }`
+ *  (`workspace-crud.service.ts`). `str`, not the literal: this module asserts at the loosest
+ *  type that is still meaningful, and no caller reads the status. */
+const closedWorkspace = looseObject({ id: str, status: str });
+
 export interface ApiResponseRoute {
   method: ApiMethod;
   /** Express-style template with `:param` segments, matched against the request path. */
@@ -263,6 +349,39 @@ export const API_RESPONSE_SCHEMAS: readonly ApiResponseRoute[] = [
   { method: "POST", template: "/api/projects/create", schema: projectHandle },
   { method: "PATCH", template: "/api/projects/:id", schema: project },
   { method: "DELETE", template: "/api/projects/:id", schema: successFlag },
+
+  // ── tags (#806 batch 1) ──
+  { method: "GET", template: "/api/tags", schema: arrayRoot(tagRow) },
+  { method: "POST", template: "/api/tags", schema: createdTag },
+  // Like `PATCH /api/workspaces/:id`, this answers with `{ id }` alone
+  // (`tag.service.ts:updateTagById`) — not the updated tag. No caller reads the result here,
+  // so unlike the workspaces case there is no bug to report, only a contract to pin.
+  { method: "PATCH", template: "/api/tags/:id", schema: idHandle },
+  { method: "DELETE", template: "/api/tags/:id", schema: successFlag },
+  { method: "POST", template: "/api/tags/merge", schema: tagMergeResult },
+
+  // ── issue tags & dependencies (#806 batch 1) ──
+  { method: "POST", template: "/api/issues/:id/tags", schema: idHandle },
+  { method: "DELETE", template: "/api/issues/:id/tags/:tagId", schema: successFlag },
+  { method: "POST", template: "/api/issues/:id/dependencies", schema: dependencyHandle },
+  { method: "DELETE", template: "/api/issues/:id/dependencies/:depId", schema: successFlag },
+
+  // ── workspace lifecycle (#806 batch 1) ──
+  { method: "DELETE", template: "/api/workspaces/:id", schema: successFlag },
+  { method: "POST", template: "/api/workspaces/:id/turn", schema: turnResult },
+  { method: "POST", template: "/api/workspaces/:id/stop", schema: stoppedFlag },
+  { method: "POST", template: "/api/workspaces/:id/quarantine", schema: stoppedFlag },
+  { method: "POST", template: "/api/workspaces/:id/close", schema: closedWorkspace },
+  { method: "POST", template: "/api/workspaces/:id/implement-plan", schema: sessionHandle },
+  { method: "POST", template: "/api/workspaces/:id/reject-plan", schema: sessionHandle },
+
+  // ── projects, the list and the archive pair (#806 batch 1) ──
+  // The project list is the one read every view depends on; a wrong shape here empties the
+  // switcher rather than one panel. `routes/projects.ts` answers `ProjectResponse[]` (through
+  // `conditionalJsonResponse`, so a 304 never reaches a schema).
+  { method: "GET", template: "/api/projects", schema: arrayRoot(project) },
+  { method: "POST", template: "/api/projects/:id/archive", schema: idHandle },
+  { method: "POST", template: "/api/projects/:id/unarchive", schema: idHandle },
 ];
 
 export const API_RESPONSE_SCHEMA_COUNT = API_RESPONSE_SCHEMAS.length;

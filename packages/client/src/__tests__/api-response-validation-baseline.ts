@@ -1,8 +1,11 @@
 /**
  * Baseline for `api-response-validation-ratchet.test.ts` (#806, OUTBOUND half).
  *
- * A separate file so 240 grandfathered endpoints do not bury the rule they support — the
+ * A separate file so the grandfathered endpoints do not bury the rule they support — the
  * same split `fetch-in-effect-baseline.ts` uses for the same reason.
+ *
+ * 240 at the ratchet's first commit; **221** after #806's first outbound batch registered the
+ * tag family, issue tags/dependencies, the workspace lifecycle actions and the project list.
  *
  * **Entries are DELETED when fixed, never zeroed.** Register the endpoint in
  * `lib/apiResponseSchemas.ts` and remove its line here; the ratchet's staleness half fails on
@@ -54,8 +57,6 @@ export const UNVALIDATED_API_RESPONSES: readonly string[] = [
   // ── /api/issues ──
   "DELETE /api/issues/:param/artifacts/:param",
   "DELETE /api/issues/:param/comments/:param",
-  "DELETE /api/issues/:param/dependencies/:param",
-  "DELETE /api/issues/:param/tags/:param",
   "DELETE /api/issues/:param/time-entries/:param",
   "GET /api/issues",
   "GET /api/issues/:param/artifacts",
@@ -69,10 +70,8 @@ export const UNVALIDATED_API_RESPONSES: readonly string[] = [
   "POST /api/issues/:param/artifacts",
   "POST /api/issues/:param/decompose",
   "POST /api/issues/:param/decompose/confirm",
-  "POST /api/issues/:param/dependencies",
   "POST /api/issues/:param/preflight",
   "POST /api/issues/:param/showdown",
-  "POST /api/issues/:param/tags",
   "POST /api/issues/:param/time-entries",
   "POST /api/issues/ai-estimate",
   "POST /api/issues/analyze-dependencies",
@@ -133,7 +132,6 @@ export const UNVALIDATED_API_RESPONSES: readonly string[] = [
   "DELETE /api/projects/:param/repos/:param",
   "DELETE /api/projects/:param/scripts/:param",
   "DELETE /api/projects/:param/worktrees",
-  "GET /api/projects",
   "GET /api/projects/:param",
   "GET /api/projects/:param/agent-questions",
   "GET /api/projects/:param/board",
@@ -176,7 +174,6 @@ export const UNVALIDATED_API_RESPONSES: readonly string[] = [
   "PATCH /api/projects/:param/scripts/:param",
   "PATCH /api/projects/:param/statuses/:param",
   "POST /api/projects/:param/agent-questions/:param/answer",
-  "POST /api/projects/:param/archive",
   "POST /api/projects/:param/backlog.md/import",
   "POST /api/projects/:param/backlog.md/preview",
   "POST /api/projects/:param/backlog/import",
@@ -192,7 +189,6 @@ export const UNVALIDATED_API_RESPONSES: readonly string[] = [
   "POST /api/projects/:param/repos",
   "POST /api/projects/:param/repos/:param/promote",
   "POST /api/projects/:param/scripts",
-  "POST /api/projects/:param/unarchive",
   "POST /api/projects/:param/voice-capture",
   "POST /api/projects/:param/worktrees/open",
   "POST /api/projects/generate-setup-script",
@@ -216,12 +212,6 @@ export const UNVALIDATED_API_RESPONSES: readonly string[] = [
   // ── /api/showdowns ──
   "GET /api/showdowns/:param",
   "POST /api/showdowns/:param/pick-winner",
-  // ── /api/tags ──
-  "DELETE /api/tags/:param",
-  "GET /api/tags",
-  "PATCH /api/tags/:param",
-  "POST /api/tags",
-  "POST /api/tags/merge",
   // ── /api/workers ──
   "DELETE /api/workers/:param",
   "GET /api/workers",
@@ -242,7 +232,6 @@ export const UNVALIDATED_API_RESPONSES: readonly string[] = [
   "POST /api/workflows/workspaces/:param/transition",
   "PUT /api/workflows/templates/:param",
   // ── /api/workspaces ──
-  "DELETE /api/workspaces/:param",
   "DELETE /api/workspaces/:param/comments/:param",
   "DELETE /api/workspaces/:param/stale-worktree",
   "GET /api/workspaces",
@@ -263,22 +252,16 @@ export const UNVALIDATED_API_RESPONSES: readonly string[] = [
   "PATCH /api/workspaces/:param/comments/:param/resolve",
   "POST /api/workspaces/:param/abort-rebase",
   "POST /api/workspaces/:param/bisect",
-  "POST /api/workspaces/:param/close",
   "POST /api/workspaces/:param/comments",
   "POST /api/workspaces/:param/github-handoff-draft",
-  "POST /api/workspaces/:param/implement-plan",
   "POST /api/workspaces/:param/merge",
   "POST /api/workspaces/:param/open-editor",
-  "POST /api/workspaces/:param/quarantine",
-  "POST /api/workspaces/:param/reject-plan",
   "POST /api/workspaces/:param/repos/:param/rebase",
   "POST /api/workspaces/:param/retry-cleanup",
   "POST /api/workspaces/:param/services/down",
   "POST /api/workspaces/:param/services/restart",
   "POST /api/workspaces/:param/services/up",
-  "POST /api/workspaces/:param/stop",
   "POST /api/workspaces/:param/terminal",
-  "POST /api/workspaces/:param/turn",
   "POST /api/workspaces/:param/update-base",
   "POST /api/workspaces/preview",
 ];
