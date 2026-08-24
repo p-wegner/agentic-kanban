@@ -1,9 +1,13 @@
+import type { Context } from "hono";
+import { HTTPException } from "hono/http-exception";
+import type { ZodType } from "zod";
 import type { Database } from "../db/index.js";
-import { createDriveService } from "../services/drive.service.js";
+import { createDriveService, DriveError } from "../services/drive.service.js";
 import { buildDriveDashboard } from "../services/drive-dashboard.service.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody, parseOptionalJsonBody } from "../middleware/parse-body.js";
 import { queryFlag } from "../middleware/query-params.js";
+import { startDriveBody } from "./drive-body-schemas.js";
 import {
   computeReviewEffectiveness,
   resolveDriveIssueIds,
@@ -15,6 +19,32 @@ import {
 export function createDrivesRoute(database: Database) {
   const router = createRouter();
   const service = createDriveService({ database });
+
+  /**
+   * `parseJsonBody(c, schema)` with this route file's ERROR IDENTITY preserved (#806, batch 4),
+   * the `parsePluginBody` pattern batch 2 established.
+   *
+   * Every guard on this surface throws `DriveError(msg, "BAD_REQUEST")`, which
+   * `domainErrorHandler` renders as `{ error, code: "BAD_REQUEST" }` at 400 (#823); an
+   * unwrapped schema throws `HTTPException`, whose body is `{ error }` alone. Re-wrapping keeps
+   * the third field. Knowing difference: "invalid JSON body" now carries `code` too.
+   *
+   * Only `POST /:projectId/drives` uses it. `PUT /:projectId/drives/:id` reads an UNTYPED body
+   * forwarded whole to `service.update`, whose `target cannot be empty` guard runs AFTER the
+   * existence + ownership checks — so a schema would answer 400 where a caller gets 404/403
+   * today. `POST /:id/finish` is a `parseOptionalJsonBody` site whose contract is that the body
+   * may be absent. Both stay in #806's census.
+   */
+  async function parseDriveBody<T>(c: Context, schema: ZodType<T>): Promise<T> {
+    try {
+      return await parseJsonBody(c, schema);
+    } catch (err) {
+      if (err instanceof HTTPException && err.status === 400) {
+        throw new DriveError(err.message, "BAD_REQUEST");
+      }
+      throw err;
+    }
+  }
 
   // GET /api/projects/:projectId/drives
   router.get("/:projectId/drives", async (c) => {
@@ -71,11 +101,7 @@ export function createDrivesRoute(database: Database) {
 
   // POST /api/projects/:projectId/drives  — starts a drive
   router.post("/:projectId/drives", async (c) => {
-    const body = await parseJsonBody<{
-      metaIssueId?: string | null;
-      target: string;
-      completionContract?: string | null;
-    }>(c);
+    const body = await parseDriveBody(c, startDriveBody);
     const result = await service.start(c.req.param("projectId"), body);
     return c.json(result, 201);
   });

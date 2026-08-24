@@ -1,8 +1,12 @@
+import type { Context } from "hono";
+import { HTTPException } from "hono/http-exception";
+import type { ZodType } from "zod";
 import type { Database } from "../db/index.js";
-import { createScheduledRunService } from "../services/scheduled-run.service.js";
+import { createScheduledRunService, ScheduledRunError } from "../services/scheduled-run.service.js";
 import { createWorkspaceService } from "../services/workspace.service.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
+import { createScheduledRunBody } from "./scheduled-run-body-schemas.js";
 import type { BoardEventSink } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
 
@@ -15,6 +19,25 @@ export function createScheduledRunsRoute(
   const workspaceService = createWorkspaceService({ database, getSessionManager, boardEvents });
   const service = createScheduledRunService({ database, createWorkspace: workspaceService.createWorkspace });
 
+  /**
+   * `parseJsonBody(c, schema)` with this route file's ERROR IDENTITY preserved (#806, batch 4),
+   * the `parsePluginBody` pattern batch 2 established.
+   *
+   * `ScheduledRunError(msg, "BAD_REQUEST")` renders as `{ error, code: "BAD_REQUEST" }` at 400
+   * (#823); an unwrapped schema throws `HTTPException`, whose body is `{ error }` alone, so the
+   * swap would have dropped `code`. Knowing difference: "invalid JSON body" now carries it too.
+   */
+  async function parseScheduledRunBody<T>(c: Context, schema: ZodType<T>): Promise<T> {
+    try {
+      return await parseJsonBody(c, schema);
+    } catch (err) {
+      if (err instanceof HTTPException && err.status === 400) {
+        throw new ScheduledRunError(err.message, "BAD_REQUEST");
+      }
+      throw err;
+    }
+  }
+
   // GET /api/scheduled-runs?projectId=
   router.get("/", async (c) => {
     const projectId = c.req.query("projectId");
@@ -24,16 +47,7 @@ export function createScheduledRunsRoute(
 
   // POST /api/scheduled-runs — create
   router.post("/", async (c) => {
-    const body = await parseJsonBody<{
-      name: string;
-      projectId: string;
-      description?: string;
-      prompt?: string;
-      skillId?: string;
-      intervalMinutes?: number;
-      cronExpression?: string;
-      enabled?: boolean;
-    }>(c);
+    const body = await parseScheduledRunBody(c, createScheduledRunBody);
     const created = await service.create(body);
     return c.json(created, 201);
   });
