@@ -1,12 +1,17 @@
 import { describe, it, expect, beforeAll } from "vitest";
 
 import { randomUUID } from "node:crypto";
+import * as schema from "@agentic-kanban/shared/schema";
 
 import {
   createTestApp,
   createProjectDirectly,
   createStatusDirectly,
 } from "./helpers/api-test-helpers.js";
+
+// The comment routes return the DB rows straight through, so the row type IS the
+// response contract these assertions are written against.
+type CommentRow = typeof schema.diffComments.$inferSelect;
 
 describe("Diff Comments API", () => {
   const { app, db: database } = createTestApp();
@@ -24,14 +29,14 @@ describe("Diff Comments API", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: "Comment test issue", statusId, projectId }),
     });
-    const issueId = (await issueRes.json()).id;
+    const issueId = (await issueRes.json() as { id: string }).id;
 
     const wsRes = await app.request("/api/workspaces", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ issueId, branch: "feature/comments" }),
     });
-    workspaceId = (await wsRes.json()).id;
+    workspaceId = (await wsRes.json() as { id: string }).id;
   });
 
   it("POST creates a comment", async () => {
@@ -102,7 +107,7 @@ describe("Diff Comments API", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ filePath: "a.ts", body: "Original" }),
     });
-    const { id } = await createRes.json();
+    const { id } = await createRes.json() as CommentRow;
 
     const res = await app.request(`/api/workspaces/${workspaceId}/comments/${id}`, {
       method: "PATCH",
@@ -114,9 +119,9 @@ describe("Diff Comments API", () => {
     expect(body.id).toBe(id);
 
     // Verify update
-    const comments = await (await app.request(`/api/workspaces/${workspaceId}/comments`)).json();
-    const updated = comments.find((c: { id: string }) => c.id === id);
-    expect(updated.body).toBe("Updated");
+    const comments = await (await app.request(`/api/workspaces/${workspaceId}/comments`)).json() as CommentRow[];
+    const updated = comments.find((c) => c.id === id);
+    expect(updated?.body).toBe("Updated");
   });
 
   it("PATCH requires body", async () => {
@@ -143,7 +148,7 @@ describe("Diff Comments API", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ filePath: "b.ts", body: "To delete" }),
     });
-    const { id } = await createRes.json();
+    const { id } = await createRes.json() as CommentRow;
 
     const res = await app.request(`/api/workspaces/${workspaceId}/comments/${id}`, {
       method: "DELETE",
@@ -153,8 +158,8 @@ describe("Diff Comments API", () => {
     expect(body.success).toBe(true);
 
     // Verify gone
-    const comments = await (await app.request(`/api/workspaces/${workspaceId}/comments`)).json();
-    expect(comments.find((c: { id: string }) => c.id === id)).toBeUndefined();
+    const comments = await (await app.request(`/api/workspaces/${workspaceId}/comments`)).json() as CommentRow[];
+    expect(comments.find((c) => c.id === id)).toBeUndefined();
   });
 
   it("DELETE returns 404 for missing comment", async () => {
@@ -180,7 +185,7 @@ describe("Diff Comments API", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ filePath: "resolve.ts", body: "Please fix" }),
     });
-    const { id } = await createRes.json();
+    const { id } = await createRes.json() as CommentRow;
 
     // Resolve
     const resolveRes = await app.request(`/api/workspaces/${workspaceId}/comments/${id}/resolve`, {
@@ -195,8 +200,8 @@ describe("Diff Comments API", () => {
     expect(typeof resolved.resolvedAt).toBe("string");
 
     // Verify persisted via GET
-    const listed = await (await app.request(`/api/workspaces/${workspaceId}/comments`)).json();
-    expect(listed.find((c: { id: string }) => c.id === id).resolvedAt).not.toBeNull();
+    const listed = await (await app.request(`/api/workspaces/${workspaceId}/comments`)).json() as CommentRow[];
+    expect(listed.find((c) => c.id === id)?.resolvedAt).not.toBeNull();
 
     // Reopen
     const reopenRes = await app.request(`/api/workspaces/${workspaceId}/comments/${id}/resolve`, {
@@ -215,7 +220,7 @@ describe("Diff Comments API", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ filePath: "resolve.ts", body: "missing flag" }),
     });
-    const { id } = await createRes.json();
+    const { id } = await createRes.json() as CommentRow;
 
     const res = await app.request(`/api/workspaces/${workspaceId}/comments/${id}/resolve`, {
       method: "PATCH",
@@ -240,13 +245,13 @@ describe("Diff Comments API", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ filePath: "list-state.ts", body: "has resolvedAt" }),
     });
-    const { id } = await createRes.json();
+    const { id } = await createRes.json() as CommentRow;
 
-    const listed = await (await app.request(`/api/workspaces/${workspaceId}/comments`)).json();
-    const found = listed.find((c: { id: string }) => c.id === id);
+    const listed = await (await app.request(`/api/workspaces/${workspaceId}/comments`)).json() as CommentRow[];
+    const found = listed.find((c) => c.id === id);
     expect(found).toBeDefined();
     expect(found).toHaveProperty("resolvedAt");
-    expect(found.resolvedAt).toBeNull();
+    expect(found?.resolvedAt).toBeNull();
   });
 });
 

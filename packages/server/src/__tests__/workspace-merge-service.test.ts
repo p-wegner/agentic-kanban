@@ -38,7 +38,7 @@ beforeEach(() => {
   activeMerges.clear();
 });
 
-function makeGit(overrides: Partial<Record<string, (...a: unknown[]) => unknown>> = {}) {
+function makeGit(overrides: Partial<Record<string, (...a: never[]) => unknown>> = {}) {
   return {
     getDiff: vi.fn(async () => ""),
     getDiffFromRepo: vi.fn(async () => ""),
@@ -579,31 +579,19 @@ function makeWorkspace(overrides: Partial<typeof workspaces.$inferSelect> = {}):
     forkStatus: null,
     showdownId: null,
     showdownLabel: null,
-    conflictCacheCheckedAt: null,
-    conflictCacheHasConflicts: null,
-    conflictCacheFiles: null,
-    diffStatCacheCheckedAt: null,
-    diffStatCacheHeadSha: null,
-    diffStatCacheFilesChanged: null,
-    diffStatCacheInsertions: null,
-    diffStatCacheDeletions: null,
-    scorecardScore: null,
-    scorecardJson: null,
-    scorecardComputedAt: null,
-    latestSetupCommand: null,
-    latestSetupState: null,
-    latestSetupStartedAt: null,
-    latestSetupEndedAt: null,
-    latestSetupExitCode: null,
-    latestSetupDurationMs: null,
-    latestSetupStdoutTail: null,
-    latestSetupStderrTail: null,
     contextPrimer: null,
+    // #815 moved conflict_cache_*/diff_stat_cache_*/scorecard_*/latest_setup_* off this row;
+    // these five are the columns it still has that the fixture had never listed.
+    mergedHeadSha: null,
+    latestLaunchError: null,
+    serviceState: null,
+    isolationDowngraded: false,
+    isolationDowngradeReason: null,
     ...overrides,
   };
 }
 
-function makeGitForStateMachine(overrides: Partial<Record<string, (...a: unknown[]) => unknown>> = {}) {
+function makeGitForStateMachine(overrides: Partial<Record<string, (...a: never[]) => unknown>> = {}) {
   return {
     checkBranchTipIsAncestor: vi.fn(async () => ({ isAncestor: false, branchSha: "sha-branch", baseSha: "sha-base" })),
     countUniqueCommits: vi.fn(async () => 1),

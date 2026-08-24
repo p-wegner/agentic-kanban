@@ -10,7 +10,7 @@ import {
   parseStoredServiceStackState,
   type ComposeRunner,
 } from "../services/workspace-services.service.js";
-import type { ServiceStackConfig } from "@agentic-kanban/shared";
+import type { ServiceStackConfig, ServiceStackState } from "@agentic-kanban/shared";
 import { composeProjectName } from "@agentic-kanban/shared";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import { createStackPortAllocator, releaseStackPorts } from "../services/port-allocator.js";
@@ -594,7 +594,7 @@ describe("teardownWorkspaceServices", () => {
   it("downs the STORED compose project name and never throws", async () => {
     const { runner, downs } = makeFakeRunner();
     const { svc } = makeService({ runner });
-    await svc.teardownWorkspaceServices({ composeProjectName: "ak-testinst-ws-stored123abc", composeWorktreePath: workDir });
+    await svc.teardownWorkspaceServices({ composeProjectName: "ak-testinst-ws-stored123abc", composeWorktreePath: workDir, releasedByWorkspaceId: WORKSPACE_ID });
     expect(downs).toHaveLength(1);
     expect(downs[0].projectName).toBe("ak-testinst-ws-stored123abc");
     expect(downs[0].cwd).toBe(workDir);
@@ -603,7 +603,7 @@ describe("teardownWorkspaceServices", () => {
   it("marks the stored service state 'down' after a SUCCESSFUL down (stale-DTO fix)", async () => {
     const { runner } = makeFakeRunner();
     const { svc, markedDown } = makeService({ runner });
-    await svc.teardownWorkspaceServices({ composeProjectName: "ak-testinst-ws-stored123abc", composeWorktreePath: workDir });
+    await svc.teardownWorkspaceServices({ composeProjectName: "ak-testinst-ws-stored123abc", composeWorktreePath: workDir, releasedByWorkspaceId: WORKSPACE_ID });
     expect(markedDown).toEqual(["ak-testinst-ws-stored123abc"]);
   });
 
@@ -611,7 +611,7 @@ describe("teardownWorkspaceServices", () => {
     const { runner } = makeFakeRunner({ down: async () => ({ ok: false, stderr: "daemon busy" }) });
     const { svc, markedDown } = makeService({ runner });
     await expect(
-      svc.teardownWorkspaceServices({ composeProjectName: "ak-testinst-ws-abc123def", composeWorktreePath: workDir }),
+      svc.teardownWorkspaceServices({ composeProjectName: "ak-testinst-ws-abc123def", composeWorktreePath: workDir, releasedByWorkspaceId: WORKSPACE_ID }),
     ).resolves.toBeUndefined();
     expect(markedDown).toEqual([]);
   });
@@ -625,7 +625,7 @@ describe("teardownWorkspaceServices", () => {
       }).runner,
     });
     await expect(
-      svc.teardownWorkspaceServices({ composeProjectName: "ak-testinst-ws-abc123def", composeWorktreePath: workDir }),
+      svc.teardownWorkspaceServices({ composeProjectName: "ak-testinst-ws-abc123def", composeWorktreePath: workDir, releasedByWorkspaceId: WORKSPACE_ID }),
     ).resolves.toBeUndefined();
   });
 });
@@ -808,7 +808,7 @@ describe("lifecycle controls (#92) — start / stop / restart / rebuild / logs",
     composeProjectName: composeProjectName(WORKSPACE_ID, INSTANCE),
     ports: { db: 61000, cache: 61001 },
     envFilePath: "C:/wt/.kanban/services.env",
-    status: "up" as const,
+    status: "up" as ServiceStackState["status"],
     updatedAt: new Date(Date.now() - 60000).toISOString(),
   };
   const ctx = (over: Partial<typeof STORED> = {}) => ({
