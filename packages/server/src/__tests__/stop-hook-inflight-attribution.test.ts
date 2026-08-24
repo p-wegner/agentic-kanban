@@ -57,7 +57,7 @@ type Activity = {
   subagentTranscripts: number;
   subagentAuthorshipUnknown: boolean;
 } | null;
-type Partition = { stranded: string[]; inFlight: string[]; unknown?: string[] };
+type Partition = { stranded: string[]; inFlight: string[]; unknown?: string[]; weak?: string[] };
 const { readSessionActivity, attributeToSession, partitionAuthored, buildStopReport } = requireCjs(
   hookPath,
 ) as {
@@ -68,6 +68,8 @@ const { readSessionActivity, attributeToSession, partitionAuthored, buildStopRep
     stranded: string[];
     inFlight: string[];
     unknown?: string[];
+    weak?: string[];
+    freshForeign?: string[];
     activity: Activity;
     totalDirty?: number;
   }) => { exitCode: number; lines: string[] };
@@ -246,19 +248,26 @@ describe("check-uncommitted hook — fail-safe attribution while agents are live
     expect(report.lines.join("\n")).toContain("Commit the STRANDED files listed above");
   });
 
-  it("with NO live subagent, weak evidence is stranded again (pre-#771 behaviour intact)", async () => {
-    // Once nobody is live there is no work a commit demand could corrupt, so the hook goes back to
-    // reporting everything it attributes — a delayed warning, not a dropped one.
+  it("with NO live subagent, weak evidence is REPORTED but never instructed (#884 supersedes #771 here)", async () => {
+    // #771 let everything weakly attributed become STRANDED again once nobody was live — but the
+    // weak set is a guess (39% of its 10,286 entries measured as non-paths in #884), and a guess
+    // must never carry "Commit them before stopping". Weak-only files are now a soft
+    // "dirty, possibly yours — verify" mention, and the stop is not blocked by them.
     const p = await session({
       parentBlocks: [bash(`grep -n "export\\|import" ${A}`)],
       subagents: [{ id: "finishedagent", blocks: [heredocPatch(B)], closed: true }],
     });
     const activity = readSessionActivity(p);
     expect(activity?.liveSubagents).toBe(0);
-    const part = partitionAuthored([A, B], activity, REPO);
-    expect(part.stranded.sort()).toEqual([A, B].sort());
+    const part = partitionAuthored([A, B], activity, REPO) as Partition & { weak?: string[] };
+    expect(part.stranded).toEqual([]);
+    expect(part.weak?.sort()).toEqual([A, B].sort());
     expect(part.unknown ?? []).toEqual([]);
-    expect(buildStopReport({ ...part, activity, totalDirty: 2 }).exitCode).toBe(1);
+    const report = buildStopReport({ ...part, activity, totalDirty: 2 });
+    expect(report.exitCode).toBe(0);
+    const text = report.lines.join("\n");
+    expect(text).toContain("POSSIBLY YOURS");
+    expect(text).not.toContain("Commit them before stopping");
   });
 
   it("end to end: the hook SCRIPT exits 0 and demands nothing while a live agent holds the file", async () => {
