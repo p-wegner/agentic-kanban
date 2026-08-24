@@ -231,6 +231,105 @@ describe("cross-worktree guard — self-authorization (#369 gap ii)", () => {
   });
 });
 
+/**
+ * #890 — the guard matches WRITE TARGETS, not mentions.
+ *
+ * The old shell detection blocked any command whose TEXT contained another worktree's path once
+ * a mutating verb appeared anywhere — a path quoted in a heredoc body, a data string, or a
+ * `git -C <wt> config` READ all counted, and the documented escape
+ * (ALLOW_CROSS_WORKTREE_WRITE=1) disables the whole guard, which is disproportionate. Heredoc
+ * bodies are now stripped (data, never commands), and for classifiable shapes only the resolved
+ * write targets — plus the cd-tracked effective cwd — are matched. Ambiguous mutating shapes
+ * still fail closed.
+ */
+describe("cross-worktree guard — write targets, not mentions (#890)", () => {
+  it("ALLOWS a heredoc whose BODY merely mentions the main checkout (data, not a write)", () => {
+    const res = runHook({
+      tool_name: "Bash",
+      tool_input: {
+        command: `cat > notes.txt <<'EOF'\nsee ${mainCheckout.replace(/\\/g, "/")}/seed.md and run git commit -m x there\nEOF`,
+      },
+      cwd: worktree,
+    });
+    expect(res.blocked).toBe(false);
+  });
+
+  it("BLOCKS a redirect INTO the main checkout even when it feeds a heredoc", () => {
+    const res = runHook({
+      tool_name: "Bash",
+      tool_input: {
+        command: `cat > ${mainCheckout.replace(/\\/g, "/")}/x.txt <<'EOF'\nhello\nEOF`,
+      },
+      cwd: worktree,
+    });
+    expect(res.blocked).toBe(true);
+  });
+
+  it("ALLOWS `git -C <foreign> config` — a READ of another worktree", () => {
+    const res = runHook({
+      tool_name: "Bash",
+      tool_input: { command: `git -C ${mainCheckout.replace(/\\/g, "/")} config user.name` },
+      cwd: worktree,
+    });
+    expect(res.blocked).toBe(false);
+  });
+
+  it("BLOCKS `git -C <foreign> commit` — a MUTATION of another worktree", () => {
+    const res = runHook({
+      tool_name: "Bash",
+      tool_input: { command: `git -C ${mainCheckout.replace(/\\/g, "/")} commit -m x` },
+      cwd: worktree,
+    });
+    expect(res.blocked).toBe(true);
+    expect(res.reason).toContain("Cross-worktree shell command blocked");
+  });
+
+  it("ALLOWS a foreign path quoted as DATA in a commit message", () => {
+    const res = runHook({
+      tool_name: "Bash",
+      tool_input: {
+        command: `git commit -m "refs ${mainCheckout.replace(/\\/g, "/")}/seed.md in the main tree"`,
+      },
+      cwd: worktree,
+    });
+    expect(res.blocked).toBe(false);
+  });
+
+  it("ALLOWS copying FROM the main checkout (a read), BLOCKS copying INTO it (the write)", () => {
+    const fwd = mainCheckout.replace(/\\/g, "/");
+    expect(
+      runHook(
+        { tool_name: "Bash", tool_input: { command: `cp ${fwd}/seed.md ./copy.md` }, cwd: worktree },
+      ).blocked,
+    ).toBe(false);
+    expect(
+      runHook(
+        { tool_name: "Bash", tool_input: { command: `cp ./copy.md ${fwd}/seed.md` }, cwd: worktree },
+      ).blocked,
+    ).toBe(true);
+  });
+
+  it("keeps failing CLOSED for a mutating shape it cannot classify", () => {
+    // `install` mutates (it is in the POSIX pattern) but its arg roles are not resolved — the
+    // old whole-segment mention match still applies to that segment.
+    const res = runHook({
+      tool_name: "Bash",
+      tool_input: { command: `install -m 644 x ${mainCheckout.replace(/\\/g, "/")}/y` },
+      cwd: worktree,
+    });
+    expect(res.blocked).toBe(true);
+  });
+
+  it("still handles the Codex shell input shape (tool_input.command on `shell`)", () => {
+    const res = runHook({
+      tool_name: "shell",
+      tool_input: { command: `git -C ${mainCheckout.replace(/\\/g, "/")} commit -m x` },
+      cwd: worktree,
+    });
+    expect(res.blocked).toBe(true);
+  });
+});
+
 describe("cross-worktree guard — structured writes still guarded", () => {
   it("BLOCKS an Edit targeting the main checkout from the worktree", () => {
     const res = runHook({
