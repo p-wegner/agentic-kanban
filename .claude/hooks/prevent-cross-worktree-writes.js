@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @board-hook-version: 2
+// @board-hook-version: 3
 /**
  * Prevent cross-worktree writes — keep each Claude Code instance inside its own
  * git worktree.
@@ -41,6 +41,17 @@
  * session's), because the hook is its own process: `VAR=1 cmd` sets it for `cmd`, not for the
  * guard that inspects `cmd`. Write/Edit calls carry no command, so only the session-env form
  * applies to them.
+ *
+ * Match WRITE TARGETS, not mentions (#890): the old shell detection blocked any command whose
+ * TEXT contained another worktree's path once a mutating verb appeared ANYWHERE — a path quoted
+ * inside a heredoc body, a data string, or next to an unrelated `>` elsewhere in the command all
+ * counted, and the only escape disabled the whole guard. The command is now analysed per
+ * SEGMENT: heredoc bodies are stripped first (data, never commands — the write target is the
+ * redirect before them), and for the shapes the guard can classify (redirect targets, cp/mv
+ * destinations, tee args, `git -C <path>` + a mutating subcommand, rm/mkdir/touch/sed -i
+ * targets) only the RESOLVED WRITE TARGETS — plus the segment's effective cwd, tracked across
+ * `cd` — are matched against foreign worktrees. A segment that mutates in a way the guard
+ * cannot classify keeps the old whole-segment mention matching: fail closed, never open.
  */
 
 const path = require("path");
@@ -192,27 +203,206 @@ function commandPathTokens(command) {
 }
 
 /**
+ * Remove every heredoc BODY (the lines between `<<MARKER` and the closing MARKER line) from a
+ * command (#890). A heredoc body is data — mentioning a sibling worktree there, or even quoting
+ * `git commit` there, mutates nothing; the actual write target is the redirect on the intro
+ * line, which is kept. A heredoc whose closing marker is missing strips to end-of-command,
+ * which can only make the guard MISS a body — and the body is exactly what must not match.
+ */
+function stripHeredocBodies(command) {
+  const lines = String(command).split(/\r?\n/);
+  const kept = [];
+  for (let i = 0; i < lines.length; i++) {
+    kept.push(lines[i]);
+    const m = /<<-?\s*(["']?)([A-Za-z_][A-Za-z0-9_]*)\1/.exec(lines[i]);
+    if (!m) continue;
+    const marker = m[2];
+    let j = i + 1;
+    for (; j < lines.length && lines[j].trim() !== marker; j++) {
+      /* body line — dropped */
+    }
+    if (j < lines.length) kept.push(lines[j]);
+    i = j;
+  }
+  return kept.join("\n");
+}
+
+/** True when the (body-stripped) command carries any mutating verb at all. */
+function commandMutates(command) {
+  return MUTATING_PATTERNS.some((re) => re.test(stripHeredocBodies(command)));
+}
+
+/** Split a (body-stripped) shell command into the segments that run as separate commands. */
+function splitShellSegments(command) {
+  return String(command).split(/\n|&&|\|\||;|\|/g);
+}
+
+/** Tokenize one segment, stripping surrounding quotes. */
+function segmentTokens(segment) {
+  const tokens = [];
+  const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let m;
+  while ((m = re.exec(segment)) !== null) {
+    const t = m[1] !== undefined ? m[1] : m[2] !== undefined ? m[2] : m[3];
+    if (t !== "") tokens.push(t);
+  }
+  return tokens;
+}
+
+const VERB_PREFIXES = new Set(["sudo", "command", "time", "nohup", "env", "exec", "builtin", "nice"]);
+const CD_VERBS = new Set(["cd", "pushd", "chdir", "set-location", "sl"]);
+
+/** The segment's command verb, skipping `FOO=bar` prefixes and wrappers. */
+function segmentVerb(tokens) {
+  for (const raw of tokens) {
+    const t = raw.replace(/^[(){}!]+/, "");
+    if (t === "" || /^[A-Za-z_][A-Za-z0-9_]*=/.test(t)) continue;
+    const verb = t.replace(/\\/g, "/").split("/").pop().replace(/\.(exe|cmd|bat|sh|ps1)$/i, "").toLowerCase();
+    if (VERB_PREFIXES.has(verb)) continue;
+    return verb;
+  }
+  return "";
+}
+
+/** Non-flag, non-assignment, non-whitespace-bearing argument tokens (candidate paths). */
+function pathArgs(tokens) {
+  return tokens
+    .slice(1)
+    .filter((t) => !t.startsWith("-") && !/^[A-Za-z_][A-Za-z0-9_]*=/.test(t) && !/\s/.test(t));
+}
+
+/** Verbs whose ONLY writes go through a redirect — a foreign path argument to them is a read. */
+const READ_ONLY_VERBS = new Set([
+  "cat", "echo", "printf", "head", "tail", "less", "more", "grep", "rg", "egrep", "fgrep",
+  "sort", "uniq", "cut", "tr", "wc", "jq", "yq", "ls", "dir", "find", "fd", "diff", "cmp",
+  "stat", "file", "type", "which", "basename", "dirname", "md5sum", "sha1sum", "sha256sum",
+]);
+
+/**
+ * The write TARGETS of one mutating segment, for the shapes the guard can classify (#890).
+ * Returns `{ targets, classified }`; `classified: false` means "it mutates, but WHAT it writes
+ * could not be resolved" — the caller then falls back to the old whole-segment mention match
+ * (fail closed).
+ */
+function segmentWriteTargets(segment, tokens, verb) {
+  const targets = [];
+  // `> out` / `>> out` redirect targets — a write whatever the verb is.
+  const re = /\d?>>?\s*("[^"]+"|'[^']+'|[^\s|&;<>]+)/g;
+  let m;
+  while ((m = re.exec(segment)) !== null) {
+    const t = m[1].replace(/^["']|["']$/g, "");
+    if (t && !t.startsWith("&") && t !== "/dev/null" && t.toLowerCase() !== "$null") targets.push(t);
+  }
+  if (verb === "git") {
+    // `git -C <path> <mutating-sub>` writes into <path>; a plain `git <mutating>` writes into
+    // the effective cwd (checked by the caller). Path-shaped args (a path remote, a pathspec)
+    // stay targets so `git push /other/repo` keeps blocking — reads like `-F <msg>` outside a
+    // worktree resolve to nothing foreign anyway.
+    const ci = tokens.findIndex((t) => t === "-C");
+    if (ci !== -1 && tokens[ci + 1]) targets.push(tokens[ci + 1]);
+    for (const t of pathArgs(tokens)) {
+      if (t.includes("/") || t.includes("\\") || t.includes("..")) targets.push(t);
+    }
+    return { targets, classified: true };
+  }
+  if (verb === "cp" || verb === "mv") {
+    // The DESTINATION is the last path argument; the sources are reads.
+    const args = pathArgs(tokens);
+    if (args.length >= 2) targets.push(args[args.length - 1]);
+    else targets.push(...args);
+    return { targets, classified: true };
+  }
+  if (verb === "tee") {
+    targets.push(...pathArgs(tokens));
+    return { targets, classified: true };
+  }
+  if (["rm", "rmdir", "mkdir", "touch", "truncate", "remove-item"].includes(verb)) {
+    // For these the path arguments ARE the write targets.
+    targets.push(...pathArgs(tokens));
+    return { targets, classified: true };
+  }
+  if (
+    ["sed", "perl", "awk", "gawk", "ruby"].includes(verb) &&
+    tokens.some((t) => /^-[a-zA-Z]*i/.test(t) || t === "--in-place")
+  ) {
+    targets.push(...pathArgs(tokens).filter((t) => t.includes("/") || t.includes("\\") || t.includes(".")));
+    return { targets, classified: true };
+  }
+  // A read verb whose only write is its redirect: the redirect targets are the complete set.
+  if (verb === "" || READ_ONLY_VERBS.has(verb)) return { targets, classified: true };
+  return { targets, classified: false };
+}
+
+/**
  * Decide whether a shell command reaches into another worktree in a MUTATING way.
  * Returns the offending worktree root, or null.
  *
- * Two independent detections, because agents write paths both ways:
- *  - a raw substring hit on another worktree's absolute path (covers `cd C:\...\other-repo`,
- *    `git -C C:/…/other-repo commit`, a redirect into an absolute path), and
- *  - a relative token (`../../other-repo/x`) resolved against the authorized root.
+ * #890 — per-segment write-target analysis instead of whole-command mention matching:
+ *  - heredoc bodies are stripped up front (data, not commands);
+ *  - `cd`/`pushd` move the effective cwd for later segments; a MUTATING segment whose
+ *    effective cwd sits inside a foreign worktree is a violation whatever it names
+ *    (the #369 incident shape: `cd <main>; git commit -F msg`);
+ *  - for classifiable shapes only the resolved WRITE TARGETS are matched, so a foreign path
+ *    that is merely read (`cp <foreign>/a ./b`, `git -C <foreign> config`, a quoted mention)
+ *    no longer blocks;
+ *  - a mutating segment the guard cannot classify falls back to the old behaviour — any
+ *    foreign-worktree mention in THAT segment blocks. Ambiguity fails closed, never open.
  */
-function shellViolation(command, currentRoot, others, cwd) {
+function shellViolation(command, currentRoot, others, cwd, execCwd) {
   if (!command || others.length === 0) return null;
-  if (!MUTATING_PATTERNS.some((re) => re.test(command))) return null;
+  const stripped = stripHeredocBodies(command);
+  if (!MUTATING_PATTERNS.some((re) => re.test(stripped))) return null;
 
-  const haystack = normText(command);
-  for (const other of others) {
-    if (haystack.includes(other)) return other;
-  }
-  for (const token of commandPathTokens(command)) {
-    const resolved = norm(path.isAbsolute(token) ? token : path.join(cwd, token));
-    if (isInside(resolved, currentRoot)) continue;
-    const offending = others.find((w) => isInside(resolved, w));
-    if (offending) return offending;
+  const base = norm(execCwd || cwd || "");
+  let effCwd = base;
+  // Whether the COMMAND moved its own cwd. Only then is "mutating while standing in a foreign
+  // worktree" this function's call — a foreign STARTING cwd is #472's check, which is gated on
+  // the board-declared root precisely because a derived root would compare a value to itself.
+  let cdChanged = false;
+  const resolveTok = (t) => {
+    const clean = String(t).replace(/^["']|["']$/g, "");
+    if (!clean) return "";
+    return norm(path.isAbsolute(clean) ? clean : path.join(effCwd || base || ".", clean));
+  };
+  const foreignOf = (resolved) => {
+    if (!resolved || isInside(resolved, currentRoot)) return null;
+    return others.find((w) => isInside(resolved, w)) || null;
+  };
+
+  for (const segment of splitShellSegments(stripped)) {
+    if (!segment.trim()) continue;
+    const tokens = segmentTokens(segment);
+    const verb = segmentVerb(tokens);
+    if (CD_VERBS.has(verb)) {
+      const target = tokens.slice(1).find((t) => !t.startsWith("-"));
+      if (!target || target === "-" || target === "~") effCwd = base;
+      else effCwd = norm(path.isAbsolute(target) ? target : path.join(effCwd || base || ".", target));
+      cdChanged = true;
+      continue;
+    }
+    if (!MUTATING_PATTERNS.some((re) => re.test(segment))) continue; // this segment only reads
+
+    // Mutating after the command CD-ED into a foreign worktree — the incident shape
+    // (`cd <main>; git commit -F msg`), no path in the mutating segment needed.
+    const cwdForeign = cdChanged && effCwd ? foreignOf(effCwd) : null;
+    if (cwdForeign) return cwdForeign;
+
+    const { targets, classified } = segmentWriteTargets(segment, tokens, verb);
+    for (const t of targets) {
+      const offending = foreignOf(resolveTok(t));
+      if (offending) return offending;
+    }
+    if (!classified) {
+      // Fail closed: it mutates, we cannot tell what — any foreign mention in this segment blocks.
+      const haystack = normText(segment);
+      for (const other of others) {
+        if (haystack.includes(other)) return other;
+      }
+      for (const token of commandPathTokens(segment)) {
+        const offending = foreignOf(resolveTok(token));
+        if (offending) return offending;
+      }
+    }
   }
   return null;
 }
@@ -341,12 +531,9 @@ async function main() {
   // blocked a write into the CORRECT worktree issued from a session whose cwd was elsewhere,
   // which is legitimate and is asserted by cross-worktree-guard.test.ts. And reads stay allowed:
   // an inspection command run from another worktree is odd, not dangerous.
-  if (
-    rootSource === "KANBAN_WORKTREE_DIR" &&
-    input.cwd &&
-    isShell &&
-    MUTATING_PATTERNS.some((re) => re.test(command))
-  ) {
+  // `commandMutates` strips heredoc bodies first (#890): a mutating verb quoted inside a
+  // heredoc's DATA must not arm this check any more than it arms the segment analysis below.
+  if (rootSource === "KANBAN_WORKTREE_DIR" && input.cwd && isShell && commandMutates(command)) {
     const here = norm(gitToplevel(input.cwd) || input.cwd);
     if (!isInside(norm(input.cwd), currentRoot) && others.includes(here)) {
       block(
@@ -366,7 +553,9 @@ async function main() {
   }
 
   if (isShell) {
-    const offending = shellViolation(command, currentRoot, others, cwd);
+    // `input.cwd` (where the command actually runs) anchors relative paths and the effective-cwd
+    // tracking; the authorized root's cwd is the fallback for harnesses that send none.
+    const offending = shellViolation(command, currentRoot, others, cwd, input.cwd);
     if (offending) {
       block(
         "⛔ Cross-worktree shell command blocked.\n\n" +
