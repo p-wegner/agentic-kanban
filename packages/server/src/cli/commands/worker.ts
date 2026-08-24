@@ -8,6 +8,7 @@ import {
   DEFAULT_DRAIN_TIMEOUT_MS,
   WorkerRegistrationRefused,
 } from "../../worker/worker-daemon.js";
+import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "../../worker/worker-repo.js";
 import { SHARES_FILESYSTEM_LABEL } from "@agentic-kanban/shared/lib/worker-protocol";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 // Type-only + a db-free formatter: this module is also the standalone worker
@@ -333,7 +334,7 @@ export function renderWorkerConnectMarkdown(
 export function registerWorkerCommand(program: Command) {
   const workerCmd = program
     .command("worker")
-    .description("Fleet worker: connect this machine to a board and execute assigned agent sessions.\n\nSubcommands: pair, start, instructions, list, explain, placements, doctor, doctor-board");
+    .description("Fleet worker: connect this machine to a board and execute assigned agent sessions.\n\nSubcommands: pair, start, instructions, list, explain, placements, doctor, doctor-board, cleanup, events");
   registerWorkerSubcommands(workerCmd);
 }
 
@@ -669,6 +670,33 @@ export function registerWorkerSubcommands(workerCmd: Command) {
       });
       console.log(options.json ? JSON.stringify(report, null, 2) : renderDoctorReport(report));
       if (!report.ok) process.exit(1);
+    });
+
+  workerCmd
+    .command("cleanup")
+    .description(
+      "Run ON THE WORKER MACHINE: remove checkout directories under <work-root>/checkouts/ whose git " +
+        "worktree registration is gone (#850) — left behind when a prior daemon stopped, disconnected, " +
+        "or crashed mid-session. Also runs automatically on every 'worker start'; this is for a manual " +
+        "sweep without starting the daemon.",
+    )
+    .option("--work-root <path>", "Root for git-transport clones/checkouts (default: ~/.agentic-kanban/worker)")
+    .option("--json", "Output the report as JSON")
+    .action(async (options: { workRoot?: string; json?: boolean }) => {
+      const workRoot = options.workRoot ?? defaultWorkerWorkRoot();
+      const lines: string[] = [];
+      const report = await reapOrphanedCheckouts(workRoot, (line) => lines.push(line));
+      if (options.json) {
+        console.log(JSON.stringify({ workRoot, ...report }, null, 2));
+        return;
+      }
+      for (const line of lines) console.log(line);
+      console.log(
+        report.reaped.length === 0 && report.errored.length === 0
+          ? `Scanned ${report.scanned} checkout(s) under ${workRoot} — none orphaned.`
+          : `Scanned ${report.scanned} checkout(s): reaped ${report.reaped.length}, ${report.errored.length} could not be removed.`,
+      );
+      if (report.errored.length > 0) process.exit(1);
     });
 
   workerCmd
