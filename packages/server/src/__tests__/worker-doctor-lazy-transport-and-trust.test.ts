@@ -33,7 +33,7 @@
 //     really would be dropped. It must never WRITE `hasTrustDialogAccepted` — that would be
 //     the board granting trust, on a machine it deliberately holds no credentials for, to
 //     code it just pushed there.
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createServer, type Server } from "node:http";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -188,8 +188,15 @@ describe("#851 — the doctor names untrusted worker checkouts instead of nothin
     // leaked by a crashed run is collected instead of accumulating forever (#840/#843).
     home = mkdtempSync(join(tmpdir(), "ak-doctor-home-"));
     workRoot = mkdtempSync(join(tmpdir(), "ak-doctor-work-"));
+    // Hermetic env: checkWorkerCheckoutTrust resolves $CLAUDE_CONFIG_DIR from the LIVE
+    // environment, so a runner launched from a profile session (CLAUDE_CONFIG_DIR set to a
+    // real ~/.claude-* dir) had the check consult the operator's actual config instead of
+    // this fixture — 4 of these tests failed on any profile machine and passed elsewhere.
+    // Pin it to the fixture's config dir, which is what the tests already seed.
+    vi.stubEnv("CLAUDE_CONFIG_DIR", join(home, ".claude"));
   });
   afterEach(() => {
+    vi.unstubAllEnvs();
     rmSync(home, { recursive: true, force: true });
     rmSync(workRoot, { recursive: true, force: true });
   });
