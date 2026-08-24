@@ -6,7 +6,18 @@ import type { SessionManager } from "../../services/session.manager.js";
  * Creates a mock ChildProcess with event-listener tracking.
  * Useful for testing agent.service and related code that spawns subprocesses.
  */
-export function createMockProc(overrides: Partial<ChildProcess> = {}): ChildProcess {
+/**
+ * A mock child process. `ChildProcess` types the three stdio handles as nullable (they are
+ * absent for an `ignore`d/detached stdio), but this factory always populates them — so the
+ * return type says so, and callers do not have to assert it at every read.
+ */
+export type MockChildProcess = ChildProcess & {
+  stdin: NonNullable<ChildProcess["stdin"]>;
+  stdout: NonNullable<ChildProcess["stdout"]>;
+  stderr: NonNullable<ChildProcess["stderr"]>;
+};
+
+export function createMockProc(overrides: Partial<ChildProcess> = {}): MockChildProcess {
   const listeners: Record<string, ((...args: unknown[]) => unknown)[]> = {};
   return {
     pid: 12345,

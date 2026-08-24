@@ -34,9 +34,9 @@ describe("workflow.service — template CRUD", () => {
 
     expect("error" in result).toBe(false);
     if ("data" in result) {
-      expect(result.data.name).toBe("My Workflow");
-      expect(result.data.nodes).toHaveLength(2);
-      expect(result.data.edges).toHaveLength(1);
+      expect(result.data?.name).toBe("My Workflow");
+      expect(result.data?.nodes).toHaveLength(2);
+      expect(result.data?.edges).toHaveLength(1);
     }
   });
 
@@ -71,7 +71,7 @@ describe("workflow.service — template CRUD", () => {
       ],
       edges: [{ fromNodeId: "s", toNodeId: "e" }],
     });
-    const originalId = ("data" in original) ? original.data.id : "";
+    const originalId = ("data" in original) ? original.data?.id ?? "" : "";
 
     const cloned = await service.createTemplate({
       projectId,
@@ -80,9 +80,9 @@ describe("workflow.service — template CRUD", () => {
 
     expect("error" in cloned).toBe(false);
     if ("data" in cloned) {
-      expect(cloned.data.name).toBe("Original (copy)");
-      expect(cloned.data.id).not.toBe(originalId);
-      expect(cloned.data.nodes).toHaveLength(2);
+      expect(cloned.data?.name).toBe("Original (copy)");
+      expect(cloned.data?.id).not.toBe(originalId);
+      expect(cloned.data?.nodes).toHaveLength(2);
     }
   });
 
@@ -100,7 +100,7 @@ describe("workflow.service — template CRUD", () => {
       ],
       edges: [{ fromNodeId: "s", toNodeId: "e" }],
     });
-    const id = ("data" in created) ? created.data.id : "";
+    const id = ("data" in created) ? created.data?.id ?? "" : "";
 
     const result = await service.deleteTemplate(id);
     expect(result.ok).toBe(true);
@@ -138,14 +138,14 @@ describe("workflow.service — template CRUD", () => {
       edges: [{ fromNodeId: "s", toNodeId: "e" }],
     });
     expect("data" in created).toBe(true);
-    const id = ("data" in created) ? created.data.id : "";
+    const id = ("data" in created) ? created.data?.id ?? "" : "";
 
     const result = await service.updateTemplate(id, { name: "After" });
     expect("data" in result).toBe(true);
     if ("data" in result) {
-      expect(result.data.name).toBe("After");
-      expect(result.data.nodes).toHaveLength(2);
-      expect(result.data.edges).toHaveLength(1);
+      expect(result.data?.name).toBe("After");
+      expect(result.data?.nodes).toHaveLength(2);
+      expect(result.data?.edges).toHaveLength(1);
     }
   });
 
@@ -175,13 +175,13 @@ describe("workflow.service — import/export", () => {
       nodes: [{ id: "s", name: "Start", nodeType: "start" }],
       edges: [],
     });
-    const id = ("data" in created) ? created.data.id : "";
+    const id = ("data" in created) ? created.data?.id ?? "" : "";
 
     const result = await service.exportTemplate(id);
     if ("data" in result) {
-      expect(result.data.version).toBe(1);
-      expect(result.data.metadata.name).toBe("Exportable");
-      expect(result.data.nodes).toHaveLength(1);
+      expect(result.data?.version).toBe(1);
+      expect(result.data?.metadata.name).toBe("Exportable");
+      expect(result.data?.nodes).toHaveLength(1);
     }
   });
 
@@ -204,8 +204,8 @@ describe("workflow.service — import/export", () => {
 
     expect("error" in result).toBe(false);
     if ("data" in result) {
-      expect(result.data.name).toBe("Imported");
-      expect(result.data.nodes).toHaveLength(2);
+      expect(result.data?.name).toBe("Imported");
+      expect(result.data?.nodes).toHaveLength(2);
     }
   });
 
@@ -291,7 +291,7 @@ describe("workflow.service — resolve", () => {
 
     const result = await service.resolveTemplate({ issueId });
     if ("data" in result) {
-      expect(result.data.templateId).toBe(templateId);
+      expect(result.data?.templateId).toBe(templateId);
     }
   });
 
@@ -325,10 +325,10 @@ describe("workflow.service — progress", () => {
 
     const result = await service.getWorkspaceProgress(wsId);
     if ("data" in result) {
-      expect(result.data.currentNodeId).toBe(buildId);
-      expect(result.data.transitions).toHaveLength(2);
-      expect(result.data.nextTransitions.length).toBeGreaterThan(0);
-      expect(result.data.nextTransitions[0].toNodeId).toBe(doneId);
+      expect(result.data?.currentNodeId).toBe(buildId);
+      expect(result.data?.transitions).toHaveLength(2);
+      expect(result.data?.nextTransitions.length).toBeGreaterThan(0);
+      expect(result.data?.nextTransitions[0].toNodeId).toBe(doneId);
     }
   });
 
@@ -360,9 +360,9 @@ describe("workflow.service — transitions", () => {
 
     const result = await service.executeTransition(wsId, { toNodeName: "Review", summary: "ready" });
     if ("data" in result) {
-      expect(result.data.ok).toBe(true);
-      expect(result.data.movedTo).toBe("Review");
-      expect(result.data.status).toBe("In Review");
+      expect(result.data?.ok).toBe(true);
+      expect(result.data?.movedTo).toBe("Review");
+      expect(result.data?.status).toBe("In Review");
     }
 
     const issue = (await db.select().from(schema.issues).where(eq(schema.issues.id, issueId)))[0];
@@ -430,7 +430,7 @@ describe("workflow.service — transitions", () => {
 
       const result = await service.executeTransition(wsId, { toNodeId: designId });
       if ("data" in result) {
-        expect(result.data.phaseArtifact.relativePath).toBeTruthy();
+        expect(result.data?.phaseArtifact.relativePath).toBeTruthy();
       }
     } finally {
       rmSync(worktreePath, { recursive: true, force: true });
