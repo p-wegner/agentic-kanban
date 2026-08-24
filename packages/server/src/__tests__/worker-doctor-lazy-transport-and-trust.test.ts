@@ -210,7 +210,9 @@ describe("#851 — the doctor names untrusted worker checkouts instead of nothin
     expect(check.detail).toContain(dir);
     // The report must name every config it consulted, so the disagreement is visible.
     expect(check.detail).toContain(join(configDir, ".claude.json"));
-    expect(check.remedy).toContain("EACH of");
+    // The remedy names the config that actually lacks the entry, not a blanket "set it everywhere".
+    expect(check.remedy).toContain(join(configDir, ".claude.json"));
+    expect(check.remedy).toContain("has to agree");
 
     // Granting it in BOTH files — what actually makes the banner go away — passes.
     writeFileSync(
@@ -219,6 +221,32 @@ describe("#851 — the doctor names untrusted worker checkouts instead of nothin
       "utf8",
     );
     expect(checkWorkerCheckoutTrust(workRoot, home).status).toBe("pass");
+  });
+
+  // The mixed case is what an operator sees MIDWAY through the fix — granted in one config,
+  // not yet the other — i.e. the check is most likely to be read exactly when a blanket
+  // "missing from every config" claim would be false and would send them to edit files that
+  // are already correct.
+  it("names WHICH config lacks the entry instead of claiming they all do", () => {
+    const dir = seedRepo(PROJECT_ID, { permissions: { allow: [], deny: ["Bash(rm:*)"], ask: [] } });
+    const configDir = join(home, ".claude");
+    mkdirSync(configDir, { recursive: true });
+    const key = dir.replace(/\\/g, "/");
+    // Granted in the home config...
+    seedClaudeJson({ [key]: { hasTrustDialogAccepted: true } });
+    // ...and absent from the one the agent reads.
+    writeFileSync(join(configDir, ".claude.json"), JSON.stringify({ projects: {} }), "utf8");
+
+    const check = checkWorkerCheckoutTrust(workRoot, home);
+    expect(check.status).toBe("unknown");
+
+    const homeJson = join(home, ".claude.json");
+    const agentJson = join(configDir, ".claude.json");
+    // It must NOT claim the entry is missing everywhere — it is present in the home config.
+    expect(check.detail).toContain(`are trusted in ${homeJson} but NOT in ${agentJson}`);
+    // The remedy names ONLY the file that lacks it, never the one already correct.
+    expect(check.remedy).toContain(agentJson);
+    expect(check.remedy).not.toContain(`true in ${homeJson}`);
   });
 
   it("resolveTrustConfigPaths puts $CLAUDE_CONFIG_DIR first and never repeats a path", () => {

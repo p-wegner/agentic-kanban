@@ -473,21 +473,34 @@ export function checkWorkerCheckoutTrust(workRoot: string, home: string): Doctor
   }
 
   const described = untrusted.map((dir) => `${dir} (${describeLostRules(dir)})`);
+
+  // Say WHICH config is the odd one out. Reporting a blanket absence across every consulted
+  // file is false in the case an operator is most likely to be reading this in — halfway
+  // through the fix, having granted trust in one file and not yet the other — and it sends
+  // them to edit files that are already correct. Both sets are already computed above; naming
+  // them is the only genuinely actionable fact this check holds.
+  const lacking = grantedBy.filter(({ trusted }) => untrusted.some((dir) => !trusted.has(normalizeTrustKey(dir))));
+  const granting = grantedBy.filter((g) => !lacking.includes(g));
+  const lackingPaths = lacking.map((g) => g.path).join(", ");
+  const where =
+    granting.length > 0
+      ? `are trusted in ${granting.map((g) => g.path).join(", ")} but NOT in ${lackingPaths}`
+      : `have no hasTrustDialogAccepted entry in ${lackingPaths}`;
+
   return {
     name,
     status: "unknown",
     detail:
-      `${untrusted.length} of ${projectDirs.length} worker checkout(s) have no hasTrustDialogAccepted entry in ` +
-      `every config Claude Code might read here (${consulted}), so every dispatch into them prints ` +
+      `${untrusted.length} of ${projectDirs.length} worker checkout(s) ${where}, so every dispatch into them prints ` +
       '"this workspace has not been trusted" and ' +
       `drops that repo's permission settings: ${described.join("; ")}. The agent still runs either way — the worker ` +
       "launches it with permissions bypassed and the PreToolUse hooks fire regardless.",
     remedy:
       "If you want the banner gone (and any deny/ask rules honoured), THIS MACHINE'S OPERATOR grants the trust — the " +
       "board never will: run Claude Code interactively once in each directory above and accept the trust dialog, or set " +
-      `projects["<that path, forward slashes>"].hasTrustDialogAccepted: true in EACH of: ${consulted}. ` +
-      "Setting only one is what makes this check disagree with what the agent actually reads — " +
-      "CLAUDE_CONFIG_DIR decides which file wins, and a worker always has it pinned.",
+      `projects["<that path, forward slashes>"].hasTrustDialogAccepted: true in ${lackingPaths}. ` +
+      "Every config Claude Code might read here has to agree, because CLAUDE_CONFIG_DIR decides which one the agent " +
+      "actually gets and a worker always has it pinned.",
   };
 }
 
