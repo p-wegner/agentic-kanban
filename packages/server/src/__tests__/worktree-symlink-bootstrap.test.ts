@@ -81,7 +81,7 @@ describe("parseSymlinkDirs", () => {
 
 describe("discoverWorkspaceNodeModules", () => {
   function makeWorkspace(opts: { workspaceYaml?: string; pkgs?: string[]; withNodeModules?: string[] }): string {
-    const root = mkdtempSync(join(tmpdir(), "ws-"));
+    const root = mkdtempSync(join(tmpdir(), "ak-ws-"));
     if (opts.workspaceYaml !== undefined) writeFileSync(join(root, "pnpm-workspace.yaml"), opts.workspaceYaml);
     for (const p of opts.pkgs ?? []) mkdirSync(join(root, p), { recursive: true });
     for (const p of opts.withNodeModules ?? []) mkdirSync(join(root, p, "node_modules"), { recursive: true });

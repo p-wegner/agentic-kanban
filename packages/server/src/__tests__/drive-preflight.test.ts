@@ -28,7 +28,7 @@ const now = new Date().toISOString();
 
 /** A throwaway node project so offline stack detection succeeds and auto-repair artifacts land in temp. */
 function makeRepo(): string {
-  const dir = mkdtempSync(join(tmpdir(), "preflight-test-"));
+  const dir = mkdtempSync(join(tmpdir(), "ak-preflight-test-"));
   writeFileSync(
     join(dir, "package.json"),
     JSON.stringify({ name: "preflight-fixture", scripts: { test: "echo test", build: "echo build" } }),

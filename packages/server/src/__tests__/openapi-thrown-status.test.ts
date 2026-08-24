@@ -135,7 +135,7 @@ describe("openapi thrown-status attribution (#826)", () => {
     // first difference to the line the 404 was removed from says the generator still produces
     // exactly that status there, and nothing before it changed.
     const before = readFileSync(SPEC, "utf8");
-    const dir = mkdtempSync(join(tmpdir(), "openapi-thrown-"));
+    const dir = mkdtempSync(join(tmpdir(), "ak-openapi-thrown-"));
     try {
       const copy = join(dir, "openapi.yaml");
       copyFileSync(SPEC, copy);

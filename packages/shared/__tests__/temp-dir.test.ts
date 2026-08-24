@@ -46,6 +46,9 @@ describe("createManagedTempDir", () => {
   it("refuses a prefix outside the kanban- namespace", () => {
     // A directory a sweep cannot recognise is one that leaks forever the moment its disposer
     // is missed — which is exactly how 8,448 of them accumulated.
+    // The prefix here is REFUSED, so it names a directory that is never created; namespacing
+    // it would delete the assertion.
+    // TEMP-PREFIX OK: negative test — this prefix must stay outside the namespace (#839).
     expect(() => createManagedTempDir("some-other-tool-")).toThrow(/must start with "kanban-"/);
     expect(TEMP_DIR_NAMESPACE).toBe("kanban-");
   });

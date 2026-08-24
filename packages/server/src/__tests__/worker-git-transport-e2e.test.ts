@@ -43,8 +43,14 @@ describe("worker git transport e2e (phase 2)", () => {
   let dispatch: AgentExecutionService;
   let repoDir: string;
   let workerRoot: string;
-  const stateFile = join(tmpdir(), `git-transport-${randomUUID()}.json`);
-  const agentScript = join(tmpdir(), `mock-agent-git-${randomUUID()}.cjs`);
+  // #839 — these fixture files live INSIDE an `ak-` DIRECTORY rather than loose in
+  // `%TEMP%`, because the reaper (`helpers/reap-fixture-child-servers.ts`) only sweeps
+  // entries where `statSync(...).isDirectory()` — files are excluded on purpose, since
+  // `kanban-session-*.out` transcripts are read by a running server. A loose fixture file
+  // was therefore in NO swept namespace and a failed teardown leaked it permanently.
+  const fixtureDir = mkdtempSync(join(tmpdir(), "ak-git-transport-"));
+  const stateFile = join(fixtureDir, `worker-state-${randomUUID()}.json`);
+  const agentScript = join(fixtureDir, `mock-agent-git-${randomUUID()}.cjs`);
 
   beforeAll(async () => {
     db = createTestDb().db as unknown as Database;
@@ -117,7 +123,7 @@ describe("worker git transport e2e (phase 2)", () => {
     // Not a retry loop around `rm` (#777): a retry hides which handle leaked. If a removal
     // fails, the helper names the surviving subtree and the processes that plausibly hold it.
     for (const p of [repoDir, workerRoot]) await rmOrReportHolder(p);
-    for (const f of [stateFile, agentScript]) rmSync(f, { force: true });
+    rmSync(fixtureDir, { recursive: true, force: true });
   });
 
   it("clones, runs, pushes back, and the board lands the branch", async () => {
@@ -180,7 +186,7 @@ describe("worker git transport e2e (phase 2)", () => {
   it("materializes the branch so a second session resumes from it", async () => {
     const sessionId = `sess-${randomUUID()}`;
     const events: AgentOutputEvent[] = [];
-    const secondAgent = join(tmpdir(), `mock-agent-git2-${randomUUID()}.cjs`);
+    const secondAgent = join(fixtureDir, `mock-agent-git2-${randomUUID()}.cjs`);
     writeFileSync(
       secondAgent,
       `const fs = require("fs");
@@ -223,7 +229,7 @@ describe("worker git transport e2e (phase 2)", () => {
     await gitExecOrThrow(["worktree", "add", "-b", branch, worktreePath, "master"], { cwd: repoDir });
     const baseSha = (await gitExecOrThrow(["rev-parse", `refs/heads/${branch}`], { cwd: repoDir })).trim();
 
-    const agent = join(tmpdir(), `mock-agent-git3-${randomUUID()}.cjs`);
+    const agent = join(fixtureDir, `mock-agent-git3-${randomUUID()}.cjs`);
     writeFileSync(
       agent,
       `const { execFileSync } = require("child_process");

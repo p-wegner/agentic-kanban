@@ -46,7 +46,7 @@ describe("check-god-modules.mjs — the merge-blocking god-module gate", () => {
   it("exits NON-ZERO when a source file breaches the 1000-line ceiling", () => {
     // Isolated temp tree mirroring the gate's <root>/packages/<pkg>/src layout, so the
     // 1001-line probe never touches the live source the parallel gates scan.
-    const root = mkdtempSync(join(tmpdir(), "god-gate-probe-"));
+    const root = mkdtempSync(join(tmpdir(), "ak-god-gate-probe-"));
     try {
       const libDir = join(root, "packages", "shared", "src", "lib");
       mkdirSync(libDir, { recursive: true });

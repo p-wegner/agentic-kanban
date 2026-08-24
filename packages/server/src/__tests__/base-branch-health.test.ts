@@ -37,7 +37,7 @@ const { verifyScriptPrefKey } = await import("../services/stack-profile.service.
 
 const tempRepos: string[] = [];
 function makeRepoPath(): string {
-  const dir = mkdtempSync(join(tmpdir(), "base-branch-health-repo-"));
+  const dir = mkdtempSync(join(tmpdir(), "ak-base-branch-health-repo-"));
   mkdirSync(join(dir, ".git"), { recursive: true });
   tempRepos.push(dir);
   return dir;
@@ -264,7 +264,7 @@ describe("verifyBaseBranchHealth — installs before verifying (#674)", () => {
   let db: ReturnType<typeof createTestDb>["db"];
 
   function makeRealGitRepo(): string {
-    const dir = mkdtempSync(join(tmpdir(), "base-branch-health-realrepo-"));
+    const dir = mkdtempSync(join(tmpdir(), "ak-base-branch-health-realrepo-"));
     const { execFileSync } = require("node:child_process") as typeof import("node:child_process");
     const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" });
     git("init", "-q", "-b", "master");

@@ -60,7 +60,7 @@ describe("incoming-ref visibility and reclaim (#752)", () => {
 
   beforeEach(async () => {
     db = createTestDb().db as unknown as Database;
-    repo = mkdtempSync(join(tmpdir(), "incoming-refs-"));
+    repo = mkdtempSync(join(tmpdir(), "ak-incoming-refs-"));
     await gitExecOrThrow(["init", "-b", "master", repo], {});
     await commit("base", "a.txt");
     await db.insert(projectsTable).values({

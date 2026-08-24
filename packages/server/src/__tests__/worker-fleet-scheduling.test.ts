@@ -218,7 +218,7 @@ describe("worker fleet scheduling (phase 3)", () => {
     let repo: string;
 
     beforeEach(async () => {
-      repo = mkdtempSync(join(tmpdir(), "sweep-repo-"));
+      repo = mkdtempSync(join(tmpdir(), "ak-sweep-repo-"));
       await gitExecOrThrow(["init", "-b", "master", repo], {});
       writeFileSync(join(repo, "a.txt"), "base\n");
       await gitExecOrThrow(["add", "."], { cwd: repo });
@@ -327,7 +327,7 @@ describe("worker fleet scheduling (phase 3)", () => {
 
     it("does not land a branch assigned in ANOTHER project (#246)", async () => {
       const otherProjectId = "dddd1111-2222-3333-4444-555566667777";
-      const otherRepo = mkdtempSync(join(tmpdir(), "sweep-other-"));
+      const otherRepo = mkdtempSync(join(tmpdir(), "ak-sweep-other-"));
       try {
         await db.insert(projectsTable).values({
           id: otherProjectId, name: "other-fixture", repoPath: otherRepo, defaultBranch: "master",

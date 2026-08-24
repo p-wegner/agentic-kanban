@@ -177,7 +177,7 @@ describe("set_preference tool — provider-divergence guard (arch-review §3.3)"
 describe("set_preference tool — objective.md regeneration (arch-review §3.3)", () => {
   it("regenerates the repo's objective.md when a board_strategy Bullseye is written via MCP", async () => {
     const { invoke, db } = setupTool(registerSetPreference);
-    const repo = mkdtempSync(join(tmpdir(), "mcp-objective-"));
+    const repo = mkdtempSync(join(tmpdir(), "ak-mcp-objective-"));
     try {
       mkdirSync(join(repo, "scripts", "board-monitor"), { recursive: true });
       const objectivePath = join(repo, "scripts", "board-monitor", "objective.md");

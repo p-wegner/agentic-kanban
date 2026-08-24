@@ -55,8 +55,8 @@ describe("codemods.preview.limit-guard — blast-radius interlock blocks >limit 
 
   beforeAll(async () => {
     [atLimitRepo, overLimitRepo] = await Promise.all([
-      makeRepoWithTsFiles("codemod-limit-at-", CODEMOD_FILE_LIMIT),
-      makeRepoWithTsFiles("codemod-limit-over-", CODEMOD_FILE_LIMIT + 1),
+      makeRepoWithTsFiles("ak-codemod-limit-at-", CODEMOD_FILE_LIMIT),
+      makeRepoWithTsFiles("ak-codemod-limit-over-", CODEMOD_FILE_LIMIT + 1),
     ]);
   });
 

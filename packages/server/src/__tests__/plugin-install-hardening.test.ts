@@ -40,7 +40,7 @@ describe("installPlugin hardening", () => {
   let pluginsHome: string;
 
   beforeEach(() => {
-    pluginsHome = makeTempDir("plugins-home-");
+    pluginsHome = makeTempDir("ak-plugins-home-");
     process.env.AGENTIC_KANBAN_PLUGINS_DIR = pluginsHome;
   });
 
@@ -58,7 +58,7 @@ describe("installPlugin hardening", () => {
   it("installs a manifest written with a UTF-8 BOM", async () => {
     const { db } = createTestDb();
     const service = createPluginService({ database: db as unknown as Database });
-    const dir = makeTempDir("plugin-bom-");
+    const dir = makeTempDir("ak-plugin-bom-");
     // What PowerShell's `Set-Content -Encoding utf8` produces.
     writeFileSync(join(dir, "kanban-plugin.json"), "﻿" + JSON.stringify({ id: "bom-plugin", name: "BOM Plugin" }));
 

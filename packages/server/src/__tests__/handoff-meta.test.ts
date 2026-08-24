@@ -8,7 +8,7 @@ import { readHandoffMeta } from "../services/handoff.service.js";
 // mtime + truncated excerpt, absent-safe. Exercised against real temp worktrees.
 describe("readHandoffMeta (#89)", () => {
   async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
-    const dir = await mkdtemp(join(tmpdir(), "handoff-meta-"));
+    const dir = await mkdtemp(join(tmpdir(), "ak-handoff-meta-"));
     try {
       await fn(dir);
     } finally {

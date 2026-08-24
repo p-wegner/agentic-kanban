@@ -74,7 +74,7 @@ describe("openapi.yaml drift gate (#780)", () => {
     // a THROWAWAY COPY in os.tmpdir(); the real file is never opened for writing at all, which
     // is a property of the code rather than a promise about control flow.
     const original = readFileSync(SPEC, "utf8");
-    const dir = mkdtempSync(join(tmpdir(), "openapi-drift-"));
+    const dir = mkdtempSync(join(tmpdir(), "ak-openapi-drift-"));
     try {
       const copy = join(dir, "openapi.yaml");
       writeFileSync(copy, original.replace(/^  version: .*$/m, "  version: 0.0.0-drifted"), "utf8");

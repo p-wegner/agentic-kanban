@@ -17,7 +17,7 @@ describe("repo-lock (#993 on-disk cross-process merge lock)", () => {
   const dirs: string[] = [];
 
   function makeRepo(): string {
-    const dir = mkdtempSync(join(tmpdir(), "repo-lock-test-"));
+    const dir = mkdtempSync(join(tmpdir(), "ak-repo-lock-test-"));
     mkdirSync(join(dir, ".git"), { recursive: true });
     dirs.push(dir);
     return dir;
@@ -126,7 +126,7 @@ describe("repo-lock (#993 on-disk cross-process merge lock)", () => {
   });
 
   it("refuses to acquire (and does not fabricate .git) for a repoPath with no .git directory", () => {
-    const dir = mkdtempSync(join(tmpdir(), "repo-lock-test-nogit-"));
+    const dir = mkdtempSync(join(tmpdir(), "ak-repo-lock-test-nogit-"));
     dirs.push(dir);
 
     const handle = tryAcquireRepoLock(dir, "test-holder");
@@ -359,7 +359,7 @@ describe("repo-lock CONTENDED vs UNAVAILABLE (#230)", () => {
   const dirs: string[] = [];
 
   function makeRepo(): string {
-    const dir = mkdtempSync(join(tmpdir(), "repo-lock-230-"));
+    const dir = mkdtempSync(join(tmpdir(), "ak-repo-lock-230-"));
     mkdirSync(join(dir, ".git"), { recursive: true });
     dirs.push(dir);
     return dir;
@@ -397,7 +397,7 @@ describe("repo-lock CONTENDED vs UNAVAILABLE (#230)", () => {
     // this is what happens when a worktree path reaches a repoPath parameter. `existsSync`
     // sees `.git`, but the lockfile under it can never be created (ENOTDIR/ENOENT). Pre-fix
     // the caller polled that forever; the errno is not EEXIST, so it must read UNAVAILABLE.
-    const dir = mkdtempSync(join(tmpdir(), "repo-lock-230-gitfile-"));
+    const dir = mkdtempSync(join(tmpdir(), "ak-repo-lock-230-gitfile-"));
     dirs.push(dir);
     writeFileSync(join(dir, ".git"), "gitdir: /elsewhere/.git/worktrees/x\n");
 

@@ -92,7 +92,7 @@ function makeGit(overrides: Partial<Record<string, (...a: unknown[]) => unknown>
  */
 const tempRepos: string[] = [];
 function makeRepoPath(): string {
-  const dir = mkdtempSync(join(tmpdir(), "gate-path-"));
+  const dir = mkdtempSync(join(tmpdir(), "ak-gate-path-"));
   mkdirSync(join(dir, ".git"), { recursive: true });
   tempRepos.push(dir);
   return dir;

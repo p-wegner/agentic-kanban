@@ -71,7 +71,7 @@ import { setWorkspaceStatus } from "../repositories/workspace-status.repository.
  * Same fix as `zero-diff-inreview-exit.test.ts`, which shares this fixture shape.
  */
 function fakeWorktree(): string {
-  const dir = mkdtempSync(join(tmpdir(), "ak966-ws-"));
+  const dir = mkdtempSync(join(tmpdir(), "ak-966-ws-"));
   writeFileSync(join(dir, ".git"), "gitdir: /nowhere");
   return dir;
 }

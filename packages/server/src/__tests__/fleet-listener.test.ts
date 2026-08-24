@@ -6,7 +6,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { createTestDb } from "./helpers/test-db.js";
 import type { Database } from "../db/index.js";
@@ -116,14 +116,21 @@ describe("fleet listener", () => {
 
   describe("a real worker completes the flow through it", () => {
     let daemon: WorkerDaemonHandle;
-    const stateFile = join(tmpdir(), `fleet-listener-${randomUUID()}.json`);
+    // #839 — the state file lives INSIDE an `ak-` DIRECTORY rather than being a loose
+    // `%TEMP%` file, because the reaper (`helpers/reap-fixture-child-servers.ts`) sweeps
+    // stale `ak-*`/`kanban-*` entries only when `statSync(...).isDirectory()` — files are
+    // excluded on purpose, since `kanban-session-*.out` transcripts are read by a running
+    // server. A loose `fleet-listener-*.json` was therefore in no swept namespace at all and
+    // a teardown that failed for any reason leaked it permanently; a directory self-heals.
+    const fixtureDir = mkdtempSync(join(tmpdir(), "ak-fleet-listener-"));
+    const stateFile = join(fixtureDir, `worker-state-${randomUUID()}.json`);
 
     afterAll(async () => {
       // `stop()` is ASYNC and DRAINS (#754). Unawaited it both races the `rmSync` below and
       // leaves its promise unhandled, so a rejection in shutdown is reported against whatever
       // file vitest runs NEXT — the cross-file misattribution of #680 (#777, #816).
       await daemon?.stop({ killAgents: true });
-      rmSync(stateFile, { force: true });
+      rmSync(fixtureDir, { recursive: true, force: true });
     });
 
     it("pairs, connects over the WebSocket, and can be assigned work", async () => {

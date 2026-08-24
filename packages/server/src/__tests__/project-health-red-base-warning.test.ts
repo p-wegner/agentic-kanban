@@ -16,7 +16,7 @@ import { getProjectHealth } from "../services/project-health.service.js";
 
 const tempRepos: string[] = [];
 function makeRealRepoPath(): string {
-  const dir = mkdtempSync(join(tmpdir(), "project-health-repo-"));
+  const dir = mkdtempSync(join(tmpdir(), "ak-project-health-repo-"));
   const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" });
   git("init", "-q", "-b", "master");
   git("config", "user.email", "test@example.com");

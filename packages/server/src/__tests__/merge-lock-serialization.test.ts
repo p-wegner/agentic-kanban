@@ -39,7 +39,7 @@ function deferred<T = void>() {
 describe("acquireRepoMergeLock serialization (#944)", () => {
   beforeEach(() => {
     activeMerges.clear();
-    REPO = mkdtempSync(join(tmpdir(), "serialization-test-repo-"));
+    REPO = mkdtempSync(join(tmpdir(), "ak-serialization-test-repo-"));
     mkdirSync(join(REPO, ".git"), { recursive: true });
   });
 
@@ -292,7 +292,7 @@ describe("acquireRepoMergeLock serialization (#944)", () => {
     let repoDir: string;
 
     beforeEach(() => {
-      repoDir = mkdtempSync(join(tmpdir(), "merge-lock-stale-"));
+      repoDir = mkdtempSync(join(tmpdir(), "ak-merge-lock-stale-"));
       mkdirSync(join(repoDir, ".git"), { recursive: true });
     });
 
@@ -341,8 +341,8 @@ describe("acquireRepoMergeLock serialization (#944)", () => {
     const events: string[] = [];
 
     // Two DISTINCT real repos — same `.git`-must-exist guard as REPO above.
-    const repoOne = mkdtempSync(join(tmpdir(), "repo-one-"));
-    const repoTwo = mkdtempSync(join(tmpdir(), "repo-two-"));
+    const repoOne = mkdtempSync(join(tmpdir(), "ak-repo-one-"));
+    const repoTwo = mkdtempSync(join(tmpdir(), "ak-repo-two-"));
     mkdirSync(join(repoOne, ".git"), { recursive: true });
     mkdirSync(join(repoTwo, ".git"), { recursive: true });
 

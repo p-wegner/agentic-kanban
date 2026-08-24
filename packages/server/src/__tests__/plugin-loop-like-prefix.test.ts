@@ -38,7 +38,7 @@ const MANIFEST = {
 };
 
 function makePluginDir(): string {
-  const dir = makeTempDir("loop-like-plugin-");
+  const dir = makeTempDir("ak-loop-like-plugin-");
   writeFileSync(join(dir, "kanban-plugin.json"), JSON.stringify(MANIFEST, null, 2));
   const skillDir = join(dir, "skills", "analysis");
   mkdirSync(skillDir, { recursive: true });

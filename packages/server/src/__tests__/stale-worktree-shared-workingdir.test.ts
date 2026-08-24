@@ -35,7 +35,7 @@ describe("removeStaleWorktree does not delete a workingDir another workspace sti
   let workingDir: string;
 
   beforeEach(() => {
-    tmpRoot = mkdtempSync(join(tmpdir(), "ak673-stale-"));
+    tmpRoot = mkdtempSync(join(tmpdir(), "ak-673-stale-"));
     repoPath = join(tmpRoot, "repo");
     workingDir = join(tmpRoot, ".worktrees", "ak-670");
     mkdirSync(workingDir, { recursive: true });

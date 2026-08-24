@@ -21,7 +21,7 @@ import {
 const roots: string[] = [];
 
 function makeRepo(): string {
-  const dir = mkdtempSync(join(tmpdir(), "tree-memo-"));
+  const dir = mkdtempSync(join(tmpdir(), "ak-tree-memo-"));
   roots.push(dir);
   const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" });
   git("init", "-b", "main");

@@ -36,8 +36,8 @@ describe("git-http service (worker fleet phase 2)", () => {
 
   beforeAll(async () => {
     db = createTestDb().db as unknown as Database;
-    repoDir = mkdtempSync(join(tmpdir(), "git-http-origin-"));
-    workDir = mkdtempSync(join(tmpdir(), "git-http-work-"));
+    repoDir = mkdtempSync(join(tmpdir(), "ak-git-http-origin-"));
+    workDir = mkdtempSync(join(tmpdir(), "ak-git-http-work-"));
 
     await gitExecOrThrow(["init", "-b", "master", repoDir], {});
     writeFileSync(join(repoDir, "README.md"), "hello fleet\n");

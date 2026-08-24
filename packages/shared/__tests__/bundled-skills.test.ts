@@ -25,7 +25,7 @@ async function makeBundle(commit: string) {
 }
 
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), "bundled-skills-"));
+  root = await mkdtemp(join(tmpdir(), "ak-bundled-skills-"));
   bundle = join(root, "skills");
   await makeBundle("aaaa111");
   [skill] = await listBundledSkills(bundle);

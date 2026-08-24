@@ -9,7 +9,7 @@ import { serve } from "@hono/node-server";
 import { createNodeWebSocket } from "@hono/node-ws";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { createTestDb } from "./helpers/test-db.js";
 import { createWorkersRoute } from "../routes/workers.js";
@@ -33,10 +33,16 @@ describe("worker dispatch e2e (phase 1c)", () => {
   let boardUrl: string;
   let daemon: WorkerDaemonHandle;
   let dispatch: AgentExecutionService;
-  const stateFile = join(tmpdir(), `worker-dispatch-e2e-${randomUUID()}.json`);
+  // #839 — these fixture files live INSIDE an `ak-` DIRECTORY rather than loose in
+  // `%TEMP%`, because the reaper (`helpers/reap-fixture-child-servers.ts`) only sweeps
+  // entries where `statSync(...).isDirectory()` — files are excluded on purpose, since
+  // `kanban-session-*.out` transcripts are read by a running server. A loose fixture file
+  // was therefore in NO swept namespace and a failed teardown leaked it permanently.
+  const fixtureDir = mkdtempSync(join(tmpdir(), "ak-worker-dispatch-e2e-"));
+  const stateFile = join(fixtureDir, `worker-state-${randomUUID()}.json`);
   // "mock-agent" in the path selects the provider's mock launch path (argv-free,
   // prompt via stdin) — exactly what a hand-rolled echo script wants.
-  const scriptPath = join(tmpdir(), `fleet-mock-agent-${randomUUID()}.cjs`);
+  const scriptPath = join(fixtureDir, `fleet-mock-agent-${randomUUID()}.cjs`);
 
   beforeAll(async () => {
     db = createTestDb().db as unknown as Database;
@@ -78,8 +84,7 @@ describe("worker dispatch e2e (phase 1c)", () => {
     // next) and let the teardown delete the daemon's state file while it was still writing it.
     await daemon.stop({ killAgents: true });
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    rmSync(stateFile, { force: true });
-    rmSync(scriptPath, { force: true });
+    rmSync(fixtureDir, { recursive: true, force: true });
   });
 
   function launchRemote(sessionId: string, onOutput: (e: AgentOutputEvent) => void, keepAlive = false) {

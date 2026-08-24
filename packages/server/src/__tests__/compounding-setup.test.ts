@@ -21,7 +21,7 @@ import { createTestDb, type TestDb } from "./helpers/test-db.js";
 const NOW = "2026-07-20T10:00:00.000Z";
 
 function makeDir(): string {
-  return mkdtempSync(join(tmpdir(), "compounding-setup-"));
+  return mkdtempSync(join(tmpdir(), "ak-compounding-setup-"));
 }
 
 function makeRepo(): string {

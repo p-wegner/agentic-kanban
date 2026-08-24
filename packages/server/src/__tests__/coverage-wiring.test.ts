@@ -139,7 +139,7 @@ describe("coverage wiring (#765)", () => {
     )) as { mergeLcov: (root: string, reports: unknown[]) => { text: string; fileCount: number } };
     // Both packages have a `src/index.ts`. Package-relative SF: lines make them the same
     // file to the analyzer — which is exactly why a naive `cat` of the four lcovs is wrong.
-    const dir = mkdtempSync(path.join(tmpdir(), "lcov-merge-"));
+    const dir = mkdtempSync(path.join(tmpdir(), "ak-lcov-merge-"));
     const a = path.join(dir, "a.info");
     const b = path.join(dir, "b.info");
     writeFileSync(a, ["TN:", "SF:src\\index.ts", "DA:1,1", "end_of_record"].join("\n"));

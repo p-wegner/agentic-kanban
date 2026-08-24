@@ -87,7 +87,7 @@ describe("writeStrategyObjective + commitObjectiveFile — auto-commit hook", ()
   const config = JSON.stringify({ segments: [{ id: "perf", label: "REST API Performance", kind: "area", weight: 5, keywords: "performance rest api" }] });
 
   beforeEach(() => {
-    repo = mkdtempSync(join(tmpdir(), "strategy-objective-"));
+    repo = mkdtempSync(join(tmpdir(), "ak-strategy-objective-"));
     git(repo, ["init", "-q"]);
     git(repo, ["config", "commit.gpgsign", "false"]);
     mkdirSync(join(repo, "scripts", "board-monitor"), { recursive: true });
@@ -110,7 +110,7 @@ describe("writeStrategyObjective + commitObjectiveFile — auto-commit hook", ()
   });
 
   it("returns false (no rewrite) when there is no objective.md", () => {
-    const empty = mkdtempSync(join(tmpdir(), "strategy-empty-"));
+    const empty = mkdtempSync(join(tmpdir(), "ak-strategy-empty-"));
     try {
       expect(writeStrategyObjective(empty, config)).toBe(false);
     } finally {
@@ -119,7 +119,7 @@ describe("writeStrategyObjective + commitObjectiveFile — auto-commit hook", ()
   });
 
   it("creates a per-project conductor objective when opted in", () => {
-    const empty = mkdtempSync(join(tmpdir(), "strategy-conductor-"));
+    const empty = mkdtempSync(join(tmpdir(), "ak-strategy-conductor-"));
     try {
       const changed = writeStrategyObjective(empty, config, {
         objectiveRelativePath: PROJECT_CONDUCTOR_OBJECTIVE_RELATIVE_PATH,

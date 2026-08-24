@@ -33,7 +33,7 @@ import { tryAcquireRepoLock } from "@agentic-kanban/shared/lib/repo-lock";
  */
 const tempRepos: string[] = [];
 function makeRepoPath(): string {
-  const dir = mkdtempSync(join(tmpdir(), "gate-lock-repo-"));
+  const dir = mkdtempSync(join(tmpdir(), "ak-gate-lock-repo-"));
   mkdirSync(join(dir, ".git"), { recursive: true });
   tempRepos.push(dir);
   return dir;

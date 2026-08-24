@@ -12,7 +12,7 @@ describe("readOrchestratorStatus stop-marker", () => {
   let dir: string;
 
   beforeEach(() => {
-    repo = mkdtempSync(join(tmpdir(), "orch-mon-"));
+    repo = mkdtempSync(join(tmpdir(), "ak-orch-mon-"));
     dir = join(repo, "scripts", "board-monitor");
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "loop.sh"), "#!/usr/bin/env bash\n", "utf8");

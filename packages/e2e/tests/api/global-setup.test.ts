@@ -12,7 +12,7 @@ test.describe("global setup project registration", () => {
     const activeBefore = activeBeforeRes.ok() ? await activeBeforeRes.json() : { projectId: null };
     const previousProjectId = activeBefore.projectId ?? null;
 
-    const tmpDir = mkdtempSync(join(tmpdir(), "e2e-global-setup-"));
+    const tmpDir = mkdtempSync(join(tmpdir(), "ak-e2e-global-setup-"));
     let projectId: string | null = null;
 
     try {

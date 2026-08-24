@@ -15,7 +15,7 @@ import { getE2EProjectId } from "../helpers/e2e-project.js";
 
 /** Create 5 TypeScript fixture files in a temp directory for testing. */
 async function createFixtures(): Promise<{ tmpDir: string; files: string[] }> {
-  const tmpDir = await mkdtemp(join(tmpdir(), "codemod-e2e-"));
+  const tmpDir = await mkdtemp(join(tmpdir(), "ak-codemod-e2e-"));
 
   const fixtures = [
     {

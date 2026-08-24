@@ -506,7 +506,7 @@ describe("session-lifecycle", () => {
 
   /** Put the workspace into plan mode with a REAL temp working dir (so writePlanFile works). */
   async function enterPlanMode(workspaceId: string): Promise<string> {
-    const dir = mkdtempSync(join(tmpdir(), "ak924-"));
+    const dir = mkdtempSync(join(tmpdir(), "ak-924-"));
     await db.update(workspaces).set({ planMode: true, workingDir: dir }).where(eq(workspaces.id, workspaceId));
     return dir;
   }

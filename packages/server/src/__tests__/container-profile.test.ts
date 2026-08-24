@@ -16,7 +16,7 @@ let sourceDir: string;
 let stateDir: string;
 
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), "container-profile-"));
+  home = mkdtempSync(join(tmpdir(), "ak-container-profile-"));
   sourceDir = join(home, ".claude");
   stateDir = join(home, ".agentic-kanban");
   mkdirSync(sourceDir, { recursive: true });

@@ -271,7 +271,7 @@ describe("runPreMergeGate: an unverified merge must be SAYABLE (#377)", () => {
     runSmokeCheck.mockReset();
     getChangedFileNames.mockReset();
     getChangedFileNames.mockResolvedValue([]);
-    repoDir = mkdtempSync(join(tmpdir(), "gate-rederive-"));
+    repoDir = mkdtempSync(join(tmpdir(), "ak-gate-rederive-"));
   });
 
   afterEach(() => {

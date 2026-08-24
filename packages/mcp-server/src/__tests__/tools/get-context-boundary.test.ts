@@ -122,7 +122,7 @@ describe("get_context boundary — empty board", () => {
   let projectId: string;
 
   beforeAll(async () => {
-    tmpDir = mkdtempSync(join(tmpdir(), "mcp-getctx-empty-"));
+    tmpDir = mkdtempSync(join(tmpdir(), "ak-mcp-getctx-empty-"));
     const dbPath = join(tmpDir, "test.db");
     createTestDb(dbPath);
     const db = new DatabaseSync(dbPath);
@@ -174,7 +174,7 @@ describe("get_context boundary — stale active project pref", () => {
   const danglingId = randomUUID();
 
   beforeAll(async () => {
-    tmpDir = mkdtempSync(join(tmpdir(), "mcp-getctx-stale-"));
+    tmpDir = mkdtempSync(join(tmpdir(), "ak-mcp-getctx-stale-"));
     const dbPath = join(tmpDir, "test.db");
     createTestDb(dbPath);
     const db = new DatabaseSync(dbPath);

@@ -17,7 +17,7 @@ import {
  */
 const dirs: string[] = [];
 function temp(): string {
-  const dir = mkdtempSync(join(tmpdir(), "skill-ssot-"));
+  const dir = mkdtempSync(join(tmpdir(), "ak-skill-ssot-"));
   dirs.push(dir);
   return dir;
 }

@@ -41,7 +41,7 @@ describe("vital-file-guard — WAL-aware backup (#988)", () => {
   let projectDir: string;
 
   beforeEach(async () => {
-    projectDir = await mkdtemp(join(tmpdir(), "vital-guard-test-"));
+    projectDir = await mkdtemp(join(tmpdir(), "ak-vital-guard-test-"));
   });
 
   afterEach(async () => {

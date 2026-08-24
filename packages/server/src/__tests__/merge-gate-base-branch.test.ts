@@ -26,7 +26,7 @@ import { createTestDb } from "./helpers/test-db.js";
 
 const tempRepos: string[] = [];
 function makeRepoPath(): string {
-  const dir = mkdtempSync(join(tmpdir(), "gate-base-branch-repo-"));
+  const dir = mkdtempSync(join(tmpdir(), "ak-gate-base-branch-repo-"));
   mkdirSync(join(dir, ".git"), { recursive: true });
   tempRepos.push(dir);
   return dir;

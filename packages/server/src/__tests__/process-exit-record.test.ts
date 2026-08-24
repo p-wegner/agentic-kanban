@@ -32,7 +32,7 @@ let dir: string;
 let path: string;
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "exit-record-"));
+  dir = mkdtempSync(join(tmpdir(), "ak-exit-record-"));
   path = join(dir, "process-exit-log.jsonl");
 });
 

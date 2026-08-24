@@ -202,7 +202,7 @@ describe("the baseline survives a process restart (#375)", () => {
   let storePath: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "spawn-baseline-"));
+    dir = mkdtempSync(join(tmpdir(), "ak-spawn-baseline-"));
     storePath = join(dir, "store.json");
     process.env.KANBAN_SPAWN_BASELINE_FILE = storePath;
     resetSpawnControlBaselineForTest({ persist: true });

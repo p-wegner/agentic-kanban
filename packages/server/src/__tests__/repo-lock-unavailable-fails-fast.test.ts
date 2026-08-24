@@ -68,7 +68,7 @@ describe("on-disk repo lock: UNAVAILABLE fails fast (#230)", () => {
   });
 
   it("still WAITS (does not fail fast) when the lock is merely contended", async () => {
-    const repo = mkdtempSync(join(tmpdir(), "repo-lock-contended-"));
+    const repo = mkdtempSync(join(tmpdir(), "ak-repo-lock-contended-"));
     mkdirSync(join(repo, ".git"), { recursive: true });
     dirs.push(repo);
 

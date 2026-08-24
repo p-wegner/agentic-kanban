@@ -43,7 +43,7 @@ describe("conductor lifecycle (start no-op-if-alive, stop kills recorded PID)", 
   let dir: string;
 
   beforeEach(() => {
-    repo = mkdtempSync(join(tmpdir(), "conductor-life-"));
+    repo = mkdtempSync(join(tmpdir(), "ak-conductor-life-"));
     dir = join(repo, "scripts", "board-monitor");
     mkdirSync(dir, { recursive: true });
     // A repo "ships a loop" iff scripts/board-monitor/loop.sh exists (conductorAvailable).

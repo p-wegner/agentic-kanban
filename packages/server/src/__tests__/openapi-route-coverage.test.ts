@@ -50,7 +50,7 @@ function runGenerator(args: string[]): { ok: boolean; output: string } {
 
 /** A throwaway tree holding one route the generator has no way to have scanned. */
 function withRogueRouteDir(fn: (dir: string) => void) {
-  const dir = mkdtempSync(join(tmpdir(), "openapi-rogue-"));
+  const dir = mkdtempSync(join(tmpdir(), "ak-openapi-rogue-"));
   try {
     writeFileSync(
       join(dir, "rogue.ts"),

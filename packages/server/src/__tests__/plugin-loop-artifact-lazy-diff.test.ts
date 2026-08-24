@@ -41,7 +41,7 @@ const MANIFEST = {
 };
 
 function makePluginDir(): string {
-  const dir = makeTempDir("artifact-diff-plugin-");
+  const dir = makeTempDir("ak-artifact-diff-plugin-");
   writeFileSync(join(dir, "kanban-plugin.json"), JSON.stringify(MANIFEST, null, 2));
   const skillDir = join(dir, "skills", "step-runner");
   mkdirSync(skillDir, { recursive: true });
@@ -54,7 +54,7 @@ const ARTIFACT_REL = "docs/steps/step-1/report.md";
 
 /** A repo whose artifact has TWO commits, so a v(N-1)→vN diff genuinely exists. */
 function makeRepoWithTwoVersions(): string {
-  const parent = makeTempDir("artifact-diff-parent-");
+  const parent = makeTempDir("ak-artifact-diff-parent-");
   const repo = join(parent, "product-repo");
   mkdirSync(join(repo, "docs", "steps", "step-1"), { recursive: true });
   gitExecSync(["init"], { cwd: repo });
@@ -74,7 +74,7 @@ function makeRepoWithTwoVersions(): string {
 
 /** A repo whose artifact has exactly ONE commit — no previous version to diff against. */
 function makeRepoWithOneVersion(): string {
-  const parent = makeTempDir("artifact-diff-parent-");
+  const parent = makeTempDir("ak-artifact-diff-parent-");
   const repo = join(parent, "product-repo");
   mkdirSync(join(repo, "docs", "steps", "step-1"), { recursive: true });
   gitExecSync(["init"], { cwd: repo });

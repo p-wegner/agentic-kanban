@@ -49,7 +49,7 @@ async function insertInvalidUtf8Row(client: Client, sessionId: string, data: Uin
 let quarantineDir: string;
 
 beforeEach(() => {
-  quarantineDir = mkdtempSync(join(tmpdir(), "utf8-quarantine-test-"));
+  quarantineDir = mkdtempSync(join(tmpdir(), "ak-utf8-quarantine-test-"));
 });
 
 afterEach(() => {
