@@ -36,7 +36,8 @@
  * once — ~200 call sites did not have to be edited, and a new caller is covered the day it
  * is written.
  *
- * Scope, stated plainly: 36 method+path pairs. It is NOT the whole surface. An unregistered
+ * Scope, stated plainly: 46 method+path pairs of the 257 the client calls — 211 remain. It is
+ * NOT the whole surface. An unregistered
  * path is returned unchecked through the single named seam in `apiFetch`
  * (`unvalidatedResponse`). `API_RESPONSE_SCHEMA_COUNT` is the number to quote.
  *
@@ -64,6 +65,10 @@
 import type { ProjectResponse } from "@agentic-kanban/shared/types";
 import type { WorkspaceResponse } from "@agentic-kanban/shared/types";
 import type { IssueComment } from "@agentic-kanban/shared/types";
+import type { ProjectRepoResponse } from "@agentic-kanban/shared/types";
+import type { RepoMergeStatusResponse } from "@agentic-kanban/shared/types";
+import type { StatusWithIssues, IssueWithStatus } from "@agentic-kanban/shared/types";
+import type { DiffResponse, DiffStatsResponse } from "@agentic-kanban/shared/types";
 
 export type ApiMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -111,6 +116,41 @@ export function arrayOf<T>(inner: Check<T>): Check<T[]> {
         return;
       }
       value.forEach((item, i) => inner.check(item, `${path}[${i}]`, issues));
+    },
+  };
+}
+
+/**
+ * The value is an ARRAY; its elements are not checked (#806 batch 2).
+ *
+ * The honest way to say "this endpoint answers a list of things whose element shape no
+ * caller depends on structurally". `arrayOf(nested(...))` is the stricter option and is used
+ * where the elements ARE destructured; reaching for this one instead is a deliberate choice,
+ * not a shortcut — a `comments: DiffComment[]` the diff panel only maps over by id gains
+ * nothing from ten per-element field checks, and each one is a way for an unrelated server
+ * change to redden a boundary the UI does not actually depend on.
+ */
+function anyArray<T = unknown>(): Check<T[]> {
+  return primitive<T[]>("array", (v) => Array.isArray(v));
+}
+
+/**
+ * An {@link ObjectSchema} used as a FIELD check, so schemas can nest (#806 batch 2).
+ *
+ * `arrayOf` takes a `Check`, and until now the only `Check`s were primitives — which is why
+ * the registry could describe a list of scalars but not a list of records, nor an object with
+ * an object inside it. `GET /api/projects/:id/board` is exactly that shape (columns holding
+ * issues), and it is the single most load-bearing read in the app.
+ *
+ * Nested problems are reported with the outer path prefixed, so a failure names
+ * `issues[3].id` rather than a bare `id` whose owner is anyone's guess.
+ */
+function nested<T = unknown>(schema: ObjectSchema): Check<T> {
+  return {
+    check(value, path, issues) {
+      const inner: string[] = [];
+      schema.validate(value, inner);
+      for (const issue of inner) issues.push(`${path}.${issue}`);
     },
   };
 }
@@ -309,6 +349,162 @@ const stoppedFlag = looseObject({ stopped: bool });
  *  type that is still meaningful, and no caller reads the status. */
 const closedWorkspace = looseObject({ id: str, status: str });
 
+// ── #806 batch 2: the deep READS — the board, the issue panel, the diff, the lists ──
+//
+// Batch 1 registered mutations, which mostly answer a handle: a wrong shape there fails
+// loudly and immediately (a button does nothing). These are the opposite end — responses the
+// client destructures several levels down and then RENDERS. A dropped field in one of them
+// does not throw where it happened; it arrives as an `undefined` inside a component, and the
+// screen goes blank or silently empty with no line number pointing at the wire. That is the
+// failure mode #780 exists to convert into a boundary error, so it is where the next batch
+// is worth spending.
+//
+// Every shape below was read off the SERVER handler (route file → service → repository
+// projection), not inferred from how the client happens to use it — inferring from the
+// consumer is how a schema ends up asserting a field the server never promised.
+
+/**
+ * A board issue, as `buildBoardColumns` emits it (`server/src/lib/board-view.ts`): the issue
+ * row spread wholesale, plus `tags` and an optional `checklist`.
+ *
+ * Only the four fields whose absence breaks the CARD are asserted. `IssueWithStatus` declares
+ * a dozen more — `issueNumber`, `statusName`, `priority`, `workspaceSummary`, … — and several
+ * are genuinely optional or absent on the slim projection, so asserting them would make an
+ * ordinary server-side narrowing look like a contract break.
+ */
+const boardIssue = looseObject({ id: str, title: str, statusId: str, projectId: str });
+
+/**
+ * `GET /api/projects/:id/board` → `StatusWithIssues[]`.
+ *
+ * **The most load-bearing read in the app.** Every column, every card and the whole drag
+ * target derive from it, so a shape change here does not break one panel — it empties the
+ * board, which reads to the user as "my tickets are gone" rather than as a bug. It is also
+ * the response most likely to change shape, because it is assembled (statuses joined to
+ * issues joined to workspace summaries) rather than returned from one query.
+ *
+ * Answered through an ETag fast path, so a 304 never reaches a schema; only a 200 body is
+ * checked, which is exactly right — the 304 branch returns the PREVIOUS body, already checked
+ * when it was a 200.
+ */
+const boardColumn = dtoObject<StatusWithIssues>({
+  id: str,
+  name: str,
+  projectId: str,
+  sortOrder: num,
+  count: num,
+  issues: arrayOf(nested<IssueWithStatus>(boardIssue)),
+});
+
+/**
+ * `GET /api/projects/:id/statuses` → the `project_statuses` rows (`getProjectStatuses`, a
+ * bare `select()`), so the four NOT NULL columns the workflow builder and the
+ * backlog-markdown lookups read are guaranteed. `isDefault`/`createdAt` are returned and read
+ * by nobody here.
+ */
+const projectStatus = looseObject({ id: str, name: str, projectId: str, sortOrder: num });
+
+/**
+ * `GET /api/projects/:id/repos` → `toProjectRepoResponse` (`routes/projects.ts`), which
+ * builds the DTO field by field — so unlike most list endpoints this one's shape is stated in
+ * the route rather than inherited from a table. `name` and `defaultBranch` are genuinely
+ * `string | null` on the DTO and in the column; modelling them as plain `str` would have
+ * reddened every project whose sibling repo has no configured branch.
+ */
+const projectRepo = dtoObject<ProjectRepoResponse>({
+  id: str,
+  projectId: str,
+  path: str,
+  name: nullable(str),
+  defaultBranch: nullable(str),
+  createdAt: str,
+});
+
+/**
+ * `GET /api/projects/all/workspaces` → one group per project
+ * (`projectService.getCrossProjectWorkspaces`). The group header is what the All-Workspaces
+ * panel renders and navigates by; the issues inside carry a `workspaceSummary` whose shape is
+ * the summary cache's, checked no further than "it is a list".
+ */
+const crossProjectGroup = looseObject({ projectId: str, projectName: str, issues: anyArray() });
+
+/**
+ * `GET /api/issues` → `getIssuesByProject`'s rows. TWO projections answer this path —
+ * `?slim=1` drops `description` — so only the columns present in BOTH are asserted. That is
+ * the same reasoning as the diff union below, arrived at from the other direction: where the
+ * variants differ in one optional field, the intersection is enough; where they are different
+ * shapes, it takes a union.
+ */
+const issueListRow = looseObject({ id: str, title: str, statusId: str, projectId: str });
+
+/**
+ * `GET /api/issues/:id/detail-bundle` (#418) → the ONE request behind the whole issue panel.
+ *
+ * Its twelve fields are each a `Promise.all` arm with `.catch(() => …)`, so the failure modes
+ * are already distinguished by the server: six arms fall back to `null`, five to `[]`, and
+ * `activity` to `{ events: [] }`. Only the arms with a NON-null fallback are asserted —
+ * `dependencies`, `cycleTime`, `timeEntries`, `touchedFiles`, `relatedIssues` and
+ * `mergedCommits` are legitimately `null` on a healthy response, and the client's own props
+ * are typed `T | null` to match. Asserting them would turn a caught server-side error into a
+ * blank panel, which is precisely the outcome this file exists to prevent.
+ */
+const issueDetailBundle = looseObject({
+  issue: nested(looseObject({ id: str, title: str })),
+  workspaces: anyArray(),
+  tags: anyArray(),
+  artifacts: anyArray(),
+  comments: anyArray(),
+  activity: nested(looseObject({ events: anyArray() })),
+});
+
+/** The `{ filesChanged, insertions, deletions }` triple, shared by both diff variants. */
+const diffStatsTriple = looseObject({ filesChanged: num, insertions: num, deletions: num });
+
+/**
+ * `GET /api/workspaces/:id/diff` answers TWO DIFFERENT SHAPES on ONE path, selected by the
+ * `?stats=1` query parameter (#415) — and the registry is keyed by method+path, with the
+ * query deliberately stripped. So this is the case the module header calls out as possibly
+ * un-schematisable ("a shape that varies by query parameter"), and it turns out to be
+ * schematisable after all: the two variants are a union, exactly like `POST /api/workspaces`'s
+ * 201-or-202. Worth stating, because the alternative was a baseline line with a reason,
+ * permanently exempting the response four panels destructure most deeply.
+ *
+ * The full variant additionally carries `conflicts` and (multi-repo only) `repos`, and the
+ * route may spread a `remoteMidSession` beside either — all passthrough, none asserted.
+ */
+const workspaceDiff = union(
+  dtoObject<DiffResponse>({
+    diff: str,
+    stats: nested<DiffResponse["stats"]>(diffStatsTriple),
+    comments: anyArray(),
+  }),
+  dtoObject<DiffStatsResponse>({
+    stats: nested<DiffStatsResponse["stats"]>(diffStatsTriple),
+    repos: anyArray(),
+  }),
+);
+
+/**
+ * `GET /api/workspaces/:id/sessions` → the `sessions` rows (a bare `select()`) with a
+ * `skillName` attached. The four NOT NULL columns the timeline keys and orders by are
+ * asserted; `endedAt`/`exitCode`/`pid` are nullable by schema and stay unchecked.
+ */
+const sessionRow = looseObject({ id: str, workspaceId: str, status: str, startedAt: str });
+
+/**
+ * `GET /api/workspaces/:id/repo-merge-status` → `RepoMergeStatusResponse` (#70/#168). The
+ * strip's headline is `allMerged`, and a missing boolean reads as `false` — so this endpoint
+ * silently claims "not merged" rather than failing, the quiet failure mode this ratchet's
+ * whole premise is about. `branch` is `string | null` on the DTO; `installSummary` is optional
+ * (`tracked: 0` is the inline-install default) and is not asserted.
+ */
+const repoMergeStatus = dtoObject<RepoMergeStatusResponse>({
+  branch: nullable(str),
+  baseBranch: str,
+  allMerged: bool,
+  repos: anyArray(),
+});
+
 export interface ApiResponseRoute {
   method: ApiMethod;
   /** Express-style template with `:param` segments, matched against the request path. */
@@ -382,6 +578,23 @@ export const API_RESPONSE_SCHEMAS: readonly ApiResponseRoute[] = [
   { method: "GET", template: "/api/projects", schema: arrayRoot(project) },
   { method: "POST", template: "/api/projects/:id/archive", schema: idHandle },
   { method: "POST", template: "/api/projects/:id/unarchive", schema: idHandle },
+
+  // ── the deep reads (#806 batch 2) ──
+  { method: "GET", template: "/api/projects/:id/board", schema: arrayRoot(boardColumn) },
+  { method: "GET", template: "/api/projects/:id/statuses", schema: arrayRoot(projectStatus) },
+  { method: "GET", template: "/api/projects/:id/repos", schema: arrayRoot(projectRepo) },
+  // `all` is a LITERAL segment, not a project id. It has the same segment count as
+  // `/:id/statuses`, and `findApiResponseSchema` prefers the more literal template — but the
+  // last segments differ anyway, so neither can shadow the other.
+  { method: "GET", template: "/api/projects/all/workspaces", schema: arrayRoot(crossProjectGroup) },
+  { method: "GET", template: "/api/issues", schema: arrayRoot(issueListRow) },
+  { method: "GET", template: "/api/issues/:id/detail-bundle", schema: issueDetailBundle },
+  // The list is `listWorkspacesSlim`'s projection, which happens to be a superset of exactly
+  // the fields `GET /api/workspaces/:id` guarantees — so the element schema is the same one.
+  { method: "GET", template: "/api/workspaces", schema: arrayRoot(workspace) },
+  { method: "GET", template: "/api/workspaces/:id/diff", schema: workspaceDiff },
+  { method: "GET", template: "/api/workspaces/:id/sessions", schema: arrayRoot(sessionRow) },
+  { method: "GET", template: "/api/workspaces/:id/repo-merge-status", schema: repoMergeStatus },
 ];
 
 export const API_RESPONSE_SCHEMA_COUNT = API_RESPONSE_SCHEMAS.length;
