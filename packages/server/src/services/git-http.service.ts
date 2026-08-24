@@ -688,6 +688,14 @@ export async function revokeGitTokensForWorker(
   return removed;
 }
 
+/**
+ * Release the transport's listener (#856). Dead code until #855 chose bind-at-startup-and-
+ * keep-bound: a pinned KANBAN_GIT_HTTP_PORT held for the process's whole life needs a
+ * release on every path that stops the board without killing the process, or the next
+ * start's eager bind fails with EADDRINUSE. Called from the signal-handler shutdown
+ * (startup/process-handlers.ts) and from server-start's cleanup callbacks (which a fresh
+ * startServer() also runs). Idempotent: a second call, or a call when nothing bound, no-ops.
+ */
 export async function stopGitHttpServer(): Promise<void> {
   if (!activeServer) return;
   const handle = await activeServer.catch(() => null);

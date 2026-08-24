@@ -18,7 +18,7 @@ import { createAutoMerge } from "./startup/merge-workflow.js";
 import { createMonitorSetup } from "./startup/monitor-setup.js";
 import { setupProcessHandlers } from "./startup/process-handlers.js";
 import { resolveFleetHost, resolveFleetPort, startFleetListener } from "./services/fleet-listener.service.js";
-import { ensureGitHttpServer } from "./services/git-http.service.js";
+import { ensureGitHttpServer, stopGitHttpServer } from "./services/git-http.service.js";
 import { createFleetWorkersRoute } from "./routes/workers.js";
 import { setupRoutes } from "./startup/route-setup.js";
 import { BACKGROUND_SERVICES } from "./startup/background-services.js";
@@ -363,6 +363,13 @@ export async function startServer(port?: number, hostname?: string) {
       );
     }
   }
+
+  // #856 — release the git transport listener (bound eagerly above on a fleet-configured
+  // board, or lazily by a git-transport dispatch) whenever THIS server instance is torn
+  // down without the process dying: a fresh startServer() runs the previous instance's
+  // cleanup via replaceStartupTimerCleanup, and the signal handlers run it too. Registered
+  // unconditionally — stopGitHttpServer is an idempotent no-op when nothing ever bound.
+  cleanupCallbacks.push(() => { void stopGitHttpServer(); });
 
   setupProcessHandlers(server, agentService, { cleanupStartupTimers });
 
