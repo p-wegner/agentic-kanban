@@ -18,6 +18,7 @@ import { createAutoMerge } from "./startup/merge-workflow.js";
 import { createMonitorSetup } from "./startup/monitor-setup.js";
 import { setupProcessHandlers } from "./startup/process-handlers.js";
 import { resolveFleetHost, resolveFleetPort, startFleetListener } from "./services/fleet-listener.service.js";
+import { ensureGitHttpServer } from "./services/git-http.service.js";
 import { createFleetWorkersRoute } from "./routes/workers.js";
 import { setupRoutes } from "./startup/route-setup.js";
 import { BACKGROUND_SERVICES } from "./startup/background-services.js";
@@ -336,6 +337,28 @@ export async function startServer(port?: number, hostname?: string) {
     } catch (err) {
       console.error(
         `[fleet-listener] failed to bind KANBAN_FLEET_PORT=${fleetPort}; remote workers cannot connect:`,
+        errorMessage(err),
+      );
+    }
+
+    // #855 — bind the git transport EAGERLY when a fleet is configured. It used to bind
+    // lazily on the first git-transport dispatch only (`ensureGitHttpServer` in
+    // agent-remote.service.ts), so from every board restart until that first dispatch a
+    // worker probing the pinned KANBAN_GIT_HTTP_PORT saw ECONNREFUSED with no way to tell
+    // a healthy pre-dispatch board from a misconfigured one (#847). With KANBAN_FLEET_PORT
+    // set the git port is pinned by construction — `gitPortStabilityViolation` refuses an
+    // OS-assigned port while a fleet listener exists — so binding at startup exposes
+    // nothing new and turns "refused" back into a real signal. Without a fleet port the
+    // lazy path stays: a single-user local board must not open a listener it never uses.
+    // Failure is NON-FATAL: log and degrade to the lazy path — the dispatch-time
+    // `ensureGitHttpServer` call sites remain (the failed memoized promise is reset, so
+    // they retry; once this succeeds they are no-ops against the memoized handle).
+    try {
+      const git = await ensureGitHttpServer(db);
+      console.log(`[git-http] bound eagerly at startup for the fleet (port ${git.port})`);
+    } catch (err) {
+      console.warn(
+        "[git-http] eager startup bind failed — degrading to lazy bind on the first git-transport dispatch:",
         errorMessage(err),
       );
     }
