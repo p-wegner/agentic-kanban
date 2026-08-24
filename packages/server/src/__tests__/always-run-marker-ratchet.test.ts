@@ -2,6 +2,12 @@
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
+// #891: the marker rule itself comes from the script that RUNS the set, so this ratchet and
+// the runner cannot disagree about what counts as marked. Four checks below used a bare
+// `.includes(MARKER)`, and the one at `scanTestsDir` is why it mattered: it exempted a file
+// from the unsound-signature scan BEFORE running it, so a tree-scanning suite that merely
+// quoted the marker in a comment got a free pass from the ratchet built to catch exactly that.
+import { isAlwaysRunMarked } from "../../../../scripts/test-mine.mjs";
 
 /**
  * #538 — the always-run guard list was itself hand-maintained, which is the exact failure
@@ -297,7 +303,7 @@ function scanTestsDir(label: string, testsDir: string): Offender[] {
   const offenders: Offender[] = [];
   for (const { rel, full } of collectTestFiles(testsDir)) {
     const source = fs.readFileSync(full, "utf8");
-    if (source.includes(MARKER)) continue;
+    if (isAlwaysRunMarked(source)) continue;
     // Matched by PATH since #734: an exemption covers the file it was argued for, and moving
     // that file is a reviewed edit here rather than a silent transfer to its new neighbour.
     if (KNOWN_SAFE_UNMARKED.has(`${label}/${rel}`)) continue;
@@ -354,7 +360,7 @@ describe("always-run marker ratchet (#538)", () => {
     const marked: string[] = [];
     for (const { label, testsDir } of SCAN_PACKAGES) {
       for (const f of collectTestFiles(testsDir)) {
-        if (fs.readFileSync(f.full, "utf8").includes(MARKER)) marked.push(`${label}/${f.rel}`);
+        if (isAlwaysRunMarked(fs.readFileSync(f.full, "utf8"))) marked.push(`${label}/${f.rel}`);
       }
     }
     // Sanity floor: the mechanism is worthless if the walk finds nothing.
@@ -373,7 +379,7 @@ describe("always-run marker ratchet (#538)", () => {
     for (const { label, testsDir } of SCAN_PACKAGES) {
       for (const { rel, full } of collectTestFiles(testsDir)) {
         const source = fs.readFileSync(full, "utf8");
-        if (!source.includes(MARKER)) continue;
+        if (!isAlwaysRunMarked(source)) continue;
         if (MARKED_BY_POLICY.has(`${label}/${rel}`)) continue;
         if (UNSOUND_SIGNATURES.some((sig) => sig.test(source))) continue;
         undefended.push(`${label}/${rel}`);
@@ -399,7 +405,7 @@ describe("always-run marker ratchet (#538)", () => {
       const full = byPath.get(key);
       if (!full) { stale.push(`${key} (no such test file)`); continue; }
       const source = fs.readFileSync(full, "utf8");
-      if (!source.includes(MARKER)) { stale.push(`${key} (no longer marked)`); continue; }
+      if (!isAlwaysRunMarked(source)) { stale.push(`${key} (no longer marked)`); continue; }
       if (UNSOUND_SIGNATURES.some((sig) => sig.test(source))) stale.push(`${key} (now matches a signature)`);
     }
     expect(stale, `remove these from MARKED_BY_POLICY:\n  ${stale.join("\n  ")}`).toEqual([]);

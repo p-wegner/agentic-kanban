@@ -75,6 +75,25 @@ export function resolveGateScoping(args: {
  *  `scripts/test-mine.mjs`'s `ALWAYS_RUN_TESTS_DIR`. Best-effort: this repo checkout's own
  *  monorepo layout, so it is inert (returns 0) for a project this gate runs FOR that isn't
  *  this repo — the count only decorates the message, it never gates behavior. */
+/**
+ * The always-run marker and test-file rules, MIRRORED from `scripts/test-mine.mjs` (#891).
+ *
+ * Deliberately a copy, not an import. `packages/server` ships only `dist/` (see its `files`),
+ * so importing a repo-root script would make a published install crash on load; and the script
+ * itself imports only Node built-ins on purpose, so it cannot depend on this package either.
+ * Two implementations is the floor the packaging allows.
+ *
+ * What stops them drifting is `always-run-dirs-lockstep.test.ts`, which now holds them to the
+ * same RULE — feeding both the same fixtures and asserting identical classification — rather
+ * than to the same TEXT by comment. Before #891 both sides used a bare `.includes()`, which
+ * matched a file that merely MENTIONS the marker: they agreed only because both were wrong the
+ * same way, and this counter's own guard suite was one of the two files being miscounted.
+ */
+const ALWAYS_RUN_MARKER_RE = /^\s*\/\/\s*@gate:always-run\b/m;
+
+/** Mirrors `ALWAYS_RUN_TEST_FILE` in `scripts/test-mine.mjs`; held in lockstep by the same suite. */
+const ALWAYS_RUN_TEST_FILE = /\.test\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
+
 export const ALWAYS_RUN_TESTS_DIRS = [
   join("packages", "shared", "__tests__"),
   join("packages", "server", "src", "__tests__"),
@@ -101,8 +120,8 @@ export function countAlwaysRunGuardSuites(repoRoot: string): number {
         if (entry.name !== "node_modules" && !entry.name.startsWith(".")) scan(full);
         continue;
       }
-      if (!/\.test\.[cm]?[jt]sx?$/.test(entry.name)) continue;
-      if (readFileSync(full, "utf8").includes("@gate:always-run")) count += 1;
+      if (!ALWAYS_RUN_TEST_FILE.test(entry.name)) continue;
+      if (ALWAYS_RUN_MARKER_RE.test(readFileSync(full, "utf8"))) count += 1;
     }
   };
   for (const dir of ALWAYS_RUN_TESTS_DIRS) {

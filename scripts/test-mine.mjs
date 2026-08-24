@@ -249,8 +249,49 @@ function resolveVitestEntry(pkgDir) {
  */
 const ALWAYS_RUN_MARKER = "@gate:always-run";
 
+/**
+ * The marker, matched as a DECLARATION rather than as a substring (#891).
+ *
+ * This was `source.includes(ALWAYS_RUN_MARKER)`, which cannot tell a marker from a sentence
+ * about markers, or from the string used as data. Two suites were force-run on that basis, and
+ * they were the two that guard this very mechanism: `guard-suite-count.test.ts` (which holds the
+ * marker in a `const MARKER` fixture) and `test-mine-scope-derivation.test.mjs` (whose fixture
+ * text exists to assert that a NON-test file carrying the marker is ignored). The scanner was
+ * matching a string whose whole purpose is to describe what it should skip.
+ *
+ * Benign in outcome — both arguably should always run — but load-bearing for the wrong reason:
+ * rewriting that constant as `"// @gate:" + "always-run"`, or moving the fixture into a JSON
+ * file, silently drops the marker mechanism's own guards out of every gate, with no test to fail
+ * on it. That is what this file already warns about at #647: "a marker that silently does
+ * nothing is worse than no marker".
+ *
+ * Line- and comment-anchored, \b-terminated so the house style of a trailing rationale
+ * (`// @gate:always-run - reads the tree...`) still matches.
+ */
+const ALWAYS_RUN_MARKER_RE = /^\s*\/\/\s*@gate:always-run\b/m;
+
+/**
+ * Does `source` DECLARE itself always-run?
+ *
+ * The single definition of that rule for everything that CAN import this file. It deliberately
+ * does NOT live in `packages/shared`: this script is run by bare `node` from the repo root with
+ * no build step and imports only Node built-ins, so reaching into a workspace package would make
+ * the test runner depend on a built `packages/shared/dist` — which worktrees do not have. A
+ * runner that cannot run until something is built is a bootstrap problem, and the drift this
+ * fixes is not worth trading for it.
+ *
+ * `pre-merge-gate-tier.ts` cannot import it either — `packages/server` ships only `dist/`, so a
+ * published install importing a repo-root script would crash on load. It keeps a deliberate
+ * mirror, and `always-run-dirs-lockstep.test.ts` holds the two to the same RULE with fixtures
+ * rather than to the same TEXT by comment. Six copies became two bound by an executable check;
+ * do not "finish the job" by importing this from shipped server code.
+ */
+export function isAlwaysRunMarked(source) {
+  return ALWAYS_RUN_MARKER_RE.test(source);
+}
+
 /** Test-file extensions the marker scan recognises. `.tsx` and `.mjs` were invisible (#647). */
-const ALWAYS_RUN_TEST_FILE = /\.test\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
+export const ALWAYS_RUN_TEST_FILE = /\.test\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
 
 /** The `__tests__` dir, relative to the package dir, for each entry in PACKAGES.
  *
@@ -294,7 +335,7 @@ export function scanAlwaysRunTests(
         continue;
       }
       if (!ALWAYS_RUN_TEST_FILE.test(name)) continue;
-      if (readText(resolve(pkgDir, rel)).includes(ALWAYS_RUN_MARKER)) found.push(rel);
+      if (isAlwaysRunMarked(readText(resolve(pkgDir, rel)))) found.push(rel);
     }
   };
   walk(testsDir);

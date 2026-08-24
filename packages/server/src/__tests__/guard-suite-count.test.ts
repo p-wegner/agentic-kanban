@@ -1,3 +1,6 @@
+// @gate:always-run - asserts a property of the gate's own scanner; before #891 this suite
+// was force-run only because it holds the marker in a `const MARKER` fixture below, which
+// the old substring match could not tell apart from a declaration.
 /**
  * #583 — the gate's guard-suite count must mean what it says.
  *
