@@ -1048,4 +1048,14 @@ describe("shared/dist freshness guard for typecheck (#582)", () => {
     const rootPkg = JSON.parse(readFileSync(join(repoRootDir, "package.json"), "utf8"));
     expect(rootPkg.scripts.typecheck).toContain("ensure-shared-fresh.mjs");
   });
+
+  it("is wired into the root `cli` script (#846) — a stale dist otherwise dies with an unhelpful ERR_MODULE_NOT_FOUND on every CLI verb", () => {
+    // The `cli` script has no `--conditions development`, so it always resolves
+    // @agentic-kanban/shared through dist/ regardless of freshness — unlike `pnpm dev`,
+    // which resolves live from src. Every worker-setup verb (`worker instructions`,
+    // `worker doctor`) routes through this script, so a stale dist hits a first-time
+    // fleet user hardest, with an error that names no fix.
+    const rootPkg = JSON.parse(readFileSync(join(repoRootDir, "package.json"), "utf8"));
+    expect(rootPkg.scripts.cli).toContain("ensure-shared-fresh.mjs");
+  });
 });
