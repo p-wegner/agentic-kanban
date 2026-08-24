@@ -1,3 +1,5 @@
+// @gate:always-run - reads ../services/*.ts as TEXT, so nothing it asserts on is in its own
+// import graph; dependency-based selection cannot see the link (#538).
 /**
  * A verify subprocess must not inherit the board's OWN listener pins.
  *
