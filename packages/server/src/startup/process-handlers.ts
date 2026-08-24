@@ -4,6 +4,7 @@ import { createBackup } from "../db/backup.js";
 import { isTransientNetworkError } from "../lib/transient-errors.js";
 import { activeMerges } from "../services/workspace-internals.js";
 import { stopMcpHttpBridge } from "../services/mcp-http-bridge.service.js";
+import { stopGitHttpServer } from "../services/git-http.service.js";
 import { stopAllPluginViewsAsync } from "../services/plugin.service.js";
 import { appendExitRecord, recordProcessStart } from "../lib/exit-record.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -108,6 +109,16 @@ export function setupProcessHandlers(
     // go on any shutdown — not just SIGINT like the detached agents. A survivor
     // would keep the port bound and the next board start would spawn a second one.
     stopMcpHttpBridge();
+    // The git smart-HTTP transport is bound at startup on a fleet-configured board (#855)
+    // and holds a PINNED port (KANBAN_GIT_HTTP_PORT), so like the MCP bridge it must be
+    // released on any shutdown — a survivor would keep the port bound and the next board
+    // start would fail its eager bind with EADDRINUSE (#856). Fire-and-forget: close()
+    // stops accepting synchronously, the promise only waits for in-flight pack exchanges,
+    // and the 70s hard-exit timer below bounds everything anyway. Idempotent — a no-op
+    // when the transport never bound, or when server-start's cleanup already stopped it.
+    void stopGitHttpServer().catch((err) =>
+      console.warn("[shutdown] git transport close failed:", errorMessage(err)),
+    );
     // Plugin view servers are non-detached children of THIS process holding ports —
     // like the MCP bridge, they must go on any shutdown (cheap to restart on demand).
     // AWAITED (#352): the tree kill spawns `taskkill /T /F`, and the old fire-and-forget call
