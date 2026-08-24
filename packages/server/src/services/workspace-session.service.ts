@@ -22,6 +22,8 @@ import {
   resolveProjectRepo,
   updateWorkspaceStatus,
 } from "../repositories/workspace.repository.js";
+import { getIssueForWorkspaceCreate } from "../repositories/workspace-crud.repository.js";
+import { createWorkspaceProvisionService } from "./workspace-provision.service.js";
 import {
   findResumableSession,
   getWorkspaceSessions,
@@ -50,9 +52,49 @@ export function createWorkspaceSessionService(deps: {
   gitService?: GitService;
   /** Optional override for workspace setup (worktree rebuild). Tests inject a fake. */
   setupWorkspace?: (id: string) => Promise<{ id: string; workingDir: string }>;
+  /** Optional override for the skill/ticket-context re-materialization on relaunch (#892). Tests inject a fake. */
+  provision?: ReturnType<typeof createWorkspaceProvisionService>;
 }) {
   const { database, getSessionManager, boardEvents } = deps;
   const gitService = deps.gitService ?? realGitService;
+  const provision = deps.provision ?? createWorkspaceProvisionService({ database, gitService });
+
+  /**
+   * Skills (and the CLAUDE.local.md ticket-context file) are materialized into a worktree
+   * only at PROVISIONING time (`workspace-provision.service.ts`). A relaunch/resume used to
+   * skip that entirely, so an agent could be handed a worktree copy that went stale the
+   * moment the DB skill, an enabled plugin's skill bundle, or the ticket text changed after
+   * the workspace was first created (#892). Re-run the exact same provisioning step here,
+   * right before the agent starts. Best-effort: a failure must never block a launch — the
+   * agent still gets whatever it already has on disk.
+   */
+  async function refreshWorktreeMaterialization(ws0: { id: string; issueId: string; workingDir: string | null; skillId: string | null }): Promise<void> {
+    if (!ws0.workingDir) return;
+    try {
+      const { repoPath } = await resolveProjectRepo(ws0.id, database);
+      const issueRows = await getIssueForWorkspaceCreate(ws0.issueId, database);
+      const issue = issueRows[0];
+      if (!issue) return;
+      await provision.materializeWorkspaceSkills({
+        skillId: ws0.skillId ?? null,
+        // The disk-skill name a workspace was created with is never persisted (only a DB
+        // `skillId` is), so a re-materialization can only re-run the DB-skill + plugin-skill
+        // halves here — not re-select a disk skill from scratch. Those two are still exactly
+        // what can go stale (an edited DB skill, or a plugin skill bundle that changed).
+        diskSkillName: null,
+        worktreePath: ws0.workingDir,
+        repoPath,
+        projectId: issue.projectId,
+      });
+      await provision.writeWorktreeTicketContext(
+        ws0.workingDir,
+        { issueNumber: issue.issueNumber, title: issue.title, description: issue.description, projectId: issue.projectId },
+        null,
+      );
+    } catch (err) {
+      console.warn(`[workspace-session] skill/ticket-context re-materialization failed (non-fatal) for workspaceId=${ws0.id}: ${errorMessage(err)}`);
+    }
+  }
 
   async function launchSession(id: string, body: Record<string, unknown> = {}) {
     const ws0 = await getWorkspaceById(id, database);
@@ -147,6 +189,10 @@ export function createWorkspaceSessionService(deps: {
 
     const planMode = ws0.planMode ?? false;
     const resumeFromId = typeof body.resumeFromId === "string" ? body.resumeFromId : undefined;
+
+    // #892: re-materialize skills + the ticket-context file before the agent starts, so a
+    // resume never runs against a worktree copy that went stale since provisioning.
+    await refreshWorktreeMaterialization(ws0);
 
     const sessionId = await getSessionManager().startSession({
       workspaceId: id, prompt, agentCommand, agentArgs, resumeFromId, 
