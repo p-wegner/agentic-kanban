@@ -1,5 +1,6 @@
 import { resolve, dirname, join, parse, relative, sep } from "node:path";
 import { Hono } from "hono";
+import type { StaleWorktreeEntry } from "@agentic-kanban/shared";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 /**
@@ -70,7 +71,7 @@ describe("stale worktree cleanup API", () => {
       const res = await app.request("/api/workspaces/stale-worktrees?projectId=proj-1");
       expect(res.status).toBe(200);
 
-      const body = await res.json();
+      const body = await res.json() as StaleWorktreeEntry[];
       expect(body).toHaveLength(1);
       expect(body[0].id).toBe("ws-1");
       expect(body[0].issueNumber).toBe(42);
@@ -86,7 +87,7 @@ describe("stale worktree cleanup API", () => {
       const res = await app.request("/api/workspaces/stale-worktrees");
       expect(res.status).toBe(200);
 
-      const body = await res.json();
+      const body = await res.json() as StaleWorktreeEntry[];
       expect(body).toEqual([]);
       expect(mockListStaleWorktrees).toHaveBeenCalledWith(undefined);
     });
@@ -100,7 +101,7 @@ describe("stale worktree cleanup API", () => {
       const res = await app.request("/api/workspaces/ws-1/stale-worktree", { method: "DELETE" });
       expect(res.status).toBe(200);
 
-      const body = await res.json();
+      const body = await res.json() as { success: boolean };
       expect(body.success).toBe(true);
       expect(mockRemoveStaleWorktree).toHaveBeenCalledWith("ws-1");
     });
@@ -115,7 +116,7 @@ describe("stale worktree cleanup API", () => {
       const res = await app.request("/api/workspaces/ws-1/stale-worktree", { method: "DELETE" });
       expect(res.status).toBe(400);
 
-      const body = await res.json();
+      const body = await res.json() as { error: string };
       expect(body.error).toBe("Workspace is not closed");
     });
 
@@ -129,7 +130,7 @@ describe("stale worktree cleanup API", () => {
       const res = await app.request("/api/workspaces/ws-1/stale-worktree", { method: "DELETE" });
       expect(res.status).toBe(400);
 
-      const body = await res.json();
+      const body = await res.json() as { error: string };
       expect(body.error).toContain("Refusing to remove");
     });
 
@@ -143,7 +144,7 @@ describe("stale worktree cleanup API", () => {
       const res = await app.request("/api/workspaces/nonexistent/stale-worktree", { method: "DELETE" });
       expect(res.status).toBe(400);
 
-      const body = await res.json();
+      const body = await res.json() as { error: string };
       expect(body.error).toBe("Workspace not found");
     });
   });

@@ -4,6 +4,7 @@ import * as schema from "@agentic-kanban/shared/schema";
 import { randomUUID } from "node:crypto";
 import { createTestApp as _createTestApp } from "./helpers/test-app.js";
 import type { TestDb } from "./helpers/test-db.js";
+import type { SessionSummaryResult } from "../repositories/session/stats.js";
 
 function createTestApp() {
   return _createTestApp((app, db) => {
@@ -101,7 +102,8 @@ describe("Session Summary API", () => {
   it("returns 404 for non-existent session", async () => {
     const res = await testApp.app.request("/api/sessions/nonexistent/summary");
     expect(res.status).toBe(404);
-    const body = await res.json();
+    // The 404 body is the error-handler envelope, not a summary.
+    const body = await res.json() as { error: string };
     expect(body.error).toBe("Session not found");
   });
 
@@ -111,7 +113,7 @@ describe("Session Summary API", () => {
     const res = await testApp.app.request(`/api/sessions/${sessionId}/summary`);
     expect(res.status).toBe(200);
 
-    const body = await res.json();
+    const body = await res.json() as SessionSummaryResult;
     expect(body.sessionId).toBe(sessionId);
     expect(body.status).toBe("completed");
     expect(body.duration).toBe("5m 45s");
@@ -161,7 +163,7 @@ describe("Session Summary API", () => {
     const res = await testApp.app.request(`/api/sessions/${sessionId}/summary`);
     expect(res.status).toBe(200);
 
-    const body = await res.json();
+    const body = await res.json() as SessionSummaryResult;
     expect(body.model).toBe("claude-sonnet-4-20250514");
     expect(body.keyExcerpts).toContain("I'll start by reading the existing code.");
     expect(body.overview).toContain("claude-sonnet-4-20250514");
@@ -217,7 +219,7 @@ describe("Session Summary API", () => {
     const res = await testApp.app.request(`/api/sessions/${sessionId}/summary`);
     expect(res.status).toBe(200);
 
-    const body = await res.json();
+    const body = await res.json() as SessionSummaryResult;
     expect(body.filesRead).toEqual(["/src/foo.ts", "/src/bar.ts"]);
     expect(body.filesEdited).toEqual(["/src/foo.ts"]);
     expect(body.filesWritten).toEqual(["/src/new-file.ts"]);
@@ -282,7 +284,7 @@ describe("Session Summary API", () => {
     const res = await testApp.app.request(`/api/sessions/${sessionId}/summary`);
     expect(res.status).toBe(200);
 
-    const body = await res.json();
+    const body = await res.json() as SessionSummaryResult;
     expect(body.model).toBe("gpt-5.2");
     expect(body.keyExcerpts).toContain("I'll inspect the parser and add tests.");
     expect(body.filesRead).toEqual(["/src/parser.ts"]);
@@ -346,7 +348,7 @@ describe("Session Summary API", () => {
     const res = await testApp.app.request(`/api/sessions/${sessionId}/summary`);
     expect(res.status).toBe(200);
 
-    const body = await res.json();
+    const body = await res.json() as SessionSummaryResult;
     expect(body.model).toBe("claude-sonnet-4.6");
     expect(body.keyExcerpts).toContain("I found global setup and teardown for isolated E2E projects.");
     expect(body.filesRead).toEqual(["/repo/packages/e2e/global-setup.ts"]);
@@ -396,7 +398,7 @@ describe("Session Summary API", () => {
     const res = await testApp.app.request(`/api/sessions/${sessionId}/summary`);
     expect(res.status).toBe(200);
 
-    const body = await res.json();
+    const body = await res.json() as SessionSummaryResult;
     expect(body.errors.length).toBe(1);
     expect(body.errors[0]).toContain("Bash");
     expect(body.errors[0]).toContain("Command not found: bad-cmd");
@@ -426,7 +428,7 @@ describe("Session Summary API", () => {
     const res = await testApp.app.request(`/api/sessions/${sessionId}/summary`);
     expect(res.status).toBe(200);
 
-    const body = await res.json();
+    const body = await res.json() as SessionSummaryResult;
     expect(body.keyExcerpts).toContain("First message");
     expect(body.keyExcerpts).toContain("Second message");
   });
@@ -437,7 +439,7 @@ describe("Session Summary API", () => {
     const res = await testApp.app.request(`/api/sessions/${sessionId}/summary`);
     expect(res.status).toBe(200);
 
-    const body = await res.json();
+    const body = await res.json() as SessionSummaryResult;
     expect(body.stats).toBeTruthy();
     expect((body.stats as Record<string, unknown>).totalCostUsd).toBe(0.15);
     expect((body.stats as Record<string, unknown>).model).toBe("claude-sonnet-4-20250514");
@@ -466,7 +468,7 @@ describe("Session Summary API", () => {
     const res = await testApp.app.request(`/api/sessions/${sessionId}/summary`);
     expect(res.status).toBe(200);
 
-    const body = await res.json();
+    const body = await res.json() as SessionSummaryResult;
     expect(body.keyExcerpts.length).toBe(10);
   });
 
@@ -488,7 +490,7 @@ describe("Session Summary API", () => {
     const res = await testApp.app.request(`/api/sessions/${sessionId}/summary`);
     expect(res.status).toBe(200);
 
-    const body = await res.json();
+    const body = await res.json() as SessionSummaryResult;
     expect(body.keyExcerpts[0].length).toBeLessThan(longText.length);
     expect(body.keyExcerpts[0]).toContain("...");
   });
@@ -519,7 +521,7 @@ describe("Session Summary API", () => {
     const res = await testApp.app.request(`/api/sessions/${sessionId}/summary`);
     expect(res.status).toBe(200);
 
-    const body = await res.json();
+    const body = await res.json() as SessionSummaryResult;
     expect(body.rateLimits).toHaveLength(1);
     expect(body.rateLimits[0]).toMatchObject({
       rateLimitType: "five_hour",
@@ -543,7 +545,7 @@ describe("Session Summary API", () => {
     const res = await testApp.app.request(`/api/sessions/${sessionId}/summary`);
     expect(res.status).toBe(200);
 
-    const body = await res.json();
+    const body = await res.json() as SessionSummaryResult;
     expect(body.overview).toBe("No activity recorded");
   });
 
@@ -584,7 +586,7 @@ describe("Session Summary API", () => {
     const res = await testApp.app.request(`/api/sessions/${sessionId}/summary`);
     expect(res.status).toBe(200);
 
-    const body = await res.json();
+    const body = await res.json() as SessionSummaryResult;
     expect(body.commandsRun).toEqual(["pnpm test"]);
     expect(body.filesRead).toEqual(["/src/foo.ts"]);
     expect(body.keyExcerpts).toContain("I've completed the task successfully.");
@@ -633,7 +635,7 @@ describe("Session Summary API", () => {
     const res = await testApp.app.request(`/api/sessions/${sessionId}/summary`);
     expect(res.status).toBe(200);
 
-    const body = await res.json();
+    const body = await res.json() as SessionSummaryResult;
     expect(body.filesEdited).toEqual(["/src/edited.ts", "/src/flat.ts"]);
     expect(body.filesWritten).toEqual(["/src/new.ts"]);
     expect(body.overview).toContain("edited 2 files");
@@ -702,7 +704,7 @@ describe("Session Summary API", () => {
     const res = await testApp.app.request(`/api/sessions/${sessionId}/summary`);
     expect(res.status).toBe(200);
 
-    const body = await res.json();
+    const body = await res.json() as SessionSummaryResult;
     expect(body.overview).not.toBe("No activity recorded");
     expect(body.model).toBe("claude-opus-4");
     expect(body.filesRead).toEqual(["/src/a.ts"]);
@@ -744,7 +746,7 @@ describe("Session Summary API", () => {
     const res = await testApp.app.request(`/api/sessions/${sessionId}/summary`);
     expect(res.status).toBe(200);
 
-    const body = await res.json();
+    const body = await res.json() as SessionSummaryResult;
     expect(body.errors).toHaveLength(2);
     expect(body.errors[0]).toContain("command not found: bad-cmd");
     expect(body.errors[1]).toContain("Sandbox restriction violated");
@@ -782,7 +784,7 @@ describe("Session Summary API", () => {
     const res = await testApp.app.request(`/api/sessions/${sessionId}/summary`);
     expect(res.status).toBe(200);
 
-    const body = await res.json();
+    const body = await res.json() as SessionSummaryResult;
     expect(body.model).toBe("claude-sonnet-4.6");
     expect(body.overview).toContain("claude-sonnet-4.6");
   });
@@ -822,7 +824,7 @@ describe("Session Summary API", () => {
     const res = await testApp.app.request(`/api/sessions/${sessionId}/summary`);
     expect(res.status).toBe(200);
 
-    const body = await res.json();
+    const body = await res.json() as SessionSummaryResult;
     expect(body.commandsRun).toEqual(["pnpm build"]);
     expect(body.filesRead).toEqual(["/repo/src/index.ts"]);
   });

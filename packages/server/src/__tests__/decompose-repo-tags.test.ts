@@ -60,10 +60,10 @@ describe("confirmEpicDecomposition — repo-aware fan-out (#94)", () => {
         issueId: parentId,
         projectId,
         children: [
-          { tempId: "t1", title: "Frontend work", priority: "medium", targetRepo: "web" },
-          { tempId: "t2", title: "Backend work", priority: "medium", targetRepo: "API" }, // canonicalizes
-          { tempId: "t3", title: "Unknown repo", priority: "medium", targetRepo: "mobile" }, // dropped
-          { tempId: "t4", title: "No repo", priority: "medium" }, // unassigned
+          { tempId: "t1", title: "Frontend work", description: "", priority: "medium", targetRepo: "web" },
+          { tempId: "t2", title: "Backend work", description: "", priority: "medium", targetRepo: "API" }, // canonicalizes
+          { tempId: "t3", title: "Unknown repo", description: "", priority: "medium", targetRepo: "mobile" }, // dropped
+          { tempId: "t4", title: "No repo", description: "", priority: "medium" }, // unassigned
         ],
         dependencies: [],
       },
@@ -90,7 +90,7 @@ describe("confirmEpicDecomposition — repo-aware fan-out (#94)", () => {
       {
         issueId: parentId,
         projectId,
-        children: [{ tempId: "t1", title: "Some work", priority: "medium", targetRepo: "web" }],
+        children: [{ tempId: "t1", title: "Some work", description: "", priority: "medium", targetRepo: "web" }],
         dependencies: [],
       },
       db as any,
