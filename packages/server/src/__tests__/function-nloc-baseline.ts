@@ -81,7 +81,7 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "services/workspace-provision.service.ts::createWorkspaceProvisionService": 418,
   // 404 -> 399, banked (#806): five hand-written body guards became one schema parse each.
   "routes/workspace-actions.ts::createWorkspaceActionsRoute": 399,
-  "worker/worker-agent-runner.ts::createWorkerAgentRunner": 410,
+  "worker/worker-agent-runner.ts::createWorkerAgentRunner": 406,
 };
 
 /**
