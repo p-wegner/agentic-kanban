@@ -49,6 +49,27 @@ export function resolveWindowsToolsDir(
   return null;
 }
 
+/**
+ * `worker list` talks to an OWNER route (`GET /api/workers`), mounted only on the board's
+ * loopback app — never on the fleet listener a remote worker's `--board` points at (#848).
+ * A 404 there is not "board unreachable" (that would be a fetch rejection, never a response
+ * at all): it means this URL answered, just not with that route, which is exactly what
+ * happens when `--board` was pointed at the fleet port instead of the board's API port.
+ * Any OTHER non-OK status (5xx, etc.) keeps the original "is the board running" framing,
+ * since those genuinely can indicate a struggling-but-reachable board.
+ */
+export function describeWorkerListFailure(status: number, boardUrl: string): string {
+  if (status === 404) {
+    return (
+      `Failed to list workers (404). '${boardUrl}' answered, but 'GET /api/workers' is an owner route ` +
+      "reachable only from the board's own machine (loopback) — never from the fleet port a remote " +
+      "worker's --board points at. Run 'worker list' on the board machine instead, against its API " +
+      "port (default http://127.0.0.1:3001)."
+    );
+  }
+  return `Failed to list workers (${status}). Is the board running at ${boardUrl}?`;
+}
+
 function splitList(value?: string): string[] | undefined {
   if (!value) return undefined;
   const items = value.split(",").map((s) => s.trim()).filter(Boolean);
@@ -479,13 +500,17 @@ export function registerWorkerSubcommands(workerCmd: Command) {
 
   workerCmd
     .command("list")
-    .description("List the board's registered workers with their effective status.")
-    .option("--board <url>", "Board base URL", DEFAULT_BOARD_URL)
+    .description(
+      "List the board's registered workers with their effective status. Board machine only — " +
+        "GET /api/workers is an owner route, mounted on the board's loopback app, not the fleet " +
+        "port a remote worker's --board points at.",
+    )
+    .option("--board <url>", "Board base URL — the board's API port (default), not the fleet port", DEFAULT_BOARD_URL)
     .option("--json", "Output raw JSON")
     .action(async (options: { board: string; json?: boolean }) => {
       const res = await fetch(`${options.board.replace(/\/+$/, "")}/api/workers`);
       if (!res.ok) {
-        console.error(`Failed to list workers (${res.status}). Is the board running at ${options.board}?`);
+        console.error(describeWorkerListFailure(res.status, options.board));
         process.exit(1);
       }
       const body = await res.json() as { workers: Array<{ id: string; name: string; effectiveStatus: string; status: string; os: string | null; labels: string | null; maxConcurrency: number; lastHeartbeatAt: string | null; protocolVersion?: number; workerVersion?: string }> };
