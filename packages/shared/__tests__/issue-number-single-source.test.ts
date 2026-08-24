@@ -46,7 +46,15 @@ const ALLOWLIST = new Set([join("packages", "shared", "src", "lib", "issue-numbe
 const ISSUE_NUMBER_MAX_TEXT = /max\([\s\S]*?issueNumber/i;
 
 function isExcluded(absPath: string): boolean {
-  const parts = absPath.split(sep);
+  // Segment tests run on the path RELATIVE to REPO_ROOT, never on the absolute path.
+  // Worktrees for this repo live under `<parent>/.worktrees/<repo>/<branch>/`, so when this
+  // suite runs INSIDE one, every absolute path contains a `.worktrees` segment — the absolute
+  // form excluded the entire tree, `sourceFiles()` returned 0, and the anti-vacuity assertion
+  // below failed. Since the suite is @gate:always-run it runs in every pre-merge gate, i.e.
+  // always in a worktree: it could never pass there, and blamed whichever branch was queued.
+  // Same class as #885 (an openapi.yaml that is CRLF in every worktree and LF in main): the
+  // subject varied by checkout, so "passes on master" carried no information about any other.
+  const parts = relative(REPO_ROOT, absPath).split(sep);
   return (
     parts.includes("node_modules") ||
     parts.includes("dist") ||
