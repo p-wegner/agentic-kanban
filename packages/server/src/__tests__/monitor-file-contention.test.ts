@@ -18,7 +18,9 @@ function makeSelectChain(result: unknown[]) {
   chain.then = (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
     Promise.resolve(result).then(resolve, reject);
   chain.catch = (fn: (e: unknown) => unknown) => Promise.resolve(result).catch(fn);
-  return chain;
+  // Drizzle's select builder is a deep generic no hand-rolled double can satisfy
+  // structurally; this suite only ever calls the chain methods stubbed above.
+  return chain as unknown as ReturnType<typeof db.select>;
 }
 
 /** A fake database exposing only `select`, returning the queued results in order. */
@@ -257,24 +259,24 @@ describe("runAutoStart serializes on a shared registration file (#119 reproducti
    */
   function mockTwoContendingTodos() {
     vi.mocked(db.select)
-      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: PROJECT }]) as ReturnType<typeof db.select>) // inProgressStatuses
-      .mockReturnValueOnce(makeSelectChain([{ active: 0, inactiveStale: 0 }]) as ReturnType<typeof db.select>) // loop1 capacity
-      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // loop1 inProgressIssues (none)
-      .mockReturnValueOnce(makeSelectChain([{ active: 0, inactiveStale: 0 }]) as ReturnType<typeof db.select>) // loop2 capacity
-      .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }]) as ReturnType<typeof db.select>) // todoStatus
+      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: PROJECT }])) // inProgressStatuses
+      .mockReturnValueOnce(makeSelectChain([{ active: 0, inactiveStale: 0 }])) // loop1 capacity
+      .mockReturnValueOnce(makeSelectChain([])) // loop1 inProgressIssues (none)
+      .mockReturnValueOnce(makeSelectChain([{ active: 0, inactiveStale: 0 }])) // loop2 capacity
+      .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }])) // todoStatus
       .mockReturnValueOnce(makeSelectChain([
         { id: "ticket-a", title: "Add tags", projectId: PROJECT, issueNumber: 41 },
         { id: "ticket-b", title: "Add labels", projectId: PROJECT, issueNumber: 42 },
-      ]) as ReturnType<typeof db.select>) // todoIssues
-      .mockReturnValueOnce(makeSelectChain([{ id: "done-1" }]) as ReturnType<typeof db.select>) // doneStatuses
-      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // ticket-a existingWs
-      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // ticket-a tag
-      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // ticket-a deps
-      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // ticket-b existingWs
-      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // ticket-b tag
+      ])) // todoIssues
+      .mockReturnValueOnce(makeSelectChain([{ id: "done-1" }])) // doneStatuses
+      .mockReturnValueOnce(makeSelectChain([])) // ticket-a existingWs
+      .mockReturnValueOnce(makeSelectChain([])) // ticket-a tag
+      .mockReturnValueOnce(makeSelectChain([])) // ticket-a deps
+      .mockReturnValueOnce(makeSelectChain([])) // ticket-b existingWs
+      .mockReturnValueOnce(makeSelectChain([])) // ticket-b tag
       // Only consumed when the gate lets ticket-b through (the opt-out case) —
       // in serialize mode the deferral happens before this query.
-      .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>) // ticket-b deps
+      .mockReturnValueOnce(makeSelectChain([])) // ticket-b deps
       // #666 — a DEFAULT for anything after the scripted prefix, returning no rows.
       //
       // This chain was an exact script of every query `runAutoStart` makes, so #661's ticket
@@ -283,7 +285,7 @@ describe("runAutoStart serializes on a shared registration file (#119 reproducti
       // `Cannot read properties of undefined (reading 'from')`, which reads like a product
       // bug and is not one. The scripted prefix above still pins the queries this test is
       // ABOUT; a new read-only query no longer breaks it, it just finds nothing.
-      .mockReturnValue(makeSelectChain([]) as ReturnType<typeof db.select>);
+      .mockReturnValue(makeSelectChain([]));
     vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ id: "ws-new" }) } as Response);
   }
 

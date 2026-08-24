@@ -22,7 +22,9 @@ function makeSelectChain(result: unknown[]) {
   chain.then = (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
     Promise.resolve(result).then(resolve, reject);
   chain.catch = (fn: (e: unknown) => unknown) => Promise.resolve(result).catch(fn);
-  return chain;
+  // Drizzle's select builder is a deep generic no hand-rolled double can satisfy
+  // structurally; this suite only ever calls the chain methods stubbed above.
+  return chain as unknown as ReturnType<typeof mockedDb.select>;
 }
 
 function makeInsertChain(result: unknown[]) {
@@ -32,13 +34,17 @@ function makeInsertChain(result: unknown[]) {
     const p = Promise.resolve(result) as Promise<unknown[]> & { catch: (fn: unknown) => unknown };
     return p;
   };
-  return chain;
+  // Drizzle's builder types are deep generics no hand-rolled double can satisfy
+  // structurally; this suite only calls the chain methods stubbed above.
+  return chain as unknown as ReturnType<typeof mockedDb.insert>;
 }
 
 function makeDeleteChain() {
   const chain: Record<string, unknown> = {};
   chain.where = () => ({ catch: () => Promise.resolve() });
-  return chain;
+  // Drizzle's builder types are deep generics no hand-rolled double can satisfy
+  // structurally; this suite only calls the chain methods stubbed above.
+  return chain as unknown as ReturnType<typeof mockedDb.delete>;
 }
 
 function makeDeps(overrides: Partial<BacklogEmptyDeps> = {}): BacklogEmptyDeps & { setCooldownStamp: ReturnType<typeof vi.fn> } {
@@ -142,12 +148,12 @@ describe("runBacklogEmptyStrategy — gating", () => {
 describe("runBacklogEmptyStrategy — generation", () => {
   it("launches the skill workspace and stamps cooldown when backlog is empty", async () => {
     vi.mocked(mockedDb.select)
-      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }]) as ReturnType<typeof mockedDb.select>) // In Progress statuses
-      .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }]) as ReturnType<typeof mockedDb.select>)                    // Todo status
-      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof mockedDb.select>)                        // backlog count = 0
-      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof mockedDb.select>)                        // WIP count = 0
-      .mockReturnValueOnce(makeSelectChain([{ max: 41 }]) as ReturnType<typeof mockedDb.select>);                        // next issue number
-    vi.mocked(mockedDb.insert).mockReturnValue(makeInsertChain([{ id: "host-issue-1" }]) as ReturnType<typeof mockedDb.insert>);
+      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }])) // In Progress statuses
+      .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }]))                    // Todo status
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]))                        // backlog count = 0
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]))                        // WIP count = 0
+      .mockReturnValueOnce(makeSelectChain([{ max: 41 }]));                        // next issue number
+    vi.mocked(mockedDb.insert).mockReturnValue(makeInsertChain([{ id: "host-issue-1" }]));
     vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ id: "ws-9" }) } as unknown as Response);
 
     const deps = makeDeps();
@@ -171,9 +177,9 @@ describe("runBacklogEmptyStrategy — generation", () => {
 
   it("does NOT generate when the backlog still has unstarted issues", async () => {
     vi.mocked(mockedDb.select)
-      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }]) as ReturnType<typeof mockedDb.select>) // In Progress statuses
-      .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }]) as ReturnType<typeof mockedDb.select>)                    // Todo status
-      .mockReturnValueOnce(makeSelectChain([{ count: 3 }]) as ReturnType<typeof mockedDb.select>);                       // backlog count = 3
+      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }])) // In Progress statuses
+      .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }]))                    // Todo status
+      .mockReturnValueOnce(makeSelectChain([{ count: 3 }]));                       // backlog count = 3
 
     const deps = makeDeps();
     await runBacklogEmptyStrategy(new Map([["backlog_empty_strategy", "generate_tickets"]]), deps);
@@ -184,10 +190,10 @@ describe("runBacklogEmptyStrategy — generation", () => {
 
   it("does NOT generate when WIP is at the limit", async () => {
     vi.mocked(mockedDb.select)
-      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }]) as ReturnType<typeof mockedDb.select>) // In Progress statuses
-      .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }]) as ReturnType<typeof mockedDb.select>)                    // Todo status
-      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof mockedDb.select>)                        // backlog count = 0
-      .mockReturnValueOnce(makeSelectChain([{ count: 5 }]) as ReturnType<typeof mockedDb.select>);                       // WIP count = 5 (== limit)
+      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }])) // In Progress statuses
+      .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }]))                    // Todo status
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]))                        // backlog count = 0
+      .mockReturnValueOnce(makeSelectChain([{ count: 5 }]));                       // WIP count = 5 (== limit)
 
     const deps = makeDeps();
     await runBacklogEmptyStrategy(new Map([
@@ -201,11 +207,11 @@ describe("runBacklogEmptyStrategy — generation", () => {
 
   it("uses the configured skill name", async () => {
     vi.mocked(mockedDb.select)
-      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }]) as ReturnType<typeof mockedDb.select>)
-      .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }]) as ReturnType<typeof mockedDb.select>)
-      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof mockedDb.select>)
-      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof mockedDb.select>)
-      .mockReturnValueOnce(makeSelectChain([{ max: 0 }]) as ReturnType<typeof mockedDb.select>);
+      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }]))
+      .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }]))
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]))
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]))
+      .mockReturnValueOnce(makeSelectChain([{ max: 0 }]));
     vi.mocked(mockedDb.insert).mockReturnValue(makeInsertChain([{ id: "host-issue-2" }]) as ReturnType<typeof mockedDb.insert>);
     vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ id: "ws-1" }) } as unknown as Response);
 
@@ -221,11 +227,11 @@ describe("runBacklogEmptyStrategy — generation", () => {
 
   it("deletes the orphan host issue and does not stamp cooldown when workspace launch fails", async () => {
     vi.mocked(mockedDb.select)
-      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }]) as ReturnType<typeof mockedDb.select>)
-      .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }]) as ReturnType<typeof mockedDb.select>)
-      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof mockedDb.select>)
-      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof mockedDb.select>)
-      .mockReturnValueOnce(makeSelectChain([{ max: 0 }]) as ReturnType<typeof mockedDb.select>);
+      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }]))
+      .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }]))
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]))
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }]))
+      .mockReturnValueOnce(makeSelectChain([{ max: 0 }]));
     vi.mocked(mockedDb.insert).mockReturnValue(makeInsertChain([{ id: "host-issue-3" }]) as ReturnType<typeof mockedDb.insert>);
     vi.mocked(mockedDb.delete).mockReturnValue(makeDeleteChain() as ReturnType<typeof mockedDb.delete>);
     vi.mocked(fetch).mockResolvedValueOnce({ ok: false, json: () => Promise.resolve({}) } as unknown as Response);

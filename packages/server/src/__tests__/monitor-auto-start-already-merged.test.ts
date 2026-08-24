@@ -38,7 +38,9 @@ function makeSelectChain(result: unknown[]) {
   chain.then = (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
     Promise.resolve(result).then(resolve, reject);
   chain.catch = (fn: (e: unknown) => unknown) => Promise.resolve(result).catch(fn);
-  return chain;
+  // Drizzle's select builder is a deep generic no hand-rolled double can satisfy
+  // structurally; this suite only ever calls the chain methods stubbed above.
+  return chain as unknown as ReturnType<typeof db.select>;
 }
 
 function makeDeps(overrides: Partial<AutoStartDeps> = {}): AutoStartDeps {
