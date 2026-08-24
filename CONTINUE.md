@@ -3,6 +3,66 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## Hooks were 18.7% of session wall-clock — half fixed, half filed (2026-08-24)
+
+**Commit `66fc342e1a`. Filed: #868. Nothing pushed.**
+
+Measured, not estimated: over 3 days of this repo's own sessions, hooks burned **14.35h =
+18.7%** of the 76.88h those sessions spanned, and `smart-hooks-runner` was **84%** of it. The
+dominant half was the PER-EDIT chain at a **median 5m50s per Write/Edit** — which is exactly
+typecheck's 120s budget plus tests' 180s budget, because the transcripts show **both checks
+were being killed every time** (`[smart-hooks] Quick tests: SKIPPED (inconclusive)` ×11,
+`Typecheck: SKIPPED (inconclusive)` ×5 in one session). It cost hours of latency and produced
+no signal at all.
+
+`#487` had already anticipated this and added two layers — timeout ⇒ inconclusive rather than
+blocking, full-suite fallback ⇒ advisory. Both address what happens *when* a check is too slow;
+neither removes the per-edit cost, which is the dominant one.
+
+**Fixed:** generated rules may now declare `events: ["PostToolUse"|"Stop"]`, and
+`buildSmartHooksRules` marks test rules (quick and full-suite fallback) Stop-only. A test
+command is never scoped to the one file just edited, so per-edit it buys nothing the end-of-turn
+run doesn't. Typecheck keeps its per-edit loop — it IS the cheap signal the design wants.
+Absent/malformed `events` normalizes to BOTH events, so older generated rules files are
+unaffected and a bad value fails open.
+
+**Verified how:** the hook was executed directly — `PostToolUse` on a `.ts` file now resolves to
+zero generated rules and returns in **1.28s** (was a 5m50s median); `Stop` still resolves both
+rules. `normalizeRuleEvents` unit-checked for absent/valid/empty/garbage/non-array input.
+
+**NOT verified: the test suite was not run.** The box was RAM-limited and swapping (0.46 GB
+usable), so `pnpm typecheck` / `pnpm test:mine` were deliberately skipped. Two new cases in
+`stack-profile.service.test.ts` have therefore **never been executed**. Run them before trusting
+them.
+
+**Filed, not fixed — #868.** The generated Typecheck rule hard-codes `timeout: 120`, which this
+monorepo's typecheck exceeds, so it is `blocking: true` and can only ever be killed. The
+generator has no way to express a per-project time budget. Not fixable in-repo:
+`.claude/smart-hooks-rules.json` is **gitignored and machine-generated**, regenerated from the
+stack profile on registration / profile persistence / compounding setup — it regenerated at
+`2026-08-23T08:48` and reinstated the trap after it had previously been removed.
+
+**This checkout's `.claude/smart-hooks-rules.json` carries a hand-set `localOverride`**
+(Typecheck ⇒ Stop-only/300s, tests ⇒ `pnpm test:mine -- --changed HEAD`/300s). It is gitignored,
+so it is per-machine, and **the next regeneration reverts it**. That is #868's point.
+
+**Collision worth knowing about:** `.claude/hooks/smart-hooks-runner.js` is a
+`SAFETY_POLICY_FILES` entry, and workspace preflight judges those against the main checkout's
+*working tree* while repairing them from the *committed* base. While this edit sat uncommitted,
+every new worktree was born stale and the second one failed outright with a reconcile/restore
+ping-pong error — it killed a peer session's #860 dispatch. Committing cleared it. The board-side
+bug (check and repair should use the same source; the error message misdirects) is a peer's
+**#867**. Do not leave an uncommitted edit to a safety-policy file in main.
+
+**Tooling:** the measurement came from a new `session-inspector` script, `hook-cost.mjs`
+(committed in `claude-session-tools` as `781c895`) — every other fleet tool measures tokens, and
+hooks cost pure latency. Two traps encapsulated there: the two transcript hook channels
+**overlap** (summing them inflated one 11m41s invocation to 23m), and silent hooks emit no
+record at all, so its totals are a lower bound.
+
+**Next:** run the suite when the box has RAM; then decide #868's direction (measured budget in
+the stack profile, vs the runner downgrading a repeatedly-killed check).
+
 ## Session 2026-08-23/24 (night): the second pass over the same 13, plus what it spawned
 
 Supersedes the section below where they disagree. **The board has 7 open tickets**, and none of
