@@ -48,6 +48,9 @@
   .card .v { font-size: 15px; font-weight: 500; word-break: break-word; }
   .card .v.mono { font-family: var(--mono); font-size: 13px; }
   .ok { color: var(--green); } .bad { color: var(--red); } .warn { color: var(--yellow); } .dim { color: var(--muted); }
+  .card .hint { color: var(--muted); font-size: 11.5px; margin-top: 5px; line-height: 1.35; }
+  a { color: var(--blue); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--blue) 35%, transparent); }
+  a:hover { border-bottom-color: currentColor; }
   section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; margin-bottom: 16px; overflow: hidden; }
   section > h2 {
     font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
@@ -87,7 +90,8 @@
   <div class="card"><h2>Connection</h2><div class="v" id="c-conn">—</div></div>
   <div class="card"><h2>Board reachable</h2><div class="v" id="c-board">—</div></div>
   <div class="card"><h2>Sessions in flight</h2><div class="v" id="c-sessions">—</div></div>
-  <div class="card"><h2>Board URL</h2><div class="v mono" id="c-url">—</div></div>
+  <div class="card"><h2>Fleet endpoint</h2><div class="v mono" id="c-url">—</div>
+    <div class="hint">the board's fleet listener — not its UI, which stays loopback-only on the board host</div></div>
   <div class="card"><h2>Log size</h2><div class="v" id="c-size">—</div></div>
 </div>
 
@@ -180,7 +184,12 @@ function render(s) {
       (s.boardCheckedAt ? ` <span class="dim">(${ago(s.boardCheckedAt)})</span>` : "");
   $("c-sessions").innerHTML = s.sessions > 0
     ? `<span style="color:var(--blue)">${s.sessions}</span>` : '<span class="dim">0 — idle</span>';
-  $("c-url").textContent = s.board || "—";
+  // Link to /health, not the bare origin: the fleet listener serves ONLY the
+  // worker routes, so its root is a 404 and a link there would look broken.
+  // /health answers {"ok":true} and is the one URL that proves the board is up.
+  $("c-url").innerHTML = s.board
+    ? `<a href="${esc(s.board)}/health" target="_blank" rel="noreferrer">${esc(s.board)}</a>`
+    : "—";
   $("c-size").textContent = s.logExists ? `${(s.logSize / 1024).toFixed(0)} KB` : "no log yet";
   $("logfile").textContent = s.logFile || "";
 
