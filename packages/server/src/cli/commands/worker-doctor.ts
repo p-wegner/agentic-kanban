@@ -575,6 +575,11 @@ async function checkGit(): Promise<DoctorCheck> {
   return ok("git on PATH", probe.output.split("\n")[0] ?? "git present");
 }
 
+// #860's Node-floor check lives in its own module: this file sits exactly at the
+// god-module gate's 20-declaration ceiling (#889), and the check pushed it to 21.
+import { checkNodeVersion } from "./worker-doctor-node-check.js";
+export { MIN_SUPPORTED_NODE_MAJOR, checkNodeVersion } from "./worker-doctor-node-check.js";
+
 /**
  * Check 7 — the provider CLI, installed AND logged in.
  *
@@ -649,6 +654,7 @@ export async function runWorkerDoctor(opts: WorkerDoctorOptions): Promise<Doctor
   checks.push(await checkWebSocket(boardUrl, identity, opts.timeoutMs));
   checks.push(await checkGitTransport(boardUrl, opts.gitPort));
   checks.push(await checkGit());
+  checks.push(checkNodeVersion());
   checks.push(checkWorkerCheckoutTrust(opts.workRoot ?? defaultWorkerWorkRoot(), opts.home ?? homedir()));
   for (const provider of opts.providers) {
     checks.push(...(await checkProvider(provider, opts.home)));
