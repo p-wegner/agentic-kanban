@@ -1,12 +1,16 @@
+import type { Context } from "hono";
+import { HTTPException } from "hono/http-exception";
+import type { ZodType } from "zod";
 import type { Database } from "../db/index.js";
 import { createProjectService } from "../services/project.service.js";
+import { ProjectError } from "../services/project-error.js";
 import { getRegistrationProgress } from "../services/registration-progress.service.js";
 import { searchGraphIssueIds } from "../repositories/graph-search.repository.js";
 import { parseJsonBody, parseOptionalJsonBody } from "../middleware/parse-body.js";
 import {
   generateScriptBody, updateStatusSortOrderBody, updateProjectRepoBody,
   removeWorktreeBody, openWorktreeBody, onboardingApplyBody, onboardingSkipBody,
-  addStatusBody, addProjectRepoBody,
+  addStatusBody, addProjectRepoBody, createProjectBody,
 } from "./project-body-schemas.js";
 import { createRouter } from "../middleware/create-router.js";
 import { wrapAiOperation } from "../lib/ai-operation.js";
@@ -181,6 +185,29 @@ function parseServicesConfig(raw: unknown): ServiceStackConfig | null {
 export function createProjectsRoute(database: Database, options?: { boardEvents?: BoardEvents; getSessionManager?: () => SessionLauncher }) {
   const router = createRouter();
 
+  /**
+   * `parseJsonBody(c, schema)` with `POST /api/projects/create`'s ERROR IDENTITY preserved
+   * (#806, batch 5) — `routes/plugins.ts`'s batch-2 wrapper again.
+   *
+   * The guard it replaces threw `ProjectError("name is required", "BAD_REQUEST")`, rendered as
+   * `{ error, code: "BAD_REQUEST" }` at 400 (#823). Used ONLY on that one route: every other
+   * schema in this file replaced an inline `c.json({ error }, 400)` that never carried a code,
+   * and wrapping those would ADD a field to their rejections.
+   *
+   * Same-file on purpose — `scripts/generate-openapi.ts` follows exactly one hop via
+   * `findFunctionNamed(sf, …)`.
+   */
+  async function parseProjectBody<T>(c: Context, schema: ZodType<T>): Promise<T> {
+    try {
+      return await parseJsonBody(c, schema);
+    } catch (err) {
+      if (err instanceof HTTPException && err.status === 400) {
+        throw new ProjectError(err.message, "BAD_REQUEST");
+      }
+      throw err;
+    }
+  }
+
   const workspaceSummaryCache = createWorkspaceSummaryCache();
   const projectService = createProjectService({ database, workspaceSummaryCache });
   const onboardingIssueService = createIssueService({
@@ -275,14 +302,7 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
 
   // POST /api/projects/create — create a new directory as a git repo and register it
   router.post("/create", async (c) => {
-    const body = await parseJsonBody<{
-      name: string;
-      path?: string;
-      description?: string;
-      color?: string;
-      gitignoreTemplate?: string;
-      generateReadme?: boolean;
-    }>(c);
+    const body = await parseProjectBody(c, createProjectBody);
     const result = await projectService.createProject(body);
     options?.boardEvents?.broadcastProjectsChanged(result.id, "project_created");
     return c.json(result, 201);

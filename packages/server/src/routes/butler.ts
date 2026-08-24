@@ -8,7 +8,7 @@ import { homedir } from "node:os";
 import { streamSSE } from "hono/streaming";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
-import { butlerMessageBody, butlerAskBody, butlerAnswerBody } from "./butler-body-schemas.js";
+import { butlerMessageBody, butlerAskBody, butlerAnswerBody, butlerModelBody, butlerProfileBody, butlerSkillBody } from "./butler-body-schemas.js";
 import { setPreference } from "../repositories/preferences.repository.js";
 import { deleteRuntimeState, getRuntimeState, setRuntimeState } from "../repositories/runtime-state.repository.js";
 import { getProjectById } from "../repositories/project.repository.js";
@@ -441,7 +441,7 @@ export function createButlerRoute(
   router.post("/:id/butler/model", async (c) => {
     const projectId = c.req.param("id");
     const butlerId = resolveButlerId(c);
-    const body = await parseJsonBody<{ model?: string }>(c);
+    const body = await parseJsonBody(c, butlerModelBody);
     const backend = await resolveButlerBackend(projectId, butlerId);
     const state = getButlerSession(projectId, butlerId);
     const model = normalizeModelForBackend(body.model, state.active ? state.backend : butlerSdkBackend(backend.provider));
@@ -461,7 +461,7 @@ export function createButlerRoute(
   router.post("/:id/butler/profile", async (c) => {
     const projectId = c.req.param("id");
     const butlerId = resolveButlerId(c);
-    const body = await parseJsonBody<{ profile?: string }>(c);
+    const body = await parseJsonBody(c, butlerProfileBody);
     const profile = (body.profile ?? "").trim();
     await setPreference(butlerProfilePrefKey(projectId), profile, database);
     // Fresh session: stop, forget resume id (different endpoint can't resume), restart.
@@ -492,7 +492,7 @@ export function createButlerRoute(
   // An empty prompt removes the override (revert to the global default).
   router.put("/:id/butler/skill", async (c) => {
     const projectId = c.req.param("id");
-    const body = await parseJsonBody<{ prompt: string }>(c);
+    const body = await parseJsonBody(c, butlerSkillBody);
     if (!body.prompt?.trim()) {
       await deleteButlerOverride(projectId, database);
       return c.json({ ok: true, isOverride: false });

@@ -53,8 +53,43 @@ import {
  * 70 → 64 across four route files — `butler.ts` (6 → 3), `drives.ts` (3 → 2),
  * `milestones.ts` (2 → 1) and `scheduled-runs.ts` (2 → 1) — and is mostly a REJECTION batch:
  * it read every remaining handler and added two families below rather than manufacturing
- * conversions. The remainder is the disclosed one, per CLAUDE.md's partial-refactor rule —
- * this file IS that disclosure.
+ * conversions. Batch 5 took 64 → 58 across four route files — `butler.ts` (3 → 0),
+ * `butler-definitions.ts` (2 → 1), `agent-skills.ts` (3 → 2) and `projects.ts` (4 → 3). The
+ * remainder is the disclosed one, per CLAUDE.md's partial-refactor rule — this file IS that
+ * disclosure.
+ *
+ * **Batch 5 was an AUDIT of the 64, not a search for more conversions, and it is the reason to
+ * distrust a recorded reason that has not been re-read.** Batch 4 declared the route-level
+ * surface exhausted and the remainder six documented families. Re-deriving every reason against
+ * HEAD found four that did not survive, and all four had the same shape — a rejection argued
+ * against a schema NOBODY HAD TO WRITE:
+ *
+ *   - **`butler.ts` ×3 rested on a factually wrong claim.** The recorded reason said
+ *     `{ model: 7 }` "is a request that succeeds today". It does not: `?.` short-circuits on
+ *     nullish only, so `normalizeModelForBackend`'s `model?.trim()` throws on a number and the
+ *     endpoint answers **500**. `profile` is the same shape. For `skill`, the BRANCH reading was
+ *     right (an empty prompt deletes the override and answers 200) but the conclusion did not
+ *     follow: it argued against `required("prompt is required")`, when the declared-type
+ *     tightening keeps the branch and touches only the 500.
+ *   - **`butler-definitions.ts POST /` and `agent-skills.ts POST /` were recorded as having no
+ *     movable guard.** Both service guards are their function's FIRST statement — batch 4's own
+ *     conversion criterion, applied to `milestones` / `drives` / `scheduled-runs` in the same
+ *     batch that rejected these.
+ *   - **`projects.ts POST /create`'s reason was about the OPTIONAL fields** (no null discipline,
+ *     true and still respected — they all stay unchecked) and never addressed `name`, whose
+ *     guard is `createProject`'s first statement.
+ *
+ * The audit also found `workspace-actions.ts` carrying NO reason at all, against batch 4's claim
+ * that "all 64 remaining entries now carry their family and reason inline". Its six were read
+ * and are correctly rejected; the reason is written on the entry now.
+ *
+ * The other 54 entries were re-derived against HEAD and their reasons HOLD — including the
+ * subtle ones: `milestone.service.update`, `drive.service.update`, `tag.updateTagById`,
+ * `project-scripts.create/update`, `scheduled-run.update`, `quality-metrics.recordBatch`,
+ * `agent-skill.updateSkill/installSkill` and `butler-definitions.updateButlerDefinition` were
+ * each read to confirm the 404/403 lookup really does precede the body check (family 5), and
+ * the five multi-encoding readers were read to confirm they still accept multipart / a bare
+ * array / a bare string (family 6).
  *
  * **What batch 4 found, and why its yield is small on purpose.** Batches 1–3 took the
  * ROUTE-LEVEL guards; by batch 4 that surface is empty. Every remaining `c.json({error}, 400)`
@@ -89,8 +124,8 @@ import {
  *   2. **No declared body to tighten TO.** The body is untyped (or `Record<string, unknown>`) and
  *      forwarded whole to a service that decides field by field what it recognises. A schema must
  *      either invent a field list — and 400 the fields it forgot — or check nothing and merely
- *      look validated. `issues.ts PATCH /:id`, `projects.ts PATCH /:id`, all three unconverted
- *      `agent-skills.ts` reads.
+ *      look validated. `issues.ts PATCH /:id`, `projects.ts PATCH /:id`,
+ *      `project-stack-profile.ts PUT /:id/stack-profile`.
  *   3. **A different STATUS or error BODY.** `workers.ts` — 422, and the fleet protocol's
  *      `{ error, boardProtocolVersion }` that the worker daemon branches on (#754).
  *   4. **`parseOptionalJsonBody` by contract.** A missing body is a valid request the handler
@@ -104,7 +139,11 @@ import {
  *      schema runs before the handler, so it would answer 400 where a caller gets 404 or 403
  *      today. This is the family that separates the four handlers batch 4 DID convert: in
  *      `milestone.service.ts`, `drive.service.ts` and `scheduled-run.service.ts` the guard is
- *      the FIRST statement, so moving it to the boundary re-orders nothing.
+ *      the FIRST statement, so moving it to the boundary re-orders nothing. Batch 5 moved
+ *      `agent-skills.ts PUT /:id` + `POST /:id/install` and `butler-definitions.ts PUT /:bid`
+ *      INTO this family, out of the "no guard at all" / "coercion" reasons they had been given:
+ *      each of those services opens with a 404 lookup, which is a stronger and checkable
+ *      reason than the one on record.
  *   6. **The JSON body is only ONE of several accepted encodings** (new in batch 4).
  *      `backlog-markdown.ts`, `backlog-snapshot.ts`, `issue-export-import.ts` (both reads) and
  *      `config-export-import.ts` branch on `Content-Type` and also accept `multipart/form-data`,
@@ -115,6 +154,15 @@ import {
  * Family 3 and family 4 can still fall the way `plugins.ts`'s error CLASS did — by restoring the
  * identity around the schema. Families 1, 2, 5 and 6 cannot: there is nothing left to check that
  * would not narrow what the endpoint accepts today, or would change which answer a caller gets.
+ *
+ * **The one structural move that would shrink the remainder further, and why batch 5 did not
+ * make it.** Eighteen of the 58 are `parseOptionalJsonBody` sites (family 4), and that helper
+ * has no schema overload — so an optional body cannot be type-checked at all today. A
+ * `parseOptionalJsonBody(c, schema)` taking an all-optional schema would be a real seam. It was
+ * declined here because for almost every one of those sites the field is read through a
+ * coercion with a default (family 1 as well), so the new check would 400 requests that succeed
+ * today: the seam would lower the census without hardening anything. Building middleware to
+ * move a number is the failure this file's own preamble warns about.
  *
  * **What batch 2 learned about the two families batch 1 flagged**, since the flags were half
  * right and a later batch should inherit the corrected version:
@@ -192,10 +240,15 @@ function findUnvalidatedBodyReads(): Offender[] {
  * **Only ever lower a number here** — raising one re-opens the gap this file measures.
  */
 const BASELINE: Readonly<Record<string, number>> = {
-  // 3 = `POST /`, `PUT /:id`, `POST /:id/install`. REJECTED, not deferred: none of the three
-  // has a guard — each forwards the WHOLE body to `agentSkillService`, which owns the field
-  // rules. `POST /enhance`, the one with a real `name is required` guard, converted in batch 3.
-  "agent-skills.ts": 3,
+  // 2 = `PUT /:id` and `POST /:id/install`. REJECTED, family 5 (ORDER) — and batch 3's recorded
+  // reason for this file ("none of the three has a guard") was WRONG about the third read:
+  // `createSkill` opens with `if (!input.name || !input.description || !input.prompt)`, a
+  // first-statement guard, so `POST /` converted in batch 5. The two that remain both open with
+  // `getAgentSkillById` → `Skill not found` (404) — `updateSkill` also `Cannot modify built-in
+  // skills` (403) — before any field is read, so a boundary schema would answer 400 where a
+  // caller gets 404/403 today. `POST /:id/install` is additionally a body-optional read
+  // (`.catch(() => ({}))`).
+  "agent-skills.ts": 2,
   // 2 = `POST /` and `PUT /:id`. REJECTED: neither has a guard, and the declared-type
   // tightening `addStatusBody` used is NOT available here — `resolveApprovalContext` CATCHES
   // its own failures and returns `{}`, so `POST /` with no `sessionId` creates an approval and
@@ -214,17 +267,13 @@ const BASELINE: Readonly<Record<string, number>> = {
   // stored schedule (200) on the second. `parseJsonBody` would answer `invalid JSON body` for
   // both.
   "board-monitor.ts": 2,
-  // 2 = `POST /` and `PUT /:bid`. REJECTED, family 1: `provider` is read through a ternary
-  // that maps anything unrecognised to `undefined`, and `name` through `body.name ?? ""` —
-  // both coercions, so `{ provider: 7 }` is a valid request today. The real guards live in
-  // `butler-definitions.service.ts`, behind the MAX_BUTLERS / name rules.
-  "butler-definitions.ts": 2,
-  // 3 = `POST /:id/butler/model`, `POST /:id/butler/profile`, `PUT /:id/butler/skill`. The
-  // other three converted in batch 4. REJECTED, not deferred — see the header of
-  // `routes/butler-body-schemas.ts`: `model` is normalised, `profile` is `(x ?? "").trim()`,
-  // and `skill`'s `!body.prompt?.trim()` is a BRANCH (an empty prompt DELETES the override and
-  // answers 200), so a schema there would 400 the documented way to revert to the default.
-  "butler.ts": 3,
+  // 1 = `PUT /:bid`. REJECTED, family 5 (ORDER) — a CORRECTION of batch 3's family-1 reason,
+  // which was right about `provider` (a ternary mapping anything unrecognised to `undefined`,
+  // so `{ provider: 7 }` is valid today, and it stays unchecked) and wrong about where the name
+  // rule lives: it is the FIRST statement of `createButlerDefinition`, which is why `POST /`
+  // converted in batch 5. `updateButlerDefinition` is the one that cannot move — it throws
+  // `Butler not found` (404) before it reads `patch.name`.
+  "butler-definitions.ts": 1,
   // REJECTED, family 6: multipart-or-JSON, then `validateBoardConfigShape` answers
   // `{ error: "Invalid config shape", details }` — a body `parseJsonBody` cannot produce.
   "config-export-import.ts": 1,
@@ -285,12 +334,14 @@ const BASELINE: Readonly<Record<string, number>> = {
   // merged field-by-field into the stored profile by `saveManualStackProfile`, with no guard
   // anywhere — a schema would have to invent a field list for a type that is all-optional.
   "project-stack-profile.ts": 1,
-  // 4 = `POST /`, `POST /create`, `PATCH /:id`, and one `parseOptionalJsonBody`. All three
-  // rejected with reasons in `project-body-schemas.ts`'s header; the short version is that
-  // `PATCH /:id` has no declared body type to tighten TO and its only real check answers 422,
-  // and the two POSTs forward the whole body to a service with its own guards, where a
-  // declared-type tightening risks 400-ing a body (a `null` optional) that succeeds today.
-  "projects.ts": 4,
+  // 3 = `POST /`, `PATCH /:id`, and one `parseOptionalJsonBody` (`/onboarding/dismiss`, whose
+  // body is read and DISCARDED). Reasons in `project-body-schemas.ts`'s header: `PATCH /:id`
+  // has no declared body type to tighten TO and its only real check answers 422; `POST /`'s
+  // cross-field guard sits behind `startRegistrationProgress`, so moving it would stop creating
+  // the progress record the caller polls, and `{ repoPath: 7 }` is truthy and fails later with
+  // a different 400 message. `POST /create` converted in batch 5 — its `name` guard is the
+  // first statement of `createProject`, which batch 2's optional-field reason never addressed.
+  "projects.ts": 3,
   // 1 = `POST /:id/quality-metrics`. REJECTED, families 5 + 3: `recordBatch` runs
   // `assertProject` (404) BEFORE `metrics must be a non-empty array`, and its per-ENTRY rules
   // (`metricKey is required`, …) throw `ValidationError`, rendered as
@@ -321,6 +372,15 @@ const BASELINE: Readonly<Record<string, number>> = {
   // passes the WHOLE raw body on as the template document. `POST /workspaces/:id/transition`
   // reads an untyped body and casts three optional strings out of it with no check at all.
   "workflows.ts": 4,
+  // 6 = `POST /:id/launch`, `/implement-plan`, `/bisect`, `/reconcile-as-done`, `/fix-and-merge`
+  // (all `parseOptionalJsonBody`) and `POST /:id/update-base` (`parseJsonBody(c)`). Batch 4
+  // claimed every remaining entry carried a family and a reason; this one did not, and batch 5
+  // audited all six rather than assuming. REJECTED, families 4 + 1: five have an OPTIONAL body
+  // (`/launch` and `/fix-and-merge` are called with none by the monitor), which `parseJsonBody`
+  // would answer `invalid JSON body` for, and every field any of them reads is a COERCION with
+  // a default — `body.scope === "full" ? … : "related"`, `adoptMainCheckout === true`,
+  // `body.mode === "merge" ? … : "rebase"` — so `{ mode: 7 }` is a live request meaning
+  // "rebase". `/launch` additionally forwards the whole body to `launchSession` (family 2).
   "workspace-actions.ts": 6,
   // 1 = `POST /:id/review`. REJECTED, family 4: `thoroughReview` is read as
   // `body.thoroughReview === true` and the endpoint is called with no body at all by the UI.
@@ -333,7 +393,7 @@ const BASELINE: Readonly<Record<string, number>> = {
 };
 
 /** The total the baseline encodes — asserted separately so a mass edit cannot drift it silently. */
-const BASELINE_TOTAL = 64;
+const BASELINE_TOTAL = 58;
 
 describe("route request-body validation (#806)", () => {
   it("scans the real routes directory", () => {

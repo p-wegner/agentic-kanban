@@ -143,6 +143,22 @@ export function requiredTrimmed(message: string) {
 }
 
 /**
+ * A bare TRUTHY test — the schema form of `if (!body.x) throw …` where the guard was written
+ * against a field it never type-checked.
+ *
+ * Deliberately NOT {@link requiredRaw} (`z.string().min(1)`), and this is rule 3 at its most
+ * literal: `!input.name` ACCEPTS `7`, `true` and `[]`, so a request sending one of those
+ * succeeds today and `requiredRaw` would start answering 400 for it. This rejects exactly what
+ * the guard rejected — `undefined`, `null`, `""`, `0`, `false`, `NaN` — and nothing else.
+ *
+ * The declared type is carried through for the call site's benefit; it is not enforced, for
+ * the same reason it was not enforced before.
+ */
+export function requiredTruthy(message: string) {
+  return z.custom<string>((v) => Boolean(v), { message });
+}
+
+/**
  * `typeof v === "boolean"`, REQUIRED — the schema form of
  * `if (typeof body.x !== "boolean") return c.json({ error: message }, 400)`.
  *
