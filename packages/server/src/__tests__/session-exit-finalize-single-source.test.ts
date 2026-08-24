@@ -41,9 +41,20 @@ const FINALIZE_MOVES = [
 
 describe("#543: session-exit finalize is single-source", () => {
   const lifecycle = read("session-lifecycle.ts");
+  /**
+   * #876 lifted the launch-THROW finalizer OUT of `session-lifecycle.ts` (that file was at the
+   * god-module ceiling). Extracting it made this a SECOND file in which a finalize copy could
+   * grow, so the ratchet scans it too — otherwise the extraction would have quietly re-opened
+   * the hole this test exists to keep shut, while still passing.
+   */
+  const launchFailure = read("launch-failure.ts");
 
   it.each(FINALIZE_MOVES)("session-lifecycle.ts does not re-implement %s", (symbol) => {
     expect(lifecycle).not.toContain(symbol);
+  });
+
+  it.each(FINALIZE_MOVES)("launch-failure.ts does not re-implement %s", (symbol) => {
+    expect(launchFailure).not.toContain(symbol);
   });
 
   it("exit-finalize.ts owns all of them", () => {
@@ -62,11 +73,18 @@ describe("#543: session-exit finalize is single-source", () => {
   });
 
   it("the launch-THROW path is deliberately not routed through it", () => {
-    // `startSession`'s catch records a profile failure for a spawn that never produced an exit
-    // event at all. That is not a terminal ROUTE — there is no `classifySessionExit` result to
-    // finalize — so it keeps its own record call, and this test says so rather than letting a
-    // future reader "fix" the inconsistency.
-    expect(lifecycle).toContain("recordAgentProfileLaunchFailure");
-    expect(lifecycle).not.toContain("recordAgentProfileLaunchFailure(db, {\n        provider: lifecycleProviderName(provider, profile),\n        profileName: profile?.name,\n        summary: stats.failureReason");
+    // `startSession`'s failure path records a profile failure for a launch that never produced
+    // an exit event at all. That is not a terminal ROUTE — there is no `classifySessionExit`
+    // result to finalize — so it keeps its own record call, and this test says so rather than
+    // letting a future reader "fix" the inconsistency.
+    //
+    // #876 moved that call into `launch-failure.ts`, so it is asserted THERE now. Keeping its
+    // own `recordAgentProfileLaunchFailure` is the ONE thing the throw path may do alone;
+    // growing any of FINALIZE_MOVES beside it is the second copy, which the scan above catches.
+    expect(launchFailure).toContain("recordAgentProfileLaunchFailure");
+    // Single-source: exactly ONE file records the throw-path failure. The previous form pinned
+    // a whitespace-exact call snippet, i.e. it asserted the FORMATTING of the copy it feared
+    // rather than its absence — a reindent would have slipped straight past it.
+    expect(lifecycle).not.toContain("recordAgentProfileLaunchFailure");
   });
 });
