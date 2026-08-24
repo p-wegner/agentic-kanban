@@ -16,18 +16,26 @@
  * A single command claiming to check both ends would therefore have to lie about one of
  * them. So:
  *
- *   - `worker doctor`        runs ON THE WORKER MACHINE  — the five hops it can prove.
+ *   - `worker doctor`        runs ON THE WORKER MACHINE  — the hops it can prove.
  *   - `worker doctor-board`  runs ON THE BOARD MACHINE   — what the board sees of the fleet.
  *
  * Each check reports `pass` / `fail` / `skip` / `unknown` and never dresses an
  * indeterminate result as a pass. `unknown` is a real outcome here: an OAuth login can be
  * checked by file presence but not proven without spending a request.
+ *
+ * `unknown` is ALSO where a true-but-not-faulty condition goes, and that distinction is
+ * load-bearing (#847, #851): only `fail` flips `report.ok` and the process exit code, so a
+ * condition an operator cannot or need not act on must never be one. A doctor that cannot
+ * return clean on a healthy machine gets ignored, which costs more than the thing it warned
+ * about. Reserve `fail` for a fault: something is wrong AND the remedy printed beside it
+ * will fix it.
  */
 import { execFile } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import WebSocket from "ws";
+import { defaultWorkerWorkRoot } from "../../worker/worker-repo.js";
 
 export type CheckStatus = "pass" | "fail" | "skip" | "unknown";
 
@@ -96,13 +104,52 @@ export function probeCommand(
   });
 }
 
+/**
+ * The OS-level errno behind a failed `fetch`, or null.
+ *
+ * `fetch` reports every transport failure as the same useless `TypeError: fetch failed`; the
+ * thing that actually distinguishes "routable host, nothing bound on that port" from "cannot
+ * get there at all" is the errno hanging off `.cause` — and when a hostname resolves to
+ * several addresses undici raises an `AggregateError` whose `errors[]` carry it instead.
+ * #847 turned on this distinction, so it is dug out rather than flattened into a message.
+ */
+export function errnoOfFetchFailure(err: unknown): string | null {
+  const seen = new Set<unknown>();
+  const walk = (e: unknown): string | null => {
+    if (!e || typeof e !== "object" || seen.has(e)) return null;
+    seen.add(e);
+    const code = (e as { code?: unknown }).code;
+    if (typeof code === "string" && code.length > 0) return code;
+    const aggregate = (e as { errors?: unknown }).errors;
+    if (Array.isArray(aggregate)) {
+      for (const inner of aggregate) {
+        const found = walk(inner);
+        if (found) return found;
+      }
+    }
+    return walk((e as { cause?: unknown }).cause);
+  };
+  return walk(err);
+}
+
 /** Any HTTP answer proves the listener is up; only a transport error is a failure. */
-async function probeHttp(url: string, init?: RequestInit): Promise<{ reachable: boolean; status?: number; error?: string }> {
+async function probeHttp(
+  url: string,
+  init?: RequestInit,
+): Promise<{ reachable: boolean; status?: number; error?: string; errno?: string }> {
   try {
     const res = await fetch(url, init);
     return { reachable: true, status: res.status };
   } catch (err) {
-    return { reachable: false, error: err instanceof Error ? err.message : String(err) };
+    const errno = errnoOfFetchFailure(err);
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      reachable: false,
+      // `fetch failed` on its own has never told anyone anything; append the errno when
+      // there is one so the report names the actual condition.
+      error: errno ? `${message} (${errno})` : message,
+      ...(errno ? { errno } : {}),
+    };
   }
 }
 
@@ -261,8 +308,29 @@ export function checkWebSocket(
  * BOARD, per assignment (`composeGitUrl`), so a doctor with no assignment in hand does not
  * know it. Reporting `skip` with the reason beats guessing 3002 and calling a wrong answer
  * a failure.
+ *
+ * And a REACHABLE port is not the same as a BOUND one (#847). `ensureGitHttpServer` is
+ * called by a git-transport dispatch and by nothing else (`stopGitHttpServer` has no callers
+ * at all), so the listener exists only from a board process's first git dispatch until that
+ * process ends — and a board restart puts it back to absent. For that whole window the
+ * honest verdict for "connection refused" is `unknown`, not `fail`. See
+ * {@link LAZY_BIND_ERRNOS}.
  */
-async function checkGitTransport(boardUrl: string, gitPort?: number): Promise<DoctorCheck> {
+/**
+ * The errnos that mean "this machine CAN reach that host, and that port simply has no
+ * listener" — i.e. exactly what a not-yet-lazily-bound git transport looks like from here.
+ * Anything outside this set (ENOTFOUND, ETIMEDOUT, EHOSTUNREACH, ECONNRESET, EAI_AGAIN, a
+ * TLS error, ...) is a real routing/config fault and stays a FAIL.
+ */
+const LAZY_BIND_ERRNOS = new Set(["ECONNREFUSED"]);
+
+// This is the REPORTING half of #847. The structural half — bind the transport at startup
+// and keep it bound, so the listener stops depending on dispatch history and on restarts —
+// is #855: it changes listener lifecycle and exposure duration, which #847 should not carry.
+// When #855 lands this branch stays (a board with no fleet configured legitimately has no
+// listener) but stops being the common case.
+
+export async function checkGitTransport(boardUrl: string, gitPort?: number): Promise<DoctorCheck> {
   if (!gitPort) {
     return {
       name: "git transport reachable",
@@ -283,6 +351,45 @@ async function checkGitTransport(boardUrl: string, gitPort?: number): Promise<Do
   const url = `${base.protocol}//${base.hostname}:${gitPort}/git/`;
   const probe = await probeHttp(url);
   if (!probe.reachable) {
+    if (probe.errno && LAZY_BIND_ERRNOS.has(probe.errno)) {
+      // #847. THE MECHANISM, verified rather than assumed: `ensureGitHttpServer` is called
+      // by a git-transport dispatch and by nothing else, and `stopGitHttpServer` has zero
+      // callers anywhere in the repo. So the listener binds on the first dispatch of a BOARD
+      // PROCESS and then stays bound for that process's whole life — and every board restart
+      // drops it until the next dispatch. The failing window is therefore "any time since
+      // the last board restart in which no git dispatch has happened": on a `tsx watch` dev
+      // board, most of the time; on a production board, the whole period after each deploy
+      // until the first dispatch. That is what produced an operator's FAIL -> PASS -> FAIL
+      // across three runs with zero configuration changed on either machine.
+      //
+      // The worker cannot observe any of that: whether this board process has dispatched
+      // since it started is not visible from here, and nothing on the worker's side changed
+      // between those three runs. What IS observable is the errno — "the host is routable
+      // and that port has no listener" versus "cannot get there at all" — so the verdict is
+      // keyed on that and needs no dispatch state at all. It must not resolve the remaining
+      // ambiguity as the alarming one: `fail` meant a healthy worker read as broken for most
+      // of its life, under a remedy naming two env vars that were already correct.
+      return {
+        name: "git transport reachable",
+        status: "unknown",
+        detail:
+          `${url} is routable but nothing is listening on port ${gitPort} (${probe.errno}). ` +
+          "The board binds the git transport LAZILY: the first git-transport dispatch of a board " +
+          "process brings it up, it then stays up for that process's life, and a board restart " +
+          "drops it until the next dispatch. So a board that has not dispatched git work SINCE " +
+          "ITS LAST RESTART has no listener here, and that is the expected state, not a fault. " +
+          "Nothing on this machine can tell the two apart, which is why this is not a verdict.",
+        remedy:
+          "Nothing to do if the board has not dispatched git work since its last restart — that is " +
+          "what a healthy fleet looks like from here, and a restarted board looks like it again. If " +
+          "a dispatch HAS run since the board last started and the port still refuses, THEN check " +
+          "KANBAN_GIT_HTTP_PORT on the board and that " +
+          "KANBAN_GIT_HTTP_HOST names an interface this machine can route to. Never put a " +
+          "path-based reverse proxy in front of it (docs §8).",
+      };
+    }
+    // Everything else — DNS failure, timeout, no route — is a fault regardless of whether
+    // the transport has bound yet, so it stays a FAIL with the configuration remedy.
     return bad(
       "git transport reachable",
       `${url} could not be reached: ${probe.error}`,
@@ -295,6 +402,124 @@ async function checkGitTransport(boardUrl: string, gitPort?: number): Promise<Do
   return ok("git transport reachable", `${url} answered ${probe.status} (a listener is there and authenticating)`);
 }
 
+/**
+ * Check 6 — has the operator trusted this machine's worker checkouts? (#851)
+ *
+ * A worker clones each project into `<work-root>/repos/<projectId>` and carves per-session
+ * worktrees out of it, so that directory HAS NEVER BEEN OPENED INTERACTIVELY — by
+ * construction. Claude Code therefore prints, on every dispatch to a new worker/project
+ * pair:
+ *
+ *   Ignoring N permissions.allow entries from .claude/settings.json ...:
+ *   this workspace has not been trusted.
+ *
+ * WHAT THIS IS AND IS NOT. The worker launches the agent in `bypassPermissions`, and the
+ * session transcript from the first real cross-machine dispatch (`c63965b3`) shows zero
+ * permission denials, zero prompts, and all 65 PreToolUse hook events firing normally — the
+ * real guardrails were active throughout. So the discarded ALLOW list costs nothing and this
+ * is a recurring confusing banner, not a security bypass. What it would cost, on a project
+ * that defines `deny`/`ask` rules, is those rules — dropped the same silent way. Nothing
+ * here defines any today, which is why the check names which case it found rather than
+ * warning flatly, and why it is `unknown` rather than `fail`: a doctor that exits non-zero
+ * over a cosmetic banner is the #847 defect again.
+ *
+ * WHAT THIS DELIBERATELY DOES NOT DO: write `hasTrustDialogAccepted` itself. That would make
+ * the banner vanish by routing around a security control — the board granting trust, on a
+ * machine it deliberately holds no credentials for (decision 012), to code it just pushed
+ * there. It would also only make the run PERMITTED, never more CORRECT. The decision stays
+ * with this machine's operator; the doctor's job is to tell them it is theirs to make.
+ */
+export function checkWorkerCheckoutTrust(workRoot: string, home: string): DoctorCheck {
+  const name = "worker checkouts trusted";
+  const reposDir = join(workRoot, "repos");
+  let projectDirs: string[];
+  try {
+    projectDirs = readdirSync(reposDir, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => join(reposDir, e.name));
+  } catch {
+    return {
+      name,
+      status: "skip",
+      detail: `${reposDir} does not exist yet — this machine has not been dispatched any git work, so there is no checkout to trust`,
+    };
+  }
+  if (projectDirs.length === 0) {
+    return { name, status: "skip", detail: `${reposDir} holds no project clone yet — nothing to trust` };
+  }
+
+  const trusted = readTrustedProjectPaths(join(home, ".claude.json"));
+  const untrusted = projectDirs.filter((dir) => !trusted.has(normalizeTrustKey(dir)));
+  if (untrusted.length === 0) {
+    return ok(name, `all ${projectDirs.length} worker checkout(s) under ${reposDir} are trusted in ~/.claude.json`);
+  }
+
+  const described = untrusted.map((dir) => `${dir} (${describeLostRules(dir)})`);
+  return {
+    name,
+    status: "unknown",
+    detail:
+      `${untrusted.length} of ${projectDirs.length} worker checkout(s) have no hasTrustDialogAccepted entry in ` +
+      `${join(home, ".claude.json")}, so every dispatch into them prints "this workspace has not been trusted" and ` +
+      `drops that repo's permission settings: ${described.join("; ")}. The agent still runs either way — the worker ` +
+      "launches it with permissions bypassed and the PreToolUse hooks fire regardless.",
+    remedy:
+      "If you want the banner gone (and any deny/ask rules honoured), THIS MACHINE'S OPERATOR grants the trust — the " +
+      "board never will: run Claude Code interactively once in each directory above and accept the trust dialog, or set " +
+      `projects["<that path, forward slashes>"].hasTrustDialogAccepted: true in ${join(home, ".claude.json")}.`,
+  };
+}
+
+/** Trust keys are written with forward slashes and vary in case on Windows. */
+function normalizeTrustKey(p: string): string {
+  const slashed = p.replace(/\\/g, "/").replace(/\/+$/, "");
+  return process.platform === "win32" ? slashed.toLowerCase() : slashed;
+}
+
+/** The project paths `~/.claude.json` records as trusted. Never throws. */
+export function readTrustedProjectPaths(claudeJsonPath: string): Set<string> {
+  const out = new Set<string>();
+  try {
+    const parsed = JSON.parse(readFileSync(claudeJsonPath, "utf8")) as {
+      projects?: Record<string, { hasTrustDialogAccepted?: unknown }>;
+    };
+    for (const [key, value] of Object.entries(parsed.projects ?? {})) {
+      if (value && value.hasTrustDialogAccepted === true) out.add(normalizeTrustKey(key));
+    }
+  } catch {
+    /* absent or corrupt — treat as "nothing is trusted", which is the safe read */
+  }
+  return out;
+}
+
+/**
+ * Does this repo actually LOSE anything when its settings are ignored?
+ *
+ * A shallow count of `permissions.deny` / `permissions.ask` in the checkout's two settings
+ * files — deliberately NOT a settings parser: no merge order, no precedence, no rule
+ * semantics. It only has to separate "there are restrictive rules here that would be
+ * dropped" from "allow-only, so this is cosmetic", and for that a count is enough.
+ */
+function describeLostRules(repoDir: string): string {
+  let restrictive = 0;
+  let read = false;
+  for (const file of ["settings.json", "settings.local.json"]) {
+    try {
+      const parsed = JSON.parse(readFileSync(join(repoDir, ".claude", file), "utf8")) as {
+        permissions?: { deny?: unknown[]; ask?: unknown[] };
+      };
+      read = true;
+      restrictive += (parsed.permissions?.deny?.length ?? 0) + (parsed.permissions?.ask?.length ?? 0);
+    } catch {
+      /* absent or unreadable — contributes nothing */
+    }
+  }
+  if (!read) return "no .claude settings found, so nothing is being dropped";
+  return restrictive > 0
+    ? `${restrictive} deny/ask rule(s) here WOULD be dropped — worth acting on`
+    : "allow-only settings, so the effect is a confusing banner and nothing more";
+}
+
 /** Check 5 — git on PATH. The transport is useless without it. */
 async function checkGit(): Promise<DoctorCheck> {
   const probe = await probeCommand("git", ["--version"]);
@@ -303,7 +528,7 @@ async function checkGit(): Promise<DoctorCheck> {
 }
 
 /**
- * Check 6 — the provider CLI, installed AND logged in.
+ * Check 7 — the provider CLI, installed AND logged in.
  *
  * The board cannot diagnose this at all: a worker authenticates the agent with its OWN
  * local login and the board sends no credentials (decision 012), so "installed but not
@@ -362,6 +587,8 @@ export interface WorkerDoctorOptions {
   gitPort?: number;
   home?: string;
   timeoutMs?: number;
+  /** Worker work root, for the checkout-trust check (#851). Defaults to ~/.agentic-kanban/worker. */
+  workRoot?: string;
 }
 
 /** The worker-machine half. Runs every hop this side can actually prove. */
@@ -374,6 +601,7 @@ export async function runWorkerDoctor(opts: WorkerDoctorOptions): Promise<Doctor
   checks.push(await checkWebSocket(boardUrl, identity, opts.timeoutMs));
   checks.push(await checkGitTransport(boardUrl, opts.gitPort));
   checks.push(await checkGit());
+  checks.push(checkWorkerCheckoutTrust(opts.workRoot ?? defaultWorkerWorkRoot(), opts.home ?? homedir()));
   for (const provider of opts.providers) {
     checks.push(...(await checkProvider(provider, opts.home)));
   }
