@@ -60,7 +60,7 @@ describe("POST agent-questions/:toolUseId/answer — workspace no longer answera
     const app = await appWithWorkspace({ status: "closed", closedAt: new Date().toISOString() });
     const res = await app.request("/projects/proj-1/agent-questions/mcp-clarify-1/answer", answerRequest());
     expect(res.status).toBe(409);
-    const body = await res.json();
+    const body = await res.json() as { error: string; canDismiss: boolean };
     expect(body.canDismiss).toBe(true);
     expect(body.error).toContain("closed");
     // The old failure mode leaked a setup instruction the user could not act on.
@@ -71,7 +71,7 @@ describe("POST agent-questions/:toolUseId/answer — workspace no longer answera
     const app = await appWithWorkspace(null);
     const res = await app.request("/projects/proj-1/agent-questions/mcp-clarify-1/answer", answerRequest());
     expect(res.status).toBe(409);
-    const body = await res.json();
+    const body = await res.json() as { error: string; canDismiss: boolean };
     expect(body.canDismiss).toBe(true);
     expect(body.error).toContain("deleted");
   });
@@ -80,7 +80,7 @@ describe("POST agent-questions/:toolUseId/answer — workspace no longer answera
     const app = await appWithWorkspace({ status: "active", workingDir: null });
     const res = await app.request("/projects/proj-1/agent-questions/mcp-clarify-1/answer", answerRequest());
     expect(res.status).toBe(409);
-    const body = await res.json();
+    const body = await res.json() as { error: string; canDismiss: boolean };
     expect(body.canDismiss).toBe(true);
     expect(body.error).toContain("no working directory");
   });

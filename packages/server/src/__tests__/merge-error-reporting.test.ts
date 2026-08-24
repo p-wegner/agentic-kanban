@@ -3,6 +3,16 @@ import { describe, expect, it, vi } from "vitest";
 import { createWorkspaceActionsRoute } from "../routes/workspace-actions.js";
 import { createWorkspaceService } from "../services/workspace.service.js";
 
+// The merge endpoint's structured refusal body, built in middleware/error-handler.ts
+// from WorkspaceError.data. Optional members are the ones that route only sets for
+// the reason that carries them.
+type MergeErrorBody = {
+  reason: string;
+  message: string;
+  conflictFiles?: string[];
+  blockingFiles?: string[];
+};
+
 // Partially mock workspace.service.js — keep real WorkspaceError so the error
 // handler's `instanceof` check works (it imports WorkspaceError from this module).
 vi.mock("../services/workspace.service.js", async (importOriginal) => {
@@ -42,7 +52,7 @@ describe("merge 409 structured body", () => {
     const res = await app.request("/api/workspaces/ws-1/merge", { method: "POST" });
 
     expect(res.status).toBe(409);
-    const body = await res.json();
+    const body = await res.json() as MergeErrorBody;
     expect(body.reason).toBe("conflict");
     expect(body.message).toContain("conflicts");
     expect(body.conflictFiles).toEqual(["src/foo.ts", "src/bar.ts"]);
@@ -60,7 +70,7 @@ describe("merge 409 structured body", () => {
     const res = await app.request("/api/workspaces/ws-2/merge", { method: "POST" });
 
     expect(res.status).toBe(409);
-    const body = await res.json();
+    const body = await res.json() as MergeErrorBody;
     expect(body.reason).toBe("not_approved");
     expect(body.message).toContain("ready-for-merge");
     expect(body).not.toHaveProperty("conflictFiles");
@@ -78,7 +88,7 @@ describe("merge 409 structured body", () => {
     const res = await app.request("/api/workspaces/ws-3/merge", { method: "POST" });
 
     expect(res.status).toBe(409);
-    const body = await res.json();
+    const body = await res.json() as MergeErrorBody;
     expect(body.reason).toBe("already_merged");
     expect(body.message).toContain("already been merged");
     expect(body).not.toHaveProperty("conflictFiles");
@@ -96,7 +106,7 @@ describe("merge 409 structured body", () => {
     const res = await app.request("/api/workspaces/ws-4/merge", { method: "POST" });
 
     expect(res.status).toBe(409);
-    const body = await res.json();
+    const body = await res.json() as MergeErrorBody;
     expect(body.reason).toBe("dirty_main");
     expect(body.message).toContain("uncommitted");
     expect(body.blockingFiles).toEqual(["src/a.ts", "src/b.ts"]);
@@ -115,7 +125,7 @@ describe("merge 409 structured body", () => {
     const res = await app.request("/api/workspaces/ws-stale/merge", { method: "POST" });
 
     expect(res.status).toBe(503);
-    const body = await res.json();
+    const body = await res.json() as MergeErrorBody;
     expect(body.reason).toBe("server_build_stale");
     expect(body.message).toContain("stale");
     expect(body).not.toHaveProperty("conflictFiles");
@@ -128,7 +138,7 @@ describe("merge 409 structured body", () => {
     const res = await app.request("/api/workspaces/ws-5/merge", { method: "POST" });
 
     expect(res.status).toBe(500);
-    const body = await res.json();
+    const body = await res.json() as { error: string };
     expect(body).toHaveProperty("error");
     expect(body.error).toContain("something unexpected broke");
   });
@@ -145,7 +155,7 @@ describe("merge 409 structured body", () => {
     const res = await app.request("/api/workspaces/ws-6/merge", { method: "POST" });
 
     expect(res.status).toBe(409);
-    const body = await res.json();
+    const body = await res.json() as MergeErrorBody;
     expect(body.reason).toBe("conflict");
     expect(body.message).toContain("git-merge step");
   });

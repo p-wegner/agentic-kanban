@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { ArtifactEntry } from "@agentic-kanban/shared";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -74,7 +75,7 @@ describe("session artifact routes", () => {
 
         const res = await app.request(`/api/workspaces/${workspaceId}/artifacts`);
         expect(res.status).toBe(200);
-        const body = await res.json();
+        const body = await res.json() as ArtifactEntry[];
         expect(body).toEqual([]);
       } finally {
         rmSync(tempDir, { recursive: true, force: true });
@@ -99,12 +100,12 @@ describe("session artifact routes", () => {
 
         const res = await app.request(`/api/workspaces/${workspaceId}/artifacts`);
         expect(res.status).toBe(200);
-        const body = await res.json();
+        const body = await res.json() as ArtifactEntry[];
 
         // Should find 3 artifacts: screenshot.png (image), test.log (text), playwright.trace (trace)
         expect(body).toHaveLength(3);
 
-        const paths = body.map((a: any) => a.path);
+        const paths = body.map((a) => a.path);
         expect(paths).toContain("screenshot.png");
         expect(paths).toContain("test.log");
         expect(paths).toContain("traces/playwright.trace");
@@ -114,16 +115,16 @@ describe("session artifact routes", () => {
         expect(paths).not.toContain("binary.bin");
 
         // Verify type classification
-        const screenshot = body.find((a: any) => a.path === "screenshot.png");
-        expect(screenshot.type).toBe("image");
-        expect(screenshot.size).toBe(1024);
-        expect(screenshot.ext).toBe(".png");
+        const screenshot = body.find((a) => a.path === "screenshot.png");
+        expect(screenshot?.type).toBe("image");
+        expect(screenshot?.size).toBe(1024);
+        expect(screenshot?.ext).toBe(".png");
 
-        const log = body.find((a: any) => a.path === "test.log");
-        expect(log.type).toBe("text");
+        const log = body.find((a) => a.path === "test.log");
+        expect(log?.type).toBe("text");
 
-        const trace = body.find((a: any) => a.path === "traces/playwright.trace");
-        expect(trace.type).toBe("trace");
+        const trace = body.find((a) => a.path === "traces/playwright.trace");
+        expect(trace?.type).toBe("trace");
       } finally {
         rmSync(tempDir, { recursive: true, force: true });
       }
@@ -176,7 +177,7 @@ describe("session artifact routes", () => {
         const { workspaceId } = await seedWorkspace(db, tempDir);
 
         const res = await app.request(`/api/workspaces/${workspaceId}/artifacts`);
-        const body = await res.json();
+        const body = await res.json() as ArtifactEntry[];
         expect(body).toHaveLength(1);
         expect(body[0].path).toBe("visible.txt");
       } finally {
@@ -197,7 +198,7 @@ describe("session artifact routes", () => {
           `/api/workspaces/${workspaceId}/artifacts-file?path=${encodeURIComponent("output.log")}`,
         );
         expect(res.status).toBe(200);
-        const body = await res.json();
+        const body = await res.json() as { content: string; path: string };
         expect(body.content).toBe("hello world\nline 2");
         expect(body.path).toBe("output.log");
       } finally {
@@ -236,7 +237,7 @@ describe("session artifact routes", () => {
           `/api/workspaces/${workspaceId}/artifacts-file?path=${encodeURIComponent("../../../etc/passwd")}`,
         );
         expect(res.status).toBe(400);
-        const body = await res.json();
+        const body = await res.json() as { error: string };
         expect(body.error).toContain("outside");
       } finally {
         rmSync(tempDir, { recursive: true, force: true });
@@ -261,7 +262,7 @@ describe("session artifact routes", () => {
           `/api/workspaces/${workspaceId}/artifacts-file?path=${encodeURIComponent(outside)}`,
         );
         expect(res.status).toBe(400);
-        const body = await res.json();
+        const body = await res.json() as { error: string };
         expect(body.error).toContain("outside");
       } finally {
         rmSync(tempDir, { recursive: true, force: true });
@@ -286,7 +287,7 @@ describe("session artifact routes", () => {
           `/api/workspaces/${workspaceId}/artifacts-file?path=${encodeURIComponent("linked/secret.txt")}`,
         );
         expect(res.status).toBe(400);
-        const body = await res.json();
+        const body = await res.json() as { error: string };
         expect(body.error).toContain("outside");
       } finally {
         rmSync(tempDir, { recursive: true, force: true });
@@ -301,7 +302,7 @@ describe("session artifact routes", () => {
         const { workspaceId } = await seedWorkspace(db, tempDir);
         const res = await app.request(`/api/workspaces/${workspaceId}/artifacts-file`);
         expect(res.status).toBe(400);
-        const body = await res.json();
+        const body = await res.json() as { error: string };
         expect(body.error).toContain("path");
       } finally {
         rmSync(tempDir, { recursive: true, force: true });
@@ -333,7 +334,7 @@ describe("session artifact routes", () => {
           `/api/workspaces/${workspaceId}/artifacts-file?path=${encodeURIComponent("data.exe")}`,
         );
         expect(res.status).toBe(400);
-        const body = await res.json();
+        const body = await res.json() as { error: string };
         expect(body.error).toContain("Cannot read");
       } finally {
         rmSync(tempDir, { recursive: true, force: true });

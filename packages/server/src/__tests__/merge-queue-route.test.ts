@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { createMergeQueueRoute } from "../routes/merge-queue.js";
+import type { MergeQueuePlan, WorkspaceConflictPreview } from "../services/merge-queue.service.js";
 
 const mockComputePlan = vi.fn();
 const mockExecuteQueue = vi.fn();
@@ -59,7 +60,7 @@ describe("merge-queue route", () => {
     const res = await app.request("/api/merge-queue/preview/ws-missing", { method: "POST" });
 
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as { ok: boolean; preview: WorkspaceConflictPreview };
     expect(body.ok).toBe(true);
     expect(body.preview.workspaceId).toBe("ws-missing");
     expect(body.preview.hasConflicts).toBe(false);
@@ -86,7 +87,7 @@ describe("merge-queue route", () => {
     });
 
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as { ok: boolean; dryRun: boolean; plan: MergeQueuePlan };
     expect(body.ok).toBe(true);
     expect(body.dryRun).toBe(true);
     expect(body.plan.conflictPreviews).toHaveLength(2);
@@ -112,7 +113,7 @@ describe("merge-queue route", () => {
     const res = await app.request("/api/merge-queue/preview/ws-err", { method: "POST" });
 
     expect(res.status).toBe(500);
-    const body = await res.json();
+    const body = await res.json() as { ok: boolean; error: string };
     expect(body.ok).toBe(false);
     expect(body.error).toContain("db connection failed");
   });

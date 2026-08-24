@@ -5,6 +5,9 @@ import { randomUUID } from "node:crypto";
 import { createTestApp as _createTestApp } from "./helpers/test-app.js";
 import type { TestDb } from "./helpers/test-db.js";
 
+// The issues route returns the DB row straight through.
+type IssueRow = typeof schema.issues.$inferSelect;
+
 function createTestApp() {
   return _createTestApp((app, db) => {
     app.route("/api/issues", createIssuesRoute(db));
@@ -94,10 +97,10 @@ describe("Issue Number Auto-Increment", () => {
   it("GET /api/issues returns issues with their issue numbers", async () => {
     const res = await app.request(`/api/issues?projectId=${projectId}`);
     expect(res.status).toBe(200);
-    const body = await res.json() as any;
+    const body = await res.json() as IssueRow[];
     expect(body.length).toBe(3);
 
-    const numbers = body.map((i: { issueNumber: number }) => i.issueNumber);
+    const numbers = body.map((i) => i.issueNumber);
     expect(numbers).toContain(1);
     expect(numbers).toContain(2);
     expect(numbers).toContain(3);
@@ -110,7 +113,7 @@ describe("Issue Number Auto-Increment", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: "Issue four", statusId, projectId }),
     });
-    const issue4 = await res4.json();
+    const issue4 = await res4.json() as IssueRow;
     expect(issue4.issueNumber).toBe(4);
 
     // Delete issue 4
@@ -122,7 +125,7 @@ describe("Issue Number Auto-Increment", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: "Issue after delete", statusId, projectId }),
     });
-    const issueNext = await resNext.json();
+    const issueNext = await resNext.json() as IssueRow;
     expect(issueNext.issueNumber).toBe(4);
   });
 
@@ -133,7 +136,7 @@ describe("Issue Number Auto-Increment", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: "Issue five", statusId, projectId }),
     });
-    const issue5 = await res5.json();
+    const issue5 = await res5.json() as IssueRow;
     // MAX was 4 (from the "after delete" test above), so this is 5
     expect(issue5.issueNumber).toBe(5);
 
@@ -143,7 +146,7 @@ describe("Issue Number Auto-Increment", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: "Issue six", statusId, projectId }),
     });
-    const issue6 = await res6.json();
+    const issue6 = await res6.json() as IssueRow;
     expect(issue6.issueNumber).toBe(6);
   });
 });
@@ -215,21 +218,21 @@ describe("Issue Number - Independent Per Project", () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: "A-3", statusId: statusAId, projectId: projectAId }),
       })
-    ).json();
+    ).json() as IssueRow;
     const b3 = await (
       await app.request("/api/issues", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: "B-3", statusId: statusBId, projectId: projectBId }),
       })
-    ).json();
+    ).json() as IssueRow;
     const a4 = await (
       await app.request("/api/issues", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: "A-4", statusId: statusAId, projectId: projectAId }),
       })
-    ).json();
+    ).json() as IssueRow;
 
     expect(a3.issueNumber).toBe(3);
     expect(b3.issueNumber).toBe(3);
@@ -238,17 +241,17 @@ describe("Issue Number - Independent Per Project", () => {
 
   it("GET /api/issues returns correct issue numbers per project", async () => {
     const resA = await app.request(`/api/issues?projectId=${projectAId}`);
-    const issuesA = await resA.json();
+    const issuesA = await resA.json() as IssueRow[];
     const numbersA = issuesA
-      .map((i: { issueNumber: number }) => i.issueNumber)
-      .sort((a: number, b: number) => a - b);
+      .map((i) => i.issueNumber)
+      .sort((a, b) => (a ?? 0) - (b ?? 0));
     expect(numbersA).toEqual([1, 2, 3, 4]);
 
     const resB = await app.request(`/api/issues?projectId=${projectBId}`);
-    const issuesB = await resB.json();
+    const issuesB = await resB.json() as IssueRow[];
     const numbersB = issuesB
-      .map((i: { issueNumber: number }) => i.issueNumber)
-      .sort((a: number, b: number) => a - b);
+      .map((i) => i.issueNumber)
+      .sort((a, b) => (a ?? 0) - (b ?? 0));
     expect(numbersB).toEqual([1, 2, 3]);
   });
 });
