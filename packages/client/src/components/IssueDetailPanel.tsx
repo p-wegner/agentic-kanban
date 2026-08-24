@@ -348,7 +348,7 @@ export function IssueDetailPanel({
           className={`flex-1 overflow-y-auto p-4 space-y-4 ${
             panelMode === "sidebar"
               ? ""
-              : "xl:space-y-0 xl:[column-width:34rem] xl:[column-gap:1rem] xl:[&>*]:[break-inside:avoid] xl:[&>*]:mb-4"
+              : "xl:space-y-0 xl:grid xl:grid-cols-[repeat(auto-fill,minmax(34rem,1fr))] xl:gap-4 xl:items-start"
           }`}
         >
           {/* Blocked banner — shown when issue has unresolved blocking dependencies */}
