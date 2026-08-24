@@ -80,6 +80,15 @@ const LINE_BASED_GUARDS: Record<string, string> = {
     "(1) line number for the offender message only; the scan is over whole file text.",
   "server/src/__tests__/status-write-ratchet.test.ts":
     "(1) line number for the offender message only; the scan is over whole file text.",
+  "server/src/__tests__/temp-dir-namespace-guard.test.ts":
+    "(3) HONESTLY EVADABLE, and listed rather than dressed up as (1) or (2). Its three passes " +
+    "match `mkdtemp(...)` / `join(tmpdir(), ...)` with a regex per line against real " +
+    "TypeScript, so a call wrapped across two lines slips past exactly the way #779 describes. " +
+    "It is NOT category (1) (the scan is genuinely per-line, not whole-text with a line number " +
+    "for the message) and NOT category (2) (there is a TS AST here to match). The marker half " +
+    "does need lines — `findOkMarker` walks the contiguous comment block above a site — but " +
+    "that argues for an AST site scan feeding a line-based marker lookup, not for the whole " +
+    "guard staying textual. Conversion is tracked; until then this entry is the disclosure.",
   "shared/__tests__/git-exec-single-spawn.test.ts":
     "(1) already an AST pass; the split quotes the offending source line in the message.",
   "shared/__tests__/max-file-size.test.ts":
