@@ -4,8 +4,17 @@
  * A separate file so the grandfathered endpoints do not bury the rule they support — the
  * same split `fetch-in-effect-baseline.ts` uses for the same reason.
  *
- * 240 at the ratchet's first commit; **221** after #806's first outbound batch registered the
- * tag family, issue tags/dependencies, the workspace lifecycle actions and the project list.
+ * 240 at the ratchet's first commit; 221 after #806's first outbound batch registered the tag
+ * family, issue tags/dependencies, the workspace lifecycle actions and the project list;
+ * **211** after batch 2 took the ten deepest READS — the board, the issue detail-bundle, the
+ * workspace diff, and the status/repo/session/issue/workspace lists.
+ *
+ * The two batches are deliberately different in kind. Batch 1 registered MUTATIONS, whose
+ * responses are mostly a handle: a wrong shape there is loud and immediate. Batch 2 is the
+ * opposite end — responses the client destructures several levels down and then renders, where
+ * a dropped field surfaces as an `undefined` inside a component and blanks a screen with
+ * nothing pointing at the wire. Remaining entries should be picked the same way: by how badly
+ * their failure mode hides, not alphabetically and not by how easy the schema is to write.
  *
  * **Entries are DELETED when fixed, never zeroed.** Register the endpoint in
  * `lib/apiResponseSchemas.ts` and remove its line here; the ratchet's staleness half fails on
@@ -58,10 +67,8 @@ export const UNVALIDATED_API_RESPONSES: readonly string[] = [
   "DELETE /api/issues/:param/artifacts/:param",
   "DELETE /api/issues/:param/comments/:param",
   "DELETE /api/issues/:param/time-entries/:param",
-  "GET /api/issues",
   "GET /api/issues/:param/artifacts",
   "GET /api/issues/:param/dependencies",
-  "GET /api/issues/:param/detail-bundle",
   "GET /api/issues/:param/showdown",
   "GET /api/issues/:param/time-entries",
   "GET /api/issues/:param/workspaces",
@@ -134,7 +141,6 @@ export const UNVALIDATED_API_RESPONSES: readonly string[] = [
   "DELETE /api/projects/:param/worktrees",
   "GET /api/projects/:param",
   "GET /api/projects/:param/agent-questions",
-  "GET /api/projects/:param/board",
   "GET /api/projects/:param/board-health-events",
   "GET /api/projects/:param/board-health-events/:param",
   "GET /api/projects/:param/branches",
@@ -155,19 +161,16 @@ export const UNVALIDATED_API_RESPONSES: readonly string[] = [
   "GET /api/projects/:param/orchestrator",
   "GET /api/projects/:param/plugin-surface",
   "GET /api/projects/:param/quality-metrics",
-  "GET /api/projects/:param/repos",
   "GET /api/projects/:param/runbooks",
   "GET /api/projects/:param/runbooks/content",
   "GET /api/projects/:param/scripts",
   "GET /api/projects/:param/sprint-capacity",
   "GET /api/projects/:param/stats",
-  "GET /api/projects/:param/statuses",
   "GET /api/projects/:param/time-report",
   "GET /api/projects/:param/workspace-launch-failures",
   "GET /api/projects/:param/workspace-repo-status",
   "GET /api/projects/:param/workspace-risk",
   "GET /api/projects/:param/worktrees",
-  "GET /api/projects/all/workspaces",
   "GET /api/projects/health",
   "GET /api/projects/registration-progress/:param",
   "PATCH /api/projects/:param/repos/:param",
@@ -234,18 +237,14 @@ export const UNVALIDATED_API_RESPONSES: readonly string[] = [
   // ── /api/workspaces ──
   "DELETE /api/workspaces/:param/comments/:param",
   "DELETE /api/workspaces/:param/stale-worktree",
-  "GET /api/workspaces",
   "GET /api/workspaces/:param/artifacts",
   "GET /api/workspaces/:param/artifacts-file",
   "GET /api/workspaces/:param/dev-server-plan",
-  "GET /api/workspaces/:param/diff",
   "GET /api/workspaces/:param/github-handoff-draft",
   "GET /api/workspaces/:param/latest-commit",
   "GET /api/workspaces/:param/plan",
-  "GET /api/workspaces/:param/repo-merge-status",
   "GET /api/workspaces/:param/scorecard",
   "GET /api/workspaces/:param/services/logs",
-  "GET /api/workspaces/:param/sessions",
   "GET /api/workspaces/:param/timeline",
   "GET /api/workspaces/:param/visual-proof",
   "PATCH /api/workspaces/:param/comments/:param",

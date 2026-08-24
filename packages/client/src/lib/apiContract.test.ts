@@ -147,8 +147,12 @@ describe("the unvalidated path is explicit, not accidental", () => {
   });
 
   it("a GET on a path only registered for POST is not validated by the POST schema", async () => {
-    expect(findApiResponseSchema("GET", "/api/issues")).toBeUndefined();
-    expect(findApiResponseSchema("POST", "/api/issues")).toBeDefined();
+    // Was `/api/issues` until #806 batch 2 registered the GET too — which is the healthy
+    // outcome, not a broken test: this assertion needs a path the registry covers for ONE
+    // verb, and every such example is a candidate for a later batch to fill in. `merge` is a
+    // POST-only action, so it will not be claimed by a future read.
+    expect(findApiResponseSchema("GET", "/api/tags/merge")).toBeUndefined();
+    expect(findApiResponseSchema("POST", "/api/tags/merge")).toBeDefined();
   });
 
   it("prefers a literal segment over a :param at the same position", () => {

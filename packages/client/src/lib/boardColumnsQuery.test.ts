@@ -10,10 +10,18 @@ import {
 } from "./boardColumnsQuery.js";
 
 function issue(id: string, over: Partial<IssueWithStatus> = {}): IssueWithStatus {
+  // `projectId` was missing, the same drift the `col()` comment below records fixing one
+  // level up — and the `as IssueWithStatus` cast is what let both hide. The server always
+  // returns it (`getIssuesByProject`'s projection selects `issues.projectId`, and
+  // `buildBoardColumns` spreads the row whole), and the client leans on it hard: the
+  // preflight, decompose and dependency-analysis POSTs all send `projectId: issue.projectId`.
+  // Absent, those go out as `undefined` and fail somewhere else entirely — which is why
+  // #806 batch 2 asserts it, and why this fixture now has to be honest about it.
   return {
     id,
     issueNumber: Number(id.replace(/\D/g, "")) || 1,
     title: `Issue ${id}`,
+    projectId: "project-1",
     statusId: "s1",
     statusName: "Todo",
     issueType: "task",

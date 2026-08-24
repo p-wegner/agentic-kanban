@@ -10,6 +10,10 @@ function issue(id: string): IssueWithStatus {
     id,
     issueNumber: Number(id.replace(/\D/g, "")) || 1,
     title: `Issue ${id}`,
+    // The server always returns it and the client leans on it (#806 batch 2); the
+    // `as IssueWithStatus` cast is what let this fixture omit it. Same fix as
+    // `lib/boardColumnsQuery.test.ts`, which has the longer note.
+    projectId: "project-1",
     statusId: "s1",
     statusName: "Todo",
     issueType: "task",
