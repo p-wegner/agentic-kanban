@@ -250,9 +250,9 @@ export function QualityMetricsView({ projectId }: QualityMetricsViewProps) {
                     {entries.length > 0 && (
                       <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400">
                         {entries.map(([key, value]) => (
-                          <div key={key} className="min-w-0">
+                          <div key={key} className="min-w-0 truncate" title={`${key}: ${value}`}>
                             <span className="text-gray-400 dark:text-gray-500">{key}: </span>
-                            <span className="truncate">{value}</span>
+                            <span>{value}</span>
                           </div>
                         ))}
                       </div>
