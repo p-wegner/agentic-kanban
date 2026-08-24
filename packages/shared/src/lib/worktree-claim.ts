@@ -1,6 +1,6 @@
 import { isNotNull } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
-import { workspaces } from "../schema/index.js";
+import { workspaceProvisioning, workspaces } from "../schema/index.js";
 import type * as schema from "../schema/index.js";
 import { samePath } from "./path-key.js";
 import { holdsLiveResources } from "./workspace-liveness.js";
@@ -141,6 +141,85 @@ export async function findLiveWorktreeSharers(
   );
 }
 
+/**
+ * Every workspace row — WHATEVER its status — that names `workingDir` (#859).
+ *
+ * The orphaned-worktree reconciler's own rule (`classifyWorktree`) has always been "a row
+ * that still names the path owns it, whatever its status", but the shared guard only asked
+ * the LIVE-row question — so the guard could approve a removal the reconciler's project-
+ * scoped pre-filter would have refused, whenever the row was outside that project scope or
+ * landed between the two reads. Path comparison is `samePath` (Windows case/separator safe).
+ */
+export async function findWorkspaceRowsNamingPath(
+  database: WorktreeClaimDb,
+  workingDir: string,
+  opts: { excludeWorkspaceId?: string } = {},
+): Promise<WorkingDirClaim[]> {
+  const claims = await selectWorkingDirClaims(database);
+  return claims.filter((c) => c.id !== opts.excludeWorkspaceId && samePath(c.workingDir, workingDir));
+}
+
+/** One in-flight workspace-create marker (#630) that claims a path or branch. */
+export interface ProvisioningClaim {
+  id: string;
+  issueId: string;
+  phase: string;
+  branch: string | null;
+  worktreePath: string | null;
+  serverPid: number;
+}
+
+/** Is the process behind a provisioning marker still alive? Fail toward "alive" is NOT
+ * wanted here: a dead pid's marker must stay removable, or the startup orphan sweep could
+ * never clean up after a crashed create (`reconcileAbandonedProvisioning` depends on it). */
+function provisioningPidAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * In-flight workspace creates (#630 markers, LIVE process only) that claim `workingDir` —
+ * by the marker's recorded worktree path, or by its intended branch when the caller knows
+ * the worktree's branch (#859).
+ *
+ * This is the claim NO workspace-row read can see: for the whole provisioning window
+ * (measured 48s to 8+ minutes) the worktree exists on disk and in `git worktree list`
+ * while the workspace row does not exist yet — the exact gap through which the orphan
+ * reconciler deleted a worktree the create was still standing up. A marker whose owning
+ * pid is dead is deliberately NOT a claim: the startup sweep must stay able to remove a
+ * crashed create's debris before `reconcileAbandonedProvisioning` reports it.
+ */
+export async function findInFlightProvisioningClaims(
+  database: WorktreeClaimDb,
+  workingDir: string,
+  opts: { branch?: string } = {},
+): Promise<ProvisioningClaim[]> {
+  const rows = await database
+    .select({
+      id: workspaceProvisioning.id,
+      issueId: workspaceProvisioning.issueId,
+      phase: workspaceProvisioning.phase,
+      branch: workspaceProvisioning.branch,
+      worktreePath: workspaceProvisioning.worktreePath,
+      serverPid: workspaceProvisioning.serverPid,
+    })
+    .from(workspaceProvisioning)
+    .where(isNotNull(workspaceProvisioning.serverPid));
+  const branch = opts.branch?.trim();
+  return rows.filter((r) => {
+    if (!provisioningPidAlive(r.serverPid)) return false;
+    const pathMatch =
+      typeof r.worktreePath === "string" && r.worktreePath.length > 0 && samePath(r.worktreePath, workingDir);
+    const branchMatch = !!branch && typeof r.branch === "string" && r.branch === branch;
+    return pathMatch || branchMatch;
+  });
+}
+
 /** One workspace row that holds a branch. */
 export interface BranchClaim {
   id: string;
@@ -199,6 +278,16 @@ export type WorktreeRemovalOutcome =
    * supplies `branch`.
    */
   | { removed: false; reason: "branch-claimed"; holders: BranchClaim[]; message: string }
+  /**
+   * An in-flight workspace create (#630 marker, live process) claims the path or branch —
+   * the worktree is being provisioned RIGHT NOW and has no workspace row yet (#859).
+   */
+  | { removed: false; reason: "provisioning"; provisioning: ProvisioningClaim[]; message: string }
+  /**
+   * A workspace row in SOME state (possibly terminal) still names the path, and the caller
+   * asked for the strict any-row rule (`treatAnyRowAsClaim`, #859). Nothing was touched.
+   */
+  | { removed: false; reason: "named-by-row"; namers: WorkingDirClaim[]; message: string }
   /** The sharer check itself failed, so the removal was refused rather than guessed. */
   | { removed: false; reason: "claim-check-failed"; message: string; error: unknown }
   /** The guard passed; the removal itself threw. */
@@ -235,6 +324,16 @@ export async function removeWorktreeUnlessShared(args: {
    * cleanup, post-merge) do not pass it and are unaffected.
    */
   branch?: string;
+  /**
+   * #859: treat ANY workspace row naming the path — whatever its status, terminal
+   * included — as a claim. This is the orphaned-worktree reconciler's own rule
+   * (`classifyWorktree` leaves such a directory to `pruneStaleWorktrees`), enforced at
+   * the removal itself so a row the caller's own claim set missed (out of project scope,
+   * or committed between the two reads) still stops the delete. Callers that remove a
+   * directory their OWN (closed) row still names must NOT set this without passing
+   * `workspaceId`, or they would refuse themselves.
+   */
+  treatAnyRowAsClaim?: boolean;
   /** Short tag for the log line, e.g. `"merge:post-merge"`. */
   label: string;
   /** The actual removal. Injected so this module stays free of the git service. */
@@ -261,6 +360,28 @@ export async function removeWorktreeUnlessShared(args: {
     return { removed: false, reason: "shared", sharers, message };
   }
 
+  if (args.treatAnyRowAsClaim) {
+    let namers: WorkingDirClaim[];
+    try {
+      namers = await findWorkspaceRowsNamingPath(args.database, args.workingDir, {
+        excludeWorkspaceId: args.workspaceId,
+      });
+    } catch (err) {
+      const message =
+        `[${args.label}] refusing to remove worktree ${args.workingDir}: could not determine `
+        + `whether a workspace row still names it (${errorMessage(err)})`;
+      console.warn(`[worktree-claim] ${message}`);
+      return { removed: false, reason: "claim-check-failed", message, error: err };
+    }
+    if (namers.length > 0) {
+      const message =
+        `Worktree ${args.workingDir} is still NAMED by ${namers.length} workspace row(s) `
+        + `(${namers.map((n) => `${n.id}:${n.status}`).join(", ")}) — it is claimed, skipping removal [${args.label}] (#859)`;
+      console.log(`[worktree-claim] ${message}`);
+      return { removed: false, reason: "named-by-row", namers, message };
+    }
+  }
+
   if (args.branch) {
     let holders: BranchClaim[];
     try {
@@ -281,6 +402,31 @@ export async function removeWorktreeUnlessShared(args: {
       console.log(`[worktree-claim] ${message}`);
       return { removed: false, reason: "branch-claimed", holders, message };
     }
+  }
+
+  // #859: an in-flight create (a live #630 marker) claims the directory for the whole
+  // provisioning window in which NO workspace row exists yet — measured 48s to 8+ minutes
+  // between `git worktree add` and the row's commit. Checked for every caller: deleting a
+  // directory a concurrent create is standing up is wrong for all of them.
+  let provisioning: ProvisioningClaim[];
+  try {
+    provisioning = await findInFlightProvisioningClaims(args.database, args.workingDir, {
+      branch: args.branch,
+    });
+  } catch (err) {
+    const message =
+      `[${args.label}] refusing to remove worktree ${args.workingDir}: could not determine `
+      + `whether an in-flight workspace create claims it (${errorMessage(err)})`;
+    console.warn(`[worktree-claim] ${message}`);
+    return { removed: false, reason: "claim-check-failed", message, error: err };
+  }
+  if (provisioning.length > 0) {
+    const message =
+      `Worktree ${args.workingDir} is claimed by ${provisioning.length} in-flight workspace `
+      + `create(s) (${provisioning.map((p) => `${p.id} phase=${p.phase}`).join(", ")}) — provisioning is `
+      + `still running, skipping removal [${args.label}] (#859)`;
+    console.log(`[worktree-claim] ${message}`);
+    return { removed: false, reason: "provisioning", provisioning, message };
   }
 
   try {

@@ -337,6 +337,104 @@ describe("removeWorktreeUnlessShared — the branch-keyed claim (#735)", () => {
   });
 });
 
+/**
+ * #859 — two claims the guard could not see, both taken from a real incident: the orphaned-
+ * worktree reconciler deleted a worktree while (a) a workspace row pointed at exactly that
+ * workingDir and (b) its 48s provisioning was still in flight.
+ */
+describe("removeWorktreeUnlessShared — any-row and in-flight-provisioning claims (#859)", () => {
+  it("with treatAnyRowAsClaim, a row in ANY state naming the path refuses the removal", async () => {
+    const { db } = createTestDb();
+    const issueId = await seedIssue(db);
+    const dir = "/tmp/claim-repo/.worktrees/ak-59";
+    // Closed — invisible to the live-sharers check, but it still NAMES the path.
+    await seedWorkspace(db, issueId, "closed", dir);
+    const removeWorktree = vi.fn(async () => {});
+
+    const outcome = await removeWorktreeUnlessShared({
+      database: db, workingDir: dir, treatAnyRowAsClaim: true, label: "test", removeWorktree,
+    });
+
+    expect(outcome).toMatchObject({ removed: false, reason: "named-by-row" });
+    expect(removeWorktree).not.toHaveBeenCalled();
+  });
+
+  it("treatAnyRowAsClaim still excludes the workspace's OWN row, so self-cleanup keeps working", async () => {
+    const { db } = createTestDb();
+    const issueId = await seedIssue(db);
+    const dir = "/tmp/claim-repo/.worktrees/ak-60";
+    const id = await seedWorkspace(db, issueId, "closed", dir);
+
+    const outcome = await removeWorktreeUnlessShared({
+      database: db, workingDir: dir, workspaceId: id, treatAnyRowAsClaim: true,
+      label: "test", removeWorktree: vi.fn(async () => {}),
+    });
+
+    expect(outcome.removed).toBe(true);
+  });
+
+  it("REFUSES while an in-flight create (live #630 marker) names the path — no workspace row exists yet", async () => {
+    const { db } = createTestDb();
+    const issueId = await seedIssue(db);
+    const dir = "/tmp/claim-repo/.worktrees/ak-61";
+    const { workspaceProvisioning, issues: issuesTable } = await import("@agentic-kanban/shared/schema");
+    const { eq } = await import("drizzle-orm");
+    const [issueRow] = await db.select({ projectId: issuesTable.projectId }).from(issuesTable).where(eq(issuesTable.id, issueId));
+    await db.insert(workspaceProvisioning).values({
+      id: randomUUID(), issueId, projectId: issueRow.projectId, branch: "feature/ak-61",
+      worktreePath: dir, serverPid: process.pid, phase: "siblings", startedAt: new Date().toISOString(),
+    });
+    const removeWorktree = vi.fn(async () => {});
+
+    const outcome = await removeWorktreeUnlessShared({
+      database: db, workingDir: dir, label: "test", removeWorktree,
+    });
+
+    expect(outcome).toMatchObject({ removed: false, reason: "provisioning" });
+    expect(removeWorktree).not.toHaveBeenCalled();
+  });
+
+  it("also claims by the marker's BRANCH before the worktree path is recorded", async () => {
+    const { db } = createTestDb();
+    const issueId = await seedIssue(db);
+    const { workspaceProvisioning, issues: issuesTable } = await import("@agentic-kanban/shared/schema");
+    const { eq } = await import("drizzle-orm");
+    const [issueRow] = await db.select({ projectId: issuesTable.projectId }).from(issuesTable).where(eq(issuesTable.id, issueId));
+    await db.insert(workspaceProvisioning).values({
+      id: randomUUID(), issueId, projectId: issueRow.projectId, branch: "feature/ak-62",
+      worktreePath: null, serverPid: process.pid, phase: "worktree", startedAt: new Date().toISOString(),
+    });
+
+    const outcome = await removeWorktreeUnlessShared({
+      database: db, workingDir: "/tmp/claim-repo/.worktrees/ak-62", branch: "feature/ak-62",
+      label: "test", removeWorktree: vi.fn(async () => {}),
+    });
+
+    expect(outcome).toMatchObject({ removed: false, reason: "provisioning" });
+  });
+
+  it("a DEAD process's marker is NOT a claim — crashed-create debris stays removable", async () => {
+    const { db } = createTestDb();
+    const issueId = await seedIssue(db);
+    const dir = "/tmp/claim-repo/.worktrees/ak-63";
+    const { workspaceProvisioning, issues: issuesTable } = await import("@agentic-kanban/shared/schema");
+    const { eq } = await import("drizzle-orm");
+    const [issueRow] = await db.select({ projectId: issuesTable.projectId }).from(issuesTable).where(eq(issuesTable.id, issueId));
+    await db.insert(workspaceProvisioning).values({
+      id: randomUUID(), issueId, projectId: issueRow.projectId, branch: "feature/ak-63",
+      worktreePath: dir, serverPid: 999_999_999, phase: "siblings", startedAt: new Date().toISOString(),
+    });
+    const removeWorktree = vi.fn(async () => {});
+
+    const outcome = await removeWorktreeUnlessShared({
+      database: db, workingDir: dir, label: "test", removeWorktree,
+    });
+
+    expect(outcome.removed).toBe(true);
+    expect(removeWorktree).toHaveBeenCalledOnce();
+  });
+});
+
 describe("cleanupMergedWorktreeAndBranch — the post-merge delete path (#673 at 1 of 5)", () => {
   function fakeGit(): GitService {
     return {

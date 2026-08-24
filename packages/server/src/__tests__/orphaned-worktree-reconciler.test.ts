@@ -209,6 +209,66 @@ describe("#735: the shared guard has the last word on the removal", () => {
     expect(report.keptClaimed).toEqual([]);
   });
 
+  // #859: the observed incident — a worktree deleted as "orphaned" while a workspace row
+  // pointed at exactly that workingDir, and while its 48s provisioning was still in flight.
+  // The reconciler's `claims` snapshot is project-scoped and read once per sweep, so the
+  // guard itself must refuse (a) any workspace row naming the path, whatever its status,
+  // and (b) any in-flight create marker (#630) owned by a live process.
+  it("REFUSES a worktree ANY workspace row still names — terminal status included (#859)", async () => {
+    const git = makeGit();
+
+    const report = await reconcileOrphanedWorktrees({
+      repoPath: REPO, baseBranch: "master", claims: KASSENBUCH_CLAIMS, git,
+      // A closed row that still NAMES the path: invisible to `findLiveWorktreeSharers`
+      // (not live) and — being outside the sweep's own claims — to `classifyWorktree`.
+      database: guardDb([{ id: "ws-closed", status: "closed", workingDir: WT6, branch: null }]),
+    });
+
+    expect(report.keptClaimed).toEqual([WT6]);
+    expect(report.removed).toEqual([WT12]);
+    for (const call of vi.mocked(git.removeWorktree).mock.calls) expect(call[1]).not.toBe(WT6);
+  });
+
+  it("REFUSES a worktree an in-flight workspace create (live #630 marker) is still provisioning (#859)", async () => {
+    const git = makeGit();
+
+    // The marker row: no workspace row exists yet (workingDir/branch empty so neither
+    // workspace-keyed read claims it), but `worktree_path` names WT6 and the owning pid is
+    // alive — the exact window in which the incident's worktree was deleted.
+    const marker = {
+      id: "ws-in-flight", status: "provisioning", workingDir: null, branch: null,
+      issueId: "issue-1", phase: "siblings", worktreePath: WT6, serverPid: process.pid,
+    };
+
+    const report = await reconcileOrphanedWorktrees({
+      repoPath: REPO, baseBranch: "master", claims: KASSENBUCH_CLAIMS, git,
+      database: guardDb([marker as never]),
+    });
+
+    expect(report.keptClaimed).toEqual([WT6]);
+    expect(report.removed).toEqual([WT12]);
+    for (const call of vi.mocked(git.removeWorktree).mock.calls) expect(call[1]).not.toBe(WT6);
+  });
+
+  it("does NOT let a DEAD process's provisioning marker block the sweep — crashed-create debris stays removable (#859)", async () => {
+    const git = makeGit();
+
+    // Same marker shape, but its owning process is gone. `reconcileAbandonedProvisioning`
+    // depends on the sweep having removed the removable debris before it reports.
+    const marker = {
+      id: "ws-abandoned", status: "provisioning", workingDir: null, branch: null,
+      issueId: "issue-1", phase: "siblings", worktreePath: WT6, serverPid: 999_999_999,
+    };
+
+    const report = await reconcileOrphanedWorktrees({
+      repoPath: REPO, baseBranch: "master", claims: KASSENBUCH_CLAIMS, git,
+      database: guardDb([marker as never]),
+    });
+
+    expect(report.removed.sort()).toEqual([WT12, WT6].sort());
+    expect(report.keptClaimed).toEqual([]);
+  });
+
   it("REFUSES every removal when the claim read itself fails — a locked DB is not a green light", async () => {
     const git = makeGit();
 
