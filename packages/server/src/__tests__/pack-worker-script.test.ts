@@ -47,7 +47,7 @@ function runScript(
 
 describe("pack-worker.mjs — ACP CLI resolution (#844)", () => {
   it("resolves an ACP CLI given in ACP_CLI and reports where it came from", () => {
-    const dir = mkdtempSync(join(tmpdir(), "pack-worker-acp-"));
+    const dir = mkdtempSync(join(tmpdir(), "ak-pack-worker-acp-"));
     const cli = join(dir, "acp.js");
     writeFileSync(cli, "// stand-in for the real acp CLI\n");
 
@@ -72,7 +72,7 @@ describe("pack-worker.mjs — ACP CLI resolution (#844)", () => {
   it("names ACP_CLI when nothing can be discovered on the machine either", () => {
     // A tree with no `acp` sibling, an empty home (no agent profile skill dirs), and a PATH
     // holding only the node binary — the state of a fresh worker machine.
-    const sandbox = mkdtempSync(join(tmpdir(), "pack-worker-sandbox-"));
+    const sandbox = mkdtempSync(join(tmpdir(), "ak-pack-worker-sandbox-"));
     const fakeHome = join(sandbox, "home");
     mkdirSync(join(sandbox, "scripts"), { recursive: true });
     mkdirSync(fakeHome, { recursive: true });
