@@ -42,7 +42,9 @@ function makeSelectChain(result: unknown[]) {
   chain.then = (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
     Promise.resolve(result).then(resolve, reject);
   chain.catch = (fn: (e: unknown) => unknown) => Promise.resolve(result).catch(fn);
-  return chain;
+  // Drizzle's select builder is a deep generic no hand-rolled double can satisfy
+  // structurally; this suite only ever calls the chain methods stubbed above.
+  return chain as unknown as ReturnType<typeof db.select>;
 }
 
 function makeUpdateChain() {
@@ -51,7 +53,9 @@ function makeUpdateChain() {
     chain[fn] = () => chain;
   }
   chain.catch = () => Promise.resolve();
-  return chain;
+  // Drizzle's builder types are deep generics no hand-rolled double can satisfy
+  // structurally; this suite only calls the chain methods stubbed above.
+  return chain as unknown as ReturnType<typeof db.update>;
 }
 
 // Fake of the injected workspace-actions PORT. Each method resolves by default
@@ -115,9 +119,9 @@ const baseCandidate: WorkspaceCandidate = {
 
 beforeEach(() => {
   vi.mocked(db.select)
-    .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>)          // sessions query → no session
-    .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>); // session count → 0
-  vi.mocked(db.update).mockReturnValue(makeUpdateChain() as ReturnType<typeof db.update>);
+    .mockReturnValueOnce(makeSelectChain([]))          // sessions query → no session
+    .mockReturnValueOnce(makeSelectChain([{ count: 0 }])); // session count → 0
+  vi.mocked(db.update).mockReturnValue(makeUpdateChain());
   // The monitor must NEVER call its own server over HTTP — it uses the injected
   // workspaceActions port. This stub turns any regression into a hard failure.
   vi.stubGlobal("fetch", vi.fn(() => {
@@ -215,9 +219,9 @@ describe("processWorkspaceCandidates — stuck builder recovery", () => {
         startedAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
         triggerType: "agent",
         stats: null,
-      }]) as ReturnType<typeof db.select>)
-      .mockReturnValueOnce(makeSelectChain([{ count: 1 }]) as ReturnType<typeof db.select>)
-      .mockReturnValueOnce(makeSelectChain([{ id: "status-in-review" }]) as ReturnType<typeof db.select>);
+      }]))
+      .mockReturnValueOnce(makeSelectChain([{ count: 1 }]))
+      .mockReturnValueOnce(makeSelectChain([{ id: "status-in-review" }]));
 
     const reviewSessionIds = new Set<string>();
     const deps = {
@@ -299,8 +303,8 @@ describe("processWorkspaceCandidates — idle + readyForMerge=false", () => {
           rateLimitKind: "codex-usage-limit",
           retryAfter: "Jun 6th, 2026 12:30 AM",
         }),
-      }]) as ReturnType<typeof db.select>)
-      .mockReturnValueOnce(makeSelectChain([{ count: 1 }]) as ReturnType<typeof db.select>);
+      }]))
+      .mockReturnValueOnce(makeSelectChain([{ count: 1 }]));
 
     const deps = makeDeps();
     const candidate: WorkspaceCandidate = { ...baseCandidate, readyForMerge: false, issueStatusName: "In Progress" };
@@ -329,8 +333,8 @@ describe("processWorkspaceCandidates — idle + readyForMerge=false", () => {
     vi.mocked(db.select).mockReset();
     for (let i = 0; i < 3; i++) {
       vi.mocked(db.select)
-        .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>)
-        .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>);
+        .mockReturnValueOnce(makeSelectChain([]))
+        .mockReturnValueOnce(makeSelectChain([{ count: 0 }]));
     }
 
     const deps = makeDeps();
@@ -371,9 +375,9 @@ describe("processWorkspaceCandidates — auto_merge_in_review (not-ready In Revi
   it("still repairs a zero-diff reviewing ghost workspace with no workingDir", async () => {
     vi.mocked(db.select).mockReset();
     vi.mocked(db.select)
-      .mockReturnValueOnce(makeSelectChain([{ id: "sess-1", status: "stopped", startedAt: new Date().toISOString() }]) as ReturnType<typeof db.select>)
-      .mockReturnValueOnce(makeSelectChain([{ count: 1 }]) as ReturnType<typeof db.select>)
-      .mockReturnValueOnce(makeSelectChain([{ id: "status-in-progress" }]) as ReturnType<typeof db.select>);
+      .mockReturnValueOnce(makeSelectChain([{ id: "sess-1", status: "stopped", startedAt: new Date().toISOString() }]))
+      .mockReturnValueOnce(makeSelectChain([{ count: 1 }]))
+      .mockReturnValueOnce(makeSelectChain([{ id: "status-in-progress" }]));
 
     const deps = { ...makeDeps(), autoMergeEnabled: true, autoMergeInReview: true };
     const candidate: WorkspaceCandidate = {
@@ -461,8 +465,8 @@ describe("processWorkspaceCandidates — auto_merge gating", () => {
     vi.mocked(db.select).mockReset();
     for (let i = 0; i < 3; i++) {
       vi.mocked(db.select)
-        .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>)
-        .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>);
+        .mockReturnValueOnce(makeSelectChain([]))
+        .mockReturnValueOnce(makeSelectChain([{ count: 0 }]));
     }
 
     const deps = { ...makeDeps(), autoMergeEnabled: true };
@@ -484,8 +488,8 @@ describe("processWorkspaceCandidates — auto_merge gating", () => {
     // Override the default session mock: this path needs a stopped session.
     vi.mocked(db.select).mockReset();
     vi.mocked(db.select)
-      .mockReturnValueOnce(makeSelectChain([{ id: "sess-1", status: "stopped", startedAt: new Date().toISOString() }]) as ReturnType<typeof db.select>)
-      .mockReturnValueOnce(makeSelectChain([{ count: 1 }]) as ReturnType<typeof db.select>);
+      .mockReturnValueOnce(makeSelectChain([{ id: "sess-1", status: "stopped", startedAt: new Date().toISOString() }]))
+      .mockReturnValueOnce(makeSelectChain([{ count: 1 }]));
 
     const deps = { ...makeDeps(), autoMergeEnabled: false };
     const candidate: WorkspaceCandidate = { ...baseCandidate, wsStatus: "reviewing", readyForMerge: false };
@@ -498,8 +502,8 @@ describe("processWorkspaceCandidates — auto_merge gating", () => {
   it("merges a reviewing+stopped workspace when autoMergeEnabled=true", async () => {
     vi.mocked(db.select).mockReset();
     vi.mocked(db.select)
-      .mockReturnValueOnce(makeSelectChain([{ id: "sess-1", status: "stopped", startedAt: new Date().toISOString() }]) as ReturnType<typeof db.select>)
-      .mockReturnValueOnce(makeSelectChain([{ count: 1 }]) as ReturnType<typeof db.select>);
+      .mockReturnValueOnce(makeSelectChain([{ id: "sess-1", status: "stopped", startedAt: new Date().toISOString() }]))
+      .mockReturnValueOnce(makeSelectChain([{ count: 1 }]));
 
     const deps = { ...makeDeps(), autoMergeEnabled: true };
     const candidate: WorkspaceCandidate = { ...baseCandidate, wsStatus: "reviewing", readyForMerge: false };
@@ -519,8 +523,8 @@ describe("processWorkspaceCandidates — auto_merge gating", () => {
     // were the only ones that did not.
     vi.mocked(db.select).mockReset();
     vi.mocked(db.select)
-      .mockReturnValueOnce(makeSelectChain([{ id: "sess-1", status: "stopped", startedAt: new Date().toISOString() }]) as ReturnType<typeof db.select>)
-      .mockReturnValueOnce(makeSelectChain([{ count: 1 }]) as ReturnType<typeof db.select>);
+      .mockReturnValueOnce(makeSelectChain([{ id: "sess-1", status: "stopped", startedAt: new Date().toISOString() }]))
+      .mockReturnValueOnce(makeSelectChain([{ count: 1 }]));
 
     const deps = { ...makeDeps(), autoMergeEnabled: true };
     const candidate: WorkspaceCandidate = { ...baseCandidate, wsStatus: "reviewing", readyForMerge: false };
@@ -548,8 +552,8 @@ describe("processWorkspaceCandidates — per-project auto_merge_disabled", () =>
     vi.mocked(db.select).mockReset();
     for (let i = 0; i < 2; i++) {
       vi.mocked(db.select)
-        .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>)
-        .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>);
+        .mockReturnValueOnce(makeSelectChain([]))
+        .mockReturnValueOnce(makeSelectChain([{ count: 0 }]));
     }
 
     const deps = { ...makeDeps(), autoMergeEnabled: true, autoMergeDisabledProjectIds: new Set(["proj-disabled"]) };
@@ -565,8 +569,8 @@ describe("processWorkspaceCandidates — per-project auto_merge_disabled", () =>
   it("does NOT merge a reviewing+stopped workspace when its project is in autoMergeDisabledProjectIds", async () => {
     vi.mocked(db.select).mockReset();
     vi.mocked(db.select)
-      .mockReturnValueOnce(makeSelectChain([{ id: "sess-1", status: "stopped", startedAt: new Date().toISOString() }]) as ReturnType<typeof db.select>)
-      .mockReturnValueOnce(makeSelectChain([{ count: 1 }]) as ReturnType<typeof db.select>);
+      .mockReturnValueOnce(makeSelectChain([{ id: "sess-1", status: "stopped", startedAt: new Date().toISOString() }]))
+      .mockReturnValueOnce(makeSelectChain([{ count: 1 }]));
 
     const deps = { ...makeDeps(), autoMergeEnabled: true, autoMergeDisabledProjectIds: new Set(["proj-1"]) };
     const candidate: WorkspaceCandidate = { ...baseCandidate, wsStatus: "reviewing", readyForMerge: false };
@@ -742,8 +746,8 @@ describe("processWorkspaceCandidates — per-project time budget (#208)", () => 
     // consumes 2 db.select calls (sessions + session count).
     for (let i = 0; i < 3; i++) {
       vi.mocked(db.select)
-        .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>)
-        .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>);
+        .mockReturnValueOnce(makeSelectChain([]))
+        .mockReturnValueOnce(makeSelectChain([{ count: 0 }]));
     }
 
     const deps = makeDeps();
@@ -790,8 +794,8 @@ describe("processWorkspaceCandidates — global cycle budget with carry-over (#4
     vi.mocked(db.select).mockReset();
     for (let i = 0; i < candidateCount; i++) {
       vi.mocked(db.select)
-        .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>)
-        .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>);
+        .mockReturnValueOnce(makeSelectChain([]))
+        .mockReturnValueOnce(makeSelectChain([{ count: 0 }]));
     }
   }
 
@@ -900,8 +904,8 @@ describe("processWorkspaceCandidates — preemptive per-candidate timeout (#208 
     vi.mocked(db.select).mockReset();
     for (let i = 0; i < candidateCount; i++) {
       vi.mocked(db.select)
-        .mockReturnValueOnce(makeSelectChain([]) as ReturnType<typeof db.select>)
-        .mockReturnValueOnce(makeSelectChain([{ count: 0 }]) as ReturnType<typeof db.select>);
+        .mockReturnValueOnce(makeSelectChain([]))
+        .mockReturnValueOnce(makeSelectChain([{ count: 0 }]));
     }
   }
 
@@ -995,8 +999,8 @@ describe("processWorkspaceCandidates — blocked on a provider usage limit (#387
   function queueSession(session: Record<string, unknown> | null) {
     vi.mocked(db.select).mockReset();
     vi.mocked(db.select)
-      .mockReturnValueOnce(makeSelectChain(session ? [session] : []) as ReturnType<typeof db.select>)
-      .mockReturnValueOnce(makeSelectChain([{ count: 1 }]) as ReturnType<typeof db.select>);
+      .mockReturnValueOnce(makeSelectChain(session ? [session] : []))
+      .mockReturnValueOnce(makeSelectChain([{ count: 1 }]));
   }
 
   it("returns a blocked workspace to idle once its retryAfter has passed", async () => {

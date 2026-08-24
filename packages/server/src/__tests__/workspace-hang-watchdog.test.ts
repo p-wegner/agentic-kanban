@@ -57,7 +57,9 @@ function makeSelectChain(result: unknown[]) {
   chain.then = (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
     Promise.resolve(result).then(resolve, reject);
   chain.catch = (fn: (e: unknown) => unknown) => Promise.resolve(result).catch(fn);
-  return chain;
+  // Drizzle's select builder is a deep generic no hand-rolled double can satisfy
+  // structurally; this suite only ever calls the chain methods stubbed above.
+  return chain as unknown as ReturnType<typeof db.select>;
 }
 
 function makeUpdateChain() {
@@ -66,7 +68,9 @@ function makeUpdateChain() {
     chain[fn] = () => chain;
   }
   chain.catch = () => Promise.resolve();
-  return chain;
+  // Drizzle's builder types are deep generics no hand-rolled double can satisfy
+  // structurally; this suite only calls the chain methods stubbed above.
+  return chain as unknown as ReturnType<typeof db.update>;
 }
 
 function makeWorkspaceActions() {
@@ -75,6 +79,7 @@ function makeWorkspaceActions() {
     merge: vi.fn<(id: string) => Promise<void>>(async () => {}),
     fixAndMerge: vi.fn<(id: string, mergeError: string) => Promise<void>>(async () => {}),
     delete: vi.fn<(id: string) => Promise<void>>(async () => {}),
+    updateBase: vi.fn<(id: string, mode: "rebase" | "merge") => Promise<void>>(async () => {}),
   };
 }
 
@@ -131,13 +136,13 @@ function mockRunningSession(startedAt: string) {
     .mockReturnValueOnce(
       makeSelectChain([
         { id: "sess-1", status: "running", startedAt, triggerType: "agent", stats: null },
-      ]) as ReturnType<typeof db.select>,
+      ]),
     )
-    .mockReturnValueOnce(makeSelectChain([{ count: 1 }]) as ReturnType<typeof db.select>);
+    .mockReturnValueOnce(makeSelectChain([{ count: 1 }]));
 }
 
 beforeEach(() => {
-  vi.mocked(db.update).mockReturnValue(makeUpdateChain() as ReturnType<typeof db.update>);
+  vi.mocked(db.update).mockReturnValue(makeUpdateChain());
   // The monitor must never self-HTTP — turn any regression into a hard failure.
   vi.stubGlobal("fetch", vi.fn(() => {
     throw new Error("monitor-cycle must not self-HTTP — use the injected workspaceActions port");
