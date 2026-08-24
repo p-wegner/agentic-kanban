@@ -90,8 +90,10 @@
   <div class="card"><h2>Connection</h2><div class="v" id="c-conn">—</div></div>
   <div class="card"><h2>Board reachable</h2><div class="v" id="c-board">—</div></div>
   <div class="card"><h2>Sessions in flight</h2><div class="v" id="c-sessions">—</div></div>
+  <div class="card"><h2>Board</h2><div class="v" id="c-boardui">—</div>
+    <div class="hint" id="c-boardui-hint">the board's own UI, if this machine can reach it</div></div>
   <div class="card"><h2>Fleet endpoint</h2><div class="v mono" id="c-url">—</div>
-    <div class="hint">the board's fleet listener — not its UI, which stays loopback-only on the board host</div></div>
+    <div class="hint">the worker's own channel — register, heartbeat, assignments</div></div>
   <div class="card"><h2>Log size</h2><div class="v" id="c-size">—</div></div>
 </div>
 
@@ -190,6 +192,17 @@ function render(s) {
   $("c-url").innerHTML = s.board
     ? `<a href="${esc(s.board)}/health" target="_blank" rel="noreferrer">${esc(s.board)}</a>`
     : "—";
+
+  // Only linked when the worker actually reached it. A board whose UI is
+  // loopback-only is correctly configured, so "not reachable" is a normal
+  // state and must not read as a fault.
+  if (s.boardUi) {
+    $("c-boardui").innerHTML = `<a href="${esc(s.boardUi)}" target="_blank" rel="noreferrer">open the board</a>`;
+    $("c-boardui-hint").textContent = s.boardUi;
+  } else {
+    $("c-boardui").innerHTML = '<span class="dim">not reachable from here</span>';
+    $("c-boardui-hint").textContent = "the board's UI is loopback-only on its host, which is the documented default";
+  }
   $("c-size").textContent = s.logExists ? `${(s.logSize / 1024).toFixed(0)} KB` : "no log yet";
   $("logfile").textContent = s.logFile || "";
 
