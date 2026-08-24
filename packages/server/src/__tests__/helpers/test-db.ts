@@ -1,7 +1,7 @@
 import { createClient } from "@libsql/client";
 import type { Client } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID, createHash } from "node:crypto";
@@ -50,6 +50,28 @@ export function applyMigrationsToClient(client: Client): void {
 const createdTempDbFiles: string[] = [];
 
 /**
+ * One directory per process, in the reaper's `ak-` namespace, holding every throwaway
+ * `.db` this helper mints (#840).
+ *
+ * Why a directory and not just a renamed file: the reaper
+ * (`helpers/reap-fixture-child-servers.ts`) is gated on `statSync(...).isDirectory()`, so
+ * a LOOSE FILE is in no swept namespace whatever it is called — renaming
+ * `test-db-<uuid>.db` to `ak-test-db-<uuid>.db` would have changed nothing while reading
+ * as a fix. Measured when this was written: **518,112 `test-db-*` entries** in `%TEMP%`,
+ * because the `process.on("exit")` sweep below does not run on a killed vitest worker,
+ * and libsql's native handle can hold a `-wal`/`-shm` past it even when it does.
+ *
+ * Minting inside an `ak-` DIRECTORY makes the recovery path exist at all: whatever this
+ * process fails to remove, the next run's sweep removes two hours later.
+ */
+let processTempDbDir: string | null = null;
+function tempDbDir(): string {
+  if (processTempDbDir) return processTempDbDir;
+  processTempDbDir = mkdtempSync(join(tmpdir(), "ak-test-db-"));
+  return processTempDbDir;
+}
+
+/**
  * Every client handed out by createTestDb, so the fork can CLOSE them before it exits (#471).
  *
  * Measured: 248 test files call `createTestDb`, 7 of them ever call `dispose`. Most create a DB
@@ -91,6 +113,15 @@ function registerExitCleanup(): void {
         }
       }
     }
+    // Remove the DIRECTORY, not just the files inside it — an `ak-` dir left behind is
+    // swept two hours later, but only if it is a directory the reaper can see (#840).
+    if (processTempDbDir) {
+      try {
+        rmSync(processTempDbDir, { recursive: true, force: true, maxRetries: 1 });
+      } catch {
+        /* best-effort — the reaper is the backstop */
+      }
+    }
   });
 }
 
@@ -127,6 +158,14 @@ let cachedTemplatePath: string | null = null;
 function getOrBuildTemplateDb(): string {
   if (cachedTemplatePath && existsSync(cachedTemplatePath)) return cachedTemplatePath;
   const hash = migrationsContentHash();
+  // TEMP-PREFIX OK: a deliberate PERSISTENT build cache, and the one path here that must
+  // NOT become sweepable (#840). It is shared across processes, across vitest runs and
+  // across worktrees — that reuse is the whole point of #535 (121 migrations copied
+  // instead of replayed). A loose file is invisible to the reaper's `isDirectory()` gate,
+  // which is exactly the property wanted: moving it into an `ak-` directory, or widening
+  // the reaper to sweep files, would put a cache with a legitimate lifetime of weeks in
+  // reach of a two-hour delete. It also cannot accumulate — the name is keyed by the
+  // migration content hash, so there is one per schema, not one per run (122 measured).
   const templatePath = join(tmpdir(), `test-db-template-${hash}.db`);
   if (existsSync(templatePath)) {
     cachedTemplatePath = templatePath;
@@ -136,7 +175,10 @@ function getOrBuildTemplateDb(): string {
   // handle keeps the file briefly locked on Windows even after client.close() (the same
   // quirk #471 works around elsewhere), so a rename right after close intermittently
   // fails with EBUSY. copyFileSync only reads the source, which the OS allows immediately.
-  const buildingPath = join(tmpdir(), `test-db-template-building-${randomUUID()}.db`);
+  // The BUILD scratch file is the opposite case from the published template: it is
+  // per-attempt, has no value once the copy lands, and 82 of them were sitting in `%TEMP%`
+  // from crashed builds. It goes inside this process's `ak-` dir (#840).
+  const buildingPath = join(tempDbDir(), `test-db-template-building-${randomUUID()}.db`);
   const buildClient = createClient({ url: `file:${buildingPath}` });
   try {
     applyMigrationsToClient(buildClient);
@@ -152,7 +194,10 @@ function getOrBuildTemplateDb(): string {
     // means a reader sees either no file or the complete one; rename is atomic within a
     // volume, and the staged file is a plain copy (no libsql handle), so it has none of
     // the EBUSY problem that rules out renaming `buildingPath` directly.
-    const stagedPath = `${templatePath}.staged-${randomUUID()}`;
+    // Staged inside this process's `ak-` dir rather than beside the template: it is scratch
+    // like `buildingPath`, and `rename` is still atomic because both live under `tmpdir()`,
+    // i.e. the same volume (#840).
+    const stagedPath = join(tempDbDir(), `test-db-template-staged-${randomUUID()}.db`);
     try {
       copyFileSync(buildingPath, stagedPath);
       renameSync(stagedPath, templatePath);
@@ -198,7 +243,11 @@ function getOrBuildTemplateDb(): string {
 export function createTestDb() {
   registerExitCleanup();
   const templatePath = getOrBuildTemplateDb();
-  const file = join(tmpdir(), `test-db-${randomUUID()}.db`);
+  // The per-test DB, and the site that actually produced the 518,112 `test-db-*` entries
+  // measured in %TEMP% (#840): one is minted per createTestDb() call, and neither the
+  // dispose() below nor the exit hook runs when a vitest worker is killed. Inside the
+  // `ak-` dir, whatever leaks is swept two hours later instead of never.
+  const file = join(tempDbDir(), `test-db-${randomUUID()}.db`);
   createdTempDbFiles.push(file);
   copyFileSync(templatePath, file);
   const client = createClient({ url: `file:${file}` });
