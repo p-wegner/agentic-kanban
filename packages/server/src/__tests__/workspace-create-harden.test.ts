@@ -135,7 +135,7 @@ describe("workspace creation hardening (AK-501 / AK-587)", () => {
     expect(launchResolved).toBe(false);
   });
 
-  it("workspace status updated to idle in background when deferred launch fails (AK-587)", async () => {
+  it("workspace status updated to error (with the failure persisted) in background when deferred launch fails (AK-587/#859)", async () => {
     const { issueId } = await seedIssue(db);
 
     const failingSessionManager = {
@@ -172,11 +172,17 @@ describe("workspace creation hardening (AK-501 / AK-587)", () => {
     // Let the deferred setImmediate fire and the failing launch + DB update run
     await vi.runAllTimersAsync();
 
-    // The background handler should have updated the workspace status to idle
+    // #859: the background handler lands the workspace in "error" WITH the failure
+    // persisted — an "idle" row with lastError null read as healthy, was never
+    // relaunched, and had its worktree reaped as an orphan in the observed incident.
     const { workspaces } = await import("@agentic-kanban/shared/schema");
     const { eq } = await import("drizzle-orm");
-    const [row] = await db.select({ status: workspaces.status }).from(workspaces).where(eq(workspaces.id, result.id));
-    expect(row?.status).toBe("idle");
+    const [row] = await db
+      .select({ status: workspaces.status, latestLaunchError: workspaces.latestLaunchError })
+      .from(workspaces)
+      .where(eq(workspaces.id, result.id));
+    expect(row?.status).toBe("error");
+    expect(row?.latestLaunchError).toContain("agent binary not found");
   });
 
   it("does not inject builder screenshot steps when visual proof is requested", async () => {

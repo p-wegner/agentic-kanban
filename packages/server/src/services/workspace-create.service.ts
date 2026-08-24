@@ -514,21 +514,32 @@ export function createWorkspaceCreateService(deps: {
         const staleSafetyPolicy =
           err instanceof WorkspaceError && err.data?.code === "STALE_SAFETY_POLICY";
         const persistedError = staleSafetyPolicy ? `STALE_SAFETY_POLICY: ${errorMsg}` : errorMsg;
-        const nextStatus = staleSafetyPolicy ? "error" : "idle";
         console.error(`[workspaces] deferred provision/launch failed for workspace ${workspaceId}: ${errorMsg}`);
-        if (staleSafetyPolicy) {
-          emitButlerSystemEvent({
-            projectId,
-            kind: "workspace_error",
-            workspaceId,
-            text: `Workspace launch blocked by stale safety policy for ${workspaceId}: ${errorMsg.slice(0, 200)}`,
-          });
-        }
+        emitButlerSystemEvent({
+          projectId,
+          kind: "workspace_error",
+          workspaceId,
+          text: staleSafetyPolicy
+            ? `Workspace launch blocked by stale safety policy for ${workspaceId}: ${errorMsg.slice(0, 200)}`
+            : `Deferred provision/launch failed for workspace ${workspaceId}: ${errorMsg.slice(0, 200)}`,
+        });
+        // #859: EVERY deferred failure lands in "error" with the reason persisted — never a
+        // bare "idle". An idle row with a null launch error reads as "paused on purpose":
+        // nothing relaunches it, the launch-failures panel cannot classify it, and the
+        // observed incident had the workspace sit dead while looking healthy until a
+        // sweeper mistook its worktree for an orphan. "error" is the state this path
+        // already used for the stale-safety refusal, and `latestLaunchError` is what
+        // `getWorkspaceLaunchFailures` classifies as `preflight-failed`.
         crudRepo.updateWorkspaceLaunchFailure(workspaceId, {
-          status: nextStatus,
+          status: "error",
           latestLaunchError: persistedError,
           updatedAt: new Date().toISOString(),
         }, database)
+          .then((written) => {
+            if (!written) {
+              console.warn(`[workspaces] deferred launch failure for ${workspaceId} was NOT persisted (status write matched no row — closed/deleted concurrently?); the failure above is only in this log`);
+            }
+          })
           .catch((dbErr: unknown) => console.warn(`[workspaces] failed to update workspace status after deferred launch failure: ${errorMessage(dbErr)}`));
       });
     });

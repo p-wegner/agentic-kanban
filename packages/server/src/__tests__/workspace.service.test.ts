@@ -435,7 +435,7 @@ describe("workspace.service", () => {
       }));
     });
 
-    it("marks the workspace idle with a launch error when the deferred agent spawn fails", async () => {
+    it("marks the workspace error with a persisted launch error when the deferred agent spawn fails (#859)", async () => {
       const { issueId } = await seedProjectAndIssue(db);
       const gitService = createFakeGitService();
       const sessionManager = createMockSessionManager();
@@ -456,10 +456,12 @@ describe("workspace.service", () => {
       // Let the deferred chain fire so the failing launch + status update run.
       await flushDeferred();
 
-      // The workspace row remains (relaunchable) and is marked idle with the launch error.
+      // #859: the workspace row remains (relaunchable) and is marked ERROR with the launch
+      // error persisted — never a bare "idle" with lastError null, which reads as "paused
+      // on purpose" and got its worktree reaped as an orphan in the observed incident.
       const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, result.id));
       expect(wsRows).toHaveLength(1);
-      expect(wsRows[0].status).toBe("idle");
+      expect(wsRows[0].status).toBe("error");
       expect(wsRows[0].latestLaunchError).toContain("spawn ENOENT");
     });
 
