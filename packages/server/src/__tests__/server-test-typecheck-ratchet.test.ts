@@ -50,7 +50,7 @@ import { createRequire } from "node:module";
  * actually produce, and the six-file `helpers/merge-result.ts` workaround alias that existed
  * only because the production type was `unknown` is gone.
  *
- * #808 batch 2 (2026-08-24): 65 -> 0 grandfathered and 898 -> 0 errors. The list is now EMPTY —
+ * #808 batch 2 (2026-08-24): 65 -> 0 grandfathered and 898 -> 0 errors. The list is now EMPTY â€”
  * every server test file typechecks, and `tsconfig.json`'s `exclude` is kept (empty) so this
  * ratchet still has the thing it guards. The dominant remaining class was `await res.json()`
  * returning `unknown` (the route response types now name what each read is), followed by
@@ -59,7 +59,7 @@ import { createRequire } from "node:module";
  *
  * With the baseline at 0 the two halves say something slightly different than before: the
  * shrink-only half now means "no file may EVER be parked here again", and the stale half is
- * vacuously true. Keep both — re-adding an entry is exactly what the first one must catch.
+ * vacuously true. Keep both â€” re-adding an entry is exactly what the first one must catch.
  */
 
 const BASELINE_GRANDFATHERED_FILES = 0;

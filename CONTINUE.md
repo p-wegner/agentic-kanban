@@ -10,7 +10,8 @@ them is open by neglect — each has a stated reason below.
 
 **Closed with evidence this session:** #816, #833, #835, #836, #837, #838, #839.
 **Filed this session:** #835, #836, #837, #838, #839, #840, #841.
-**Still open, with the reason:** #806, #807, #808, #831, #834, #840, #841.
+**Still open, with the reason:** #806, #807, #831, #834, #840, #841.
+**#808 is CLOSED** (2026-08-24) — see below.
 
 Commits, oldest first: `b03cafd180` (#835), `22341179b8` (#833), `a7b573ea47` (#806 b3),
 `f637bcf7f9` (nloc ring), `c451a86db7` (red master), `a815305f1c` (#816), `304eccaa6e` (#837),
@@ -67,9 +68,18 @@ running it.**
   the remainder is six documented rejection families, and batch 5's real question is whether
   moving a service guard to the boundary is worth turning a 404 into a 400. Probably no for
   most. Held by `route-body-validation-ratchet.test.ts`.
-- **#808**: 65 grandfathered files / ~898 type errors remain (was 132 / 1044). Eight files are
-  522 of the previous 962 (`monitor-auto-start` 210, `session-summary` 86, …), so the next batch
-  has an obvious shape.
+- **#808**: **DONE (2026-08-24).** 65 -> **0** grandfathered files and 898 -> **0** errors, over
+  five batches (`26725219ae` … `f6844b37ec`). `packages/server/tsconfig.json`'s `exclude` is now
+  empty, `BASELINE_GRANDFATHERED_FILES = 0`, and every server test file is covered by
+  `pnpm typecheck`. **Verified**: root `pnpm typecheck` exits 0 with zero `error TS`, and every
+  suite removed from the list was re-run (`--pool=forks --maxWorkers=1`) and still passes — no
+  assertion was changed. The ratchet stays: shrink-only at 0 now means "nothing may be parked
+  here again".
+  - Two production types were found suspect and deliberately NOT changed (each named in its
+    commit): `getWorktrees`'s two-variant union vs. the client's flat `WorktreeInfo`, and
+    `startAncestorBranchReconciler`'s `Omit<…, "enabled">` parameter that still forwards
+    `deps.enabled` downstream. Also unfixed and unfiled: `POST /api/issues/:id/preflight`
+    returns `skipped: true` but `skipped` is absent from `PreflightResponse`.
 
 ### #840 is half done
 
@@ -102,10 +112,9 @@ a human decision.
 2. `pnpm --filter agentic-kanban test` on an idle box — the session's outstanding gate.
 3. #831 once RAM frees up (fresh deep code-metrics run FIRST; a 0-candidate result from a
    shallow run is the artifact, not the answer).
-4. #808 next batch — the eight heavy files above.
-5. #840 finding 2 — take the "mint inside an `ak-` dir" option unless the reaper decision is
+4. #840 finding 2 — take the "mint inside an `ak-` dir" option unless the reaper decision is
    revisited deliberately.
-6. #806 batch 5 only if the 404→400 trade is judged worth it; otherwise close it as
+5. #806 batch 5 only if the 404→400 trade is judged worth it; otherwise close it as
    ratchet-held with the six families as the record.
 
 ## Session 2026-08-23 (later): driving the 13 open tickets to Done
