@@ -115,6 +115,22 @@ async function getBranchOwnedFiles(
  * A worktree holding the base branch's committed policy is a consistent, safe state — so this
  * is reported, not treated as a fault.
  */
+async function reportMainDirtyPolicyFiles(
+  git: (args: string[], cwd: string) => Promise<string>,
+  repoPath: string,
+): Promise<Set<SafetyPolicyFile>> {
+  const dirty = await findMainDirtyPolicyFiles(git, repoPath);
+  if (dirty.size > 0) {
+    console.warn(
+      `[preflight] ignoring safety-policy drift for ${[...dirty].join(", ")}: ` +
+        `modified but uncommitted in the main checkout (${repoPath}), so the worktree cannot be ` +
+        "reconciled to it. This worktree holds the base branch's committed copy, which is safe. " +
+        "Commit or revert it in the main checkout to clear this.",
+    );
+  }
+  return dirty;
+}
+
 async function findMainDirtyPolicyFiles(
   git: (args: string[], cwd: string) => Promise<string>,
   repoPath: string,
@@ -220,15 +236,7 @@ export async function workspaceLaunchPreflight(
 
   // #867: a safety file left uncommitted in the main checkout can never be reconciled to, so
   // treating it as drift bricks workspace creation for every branch. Report it and move on.
-  const mainDirtyPolicyFiles = await findMainDirtyPolicyFiles(git, options.repoPath);
-  if (mainDirtyPolicyFiles.size > 0) {
-    console.warn(
-      `[preflight] ignoring safety-policy drift for ${[...mainDirtyPolicyFiles].join(", ")}: ` +
-        `modified but uncommitted in the main checkout (${options.repoPath}), so the worktree cannot be ` +
-        "reconciled to it. This worktree holds the base branch's committed copy, which is safe. " +
-        "Commit or revert it in the main checkout to clear this.",
-    );
-  }
+  const mainDirtyPolicyFiles = await reportMainDirtyPolicyFiles(git, options.repoPath);
 
   if (expectedBranch) {
     const currentBranch = await getCurrentBranch(git, options.worktreePath);
