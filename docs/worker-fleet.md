@@ -470,7 +470,10 @@ install then succeeds and the binary is simply absent. Check `npm view agentic-k
 before relying on the registry; otherwise build a tarball on the board machine with
 `node scripts/pack-worker.mjs`, which refuses to pack a tarball whose bin map lacks the
 worker and stamps a `<version>-dev.<sha>` prerelease so npm cannot serve a cached
-same-version copy in its place.
+same-version copy in its place. That build deliberately SKIPS the React client — a worker
+never loads it, and a client-only breakage (a corrupt rollup binary in the pnpm store) used
+to block packaging a worker entirely (#845). Pass `--with-client` when the tarball should
+carry the UI too.
 
 ## 9. How work travels, and what survives a disconnect
 

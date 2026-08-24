@@ -16,10 +16,17 @@
 // in the registry or in a local cache.
 //
 // Usage:
-//   node scripts/pack-worker.mjs                 # build + pack, print the path
+//   node scripts/pack-worker.mjs                 # build (no React client) + pack, print the path
+//   node scripts/pack-worker.mjs --with-client   # ALSO build the React client (a full `pnpm build`)
 //   node scripts/pack-worker.mjs --skip-build    # pack what is already in dist/
 //   node scripts/pack-worker.mjs --blob          # also put it on the ACP relay
 //   node scripts/pack-worker.mjs --print-acp     # resolve the ACP CLI, print it, exit
+//
+// The default build DELIBERATELY SKIPS the React client (#845). The worker daemon is
+// `packages/server/dist/worker.js`; it never loads the UI, so a client-only failure —
+// a corrupt rollup binary in the pnpm store is the one that actually happened — used
+// to block pairing a worker machine entirely. Pass `--with-client` when the tarball is
+// meant to serve the board UI too.
 //
 // --blob shells out to the ACP CLI and prints an `acp-blob:` ref for a cross-machine
 // handoff. ACP is not a dependency of this repo — the coupling is one optional spawn,
@@ -40,6 +47,7 @@ const outDir = join(root, "dist-worker-pack");
 
 const args = new Set(process.argv.slice(2));
 const skipBuild = args.has("--skip-build");
+const withClient = args.has("--with-client");
 const toBlob = args.has("--blob");
 const printAcp = args.has("--print-acp");
 
@@ -152,10 +160,43 @@ function shortSha() {
   }
 }
 
+// Mirrors the root `build` script's steps, minus the client unless asked (#845).
+function buildSteps() {
+  const steps = [
+    { script: "build:shared", what: "shared" },
+    { script: "build:server", what: "server" },
+    { script: "build:mcp", what: "mcp" },
+    { script: "build:worker", what: "worker daemon" },
+  ];
+  if (withClient) steps.push({ script: "build:client", what: "React client" });
+  return steps;
+}
+
 if (!skipBuild) {
-  console.log("[pack-worker] building (pnpm build)…");
-  // Inherit stdio: the build is slow and its progress is the only feedback.
-  execFileSync("pnpm", ["build"], { cwd: root, stdio: "inherit", shell: needsShell });
+  const steps = buildSteps();
+  const stepList = steps.map((s) => s.what).join(", ");
+  const clientNote = withClient
+    ? ""
+    : " — the React client is NOT built (a worker never loads it); pass --with-client to include it";
+  console.log(`[pack-worker] building: ${stepList}${clientNote}`);
+  for (const step of steps) {
+    try {
+      // Inherit stdio: the build is slow and its progress is the only feedback.
+      execFileSync("pnpm", ["run", step.script], { cwd: root, stdio: "inherit", shell: needsShell });
+    } catch {
+      console.error(`[pack-worker] build step failed: pnpm run ${step.script} (${step.what}).`);
+      if (step.script === "build:client") {
+        console.error("[pack-worker] The worker daemon does NOT need the React client — re-run WITHOUT --with-client to");
+        console.error("[pack-worker] get a worker tarball anyway.");
+      } else {
+        console.error("[pack-worker] If dist/ already holds a good build, re-run with --skip-build to pack it as-is.");
+      }
+      process.exit(1);
+    }
+  }
+  // copy-assets stages migrations + scaffold hooks into server/dist. It warns (does not
+  // fail) when packages/client/dist is absent, which is exactly the no-client case.
+  execFileSync("node", [join("scripts", "copy-assets.mjs")], { cwd: root, stdio: "inherit", shell: needsShell });
 }
 
 const original = readFileSync(pkgJsonPath, "utf8");
@@ -184,6 +225,9 @@ try {
 
 console.log(`[pack-worker] ${tarball}`);
 console.log(`[pack-worker] version ${stamped} (prerelease — cannot collide with the registry's ${pkg.version})`);
+if (!skipBuild && !withClient) {
+  console.log("[pack-worker] note: no React client in this tarball — it is a worker build (--with-client for the full UI).");
+}
 console.log(`[pack-worker] install on the worker machine:  npm i -g "${tarball}"`);
 console.log(`[pack-worker] then verify:  agentic-kanban-worker --version`);
 
