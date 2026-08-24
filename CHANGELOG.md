@@ -15,6 +15,24 @@ All notable changes to this project are documented here. The format is based on
   gained a matching step, because the runbook previously assumed the binary already existed.
 
 ### Fixed
+- **A worker daemon whose supervisor died kept running, kept its board socket, burned a full CPU
+  core, and logged nothing for three hours — and every indicator on the machine reported it as
+  healthy and idle.** Three separate defects lined up. (1) `worker.log` is written by the
+  *supervisor*, not the daemon, so orphaning the daemon freezes the log while it runs on; the tray,
+  the dashboard and the restart guard all derive state from that log and so served a three-hour-old
+  snapshot as the present. Worker state now carries `LogAgeSec`/`logStale` and an explicit
+  `Orphaned` (daemon up, supervisor gone), both ranked *above* connection and session count in the
+  verdict, because those are exactly the readings a frozen log falsifies. (2) The daemon was matched
+  by "command line contains *agentic-kanban* and *worker*" — which the tray and the dashboard also
+  satisfy, being files under `tools/worker-windows/`. Three processes matched and `-First 1` picked
+  whichever Windows enumerated first, so `-Stop` could kill the **tray**, print `killed pid <tray>`
+  and `stopped`, and leave the real daemon running. Matching is now on `--board`, carried only by
+  the daemon's own argv, and query processes are excluded so a filter can never match the shell
+  running it. Covered by `ak-worker-process-match.test.ps1`. (3) The restart guard trusted that log
+  unconditionally, so on an orphaned worker it would have reported `0 sessions in flight, safe to
+  proceed` from stale data — the precise reading that destroys work. It now refuses to present a
+  stale log as fact.
+
 - **`agentic-kanban-worker --version` reported a hardcoded `0.0.1`** regardless of which build was
   installed. Since worker builds are handed over as sha-stamped tarballs, `--version` is the one
   question that binary needs to answer honestly; it now reads the version from its own installed

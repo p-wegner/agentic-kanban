@@ -128,14 +128,16 @@ async function processes() {
     );
     const lines = stdout.split(/\r?\n/);
     const supervisor = lines.some((l) => l.includes("ak-worker-run.ps1"));
-    // Same three-part test the tray uses: an agentic-kanban worker process that
-    // is NOT the supervisor script itself.
-    const daemon = lines.some(
-      (l) => l.includes("agentic-kanban") && l.includes("worker") && !l.includes("ak-worker-run.ps1"),
-    );
-    return { supervisor, daemon };
+    // MATCH ON --board, NOT ON THE PATH. The old test (contains "agentic-kanban"
+    // AND "worker") matched THIS FILE: the dashboard and the tray both live under
+    // ...gentic-kanban\packages\server	ools\worker-windows\, so the dashboard
+    // reported "daemon running" whenever it was itself running. It agreed with the
+    // tray because the tray had the same bug, which is the worst way for two
+    // indicators to agree. Only the daemon's own argv carries --board.
+    const daemon = lines.some((l) => l.includes("--board") && !l.includes("ak-worker-run.ps1"));
+    return { supervisor, daemon, orphaned: daemon && !supervisor };
   } catch {
-    return { supervisor: false, daemon: false };
+    return { supervisor: false, daemon: false, orphaned: false };
   }
 }
 
@@ -253,6 +255,12 @@ async function probeBoard(board) {
 function verdict(s) {
   if (!s.installed && !s.supervisor) return { key: "grey", text: "service not installed" };
   if (!s.daemon) return { key: "red", text: "daemon down (supervisor backoff)" };
+  // Ranked above connection and sessions on purpose: both are read from a log the
+  // orphan is no longer writing, so they render a frozen past as the present.
+  // Measured here: "connected, idle" shown for three hours against a log whose
+  // last line was three hours old.
+  if (s.orphaned) return { key: "red", text: "daemon ORPHANED - no supervisor" };
+  if (s.logStale) return { key: "red", text: `log frozen ${Math.round(s.logAgeSec / 60)}m - state unknown` };
   if (s.connection === "disconnected") return { key: "red", text: "disconnected from board" };
   if (s.sessions > 0) return { key: "blue", text: `running ${s.sessions} session(s)` };
   if (s.boardOk === false) return { key: "yellow", text: "board unreachable from here" };
@@ -278,8 +286,13 @@ async function snapshot() {
     logFile: LOG_FILE,
     logExists: existsSync(LOG_FILE),
     logSize: existsSync(LOG_FILE) ? statSync(LOG_FILE).size : 0,
+    // The supervisor writes worker.log; the daemon does not. So an orphaned daemon
+    // freezes it silently and every field derived from it below describes the past.
+    logAgeSec: existsSync(LOG_FILE) ? Math.round((Date.now() - statSync(LOG_FILE).mtimeMs) / 1000) : null,
+    orphaned: procs.orphaned === true,
     ...log,
   };
+  s.logStale = s.daemon && s.logAgeSec !== null && s.logAgeSec > 900;
   s.verdict = verdict(s);
   return s;
 }

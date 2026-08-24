@@ -50,10 +50,28 @@ function Get-WorkerProcess {
   # The daemon is a node process whose command line names the worker bin; the
   # supervisor is the powershell running ak-worker-run.ps1. Report both, because
   # "supervisor up, daemon down" is a real and interesting state (backoff).
-  $procs = Get-CimInstance Win32_Process -Filter "Name='node.exe' or Name='powershell.exe'" -ErrorAction SilentlyContinue
+  #
+  # MATCH ON --board, NOT ON THE PATH. The obvious filter -- command line contains
+  # "agentic-kanban" and "worker" -- is a trap on the machine this actually runs on:
+  # the tray and the dashboard are THEMSELVES files under
+  # ...gentic-kanban\packages\server	ools\worker-windows\, so their command lines
+  # contain both substrings and they matched as "the daemon". Measured: three
+  # processes matched and `-First 1` returned the TRAY, so -Stop killed the tray,
+  # printed "killed pid <tray>" and "stopped", and left the real daemon running --
+  # a destructive command reporting success for the wrong process. `--board` is
+  # carried only by the daemon's own argv and by nothing else on the box.
+  #
+  # A query process must never match either. Win32_Process reports the command
+  # line of the shell running THIS query, so a filter whose own text contains the
+  # pattern finds itself; that has now produced two wrong conclusions on this
+  # machine (a phantom tray, then a phantom supervisor crash-loop).
+  $procs = Get-CimInstance Win32_Process -Filter "Name='node.exe' or Name='powershell.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -and $_.CommandLine -notlike '*Win32_Process*' }
   [pscustomobject]@{
     Supervisor = $procs | Where-Object { $_.CommandLine -like '*ak-worker-run.ps1*' } | Select-Object -First 1
-    Daemon     = $procs | Where-Object { $_.CommandLine -like '*agentic-kanban*' -and $_.CommandLine -like '*worker*' -and $_.CommandLine -notlike '*ak-worker-run.ps1*' } | Select-Object -First 1
+    Daemon     = $procs | Where-Object {
+        $_.Name -eq 'node.exe' -and $_.CommandLine -like '*--board*' -and $_.CommandLine -notlike '*ak-worker-run.ps1*'
+      } | Select-Object -First 1
   }
 }
 
@@ -65,16 +83,32 @@ function Get-WorkerState {
     Task = 'not installed'; Supervisor = $false; Daemon = $false
     Connection = 'unknown'; Since = $null; RunningSessions = 0; RunningSessionIds = @()
     OrphanedSessionIds = @(); LastLine = $null; Board = $null
+    Orphaned = $false; LogAgeSec = $null; LogStale = $false
   }
   $t = Get-Task
   if ($t) { $state.Task = (Get-ScheduledTaskInfo -TaskName $TaskName).LastTaskResult; $state.Task = $t.State }
   $p = Get-WorkerProcess
   $state.Supervisor = [bool]$p.Supervisor
   $state.Daemon = [bool]$p.Daemon
+  # A DAEMON WITHOUT A SUPERVISOR IS THE DANGEROUS STATE, not a missing daemon.
+  # Measured on this machine: the supervisor died and the daemon kept running for
+  # ~3h -- still holding an ESTABLISHED socket to the board, so the board went on
+  # assigning sessions to it, while it burned 102% of one core and launched
+  # nothing. Nothing restarts an orphan (that is the supervisor's job) and nothing
+  # logs for it either (see LogStale below), so it is invisible from both ends.
+  $state.Orphaned = ($state.Daemon -and -not $state.Supervisor)
   if (Test-Path $ConfigFile) {
     try { $state.Board = (Get-Content $ConfigFile -Raw | ConvertFrom-Json).board } catch { }
   }
   if (Test-Path $LogFile) {
+    # THE LOG IS WRITTEN BY THE SUPERVISOR, NOT THE DAEMON (Add-Content in
+    # ak-worker-run.ps1). Kill the supervisor and the log freezes while the daemon
+    # runs on, so every reading below silently describes the moment the supervisor
+    # died rather than now. This machine served a three-hour-old snapshot as the
+    # present to the tray, the dashboard AND the restart guard. Age it, so a
+    # consumer can tell "nothing happened" from "I stopped being told".
+    $state.LogAgeSec = [int]((Get-Date).ToUniversalTime() - (Get-Item $LogFile).LastWriteTimeUtc).TotalSeconds
+    $state.LogStale = ($state.Daemon -and $state.LogAgeSec -gt 900)
     $lines = Get-Content $LogFile -Tail 400 -ErrorAction SilentlyContinue
     if ($lines) {
       $state.LastLine = $lines[-1]
@@ -132,6 +166,22 @@ function Get-WorkerState {
 function Assert-SafeToInterrupt {
   param([string]$Action, [switch]$Force)
   $s = Get-WorkerState
+  # A STALE LOG MAKES EVERY ANSWER BELOW UNTRUSTWORTHY, INCLUDING "0 in flight".
+  # The guard reads the log; the supervisor writes it. Orphan the daemon and the
+  # log stops advancing, so the guard cheerfully reports the world as it was when
+  # the supervisor died -- and "nothing running, safe to proceed" is exactly the
+  # reading that gets work destroyed. Say so instead of guessing; the operator can
+  # tell a quiet worker from a mute one, and this tool cannot.
+  if ($s.LogStale) {
+    Write-Warning "worker.log has not been written for $([int]($s.LogAgeSec / 60)) minute(s) while the daemon is RUNNING."
+    Write-Warning "The supervisor writes that log, so it has probably died and left the daemon orphaned."
+    Write-Warning "Everything below is derived from that log and describes the past, not now -"
+    Write-Warning "including a session count of 0. Check .k-worker-service.ps1 -Status before trusting it."
+  }
+  if ($s.Orphaned) {
+    Write-Warning "daemon is running with NO supervisor: nothing will restart it, nothing logs for it,"
+    Write-Warning "and it may still hold a board connection and be assigned work it cannot run."
+  }
   if ($s.OrphanedSessionIds.Count -gt 0) {
     Write-Warning "$($s.OrphanedSessionIds.Count) session(s) in the log never logged an exit and their process is gone - work already lost, board never told:"
     foreach ($id in $s.OrphanedSessionIds) { Write-Warning "    $id" }
@@ -163,8 +213,11 @@ function Show-Status {
   $s = Get-WorkerState
   Write-Output "task       : $($s.Task)"
   Write-Output "supervisor : $(if ($s.Supervisor) { 'running' } else { 'stopped' })"
-  Write-Output "daemon     : $(if ($s.Daemon) { 'running' } else { 'stopped' })"
+  Write-Output "daemon     : $(if ($s.Daemon) { 'running' } else { 'stopped' })$(if ($s.Orphaned) { '  *** ORPHANED - no supervisor; nothing will restart it ***' })"
   Write-Output "board      : $($s.Board)"
+  if ($null -ne $s.LogAgeSec) {
+    Write-Output "log age    : $($s.LogAgeSec)s$(if ($s.LogStale) { '  *** STALE - the readings below describe the past, not now ***' })"
+  }
   Write-Output "connection : $($s.Connection)$(if ($s.Since) { " (since $($s.Since))" })"
   Write-Output "sessions   : $($s.RunningSessions) in flight"
   if ($s.LastLine) { Write-Output "last log   : $($s.LastLine)" }

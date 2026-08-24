@@ -76,15 +76,25 @@ function Get-State {
   $s = [ordered]@{
     installed = $false; supervisor = $false; daemon = $false
     connection = 'unknown'; since = $null; sessions = 0; board = $null; lastLine = $null
+    orphaned = $false; logStale = $false
   }
   $s.installed = [bool](Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue)
-  $procs = Get-CimInstance Win32_Process -Filter "Name='node.exe' or Name='powershell.exe'" -ErrorAction SilentlyContinue
+  # Match the daemon on --board, never on the path: THIS SCRIPT lives under
+  # ...gentic-kanban\...\worker-windows\, so a path-substring filter matched the
+  # tray itself and reported "daemon running" when the tray was the only thing up.
+  # Excluding $PID and query processes matters for the same reason.
+  $procs = Get-CimInstance Win32_Process -Filter "Name='node.exe' or Name='powershell.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -and $_.CommandLine -notlike '*Win32_Process*' }
   $s.supervisor = [bool]($procs | Where-Object { $_.CommandLine -like '*ak-worker-run.ps1*' } | Select-Object -First 1)
   $s.daemon = [bool]($procs | Where-Object {
-      $_.CommandLine -like '*agentic-kanban*' -and $_.CommandLine -like '*worker*' -and $_.CommandLine -notlike '*ak-worker-run.ps1*'
+      $_.Name -eq 'node.exe' -and $_.CommandLine -like '*--board*' -and $_.CommandLine -notlike '*ak-worker-run.ps1*'
     } | Select-Object -First 1)
+  $s.orphaned = ($s.daemon -and -not $s.supervisor)
   if (Test-Path $ConfigFile) { try { $s.board = (Get-Content $ConfigFile -Raw | ConvertFrom-Json).board } catch { } }
   if (Test-Path $LogFile) {
+    # The SUPERVISOR writes this log, so an orphaned daemon freezes it while
+    # running. Without this the dot stayed green on three-hour-old lines.
+    $s.logStale = ($s.daemon -and ((Get-Date).ToUniversalTime() - (Get-Item $LogFile).LastWriteTimeUtc).TotalSeconds -gt 900)
     $lines = Get-Content $LogFile -Tail 400 -ErrorAction SilentlyContinue
     if ($lines) {
       $s.lastLine = $lines[-1]
@@ -106,6 +116,11 @@ function Get-Verdict {
   if (-not $s.installed -and -not $s.supervisor) { return @{ key='grey';   text='not installed' } }
   if (-not $s.supervisor)                        { return @{ key='grey';   text='service stopped' } }
   if (-not $s.daemon)                            { return @{ key='red';    text='daemon down (restarting)' } }
+  # Ranked ABOVE connection/sessions: an orphan can report "connected, 0 sessions"
+  # from a frozen log while accepting board work it will never run. Silent wrong
+  # beats loud wrong only if you never look, and the tray exists to be looked at.
+  if ($s.orphaned)                               { return @{ key='red';    text='daemon ORPHANED - no supervisor' } }
+  if ($s.logStale)                               { return @{ key='red';    text='log frozen - state unknown' } }
   if ($s.connection -ne 'connected')             { return @{ key='red';    text="disconnected from board" } }
   if ($s.sessions -gt 0)                         { return @{ key='blue';   text="running $($s.sessions) session(s)" } }
   if ($script:boardOk -eq $false)                { return @{ key='yellow'; text='board unreachable from here' } }
