@@ -4,6 +4,7 @@
  * base rather than the branch under test.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import type { runSetupScript as realRunSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -19,11 +20,11 @@ import {
 // #674: verifyBaseBranchHealth must INSTALL the clone before running verify_script, and must
 // record "unverified" (never "red") when the install itself fails. Mock the two shared
 // primitives it calls so the test drives that orchestration without spawning real git/pnpm.
-const runSetupScript = vi.fn();
+const runSetupScript = vi.fn<typeof realRunSetupScript>();
 vi.mock("@agentic-kanban/shared/lib/setup-script", () => ({
-  runSetupScript: (...args: unknown[]) => runSetupScript(...args),
+  runSetupScript: (...args: Parameters<typeof realRunSetupScript>) => runSetupScript(...args),
 }));
-const cloneBranchTo = vi.fn(async () => {});
+const cloneBranchTo = vi.fn(async (..._args: unknown[]) => {});
 vi.mock("@agentic-kanban/shared/lib/git-service", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return { ...actual, cloneBranchTo: (...args: unknown[]) => cloneBranchTo(...args) };
@@ -114,6 +115,7 @@ describe("describeRedBaseAttribution (#491)", () => {
         durationMs: 500,
         message: "verify_script failed (exit 1): TypeError somewhere",
         createdAt: new Date().toISOString(),
+        failedSuites: null,
       },
     });
     expect(attribution).not.toBeNull();
@@ -134,6 +136,7 @@ describe("describeRedBaseAttribution (#491)", () => {
         durationMs: 500,
         message: null,
         createdAt: new Date().toISOString(),
+        failedSuites: null,
       },
     });
     expect(attribution).toBeNull();
@@ -155,6 +158,7 @@ describe("describeRedBaseAttribution (#491)", () => {
         durationMs: 500,
         message: "still broken",
         createdAt: new Date().toISOString(),
+        failedSuites: null,
       },
     });
     expect(attribution).not.toBeNull();

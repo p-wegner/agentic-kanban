@@ -12,6 +12,9 @@ import { Hono } from "hono";
 import * as schema from "@agentic-kanban/shared/schema";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createIssuesRoute } from "../routes/issues.js";
+// `skipped` is set by the route (issues.ts) but is not declared on PreflightResponse,
+// hence the intersection at the two read sites below.
+import type { PreflightResponse } from "@agentic-kanban/shared";
 
 const runTicketPreflight = vi.hoisted(() => vi.fn());
 
@@ -68,7 +71,7 @@ describe("POST /api/issues/:id/preflight — skip_preflight", () => {
 
     const res = await post({ projectId: ids.projectId });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as PreflightResponse & { skipped?: boolean };
 
     expect(body.skipped).toBe(true);
     expect(body.verdict).toBe("ready");
@@ -79,7 +82,7 @@ describe("POST /api/issues/:id/preflight — skip_preflight", () => {
   it("runs the check when the pref is absent (default off)", async () => {
     const res = await post({ projectId: ids.projectId });
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as PreflightResponse & { skipped?: boolean };
 
     expect(body.skipped).toBeUndefined();
     expect(runTicketPreflight).toHaveBeenCalledTimes(1);
