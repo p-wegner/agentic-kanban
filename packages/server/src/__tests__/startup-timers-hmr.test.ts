@@ -2,6 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setupScheduledTasks } from "../startup/scheduled-tasks.js";
 import { startAutoMergeOrchestrator } from "../startup/auto-merge-orchestrator.js";
 import { startAncestorBranchReconciler, stopAncestorBranchReconciler } from "../startup/ancestor-branch-reconciler.js";
+import type { AncestorBranchReconcilerDeps } from "../startup/ancestor-branch-reconciler.js";
+import type { StrandedReviewReconcilerDeps } from "../startup/stranded-review-reconciler.js";
+import type { ZombieFixSessionReconcilerDeps } from "../startup/zombie-fix-session-reconciler.js";
+import type { Database } from "../db/index.js";
 import { startDoneUnmergedSweep, stopDoneUnmergedSweep } from "../startup/done-unmerged-invariant-sweep.js";
 import { startStrandedReviewReconciler } from "../startup/stranded-review-reconciler.js";
 import { startZombieFixSessionReconciler } from "../startup/zombie-fix-session-reconciler.js";
@@ -154,7 +158,8 @@ describe("startup timers are restart-safe for HMR-style reloads", () => {
   it("ancestor-branch reconciler's default tick also runs the stranded-sibling compensator on the same cadence (#151)", async () => {
     // Long interval (100s) so the initial 35s boot timeout and the recurring interval
     // fire at clearly separate points instead of overlapping in the assertion window.
-    startAncestorBranchReconciler({ enabled: false }, 100_000);
+    const ancestorDeps: AncestorBranchReconcilerDeps = { enabled: false };
+    startAncestorBranchReconciler(ancestorDeps, 100_000);
 
     await vi.advanceTimersByTimeAsync(35_000); // fires the initial boot timeout only
     expect(reconcileStrandedSiblingMergesMock).toHaveBeenCalledTimes(1);
@@ -238,11 +243,11 @@ describe("startup timers are restart-safe for HMR-style reloads", () => {
       boardEvents: {
         startCleanup: vi.fn(),
         cleanupStaleConnections: vi.fn(),
-      } as unknown as Record<string, never>,
-      getSessionManager: () => ({}) as unknown as Record<string, never>,
-    };
-    const first = startAutoMergeOrchestrator(deps, 60_000);
-    const second = startAutoMergeOrchestrator(deps, 60_000);
+      },
+      getSessionManager: () => ({}),
+    } as unknown as Parameters<typeof startAutoMergeOrchestrator>[0];
+    const first = startAutoMergeOrchestrator(deps);
+    const second = startAutoMergeOrchestrator(deps);
 
     expect(clearTimeoutSpy).toHaveBeenCalledOnce();
     expect(clearIntervalSpy).toHaveBeenCalledOnce();
@@ -250,12 +255,13 @@ describe("startup timers are restart-safe for HMR-style reloads", () => {
   });
 
   it("recreates stranded-review reconciler timer instead of accumulating handles", () => {
+    // These lifecycle tests never let a tick run, so the collaborators are stubs.
     const deps = {
-      database: {} as unknown as Record<string, never>,
-      getSessionManager: () => ({}) as unknown as Record<string, never>,
-      boardEvents: { broadcast: vi.fn() } as unknown as Record<string, never>,
+      database: {},
+      getSessionManager: () => ({}),
+      boardEvents: { broadcast: vi.fn() },
       reviewSessionIds: new Set<string>(),
-    };
+    } as unknown as StrandedReviewReconcilerDeps;
     const first = startStrandedReviewReconciler(deps, 60_000);
     const second = startStrandedReviewReconciler(deps, 60_000);
 
@@ -266,9 +272,9 @@ describe("startup timers are restart-safe for HMR-style reloads", () => {
 
   it("recreates zombie-fix reconciler timer instead of accumulating handles", () => {
     const deps = {
-      boardEvents: { broadcast: vi.fn(), broadcastActivity: vi.fn() } as unknown as Record<string, never>,
-      database: {} as unknown as Record<string, never>,
-    };
+      boardEvents: { broadcast: vi.fn(), broadcastActivity: vi.fn() },
+      database: {},
+    } as unknown as ZombieFixSessionReconcilerDeps;
     const first = startZombieFixSessionReconciler(deps, 60_000);
     const second = startZombieFixSessionReconciler(deps, 60_000);
 
@@ -288,8 +294,8 @@ describe("startup timers are restart-safe for HMR-style reloads", () => {
   });
 
   it("recreates session message pruner timer handles instead of accumulating interval and timeout", () => {
-    startSessionMessagePruner({} as unknown as Record<string, never>);
-    startSessionMessagePruner({} as unknown as Record<string, never>);
+    startSessionMessagePruner({} as unknown as Database);
+    startSessionMessagePruner({} as unknown as Database);
 
     expect(clearTimeoutSpy).toHaveBeenCalledOnce();
     expect(clearIntervalSpy).toHaveBeenCalledOnce();

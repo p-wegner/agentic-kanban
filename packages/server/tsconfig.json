@@ -11,10 +11,7 @@
   ],
   "exclude": [
     "src/__tests__/agent.service.test.ts",
-    "src/__tests__/container-mcp-reattach-refresh.test.ts",
     "src/__tests__/issues-routes-edge-cases.test.ts",
-    "src/__tests__/reconcile-silently-merged.test.ts",
-    "src/__tests__/startup-timers-hmr.test.ts",
     "src/__tests__/workflow.service.test.ts"
   ]
 }

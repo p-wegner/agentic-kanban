@@ -19,9 +19,15 @@ vi.mock("../db/seed.js", () => ({ ensureBuiltinTags: vi.fn(async () => {}), ensu
 vi.mock("../services/project-registration.js", () => ({ deduplicateProjects: vi.fn(async () => {}) }));
 vi.mock("../services/agent.service.js", () => ({}));
 
-const mockUpdateWorkspaceStatus = vi.fn(async () => {});
-const mockMoveIssueToDone = vi.fn(async () => {});
-const mockFinalizeMergeCleanup = vi.fn(async () => ({
+// The doubles carry the real input types so `mock.calls[0][0]` is the call's argument
+// rather than an empty tuple.
+import type { FinalizeMergeCleanupInput, ReconcileMergedIssueInput } from "../services/merge-cleanup.service.js";
+import type { LogBoardHealthEventInput } from "../repositories/board-health-events.repository.js";
+import type { updateWorkspaceStatus, moveIssueToDone } from "../repositories/workspace.repository.js";
+
+const mockUpdateWorkspaceStatus = vi.fn<typeof updateWorkspaceStatus>(async () => {});
+const mockMoveIssueToDone = vi.fn<typeof moveIssueToDone>(async () => {});
+const mockFinalizeMergeCleanup = vi.fn(async (_input: FinalizeMergeCleanupInput) => ({
   projectId: "project-id",
   closedAt: new Date().toISOString(),
   mergedAt: new Date().toISOString(),
@@ -29,25 +35,25 @@ const mockFinalizeMergeCleanup = vi.fn(async () => ({
   issueTransitioned: true,
   broadcasted: false,
 }));
-const mockReconcileMergedIssue = vi.fn(async () => ({
+const mockReconcileMergedIssue = vi.fn(async (_input: ReconcileMergedIssueInput) => ({
   projectId: "project-id",
   issueTransitioned: true,
   targetStatusId: "done-status-id",
 }));
-const mockLogBoardHealthEvent = vi.fn(async () => "event-id");
+const mockLogBoardHealthEvent = vi.fn(async (_input: LogBoardHealthEventInput) => "event-id");
 
 vi.mock("../repositories/workspace.repository.js", () => ({
-  updateWorkspaceStatus: (...args: unknown[]) => mockUpdateWorkspaceStatus(...args),
-  moveIssueToDone: (...args: unknown[]) => mockMoveIssueToDone(...args),
+  updateWorkspaceStatus: (...args: Parameters<typeof updateWorkspaceStatus>) => mockUpdateWorkspaceStatus(...args),
+  moveIssueToDone: (...args: Parameters<typeof moveIssueToDone>) => mockMoveIssueToDone(...args),
 }));
 
 vi.mock("../services/merge-cleanup.service.js", () => ({
-  finalizeMergeCleanup: (...args: unknown[]) => mockFinalizeMergeCleanup(...args),
-  reconcileMergedIssue: (...args: unknown[]) => mockReconcileMergedIssue(...args),
+  finalizeMergeCleanup: (...args: Parameters<typeof mockFinalizeMergeCleanup>) => mockFinalizeMergeCleanup(...args),
+  reconcileMergedIssue: (...args: Parameters<typeof mockReconcileMergedIssue>) => mockReconcileMergedIssue(...args),
 }));
 
 vi.mock("../repositories/board-health-events.repository.js", () => ({
-  logBoardHealthEvent: (...args: unknown[]) => mockLogBoardHealthEvent(...args),
+  logBoardHealthEvent: (...args: Parameters<typeof mockLogBoardHealthEvent>) => mockLogBoardHealthEvent(...args),
 }));
 
 import { reconcileSilentlyMergedWorkspaces } from "../startup/startup-tasks.js";
