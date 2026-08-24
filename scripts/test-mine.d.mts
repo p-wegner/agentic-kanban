@@ -25,6 +25,19 @@ export declare const PACKAGES: {
 export declare const ALWAYS_RUN_TESTS_DIR: Record<string, string>;
 
 /**
+ * Does `source` DECLARE itself always-run — i.e. carry a top-of-line `// @gate:always-run`
+ * comment — as opposed to merely mentioning the marker in prose or holding it as fixture data?
+ *
+ * The single definition of that rule for every importer (#891). It cannot live in
+ * `packages/shared`: the runner is bare `.mjs` with no build step, and making it depend on a
+ * built `dist/` would break it in worktrees, which have none.
+ */
+export declare function isAlwaysRunMarked(source: string): boolean;
+
+/** Test-file extensions the marker scan recognises (`.tsx` and `.mjs` were invisible, #647). */
+export declare const ALWAYS_RUN_TEST_FILE: RegExp;
+
+/**
  * Scan `<pkgDir>/<testsDir>` recursively for test files carrying the
  * `@gate:always-run` marker, returning paths relative to `pkgDir`.
  * The lister/reader pair is injectable so the walk is unit-testable.

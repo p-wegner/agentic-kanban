@@ -1,3 +1,7 @@
+// @gate:always-run - exercises the scope derivation in `scripts/test-mine.mjs`, a repo script
+// outside this suite's own import graph. Before #891 it was force-run only because its
+// FIXTURE TEXT quotes the marker - text whose whole purpose is to assert the scanner ignores
+// a non-test file that carries it.
 import { describe, expect, it } from "vitest";
 import { resolve } from "node:path";
 import {

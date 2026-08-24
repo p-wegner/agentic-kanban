@@ -16,10 +16,20 @@
  * This suite reads the repo tree (a script outside its own import graph), hence the marker.
  */
 import { describe, it, expect } from "vitest";
-import { resolve } from "node:path";
+import path, { resolve } from "node:path";
 import { existsSync } from "node:fs";
-import { ALWAYS_RUN_TESTS_DIR, PACKAGES, scanAlwaysRunTests } from "../../../../scripts/test-mine.mjs";
-import { ALWAYS_RUN_TESTS_DIRS } from "../services/pre-merge-gate-tier.js";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import {
+  ALWAYS_RUN_TESTS_DIR,
+  PACKAGES,
+  scanAlwaysRunTests,
+  isAlwaysRunMarked,
+} from "../../../../scripts/test-mine.mjs";
+import {
+  ALWAYS_RUN_TESTS_DIRS,
+  countAlwaysRunGuardSuites,
+} from "../services/pre-merge-gate-tier.js";
 import { SCAN_PACKAGES } from "./always-run-marker-ratchet.test.js";
 
 const REPO_ROOT = resolve(__dirname, "../../../..");
@@ -76,5 +86,82 @@ describe("always-run guard-suite dirs: test-mine vs the gate's tier reporter", (
     const server = scanAlwaysRunTests(resolve(REPO_ROOT, "packages/server"), "src/__tests__") as string[];
     expect(server.length).toBeGreaterThan(0);
     expect(server.some((f) => f.endsWith(".test.mjs"))).toBe(true);
+  });
+
+  /**
+   * #891 — the DIRECTORIES were held in lockstep; the matching RULE was not.
+   *
+   * One rule ("is this suite marked always-run?") had six independent implementations, all
+   * `source.includes("@gate:always-run")`, which cannot tell a marker from a sentence about
+   * markers or from the string used as data. They agreed only because all six were wrong the
+   * same way — and the two files being miscounted were the two that guard this mechanism.
+   *
+   * Four of the six were consolidated onto `isAlwaysRunMarked` by import. The remaining two
+   * CANNOT share a module: `scripts/test-mine.mjs` is run by bare `node` with no build step
+   * and imports only Node built-ins, while `packages/server` ships only `dist/` and so cannot
+   * import a repo-root script without breaking a published install. Two implementations is the
+   * floor the packaging allows, so they are bound here by BEHAVIOUR instead of by comment.
+   *
+   * The fixtures are the two real shapes that were being misclassified.
+   */
+  describe("the marker RULE is the same on both sides (#891)", () => {
+    /** A file that DECLARES the marker, in the house style with a trailing rationale. */
+    const DECLARES = "// @gate:always-run - walks the repo tree\nimport {} from \"vitest\";\n";
+    /** A file that only MENTIONS it — the `const MARKER` / fixture-text shape. */
+    const MENTIONS = 'const MARKER = "// @gate:always-run";\nimport {} from "vitest";\n';
+
+    /** Build a throwaway repo root holding the two fixtures in a scanned guard dir. */
+    function repoWithFixtures(): string {
+      const root = mkdtempSync(path.join(tmpdir(), "ak-marker-rule-"));
+      const dir = path.join(root, "packages", "server", "src", "__tests__");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(path.join(dir, "declares.test.ts"), DECLARES);
+      writeFileSync(path.join(dir, "mentions.test.ts"), MENTIONS);
+      return root;
+    }
+
+    it("the canonical matcher counts a declaration and not a mention", () => {
+      expect(isAlwaysRunMarked(DECLARES)).toBe(true);
+      expect(isAlwaysRunMarked(MENTIONS)).toBe(false);
+    });
+
+    it("both implementations classify the same fixtures identically", () => {
+      const root = repoWithFixtures();
+      try {
+        // Site 1 — what actually RUNS.
+        const run = scanAlwaysRunTests(
+          path.join(root, "packages", "server"),
+          "src/__tests__",
+        ) as string[];
+        // Site 2 — what the gate REPORTS as "+N guard suites".
+        const reported = countAlwaysRunGuardSuites(root);
+
+        expect(run.map((r) => r.replace(/\\/g, "/"))).toEqual(["src/__tests__/declares.test.ts"]);
+        expect(reported).toBe(1);
+        expect(reported).toBe(run.length);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    /**
+     * The regression this ticket is about: under the old `.includes()` BOTH sides returned 2,
+     * agreeing with each other while both counted a file that never declared anything. A count
+     * that agrees is not the same as a count that is right.
+     */
+    it("neither side is fooled by a file that merely mentions the marker", () => {
+      const root = mkdtempSync(path.join(tmpdir(), "ak-marker-rule-mention-"));
+      try {
+        const dir = path.join(root, "packages", "server", "src", "__tests__");
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(path.join(dir, "mentions-only.test.ts"), MENTIONS);
+        expect(
+          scanAlwaysRunTests(path.join(root, "packages", "server"), "src/__tests__"),
+        ).toEqual([]);
+        expect(countAlwaysRunGuardSuites(root)).toBe(0);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
   });
 });
