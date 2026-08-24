@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { CleanupWarningEntry } from "@agentic-kanban/shared";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 /**
@@ -70,7 +71,7 @@ describe("cleanup warnings API", () => {
       const res = await app.request("/api/workspaces/cleanup-warnings?projectId=proj-1");
       expect(res.status).toBe(200);
 
-      const body = await res.json();
+      const body = await res.json() as CleanupWarningEntry[];
       expect(body).toHaveLength(1);
       expect(body[0].id).toBe("ws-1");
       expect(body[0].issueNumber).toBe(100);
@@ -85,7 +86,7 @@ describe("cleanup warnings API", () => {
       const res = await app.request("/api/workspaces/cleanup-warnings");
       expect(res.status).toBe(200);
 
-      const body = await res.json();
+      const body = await res.json() as CleanupWarningEntry[];
       expect(body).toEqual([]);
       expect(mockListCleanupWarnings).toHaveBeenCalledWith(undefined);
     });
@@ -98,7 +99,7 @@ describe("cleanup warnings API", () => {
       const res = await app.request("/api/workspaces/cleanup-warnings?projectId=proj-1");
       expect(res.status).toBe(200);
 
-      const body = await res.json();
+      const body = await res.json() as CleanupWarningEntry[];
       expect(body).toHaveLength(2);
       expect(body[0].id).toBe("ws-1");
       expect(body[1].id).toBe("ws-2");
@@ -113,7 +114,7 @@ describe("cleanup warnings API", () => {
       const res = await app.request("/api/workspaces/ws-1/retry-cleanup", { method: "POST" });
       expect(res.status).toBe(200);
 
-      const body = await res.json();
+      const body = await res.json() as { success: boolean };
       expect(body.success).toBe(true);
       expect(mockRetryCleanup).toHaveBeenCalledWith("ws-1");
     });
@@ -125,7 +126,7 @@ describe("cleanup warnings API", () => {
       const res = await app.request("/api/workspaces/nonexistent/retry-cleanup", { method: "POST" });
       expect(res.status).toBe(400);
 
-      const body = await res.json();
+      const body = await res.json() as { error: string };
       expect(body.error).toBe("Workspace not found");
     });
 
@@ -136,7 +137,7 @@ describe("cleanup warnings API", () => {
       const res = await app.request("/api/workspaces/ws-1/retry-cleanup", { method: "POST" });
       expect(res.status).toBe(400);
 
-      const body = await res.json();
+      const body = await res.json() as { error: string };
       expect(body.error).toBe("Workspace is not closed");
     });
 
@@ -147,7 +148,7 @@ describe("cleanup warnings API", () => {
       const res = await app.request("/api/workspaces/ws-1/retry-cleanup", { method: "POST" });
       expect(res.status).toBe(400);
 
-      const body = await res.json();
+      const body = await res.json() as { error: string };
       expect(body.error).toContain("No pending cleanup warning");
     });
 
@@ -161,7 +162,7 @@ describe("cleanup warnings API", () => {
       const res = await app.request("/api/workspaces/ws-1/retry-cleanup", { method: "POST" });
       expect(res.status).toBe(400);
 
-      const body = await res.json();
+      const body = await res.json() as { error: string };
       expect(body.error).toContain("EBUSY");
     });
 
@@ -173,7 +174,7 @@ describe("cleanup warnings API", () => {
       const res = await app.request("/api/workspaces/ws-1/retry-cleanup", { method: "POST" });
       expect(res.status).toBe(200);
 
-      const body = await res.json();
+      const body = await res.json() as { success: boolean };
       expect(body.success).toBe(true);
     });
   });
@@ -184,7 +185,7 @@ describe("cleanup warnings API", () => {
 
       const app = createTestApp();
       const res = await app.request("/api/workspaces/cleanup-warnings?projectId=proj-1");
-      const [entry] = await res.json();
+      const [entry] = await res.json() as CleanupWarningEntry[];
 
       // All fields required by the queue panel must be present.
       expect(entry.id).toBeDefined();
@@ -202,7 +203,7 @@ describe("cleanup warnings API", () => {
 
       const app = createTestApp();
       const res = await app.request("/api/workspaces/cleanup-warnings?projectId=proj-1");
-      const [entry] = await res.json();
+      const [entry] = await res.json() as CleanupWarningEntry[];
 
       expect(entry.workingDir).toBeNull();
       expect(entry.cleanupWarning).toContain("EBUSY");

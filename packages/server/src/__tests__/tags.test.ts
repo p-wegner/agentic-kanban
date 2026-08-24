@@ -6,6 +6,11 @@ import { createTestApp as _createTestApp } from "./helpers/test-app.js";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createMockSessionManager } from "./helpers/mocks.js";
 
+// The tag/issue routes return the DB rows straight through, so the row types ARE
+// the response contract these assertions are written against.
+type TagRow = typeof schema.tags.$inferSelect;
+type IssueRow = typeof schema.issues.$inferSelect;
+
 function createTestApp() {
   return _createTestApp((app, db) => {
     app.route("/api", createRoutes(db, () => createMockSessionManager()));
@@ -144,7 +149,7 @@ describe("Tags API - CRUD", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: "to-update" }),
     });
-    const { id } = await createRes.json();
+    const { id } = await createRes.json() as TagRow;
 
     const res = await app.request(`/api/tags/${id}`, {
       method: "PATCH",
@@ -156,9 +161,9 @@ describe("Tags API - CRUD", () => {
     expect(body.id).toBe(id);
 
     // Verify update
-    const tags = await (await app.request("/api/tags")).json();
+    const tags = await (await app.request("/api/tags")).json() as TagRow[];
     const updated = tags.find((t: { id: string }) => t.id === id);
-    expect(updated.name).toBe("updated-name");
+    expect(updated?.name).toBe("updated-name");
   });
 
   it("PATCH /api/tags/:id updates tag color", async () => {
@@ -167,7 +172,7 @@ describe("Tags API - CRUD", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: "color-test", color: "#111111" }),
     });
-    const { id } = await createRes.json();
+    const { id } = await createRes.json() as TagRow;
 
     const res = await app.request(`/api/tags/${id}`, {
       method: "PATCH",
@@ -176,9 +181,9 @@ describe("Tags API - CRUD", () => {
     });
     expect(res.status).toBe(200);
 
-    const tags = await (await app.request("/api/tags")).json();
+    const tags = await (await app.request("/api/tags")).json() as TagRow[];
     const updated = tags.find((t: { id: string }) => t.id === id);
-    expect(updated.color).toBe("#222222");
+    expect(updated?.color).toBe("#222222");
   });
 
   it("PATCH /api/tags/:id rejects empty update", async () => {
@@ -187,7 +192,7 @@ describe("Tags API - CRUD", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: "no-update" }),
     });
-    const { id } = await createRes.json();
+    const { id } = await createRes.json() as TagRow;
 
     const res = await app.request(`/api/tags/${id}`, {
       method: "PATCH",
@@ -205,7 +210,7 @@ describe("Tags API - CRUD", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: "to-delete" }),
     });
-    const { id } = await createRes.json();
+    const { id } = await createRes.json() as TagRow;
 
     const res = await app.request(`/api/tags/${id}`, { method: "DELETE" });
     expect(res.status).toBe(200);
@@ -213,7 +218,7 @@ describe("Tags API - CRUD", () => {
     expect(body.success).toBe(true);
 
     // Verify gone
-    const tags = await (await app.request("/api/tags")).json();
+    const tags = await (await app.request("/api/tags")).json() as TagRow[];
     const deleted = tags.find((t: { id: string }) => t.id === id);
     expect(deleted).toBeUndefined();
   });
@@ -231,7 +236,7 @@ describe("Tags API - Issue Associations", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: "assoc-test-tag", color: "#ff00ff" }),
     });
-    const tag = await tagRes.json();
+    const tag = await tagRes.json() as TagRow;
 
     // Create an issue
     const issueRes = await app.request("/api/issues", {
@@ -239,7 +244,7 @@ describe("Tags API - Issue Associations", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: "Tag association issue", statusId, projectId }),
     });
-    const issue = await issueRes.json();
+    const issue = await issueRes.json() as IssueRow;
 
     // Associate tag with issue
     const assocRes = await app.request(`/api/issues/${issue.id}/tags`, {
@@ -252,7 +257,7 @@ describe("Tags API - Issue Associations", () => {
     // Verify association exists
     const issueTags = await (
       await app.request(`/api/issues/${issue.id}/tags`)
-    ).json();
+    ).json() as TagRow[];
     expect(issueTags.length).toBe(1);
     expect(issueTags[0].name).toBe("assoc-test-tag");
 
@@ -262,7 +267,7 @@ describe("Tags API - Issue Associations", () => {
     // Verify issue no longer has the tag
     const issueTagsAfter = await (
       await app.request(`/api/issues/${issue.id}/tags`)
-    ).json();
+    ).json() as TagRow[];
     expect(issueTagsAfter).toEqual([]);
   });
 
@@ -275,14 +280,14 @@ describe("Tags API - Issue Associations", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: "e2e-tag-1", color: "#aabbcc" }),
     });
-    const tag1 = await tag1Res.json();
+    const tag1 = await tag1Res.json() as TagRow;
 
     const tag2Res = await app.request("/api/tags", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: "e2e-tag-2", color: "#ddeeff" }),
     });
-    const tag2 = await tag2Res.json();
+    const tag2 = await tag2Res.json() as TagRow;
 
     // Create an issue
     const issueRes = await app.request("/api/issues", {
@@ -290,7 +295,7 @@ describe("Tags API - Issue Associations", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: "Multi-tag issue", statusId, projectId }),
     });
-    const issue = await issueRes.json();
+    const issue = await issueRes.json() as IssueRow;
 
     // Assign both tags
     await app.request(`/api/issues/${issue.id}/tags`, {
@@ -307,7 +312,7 @@ describe("Tags API - Issue Associations", () => {
     // Verify both tags
     const tags = await (
       await app.request(`/api/issues/${issue.id}/tags`)
-    ).json();
+    ).json() as TagRow[];
     expect(tags.length).toBe(2);
 
     // Remove one tag
@@ -318,7 +323,7 @@ describe("Tags API - Issue Associations", () => {
     // Verify only one remains
     const remaining = await (
       await app.request(`/api/issues/${issue.id}/tags`)
-    ).json();
+    ).json() as TagRow[];
     expect(remaining.length).toBe(1);
     expect(remaining[0].name).toBe("e2e-tag-2");
   });
@@ -330,7 +335,7 @@ describe("Tags API - Issue Associations", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: "Tag validation issue", statusId, projectId }),
     });
-    const issue = await issueRes.json();
+    const issue = await issueRes.json() as IssueRow;
 
     const res = await app.request(`/api/issues/${issue.id}/tags`, {
       method: "POST",
@@ -351,7 +356,7 @@ describe("Tags API - Issue Associations", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: "persistent-tag", color: "#333333" }),
     });
-    const tag = await tagRes.json();
+    const tag = await tagRes.json() as TagRow;
 
     // Create issue and associate
     const issueRes = await app.request("/api/issues", {
@@ -359,7 +364,7 @@ describe("Tags API - Issue Associations", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: "Issue to delete", statusId, projectId }),
     });
-    const issue = await issueRes.json();
+    const issue = await issueRes.json() as IssueRow;
 
     await app.request(`/api/issues/${issue.id}/tags`, {
       method: "POST",
@@ -371,10 +376,10 @@ describe("Tags API - Issue Associations", () => {
     await app.request(`/api/issues/${issue.id}`, { method: "DELETE" });
 
     // Verify the tag still exists
-    const tags = await (await app.request("/api/tags")).json();
+    const tags = await (await app.request("/api/tags")).json() as TagRow[];
     const found = tags.find((t: { id: string }) => t.id === tag.id);
     expect(found).toBeDefined();
-    expect(found.name).toBe("persistent-tag");
+    expect(found?.name).toBe("persistent-tag");
   });
 });
 
@@ -431,7 +436,7 @@ describe("Tags API - Built-in tag protection", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: "merge-target" }),
     });
-    const { id: targetId } = await regularRes.json();
+    const { id: targetId } = await regularRes.json() as TagRow;
 
     const res = await app.request("/api/tags/merge", {
       method: "POST",
@@ -449,7 +454,7 @@ describe("Tags API - Built-in tag protection", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: "deletable-tag" }),
     });
-    const { id } = await createRes.json();
+    const { id } = await createRes.json() as TagRow;
 
     const res = await app.request(`/api/tags/${id}`, { method: "DELETE" });
     expect(res.status).toBe(200);
@@ -461,7 +466,7 @@ describe("Tags API - Built-in tag protection", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: "renamable-tag" }),
     });
-    const { id } = await createRes.json();
+    const { id } = await createRes.json() as TagRow;
 
     const res = await app.request(`/api/tags/${id}`, {
       method: "PATCH",
