@@ -10,6 +10,8 @@ export interface ExecCommandOptions {
   timeout?: number;
   maxBuffer?: number;
   env?: NodeJS.ProcessEnv;
+  /** cmd.exe-only concern — see shellCommandSpec. Leave unset for real executables. */
+  windowsVerbatimArguments?: boolean;
 }
 
 export interface ShellCommandOptions extends ExecCommandOptions {
@@ -43,9 +45,20 @@ function mergedEnv(options: Pick<ShellCommandOptions, "env" | "mergeEnv">): Node
   return options.env ?? process.env;
 }
 
-export function shellCommandSpec(command: string): { command: string; args: string[] } {
-  if (process.platform === "win32") return { command: "cmd.exe", args: ["/d", "/s", "/c", command] };
-  return { command: "/bin/sh", args: ["-c", command] };
+export function shellCommandSpec(
+  command: string,
+): { command: string; args: string[]; windowsVerbatimArguments: boolean } {
+  // On Windows the command must reach cmd.exe VERBATIM. With the default
+  // windowsVerbatimArguments:false, Node re-quotes the single command arg and escapes
+  // embedded double-quotes as \" — an escape cmd.exe does not understand — so every
+  // legitimately-quoted argument (e.g. a plugin command's "{{leadingRepoPath}}") reached
+  // the child with LITERAL quote characters (found live: click rejected the repo path as
+  // Directory '"C:\..."' does not exist). Same bug and same fix as setup-script.ts (#111),
+  // whose comment already claimed — wrongly, until now — that this function matched it.
+  if (process.platform === "win32") {
+    return { command: "cmd.exe", args: ["/d", "/s", "/c", command], windowsVerbatimArguments: true };
+  }
+  return { command: "/bin/sh", args: ["-c", command], windowsVerbatimArguments: false };
 }
 
 export async function execCommand(
@@ -86,6 +99,7 @@ async function execCommandInner(
     maxBuffer: options.maxBuffer,
     windowsHide: true,
     env: options.env,
+    windowsVerbatimArguments: options.windowsVerbatimArguments,
   });
   return { stdout: String(stdout ?? ""), stderr: String(stderr ?? "") };
 }
@@ -100,6 +114,7 @@ export async function execShellCommand(
     timeout: options.timeout,
     maxBuffer: options.maxBuffer,
     env: mergedEnv(options),
+    windowsVerbatimArguments: spec.windowsVerbatimArguments,
   });
 }
 
@@ -111,6 +126,7 @@ export function spawnShellCommand(command: string, options: SpawnShellCommandOpt
     windowsHide: true,
     stdio: options.stdio,
     env: mergedEnv(options),
+    windowsVerbatimArguments: spec.windowsVerbatimArguments,
   } satisfies SpawnOptions);
 }
 
