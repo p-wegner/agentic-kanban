@@ -3,6 +3,111 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## Session 2026-08-23/24 (night): the second pass over the same 13, plus what it spawned
+
+Supersedes the section below where they disagree. **The board has 7 open tickets**, and none of
+them is open by neglect — each has a stated reason below.
+
+**Closed with evidence this session:** #816, #833, #835, #836, #837, #838, #839.
+**Filed this session:** #835, #836, #837, #838, #839, #840, #841.
+**Still open, with the reason:** #806, #807, #808, #831, #834, #840, #841.
+
+Commits, oldest first: `b03cafd180` (#835), `22341179b8` (#833), `a7b573ea47` (#806 b3),
+`f637bcf7f9` (nloc ring), `c451a86db7` (red master), `a815305f1c` (#816), `304eccaa6e` (#837),
+`670d5e8925` (#838), `6678944bd9` (#806 b4), `b2a5544c3d` (#839), `5a182f9fe9` (#836),
+`d1bba74f77` (#840 findings 1+3).
+
+**Nothing has been pushed.** That is a live decision for the operator, not an oversight — see
+"Blocked on a push" below.
+
+### Master was red and nobody knew — the finding that justifies the whole #816 line of work
+
+The first strict full run of the session found `worktrees-panel-multirepo` had been failing
+since #815 landed hours earlier: a hand-rolled drizzle chain mock never learned #815's LEFT
+join. **A hand-rolled mock is invisible to both import-graph scoping and typecheck**, so the
+scoped gate never ran it and the root typecheck could not see it. Fixed in `c451a86db7`.
+
+That is #816's thesis demonstrated live rather than argued: the gate's blind spots are not
+hypothetical, and they stay green while master is red.
+
+### Three traps found, all cheap to re-hit
+
+- **`node.parent` is `undefined` in raw `ts.createSourceFile` guard scanners** (they parse with
+  `setParentNodes: false`) — but **NOT** in `generate-openapi.ts`, which is ts-morph with
+  defaults and relies on `getParent()` throughout. The blanket rule recorded last session is
+  too broad; an agent applying it to the generator would have broken working code. It correctly
+  refused.
+- **A whole-file grandfather entry hides every FUTURE offender in that file, not just the one it
+  was written for.** #839 grandfathered `test-tree-write-hermeticity.test.ts` whole; removing
+  the entry in #840 immediately surfaced two more sites in it. Next such entry should name the
+  **site**, not the file.
+- **The reaper is gated on `statSync(...).isDirectory()` — loose FILES are excluded on purpose.**
+  So "rename it to `ak-`" is a no-op for a file and reads as a fix. Four of #839's five targets
+  were files; they had to be minted *inside* an `ak-` directory instead.
+
+### Blocked on a push — #807 and #834
+
+Both need a **Linux CI run**, hence a push. #834 is the confirmation that #828/#832/#833's kill
+fixes actually work on Linux — they are unprovable on Windows, and the Windows-side evidence is
+already banked. #807 needs the CI placement decision before a coverage floor means anything.
+**The push decision is the operator's and was deliberately left alone.**
+
+### Deferred on the machine, with the reason — #831
+
+Its first step is a **fresh deep code-metrics run**. The cached shallow run reports **zero**
+`split_responsibility` candidates, which is a measurement artifact — so an agent that runs the
+documented command on a RAM-starved box would see 0, conclude the work is done, and close a
+90-file remainder on nothing. At the time of writing: 2.9 GB usable of 28 GB and actively
+swapping (484 faults/s). **This waits for a quieter box; running it degraded is worse than not
+running it.**
+
+### Open by design, held by a ratchet — #806 and #808
+
+- **#806**: 64 unvalidated reads remain (was 92). The **route-level surface is exhausted** —
+  the remainder is six documented rejection families, and batch 5's real question is whether
+  moving a service guard to the boundary is worth turning a 404 into a 400. Probably no for
+  most. Held by `route-body-validation-ratchet.test.ts`.
+- **#808**: 65 grandfathered files / ~898 type errors remain (was 132 / 1044). Eight files are
+  522 of the previous 962 (`monitor-auto-start` 210, `session-summary` 86, …), so the next batch
+  has an obvious shape.
+
+### #840 is half done
+
+Findings 1 and 3 landed in `d1bba74f77`. **Finding 2 (43 unswept non-`mkdtemp` prefixes) is a
+decision, not cleanup**: either each site mints its file inside an `ak-` directory, or the
+reaper grows a file-sweep with an explicit exclusion for the `test-db-template-<hash>` build
+cache — which is more machinery and more ways to delete the wrong thing. The first is almost
+certainly right.
+
+### Unverified, stated plainly
+
+- **The full suite has not been run since `b03cafd180`.** Every gate this session was targeted
+  (`--maxWorkers=1..2 --pool=forks`) because the box was RAM-bound throughout. `pnpm --filter
+  agentic-kanban test` is the outstanding check for the whole session's work.
+- **`openTerminal` has no test** — win32-only, spawns a real terminal window. Typecheck is the
+  only evidence for that hunk of `d1bba74f77`.
+- **`packages/e2e` typechecks but its Playwright suite was not run** (#837).
+- **POSIX kill/detach behaviour is unobserved** — #834 and #841 both exist for that reason.
+
+### Operator flag, not acted on
+
+`packages/server/kanban.db` is a **schema-only stub**. The CLI warns and falls back to
+`~/.agentic-kanban/kanban.db`, which is the real board — so tools that pick the checkout path
+on presence alone will silently address an empty database. Not deleted (DB hard rule); it needs
+a human decision.
+
+### Next steps, in order
+
+1. **Operator: decide the push.** It unblocks #834 and #807 together.
+2. `pnpm --filter agentic-kanban test` on an idle box — the session's outstanding gate.
+3. #831 once RAM frees up (fresh deep code-metrics run FIRST; a 0-candidate result from a
+   shallow run is the artifact, not the answer).
+4. #808 next batch — the eight heavy files above.
+5. #840 finding 2 — take the "mint inside an `ak-` dir" option unless the reaper decision is
+   revisited deliberately.
+6. #806 batch 5 only if the 404→400 trade is judged worth it; otherwise close it as
+   ratchet-held with the six families as the record.
+
 ## Session 2026-08-23 (later): driving the 13 open tickets to Done
 
 State at the time of writing, and the `## Next steps` section far below is STALE where it says
