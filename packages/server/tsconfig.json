@@ -9,9 +9,5 @@
   "include": [
     "src"
   ],
-  "exclude": [
-    "src/__tests__/agent.service.test.ts",
-    "src/__tests__/issues-routes-edge-cases.test.ts",
-    "src/__tests__/workflow.service.test.ts"
-  ]
+  "exclude": []
 }

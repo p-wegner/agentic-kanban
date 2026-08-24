@@ -249,7 +249,7 @@ describe("agent.service", () => {
       });
 
       // Find the stdout data handler
-      const stdoutHandler = mockProc.stdout.on.mock.calls.find(
+      const stdoutHandler = vi.mocked(mockProc.stdout.on).mock.calls.find(
         (c: any[]) => c[0] === "data",
       )?.[1] as (...args: unknown[]) => unknown;
       stdoutHandler(Buffer.from("output line"));
@@ -274,7 +274,7 @@ describe("agent.service", () => {
         onOutput: onOutput,
       });
 
-      const stderrHandler = mockProc.stderr.on.mock.calls.find(
+      const stderrHandler = vi.mocked(mockProc.stderr.on).mock.calls.find(
         (c: any[]) => c[0] === "data",
       )?.[1] as (...args: unknown[]) => unknown;
       stderrHandler(Buffer.from("error msg"));
@@ -330,7 +330,7 @@ describe("agent.service", () => {
         onOutput: onOutput,
       });
 
-      const exitHandler = mockProc.on.mock.calls.find(
+      const exitHandler = vi.mocked(mockProc.on).mock.calls.find(
         (c: any[]) => c[0] === "exit",
       )?.[1] as (...args: unknown[]) => unknown;
       exitHandler(0, null);
@@ -362,12 +362,12 @@ describe("agent.service", () => {
       });
 
       // Trigger stdout (which will throw) then exit (should still fire)
-      const stdoutHandler = mockProc.stdout.on.mock.calls.find(
+      const stdoutHandler = vi.mocked(mockProc.stdout.on).mock.calls.find(
         (c: any[]) => c[0] === "data",
       )?.[1] as (...args: unknown[]) => unknown;
       stdoutHandler(Buffer.from("data"));
 
-      const exitHandler = mockProc.on.mock.calls.find(
+      const exitHandler = vi.mocked(mockProc.on).mock.calls.find(
         (c: any[]) => c[0] === "exit",
       )?.[1] as (...args: unknown[]) => unknown;
       exitHandler(0, null);
@@ -454,7 +454,7 @@ describe("agent.service", () => {
           agentCommand: "claude",
           keepAlive: true,
           planMode: false,
-          provider: "claude",
+          provider: "claude-code",
         });
 
         expect(mockProc.stdin.end).toHaveBeenCalledWith("resolve the conflict\n");
@@ -476,7 +476,7 @@ describe("agent.service", () => {
         onOutput: onOutput,
       });
 
-      const errorHandler = mockProc.on.mock.calls.find(
+      const errorHandler = vi.mocked(mockProc.on).mock.calls.find(
         (c: any[]) => c[0] === "error",
       )?.[1] as (...args: unknown[]) => unknown;
       errorHandler(new Error("spawn ENOENT"));
@@ -577,7 +577,7 @@ describe("agent.service", () => {
         agentArgs: undefined,
         onOutput: onOutput,
         agentCommand: "claude",
-        provider: "claude",
+        provider: "claude-code",
       });
       expect(getProcess("hang-1")).toBeDefined();
 
@@ -606,10 +606,10 @@ describe("agent.service", () => {
         agentArgs: undefined,
         onOutput: onOutput,
         agentCommand: "claude",
-        provider: "claude",
+        provider: "claude-code",
       });
 
-      const stdoutHandler = mockProc.stdout.on.mock.calls.find(
+      const stdoutHandler = vi.mocked(mockProc.stdout.on).mock.calls.find(
         (c: any[]) => c[0] === "data",
       )?.[1] as (...args: unknown[]) => unknown;
 
@@ -640,7 +640,7 @@ describe("agent.service", () => {
         agentArgs: undefined,
         onOutput: onOutput,
         agentCommand: "claude",
-        provider: "claude",
+        provider: "claude-code",
       });
       vi.advanceTimersByTime(60_000);
 
@@ -729,7 +729,7 @@ describe("agent.service", () => {
         agentArgs: undefined,
         onOutput: vi.fn(),
         agentCommand: "claude",
-        provider: "claude",
+        provider: "claude-code",
         containerProvision: containerProvision,
       });
 
@@ -750,7 +750,7 @@ describe("agent.service", () => {
         agentArgs: undefined,
         onOutput: vi.fn(),
         agentCommand: "claude",
-        provider: "claude",
+        provider: "claude-code",
         containerProvision: makeContainerProvision("container-def456"),
       });
       launch({
@@ -797,7 +797,7 @@ describe("agent.service", () => {
         agentArgs: undefined,
         onOutput: vi.fn(),
         agentCommand: "claude",
-        provider: "claude",
+        provider: "claude-code",
         containerProvision: makeContainerProvision("container-version1"),
       });
 
@@ -822,7 +822,7 @@ describe("agent.service", () => {
         agentArgs: undefined,
         onOutput: vi.fn(),
         agentCommand: "claude",
-        provider: "claude",
+        provider: "claude-code",
         extraEnv: { KANBAN_CUSTOM_TEST: "abc123" },
         containerProvision: makeContainerProvision("container-env1"),
       });
