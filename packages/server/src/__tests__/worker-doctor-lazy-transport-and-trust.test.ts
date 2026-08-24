@@ -117,7 +117,7 @@ describe("#847 — the git transport check does not call a not-yet-bound listene
       checks: [check],
       ok: check.status !== "fail",
     });
-    expect(rendered).toContain("[????]");
+    expect(rendered).toContain("[UNKN]");
     expect(rendered).not.toContain("check(s) failed");
     expect(rendered).toContain("1 indeterminate");
   });

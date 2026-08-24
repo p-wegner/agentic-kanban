@@ -223,7 +223,7 @@ describe("worker doctor — rendering", () => {
     };
     const text = renderDoctorReport(report);
     expect(text).toContain("[PASS] fleet port reachable");
-    expect(text).toContain("[????] claude logged in");
+    expect(text).toContain("[UNKN] claude logged in");
     expect(text).toContain("run claude /login");
     // The honest framing: this half genuinely cannot see the board's view (docs §1).
     expect(text).toContain("doctor-board");
