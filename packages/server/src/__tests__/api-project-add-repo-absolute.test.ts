@@ -47,7 +47,7 @@ describe("POST /:id/repos absolute-path guard (#68)", () => {
     const app = createApp();
     const res = await postRepo(app, { path: "projects/andrena/toy-fullstack/frontend" });
     expect(res.status).toBe(400);
-    const body = await res.json();
+    const body = await res.json() as { error: string };
     expect(body.error).toBe("repo path must be an absolute path");
     // Must NOT have leaked into detectRepoInfo (which would produce a "not a git repository" error
     // pointing at the server's own directory).
@@ -58,13 +58,13 @@ describe("POST /:id/repos absolute-path guard (#68)", () => {
     const app = createApp();
     const res = await postRepo(app, { path: "../frontend" });
     expect(res.status).toBe(400);
-    expect((await res.json()).error).toBe("repo path must be an absolute path");
+    expect((await res.json() as { error: string }).error).toBe("repo path must be an absolute path");
   });
 
   it("still enforces the exactly-one-of guard before the absolute check", async () => {
     const app = createApp();
     const res = await postRepo(app, {});
     expect(res.status).toBe(400);
-    expect((await res.json()).error).toBe("Provide exactly one of path, cloneUrl, or createName");
+    expect((await res.json() as { error: string }).error).toBe("Provide exactly one of path, cloneUrl, or createName");
   });
 });

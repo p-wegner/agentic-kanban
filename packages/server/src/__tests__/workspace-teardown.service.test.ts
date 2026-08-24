@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import type { runScript } from "../services/script-runner.js";
 import { mkdtempSync, rmSync, mkdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -103,7 +104,8 @@ describe("teardownWorktree", () => {
       killDir: vi.fn(async () => 1),
       killPorts: vi.fn(async () => 1),
       killSupervisor: vi.fn(async () => 1),
-      runScript: vi.fn(async () => ({ ok: true, output: "" })),
+      // Typed so `runScript.mock.calls[0]` destructures, instead of being an empty tuple.
+      runScript: vi.fn<typeof runScript>(async () => ({ ok: true, output: "" })),
     };
   }
 
@@ -145,7 +147,8 @@ describe("teardownWorktree", () => {
       killDir: vi.fn(async () => 1),
       killSupervisor: vi.fn(async () => { order.push("supervisor"); return 1; }),
       killPorts: vi.fn(async () => { order.push("ports"); return 1; }),
-      runScript: vi.fn(async () => ({ ok: true, output: "" })),
+      // Typed so `runScript.mock.calls[0]` destructures, instead of being an empty tuple.
+      runScript: vi.fn<typeof runScript>(async () => ({ ok: true, output: "" })),
     };
     await teardownWorktree(
       { workingDir: "C:/andrena/.worktrees/feature_ak-42-foo", branch: "feature/ak-42-foo", label: "merge" },
@@ -161,7 +164,8 @@ describe("teardownWorktree", () => {
       killDir: vi.fn(async () => 0),
       killSupervisor: vi.fn(async () => { throw new Error("boom"); }),
       killPorts: vi.fn(async () => 1),
-      runScript: vi.fn(async () => ({ ok: true, output: "" })),
+      // Typed so `runScript.mock.calls[0]` destructures, instead of being an empty tuple.
+      runScript: vi.fn<typeof runScript>(async () => ({ ok: true, output: "" })),
     };
     await expect(
       teardownWorktree({ workingDir: "C:/andrena/.worktrees/feature_ak-1-x", label: "delete" }, d),
@@ -214,7 +218,8 @@ describe("teardownWorktree", () => {
     const d = {
       killDir: vi.fn(async () => { throw new Error("boom"); }),
       killPorts: vi.fn(async () => 0),
-      runScript: vi.fn(async () => ({ ok: true, output: "" })),
+      // Typed so `runScript.mock.calls[0]` destructures, instead of being an empty tuple.
+      runScript: vi.fn<typeof runScript>(async () => ({ ok: true, output: "" })),
     };
     await expect(
       teardownWorktree({ workingDir: "C:/andrena/.worktrees/feature_ak-1-x", label: "delete" }, d),

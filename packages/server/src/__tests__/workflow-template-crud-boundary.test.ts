@@ -44,10 +44,10 @@ describe("workflow.service — template CRUD boundary (empty-node draft)", () =>
     expect("error" in result).toBe(false);
     expect("data" in result).toBe(true);
     if ("data" in result) {
-      expect(result.data.name).toBe("Blank Draft");
-      expect(result.data.isBuiltin).toBe(false);
-      expect(result.data.nodes).toHaveLength(0);
-      expect(result.data.edges).toHaveLength(0);
+      expect(result.data?.name).toBe("Blank Draft");
+      expect(result.data?.isBuiltin).toBe(false);
+      expect(result.data?.nodes).toHaveLength(0);
+      expect(result.data?.edges).toHaveLength(0);
     }
   });
 

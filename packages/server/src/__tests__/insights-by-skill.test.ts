@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { projects, projectStatuses, issues, workspaces, sessions, agentSkills } from "@agentic-kanban/shared/schema";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createInsightsRoute } from "../routes/insights.js";
+import type { InsightsData } from "../services/insights.service.js";
 
 /**
  * Integration tests for the Insights "By Skill" aggregation (#110).
@@ -54,7 +55,7 @@ async function getBySkill(db: TestDb, projectId: string) {
   const app = createInsightsRoute(db);
   const res = await app.request(`/?projectId=${projectId}&range=all`);
   expect(res.status).toBe(200);
-  const body = await res.json();
+  const body = await res.json() as InsightsData;
   return body.bySkill as Array<{ skillId: string | null; skillName: string; sessionCount: number }>;
 }
 
@@ -135,7 +136,7 @@ describe("insights by-skill attribution (#110)", () => {
     const app = createInsightsRoute(db);
     const res = await app.request(`/?projectId=${projectId}&range=all`);
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as InsightsData;
 
     expect(body.totals.dateFrom).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(body.totals.dateTo).toMatch(/^\d{4}-\d{2}-\d{2}T/);

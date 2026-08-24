@@ -1,21 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { dockerAvailable, dockerExec } from "@agentic-kanban/shared/lib/docker-exec";
 
 // Capture the raw `docker` argv the default compose runner passes to the adapter,
 // so we can assert teardown removes locally-built images (#106).
-const dockerExecMock = vi.fn(async () => ({ stdout: "", stderr: "", code: 0 }));
-const dockerAvailableMock = vi.fn(async () => true);
+const dockerExecMock = vi.fn<typeof dockerExec>(async () => ({ stdout: "", stderr: "", code: 0, error: null }));
+const dockerAvailableMock = vi.fn<typeof dockerAvailable>(async () => true);
 
 vi.mock("@agentic-kanban/shared/lib/docker-exec", () => ({
-  dockerExec: (...args: unknown[]) => dockerExecMock(...(args as [])),
-  dockerAvailable: (...args: unknown[]) => dockerAvailableMock(...(args as [])),
+  dockerExec: (...args: Parameters<typeof dockerExec>) => dockerExecMock(...args),
+  dockerAvailable: (...args: Parameters<typeof dockerAvailable>) => dockerAvailableMock(...args),
 }));
 
 import { createDefaultComposeRunner } from "../services/workspace-services.service.js";
 
 function lastDownArgs(): string[] {
-  const call = dockerExecMock.mock.calls.find((c) => Array.isArray(c[0]) && (c[0] as string[]).includes("down"));
+  const call = dockerExecMock.mock.calls.find((c) => c[0].includes("down"));
   if (!call) throw new Error("no `down` invocation captured");
-  return call[0] as string[];
+  return call[0];
 }
 
 describe("default compose runner — teardown removes build-context images (#106)", () => {

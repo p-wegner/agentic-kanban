@@ -46,8 +46,8 @@ describe("confirmEpicDecomposition — child_of edges and Drive creation", () =>
         issueId: parentId,
         projectId,
         children: [
-          { tempId: "t1", title: "Child 1", priority: "medium" },
-          { tempId: "t2", title: "Child 2", priority: "medium" },
+          { tempId: "t1", title: "Child 1", description: "", priority: "medium" },
+          { tempId: "t2", title: "Child 2", description: "", priority: "medium" },
         ],
         dependencies: [],
       },
@@ -83,7 +83,7 @@ describe("confirmEpicDecomposition — child_of edges and Drive creation", () =>
       {
         issueId: parentId,
         projectId,
-        children: [{ tempId: "t1", title: "Subtask", priority: "medium" }],
+        children: [{ tempId: "t1", title: "Subtask", description: "", priority: "medium" }],
         dependencies: [],
         driveTarget: "Ship the epic",
       },
@@ -111,7 +111,7 @@ describe("confirmEpicDecomposition — child_of edges and Drive creation", () =>
       {
         issueId: parentId,
         projectId,
-        children: [{ tempId: "t1", title: "Subtask", priority: "medium" }],
+        children: [{ tempId: "t1", title: "Subtask", description: "", priority: "medium" }],
         dependencies: [],
       },
       db as any,
