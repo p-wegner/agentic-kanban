@@ -26,7 +26,7 @@ function makeTempDir(prefix: string): string {
 }
 
 function makePluginDir(id: string, name: string): string {
-  const dir = makeTempDir("plugin-market-");
+  const dir = makeTempDir("ak-plugin-market-");
   writeFileSync(
     join(dir, "kanban-plugin.json"),
     JSON.stringify({ id, name, version: "1.2.3", description: `${name} description` }),
@@ -35,7 +35,7 @@ function makePluginDir(id: string, name: string): string {
 }
 
 async function insertProject(db: TestDb): Promise<string> {
-  const parent = makeTempDir("plugin-market-repo-");
+  const parent = makeTempDir("ak-plugin-market-repo-");
   const repo = join(parent, "product-repo");
   mkdirSync(repo, { recursive: true });
   gitExecSync(["init"], { cwd: repo });
@@ -60,7 +60,7 @@ describe("plugin marketplace", () => {
 
   beforeEach(() => {
     ({ db, dispose } = createTestDb());
-    pluginsHome = makeTempDir("plugin-market-home-");
+    pluginsHome = makeTempDir("ak-plugin-market-home-");
     process.env.AGENTIC_KANBAN_PLUGINS_DIR = pluginsHome;
     // Point at a non-existent dir so the repo's REAL bundled plugins/ never leaks into
     // assertions about entry counts; the bundled tests below override this per-test.
@@ -169,7 +169,7 @@ describe("plugin marketplace", () => {
     const svc = service();
     // A local "origin" repo the clone can pull from; sourceUrl only marks the row as
     // board-managed — the pull itself uses the clone's own origin remote.
-    const originParent = makeTempDir("plugin-market-origin-");
+    const originParent = makeTempDir("ak-plugin-market-origin-");
     const origin = join(originParent, "origin");
     mkdirSync(origin, { recursive: true });
     gitExecSync(["init"], { cwd: origin });
@@ -177,7 +177,7 @@ describe("plugin marketplace", () => {
     gitExecSync(["add", "."], { cwd: origin });
     gitExecSync(["commit", "-m", "v1"], { cwd: origin });
 
-    const cloneParent = makeTempDir("plugin-market-clone-");
+    const cloneParent = makeTempDir("ak-plugin-market-clone-");
     const clone = join(cloneParent, "gitplug");
     gitExecSync(["clone", origin, clone], {});
     const row = await svc.installPlugin({ source: clone });
@@ -221,7 +221,7 @@ describe("plugin marketplace", () => {
   });
 
   function makeBundledDir(...plugins: Array<{ id: string; name?: string; broken?: boolean }>): string {
-    const root = makeTempDir("plugin-market-bundled-");
+    const root = makeTempDir("ak-plugin-market-bundled-");
     for (const p of plugins) {
       const dir = join(root, p.id);
       mkdirSync(dir, { recursive: true });

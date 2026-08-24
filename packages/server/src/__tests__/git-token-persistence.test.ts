@@ -58,7 +58,7 @@ describe("persisted git token scopes (#775)", () => {
 
   beforeAll(async () => {
     db = createTestDb().db as unknown as Database;
-    repoDir = mkdtempSync(join(tmpdir(), "git-token-persist-"));
+    repoDir = mkdtempSync(join(tmpdir(), "ak-git-token-persist-"));
     await gitExecOrThrow(["init", "-b", "master", repoDir], {});
     writeFileSync(join(repoDir, "README.md"), "hello fleet\n");
     await gitExecOrThrow(["add", "."], { cwd: repoDir });

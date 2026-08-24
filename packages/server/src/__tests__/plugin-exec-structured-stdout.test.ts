@@ -32,7 +32,7 @@ describe("plugin-exec structured stdout", () => {
   // pasted onto a shell command line — which is the same reason the real planner uses stdout.
   let command = "";
   beforeAll(() => {
-    const dir = mkdtempSync(join(tmpdir(), "plugin-exec-plan-"));
+    const dir = mkdtempSync(join(tmpdir(), "ak-plugin-exec-plan-"));
     const planFile = join(dir, "plan.json");
     const emitter = join(dir, "emit.mjs");
     writeFileSync(planFile, bigPlan, "utf8");

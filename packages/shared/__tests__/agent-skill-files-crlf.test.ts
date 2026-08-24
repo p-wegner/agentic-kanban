@@ -33,7 +33,7 @@ async function installSkill(name: string, eol: "\n" | "\r\n", front = `name: ${n
 }
 
 beforeEach(async () => {
-  repoPath = await mkdtemp(join(tmpdir(), "ak61-skills-"));
+  repoPath = await mkdtemp(join(tmpdir(), "ak-61-skills-"));
 });
 
 afterEach(async () => {
@@ -114,7 +114,7 @@ describe("writeAgentSkillFile", () => {
   // the result is materialized into the worktree. Exactly ONE frontmatter block.
   it("materializes a single frontmatter block from a CRLF local override", async () => {
     await installSkill("board-navigator", "\r\n");
-    const worktreePath = await mkdtemp(join(tmpdir(), "ak61-worktree-"));
+    const worktreePath = await mkdtemp(join(tmpdir(), "ak-61-worktree-"));
     try {
       const localPrompt = await readLocalSkillPrompt(repoPath, "board-navigator");
       await writeAgentSkillFile(worktreePath, {
@@ -135,7 +135,7 @@ describe("writeAgentSkillFile", () => {
   // prompt, it must not round-trip into a stacked second block.
   for (const [label, eol] of [["LF", "\n"], ["CRLF", "\r\n"]] as const) {
     it(`strips leading ${label} frontmatter already present in the prompt`, async () => {
-      const worktreePath = await mkdtemp(join(tmpdir(), "ak61-worktree-"));
+      const worktreePath = await mkdtemp(join(tmpdir(), "ak-61-worktree-"));
       try {
         const poisoned = ["---", "name: board-navigator", "description: stale", "---", "", SKILL_BODY]
           .join("\n")
@@ -158,7 +158,7 @@ describe("writeAgentSkillFile", () => {
   }
 
   it("keeps a `---` divider inside the skill body", async () => {
-    const worktreePath = await mkdtemp(join(tmpdir(), "ak61-worktree-"));
+    const worktreePath = await mkdtemp(join(tmpdir(), "ak-61-worktree-"));
     try {
       await writeAgentSkillFile(worktreePath, {
         name: "divider",

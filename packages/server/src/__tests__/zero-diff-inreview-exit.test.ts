@@ -64,7 +64,7 @@ import { createWorkflowEngine } from "../startup/exit-workflow.js";
  * fixture that only mocks execFile can no longer stand in for a worktree. So make one.
  */
 function fakeWorktree(): string {
-  const dir = mkdtempSync(join(tmpdir(), "zero-diff-ws-"));
+  const dir = mkdtempSync(join(tmpdir(), "ak-zero-diff-ws-"));
   writeFileSync(join(dir, ".git"), "gitdir: /nowhere");
   return dir;
 }

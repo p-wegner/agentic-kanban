@@ -271,12 +271,12 @@ describe("onboarding.service", () => {
     // accepts an existing directory as-is. Its manifest is what the marketplace catalog entry
     // must also declare (gitUrl doubles as install source here — see plugin-fs's looksLikeGitUrl
     // vs local-directory branch in installPlugin).
-    const pluginDir = makeTempDir("onboarding-plugin-");
+    const pluginDir = makeTempDir("ak-onboarding-plugin-");
     writeFileSync(
       join(pluginDir, "kanban-plugin.json"),
       JSON.stringify({ id: "catalog-plugin", name: "Catalog Plugin", version: "0.1.0" }),
     );
-    const marketplaceDir = makeTempDir("onboarding-marketplace-");
+    const marketplaceDir = makeTempDir("ak-onboarding-marketplace-");
     writeFileSync(
       join(marketplaceDir, "marketplace.json"),
       JSON.stringify([{ name: "Catalog Plugin", slug: "catalog-plugin", gitUrl: pluginDir }]),
@@ -304,9 +304,9 @@ describe("onboarding.service", () => {
   it("surfaces unfilled scaffold placeholders on an enabled plugin step instead of a bare done", async () => {
     // A real project repoPath: enabling this plugin actually writes its scaffold template to
     // disk, so a fake path (as the other tests use) would silently mkdir a stray directory.
-    const projectRepo = makeTempDir("onboarding-scaffold-project-");
+    const projectRepo = makeTempDir("ak-onboarding-scaffold-project-");
     const { projectId } = await seedProject(db, projectRepo);
-    const pluginDir = makeTempDir("onboarding-scaffold-plugin-");
+    const pluginDir = makeTempDir("ak-onboarding-scaffold-plugin-");
     const manifestJson = JSON.stringify({
       id: "scaffold-plugin",
       name: "Scaffold Plugin",

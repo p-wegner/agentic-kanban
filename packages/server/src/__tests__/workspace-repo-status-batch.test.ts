@@ -66,7 +66,7 @@ const ALL = parseIncludeParam("merge,conflicts,handoff,diffstats");
 
 const tempDirs: string[] = [];
 function makeWorktree(label: string, withHandoff: boolean): string {
-  const dir = mkdtempSync(join(tmpdir(), `wrsb-${label}-`));
+  const dir = mkdtempSync(join(tmpdir(), `ak-wrsb-${label}-`));
   writeFileSync(join(dir, ".git"), "gitdir: /nowhere\n", "utf-8");
   if (withHandoff) writeFileSync(join(dir, "HANDOFF.md"), `# Session Handoff\n${label} content\n`, "utf-8");
   tempDirs.push(dir);

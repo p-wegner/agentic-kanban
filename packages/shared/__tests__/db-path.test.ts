@@ -352,7 +352,7 @@ describe("resolveDbLocation content probe (#663)", () => {
 });
 
 describe("sqliteHasBoardContent", () => {
-  const tmpRoot = mkdtempSync(join(tmpdir(), "db-path-probe-"));
+  const tmpRoot = mkdtempSync(join(tmpdir(), "ak-db-path-probe-"));
 
   afterAll(() => {
     rmSync(tmpRoot, { recursive: true, force: true });

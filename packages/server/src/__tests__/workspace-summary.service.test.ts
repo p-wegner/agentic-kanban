@@ -13,7 +13,7 @@ import { createTestDb } from "./helpers/test-db.js";
 // workspace to be eligible, so they need a real directory rather than a made-up path.
 const tempWorktrees: string[] = [];
 function makeTempWorktree(label: string): string {
-  const dir = mkdtempSync(join(tmpdir(), `ws-summary-${label}-`));
+  const dir = mkdtempSync(join(tmpdir(), `ak-ws-summary-${label}-`));
   tempWorktrees.push(dir);
   return dir;
 }

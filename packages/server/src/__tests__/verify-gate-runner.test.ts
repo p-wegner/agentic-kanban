@@ -46,7 +46,7 @@ function runGate(opts: {
 }
 
 async function tmp(): Promise<string> {
-  return mkdtemp(join(tmpdir(), "verify-gate-test-"));
+  return mkdtemp(join(tmpdir(), "ak-verify-gate-test-"));
 }
 
 describe("verify-gate-runner — source identity (#952)", () => {
@@ -371,7 +371,7 @@ describe("verify-gate-runner — bounded self-repair loop (#795)", () => {
     process.platform === "win32" ? "echo BUILD_BROKEN 1>&2 && exit 1" : "echo BUILD_BROKEN 1>&2; false";
 
   beforeEach(async () => {
-    hookDir = await mkdtemp(join(tmpdir(), "verify-gate-loop-"));
+    hookDir = await mkdtemp(join(tmpdir(), "ak-verify-gate-loop-"));
   });
   afterEach(async () => {
     await rmTree(hookDir);

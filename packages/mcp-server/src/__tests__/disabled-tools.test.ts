@@ -99,7 +99,7 @@ describe("MCP disabled_mcp_tools governance gate", () => {
   let tmpDir: string;
 
   beforeAll(async () => {
-    tmpDir = mkdtempSync(join(tmpdir(), "mcp-test-disabled-"));
+    tmpDir = mkdtempSync(join(tmpdir(), "ak-mcp-test-disabled-"));
     const dbPath = join(tmpDir, "test.db");
     createTestDb(dbPath);
 
@@ -202,7 +202,7 @@ describe("MCP disabled_mcp_tools gate normalizes whitespace and case", () => {
   const EXPECTED_DISABLED = ["delete_issue", "delete_workspace"] as const;
 
   beforeAll(async () => {
-    tmpDir = mkdtempSync(join(tmpdir(), "mcp-test-disabled-norm-"));
+    tmpDir = mkdtempSync(join(tmpdir(), "ak-mcp-test-disabled-norm-"));
     const dbPath = join(tmpDir, "test.db");
     createTestDb(dbPath);
 

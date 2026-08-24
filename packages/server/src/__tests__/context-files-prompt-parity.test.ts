@@ -18,7 +18,7 @@ import { resolveEffectivePrompt, appendContextFilesToPrompt } from "../services/
 const SERVICES = join(import.meta.dirname!, "..", "services");
 
 describe("resolveEffectivePrompt (#524)", () => {
-  const dir = mkdtempSync(join(tmpdir(), "ctxfiles-"));
+  const dir = mkdtempSync(join(tmpdir(), "ak-ctxfiles-"));
   const file = join(dir, "CLAUDE.local.md");
   writeFileSync(file, "TICKET BODY HERE", "utf-8");
 

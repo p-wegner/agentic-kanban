@@ -68,7 +68,7 @@ describe("plugin manifest / loop-plan UTF-8 repro", () => {
       `console.log(JSON.stringify({ units: [{ id: "r1", title: ${JSON.stringify(EM_DASH_TITLE)} }] }));`,
     );
 
-    const projectRepo = makeTempDir("plugin-encoding-repo-");
+    const projectRepo = makeTempDir("ak-plugin-encoding-repo-");
     gitExecSync(["init"], { cwd: projectRepo });
     const projectId = randomUUID();
     const now = new Date().toISOString();

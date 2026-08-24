@@ -50,7 +50,7 @@ async function insertOrphan(client: Client, id = "orphan1", title = "Orphaned is
 let quarantineDir: string;
 
 beforeEach(() => {
-  quarantineDir = mkdtempSync(join(tmpdir(), "fk-quarantine-test-"));
+  quarantineDir = mkdtempSync(join(tmpdir(), "ak-fk-quarantine-test-"));
 });
 
 afterEach(() => {

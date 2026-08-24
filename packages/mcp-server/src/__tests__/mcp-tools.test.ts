@@ -93,7 +93,7 @@ describe("MCP Server Tools", () => {
 
   beforeAll(async () => {
     // Spawn the server against an isolated, seeded temp DB — never the real dev DB.
-    tmpDir = mkdtempSync(join(tmpdir(), "mcp-test-tools-"));
+    tmpDir = mkdtempSync(join(tmpdir(), "ak-mcp-test-tools-"));
     const dbPath = join(tmpDir, "test.db");
     createTestDb(dbPath);
     const db = new DatabaseSync(dbPath);
@@ -273,7 +273,7 @@ describe("MCP active project resolution", () => {
   let secondStatusId: string;
 
   beforeAll(async () => {
-    tmpDir = mkdtempSync(join(tmpdir(), "mcp-test-"));
+    tmpDir = mkdtempSync(join(tmpdir(), "ak-mcp-test-"));
     dbPath = join(tmpDir, "test.db");
     createTestDb(dbPath);
 
@@ -355,7 +355,7 @@ describe("MCP active project resolution", () => {
   });
 
   it("get_context returns error when no activeProjectId preference is set", async () => {
-    const noActiveTmpDir = mkdtempSync(join(tmpdir(), "mcp-test-noactive-"));
+    const noActiveTmpDir = mkdtempSync(join(tmpdir(), "ak-mcp-test-noactive-"));
     const noActiveDbPath = join(noActiveTmpDir, "test.db");
     createTestDb(noActiveDbPath);
 
@@ -381,7 +381,7 @@ describe("MCP active project resolution", () => {
   }, SPAWN_TEST_TIMEOUT_MS);
 
   it("create_issue returns error when no activeProjectId preference is set", async () => {
-    const noActiveTmpDir = mkdtempSync(join(tmpdir(), "mcp-test-noactive2-"));
+    const noActiveTmpDir = mkdtempSync(join(tmpdir(), "ak-mcp-test-noactive2-"));
     const noActiveDbPath = join(noActiveTmpDir, "test.db");
     createTestDb(noActiveDbPath);
 

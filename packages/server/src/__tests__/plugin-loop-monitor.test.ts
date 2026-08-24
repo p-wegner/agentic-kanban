@@ -48,7 +48,7 @@ const MANIFEST = {
 };
 
 function makePluginDir(): string {
-  const dir = makeTempDir("loop-monitor-plugin-");
+  const dir = makeTempDir("ak-loop-monitor-plugin-");
   writeFileSync(join(dir, "kanban-plugin.json"), JSON.stringify(MANIFEST, null, 2));
   return dir;
 }

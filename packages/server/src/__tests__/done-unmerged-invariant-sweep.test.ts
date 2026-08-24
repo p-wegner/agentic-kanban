@@ -32,7 +32,7 @@ epo\.git`. On a clean checkout it hangs.
  */
 const tempRepos: string[] = [];
 function makeTempRepo(): string {
-  const dir = mkdtempSync(join(tmpdir(), "done-unmerged-"));
+  const dir = mkdtempSync(join(tmpdir(), "ak-done-unmerged-"));
   mkdirSync(join(dir, ".git"), { recursive: true });
   tempRepos.push(dir);
   return dir;

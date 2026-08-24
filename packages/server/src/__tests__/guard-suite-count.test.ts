@@ -17,7 +17,7 @@ import { countAlwaysRunGuardSuites, ALWAYS_RUN_TESTS_DIRS } from "../services/pr
 const MARKER = "// @gate:always-run\n";
 
 function repoWith(files: Record<string, string>): string {
-  const root = mkdtempSync(join(tmpdir(), "guard-count-"));
+  const root = mkdtempSync(join(tmpdir(), "ak-guard-count-"));
   for (const [rel, body] of Object.entries(files)) {
     const abs = join(root, rel);
     mkdirSync(join(abs, ".."), { recursive: true });

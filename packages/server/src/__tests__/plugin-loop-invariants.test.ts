@@ -49,7 +49,7 @@ function makeTempDir(prefix: string): string {
 
 /** Own parent dir per repo: `setOutputLocation(…, "sidecar")` derives a FIXED sibling name. */
 function makeProjectRepo(): string {
-  const parent = makeTempDir("loop-inv-parent-");
+  const parent = makeTempDir("ak-loop-inv-parent-");
   const repo = join(parent, "product-repo");
   mkdirSync(repo, { recursive: true });
   gitExecSync(["init"], { cwd: repo });
@@ -79,7 +79,7 @@ function manifest(planEnv: Record<string, string> = {
  * planner consulted at all?" is observable.
  */
 function makeScriptedPluginDir(plans: unknown[]): string {
-  const dir = makeTempDir("loop-inv-plugin-");
+  const dir = makeTempDir("ak-loop-inv-plugin-");
   writeFileSync(join(dir, "kanban-plugin.json"), JSON.stringify(manifest(), null, 2));
   const skillDir = join(dir, "skills", "analysis");
   mkdirSync(skillDir, { recursive: true });
@@ -277,7 +277,7 @@ describe("plugin loop — the planner's {{repoPath}}/{{leadingRepoPath}} contrac
 
   it("hands the planner the OUTPUT repo as {{repoPath}} and the PRODUCT repo as {{leadingRepoPath}} in sidecar mode", async () => {
     const { db } = createTestDb();
-    const pluginDir = makeTempDir("loop-inv-sidecar-plugin-");
+    const pluginDir = makeTempDir("ak-loop-inv-sidecar-plugin-");
     writeFileSync(
       join(pluginDir, "kanban-plugin.json"),
       JSON.stringify(manifest({ LEADING: "{{leadingRepoPath}}", OUTPUT: "{{repoPath}}" }), null, 2),

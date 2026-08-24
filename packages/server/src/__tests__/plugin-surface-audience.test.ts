@@ -40,7 +40,7 @@ const MANIFEST = {
 };
 
 function makePluginDir(): string {
-  const dir = makeTempDir("audience-plugin-");
+  const dir = makeTempDir("ak-audience-plugin-");
   writeFileSync(join(dir, "kanban-plugin.json"), JSON.stringify(MANIFEST, null, 2));
   for (const name of ["operate", "step-runner"]) {
     const skillDir = join(dir, "skills", name);
@@ -51,7 +51,7 @@ function makePluginDir(): string {
 }
 
 function makeProjectRepo(): string {
-  const parent = makeTempDir("audience-parent-");
+  const parent = makeTempDir("ak-audience-parent-");
   const repo = join(parent, "product-repo");
   mkdirSync(repo, { recursive: true });
   gitExecSync(["init"], { cwd: repo });

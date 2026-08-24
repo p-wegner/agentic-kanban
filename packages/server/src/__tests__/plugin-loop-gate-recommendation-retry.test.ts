@@ -70,7 +70,7 @@ vi.mock("../services/plugin-gate-butler.service.js", () => ({
 const tempDirs: string[] = [];
 
 function makeGatePluginDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), "loop-gate-retry-plugin-"));
+  const dir = mkdtempSync(join(tmpdir(), "ak-loop-gate-retry-plugin-"));
   tempDirs.push(dir);
   writeFileSync(join(dir, "kanban-plugin.json"), JSON.stringify({
     id: "gate-plugin",

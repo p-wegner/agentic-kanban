@@ -58,7 +58,7 @@ import { healWorkspaceSummaryProjection } from "../services/workspace-summary-pr
 import type { GitService } from "../services/workspace-internals.js";
 
 function tempRepoDir(label: string): string {
-  const dir = mkdtempSync(join(tmpdir(), `rms-proj-${label}-`));
+  const dir = mkdtempSync(join(tmpdir(), `ak-rms-proj-${label}-`));
   writeFileSync(join(dir, ".git"), "gitdir: /nowhere\n", "utf-8");
   return dir;
 }

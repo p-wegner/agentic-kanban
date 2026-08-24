@@ -31,7 +31,7 @@ test.describe("@smoke: Projects API", () => {
     request,
   }) => {
     // Create a temporary git repo for the test
-    const tmpDir = mkdtempSync(join(tmpdir(), "e2e-project-"));
+    const tmpDir = mkdtempSync(join(tmpdir(), "ak-e2e-project-"));
     execSync("git init", { cwd: tmpDir });
     execSync("git config user.email test@test.com", { cwd: tmpDir });
     execSync("git config user.name Test", { cwd: tmpDir });
@@ -94,7 +94,7 @@ test.describe("@smoke: Projects API", () => {
   test("POST /api/projects/:id/statuses creates a new status", async ({
     request,
   }) => {
-    const tmpDir = mkdtempSync(join(tmpdir(), "e2e-status-"));
+    const tmpDir = mkdtempSync(join(tmpdir(), "ak-e2e-status-"));
     execSync("git init", { cwd: tmpDir });
     execSync("git config user.email test@test.com", { cwd: tmpDir });
     execSync("git config user.name Test", { cwd: tmpDir });

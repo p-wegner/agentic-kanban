@@ -55,7 +55,7 @@ const { recordBaseBranchHealth } = await import("../repositories/base-branch-hea
 
 const tempRepos: string[] = [];
 function makeRepoPath(): string {
-  const dir = mkdtempSync(join(tmpdir(), "base-health-conc-repo-"));
+  const dir = mkdtempSync(join(tmpdir(), "ak-base-health-conc-repo-"));
   mkdirSync(join(dir, ".git"), { recursive: true });
   tempRepos.push(dir);
   return dir;

@@ -31,13 +31,13 @@ function makeTempDir(prefix: string): string {
 }
 
 function makeProjectRepo(): string {
-  const repo = makeTempDir("provision-test-repo-");
+  const repo = makeTempDir("ak-provision-test-repo-");
   gitExecSync(["init"], { cwd: repo });
   return repo;
 }
 
 function makePluginDir(): string {
-  const dir = makeTempDir("provision-test-plugin-");
+  const dir = makeTempDir("ak-provision-test-plugin-");
   const manifest = {
     id: "test-safety-net",
     name: "Test Safety Net",
@@ -96,7 +96,7 @@ describe("workspace-provision.service materializeEnabledPluginSkills", () => {
 
     // A worktree is a SEPARATE checkout — it must not already carry the
     // leading repo's junctioned/gitignored plugin skill.
-    const worktreePath = makeTempDir("provision-test-worktree-");
+    const worktreePath = makeTempDir("ak-provision-test-worktree-");
     expect(existsSync(join(worktreePath, ".claude", "skills", "requirement-extraction"))).toBe(false);
 
     const provision = createWorkspaceProvisionService({
@@ -120,7 +120,7 @@ describe("workspace-provision.service materializeEnabledPluginSkills", () => {
     const projectId = await insertProject(db, repo);
     // Deliberately not enabled.
 
-    const worktreePath = makeTempDir("provision-test-worktree-");
+    const worktreePath = makeTempDir("ak-provision-test-worktree-");
     const provision = createWorkspaceProvisionService({
       database: db as unknown as Database,
       gitService: {} as GitService,
@@ -196,7 +196,7 @@ describe("workspace-provision.service loop-ticket skill resolution (#321)", () =
     const { db, repo, plugin, projectId, pluginService, provision } = await setup();
     await pluginService.enableForProject(plugin.id, projectId);
     await seedDefaultSkill(db);
-    const worktreePath = makeTempDir("provision-test-worktree-");
+    const worktreePath = makeTempDir("ak-provision-test-worktree-");
 
     const out = await provision.resolveAgentPromptAndSkill({
       issue: loopIssue(projectId, "plugin-loop:test-safety-net:extraction:auth-service-r1"),
@@ -218,7 +218,7 @@ describe("workspace-provision.service loop-ticket skill resolution (#321)", () =
     const { db, repo, plugin, projectId, pluginService, provision } = await setup();
     await pluginService.enableForProject(plugin.id, projectId);
     await seedDefaultSkill(db);
-    const worktreePath = makeTempDir("provision-test-worktree-");
+    const worktreePath = makeTempDir("ak-provision-test-worktree-");
 
     const out = await provision.resolveAgentPromptAndSkill({
       issue: loopIssue(projectId, null),
@@ -238,7 +238,7 @@ describe("workspace-provision.service loop-ticket skill resolution (#321)", () =
     const { db, repo, plugin, projectId, pluginService, provision } = await setup();
     await pluginService.enableForProject(plugin.id, projectId);
     await seedDefaultSkill(db);
-    const worktreePath = makeTempDir("provision-test-worktree-");
+    const worktreePath = makeTempDir("ak-provision-test-worktree-");
 
     const out = await provision.resolveAgentPromptAndSkill({
       issue: loopIssue(projectId, "plugin-loop:test-safety-net:extraction:auth-service-r1"),
@@ -259,7 +259,7 @@ describe("workspace-provision.service loop-ticket skill resolution (#321)", () =
     // skill would point the agent at a file that isn't there.
     const { db, repo, projectId, provision } = await setup();
     await seedDefaultSkill(db);
-    const worktreePath = makeTempDir("provision-test-worktree-");
+    const worktreePath = makeTempDir("ak-provision-test-worktree-");
 
     const out = await provision.resolveAgentPromptAndSkill({
       issue: loopIssue(projectId, "plugin-loop:test-safety-net:extraction:auth-service-r1"),
@@ -354,7 +354,7 @@ describe("workspace-provision.service onboarding init-skill ticket resolution (#
     const { repo, plugin, projectId, pluginService, provision, db } = await setup();
     await pluginService.enableForProject(plugin.id, projectId);
     await seedDefaultSkill(db);
-    const worktreePath = makeTempDir("provision-test-worktree-");
+    const worktreePath = makeTempDir("ak-provision-test-worktree-");
 
     const stepId = pluginInitSkillStepId("test-safety-net", "requirement-extraction");
     const externalKey = onboardingUnitKey(projectId, stepId);
@@ -379,7 +379,7 @@ describe("workspace-provision.service onboarding init-skill ticket resolution (#
     const { repo, projectId, provision, db } = await setup();
     await seedDefaultSkill(db);
     await seedDbInitSkill(db);
-    const worktreePath = makeTempDir("provision-test-worktree-");
+    const worktreePath = makeTempDir("ak-provision-test-worktree-");
 
     const stepId = dbInitSkillStepId(dbInitSkillId);
     const externalKey = onboardingUnitKey(projectId, stepId);
@@ -403,7 +403,7 @@ describe("workspace-provision.service onboarding init-skill ticket resolution (#
     const { repo, projectId, provision, db } = await setup();
     // Deliberately not enabled.
     await seedDefaultSkill(db);
-    const worktreePath = makeTempDir("provision-test-worktree-");
+    const worktreePath = makeTempDir("ak-provision-test-worktree-");
 
     const stepId = pluginInitSkillStepId("test-safety-net", "requirement-extraction");
     const externalKey = onboardingUnitKey(projectId, stepId);
@@ -426,7 +426,7 @@ describe("workspace-provision.service onboarding init-skill ticket resolution (#
     const { repo, plugin, projectId, pluginService, provision, db } = await setup();
     await pluginService.enableForProject(plugin.id, projectId);
     await seedDefaultSkill(db);
-    const worktreePath = makeTempDir("provision-test-worktree-");
+    const worktreePath = makeTempDir("ak-provision-test-worktree-");
 
     const stepId = pluginInitSkillStepId("test-safety-net", "requirement-extraction");
     const externalKey = onboardingUnitKey(projectId, stepId);

@@ -15,7 +15,7 @@ import {
 let worktree: string;
 
 beforeEach(() => {
-  worktree = mkdtempSync(join(tmpdir(), "dep-volumes-"));
+  worktree = mkdtempSync(join(tmpdir(), "ak-dep-volumes-"));
 });
 
 afterEach(() => {

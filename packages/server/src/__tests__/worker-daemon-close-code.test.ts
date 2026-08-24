@@ -15,7 +15,7 @@ import { describe, it, expect, afterAll, beforeAll, vi } from "vitest";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { WebSocketServer, type WebSocket as ServerSocket } from "ws";
 import { startWorkerDaemon, type WorkerDaemonHandle } from "../worker/worker-daemon.js";
@@ -27,7 +27,13 @@ describe("worker daemon disconnect log", () => {
   const logs: string[] = [];
   /** Every board-side socket the daemon has opened, in order. */
   const accepted: ServerSocket[] = [];
-  const stateFile = join(tmpdir(), `worker-close-code-${randomUUID()}.json`);
+  // #839 — these fixture files live INSIDE an `ak-` DIRECTORY rather than loose in
+  // `%TEMP%`, because the reaper (`helpers/reap-fixture-child-servers.ts`) only sweeps
+  // entries where `statSync(...).isDirectory()` — files are excluded on purpose, since
+  // `kanban-session-*.out` transcripts are read by a running server. A loose fixture file
+  // was therefore in NO swept namespace and a failed teardown leaked it permanently.
+  const fixtureDir = mkdtempSync(join(tmpdir(), "ak-worker-close-code-"));
+  const stateFile = join(fixtureDir, `worker-state-${randomUUID()}.json`);
 
   const nextSocket = async (n: number): Promise<ServerSocket> => {
     await vi.waitFor(() => expect(accepted.length).toBeGreaterThanOrEqual(n), { timeout: 15000 });
@@ -73,7 +79,7 @@ describe("worker daemon disconnect log", () => {
     // file vitest runs NEXT — the cross-file misattribution of #680 (#777, #816).
     await daemon?.stop({ killAgents: true });
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    rmSync(stateFile, { force: true });
+    rmSync(fixtureDir, { recursive: true, force: true });
   });
 
   it("names the board, and quotes its reason, when the board closes cleanly", async () => {

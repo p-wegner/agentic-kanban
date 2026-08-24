@@ -26,7 +26,7 @@ describe("worker-remote-sync (phase 2)", () => {
   }
 
   beforeEach(async () => {
-    repo = mkdtempSync(join(tmpdir(), "sync-repo-"));
+    repo = mkdtempSync(join(tmpdir(), "ak-sync-repo-"));
     await gitExecOrThrow(["init", "-b", "master", repo], {});
     await commit("base");
   });

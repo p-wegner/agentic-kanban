@@ -40,7 +40,7 @@ describe("codemods.preview.generate — supplied-script preview produces a real 
   const UNCHANGED = "unrelated.ts";
 
   beforeAll(async () => {
-    repoPath = await mkdtemp(join(tmpdir(), "codemod-preview-gen-"));
+    repoPath = await mkdtemp(join(tmpdir(), "ak-codemod-preview-gen-"));
     for (const name of CHANGED) {
       await writeFile(
         join(repoPath, name),

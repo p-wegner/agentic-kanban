@@ -52,7 +52,7 @@ const { createMergeQueueService } = await import("../services/merge-queue.servic
  *  then polls for its full 90-minute budget instead of failing. */
 const tempRepos: string[] = [];
 function makeRepoPath(): string {
-  const dir = mkdtempSync(join(tmpdir(), "merge-queue-lock-"));
+  const dir = mkdtempSync(join(tmpdir(), "ak-merge-queue-lock-"));
   mkdirSync(join(dir, ".git"), { recursive: true });
   tempRepos.push(dir);
   return dir;

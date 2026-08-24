@@ -20,7 +20,7 @@ describe("e2eLaneExists", () => {
   });
 
   it("is false for a checkout without one", () => {
-    const dir = mkdtempSync(join(tmpdir(), "no-e2e-"));
+    const dir = mkdtempSync(join(tmpdir(), "ak-no-e2e-"));
     try {
       expect(e2eLaneExists(dir)).toBe(false);
     } finally {
@@ -33,7 +33,7 @@ describe("runE2ESmokeLane", () => {
   it("reports INCONCLUSIVE — never failed — when there is no e2e package", async () => {
     // The distinction that matters: a checkout without the lane has not failed anything.
     // Reporting red here would block merges on an absence.
-    const dir = mkdtempSync(join(tmpdir(), "no-e2e-run-"));
+    const dir = mkdtempSync(join(tmpdir(), "ak-no-e2e-run-"));
     try {
       const result = await runE2ESmokeLane(dir);
       expect(result.inconclusive).toBe(true);
@@ -48,7 +48,7 @@ describe("runE2ESmokeLane", () => {
     // Same distinction the verify gate draws (#192): a wall-clock kill is retryable, not proof
     // the code is broken. Uses a real e2e-shaped checkout with a 1ms budget so the kill is
     // certain and instant.
-    const dir = mkdtempSync(join(tmpdir(), "e2e-timeout-"));
+    const dir = mkdtempSync(join(tmpdir(), "ak-e2e-timeout-"));
     try {
       mkdirSync(join(dir, "packages", "e2e"), { recursive: true });
       writeFileSync(join(dir, "packages", "e2e", "playwright.config.ts"), "export default {};\n");

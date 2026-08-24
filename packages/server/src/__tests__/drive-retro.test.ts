@@ -186,7 +186,7 @@ describe("drive retro telemetry", () => {
 describe("drive service finish → auto-writes retro (#804)", () => {
   it("completing a drive writes docs/board-runs/<slug>.md; abandoning does not", async () => {
     const { db } = createTestDb();
-    const repoPath = mkdtempSync(join(tmpdir(), "drive-retro-"));
+    const repoPath = mkdtempSync(join(tmpdir(), "ak-drive-retro-"));
     try {
       const { projectId, drive } = await seed(db, repoPath);
       const service = createDriveService({ database: db });

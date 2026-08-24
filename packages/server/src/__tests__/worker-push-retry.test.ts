@@ -56,7 +56,7 @@ const fakeRepo = (branch: string): WorkerRepoTransport => ({
 
 // A REAL directory: the runner spawns the agent with `cwd` set to the checkout, and a
 // nonexistent cwd fails the spawn before the push under test is ever reached.
-const CHECKOUT = mkdtempSync(join(tmpdir(), "worker-checkout-750-"));
+const CHECKOUT = mkdtempSync(join(tmpdir(), "ak-worker-checkout-750-"));
 
 /**
  * A git transport that does no git: `push` is scripted per attempt, and `cleanup` is

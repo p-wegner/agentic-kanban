@@ -73,7 +73,7 @@ import { activeMerges } from "../services/workspace-internals.js";
 
 const tempDirs: string[] = [];
 function makeTempWorktree(label: string): string {
-  const dir = mkdtempSync(join(tmpdir(), `ws-proj-${label}-`));
+  const dir = mkdtempSync(join(tmpdir(), `ak-ws-proj-${label}-`));
   // Make it look like a git working tree so isGitWorkingTree() passes without a repo.
   writeFileSync(join(dir, ".git"), "gitdir: /nowhere\n", "utf-8");
   tempDirs.push(dir);

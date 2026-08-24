@@ -37,7 +37,7 @@ const SRC_DIR = resolve(import.meta.dirname, "..");
 // throwaway temp DB BEFORE any tool module is imported (all tool imports below are
 // dynamic, so this assignment reliably precedes them). db.ts only runs PRAGMAs at
 // import time — no schema is needed, and the real dev kanban.db is never touched.
-const tmpDir = mkdtempSync(join(tmpdir(), "mcp-parity-"));
+const tmpDir = mkdtempSync(join(tmpdir(), "ak-mcp-parity-"));
 process.env.DB_URL = `file:${join(tmpDir, "parity-throwaway.db")}`;
 
 // vitest's vite transform provides import.meta.glob; this package has no vite/client

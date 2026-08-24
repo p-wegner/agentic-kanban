@@ -25,7 +25,7 @@ function createTestApp() {
 const now = new Date().toISOString();
 // A throwaway node project so stack detection (offline, skipLlm) succeeds and any artifacts
 // Drive seeds (smart-hooks rules, test scaffold) land in temp — never in the real repo.
-const REPO_PATH = mkdtempSync(join(tmpdir(), "drive-test-"));
+const REPO_PATH = mkdtempSync(join(tmpdir(), "ak-drive-test-"));
 writeFileSync(
   join(REPO_PATH, "package.json"),
   JSON.stringify({ name: "drive-fixture", scripts: { test: "echo test", build: "echo build" } }),

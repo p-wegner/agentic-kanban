@@ -42,7 +42,7 @@ const MANIFEST = {
 };
 
 function makePluginDir(): string {
-  const dir = makeTempDir("loop-race-plugin-");
+  const dir = makeTempDir("ak-loop-race-plugin-");
   writeFileSync(join(dir, "kanban-plugin.json"), JSON.stringify(MANIFEST, null, 2));
   const skillDir = join(dir, "skills", "analysis");
   mkdirSync(skillDir, { recursive: true });
@@ -100,7 +100,7 @@ describe("plugin loop advance — concurrency (#249)", () => {
 
   it("two concurrent advances of one loop create ONE ticket set", async () => {
     const { db } = createTestDb();
-    const repo = makeTempDir("loop-race-repo-");
+    const repo = makeTempDir("ak-loop-race-repo-");
     const { projectId, statusId } = await insertProject(db, repo);
 
     let issueNumber = 0;

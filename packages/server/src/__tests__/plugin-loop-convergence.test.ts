@@ -52,7 +52,7 @@ function manifest(): Record<string, unknown> {
 
 /** A planner that records every invocation, so "was it run again?" is observable. */
 function makePluginDir(converged: boolean): string {
-  const dir = makeTempDir("loop-converge-plugin-");
+  const dir = makeTempDir("ak-loop-converge-plugin-");
   writeFileSync(join(dir, "kanban-plugin.json"), JSON.stringify(manifest(), null, 2));
   const skillDir = join(dir, "skills", "analysis");
   mkdirSync(skillDir, { recursive: true });

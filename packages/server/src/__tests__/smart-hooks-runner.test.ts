@@ -98,7 +98,7 @@ describe("smart-hooks-runner Stop hook — containerized downgrade (#158)", () =
   let projectDir: string;
 
   beforeEach(async () => {
-    projectDir = await mkdtemp(join(tmpdir(), "smart-hooks-container-"));
+    projectDir = await mkdtemp(join(tmpdir(), "ak-smart-hooks-container-"));
     await mkdir(join(projectDir, ".claude", "hooks"), { recursive: true });
     await writeFile(
       join(projectDir, ".claude", "hooks", "smart-hooks-config.json"),

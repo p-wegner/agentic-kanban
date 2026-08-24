@@ -31,7 +31,7 @@ const until = async (fn, timeoutMs, label) => {
 };
 
 // fixture repo: one tiny app that reads PORT_FIXTURE from env
-const repo = mkdtempSync(join(tmpdir(), 'app-runner-selftest-'));
+const repo = mkdtempSync(join(tmpdir(), 'ak-app-runner-selftest-'));
 mkdirSync(join(repo, '.app-runner'), { recursive: true });
 writeFileSync(join(repo, 'app.mjs'), `
 import http from 'node:http';
@@ -44,7 +44,7 @@ writeFileSync(join(repo, '.app-runner', 'apps.json'), JSON.stringify({
 }, null, 2));
 
 // empty-case repo: no config at all
-const emptyRepo = mkdtempSync(join(tmpdir(), 'app-runner-empty-'));
+const emptyRepo = mkdtempSync(join(tmpdir(), 'ak-app-runner-empty-'));
 
 let dash, dash2;
 try {

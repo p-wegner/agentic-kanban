@@ -30,7 +30,7 @@ async function seed(db: Database, harnessKey: string | null) {
   await db.insert(projectStatuses).values({ id: statusId, projectId, name: "In Progress", sortOrder: 0, isDefault: true, createdAt: now } as never);
   await db.insert(issues).values({ id: issueId, projectId, statusId, title: "t", issueNumber: 1, priority: "medium", sortOrder: 0, createdAt: now, updatedAt: now } as never);
   await db.insert(workspaces).values({
-    id: workspaceId, issueId, branch: "feature/ak-1", workingDir: mkdtempSync(join(tmpdir(), "plan-harness-")),
+    id: workspaceId, issueId, branch: "feature/ak-1", workingDir: mkdtempSync(join(tmpdir(), "ak-plan-harness-")),
     isDirect: false, status: "active", planMode: true, createdAt: now, updatedAt: now,
   } as never);
   // Auto-continue OFF for pi, ON for claude — so the two resolutions are distinguishable

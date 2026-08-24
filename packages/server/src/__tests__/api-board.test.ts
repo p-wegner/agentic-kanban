@@ -465,7 +465,7 @@ describe("Board API", () => {
   // makeTempWorktree in workspace-summary.service.test.ts.
   const tempWorktrees: string[] = [];
   function makeTempWorktree(label: string): string {
-    const dir = mkdtempSync(join(tmpdir(), `api-board-${label}-`));
+    const dir = mkdtempSync(join(tmpdir(), `ak-api-board-${label}-`));
     tempWorktrees.push(dir);
     return dir;
   }

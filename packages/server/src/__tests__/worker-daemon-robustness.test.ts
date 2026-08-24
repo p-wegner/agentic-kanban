@@ -211,7 +211,7 @@ describe("the daemon against a real board socket (#754 items 2,4,5,6)", () => {
   const stateFiles: string[] = [];
 
   function stateFile(): string {
-    const f = join(mkdtempSync(join(tmpdir(), "worker-state-")), "worker-state.json");
+    const f = join(mkdtempSync(join(tmpdir(), "ak-worker-state-")), "worker-state.json");
     stateFiles.push(f);
     return f;
   }
@@ -399,7 +399,7 @@ describe("a 401 stops instead of looping forever (#754 item 4)", () => {
 
   /** A state file that already holds a pairing, so no registration is attempted. */
   function pairedStateFile(boardUrl: string): string {
-    const dir = mkdtempSync(join(tmpdir(), "worker-paired-"));
+    const dir = mkdtempSync(join(tmpdir(), "ak-worker-paired-"));
     dirs.push(dir);
     const file = join(dir, "worker-state.json");
     writeFileSync(file, JSON.stringify({

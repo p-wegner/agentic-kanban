@@ -98,7 +98,7 @@ describe("a git token is bound to a LIVE dispatch, not to its own TTL (#753)", (
     // A real repo, so a request that gets PAST the assignment gate produces a real ref
     // advertisement — otherwise "allowed" and "refused" are only distinguishable by a
     // status code the transport never reached.
-    repoDir = mkdtempSync(join(tmpdir(), "token-bound-origin-"));
+    repoDir = mkdtempSync(join(tmpdir(), "ak-token-bound-origin-"));
     await gitExecOrThrow(["init", "-b", "master", repoDir], {});
     writeFileSync(join(repoDir, "README.md"), "bound repo\n");
     await gitExecOrThrow(["add", "."], { cwd: repoDir });

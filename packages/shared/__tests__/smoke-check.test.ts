@@ -23,7 +23,7 @@ afterEach(() => {
 // Writing the server to a temp .js file (rather than `node -e "..."`) sidesteps shell
 // quote-escaping differences between cmd.exe and /bin/sh, which break inline eval.
 function serverCommand(port: number, status: number, body: string): { cmd: string; dir: string } {
-  const dir = mkdtempSync(join(tmpdir(), "smoke-srv-"));
+  const dir = mkdtempSync(join(tmpdir(), "ak-smoke-srv-"));
   tmpDirs.push(dir);
   const script = `require('http').createServer((q,s)=>{s.writeHead(${status},{'Content-Type':'text/html'});s.end(${JSON.stringify(body)})}).listen(${port},'127.0.0.1');`;
   writeFileSync(join(dir, "server.js"), script, "utf8");

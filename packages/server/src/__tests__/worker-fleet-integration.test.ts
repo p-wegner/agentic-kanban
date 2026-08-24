@@ -10,7 +10,7 @@ import { serve } from "@hono/node-server";
 import { createNodeWebSocket } from "@hono/node-ws";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import WebSocket from "ws";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
@@ -36,7 +36,13 @@ describe("worker fleet integration (board <-> daemon <-> agent)", () => {
   let server: ReturnType<typeof serve>;
   let boardUrl: string;
   let daemon: WorkerDaemonHandle | undefined;
-  const stateFile = join(tmpdir(), `worker-fleet-test-${randomUUID()}.json`);
+  // #839 — these fixture files live INSIDE an `ak-` DIRECTORY rather than loose in
+  // `%TEMP%`, because the reaper (`helpers/reap-fixture-child-servers.ts`) only sweeps
+  // entries where `statSync(...).isDirectory()` — files are excluded on purpose, since
+  // `kanban-session-*.out` transcripts are read by a running server. A loose fixture file
+  // was therefore in NO swept namespace and a failed teardown leaked it permanently.
+  const fixtureDir = mkdtempSync(join(tmpdir(), "ak-worker-fleet-test-"));
+  const stateFile = join(fixtureDir, `worker-state-${randomUUID()}.json`);
   const received: Array<{ workerId: string; message: WorkerToBoardMessage }> = [];
 
   beforeAll(async () => {
@@ -66,7 +72,7 @@ describe("worker fleet integration (board <-> daemon <-> agent)", () => {
     // file vitest runs NEXT — the cross-file misattribution of #680 (#777, #816).
     await daemon?.stop({ killAgents: true });
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    rmSync(stateFile, { force: true });
+    rmSync(fixtureDir, { recursive: true, force: true });
   });
 
   it("rejects a WS upgrade without a valid token", async () => {

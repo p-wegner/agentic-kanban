@@ -35,7 +35,7 @@ let dir: string;
 let db: DatabaseSync;
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "status-unique-"));
+  dir = mkdtempSync(join(tmpdir(), "ak-status-unique-"));
   db = new DatabaseSync(join(dir, "test.db"));
   // Only the two tables the migration touches, with the columns it reads.
   db.exec(`CREATE TABLE project_statuses (

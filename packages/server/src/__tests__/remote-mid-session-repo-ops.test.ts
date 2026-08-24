@@ -66,8 +66,14 @@ describe("mid-session repo operations against a live remote worker (#783, #784)"
   let repoDir: string;
   let workerRoot: string;
   let controlDir: string;
-  const stateFile = join(tmpdir(), `mid-session-${randomUUID()}.json`);
-  const agentScript = join(tmpdir(), `mock-agent-live-${randomUUID()}.cjs`);
+  // #839 — these fixture files live INSIDE an `ak-` DIRECTORY rather than loose in
+  // `%TEMP%`, because the reaper (`helpers/reap-fixture-child-servers.ts`) only sweeps
+  // entries where `statSync(...).isDirectory()` — files are excluded on purpose, since
+  // `kanban-session-*.out` transcripts are read by a running server. A loose fixture file
+  // was therefore in NO swept namespace and a failed teardown leaked it permanently.
+  const fixtureDir = mkdtempSync(join(tmpdir(), "ak-mid-session-fixture-"));
+  const stateFile = join(fixtureDir, `worker-state-${randomUUID()}.json`);
+  const agentScript = join(fixtureDir, `mock-agent-live-${randomUUID()}.cjs`);
 
   beforeAll(async () => {
     db = createTestDb().db as unknown as Database;
@@ -75,9 +81,9 @@ describe("mid-session repo operations against a live remote worker (#783, #784)"
     remote = fleet.remoteAgentService as RemoteAgentService;
     dispatch = createAgentDispatch({ host: hostStub, remote: fleet.remoteAgentService });
 
-    repoDir = mkdtempSync(join(tmpdir(), "mid-session-board-"));
-    workerRoot = mkdtempSync(join(tmpdir(), "mid-session-worker-"));
-    controlDir = mkdtempSync(join(tmpdir(), "mid-session-control-"));
+    repoDir = mkdtempSync(join(tmpdir(), "ak-mid-session-board-"));
+    workerRoot = mkdtempSync(join(tmpdir(), "ak-mid-session-worker-"));
+    controlDir = mkdtempSync(join(tmpdir(), "ak-mid-session-control-"));
 
     await gitExecOrThrow(["init", "-b", "master", repoDir], {});
     await gitExecOrThrow(["config", "user.email", "board@test"], { cwd: repoDir });
@@ -150,7 +156,7 @@ describe("mid-session repo operations against a live remote worker (#783, #784)"
     await git?.close();
     await new Promise<void>((resolve) => server?.close(() => resolve()));
     for (const p of [repoDir, workerRoot, controlDir]) rmSync(p, { recursive: true, force: true });
-    for (const f of [stateFile, agentScript]) rmSync(f, { force: true });
+    rmSync(fixtureDir, { recursive: true, force: true });
   });
 
   /** Start a live remote session on `branch`; resolves once the agent has reported its cwd. */

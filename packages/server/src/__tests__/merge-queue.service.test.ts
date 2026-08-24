@@ -91,7 +91,7 @@ async function seedWorkspace(
  */
 const tempRepos: string[] = [];
 function makeRepoPath(): string {
-  const dir = mkdtempSync(join(tmpdir(), "merge-queue-"));
+  const dir = mkdtempSync(join(tmpdir(), "ak-merge-queue-"));
   mkdirSync(join(dir, ".git"), { recursive: true });
   tempRepos.push(dir);
   return dir;

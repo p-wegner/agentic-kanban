@@ -31,7 +31,7 @@ async function seedStrandedPlan(db: TestDb, opts?: { writePlanOut?: boolean }): 
   const statusId = randomUUID();
   const workspaceId = randomUUID();
   const sessionId = randomUUID();
-  const dir = mkdtempSync(join(tmpdir(), "ak924-recon-"));
+  const dir = mkdtempSync(join(tmpdir(), "ak-924-recon-"));
 
   await db.insert(projects).values({ id: projectId, name: "P", repoPath: "/tmp/repo", repoName: "repo", defaultBranch: "main", createdAt: now, updatedAt: now });
   await db.insert(projectStatuses).values({ id: statusId, projectId, name: "In Progress", sortOrder: 0, isDefault: true, createdAt: now });

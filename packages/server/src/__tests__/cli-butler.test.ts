@@ -40,7 +40,7 @@ function applyMigrations(dbPath: string) {
 }
 
 function createTestDb() {
-  const tmpDir = mkdtempSync(join(tmpdir(), "cli-butler-test-"));
+  const tmpDir = mkdtempSync(join(tmpdir(), "ak-cli-butler-test-"));
   const dbPath = join(tmpDir, "test.db");
   applyMigrations(dbPath);
   return { dbPath, cleanup: () => { try { rmSync(tmpDir, { recursive: true, force: true }); } catch {} } };

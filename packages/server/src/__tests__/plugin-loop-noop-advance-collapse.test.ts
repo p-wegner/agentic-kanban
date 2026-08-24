@@ -31,7 +31,7 @@ function makeTempDir(prefix: string): string {
 
 /** A planner whose note is read from a file, so the loop's reported state can be changed. */
 function makePluginDir(): { pluginDir: string; setNote: (note: string) => void } {
-  const dir = makeTempDir("loop-noop-collapse-");
+  const dir = makeTempDir("ak-loop-noop-collapse-");
   const noteFile = join(dir, "note.txt");
   writeFileSync(
     join(dir, "kanban-plugin.json"),

@@ -61,7 +61,7 @@ describe("worker doctor — provider auth parity", () => {
 describe("worker doctor — provider checks", () => {
   let home: string;
   beforeEach(() => {
-    home = mkdtempSync(join(tmpdir(), "wd-home-"));
+    home = mkdtempSync(join(tmpdir(), "ak-wd-home-"));
   });
   afterEach(() => rmSync(home, { recursive: true, force: true }));
 
@@ -111,7 +111,7 @@ describe("worker doctor — provider checks", () => {
 describe("worker doctor — saved pairing", () => {
   let dir: string;
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "wd-state-"));
+    dir = mkdtempSync(join(tmpdir(), "ak-wd-state-"));
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 

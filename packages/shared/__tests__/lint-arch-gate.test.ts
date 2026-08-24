@@ -65,7 +65,7 @@ describe("lint:arch — the merge-blocking layering gate (#602)", () => {
     // The exact violation shape #602 found red on master, rebuilt in an isolated tree so
     // the live source the parallel arch gates walk is never touched (same hazard the
     // god-module probe hit: a probe file written into real src races the other scanners).
-    const root = mkdtempSync(join(tmpdir(), "lint-arch-probe-"));
+    const root = mkdtempSync(join(tmpdir(), "ak-lint-arch-probe-"));
     try {
       const routesDir = join(root, "packages", "server", "src", "routes");
       const dbDir = join(root, "packages", "server", "src", "db");
