@@ -57,7 +57,7 @@
     "test:e2e:headed": "pnpm --filter e2e test:headed",
     "test:e2e:smoke": "pnpm --filter e2e test:smoke",
     "test:e2e:system": "pnpm --filter e2e test:system",
-    "cli": "pnpm --filter agentic-kanban exec node --disable-warning=DEP0205 --import tsx src/cli/index.ts",
+    "cli": "node scripts/ensure-shared-fresh.mjs && pnpm --filter agentic-kanban exec node --disable-warning=DEP0205 --import tsx src/cli/index.ts",
     "board": "pnpm cli -- status",
     "issue": "pnpm cli -- issue",
     "workspace": "pnpm cli -- workspace",
