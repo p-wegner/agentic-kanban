@@ -40,14 +40,14 @@ vi.mock("../db/manual-migrate.js", () => ({ applyMigrations: vi.fn(async () => {
 vi.mock("../db/seed.js", () => ({ ensureBuiltinTags: vi.fn(async () => {}), ensureBuiltinSkills: vi.fn(async () => {}) }));
 vi.mock("../services/project-registration.js", () => ({ deduplicateProjects: vi.fn(async () => {}) }));
 
-const refreshContainerMcpConfig = vi.fn<[string, string?], Promise<string | undefined>>();
+const refreshContainerMcpConfig = vi.fn<(workspaceId: string, hostTmp?: string) => Promise<string | undefined>>();
 vi.mock("../services/devcontainer-workspace.service.js", () => ({
   refreshContainerMcpConfig: (...args: [string, string?]) => refreshContainerMcpConfig(...args),
 }));
 
-const insertIssueComment = vi.fn(async () => ({}));
+const insertIssueComment = vi.fn(async (_input: AddIssueCommentInput) => ({}));
 vi.mock("../repositories/issue-comments.repository.js", () => ({
-  insertIssueComment: (...args: unknown[]) => insertIssueComment(...args),
+  insertIssueComment: (...args: Parameters<typeof insertIssueComment>) => insertIssueComment(...args),
 }));
 
 vi.spyOn(console, "log").mockImplementation(() => {});
@@ -58,6 +58,7 @@ vi.spyOn(console, "error").mockImplementation(() => {});
 const { cleanupStaleSessions } = await import("../startup/startup-tasks.js");
 import { projects, projectStatuses, issues, workspaces, sessions } from "@agentic-kanban/shared/schema";
 import type { SessionManager } from "../services/session.manager.js";
+import type { AddIssueCommentInput } from "../repositories/issue-comments.repository.js";
 import type * as agentServiceType from "../services/agent.service.js";
 import type { TestDb } from "./helpers/test-db.js";
 
@@ -143,7 +144,7 @@ describe("container-mcp.reattach.refresh — cleanupStaleSessions refreshes cont
     expect(refreshContainerMcpConfig).toHaveBeenCalledWith(seeded.workspaceId);
 
     expect(insertIssueComment).toHaveBeenCalledTimes(1);
-    const [commentArg] = insertIssueComment.mock.calls[0] as [Record<string, unknown>];
+    const [commentArg] = insertIssueComment.mock.calls[0];
     expect(commentArg).toMatchObject({
       issueId: seeded.issueId,
       workspaceId: seeded.workspaceId,
