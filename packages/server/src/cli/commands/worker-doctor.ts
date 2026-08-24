@@ -734,7 +734,7 @@ export async function runBoardDoctor(opts: {
   return { side: "board", boardUrl, checks, ok: checks.every((c) => c.status !== "fail") };
 }
 
-const ICONS: Record<CheckStatus, string> = { pass: "PASS", fail: "FAIL", skip: "SKIP", unknown: "????" };
+const ICONS: Record<CheckStatus, string> = { pass: "PASS", fail: "FAIL", skip: "SKIP", unknown: "UNKN" };
 
 /** Human-readable report. Deliberately plain text — this gets pasted into an issue. */
 export function renderDoctorReport(report: DoctorReport): string {
