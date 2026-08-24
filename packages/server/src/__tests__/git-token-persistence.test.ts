@@ -43,6 +43,10 @@ describe("persisted git token scopes (#775)", () => {
     const handle = await startGitHttpServer({
       database: db,
       host: "127.0.0.1",
+      // Explicit, so this never resolves the OPERATOR's `KANBAN_GIT_HTTP_PORT` and tries to
+      // bind the socket the live board is already holding. The gate neutralizes that pin now
+      // (lib/verify-env.ts), but `pnpm test` from a board shell inherits it too.
+      port: 0,
       // The assignment is current in both processes — the point of the test is the TOKEN
       // store surviving, not the assignment check, which already reads the DB per request.
       assignmentLookup: async () => true,

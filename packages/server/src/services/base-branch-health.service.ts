@@ -13,6 +13,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
+// The base probe spawns the SAME verify script as the gate, so it inherits the board's
+// listener pins the same way — and a phantom EADDRINUSE here is worse, because it is
+// recorded as "the base is red" and then withholds every branch's merge.
+import { VERIFY_NEUTRALIZED_LISTENER_ENV } from "../lib/verify-env.js";
 import { cloneBranchTo, getMergeBase, revParse } from "@agentic-kanban/shared/lib/git-service";
 import type { Database } from "../db/index.js";
 import { getPreference, setPreference } from "../repositories/preferences.repository.js";
@@ -181,7 +185,7 @@ async function runBaseBranchProbe(
   try {
     await cloneBranchTo(project.repoPath, branch, dest, CLONE_TIMEOUT_MS);
     if (installCommand) {
-      const install = await runSetupScript(dest, installCommand, { timeoutMs: INSTALL_TIMEOUT_MS }).catch((e) => ({
+      const install = await runSetupScript(dest, installCommand, { timeoutMs: INSTALL_TIMEOUT_MS, env: { ...VERIFY_NEUTRALIZED_LISTENER_ENV } }).catch((e) => ({
         exitCode: 1,
         stdout: "",
         stderr: String(e),
@@ -206,7 +210,7 @@ ${tail(combined)}`,
         return result;
       }
     }
-    const run = await runSetupScript(dest, verifyScript, { timeoutMs: VERIFY_TIMEOUT_MS }).catch((e) => ({
+    const run = await runSetupScript(dest, verifyScript, { timeoutMs: VERIFY_TIMEOUT_MS, env: { ...VERIFY_NEUTRALIZED_LISTENER_ENV } }).catch((e) => ({
       exitCode: 1,
       stdout: "",
       stderr: String(e),
