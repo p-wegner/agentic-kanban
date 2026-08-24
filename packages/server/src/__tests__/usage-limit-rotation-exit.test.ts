@@ -57,13 +57,15 @@ import { emitButlerSystemEvent } from "../services/butler-event-feed.js";
 import { issues, projectStatuses, projects, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { createWorkflowEngine } from "../startup/exit-workflow.js";
+import type { StartSessionOptions } from "../services/session.manager.js";
 import { buildUsageLimitStats } from "@agentic-kanban/shared/lib/session-stats-blob";
 
 function makeBoardEvents() {
   return { broadcast: vi.fn(), broadcastActivity: vi.fn() };
 }
 function makeSessionManager() {
-  return { startSession: vi.fn(async () => randomUUID()) };
+  // Typed so `startSession.mock.calls[0][0]` is the launch options, not an empty tuple.
+  return { startSession: vi.fn(async (_opts: StartSessionOptions) => randomUUID()) };
 }
 
 /** Seed a builder workspace whose latest session hit a provider usage limit. */

@@ -31,10 +31,10 @@ async function seedSession(): Promise<string> {
   const sessionId = randomUUID();
 
   await db.insert(projects).values({ id: projectId, name: "P", repoPath: "/tmp/p", repoName: "p", defaultBranch: "main", createdAt: now, updatedAt: now });
-  await db.insert(projectStatuses).values({ id: statusId, projectId, name: "In Progress", sortOrder: 0, createdAt: now, updatedAt: now });
+  await db.insert(projectStatuses).values({ id: statusId, projectId, name: "In Progress", sortOrder: 0, createdAt: now });
   await db.insert(issues).values({ id: issueId, projectId, statusId, title: "T", sortOrder: 0, createdAt: now, updatedAt: now });
   await db.insert(workspaces).values({ id: workspaceId, issueId, branch: "feature/cap", workingDir: "/tmp/ws", status: "active", createdAt: now, updatedAt: now });
-  await db.insert(sessions).values({ id: sessionId, workspaceId, status: "running", startedAt: now, createdAt: now });
+  await db.insert(sessions).values({ id: sessionId, workspaceId, status: "running", startedAt: now });
   return sessionId;
 }
 
@@ -69,7 +69,7 @@ describe("insert-time session_messages cap — acceptance (#404)", () => {
     // not hours later by the periodic pruner.
     const TOTAL = 5000;
     for (let i = 0; i < TOTAL; i++) {
-      broadcast(sessionId, { type: "stderr", data: `line ${i}` });
+      broadcast(sessionId, { sessionId, type: "stderr", data: `line ${i}` });
     }
 
     const count = await waitForStableCount(sessionId);

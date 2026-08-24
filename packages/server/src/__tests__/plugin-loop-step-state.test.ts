@@ -17,35 +17,35 @@ function step(overrides: Partial<PluginLoopProgressStep> = {}): PluginLoopProgre
 describe("reconcileProgressStepStates", () => {
   it("downgrades to 'planned' when the ticket has no workspace at all (#481)", () => {
     const [result] = reconcileProgressStepStates([step()], [
-      { externalKey: "plugin-loop:pm:pipeline:step-1", hasAnyWorkspace: false, hasLiveWorkspace: false },
+      { id: "issue-1", issueNumber: 1, externalKey: "plugin-loop:pm:pipeline:step-1", hasAnyWorkspace: false, hasLiveWorkspace: false },
     ]);
     expect(result.state).toBe("planned");
   });
 
   it("leaves 'generating' alone when a workspace is genuinely live", () => {
     const [result] = reconcileProgressStepStates([step()], [
-      { externalKey: "plugin-loop:pm:pipeline:step-1", hasAnyWorkspace: true, hasLiveWorkspace: true },
+      { id: "issue-2", issueNumber: 2, externalKey: "plugin-loop:pm:pipeline:step-1", hasAnyWorkspace: true, hasLiveWorkspace: true },
     ]);
     expect(result.state).toBe("generating");
   });
 
   it("downgrades to 'stalled' when the workspace exited with no commits and nothing is live (#479)", () => {
     const [result] = reconcileProgressStepStates([step()], [
-      { externalKey: "plugin-loop:pm:pipeline:step-1", hasAnyWorkspace: true, hasLiveWorkspace: false },
+      { id: "issue-3", issueNumber: 3, externalKey: "plugin-loop:pm:pipeline:step-1", hasAnyWorkspace: true, hasLiveWorkspace: false },
     ]);
     expect(result.state).toBe("stalled");
   });
 
   it("matches a ticket's unit id by step-id prefix (versioned unit ids)", () => {
     const [result] = reconcileProgressStepStates([step()], [
-      { externalKey: "plugin-loop:pm:pipeline:step-1:v2", hasAnyWorkspace: true, hasLiveWorkspace: false },
+      { id: "issue-4", issueNumber: 4, externalKey: "plugin-loop:pm:pipeline:step-1:v2", hasAnyWorkspace: true, hasLiveWorkspace: false },
     ]);
     expect(result.state).toBe("stalled");
   });
 
   it("leaves the step untouched when no open ticket matches it", () => {
     const [result] = reconcileProgressStepStates([step()], [
-      { externalKey: "plugin-loop:pm:pipeline:step-2", hasAnyWorkspace: true, hasLiveWorkspace: false },
+      { id: "issue-5", issueNumber: 5, externalKey: "plugin-loop:pm:pipeline:step-2", hasAnyWorkspace: true, hasLiveWorkspace: false },
     ]);
     expect(result.state).toBe("generating");
   });
@@ -57,9 +57,9 @@ describe("reconcileProgressStepStates", () => {
       step({ id: "step-3", state: "awaiting-approval" }),
     ];
     const openTickets = [
-      { externalKey: "plugin-loop:pm:pipeline:step-1", hasAnyWorkspace: true, hasLiveWorkspace: false },
-      { externalKey: "plugin-loop:pm:pipeline:step-2", hasAnyWorkspace: false, hasLiveWorkspace: false },
-      { externalKey: "plugin-loop:pm:pipeline:step-3", hasAnyWorkspace: true, hasLiveWorkspace: true },
+      { id: "issue-6", issueNumber: 6, externalKey: "plugin-loop:pm:pipeline:step-1", hasAnyWorkspace: true, hasLiveWorkspace: false },
+      { id: "issue-7", issueNumber: 7, externalKey: "plugin-loop:pm:pipeline:step-2", hasAnyWorkspace: false, hasLiveWorkspace: false },
+      { id: "issue-8", issueNumber: 8, externalKey: "plugin-loop:pm:pipeline:step-3", hasAnyWorkspace: true, hasLiveWorkspace: true },
     ];
     const result = reconcileProgressStepStates(steps, openTickets);
     expect(result.map((s) => s.state)).toEqual(["done", "pending", "awaiting-approval"]);

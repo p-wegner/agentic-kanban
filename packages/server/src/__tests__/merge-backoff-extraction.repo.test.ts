@@ -18,6 +18,7 @@
  *    applying 0131 and reading the new table.
  */
 import { describe, it, expect } from "vitest";
+import type { Row } from "@libsql/client";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { createClient } from "@libsql/client";
@@ -76,8 +77,8 @@ const NEVER_BLOCKED = {
   failures: 0, signature: null, branchSha: null, verifyHash: null, nextRetryAt: null,
 };
 
-function columnNames(rows: { name?: unknown }[]): string[] {
-  return rows.map((r) => String((r as unknown as { name: string }).name));
+function columnNames(rows: Row[]): string[] {
+  return rows.map((r) => String(r.name));
 }
 
 describe("merge-backoff extraction (#781)", () => {

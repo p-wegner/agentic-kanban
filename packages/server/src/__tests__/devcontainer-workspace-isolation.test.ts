@@ -6,9 +6,9 @@ import { provisionContainerForWorkspace, DevcontainerIsolationRefusedError } fro
  * strict-mode contract, isolated from the session lifecycle. The devcontainer
  * CLI adapter is mocked so behavior is deterministic without real Docker.
  */
-const hasDevcontainerConfig = vi.fn(() => true);
-const devcontainerAvailable = vi.fn(async () => false);
-const devcontainerUp = vi.fn(async () => null);
+const hasDevcontainerConfig = vi.fn((..._args: unknown[]) => true);
+const devcontainerAvailable = vi.fn(async (..._args: unknown[]) => false);
+const devcontainerUp = vi.fn(async (..._args: unknown[]) => null);
 vi.mock("@agentic-kanban/shared/lib/devcontainer-exec", () => ({
   hasDevcontainerConfig: (...args: unknown[]) => hasDevcontainerConfig(...args),
   devcontainerAvailable: (...args: unknown[]) => devcontainerAvailable(...args),

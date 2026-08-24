@@ -51,7 +51,7 @@ import { createRequire } from "node:module";
  * only because the production type was `unknown` is gone.
  */
 
-const BASELINE_GRANDFATHERED_FILES = 48;
+const BASELINE_GRANDFATHERED_FILES = 39;
 
 const serverRoot = path.join(import.meta.dirname!, "..", "..");
 const tsconfigPath = path.join(serverRoot, "tsconfig.json");
