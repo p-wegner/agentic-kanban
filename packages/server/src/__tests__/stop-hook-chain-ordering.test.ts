@@ -75,9 +75,14 @@ describe("Stop hook chain — outer/inner timeout budget (#480)", () => {
 
   it("runs the Uncommitted worktree changes check before the expensive Vitest/typecheck checks", () => {
     const names = loadStopChecks().map((c) => c.name);
-    const uncommittedIdx = names.indexOf("Uncommitted worktree changes");
-    const vitestIdx = names.indexOf("Vitest (edited files only)");
-    const typecheckIdx = names.indexOf("TypeScript typecheck");
+    // Match on WHAT the check is, not on its exact label. The labels are prose and have been
+    // renamed before ("TypeScript typecheck" -> "Typecheck (edited packages only)" in
+    // 9e60a3987c), which turned this ordering guard red on master while the ordering it
+    // guards was still perfectly correct — a rename cannot be allowed to read as a defect.
+    const findIdx = (re: RegExp) => names.findIndex((n) => re.test(n));
+    const uncommittedIdx = findIdx(/uncommitted/i);
+    const vitestIdx = findIdx(/vitest/i);
+    const typecheckIdx = findIdx(/typecheck/i);
 
     expect(uncommittedIdx).toBeGreaterThanOrEqual(0);
     expect(vitestIdx).toBeGreaterThanOrEqual(0);
