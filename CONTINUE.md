@@ -64,10 +64,31 @@ running it.**
 
 ### Open by design, held by a ratchet — #806 and #808
 
-- **#806**: 64 unvalidated reads remain (was 92). The **route-level surface is exhausted** —
-  the remainder is six documented rejection families, and batch 5's real question is whether
-  moving a service guard to the boundary is worth turning a 404 into a 400. Probably no for
-  most. Held by `route-body-validation-ratchet.test.ts`.
+- **#806, inbound half**: **58** unvalidated reads remain (was 64, was 92). Batch 5 audited the
+  64 and overturned four (`b53ee7ad3d`). The **route-level surface is exhausted** — the
+  remainder is documented rejection families, and the real question is whether moving a
+  service guard to the boundary is worth turning a 404 into a 400. Probably no for most. Held
+  by `route-body-validation-ratchet.test.ts`.
+- **#806, outbound half**: **221** unvalidated endpoints remain (was 240). This half had **no
+  ratchet at all** until 2026-08-24 and had therefore not moved once in five batches — the
+  registry sat at exactly the 17 pairs #780 left it at, with `dc297889eb` its only commit.
+  `packages/client/src/__tests__/api-response-validation-ratchet.test.ts` (`a08c6d9e7`) is now
+  that gate: it DERIVES the client's method+path surface from the AST (257 pairs across 445
+  call sites — not the ticket's 292/275, which counts the OpenAPI spec including endpoints only
+  the MCP server, CLI or a worker calls and which `apiFetch` can never cover), is shrink-only,
+  and fails on a stale entry so a fixed endpoint's line is deleted rather than zeroed. Batch 1
+  (`9dc1b0a73`) registered 19: the tag family, issue tags/dependencies, the workspace lifecycle
+  actions, and the project list. **Verified**: root `pnpm typecheck` exits 0; both halves of the
+  ratchet were seen to FAIL before landing (an unregistered endpoint, and a baseline line left
+  in after its endpoint was registered).
+  - Found while deriving shapes and NOT papered over: `POST /api/workspaces/:id/turn` really is
+    a two-variant union (`{ ok: true }` 200 / `{ sessionId, resumed: true }` 201) against a
+    client type of three optional fields — now stated as a union. `PATCH /api/tags/:id` answers
+    `{ id }` alone, the same shape `PATCH /api/workspaces/:id` turned out to have; no caller
+    reads it today, so it is pinned rather than reported as a bug.
+  - `arrayRoot` had to be added before ANY list endpoint could be registered — `objectSchema`
+    rejects an array outright. That limitation, not a judgement about lists, is much of why
+    #780 stopped at three resources' mutating endpoints.
 - **#808**: **DONE (2026-08-24).** 65 -> **0** grandfathered files and 898 -> **0** errors, over
   five batches (`26725219ae` … `f6844b37ec`). `packages/server/tsconfig.json`'s `exclude` is now
   empty, `BASELINE_GRANDFATHERED_FILES = 0`, and every server test file is covered by
