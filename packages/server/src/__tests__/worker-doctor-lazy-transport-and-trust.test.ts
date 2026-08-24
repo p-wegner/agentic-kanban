@@ -6,18 +6,21 @@
 //
 // The shared defect is the verdict, not the observation:
 //
-//  #847 — the board binds the git transport LAZILY: `ensureGitHttpServer` is called by a git
-//     dispatch and by nothing else, `stopGitHttpServer` has no callers at all, so the
-//     listener exists from a board process's first git dispatch until that process ends —
-//     and every board restart puts it back to absent. "That port refuses" is therefore the
-//     CORRECT state for the whole window since the last restart in which nothing was
-//     dispatched, which on a `tsx watch` dev board is most of the time. The check called it
-//     FAIL with a remedy naming two env vars that were already right, and counted it into
-//     "N check(s) failed", so a healthy worker could not get a clean doctor run. It must now
-//     separate "routable host, nothing bound" (ECONNREFUSED -> unknown) from a genuine
-//     routing/DNS fault (still fail) — the one distinction a worker CAN observe, needing no
-//     knowledge of the board's dispatch history. Weakening it into never-fails would be the
-//     opposite mistake, so both directions are proven below against real sockets, not mocks.
+//  #847 — the board used to bind the git transport ONLY lazily (a git dispatch called
+//     `ensureGitHttpServer`, nothing else did, and `stopGitHttpServer` had no callers), so
+//     "that port refuses" was the CORRECT state for the whole window since the last board
+//     restart in which nothing was dispatched — on a `tsx watch` dev board, most of the
+//     time. The check called it FAIL with a remedy naming two env vars that were already
+//     right, and counted it into "N check(s) failed", so a healthy worker could not get a
+//     clean doctor run. Since #855 a fleet-configured board (KANBAN_FLEET_PORT set) binds
+//     the transport at STARTUP (#856 gave the listener a shutdown release), so there a
+//     refused pinned port is a real fault again — but the worker cannot observe which kind
+//     of board it probed, or whether an eager bind failed and degraded to lazy. The check
+//     must therefore separate "routable host, nothing bound" (ECONNREFUSED -> unknown, with
+//     BOTH readings spelled out) from a genuine routing/DNS fault (still fail) — the one
+//     distinction a worker CAN observe, needing no knowledge of the board's configuration.
+//     Weakening it into never-fails would be the opposite mistake, so both directions are
+//     proven below against real sockets, not mocks.
 //
 //  #851 — a worker clones into `<work-root>/repos/<projectId>`, which by construction has
 //     never been opened interactively, so Claude Code prints "this workspace has not been
@@ -78,12 +81,12 @@ describe("#847 — the git transport check does not call a not-yet-bound listene
     }
   });
 
-  it("BITE, direction 1: a routable host refusing the port is UNKNOWN, not FAIL — that is what an unbound-since-restart board looks like", async () => {
+  it("BITE, direction 1: a routable host refusing the port is UNKNOWN, not FAIL — that is what a not-yet-bound board looks like", async () => {
     // Bind then close: the port is now provably free on a host that is provably routable,
     // which is exactly what a board whose git transport is not currently bound looks like
-    // from a worker — the state every board is in from each restart until its next git
-    // dispatch, since `ensureGitHttpServer` is called only by a dispatch and its listener
-    // lives only as long as the board process.
+    // from a worker — a lazily-binding board (no fleet port, or pre-#855) before its first
+    // git dispatch. The worker cannot tell that apart from a fleet-configured board whose
+    // startup bind failed, so the verdict names BOTH readings instead of picking one.
     const { server, port } = await listenEphemeral(() => 200);
     await closeServer(server);
 
@@ -91,11 +94,16 @@ describe("#847 — the git transport check does not call a not-yet-bound listene
     expect(check.status).toBe("unknown");
     expect(check.status).not.toBe("fail");
     expect(check.detail).toContain("ECONNREFUSED");
-    expect(check.detail).toContain("binds the git transport LAZILY");
-    expect(check.detail).toContain("SINCE ITS LAST RESTART");
-    // And the remedy must no longer open with "go re-check your env vars".
-    expect(check.remedy).toMatch(/^Nothing to do if the board has not dispatched git work/);
-    expect(check.remedy).toContain("If a dispatch HAS run since the board last started");
+    // Both possibilities are spelled out: startup bind on fleet-configured boards (#855)...
+    expect(check.detail).toContain("may not have bound the git transport yet");
+    expect(check.detail).toContain("binds it at STARTUP");
+    // ...and lazy bind on first dispatch everywhere else — including when it IS real.
+    expect(check.detail).toContain("first git-transport dispatch");
+    expect(check.detail).toContain("fleet-configured and freshly started");
+    // The remedy names the env vars only for the case where they are actually suspect.
+    expect(check.remedy).toContain("KANBAN_FLEET_PORT");
+    expect(check.remedy).toContain("KANBAN_GIT_HTTP_PORT");
+    expect(check.remedy).toContain("nothing to do until the first git dispatch");
   });
 
   it("BITE, direction 2: a host that cannot be reached at all is STILL a FAIL with the configuration remedy", async () => {

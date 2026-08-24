@@ -309,11 +309,13 @@ export function checkWebSocket(
  * know it. Reporting `skip` with the reason beats guessing 3002 and calling a wrong answer
  * a failure.
  *
- * And a REACHABLE port is not the same as a BOUND one (#847). `ensureGitHttpServer` is
- * called by a git-transport dispatch and by nothing else (`stopGitHttpServer` has no callers
- * at all), so the listener exists only from a board process's first git dispatch until that
- * process ends — and a board restart puts it back to absent. For that whole window the
- * honest verdict for "connection refused" is `unknown`, not `fail`. See
+ * And a REACHABLE port is not the same as a BOUND one (#847). Since #855 the board binds
+ * the transport at STARTUP when a fleet is configured (KANBAN_FLEET_PORT set) — on such a
+ * board a refused pinned port is a genuine fault again. But a board WITHOUT a fleet port
+ * (or a pre-#855 build) still binds lazily on its first git-transport dispatch, and the
+ * worker cannot observe which kind of board it is probing, nor whether an eager bind
+ * failed and the board degraded to lazy. So the honest verdict for "connection refused"
+ * stays `unknown`, never `fail`, with BOTH readings spelled out. See
  * {@link LAZY_BIND_ERRNOS}.
  */
 /**
@@ -324,11 +326,12 @@ export function checkWebSocket(
  */
 const LAZY_BIND_ERRNOS = new Set(["ECONNREFUSED"]);
 
-// This is the REPORTING half of #847. The structural half — bind the transport at startup
-// and keep it bound, so the listener stops depending on dispatch history and on restarts —
-// is #855: it changes listener lifecycle and exposure duration, which #847 should not carry.
-// When #855 lands this branch stays (a board with no fleet configured legitimately has no
-// listener) but stops being the common case.
+// This is the REPORTING half of #847. The structural half landed as #855: a fleet-configured
+// board binds the transport at startup and keeps it bound (released only by shutdown, #856),
+// so the listener no longer depends on dispatch history. This branch stays — a board without
+// a fleet port legitimately has no listener until its first git dispatch, an older board
+// binds lazily in every case, and an eager bind can fail and degrade to lazy — but on a
+// current fleet-configured board it stops being the common case.
 
 export async function checkGitTransport(boardUrl: string, gitPort?: number): Promise<DoctorCheck> {
   if (!gitPort) {
@@ -352,40 +355,38 @@ export async function checkGitTransport(boardUrl: string, gitPort?: number): Pro
   const probe = await probeHttp(url);
   if (!probe.reachable) {
     if (probe.errno && LAZY_BIND_ERRNOS.has(probe.errno)) {
-      // #847. THE MECHANISM, verified rather than assumed: `ensureGitHttpServer` is called
-      // by a git-transport dispatch and by nothing else, and `stopGitHttpServer` has zero
-      // callers anywhere in the repo. So the listener binds on the first dispatch of a BOARD
-      // PROCESS and then stays bound for that process's whole life — and every board restart
-      // drops it until the next dispatch. The failing window is therefore "any time since
-      // the last board restart in which no git dispatch has happened": on a `tsx watch` dev
-      // board, most of the time; on a production board, the whole period after each deploy
-      // until the first dispatch. That is what produced an operator's FAIL -> PASS -> FAIL
-      // across three runs with zero configuration changed on either machine.
-      //
-      // The worker cannot observe any of that: whether this board process has dispatched
-      // since it started is not visible from here, and nothing on the worker's side changed
-      // between those three runs. What IS observable is the errno — "the host is routable
-      // and that port has no listener" versus "cannot get there at all" — so the verdict is
-      // keyed on that and needs no dispatch state at all. It must not resolve the remaining
-      // ambiguity as the alarming one: `fail` meant a healthy worker read as broken for most
-      // of its life, under a remedy naming two env vars that were already correct.
+      // #847. What the errno proves is exactly "the host is routable and that port has no
+      // listener" — and since #855 that has TWO honest readings the worker cannot tell
+      // apart. A fleet-configured board (KANBAN_FLEET_PORT set) binds the transport at
+      // STARTUP and keeps it bound, so there a refused pinned port is a real fault (a
+      // failed eager bind, or the two env vars genuinely wrong). A board without a fleet
+      // port, or a pre-#855 build, binds lazily on its first git-transport dispatch, so
+      // there a refused port is the EXPECTED pre-dispatch state — the condition that used
+      // to produce an operator's FAIL -> PASS -> FAIL across three runs with zero
+      // configuration changed. Whether the probed board eagerly bound, and whether it has
+      // dispatched since its last restart, are both invisible from this machine, so the
+      // verdict is keyed on the one observable — the errno — and stays `unknown` rather
+      // than resolving the ambiguity as the alarming one: `fail` here meant a healthy
+      // pre-dispatch worker could never get a clean doctor run.
       return {
         name: "git transport reachable",
         status: "unknown",
         detail:
           `${url} is routable but nothing is listening on port ${gitPort} (${probe.errno}). ` +
-          "The board binds the git transport LAZILY: the first git-transport dispatch of a board " +
-          "process brings it up, it then stays up for that process's life, and a board restart " +
-          "drops it until the next dispatch. So a board that has not dispatched git work SINCE " +
-          "ITS LAST RESTART has no listener here, and that is the expected state, not a fault. " +
-          "Nothing on this machine can tell the two apart, which is why this is not a verdict.",
+          "The board may not have bound the git transport yet: since #855 a fleet-configured " +
+          "board (KANBAN_FLEET_PORT set) binds it at STARTUP, while a board without a fleet " +
+          "port — or an older board in every case — binds it on its first git-transport " +
+          "dispatch. This machine cannot tell which kind of board it probed, so this is not a " +
+          "verdict — but if the board IS fleet-configured and freshly started, a refused port " +
+          "here is a real failure.",
         remedy:
-          "Nothing to do if the board has not dispatched git work since its last restart — that is " +
-          "what a healthy fleet looks like from here, and a restarted board looks like it again. If " +
-          "a dispatch HAS run since the board last started and the port still refuses, THEN check " +
-          "KANBAN_GIT_HTTP_PORT on the board and that " +
-          "KANBAN_GIT_HTTP_HOST names an interface this machine can route to. Never put a " +
-          "path-based reverse proxy in front of it (docs §8).",
+          "If the board is fleet-configured (KANBAN_FLEET_PORT set) and has finished starting, " +
+          "treat this as real: check KANBAN_GIT_HTTP_PORT on the board, that KANBAN_GIT_HTTP_HOST " +
+          "names an interface this machine can route to, and the board's startup log for a " +
+          "'[git-http] eager startup bind failed' warning. On a board that binds lazily (no fleet " +
+          "port configured, or a pre-#855 build), nothing to do until the first git dispatch — " +
+          "that is what a healthy fleet looks like from here. Never put a path-based reverse " +
+          "proxy in front of it (docs §8).",
       };
     }
     // Everything else — DNS failure, timeout, no route — is a fault regardless of whether
