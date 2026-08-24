@@ -22,7 +22,9 @@ import { join } from "node:path";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
+  MIN_SUPPORTED_NODE_MAJOR,
   PROVIDER_AUTH_FILES,
+  checkNodeVersion,
   checkProvider,
   readSavedIdentity,
   renderDoctorReport,
@@ -105,6 +107,26 @@ describe("worker doctor — provider checks", () => {
     const login = checks.find((c) => c.name === "node logged in");
     expect(login?.status).toBe("unknown");
     expect(login?.detail).toContain("no known auth-file location");
+  });
+});
+
+describe("worker doctor — node runtime version (#860)", () => {
+  it("passes a Node version at or above the floor", () => {
+    const check = checkNodeVersion(`v${MIN_SUPPORTED_NODE_MAJOR}.1.0`);
+    expect(check.status).toBe("pass");
+    expect(check.detail).toContain(`Node v${MIN_SUPPORTED_NODE_MAJOR}.1.0`);
+  });
+
+  it("fails a Node version below the floor, with a remedy", () => {
+    const check = checkNodeVersion(`v${MIN_SUPPORTED_NODE_MAJOR - 1}.9.0`);
+    expect(check.status).toBe("fail");
+    expect(check.detail).toContain("older than the board's declared floor");
+    expect(check.remedy).toContain(`Node ${MIN_SUPPORTED_NODE_MAJOR}`);
+  });
+
+  it("reports unknown, not a failure, for an unparseable version string", () => {
+    const check = checkNodeVersion("not-a-version");
+    expect(check.status).toBe("unknown");
   });
 });
 
