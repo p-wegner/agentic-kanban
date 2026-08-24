@@ -78,7 +78,12 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // ladder for a `parseJsonBody(c, schema)` call.
   "routes/issues.ts::createIssuesRoute": 474,
   "services/workflow.service.ts::createWorkflowService": 456,
-  "services/workspace-provision.service.ts::createWorkspaceProvisionService": 418,
+  // 418 -> 409, banked (#892): the skill-materialization body (resolveSkillFile +
+  // materializeEnabledPluginSkills + the new materializeWorkspaceSkills) moved to
+  // module-level `*Impl` functions taking `database` explicitly, so the relaunch seam in
+  // `workspace-session.service.ts` can share the exact same logic without this factory
+  // re-growing every time that shared logic changes. The factory now holds thin delegators.
+  "services/workspace-provision.service.ts::createWorkspaceProvisionService": 409,
   // 404 -> 399, banked (#806): five hand-written body guards became one schema parse each.
   "routes/workspace-actions.ts::createWorkspaceActionsRoute": 399,
   "worker/worker-agent-runner.ts::createWorkerAgentRunner": 406,

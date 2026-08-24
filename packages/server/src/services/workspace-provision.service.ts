@@ -11,6 +11,7 @@
  */
 
 import { mkdirSync, writeFileSync, chmodSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { resolveWorktreeClaims } from "@agentic-kanban/shared/lib/worktree-claim";
@@ -35,7 +36,7 @@ import {
   type LatestSetupRun,
   type LatestSymlinkRun,
 } from "./workspace-run-records.js";
-import { writeAgentSkillFile, readLocalSkillPrompt, copySkillToWorktree, listLocalSkillNames } from "@agentic-kanban/shared/lib/agent-skill-files";
+import { writeAgentSkillFile, readLocalSkillPrompt, copySkillToWorktree, listLocalSkillNames, buildSkillMarkdown, localSkillFilePath } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { buildSkillInvocationBlock, selectBuilderSkills } from "@agentic-kanban/shared/lib/builder-skill-policy";
 import { writeTicketContextFile } from "@agentic-kanban/shared/lib/ticket-context";
 import { bootstrapSymlinks } from "@agentic-kanban/shared/lib/worktree-symlink-bootstrap";
@@ -46,6 +47,124 @@ import { buildContextPrimer } from "./context-packer.service.js";
 import { getStackProfile, resolveEffectiveVerify } from "./stack-profile.service.js";
 import { resolveBoardFeedbackRouting } from "./board-feedback-routing.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+
+/** Reads a worktree's already-materialized SKILL.md, or null when it doesn't exist yet. */
+async function readExistingSkillFile(worktreePath: string, skillName: string): Promise<string | null> {
+  try {
+    return await readFile(localSkillFilePath(worktreePath, skillName), "utf-8");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve + materialize the effective skill file (a DB row or a disk skill) into a worktree.
+ * Module-level (rather than nested in the factory below) so this — and the two functions
+ * after it — stay OUT of `createWorkspaceProvisionService`'s own line count: they are the
+ * shared implementation behind both `resolveSkillFile`/`materializeEnabledPluginSkills`
+ * (provisioning time) and `materializeWorkspaceSkills` (also called from the relaunch seam
+ * in `workspace-session.service.ts`, #892), and the factory keeps thin one-line delegators.
+ *
+ * Compares the worktree's existing content to what is about to be written so a
+ * RE-materialization (i.e. a relaunch, not first provisioning) can say WHEN it actually
+ * changed something — overwriting a hand edit made directly in the worktree is deliberate,
+ * not a bug, and this is what makes that visible in the log instead of silent.
+ */
+async function resolveSkillFileImpl(
+  database: Database,
+  skillId: string | null,
+  diskSkillName: string | null,
+  worktreePath: string,
+  repoPath: string,
+): Promise<string | null> {
+  if (skillId) {
+    const skillRows = await crudRepo.getAgentSkillById(skillId, database);
+    if (skillRows.length === 0) return null;
+    const skill = skillRows[0];
+    const localPrompt = await readLocalSkillPrompt(repoPath, skill.name);
+    const effectiveSkill = localPrompt ? { ...skill, prompt: localPrompt } : skill;
+    const before = await readExistingSkillFile(worktreePath, skill.name);
+    await writeAgentSkillFile(worktreePath, effectiveSkill);
+    if (before !== null && before !== buildSkillMarkdown(effectiveSkill)) {
+      console.log(`[workspaces] skill "${skill.name}" updated since this worktree was provisioned`);
+    }
+    return skill.name;
+  }
+  if (diskSkillName) {
+    const before = await readExistingSkillFile(worktreePath, diskSkillName);
+    const source = await readFile(localSkillFilePath(repoPath, diskSkillName), "utf-8").catch(() => null);
+    const copied = await copySkillToWorktree(repoPath, diskSkillName, worktreePath);
+    if (copied && before !== null && source !== null && before !== source) {
+      console.log(`[workspaces] skill "${diskSkillName}" updated since this worktree was provisioned`);
+    }
+    return copied ? diskSkillName : null;
+  }
+  return null;
+}
+
+/**
+ * Copy every skill declared by a plugin ENABLED for this project into the worktree — not
+ * just the one skill `resolveSkillFileImpl` resolves for the workspace's own skill/workflow
+ * selection.
+ *
+ * `enableForProject` only fans a plugin's skills out into the project's LEADING repo
+ * (`fanOutSkills`, junctioned + excluded via `.git/info/exclude` so it never lands in git). A
+ * worktree is a separate checkout that never sees a gitignored path, so a plugin-loop ticket
+ * (or any other ticket for a project with a safety-net-style plugin enabled) launched with
+ * only `board-navigator` present — the agent could read the skill's NAME in the ticket prose
+ * but had no bundle to actually run (#204). `copySkillToWorktree` already handles
+ * dereferencing the junction into real files, so this reuses it per enabled plugin's skill
+ * list instead of materializing only one.
+ *
+ * Best-effort: a broken plugin manifest or a missing skill source must not block workspace
+ * creation.
+ */
+async function materializeEnabledPluginSkillsImpl(
+  database: Database,
+  worktreePath: string,
+  repoPath: string,
+  projectId: string,
+): Promise<void> {
+  try {
+    // #552: one enabled-plugin iterator — this used to run `isPluginEnabledForProject`
+    // once per INSTALLED plugin, i.e. a DB query per plugin on the workspace-create path.
+    for (const { manifest } of await listEnabledPlugins(projectId, database)) {
+      for (const skill of manifest.skills ?? []) {
+        // #553: pluginSkillName is the ONE derivation of a plugin skill's directory name
+        // (its comment says three hand-rolled ones disagreed) — the loop and onboarding
+        // resolvers in this same file already use it.
+        await copySkillToWorktree(repoPath, pluginSkillName(skill.dir), worktreePath);
+      }
+    }
+  } catch (err) {
+    console.warn(`[workspaces] plugin-skill materialization failed (non-fatal): ${errorMessage(err)}`);
+  }
+}
+
+/**
+ * The ONE skill-materialization step, shared by provisioning (`resolveAgentPromptAndSkill`,
+ * at workspace-create time) and relaunch (`workspace-session.service.ts`'s `launchSession`,
+ * #892). Skills are only written into a worktree at provisioning time; a resume/relaunch
+ * used to skip this entirely and hand the agent a worktree copy that could be stale — edited
+ * in the DB, or changed on disk in the main checkout — since the workspace was first
+ * provisioned. Re-running it here means both seams honor the exact same inputs: the resolved
+ * skill (DB row or disk skill) plus every skill an ENABLED plugin declares.
+ */
+async function materializeWorkspaceSkillsImpl(
+  database: Database,
+  params: {
+    skillId: string | null;
+    diskSkillName: string | null;
+    worktreePath: string;
+    repoPath: string;
+    projectId: string;
+  },
+): Promise<{ skillName: string | null }> {
+  const { skillId, diskSkillName, worktreePath, repoPath, projectId } = params;
+  const skillName = await resolveSkillFileImpl(database, skillId, diskSkillName, worktreePath, repoPath);
+  await materializeEnabledPluginSkillsImpl(database, worktreePath, repoPath, projectId);
+  return { skillName };
+}
 
 export function createWorkspaceProvisionService(deps: {
   database: Database;
@@ -227,61 +346,31 @@ export function createWorkspaceProvisionService(deps: {
   // isBuildTimeVisualVerificationInstruction are pure policy — extracted to
   // ./workspace-create/policy.ts and unit-tested there. Imported at top of file.
 
+  // resolveSkillFile / materializeWorkspaceSkills / materializeEnabledPluginSkills delegate to
+  // the module-level `*Impl` functions above (#892) — kept OUT of this factory's own body so
+  // the relaunch seam (`workspace-session.service.ts`) can share the exact same logic without
+  // growing this function's line count every time the shared implementation changes.
   async function resolveSkillFile(
     skillId: string | null,
     diskSkillName: string | null,
     worktreePath: string,
     repoPath: string,
   ): Promise<string | null> {
-    if (skillId) {
-      const skillRows = await crudRepo.getAgentSkillById(skillId, database);
-      if (skillRows.length === 0) return null;
-      const skill = skillRows[0];
-      const localPrompt = await readLocalSkillPrompt(repoPath, skill.name);
-      const effectiveSkill = localPrompt ? { ...skill, prompt: localPrompt } : skill;
-      await writeAgentSkillFile(worktreePath, effectiveSkill);
-      return skill.name;
-    }
-    if (diskSkillName) {
-      const copied = await copySkillToWorktree(repoPath, diskSkillName, worktreePath);
-      return copied ? diskSkillName : null;
-    }
-    return null;
+    return resolveSkillFileImpl(database, skillId, diskSkillName, worktreePath, repoPath);
   }
 
-  /**
-   * Copy every skill declared by a plugin ENABLED for this project into the
-   * worktree — not just the one skill `resolveSkillFile` resolves for the
-   * workspace's own skill/workflow selection.
-   *
-   * `enableForProject` only fans a plugin's skills out into the project's
-   * LEADING repo (`fanOutSkills`, junctioned + excluded via `.git/info/exclude`
-   * so it never lands in git). A worktree is a separate checkout that never
-   * sees a gitignored path, so a plugin-loop ticket (or any other ticket for a
-   * project with a safety-net-style plugin enabled) launched with only
-   * `board-navigator` present — the agent could read the skill's NAME in the
-   * ticket prose but had no bundle to actually run (#204). `copySkillToWorktree`
-   * already handles dereferencing the junction into real files, so this reuses
-   * it per enabled plugin's skill list instead of materializing only one.
-   *
-   * Best-effort: a broken plugin manifest or a missing skill source must not
-   * block workspace creation.
-   */
+  async function materializeWorkspaceSkills(params: {
+    skillId: string | null;
+    diskSkillName: string | null;
+    worktreePath: string;
+    repoPath: string;
+    projectId: string;
+  }): Promise<{ skillName: string | null }> {
+    return materializeWorkspaceSkillsImpl(database, params);
+  }
+
   async function materializeEnabledPluginSkills(worktreePath: string, repoPath: string, projectId: string): Promise<void> {
-    try {
-      // #552: one enabled-plugin iterator — this used to run `isPluginEnabledForProject`
-      // once per INSTALLED plugin, i.e. a DB query per plugin on the workspace-create path.
-      for (const { manifest } of await listEnabledPlugins(projectId, database)) {
-        for (const skill of manifest.skills ?? []) {
-          // #553: pluginSkillName is the ONE derivation of a plugin skill's directory name
-          // (its comment says three hand-rolled ones disagreed) — the loop and onboarding
-          // resolvers in this same file already use it.
-          await copySkillToWorktree(repoPath, pluginSkillName(skill.dir), worktreePath);
-        }
-      }
-    } catch (err) {
-      console.warn(`[workspaces] plugin-skill materialization failed (non-fatal): ${errorMessage(err)}`);
-    }
+    return materializeEnabledPluginSkillsImpl(database, worktreePath, repoPath, projectId);
   }
 
   /**
@@ -597,17 +686,19 @@ exit 1
       effectiveSkillId = project.defaultSkillId;
     }
 
+    // Resolves the skill file AND every skill an ENABLED plugin declares (not just the one
+    // resolved above) — a plugin-loop ticket's skill, and any other safety-net skill a
+    // plugin offers, must be readable in this worktree regardless of which agent
+    // provider/machine launches it (#204). Shared with the relaunch seam (#892).
     const skillName = worktreePath
-      ? await resolveSkillFile(effectiveSkillId, effectiveDiskSkill, worktreePath, project.repoPath)
+      ? (await materializeWorkspaceSkills({
+          skillId: effectiveSkillId,
+          diskSkillName: effectiveDiskSkill,
+          worktreePath,
+          repoPath: project.repoPath,
+          projectId: issue.projectId,
+        })).skillName
       : null;
-
-    // Every skill an ENABLED plugin declares (not just the one resolved above) —
-    // a plugin-loop ticket's skill, and any other safety-net skill a plugin
-    // offers, must be readable in this worktree regardless of which agent
-    // provider/machine launches it (#204).
-    if (worktreePath) {
-      await materializeEnabledPluginSkills(worktreePath, project.repoPath, issue.projectId);
-    }
 
     // #129: a skill nobody invokes is a per-turn context tax for nothing — over
     // 200 builder sessions, 0/47 materialized skills were ever fired. Name the
@@ -634,6 +725,7 @@ exit 1
     installTddHook,
     packContextPrimer,
     materializeEnabledPluginSkills,
+    materializeWorkspaceSkills,
     writeWorktreeTicketContext,
     resolveAgentPromptAndSkill,
   };
