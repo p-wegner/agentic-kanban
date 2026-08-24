@@ -21,8 +21,8 @@ import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { insertProjectRepo } from "../repositories/repo.repository.js";
 import { setIssueReposTouched, applyRepoTags, getIssueReposTouched } from "../services/repo-tags.service.js";
 
-let testDb: TestDb;
-let db: TestDb["db"];
+let testDb: ReturnType<typeof createTestDb>;
+let db: TestDb;
 let projectId: string;
 let issueId: string;
 

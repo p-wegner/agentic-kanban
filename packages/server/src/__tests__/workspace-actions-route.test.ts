@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createWorkspaceActionsRoute } from "../routes/workspace-actions.js";
 import { createWorkspaceService } from "../services/workspace.service.js";
 
-const mergeWorkspaceMock = vi.hoisted(() => vi.fn(async (id: string) => ({
+type WorkspaceService = ReturnType<typeof createWorkspaceService>;
+
+const mergeWorkspaceMock = vi.hoisted(() => vi.fn<WorkspaceService["mergeWorkspace"]>(async (id: string) => ({
   id,
   mergeOutput: "Merge made by the 'ort' strategy.",
   warnings: [
@@ -16,7 +18,7 @@ const mergeWorkspaceMock = vi.hoisted(() => vi.fn(async (id: string) => ({
 // promise, so the underlying mergeWorkspace runs once even across a dropped + retried request.
 const inFlightMerges = vi.hoisted(() => new Map<string, Promise<unknown>>());
 
-const rebaseRepoMock = vi.hoisted(() => vi.fn(async (id: string, repoName: string) => ({
+const rebaseRepoMock = vi.hoisted(() => vi.fn<WorkspaceService["rebaseRepo"]>(async (id: string, repoName: string) => ({
   repo: repoName,
   success: true,
 })));
@@ -103,7 +105,7 @@ describe("workspace actions route", () => {
       mergeOutput: "Merge made after disconnect.",
     });
     expect(mergeWorkspaceMock).toHaveBeenCalledTimes(1);
-    await droppedRequest.catch(() => undefined);
+    await Promise.resolve(droppedRequest).catch(() => undefined);
   });
 
   it("routes POST /api/workspaces/:id/repos/:repoName/rebase to rebaseRepo, url-decoding the repo name", async () => {

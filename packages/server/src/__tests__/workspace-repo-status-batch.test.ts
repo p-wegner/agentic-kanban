@@ -9,7 +9,7 @@
  * (3) Route: 304 on unchanged If-None-Match; the ~10s memo means the repeat request
  *     does not recompute (no additional git calls).
  */
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, afterAll, beforeEach, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -20,6 +20,7 @@ import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { insertWorkspaceRepo } from "../repositories/repo.repository.js";
 import type { Database } from "../db/index.js";
 import type { GitService } from "../services/workspace-internals.js";
+import type { WorkspaceRepoStatusBatchResponse } from "@agentic-kanban/shared";
 
 // ── git-exec seam mock (route-level tests go through the REAL git.service) ──────
 const gitExecCalls: string[][] = [];
@@ -206,7 +207,7 @@ describe("workspace-repo-status batch — route (ETag + memo)", () => {
     expect(res1.status).toBe(200);
     const etag = res1.headers.get("ETag")!;
     expect(etag).toBeTruthy();
-    const body = await res1.json();
+    const body = await res1.json() as WorkspaceRepoStatusBatchResponse;
     expect(body.workspaces).toHaveLength(1);
     const callsAfterFirst = gitExecCalls.length;
     expect(callsAfterFirst).toBeGreaterThan(0); // the real path did git work once
@@ -223,7 +224,7 @@ describe("workspace-repo-status batch — route (ETag + memo)", () => {
     const a = app();
     const res = await a.request(`/api/projects/${projectId}/workspace-repo-status`);
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await res.json() as WorkspaceRepoStatusBatchResponse;
     expect(body.include).toEqual(["merge", "conflicts", "handoff"]);
     expect(body.workspaces[0].diffStats).toBeNull();
     expect(body.workspaces[0].mergeStatus).not.toBeNull();

@@ -43,7 +43,9 @@ const workspace = {
   isDirect: false,
 } as unknown as typeof workspaces.$inferSelect;
 
-async function callRunPreLockGate(recordMergeAttempt: (...args: unknown[]) => Promise<void>) {
+type RecordMergeAttempt = Parameters<typeof runPreLockGate>[0]["recordMergeAttempt"];
+
+async function callRunPreLockGate(recordMergeAttempt: RecordMergeAttempt) {
   return runPreLockGate({
     workspaceId: "ws-1",
     workspace,
@@ -51,7 +53,7 @@ async function callRunPreLockGate(recordMergeAttempt: (...args: unknown[]) => Pr
     baseBranch: "master",
     token: RUN_GATE_TOKEN,
     database: {} as Database,
-    recordMergeAttempt: recordMergeAttempt as never,
+    recordMergeAttempt,
   });
 }
 
@@ -71,6 +73,7 @@ describe("runPreLockGate attributes a gate failure to an already-red base (#491)
         outcome: "red",
         durationMs: 1000,
         message: "master's own verify_script fails independent of any branch",
+        failedSuites: null,
         createdAt: new Date().toISOString(),
       },
     });
@@ -100,6 +103,7 @@ describe("runPreLockGate attributes a gate failure to an already-red base (#491)
         outcome: "green",
         durationMs: 1000,
         message: null,
+        failedSuites: null,
         createdAt: new Date().toISOString(),
       },
     });

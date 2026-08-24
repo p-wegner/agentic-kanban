@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import * as schema from "@agentic-kanban/shared/schema";
+import type { IssueWithStatus } from "@agentic-kanban/shared";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 
@@ -93,7 +94,7 @@ describe("Issues API", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: "To update", statusId, projectId }),
     });
-    const { id } = await createRes.json();
+    const { id } = await createRes.json() as { id: string };
 
     // Update it
     const res = await app.request(`/api/issues/${id}`, {
@@ -106,9 +107,9 @@ describe("Issues API", () => {
     // Verify
     const issues = await (
       await app.request(`/api/issues?projectId=${projectId}`)
-    ).json();
-    const updated = issues.find((i: { id: string }) => i.id === id);
-    expect(updated.title).toBe("Updated title");
+    ).json() as IssueWithStatus[];
+    const updated = issues.find((i) => i.id === id);
+    expect(updated?.title).toBe("Updated title");
   });
 
   it("DELETE /api/issues/:id deletes an issue", async () => {
@@ -117,7 +118,7 @@ describe("Issues API", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: "To delete", statusId, projectId }),
     });
-    const { id } = await createRes.json();
+    const { id } = await createRes.json() as { id: string };
 
     const res = await app.request(`/api/issues/${id}`, { method: "DELETE" });
     expect(res.status).toBe(200);

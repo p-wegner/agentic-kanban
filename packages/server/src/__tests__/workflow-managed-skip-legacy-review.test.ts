@@ -136,7 +136,6 @@ async function seedWorkflowManagedBuilderExit(
     id: builderSessionId, workspaceId,
     status: "running",
     triggerType: "builder",
-    createdAt: now, updatedAt: now,
   });
 
   return { projectId, issueId, workspaceId, builderSessionId };
@@ -231,7 +230,6 @@ describe("exit-workflow: workflow-managed workspaces skip legacy auto-review (is
         id: sessId, workspaceId: wsId,
         status: "running",
         triggerType: "builder",
-        createdAt: now, updatedAt: now,
       });
       return { workspaceId: wsId, builderSessionId: sessId, issueId: iId, projectId: pId };
     })();
@@ -365,7 +363,6 @@ describe("exit-workflow: fork children are excluded from legacy auto-review (iss
       id: builderSessionId, workspaceId,
       status: "running",
       triggerType: "builder",
-      createdAt: now, updatedAt: now,
     });
 
     return { projectId, issueId, workspaceId, builderSessionId };
