@@ -9,7 +9,8 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { projects } from "@agentic-kanban/shared/schema";
+import { projects, baseBranchHealth } from "@agentic-kanban/shared/schema";
+import { eq } from "drizzle-orm";
 import { createTestDb } from "./helpers/test-db.js";
 import {
   recordBaseBranchHealth,
@@ -203,6 +204,79 @@ describe("getBaseBranchHealthAtMergeBase (#491)", () => {
     const attribution = describeRedBaseAttribution(result);
     expect(attribution).toContain("BASE BRANCH ALREADY RED");
     expect(attribution).toContain("master is broken");
+  });
+
+  it("falls back to the latest row when it IS an ancestor of the merge-base, with recordedSha/ageMs on the result (#886)", async () => {
+    const repoPath = makeRepoPath();
+    const projectId = await seedProject(db, repoPath);
+
+    const { execFileSync } = await import("node:child_process");
+    const git = (...args: string[]) => execFileSync("git", args, { cwd: repoPath, encoding: "utf8" });
+    git("init", "-q", "-b", "master");
+    git("config", "user.email", "test@example.com");
+    git("config", "user.name", "Test");
+    git("commit", "--allow-empty", "-q", "-m", "root");
+    const oldProbedSha = git("rev-parse", "HEAD").trim();
+    // Master moves forward past the probed sha WITHOUT a new probe recorded — the
+    // scheduled/post-merge check that lags behind commits.
+    git("commit", "--allow-empty", "-q", "-m", "master moves on, unprobed");
+    const mergeBaseSha = git("rev-parse", "HEAD").trim();
+    git("checkout", "-q", "-b", "feature/y");
+    git("commit", "--allow-empty", "-q", "-m", "feature commit");
+
+    const rowId = await recordBaseBranchHealth(
+      { projectId, sha: oldProbedSha, branch: "master", outcome: "red", message: "still red" },
+      db,
+    );
+    // Backdate the row directly (the repository always stamps `new Date()`; this test
+    // needs a controllable age to assert `ageMs`/the rendered "Nh ago").
+    const probedAt = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+    await db.update(baseBranchHealth).set({ createdAt: probedAt }).where(eq(baseBranchHealth.id, rowId));
+
+    const result = await getBaseBranchHealthAtMergeBase(projectId, repoPath, "feature/y", "master", db);
+    expect(result.mergeBaseSha).toBe(mergeBaseSha);
+    expect(result.health?.outcome).toBe("red");
+    expect(result.recordedSha).toBe(oldProbedSha);
+    expect(result.ageMs).toBeGreaterThanOrEqual(3 * 60 * 60 * 1000 - 5000);
+
+    const attribution = describeRedBaseAttribution(result);
+    expect(attribution).toContain("BASE BRANCH ALREADY RED");
+    expect(attribution).toContain("as of the last check");
+    expect(attribution).toContain("checked 3h ago");
+  });
+
+  it("does NOT present a latest row that is NOT an ancestor of the merge-base — reports unknown instead of a stale red (#886)", async () => {
+    const repoPath = makeRepoPath();
+    const projectId = await seedProject(db, repoPath);
+
+    const { execFileSync } = await import("node:child_process");
+    const git = (...args: string[]) => execFileSync("git", args, { cwd: repoPath, encoding: "utf8" });
+    git("init", "-q", "-b", "master");
+    git("config", "user.email", "test@example.com");
+    git("config", "user.name", "Test");
+    git("commit", "--allow-empty", "-q", "-m", "root");
+    const rootSha = git("rev-parse", "HEAD").trim();
+    git("commit", "--allow-empty", "-q", "-m", "old red commit");
+    const staleProbedSha = git("rev-parse", "HEAD").trim();
+    // Rewind master and move it forward on a DIFFERENT commit — the stale probed sha is
+    // now a sibling of the new tip, not an ancestor of it (simulates a rebase past a fix).
+    git("reset", "--hard", rootSha);
+    git("commit", "--allow-empty", "-q", "-m", "the actual fix, superseding the stale probe");
+    const mergeBaseSha = git("rev-parse", "HEAD").trim();
+    git("checkout", "-q", "-b", "feature/z");
+    git("commit", "--allow-empty", "-q", "-m", "feature commit");
+
+    await recordBaseBranchHealth(
+      { projectId, sha: staleProbedSha, branch: "master", outcome: "red", message: "old failure, since fixed" },
+      db,
+    );
+
+    const result = await getBaseBranchHealthAtMergeBase(projectId, repoPath, "feature/z", "master", db);
+    expect(result.mergeBaseSha).toBe(mergeBaseSha);
+    expect(result.health).toBeNull();
+
+    const attribution = describeRedBaseAttribution(result);
+    expect(attribution).toBeNull();
   });
 });
 
