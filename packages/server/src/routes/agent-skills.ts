@@ -1,14 +1,38 @@
 import type { Database } from "../db/index.js";
-import { createAgentSkillService } from "../services/agent-skill.service.js";
+import { createAgentSkillService, AgentSkillError } from "../services/agent-skill.service.js";
 import { parseJsonBody } from "../middleware/parse-body.js";
-import { enhanceSkillBody } from "./agent-skill-body-schemas.js";
+import { enhanceSkillBody, createSkillBody } from "./agent-skill-body-schemas.js";
 import { createRouter } from "../middleware/create-router.js";
 import { wrapAiOperation } from "../lib/ai-operation.js";
 
+import type { Context } from "hono";
+import { HTTPException } from "hono/http-exception";
+import type { ZodType } from "zod";
 import { queryFlag } from "../middleware/query-params.js";
 export function createAgentSkillsRoute(database: Database) {
   const router = createRouter();
   const agentSkillService = createAgentSkillService({ database });
+
+  /**
+   * `parseJsonBody(c, schema)` with this route file's ERROR IDENTITY preserved (#806, batch 5)
+   * — `routes/plugins.ts`'s batch-2 wrapper, third instance.
+   *
+   * The guard this replaces threw `AgentSkillError("name, description, and prompt are
+   * required", "BAD_REQUEST")`, rendered by `domainErrorHandler` as
+   * `{ error, code: "BAD_REQUEST" }` at 400 (#823); `parseJsonBody`'s `HTTPException` renders
+   * `{ error }` alone, so the re-wrap is what keeps `code` on the wire. Same-file on purpose:
+   * `scripts/generate-openapi.ts` follows exactly one hop via `findFunctionNamed(sf, …)`.
+   */
+  async function parseAgentSkillBody<T>(c: Context, schema: ZodType<T>): Promise<T> {
+    try {
+      return await parseJsonBody(c, schema);
+    } catch (err) {
+      if (err instanceof HTTPException && err.status === 400) {
+        throw new AgentSkillError(err.message, "BAD_REQUEST");
+      }
+      throw err;
+    }
+  }
 
   // GET /api/agent-skills — list skills
   router.get("/", async (c) => {
@@ -37,13 +61,19 @@ export function createAgentSkillsRoute(database: Database) {
 
   // POST /api/agent-skills — create a skill
   router.post("/", async (c) => {
-    const body = await parseJsonBody<{ name: string; description: string; prompt: string; model?: string; projectId?: string | null; isInit?: boolean }>(c);
+    const body = await parseAgentSkillBody(c, createSkillBody);
     const skill = await agentSkillService.createSkill(body);
     return c.json(skill, 201);
   });
 
   // PUT /api/agent-skills/:id — update a skill
   router.put("/:id", async (c) => {
+    // #806 batch 5 REJECTED this read (family 5, ORDER — batch 3's "no guard at all" was the
+    // wrong reason): `updateSkill` throws `"Skill not found"` (404) and `"Cannot modify
+    // built-in skills"` (403) before it reads any field, so a schema at the boundary would
+    // answer 400 where a caller gets 404/403 today. Same for `POST /:id/install` below.
+    // (The note lives INSIDE the handler on purpose: `scripts/generate-openapi.ts` takes the
+    // last comment line ABOVE a route as its summary.)
     const id = c.req.param("id");
     const body = await parseJsonBody<{ name?: string; description?: string; prompt?: string; model?: string; projectId?: string | null; isInit?: boolean }>(c);
     const updated = await agentSkillService.updateSkill(id, body);

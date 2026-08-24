@@ -23,14 +23,29 @@
  * validated. Its one real check (`servicesConfig`, a 40-line validator) answers **422**, not 400,
  * so it cannot move into `parseJsonBody` at all. It stays in the countable remainder.
  *
- * `POST /api/projects` and `POST /api/projects/create` also stay: both forward the whole body to
- * a service that runs its own guards, and their optional string fields have no observed null
- * discipline — a declared-type tightening there could 400 a body that succeeds today, which is
- * the one thing these swaps may not do.
+ * **`POST /api/projects/create` converted in batch 5, and batch 2's reason for skipping it did
+ * not survive an audit.** That reason — "their optional string fields have no observed null
+ * discipline" — is about the OPTIONAL fields, and it is still correct about them; every one of
+ * them stays {@link unchecked} here. It never addressed `name`, which is REQUIRED, and whose
+ * guard is the first statement of `createProject` (`const name = body.name.trim(); if (!name)
+ * throw ProjectError("name is required", "BAD_REQUEST")`) — batch 4's own conversion criterion.
+ * `{}` reaches `undefined.trim()` and answers **500** today; it now answers the 400 the
+ * endpoint already gives a blank name. See {@link createProjectBody}.
+ *
+ * **`POST /api/projects` stays, with a sharper reason than batch 2 gave it.** Two things block
+ * it, and neither is about optional fields. Its guard is a CROSS-FIELD rule
+ * ("repoPath or cloneUrl is required" / "…not both") that lives inside `registerProjectTracked`
+ * — which `registerProject` calls only AFTER `startRegistrationProgress(body.progressId)` has
+ * created the progress record the caller polls via
+ * `GET /api/projects/registration-progress/:id`. A schema at the boundary would leave that
+ * record uncreated, so a poller would get 404 "No such registration in progress" where it gets
+ * a failed record today. And `{ repoPath: 7 }` is truthy, so it passes the cross-field rule and
+ * fails later as `"Invalid repo: …"` — a different 400 message than any type check would give.
  */
 import { isAbsolute } from "node:path";
 import { z } from "zod";
 import {
+  required,
   requiredRaw,
   optionalString,
   optionalStringOrNull,
@@ -164,3 +179,22 @@ export const addProjectRepoBody = z.object({
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: "repo path must be an absolute path" });
   }
 });
+
+/**
+ * `POST /api/projects/create`.
+ *
+ * `required`, because the guard tested the TRIMMED value and a whitespace-only name answers
+ * "name is required" today. The ORIGINAL value is forwarded — `createProject` trims it itself.
+ *
+ * Everything else stays {@link unchecked}, which is the whole reason this conversion is safe:
+ * batch 2 declined the file on the optional fields' null discipline, and declining to check
+ * them keeps that concern intact while still moving the one guard that exists.
+ */
+export const createProjectBody = z.object({
+  name: required("name is required"),
+  path: unchecked<string>(),
+  description: unchecked<string>(),
+  color: unchecked<string>(),
+  gitignoreTemplate: unchecked<string>(),
+  generateReadme: unchecked<boolean>(),
+}).passthrough();

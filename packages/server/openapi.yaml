@@ -78,6 +78,8 @@ paths:
                 - name
                 - description
                 - prompt
+              additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "201":
           description: Success
@@ -85,7 +87,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          description: Error (thrown BAD_REQUEST, HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -442,6 +444,10 @@ paths:
                   type: string
                 provider:
                   type: string
+              required:
+                - name
+              additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "201":
           description: Success
@@ -449,7 +455,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          description: Error (thrown BAD_REQUEST, HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -4410,6 +4416,8 @@ paths:
                   type: boolean
               required:
                 - name
+              additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "201":
           description: Success
@@ -4417,7 +4425,7 @@ paths:
             application/json:
               schema: {}
         "400":
-          description: Error (thrown BAD_REQUEST, status from domainErrorHandler)
+          description: Error (thrown BAD_REQUEST, HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -5357,6 +5365,9 @@ paths:
               properties:
                 model:
                   type: string
+                  nullable: true
+              additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
@@ -5394,9 +5405,17 @@ paths:
               properties:
                 profile:
                   type: string
+                  nullable: true
+              additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
@@ -5527,11 +5546,17 @@ paths:
               properties:
                 prompt:
                   type: string
-              required:
-                - prompt
+                  nullable: true
+              additionalProperties: true
+              x-unknown-keys: passthrough
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
