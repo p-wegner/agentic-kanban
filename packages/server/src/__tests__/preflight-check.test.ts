@@ -340,6 +340,66 @@ describe("workspaceLaunchPreflight", () => {
     expect(result.staleFiles).toContain(".codex/hooks.json");
   });
 
+  // #867: staleness is judged against the main checkout's WORKING TREE, but the repair restores
+  // baseBranch's COMMITTED content. While a safety file is uncommitted in main those two can
+  // never agree, so the first workspace reconciles-and-stays-stale and every one after it trips
+  // the ping-pong guard — one agent's in-flight hook edit bricked workspace creation for the
+  // whole board. The worktree's copy is baseBranch's committed policy, which is safe.
+  it("launches normally when a safety file is uncommitted in the main checkout, twice in a row", async () => {
+    const NL = String.fromCharCode(10);
+    const runOnce = async (priorReconcileCommits: string) => {
+      const files = new Map<string, string>([
+        // main has an in-flight edit; the worktree holds what master committed.
+        ["main:.claude/hooks/smart-hooks-runner.js", "runner WITH an uncommitted edit"],
+        ["worktree:.claude/hooks/smart-hooks-runner.js", "runner"],
+        ["main:.codex/hooks.json", "codex hooks"],
+        ["worktree:.codex/hooks.json", "codex hooks"],
+        ["main:.claude/hooks/validate-command-safety.js", "validator"],
+        ["worktree:.claude/hooks/validate-command-safety.js", "validator"],
+        ["main:.claude/hooks/prevent-cross-worktree-writes.js", "cross-worktree"],
+        ["worktree:.claude/hooks/prevent-cross-worktree-writes.js", "cross-worktree"],
+        ["main:CLAUDE.md", "guidance"],
+        ["worktree:CLAUDE.md", "guidance"],
+      ]);
+
+      return workspaceLaunchPreflight({
+        repoPath: "main",
+        worktreePath: "worktree",
+        baseBranch: "master",
+        branch: "feature/test",
+        isDirect: false,
+        execGit: async (args, cwd) => {
+          if (args[0] === "status") return "";
+          if (args[0] === "rev-parse") return "feature/test" + NL;
+          if (args[0] === "rebase") return "";
+          // The main checkout has the file modified but uncommitted; the branch owns nothing.
+          if (args[0] === "diff" && args[1] === "--name-only") {
+            return cwd === "main" ? ".claude/hooks/smart-hooks-runner.js" + NL : "";
+          }
+          if (args[0] === "log" && args.includes("--")) return priorReconcileCommits;
+          if (args[0] === "checkout" && args[1] === "master") {
+            throw new Error("must not reconcile to a file that is uncommitted in main");
+          }
+          return "";
+        },
+        readFile: async (root, path) => files.get(`${root}:${path}`) ?? "",
+        exists: async (root, path) => files.has(`${root}:${path}`),
+      });
+    };
+
+    // First workspace: no prior reconcile commit.
+    const first = await runOnce("");
+    expect(first.ok).toBe(true);
+    expect(first.errors).toEqual([]);
+    expect(first.staleFiles).toEqual([]);
+
+    // Second workspace, in the world where a prior reconcile HAD happened: still launches,
+    // because the file is never classified as drift in the first place.
+    const second = await runOnce("abc123 chore: reconcile safety files from master [preflight]" + NL);
+    expect(second.ok).toBe(true);
+    expect(second.errors.join(" ")).not.toContain("ping-pong");
+  });
+
   it("returns ok=false with stale file list when reconciliation checkout fails", async () => {
     const files = new Map<string, string>([
       ["main:.codex/hooks.json", "new codex hooks"],
