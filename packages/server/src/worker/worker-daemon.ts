@@ -43,6 +43,7 @@ import {
   type WorkerToBoardMessage,
 } from "@agentic-kanban/shared/lib/worker-protocol";
 import { createWorkerAgentRunner } from "./worker-agent-runner.js";
+import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "./worker-repo.js";
 
 const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 const RECONNECT_MIN_MS = 1000;
@@ -280,6 +281,19 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   const boardUrl = normalizeBoardUrl(opts.boardUrl);
   const stateFile = opts.stateFile ?? defaultWorkerStateFile();
   const name = opts.name ?? hostname();
+
+  // #850: a checkout whose worktree registration is gone (a prior daemon that stopped,
+  // disconnected, or crashed mid-session) is reaped before anything else runs, so a
+  // long-lived worker never accumulates whole repo clones from abandoned sessions.
+  // Best-effort — a scan failure must never block pairing/connecting.
+  try {
+    const reaped = await reapOrphanedCheckouts(opts.workRoot ?? defaultWorkerWorkRoot(), log);
+    if (reaped.reaped.length > 0) {
+      log(`[worker] startup cleanup: reaped ${reaped.reaped.length} orphaned checkout(s) of ${reaped.scanned} scanned`);
+    }
+  } catch (err) {
+    log(`[worker] startup checkout cleanup failed (continuing): ${err instanceof Error ? err.message : String(err)}`);
+  }
 
   let identity = loadState(stateFile).boards[boardUrl];
   if (!identity) {

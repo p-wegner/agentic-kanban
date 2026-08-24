@@ -11,10 +11,10 @@
 // Every git call goes through the sanctioned @agentic-kanban/shared git-exec
 // adapter (single-spawn architecture gate).
 
-import { mkdirSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, existsSync, readdirSync, rmSync } from "node:fs";
 import { writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { gitExec, gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
 import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import {
@@ -308,4 +308,82 @@ export async function pushWorkerHead(
 /** Best-effort teardown of the per-session worktree (cache clone stays). */
 export async function cleanupWorkerCheckout(checkout: WorkerCheckout): Promise<void> {
   await gitExec(["worktree", "remove", "--force", checkout.cwd], { cwd: checkout.cacheDir });
+}
+
+/** Outcome of a {@link reapOrphanedCheckouts} pass. */
+export interface ReapCheckoutsReport {
+  /** Checkout directories examined. */
+  scanned: number;
+  /** Directories removed because no cached clone's worktree list named them. */
+  reaped: string[];
+  /** Directories a removal attempt failed for (logged, left in place). */
+  errored: string[];
+}
+
+/**
+ * Remove checkout directories under `<workRoot>/checkouts/` whose git worktree
+ * registration is gone (#850).
+ *
+ * A daemon stopped, disconnected, or crashed mid-session leaves its per-session
+ * checkout on disk while `git worktree` forgets it — nothing else in the worker
+ * ever revisits `checkouts/`, so those directories (each a full clone's worth of
+ * files) accumulate forever. A checkout is orphaned when its absolute path does
+ * not appear in `git worktree list --porcelain` for ANY of this machine's cached
+ * clones under `repos/` — including when the checkout's own project cache is
+ * itself gone, which is exactly the "git no longer knows about it" state this
+ * ticket reports.
+ *
+ * Best-effort and non-throwing: called from daemon startup, where a scan failure
+ * must never block pairing/connecting.
+ */
+export async function reapOrphanedCheckouts(
+  workRoot: string = defaultWorkerWorkRoot(),
+  log: (line: string) => void = () => {},
+): Promise<ReapCheckoutsReport> {
+  const checkoutsDir = join(workRoot, "checkouts");
+  const reposDir = join(workRoot, "repos");
+  const report: ReapCheckoutsReport = { scanned: 0, reaped: [], errored: [] };
+
+  let checkoutNames: string[];
+  try {
+    checkoutNames = readdirSync(checkoutsDir, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name);
+  } catch {
+    return report; // no checkouts directory yet — nothing to scan
+  }
+  report.scanned = checkoutNames.length;
+  if (checkoutNames.length === 0) return report;
+
+  let projectDirs: string[] = [];
+  try {
+    projectDirs = readdirSync(reposDir, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => join(reposDir, e.name));
+  } catch {
+    // No caches at all: every checkout below is orphaned by definition.
+  }
+
+  const known = new Set<string>();
+  for (const cacheDir of projectDirs) {
+    const listed = await gitExec(["worktree", "list", "--porcelain"], { cwd: cacheDir });
+    if (!execSucceeded(listed)) continue; // corrupt/missing cache — its checkouts fall through as orphaned
+    for (const line of listed.stdout.split("\n")) {
+      if (line.startsWith("worktree ")) known.add(resolve(line.slice("worktree ".length).trim()));
+    }
+  }
+
+  for (const name of checkoutNames) {
+    const dir = join(checkoutsDir, name);
+    if (known.has(resolve(dir))) continue;
+    try {
+      rmSync(dir, { recursive: true, force: true });
+      report.reaped.push(dir);
+      log(`[worker] reaped orphaned checkout (no worktree registration): ${dir}`);
+    } catch (err) {
+      report.errored.push(dir);
+      log(`[worker] could not reap orphaned checkout ${dir}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  return report;
 }
