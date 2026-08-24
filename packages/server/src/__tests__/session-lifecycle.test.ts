@@ -537,9 +537,11 @@ describe("session-lifecycle", () => {
     } as never);
     onOutput!({ type: "exit", exitCode: 0 } as never);
 
-    await flush(() => onSessionExit.mock.calls.length > 0);
+    await flush(() => onSessionExit.mock.calls.length > 0, 10_000);
     // The auto-continue path launches an implement session — wait for the 2nd launch.
-    await flush(() => (agentService.launch as ReturnType<typeof vi.fn>).mock.calls.length >= 2);
+    // 10s budget: under full-suite load the exit→PLAN.md→relaunch chain routinely takes
+    // longer than flush's 1s default, and this was the gate's most frequent flake (#894).
+    await flush(() => (agentService.launch as ReturnType<typeof vi.fn>).mock.calls.length >= 2, 10_000);
 
     const wsRows = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
     expect(wsRows[0].planMode).toBe(false);
