@@ -20,12 +20,12 @@ describe("isDriveOrEpicMeta (#824) — a drive/epic meta must not be auto-starte
     projectId = "proj-1";
     statusId = "status-backlog";
     await db.insert(projects).values({ id: projectId, name: "P", repoPath: "/tmp/p", defaultBranch: "master", createdAt: now, updatedAt: now });
-    await db.insert(projectStatuses).values({ id: statusId, projectId, name: "Backlog", position: -1, createdAt: now });
+    await db.insert(projectStatuses).values({ id: statusId, projectId, name: "Backlog", createdAt: now });
   });
 
   it("true when the issue is a Drive record's metaIssueId", async () => {
     await seedIssue(db, projectId, statusId, "meta-1", 1);
-    await db.insert(drives).values({ id: "drive-1", projectId, metaIssueId: "meta-1", target: "Finish the epic", status: "active", createdAt: now, updatedAt: now });
+    await db.insert(drives).values({ id: "drive-1", projectId, metaIssueId: "meta-1", target: "Finish the epic", status: "active", startedAt: now });
     expect(await isDriveOrEpicMeta("meta-1", db)).toBe(true);
   });
 
@@ -55,7 +55,7 @@ describe("isDriveOrEpicMeta (#824) — a drive/epic meta must not be auto-starte
     await seedIssue(db, projectId, statusId, "leaf-a", 2);
     await seedIssue(db, projectId, statusId, "leaf-b", 3);
     await db.insert(issueDependencies).values({ id: "d1", issueId: "epic", dependsOnId: "leaf-a", type: "parent_of", createdAt: now });
-    await db.insert(drives).values({ id: "drv", projectId, metaIssueId: "leaf-b", target: "x", status: "active", createdAt: now, updatedAt: now });
+    await db.insert(drives).values({ id: "drv", projectId, metaIssueId: "leaf-b", target: "x", status: "active", startedAt: now });
 
     // The actual candidate-query filter, run against a real SQLite DB.
     const rows = await db.select({ id: issues.id }).from(issues)

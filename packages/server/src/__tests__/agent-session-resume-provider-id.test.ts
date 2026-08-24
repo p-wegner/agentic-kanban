@@ -129,6 +129,7 @@ describe("agent-sessions.resume.provider-id — capture + relaunch", () => {
       const resumeToken = "claude-init-" + randomUUID();
       // A real Claude stream-json system/init line (the event that carries the resume token).
       broadcast(sessionId, {
+        sessionId,
         type: "stdout",
         data: JSON.stringify({ type: "system", subtype: "init", session_id: resumeToken, model: "claude-opus-4-8", cwd: "/tmp/repo" }),
       });
@@ -148,6 +149,7 @@ describe("agent-sessions.resume.provider-id — capture + relaunch", () => {
 
       const resumeToken = "pi-session-" + randomUUID();
       broadcast(sessionId, {
+        sessionId,
         type: "stdout",
         data: JSON.stringify({ type: "session", version: 3, id: resumeToken, cwd: "/tmp/repo/.worktrees/ak-1" }),
       });
@@ -167,6 +169,7 @@ describe("agent-sessions.resume.provider-id — capture + relaunch", () => {
 
       // Assistant text only — no session_id anywhere in the stream.
       broadcast(sessionId, {
+        sessionId,
         type: "stdout",
         data: JSON.stringify({ type: "assistant", message: { model: "claude-opus-4-8", content: [{ type: "text", text: "working" }] } }),
       });

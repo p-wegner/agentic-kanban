@@ -46,12 +46,12 @@ describe("projectSessionStats", () => {
   });
 
   it("prefers the blob model, falling back to the summary model", () => {
-    expect(projectSessionStats({ model: "opus" }, "sonnet").model).toBe("opus");
-    expect(projectSessionStats({}, "sonnet").model).toBe("sonnet");
+    expect(projectSessionStats({ model: "opus" }, "sonnet")?.model).toBe("opus");
+    expect(projectSessionStats({}, "sonnet")?.model).toBe("sonnet");
   });
 
   it("coerces a non-number field to its default", () => {
-    expect(projectSessionStats({ inputTokens: "oops" as unknown }, null).inputTokens).toBe(0);
+    expect(projectSessionStats({ inputTokens: "oops" as unknown }, null)?.inputTokens).toBe(0);
   });
 });
 

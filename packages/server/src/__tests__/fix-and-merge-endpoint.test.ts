@@ -81,6 +81,7 @@ vi.mock("../db/backup.js", () => ({ createBackup: vi.fn(async () => {}) }));
 vi.mock("../services/process-cleanup.js", () => ({ killProcessesInDir: vi.fn(async () => 0) }));
 
 import { Hono } from "hono";
+import type { StartSessionOptions } from "../services/session.manager.js";
 import { describe, it, expect, beforeEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
@@ -248,7 +249,8 @@ describe("POST /api/workspaces/:id/fix-and-merge — endpoint drives status→fi
     gitHolder.current = makeGitH({
       rebaseOntoBase: vi.fn(async () => ({ success: false, conflictingFiles: ["src/server.js"] })),
     });
-    const startSession = vi.fn(async () => "fix-session-multirepo");
+    // Typed so `mock.calls[0][0]` is the launch options, not an empty tuple.
+    const startSession = vi.fn(async (_opts: StartSessionOptions) => "fix-session-multirepo");
     const fixAndMergeSessionIds = new Set<string>();
     const app = mountRoute(db, startSession, fixAndMergeSessionIds);
 
