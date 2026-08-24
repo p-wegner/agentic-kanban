@@ -287,9 +287,19 @@ export function createSessionLifecycle(
       }
     }
 
-    // Inject HANDOFF.md context if available and not using provider resume or plan mode
+    // Inject HANDOFF.md context if available and not using provider resume or plan mode.
+    //
+    // #853: BUILDER SESSIONS ONLY. HANDOFF.md is the previous session's account of ITS OWN
+    // work — last commit sha, changed files, a self-assessment ("No critical or major
+    // issues"), model/cost stats — and the banner tells the reader to "avoid re-reading
+    // files you already explored". Handing that to a REVIEW session gives the reviewer the
+    // implementer's self-report as context before it forms a verdict, plus an instruction
+    // not to read, which is its entire job. Measured: 22 of 503 review sessions approved
+    // with zero tool calls, their summaries specific about files they never opened. The
+    // role is already in scope here — reuse `builderSession` (line ~130) rather than
+    // re-deriving it, and note it already implies `!planMode`.
     let effectivePrompt = prompt;
-    if (effectiveWorkingDir && !planMode && !providerSessionId) {
+    if (effectiveWorkingDir && builderSession && !providerSessionId) {
       try {
         const { readHandoffFile } = await import("../handoff.service.js");
         const handoff = await readHandoffFile(effectiveWorkingDir);
