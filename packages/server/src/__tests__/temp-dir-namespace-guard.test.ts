@@ -55,12 +55,9 @@ const OK_MARKER = "TEMP-PREFIX OK:";
  * here looking like ongoing debt.
  */
 const KNOWN_UNSWEPT: Record<string, string> = {
-  // Owned by another agent's in-flight work for the whole of #839; its one real site
-  // (`hermeticity-guard-`) is a fixture dir for the hermeticity guard's own bite test, and its
-  // other two hits are prefix text INSIDE a doc string and a synthesized fixture file that is
-  // never executed. Rename separately once that file is free.
-  "packages/shared/__tests__/test-tree-write-hermeticity.test.ts":
-    "concurrent-edit boundary during #839 — rename in a follow-up",
+  // Empty, and that is the intended resting state: #839's one grandfathered entry
+  // (`test-tree-write-hermeticity.test.ts`, a concurrent-edit boundary at the time) was
+  // renamed in #840 and its entry DELETED rather than zeroed, per the shrink-only rule above.
 };
 
 interface Site {

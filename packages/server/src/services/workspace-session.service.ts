@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { writeFileSync, readFileSync, existsSync } from "node:fs";
+import { writeFileSync, readFileSync, existsSync, mkdtempSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { preferences } from "@agentic-kanban/shared/schema";
 import { profileNameOf } from "@agentic-kanban/shared/lib/profile-selection";
@@ -383,7 +383,11 @@ export function createWorkspaceSessionService(deps: {
     const fullCommand = agentArgs ? `${resolvedCommand} ${agentArgs}` : resolvedCommand;
 
     if (process.platform === "win32") {
-      const tmpScript = join(tmpdir(), `terminal-${id}.cmd`);
+      // Minted inside an `ak-` directory so the temp reaper actually collects it (#840).
+      // The reaper is gated on isDirectory(), so a loose `terminal-*.cmd` sitting in %TEMP%
+      // is never swept — and this is product code, so it accumulates on a real user's
+      // machine rather than a CI runner's.
+      const tmpScript = join(mkdtempSync(join(tmpdir(), "ak-terminal-")), `terminal-${id}.cmd`);
       writeFileSync(tmpScript, `@cd /d "${workspace.workingDir}"\r\n@${fullCommand}\r\n`);
       spawn("cmd.exe", ["/c", "start", `Terminal - ${workspace.branch}`, tmpScript], {
         detached: true, stdio: "ignore",
