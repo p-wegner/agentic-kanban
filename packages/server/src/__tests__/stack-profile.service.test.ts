@@ -306,6 +306,24 @@ describe("buildSmartHooksRules", () => {
     expect(out.rules).toEqual([]);
   });
 
+  it("runs test rules on Stop only — a test command is never scoped to the edited file", () => {
+    // Measured: per-edit typecheck+tests ran to their timeouts on every Write/Edit (median
+    // 5m50s) and were killed, so the per-edit test run produced no signal for pure latency.
+    // Typecheck stays per-edit (it IS the cheap signal); tests move to end-of-turn.
+    const out = buildSmartHooksRules(
+      profile({ stack: "node", typecheckCommand: "pnpm tsc --noEmit", quickTestCommand: "pnpm test:mine", testCommand: "pnpm test" }),
+    );
+    expect(out.rules.find((r) => r.name === "Quick tests")!.events).toEqual(["Stop"]);
+    // Typecheck keeps the default (absent => both events, which the runner preserves).
+    expect(out.rules.find((r) => r.name === "Typecheck")!.events).toBeUndefined();
+  });
+
+  it("marks the full-suite fallback test rule Stop-only too", () => {
+    const out = buildSmartHooksRules(profile({ stack: "go", testCommand: "go test ./...", typecheckCommand: null }));
+    expect(out.rules[0].name).toBe("Tests");
+    expect(out.rules[0].events).toEqual(["Stop"]);
+  });
+
   it("keeps a Java compileJava typecheck rule but downgrades it to non-blocking (gradle is slow)", () => {
     const out = buildSmartHooksRules(
       profile({ stack: "java", typecheckCommand: "./gradlew compileJava", testCommand: "./gradlew test" }),
