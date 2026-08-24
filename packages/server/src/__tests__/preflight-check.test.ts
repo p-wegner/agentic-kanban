@@ -168,7 +168,7 @@ describe("workspaceLaunchPreflight", () => {
         return "";
       },
       readFile: async (root, path) => files.get(`${root}:${path}`) ?? "",
-      exists: async (root, path) => files.has(`${root}:${path}`),
+      exists: async (root, path) => (path === ".git" ? root === "worktree" : files.has(`${root}:${path}`)),
     });
 
     expect(result.ok).toBe(true);
@@ -201,7 +201,7 @@ describe("workspaceLaunchPreflight", () => {
         return "";
       },
       readFile: async (root, path) => files.get(`${root}:${path}`) ?? "",
-      exists: async (root, path) => files.has(`${root}:${path}`),
+      exists: async (root, path) => (path === ".git" ? root === "worktree" : files.has(`${root}:${path}`)),
     });
 
     expect(result.ok).toBe(false);
@@ -246,7 +246,7 @@ describe("workspaceLaunchPreflight", () => {
         return "";
       },
       readFile: async (root, path) => files.get(`${root}:${path}`) ?? "",
-      exists: async (root, path) => files.has(`${root}:${path}`),
+      exists: async (root, path) => (path === ".git" ? root === "worktree" : files.has(`${root}:${path}`)),
     });
 
     expect(result.ok).toBe(true);
@@ -289,7 +289,7 @@ describe("workspaceLaunchPreflight", () => {
         return "";
       },
       readFile: async (root, path) => files.get(`${root}:${path}`) ?? "",
-      exists: async (root, path) => files.has(`${root}:${path}`),
+      exists: async (root, path) => (path === ".git" ? root === "worktree" : files.has(`${root}:${path}`)),
     });
 
     expect(result.ok).toBe(true);
@@ -332,7 +332,7 @@ describe("workspaceLaunchPreflight", () => {
         return "";
       },
       readFile: async (root, path) => files.get(`${root}:${path}`) ?? "",
-      exists: async (root, path) => files.has(`${root}:${path}`),
+      exists: async (root, path) => (path === ".git" ? root === "worktree" : files.has(`${root}:${path}`)),
     });
 
     expect(result.ok).toBe(false);
@@ -383,7 +383,7 @@ describe("workspaceLaunchPreflight", () => {
           return "";
         },
         readFile: async (root, path) => files.get(`${root}:${path}`) ?? "",
-        exists: async (root, path) => files.has(`${root}:${path}`),
+        exists: async (root, path) => (path === ".git" ? root === "worktree" : files.has(`${root}:${path}`)),
       });
     };
 
@@ -428,7 +428,7 @@ describe("workspaceLaunchPreflight", () => {
         return "";
       },
       readFile: async (root, path) => files.get(`${root}:${path}`) ?? "",
-      exists: async (root, path) => files.has(`${root}:${path}`),
+      exists: async (root, path) => (path === ".git" ? root === "worktree" : files.has(`${root}:${path}`)),
     });
 
     expect(result.ok).toBe(false);
@@ -469,7 +469,7 @@ describe("workspaceLaunchPreflight", () => {
         return "";
       },
       readFile: async (root, path) => files.get(`${root}:${path}`) ?? "",
-      exists: async (root, path) => files.has(`${root}:${path}`),
+      exists: async (root, path) => (path === ".git" ? root === "worktree" : files.has(`${root}:${path}`)),
     });
 
     expect(result.ok).toBe(true);
@@ -503,7 +503,7 @@ describe("workspaceLaunchPreflight", () => {
         return "";
       },
       readFile: async (root, path) => files.get(`${root}:${path}`) ?? "",
-      exists: async (root, path) => files.has(`${root}:${path}`),
+      exists: async (root, path) => (path === ".git" ? root === "worktree" : files.has(`${root}:${path}`)),
     });
 
     expect(result.ok).toBe(true);
@@ -548,7 +548,7 @@ describe("workspaceLaunchPreflight", () => {
         return "";
       },
       readFile: async (root, path) => files.get(`${root}:${path}`) ?? "",
-      exists: async (root, path) => files.has(`${root}:${path}`),
+      exists: async (root, path) => (path === ".git" ? root === "worktree" : files.has(`${root}:${path}`)),
     });
 
     expect(result.errors).toEqual([]);
@@ -583,7 +583,7 @@ describe("workspaceLaunchPreflight", () => {
         return "";
       },
       readFile: async (root, path) => files.get(`${root}:${path}`) ?? "",
-      exists: async (root, path) => files.has(`${root}:${path}`),
+      exists: async (root, path) => (path === ".git" ? root === "worktree" : files.has(`${root}:${path}`)),
     });
 
     expect(result.ok).toBe(false);
@@ -626,7 +626,7 @@ describe("workspaceLaunchPreflight", () => {
         return "";
       },
       readFile: async (root, path) => files.get(`${root}:${path}`) ?? "",
-      exists: async (root, path) => files.has(`${root}:${path}`),
+      exists: async (root, path) => (path === ".git" ? root === "worktree" : files.has(`${root}:${path}`)),
     });
 
     expect(result.ok).toBe(true);
@@ -634,4 +634,69 @@ describe("workspaceLaunchPreflight", () => {
     expect(result.repairedSymlinks).toEqual(["node_modules", "packages/server/node_modules"]);
     expect(calls).toEqual([{ source: "main", worktree: "worktree", dirs: ["node_modules"] }]);
   });
+
+  // #859: a deferred launch fired `git status --porcelain` into a worktree whose provisioning
+  // was still in flight (48s measured) and died with the raw `fatal: not a git repository`.
+  // The preflight must never spawn git against a directory that is not a git repository:
+  // it waits for `.git` (bounded) and otherwise refuses with a normal ok=false result the
+  // caller can persist — never an unhandled throw.
+  it("refuses without running any git command when the worktree is not a git repository (#859)", async () => {
+    const gitCalls: string[][] = [];
+
+    const result = await workspaceLaunchPreflight({
+      repoPath: "main",
+      worktreePath: "worktree",
+      baseBranch: "main",
+      branch: "feature/test",
+      isDirect: false,
+      worktreeReadyTimeoutMs: 0,
+      execGit: async (args) => {
+        gitCalls.push(args);
+        throw new Error("fatal: not a git repository (or any of the parent directories): .git");
+      },
+      readFile: async () => "",
+      // No `.git` anywhere — the worktree is not (yet, or any longer) a repository.
+      exists: async () => false,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.errors.join("\n")).toContain("not a git repository");
+    expect(result.errors.join("\n")).toContain("worktree");
+    // The whole point: git was never spawned against the broken directory.
+    expect(gitCalls).toEqual([]);
+  });
+
+  it("waits out an in-flight provision: `.git` appearing during the bounded wait lets the launch proceed (#859)", async () => {
+    const gitCalls: string[][] = [];
+    let gitProbes = 0;
+
+    const result = await workspaceLaunchPreflight({
+      repoPath: "main",
+      worktreePath: "worktree",
+      baseBranch: null,
+      branch: "feature/test",
+      isDirect: false,
+      worktreeReadyTimeoutMs: 30_000,
+      execGit: async (args) => {
+        gitCalls.push(args);
+        if (args[0] === "status") return "";
+        if (args[0] === "rev-parse") return "feature/test\n";
+        return "";
+      },
+      readFile: async () => "",
+      exists: async (root, path) => {
+        if (path === ".git" && root === "worktree") {
+          // The provision finishes while the preflight is waiting: absent twice, then present.
+          gitProbes += 1;
+          return gitProbes > 2;
+        }
+        return false;
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(gitProbes).toBeGreaterThan(2);
+    // Git ran only AFTER the repository existed.
+    expect(gitCalls.some((args) => args[0] === "status")).toBe(true);
+  }, 20_000);
 });

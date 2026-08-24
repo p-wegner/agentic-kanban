@@ -32,6 +32,11 @@ interface WorkspaceLaunchPreflightOptions {
   exists?: (root: string, relativePath: string) => Promise<boolean>;
   symlinkDirs?: string[];
   bootstrapSymlinks?: (sourceDir: string, worktreeDir: string, dirNames: string[]) => Promise<SymlinkBootstrapResult>;
+  /**
+   * #859: how long to wait for `<worktreePath>/.git` before refusing to run any git
+   * command. Only tests should shrink this; see {@link WORKTREE_READY_DEFAULT_TIMEOUT_MS}.
+   */
+  worktreeReadyTimeoutMs?: number;
 }
 
 export interface WorkspaceLaunchPreflightResult extends PreflightResult {
@@ -43,6 +48,36 @@ export interface WorkspaceLaunchPreflightResult extends PreflightResult {
 
 function execGit(args: string[], cwd: string): Promise<string> {
   return gitExecOrThrow(args, { cwd });
+}
+
+/**
+ * #859: how long the launch preflight waits for the worktree to become a git repository
+ * before refusing. A deferred launch used to fire `git status --porcelain` into a directory
+ * whose provisioning was still in flight (measured at 48s on a loaded machine) and die with
+ * the raw `fatal: not a git repository` — leaving the workspace `idle` with no persisted
+ * error. The wait rides out an in-flight provision; the refusal (a normal `ok: false`
+ * preflight result, not a throw) covers a worktree that was genuinely removed underneath us.
+ */
+const WORKTREE_READY_DEFAULT_TIMEOUT_MS = 60_000;
+const WORKTREE_READY_POLL_INTERVAL_MS = 500;
+
+/**
+ * Wait (bounded) until `<worktreePath>/.git` exists — the cheapest "this directory is a git
+ * repository" signal, checked WITHOUT spawning git, so the preflight never runs a git
+ * command against a directory that cannot answer one (#859).
+ */
+async function waitForWorktreeRepository(
+  exists: (root: string, relativePath: string) => Promise<boolean>,
+  worktreePath: string,
+  timeoutMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (await exists(worktreePath, ".git")) return true;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return false;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(WORKTREE_READY_POLL_INTERVAL_MS, remaining)));
+  }
 }
 
 async function defaultExists(root: string, relativePath: string): Promise<boolean> {
@@ -204,6 +239,32 @@ async function getCurrentBranch(
 }
 
 /**
+ * Repair the configured dependency symlinks (best-effort, never fatal). Extracted from
+ * `workspaceLaunchPreflight` so the #859 repository gate could be added there without
+ * growing that function past its grandfathered branch-complexity baseline (#726).
+ */
+async function repairConfiguredSymlinks(
+  options: WorkspaceLaunchPreflightOptions,
+): Promise<{ repaired: string[]; refreshed: boolean }> {
+  const symlinkDirs = options.symlinkDirs ?? [];
+  if (symlinkDirs.length === 0) return { repaired: [], refreshed: false };
+  const linkDeps = options.bootstrapSymlinks ?? bootstrapSymlinks;
+  try {
+    const symlinkResult = await linkDeps(options.repoPath, options.worktreePath, symlinkDirs);
+    if (symlinkResult.linked.length > 0) {
+      console.log(`[preflight] repaired worktree symlinks: ${symlinkResult.linked.join(", ")}`);
+    }
+    if (symlinkResult.failed.length > 0) {
+      console.warn(`[preflight] worktree symlink repair skipped failures: ${symlinkResult.failed.map(f => `${f.dir}: ${f.error}`).join(", ")}`);
+    }
+    return { repaired: symlinkResult.linked, refreshed: symlinkResult.linked.length > 0 };
+  } catch (err) {
+    console.warn(`[preflight] worktree symlink repair error (non-fatal): ${errorMessage(err)}`);
+    return { repaired: [], refreshed: false };
+  }
+}
+
+/**
  * Deterministic guard before launching/resuming an agent in a worktree.
  *
  * Safety hook/policy files are compared against the main checkout. Clean worktrees
@@ -223,6 +284,20 @@ export async function workspaceLaunchPreflight(
   const errors: string[] = [];
   const expectedBranch = options.branch.trim();
   const baseBranch = options.baseBranch?.trim();
+
+  // #859: never run a git command against a directory that is not (yet, or any longer) a
+  // git repository. Wait out an in-flight provision; refuse — visibly, as a normal
+  // preflight failure the caller persists — when `.git` never appears.
+  const worktreeReadyTimeoutMs = options.worktreeReadyTimeoutMs ?? WORKTREE_READY_DEFAULT_TIMEOUT_MS;
+  if (!(await waitForWorktreeRepository(policyExists, options.worktreePath, worktreeReadyTimeoutMs))) {
+    errors.push(
+      `Worktree at ${options.worktreePath} is not a git repository (no .git after waiting ${worktreeReadyTimeoutMs}ms) — ` +
+        "worktree provisioning may still be in flight, or the directory was removed underneath the workspace. " +
+        "Refusing to run git commands or launch the agent; recreate or resume the workspace once the worktree exists.",
+    );
+    return { ok: false, errors, staleFiles: [], refreshed: false, dirtyFiles: [], repairedSymlinks: [] };
+  }
+
   let dirtyFiles = excludeBoardMaterializedFiles(
     parsePorcelainFiles(await git(["status", "--porcelain"], options.worktreePath)),
   );
@@ -279,24 +354,9 @@ export async function workspaceLaunchPreflight(
     return { ok: false, errors, staleFiles: staleBefore, refreshed: false, dirtyFiles, repairedSymlinks };
   }
 
-  let refreshed = false;
-  const symlinkDirs = options.symlinkDirs ?? [];
-  if (symlinkDirs.length > 0) {
-    const linkDeps = options.bootstrapSymlinks ?? bootstrapSymlinks;
-    try {
-      const symlinkResult = await linkDeps(options.repoPath, options.worktreePath, symlinkDirs);
-      repairedSymlinks = symlinkResult.linked;
-      if (symlinkResult.linked.length > 0) {
-        refreshed = true;
-        console.log(`[preflight] repaired worktree symlinks: ${symlinkResult.linked.join(", ")}`);
-      }
-      if (symlinkResult.failed.length > 0) {
-        console.warn(`[preflight] worktree symlink repair skipped failures: ${symlinkResult.failed.map(f => `${f.dir}: ${f.error}`).join(", ")}`);
-      }
-    } catch (err) {
-      console.warn(`[preflight] worktree symlink repair error (non-fatal): ${errorMessage(err)}`);
-    }
-  }
+  const symlinkRepair = await repairConfiguredSymlinks(options);
+  repairedSymlinks = symlinkRepair.repaired;
+  let refreshed = symlinkRepair.refreshed;
 
   if (dirtyFiles.length === 0 && baseBranch) {
     try {
