@@ -181,6 +181,43 @@ function fromLog(lines) {
 
 let boardOk = null;
 let boardCheckedAt = null;
+let boardUi = null;
+
+/**
+ * Find the board's UI, if this machine can reach it at all.
+ *
+ * The worker is never told the UI's port -- it only ever learns the FLEET port,
+ * because the fleet channel is the only thing a worker legitimately needs. So
+ * this probes the usual candidates on the board's host and reports whichever
+ * answers: the Vite dev server, then the port the built client is served from.
+ *
+ * Only the ROOT is probed, and only the root is ever linked. The board API under
+ * /api has no authentication, so this deliberately does not touch it, surface it,
+ * or invite anyone else to -- a worker dashboard is not the place to make an
+ * unauthenticated control plane one click closer.
+ *
+ * Reporting nothing when nothing answers is the correct outcome, not a failure:
+ * a board whose UI is loopback-only is a board configured the way the docs say.
+ */
+const BOARD_UI_PORTS = (process.env.AK_BOARD_UI_PORTS || "5173,3001")
+  .split(",").map((p) => Number(p.trim())).filter(Boolean);
+
+async function probeBoardUi(board) {
+  if (!board) return;
+  let host;
+  try { host = new URL(board).hostname; } catch { return; }
+  for (const port of BOARD_UI_PORTS) {
+    const url = `http://${host}:${port}/`;
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 3000);
+      const res = await fetch(url, { signal: ctrl.signal });
+      clearTimeout(t);
+      if (res.ok) { boardUi = url; return; }
+    } catch { /* not reachable on this port; try the next */ }
+  }
+  boardUi = null;
+}
 
 async function probeBoard(board) {
   if (!board) return;
@@ -224,6 +261,7 @@ async function snapshot() {
     labels: cfg.labels,
     boardOk,
     boardCheckedAt,
+    boardUi,
     logFile: LOG_FILE,
     logExists: existsSync(LOG_FILE),
     logSize: existsSync(LOG_FILE) ? statSync(LOG_FILE).size : 0,
@@ -362,6 +400,7 @@ try {
 
 latest = await snapshot();
 await probeBoard(latest.board);
+await probeBoardUi(latest.board);
 
 setInterval(async () => {
   try {
@@ -372,7 +411,7 @@ setInterval(async () => {
 
 setInterval(async () => {
   try {
-    if (latest?.board) await probeBoard(latest.board);
+    if (latest?.board) { await probeBoard(latest.board); await probeBoardUi(latest.board); }
   } catch { /* probe failures are a state, not an error */ }
 }, BOARD_PROBE_MS);
 
