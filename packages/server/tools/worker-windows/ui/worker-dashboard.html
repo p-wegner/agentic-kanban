@@ -87,6 +87,8 @@
   /* ── running sessions: only rendered when there are any ── */
   #work { margin-bottom: 18px; }
   #work .item { border-color: color-mix(in srgb, var(--blue) 35%, var(--line)); }
+  #work .item.orphan { border-color: color-mix(in srgb, var(--red) 40%, var(--line)); }
+  #work .item.orphan .v { color: var(--red); }
   #work .ids { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-top: 4px; }
 
   /* ── log ── */
@@ -228,13 +230,26 @@ function render(s) {
 
   // Only present when there is work. An empty panel every idle minute trains the
   // eye to skip the place where the interesting thing will appear.
-  $("work").innerHTML = s.sessions > 0
-    ? `<div class="links"><div class="item" style="flex:1">
-         <div class="k">Running now</div>
-         <div class="v">${s.sessions} session${s.sessions === 1 ? "" : "s"}</div>
-         <div class="ids">${(s.sessionIds || []).map(esc).join("<br>")}</div>
-       </div></div>`
-    : "";
+  // Orphans are shown even when nothing is running: a session that died without
+  // logging an exit means work was lost and the board was never told, and that is
+  // exactly the state nobody currently has any way to see.
+  const panels = [];
+  if (s.sessions > 0) {
+    panels.push(`<div class="item" style="flex:1">
+      <div class="k">Running now</div>
+      <div class="v">${s.sessions} session${s.sessions === 1 ? "" : "s"}</div>
+      <div class="ids">${(s.sessionIds || []).map(esc).join("<br>")}</div>
+    </div>`);
+  }
+  if (s.orphanIds?.length) {
+    panels.push(`<div class="item orphan" style="flex:1">
+      <div class="k">Died without reporting</div>
+      <div class="v">${s.orphanIds.length} session${s.orphanIds.length === 1 ? "" : "s"}</div>
+      <div class="ids">${s.orphanIds.map(esc).join("<br>")}</div>
+      <div class="note">process gone, no exit logged — the board was never told</div>
+    </div>`);
+  }
+  $("work").innerHTML = panels.length ? `<div class="links">${panels.join("")}</div>` : "";
 
   $("c-boardui").innerHTML = s.boardUi
     ? `<a href="${esc(s.boardUi)}" target="_blank" rel="noreferrer">open the board</a>`

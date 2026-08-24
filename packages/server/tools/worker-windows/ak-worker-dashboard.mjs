@@ -154,21 +154,34 @@ function fromConfig() {
   }
 }
 
+/** Cheap liveness: signal 0 throws ESRCH if the pid is gone, and never signals. */
+function pidAlive(pid) {
+  try { process.kill(pid, 0); return true; } catch (e) { return e.code === "EPERM"; }
+}
+
 function fromLog(lines) {
-  const out = { connection: "unknown", since: null, sessions: 0, lastLine: null, sessionIds: [] };
+  const out = { connection: "unknown", since: null, sessions: 0, lastLine: null, sessionIds: [], orphanIds: [] };
   if (!lines.length) return out;
   out.lastLine = lines[lines.length - 1];
 
-  // In-flight count is launched-minus-exited over the window, floored at 0 -
-  // identical to the tray. It is approximate by construction: a dispatch whose
-  // launch line has aged out of the window reads as one fewer.
-  const launched = lines.filter((l) => /launched agent/.test(l));
-  const exited = lines.filter((l) => /agent exited/.test(l));
-  out.sessions = Math.max(0, launched.length - exited.length);
-
-  const idOf = (l) => (l.match(/sessionId=([0-9a-f-]{8,})/) || [])[1];
-  const done = new Set(exited.map(idOf).filter(Boolean));
-  out.sessionIds = launched.map(idOf).filter((id) => id && !done.has(id));
+  // A session killed without logging `agent exited` -- which is what a daemon
+  // restart does to everything under it -- stays "launched" in this log forever.
+  // Counting log lines alone therefore over-reports in flight work indefinitely:
+  // measured 3 here when 1 was real and 2 were zombies from an earlier restart.
+  // So the pid is checked, and the dead ones are reported SEPARATELY rather than
+  // dropped, because a zombie means work was lost and the board was never told.
+  const pending = new Map();
+  for (const l of lines) {
+    const launch = l.match(/launched agent: sessionId=([0-9a-f-]{8,}) pid=(\d+)/);
+    if (launch) pending.set(launch[1], Number(launch[2]));
+    const exit = l.match(/agent exited: sessionId=([0-9a-f-]{8,})/);
+    if (exit) pending.delete(exit[1]);
+  }
+  for (const [id, pid] of pending) {
+    if (pidAlive(pid)) out.sessionIds.push(id);
+    else out.orphanIds.push(id);
+  }
+  out.sessions = out.sessionIds.length;
 
   const conn = [...lines].reverse().find((l) => /connected to|disconnected|socket error/.test(l));
   if (conn) {
