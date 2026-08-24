@@ -102,6 +102,35 @@ async function getBranchOwnedFiles(
   }
 }
 
+/**
+ * Safety files with UNCOMMITTED changes in the MAIN CHECKOUT.
+ *
+ * These must be excluded from every staleness check, because staleness is judged against the
+ * main checkout's working tree while the repair (`git checkout <base> -- <file>`) restores the
+ * COMMITTED content. When those two disagree the repair can never satisfy the check: the first
+ * workspace reconciles and stays stale, and every workspace after it trips the ping-pong guard
+ * and fails to launch. One agent's in-flight hook edit would brick workspace creation
+ * board-wide (#867).
+ *
+ * A worktree holding the base branch's committed policy is a consistent, safe state — so this
+ * is reported, not treated as a fault.
+ */
+async function findMainDirtyPolicyFiles(
+  git: (args: string[], cwd: string) => Promise<string>,
+  repoPath: string,
+): Promise<Set<SafetyPolicyFile>> {
+  try {
+    // --name-only against HEAD yields bare paths (unlike --porcelain, whose lines keep their
+    // " M " status prefix) and covers both staged and unstaged edits, which is exactly
+    // "differs from what is committed".
+    const output = await git(["diff", "--name-only", "HEAD", "--", ...SAFETY_POLICY_FILES], repoPath);
+    const changed = new Set(parsePorcelainFiles(output));
+    return new Set(SAFETY_POLICY_FILES.filter((f) => changed.has(f)));
+  } catch {
+    return new Set();
+  }
+}
+
 /** How many times a [preflight] reconcile commit already touched this file on this branch. */
 async function countPriorReconcileCommits(
   git: (args: string[], cwd: string) => Promise<string>,
@@ -189,6 +218,18 @@ export async function workspaceLaunchPreflight(
     ? await getBranchOwnedFiles(git, options.worktreePath, baseBranch)
     : new Set<SafetyPolicyFile>();
 
+  // #867: a safety file left uncommitted in the main checkout can never be reconciled to, so
+  // treating it as drift bricks workspace creation for every branch. Report it and move on.
+  const mainDirtyPolicyFiles = await findMainDirtyPolicyFiles(git, options.repoPath);
+  if (mainDirtyPolicyFiles.size > 0) {
+    console.warn(
+      `[preflight] ignoring safety-policy drift for ${[...mainDirtyPolicyFiles].join(", ")}: ` +
+        `modified but uncommitted in the main checkout (${options.repoPath}), so the worktree cannot be ` +
+        "reconciled to it. This worktree holds the base branch's committed copy, which is safe. " +
+        "Commit or revert it in the main checkout to clear this.",
+    );
+  }
+
   if (expectedBranch) {
     const currentBranch = await getCurrentBranch(git, options.worktreePath);
     if (currentBranch !== expectedBranch) {
@@ -220,7 +261,7 @@ export async function workspaceLaunchPreflight(
     worktreePath: options.worktreePath,
     readFile: readPolicyFile,
     exists: policyExists,
-  })).filter((f) => !branchOwnedFiles.has(f));
+  })).filter((f) => !branchOwnedFiles.has(f) && !mainDirtyPolicyFiles.has(f));
 
   if (dirtyFiles.length > 0 && staleBefore.length > 0) {
     errors.push(
@@ -287,7 +328,7 @@ export async function workspaceLaunchPreflight(
     worktreePath: options.worktreePath,
     readFile: readPolicyFile,
     exists: policyExists,
-  })).filter((f) => !branchOwnedFiles.has(f));
+  })).filter((f) => !branchOwnedFiles.has(f) && !mainDirtyPolicyFiles.has(f));
 
   if (staleAfter.length > 0 && dirtyFiles.length === 0 && baseBranch) {
     // Worktree is clean but safety files diverge from main (e.g. branch pre-dates a hooks
