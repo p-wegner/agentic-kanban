@@ -277,8 +277,16 @@ describe("client conventions (#601)", () => {
    * being raised to meet it. The number below has never moved and must not.
    */
   const PREFERENCES_BYPASS_BASELINE = 15;
+  // `__tests__/` is excluded for the same reason the node-only-API rule below excludes it: the
+  // rule is about RUNTIME call sites. `walk` already drops `*.test.*`, but a guard's BASELINE
+  // module is a plain `.ts` beside it — `api-response-validation-baseline.ts` names
+  // `PUT /api/preferences/settings` precisely because it is an unvalidated endpoint (#806), and
+  // counting that as a settings-store bypass would punish writing the gap down.
   const preferenceBypasses = () =>
-    files.filter((f) => !rel(f).includes("settingsStore") && read(f).includes("/api/preferences")).map(rel);
+    files
+      .filter((f) => !rel(f).startsWith("__tests__/") && !rel(f).includes("/__tests__/"))
+      .filter((f) => !rel(f).includes("settingsStore") && read(f).includes("/api/preferences"))
+      .map(rel);
 
   it("the raw /api/preferences count only ever shrinks", () => {
     const hits = preferenceBypasses();
