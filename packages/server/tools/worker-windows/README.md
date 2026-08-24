@@ -25,6 +25,9 @@ resolved from the installed module rather than guessed.
 | `ak-worker-run.ps1` | The supervised wrapper the Scheduled Task actually runs. Not called by hand. Sets the two variables below explicitly, strips inherited `CLAUDE_*` session variables, resolves the worker binary (a task's PATH usually lacks the npm global bin), timestamps every daemon line into `%LOCALAPPDATA%\agentic-kanban-worker\worker.log`, and restarts the daemon with exponential backoff (reset after 60s of health). |
 | `ak-worker-tray.ps1` | WinForms `NotifyIcon`. grey = not installed/stopped, red = daemon down or disconnected, yellow = connected but the board is unreachable from here, green = connected and idle, blue = running N sessions. State comes from the log tail plus a process check; the board `/api/health` probe runs on a slower timer. Single-instance via a named mutex. |
 | `ak-worker-tray-launch.vbs` | Hidden launcher for the tray (window mode 0), so there is no permanent console window. Resolves its own folder, so it works from wherever the package is installed. |
+| `ak-worker-dashboard.mjs` | Live browser view of the same state, opened from the tray's **Open dashboard (live)**. Zero-dep Node, binds **127.0.0.1 only**, Origin-checked, token in `%LOCALAPPDATA%\agentic-kanban-worker\dashboard-token`. Serves `/` (the page), `/api/snapshot`, `/api/log`, and `/api/stream` (SSE). **Read-only** — it starts and stops nothing. |
+| `ui/worker-dashboard.html` | The page: status dot, state cards, running sessions, and a colour-coded live log tail. Self-contained and theme-aware; no external assets. The favicon carries the status colour, so a backgrounded tab still shows worker state. |
+| `ak-worker-dashboard-launch.vbs` | Hidden launcher for the dashboard, same pattern as the tray's. Launching twice is harmless — the server steps to the next free port and writes its real URL to `dashboard.json`. |
 
 ## Install sequence
 
