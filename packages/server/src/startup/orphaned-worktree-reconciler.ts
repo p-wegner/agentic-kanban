@@ -244,6 +244,14 @@ export async function reconcileOrphanedWorktrees(args: {
       database: args.database,
       workingDir: worktree.path,
       branch: worktree.branch,
+      // #859: enforce this file's own "a row that names the path owns it, whatever its
+      // status" rule AT THE REMOVAL — `claims` above is project-scoped and read once per
+      // sweep, so a row outside that scope, or one committed after the snapshot (a create
+      // finishing mid-sweep), is invisible to `classifyWorktree` but must still refuse.
+      // The guard also refuses while an in-flight create (#630 marker, live pid) is still
+      // provisioning the directory — the window in which no workspace row exists at all,
+      // which is how a 48s-provisioning worktree got deleted as "orphaned".
+      treatAnyRowAsClaim: true,
       label: "startup:orphaned-worktree-reconcile",
       removeWorktree: () => args.git.removeWorktree(args.repoPath, worktree.path),
     });
