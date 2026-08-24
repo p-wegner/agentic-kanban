@@ -56,6 +56,23 @@ function runGenerator(args: string[]): { ok: boolean; output: string } {
   }
 }
 
+/**
+ * The committed spec, with line endings normalized to LF.
+ *
+ * The assertions below anchor on `\n  <path>:\n`, which is a claim about the spec's CONTENT
+ * — but under a CRLF checkout the terminator is `:\r\n` and every lookup reports the path as
+ * ABSENT. That is not hypothetical: `core.autocrlf=true` is set in this repo, so git checks
+ * this file out as CRLF into every worktree while the main checkout holds the generator's own
+ * LF bytes. The test therefore passed on master and failed in all twelve worktrees — i.e. in
+ * every pre-merge gate run, for every branch, blaming whichever branch happened to be in the
+ * queue. `.gitattributes` now pins the file to LF so new checkouts agree; this normalization
+ * is the belt to that braces, and keeps the assertion about content rather than about
+ * whoever's `core.autocrlf` happened to be in force.
+ */
+function readSpec(): string {
+  return readFileSync(SPEC, "utf8").replace(/\r\n/g, "\n");
+}
+
 /** The operation block for `<method> <path>` in the committed YAML, as raw text. */
 function operationBlock(spec: string, path: string, method: string): string {
   const pathStart = spec.indexOf(`\n  ${path}:\n`);
@@ -103,7 +120,7 @@ describe("openapi thrown-status attribution (#826)", () => {
   });
 
   it("documents the 404 of a route that answers it by THROWING", () => {
-    const spec = readFileSync(SPEC, "utf8");
+    const spec = readSpec();
     // The two the ticket measured live. `branches` throws from a SERVICE one hop away,
     // `output` throws in the handler itself — the two shapes the walk has to cover.
     for (const [path, method] of [
@@ -119,7 +136,7 @@ describe("openapi thrown-status attribution (#826)", () => {
   it("says in the artifact what the attribution CANNOT see", () => {
     // A generator that lists what it found and stays quiet about what it skipped reads as
     // complete — the #824 failure. The bound is written into the spec itself.
-    const spec = readFileSync(SPEC, "utf8");
+    const spec = readSpec();
     expect(spec).toContain("errorResponses:");
     expect(spec).toContain("Attribution stops at");
     expect(spec).toMatch(/cannot be resolved syntactically/);
