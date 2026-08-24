@@ -5,6 +5,8 @@ import { issues, projectStatuses, projects, workspaces } from "@agentic-kanban/s
 import { createTestDb } from "./helpers/test-db.js";
 import { createWorkspaceCrudService } from "../services/workspace-crud.service.js";
 import { WorkspaceError } from "../services/workspace-internals.js";
+// Typed so `startSession.mock.calls[0][0]` is the launch options, not an empty tuple.
+import type { StartSessionOptions } from "../services/session.manager.js";
 
 /**
  * Regression tests for POST /api/workspaces connection-drop hardening.
@@ -181,7 +183,7 @@ describe("workspace creation hardening (AK-501 / AK-587)", () => {
     const { issueId } = await seedIssue(db);
 
     const sessionManager = {
-      startSession: vi.fn(async () => "session-id"),
+      startSession: vi.fn(async (_opts: StartSessionOptions) => "session-id"),
       stopSession: vi.fn(),
       subscribe: vi.fn(),
       unsubscribe: vi.fn(),
@@ -226,7 +228,7 @@ describe("workspace creation hardening (AK-501 / AK-587)", () => {
     ].join("\n"));
 
     const sessionManager = {
-      startSession: vi.fn(async () => "session-id"),
+      startSession: vi.fn(async (_opts: StartSessionOptions) => "session-id"),
       stopSession: vi.fn(),
       subscribe: vi.fn(),
       unsubscribe: vi.fn(),
@@ -270,7 +272,7 @@ describe("workspace creation hardening (AK-501 / AK-587)", () => {
     ].join("\n"));
 
     const sessionManager = {
-      startSession: vi.fn(async () => "session-id"),
+      startSession: vi.fn(async (_opts: StartSessionOptions) => "session-id"),
       stopSession: vi.fn(),
       subscribe: vi.fn(),
       unsubscribe: vi.fn(),
@@ -355,7 +357,7 @@ describe("workspace creation hardening (AK-501 / AK-587)", () => {
       createWorktree: vi.fn(async () => { throw new Error("git worktree add failed"); }),
     });
     const sessionManager = {
-      startSession: vi.fn(async () => "session-id"),
+      startSession: vi.fn(async (_opts: StartSessionOptions) => "session-id"),
       stopSession: vi.fn(),
       subscribe: vi.fn(),
       unsubscribe: vi.fn(),
@@ -406,7 +408,7 @@ describe("workspace creation hardening (AK-501 / AK-587)", () => {
 
     const git = makeGitService();
     const sessionManager = {
-      startSession: vi.fn(async () => "session-id"),
+      startSession: vi.fn(async (_opts: StartSessionOptions) => "session-id"),
       stopSession: vi.fn(),
       subscribe: vi.fn(),
       unsubscribe: vi.fn(),

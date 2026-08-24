@@ -61,9 +61,9 @@ describe("broadcast DB flush-on-exit + FK race", () => {
 
   // ---- (a) 250ms TIME-based flush of a partial (<50) batch ----
   it("flushes a partial (<50) batch only after the 250ms timer elapses", () => {
-    broadcast("time1", { type: "stderr", data: "p1" });
-    broadcast("time1", { type: "stderr", data: "p2" });
-    broadcast("time1", { type: "stderr", data: "p3" });
+    broadcast("time1", { sessionId: "time1", type: "stderr", data: "p1" });
+    broadcast("time1", { sessionId: "time1", type: "stderr", data: "p2" });
+    broadcast("time1", { sessionId: "time1", type: "stderr", data: "p3" });
 
     // 3 buffered rows: well under the 50-row size flush — a timer is armed, nothing written yet.
     expect(insertedBatches).toHaveLength(0);
@@ -84,14 +84,14 @@ describe("broadcast DB flush-on-exit + FK race", () => {
 
   // ---- (b) flush-on-EXIT guarantee: the buffered tail is not lost ----
   it("flushes the pre-timer buffered tail together with exit — no lost or duplicated tail", () => {
-    broadcast("exit1", { type: "stderr", data: "tail-1" });
-    broadcast("exit1", { type: "stderr", data: "tail-2" });
+    broadcast("exit1", { sessionId: "exit1", type: "stderr", data: "tail-1" });
+    broadcast("exit1", { sessionId: "exit1", type: "stderr", data: "tail-2" });
 
     // Timer pending, nothing flushed — these would be lost if exit didn't flush.
     expect(insertedBatches).toHaveLength(0);
     expect(state.dbWriteTimers.has("exit1")).toBe(true);
 
-    broadcast("exit1", { type: "exit", exitCode: 0 });
+    broadcast("exit1", { sessionId: "exit1", type: "exit", exitCode: 0 });
 
     // Exit flushes the entire buffer in ONE batch: both tail stderrs + the exit row.
     expect(insertedBatches).toHaveLength(1);
@@ -108,11 +108,11 @@ describe("broadcast DB flush-on-exit + FK race", () => {
     // NOTE: this is a SIMULATED concurrency race (the FK rejection a deleted
     // session would cause), not true parallel execution.
     rejectInsertFor = "fk1";
-    broadcast("fk1", { type: "stderr", data: "late-message" });
+    broadcast("fk1", { sessionId: "fk1", type: "stderr", data: "late-message" });
 
     // Exit triggers the flush → insertSessionMessages rejects with the FK error.
     // The broadcast call itself must not throw.
-    expect(() => broadcast("fk1", { type: "exit", exitCode: 0 })).not.toThrow();
+    expect(() => broadcast("fk1", { sessionId: "fk1", type: "exit", exitCode: 0 })).not.toThrow();
 
     // Let the rejected insert's swallowing `.catch` run.
     await Promise.resolve();
@@ -129,7 +129,7 @@ describe("broadcast DB flush-on-exit + FK race", () => {
     rejectInsertFor = "busy1";
     rejectInsertWith = new Error("SQLITE_BUSY: database is locked");
 
-    broadcast("busy1", { type: "exit", exitCode: 0 });
+    broadcast("busy1", { sessionId: "busy1", type: "exit", exitCode: 0 });
 
     await Promise.resolve();
     await Promise.resolve();

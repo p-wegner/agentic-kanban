@@ -88,7 +88,7 @@ describe("worktrees endpoint spans every repo (#631)", () => {
 
     const out = await (await service()).getWorktrees("p1");
 
-    const siblings = out.filter((w: { repoName?: string }) => w.repoName);
+    const siblings = out.filter((w) => "repoName" in w);
     expect(siblings).toHaveLength(1);
     expect(siblings[0]).toMatchObject({ repoName: "admin-cockpit-backend", branch: "feature/ak-1", isMain: false });
   });
@@ -101,7 +101,7 @@ describe("worktrees endpoint spans every repo (#631)", () => {
         : [{ path: LEADING, branch: "refs/heads/main" }],
     );
 
-    const [sibling] = (await (await service()).getWorktrees("p1")).filter((w: { repoName?: string }) => w.repoName);
+    const [sibling] = (await (await service()).getWorktrees("p1")).filter((w) => "repoName" in w);
     expect(sibling.orphaned).toBe(true);
     expect(sibling.workspace).toBeUndefined();
   });
@@ -117,7 +117,7 @@ describe("worktrees endpoint spans every repo (#631)", () => {
       { repoPath: API, worktreePath: API_WT, branch: "feature/ak-1", workspaceId: "ws-1", status: "active", issueId: "i1", issueNumber: 1, issueTitle: "Do the thing" },
     ]);
 
-    const [sibling] = (await (await service()).getWorktrees("p1")).filter((w: { repoName?: string }) => w.repoName);
+    const [sibling] = (await (await service()).getWorktrees("p1")).filter((w) => "repoName" in w);
     expect(sibling.orphaned).toBe(false);
     expect(sibling.workspace).toMatchObject({ id: "ws-1", status: "active", issueNumber: 1 });
   });
@@ -125,7 +125,7 @@ describe("worktrees endpoint spans every repo (#631)", () => {
   it("never lists a sibling repo's MAIN checkout as a worktree", async () => {
     listProjectReposMock.mockResolvedValue([{ id: "r0", path: API, name: "admin-cockpit-backend" }]);
     const out = await (await service()).getWorktrees("p1");
-    expect(out.some((w: { path: string }) => w.path === API)).toBe(false);
+    expect(out.some((w) => w.path === API)).toBe(false);
   });
 
   it("an unreadable sibling repo does not fail the whole panel", async () => {
@@ -140,7 +140,7 @@ describe("worktrees endpoint spans every repo (#631)", () => {
     });
 
     const out = await (await service()).getWorktrees("p1");
-    expect(out.filter((w: { repoName?: string }) => w.repoName)).toHaveLength(1);
+    expect(out.filter((w) => "repoName" in w)).toHaveLength(1);
   });
 
   it("is unchanged for a single-repo project", async () => {
@@ -150,7 +150,7 @@ describe("worktrees endpoint spans every repo (#631)", () => {
     ]);
     const out = await (await service()).getWorktrees("p1");
     expect(out).toHaveLength(2);
-    expect(out.every((w: { repoName?: string }) => !w.repoName)).toBe(true);
+    expect(out.every((w) => !("repoName" in w))).toBe(true);
   });
 });
 
