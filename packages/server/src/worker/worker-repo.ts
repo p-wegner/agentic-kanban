@@ -11,8 +11,9 @@
 // Every git call goes through the sanctioned @agentic-kanban/shared git-exec
 // adapter (single-spawn architecture gate).
 
-import { mkdirSync, writeFileSync, existsSync, readdirSync, rmSync } from "node:fs";
+import { mkdirSync, writeFileSync, existsSync, readdirSync, rmSync, appendFileSync } from "node:fs";
 import { writeAgentSkillFile } from "@agentic-kanban/shared/lib/agent-skill-files";
+import { TICKET_CONTEXT_FILENAME } from "@agentic-kanban/shared/lib/ticket-context";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { gitExec, gitExecOrThrow } from "@agentic-kanban/shared/lib/git-exec";
@@ -64,6 +65,36 @@ export function gitAuthEnv(repo: WorkerRepoTransport): NodeJS.ProcessEnv {
 export interface WorkerCheckout {
   cwd: string;
   cacheDir: string;
+}
+
+/**
+ * Marker-based fallback install command for a checkout whose assignment carried no
+ * setup script (#852).
+ *
+ * The board derives a stack-aware `setup_script` per project at registration (#810) and
+ * the assignment carries it — but projects registered before that backfill have a null
+ * column, so the assignment arrives with no script and the worker used to install NOTHING.
+ * The dispatched agent then ran `pnpm exec vitest` against a checkout with no linked
+ * binaries, burned a turn on `Command "vitest" not found`, and shipped unverified work
+ * with exit 0.
+ *
+ * Deliberately Node-only and deliberately tiny: the worker binary is isolated from the
+ * board's service layer (`worker-cli-isolation`), so it cannot reuse the full
+ * `detectStackProfile` cascade — and Node is the stack where a missing install is silent
+ * (a JVM/Python agent fails loudly and immediately on a missing build). Non-Node stacks
+ * are expected to travel via the assignment's setup script.
+ */
+export function deriveFallbackSetupCommand(checkoutDir: string): string | null {
+  const has = (name: string): boolean => existsSync(join(checkoutDir, name));
+  if (!has("package.json")) return null;
+  if (has("pnpm-lock.yaml") || has("pnpm-workspace.yaml")) {
+    // pnpm installs the whole workspace from the root; `-r` is surfaced for monorepos to
+    // make that explicit (same shape the board's own derivation emits).
+    return has("pnpm-workspace.yaml") ? "pnpm install -r" : "pnpm install";
+  }
+  if (has("yarn.lock")) return "yarn install";
+  if (has("bun.lockb") || has("bun.lock")) return "bun install";
+  return "npm install --no-audit --no-fund";
 }
 
 /**
@@ -138,14 +169,66 @@ export async function provisionWorkerCheckout(
     writeFileSync(join(checkoutDir, file.name), file.content, "utf-8");
   }
 
-  if (repo.setupScript?.trim()) {
-    const result = await runSetupScript(checkoutDir, repo.setupScript);
+  // #852: an assignment with no setup script used to mean NO install at all — the agent
+  // then discovered the missing dependencies by failing (`Command "vitest" not found`)
+  // and shipped unverified work with exit 0. Honor the assignment's script when it
+  // travels; otherwise fall back to a marker-derived install so the agent can verify
+  // its own work.
+  const assignmentScript = repo.setupScript?.trim();
+  const setupCommand = assignmentScript || deriveFallbackSetupCommand(checkoutDir);
+  if (setupCommand) {
+    const source = assignmentScript
+      ? "assignment setup script"
+      : "fallback install (assignment carried no setup script)";
+    console.log(`[worker] running ${source} for session ${sessionId}: ${setupCommand}`);
+    const result = await runSetupScript(checkoutDir, setupCommand);
     if (result.exitCode !== 0) {
-      throw new Error(`setup script failed (exit ${result.exitCode}): ${(result.stderr || result.stdout).slice(-400)}`);
+      const detail = (result.stderr || result.stdout).slice(-400);
+      throw new Error(
+        result.timedOut
+          ? `setup (${setupCommand}) timed out — dependencies are incomplete, the agent could not verify its work`
+          : `setup script failed (exit ${result.exitCode}): ${detail}`,
+      );
     }
+    warnIfBinariesUnlinked(checkoutDir, setupCommand);
   }
 
   return { cwd: checkoutDir, cacheDir };
+}
+
+/**
+ * The #852 failure shape made VISIBLE: an install that exits 0 but links no binaries
+ * (`node_modules` exists with packages in it, no `.bin` directory), so no test runner
+ * resolves and the agent works blind.
+ *
+ * A warning rather than a throw: a root manifest whose few deps carry no bin entries
+ * legitimately gets no `.bin`, and failing the whole dispatch on that heuristic would
+ * permanently block such projects. Instead the note is appended to the ticket-context
+ * file the agent reads at session start, so it is TOLD it may be unable to verify —
+ * and told to say so — instead of discovering it by failure.
+ */
+function warnIfBinariesUnlinked(checkoutDir: string, setupCommand: string): void {
+  if (!existsSync(join(checkoutDir, "package.json"))) return;
+  if (!existsSync(join(checkoutDir, "node_modules"))) return;
+  if (existsSync(join(checkoutDir, "node_modules", ".bin"))) return;
+  const warning =
+    `setup (${setupCommand}) completed but node_modules/.bin was not created — ` +
+    `package binaries (test runners, linters) may not resolve in this checkout`;
+  console.warn(`[worker] ${warning}`);
+  const contextFile = join(checkoutDir, TICKET_CONTEXT_FILENAME);
+  if (!existsSync(contextFile)) return;
+  try {
+    appendFileSync(
+      contextFile,
+      `\n\n## Worker checkout warning (#852)\n\n` +
+        `${warning}. If you cannot run the project's tests here, say so explicitly in your ` +
+        `final summary and commit message ("unverified") instead of finishing silently — ` +
+        `the board re-verifies before merge, but it must know this work was not verified locally.\n`,
+      "utf-8",
+    );
+  } catch (err) {
+    console.warn(`[worker] could not append the .bin warning to ${contextFile}: ${String(err)}`);
+  }
 }
 
 /**
