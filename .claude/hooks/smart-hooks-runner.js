@@ -780,6 +780,11 @@ if (require.main === module) {
 }
 
 module.exports = {
+  // Exported so the resolved hook chain can be asserted without spawning the
+  // runner: the generated-rules merge is exactly where duplicate checks crept in
+  // (a second whole-monorepo typecheck on Stop), and that is only visible in the
+  // MERGED config, not in either input file alone.
+  loadConfig,
   wrongCheckoutVitestReason,
   isContainerized,
   parseCompileErrorFiles,

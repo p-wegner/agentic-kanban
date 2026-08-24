@@ -30,6 +30,7 @@
 const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
+const { capacityHold } = require("./machine-capacity.js");
 
 // Repo-relative package dir -> pnpm filter name. Longest prefix wins, so
 // `packages/server/...` never matches a shorter sibling by accident.
@@ -91,6 +92,15 @@ function main() {
 
   if (byPackage.size === 0) process.exit(0);
 
+  // Even scoped, this spawns a vitest per package. On a box already swapping that
+  // is the #280 failure in miniature — so stand down loudly instead (see
+  // machine-capacity.js). Not a code failure: nothing ran, nothing is claimed.
+  const gate = capacityHold({ label: `Scoped vitest (${byPackage.size} package(s))` });
+  if (gate.hold) {
+    console.error(`[smart-hooks] ${gate.reason}`);
+    process.exit(0);
+  }
+
   const failures = [];
   for (const [filter, relFiles] of byPackage) {
     const args = [
@@ -107,6 +117,13 @@ function main() {
       // No related test for an edited file is a pass, not an error — plenty of
       // source files legitimately have no direct suite.
       "--passWithNoTests",
+      // Stop at the first failing file. `vitest related` is bounded by the module
+      // graph, not by a file count: editing something widely imported (a barrel, a
+      // type module) can resolve to hundreds of suites, and then this check is the
+      // full-suite run it exists to avoid. A hook only needs to answer "did I break
+      // something" — the exhaustive list is the pre-merge gate's job, so paying for
+      // failures 2..N here buys nothing and costs the whole budget.
+      "--bail=1",
     ];
     const result = spawnSync("pnpm", args, {
       cwd: root,
@@ -129,6 +146,11 @@ function main() {
     );
     console.error(failures.join("\n\n"));
     process.exit(1);
+  }
+  if (overBudget) {
+    // Report AFTER real failures: a genuine red result found before the budget
+    // ran out is the more useful answer, and must not be downgraded to a skip.
+    console.error(`[smart-hooks] ${budgetMessage("Scoped vitest", budget)}`);
   }
   process.exit(0);
 }
