@@ -28,22 +28,24 @@ import { eq } from "drizzle-orm";
 import { createTestDb } from "./helpers/test-db.js";
 import type { BoardEvents } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
+import type { startManualReview, isReviewLaunchPending } from "../services/review.service.js";
+import type { getCommitCountAhead } from "../services/git.service.js";
 
 // Mock the agent/session boundary so no real review agent spawns. The reconciler
 // imports startManualReview directly; we assert it is (or is not) invoked.
-const startManualReviewMock = vi.fn(async () => ({ sessionId: randomUUID() }));
-const isReviewLaunchPendingMock = vi.fn(() => false);
+const startManualReviewMock = vi.fn<typeof startManualReview>(async () => ({ sessionId: randomUUID() }));
+const isReviewLaunchPendingMock = vi.fn<typeof isReviewLaunchPending>(() => false);
 vi.mock("../services/review.service.js", () => ({
-  startManualReview: (...args: unknown[]) => startManualReviewMock(...args),
-  isReviewLaunchPending: (...args: unknown[]) => isReviewLaunchPendingMock(...args),
+  startManualReview: (...args: Parameters<typeof startManualReview>) => startManualReviewMock(...args),
+  isReviewLaunchPending: (...args: Parameters<typeof isReviewLaunchPending>) => isReviewLaunchPendingMock(...args),
 }));
 
 // Mock the git boundary so "has commits ahead of base" is deterministic without a
 // real worktree on disk (the working dirs below never exist).
-const getCommitCountAheadMock = vi.fn(async () => 1);
+const getCommitCountAheadMock = vi.fn<typeof getCommitCountAhead>(async () => 1);
 const revParseMock = vi.fn(async (_dir: string, ref: string) => `sha-${ref}`);
 vi.mock("../services/git.service.js", () => ({
-  getCommitCountAhead: (...args: unknown[]) => getCommitCountAheadMock(...args),
+  getCommitCountAhead: (...args: Parameters<typeof getCommitCountAhead>) => getCommitCountAheadMock(...args),
   revParse: (...args: [string, string]) => revParseMock(...args),
 }));
 
@@ -65,7 +67,7 @@ function makeDeps(db: Db, overrides: Partial<{ enabled: boolean }> = {}) {
     // #539: the commits-ahead probe is now the leading-OR-sibling helper, which reaches the
     // git-service SSOT in @agentic-kanban/shared — out of reach of the git.service mock
     // above. The reconciler exposes it as a dep, so the same mock still drives it.
-    hasCommittedWork: async () => (await getCommitCountAheadMock()) > 0,
+    hasCommittedWork: async (ws: { workingDir: string | null; baseBranch: string | null }) => ((await getCommitCountAheadMock(ws.workingDir ?? "", ws.baseBranch ?? "")) ?? 0) > 0,
     ...overrides,
   };
 }
