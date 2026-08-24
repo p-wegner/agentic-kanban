@@ -371,14 +371,92 @@ const STDIN_SCRIPT_VERBS = new Set([
   "python", "python3", "py", "node", "perl", "ruby", "php", "bash", "sh", "zsh", "pwsh", "powershell",
 ]);
 
+/**
+ * #884 point 1 — validity filter for harvested tokens. The old harvester accepted ANY
+ * slash-containing span ending in `.ext`, SPACES INCLUDED — so prose ("see docs/foo and read
+ * bar.ts"), code fragments (`s/a/b/ file.ts`), markdown-fence fragments, and a whole
+ * `git commit -F msg -- <pathspec list>` were each swallowed as ONE pseudo-path (measured:
+ * 39% of 10,286 weak-set entries were not paths). A candidate is a path only when it carries
+ * none of: whitespace (which is also what splits a ` -- ` pathspec list into its member
+ * paths instead of one giant token), quotes/backticks, parens/brackets/braces, shell
+ * operators, `::`, a non-drive-letter colon, or a literal `\n`/`\t`/`\r` escape (a string
+ * with an embedded escape is prose, not a path — a real Windows directory that happens to
+ * start with n/t/r loses WEAK attribution only, which is the safe direction: the file lands
+ * in the leave-alone bucket instead of the commit demand).
+ */
+function isValidPathToken(raw) {
+  if (!raw || typeof raw !== "string") return false;
+  if (/\s/.test(raw)) return false; // also rules out any ` -- `-joined pathspec span
+  if (/["'`()\[\]{}<>|;,$*?]/.test(raw)) return false;
+  const noDrive = raw.replace(/^[A-Za-z]:/, "");
+  if (noDrive.includes(":")) return false; // `::` and any other embedded colon
+  if (/\\[nrt]/.test(raw)) return false; // literal escape rendered into the text
+  return true;
+}
+
 /** Every path-shaped literal anywhere in a command, heredoc body included. Weak evidence by nature. */
 function harvestPathLiterals(command) {
   const out = [];
-  const re = /[A-Za-z0-9_@.\-]*(?:[/\\][A-Za-z0-9_@.\- ]+)+\.[A-Za-z0-9]{1,8}/g;
+  // No space in the segment class (#884): a span with spaces is prose or a pathspec LIST,
+  // never one path. Optional drive-letter prefix so `C:\x\y.ts` harvests whole.
+  const re = /(?:[A-Za-z]:)?[A-Za-z0-9_@.\-]*(?:[/\\][A-Za-z0-9_@.\-]+)+\.[A-Za-z0-9]{1,8}/g;
   let m;
   while ((m = re.exec(command)) !== null) {
+    if (!isValidPathToken(m[0])) continue;
     const tok = normPath(m[0]);
     if (looksLikePath(tok)) out.push(tok);
+  }
+  return out;
+}
+
+/** Body text of every `<<MARKER … MARKER` heredoc in a command, plus the command with those bodies removed. */
+function heredocBodies(command) {
+  const bodies = [];
+  const kept = [];
+  const lines = String(command).split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    kept.push(lines[i]);
+    const m = /<<-?\s*(["']?)([A-Za-z_][A-Za-z0-9_]*)\1/.exec(lines[i]);
+    if (!m) continue;
+    const marker = m[2];
+    const body = [];
+    let j = i + 1;
+    for (; j < lines.length && lines[j].trim() !== marker; j++) body.push(lines[j]);
+    if (j < lines.length) kept.push(lines[j]);
+    bodies.push(body.join("\n"));
+    i = j;
+  }
+  return { bodies, stripped: kept.join("\n") };
+}
+
+/**
+ * #884 point 3 — the heredoc-writes-a-file shape, as STRONG evidence. `python - <<'PY' …
+ * open("x.ts","w") … PY` and `node - <<'JS' … writeFileSync("x.ts", …) … JS` are the DOMINANT
+ * write idiom here (measured in #771: 137 shell commands, zero write tools), and the strong
+ * tier could not see them — its own comments said the weak tier "must never be the basis for
+ * telling a session to commit", so heredoc-written files could never be demanded at all.
+ * A LITERAL path opened for writing inside a heredoc body is as unambiguous as a redirect:
+ * extract it. A path held in a variable stays weak — we cannot resolve it.
+ * (`cat > X <<EOF` needs nothing here: the redirect on the intro line is already strong.)
+ */
+function heredocStrongWriteTargets(command) {
+  const out = [];
+  const push = (p) => {
+    if (!isValidPathToken(p)) return;
+    const t = normPath(p);
+    if (looksLikePath(t)) out.push(t);
+  };
+  for (const body of heredocBodies(command).bodies) {
+    let m;
+    // Python: open("path", "w"|"a"|"x"…) — also matches io.open(...).
+    const openRe = /\bopen\(\s*(["'])([^"'\n]+)\1\s*,\s*(["'])([wax][^"']*)\3/g;
+    while ((m = openRe.exec(body)) !== null) push(m[2]);
+    // Node: writeFileSync/appendFileSync/writeFile("path", …).
+    const fsRe = /\b(?:writeFileSync|appendFileSync|writeFile)\(\s*(["'])([^"'\n]+)\1/g;
+    while ((m = fsRe.exec(body)) !== null) push(m[2]);
+    // Python pathlib: Path("path").write_text/bytes(…).
+    const pathlibRe = /\bPath\(\s*(["'])([^"'\n]+)\1\s*\)\s*\.write_(?:text|bytes)\(/g;
+    while ((m = pathlibRe.exec(body)) !== null) push(m[2]);
   }
   return out;
 }
@@ -404,7 +482,10 @@ function runsInlineScript(command, verbs) {
 function collectShellWrites(command, baseCwd, abs, rel, strongAbs, strongRel) {
   const base = baseCwd ? normPath(baseCwd) : "";
   let cwd = base;
-  const norm = normPath(command);
+  // Heredoc BODIES are data, not commands (#884): fed to the segment loop they produce junk
+  // verbs and — worse — false STRONG hits (a body line containing `>` parsed as a redirect).
+  // Segments see the stripped command; the bodies are handled separately below.
+  const norm = normPath(heredocBodies(command).stripped);
   const verbs = [];
   const add = (t, strong) => {
     const resolved = joinPath(cwd, t);
@@ -442,11 +523,14 @@ function collectShellWrites(command, baseCwd, abs, rel, strongAbs, strongRel) {
   // Widening (#771): an inline/heredoc script's paths live in its BODY, not in its argv. Harvest
   // them as weak evidence — enough to mark a live agent's file as in flight, never enough to
   // demand a commit. Resolved against the command's base cwd, since a `cd` before the interpreter
-  // is what the body's relative paths are written against.
+  // is what the body's relative paths are written against. Harvesting runs over the RAW command
+  // (bodies included — they were stripped from the segment loop above), and (#884) a heredoc body
+  // that opens a LITERAL path for writing promotes that path to STRONG evidence.
   if (runsInlineScript(norm, verbs)) {
     const savedCwd = cwd;
     cwd = base;
-    for (const t of harvestPathLiterals(norm)) add(t, false);
+    for (const t of heredocStrongWriteTargets(command)) add(t, true);
+    for (const t of harvestPathLiterals(command)) add(t, false);
     cwd = savedCwd;
   }
 }
@@ -665,6 +749,10 @@ function readSessionActivity(transcriptPath, nowMs) {
     inFlightRel,
     parentStrongAbs,
     parentStrongRel,
+    // #884 — the strong-evidence UNION (parent + every subagent, finished or not): the only
+    // paths a "commit this" instruction may ever rest on.
+    strongAbs: sink.strongAbs,
+    strongRel: sink.strongRel,
     liveSubagents,
     subagentCount,
     agentCalls: sink.agentCalls,
@@ -746,30 +834,105 @@ function attributeToSession(paths, activity, repoRoot) {
  *  2. WIDEN. Heredoc/inline-script bodies are now harvested (weak evidence), which is what puts a
  *     `python - <<EOF`-patched file into the live agent's IN FLIGHT set instead of nobody's.
  *
- * `unknown` is omitted when empty so the exact-shape assertions #724 wrote against this function
- * stay valid; read it as `result.unknown ?? []`.
+ * ---------------------------------------------------------------------------
+ * #884 — STRANDED is now a strong-evidence claim EVERYWHERE, not only while agents are live.
+ *
+ * #771 restricted the commit demand to strong evidence only while a subagent was live; with
+ * none live, every weakly-attributed file (a path harvested out of a heredoc body, a bare
+ * path argument to a verb the scanner could not classify, a `grep` whose quoted `|` split
+ * into a junk verb) was still STRANDED and carried "Commit them before stopping". The weak
+ * set measured 10,286 entries, 39% of them not paths at all — evidence of that quality must
+ * never instruct. So the two questions are now split unconditionally:
+ *   - "you must commit this before stopping"  → STRONG evidence only (`stranded`).
+ *   - "this is dirty and might be yours"      → weak-only evidence (`weak`) — reported as
+ *     informational, never demanded, never blocking.
+ *
+ * `unknown`/`weak` are omitted when empty so the exact-shape assertions #724 wrote against
+ * this function stay valid; read them as `result.unknown ?? []` / `result.weak ?? []`.
  */
 function partitionAuthored(paths, activity, repoRoot) {
   const mine = attributeToSession(paths, activity, repoRoot);
-  const withUnknown = (stranded, inFlight, unknown) =>
-    unknown.length > 0 ? { stranded, inFlight, unknown } : { stranded, inFlight };
-  if (!activity || activity.subagentAuthorshipUnknown) return withUnknown(mine, [], []);
+  const withBuckets = (stranded, inFlight, unknown, weak) => {
+    const out = { stranded, inFlight };
+    if (unknown.length > 0) out.unknown = unknown;
+    if (weak.length > 0) out.weak = weak;
+    return out;
+  };
+  if (!activity || activity.subagentAuthorshipUnknown) return withBuckets(mine, [], [], []);
   const inFlightSet = new Set(
     matchWritten(mine, activity.inFlightAbs || new Set(), activity.inFlightRel || new Set(), repoRoot)
   );
   const inFlight = mine.filter((p) => inFlightSet.has(p));
   const rest = mine.filter((p) => !inFlightSet.has(p));
-  // No live subagent: there is nobody whose work a commit demand could corrupt, so the pre-#771
-  // behaviour stands and every remaining file of ours is stranded.
-  if (!activity.liveSubagents) return withUnknown(rest, inFlight, []);
+  // No live subagent: nobody's mid-edit work can be corrupted, but the commit DEMAND still
+  // requires strong evidence (#884) — weak-only attribution is a soft "possibly yours" mention.
+  if (!activity.liveSubagents) {
+    const strong = new Set(
+      matchWritten(rest, activity.strongAbs || new Set(), activity.strongRel || new Set(), repoRoot)
+    );
+    return withBuckets(
+      rest.filter((p) => strong.has(p)),
+      inFlight,
+      [],
+      rest.filter((p) => !strong.has(p))
+    );
+  }
   const parentStrong = new Set(
     matchWritten(rest, activity.parentStrongAbs || new Set(), activity.parentStrongRel || new Set(), repoRoot)
   );
-  return withUnknown(
+  return withBuckets(
     rest.filter((p) => parentStrong.has(p)),
     inFlight,
-    rest.filter((p) => !parentStrong.has(p))
+    rest.filter((p) => !parentStrong.has(p)),
+    []
   );
+}
+
+// ---------------------------------------------------------------------------
+// #884 point 4 — a file another LIVE session is holding right now.
+//
+// The buckets above are computed from THIS session's transcript, so a co-tenant's hands-on
+// file is indistinguishable from genuinely stranded work whenever authorship is uncertain
+// (unreadable transcript, unresolvable subagent — the paths where EVERYTHING is stranded).
+// The filesystem carries the missing signal: a file whose mtime is very recent was just
+// written by SOMETHING, and if the strong tier does not tie it to this session, the most
+// likely writer is another live session mid-edit. Instructing a commit there is exactly the
+// cross-author snapshot the root CLAUDE.md names by hash. Disqualify it: report "recently
+// modified by someone else, leave it alone" instead of demanding a commit. Past the window
+// the file returns to the stranded set — a delayed warning, not a dropped one.
+// ---------------------------------------------------------------------------
+
+/** A dirty file touched within this window, without strong attribution, is never demanded. */
+const FRESH_FOREIGN_MS = 2 * 60 * 1000;
+
+/**
+ * Split `stranded` (repo-relative paths) into the demandable remainder and the fresh-foreign
+ * set. `strongSet` holds the strongly-attributed subset — those are OURS whatever their mtime.
+ * `statFn`/`nowMs` are injectable for tests; an unstattable file stays stranded (over-reporting
+ * is the recoverable direction).
+ */
+function disqualifyFreshForeign(stranded, strongSet, repoRoot, opts = {}) {
+  const stat = opts.statFn || statSync;
+  const now = typeof opts.nowMs === "number" ? opts.nowMs : Date.now();
+  const root = normPath(repoRoot || "").replace(/\/+$/, "");
+  const keep = [];
+  const freshForeign = [];
+  for (const p of stranded) {
+    if (strongSet && strongSet.has(p)) {
+      keep.push(p);
+      continue;
+    }
+    let mtimeMs;
+    try {
+      mtimeMs = stat(root ? root + "/" + p : p).mtimeMs;
+    } catch {
+      keep.push(p);
+      continue;
+    }
+    if (now - mtimeMs < FRESH_FOREIGN_MS) freshForeign.push(p);
+    else keep.push(p);
+  }
+  return { stranded: keep, freshForeign };
 }
 
 /**
@@ -785,10 +948,35 @@ function partitionAuthored(paths, activity, repoRoot) {
  * instead of demanding anything, and a mixed tree lists the two sets separately (`-` vs `~`) with
  * the commit demand explicitly scoped to the stranded ones.
  */
-function buildStopReport({ stranded, inFlight, unknown, activity, totalDirty }) {
+function buildStopReport({ stranded, inFlight, unknown, weak, freshForeign, activity, totalDirty }) {
   const lines = [];
   const unknownList = unknown || [];
-  const mineCount = stranded.length + inFlight.length + unknownList.length;
+  const weakList = weak || [];
+  const freshList = freshForeign || [];
+  const mineCount =
+    stranded.length + inFlight.length + unknownList.length + weakList.length + freshList.length;
+
+  // #884 — weak evidence REPORTS, it never INSTRUCTS. These files are dirty and might be this
+  // session's, but nothing strong says so; the co-tenant case is exactly as likely.
+  const pushWeak = () => {
+    if (weakList.length === 0) return;
+    lines.push(
+      `DIRTY, POSSIBLY YOURS — ${weakList.length} uncommitted source file(s) are attributed to this ` +
+        "session on WEAK evidence only (a path mentioned in a script body or an unclassified shell " +
+        "argument, not a recorded write). Verify before committing — each may belong to another session:"
+    );
+    for (const f of weakList) lines.push(`  * ${f}`);
+  };
+  // #884 point 4 — a fresh mtime with no strong attribution means someone else's hands are on it.
+  const pushFresh = () => {
+    if (freshList.length === 0) return;
+    lines.push(
+      `RECENTLY MODIFIED — ${freshList.length} dirty source file(s) changed on disk within the last ` +
+        "2 minutes and no strong evidence ties them to this session — recently modified by someone " +
+        "else, leave them alone:"
+    );
+    for (const f of freshList) lines.push(`  ! ${f}`);
+  };
 
   const pushUnknown = () => {
     if (unknownList.length === 0) return;
@@ -804,7 +992,7 @@ function buildStopReport({ stranded, inFlight, unknown, activity, totalDirty }) 
     // quietly varies (1 of 3, then 11 of 16, then 4 of 6 within one agent's single change) is
     // read as authoritative when it is guessing.
     if (!activity || typeof totalDirty !== "number") return;
-    const accounted = stranded.length + inFlight.length;
+    const accounted = stranded.length + inFlight.length + weakList.length + freshList.length;
     if (totalDirty - accounted <= 0) return;
     lines.push(
       `(${totalDirty - accounted} of ${totalDirty} dirty source file(s) could not be attributed ` +
@@ -829,8 +1017,10 @@ function buildStopReport({ stranded, inFlight, unknown, activity, totalDirty }) 
   };
 
   if (stranded.length === 0) {
-    // Nothing of ours is stranded: informational only, and the stop is NOT blocked (#724, #771).
+    // Nothing of ours is stranded: informational only, and the stop is NOT blocked (#724, #771, #884).
     if (inFlight.length > 0) pushInFlight();
+    pushWeak();
+    pushFresh();
     pushUnknown();
     pushUnattributedCount();
     lines.push("Nothing is STRANDED, so this stop is not blocked.");
@@ -845,6 +1035,8 @@ function buildStopReport({ stranded, inFlight, unknown, activity, totalDirty }) 
   );
   for (const f of stranded) lines.push(`  - ${f}`);
   if (inFlight.length > 0) pushInFlight();
+  pushWeak();
+  pushFresh();
   if (activity && activity.subagentAuthorshipUnknown) {
     // #720 defect 1: a subagent's writes live in its own transcript. When one ran and we could not
     // read it, we cannot narrow the list — reporting nothing would hide real stranded work.
@@ -878,6 +1070,13 @@ if (require.main !== module) {
     partitionAuthored,
     buildStopReport,
     SUBAGENT_STALE_MS,
+    // #884
+    isValidPathToken,
+    harvestPathLiterals,
+    heredocStrongWriteTargets,
+    disqualifyFreshForeign,
+    FRESH_FOREIGN_MS,
+    matchWritten,
   };
 }
 
@@ -972,11 +1171,23 @@ async function main() {
   // by hash. `attributeToSession` returns everything when authorship is unknown, so a session
   // with no readable transcript still gets the old, useful warning.
   const activity = readSessionActivity(input.transcript_path);
-  const { stranded, inFlight, unknown } = partitionAuthored(verdict.files, activity, mainCheckout);
+  const { stranded, inFlight, unknown, weak } = partitionAuthored(verdict.files, activity, mainCheckout);
+  // #884 point 4 — of the would-be-demanded files, one with a very fresh mtime that the strong
+  // tier does NOT tie to this session is being edited by someone else right now: never instruct
+  // a commit on it. Only bites on the uncertain paths (unreadable transcript, unresolvable
+  // subagent), since otherwise `stranded` is strong-attributed already.
+  const strongSet = activity
+    ? new Set(
+        matchWritten(stranded, activity.strongAbs || new Set(), activity.strongRel || new Set(), mainCheckout)
+      )
+    : new Set();
+  const { stranded: strandedSafe, freshForeign } = disqualifyFreshForeign(stranded, strongSet, mainCheckout);
   const report = buildStopReport({
-    stranded,
+    stranded: strandedSafe,
     inFlight,
     unknown,
+    weak,
+    freshForeign,
     activity,
     totalDirty: verdict.files.length,
   });

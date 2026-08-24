@@ -38,14 +38,29 @@ const {
   partitionAuthored,
   buildStopReport,
   SUBAGENT_STALE_MS,
+  isValidPathToken,
+  harvestPathLiterals,
+  heredocStrongWriteTargets,
+  disqualifyFreshForeign,
+  FRESH_FOREIGN_MS,
 } = requireCjs(hookPath) as {
   classifyStranded: (c: { edited: string[]; deleted: string[]; all: string[] }) => { action: string; files?: string[]; deleted?: string[]; edited?: string[] };
   trackedSourceChanges: (cwd: string) => { edited: string[]; deleted: string[]; all: string[] };
   readSessionActivity: (transcriptPath: string | undefined, nowMs?: number) => SessionActivity;
   attributeToSession: (paths: string[], activity: SessionActivity, repoRoot: string) => string[];
-  partitionAuthored: (paths: string[], activity: SessionActivity, repoRoot: string) => { stranded: string[]; inFlight: string[] };
-  buildStopReport: (arg: { stranded: string[]; inFlight: string[]; activity: SessionActivity; totalDirty?: number }) => StopReport;
+  partitionAuthored: (paths: string[], activity: SessionActivity, repoRoot: string) => { stranded: string[]; inFlight: string[]; unknown?: string[]; weak?: string[] };
+  buildStopReport: (arg: { stranded: string[]; inFlight: string[]; unknown?: string[]; weak?: string[]; freshForeign?: string[]; activity: SessionActivity; totalDirty?: number }) => StopReport;
   SUBAGENT_STALE_MS: number;
+  isValidPathToken: (raw: string) => boolean;
+  harvestPathLiterals: (command: string) => string[];
+  heredocStrongWriteTargets: (command: string) => string[];
+  disqualifyFreshForeign: (
+    stranded: string[],
+    strongSet: Set<string>,
+    repoRoot: string,
+    opts?: { statFn?: (p: string) => { mtimeMs: number }; nowMs?: number },
+  ) => { stranded: string[]; freshForeign: string[] };
+  FRESH_FOREIGN_MS: number;
 };
 
 function git(cwd: string, args: string[]): Promise<string> {
@@ -598,5 +613,247 @@ describe("check-uncommitted hook — in-flight vs stranded (#724)", () => {
       child.stdin!.end(JSON.stringify({ stop_hook_active: true }));
     });
     expect(code).toBe(0);
+  });
+});
+
+/**
+ * #884 — the Stop hook instructs only on STRONG evidence, and the harvester stops eating prose.
+ *
+ * Measured against the live weak set: 10,286 entries, 39% not paths — code fragments, markdown
+ * fence fragments, and whole `git commit -F msg -- <pathspec list>` lines swallowed as ONE
+ * pseudo-path. The hook's own comments said the weak tier "must never be the basis for telling a
+ * session to commit", but with no live subagent the Stop report was not gated on the strong tier.
+ * And the strong tier had false negatives: files written via `python - <<'PY'` / `node - <<'JS'`
+ * heredocs were invisible to it. Each `describe` below pins one of the ticket's four points.
+ */
+describe("check-uncommitted hook — harvester validity filter and pathspec splitting (#884 p1)", () => {
+  it("rejects tokens containing quotes, parens, `::`, embedded colons, and literal escapes", () => {
+    expect(isValidPathToken("packages/server/src/x.ts")).toBe(true);
+    expect(isValidPathToken("C:/projects/andrena/agentic-kanban/packages/server/src/x.ts")).toBe(true);
+    expect(isValidPathToken("C:\\projects\\andrena\\x.ts")).toBe(true);
+    expect(isValidPathToken("p.includes('session-lifecycle'))")).toBe(false);
+    expect(isValidPathToken('say("hello/world.ts")')).toBe(false);
+    expect(isValidPathToken("Foo::Bar/baz.ts")).toBe(false);
+    expect(isValidPathToken("msg.txt -- packages/a.ts packages/b.ts")).toBe(false); // whitespace span
+    expect(isValidPathToken("line1\\nline2/part.ts")).toBe(false); // literal \n escape
+    expect(isValidPathToken("a|b/pipe.ts")).toBe(false);
+    expect(isValidPathToken("")).toBe(false);
+  });
+
+  it("splits a ` -- `-separated pathspec list into member paths instead of one giant pseudo-path", () => {
+    const harvested = harvestPathLiterals(
+      "git commit -F msg.txt -- packages/server/src/a.ts packages/shared/src/b.ts",
+    );
+    expect(harvested).toContain("packages/server/src/a.ts");
+    expect(harvested).toContain("packages/shared/src/b.ts");
+    // The old harvester (spaces allowed inside a token) produced one span covering the whole list.
+    for (const t of harvested) expect(t).not.toMatch(/\s/);
+  });
+
+  it("does not harvest prose or code fragments as paths", () => {
+    const harvested = harvestPathLiterals(
+      [
+        "python - <<'PY'",
+        "# see docs/notes and read the file, then s/a/b/ it",
+        "print('markdown fence: ```ts packages/server')",
+        "PY",
+      ].join("\n"),
+    );
+    // Nothing above is a path literal ending in an extension without junk around it.
+    expect(harvested).toEqual([]);
+  });
+});
+
+describe("check-uncommitted hook — weak evidence reports, never instructs (#884 p2)", () => {
+  const REPO = "C:/projects/andrena/agentic-kanban";
+  const MINE = "packages/server/src/services/mine.ts";
+  const THEIRS = "packages/server/src/services/theirs.ts";
+
+  let dir = "";
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "ak-hook-884-"));
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  const bash = (command: string) => ({ type: "tool_use", name: "Bash", input: { command } });
+
+  async function transcript(blocks: unknown[]): Promise<string> {
+    const p = join(dir, "transcript.jsonl");
+    await writeFile(p, blocks.map((b) => JSON.stringify({ cwd: REPO, message: { content: [b] } })).join("\n") + "\n");
+    return p;
+  }
+
+  it("a weakly-attributed file (unclassified verb) gets a soft mention, not a commit instruction", async () => {
+    // `mytool <path>` — the scanner cannot classify the verb, so the path is a GUESS. #884: a
+    // guess may say "dirty, possibly yours"; it must never say "commit this before stopping".
+    const activity = readSessionActivity(await transcript([bash(`mytool ${MINE}`)]));
+    const part = partitionAuthored([MINE, THEIRS], activity, REPO);
+    expect(part.stranded).toEqual([]);
+    expect(part.weak).toEqual([MINE]);
+    const report = buildStopReport({ ...part, activity, totalDirty: 2 });
+    expect(report.exitCode).toBe(0);
+    const text = report.lines.join("\n");
+    expect(text).toContain("POSSIBLY YOURS");
+    expect(text).toContain("Verify before committing");
+    expect(text).toContain("may belong to another session");
+    expect(text).toContain(`  * ${MINE}`);
+    expect(text).not.toContain("Commit them before stopping");
+    expect(text).not.toContain(`  - ${MINE}`);
+  });
+
+  it("a strongly-attributed file is still demanded — the warning must survive for the author", async () => {
+    const activity = readSessionActivity(await transcript([bash(`sed -i 's/a/b/' ${MINE}`)]));
+    const part = partitionAuthored([MINE, THEIRS], activity, REPO);
+    expect(part.stranded).toEqual([MINE]);
+    expect(part.weak ?? []).toEqual([]);
+    expect(buildStopReport({ ...part, activity, totalDirty: 2 }).exitCode).toBe(1);
+  });
+
+  it("mixed strong + weak: only the strong file carries the demand, the weak one is soft-mentioned", async () => {
+    const activity = readSessionActivity(
+      await transcript([bash(`sed -i 's/a/b/' ${MINE}`), bash(`mytool ${THEIRS}`)]),
+    );
+    const part = partitionAuthored([MINE, THEIRS], activity, REPO);
+    expect(part.stranded).toEqual([MINE]);
+    expect(part.weak).toEqual([THEIRS]);
+    const report = buildStopReport({ ...part, activity, totalDirty: 2 });
+    expect(report.exitCode).toBe(1);
+    const text = report.lines.join("\n");
+    expect(text).toContain(`  - ${MINE}`);
+    expect(text).toContain(`  * ${THEIRS}`);
+  });
+});
+
+describe("check-uncommitted hook — heredoc writes are STRONG evidence (#884 p3)", () => {
+  const REPO = "C:/projects/andrena/agentic-kanban";
+  const MINE = "packages/server/src/services/mine.ts";
+  const THEIRS = "packages/server/src/services/theirs.ts";
+
+  let dir = "";
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "ak-hook-884h-"));
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  const bash = (command: string) => ({ type: "tool_use", name: "Bash", input: { command } });
+
+  async function transcript(blocks: unknown[]): Promise<string> {
+    const p = join(dir, "transcript.jsonl");
+    await writeFile(p, blocks.map((b) => JSON.stringify({ cwd: REPO, message: { content: [b] } })).join("\n") + "\n");
+    return p;
+  }
+
+  it("extracts literal open(...,'w') and writeFileSync targets from heredoc bodies", () => {
+    expect(
+      heredocStrongWriteTargets(
+        ["python - <<'PY'", `open("${MINE}", "w").write("x")`, "PY"].join("\n"),
+      ),
+    ).toEqual([MINE]);
+    expect(
+      heredocStrongWriteTargets(
+        ["node - <<'JS'", `require("fs").writeFileSync("${MINE}", s)`, "JS"].join("\n"),
+      ),
+    ).toEqual([MINE]);
+    // A read (mode "r" / no mode) or a VARIABLE path is not strong evidence.
+    expect(
+      heredocStrongWriteTargets(["python - <<'PY'", `open("${MINE}").read()`, "PY"].join("\n")),
+    ).toEqual([]);
+    expect(
+      heredocStrongWriteTargets(["python - <<'PY'", 'open(p, "w").write(s)', "PY"].join("\n")),
+    ).toEqual([]);
+  });
+
+  it("a python-heredoc write with a literal path is STRANDED (demanded), not merely weak", async () => {
+    const activity = readSessionActivity(
+      await transcript([bash(["python - <<'PY'", `open("${MINE}", "w").write("x")`, "PY"].join("\n"))]),
+    );
+    const part = partitionAuthored([MINE, THEIRS], activity, REPO);
+    expect(part.stranded).toEqual([MINE]);
+    expect(buildStopReport({ ...part, activity, totalDirty: 2 }).exitCode).toBe(1);
+  });
+
+  it("`cat > X <<EOF` is strong via the intro line's redirect", async () => {
+    const activity = readSessionActivity(
+      await transcript([bash([`cat > ${REPO}/${MINE} <<'EOF'`, "content line", "EOF"].join("\n"))]),
+    );
+    const part = partitionAuthored([MINE, THEIRS], activity, REPO);
+    expect(part.stranded).toEqual([MINE]);
+  });
+
+  it("heredoc BODY lines are not fed to the segment scanner (no false strong from a `>` in data)", async () => {
+    // A body line containing `>` used to parse as a redirect and mint STRONG evidence out of data.
+    const activity = readSessionActivity(
+      await transcript([
+        bash(["python - <<'PY'", `print("if x > 1: see ${THEIRS}")`, "PY"].join("\n")),
+      ]),
+    );
+    const part = partitionAuthored([MINE, THEIRS], activity, REPO);
+    expect(part.stranded).toEqual([]);
+  });
+});
+
+describe("check-uncommitted hook — fresh-mtime foreign files are never demanded (#884 p4)", () => {
+  const REPO = "C:/projects/andrena/agentic-kanban";
+  const FRESH = "packages/server/src/services/fresh.ts";
+  const OLD = "packages/server/src/services/old.ts";
+  const STRONG = "packages/server/src/services/strong.ts";
+
+  const statFor = (mtimes: Record<string, number>) => (p: string) => {
+    const rel = p.replace(/\\/g, "/").replace(`${REPO}/`, "");
+    if (!(rel in mtimes)) throw new Error("ENOENT");
+    return { mtimeMs: mtimes[rel] };
+  };
+
+  it("a very recently modified file without strong attribution is disqualified", () => {
+    const now = 10_000_000;
+    const { stranded, freshForeign } = disqualifyFreshForeign(
+      [FRESH, OLD],
+      new Set(),
+      REPO,
+      { statFn: statFor({ [FRESH]: now - 30_000, [OLD]: now - 10 * FRESH_FOREIGN_MS }), nowMs: now },
+    );
+    expect(freshForeign).toEqual([FRESH]);
+    expect(stranded).toEqual([OLD]);
+  });
+
+  it("strong attribution overrides the mtime — our own just-written file is still demanded", () => {
+    const now = 10_000_000;
+    const { stranded, freshForeign } = disqualifyFreshForeign(
+      [STRONG],
+      new Set([STRONG]),
+      REPO,
+      { statFn: statFor({ [STRONG]: now - 1_000 }), nowMs: now },
+    );
+    expect(stranded).toEqual([STRONG]);
+    expect(freshForeign).toEqual([]);
+  });
+
+  it("an unstattable file stays stranded — over-reporting is the recoverable direction", () => {
+    const { stranded, freshForeign } = disqualifyFreshForeign([OLD], new Set(), REPO, {
+      statFn: statFor({}),
+      nowMs: 10_000_000,
+    });
+    expect(stranded).toEqual([OLD]);
+    expect(freshForeign).toEqual([]);
+  });
+
+  it("the report says 'leave them alone' and does not block when everything fresh is foreign", () => {
+    const report = buildStopReport({
+      stranded: [],
+      inFlight: [],
+      freshForeign: [FRESH],
+      activity: null,
+      totalDirty: 1,
+    });
+    expect(report.exitCode).toBe(0);
+    const text = report.lines.join("\n");
+    expect(text).toContain("RECENTLY MODIFIED");
+    expect(text).toContain("recently modified by someone else, leave them alone");
+    expect(text).toContain(`  ! ${FRESH}`);
+    expect(text).not.toContain("Commit them before stopping");
   });
 });
