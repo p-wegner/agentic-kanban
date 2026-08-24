@@ -448,10 +448,28 @@ export function checkWorkerCheckoutTrust(workRoot: string, home: string): Doctor
     return { name, status: "skip", detail: `${reposDir} holds no project clone yet — nothing to trust` };
   }
 
-  const trusted = readTrustedProjectPaths(join(home, ".claude.json"));
-  const untrusted = projectDirs.filter((dir) => !trusted.has(normalizeTrustKey(dir)));
+  // Claude Code reads .claude.json from CLAUDE_CONFIG_DIR, not from the home directory — and a
+  // fleet worker ALWAYS has that pinned (a Scheduled Task inherits nothing). Reading only
+  // ~/.claude.json made the check name a file the agent does not read: it looked right whenever
+  // both files happened to agree, and flipped to a false PASS the moment an operator followed
+  // the remedy, while every dispatch kept printing the banner. A check that becomes wrong
+  // precisely when you obey it is worse than no check.
+  //
+  // The doctor cannot always observe the env the DISPATCHED agent gets (it may run from a
+  // different shell), so it consults every candidate and requires them ALL to grant trust. A
+  // false FAIL costs a confusing message; a false PASS costs the operator their fix.
+  // Only files that EXIST count — a machine with a single config must not fail because a
+  // candidate path it never uses is absent.
+  const allCandidates = resolveTrustConfigPaths(home);
+  const present = allCandidates.filter((path) => existsSync(path));
+  const trustCandidates = present.length > 0 ? present : allCandidates.slice(0, 1);
+  const grantedBy = trustCandidates.map((path) => ({ path, trusted: readTrustedProjectPaths(path) }));
+  const untrusted = projectDirs.filter((dir) =>
+    grantedBy.some(({ trusted }) => !trusted.has(normalizeTrustKey(dir))),
+  );
+  const consulted = trustCandidates.join(", ");
   if (untrusted.length === 0) {
-    return ok(name, `all ${projectDirs.length} worker checkout(s) under ${reposDir} are trusted in ~/.claude.json`);
+    return ok(name, `all ${projectDirs.length} worker checkout(s) under ${reposDir} are trusted in ${consulted}`);
   }
 
   const described = untrusted.map((dir) => `${dir} (${describeLostRules(dir)})`);
@@ -460,13 +478,16 @@ export function checkWorkerCheckoutTrust(workRoot: string, home: string): Doctor
     status: "unknown",
     detail:
       `${untrusted.length} of ${projectDirs.length} worker checkout(s) have no hasTrustDialogAccepted entry in ` +
-      `${join(home, ".claude.json")}, so every dispatch into them prints "this workspace has not been trusted" and ` +
+      `every config Claude Code might read here (${consulted}), so every dispatch into them prints ` +
+      '"this workspace has not been trusted" and ' +
       `drops that repo's permission settings: ${described.join("; ")}. The agent still runs either way — the worker ` +
       "launches it with permissions bypassed and the PreToolUse hooks fire regardless.",
     remedy:
       "If you want the banner gone (and any deny/ask rules honoured), THIS MACHINE'S OPERATOR grants the trust — the " +
       "board never will: run Claude Code interactively once in each directory above and accept the trust dialog, or set " +
-      `projects["<that path, forward slashes>"].hasTrustDialogAccepted: true in ${join(home, ".claude.json")}.`,
+      `projects["<that path, forward slashes>"].hasTrustDialogAccepted: true in EACH of: ${consulted}. ` +
+      "Setting only one is what makes this check disagree with what the agent actually reads — " +
+      "CLAUDE_CONFIG_DIR decides which file wins, and a worker always has it pinned.",
   };
 }
 
@@ -477,6 +498,20 @@ function normalizeTrustKey(p: string): string {
 }
 
 /** The project paths `~/.claude.json` records as trusted. Never throws. */
+/**
+ * Every `.claude.json` Claude Code might read on this machine, most authoritative first:
+ * `$CLAUDE_CONFIG_DIR/.claude.json` when that is set (what a dispatched worker agent uses),
+ * then the `~/.claude/` and `~/` defaults. Deduplicated, order preserved.
+ */
+export function resolveTrustConfigPaths(home: string, env: NodeJS.ProcessEnv = process.env): string[] {
+  const paths: string[] = [];
+  const configDir = env.CLAUDE_CONFIG_DIR?.trim();
+  if (configDir) paths.push(join(configDir, ".claude.json"));
+  paths.push(join(home, ".claude", ".claude.json"));
+  paths.push(join(home, ".claude.json"));
+  return [...new Set(paths)];
+}
+
 export function readTrustedProjectPaths(claudeJsonPath: string): Set<string> {
   const out = new Set<string>();
   try {

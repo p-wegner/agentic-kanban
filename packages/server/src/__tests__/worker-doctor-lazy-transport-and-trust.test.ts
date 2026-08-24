@@ -40,6 +40,7 @@ import {
   checkWorkerCheckoutTrust,
   errnoOfFetchFailure,
   readTrustedProjectPaths,
+  resolveTrustConfigPaths,
   renderDoctorReport,
 } from "../cli/commands/worker-doctor.js";
 
@@ -189,6 +190,45 @@ describe("#851 — the doctor names untrusted worker checkouts instead of nothin
     const check = checkWorkerCheckoutTrust(workRoot, home);
     expect(check.status).toBe("skip");
     expect(check.detail).toContain("does not exist yet");
+  });
+
+  // A fleet worker ALWAYS has CLAUDE_CONFIG_DIR pinned, and Claude Code reads .claude.json from
+  // there — not from the home directory. Reading only ~/.claude.json made the check name a file
+  // the agent does not read: correct only while both files happened to agree, and a FALSE PASS
+  // the moment an operator followed the remedy, with every dispatch still printing the banner.
+  it("BITE: trust granted only in ~/.claude.json is NOT a pass when CLAUDE_CONFIG_DIR points elsewhere", () => {
+    const dir = seedRepo(PROJECT_ID, { permissions: { allow: [], deny: ["Bash(rm:*)"], ask: [] } });
+    const configDir = join(home, ".claude");
+    mkdirSync(configDir, { recursive: true });
+    // The operator followed the old remedy: granted in the HOME file only...
+    seedClaudeJson({ [dir.replace(/\\/g, "/")]: { hasTrustDialogAccepted: true } });
+    // ...while the file the agent actually reads still says nothing.
+    writeFileSync(join(configDir, ".claude.json"), JSON.stringify({ projects: {} }), "utf8");
+
+    const check = checkWorkerCheckoutTrust(workRoot, home);
+    expect(check.status).not.toBe("pass");
+    expect(check.detail).toContain(dir);
+    // The report must name every config it consulted, so the disagreement is visible.
+    expect(check.detail).toContain(join(configDir, ".claude.json"));
+    expect(check.remedy).toContain("EACH of");
+
+    // Granting it in BOTH files — what actually makes the banner go away — passes.
+    writeFileSync(
+      join(configDir, ".claude.json"),
+      JSON.stringify({ projects: { [dir.replace(/\\/g, "/")]: { hasTrustDialogAccepted: true } } }),
+      "utf8",
+    );
+    expect(checkWorkerCheckoutTrust(workRoot, home).status).toBe("pass");
+  });
+
+  it("resolveTrustConfigPaths puts $CLAUDE_CONFIG_DIR first and never repeats a path", () => {
+    const withVar = resolveTrustConfigPaths("/h", { CLAUDE_CONFIG_DIR: "/cfg" } as NodeJS.ProcessEnv);
+    expect(withVar[0]).toBe(join("/cfg", ".claude.json"));
+    expect(withVar).toContain(join("/h", ".claude.json"));
+
+    const without = resolveTrustConfigPaths("/h", {} as NodeJS.ProcessEnv);
+    expect(without).not.toContain(join("/cfg", ".claude.json"));
+    expect(new Set(without).size).toBe(without.length);
   });
 
   it("BITE: an untrusted, allow-only checkout is reported as the cosmetic case it is", () => {
