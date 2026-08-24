@@ -485,9 +485,11 @@ export function resolveConfiguredGitPort(env: NodeJS.ProcessEnv = process.env): 
  * defect.
  *
  * Scope of the refusal: the git TRANSPORT only, and only when it is started without an
- * explicit port. A same-filesystem worker (`--shares-filesystem`) never reaches the transport,
- * and the transport is started lazily by the first git-transport dispatch — so this surfaces
- * as one legible failed dispatch, not a board that will not boot.
+ * explicit port. A same-filesystem worker (`--shares-filesystem`) never reaches the transport.
+ * Since #855 a fleet-configured board binds the transport eagerly at STARTUP (server-start.ts)
+ * — where this refusal is caught and logged, never fatal — and the dispatch-time call sites
+ * remain as the lazy fallback, so this surfaces as one legible warning or failed dispatch,
+ * not a board that will not boot.
  *
  * @returns the operator-facing reason to refuse, or null when the configuration is sound.
  */
@@ -636,7 +638,12 @@ export async function startGitHttpServer(opts?: {
   };
 }
 
-/** Lazily-started singleton for the board process (mirrors ensureMcpHttpBridge). */
+/**
+ * Started-once singleton for the board process (mirrors ensureMcpHttpBridge). Bound EAGERLY
+ * at startup on a fleet-configured board (#855, server-start.ts) and lazily by the first
+ * git-transport dispatch otherwise; idempotent either way — the memoized promise makes every
+ * later call a no-op, and a failed start resets it so the next caller retries.
+ */
 let activeServer: Promise<GitHttpHandle> | null = null;
 
 export function ensureGitHttpServer(database?: Database): Promise<GitHttpHandle> {
