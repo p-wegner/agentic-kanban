@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createClient, type Client } from "@libsql/client";
-import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -32,7 +32,7 @@ interface SyntheticMigration {
 let tempPaths: string[] = [];
 
 function makeMigrationsFolder(migrations: SyntheticMigration[]): string {
-  const folder = join(tmpdir(), `manual-migrate-test-${randomUUID()}`);
+  const folder = join(tmpdir(), `ak-manual-migrate-test-${randomUUID()}`);
   mkdirSync(join(folder, "meta"), { recursive: true });
   const entries = migrations.map((m, i) => ({
     idx: m.idx,
@@ -49,8 +49,21 @@ function makeMigrationsFolder(migrations: SyntheticMigration[]): string {
   return folder;
 }
 
+/**
+ * One directory per process, in the reaper's `ak-` namespace, holding this suite's throwaway
+ * `.db` files (#840). A loose FILE is in no swept namespace whatever it is called — the fixture
+ * reaper is gated on `statSync(...).isDirectory()` — so the file has to live INSIDE a swept
+ * directory for anything to ever reclaim it when teardown does not run.
+ */
+let scratchDbDir: string | null = null;
+function dbScratchDir(): string {
+  if (scratchDbDir) return scratchDbDir;
+  scratchDbDir = mkdtempSync(join(tmpdir(), "ak-manual-migrate-db-"));
+  return scratchDbDir;
+}
+
 function makeDb(): Client {
-  const file = join(tmpdir(), `manual-migrate-test-${randomUUID()}.db`);
+  const file = join(dbScratchDir(), `manual-migrate-test-${randomUUID()}.db`);
   tempPaths.push(file, `${file}-wal`, `${file}-shm`);
   return createClient({ url: `file:${file}` });
 }
@@ -320,6 +333,8 @@ describe("applyMigrations — FK-toggling migrations on a populated DB (arch-rev
     it("returns null (not []) when the journal is missing or conflicted — fail safe", async () => {
       const folder = makeMigrationsFolder([{ idx: 0, tag: "0000_a", sql: "CREATE TABLE a (id TEXT);" }]);
       await applyMigrations(client, { folder });
+      // TEMP-PREFIX OK: the point of the assertion is that this folder does NOT exist; it is
+      // never created, so there is nothing to sweep.
       expect(await pendingMigrationTags(client, { folder: join(tmpdir(), `does-not-exist-${randomUUID()}`) })).toBeNull();
 
       writeFileSync(join(folder, "meta", "_journal.json"), "<<<<<<< HEAD\n{}\n");

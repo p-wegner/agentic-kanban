@@ -23,7 +23,7 @@
  * `node.getSourceFile()` unusable, and the thing being checked here is a string literal in a
  * call — no type information would make the answer better.
  *
- * Two shapes are checked, and the second is why this is not just a grep:
+ * Three shapes are checked, and only the first is a grep:
  *
  *  1. A direct site: `mkdtempSync(join(tmpdir(), "some-prefix-"))`.
  *  2. A HELPER site: a suite that writes `makeTempDir("some-prefix-")`, where `makeTempDir`
@@ -31,10 +31,28 @@
  *     38 of the offenders and a literal-only scan is blind to every one of them. The helper
  *     names are DERIVED (any function whose body mints a temp dir from a parameter), not
  *     hand-listed, so a newly written helper is covered without editing this file.
+ *  3. A NON-`mkdtemp` child of `tmpdir()`: `join(tmpdir(), `thing-${randomUUID()}`)` (#840).
+ *     Both passes above key off the word `mkdtemp`, so a path merely BUILT under `tmpdir()` and
+ *     then `mkdirSync`'d — or written as a loose file — was invisible to this guard. That blind
+ *     spot is not theoretical: it is how **518,581 `test-db-*` entries** accumulated in `%TEMP%`
+ *     while this suite stayed green.
  *
- * Escape hatch: `// TEMP-PREFIX OK: <reason>` on the offending line or the line above. It has
- * a staleness half — a marker that no longer sits at a temp-prefix site FAILS, so an
- * exemption cannot outlive the code it was written for.
+ * **The discriminator for pass 3 is uniqueness per run, NOT `mkdtemp`.** `join(tmpdir(),
+ * "agentic-kanban")` is a stable singleton: one entry, reused forever, cannot accumulate — and
+ * sweeping it would delete a live cache out from under a running process. A name carrying a
+ * uuid, a pid or a timestamp mints a fresh entry every run and therefore leaks. Only the second
+ * kind is flagged; 15 stable singletons were measured at #840 and all are correct as they are.
+ *
+ * A loose FILE cannot be fixed by a rename — the reaper is gated on `statSync(…).isDirectory()`,
+ * so `ak-thing-<uuid>.db` is exactly as unswept as `thing-<uuid>.db`. The fix for a file is to
+ * mint it INSIDE an `ak-` directory (see `helpers/test-db.ts`). This guard cannot tell the two
+ * apart from the call text, which is why its failure message says so rather than saying "rename".
+ *
+ * Escape hatch: `// TEMP-PREFIX OK: <reason>` on the offending line, or anywhere in the
+ * contiguous run of comment lines directly above it (a reason worth writing rarely fits on one
+ * line, and a marker on line 1 of a five-line block used to be silently ignored). It has a
+ * staleness half — a marker that no longer sits at a temp-prefix site FAILS, so an exemption
+ * cannot outlive the code it was written for.
  */
 import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -49,15 +67,22 @@ const SOURCE_EXT = /\.(ts|tsx|mjs|cjs|js)$/;
 const OK_MARKER = "TEMP-PREFIX OK:";
 
 /**
- * Files whose offending sites this ticket could NOT rename, with the reason. Shrink-only:
- * remove an entry when it is fixed, never add one to make a new offender pass — and the
- * staleness assertion below fails if an entry no longer offends, so a stale entry cannot sit
- * here looking like ongoing debt.
+ * SITES this ticket could not fix, with the reason. Keyed `<file>::<prefix>` — a whole-FILE
+ * entry would hide every future offender in that file, which is exactly how #840's own third
+ * finding stayed invisible under #839.
+ *
+ * Shrink-only: remove an entry when it is fixed, never add one to make a new offender pass —
+ * and the staleness assertion below fails if an entry no longer offends, so a stale entry
+ * cannot sit here looking like ongoing debt.
  */
 const KNOWN_UNSWEPT: Record<string, string> = {
-  // Empty, and that is the intended resting state: #839's one grandfathered entry
-  // (`test-tree-write-hermeticity.test.ts`, a concurrent-edit boundary at the time) was
-  // renamed in #840 and its entry DELETED rather than zeroed, per the shrink-only rule above.
+  "packages/shared/src/lib/db-path.ts::agentic-kanban-vitest-":
+    "One `.db` per vitest PROCESS, so it genuinely accumulates — but `resolveDbLocation` is a " +
+    "PURE resolver that never mkdirs (its own comment says so, and the file is deliberately " +
+    "`tmpdir()` itself so the parent always exists). Minting inside an `ak-` directory would " +
+    "break that contract, and libsql will not create a missing parent. Renaming it `ak-…` would " +
+    "make this guard green while changing nothing — it is a loose FILE, and the reaper only " +
+    "sweeps directories. Left as-is deliberately rather than fixed cosmetically (#840).",
 };
 
 interface Site {
@@ -102,6 +127,15 @@ const TMPDIR_CHILD = /(?:join|resolve)\s*\(\s*(?:os\.)?tmpdir\(\)\s*,\s*([^)]*)\
 /** The literal head of the argument: `"lit"`, `'lit'`, or the leading chunk of `` `lit${x}` ``. */
 const LITERAL_HEAD = /^["'](.*)["']$|^`([^`${]*)/;
 const IDENTIFIER = /^[A-Za-z_$][\w$.]*$/;
+/** The LEADING string literal of an argument, even when something is concatenated after it. */
+const LEADING_LITERAL = /^["']([^"']*)["']|^`([^`${]*)/;
+/**
+ * The argument mints a NEW name every run. That — not `mkdtemp` — is what separates a leak from
+ * a stable singleton: `join(tmpdir(), "agentic-kanban")` is one reusable entry that can never
+ * accumulate (and must never be swept), while anything carrying a uuid, a pid, a timestamp or a
+ * random draw is a fresh entry per run.
+ */
+const PER_RUN_NAME = /\$\{|process\.pid|Date\.now\s*\(|randomUUID\s*\(|randomBytes\s*\(|Math\.random\s*\(/;
 /** A line of PROSE about the shape is not the shape — see the note at pass 1. */
 const COMMENT_LINE = /^\s*(\*|\/\/|\/\*)/;
 
@@ -114,13 +148,27 @@ function enclosingFunctionName(lines: string[], atIndex: number): string | null 
   return null;
 }
 
-function hasOkMarker(lines: string[], lineIndex: number): boolean {
-  return (lines[lineIndex] ?? "").includes(OK_MARKER) || (lines[lineIndex - 1] ?? "").includes(OK_MARKER);
+/**
+ * Index of the `TEMP-PREFIX OK:` marker covering the site on `lineIndex`, or null.
+ *
+ * The marker may sit on the offending line itself, or ANYWHERE in the contiguous run of comment
+ * lines directly above it. Checking only `lineIndex - 1` (what this did before #840) silently
+ * ignores a marker written at the TOP of a multi-line block — and a marker worth writing usually
+ * needs a paragraph, so that is the normal way to write one. `helpers/test-db.ts` already
+ * carried exactly that shape, seven lines above its site.
+ */
+function findOkMarker(lines: string[], lineIndex: number): number | null {
+  if ((lines[lineIndex] ?? "").includes(OK_MARKER)) return lineIndex;
+  for (let i = lineIndex - 1; i >= 0 && COMMENT_LINE.test(lines[i] ?? ""); i--) {
+    if (lines[i]!.includes(OK_MARKER)) return i;
+  }
+  return null;
 }
 
 interface ScanResult {
   sites: Site[];
-  exempted: Array<{ file: string; line: number }>;
+  /** `line` is the MARKER's line, not the site's — the orphan check below matches on it. */
+  exempted: Array<{ file: string; line: number; shape: string }>;
   helperNames: string[];
 }
 
@@ -134,12 +182,13 @@ function scan(): ScanResult {
   }
 
   const sites: Site[] = [];
-  const exempted: Array<{ file: string; line: number }> = [];
+  const exempted: Array<{ file: string; line: number; shape: string }> = [];
   const helperNames = new Set<string>();
 
   const record = (file: string, lines: string[], i: number, prefix: string, shape: string): void => {
-    if (hasOkMarker(lines, i)) {
-      exempted.push({ file, line: i + 1 });
+    const marker = findOkMarker(lines, i);
+    if (marker !== null) {
+      exempted.push({ file, line: marker + 1, shape });
       return;
     }
     sites.push({ file, line: i + 1, prefix, shape });
@@ -190,6 +239,26 @@ function scan(): ScanResult {
     }
   }
 
+  // Pass 3 — a child of `tmpdir()` built WITHOUT `mkdtemp`, whose name is unique per run (#840).
+  for (const [f, lines] of contents) {
+    const rel = relative(REPO_ROOT, f).replace(/\\/g, "/");
+    lines.forEach((line, i) => {
+      if (line.includes("mkdtemp")) return; // pass 1's territory
+      if (COMMENT_LINE.test(line)) return; // prose about the shape, not the shape
+      TMPDIR_CHILD.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = TMPDIR_CHILD.exec(line))) {
+        const arg = m[1]!.trim();
+        if (!PER_RUN_NAME.test(arg)) continue; // a stable singleton — reused, never accumulates
+        const lit = LEADING_LITERAL.exec(arg);
+        const head = lit ? (lit[1] ?? lit[2] ?? "") : null;
+        // No leading literal means the NAME is decided elsewhere (a variable, an interpolation
+        // in first position); there is nothing to judge here, so say nothing rather than guess.
+        if (head) record(rel, lines, i, head, "tmpdir-child");
+      }
+    });
+  }
+
   return { sites, exempted, helperNames: names };
 }
 
@@ -201,32 +270,46 @@ describe("every fixture temp dir is minted in a swept namespace (#839)", () => {
     // helper shape, a rename of `tmpdir()`), and a silent no-op reads exactly like a pass.
     expect(result.sites.length + result.exempted.length).toBeGreaterThan(200);
     expect(result.helperNames.length).toBeGreaterThan(0);
+    // Pass 3 has its own floor: it keys off the ABSENCE of `mkdtemp`, so it would go quietly
+    // dead if `TMPDIR_CHILD` ever stopped matching, and the other two passes would still carry
+    // the total above 200 — hiding it. Measured at #840: 43 unique-per-run non-mkdtemp sites.
+    const pass3 =
+      result.sites.filter((s) => s.shape === "tmpdir-child").length +
+      result.exempted.filter((e) => e.shape === "tmpdir-child").length;
+    expect(pass3, "the non-mkdtemp tmpdir-child pass matches nothing — it has gone dead").toBeGreaterThan(20);
   });
 
   it("no temp dir is minted outside the reaper's swept namespace", () => {
     const offenders = result.sites
       .filter((s) => matchedNamespace(`${s.prefix}x`) === null)
-      .filter((s) => !(s.file in KNOWN_UNSWEPT))
+      .filter((s) => !(`${s.file}::${s.prefix}` in KNOWN_UNSWEPT))
       .map((s) => `${s.file}:${s.line} -> ${JSON.stringify(s.prefix)} [${s.shape}]`);
     expect(
       offenders,
-      "These temp dirs are in NO namespace the reaper sweeps, so the first teardown that " +
+      "These temp entries are in NO namespace the reaper sweeps, so the first teardown that " +
         "fails for any reason leaks them permanently — which is how 8,448 of them " +
-        "accumulated (#364) while a working sweep was already in place.\n\n" +
-        'Prefix the name with `ak-` (e.g. `mkdtempSync(join(tmpdir(), "ak-my-fixture-"))`). ' +
-        "If the literal is deliberately NOT a real temp prefix (a negative test, a path that " +
-        `is never created), put \`// ${OK_MARKER} <reason>\` on the line or the line above.`,
+        "accumulated (#364), and 518,581 more (#840) while this guard was green.\n\n" +
+        "If it becomes a DIRECTORY, prefix the name with `ak-` (e.g. " +
+        '`mkdtempSync(join(tmpdir(), "ak-my-fixture-"))`) — the reaper sweeps directories.\n' +
+        "If it is a loose FILE, a rename buys NOTHING (the reaper is gated on " +
+        "`statSync(...).isDirectory()`): mint it INSIDE an `ak-` directory instead — see " +
+        "`helpers/test-db.ts` for the pattern.\n" +
+        "If the path is deliberately never created (a negative test), put " +
+        `\`// ${OK_MARKER} <reason>\` on the line, or anywhere in the comment block above it.`,
     ).toEqual([]);
   });
 
-  it("a grandfathered file still offends — an entry that does not is deleted, not kept", () => {
-    // The staleness half. Without it a fixed file sits in the list forever, and the list stops
+  it("a grandfathered site still offends — an entry that does not is deleted, not kept", () => {
+    // The staleness half. Without it a fixed site sits in the list forever, and the list stops
     // describing anything: the next reader cannot tell debt from decoration.
-    for (const [file, reason] of Object.entries(KNOWN_UNSWEPT)) {
-      const stillOffends = result.sites.some((s) => s.file === file && matchedNamespace(`${s.prefix}x`) === null);
+    for (const [key, reason] of Object.entries(KNOWN_UNSWEPT)) {
+      const [file, prefix] = key.split("::");
+      const stillOffends = result.sites.some(
+        (s) => s.file === file && s.prefix === prefix && matchedNamespace(`${s.prefix}x`) === null,
+      );
       expect(
         stillOffends,
-        `${file} is grandfathered ("${reason}") but no longer mints an unswept temp dir — ` +
+        `${key} is grandfathered ("${reason}") but no longer mints an unswept temp entry — ` +
           "DELETE its entry from KNOWN_UNSWEPT rather than leaving it.",
       ).toBe(true);
     }
@@ -245,8 +328,9 @@ describe("every fixture temp dir is minted in a swept namespace (#839)", () => {
       if (!src.includes(OK_MARKER)) continue;
       src.split(/\r?\n/).forEach((line, i) => {
         if (!line.includes(OK_MARKER)) return;
-        // The marker covers its own line and the one below it.
-        if (claimed.has(`${rel}:${i + 1}`) || claimed.has(`${rel}:${i + 2}`)) return;
+        // `exempted` records the MARKER's own line (see `findOkMarker`), so a marker anywhere in
+        // a comment block above a site is claimed at its real position — no ±1 guessing.
+        if (claimed.has(`${rel}:${i + 1}`)) return;
         orphans.push(`${rel}:${i + 1} -> ${line.trim().slice(0, 120)}`);
       });
     }

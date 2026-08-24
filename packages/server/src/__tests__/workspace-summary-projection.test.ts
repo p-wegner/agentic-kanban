@@ -254,7 +254,8 @@ describe("workspace-summary projection — hot path (#399)", () => {
     const { db } = createTestDb();
     const { issueId } = await seed(db, {
       status: "idle",
-      workingDir: join(tmpdir(), `ws-proj-vanished-${randomUUID()}`), // never created
+      // TEMP-PREFIX OK: never created — a vanished workingDir is the case under test.
+      workingDir: join(tmpdir(), `ws-proj-vanished-${randomUUID()}`),
       projection: { summaryDirty: true },
     });
 
@@ -416,6 +417,7 @@ describe("workspace-summary projection — heal pass (external drift)", () => {
   it("stamps a vanished-workingDir workspace with nulls so it stops being re-picked", async () => {
     const { db } = createTestDb();
     const { workspaceId } = await seed(db, {
+      // TEMP-PREFIX OK: never created — a vanished workingDir is the case under test.
       workingDir: join(tmpdir(), `ws-proj-gone-${randomUUID()}`),
       projection: { summaryDirty: true },
     });

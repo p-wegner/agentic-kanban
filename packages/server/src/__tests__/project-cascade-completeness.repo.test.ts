@@ -24,7 +24,7 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { eq, like } from "drizzle-orm";
 import { createClient, type Client } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
@@ -36,8 +36,21 @@ import { deleteProjectCascade } from "../repositories/project.repository.js";
 type TestDb = ReturnType<typeof drizzle<typeof schema>>;
 
 /** File-backed migrated test DB (see issue-cascade-completeness for why not :memory:). */
+/**
+ * One directory per process, in the reaper's `ak-` namespace, holding this suite's throwaway
+ * `.db` files (#840). A loose FILE is in no swept namespace whatever it is called — the fixture
+ * reaper is gated on `statSync(...).isDirectory()` — so the file has to live INSIDE a swept
+ * directory for anything to ever reclaim it when teardown does not run.
+ */
+let scratchDbDir: string | null = null;
+function dbScratchDir(): string {
+  if (scratchDbDir) return scratchDbDir;
+  scratchDbDir = mkdtempSync(join(tmpdir(), "ak-project-cascade-completeness-"));
+  return scratchDbDir;
+}
+
 function createFileTestDb(): { client: Client; db: TestDb; dispose: () => void } {
-  const file = join(tmpdir(), `project-cascade-completeness-${randomUUID()}.db`);
+  const file = join(dbScratchDir(), `project-cascade-completeness-${randomUUID()}.db`);
   const client = createClient({ url: `file:${file}` });
   applyMigrationsToClient(client);
   client.execute("PRAGMA foreign_keys=ON");

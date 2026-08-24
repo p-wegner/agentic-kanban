@@ -13,7 +13,7 @@ import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { unlinkSync } from "node:fs";
+import { mkdtempSync, unlinkSync } from "node:fs";
 import * as schema from "@agentic-kanban/shared/schema";
 import { createClient } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
@@ -50,8 +50,21 @@ function memorySetup(): DbAndApp {
  * per-connection, so the post-tx query hits an empty database.
  * A file-based SQLite doesn't have this problem.
  */
+/**
+ * One directory per process, in the reaper's `ak-` namespace, holding this suite's throwaway
+ * `.db` files (#840). A loose FILE is in no swept namespace whatever it is called — the fixture
+ * reaper is gated on `statSync(...).isDirectory()` — so the file has to live INSIDE a swept
+ * directory for anything to ever reclaim it when teardown does not run.
+ */
+let scratchDbDir: string | null = null;
+function dbScratchDir(): string {
+  if (scratchDbDir) return scratchDbDir;
+  scratchDbDir = mkdtempSync(join(tmpdir(), "ak-test-issues-"));
+  return scratchDbDir;
+}
+
 function fileSetup(): DbAndApp {
-  const dbPath = join(tmpdir(), `test-issues-${randomUUID()}.db`);
+  const dbPath = join(dbScratchDir(), `test-issues-${randomUUID()}.db`);
   const client = createClient({ url: `file:${dbPath}` });
   applyMigrationsToClient(client);
   const db = drizzle(client, { schema }) as TestDb;

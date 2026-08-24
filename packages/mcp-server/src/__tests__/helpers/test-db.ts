@@ -1,7 +1,7 @@
 import { createClient } from "@libsql/client";
 import type { Client } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
-import { rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -42,6 +42,24 @@ export function applyMigrationsToClient(client: Client): void {
 const createdTempDbFiles: string[] = [];
 let exitCleanupRegistered = false;
 
+/**
+ * One directory per process, in the reaper's `ak-` namespace, holding every throwaway `.db`
+ * this helper mints (#840).
+ *
+ * A LOOSE FILE is in no swept namespace whatever it is called: the fixture reaper is gated on
+ * `statSync(...).isDirectory()`, so renaming `mcp-test-db-<uuid>.db` to `ak-mcp-test-db-…`
+ * would have read as a fix and changed nothing. The `process.on("exit")` sweep below does not
+ * run on a killed vitest worker, and libsql's native handle can hold a `-wal`/`-shm` past it
+ * even when it does — so without a directory there is no recovery path at all. Inside one,
+ * whatever this process fails to remove the next run's sweep removes two hours later.
+ */
+let processTempDbDir: string | null = null;
+function tempDbDir(): string {
+  if (processTempDbDir) return processTempDbDir;
+  processTempDbDir = mkdtempSync(join(tmpdir(), "ak-mcp-test-db-"));
+  return processTempDbDir;
+}
+
 function registerExitCleanup(): void {
   if (exitCleanupRegistered) return;
   exitCleanupRegistered = true;
@@ -71,7 +89,7 @@ function registerExitCleanup(): void {
  */
 export function createTestDb(): { client: Client; db: TestDb } {
   registerExitCleanup();
-  const file = join(tmpdir(), `mcp-test-db-${randomUUID()}.db`);
+  const file = join(tempDbDir(), `mcp-test-db-${randomUUID()}.db`);
   createdTempDbFiles.push(file);
   const client = createClient({ url: `file:${file}` });
   applyMigrationsToClient(client);

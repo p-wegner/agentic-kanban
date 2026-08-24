@@ -30,6 +30,10 @@ describe("createTestDb template cache (#535)", () => {
   it("creates a template DB file keyed by the migration-content hash", () => {
     createTestDb();
     const hash = expectedTemplateHash();
+    // TEMP-PREFIX OK: this reads the PERSISTENT template build cache that
+    // `helpers/test-db.ts` publishes, so the path must mirror that helper's exactly. It is
+    // deliberately an unswept loose file — one per schema, not one per run, with a legitimate
+    // lifetime of weeks — see the marker on `getOrBuildTemplateDb` for the reasoning (#840).
     const templatePath = join(tmpdir(), `test-db-template-${hash}.db`);
     expect(existsSync(templatePath)).toBe(true);
   });
@@ -37,6 +41,7 @@ describe("createTestDb template cache (#535)", () => {
   it("reuses the same template across multiple calls instead of rebuilding it", () => {
     createTestDb();
     const hash = expectedTemplateHash();
+    // TEMP-PREFIX OK: the same persistent build cache as above (#840).
     const templatePath = join(tmpdir(), `test-db-template-${hash}.db`);
     const before = readFileSync(templatePath);
 
