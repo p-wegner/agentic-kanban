@@ -7,7 +7,7 @@ import * as realAgentService from "../agent.service.js";
 import { createAgentDispatch, type AgentExecutionService } from "../agent-dispatch.service.js";
 import { getWorkerFleet, resolveWorkerPlacement, WorkerDispatchUnavailableError } from "../worker-fleet.service.js";
 import { updateSessionPlacementReason } from "../../repositories/placement-observability.repository.js";
-import { insertSessionMessages } from "../../repositories/broadcast.repository.js";
+import { failLaunch, newLaunchTrace, type LaunchTrace } from "./launch-failure.js";
 import type { Placement } from "../agent-dispatch.service.js";
 
 /**
@@ -39,7 +39,6 @@ function recordPlacementReason(
 import { extractPlanFromMessages } from "../plan-mode.service.js";
 import { computeScorecard } from "../workspace-scorecard.service.js";
 import { computeWorkspaceCodeMetrics } from "../workspace-code-metrics.service.js";
-import { recordAgentProfileLaunchFailure } from "../agent-profile-health.service.js";
 import { emitButlerSystemEvent } from "../butler-event-feed.js";
 import { narrowProviderName, type ProviderName } from "../agent-provider.js";
 import { getProviderExitBehavior } from "../agent-provider/provider-exit-behavior.js";
@@ -58,7 +57,6 @@ import { buildIndeterminateExitStats } from "./session-exit-stats.js";
 import { CODEX_SPARK_MODEL, CODEX_SAFE_DEFAULT_MODEL, isBuilderSession, buildStaleResumeHandoffPrompt, instructionFingerprint, mergeExistingSessionStats, lifecycleProviderName, resolveProviderRotation } from "./session-launch-helpers.js";
 import { finalizePlanModeExit } from "./plan-mode-exit.js";
 import { finalizeUsageLimitRoute, finalizeLaunchFailureRoute, finalizeCompletedRoute, type ExitFinalizeContext } from "./exit-finalize.js";
-import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /** Bounds the missing-transcript fallback (#26) to one automatic retry per workspace. */
 const MAX_STALE_RESUME_RECOVERIES = 1;
@@ -102,79 +100,15 @@ export function createSessionLifecycle(
   const agentService = deps.agentService
     ?? createAgentDispatch({ host: realAgentService, remote: getWorkerFleet().remoteAgentService });
   const launchPreflight = deps.preflight ?? workspaceLaunchPreflight;
-  /**
-   * The launch a session row is a promise of, and the finalizer that keeps the two honest.
-   *
-   * `startSessionInner` inserts the row as `running` and then does ~380 more lines of
-   * fallible, awaited work — provider rotation, devcontainer provisioning, worker
-   * placement — before the spawn. Every throw in that stretch used to escape with the row
-   * still `running`, no pid, no process, no output and no failure record: an agent that
-   * the board believes is working and that does not exist. #876 is one — created 13:24,
-   * zero bytes of output, reaped 15 minutes later by the completion-state reconciler,
-   * which is the only thing that ever noticed and which says nothing when it does.
-   *
-   * So the trace records what the finalizer needs, and `startSession` wraps the whole body
-   * — not just the spawn — in the one failure path. `finalized` makes it idempotent: the
-   * inner catch around the spawn goes through the same finalizer, and the wrapper then
-   * leaves it alone.
-   */
-  interface LaunchTrace {
-    sessionId?: string;
-    workspaceId?: string;
-    provider?: ProviderName;
-    profileName?: string;
-    rowInserted: boolean;
-    finalized: boolean;
-  }
-
-  /**
-   * End an orphaned launch VISIBLY: the reason as a stderr message (so it lands in
-   * `session_messages` and the session output the UI reads), exit code 1 (so the row
-   * classifies as a failure rather than the indeterminate `stopped`/`exitCode=null` that
-   * carries no information), the workspace back to idle, and the profile's launch-failure
-   * record updated so the breaker can count it.
-   */
-  async function failLaunch(trace: LaunchTrace, err: unknown): Promise<void> {
-    if (!trace.rowInserted || trace.finalized || !trace.sessionId) return;
-    trace.finalized = true;
-    const sessionId = trace.sessionId;
-    const reason = errorMessage(err);
-    console.error(`[session] launch failed before the agent produced output: sessionId=${sessionId} reason=${reason}`);
-    await insertSessionMessages(
-      sessionId,
-      [{ type: "stderr", data: `Agent launch failed: ${reason}`, exitCode: null }],
-      trace.provider ?? null,
-      db,
-    ).catch(() => {});
-    await lifecycleRepo.updateSessionStoppedWithStats(
-      sessionId,
-      new Date().toISOString(),
-      "1",
-      JSON.stringify({ launchFailure: { reason, at: new Date().toISOString() } }),
-      db,
-    ).catch(() => {});
-    if (trace.workspaceId) {
-      await lifecycleRepo.updateWorkspaceStatus(trace.workspaceId, "idle", new Date().toISOString(), db)
-        .catch(() => {});
-    }
-    await recordAgentProfileLaunchFailure(db, {
-      provider: trace.provider ?? "claude",
-      profileName: trace.profileName,
-      summary: reason,
-      exitCode: 1,
-      sessionId,
-      workspaceId: trace.workspaceId,
-    }).catch(() => {});
-    teardownSessionState(state, sessionId);
-  }
-
   /** Create a session DB row and launch the agent process. */
   async function startSession(opts: StartSessionOptions): Promise<string> {
-    const trace: LaunchTrace = { rowInserted: false, finalized: false };
+    // The whole body, not just the spawn, runs inside one failure path (#876) — see
+    // launch-failure.ts for why the stretch before the spawn is the dangerous half.
+    const trace = newLaunchTrace();
     try {
       return await startSessionInner(opts, trace);
     } catch (err) {
-      await failLaunch(trace, err);
+      await failLaunch(trace, err, { db, state });
       throw err;
     }
   }
@@ -769,7 +703,7 @@ export function createSessionLifecycle(
       // `stopped`, `exitCode` NULL, no stderr, workspace never reset. `failLaunch` writes
       // the reason where the UI reads it and marks the trace finalized, so the wrapper
       // does not finalize a second time on the rethrow below.
-      await failLaunch(trace, err);
+      await failLaunch(trace, err, { db, state });
       // A strict-dispatch refusal can also surface at LAUNCH time (#245): the
       // worker vanished between placement and assign and the dispatch proxy
       // refused the host fallback. Same CONFLICT shape as the placement-time
