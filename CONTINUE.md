@@ -3,6 +3,94 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## The remote worker cannot run an agent, and neither side says so (2026-08-24)
+
+**Status: blocked on an operator action. No code fix attempted — see "why not yet" below.**
+
+The fleet was exercised with real backlog tickets rather than a synthetic probe: #870+#881
+(as a group) and #880 were dispatched to worker `AO-PF38Z8R8`, a genuinely different machine
+from the board host `AO-PF69VL7N`.
+
+**Everything on the remote path worked except the last step.** Pairing, heartbeat,
+eligibility, placement, git transport, remote checkout and agent launch all did their jobs:
+
+```
+placementReason  "eligible_worker"
+placementDetail  "worker c778e7fb-… took it over git transport on feature/ak-870-…"
+```
+
+Both sessions then died identically in 5.5 seconds:
+
+```
+exitCode 1 · numTurns 1 · inputTokens 0 · outputTokens 0 · totalCostUsd 0
+agentSummary  "Not logged in · Please run /login"
+launch.profile "andrena_team_5x_3"
+```
+
+**`AO-PF38Z8R8` has no usable `claude` login.** That is an interactive fix on that machine
+and cannot be done from the board by design (decision 012 — credentials never leave their
+machine). Until it is done, remote dispatch produces nothing. The fleet was live-verified
+working earlier in its life, so this lapsed at some point with no signal.
+
+### The two board-side defects this exposed — filed as #895
+
+1. **`providers: ["claude"]` is an unverified self-declaration.** The worker reported
+   `eligible: true`, `ineligibleReason: null`, `freeSlots: 4` while having a 100% dispatch
+   failure rate. Nothing checks a provider login exists before advertising the provider.
+   This is the same missing **worker-side attestation** that `CLAUDE.md` already names as the
+   reason #651 refuses remote placement for allowlisted projects — the cheaper, more urgent
+   half of the same idea. `worker doctor` is the check that already exists in spirit; it is
+   simply not on the path between "worker connects" and "board marks it eligible". (#875
+   must land for that probe to be trustworthy on a non-default `CLAUDE_CONFIG_DIR`.)
+2. **The failure is invisible.** `exitCode: 1`, `success: false`, `errorCount: 1` and a
+   plain-English `agentSummary` saying exactly what was wrong — and the workspace still ended
+   at `status: "idle"`, `lastError: undefined`. This is **#859** exactly; commented there with
+   this reproduction. A monitor-driven project would relaunch into the same wall every cycle
+   while the board reported healthy.
+
+Also noted on #895: the launch records `profile: "andrena_team_5x_3"`, which is inert for a
+remote worker (it uses its own local login). The board selects, stores and displays a profile
+that has no effect on what runs.
+
+**Cleaned up:** both workspaces deleted, #870/#881/#880 returned to Todo. They were never
+started — do not read their earlier `In Progress` as partial work.
+
+### Why no code fix yet
+
+#846's pre-merge gate (PID 37400) was running throughout. Editing `packages/server/src`
+restarts `tsx watch`, which is precisely how #893 discarded a 39-minute gate run. #859/#895
+are server-side, so they wait for the gate to clear. **Do not start them while a gate is in
+flight.**
+
+## The pre-merge gate is failing on load, not on diffs (2026-08-24) — #894
+
+#846 has now run its gate **15 times** and merged zero times, on a diff of `package.json`
+plus one test file. Attempts logged at 21.7 / 29.3 / 44.3 minutes — roughly ten hours of
+full-suite time on one ticket.
+
+Every failure is the same 3 suites out of 764 files / 7,183 tests (0.04%), all
+timing-shaped: `mock-agent-multiturn` ("mock-agent timed out"),
+`shared-package-exports` ("Test timed out in 90000ms", 109.6s), `session-lifecycle`
+(`expected 1 to be >= 2`).
+
+**Proven flaky rather than assumed:** re-running exactly those three on an idle box gives
+`3 passed, 33 tests, 21.91s`. The suite that blew a 90-second timeout finishes in ~22s
+alongside two others. So the verdict "this branch is unsafe to merge" was produced by
+machine contention, not by the diff.
+
+It cannot converge, because the retry is the load: each attempt starts another full-suite run,
+which is itself what makes the next one flake. And while any gate runs, **13 monitor-mode
+projects are held from auto-starting** (`verify_gate_running`) — one flaky ticket is a
+board-wide stall for 26–44 minutes at a time.
+
+Suggested shape is on #894, cheapest first: **re-run only the failed suites before declaring
+failure** (22s measured) — that alone would have merged #846 on attempt 1 and is what
+distinguishes flaky from real. Then cap the retry loop, make timeouts load-aware, and stop
+one project's gate from gating everyone.
+
+For scale: the `@gate:always-run` set is 152 suites / 1,002 tests / **136s**. The full gate is
+~30x that for the marginal coverage.
+
 ## Master went red from the direct-master path, and the guard set's own rule was wrong (2026-08-24)
 
 **Pushed: `457b416fcf`, `5decd67cb9`, `0b343da703`, `5c82d26f35`, `a8b211c0bb`.**
