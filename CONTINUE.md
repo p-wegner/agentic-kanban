@@ -3,6 +3,80 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## Hook strategy: a bounded local smoke, not a correctness gate (2026-08-24)
+
+**Nothing pushed.** Follows directly from the section below — that one removed the per-edit
+cost; this one answers the harder question it exposed: **running the full suite is not feasible
+on this box**, so what should a blocking hook actually do?
+
+**The rule adopted: a hook is a fast local smoke; the pre-merge gate is the correctness gate.**
+A check that cannot finish in its budget is pure latency plus a misleading veto, so it must
+stand down **loudly and honestly** — saying nothing ran and nothing is claimed — rather than
+run anyway, hang, or fail closed. Failing closed is what made a machine condition read as a
+code defect (#280).
+
+Three tiers, and what each may cost:
+
+| Event | Runs | Cost |
+|---|---|---|
+| `PreToolUse` | `validate-command-safety.js` only | instant |
+| `PostToolUse` | nothing | ~0 (was a 5m50s median) |
+| `Stop` | 3 reminders, then scoped typecheck, then scoped vitest | bounded, see below |
+
+**What changed:**
+- **`.claude/hooks/scoped-typecheck.js`** (new) — sibling of `scoped-vitest.js`. Typechecks only
+  the packages this session edited (measured: shared 6s, server 18-29s) instead of `pnpm
+  typecheck`, which is the whole monorepo and did not fit its budget. **It escalates to the FULL
+  typecheck when `packages/shared` was edited**, because every package depends on shared and
+  scoping there is unsound — that is the #816 blind spot, and the escalation is the honest cost
+  of touching shared.
+- **`.claude/hooks/machine-capacity.js`** (new) — `capacityHold()`: below 2 GB of `os.freemem()`
+  an expensive check skips loudly. Calibrated against the skew, not the fleet number: freemem
+  read 4.72 GB where fleet reported 2.5 GB usable. `os.loadavg()` is `[0,0,0]` on Windows, so it
+  carries no signal here. Fails **open** (a broken guard must not disable feedback);
+  `SMART_HOOKS_FORCE=1` / `SMART_HOOKS_MIN_FREE_GB` override; a malformed override falls back to
+  the default rather than meaning "unbounded".
+- **Both scoped hooks now enforce their OWN wall-clock budget** (120s; 180s for the escalated
+  typecheck; `SCOPED_*_BUDGET_MS`). This is the load-bearing change. `vitest related` is bounded
+  by the module GRAPH, not by a file count — **measured: one edit to
+  `packages/server/src/services/stack-profile/smart-hooks-rules.ts` ran past 400s**, i.e. past
+  the hook's own 300s timeout. Being SIGTERM'd by the runner is the #280 pathology again, so the
+  check now stops itself and reports honestly. `--bail=1` on vitest for the same reason: a hook
+  needs "did I break something", not the exhaustive list.
+- **Stop order reversed** — typecheck before vitest. It is the cheaper check and a type error
+  explains the test failures that would follow.
+- **`.claude/smart-hooks-rules.json` emptied** to `rules: []` with a `localOverride` note. The
+  generated rules were adding a SECOND whole-monorepo typecheck and a suite-wide `test:mine` to
+  a Stop chain that already had scoped versions of both. Gitignored, so per-machine, and **the
+  next regeneration reverts it** — that is #868.
+- `loadConfig` is exported from `smart-hooks-runner.js` so the MERGED chain can be asserted. The
+  duplication above was invisible in either input file alone.
+
+**Verified how — every claim below was executed, not reasoned about:**
+- Resolved chain dumped via `loadConfig()`: `PreToolUse` = 1 safety hook; **no `PostToolUse` at
+  all**; `Stop` = 3 reminders + scoped typecheck + scoped vitest, **no duplicate typecheck**.
+- Scoping: empty list, a non-package file, and a `.md` file all no-op (exit 0). server-only ⇒
+  one package, 18.1s, exit 0. shared ⇒ label says `full — shared was edited`. shared+server ⇒
+  still full. client+server ⇒ 2 packages, not full.
+- `capacityHold`: normal ⇒ no hold; floor 999 GB ⇒ holds with the loud message; `FORCE=1` ⇒ no
+  hold; malformed floor ⇒ falls back to the 2 GB default. **It also fired for real mid-session**
+  when a peer's 6-fork suite took the box to 1.9 GB free.
+- Budget: a 3s/4s budget produces the over-budget message and **exit 0**, in ~budget+1s.
+- `--bail=1` is accepted by vitest 4 (unlike `--minWorkers`, which it rejects).
+
+**One real trap found and fixed while verifying:** the first `killTree` used `taskkill /T`, which
+walks the tree through LIVE parents — but Node's `spawnSync` timeout has already killed our
+direct child (`cmd.exe`, unavoidable since `shell:true` is how pnpm is found on Windows), so /T
+found nothing and **left a live `tsc --noEmit` behind**, confirmed by process listing. WMI still
+reports a survivor's original `ParentProcessId`, so `killTree` now walks that itself. Re-verified:
+0 survivors after a budget kill. Such processes do self-terminate, but a per-turn hook would
+stack them onto a box already too loaded to run the check.
+
+**Known limits, not papered over:** the capacity floor is a heuristic on an optimistic number,
+not a real capacity model. The budget bounds the hook, not the machine — an over-budget run has
+still spent its 120s. And `killTree`'s stale-ppid walk could in principle hit a recycled pid
+inside a millisecond window; accepted, since the alternative is leaking worker fleets.
+
 ## Hooks were 18.7% of session wall-clock — half fixed, half filed (2026-08-24)
 
 **Commit `66fc342e1a`. Filed: #868. Nothing pushed.**
@@ -30,10 +104,10 @@ unaffected and a bad value fails open.
 zero generated rules and returns in **1.28s** (was a 5m50s median); `Stop` still resolves both
 rules. `normalizeRuleEvents` unit-checked for absent/valid/empty/garbage/non-array input.
 
-**NOT verified: the test suite was not run.** The box was RAM-limited and swapping (0.46 GB
-usable), so `pnpm typecheck` / `pnpm test:mine` were deliberately skipped. Two new cases in
-`stack-profile.service.test.ts` have therefore **never been executed**. Run them before trusting
-them.
+**Now verified (this was an open caveat and is closed):** the two new cases in
+`stack-profile.service.test.ts` have been executed — 32/32 pass in 17.48s — and
+`typecheck:server` exits 0. The earlier note that they had "never been executed" no longer
+applies.
 
 **Filed, not fixed — #868.** The generated Typecheck rule hard-codes `timeout: 120`, which this
 monorepo's typecheck exceeds, so it is `blocking: true` and can only ever be killed. The
@@ -60,8 +134,9 @@ hooks cost pure latency. Two traps encapsulated there: the two transcript hook c
 **overlap** (summing them inflated one 11m41s invocation to 23m), and silent hooks emit no
 record at all, so its totals are a lower bound.
 
-**Next:** run the suite when the box has RAM; then decide #868's direction (measured budget in
-the stack profile, vs the runner downgrading a repeatedly-killed check).
+**Next:** decide #868's direction (measured budget in the stack profile, vs the runner
+downgrading a repeatedly-killed check). The section below is the strategy that made this
+checkout's hooks affordable in the meantime.
 
 ## Session 2026-08-23/24 (night): the second pass over the same 13, plus what it spawned
 
