@@ -118,11 +118,19 @@ switch ($PSCmdlet.ParameterSetName) {
       Write-Warning "CLAUDE_CONFIG_DIR is not set and none was passed. The worker will run agents under the DEFAULT profile (~/.claude), which may be a different account than you expect. Pass -ClaudeConfigDir to pin it."
     }
 
-    @{
+    # WRITE UTF-8 WITHOUT A BOM (#864). `Set-Content -Encoding utf8` on Windows
+    # PowerShell 5.1 emits a BOM, and this file is read by more than PowerShell:
+    # ConvertFrom-Json tolerates the BOM, but JSON.parse throws on it, so every
+    # Node reader of this config silently got no board and no name. Found when the
+    # dashboard reported a connected worker with a null board. WriteAllText with an
+    # explicit UTF8Encoding($false) is the only reliable no-BOM write in 5.1 --
+    # Out-File and Set-Content both re-add it.
+    $json = @{
       board = $Board; name = $Name; labels = $Labels; providers = $Providers
       maxConcurrency = $MaxConcurrency; claudeConfigDir = $ClaudeConfigDir
       workerCmd = $workerCmd
-    } | ConvertTo-Json | Set-Content -Path $ConfigFile -Encoding utf8
+    } | ConvertTo-Json
+    [System.IO.File]::WriteAllText($ConfigFile, $json, (New-Object System.Text.UTF8Encoding($false)))
     Write-Output "config written: $ConfigFile"
 
     $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
