@@ -20,6 +20,13 @@ export interface SmartHooksRule {
   blocking: boolean;
   /** Seconds before the check is killed. */
   timeout: number;
+  /**
+   * Hook events this rule runs on. Omitted = both (the pre-`events` behavior the runner still
+   * defaults to). A command that is NOT scoped to the edited file — any test suite — is
+   * `["Stop"]`: per-edit it costs its full runtime on every Write/Edit while telling you
+   * nothing the end-of-turn run wouldn't.
+   */
+  events?: ("PostToolUse" | "Stop")[];
 }
 
 export interface SmartHooksRulesFile {
@@ -100,6 +107,13 @@ export function buildSmartHooksRules(profile: StackProfile): SmartHooksRulesFile
     // checks rather than a block (see smart-hooks-runner.js), and the fallback FULL test
     // command — the case we know is not scoped to the edit — is emitted as advisory only.
     // A genuine `quickTestCommand` keeps the blocking per-edit loop it was designed for.
+    // Those two layers still left the per-EDIT cost in place, and it is the dominant one:
+    // measured over 3 days on this repo, the PostToolUse chain ran a median of 5m50s per
+    // Write/Edit — typecheck and tests each running to their timeout and being killed — for
+    // 5.6h of pure latency that produced no signal at all. A test command is never scoped to
+    // the one file just edited, so running it per-edit buys nothing an end-of-turn run doesn't
+    // already give. Test rules are therefore Stop-only; the runner defaults an absent `events`
+    // to both, so older generated files are unaffected.
     const isFullSuiteFallback = !profile.quickTestCommand;
     rules.push({
       name: profile.quickTestCommand ? "Quick tests" : "Tests",
@@ -107,6 +121,7 @@ export function buildSmartHooksRules(profile: StackProfile): SmartHooksRulesFile
       filePatterns: patterns,
       blocking: !isFullSuiteFallback,
       timeout: isFullSuiteFallback ? 600 : 180,
+      events: ["Stop"],
     });
   }
 

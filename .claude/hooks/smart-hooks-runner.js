@@ -85,8 +85,28 @@ function getStatePath() {
  * Load the generated per-project edit-time feedback rules (#787) and convert each into a
  * runner "check". The rules file is machine-generated from the stack profile and uses a flat
  * `{ rules: [...] }` shape; the runner's check shape needs an `enabled` flag (rules are always
- * active). Generated rules run on both PostToolUse (per-edit) and Stop (end-of-session).
+ * active).
+ *
+ * A rule may name the events it runs on via `events: ["PostToolUse"|"Stop"]`. Absent (every
+ * rule generated before this field existed), it runs on BOTH — the original behavior, kept so
+ * an older rules file kept working unchanged. The field exists because a rule whose command is
+ * not scoped to the edited file (a test suite) costs its FULL runtime on every single edit
+ * while telling you nothing an end-of-turn run wouldn't; measured on this repo, per-edit
+ * typecheck+tests ran to their timeouts for a median of 5m50s per Write/Edit and produced no
+ * signal at all, because both were killed before finishing.
  */
+const GENERATED_RULE_EVENTS = ["PostToolUse", "Stop"];
+
+/**
+ * Which events a generated rule runs on. Unset/unusable -> both, i.e. the pre-`events`
+ * behavior: a malformed value must not silently disable a check that used to run.
+ */
+function normalizeRuleEvents(events) {
+  if (!Array.isArray(events)) return [...GENERATED_RULE_EVENTS];
+  const valid = events.filter((e) => GENERATED_RULE_EVENTS.includes(e));
+  return valid.length > 0 ? valid : [...GENERATED_RULE_EVENTS];
+}
+
 function loadGeneratedRules(projectDir) {
   let rules;
   try {
@@ -104,6 +124,7 @@ function loadGeneratedRules(projectDir) {
       filePatterns: Array.isArray(r.filePatterns) ? r.filePatterns : [],
       blocking: r.blocking !== false,
       timeout: typeof r.timeout === "number" ? r.timeout : 120,
+      events: normalizeRuleEvents(r.events),
       // Generated rules are always derived from the HOST stack profile (host pnpm/tsc/etc
       // paths) — never safe to trust verbatim inside a builder container (#158).
       containerSkippable: true,
@@ -123,8 +144,9 @@ function loadConfig(projectDir = getProjectDir()) {
   // project gets incremental edit-time feedback without any hand-authored config (#787).
   const generated = loadGeneratedRules(projectDir);
   if (generated.length > 0) {
-    config.hooks.PostToolUse = [...(config.hooks.PostToolUse || []), ...generated];
-    config.hooks.Stop = [...(config.hooks.Stop || []), ...generated];
+    const forEvent = (ev) => generated.filter((r) => r.events.includes(ev));
+    config.hooks.PostToolUse = [...(config.hooks.PostToolUse || []), ...forEvent("PostToolUse")];
+    config.hooks.Stop = [...(config.hooks.Stop || []), ...forEvent("Stop")];
   }
   return config;
 }
