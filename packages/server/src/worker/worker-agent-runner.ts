@@ -12,6 +12,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { sanitizeUtf8 } from "@agentic-kanban/shared/lib/sanitize-utf8";
 import { resolveAgentHangTimeoutMs, startHangWatchdog } from "../lib/agent-launch-env.js";
+import { killProcessTree } from "../services/process-exec.js";
 import type {
   WorkerLaunchSpec,
   WorkerRepoOpAuth,
@@ -494,6 +495,32 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
       );
     }
 
+    // #836 — why there is no `detached: true` here, and what that costs.
+    //
+    // On POSIX a `useShell` launch makes the child `sh -c "<command>"`. `sh` execs through
+    // for a single simple command, but a pipeline, an `&&` or a trailing redirect leaves it
+    // a real parent — the #833 shape. Closing that needs the child to LEAD its own process
+    // group (`detached: true`), because `killProcessTree`'s `group` arm signals `-pid` and
+    // falls back to the bare pid on ESRCH when there is no such group. So `group: true` in
+    // `stop()` below is honest but currently INERT on POSIX: it is the seam call the fix
+    // needs, not the fix itself.
+    //
+    // Detaching was rejected here, for reasons that are the worker's and not the host's:
+    //   - **Measured**: `detached: true` + `shell: true` on win32 hangs — the child never
+    //     reaches its `exit` and its piped stdout never closes (a 4-cell probe of
+    //     detached x shell; the other three cells stream and exit normally). That is the
+    //     same combination `shouldDetachAgent` refuses on the host, and on THIS module it is
+    //     the common Windows path: `resolveSpecCommand` returns `useShell: true` for every
+    //     `.cmd`/`.bat`/`.ps1` shim. Any detach here must therefore be POSIX-gated.
+    //   - A POSIX-gated detach cannot be exercised on the board's Windows box at all, and it
+    //     contradicts this module's stated invariant (see the file header): the daemon owns
+    //     its children for their whole life — there is no pid persistence and no reattach, so
+    //     a child that outlives the daemon is unreapable and its output conduit is gone.
+    //   - The exposure is narrow. `resolveSpecCommand` returns `useShell: false` for EVERY
+    //     intent-carrying spec on POSIX, so the shell only appears for a same-filesystem or
+    //     legacy-board spec that sent `useShell` verbatim.
+    // Detaching POSIX-only, verified on Linux, is tracked as #841 (and #834 is the Linux CI
+    // run that would give it evidence).
     let proc: ChildProcess;
     try {
       proc = spawn(launch.command, spec.args, {
@@ -621,15 +648,24 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
       return false;
     }
     console.log(`[worker] stopping agent: sessionId=${sessionId} pid=${proc.pid}`);
-    if (process.platform === "win32") {
-      spawn("taskkill", ["/pid", String(proc.pid), "/T", "/F"], { shell: true, windowsHide: true });
-    } else {
-      try {
-        proc.kill("SIGTERM");
-      } catch (err) {
-        console.warn(`[worker] kill failed: sessionId=${sessionId}`, err);
-      }
-    }
+    // #836: through the ONE kill seam (#832/#833) rather than a private
+    // `process.platform` branch. What that buys is not reach — see the header note above
+    // `assign`'s spawn — but assertability: the platform decision lives inside
+    // `killProcessTree`, so a test can mock the seam and pin the arguments on EITHER
+    // platform. The branch this replaced had the pre-#833 shape exactly: a win32 arm
+    // spawning `taskkill` and a POSIX arm calling `proc.kill` directly, which no test on
+    // this repo's Windows box could ever observe.
+    //
+    // `signal: "SIGTERM"` matters independently: the seam defaults to SIGKILL, and a
+    // stopped agent is asked to shut down (so its provider CLI can flush a transcript),
+    // not shot. Fire-and-forget with the host `killPid`'s error contract — `stop()` is
+    // synchronous for `stopAll()` and the hang watchdog, and an already-dead process is
+    // not a failure worth logging.
+    const pid = proc.pid;
+    void killProcessTree(pid, { timeout: 5000, signal: "SIGTERM", group: true }).catch((err) => {
+      if ((err as NodeJS.ErrnoException)?.code === "ESRCH") return; // already gone
+      console.warn(`[worker] kill failed: sessionId=${sessionId} pid=${pid}`, err);
+    });
     return true;
   }
 
