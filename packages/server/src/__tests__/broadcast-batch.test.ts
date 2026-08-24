@@ -44,25 +44,25 @@ describe("broadcast DB batching", () => {
   });
 
   it("does not write stdout messages to DB", () => {
-    broadcast("s1", { type: "stdout", data: "hello" });
+    broadcast("s1", { sessionId: "s1", type: "stdout", data: "hello" });
     vi.advanceTimersByTime(500);
     // stdout is served from the .out file — no DB inserts
     expect(insertedBatches).toHaveLength(0);
   });
 
   it("does not schedule a DB timer for stdout-only messages", () => {
-    broadcast("s1", { type: "stdout", data: "a" });
-    broadcast("s1", { type: "stdout", data: "b" });
+    broadcast("s1", { sessionId: "s1", type: "stdout", data: "a" });
+    broadcast("s1", { sessionId: "s1", type: "stdout", data: "b" });
     expect(state.dbWriteTimers.has("s1")).toBe(false);
     vi.advanceTimersByTime(500);
     expect(insertedBatches).toHaveLength(0);
   });
 
   it("writes exit messages to DB immediately on exit flush", () => {
-    broadcast("s3", { type: "stdout", data: "x" });
+    broadcast("s3", { sessionId: "s3", type: "stdout", data: "x" });
     expect(insertedBatches).toHaveLength(0);
 
-    broadcast("s3", { type: "exit", exitCode: 0 });
+    broadcast("s3", { sessionId: "s3", type: "exit", exitCode: 0 });
 
     expect(insertedBatches).toHaveLength(1);
     expect(insertedBatches[0]).toHaveLength(1);
@@ -70,7 +70,7 @@ describe("broadcast DB batching", () => {
   });
 
   it("writes stderr messages to DB via batched flush", () => {
-    broadcast("s6", { type: "stderr", data: "err" });
+    broadcast("s6", { sessionId: "s6", type: "stderr", data: "err" });
     expect(insertedBatches).toHaveLength(0);
 
     vi.advanceTimersByTime(250);
@@ -82,17 +82,17 @@ describe("broadcast DB batching", () => {
 
   it("flushes immediately when batch size (50) of non-stdout is reached", () => {
     for (let i = 0; i < 50; i++) {
-      broadcast("s2", { type: "stderr", data: `err${i}` });
+      broadcast("s2", { sessionId: "s2", type: "stderr", data: `err${i}` });
     }
     expect(insertedBatches).toHaveLength(1);
     expect(insertedBatches[0]).toHaveLength(50);
   });
 
   it("clears the timer on exit so it does not fire again", () => {
-    broadcast("s5", { type: "stderr", data: "y" });
+    broadcast("s5", { sessionId: "s5", type: "stderr", data: "y" });
     expect(state.dbWriteTimers.has("s5")).toBe(true);
 
-    broadcast("s5", { type: "exit", exitCode: 0 });
+    broadcast("s5", { sessionId: "s5", type: "exit", exitCode: 0 });
 
     expect(state.dbWriteTimers.has("s5")).toBe(false);
     const callsBefore = insertedBatches.length;

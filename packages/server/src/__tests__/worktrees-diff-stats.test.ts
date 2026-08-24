@@ -8,12 +8,12 @@ import { randomUUID } from "node:crypto";
 import * as schema from "@agentic-kanban/shared/schema";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
 
-const listWorktreesMock = vi.fn<[], Promise<{ path: string; branch: string }[]>>();
+const listWorktreesMock = vi.fn<(repoPath: string) => Promise<{ path: string; branch: string }[]>>();
 const getDiffShortstatMock = vi.fn();
 
 vi.mock("../services/git.service.js", () => ({
   listBranches: vi.fn(async () => []),
-  listWorktrees: (...args: unknown[]) => listWorktreesMock(...(args as [])),
+  listWorktrees: (repoPath: string) => listWorktreesMock(repoPath),
   getDiffShortstat: (...args: unknown[]) => getDiffShortstatMock(...args),
   removeWorktree: vi.fn(async () => {}),
 }));
@@ -105,6 +105,18 @@ async function seedProject(opts: {
   return { projectId, workspaceId };
 }
 
+type WorktreeEntry = Awaited<ReturnType<ReturnType<typeof createProjectService>["getWorktrees"]>>[number];
+
+/**
+ * #631 gave the panel a SIBLING entry variant that carries no diff stats, so the return is a
+ * union. These tests are about the leading repo's own worktrees; this narrows to that variant
+ * instead of assuming the union has the field.
+ */
+function leading(entry: WorktreeEntry) {
+  if ("repoName" in entry) throw new Error(`expected a leading-repo worktree entry, got sibling ${entry.repoName}`);
+  return entry;
+}
+
 describe("getWorktrees diff stats (#342)", () => {
   it("serves a mapped worktree's diff stats from the workspace cache columns without spawning git", async () => {
     const workingDir = "/tmp/worktree-repo/.worktrees/feature-ak-7-cached";
@@ -126,7 +138,7 @@ describe("getWorktrees diff stats (#342)", () => {
     const worktrees = await service.getWorktrees(projectId);
 
     expect(worktrees).toHaveLength(2);
-    expect(worktrees[1].diffStats).toEqual({ filesChanged: 4, insertions: 120, deletions: 17 });
+    expect(leading(worktrees[1]).diffStats).toEqual({ filesChanged: 4, insertions: 120, deletions: 17 });
     // The whole point: no `git diff --shortstat` subprocess for a mapped worktree.
     expect(getDiffShortstatMock).not.toHaveBeenCalled();
   });
@@ -148,10 +160,10 @@ describe("getWorktrees diff stats (#342)", () => {
 
     expect(worktrees).toHaveLength(3);
     // Mapped workspace with an empty cache: nothing to show, and no inline spawn.
-    expect(worktrees[1].diffStats).toBeUndefined();
+    expect(leading(worktrees[1]).diffStats).toBeUndefined();
     // Unmapped worktree: undefined on first paint, refresh queued in the background.
-    expect(worktrees[2].diffStats).toBeUndefined();
-    expect(worktrees[2].workspace).toBeUndefined();
+    expect(leading(worktrees[2]).diffStats).toBeUndefined();
+    expect(leading(worktrees[2]).workspace).toBeUndefined();
     // Exactly one background compute was scheduled — only for the unmapped worktree.
     expect(getDiffShortstatMock).toHaveBeenCalledTimes(1);
     expect(getDiffShortstatMock).toHaveBeenCalledWith("/tmp/worktree-repo/.worktrees/orphan", "main");

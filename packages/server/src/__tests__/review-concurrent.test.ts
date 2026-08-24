@@ -3,10 +3,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { issues, preferences, projectStatuses, projects, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { ReviewError, startManualReview } from "../services/review.service.js";
+import type { prepareForReview } from "../services/git.service.js";
 
-const mockPrepareForReview = vi.fn(async () => ({ success: true, diffRef: "main", conflictingFiles: [], uncommittedChanges: [] }));
+const mockPrepareForReview = vi.fn<typeof prepareForReview>(async () => ({ success: true, diffRef: "main", conflictingFiles: [], uncommittedChanges: [] }));
 vi.mock("../services/git.service.js", () => ({
-  prepareForReview: (...args: unknown[]) => mockPrepareForReview(...args),
+  prepareForReview: (...args: Parameters<typeof prepareForReview>) => mockPrepareForReview(...args),
 }));
 
 const mockBoardEvents = { broadcast: vi.fn() };

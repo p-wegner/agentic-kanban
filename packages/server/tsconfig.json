@@ -13,19 +13,13 @@
     "src/__tests__/agent.service.test.ts",
     "src/__tests__/api-diff.test.ts",
     "src/__tests__/api-workspace.test.ts",
-    "src/__tests__/broadcast-batch.test.ts",
-    "src/__tests__/broadcast-flush-on-exit.test.ts",
     "src/__tests__/container-mcp-reattach-refresh.test.ts",
     "src/__tests__/issues-routes-edge-cases.test.ts",
     "src/__tests__/reconcile-silently-merged.test.ts",
-    "src/__tests__/review-concurrent.test.ts",
     "src/__tests__/startup-timers-hmr.test.ts",
     "src/__tests__/workflow.service.test.ts",
-    "src/__tests__/workspace-create-harden.test.ts",
     "src/__tests__/workspace-merge-service.test.ts",
     "src/__tests__/workspace-services.service.test.ts",
-    "src/__tests__/workspace.service.test.ts",
-    "src/__tests__/worktrees-diff-stats.test.ts",
-    "src/__tests__/worktrees-panel-multirepo.test.ts"
+    "src/__tests__/workspace.service.test.ts"
   ]
 }
