@@ -6,214 +6,247 @@
 <title>kanban worker</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <style>
+  /* One accent per state, and the state is the only thing that gets colour.
+     Everything else is greyscale so the dot and the log are what the eye finds. */
   :root {
-    --bg: #f6f7f9; --panel: #ffffff; --line: #e2e5ea; --ink: #1a1d21; --muted: #6b7280;
+    --bg: #f7f8fa; --panel: #fff; --line: #e4e7ec; --line-soft: #eef0f4;
+    --ink: #16191d; --muted: #6b7280; --faint: #9aa2ad;
     --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
-    --grey: #9aa2ad; --red: #dc4b3e; --yellow: #d99413; --green: #2e9e57; --blue: #3b7fd4;
+    --grey: #9aa2ad; --red: #d6453a; --yellow: #c98a10; --green: #2b9553; --blue: #3577cc;
+    --shadow: 0 1px 2px rgba(16,19,29,.05), 0 1px 8px rgba(16,19,29,.04);
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-      --bg: #14161a; --panel: #1c1f25; --line: #2b3038; --ink: #e6e8ec; --muted: #939aa6;
-      --grey: #6b7280; --red: #e2685c; --yellow: #e0a63c; --green: #46b571; --blue: #5b9ae6;
+      --bg: #101216; --panel: #191c21; --line: #282d35; --line-soft: #21252b;
+      --ink: #e8eaee; --muted: #949ba6; --faint: #6b7280;
+      --grey: #6b7280; --red: #e8695c; --yellow: #ddab45; --green: #4bb877; --blue: #629ce8;
+      --shadow: none;
     }
   }
   :root[data-theme="dark"] {
-    --bg: #14161a; --panel: #1c1f25; --line: #2b3038; --ink: #e6e8ec; --muted: #939aa6;
-    --grey: #6b7280; --red: #e2685c; --yellow: #e0a63c; --green: #46b571; --blue: #5b9ae6;
+    --bg: #101216; --panel: #191c21; --line: #282d35; --line-soft: #21252b;
+    --ink: #e8eaee; --muted: #949ba6; --faint: #6b7280;
+    --grey: #6b7280; --red: #e8695c; --yellow: #ddab45; --green: #4bb877; --blue: #629ce8;
+    --shadow: none;
   }
   * { box-sizing: border-box; }
   body {
     margin: 0; background: var(--bg); color: var(--ink);
     font: 14px/1.5 ui-sans-serif, system-ui, "Segoe UI", sans-serif;
-    padding: 20px; max-width: 1100px; margin-inline: auto;
+    -webkit-font-smoothing: antialiased;
+    padding: 28px 24px 32px; max-width: 980px; margin-inline: auto;
   }
-  header { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
-  .dot { width: 14px; height: 14px; border-radius: 50%; flex: none; box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 18%, transparent); }
-  .dot.grey { background: var(--grey); color: var(--grey); }
-  .dot.red { background: var(--red); color: var(--red); }
-  .dot.yellow { background: var(--yellow); color: var(--yellow); }
-  .dot.green { background: var(--green); color: var(--green); }
-  .dot.blue { background: var(--blue); color: var(--blue); }
-  h1 { font-size: 17px; margin: 0; font-weight: 600; }
-  .sub { color: var(--muted); font-size: 13px; }
+
+  /* ── header ── */
+  header { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
+  .dot {
+    width: 12px; height: 12px; border-radius: 50%; flex: none;
+    background: var(--grey); box-shadow: 0 0 0 4px color-mix(in srgb, var(--grey) 16%, transparent);
+    transition: background .25s, box-shadow .25s;
+  }
+  .dot.red    { background: var(--red);    box-shadow: 0 0 0 4px color-mix(in srgb, var(--red) 16%, transparent); }
+  .dot.yellow { background: var(--yellow); box-shadow: 0 0 0 4px color-mix(in srgb, var(--yellow) 16%, transparent); }
+  .dot.green  { background: var(--green);  box-shadow: 0 0 0 4px color-mix(in srgb, var(--green) 16%, transparent); }
+  .dot.blue   { background: var(--blue);   box-shadow: 0 0 0 4px color-mix(in srgb, var(--blue) 16%, transparent); }
+  h1 { font-size: 19px; margin: 0; font-weight: 600; letter-spacing: -.01em; }
+  .who { color: var(--muted); font-size: 12.5px; margin-top: 1px; }
+  .who b { font-weight: 500; color: var(--ink); }
   .spacer { flex: 1; }
-  button {
-    font: inherit; color: var(--ink); background: var(--panel);
-    border: 1px solid var(--line); border-radius: 7px; padding: 5px 11px; cursor: pointer;
+  .ghost {
+    font: inherit; font-size: 12.5px; color: var(--muted); background: none;
+    border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; cursor: pointer;
   }
-  button:hover { border-color: var(--muted); }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-bottom: 16px; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
-  .card h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 6px; font-weight: 600; }
-  .card .v { font-size: 15px; font-weight: 500; word-break: break-word; }
-  .card .v.mono { font-family: var(--mono); font-size: 13px; }
-  .ok { color: var(--green); } .bad { color: var(--red); } .warn { color: var(--yellow); } .dim { color: var(--muted); }
-  .card .hint { color: var(--muted); font-size: 11.5px; margin-top: 5px; line-height: 1.35; }
-  a { color: var(--blue); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--blue) 35%, transparent); }
-  a:hover { border-bottom-color: currentColor; }
-  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; margin-bottom: 16px; overflow: hidden; }
-  section > h2 {
-    font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
-    margin: 0; padding: 10px 14px; border-bottom: 1px solid var(--line); font-weight: 600;
-    display: flex; align-items: center; gap: 8px;
+  .ghost:hover { color: var(--ink); border-color: var(--faint); }
+
+  /* ── the chain: four binaries that are only interesting when one is wrong ── */
+  .chain {
+    display: flex; align-items: stretch; gap: 1px; margin-bottom: 14px;
+    background: var(--line-soft); border: 1px solid var(--line); border-radius: 10px;
+    overflow: hidden; box-shadow: var(--shadow);
   }
-  #log { margin: 0; padding: 10px 14px; font-family: var(--mono); font-size: 12px;
-         max-height: 45vh; overflow: auto; white-space: pre-wrap; word-break: break-word; }
-  #log .l { padding: 1px 0; border-bottom: 1px solid color-mix(in srgb, var(--line) 45%, transparent); }
-  #log .ts { color: var(--muted); }
-  #log .l.err { color: var(--red); } #log .l.warn { color: var(--yellow); } #log .l.good { color: var(--green); }
-  ul.sessions { margin: 0; padding: 10px 14px; list-style: none; font-family: var(--mono); font-size: 12.5px; }
-  ul.sessions li { padding: 3px 0; }
-  body.stale { opacity: .55; transition: opacity .3s; }
-  .staleflag { display: none; color: var(--red); font-weight: 600; }
+  .link-cell { flex: 1; background: var(--panel); padding: 9px 14px; min-width: 0; }
+  .link-cell .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--faint); }
+  .link-cell .v { font-size: 13.5px; font-weight: 500; margin-top: 2px; display: flex; align-items: center; gap: 6px; }
+  .tick { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--faint); }
+  .tick.on { background: var(--green); } .tick.off { background: var(--red); }
+  .v.on { color: var(--green); } .v.off { color: var(--red); } .v.idle { color: var(--muted); font-weight: 400; }
+
+  /* ── links row ── */
+  .links { display: flex; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; }
+  .links .item {
+    flex: 1; min-width: 210px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 10px 14px; box-shadow: var(--shadow);
+  }
+  .links .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--faint); }
+  .links .v { margin-top: 3px; font-size: 13.5px; }
+  .links .note { color: var(--faint); font-size: 11px; margin-top: 3px; font-family: var(--mono); }
+  a { color: var(--blue); text-decoration: none; }
+  a:hover { text-decoration: underline; text-underline-offset: 2px; }
+  .dim { color: var(--muted); }
+
+  /* ── running sessions: only rendered when there are any ── */
+  #work { margin-bottom: 18px; }
+  #work .item { border-color: color-mix(in srgb, var(--blue) 35%, var(--line)); }
+  #work .ids { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+  /* ── log ── */
+  .logwrap { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; box-shadow: var(--shadow); }
+  .loghead {
+    display: flex; align-items: baseline; gap: 10px; padding: 9px 14px;
+    border-bottom: 1px solid var(--line); font-size: 11px; text-transform: uppercase;
+    letter-spacing: .07em; color: var(--faint);
+  }
+  .loghead .path { text-transform: none; letter-spacing: 0; font-family: var(--mono); font-size: 11px; margin-left: auto; }
+  #log { margin: 0; padding: 6px 0; font-family: var(--mono); font-size: 12px; max-height: 52vh; overflow: auto; }
+  #log .l { padding: 2px 14px; display: flex; gap: 10px; white-space: pre-wrap; word-break: break-word; }
+  #log .l:hover { background: var(--line-soft); }
+  #log .ts { color: var(--faint); flex: none; font-variant-numeric: tabular-nums; }
+  #log .l.err .m { color: var(--red); } #log .l.warn .m { color: var(--yellow); } #log .l.good .m { color: var(--green); }
+  #log .m { min-width: 0; }
+
+  body.stale { opacity: .5; }
+  .staleflag { display: none; font-size: 12px; color: var(--red); }
   body.stale .staleflag { display: inline; }
-  footer { color: var(--muted); font-size: 12px; margin-top: 8px; }
-  code { font-family: var(--mono); font-size: 12px; }
+  footer { color: var(--faint); font-size: 11.5px; margin-top: 14px; text-align: center; }
 </style>
 </head>
 <body>
 <header>
-  <span class="dot grey" id="dot"></span>
+  <span class="dot" id="dot"></span>
   <div>
     <h1 id="verdict">connecting…</h1>
-    <div class="sub" id="who">—</div>
+    <div class="who" id="who">—</div>
   </div>
   <span class="spacer"></span>
-  <span class="staleflag">connection lost — retrying</span>
-  <button id="themeBtn">theme</button>
+  <span class="staleflag">connection lost</span>
+  <button class="ghost" id="themeBtn">theme</button>
 </header>
 
-<div class="grid">
-  <div class="card"><h2>Scheduled task</h2><div class="v" id="c-task">—</div></div>
-  <div class="card"><h2>Supervisor</h2><div class="v" id="c-sup">—</div></div>
-  <div class="card"><h2>Daemon</h2><div class="v" id="c-daemon">—</div></div>
-  <div class="card"><h2>Connection</h2><div class="v" id="c-conn">—</div></div>
-  <div class="card"><h2>Board reachable</h2><div class="v" id="c-board">—</div></div>
-  <div class="card"><h2>Sessions in flight</h2><div class="v" id="c-sessions">—</div></div>
-  <div class="card"><h2>Board</h2><div class="v" id="c-boardui">—</div>
-    <div class="hint" id="c-boardui-hint">the board's own UI, if this machine can reach it</div></div>
-  <div class="card"><h2>Fleet endpoint</h2><div class="v mono" id="c-url">—</div>
-    <div class="hint">the worker's own channel — register, heartbeat, assignments</div></div>
-  <div class="card"><h2>Log size</h2><div class="v" id="c-size">—</div></div>
+<div class="chain">
+  <div class="link-cell"><div class="k">Task</div><div class="v" id="c-task">—</div></div>
+  <div class="link-cell"><div class="k">Supervisor</div><div class="v" id="c-sup">—</div></div>
+  <div class="link-cell"><div class="k">Daemon</div><div class="v" id="c-daemon">—</div></div>
+  <div class="link-cell"><div class="k">Board link</div><div class="v" id="c-conn">—</div></div>
 </div>
 
-<section id="sessions-panel" hidden>
-  <h2>Running sessions</h2>
-  <ul class="sessions" id="sessions"></ul>
-</section>
+<div id="work"></div>
 
-<section>
-  <h2>Worker log <span class="dim" id="logfile"></span></h2>
+<div class="links">
+  <div class="item">
+    <div class="k">Board</div>
+    <div class="v" id="c-boardui">—</div>
+    <div class="note" id="c-boardui-hint"></div>
+  </div>
+  <div class="item">
+    <div class="k">Fleet endpoint</div>
+    <div class="v" id="c-url">—</div>
+    <div class="note">register · heartbeat · assignments</div>
+  </div>
+</div>
+
+<div class="logwrap">
+  <div class="loghead">Worker log <span class="path" id="logfile"></span></div>
   <div id="log"></div>
-</section>
+</div>
 
-<footer>
-  Read-only. Loopback only — this page starts and stops nothing; use the tray or
-  <code>ak-worker-service.ps1</code> for that.
-</footer>
+<footer>read-only · loopback only · the tray and <code>ak-worker-service.ps1</code> are where you start and stop things</footer>
 
 <script>
 const TOKEN = "__TOKEN__";
 const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 let es = null;
 
-// Theme: explicit choice wins and persists; otherwise follow the OS.
 try {
   const saved = localStorage.getItem("ak-worker-theme");
   if (saved) document.documentElement.setAttribute("data-theme", saved);
 } catch {}
 $("themeBtn").onclick = () => {
   const cur = document.documentElement.getAttribute("data-theme");
-  const next = cur === "dark" ? "light"
-    : cur === "light" ? "dark"
+  const next = cur === "dark" ? "light" : cur === "light" ? "dark"
     : (matchMedia("(prefers-color-scheme: dark)").matches ? "light" : "dark");
   document.documentElement.setAttribute("data-theme", next);
   try { localStorage.setItem("ak-worker-theme", next); } catch {}
 };
 
-const yn = (v, good = "yes", bad = "no") =>
-  v === true ? `<span class="ok">${good}</span>`
-  : v === false ? `<span class="bad">${bad}</span>`
-  : `<span class="dim">unknown</span>`;
-
 function ago(iso) {
   if (!iso) return "";
   const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
-  if (s < 60) return `${Math.round(s)}s ago`;
-  if (s < 3600) return `${Math.round(s / 60)}m ago`;
-  return `${Math.round(s / 3600)}h ago`;
+  if (s < 60) return `${Math.round(s)}s`;
+  if (s < 3600) return `${Math.round(s / 60)}m`;
+  return `${Math.round(s / 3600)}h`;
+}
+
+// A cell states the fact, not a yes/no the reader then has to translate.
+function cell(el, ok, onText, offText, unknownText = "unknown") {
+  const e = $(el);
+  if (ok === true)       e.innerHTML = `<span class="tick on"></span><span>${onText}</span>`;
+  else if (ok === false) e.innerHTML = `<span class="tick off"></span><span>${offText}</span>`;
+  else                   e.innerHTML = `<span class="tick"></span><span class="dim">${unknownText}</span>`;
+  e.className = "v " + (ok === true ? "on" : ok === false ? "off" : "idle");
 }
 
 function classify(line) {
-  if (/socket error|disconnected|ERR_|failed|error/i.test(line)) return "err";
-  if (/retrying|backoff|warn/i.test(line)) return "warn";
+  if (/socket error|ERR_|failed|error/i.test(line)) return "err";
+  if (/disconnected|retrying|backoff/i.test(line)) return "warn";
   if (/connected to|pushed session result|agent exited/i.test(line)) return "good";
   return "";
 }
 
 function renderLog(lines) {
   const el = $("log");
-  // Only stick to the bottom if the reader is already there — otherwise scrolling
-  // back through a reconnect storm fights the 2s tick.
   const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
   el.innerHTML = lines.map((l) => {
     const m = l.match(/^(\S+Z)\s?(.*)$/);
-    const cls = classify(l);
-    const body = m ? `<span class="ts">${esc(m[1])}</span> ${esc(m[2])}` : esc(l);
-    return `<div class="l ${cls}">${body}</div>`;
+    // Strip the "[worker] " prefix: it is on every single line, so it is noise
+    // that pushes the part that differs off the right edge.
+    const body = (m ? m[2] : l).replace(/^\[worker\]\s*/, "");
+    const ts = m ? m[1].replace(/^\d{4}-\d{2}-\d{2}T/, "").replace(/Z$/, "") : "";
+    return `<div class="l ${classify(l)}"><span class="ts">${esc(ts)}</span><span class="m">${esc(body)}</span></div>`;
   }).join("");
   if (atBottom) el.scrollTop = el.scrollHeight;
 }
 
-const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
-
 function render(s) {
-  $("dot").className = "dot " + (s.verdict?.key || "grey");
+  $("dot").className = "dot " + (s.verdict?.key || "");
   $("verdict").textContent = s.verdict?.text || "unknown";
-  $("who").textContent = [s.name, s.labels && `[${s.labels}]`, s.since && `since ${s.since}`]
-    .filter(Boolean).join("  ·  ") || "—";
 
-  $("c-task").innerHTML = yn(s.installed, "registered", "not installed");
-  $("c-sup").innerHTML = yn(s.supervisor, "running", "down");
-  $("c-daemon").innerHTML = yn(s.daemon, "running", "down");
-  $("c-conn").innerHTML = s.connection === "connected"
-    ? '<span class="ok">connected</span>'
-    : s.connection === "disconnected" ? '<span class="bad">disconnected</span>'
-    : '<span class="dim">unknown</span>';
-  $("c-board").innerHTML = s.boardOk === null || s.boardOk === undefined
-    ? '<span class="dim">not probed</span>'
-    : yn(s.boardOk, "reachable", "unreachable") +
-      (s.boardCheckedAt ? ` <span class="dim">(${ago(s.boardCheckedAt)})</span>` : "");
-  $("c-sessions").innerHTML = s.sessions > 0
-    ? `<span style="color:var(--blue)">${s.sessions}</span>` : '<span class="dim">0 — idle</span>';
-  // Link to /health, not the bare origin: the fleet listener serves ONLY the
-  // worker routes, so its root is a 404 and a link there would look broken.
-  // /health answers {"ok":true} and is the one URL that proves the board is up.
+  const bits = [];
+  if (s.name) bits.push(`<b>${esc(s.name)}</b>`);
+  if (s.labels) bits.push(esc(s.labels));
+  if (s.since) bits.push(`up ${ago(s.since)}`);
+  if (s.logSize) bits.push(`log ${(s.logSize / 1024).toFixed(0)} KB`);
+  $("who").innerHTML = bits.join(" · ") || "—";
+
+  cell("c-task", s.installed, "registered", "not installed");
+  cell("c-sup", s.supervisor, "running", "down");
+  cell("c-daemon", s.daemon, "running", "down");
+  cell("c-conn",
+    s.connection === "connected" ? true : s.connection === "disconnected" ? false : null,
+    s.boardOk === false ? "connected, board unreachable" : "connected",
+    "disconnected");
+
+  // Only present when there is work. An empty panel every idle minute trains the
+  // eye to skip the place where the interesting thing will appear.
+  $("work").innerHTML = s.sessions > 0
+    ? `<div class="links"><div class="item" style="flex:1">
+         <div class="k">Running now</div>
+         <div class="v">${s.sessions} session${s.sessions === 1 ? "" : "s"}</div>
+         <div class="ids">${(s.sessionIds || []).map(esc).join("<br>")}</div>
+       </div></div>`
+    : "";
+
+  $("c-boardui").innerHTML = s.boardUi
+    ? `<a href="${esc(s.boardUi)}" target="_blank" rel="noreferrer">open the board</a>`
+    : '<span class="dim">not reachable from here</span>';
+  $("c-boardui-hint").textContent = s.boardUi || "loopback-only on its host — the documented default";
+
   $("c-url").innerHTML = s.board
-    ? `<a href="${esc(s.board)}/health" target="_blank" rel="noreferrer">${esc(s.board)}</a>`
+    ? `<a href="${esc(s.board)}/health" target="_blank" rel="noreferrer">${esc(s.board.replace(/^https?:\/\//, ""))}</a>`
     : "—";
 
-  // Only linked when the worker actually reached it. A board whose UI is
-  // loopback-only is correctly configured, so "not reachable" is a normal
-  // state and must not read as a fault.
-  if (s.boardUi) {
-    $("c-boardui").innerHTML = `<a href="${esc(s.boardUi)}" target="_blank" rel="noreferrer">open the board</a>`;
-    $("c-boardui-hint").textContent = s.boardUi;
-  } else {
-    $("c-boardui").innerHTML = '<span class="dim">not reachable from here</span>';
-    $("c-boardui-hint").textContent = "the board's UI is loopback-only on its host, which is the documented default";
-  }
-  $("c-size").textContent = s.logExists ? `${(s.logSize / 1024).toFixed(0)} KB` : "no log yet";
   $("logfile").textContent = s.logFile || "";
-
-  const panel = $("sessions-panel");
-  if (s.sessionIds?.length) {
-    panel.hidden = false;
-    $("sessions").innerHTML = s.sessionIds.map((id) => `<li>${esc(id)}</li>`).join("");
-  } else {
-    panel.hidden = true;
-  }
-  document.title = `${s.verdict?.key === "blue" ? `(${s.sessions}) ` : ""}kanban worker — ${s.verdict?.text || ""}`;
+  document.title = `${s.sessions > 0 ? `(${s.sessions}) ` : ""}kanban worker — ${s.verdict?.text || ""}`;
 }
 
 async function pullLog() {
@@ -225,13 +258,10 @@ async function pullLog() {
 
 function connect() {
   es = new EventSource(`/api/stream?token=${encodeURIComponent(TOKEN)}`);
-  es.onmessage = (e) => {
-    document.body.classList.remove("stale");
-    render(JSON.parse(e.data));
-  };
+  es.onmessage = (e) => { document.body.classList.remove("stale"); render(JSON.parse(e.data)); };
   es.onerror = () => {
-    // The server dying is itself information — dim rather than hide, so the last
-    // known state stays readable while it retries.
+    // Dim rather than blank: the last known state is still the most useful thing
+    // on screen while the server is away.
     document.body.classList.add("stale");
     es.close();
     setTimeout(connect, 3000);
