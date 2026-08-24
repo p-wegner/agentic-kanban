@@ -242,7 +242,6 @@ describe("tests never write into the real repo tree (#680)", () => {
         "file changing mid-run makes THEM red — a load-dependent failure with no code " +
         "regression behind it, which is #680. It also dirties a checkout several agents share, " +
         "and the board withholds every merge while a tracked file is dirty (#814).\n\n" +
-        // TEMP-PREFIX OK: `"..."` is a placeholder inside this assertion's advice text.
         'Write into `mkdtempSync(join(tmpdir(), "..."))` instead. If the real path is genuinely ' +
         "required, put `// REPO-TREE-WRITE OK: <reason>` on the line above the call.",
     ).toEqual([]);
@@ -283,8 +282,9 @@ describe("tests never write into the real repo tree (#680)", () => {
           'const SPEC = join(REPO_ROOT, "packages/server/openapi.yaml");',
           // The line below is source text of a SYNTHESIZED fixture file that is never
           // executed, so no temp dir is ever created from that prefix — and renaming it
-          // would change the very shape this guard's own bite test asserts on.
-          // TEMP-PREFIX OK: synthesized fixture source, not a real mkdtemp call site.
+          // would change the very shape this guard's own bite test asserts on. It needs no
+          // temp-prefix exemption since #849: that guard walks the TS AST, which sees a
+          // string literal here rather than a call.
           'const scratch = mkdtempSync(join(tmpdir(), "copy-"));',
           'const copy = join(scratch, "openapi.yaml");',
           '  writeFileSync(copy, readFileSync(SPEC, "utf8"), "utf8");',

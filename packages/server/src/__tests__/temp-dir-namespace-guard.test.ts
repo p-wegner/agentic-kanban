@@ -18,10 +18,28 @@
  *
  * So this walks the source tree and re-derives the offenders instead of listing them.
  *
- * Deliberately regex over source TEXT, not the TS AST: the repo's scanners parse with
- * `setParentNodes: false`, which makes `node.parent`, `node.getText()` and
- * `node.getSourceFile()` unusable, and the thing being checked here is a string literal in a
- * call — no type information would make the answer better.
+ * **Site detection is on the TS AST; the MARKER lookup stays line-based (#849).** The three
+ * passes used to match `mkdtemp(...)` / `join(tmpdir(), ...)` with a regex per LINE against real
+ * TypeScript, so a call wrapped across two lines walked straight past:
+ *
+ * ```ts
+ * const dir = join(
+ *   tmpdir(),
+ *   `leaky-${randomUUID()}`,
+ * );
+ * ```
+ *
+ * That is #779's defect exactly — `pref-polarity-ratchet` was green on a tree holding what it
+ * forbids, because the violation sat in a two-line form. A guard this one is load-bearing:
+ * it is what stands between the repo and a repeat of #843's 518,581 loose `test-db-*` files.
+ *
+ * The marker half genuinely needs lines and deliberately keeps them: `findOkMarker` walks the
+ * contiguous comment block upward from a site, comment adjacency IS a line concept, and the
+ * orphan check below needs the marker's own line number to report it. So this is an AST site
+ * scan feeding a line-based marker lookup — not a wholesale rewrite.
+ *
+ * `node.getText(sf)` and `node.getStart(sf)` both work without parent pointers as long as the
+ * source file is passed explicitly, which is why `setParentNodes: false` is no obstacle here.
  *
  * Three shapes are checked, and only the first is a grep:
  *
@@ -57,6 +75,14 @@
 import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
+import ts from "typescript";
+import {
+  calleeName,
+  forEachNode,
+  lineOf,
+  parseGuardSource,
+  unwrapExpression,
+} from "../../../shared/__tests__/helpers/guard-scan.js";
 import { matchedNamespace } from "./helpers/reap-fixture-child-servers.js";
 
 const REPO_ROOT = resolve(import.meta.dirname, "../../../..");
@@ -122,28 +148,82 @@ function sourceFiles(): string[] {
   return out;
 }
 
-/** `join(tmpdir(), <arg>)` / `resolve(tmpdir(), <arg>)` — the argument is captured raw. */
-const TMPDIR_CHILD = /(?:join|resolve)\s*\(\s*(?:os\.)?tmpdir\(\)\s*,\s*([^)]*)\)/g;
-/** The literal head of the argument: `"lit"`, `'lit'`, or the leading chunk of `` `lit${x}` ``. */
-const LITERAL_HEAD = /^["'](.*)["']$|^`([^`${]*)/;
-const IDENTIFIER = /^[A-Za-z_$][\w$.]*$/;
-/** The LEADING string literal of an argument, even when something is concatenated after it. */
-const LEADING_LITERAL = /^["']([^"']*)["']|^`([^`${]*)/;
 /**
- * The argument mints a NEW name every run. That — not `mkdtemp` — is what separates a leak from
- * a stable singleton: `join(tmpdir(), "agentic-kanban")` is one reusable entry that can never
+ * The name mints a NEW entry every run. That — not `mkdtemp` — is what separates a leak from a
+ * stable singleton: `join(tmpdir(), "agentic-kanban")` is one reusable entry that can never
  * accumulate (and must never be swept), while anything carrying a uuid, a pid, a timestamp or a
  * random draw is a fresh entry per run.
+ *
+ * Applied to the ARGUMENT NODE's own text (`arg.getText(sf)`), so it reads the whole expression
+ * however it is wrapped — the line-based version could only see the fragment that happened to
+ * share a line with the `join(`.
  */
 const PER_RUN_NAME = /\$\{|process\.pid|Date\.now\s*\(|randomUUID\s*\(|randomBytes\s*\(|Math\.random\s*\(/;
-/** A line of PROSE about the shape is not the shape — see the note at pass 1. */
+/** A line of PROSE about the shape is not the shape — kept for the ORPHAN scan, which is textual. */
 const COMMENT_LINE = /^\s*(\*|\/\/|\/\*)/;
 
-function enclosingFunctionName(lines: string[], atIndex: number): string | null {
-  for (let i = atIndex; i >= 0 && i > atIndex - 30; i--) {
-    const named = /^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/.exec(lines[i]!)
-      ?? /^\s*(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?\(/.exec(lines[i]!);
-    if (named) return named[1]!;
+const MKDTEMP_CALLEES = new Set(["mkdtemp", "mkdtempSync"]);
+const PATH_JOINERS = new Set(["join", "resolve"]);
+
+/** Is this expression a call to `tmpdir()` (bare or `os.tmpdir()`)? */
+function isTmpdirCall(expr: ts.Expression): boolean {
+  const inner = unwrapExpression(expr);
+  return ts.isCallExpression(inner) && calleeName(inner) === "tmpdir";
+}
+
+/** For `join(tmpdir(), X)` / `resolve(tmpdir(), X)` return `X`; otherwise null. */
+function tmpdirChildName(call: ts.CallExpression): ts.Expression | null {
+  if (!PATH_JOINERS.has(calleeName(call) ?? "")) return null;
+  if (call.arguments.length < 2) return null;
+  if (!isTmpdirCall(call.arguments[0]!)) return null;
+  return call.arguments[1]!;
+}
+
+/**
+ * The LEADING string literal of a name expression — the part that decides which namespace the
+ * entry lands in — or `null` when the name is decided elsewhere.
+ *
+ * `null` and `""` mean different things and both callers depend on the difference:
+ *  - `null` — an identifier, a call, an interpolation in FIRST position: nothing to judge here.
+ *  - `""`   — an empty leading literal (`` `${x}-thing` ``): the name IS decided by the caller,
+ *             which is what makes the enclosing function a prefix-taking helper (pass 2).
+ */
+function literalHead(expr: ts.Expression): string | null {
+  const node = unwrapExpression(expr);
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+  if (ts.isTemplateExpression(node)) return node.head.text;
+  // `"prefix-" + suffix` — the leading literal still decides the namespace.
+  if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    return literalHead(node.left);
+  }
+  return null;
+}
+
+/** A pure literal with no interpolation — what pass 2 requires of a helper's first argument. */
+function pureLiteral(expr: ts.Expression): string | null {
+  const node = unwrapExpression(expr);
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+  return null;
+}
+
+/**
+ * The name of the FUNCTION a node sits inside, for the walk-maintained stack.
+ *
+ * A plain `const path = mkdtempSync(...)` must NOT contribute a name: the enclosing helper is
+ * `createManagedTempDir`, not `path`, and pass 2 looks up CALL SITES of that name. Naming the
+ * variable instead silently emptied pass 2 for every helper whose mkdtemp result is assigned —
+ * which is most of them.
+ */
+function declaredName(node: ts.Node): string | null {
+  if (ts.isFunctionDeclaration(node)) return node.name?.text ?? null;
+  if (ts.isMethodDeclaration(node) && ts.isIdentifier(node.name)) return node.name.text;
+  if (
+    ts.isVariableDeclaration(node) &&
+    ts.isIdentifier(node.name) &&
+    node.initializer !== undefined &&
+    (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))
+  ) {
+    return node.name.text;
   }
   return null;
 }
@@ -174,92 +254,121 @@ interface ScanResult {
 
 function scan(): ScanResult {
   const files = sourceFiles();
-  const contents = new Map<string, string[]>();
+  /** `absPath -> { rel, lines, sf }` for every file that could hold a site or a marker. */
+  const parsed = new Map<string, { rel: string; lines: string[]; sf: ts.SourceFile }>();
   for (const f of files) {
     const src = readFileSync(f, "utf8");
     if (!src.includes("tmpdir()") && !src.includes("TEMP-PREFIX OK")) continue;
-    contents.set(f, src.split(/\r?\n/));
+    parsed.set(f, {
+      rel: relative(REPO_ROOT, f).replace(/\\/g, "/"),
+      lines: src.split(/\r?\n/),
+      sf: parseGuardSource(f, src),
+    });
   }
 
   const sites: Site[] = [];
   const exempted: Array<{ file: string; line: number; shape: string }> = [];
   const helperNames = new Set<string>();
 
-  const record = (file: string, lines: string[], i: number, prefix: string, shape: string): void => {
-    const marker = findOkMarker(lines, i);
+  /** Record a site at `node`, unless a `TEMP-PREFIX OK:` marker covers its line. */
+  const record = (
+    entry: { rel: string; lines: string[]; sf: ts.SourceFile },
+    node: ts.Node,
+    prefix: string,
+    shape: string,
+  ): void => {
+    const lineIndex = lineOf(entry.sf, node) - 1;
+    const marker = findOkMarker(entry.lines, lineIndex);
     if (marker !== null) {
-      exempted.push({ file, line: marker + 1, shape });
+      exempted.push({ file: entry.rel, line: marker + 1, shape });
       return;
     }
-    sites.push({ file, line: i + 1, prefix, shape });
+    sites.push({ file: entry.rel, line: lineIndex + 1, prefix, shape });
   };
 
-  // Pass 1 — direct `mkdtemp*(join(tmpdir(), …))` sites, and the helpers that take a prefix.
-  for (const [f, lines] of contents) {
-    const rel = relative(REPO_ROOT, f).replace(/\\/g, "/");
-    lines.forEach((line, i) => {
-      if (!line.includes("mkdtemp")) return;
-      // A line of PROSE about the shape is not the shape: this file's own header, the one on
-      // `shared/lib/temp-dir.ts`, and several suite docblocks all quote
-      // `mkdtempSync(join(tmpdir(), "prefix-"))` as an example. Flagging those would train
-      // everyone to ignore the guard, which is the one failure it cannot survive.
-      if (COMMENT_LINE.test(line)) return;
-      TMPDIR_CHILD.lastIndex = 0;
-      let m: RegExpExecArray | null;
-      while ((m = TMPDIR_CHILD.exec(line))) {
-        const arg = m[1]!.trim();
-        const lit = LITERAL_HEAD.exec(arg);
-        const head = lit ? (lit[1] ?? lit[2] ?? "") : null;
-        if (head) {
-          record(rel, lines, i, head, "mkdtemp");
-        } else if (head === "" || IDENTIFIER.test(arg)) {
-          // The argument is a bare identifier, or a template whose first character is already
-          // an interpolation (`makeTempRepo`'s label form). Either way the NAME is decided by
-          // the caller, so the enclosing function is a prefix-taking helper and pass 2 checks
-          // its call sites instead of guessing here.
-          const fn = enclosingFunctionName(lines, i);
-          if (fn) helperNames.add(fn);
+  /**
+   * Walk once per file carrying the enclosing function's name, and collect all three shapes in
+   * that single pass. The name stack is what replaces the old `enclosingFunctionName` lookback,
+   * which guessed by scanning up to 30 lines for something that looked like a declaration — it
+   * could name the wrong function for a site inside a nested callback, and could name none at
+   * all for a site more than 30 lines into a long helper.
+   */
+  const walkFile = (entry: { rel: string; lines: string[]; sf: ts.SourceFile }): void => {
+    const { sf } = entry;
+    const stack: Array<string | null> = [];
+    /** `join(...)` nodes that ARE the argument of a `mkdtemp*` call — pass 1's, not pass 3's. */
+    const ownedByMkdtemp = new Set<ts.Node>();
+
+    const visit = (node: ts.Node): void => {
+      const named = declaredName(node);
+      if (named !== null) stack.push(named);
+
+      if (ts.isCallExpression(node)) {
+        const callee = calleeName(node);
+
+        // Pass 1 — `mkdtempSync(join(tmpdir(), <name>))`.
+        if (MKDTEMP_CALLEES.has(callee ?? "") && node.arguments.length > 0) {
+          const arg = unwrapExpression(node.arguments[0]!);
+          if (ts.isCallExpression(arg)) {
+            const name = tmpdirChildName(arg);
+            if (name) {
+              ownedByMkdtemp.add(arg);
+              const head = literalHead(name);
+              if (head) {
+                record(entry, node, head, "mkdtemp");
+              } else {
+                // No literal head at all (an identifier), or an EMPTY one (a template opening
+                // with an interpolation): either way the caller decides the name, so the
+                // enclosing function is a prefix-taking helper and pass 2 judges its call
+                // sites instead of guessing a prefix here.
+                const fn = [...stack].reverse().find((n): n is string => n !== null);
+                if (fn) helperNames.add(fn);
+              }
+            }
+          }
+        }
+
+        // Pass 3 — a child of `tmpdir()` built WITHOUT `mkdtemp`, unique per run (#840).
+        if (!ownedByMkdtemp.has(node)) {
+          const name = tmpdirChildName(node);
+          // `getText(sf)` reads the whole name expression however it is wrapped, which is the
+          // half of #849 that the per-line regex could not do.
+          if (name && PER_RUN_NAME.test(name.getText(sf))) {
+            const head = literalHead(name);
+            // No leading literal means the NAME is decided elsewhere; there is nothing to judge
+            // here, so say nothing rather than guess.
+            if (head) record(entry, node, head, "tmpdir-child");
+          }
         }
       }
-    });
-  }
+
+      node.forEachChild(visit);
+      if (named !== null) stack.pop();
+    };
+
+    // `mkdtemp` sites must be seen BEFORE the `join` inside them is judged as a pass-3 site,
+    // and a pre-order walk gives exactly that: the outer call is visited first.
+    visit(sf);
+  };
+
+  for (const entry of parsed.values()) walkFile(entry);
 
   // Pass 2 — call sites of those helpers, whose literal first argument IS the prefix.
-  const names = [...helperNames];
-  if (names.length) {
-    const callRe = new RegExp("\\b(?:" + names.join("|") + ")\\s*\\(\\s*([`\"'])([^`\"'${]*)\\1", "g");
-    for (const [f, lines] of contents) {
-      const rel = relative(REPO_ROOT, f).replace(/\\/g, "/");
-      lines.forEach((line, i) => {
-        if (COMMENT_LINE.test(line)) return; // prose about the shape, not the shape
-        callRe.lastIndex = 0;
-        let m: RegExpExecArray | null;
-        while ((m = callRe.exec(line))) record(rel, lines, i, m[2]!, "helper-call");
+  if (helperNames.size > 0) {
+    for (const entry of parsed.values()) {
+      forEachNode(entry.sf, (node) => {
+        if (!ts.isCallExpression(node)) return;
+        if (!helperNames.has(calleeName(node) ?? "")) return;
+        if (node.arguments.length === 0) return;
+        // Only a PURE literal is a prefix. An interpolated argument is a name assembled at the
+        // call site, which this guard has never claimed to judge.
+        const prefix = pureLiteral(node.arguments[0]!);
+        if (prefix !== null) record(entry, node, prefix, "helper-call");
       });
     }
   }
 
-  // Pass 3 — a child of `tmpdir()` built WITHOUT `mkdtemp`, whose name is unique per run (#840).
-  for (const [f, lines] of contents) {
-    const rel = relative(REPO_ROOT, f).replace(/\\/g, "/");
-    lines.forEach((line, i) => {
-      if (line.includes("mkdtemp")) return; // pass 1's territory
-      if (COMMENT_LINE.test(line)) return; // prose about the shape, not the shape
-      TMPDIR_CHILD.lastIndex = 0;
-      let m: RegExpExecArray | null;
-      while ((m = TMPDIR_CHILD.exec(line))) {
-        const arg = m[1]!.trim();
-        if (!PER_RUN_NAME.test(arg)) continue; // a stable singleton — reused, never accumulates
-        const lit = LEADING_LITERAL.exec(arg);
-        const head = lit ? (lit[1] ?? lit[2] ?? "") : null;
-        // No leading literal means the NAME is decided elsewhere (a variable, an interpolation
-        // in first position); there is nothing to judge here, so say nothing rather than guess.
-        if (head) record(rel, lines, i, head, "tmpdir-child");
-      }
-    });
-  }
-
-  return { sites, exempted, helperNames: names };
+  return { sites, exempted, helperNames: [...helperNames] };
 }
 
 const result = scan();
@@ -335,6 +444,44 @@ describe("every fixture temp dir is minted in a swept namespace (#839)", () => {
       });
     }
     expect(orphans, `A \`${OK_MARKER}\` marker no longer sits at a temp-prefix site — delete it.`).toEqual([]);
+  });
+
+  it("a call wrapped across lines is caught — the whole point of the AST conversion (#849)", () => {
+    // The regex-per-line version was green on exactly this, which is #779's defect: a guard
+    // that a line wrap defeats is how the next unswept site lands unnoticed. Synthesized
+    // source, parsed the same way the scan parses the tree, so this proves the SHAPE matching
+    // rather than restating it.
+    const source = [
+      'import { join } from "node:path";',
+      'import { tmpdir } from "node:os";',
+      'import { randomUUID } from "node:crypto";',
+      "const wrapped = join(",
+      "  tmpdir(),",
+      "  `leaky-${randomUUID()}`,",
+      ");",
+      'const oneLine = join(tmpdir(), `also-leaky-${randomUUID()}`);',
+      'const singleton = join(tmpdir(), "agentic-kanban");',
+    ].join("\n");
+    const sf = parseGuardSource(join(REPO_ROOT, "__synthetic__", "wrapped-site.ts"), source);
+
+    const found: Array<{ prefix: string; perRun: boolean }> = [];
+    forEachNode(sf, (node) => {
+      if (!ts.isCallExpression(node)) return;
+      const name = tmpdirChildName(node);
+      if (!name) return;
+      const head = literalHead(name);
+      if (head === null) return;
+      found.push({ prefix: head, perRun: PER_RUN_NAME.test(name.getText(sf)) });
+    });
+
+    // All three shapes are SEEN — the wrap does not hide the call from the scan.
+    expect(found.map((f) => f.prefix)).toEqual(["leaky-", "also-leaky-", "agentic-kanban"]);
+    // And the discriminator is still uniqueness per run, not the wrap and not `mkdtemp`:
+    // the stable singleton is correctly NOT a leak, wrapped or otherwise.
+    expect(found.map((f) => f.perRun)).toEqual([true, true, false]);
+    // The prefix the wrapped site would be reported under is genuinely unswept, so it would
+    // have been an offender — this is not a shape that passes for an unrelated reason.
+    expect(matchedNamespace("leaky-abc")).toBeNull();
   });
 
   it("the guard bites — it flags an unswept prefix and clears the ak- form beside it", () => {
