@@ -3,6 +3,34 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## #887 done: the board ASKS the worker instead of waiting out a silence (2026-08-25)
+
+`9064112948`. The board could not tell "the assignment never arrived" from "the agent is
+working silently" and held a session that never existed for 100 minutes. Zero output is not
+evidence either way — but the worker remembers every `sessionId` it was ever handed, so its
+`unknown` is a FACT. New protocol pair `probe_session` → `session_probe_result`
+(`unknown | running | exited`), optional on the wire, no version bump.
+
+- **Worker half**: `worker/worker-session-registry.ts` — the ledger (bounded at 1000,
+  oldest-first) plus the reply. A remembered id whose spawn threw answers `exited(null)`,
+  never `unknown`.
+- **Board half**: `services/agent-remote-liveness.ts` now owns BOTH ways of asking. The free
+  one (a `hello` enumerates — #746) moved there verbatim; the new one asks once after
+  `ASSIGN_SILENCE_PROBE_MS` (5 min) of silence.
+- `unknown` → a LAUNCH failure (`kind: "dispatch"`), so #245/#751 re-places it and the ticket
+  stays retryable. `exited` → `landAndFinish`. `running` → observed + reported; #883's TTL
+  stays the backstop for that case.
+- **Silence is NOT `unknown`** — an older worker cannot answer, so an unanswered probe holds
+  exactly as before. Asserted directly, because getting this wrong would fail live sessions on
+  every stale worker in a fleet.
+
+**Verified**: 36 unit cases plus a 3-case e2e that sends a real probe over a real WebSocket to
+a real worker daemon (`unknown` for an id it never received, `exited(0)` for one it ran,
+`running` for one alive). Both ends are in this repo, so both are proven here. **Not** verified
+against `AO-PF38Z8R8` — see the blocker below. nloc ring disclosed in
+`function-nloc-baseline.ts`: `createRemoteAgentService` 609 → 609 (net zero — the hello
+extraction paid for the probe wiring), `createWorkerAgentRunner` 332 → 343.
+
 ## #899, #898, #897 done: a fleet refactor and two honesty fixes in the UI (2026-08-25)
 
 Three landed back to back while the remote worker was unavailable (see the blocker below).
@@ -27,7 +55,7 @@ Three landed back to back while the remote worker was unavailable (see the block
 
 **Blocked on a human, not on us:** `AO-PF38Z8R8` has been offline since 02:21Z and needs an
 interactive `claude /login` on that machine — the board cannot perform it by design (decision 012).
-Until it returns, nothing is dispatchable remotely, and #895/#874/#876/#857/#887 all wait on it
+Until it returns, nothing is dispatchable remotely, and #895/#874/#876/#857 all wait on it
 for live verification rather than for code. #895 carries a comment recording exactly what is left
 and why neither of its two routes can be honestly closed today.
 
