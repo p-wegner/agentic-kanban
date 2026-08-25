@@ -372,7 +372,29 @@ export type WorkerToBoardMessage =
   | { type: "event"; event: WorkerAgentEvent }
   | { type: "assign_failed"; sessionId: string; error: string }
   /** The answer to one `sync_repo`/`push_head` (#783, #784), by `requestId`. */
-  | { type: "repo_op_result"; sessionId: string; result: WorkerRepoOpResult };
+  | { type: "repo_op_result"; sessionId: string; result: WorkerRepoOpResult }
+  /**
+   * A completed session whose result the worker STILL cannot push (#871).
+   *
+   * Sent after the reconnect retry fails: the session's exit has long been delivered
+   * (downgraded), so without this message the only record of the finished work is a log
+   * line on the worker's own disk. The board logs it loudly and stamps the session's
+   * transcript so the undelivered state is visible, not silently missing. `lastError`
+   * is free text from the worker's git transport; `checkoutPath` names where the work
+   * sits ON THE WORKER, which is the one machine the board cannot inspect itself.
+   *
+   * An OPTIONAL message: an older board drops it as malformed (with a warn), which is
+   * a degraded report, not a broken session — so it does not bump the protocol version.
+   */
+  | {
+      type: "undelivered_result";
+      sessionId: string;
+      branch: string;
+      incomingRef: string;
+      checkoutPath: string;
+      attempts: number;
+      lastError: string;
+    };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
@@ -433,6 +455,26 @@ export function parseWorkerToBoardMessage(raw: unknown): WorkerToBoardMessage | 
       const result = parseWorkerRepoOpResult(msg.result);
       if (!result) return null;
       return { type: "repo_op_result", sessionId: msg.sessionId, result };
+    }
+    case "undelivered_result": {
+      if (
+        typeof msg.sessionId !== "string" ||
+        typeof msg.branch !== "string" ||
+        typeof msg.incomingRef !== "string" ||
+        typeof msg.checkoutPath !== "string" ||
+        typeof msg.lastError !== "string"
+      ) {
+        return null;
+      }
+      return {
+        type: "undelivered_result",
+        sessionId: msg.sessionId,
+        branch: msg.branch,
+        incomingRef: msg.incomingRef,
+        checkoutPath: msg.checkoutPath,
+        attempts: typeof msg.attempts === "number" && Number.isFinite(msg.attempts) ? msg.attempts : 0,
+        lastError: msg.lastError,
+      };
     }
     default:
       return null;

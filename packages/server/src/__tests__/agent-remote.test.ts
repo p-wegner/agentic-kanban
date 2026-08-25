@@ -4,7 +4,8 @@ import type { WorkerConnectionManager, WorkerMessageListener } from "../services
 import type { WorkerToBoardMessage, BoardToWorkerMessage } from "@agentic-kanban/shared/lib/worker-protocol";
 import type { AgentOutputEvent } from "../services/agent.service.js";
 import { createTestDb } from "./helpers/test-db.js";
-import { projects, projectStatuses, issues, workspaces, sessions } from "@agentic-kanban/shared/schema";
+import { projects, projectStatuses, issues, workspaces, sessions, sessionMessages, workerEvents } from "@agentic-kanban/shared/schema";
+import { eq } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 
 function fakeManager(initiallyConnected: string[] = []) {
@@ -230,6 +231,67 @@ describe("agent-remote service (worker fleet phase 1c)", () => {
       await flush();
 
       expect(fm.sent.filter((m) => m.message.type === "stop")).toHaveLength(1);
+    });
+  });
+
+  // #871 — a worker reporting a COMPLETED session whose result it still cannot push. The
+  // session is long finalized, so the report must land somewhere durable: the worker's
+  // event timeline, and the session's own transcript.
+  describe("a worker's undelivered_result report", () => {
+    async function seedFinalizedSession(sessionId: string, workerId: string) {
+      await db.insert(projects).values({ id: "p1", name: "p" }).onConflictDoNothing();
+      await db.insert(projectStatuses).values({ id: "st1", projectId: "p1", name: "Todo", sortOrder: 0 }).onConflictDoNothing();
+      await db.insert(issues).values({ id: "i1", title: "t", statusId: "st1", projectId: "p1" }).onConflictDoNothing();
+      await db.insert(workspaces).values({ id: "ws1", issueId: "i1", branch: "feature/x" }).onConflictDoNothing();
+      await db.insert(sessions).values({ id: sessionId, workspaceId: "ws1", status: "failed", workerId });
+    }
+
+    const report = {
+      type: "undelivered_result" as const,
+      sessionId: "s-undelivered",
+      branch: "feature/x",
+      incomingRef: "refs/kanban/incoming/feature/x",
+      checkoutPath: "C:\\worker\\checkouts\\s-undelivered",
+      attempts: 7,
+      lastError: "connect timeout",
+    };
+
+    it("records a worker event and stamps the finalized session's transcript", async () => {
+      await seedFinalizedSession("s-undelivered", "w1");
+      const fm = fakeManager(["w1"]);
+      createRemoteAgentService(fm.manager, db);
+
+      fm.fireMessage("w1", report);
+
+      await vi.waitFor(async () => {
+        const rows = await db.select().from(workerEvents).where(eq(workerEvents.type, "undelivered_result"));
+        expect(rows).toHaveLength(1);
+        expect(rows[0].sessionId).toBe("s-undelivered");
+        expect(rows[0].summary).toContain("could not be pushed");
+        expect(rows[0].summary).toContain(report.checkoutPath);
+      });
+      await vi.waitFor(async () => {
+        const messages = await db.select().from(sessionMessages).where(eq(sessionMessages.sessionId, "s-undelivered"));
+        expect(messages).toHaveLength(1);
+        expect(messages[0].type).toBe("stderr");
+        expect(messages[0].data).toContain("UNDELIVERED");
+        expect(messages[0].data).toContain(report.checkoutPath);
+        expect(messages[0].data).toContain(report.lastError);
+      });
+    });
+
+    it("does not fabricate transcript rows for a session this board has no row for", async () => {
+      const fm = fakeManager(["w1"]);
+      createRemoteAgentService(fm.manager, db);
+
+      fm.fireMessage("w1", { ...report, sessionId: "s-foreign" });
+      await new Promise((r) => setTimeout(r, 50));
+
+      // No session row -> nothing to stamp (an insert would violate the FK anyway); the
+      // loud log and the worker-event write are the record. The worker event itself is
+      // fire-and-forget and its session FK cannot hold, so no row is asserted here either.
+      const messages = await db.select().from(sessionMessages).where(eq(sessionMessages.sessionId, "s-foreign"));
+      expect(messages).toHaveLength(0);
     });
   });
 

@@ -29,6 +29,22 @@ export interface RemoteSessionEventRecorder {
     exitCode: number | null,
     how: string,
   ): void;
+  /**
+   * A worker reports a COMPLETED session whose result it still cannot push (#871): even
+   * the reconnect retry failed, so the work exists only in a checkout on that machine.
+   * Recorded so the timeline names where the work is and why it never arrived.
+   */
+  noteUndeliveredResult(
+    workerId: string,
+    report: {
+      sessionId: string;
+      branch: string;
+      incomingRef: string;
+      checkoutPath: string;
+      attempts: number;
+      lastError: string;
+    },
+  ): void;
 }
 
 export function createRemoteSessionEventRecorder(database: Database): RemoteSessionEventRecorder {
@@ -61,6 +77,26 @@ export function createRemoteSessionEventRecorder(database: Database): RemoteSess
           ...(session.repo
             ? { branch: session.repo.branch, transport: "git" satisfies RemoteSessionTransport }
             : { transport: "shared-filesystem" satisfies RemoteSessionTransport }),
+        },
+      });
+    },
+
+    noteUndeliveredResult(workerId, report) {
+      void recordWorkerEvent({
+        database,
+        workerId,
+        sessionId: report.sessionId,
+        type: "undelivered_result",
+        summary:
+          `session ${report.sessionId} completed on this worker but its result could not be pushed ` +
+          `to ${report.incomingRef} after ${report.attempts} attempt(s); the work is kept at ` +
+          `${report.checkoutPath} on the worker`,
+        payload: {
+          branch: report.branch,
+          incomingRef: report.incomingRef,
+          checkoutPath: report.checkoutPath,
+          attempts: report.attempts,
+          lastError: report.lastError,
         },
       });
     },
