@@ -27,6 +27,13 @@ export interface MergeGateEvidenceValues {
   source: string | null;
   branchSha: string | null;
   baseSha: string | null;
+  /**
+   * `gateVerificationKey(strategy, verifyCommand)` for the run that produced this proof (#893).
+   * Optional so writers that never resolved one (review-exit before it learns to) stay
+   * source-compatible — but see the normalization in {@link setMergeGateEvidence}: an omitted
+   * key is WRITTEN as null, never left as the previous row's value.
+   */
+  verificationKey?: string | null;
 }
 
 /**
@@ -40,8 +47,12 @@ export async function setMergeGateEvidence(
   values: MergeGateEvidenceValues,
   database: Database | TransactionClient = db,
 ): Promise<void> {
-  await database.insert(workspaceMergeGate).values({ workspaceId, ...values })
-    .onConflictDoUpdate({ target: workspaceMergeGate.workspaceId, set: { ...values } });
+  // Normalize the optional field: an upsert whose SET omits `verification_key` would keep the
+  // PREVIOUS run's key beside this run's tips — a proof asserting a tier it never ran under.
+  // Every write therefore overwrites the whole row.
+  const row = { ...values, verificationKey: values.verificationKey ?? null };
+  await database.insert(workspaceMergeGate).values({ workspaceId, ...row })
+    .onConflictDoUpdate({ target: workspaceMergeGate.workspaceId, set: { ...row } });
 }
 
 /**

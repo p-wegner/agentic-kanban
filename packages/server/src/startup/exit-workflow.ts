@@ -41,6 +41,7 @@ import type { Database } from "../db/index.js";
 import { classifySessionExit, resolveSessionRoleFlags } from "./session-exit-classification.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { setMergeGateEvidence } from "../repositories/merge-gate.repository.js";
+import { resolveGateVerification } from "../services/pre-merge-gate-tier.js";
 import { workspaceHasCommittedWork } from "../services/workspace-commits.js";
 import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.service.js";
 import { isFoundationalBlocker } from "../services/foundational-merge.service.js";
@@ -335,12 +336,19 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
     }).where(eq(workspaces.id, workspaceId));
     // #815: the five `merge_gate_*` columns moved to `workspace_merge_gate`. Same values,
     // same trustworthiness rule — an upsert, because a workspace can be re-gated.
+    // #893: also stamp the verification-tier key, so the HTTP merge path's bounded
+    // cross-restart reuse can accept this pass too. Best-effort — a null key only means
+    // "not reusable by that path", never a blocked merge.
+    const verificationKey = evidence.trustworthy
+      ? await resolveGateVerification(projectId, db).then((v) => v.verificationKey).catch(() => null)
+      : null;
     await setMergeGateEvidence(workspaceId, {
       ranAt: evidence.trustworthy ? evidence.ranAt : null,
       stage: evidence.trustworthy ? evidence.stage : null,
       source: evidence.trustworthy ? evidence.source : null,
       branchSha: evidence.branchSha,
       baseSha: evidence.baseSha,
+      verificationKey,
     }, db);
     boardEvents.broadcast(projectId, "workspace_ready_for_merge");
   }
