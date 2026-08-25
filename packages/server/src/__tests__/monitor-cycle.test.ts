@@ -121,6 +121,11 @@ beforeEach(() => {
   vi.mocked(db.select)
     .mockReturnValueOnce(makeSelectChain([]))          // sessions query → no session
     .mockReturnValueOnce(makeSelectChain([{ count: 0 }])); // session count → 0
+  // Default for every LATER query (merge backoff, #893's persisted-verdict read, #894's
+  // getProjectRepoPath): an empty result = "nothing found". Without a default the queue
+  // runs dry and db.select() returns undefined, which crashes the gate mid-candidate —
+  // that silent crash is exactly how these suites went red when #893/#894 added reads.
+  vi.mocked(db.select).mockReturnValue(makeSelectChain([]));
   vi.mocked(db.update).mockReturnValue(makeUpdateChain());
   // The monitor must NEVER call its own server over HTTP — it uses the injected
   // workspaceActions port. This stub turns any regression into a hard failure.
@@ -504,6 +509,8 @@ describe("processWorkspaceCandidates — auto_merge gating", () => {
     vi.mocked(db.select)
       .mockReturnValueOnce(makeSelectChain([{ id: "sess-1", status: "stopped", startedAt: new Date().toISOString() }]))
       .mockReturnValueOnce(makeSelectChain([{ count: 1 }]));
+    // Later gate reads (backoff, #893 persisted verdict, #894 repo path) → empty results.
+    vi.mocked(db.select).mockReturnValue(makeSelectChain([]));
 
     const deps = { ...makeDeps(), autoMergeEnabled: true };
     const candidate: WorkspaceCandidate = { ...baseCandidate, wsStatus: "reviewing", readyForMerge: false };
@@ -525,6 +532,7 @@ describe("processWorkspaceCandidates — auto_merge gating", () => {
     vi.mocked(db.select)
       .mockReturnValueOnce(makeSelectChain([{ id: "sess-1", status: "stopped", startedAt: new Date().toISOString() }]))
       .mockReturnValueOnce(makeSelectChain([{ count: 1 }]));
+    vi.mocked(db.select).mockReturnValue(makeSelectChain([]));
 
     const deps = { ...makeDeps(), autoMergeEnabled: true };
     const candidate: WorkspaceCandidate = { ...baseCandidate, wsStatus: "reviewing", readyForMerge: false };
