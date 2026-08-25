@@ -43,4 +43,7 @@ export interface PreflightClarification {
  */
 export interface PreflightResponse extends TicketPreflightResult {
   clarificationsBlock?: string;
+  /** True when the `skip_preflight` pref short-circuited the check (route sends a synthetic
+   *  "ready" verdict rather than the model's). See `ticket-preflight-skip-pref.test.ts`. */
+  skipped?: boolean;
 }

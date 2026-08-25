@@ -4,31 +4,46 @@ import { showToast } from "../lib/toast.js";
 import { workspaceStatusToneClass } from "../lib/badgeTones.js";
 import { Icon } from "./Icon.js";
 
-interface WorktreeInfo {
+interface WorktreeWorkspaceInfo {
+  id: string;
+  status: string;
+  isDirect: boolean;
+  issueId: string;
+  issueNumber: number | null;
+  issueTitle: string;
+}
+
+/**
+ * #842 — mirrors the two-variant union `getWorktrees` (project-worktrees.service.ts) actually
+ * returns instead of the flat interface this used to be. A leading-repo entry never carries
+ * `repoName`/`orphaned` (server never puts those keys on it); a sibling entry never carries
+ * `diffStats` (#342: diff stats are only ever computed for the leading repo's worktrees).
+ * Narrow with `"repoName" in wt`, matching the server-side tests (`worktrees-panel-multirepo.test.ts`).
+ */
+interface LeadingWorktreeInfo {
   path: string;
   branch: string;
   isMain: boolean;
-  /**
-   * #631 — the SIBLING repo this worktree belongs to, absent for the leading repo's own.
-   * Before this the endpoint listed the leading repo only, so a 17-repo project's panel read
-   * "Worktrees (1) — No additional worktrees" while 104 orphaned sibling worktrees existed
-   * across 13 repos: the panel that exists to surface exactly this debris could not see it.
-   */
-  repoName?: string;
-  workspace?: {
-    id: string;
-    status: string;
-    isDirect: boolean;
-    issueId: string;
-    issueNumber: number | null;
-    issueTitle: string;
-  };
+  workspace?: WorktreeWorkspaceInfo;
   diffStats?: {
     filesChanged: number;
     insertions: number;
     deletions: number;
   };
 }
+
+interface SiblingWorktreeInfo {
+  path: string;
+  branch: string;
+  isMain: false;
+  /** The SIBLING repo this worktree belongs to — see #631 in the module doc above. */
+  repoName: string;
+  /** No board `repos` claim exists for this worktree (an interrupted create, #630). */
+  orphaned: boolean;
+  workspace?: WorktreeWorkspaceInfo;
+}
+
+type WorktreeInfo = LeadingWorktreeInfo | SiblingWorktreeInfo;
 
 interface WorktreeOverviewProps {
   projectId: string;
@@ -296,6 +311,11 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
                 additionalWorktrees.map((wt) => {
                   const isOrphan = !wt.workspace;
                   const isSelected = selected.has(wt.path);
+                  // Narrow via key presence (as the server-side tests do), not an optional
+                  // field on a flattened type — a leading-repo entry never carries `repoName`,
+                  // a sibling entry never carries `diffStats`.
+                  const repoName = "repoName" in wt ? wt.repoName : undefined;
+                  const diffStats = "diffStats" in wt ? wt.diffStats : undefined;
                   return (
                     <div
                       key={wt.path}
@@ -308,12 +328,12 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
                           onChange={() => toggleSelect(wt.path)}
                           className="h-4 w-4 rounded border-gray-300 text-brand-600 shrink-0"
                         />
-                        {wt.repoName && (
+                        {repoName && (
                           <span
                             className="text-xs px-1.5 py-0.5 rounded bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300 shrink-0"
-                            title={`Sibling repo: ${wt.repoName}`}
+                            title={`Sibling repo: ${repoName}`}
                           >
-                            {wt.repoName}
+                            {repoName}
                           </span>
                         )}
                         <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
@@ -322,9 +342,9 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
                         {isOrphan && (
                           <span
                             className="text-xs bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded"
-                            title={wt.repoName ? "No board workspace claims this sibling worktree — most likely an interrupted create (#630)" : "No board workspace claims this worktree"}
+                            title={repoName ? "No board workspace claims this sibling worktree — most likely an interrupted create (#630)" : "No board workspace claims this worktree"}
                           >
-                            {wt.repoName ? "no board workspace" : "orphaned"}
+                            {repoName ? "no board workspace" : "orphaned"}
                           </span>
                         )}
                         {wt.workspace?.isDirect && (
@@ -335,12 +355,12 @@ export function WorktreeOverview({ projectId, onClose, onIssueClick, onWorkspace
                             {wt.workspace.status}
                           </span>
                         )}
-                        {wt.diffStats && wt.diffStats.filesChanged > 0 && (
+                        {diffStats && diffStats.filesChanged > 0 && (
                           <span className="text-xs text-gray-500 dark:text-gray-400">
-                            {wt.diffStats.filesChanged} file{wt.diffStats.filesChanged !== 1 ? "s" : ""},{" "}
-                            <span className="text-green-600">+{wt.diffStats.insertions}</span>
+                            {diffStats.filesChanged} file{diffStats.filesChanged !== 1 ? "s" : ""},{" "}
+                            <span className="text-green-600">+{diffStats.insertions}</span>
                             {" "}/{" "}
-                            <span className="text-red-600">-{wt.diffStats.deletions}</span>
+                            <span className="text-red-600">-{diffStats.deletions}</span>
                           </span>
                         )}
                         <button
