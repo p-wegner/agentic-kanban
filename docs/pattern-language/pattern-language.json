@@ -120,6 +120,13 @@
       "intent": "Type-only contracts shared between packages; no runtime code."
     },
     {
+      "name": "shared-barrel",
+      "match": [
+        "packages/shared/src/index\\.ts$"
+      ],
+      "intent": "The package facade — the ONE module whose job is to union the three sub-barrels (schema, types, lib) for external consumers (421 importers reach `@agentic-kanban/shared`). Re-exporting `schema/` is what it is FOR, so it is its own element rather than a `shared-lib` member with a standing exception (#869). Internal shared modules never import it (that would be a cycle); only the other packages may."
+    },
+    {
       "name": "shared-db-op",
       "match": [
         "packages/shared/src/lib/cascade-delete\\.ts$",
@@ -146,8 +153,7 @@
     {
       "name": "shared-lib",
       "match": [
-        "packages/shared/src/lib/",
-        "packages/shared/src/index\\.ts$"
+        "packages/shared/src/lib/"
       ],
       "intent": "Code used by more than one package, in seven sub-kinds: node-adapter (git/docker/fs, deep-path only), key-derivation, contract-codec, stream-parser, pure-policy/projection, telemetry-singleton - and shared-db-op, which is split out as its own element because it is the ONLY one allowed to touch persistence. Everything matching THIS element is pure with respect to the DB: no drizzle-orm, no shared/schema tables."
     },
@@ -208,14 +214,16 @@
       "shared-schema",
       "shared-types",
       "shared-db-op",
-      "shared-lib"
+      "shared-lib",
+      "shared-barrel"
     ],
     "server-middleware": [
       "server-lib",
       "server-service",
       "shared-db-op",
       "shared-lib",
-      "shared-types"
+      "shared-types",
+      "shared-barrel"
     ],
     "server-service": [
       "server-service",
@@ -226,7 +234,8 @@
       "shared-schema",
       "shared-types",
       "shared-db-op",
-      "shared-lib"
+      "shared-lib",
+      "shared-barrel"
     ],
     "server-monitor": [
       "server-monitor",
@@ -238,7 +247,8 @@
       "shared-schema",
       "shared-types",
       "shared-db-op",
-      "shared-lib"
+      "shared-lib",
+      "shared-barrel"
     ],
     "server-repository": [
       "server-db",
@@ -246,7 +256,8 @@
       "shared-schema",
       "shared-types",
       "shared-db-op",
-      "shared-lib"
+      "shared-lib",
+      "shared-barrel"
     ],
     "server-lib": [
       "server-lib",
@@ -254,20 +265,28 @@
       "shared-schema",
       "shared-types",
       "shared-db-op",
-      "shared-lib"
+      "shared-lib",
+      "shared-barrel"
     ],
     "server-db": [
       "shared-schema",
       "shared-db-op",
       "shared-lib",
       "server-lib",
-      "server-scaffold"
+      "server-scaffold",
+      "shared-barrel"
     ],
     "shared-db-op": [
       "shared-db-op",
       "shared-lib",
       "shared-schema",
       "shared-types"
+    ],
+    "shared-barrel": [
+      "shared-schema",
+      "shared-types",
+      "shared-db-op",
+      "shared-lib"
     ],
     "shared-lib": [
       "shared-db-op",
@@ -283,7 +302,8 @@
       "shared-db-op",
       "shared-lib",
       "shared-schema",
-      "shared-types"
+      "shared-types",
+      "shared-barrel"
     ],
     "client-component": [
       "client-component",
@@ -292,7 +312,8 @@
       "client-lib",
       "shared-types",
       "shared-db-op",
-      "shared-lib"
+      "shared-lib",
+      "shared-barrel"
     ],
     "client-hook": [
       "client-hook",
@@ -300,20 +321,23 @@
       "client-lib",
       "shared-types",
       "shared-db-op",
-      "shared-lib"
+      "shared-lib",
+      "shared-barrel"
     ],
     "client-store": [
       "client-store",
       "client-lib",
       "shared-types",
       "shared-db-op",
-      "shared-lib"
+      "shared-lib",
+      "shared-barrel"
     ],
     "client-lib": [
       "client-lib",
       "shared-types",
       "shared-db-op",
-      "shared-lib"
+      "shared-lib",
+      "shared-barrel"
     ]
   }
 }

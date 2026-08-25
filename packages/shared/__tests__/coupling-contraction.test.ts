@@ -5,7 +5,8 @@ import {
   type DependencyEdge,
   type EdgeMutation,
 } from "../src/lib/dependency-graph.js";
-import { SYMMETRIC_DEPENDENCY_TYPES, DEPENDENCY_TYPES } from "../src/schema/index.js";
+import { SYMMETRIC_DEPENDENCY_TYPES } from "../src/schema/index.js";
+import { DEPENDENCY_TYPES } from "../src/lib/dependency-type-traits.js";
 
 /**
  * Coupling-as-a-first-class-edge (#916). `coupled_with` is a SYMMETRIC peer edge.

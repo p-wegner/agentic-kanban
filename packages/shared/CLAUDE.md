@@ -100,10 +100,12 @@ membership from the imports (`drizzle-orm` is what makes a module a db-op; the t
 do not) and fails when the list and the code disagree. Adding a db-op therefore means adding
 it to the spec, which is the point.
 
-**The one standing exception**, frozen in that suite and shrink-only: a pure module may read a
-column VOCABULARY (`as const`) from `shared/schema` — `dependency-type-traits.ts` does, and the
-`shared-schema` element intent explicitly blesses vocabularies living beside their tables. A
-pure module importing a TABLE is always a violation.
+**No standing pure-module exception remains** (#869 drained the last one:
+`dependency-type-traits.ts` used to read the `DEPENDENCY_TYPES` vocabulary from
+`shared/schema`; the vocabulary now lives IN that lib module and the schema imports the
+type back type-only). A pure module importing anything from `shared/schema` at runtime is
+a violation. The package barrel (`src/index.ts`) re-exports `schema/` by design — it is
+its own `shared-barrel` element in the pattern spec, not a `shared-lib` member.
 
 ### The AUDIENCE rule was the unenforced half — #730 ratchet
 
@@ -182,7 +184,7 @@ So the rule is conditional on who needs it:
 | Who reads the vocabulary | Where it goes |
 |---|---|
 | Client (or anything client-reachable) | `shared/lib/<domain>.ts`, **pure** — no drizzle, no schema, no node builtins. Re-export from the schema barrel if the server prefers to read it there. |
-| Server/persistence only | `as const` beside its `sqliteTable` is fine and is the newer style (`DEPENDENCY_TYPES`, `WORKFLOW_NODE_TYPES`, `DRIVE_STATUSES`). |
+| Server/persistence only | `as const` beside its `sqliteTable` is fine and is the newer style (`WORKFLOW_NODE_TYPES`, `DRIVE_STATUSES`). (`DEPENDENCY_TYPES` moved to `lib/dependency-type-traits.ts` in #869 — a pure lib module, `dependency-type-traits.ts`, reads it, which makes it lib-resident by this table's own first row.) |
 
 `ISSUE_PRIORITIES` (`lib/issue-priority.ts`) and the workspace liveness sets
 (`lib/workspace-liveness.ts`) are in `lib/` for exactly this reason — the client renders

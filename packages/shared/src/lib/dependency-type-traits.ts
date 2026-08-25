@@ -5,8 +5,25 @@
 // cli-not-down-to-persistence) forbid those layers importing persistence. The first cut
 // put them in the schema module and tripped both rules — the predicates are domain
 // semantics, not table definitions.
+//
+// The VOCABULARY (union + list) is declared HERE too (#869): it used to live beside the
+// table in schema/issue-dependencies.ts, which made this pure module value-import
+// persistence — the one shared-lib→shared-schema edge the pattern spec forbids. Per the
+// #608 rule the vocabulary a non-persistence layer reads belongs in pure lib; the schema
+// module now imports the TYPE only (type-only, erased at compile time).
 
-import { DEPENDENCY_TYPES, type DependencyType } from "../schema/issue-dependencies.js";
+/** The dependency-edge vocabulary — the one source of truth for `issue_dependencies.type`. */
+export type DependencyType = "depends_on" | "blocked_by" | "related_to" | "duplicates" | "parent_of" | "child_of" | "coupled_with";
+
+export const DEPENDENCY_TYPES: DependencyType[] = [
+  "depends_on",
+  "blocked_by",
+  "related_to",
+  "duplicates",
+  "parent_of",
+  "child_of",
+  "coupled_with",
+];
 
 /**
  * Per-type semantics (#523).

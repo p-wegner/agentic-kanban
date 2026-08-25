@@ -24,6 +24,38 @@ Round-1 method: caller ran Step 0 (`vocab.py` histograms + `.dependency-cruiser.
 
 **In-flight unifications to re-measure** (drain progress, not re-discovery): `lib/periodic-sweep.ts` (#529) 2/13 sweeps · `shared/lib/board-server-url.ts` 4/14 port ladders · `auth-rotation-ring.ts` 2/2 (done).
 
+## Violation verdicts
+
+### 2026-08-25 — #869: the two `shared-lib→shared-schema` runtime edges (claude-fable-5)
+- **`packages/shared/src/index.ts → schema/index.ts` — BOUNDARY WRONG.** The package barrel's
+  job is to union the three sub-barrels for 421 external importers; it classified as
+  `shared-lib` only because that element's match hand-included `src/index.ts`, and the
+  sub-kinds guard had already frozen it as "not really an exception". Removing `schema/` from
+  the barrel would be a repo-wide consumer migration for no layering gain (the deep `./schema`
+  path exists for callers that want it). Fix: new `shared-barrel` element (match
+  `packages/shared/src/index\.ts$`, removed from `shared-lib`'s match) with rule
+  `[shared-schema, shared-types, shared-db-op, shared-lib]`; `shared-barrel` added to the
+  allow-list of every EXTERNAL consumer element that already allowed `shared-lib` (server-*,
+  mcp-tool, client-*) — internal shared elements deliberately do NOT get it (importing your
+  own facade is a cycle). Not a widening: the barrel was previously reachable as `shared-lib`
+  by exactly those consumers, and `shared-lib` itself is now strictly schema-free with **no**
+  exception.
+- **`lib/dependency-type-traits.ts → schema/issue-dependencies.ts` — REAL, fixed by
+  inversion.** The pure traits module value-imported the `DEPENDENCY_TYPES` vocabulary from
+  beside the table. Per the #608 rule (a vocabulary read by non-persistence layers lives in
+  pure lib), the vocabulary (`DependencyType`, `DEPENDENCY_TYPES`) now lives IN
+  `lib/dependency-type-traits.ts`; `schema/issue-dependencies.ts` imports the TYPE back
+  type-only (erased — no runtime edge) and keeps `DEPENDENCY_TYPE_LABELS`/
+  `SYMMETRIC_DEPENDENCY_TYPES` typed by it. `schema/index.ts` no longer re-exports
+  `DEPENDENCY_TYPES` (re-exporting a lib value through the schema barrel is the #618
+  inversion); the two value consumers (`issue-dependency.service.ts`, a shared test) import
+  the deep lib path the traits consumers already used. Shrank
+  `shared-lib-sub-kinds.test.ts`'s `SCHEMA_READ_EXCEPTIONS` to the barrel-bookkeeping entry
+  only; `packages/shared/CLAUDE.md` updated (no standing pure-module exception remains).
+- Re-measured with `pattern_edges.py --scan --violations`: **rule violations 0** (was 2);
+  `shared-barrel` allocates exactly 1 file, coverage still 100 %. `pnpm --filter
+  @agentic-kanban/shared typecheck` clean.
+
 ## Filed (exclusion list — same idea ⇒ reference, don't refile)
 | # | verb | title |
 |---|---|---|
