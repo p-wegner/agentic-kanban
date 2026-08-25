@@ -13,6 +13,7 @@ import type { AgentExecutionService } from "./agent-dispatch.service.js";
 import { createWorkerConnectionManager, type WorkerConnectionManager } from "./worker-connection.service.js";
 import { revokeGitTokensForWorker } from "./git-http.service.js";
 import { getWorkerRegistry, type WorkerRegistry } from "./worker-registry.service.js";
+import { createWorkerHealthProbe, type WorkerHealthProbe } from "./worker-health-probe.service.js";
 import type { ProviderName } from "./agent-provider.js";
 import { getProjectById } from "../repositories/project.repository.js";
 // Canonical home is the dependency-free protocol module, so the worker CLI can
@@ -42,6 +43,12 @@ export interface WorkerFleet {
   registry: WorkerRegistry;
   connections: WorkerConnectionManager;
   remoteAgentService: AgentExecutionService;
+  /**
+   * Whether each worker can still PROCESS a message, which its heartbeat and socket do not
+   * answer (#901). Built here because it subscribes to the connection manager and is read by
+   * `filterEligibleWorkers` below — the same composition-root reason the event listeners are.
+   */
+  health: WorkerHealthProbe;
 }
 
 const fleetByDb = new WeakMap<object, WorkerFleet>();
@@ -91,6 +98,7 @@ export function getWorkerFleet(database: Database = realDb): WorkerFleet {
       registry,
       connections,
       remoteAgentService: createRemoteAgentService(connections, database),
+      health: createWorkerHealthProbe({ connections }),
     };
     fleetByDb.set(database as object, fleet);
   }
@@ -184,6 +192,10 @@ function filterEligibleWorkers(
   return workers
     .filter((w) => w.effectiveStatus === "online")
     .filter((w) => fleet.connections.isConnected(w.id))
+    // #901: a live socket is not proof of a working worker. Asked AFTER `isConnected`
+    // because it is the same question one level deeper — the transport is up, but can the
+    // daemon behind it still act? A worker that has never answered a probe is exempt.
+    .filter((w) => fleet.health.isResponsive(w.id))
     .filter((w) => {
       if (!w.providers) return true;
       try {

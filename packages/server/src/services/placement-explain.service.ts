@@ -199,12 +199,22 @@ function parseJsonList(raw: string | null | undefined): string[] {
  */
 function ineligibleReasonFor(
   worker: { effectiveStatus: string; providers: string | null; maxConcurrency: number },
-  ctx: { connected: boolean; load: number; providers: string[]; missingLabels: string[]; providerName: ProviderName },
+  ctx: {
+    connected: boolean;
+    load: number;
+    providers: string[];
+    missingLabels: string[];
+    providerName: ProviderName;
+    unresponsive: string | null;
+  },
 ): string | null {
   if (worker.effectiveStatus !== "online") {
     return `status is ${worker.effectiveStatus} (heartbeat too old, or draining)`;
   }
   if (!ctx.connected) return "heartbeat is fresh but the board holds no WebSocket for it";
+  // #901 — the failure the two checks above cannot see: both are answered by the daemon's
+  // transport layer, which outlives its ability to launch anything.
+  if (ctx.unresponsive) return ctx.unresponsive;
   if (worker.providers && ctx.providers.length > 0 && !ctx.providers.includes(ctx.providerName)) {
     return `does not advertise provider '${ctx.providerName}' (has [${ctx.providers.join(",")}])`;
   }
@@ -230,6 +240,7 @@ async function describeWorkers(
       providers: parseJsonList(w.providers),
       missingLabels: requiredLabels.filter((l) => !labels.includes(l)),
       providerName,
+      unresponsive: fleet.health.unresponsiveReason(w.id),
     });
     return {
       workerId: w.id,
