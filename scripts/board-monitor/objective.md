@@ -43,7 +43,9 @@ When selecting a provider for a new workspace, apply these rules in priority ord
 1. **FILL** profiles should always have capacity — start work on them first.
 2. **THROTTLE** profiles are preferred for main work. Respect their headroom percentage.
 3. **FALLBACK-ONLY** profiles are last resort — only use if all others are exhausted or the user explicitly selects them.
-- **claude:andrena_team_5x_3** [claude:andrena_team_5x_3]: FILL — use aggressively, keep busy at all times (Primary harness. Back on _3 (5h window reset); _4 OAuth expired 2026-08-25 ~18:00 and needs an interactive /login before it is usable again.)
+- **claude:andrena_team_5x_3** [claude:andrena_team_5x_3]: FILL — use aggressively, keep busy at all times (Primary. Operator directive 2026-08-25: profiles 1-3 usable; _4 OAuth expired, needs interactive login before reuse.)
+- **claude:andrena_team_5x** [claude:andrena_team_5x]: THROTTLE — use for main work but preserve headroom, headroom 20% (Second in line when _3 cools.)
+- **claude:andrena_team_5x_2** [claude:andrena_team_5x_2]: FALLBACK-ONLY — use only when no better option exists or on explicit user request (Last resort - the operator/butler session seat.)
 <!-- STRATEGY_BULLSEYE_GENERATED_END -->
 
 ## FOCUS POLICY (operator directive 2026-08-25 — authoritative; overrides the REFILL_FOCUS wording above)
