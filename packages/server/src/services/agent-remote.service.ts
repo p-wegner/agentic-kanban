@@ -930,8 +930,12 @@ export function createRemoteAgentService(
     return [...sessions.keys()];
   }
 
+  // `tracksSession` is `isPidAlive` under a name that says what it actually answers:
+  // "this process holds the session", not "a pid is alive somewhere". The dispatch proxy
+  // asks it to route a session it never launched — an ADOPTED one (#874) — and aliasing
+  // rather than re-deriving is what keeps the two answers from ever disagreeing.
   return {
     launch, kill, sendInput, closeStdin, isStdinOpen, getProcess, getPid, isPidAlive,
-    adoptSession, trackedSessionIds, remoteSessionInfo, remoteGitTransportSessions, requestRepoOp,
+    adoptSession, trackedSessionIds, remoteSessionInfo, remoteGitTransportSessions, requestRepoOp, tracksSession: isPidAlive,
   };
 }

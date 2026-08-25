@@ -204,6 +204,25 @@ export interface AgentExecutionService {
   getProcess(sessionId: string): AgentHandle | undefined;
   getPid(sessionId: string): number | undefined;
   isPidAlive(sessionId: string): boolean;
+  /**
+   * Does THIS implementation hold `sessionId` right now?
+   *
+   * Optional, because only an implementation that can acquire a session OUTSIDE
+   * `launch` needs it — and exactly one can: the remote service ADOPTS sessions on
+   * boot that a previous board process launched (#745). Nothing told the dispatch
+   * proxy about those, so `forSession` fell through to the host for every one of
+   * them and the host, which has never heard of the session, answered `isPidAlive`
+   * false. That is #874's false "Agent process has exited" about an agent still
+   * running on a worker — the same failure shape the `kill()` comment below records
+   * having already been fixed once, arriving through a different door.
+   */
+  tracksSession?(sessionId: string): boolean;
+  /**
+   * Where is this session executing? Answered by the dispatch proxy; an individual
+   * implementation has no reason to implement it. `undefined` means "no record" and
+   * is never a claim that the session is gone.
+   */
+  placementOf?(sessionId: string): "host" | "remote" | undefined;
 }
 
 export interface AgentDispatchImplementations {
@@ -244,8 +263,17 @@ export function createAgentDispatch(implementations: AgentDispatchImplementation
     return implementations.host;
   };
 
-  const forSession = (sessionId: string): AgentExecutionService =>
-    bySession.get(sessionId) ?? implementations.host;
+  const forSession = (sessionId: string): AgentExecutionService => {
+    const known = bySession.get(sessionId);
+    if (known) return known;
+    // #874: ASK before defaulting. A routing entry is only ever written by `launch`,
+    // so an adopted session has none — and the host default answers every
+    // session-keyed query about it wrongly. The remote service's own map is the
+    // authority, which is also why this cannot drift the way a second registry would.
+    const remote = implementations.remote;
+    if (remote?.tracksSession?.(sessionId) === true) return remote;
+    return implementations.host;
+  };
 
   return {
     launch(request) {
@@ -381,6 +409,15 @@ export function createAgentDispatch(implementations: AgentDispatchImplementation
     getProcess: (sessionId) => forSession(sessionId).getProcess(sessionId),
     getPid: (sessionId) => forSession(sessionId).getPid(sessionId),
     isPidAlive: (sessionId) => forSession(sessionId).isPidAlive(sessionId),
+    tracksSession: (sessionId) =>
+      bySession.has(sessionId) || implementations.remote?.tracksSession?.(sessionId) === true,
+    placementOf(sessionId) {
+      const impl = forSession(sessionId);
+      if (implementations.remote && impl === implementations.remote) return "remote";
+      // Only claim `host` when there is a record. Falling back to host for an unknown
+      // id is what routing must do; SAYING "host" about it would be inventing a fact.
+      return bySession.has(sessionId) ? "host" : undefined;
+    },
   };
 }
 
