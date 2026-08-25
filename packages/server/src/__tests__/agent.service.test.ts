@@ -18,6 +18,8 @@ vi.mock("node:fs", () => ({
   existsSync: vi.fn(() => false),
   readFileSync: vi.fn(),
   readdirSync: vi.fn(() => []),
+  // #854: db-path.ts now also imports renameSync at module level (stub-rename-aside).
+  renameSync: vi.fn(),
   statSync: vi.fn(() => {
     throw new Error("ENOENT");
   }),
