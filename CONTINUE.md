@@ -3,6 +3,39 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## #901 done: worker health is now a capability question, not a transport one (2026-08-25)
+
+`150617ea91`. Filed and fixed from a live cross-machine report. `filterEligibleWorkers`
+admitted a worker on a fresh heartbeat plus a live WebSocket — both answered by the daemon's
+socket and timer layer, neither asking whether it can still launch an agent. The far end
+measured the failure: an orphaned daemon spinning at 102% of a core, mute for hours, holding
+an ESTABLISHED connection, handed a session that produced no launch-intent line and no process.
+
+**The probe cost no protocol change.** #887's `probe_session` is answered by the worker's
+session registry, which ALWAYS answers — including `unknown` for an id it has never held. So a
+probe carrying a SYNTHETIC id is a capability check that works against every already-deployed
+#887 worker: no new message type, no worker-side change, nothing to roll out.
+
+**#887's "silence is not `unknown`" rule is preserved exactly**, via the distinction that makes
+a worker-level consequence safe where a session-level one is not: an OLD worker never answers
+ANY probe; a WEDGED one stops answering after having answered. Attestation (has it ever
+answered?) separates them, and a never-attested worker is exempt forever.
+
+Quarantine withholds NEW work only — never revokes, never kills, never touches held sessions —
+and the sweep probes CONNECTED rather than ELIGIBLE workers, so it clears itself.
+
+**Verified**: 13 new cases incl. the mandated regression (a never-attested worker survives 10x
+the threshold untouched), plus a seam case in `placement-explain.test.ts` asserting
+`agreesWithResolver`. **Checked the fix bites**: neutering the eligibility filter fails that
+seam case. Green: 6 guard suites, the 4 fleet/placement suites, full `pnpm typecheck`,
+god-module gate, `check:arch` (0 errors, no new warning). Full always-run set NOT run —
+capped at 2 workers throughout.
+
+**Deliberately out of scope**: a `worker_unresponsive` entry in `WORKER_EVENT_TYPES`. The
+acceptance is met by `ineligibleReason`, which the panel and `worker doctor` already render.
+
+**Not verified live** — same blocker as below: no worker can authenticate.
+
 ## #857 done: a remote claude builder was never offered board tools (2026-08-25)
 
 `2859065305`. A vocabulary mismatch, not a config or ordering problem. `ProviderId`'s claude
