@@ -36,7 +36,7 @@
  * once — ~200 call sites did not have to be edited, and a new caller is covered the day it
  * is written.
  *
- * Scope, stated plainly: 46 method+path pairs of the 257 the client calls — 211 remain. It is
+ * Scope, stated plainly: 49 method+path pairs of the 257 the client calls — 208 remain. It is
  * NOT the whole surface. An unregistered
  * path is returned unchecked through the single named seam in `apiFetch`
  * (`unvalidatedResponse`). `API_RESPONSE_SCHEMA_COUNT` is the number to quote.
@@ -69,6 +69,7 @@ import type { ProjectRepoResponse } from "@agentic-kanban/shared/types";
 import type { RepoMergeStatusResponse } from "@agentic-kanban/shared/types";
 import type { StatusWithIssues, IssueWithStatus } from "@agentic-kanban/shared/types";
 import type { DiffResponse, DiffStatsResponse } from "@agentic-kanban/shared/types";
+import type { ScorecardResult } from "@agentic-kanban/shared/types";
 
 export type ApiMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -505,6 +506,58 @@ const repoMergeStatus = dtoObject<RepoMergeStatusResponse>({
   repos: anyArray(),
 });
 
+// ── #806 batch 3: the slow-request panel, the scorecard, and the attempt comparison ──
+
+/**
+ * `GET /api/metrics/slow-requests` → `{ entries: SlowRequestEntry[] }`
+ * (`SlowRequestsPanel.tsx`, no shared DTO — a server-internal ring buffer projection).
+ * All four fields on `SlowRequestEntry` are rendered by the panel, so all four are asserted.
+ */
+const slowRequestsResult = looseObject({
+  entries: arrayOf(
+    nested(looseObject({ method: str, path: str, durationMs: num, timestamp: str })),
+  ),
+});
+
+/**
+ * `GET /api/workspaces/:id/scorecard` → `ScorecardResult` (`shared/types/api/scorecard.ts`).
+ * `WorkspaceScorecardPanel` reads all three top-level fields and, per dimension, `name`,
+ * `score`, `maxScore` and `signal` — the full DTO, so the nested check names every field too.
+ */
+const scorecardResult = dtoObject<ScorecardResult>({
+  total: num,
+  computedAt: str,
+  dimensions: arrayOf(
+    nested<ScorecardResult["dimensions"][number]>(
+      looseObject({ name: str, score: num, maxScore: num, signal: str }),
+    ),
+  ),
+});
+
+/**
+ * `GET /api/issues/:id/workspaces` → `getEnrichedWorkspaces` (`issue.service.ts`): the
+ * workspace row spread wholesale, plus computed `diffStats`/`scorecard`/`sessionStatus`/
+ * `lastSessionAt`. Two client types bind to this one path — `CompareAttemptsPanel`'s
+ * `WorkspaceAttempt[]` (destructures all fields below) and `WorkspacePanel`'s
+ * `WorkspaceResponse[]` (destructures only `id`/`status`/`workingDir` of the row). The schema
+ * covers the union actually read; `pendingPlanPath` and `serviceState` are genuinely optional
+ * on this projection (checked with `=== undefined`) and stay unasserted per this file's rule
+ * against asserting a field whose absence is not a bug.
+ */
+const workspaceAttempt = looseObject({
+  id: str,
+  branch: str,
+  status: str,
+  createdAt: str,
+  workingDir: nullable(str),
+  mergedAt: nullable(str),
+  closedAt: nullable(str),
+  diffStats: nullable(nested(looseObject({ filesChanged: num, insertions: num, deletions: num }))),
+  scorecard: nullable(nested(looseObject({ score: num }))),
+  sessionStatus: nullable(str),
+  lastSessionAt: nullable(str),
+});
+
 export interface ApiResponseRoute {
   method: ApiMethod;
   /** Express-style template with `:param` segments, matched against the request path. */
@@ -595,6 +648,11 @@ export const API_RESPONSE_SCHEMAS: readonly ApiResponseRoute[] = [
   { method: "GET", template: "/api/workspaces/:id/diff", schema: workspaceDiff },
   { method: "GET", template: "/api/workspaces/:id/sessions", schema: arrayRoot(sessionRow) },
   { method: "GET", template: "/api/workspaces/:id/repo-merge-status", schema: repoMergeStatus },
+
+  // ── #806 batch 3 ──
+  { method: "GET", template: "/api/metrics/slow-requests", schema: slowRequestsResult },
+  { method: "GET", template: "/api/workspaces/:id/scorecard", schema: scorecardResult },
+  { method: "GET", template: "/api/issues/:id/workspaces", schema: arrayRoot(workspaceAttempt) },
 ];
 
 export const API_RESPONSE_SCHEMA_COUNT = API_RESPONSE_SCHEMAS.length;
