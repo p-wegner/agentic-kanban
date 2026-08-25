@@ -11,12 +11,10 @@ function harness(opts: { live?: Set<string>; pids?: Map<string, number> } = {}) 
   const live = opts.live ?? new Set<string>();
   const pids = opts.pids ?? new Map<string, number>();
   const sent: WorkerToBoardMessage[] = [];
-  let clock = 1_000;
   const registry = createWorkerSessionRegistry({
     isLive: (id) => live.has(id),
     pidOf: (id) => pids.get(id),
     safeSend: (message) => void sent.push(message),
-    nowMs: () => (clock += 1_000),
   });
   return { registry, live, pids, sent };
 }
@@ -29,8 +27,8 @@ describe("createWorkerSessionRegistry", () => {
 
   it("answers RUNNING with the pid for a live session", () => {
     const h = harness({ live: new Set(["s1"]), pids: new Map([["s1", 4242]]) });
-    h.registry.noteAssigned("s1");
-    h.registry.noteOutput("s1");
+    h.registry.noteAssigned("s1", 1_000);
+    h.registry.noteOutput("s1", 2_000);
     const answer = h.registry.probe("s1");
     expect(answer.state).toBe("running");
     expect(answer.pid).toBe(4242);
@@ -76,9 +74,9 @@ describe("createWorkerSessionRegistry", () => {
 
   it("does not restart a session's clock when the same id is assigned twice", () => {
     const h = harness();
-    h.registry.noteAssigned("s1");
+    h.registry.noteAssigned("s1", 1_000);
     const first = h.registry.probe("s1").startedAtMs;
-    h.registry.noteAssigned("s1");
+    h.registry.noteAssigned("s1", 2_000);
     expect(h.registry.probe("s1").startedAtMs).toBe(first);
   });
 

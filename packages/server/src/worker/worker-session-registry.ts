@@ -51,18 +51,15 @@ export interface SessionRegistryDeps {
   isLive: (sessionId: string) => boolean;
   /** The agent's pid, when one exists. Absent while a git-transport checkout is provisioning. */
   pidOf: (sessionId: string) => number | undefined;
-  /** Injectable clock (`nowMs`, the sanctioned spelling for arithmetic). */
-  nowMs?: () => number;
 }
 
 export function createWorkerSessionRegistry(deps: SessionRegistryDeps) {
   const records = new Map<string, SessionRecord>();
-  const now = deps.nowMs ?? (() => Date.now());
 
   /** Remember an id the board handed us. Idempotent: a re-assign must not restart the clock. */
-  function noteAssigned(sessionId: string): void {
+  function noteAssigned(sessionId: string, nowMs: number = Date.now()): void {
     if (records.has(sessionId)) return;
-    records.set(sessionId, { startedAtMs: now() });
+    records.set(sessionId, { startedAtMs: nowMs });
     while (records.size > MAX_REMEMBERED) {
       const oldest = records.keys().next();
       if (oldest.done) break;
@@ -70,16 +67,16 @@ export function createWorkerSessionRegistry(deps: SessionRegistryDeps) {
     }
   }
 
-  function noteOutput(sessionId: string): void {
+  function noteOutput(sessionId: string, nowMs: number = Date.now()): void {
     const record = records.get(sessionId);
-    if (record) record.lastOutputAtMs = now();
+    if (record) record.lastOutputAtMs = nowMs;
   }
 
-  function noteExit(sessionId: string, exitCode: number | null): void {
+  function noteExit(sessionId: string, exitCode: number | null, nowMs: number = Date.now()): void {
     const record = records.get(sessionId);
     if (!record) return;
     record.exitCode = exitCode;
-    record.exitedAtMs = now();
+    record.exitedAtMs = nowMs;
   }
 
   /**
