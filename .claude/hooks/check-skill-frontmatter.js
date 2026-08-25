@@ -134,7 +134,8 @@ async function main() {
 
   console.error(reason);
   console.log(JSON.stringify({ decision: "block", reason }));
-  process.exit(1);
+  // Exit 2 is the code Claude Code honours as a block; exit 1 only logs.
+  process.exit(2);
 }
 
 main().catch(() => process.exit(0));
