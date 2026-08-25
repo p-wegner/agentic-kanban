@@ -83,6 +83,26 @@
  *                                          plus three one-line notes on the assign/output/exit
  *                                          paths — the calls cannot be extracted from the code
  *                                          whose events they record.
+ *
+ * ── Fourth disclosed movement (2026-08-25, #874 remote turn refusal) ────────────────────
+ *
+ *   createSessionLifecycle      615 -> 616  Growth, named, and one line of it. `sendTurn`
+ *                                          asked the process-liveness question BEFORE the
+ *                                          placement question, so a session adopted onto a
+ *                                          worker after a board restart was told its agent
+ *                                          had exited while that agent was still working.
+ *                                          The fix is one guard reading the dispatch proxy's
+ *                                          new `placementOf`. It cannot be extracted: the
+ *                                          refusal it produces is one of the three this
+ *                                          function chooses between, and moving one arm out
+ *                                          would split a decision across two files. The
+ *                                          function still wants splitting for its own sake —
+ *                                          this is not the ticket that does it.
+ *                                          createRemoteAgentService stays at 609: its half
+ *                                          of the fix is `tracksSession: isPidAlive` on the
+ *                                          existing return line, an ALIAS rather than a
+ *                                          second derivation, so the two answers cannot
+ *                                          disagree and it costs nothing.
  */
 export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "cli/commands/issue.ts::registerIssueCommand": 718,
@@ -94,7 +114,7 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // in the board. It is still the largest entry in this ring and still wants splitting.
   "services/workspace-create.service.ts::createWorkspaceCreateService": 627,
   "services/issue.service.ts::createIssueService": 616,
-  "services/session-manager/session-lifecycle.ts::createSessionLifecycle": 615,
+  "services/session-manager/session-lifecycle.ts::createSessionLifecycle": 616,
   "services/workflow-fork.service.ts::createWorkflowForkService": 581,
   "cli/commands/workspace.ts::registerWorkspaceCommand": 573,
   "services/agent-remote.service.ts::createRemoteAgentService": 609,

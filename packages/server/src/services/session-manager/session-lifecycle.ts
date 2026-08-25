@@ -58,6 +58,14 @@ import { CODEX_SPARK_MODEL, CODEX_SAFE_DEFAULT_MODEL, isBuilderSession, buildSta
 import { finalizePlanModeExit } from "./plan-mode-exit.js";
 import { finalizeUsageLimitRoute, finalizeLaunchFailureRoute, finalizeCompletedRoute, type ExitFinalizeContext } from "./exit-finalize.js";
 
+/**
+ * Why a follow-up turn is refused for a session running on a fleet worker that this board
+ * process did not launch (#874). Named rather than inlined so the test asserts the same
+ * string the operator reads, and so it is greppable from a bug report.
+ */
+export const REMOTE_TURN_AFTER_RESTART =
+  "This agent is running on a fleet worker and is still alive, but the board restarted since it was launched: its stdin belongs to the previous board process, so a follow-up turn cannot reach it. Stop the workspace to end the remote run, or wait for it to finish. (Placement: remote — the agent has NOT exited.)";
+
 /** Bounds the missing-transcript fallback (#26) to one automatic retry per workspace. */
 const MAX_STALE_RESUME_RECOVERIES = 1;
 
@@ -752,6 +760,13 @@ export function createSessionLifecycle(
   function sendTurn(sessionId: string, content: string): { ok: boolean; error?: string; stale?: boolean } {
     const turnState = state.turnStates.get(sessionId);
     if (!turnState) {
+      // #874: check the PLACEMENT before concluding anything about the process. A session
+      // adopted after a board restart (#745) is still running on its worker, but its turn
+      // state lived in the old process and the board no longer holds its stdin — so both
+      // of the messages below are false about it, and "the process has exited" is the one
+      // an operator acts on. `stale` is deliberately NOT set: relaunching would run a
+      // second agent alongside the one still working.
+      if (agentService.placementOf?.(sessionId) === "remote") return { ok: false, error: REMOTE_TURN_AFTER_RESTART };
       // Session exited (turnStates cleared on exit) — treat as stale so caller can --resume
       if (!isProcessAlive(sessionId)) {
         return { ok: false, error: "Agent process has exited", stale: true };
