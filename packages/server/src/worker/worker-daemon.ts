@@ -313,6 +313,14 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   let repairAttempts = 0;
   let repairing = false;
   let reconnectDelay = RECONNECT_MIN_MS;
+  /**
+   * The one pending reconnect timer (#858). Held so a new trigger can tell that a retry is
+   * already scheduled: before this, every close scheduled its own timer and the re-pairing
+   * path called `connect()` directly, so a reconnect could fire while a connect attempt was
+   * still in flight — observed as 13 connects / 6 disconnects / 3 board-side evictions in
+   * one log, each eviction closing the OLDER socket and feeding the loop.
+   */
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   const pendingCritical: WorkerToBoardMessage[] = [];
   const workerVersion = resolveWorkerVersion();
 
@@ -328,6 +336,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
     fatal = reason;
     stopped = true;
     clearInterval(heartbeatTimer);
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
     try { ws?.close(); } catch { /* already closed */ }
     ws = null;
     log(`[worker] FATAL: ${reason}`);
@@ -410,6 +419,21 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
 
   function connect(): void {
     if (stopped) return;
+    // #858: one connection attempt at a time. A `connect()` while a socket is still
+    // CONNECTING (or already OPEN) would open a SECOND socket for the same workerId; the
+    // board sanely evicts the older one, the eviction looks like a network drop to this
+    // daemon, and the two ends sustain a connect/evict flap indefinitely.
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
+      log(
+        `[worker] connect suppressed: a connection attempt is already ` +
+          `${ws.readyState === WebSocket.OPEN ? "open" : "in flight"}`,
+      );
+      return;
+    }
     const wsUrl = `${boardUrl.replace(/^http/, "ws")}/ws/workers/${identity.workerId}`;
     const socket = new WebSocket(wsUrl, {
       headers: { authorization: `Bearer ${identity.workerToken}` },
@@ -418,38 +442,63 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
     let openedAt: number | null = null;
 
     socket.on("open", () => {
-      reconnectDelay = RECONNECT_MIN_MS;
-      openedAt = Date.now();
-      log(`[worker] connected to ${boardUrl}`);
-      socket.send(JSON.stringify({
-        type: "hello",
-        workerId: identity.workerId,
-        runningSessionIds: runner.runningSessionIds(),
-        // #754: declared on every connect, not frozen at first pairing — a machine that
-        // gained docker (or changed its ceiling) says so without being re-paired.
-        protocolVersion: WORKER_PROTOCOL_VERSION,
-        ...(workerVersion ? { workerVersion } : {}),
-        capabilities: capabilitiesOf(opts),
-      } satisfies WorkerToBoardMessage));
-      while (pendingCritical.length > 0) {
-        socket.send(JSON.stringify(pendingCritical.shift()));
+      // Wrapped whole (#870): this runs on a ws event, where a throw is a process-level
+      // uncaught exception — one bad frame during the flush must not kill every agent.
+      try {
+        reconnectDelay = RECONNECT_MIN_MS;
+        // #858: a successful connect retires any reconnect timer still pending.
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = null;
+        }
+        openedAt = Date.now();
+        log(`[worker] connected to ${boardUrl}`);
+        socket.send(JSON.stringify({
+          type: "hello",
+          workerId: identity.workerId,
+          runningSessionIds: runner.runningSessionIds(),
+          // #754: declared on every connect, not frozen at first pairing — a machine that
+          // gained docker (or changed its ceiling) says so without being re-paired.
+          protocolVersion: WORKER_PROTOCOL_VERSION,
+          ...(workerVersion ? { workerVersion } : {}),
+          capabilities: capabilitiesOf(opts),
+        } satisfies WorkerToBoardMessage));
+        while (pendingCritical.length > 0) {
+          socket.send(JSON.stringify(pendingCritical.shift()));
+        }
+        // #750: a result whose push failed while the board was unreachable can only be
+        // saved by an attempt made after it is back — this is that attempt. The push lands
+        // in the incoming namespace, where the #752 operator surface can land it.
+        void runner.retryPendingPushes().then((outcome) => {
+          if (outcome.pushed.length > 0) {
+            log(`[worker] pushed ${outcome.pushed.length} retained result(s) after reconnecting`);
+          }
+          for (const retained of runner.unpushedResults()) {
+            log(
+              `[worker] still holding an unpushed result: sessionId=${retained.sessionId} ` +
+                `checkout=${retained.checkoutPath} branch=${retained.localBranch} ` +
+                `attempts=${retained.attempts} lastError=${retained.lastError}`,
+            );
+            // #871: a result whose reconnect retry ALSO failed is reported to the board,
+            // which is the one place an operator actually looks. Through sendToBoard so a
+            // socket that died again queues it as critical rather than dropping it.
+            sendToBoard({
+              type: "undelivered_result",
+              sessionId: retained.sessionId,
+              branch: retained.branch,
+              incomingRef: retained.incomingRef,
+              checkoutPath: retained.checkoutPath,
+              attempts: retained.attempts,
+              lastError: retained.lastError,
+            });
+          }
+        }).catch((err: unknown) => {
+          log(`[worker] retained-result retry failed unexpectedly (daemon staying up): ${err instanceof Error ? err.message : String(err)}`);
+        });
+        resolveConnected();
+      } catch (err) {
+        log(`[worker] open-handler error (daemon staying up): ${err instanceof Error ? err.message : String(err)}`);
       }
-      // #750: a result whose push failed while the board was unreachable can only be
-      // saved by an attempt made after it is back — this is that attempt. The push lands
-      // in the incoming namespace, where the #752 operator surface can land it.
-      void runner.retryPendingPushes().then((outcome) => {
-        if (outcome.pushed.length > 0) {
-          log(`[worker] pushed ${outcome.pushed.length} retained result(s) after reconnecting`);
-        }
-        for (const retained of runner.unpushedResults()) {
-          log(
-            `[worker] still holding an unpushed result: sessionId=${retained.sessionId} ` +
-              `checkout=${retained.checkoutPath} branch=${retained.localBranch} ` +
-              `attempts=${retained.attempts} lastError=${retained.lastError}`,
-          );
-        }
-      });
-      resolveConnected();
     });
 
     socket.on("message", (data) => {
@@ -465,26 +514,35 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
         log(`[worker] dropping malformed board message`);
         return;
       }
-      switch (message.type) {
-        case "assign":
-          if (message.repo) runner.assignWithRepo(message.sessionId, message.spec, message.repo);
-          else runner.assign(message.sessionId, message.spec);
-          break;
-        case "input":
-          runner.input(message.sessionId, message.data);
-          break;
-        case "close_stdin":
-          runner.closeStdin(message.sessionId);
-          break;
-        case "stop":
-          runner.stop(message.sessionId);
-          break;
-        case "sync_repo":
-          runner.repoOp("sync", message.sessionId, message.requestId, message.auth);
-          break;
-        case "push_head":
-          runner.repoOp("push", message.sessionId, message.requestId, message.auth);
-          break;
+      try {
+        switch (message.type) {
+          case "assign":
+            if (message.repo) runner.assignWithRepo(message.sessionId, message.spec, message.repo);
+            else runner.assign(message.sessionId, message.spec);
+            break;
+          case "input":
+            runner.input(message.sessionId, message.data);
+            break;
+          case "close_stdin":
+            runner.closeStdin(message.sessionId);
+            break;
+          case "stop":
+            runner.stop(message.sessionId);
+            break;
+          case "sync_repo":
+            runner.repoOp("sync", message.sessionId, message.requestId, message.auth);
+            break;
+          case "push_head":
+            runner.repoOp("push", message.sessionId, message.requestId, message.auth);
+            break;
+        }
+      } catch (err) {
+        // #870: a throw out of a ws event handler is a process-level uncaught exception —
+        // one bad message must not take down every agent on this machine.
+        log(
+          `[worker] error handling a ${message.type} message (daemon staying up): ` +
+            `${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     });
 
@@ -492,6 +550,17 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       // `repairing` too: the re-pairing path calls connect() itself once it has a new
       // identity, and a backoff timer racing it opens a second socket with the OLD token.
       if (stopped || fatal || repairing) return;
+      // #858: a STALE socket's close must not restart the loop. When `ws` points at a
+      // newer socket than the one this closure was created for, that newer attempt is
+      // already connecting or connected — scheduling here would be the overlap.
+      if (ws !== null && ws !== socket) {
+        log(`[worker] disconnected (${cause}); not retrying — a newer connection attempt already exists`);
+        return;
+      }
+      // #858: one timer, ever. Two close-shaped events for the same lost link (an `error`
+      // path racing a `close`, or an eviction landing beside a heartbeat 401) used to arm
+      // two timers, each opening its own socket.
+      if (reconnectTimer) return;
       const delay = reconnectDelay;
       reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS);
       // Say how long the connection lasted, not just when the next attempt is:
@@ -500,8 +569,12 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       // dying instantly, whatever its real lifetime was.
       const lifetime = openedAt === null ? "never opened" : `up ${Math.round((Date.now() - openedAt) / 1000)}s`;
       log(`[worker] disconnected (${cause}; ${lifetime}); retrying in ${Math.round(delay / 1000)}s`);
-      const timer = setTimeout(connect, delay);
+      const timer = setTimeout(() => {
+        reconnectTimer = null;
+        connect();
+      }, delay);
       if (timer.unref) timer.unref();
+      reconnectTimer = timer;
     };
 
     socket.on("close", (code: number, reason: Buffer) => {
@@ -625,6 +698,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       }
       stopped = true;
       clearInterval(heartbeatTimer);
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       if (stopOpts?.killAgents) runner.stopAll();
       // The kill above only sends the signal. The result push is kicked off by the
       // agent's `exit` handler, so exiting now is precisely the bug: wait for it.
