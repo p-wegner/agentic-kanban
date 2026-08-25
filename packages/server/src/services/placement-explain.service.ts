@@ -674,6 +674,7 @@ export async function explainPlacement(params: {
       provider: providerName,
       requiredLabels: ctx.requiredLabels,
       workers: ctx.workers,
+      boardWorkerVersion: resolveOwnPackageVersion() ?? null,
     },
     summary: summarize(decidedBy, predicted, chain),
   };
