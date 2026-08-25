@@ -3,6 +3,39 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## #874 done: a turn against a remote agent is routed, and the refusal stops lying (2026-08-25)
+
+`6be65a4e36`. The ticket said which of its two preconditions actually fails was not pinned
+down. It is the second, and the cause was one line from a bug this seam already fixed once.
+`createAgentDispatch` writes a routing entry only in `launch`, so a session the remote
+service ADOPTS on boot (#745) has none — and `forSession` answered every session-keyed query
+about it from the HOST implementation, which has never heard of it and reports `isPidAlive`
+false. `sendTurn` read exactly that and said the agent had exited.
+
+- **Routing**: `forSession` now ASKS — `tracksSession?(sessionId)` on the remote
+  implementation, answered as an ALIAS of its own `isPidAlive` so the two cannot disagree.
+  This also repairs `kill`/`sendInput`/`closeStdin`/`isStdinOpen`/`getPid` for adopted sessions.
+- **The refusal**: still a refusal (the board's copy of that agent's stdin died with the old
+  process), but it names the placement and says the agent has NOT exited. `stale` stays off on
+  purpose — it is the caller's cue to relaunch, and relaunching would run a second agent beside
+  the one still working.
+- `placementOf(sessionId)` → `"remote" | "host" | undefined`, and `undefined` rather than
+  `"host"` for an id nothing tracks: falling back to host is what routing must do, but saying
+  host about it would invent a fact.
+
+**Verified**: 8 new cases in `remote-turn-after-restart.test.ts` (routing against the REAL
+remote service; all three refusal arms), 86 across the adjacent dispatch/remote/turn suites,
+31 across the ratchets and the two worker e2e suites, god-module gate, full `pnpm typecheck`.
+**The full 152-suite always-run set was NOT run** — `fleet gate --count 2` BLOCKED (3.2 GB
+free, RAM binds first); every run capped at 1–2 workers. nloc ring:
+`createSessionLifecycle` 615 → 616, banked as a fourth disclosed movement with its reason.
+
+**Still open, disclosed not papered over — #900**: a turn cannot yet REACH a remote agent
+after a restart. `turnStates` is not restored by `reattachSession` (true for host sessions
+too) and `adoptSession` sets `stdinOpen: false`, because the board cannot know from the DB
+whether the launch kept stdin open. The worker knows; recovering it means extending #887's
+probe channel to attest stdin state, with the same "silence is not an answer" rule.
+
 ## #887 done: the board ASKS the worker instead of waiting out a silence (2026-08-25)
 
 `9064112948`. The board could not tell "the assignment never arrived" from "the agent is
@@ -55,7 +88,7 @@ Three landed back to back while the remote worker was unavailable (see the block
 
 **Blocked on a human, not on us:** `AO-PF38Z8R8` has been offline since 02:21Z and needs an
 interactive `claude /login` on that machine — the board cannot perform it by design (decision 012).
-Until it returns, nothing is dispatchable remotely, and #895/#874/#876/#857 all wait on it
+Until it returns, nothing is dispatchable remotely, and #895/#876/#857 all wait on it
 for live verification rather than for code. #895 carries a comment recording exactly what is left
 and why neither of its two routes can be honestly closed today.
 
