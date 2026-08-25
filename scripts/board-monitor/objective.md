@@ -46,15 +46,21 @@ When selecting a provider for a new workspace, apply these rules in priority ord
 - **claude:andrena_team_5x_3** [claude:andrena_team_5x_3]: FILL — use aggressively, keep busy at all times (Primary harness - andrena team seat peter.wegner.3. Fallback order (allowed_profiles): _3, _4, _1, _2; _2 last on purpose, it is the seat the operator/butler session runs on. Quota rotation via claude_subscription_rotation.)
 <!-- STRATEGY_BULLSEYE_GENERATED_END -->
 
-## FOCUS POLICY (operator directive 2026-06-14 — authoritative; overrides the REFILL_FOCUS wording above)
-**EPIC-FIRST: build the `[project-driver]` epic #785 (turn the board into a turnkey autonomous multi-stack project driver). Keep the board healthy; do NOT refill.**
+## FOCUS POLICY (operator directive 2026-08-25 — authoritative; overrides the REFILL_FOCUS wording above)
+**FLEET-DISPATCH BUGS FIRST: land #895 and #900 before anything else, then drain the remaining Todo queue. Do NOT refill.**
 
-The `[project-driver]` epic (#785 + children #786–#812) generalizes the board's own dev harness into a per-stack agent feedback loop so the board can autonomously build arbitrary projects. **For this focus period these epic tickets ARE the work — build them even though they are feature/enhancement-typed.** (The old "no new features" directive is suspended for the epic.)
+Context: real dispatches to the worker fleet failed silently (agent dies, workspace goes `idle`, no
+`lastError`) and remote turn state does not survive a board restart. **Worker dispatch is therefore
+DISABLED for this project** (`worker_dispatch_*=false` since 2026-08-25) — all builders run on the
+host until both tickets are merged. Do not re-enable dispatch; the operator will, after verifying.
 
-1. **Starting work (priority 3): pull `[project-driver]` tickets in dependency order.** The foundation **#786 (Stack profile)** unblocks most of the harness tier — start it FIRST and let it merge before pulling its dependents (a dependent must not start until its `depends_on` blocker is actually MERGED to master, not merely Done — the cascade gate enforces this post-#784). After #786 merges, pull its now-unblocked children (#787/#788/#789/#790/#794/#810/#811/#812, then the rest). Respect each ticket's `depends_on` edges; never start a ticket whose blocker hasn't merged. Tickets with no open `[project-driver]` work to pull → fall back to any high-priority bug that threatens board health, else idle.
-2. **Keep the board healthy (still priority 1–2 below):** server alive, unblock/merge in-flight work, unstick stale/failed sessions — exactly as the global priorities say. A green moving board is the precondition for the epic landing.
-3. **Do NOT refill the backlog this period.** The epic is the backlog. Skip the BACKLOG_FLOOR refill (priority 4) — do not create new bug/perf/quality tickets while the epic is in flight. (If the epic fully drains and the board is healthy, stop and report rather than inventing work.)
-- **WIP limit = 4** concurrent agents (ACTIVE_AGENTS_TARGET = 4; MAX_NEW_STARTS_PER_CYCLE = 4). **Provider/profile = Claude Code, `anth`** (single source of truth — matches the generated PROVIDER POLICY block above; never codex — the codex account is credit-exhausted).
+1. **Start #895 and #900 first** (both `high`). They are independent — may run concurrently within WIP.
+   - #895: a worker must not advertise providers it cannot authenticate as; a failed dispatch must set `lastError`.
+   - #900: recover remote-turn stdin state after a board restart (the #874 remainder).
+2. **Then the rest of Todo** in priority order (#866 is in flight with one commit — finish/merge it; #806/#807 relaunch on host). **Never start #834** (`no-auto-start`, needs a Linux CI run).
+3. **Keep the board healthy** (priorities 1–2 above): merge finished work, unstick stale sessions.
+4. **Do NOT refill the backlog.** When Todo drains and the board is green, stop and report.
+- **WIP limit = 4**, MAX_NEW_STARTS_PER_CYCLE = 3. Provider/profile per the generated PROVIDER POLICY block above.
 
 ## REFILL STRATEGY BULLSEYE (agent-metrics-derived, 2026-06-05)
 Based on state.md recurring failure patterns from recent agent cycles, prioritize tickets in these areas:
