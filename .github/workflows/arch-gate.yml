@@ -65,8 +65,13 @@ jobs:
   # load (#206, #680: timeouts turning a green tree into a red merge gate board-wide). A
   # coverage number is worth having; it is not worth withholding every merge for. On push
   # to master and on workflow_dispatch its redness is informational, never merge-blocking.
-  # Flipping it to PRs is a one-line change once someone has MEASURED the run on a CI
-  # runner — do not do it on the strength of a local timing.
+  #
+  # #807 MEASURED this on an actual GitHub-hosted runner (not just the dev box): this job
+  # took 24m39s end-to-end on run 32813234278, and a differently-timed partial run failed
+  # its test step alone at 15m34s. A hosted runner is not meaningfully faster than the dev
+  # box for this suite — it's CPU-bound real-child-process test work, not contention. See
+  # docs/decisions/016-coverage-ci-placement-and-floor.md. Still not on PRs; re-open only
+  # if the suite itself gets faster, not by re-measuring the same suite elsewhere.
   coverage:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
@@ -86,6 +91,14 @@ jobs:
         # all. `exec vitest run --coverage` is the form that reaches vitest.
         run: pnpm test:coverage
       - name: read the reports (fails if any package emitted none)
+        # `if: always()`: #807 found this and the merge step below silently SKIPPED
+        # whenever the coverage-run step above failed (the common case — this fleet
+        # pushes to master with red suites constantly). `reportOnFailure: true` still
+        # writes each package's report on a red run, but without `always()` this step
+        # never read them and the merge below never ran, so a failed push uploaded raw
+        # per-package artifacts but no merged lcov — a narrower repeat of #765's "the
+        # report exists but nothing reads it" on every red push.
+        if: always()
         run: pnpm coverage:report
       - name: merge the four lcovs into one repo-anchored report (#797)
         # `code-metrics analyze --coverage <path>` takes exactly ONE report, and each
@@ -93,6 +106,7 @@ jobs:
         # ambiguous across four packages. `--merge` re-anchors every SF: to the repo root.
         # Without this the analyzer can only ever measure one package and leaves the other
         # three on the co-change proxy — which is the state #797 existed to end.
+        if: always()
         run: pnpm coverage:merge
       - name: upload lcov + summaries
         if: always()
