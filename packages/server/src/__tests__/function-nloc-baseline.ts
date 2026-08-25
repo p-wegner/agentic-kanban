@@ -103,6 +103,26 @@
  *                                          existing return line, an ALIAS rather than a
  *                                          second derivation, so the two answers cannot
  *                                          disagree and it costs nothing.
+ *
+ * ── Fifth disclosed movement (2026-08-25, #900 stdin-state recovery) ────────────────────
+ *
+ *   createSessionLifecycle      616 -> 627  Growth: `reattachSession` gained the seam to
+ *                                          restore `turnStates` from a worker's session-probe
+ *                                          answer instead of leaving a reattached remote
+ *                                          session with none — the guard against acting on a
+ *                                          stale/answered-too-late probe lives right beside
+ *                                          the reattach it protects, so it could not move out
+ *                                          without splitting the recovery decision from the
+ *                                          state it decides.
+ *   createRemoteAgentService    609 -> 637  Growth: `adoptSession` now asks the worker's probe
+ *                                          for `stdinOpen`/idle instead of hard-coding `false`,
+ *                                          and has to fold the "silence is not open" rule (#887)
+ *                                          into the same adoption path that sets every other
+ *                                          field of the adopted session.
+ *   createWorkerAgentRunner     343 -> 349  Growth, small and named: the probe reply gained the
+ *                                          two new fields (`stdinOpen`, `idle`) the board needs,
+ *                                          read off the same runner state the rest of the probe
+ *                                          answer already reads.
  */
 export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "cli/commands/issue.ts::registerIssueCommand": 718,
@@ -114,10 +134,10 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // in the board. It is still the largest entry in this ring and still wants splitting.
   "services/workspace-create.service.ts::createWorkspaceCreateService": 627,
   "services/issue.service.ts::createIssueService": 616,
-  "services/session-manager/session-lifecycle.ts::createSessionLifecycle": 616,
+  "services/session-manager/session-lifecycle.ts::createSessionLifecycle": 627,
   "services/workflow-fork.service.ts::createWorkflowForkService": 581,
   "cli/commands/workspace.ts::registerWorkspaceCommand": 573,
-  "services/agent-remote.service.ts::createRemoteAgentService": 609,
+  "services/agent-remote.service.ts::createRemoteAgentService": 637,
   "cli/commands/session.ts::registerSessionCommand": 569,
   "services/project.service.ts::createProjectService": 564,
   // 529 -> 534, a DELIBERATE raise (#835). `mergeWorkspace` used to return the lock's
@@ -141,7 +161,7 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "services/workspace-provision.service.ts::createWorkspaceProvisionService": 409,
   // 404 -> 399, banked (#806): five hand-written body guards became one schema parse each.
   "routes/workspace-actions.ts::createWorkspaceActionsRoute": 414,
-  "worker/worker-agent-runner.ts::createWorkerAgentRunner": 343,
+  "worker/worker-agent-runner.ts::createWorkerAgentRunner": 349,
 };
 
 /**
