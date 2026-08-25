@@ -23,7 +23,7 @@
  */
 import { execFile, spawn } from "node:child_process";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createRequire } from "node:module";
@@ -206,6 +206,11 @@ describe("check-uncommitted hook — real repo, content vs metadata (#770)", () 
     expect(await run()).toBe(0);
 
     await writeFileIn(repo, A, "export const a = 3;\n");
+    // Age the edit past #884's fresh-foreign window: a just-written file with no strong
+    // attribution is deliberately not demanded (it may be another live session's hand);
+    // past the window the real edit returns to stranded, which is what this test pins.
+    const agedSec = (Date.now() - 3 * 60 * 1000) / 1000;
+    utimesSync(join(repo, A), agedSec, agedSec);
     expect(await run()).toBe(1);
   });
 });
