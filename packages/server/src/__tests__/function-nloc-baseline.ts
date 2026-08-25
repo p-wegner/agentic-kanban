@@ -65,6 +65,24 @@
  *                                              retention/restore. The biggest jump of the
  *                                              batch; a shrink ticket is filed — the
  *                                              retention machinery is an extractable leaf.)
+ *
+ * ── Third disclosed movement (2026-08-25, #887 session probe) ───────────────────────────
+ *
+ *   createRemoteAgentService    609 -> 609  Net zero, and not by luck: the hello
+ *                                          reverse-reconcile moved out to
+ *                                          agent-remote-liveness.ts, which now owns BOTH ways
+ *                                          of asking "does this session exist on that worker?"
+ *                                          — the free half (a hello enumerates) and the new one
+ *                                          (ask, after silence). The lines that bought back
+ *                                          were exactly what the new wiring cost.
+ *   createWorkerAgentRunner     332 -> 343  Growth, named: the worker must REMEMBER every
+ *                                          session id it was handed for `unknown` to be an
+ *                                          authoritative answer. The ledger itself is a leaf
+ *                                          (worker-session-registry.ts, which also composes
+ *                                          the reply); what remains here is the construction
+ *                                          plus three one-line notes on the assign/output/exit
+ *                                          paths — the calls cannot be extracted from the code
+ *                                          whose events they record.
  */
 export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "cli/commands/issue.ts::registerIssueCommand": 718,
@@ -103,7 +121,7 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "services/workspace-provision.service.ts::createWorkspaceProvisionService": 409,
   // 404 -> 399, banked (#806): five hand-written body guards became one schema parse each.
   "routes/workspace-actions.ts::createWorkspaceActionsRoute": 414,
-  "worker/worker-agent-runner.ts::createWorkerAgentRunner": 332,
+  "worker/worker-agent-runner.ts::createWorkerAgentRunner": 343,
 };
 
 /**

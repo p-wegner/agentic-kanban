@@ -37,6 +37,7 @@ import {
   createUndeliveredStore,
 } from "./worker-undelivered-retry.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { createWorkerSessionRegistry } from "./worker-session-registry.js";
 import { resolveSpecCommand } from "./worker-command-resolver.js";
 import { FLEET_MCP_TOKEN_ENV_VAR } from "@agentic-kanban/shared/lib/worker-protocol";
 
@@ -210,6 +211,17 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
   });
 
   /**
+   * The ledger of every id the board ever handed this worker (#887), which is what makes
+   * `unknown` an authoritative answer rather than a guess. A leaf like the store above: it
+   * holds no process, so it takes the process table as two injected questions.
+   */
+  const seen = createWorkerSessionRegistry({
+    isLive: (sessionId) => processes.has(sessionId) || provisioning.has(sessionId),
+    pidOf: (sessionId) => processes.get(sessionId)?.pid,
+    safeSend,
+  });
+
+  /**
    * Answer one board-initiated repo operation on a LIVE session's checkout (#783, #784).
    *
    * Always answers, including when this worker has no such checkout (`no-session`): the
@@ -250,6 +262,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
   function emitExit(sessionId: string, exitCode: number | null): void {
     if (exited.has(sessionId)) return;
     exited.add(sessionId);
+    seen.noteExit(sessionId, exitCode);
     processes.delete(sessionId);
     provisioning.delete(sessionId);
     closeWatchdog(sessionId);
@@ -315,6 +328,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
    * reported as assign_failed (the board classifies it as a launch failure).
    */
   function assignWithRepo(sessionId: string, spec: WorkerLaunchSpec, repo: WorkerRepoTransport): void {
+    seen.noteAssigned(sessionId);
     if (processes.has(sessionId) || provisioning.has(sessionId)) {
       send({ type: "assign_failed", sessionId, error: "session already running on this worker" });
       return;
@@ -365,6 +379,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
   }
 
   function assign(sessionId: string, spec: WorkerLaunchSpec): void {
+    seen.noteAssigned(sessionId);
     if (processes.has(sessionId)) {
       send({ type: "assign_failed", sessionId, error: "session already running on this worker" });
       return;
@@ -437,6 +452,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     const emitOutput = (type: "stdout" | "stderr", chunk: Buffer) => {
       const data = sanitizeUtf8(chunk.toString());
       if (!data) return;
+      seen.noteOutput(sessionId);
       hangWatchdogs.get(sessionId)?.reset();
       // safeSend: this runs on the child's stream 'data' events, where a throw out of the
       // send seam is a process-level uncaught exception (#870).
@@ -610,6 +626,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
   return {
     assign, assignWithRepo, input, closeStdin, stop, stopAll, runningSessionIds,
     drainPushes, pendingPushCount, repoOp,
+    probeSession: seen.answerProbe, rememberedSessionCount: seen.size,
     retryPendingPushes: undelivered.retryPending,
     unpushedResults: undelivered.list,
   };
