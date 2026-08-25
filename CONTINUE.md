@@ -3,9 +3,47 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## Direct-master fleet batch: 26 tickets to Done, merge queue drained (2026-08-25)
+
+One session (direct-master, subagents in isolated worktrees, gates once per batch) took the
+backlog from 54 open to ~15. Verified state, all on master `5954b57588`:
+
+- **13 stale tickets closed with evidence** — their fixes were already on master from
+  2026-08-24 direct commits, the board just never learned (#840 #844 #845 #847 #849 #851
+  #853 #863 #864 #882 #883 #885 #889).
+- **4 In-Review merges landed via the board** (#846 #848 #850 #860). Two gate lessons,
+  both fixed: full-tier gates flake under load (machine was saturated by my own agent
+  fleet — two 35-min runs lost; `verify_gate_strategy_<dev-board>` is now `scoped`), and a
+  queued branch must be `update-base`d first or the gate blames it for master's history
+  (#885's own thesis, observed live).
+- **21 tickets implemented in worktree subagents and landed by rebase+ff** (#842 #847 #852
+  #854 #855 #856 #858 #859 #861 #869 #870 #871 #875 #879 #880 #884 #886 #888 #890 #892
+  #893), plus the #859/#895 exit-classification fix above and a flaky-wait fix in
+  `session-lifecycle.test.ts` (#894's most frequent flake, cece2099a6).
+- **Verification for the batch**: `pnpm gate:always-run` GREEN (2m41s), `check:arch` 0,
+  root typecheck 0, every new/updated test file run once green. Six guards needed
+  reconciliation (openapi regen, CODEX_HOME FOREIGN, worker-repo marker ladder declared,
+  disclosed nloc re-baseline x5, two Stop-hook tests aged past #884's fresh-foreign
+  window) — see d4b2c55b6d/6cec9b5811.
+- **Follow-ups filed**: #898 (board-card summary chip for remote placements, #861
+  remainder), #899 (shrink createWorkerAgentRunner back to <=406 nloc).
+
+Still open and NOT started here: #806 (wire-contract remainder, 211 paths), #807/#831/#834
+(CI/decision tickets — #834 needs a Linux CI run), #841, #843 (needs a human decision on
+the reaper allowlist), #857 (verify against the #799 MCP bridge before implementing),
+#872/#873 (risk-scored refactors), #876 (provider-property design), #881, #887 (session
+probe — worker-daemon.ts just changed heavily, rebase carefully), #894/#895/#896 (the
+parallel session's), #898/#899.
+
 ## #859's root cause: a non-zero exit is only believed for 10 seconds (2026-08-25)
 
-**Found, not fixed** — see "why not yet" at the end.
+**FIXED (2026-08-25, `5954b57588`)** — a non-zero exit with zero substantive output is a
+launch failure at ANY duration; the window still bounds the two heuristic cases
+(zero-output-clean-exit, fast-non-zero-with-output). Pinned by the #895 remote shape in
+`session-exit-state-machine.test.ts`. The #895 attestation half is still open. Original
+analysis kept below.
+
+**Was: found, not fixed** — see "why not yet" at the end.
 
 `classifySessionExit` (`packages/server/src/services/session-manager/session-exit-state-machine.ts:111`)
 computes `isNonZeroExit` and then gates it behind a time window:
