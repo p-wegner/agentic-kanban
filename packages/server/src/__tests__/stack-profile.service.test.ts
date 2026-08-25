@@ -309,13 +309,13 @@ describe("buildSmartHooksRules", () => {
   it("runs test rules on Stop only — a test command is never scoped to the edited file", () => {
     // Measured: per-edit typecheck+tests ran to their timeouts on every Write/Edit (median
     // 5m50s) and were killed, so the per-edit test run produced no signal for pure latency.
-    // Typecheck stays per-edit (it IS the cheap signal); tests move to end-of-turn.
+    // Typecheck was kept per-edit as "the cheap signal" — then measured at a median 5m37s
+    // per edit on a monorepo (the command is never file-scoped). Stop-only as well.
     const out = buildSmartHooksRules(
       profile({ stack: "node", typecheckCommand: "pnpm tsc --noEmit", quickTestCommand: "pnpm test:mine", testCommand: "pnpm test" }),
     );
     expect(out.rules.find((r) => r.name === "Quick tests")!.events).toEqual(["Stop"]);
-    // Typecheck keeps the default (absent => both events, which the runner preserves).
-    expect(out.rules.find((r) => r.name === "Typecheck")!.events).toBeUndefined();
+    expect(out.rules.find((r) => r.name === "Typecheck")!.events).toEqual(["Stop"]);
   });
 
   it("marks the full-suite fallback test rule Stop-only too", () => {
