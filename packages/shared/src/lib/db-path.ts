@@ -1,5 +1,5 @@
 import { homedir, tmpdir } from "node:os";
-import { existsSync as fsExistsSync, statSync as fsStatSync } from "node:fs";
+import { existsSync as fsExistsSync, statSync as fsStatSync, renameSync as fsRenameSync } from "node:fs";
 import { resolve, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
@@ -26,6 +26,16 @@ import { DatabaseSync } from "node:sqlite";
  * testable without touching real disk. The only caller-specific input is the
  * ordered list of in-checkout `kanban.db` candidate paths, which differ by the
  * calling package's location on disk.
+ *
+ * ONE deliberate, injectable side effect since #854: a candidate rejected by the
+ * SIZE FLOOR (a sub-floor stub) is RENAMED aside to `kanban.db.stub-<timestamp>`
+ * instead of being left in place. The floor protects only callers that resolve
+ * through this function; a naive `existsSync` probe or a bare `file:kanban.db`
+ * open still adopts the stub, so leaving it on disk leaves a standing trap. A
+ * rename (never a delete — the kanban.db safety guard stays intact) makes the
+ * hazard self-healing while preserving the file for inspection. Rename failure
+ * (e.g. the stub is locked by another process) degrades to the pre-#854
+ * behaviour: warn and fall through.
  */
 export type DbPathSource =
   | "DB_URL"
@@ -74,6 +84,15 @@ export interface ResolveDbLocationOptions {
    * in-checkout candidate that cleared the size floor holds actual board content.
    */
   hasBoardContent?: (p: string) => boolean;
+  /**
+   * Injected for tests; defaults to `node:fs` `renameSync`. Used ONLY to move a
+   * sub-floor stub aside (#854) — never to delete anything.
+   */
+  renameSync?: (from: string, to: string) => void;
+  /** Injected for tests; defaults to `console.warn`. The stub-rename log channel. */
+  warn?: (message: string) => void;
+  /** Injected for tests; epoch ms used to stamp the stub-aside filename. */
+  nowMs?: number;
 }
 
 /**
@@ -200,6 +219,8 @@ export function resolveDbLocation(opts: ResolveDbLocationOptions = {}): DbLocati
   const home = opts.homeDir ?? homedir();
   const candidates = opts.localDbCandidates ?? [];
   const hasContent = opts.hasBoardContent ?? sqliteHasBoardContent;
+  const rename = opts.renameSync ?? fsRenameSync;
+  const warn = opts.warn ?? console.warn;
 
   // 1. DB_URL — explicit connection URL, verbatim. A non-`file:` URL (e.g. a
   //    remote libsql endpoint) has no on-disk path/dir.
@@ -247,8 +268,33 @@ export function resolveDbLocation(opts: ResolveDbLocationOptions = {}): DbLocati
     // at all (a stub), or a real database that holds no board content (a migrated-but-
     // empty leftover, #663). Both are reported rather than silently skipped — a silent
     // skip is how a stray stayed invisible while it shadowed the real DB.
-    if (isValidLocalDb(candidate, stat) && hasContent(candidate)) {
+    const clearsFloor = isValidLocalDb(candidate, stat);
+    if (clearsFloor && hasContent(candidate)) {
       return { ...fileUrl(candidate), source: "local-checkout", rejectedLocalCandidates };
+    }
+    // #854 self-heal — SUB-FLOOR stubs only. The size floor protects resolver callers,
+    // but a naive caller (a bare `existsSync` probe, a hardcoded `file:kanban.db` open)
+    // still adopts the stub, so a stub left in place is a standing trap. RENAME it aside
+    // (never delete — guard-compatible, and the file stays inspectable). A #663
+    // content-empty rejection is deliberately NOT renamed: that is a real, full-sized
+    // database, and judging it relies on a fail-open probe — too weak a verdict to act on.
+    if (!clearsFloor) {
+      const aside = `${candidate}.stub-${new Date(opts.nowMs ?? Date.now()).toISOString().replace(/[:.]/g, "-")}`;
+      try {
+        rename(candidate, aside);
+        warn(
+          `[db-path] RENAMED sub-floor kanban.db stub aside: ${candidate} -> ${aside}. ` +
+            `The file was below the ${MIN_VALID_LOCAL_DB_BYTES}-byte floor, so it cannot be a real board database — ` +
+            `left in place it silently shadows the real DB for any tool that probes by existence alone (#854). ` +
+            `Inspect or remove the renamed file at leisure.`,
+        );
+      } catch (err) {
+        warn(
+          `[db-path] could not rename sub-floor kanban.db stub aside (${err instanceof Error ? err.message : String(err)}). ` +
+            `Leaving ${candidate} in place and falling through to the next location — but beware: ` +
+            `tools that probe by existence alone may still adopt this stub (#854).`,
+        );
+      }
     }
     rejectedLocalCandidates.push(candidate);
   }

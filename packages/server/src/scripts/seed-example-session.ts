@@ -9,16 +9,20 @@
 // client runs with foreign_keys=OFF and can INSERT FK-violating workspace/session
 // rows into the live DB (the #987 disease; arch-review §2.3).
 import { createClientWithPragmas } from "../db/pragmas.js";
+// #854: resolve the DB through the shared resolver, never a hardcoded checkout path.
+// The old `file:<__dirname>/../../kanban.db` open CREATED packages/server/kanban.db
+// when it did not exist (a libsql `file:` open mints its target) — exactly the
+// 0-byte stub that then shadows the real home-fallback DB for naive probes.
+import { getDbUrl } from "../db/data-dir.js";
 import { readFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { randomUUID } from "crypto";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const dbPath = resolve(__dirname, "../../kanban.db");
 const examplePath = resolve(__dirname, "../../../../docs/temp/examplesession.md");
 
-const db = await createClientWithPragmas(`file:${dbPath}`);
+const db = await createClientWithPragmas(getDbUrl());
 
 const ISSUE_ID = process.argv[2];
 const WS_ID = process.argv[3] || randomUUID();

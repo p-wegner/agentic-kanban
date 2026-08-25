@@ -8,6 +8,8 @@ dist/
 *.db-journal
 *.db-wal
 *.db-shm
+# A sub-floor kanban.db stub the resolver renamed aside (#854) — same non-track rule as the DB itself
+*.db.stub-*
 *.sqlite
 .db-backups/
 .env

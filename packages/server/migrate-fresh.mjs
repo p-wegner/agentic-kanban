@@ -4,10 +4,15 @@ import { applyMigrations } from './src/db/manual-migrate.ts';
 // bare createClient — FK OFF — which silently diverged from the runner: FK-toggling
 // migrations (0010/0039/0096) behaved differently here than in production. (arch-review §3.1)
 import { createClientWithPragmas } from './src/db/pragmas.ts';
-import { pathToFileURL } from 'node:url';
+// #854: route through the shared resolver, never a CWD-relative './kanban.db'.
+// The old `pathToFileURL('./kanban.db')` CREATED a brand-new packages/server/kanban.db
+// when run from this directory — the same shadow-DB minting that drizzle.config.ts
+// was cured of (see its header): once such a file exists, naive existence probes
+// adopt it instead of the real home-fallback DB.
+import { getDbUrl } from './src/db/data-dir.ts';
 
-const dbUrl = pathToFileURL('./kanban.db').href;
-console.log('Creating database at:', dbUrl);
+const dbUrl = getDbUrl();
+console.log('Migrating database at:', dbUrl);
 
 const client = await createClientWithPragmas(dbUrl);
 
