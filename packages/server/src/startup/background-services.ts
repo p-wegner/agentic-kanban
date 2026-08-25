@@ -23,6 +23,7 @@ import { startWorkerConnectionReaper, stopWorkerConnectionReaper } from "../serv
 import { getWorkerFleet } from "../services/worker-fleet.service.js";
 import { startInstallStalenessReconciler, stopInstallStalenessReconciler } from "./install-staleness-reconciler.js";
 import { startAgentSessionRegistryReaper, stopAgentSessionRegistryReaper } from "./agent-session-registry-reaper.js";
+import { startWorkerHealthProbe, stopWorkerHealthProbe } from "../services/worker-health-probe.service.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 
 /**
@@ -249,6 +250,16 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
     start() {
       startAgentSessionRegistryReaper();
       return stopAgentSessionRegistryReaper;
+    },
+  },
+  {
+    // #901 — a wedged daemon holds its socket and keeps heartbeating, so the two conditions
+    // `filterEligibleWorkers` checks both say yes about a worker that can no longer launch
+    // anything. This asks it, on an interval, to prove it can still process a message.
+    name: "worker-health-probe",
+    start({ db }) {
+      startWorkerHealthProbe(getWorkerFleet(db).health);
+      return stopWorkerHealthProbe;
     },
   },
 ];

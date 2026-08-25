@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   preferences,
   projects as projectsTable,
@@ -24,12 +24,17 @@ import {
 import { allowedProfilesPrefKey } from "@agentic-kanban/shared/lib/profile-allowlist";
 // The board refuses a worker that reports no protocol version, so every fixture
 // registration must speak the current one.
-import { WORKER_PROTOCOL_VERSION } from "@agentic-kanban/shared/lib/worker-protocol";
+import { WORKER_PROTOCOL_VERSION, type BoardToWorkerMessage } from "@agentic-kanban/shared/lib/worker-protocol";
 import {
   explainPlacement,
   explainIssuePlacement,
   listSessionPlacements,
 } from "../services/placement-explain.service.js";
+import {
+  HEALTH_PROBE_TIMEOUT_MS,
+  UNRESPONSIVE_AFTER_TIMEOUTS,
+  HEALTH_PROBE_SESSION_PREFIX,
+} from "../services/worker-health-probe.service.js";
 
 const PROJECT_ID = "bbbb1111-2222-3333-4444-555566667777";
 
@@ -104,6 +109,63 @@ describe("placement explanation (#755)", () => {
     // whole point of #651 and is what an operator gets wrong when guessing.
     expect(e.fleet.eligible).toBe(1);
     expect(e.chain.find((c) => c.id === "eligible_worker")!.outcome).toBe("not-reached");
+  });
+
+  it("names an UNRESPONSIVE worker as the reason, not 'offline' (#901)", async () => {
+    // The failure that neither eligibility check could see: heartbeat fresh, socket up,
+    // daemon wedged. The worker below is eligible on every other condition — that is the
+    // point, because before this the board would have dispatched to it.
+    vi.useFakeTimers();
+    try {
+      await pref(workerDispatchPrefKey(PROJECT_ID), "true");
+      const workerId = await connectWorker({ providers: ["claude"], labels: [SHARES_FILESYSTEM_LABEL] });
+      expect((await explain()).fleet.eligible).toBe(1);
+
+      // Attest first: a worker that has never answered is exempt forever (#887), so
+      // without this the rest of the test would prove nothing. The answer is fed through
+      // the REAL `handleMessage`, so the wire parse and the listener fan-out are exercised
+      // rather than stubbed.
+      const sends: BoardToWorkerMessage[] = [];
+      const send = vi.spyOn(fleet.connections, "send").mockImplementation((_id, message) => {
+        sends.push(message);
+        return true;
+      });
+      fleet.health.probeWorker(workerId);
+      const asked = sends.at(-1) as Extract<BoardToWorkerMessage, { type: "probe_session" }>;
+      expect(asked.sessionId.startsWith(HEALTH_PROBE_SESSION_PREFIX)).toBe(true);
+      fleet.connections.handleMessage(
+        workerId,
+        JSON.stringify({
+          type: "session_probe_result",
+          sessionId: asked.sessionId,
+          probe: { requestId: asked.requestId, state: "unknown" },
+        }),
+      );
+      expect(fleet.health.stateFor(workerId)?.attested).toBe(true);
+
+      for (let i = 0; i < UNRESPONSIVE_AFTER_TIMEOUTS; i++) {
+        fleet.health.probeWorker(workerId);
+        vi.advanceTimersByTime(HEALTH_PROBE_TIMEOUT_MS + 1);
+        // Keep the heartbeat fresh across the advance. This is not test convenience — it IS
+        // the case the ticket exists for: a daemon whose timer and socket layers still run
+        // while it can no longer process a message. If the heartbeat stopped too, the board
+        // would already mark it offline and there would be nothing to fix.
+        await fleet.registry.touchHeartbeat(workerId);
+      }
+
+      const e = await explain();
+      expect(e.decidedBy).toBe("eligible_worker");
+      // The explanation and the resolver must agree — an explanation that disagrees with
+      // the thing it describes is worse than none.
+      expect(e.agreesWithResolver).toBe(true);
+      expect(e.fleet.eligible).toBe(0);
+      const reason = e.fleet.workers[0]!.ineligibleReason!;
+      expect(reason).toMatch(/connected and heartbeating/);
+      expect(reason).not.toMatch(/offline/);
+      send.mockRestore();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("names which condition each worker fails, instead of one flat 'no eligible worker'", async () => {
