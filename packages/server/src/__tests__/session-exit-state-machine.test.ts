@@ -145,6 +145,17 @@ describe("classifySessionExit — boundary of the launch-failure window", () => 
     expect(route.phase).toBe("completed");
     expect(route.phase === "completed" && route.exitCode).toBe(1);
   });
+
+  it("a non-zero exit with ZERO output is a launch failure at ANY duration (#859/#895 remote shape)", () => {
+    // The dispatch that exposed it: 58s of clone+checkout before the agent's instant
+    // "Not logged in" exit — wall time lied about when the agent started. exitCode 1,
+    // zero output, 58s: must never finalize as `completed`.
+    const route = classifySessionExit(ctx({ hadSubstantiveOutput: false, durationMs: 58_121, exitCode: 1, capturedStderr: "Not logged in · Please run /login" }));
+    expect(route.phase).toBe("launch-failure");
+    expect(route.phase === "launch-failure" && route.isNonZeroExit).toBe(true);
+    expect(route.phase === "launch-failure" && route.effectiveExitCode).toBe(1);
+    expect(route.phase === "launch-failure" && route.errorText).toContain("Not logged in");
+  });
 });
 
 describe("classifySessionExit — completed", () => {
