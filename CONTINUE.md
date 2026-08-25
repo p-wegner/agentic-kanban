@@ -3,6 +3,88 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## #859's root cause: a non-zero exit is only believed for 10 seconds (2026-08-25)
+
+**Found, not fixed** — see "why not yet" at the end.
+
+`classifySessionExit` (`packages/server/src/services/session-manager/session-exit-state-machine.ts:111`)
+computes `isNonZeroExit` and then gates it behind a time window:
+
+```ts
+const withinWindow  = ctx.durationMs <= ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS;  // 10_000
+const isZeroOutput  = !ctx.hadSubstantiveOutput;
+const isNonZeroExit = ctx.exitCode !== 0 && ctx.exitCode !== null;
+if (withinWindow && (isZeroOutput || isNonZeroExit)) return { phase: "launch-failure", ... };
+...
+return { phase: "completed", exitCode: ctx.exitCode };
+```
+
+Outside the window `isNonZeroExit` is **not consulted at all**, so an explicit non-zero exit
+routes to `completed` — the path that finalizes a normal run and resets the workspace to
+`idle`. That is the whole of #859: not a missing diagnosis, a discarded one.
+
+Measured on the remote dispatch that exposed it (#895):
+
+```
+startedAt 20:50:00.692Z   endedAt 20:50:58.813Z   ->  durationMs 58,121
+exitCode 1 · numTurns 1 · 0 tokens
+agentSummary "Not logged in · Please run /login"
+```
+
+`58121 <= 10000` is false. Verified from source that `durationMs` is session WALL time
+(`session-lifecycle.ts:573`, `endNow - startedAt`), not the agent's self-reported duration —
+the agent ran 5.5s; the other ~53s was the worker cloning and checking out. Confirmed
+independently by the row actually landing on `completed`.
+
+**Why the fleet makes this reliable rather than rare.** The same failure on the host exits in
+~5s, lands inside the window, and is reported correctly. Remote placement inserts clone +
+checkout *before* the agent starts, so an instant failure presents as a minute-long session.
+**The 10-second window assumes the agent starts when the session does, which stopped being
+true when placement moved off-host.**
+
+Suggested fix (on the ticket): let the window gate only the *zero-output* heuristic, which
+needs a time bound to avoid mislabelling a long legitimate run that produced nothing. A
+definite `exitCode != 0` is authoritative at any duration. Caveat recorded there too — a long
+run that fails late is a "failed", not a "launch-failure", so this may want its own phase
+rather than being folded into the existing one. Either way it must not be `completed`.
+
+`#895`'s seam is `ineligibleReasonFor` (`placement-explain.service.ts:198`): five eligibility
+conditions, one of which asks whether the worker *advertises* a provider and none of which
+asks whether it can *authenticate* as one. Adding the sixth needs worker-side attestation
+(probe locally, report the verdict not the secret, refresh on heartbeat) — #875 should land
+first, since it fixes the probe this would depend on.
+
+### Why not yet
+
+A pre-merge gate has been running near-continuously all session (observed at 22:40, 23:05,
+00:31, 00:38, 00:52, 02:37). Editing `packages/server/src` restarts `tsx watch`, which is how
+#893 discarded a 39-minute gate run. **That is worth naming as its own problem: on this board
+there is currently almost no window in which server source can be safely edited from the main
+checkout, while `direct-master` simultaneously instructs agents to commit constantly.**
+
+## The UI overflow sweep is complete, and the answer is "three spots, not a pattern" (2026-08-25)
+
+All 27 registered board views swept for elements actually painting a horizontal scrollbar
+(`scrollWidth > clientWidth` while `overflow-x` is `auto`/`scroll`), at **1440x900 and
+1280x800**. Result: the board is clean at both widths except one filed item.
+
+- **#862 fixed** (`69c15f5d3c`) — the detail modal used CSS multicol under a bounded height.
+  Multicol does not scroll; it fragments into more columns *sideways*. 591px of overflow.
+  Replaced with a grid. None of the ticket's own suspects (fixed widths, `nowrap`, wide
+  `pre`, oversized `max-width`) was involved.
+- **#896 fixed** (`fd4518e561`) — `truncate` on an *inline* `<span>`. `overflow` and
+  `text-overflow` do not apply to non-replaced inline boxes, so only `white-space: nowrap`
+  survived, which *caused* the 70px overflow it was meant to prevent.
+- **#897 open** — timeline markers overflow the track (+48px @1440, +51px @1280). Possibly
+  intended; a timeline is legitimately scrollable. Needs someone who knows the intent.
+
+**Do not re-run the inline-`truncate` hunt: it is closed.** 81 files use
+`<span className="…truncate…">`, but a flex/grid child is blockified, so nearly all are fine.
+A runtime detector (computed `display === "inline"`) found **0 remaining instances across 22
+views**. That zero was proved non-vacuous by injecting the #896 shape into a live page — the
+detector caught it (0→1) and correctly ignored the same span as a flex child. So no lint guard
+was added: there is nothing left for it to catch.
+
 ## The remote worker cannot run an agent, and neither side says so (2026-08-24)
 
 **Status: blocked on an operator action. No code fix attempted — see "why not yet" below.**
