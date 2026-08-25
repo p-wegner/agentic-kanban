@@ -465,9 +465,14 @@ export async function checkProvider(
 
   const auth = PROVIDER_AUTH_FILES[provider];
   if (!auth) {
+    // "skip", not "unknown": this is not an indeterminate login state (files that might or
+    // might not be there) — there is no check at all for this provider (#895 follow-up).
+    // `attestProviderAuth` treats `skip` as attestable for exactly that reason: a provider
+    // with no known auth-file location (copilot, pi, or any future one) must be able to
+    // attest on CLI-installed alone, or it could never be advertised by a worker at all.
     checks.push({
       name: `${provider} logged in`,
-      status: "unknown",
+      status: "skip",
       detail: `no known auth-file location for '${provider}', so this cannot be checked offline`,
       remedy: `Run a one-shot ${provider} command here and confirm it does not prompt for a login.`,
     });
@@ -506,10 +511,17 @@ export async function checkProvider(
  * A doctor REPORT is read by a human who can weigh `unknown` (files absent, but an env API
  * key might be set) against what they know about the machine. Advertising a provider to the
  * board is an UNATTENDED claim the board will act on by dispatching real work, so it needs
- * the stronger bar: every check for this provider must be `pass`. This is what would have
- * caught the live #895 repro — a worker whose `claude` login had lapsed reported `unknown`
- * (a real, non-actionable possibility for a doctor report), and `unknown` must not be read as
- * "fine" by the thing that decides what gets dispatched.
+ * the stronger bar: every check for this provider must be `pass` (or `skip`). This is what
+ * would have caught the live #895 repro — a worker whose `claude` login had lapsed reported
+ * `unknown` (a real, non-actionable possibility for a doctor report), and `unknown` must not
+ * be read as "fine" by the thing that decides what gets dispatched.
+ *
+ * `skip` is accepted alongside `pass` because it means something different from `unknown`
+ * here: `checkProvider` returns `skip` ONLY for the "no known auth-file location" case
+ * (copilot, pi, or any future provider `PROVIDER_AUTH_FILES` does not cover) — there is no
+ * check at all to fail, as opposed to `unknown`'s "a check exists and came back
+ * indeterminate". Requiring `pass` from a provider with no possible check would exclude it
+ * from ever attesting, which is a worse regression than the one this function exists to fix.
  */
 export async function attestProviderAuth(
   provider: string,
@@ -517,7 +529,10 @@ export async function attestProviderAuth(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<{ attested: boolean; checks: DoctorCheck[] }> {
   const checks = await checkProvider(provider, home, env);
-  return { attested: checks.length > 0 && checks.every((c) => c.status === "pass"), checks };
+  return {
+    attested: checks.length > 0 && checks.every((c) => c.status === "pass" || c.status === "skip"),
+    checks,
+  };
 }
 
 export interface WorkerDoctorOptions {
