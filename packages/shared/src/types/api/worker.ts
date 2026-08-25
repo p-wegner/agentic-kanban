@@ -23,3 +23,45 @@ export interface WorkerEvent {
   payload: Record<string, unknown> | null;
   createdAt: string;
 }
+
+/**
+ * Why a worker went away (#881), computed by the board from the event timeline and returned
+ * alongside it by `GET /api/workers/:id/events`.
+ *
+ * The shape lives here for the same reason `WorkerEvent` does: the server derives it and the
+ * fleet panel renders it, so a second hand-maintained copy is exactly the drift
+ * `wire-dto-single-declaration.test.ts` exists to stop. The DERIVATION stays in
+ * `server/src/services/worker-drop-diagnosis.ts` — this is the contract, not the logic.
+ *
+ * Note the deliberate difference from `WorkerEvent.type`, which is a bare `string` so a
+ * client rendering an unrecognised row is not a type error: event types are written by
+ * workers, whereas `cause` is produced by the board alone. A closed union is therefore safe
+ * here, and useful — the panel switches on it.
+ */
+export type WorkerDropCause =
+  | "healthy"
+  | "process-gone"
+  | "heartbeat-stall"
+  | "silent-respawn"
+  | "cycling"
+  | "flapping"
+  | "insufficient-data";
+
+export interface WorkerDropDiagnosis {
+  cause: WorkerDropCause;
+  /** `low` when the verdict rests on fewer samples than the signal needs. Never hidden. */
+  confidence: "high" | "low";
+  /** One operator-facing line. Says what to DO, not just what happened. */
+  headline: string;
+  /** The evidence the headline rests on. */
+  detail: string;
+  drops: number;
+  /** `connected` rows with no preceding `disconnected` — respawns or duplicate dials. */
+  unpairedConnects: number;
+  reconnectIntervalsMs: number[];
+  /** Null (not false) when there are too few intervals to judge periodicity at all. */
+  reconnectRegular: boolean | null;
+  lastDropAt: string | null;
+  reconnectsSinceLastDrop: number;
+  msSinceLastDrop: number | null;
+}

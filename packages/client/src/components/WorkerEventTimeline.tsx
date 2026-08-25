@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-import type { WorkerEvent } from "@agentic-kanban/shared/types";
+import type { WorkerDropCause, WorkerDropDiagnosis, WorkerEvent } from "@agentic-kanban/shared/types";
 
 /**
  * One worker's event timeline (#774), from `GET /api/workers/:id/events`.
@@ -28,17 +28,79 @@ const TYPE_COLORS: Record<string, string> = {
   ref_discarded: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
 };
 
+/**
+ * #881 — every way a worker can stop being usable rendered as the same word, `offline`. The
+ * board now derives WHICH way from the timeline, so the panel leads with the answer instead
+ * of making an operator read 100 rows to reach it. Colour carries urgency, not decoration:
+ * `process-gone` needs a human to go and restart something, the rest resolve or recur.
+ */
+const CAUSE_STYLES: Record<WorkerDropCause, { label: string; className: string }> = {
+  "process-gone": {
+    label: "Process gone",
+    className: "border-red-300 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200",
+  },
+  "heartbeat-stall": {
+    label: "Heartbeat stall",
+    className:
+      "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200",
+  },
+  "silent-respawn": {
+    label: "Restart loop",
+    className:
+      "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200",
+  },
+  cycling: {
+    label: "Periodic drops",
+    className:
+      "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200",
+  },
+  flapping: {
+    label: "Unstable link",
+    className:
+      "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200",
+  },
+  healthy: {
+    label: "No drops",
+    className:
+      "border-green-300 bg-green-50 text-green-800 dark:border-green-800 dark:bg-green-950/40 dark:text-green-200",
+  },
+  "insufficient-data": {
+    label: "Not enough history",
+    className: "border-gray-300 bg-gray-50 text-gray-600 dark:border-gray-700 dark:bg-gray-800/60 dark:text-gray-300",
+  },
+};
+
+function DropDiagnosis({ diagnosis }: { diagnosis: WorkerDropDiagnosis }) {
+  const style = CAUSE_STYLES[diagnosis.cause] ?? CAUSE_STYLES["insufficient-data"];
+  return (
+    <div className={`mt-2 rounded border px-2 py-1.5 text-xs ${style.className}`}>
+      <div className="flex items-center gap-1.5">
+        <span className="font-medium">{style.label}</span>
+        {/* A low-confidence verdict says so on its face — a guess presented as a finding is
+            worse than no finding. */}
+        {diagnosis.confidence === "low" && <span className="opacity-70">· low confidence</span>}
+      </div>
+      <div className="mt-0.5">{diagnosis.headline}</div>
+      <div className="mt-0.5 opacity-80">{diagnosis.detail}</div>
+    </div>
+  );
+}
+
 export function WorkerEventTimeline({ workerId }: { workerId: string }) {
   const [events, setEvents] = useState<WorkerEvent[] | null>(null);
+  const [diagnosis, setDiagnosis] = useState<WorkerDropDiagnosis | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
     setError(null);
-    apiFetch<{ events: WorkerEvent[] }>(`/api/workers/${workerId}/events?limit=100`)
+    apiFetch<{ events: WorkerEvent[]; diagnosis?: WorkerDropDiagnosis }>(
+      `/api/workers/${workerId}/events?limit=100`,
+    )
       .then((r) => {
         setEvents(r.events);
+        setDiagnosis(r.diagnosis ?? null);
         setLoading(false);
       })
       .catch((err) => {
@@ -60,15 +122,19 @@ export function WorkerEventTimeline({ workerId }: { workerId: string }) {
   if (events && events.length === 0) {
     return (
       <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-        No events recorded for this worker yet. The board records registration, protocol
-        mismatches and incoming-ref decisions; WebSocket connect/disconnect and per-session
-        assign/exit are not recorded yet.
+        {/* This used to claim connect/disconnect and assign/exit were "not recorded yet",
+            which #801 made false — and false in exactly the place an operator checks when
+            those rows are the ones they are missing. */}
+        No events recorded for this worker yet. Once it registers, the board records
+        registration, connect/disconnect, status changes, per-session assign/exit,
+        undelivered results and incoming-ref decisions.
       </div>
     );
   }
 
   return (
     <div className="mt-2 space-y-1">
+      {diagnosis && <DropDiagnosis diagnosis={diagnosis} />}
       <div className="flex items-center justify-between">
         <div className="text-xs font-medium text-gray-500 dark:text-gray-400">
           Timeline ({events?.length ?? 0} event{events?.length === 1 ? "" : "s"})

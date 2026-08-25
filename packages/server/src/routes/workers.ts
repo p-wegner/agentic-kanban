@@ -28,6 +28,7 @@ import {
   listWorkerEvents,
   recordWorkerEvent,
 } from "../services/worker-events.service.js";
+import { classifyWorkerDrop } from "../services/worker-drop-diagnosis.js";
 import { getPreferenceValue } from "../repositories/session-lifecycle.repository.js";
 import { listWorkerBranchAssignments } from "../repositories/worker.repository.js";
 import type { ProviderName } from "../services/agent-provider.js";
@@ -136,14 +137,28 @@ function registerOwnerRoutes(router: Hono, reg: WorkerRegistry, database: Databa
         `types must be a comma-separated subset of: ${WORKER_EVENT_TYPES.join(", ")}`,
       );
     }
+    const workerId = c.req.param("id");
     return c.json({
-      workerId: c.req.param("id"),
+      workerId,
       events: await listWorkerEvents({
         database,
-        workerId: c.req.param("id"),
+        workerId,
         limit: Number.isInteger(limitParam) && limitParam > 0 ? Math.min(limitParam, 500) : undefined,
         types,
       }),
+      // #881 — why the worker went away, derived from the timeline rather than probed.
+      // Deliberately computed from its OWN query over the transport rows, NOT from the
+      // `events` above: those honour the caller's `types`/`limit`, and a diagnosis derived
+      // from a filtered window would be confidently wrong (ask for `assigned` only and the
+      // classifier would see no drops at all and report health).
+      diagnosis: classifyWorkerDrop(
+        await listWorkerEvents({
+          database,
+          workerId,
+          types: ["connected", "disconnected", "status_change"],
+          limit: 200,
+        }),
+      ),
     });
   });
 
