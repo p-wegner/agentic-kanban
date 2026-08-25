@@ -22,6 +22,13 @@ export interface RemoteSession {
   /** A deferred "is this really lost?" re-check, armed by a hello inside the settle window. */
   lostCheckTimer?: ReturnType<typeof setTimeout>;
   /**
+   * #887: the silence-after-assign probe. Holds the "ask now" timer before the question goes
+   * out, then the "no answer" timer after it — one field, because the two never overlap.
+   */
+  probeTimer?: ReturnType<typeof setTimeout>;
+  /** The in-flight probe's correlation id, so a stale answer is dropped rather than acted on. */
+  probeRequestId?: string;
+  /**
    * Epoch ms at which the board stopped being able to see this session (the
    * reconnect grace expired). Non-null means DETACHED: held, reported, not
    * finalized. Cleared on reconnect.

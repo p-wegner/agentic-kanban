@@ -535,6 +535,9 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
           case "push_head":
             runner.repoOp("push", message.sessionId, message.requestId, message.auth);
             break;
+          case "probe_session":
+            runner.probeSession(message.sessionId, message.requestId);
+            break;
         }
       } catch (err) {
         // #870: a throw out of a ws event handler is a process-level uncaught exception —

@@ -190,6 +190,30 @@ export interface WorkerRepoOpResult {
   error?: string;
 }
 
+/**
+ * What a worker knows about one session it was asked about (#887).
+ *
+ * `unknown` is the load-bearing one: the worker remembers every id it was ever assigned,
+ * so it means the assignment was LOST IN TRANSIT — a fact, not a timeout's guess. It is
+ * only authoritative from the worker the session was assigned TO; a different worker not
+ * knowing an id means nothing.
+ */
+export type WorkerSessionProbeState = "unknown" | "running" | "exited";
+
+/** A worker's answer to one `probe_session` (#887), by `requestId`. */
+export interface WorkerSessionProbe {
+  requestId: string;
+  state: WorkerSessionProbeState;
+  /** `running`: the agent's pid on the worker, when it has one (absent while provisioning). */
+  pid?: number;
+  /** Epoch ms on the WORKER's clock — for the operator's report, never for arithmetic here. */
+  startedAtMs?: number;
+  lastOutputAtMs?: number;
+  /** `exited`: what the agent returned, and when. The board finalizes on this. */
+  exitCode?: number | null;
+  exitedAtMs?: number;
+}
+
 /** Mirrors agent.service's AgentOutputEvent so events plug into broadcast as-is. */
 export interface WorkerAgentEvent {
   type: "stdout" | "stderr" | "exit";
@@ -356,7 +380,20 @@ export type BoardToWorkerMessage =
    * board can show a diff before the agent exits. On demand — the board asks when a diff
    * is actually wanted; the worker runs no timer of its own.
    */
-  | { type: "push_head"; sessionId: string; requestId: string; auth: WorkerRepoOpAuth };
+  | { type: "push_head"; sessionId: string; requestId: string; auth: WorkerRepoOpAuth }
+  /**
+   * #887: ask the worker whether it has ever heard of this session at all.
+   *
+   * The board cannot tell "the assignment never arrived" from "the agent is working
+   * silently" — measured, it held a session that never existed for 100 minutes. Zero
+   * output is not evidence either way, which is exactly why it waits. But the WORKER
+   * knows every `sessionId` it was ever told about, so its `unknown` is an AUTHORITATIVE
+   * never-started answer in a way "no output" can never be.
+   *
+   * Correlated by `requestId` like the repo ops, and for the same reason: the board acts
+   * on the answer, so a stale reply must not be mistaken for a fresh one.
+   */
+  | { type: "probe_session"; sessionId: string; requestId: string };
 
 export type WorkerToBoardMessage =
   | {
@@ -386,6 +423,16 @@ export type WorkerToBoardMessage =
    * An OPTIONAL message: an older board drops it as malformed (with a warn), which is
    * a degraded report, not a broken session — so it does not bump the protocol version.
    */
+  /**
+   * The answer to one `probe_session` (#887).
+   *
+   * OPTIONAL on the wire, like `undelivered_result`: a worker built before this drops the
+   * request as unknown and never answers, and the board's probe then times out. That
+   * timeout must fall back to today's behaviour (hold, and let #883's TTL be the backstop)
+   * — silence is NOT `unknown`, and treating it as one would fail live sessions on every
+   * stale worker in a fleet. So this adds no protocol-version bump.
+   */
+  | { type: "session_probe_result"; sessionId: string; probe: WorkerSessionProbe }
   | {
       type: "undelivered_result";
       sessionId: string;
@@ -456,6 +503,12 @@ export function parseWorkerToBoardMessage(raw: unknown): WorkerToBoardMessage | 
       if (!result) return null;
       return { type: "repo_op_result", sessionId: msg.sessionId, result };
     }
+    case "session_probe_result": {
+      if (typeof msg.sessionId !== "string") return null;
+      const probe = parseWorkerSessionProbe(msg.probe);
+      if (!probe) return null;
+      return { type: "session_probe_result", sessionId: msg.sessionId, probe };
+    }
     case "undelivered_result": {
       if (
         typeof msg.sessionId !== "string" ||
@@ -525,6 +578,36 @@ export function parseWorkerRepoOpResult(raw: unknown): WorkerRepoOpResult | null
     status: result.status as WorkerRepoOpStatus,
     ...(typeof result.sha === "string" ? { sha: result.sha } : {}),
     ...(typeof result.error === "string" ? { error: result.error } : {}),
+  };
+}
+
+const PROBE_STATES = new Set<string>(["unknown", "running", "exited"]);
+
+/**
+ * Shape-check a session probe off the wire (#887). Null = drop it, and the board then
+ * times out — which is the same outcome as an older worker that never answers, and is
+ * deliberately NOT the same as `unknown`.
+ */
+export function parseWorkerSessionProbe(raw: unknown): WorkerSessionProbe | null {
+  const probe = asRecord(raw);
+  if (!probe) return null;
+  if (typeof probe.requestId !== "string" || !probe.requestId) return null;
+  if (typeof probe.state !== "string" || !PROBE_STATES.has(probe.state)) return null;
+  const num = (value: unknown): number | undefined =>
+    typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  const pid = num(probe.pid);
+  const startedAtMs = num(probe.startedAtMs);
+  const lastOutputAtMs = num(probe.lastOutputAtMs);
+  const exitedAtMs = num(probe.exitedAtMs);
+  return {
+    requestId: probe.requestId,
+    state: probe.state as WorkerSessionProbeState,
+    ...(pid !== undefined ? { pid } : {}),
+    ...(startedAtMs !== undefined ? { startedAtMs } : {}),
+    ...(lastOutputAtMs !== undefined ? { lastOutputAtMs } : {}),
+    // `null` is meaningful here (killed by signal), so it is kept while `undefined` is not.
+    ...(probe.exitCode === null || num(probe.exitCode) !== undefined ? { exitCode: probe.exitCode as number | null } : {}),
+    ...(exitedAtMs !== undefined ? { exitedAtMs } : {}),
   };
 }
 
@@ -642,6 +725,9 @@ export function parseBoardToWorkerMessage(raw: unknown): BoardToWorkerMessage | 
       return { type: "close_stdin", sessionId: msg.sessionId };
     case "stop":
       return { type: "stop", sessionId: msg.sessionId };
+    case "probe_session":
+      if (typeof msg.requestId !== "string" || !msg.requestId) return null;
+      return { type: "probe_session", sessionId: msg.sessionId, requestId: msg.requestId };
     case "sync_repo":
     case "push_head": {
       if (typeof msg.requestId !== "string" || !msg.requestId) return null;

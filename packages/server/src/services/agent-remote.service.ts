@@ -63,6 +63,7 @@ import { WORKER_HEARTBEAT_STALE_MS } from "./worker-registry.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { getProjectByRepoPath } from "../repositories/project.repository.js";
 import { createRemoteSessionEventRecorder } from "./agent-remote-events.js";
+import { createRemoteLiveness } from "./agent-remote-liveness.js";
 import type { WorkerRepoOpKind, WorkerRepoOpResult } from "@agentic-kanban/shared/lib/worker-protocol";
 
 /**
@@ -109,7 +110,8 @@ export const REPO_OP_TIMEOUT_MS = 60 * 1000;
 export function createRemoteAgentService(
   manager: WorkerConnectionManager,
   database: Database = realDb,
-  opts?: { reconnectGraceMs?: number; abandonMs?: number; assignSettleMs?: number },
+  // #887 adds probeAfterMs/probeTimeoutMs so an e2e run can exercise the probe round trip.
+  opts?: { reconnectGraceMs?: number; abandonMs?: number; assignSettleMs?: number; probeAfterMs?: number; probeTimeoutMs?: number },
 ): RemoteAgentService {
   const sessions = new Map<string, RemoteSession>();
   const disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -137,6 +139,7 @@ export function createRemoteAgentService(
   const { noteAssigned, noteSessionExit, noteUndeliveredResult } = createRemoteSessionEventRecorder(database);
 
   function finishSession(sessionId: string, session: RemoteSession, stderr: string, exitCode: number | null): void {
+    liveness.cancel(sessionId);
     sessions.delete(sessionId);
     noteSessionExit(sessionId, session, exitCode, "finalized without landing");
     // #769: the board-tool token dies with its assignment. Unlike the git token it is NOT
@@ -165,6 +168,7 @@ export function createRemoteAgentService(
     session: RemoteSession,
     reportedExitCode: number | null,
   ): Promise<void> {
+    liveness.cancel(sessionId);
     sessions.delete(sessionId);
     fleetMcp.revokeSessionTokens(sessionId);
     let exitCode = reportedExitCode;
@@ -232,6 +236,34 @@ export function createRemoteAgentService(
     void landAndFinish(sessionId, session, 1);
   }
 
+  /**
+   * #887 — "does this session actually exist on that worker?", both ways of asking, in one
+   * module. This file sits at the god-module ceiling, and the two questions (a hello that
+   * omits a session; silence after an assign) are one leaf answering one thing.
+   */
+  const liveness = createRemoteLiveness({
+    sessions,
+    send: (workerId, message) => manager.send(workerId, message),
+    loseSession,
+    report,
+    // Spread FIRST so the resolved `assignSettleMs` below wins over an absent override; the
+    // probe timings ride along, which is what makes the round trip testable end to end (#887).
+    ...opts,
+    assignSettleMs,
+    assignmentLost: (sessionId, session, reason) => {
+      // A never-started assignment is a LAUNCH failure, exactly like `assign_failed`: the
+      // dispatch proxy owns the host-fallback/strict decision (#245/#751), and routing it
+      // there is what makes the ticket retryable instead of a session that exits 1.
+      if (session.onDeferredLaunchFailure) {
+        sessions.delete(sessionId);
+        session.onDeferredLaunchFailure({ kind: "dispatch", reason });
+        return;
+      }
+      finishSession(sessionId, session, `Worker never received this assignment: ${reason}`, 1);
+    },
+    finalizeExited: (sessionId, session, exitCode) => void landAndFinish(sessionId, session, exitCode),
+  });
+
   function clearWorkerTimers(workerId: string): void {
     const grace = disconnectTimers.get(workerId);
     if (grace) { clearTimeout(grace); disconnectTimers.delete(workerId); }
@@ -245,11 +277,7 @@ export function createRemoteAgentService(
       if (!session || session.workerId !== workerId) return;
       // The worker has spoken about this session, so a later hello that omits it is
       // information rather than a race (see WORKER_ASSIGN_SETTLE_MS).
-      session.observed = true;
-      if (session.lostCheckTimer) {
-        clearTimeout(session.lostCheckTimer);
-        session.lostCheckTimer = undefined;
-      }
+      liveness.noteObserved(message.event.sessionId);
       if (message.event.type !== "exit") {
         try {
           session.onOutput(message.event);
@@ -317,33 +345,7 @@ export function createRemoteAgentService(
       // names. It exits non-zero even when the branch landed cleanly: the board never
       // saw the agent's own verdict, and recording an unobserved run as a clean
       // success is the one outcome worse than a visible failure.
-      const listed = new Set(message.runningSessionIds);
-      const missing = [...sessions.entries()].filter(([id, sess]) => sess.workerId === workerId && !listed.has(id));
-      for (const [sessionId, session] of missing) {
-        if (session.observed) {
-          loseSession(sessionId, workerId);
-          continue;
-        }
-        // Never observed: this hello may simply have crossed a fresh assign. Re-check
-        // once the settle window has passed instead of guessing either way — skipping
-        // outright would reinstate the infinite hang for an ADOPTED session (which this
-        // process has never seen an event for), and acting now fails live work.
-        if (session.lostCheckTimer) continue;
-        console.warn(
-          `[agent-remote] worker ${workerId} does not list session ${sessionId}, which this process has ` +
-            `not yet seen it speak about; re-checking in ${Math.round(assignSettleMs / 1000)}s`,
-        );
-        const timer = setTimeout(() => {
-          const current = sessions.get(sessionId);
-          if (!current || current.workerId !== workerId) return;
-          current.lostCheckTimer = undefined;
-          if (current.observed) return;
-          loseSession(sessionId, workerId);
-        }, assignSettleMs);
-        if (timer.unref) timer.unref();
-        session.lostCheckTimer = timer;
-      }
-
+      liveness.reconcileHello(workerId, message.runningSessionIds);
       const unknown = message.runningSessionIds.filter((id) => !sessions.has(id));
       if (unknown.length === 0) return;
       void (async () => {
@@ -375,6 +377,10 @@ export function createRemoteAgentService(
           manager.send(workerId, { type: "stop", sessionId });
         }
       })();
+      return;
+    }
+    if (message.type === "session_probe_result") {
+      liveness.handleProbeResult(workerId, message.sessionId, message.probe);
       return;
     }
     if (message.type === "repo_op_result") {
@@ -721,6 +727,7 @@ export function createRemoteAgentService(
         : undefined,
       onDeferredLaunchFailure,
     });
+    liveness.armAssignProbe(sessionId); // #887 — ask, rather than wait out a silence TTL
     updateSessionWorkerId(sessionId, workerId, database)
       .catch((err) => console.error(`[agent-remote] failed to stamp session workerId: sessionId=${sessionId}`, err));
     return {};
