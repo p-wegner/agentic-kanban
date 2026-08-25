@@ -417,21 +417,30 @@ export function startAncestorBranchReconciler(
   intervalMs = DEFAULT_INTERVAL_MS,
 ): PeriodicSweepHandle {
   stopAncestorBranchReconciler();
+  // The Omit above only stops a literal call site (`startAncestorBranchReconciler({ enabled:
+  // false })`) from compiling — TS excess-property checking doesn't apply to a pre-typed
+  // variable, so a caller holding a full `AncestorBranchReconcilerDeps` could still pass
+  // `enabled` through structurally, and until #842 that value silently reached
+  // `reconcileAncestorBranchWorkspaces` via the un-stripped forward below, defeating the
+  // whole point of #582: the periodic tick's enabled state must be a LIVE per-tick
+  // preference read, never a value pinned at schedule time. Destructure it away so the type's
+  // promise is also true at runtime, whatever shape the caller's object actually has.
+  const { enabled: _ignoredEnabled, ...tickDeps } = deps as AncestorBranchReconcilerDeps;
   activeAncestorSweep = startPeriodicSweep({
     name: "ancestor-reconciler",
     intervalMs,
     bootDelayMs: 35_000,
     // `onTick` is the test seam — it replaces the whole tick, all three sweeps below.
     tick: deps.onTick ?? (() => {
-      void reconcileAncestorBranchWorkspaces(deps);
-      void runStrandedSiblingCompensatorTick(deps.database);
+      void reconcileAncestorBranchWorkspaces(tickDeps);
+      void runStrandedSiblingCompensatorTick(tickDeps.database);
       // #380: Path A of the interrupted-merge pair. Deliberately NOT gated on
       // `reconciler_ancestor_branch_enabled` — the enabled check lives in
       // `reconcileAncestorBranchWorkspaces` (Path B, git-touching and therefore expensive).
       // Path A is a pure DB sweep over `mergedAt IS NOT NULL AND status != 'closed'`, which
       // is cheap and must not be disable-able by a pref about git budget, exactly as the
       // stranded-sibling compensator above is not.
-      void runSilentlyMergedCompensatorTick(deps.database);
+      void runSilentlyMergedCompensatorTick(tickDeps.database);
     }),
   });
   return activeAncestorSweep;
