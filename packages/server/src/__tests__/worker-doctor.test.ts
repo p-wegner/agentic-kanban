@@ -102,10 +102,14 @@ describe("worker doctor — provider checks", () => {
     }
   });
 
-  it("reports a provider with no known auth location as unknown, never a pass", async () => {
+  it("reports a provider with no known auth location as skip, never a pass", async () => {
+    // #895 follow-up: "skip" (no check exists), not "unknown" (a check exists and came back
+    // indeterminate) — attestProviderAuth treats them differently, and conflating them here
+    // would make a provider with no known auth-file location (copilot, pi, ...) unable to
+    // ever attest.
     const checks = await checkProvider("node", home);
     const login = checks.find((c) => c.name === "node logged in");
-    expect(login?.status).toBe("unknown");
+    expect(login?.status).toBe("skip");
     expect(login?.detail).toContain("no known auth-file location");
   });
 });
