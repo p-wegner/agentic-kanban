@@ -223,6 +223,14 @@ export interface AgentExecutionService {
    * is never a claim that the session is gone.
    */
   placementOf?(sessionId: string): "host" | "remote" | undefined;
+  /**
+   * Can this session's stdin still receive a follow-up turn RIGHT NOW (#900)? Only a
+   * remote implementation can answer meaningfully — a host session's stdin state is
+   * always known in-process, and asking would just add a hop. Optional so the proxy can
+   * answer uniformly ("not supported by this placement") when the routed implementation
+   * has no way to ask.
+   */
+  probeStdinIdle?(sessionId: string): Promise<{ ok: true; stdinOpen: boolean } | { ok: false; reason: string }>;
 }
 
 export interface AgentDispatchImplementations {
@@ -411,6 +419,9 @@ export function createAgentDispatch(implementations: AgentDispatchImplementation
     isPidAlive: (sessionId) => forSession(sessionId).isPidAlive(sessionId),
     tracksSession: (sessionId) =>
       bySession.has(sessionId) || implementations.remote?.tracksSession?.(sessionId) === true,
+    probeStdinIdle: (sessionId) =>
+      forSession(sessionId).probeStdinIdle?.(sessionId) ??
+      Promise.resolve({ ok: false, reason: "this placement cannot answer whether its stdin is open" }),
     placementOf(sessionId) {
       const impl = forSession(sessionId);
       if (implementations.remote && impl === implementations.remote) return "remote";

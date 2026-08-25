@@ -42,6 +42,8 @@ export interface SessionProbeAnswer {
   lastOutputAtMs?: number;
   exitCode?: number | null;
   exitedAtMs?: number;
+  /** `running` only (#900): can this session still receive stdin input right now? */
+  stdinOpen?: boolean;
 }
 
 export interface SessionRegistryDeps {
@@ -51,6 +53,12 @@ export interface SessionRegistryDeps {
   isLive: (sessionId: string) => boolean;
   /** The agent's pid, when one exists. Absent while a git-transport checkout is provisioning. */
   pidOf: (sessionId: string) => number | undefined;
+  /**
+   * Can this session's stdin still receive input (#900)? Undefined = the caller does not
+   * track this (an older embedding, or a test) — omitted from the answer rather than
+   * guessed, since a wrong `true` here is what makes a board deliver a turn into a dead pipe.
+   */
+  stdinOpenOf?: (sessionId: string) => boolean | undefined;
   /** Injectable clock (`nowMs`, the sanctioned spelling for arithmetic). */
   nowMs?: () => number;
 }
@@ -95,9 +103,11 @@ export function createWorkerSessionRegistry(deps: SessionRegistryDeps) {
     const record = records.get(sessionId);
     if (deps.isLive(sessionId)) {
       const pid = deps.pidOf(sessionId);
+      const stdinOpen = deps.stdinOpenOf?.(sessionId);
       return {
         state: "running",
         ...(pid !== undefined ? { pid } : {}),
+        ...(stdinOpen !== undefined ? { stdinOpen } : {}),
         ...(record ? { startedAtMs: record.startedAtMs } : {}),
         ...(record?.lastOutputAtMs !== undefined ? { lastOutputAtMs: record.lastOutputAtMs } : {}),
       };
