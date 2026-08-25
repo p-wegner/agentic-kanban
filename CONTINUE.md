@@ -3,6 +3,34 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## #857 done: a remote claude builder was never offered board tools (2026-08-25)
+
+`2859065305`. A vocabulary mismatch, not a config or ordering problem. `ProviderId`'s claude
+spelling is `"claude-code"`; `ProviderName`'s is `"claude"`. All three predicates in
+`fleet-mcp-bridge.service.ts` compared a raw `provider ?? "claude"` against NAME spellings, and
+`AgentLaunchRequest.provider` is a `ProviderId` — so every remote CLAUDE dispatch, the common
+case, fell to the default arm and was treated as a provider that cannot be pointed at the
+bridge. No `--mcp-config`, no config file in the checkout, and the brief kept its "no board
+tools here" section, which made the gap self-fulfilling.
+
+That is what left a remote builder unable to file a ticket or comment a finding — disabling the
+board-feedback routing and half the partial-refactor disclosure rule, so findings discovered
+remotely were structurally likelier to be lost than findings on the host.
+
+All three now normalize through `narrowProviderName`, the ONE place the id→name mapping lives.
+
+**Why it survived**: every existing case passed a `ProviderName`, a vocabulary the production
+caller never uses. Both new suites speak the caller's: `fleet-mcp-bridge.test.ts` +3 (ids
+pinned, id/name equivalence over all four providers, default-to-claude), and a new
+`remote-board-tools-claude.test.ts` that drives `agent-remote.launch` with
+`provider: "claude-code"` against a real bridge and asserts on the `assign` itself — flag
+present, no token in argv, config file shipped, brief rewritten to name the tools. **Checked the
+fix bites**: reverting the predicate fails 6 of those cases.
+
+**Verified**: 109 passing across the eight adjacent suites, god-module gate, full
+`pnpm typecheck`. Full always-run set NOT run — `fleet gate` still RAM-BLOCKED (~3 GB free),
+every run capped at 1–2 workers. **Not** verified against a live worker; see the blocker below.
+
 ## #874 done: a turn against a remote agent is routed, and the refusal stops lying (2026-08-25)
 
 `6be65a4e36`. The ticket said which of its two preconditions actually fails was not pinned
@@ -88,7 +116,7 @@ Three landed back to back while the remote worker was unavailable (see the block
 
 **Blocked on a human, not on us:** `AO-PF38Z8R8` has been offline since 02:21Z and needs an
 interactive `claude /login` on that machine — the board cannot perform it by design (decision 012).
-Until it returns, nothing is dispatchable remotely, and #895/#876/#857 all wait on it
+Until it returns, nothing is dispatchable remotely, and #895/#876 wait on it
 for live verification rather than for code. #895 carries a comment recording exactly what is left
 and why neither of its two routes can be honestly closed today.
 
