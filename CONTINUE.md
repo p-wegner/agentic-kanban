@@ -3,6 +3,65 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## #881 done: `offline` now says WHICH kind of offline, derived not probed (2026-08-25)
+
+A worker dropped mid-session and gave a live instance of #881. The finding: **#774's event
+timeline already records enough to tell the failure modes apart** — nothing needed to be
+emitted, deployed to a worker, or kept in sync. Three signatures were visible in one
+10-hour history, and all three come from ordering, pairing and periodicity of existing rows:
+
+- **Ordering** — `status_change -> offline` BEFORE `disconnected` means heartbeats stopped
+  while the socket was open: a blocked worker, not a bad link. The reverse order is an
+  ordinary transport drop. Reading it backwards sends an operator to the network when the
+  answer is on the worker.
+- **Pairing** — a `connected` with no preceding close means the old socket was never
+  observed closing: a respawn or duplicate dial (#858's shape). 17 of these were sitting in
+  the live worker's history, invisible because nothing paired them.
+- **Retry presence** — the decisive one. A crash-loop reconnects; that is what makes it a
+  loop. Zero attempts after a clean heartbeat means the process exited or the machine went
+  away, and waiting will not fix it.
+
+Landed as `classifyWorkerDrop` (`packages/server/src/services/worker-drop-diagnosis.ts`), a
+pure `classifyX` decision function (#585) returning one of `healthy | process-gone |
+heartbeat-stall | silent-respawn | cycling | flapping | insufficient-data` plus a headline
+that says what to DO. Surfaced on `GET /api/workers/:id/events` as `diagnosis`, rendered as
+a banner above the fleet panel's timeline.
+
+**Verified** (not just "tests pass"):
+- 17/17 in `worker-drop-diagnosis.test.ts`, including two fixtures replaying the REAL
+  observed history rather than only invented rows.
+- Guard suites green: server nloc/purity/service-direction/split-responsibility/openapi x2/
+  emitter-coverage (24), client theme-tokens/conventions/nloc/type-edge/api-validation (42),
+  shared wire-dto/max-file-size/sub-kinds/single-consumer/barrel-safety (22).
+- `typecheck` exit 0 across shared, server, client.
+- **Live**: the endpoint returned `process-gone`, high confidence, on the actually-offline
+  worker, and the banner rendered in the browser at 1440x900 with page overflow 0.
+
+Two details worth keeping:
+- The diagnosis is computed from **its own query** over the transport rows, never from the
+  `events` the caller asked for — those honour `types`/`limit`, and a verdict derived from a
+  filtered window is confidently wrong (ask for `assigned` only and it would report health).
+  Confirmed live: `?limit=5` still diagnosed over the full 200-row window.
+- `reconnectRegular` is `null`, not `false`, when there are too few samples — "measured and
+  irregular" is a different and untrue claim. The live worker's real intervals turned out to
+  be an exponential backoff ramp (7s to 27s, then a 225s gap, then nothing), which correctly
+  reads as NOT periodic; the earlier 16:24-16:58 sawtooth window, in isolation, does.
+
+Also fixed in passing: the timeline's empty state claimed connect/disconnect and assign/exit
+were "not recorded yet". #801 made that false, and it was false in exactly the place an
+operator looks when those are the rows they are missing.
+
+**Still open and mine**: #894 (the gate fails on load-induced flakes and retries itself 15
+times), #895 (a worker advertises providers it cannot authenticate as — the probe exists in
+`worker doctor` check 7, only the wire is missing), #897 (timeline markers overflow ~48px,
+needs someone who knows the intent).
+
+**Blocked on the user, not on code**: `AO-PF38Z8R8` needs an interactive `claude /login`.
+Remote dispatch itself is proven working end to end — placement, git transport, and the
+incoming-ref landing all succeeded; the agent then exits in 5.5s with "Not logged in".
+The board cannot perform that login by design (decision 012: credentials never leave their
+machine), so no board-side change unblocks it.
+
 ## Direct-master fleet batch: 26 tickets to Done, merge queue drained (2026-08-25)
 
 One session (direct-master, subagents in isolated worktrees, gates once per batch) took the
