@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { DEPENDENCY_TYPES } from "../src/schema/issue-dependencies.js";
+import { DEPENDENCY_TYPES } from "../src/lib/dependency-type-traits.js";
 import {
   DEPENDENCY_TYPE_TRAITS,
   BLOCKING_DEPENDENCY_TYPES,

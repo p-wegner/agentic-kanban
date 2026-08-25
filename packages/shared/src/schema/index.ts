@@ -11,9 +11,12 @@ export { preferences } from "./preferences.js";
 export { runtimeState } from "./runtime-state.js";
 export { diffComments, diffCommentsRelations } from "./diff-comments.js";
 export {
-  issueDependencies, issueDependenciesRelations, DEPENDENCY_TYPES, DEPENDENCY_TYPE_LABELS,
+  issueDependencies, issueDependenciesRelations, DEPENDENCY_TYPE_LABELS,
   SYMMETRIC_DEPENDENCY_TYPES,
 } from "./issue-dependencies.js";
+// #869: `DEPENDENCY_TYPES` is declared in `lib/dependency-type-traits.ts` (pure) and is
+// NOT re-exported here — see the #618 note below: re-exporting a lib value through the
+// schema barrel would invert the layering. Import it from the deep lib path.
 // #618: the per-type SEMANTICS live in `lib/dependency-type-traits.ts` and are imported
 // from there directly. This barrel deliberately does NOT re-export them: schema is the
 // innermost element, so a `shared-schema -> shared-lib` edge inverts the layering. The

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Database } from "../db/index.js";
 import { withTransaction } from "../db/index.js";
 import type { BoardEventSink } from "./board-events.js";
-import { DEPENDENCY_TYPES, type DependencyType } from "@agentic-kanban/shared/schema";
+import { DEPENDENCY_TYPES, type DependencyType, isDirectionalDependencyType, DIRECTIONAL_DEPENDENCY_TYPES } from "@agentic-kanban/shared/lib/dependency-type-traits";
 import { IssueError } from "./issue-error.js";
 import type { BatchDependencyInput } from "./issue.service.js";
 import {
@@ -20,7 +20,6 @@ import {
 } from "../repositories/issue-service.repository.js";
 import { wouldCreateCycle } from "./board-aggregation.service.js";
 import { hasPath } from "../lib/dependency-graph.js";
-import { isDirectionalDependencyType, DIRECTIONAL_DEPENDENCY_TYPES } from "@agentic-kanban/shared/lib/dependency-type-traits";
 
 /** Edge types that can form a meaningful cycle (the symmetric peers cannot). */
 

@@ -73,9 +73,9 @@ function specDbOpMembers(): string[] {
 }
 
 /**
- * `lib/` plus the package barrel — the spec's `shared-lib` element matches both, so a guard
- * that scanned only `lib/` would leave the barrel's schema edge unaccounted for while the
- * map claims it is frozen.
+ * `lib/` plus the package barrel — the barrel is its own spec element (`shared-barrel`,
+ * #869) whose rule ALLOWS `shared-schema`, but it stays in this scan so its schema edge
+ * remains accounted for here rather than silently out of view.
  */
 const libFiles = [...walkPackageSources(libRoot), path.join(sharedSrc, "index.ts")];
 
@@ -83,17 +83,15 @@ const libFiles = [...walkPackageSources(libRoot), path.join(sharedSrc, "index.ts
  * Pure modules that read `shared/schema` for a legitimate reason, frozen. Only ever
  * REMOVE from this list — a new entry means a new pure module reached into persistence
  * and must be justified in review rather than waved through.
+ *
+ * (#869 shrank it: `dependency-type-traits.ts` no longer reads schema — the vocabulary
+ * it needed now lives IN that lib module, and schema imports the type back type-only.)
  */
 const SCHEMA_READ_EXCEPTIONS: Record<string, string> = {
   "../index.ts":
-    "the PACKAGE BARREL — re-exporting `schema/index.js` is what a barrel is for; it " +
-    "classifies as `shared-lib` only because the spec element's match includes " +
-    "`packages/shared/src/index.ts`.",
-  "dependency-type-traits.ts":
-    "reads the DEPENDENCY_TYPES `as const` column VOCABULARY, not a table — the " +
-    "`shared-schema` element intent explicitly blesses vocabularies living next to their " +
-    "tables, and the file's own header records why the predicates cannot live in schema/ " +
-    "(routes and the CLI ask them, and both are forbidden to import persistence).",
+    "the PACKAGE BARREL — re-exporting `schema/index.js` is what a barrel is for; since " +
+    "#869 the spec classifies it as its own `shared-barrel` element whose rule allows " +
+    "`shared-schema`, so this entry is bookkeeping, not an exception to the spec.",
 };
 
 describe("shared/lib sub-kinds (#590)", () => {
@@ -133,5 +131,7 @@ describe("shared/lib sub-kinds (#590)", () => {
     const spec = JSON.parse(fs.readFileSync(specPath, "utf8")) as { rules: Record<string, string[]> };
     expect(spec.rules["shared-lib"]).not.toContain("shared-schema");
     expect(spec.rules["shared-db-op"]).toContain("shared-schema");
+    // #869: the package barrel is its own element and MAY reach schema — that is its job.
+    expect(spec.rules["shared-barrel"]).toContain("shared-schema");
   });
 });

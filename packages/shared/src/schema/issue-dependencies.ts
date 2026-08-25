@@ -1,18 +1,12 @@
 import { sqliteTable, text, index, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { relations } from "drizzle-orm";
 import { issues } from "./issues.js";
+// #869: the vocabulary is DECLARED in lib/dependency-type-traits.ts (pure — the CLI,
+// routes and the traits predicates read it without touching persistence). This module
+// imports the TYPE only; type-only imports are erased, so schema stays edge-free.
+import type { DependencyType } from "../lib/dependency-type-traits.js";
 
-export type DependencyType = "depends_on" | "blocked_by" | "related_to" | "duplicates" | "parent_of" | "child_of" | "coupled_with";
-
-export const DEPENDENCY_TYPES: DependencyType[] = [
-  "depends_on",
-  "blocked_by",
-  "related_to",
-  "duplicates",
-  "parent_of",
-  "child_of",
-  "coupled_with",
-];
+export type { DependencyType };
 
 export const DEPENDENCY_TYPE_LABELS: Record<DependencyType, string> = {
   depends_on: "Depends on",
