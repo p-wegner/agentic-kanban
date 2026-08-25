@@ -39,6 +39,7 @@ import { VERIFY_SCRIPT_TIMEOUT_MS } from "./verify-budget.js";
 // 1000-line god-module ceiling). Re-exported below so its importers are unchanged.
 import { summarizeVerifyFailure } from "./verify-failure-summary.js";
 import { VERIFY_NEUTRALIZED_LISTENER_ENV } from "../lib/verify-env.js";
+import { resolveVerifyOutcome } from "./verify-retry-strategies.js";
 
 /**
  * Default verify-gate timeout (#192). The verify gate runs a full build+test suite in a
@@ -346,8 +347,16 @@ export async function runPreMergeGate(
   // for them a markdown-only change would cost the ~40-minute build that #198's skip exists
   // to avoid. Measured shape of the bug: the env var made the narrowing look universal while
   // being inert everywhere but here. A foreign project keeps the wholesale #198 skip.
-  const docsOnlyGuardsRunApplies =
-    docsOnly && isSelfProjectRepo(await getProjectRepoPath(projectId, database));
+  // Hoisted out of the docs-only expression below because #894's flake retry needs the same
+  // answer for a different reason: a suite scope is honoured only by THIS repo's
+  // `scripts/test-mine.mjs`, so for any other project a "retry" would be a second FULL run.
+  const isSelfRepo = isSelfProjectRepo(await getProjectRepoPath(projectId, database));
+  const docsOnlyGuardsRunApplies = docsOnly && isSelfRepo;
+  /**
+   * Set when #894's targeted re-run cleared a load-induced failure, so the PASSING gate
+   * message can say the suites were re-run. A gate that quietly downgrades its own evidence
+   * is the thing `CLAUDE.md` forbids — a level may only weaken verification visibly.
+   */
   const skipVerifyForForeignDocsOnly = docsOnly && !docsOnlyGuardsRunApplies;
   if (skipVerifyForForeignDocsOnly && verifyConfigured && workspace.workingDir) {
     console.log(`[pre-merge-gate] skipping verify_script for workspace ${workspace.id} — diff touches only docs (${changedFiles.length} file(s)), and this project's verify_script has no guards-only mode (#198)`);
@@ -483,62 +492,43 @@ export async function runPreMergeGate(
           timedOut: false,
         })),
       );
-    let result = await runVerify();
-    if (result.exitCode !== 0) {
-      // A wall-clock kill is NOT a build/test failure (#192) — the same commit can be killed
-      // now and pass minutes later purely because the build cache warmed up in the meantime.
-      // Report it as inconclusive/retryable instead of a red gate, and skip the missing-deps
-      // auto-retry below (a timeout carries no signal about missing dependencies).
-      if (result.timedOut) {
-        return {
-          passed: false,
-          skipped: false,
-          stage: "verify",
-          timedOut: true,
-          message: `verify_script timed out after ${verifyTimeoutMs}ms — inconclusive (not a build/test failure); merge withheld pending a retry. Increase verify_timeout_ms_${projectId} if this stack's clean build genuinely needs longer.`,
-        };
-      }
-      // #169: a failure that LOOKS like missing dependencies (rather than a real test/build
-      // regression) is worth one automatic install+retry before withholding the merge — this
-      // is exactly the failure mode a silently-failed worktree setup script produces hours
-      // later. Only attempted once, and only when the project has an install command configured.
-      const failureOutput = `${result.stderr || ""}\n${result.stdout || ""}`;
-      let retried = false;
-      if (looksLikeMissingDepsFailure(failureOutput)) {
-        const installCommand = await getProjectSetupScript(projectId, database).catch(() => null);
-        if (installCommand && installCommand.trim()) {
-          console.warn(`[pre-merge-gate] verify_script failed with a missing-deps signature for workspace ${workspace.id} — retrying once after running the project's install command`);
-          await runUnderBuildSemaphore(() =>
-            runSetupScript(workingDir, installCommand, { timeoutMs: DEFAULT_SETUP_SCRIPT_TIMEOUT_MS, env: gradleEnv }).catch((e) => ({
-              exitCode: 1,
-              stdout: "",
-              stderr: String(e),
-              timedOut: false,
-            })),
-          );
-          retried = true;
-          result = await runVerify();
-        }
-      }
-      if (result.exitCode !== 0) {
-        if (result.timedOut) {
-          return {
-            passed: false,
-            skipped: false,
-            stage: "verify",
-            timedOut: true,
-            message: `verify_script timed out after ${verifyTimeoutMs}ms${retried ? " (after an auto-install retry)" : ""} — inconclusive (not a build/test failure); merge withheld pending a retry. Increase verify_timeout_ms_${projectId} if this stack's clean build genuinely needs longer.`,
-          };
-        }
-        const suffix = retried ? " (retried once after an auto-install; still failing)" : "";
-        return {
-          passed: false,
-          skipped: false,
-          stage: "verify",
-          message: `verify_script failed (exit ${result.exitCode})${suffix}: ${summarizeVerifyFailure(result.stdout || "", result.stderr || "", workspace.id)}`,
-        };
-      }
+    // #169's install retry and #894's targeted flake retry both answer ONE question - "is this
+    // failure the code's fault?" - and inlined here they took runPreMergeGate past the
+    // god-module gate's branch ceiling. They live in verify-retry-strategies.ts now; everything
+    // that needs a worktree, the database or the build semaphore is injected below.
+    const outcome = await resolveVerifyOutcome({
+      result: await runVerify(),
+      runVerify,
+      runVerifyWithRetryScope: (retryScope) =>
+        runUnderBuildSemaphore(() =>
+          runSetupScript(workingDir, verifyScript!, {
+            timeoutMs: verifyTimeoutMs,
+            env: { ...verifyEnv, KANBAN_RETRY_TEST_FILES: retryScope },
+          }).catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e), timedOut: false })),
+        ),
+      getInstallCommand: () => getProjectSetupScript(projectId, database).catch(() => null),
+      runInstall: async (command) => {
+        await runUnderBuildSemaphore(() =>
+          runSetupScript(workingDir, command, {
+            timeoutMs: DEFAULT_SETUP_SCRIPT_TIMEOUT_MS,
+            env: gradleEnv,
+          }).catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e), timedOut: false })),
+        );
+      },
+      looksLikeMissingDeps: looksLikeMissingDepsFailure,
+      // Only this repo's `scripts/test-mine.mjs` honours a suite scope; for any other project
+      // the env var is inert and the "targeted re-run" would be a second FULL run.
+      scoped: isSelfRepo,
+      verifyTimeoutMs,
+      projectId,
+      workspaceId: workspace.id,
+      summarize: (stdout, stderr) => summarizeVerifyFailure(stdout, stderr, workspace.id),
+    });
+    if (outcome.failure) {
+      return { passed: false, skipped: false, stage: "verify", ...outcome.failure };
     }
+    // Carried on the tier info so the PASSING message names it (see GateTierInfo).
+    if (gateTierInfo && outcome.flakeRetryNote) gateTierInfo.flakeRetryNote = outcome.flakeRetryNote;
     } finally {
       // Best-effort by design (#352's root cause): on Windows the directory cannot be removed
       // while any surviving grandchild of the verify run still holds it as its cwd. Log it so a

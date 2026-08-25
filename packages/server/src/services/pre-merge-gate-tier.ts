@@ -160,6 +160,14 @@ export interface GateTierInfo {
    * defect, so nothing about the failure itself said "contention".
    */
   buildersQuiesced?: boolean;
+  /**
+   * Set when #894's targeted re-run cleared suites that had failed under load. A PASSING gate
+   * must say this: the merge was cleared by a second, narrower run, and an operator reading
+   * "passed" with no mention of it would have a different picture of the evidence than the
+   * one that actually exists. Same rule as `buildersQuiesced` — the conditions a verdict was
+   * produced under are part of the verdict.
+   */
+  flakeRetryNote?: string;
 }
 
 /**
@@ -193,7 +201,8 @@ export function buildGateTierMessage(tierInfo: GateTierInfo | null): string {
       ? []
       : [tierInfo.buildersQuiesced ? "builders held" : "builders NOT held"]),
   ];
-  return `pre-merge gate passed (${parts.join(", ")})`;
+  const retry = tierInfo.flakeRetryNote ? ` ${tierInfo.flakeRetryNote}` : "";
+  return `pre-merge gate passed (${parts.join(", ")})${retry}`;
 }
 
 /**

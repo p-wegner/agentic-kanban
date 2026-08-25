@@ -383,6 +383,44 @@ const ALWAYS_RUN_TESTS = buildAlwaysRunTests();
 const guardsOnly = /^(1|true|yes)$/i.test((process.env.KANBAN_TEST_GUARDS_ONLY || "").trim());
 
 /**
+ * Flake-retry mode (`KANBAN_RETRY_TEST_FILES=pkg:file,pkg:file`): run EXACTLY these suites and
+ * nothing else (#894).
+ *
+ * Why its own variable rather than reusing `KANBAN_TEST_FILES`: that one takes CHANGED SOURCE
+ * files and derives their related tests via `vitest related`. Handing it a test-file path asks
+ * "what tests relate to this test", which is not the question — and for a suite that imports
+ * nothing it checks (every guard/ratchet/scanner) the answer is "nothing", so the retry would
+ * silently run an empty set and report green.
+ *
+ * The package label is part of each entry because vitest runs with the PACKAGE as its cwd, so
+ * a bare `src/__tests__/x.test.ts` is ambiguous — every package has one.
+ *
+ * Motivation: the gate ran the full 7,183-test suite fifteen times on one workspace, failing
+ * each time on ~3 timing-shaped tests that pass in ~22s when re-run on a quiet box. See
+ * `packages/server/src/services/verify-flake-retry.ts` for the measurement and the guard rails.
+ */
+export function parseRetryScope(raw) {
+  const out = new Map();
+  for (const entry of (raw || "").split(",")) {
+    const trimmed = entry.trim();
+    if (!trimmed) continue;
+    const idx = trimmed.indexOf(":");
+    // No label means we cannot know which package's cwd the path is relative to. Skipping is
+    // the safe read: a wrong guess runs a DIFFERENT file and reports a green for it.
+    if (idx <= 0) continue;
+    const label = trimmed.slice(0, idx).trim();
+    const file = trimmed.slice(idx + 1).trim().replace(/\\/g, "/");
+    if (!label || !file) continue;
+    if (!out.has(label)) out.set(label, []);
+    const files = out.get(label);
+    if (!files.includes(file)) files.push(file);
+  }
+  return out;
+}
+
+const retryScope = parseRetryScope(process.env.KANBAN_RETRY_TEST_FILES);
+
+/**
  * File-level test scoping via `KANBAN_TEST_FILES` (comma-separated, repo-relative), the
  * gate's tier 1 (#278).
  *
@@ -474,7 +512,16 @@ function runPackage({ dir, label, exclude }, mode = null) {
       ? ["related", ...mode.files, "--run", "--passWithNoTests"]
       : mode?.kind === "guards"
         ? ["run", ...mode.files, "--passWithNoTests"]
-        : ["run"];
+        // #894 flake-retry: the named suites, and deliberately NO `--passWithNoTests`. If a
+        // suite resolves to nothing — it is in this package's `exclude` list, or the path no
+        // longer selects — vitest exits non-zero and the retry fails, leaving the gate red.
+        // That is the correct direction to fail: a retry that "passes" by running nothing
+        // would clear a merge on the strength of an empty run. Note also that an unknown
+        // `kind` falls through to `["run"]`, i.e. the package's FULL suite, which for this
+        // mode would be the 44-minute operation the whole mechanism exists to avoid.
+        : mode?.kind === "flake-retry"
+          ? ["run", ...mode.files]
+          : ["run"];
     const args = [vitestEntry, ...modeArgs, ...excludeArgs, ...workerCapArgs, ...passthrough];
     console.log(
       `\n[test:mine] ${label}: node vitest ${[...modeArgs, ...excludeArgs, ...workerCapArgs, ...passthrough].join(" ")}`
@@ -779,6 +826,40 @@ function reportTreeDrift(before) {
 if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
   let failed = false;
   const treeBefore = treeSnapshot();
+  if (retryScope.size > 0) {
+    // #894 — the narrow re-run of suites that just failed a full gate. Runs ONLY what it was
+    // given: no guard top-up, no related-derivation, no fallback to a package's full suite.
+    // A fallback here would defeat the purpose, since the point is that this costs ~22s
+    // rather than 44 minutes.
+    const planned = PACKAGES.map((pkg) => ({
+      pkg,
+      files: (retryScope.get(pkg.label) ?? []).filter((f) => existsSync(resolve(ROOT, pkg.dir, f))),
+    })).filter((entry) => entry.files.length > 0);
+    const total = planned.reduce((n, entry) => n + entry.files.length, 0);
+    const asked = [...retryScope.values()].reduce((n, files) => n + files.length, 0);
+    console.log(`\n[test:mine] flake-retry mode (KANBAN_RETRY_TEST_FILES): ${total} suite(s) across ${planned.length} package(s)`);
+    if (total !== asked) {
+      // Never quietly run a subset: a suite that vanished between the failing run and the
+      // retry (renamed, deleted, or attributed to the wrong package) means the retry no
+      // longer covers what failed, and a green would be a false clearance.
+      console.error(`[test:mine] flake-retry was asked for ${asked} suite(s) but only ${total} exist on disk — refusing to report a green that did not re-run everything that failed.`);
+      process.exit(1);
+    }
+    if (total === 0) {
+      console.error("[test:mine] flake-retry mode resolved no suites — refusing to report a green that checked nothing.");
+      process.exit(1);
+    }
+    for (const { pkg, files } of planned) {
+      if ((await runPackage(pkg, { kind: "flake-retry", files })).code !== 0) failed = true;
+    }
+    if (reportTreeDrift(treeBefore)) failed = true;
+    if (failed) {
+      console.error("\n[test:mine] The re-run suites failed again — this is a real failure, not machine load.");
+      process.exit(1);
+    }
+    console.log("\n[test:mine] All re-run suites passed.");
+    process.exit(0);
+  }
   if (guardsOnly) {
     // Every package's guard suites, and only those. A package with no marked suite is skipped
     // rather than falling through to its full suite.
