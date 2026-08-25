@@ -170,6 +170,18 @@ export interface WorkspaceResponse {
   isolationDowngraded?: boolean;
   /** Reason for the isolation downgrade (CLI missing, provisioning failed, ...); null when not downgraded. */
   isolationDowngradeReason?: string | null;
+  /**
+   * #861 — set when this workspace's latest session ran on a REMOTE fleet worker
+   * (`sessions.worker_id`). A remote worker authenticates the agent with its OWN
+   * local login and the board sends no credentials (decision 012 / #244 —
+   * `CLAUDE_CONFIG_DIR` is not in the remote-spec env allowlist), so
+   * `profile`/`claudeProfile` above are the BOARD's preference only — they were
+   * never sent to the worker and the UI must not present them as the login that
+   * was actually used. No worker attestation exists (#895), so the effective
+   * worker-local profile is UNKNOWN to the board; the honest render is a
+   * "worker-local profile" label with the board pick demoted to a tooltip.
+   */
+  remotePlacement?: { workerId: string } | null;
 }
 
 /** One repo's entry in GET /api/workspaces/:id/repo-merge-status (#70/#75). */

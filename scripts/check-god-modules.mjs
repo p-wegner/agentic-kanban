@@ -152,7 +152,7 @@ const MAX_FUNCTION_BRANCHES = 25;
 const COMPLEXITY_BASELINE = {
   "packages/client/src/components/BoardColumn.tsx": 26,
   "packages/client/src/components/TerminalEventRenderer.tsx": 36,
-  "packages/client/src/components/WorkspaceCard.tsx": 35,
+  "packages/client/src/components/WorkspaceCard.tsx": 34,
   "packages/client/src/lib/butler-event-reducer.ts": 31,
   "packages/client/src/lib/terminal-transcript.ts": 27,
   "packages/mcp-server/src/tools/reviewer-fixes.ts": 26,

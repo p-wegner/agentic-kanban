@@ -303,6 +303,9 @@ export async function getLatestSessionsForWorkspaces(
       startedAt: sessions.startedAt,
       endedAt: sessions.endedAt,
       triggerType: sessions.triggerType,
+      // #861 — non-null when the session was dispatched to a remote fleet worker;
+      // the enriched workspace DTO derives `remotePlacement` from it.
+      workerId: sessions.workerId,
     })
     .from(sessions)
     .where(inArray(sessions.workspaceId, wsIds))
