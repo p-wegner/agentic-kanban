@@ -93,6 +93,9 @@ describe("MCP catalog ↔ runtime parity (fast, no server spawn)", () => {
 
   // Importing all ~80 tool modules (first-run transform included) can exceed the
   // default 10s hook timeout on a cold cache — still no spawn, just module loading.
+  // 180s, not 60s: measured 2026-08-25, 60s was exceeded by module loading alone
+  // whenever a second verify chain shared the box (gate + builder is a NORMAL load
+  // shape here, not an anomaly) — it failed the merge gate three times that day.
   beforeAll(async () => {
     registry = parseIndexRegistry();
 
@@ -133,7 +136,7 @@ describe("MCP catalog ↔ runtime parity (fast, no server spawn)", () => {
     } catch {
       // best-effort: the libsql client may still hold the throwaway file on Windows
     }
-  }, 60_000);
+  }, 180_000);
 
   it("the parsed TOOL_REGISTRARS map is substantial and every registrar registers its wired name", () => {
     // Parse sanity: if the index.ts regex ever stops matching, fail loudly instead of
