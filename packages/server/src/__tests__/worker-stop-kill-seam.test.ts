@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { tmpdir } from "node:os";
+import { mkdtempSync } from "node:fs";
+import { join } from "node:path";
 import type { WorkerToBoardMessage, WorkerLaunchSpec } from "@agentic-kanban/shared/lib/worker-protocol";
 
 /**
@@ -63,7 +65,10 @@ function nodeSpec(script: string, overrides?: Partial<WorkerLaunchSpec>): Worker
 
 function collector() {
   const messages: WorkerToBoardMessage[] = [];
-  const runner = createWorkerAgentRunner((msg) => messages.push(msg));
+  // Temp work root: since #871 the runner reads/writes an undelivered-results file under
+  // its work root; the machine's real one is out of bounds for a test.
+  const workRoot = mkdtempSync(join(tmpdir(), "ak-worker-root-"));
+  const runner = createWorkerAgentRunner((msg) => messages.push(msg), { workRoot });
   const eventsOf = (sessionId: string) =>
     messages.flatMap((m) => (m.type === "event" && m.event.sessionId === sessionId ? [m.event] : []));
   const exitOf = (sessionId: string) => eventsOf(sessionId).find((e) => e.type === "exit");

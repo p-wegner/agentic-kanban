@@ -1,5 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { tmpdir } from "node:os";
+import { mkdtempSync } from "node:fs";
+import { join } from "node:path";
 import { createWorkerAgentRunner, ASSIGN_REFUSED_AT_CAPACITY } from "../worker/worker-agent-runner.js";
 import type { WorkerToBoardMessage, WorkerLaunchSpec } from "@agentic-kanban/shared/lib/worker-protocol";
 
@@ -20,7 +22,10 @@ function nodeSpec(script: string, overrides?: Partial<WorkerLaunchSpec>): Worker
 
 function collector(options?: { maxConcurrency?: number }) {
   const messages: WorkerToBoardMessage[] = [];
-  const runner = createWorkerAgentRunner((msg) => messages.push(msg), options);
+  // A temp work root per runner: since #871 the runner reads/writes the undelivered-results
+  // file under its work root, and a test must never touch the machine's real one.
+  const workRoot = mkdtempSync(join(tmpdir(), "ak-worker-root-"));
+  const runner = createWorkerAgentRunner((msg) => messages.push(msg), { ...options, workRoot });
   const eventsOf = (sessionId: string) =>
     messages.flatMap((m) => (m.type === "event" && m.event.sessionId === sessionId ? [m.event] : []));
   const exitOf = (sessionId: string) => eventsOf(sessionId).find((e) => e.type === "exit");

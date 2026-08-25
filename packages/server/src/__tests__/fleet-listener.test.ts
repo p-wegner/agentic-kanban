@@ -137,6 +137,9 @@ describe("fleet listener", () => {
       const { pairingToken } = fleet.registry.mintPairingToken();
       daemon = await startWorkerDaemon({
         boardUrl: base, pairingToken, name: "through-fleet-port", stateFile, log: () => {},
+        // Temp work root (#871): the daemon's runner reads/writes an undelivered-results
+        // file under its work root; the machine's real one is out of bounds for a test.
+        workRoot: mkdtempSync(join(tmpdir(), "ak-worker-root-")),
       });
       await daemon.connected;
 

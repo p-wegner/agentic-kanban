@@ -31,6 +31,13 @@ import type { WorkerLaunchSpec, WorkerRepoTransport, WorkerToBoardMessage } from
 import { createWorkerAgentRunner } from "../worker/worker-agent-runner.js";
 import { MAX_REPAIR_ATTEMPTS, startWorkerDaemon, type WorkerDaemonHandle } from "../worker/worker-daemon.js";
 
+/**
+ * Temp work root per runner/daemon: since #871 the runner reads and writes an
+ * undelivered-results file under its work root, and a test must never touch the
+ * machine's real ~/.agentic-kanban/worker.
+ */
+const freshWorkRoot = () => mkdtempSync(join(tmpdir(), "ak-worker-root-"));
+
 const cleanEnv = Object.fromEntries(
   Object.entries(process.env).filter(([, v]) => v !== undefined),
 ) as Record<string, string>;
@@ -165,6 +172,7 @@ describe("the drain waits for results that are already finished (#754 items 1+2)
     let pushReached = false;
     const runner = createWorkerAgentRunner(() => {}, {
       boardUrl: "http://board",
+      workRoot: freshWorkRoot(),
       repoOps: stubRepoOps(() => {
         pushReached = true;
         return new Promise<void>((r) => { release = r; });
@@ -189,6 +197,7 @@ describe("the drain waits for results that are already finished (#754 items 1+2)
       // Never resolves: a real one is a `git push` over a link that may be gone, which is
       // exactly why the wait has to be bounded rather than infinite.
       repoOps: stubRepoOps(() => new Promise<void>(() => {})),
+      workRoot: freshWorkRoot(),
     });
     runner.assignWithRepo("s-hang", nodeSpec("process.exit(0)"), fakeRepo("feature/ak-2"));
     await vi.waitFor(() => expect(runner.pendingPushCount()).toBe(1), { timeout: 20000 });
@@ -198,7 +207,7 @@ describe("the drain waits for results that are already finished (#754 items 1+2)
   }, 40000);
 
   it("a session with no repo owes no push, so a drain is instant and empty", async () => {
-    const runner = createWorkerAgentRunner(() => {}, {});
+    const runner = createWorkerAgentRunner(() => {}, { workRoot: freshWorkRoot() });
     runner.assign("s-plain", nodeSpec("process.exit(0)"));
     await vi.waitFor(() => expect(runner.runningSessionIds()).toEqual([]), { timeout: 20000 });
     expect(await runner.drainPushes(50)).toEqual({ completed: 0, abandoned: 0 });
@@ -234,6 +243,7 @@ describe("the daemon against a real board socket (#754 items 2,4,5,6)", () => {
       providers: ["claude"],
       maxConcurrency: 3,
       stateFile: stateFile(),
+      workRoot: freshWorkRoot(),
       heartbeatIntervalMs: 60,
       log: () => {},
     });
@@ -270,6 +280,7 @@ describe("the daemon against a real board socket (#754 items 2,4,5,6)", () => {
       boardUrl: board.url,
       pairingToken: "pair-1",
       stateFile: stateFile(),
+      workRoot: freshWorkRoot(),
       heartbeatIntervalMs: 60_000, // no periodic beat: the drain must send one itself
       log: () => {},
     });
@@ -300,6 +311,7 @@ describe("the daemon against a real board socket (#754 items 2,4,5,6)", () => {
       boardUrl: board.url,
       pairingToken: "pair-1",
       stateFile: stateFile(),
+      workRoot: freshWorkRoot(),
       heartbeatIntervalMs: 60_000,
       log: () => {},
     });
@@ -332,7 +344,7 @@ describe("an agent's stdin cannot take the daemon down (#754 item 3)", () => {
     process.on("uncaughtException", onUncaught);
     try {
       const messages: WorkerToBoardMessage[] = [];
-      const runner = createWorkerAgentRunner((m) => messages.push(m), {});
+      const runner = createWorkerAgentRunner((m) => messages.push(m), { workRoot: freshWorkRoot() });
       // Exits immediately; the prompt is far bigger than a pipe buffer, so the write
       // cannot complete and the pipe breaks under it. Before #754 nothing in worker/
       // listened for that 'error' — and an unhandled stream error is a process-level
@@ -419,6 +431,7 @@ describe("a 401 stops instead of looping forever (#754 item 4)", () => {
       const daemon = await startWorkerDaemon({
         boardUrl: board.url,
         stateFile: pairedStateFile(board.url), // already paired => no --token needed to start
+        workRoot: freshWorkRoot(),
         heartbeatIntervalMs: 40,
         log: () => {},
         onFatal: (reason) => fatal.push(reason),
@@ -449,6 +462,7 @@ describe("a 401 stops instead of looping forever (#754 item 4)", () => {
         boardUrl: board.url,
         pairingToken: "pair-1",
         stateFile: pairedStateFile(board.url),
+        workRoot: freshWorkRoot(),
         heartbeatIntervalMs: 40,
         log: () => {},
         onFatal: (reason) => fatal.push(reason),

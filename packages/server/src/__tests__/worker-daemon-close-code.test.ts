@@ -66,6 +66,9 @@ describe("worker daemon disconnect log", () => {
       pairingToken: "pair",
       name: "close-code-worker",
       stateFile,
+      // Temp work root (#871): the daemon's runner reads/writes an undelivered-results
+      // file under its work root; the machine's real one is out of bounds for a test.
+      workRoot: join(fixtureDir, "work-root"),
       // A heartbeat would only add noise; the WS is what these tests watch.
       heartbeatIntervalMs: 60 * 60 * 1000,
       log: (line) => logs.push(line),
