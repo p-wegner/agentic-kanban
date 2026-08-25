@@ -10280,7 +10280,7 @@ paths:
               schema: {}
   /api/workspaces/{id}/merge-status:
     get:
-      summary: a finished one. `null` means this process has no record (never merged here, or restarted).
+      summary: '"the gate passed and only the transport died; a merge retry will reuse the verdict".'
       tags:
         - workspace-actions
       operationId: get_api_workspaces_id_merge-status
