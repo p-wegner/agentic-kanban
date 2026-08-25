@@ -14,6 +14,7 @@ import {
   updateWorkspaceCommentBody, resolveWorkspaceCommentBody,
 } from "./workspace-action-body-schemas.js";
 import { completeMergeJob, failMergeJob, getMergeJob, startMergeJob } from "../services/merge-job.service.js";
+import { describePersistedGateVerdict } from "../services/workspace-merge-gate.js";
 
 import { queryFlag } from "../middleware/query-params.js";
 import { ConflictError, UnprocessableError } from "../errors/index.js";
@@ -359,10 +360,31 @@ export function createWorkspaceActionsRoute(
 
   // GET /api/workspaces/:id/merge-status — the latest merge job for this workspace, including
   // a finished one. `null` means this process has no record (never merged here, or restarted).
-  router.get("/:id/merge-status", (c) => {
+  //
+  // #893: "restarted" is exactly the case where a caller most needs this endpoint — a tsx-watch
+  // restart killed the merge request AFTER its 30-45 min gate had passed. The persisted gate
+  // verdict (workspace_merge_gate) survives that restart, so when this process has no job the
+  // response says whether a PASSING verdict is stored — distinguishing "the gate failed" from
+  // "the gate passed and only the transport died; a merge retry will reuse the verdict".
+  router.get("/:id/merge-status", async (c) => {
     const id = c.req.param("id");
     const job = getMergeJob(id);
-    if (!job) return c.json({ job: null, message: "no merge job recorded for this workspace in the current server process" });
+    if (!job) {
+      const persistedGateVerdict = await describePersistedGateVerdict(id);
+      if (persistedGateVerdict) {
+        return c.json({
+          job: null,
+          persistedGateVerdict,
+          message:
+            "no merge job recorded for this workspace in the current server process (it may have restarted mid-merge) — "
+            + `but a PASSING pre-merge gate verdict is persisted (stage ${persistedGateVerdict.stage}, ran ${persistedGateVerdict.ranAt}). `
+            + (persistedGateVerdict.reusable
+              ? "A merge retry will reuse it instead of re-running the gate, as long as the branch/base tips and verification tier are unchanged (#893)."
+              : "It is too old (or lacks tips/tier) to reuse, so a merge retry will re-run the gate."),
+        });
+      }
+      return c.json({ job: null, message: "no merge job recorded for this workspace in the current server process" });
+    }
     return c.json({ job });
   });
 
