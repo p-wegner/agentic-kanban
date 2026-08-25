@@ -8886,6 +8886,29 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/workers/{id}/update-check:
+    get:
+      summary: Answers the board's own worker build + protocol version, for `worker update-check` (#880).
+      tags:
+        - workers
+      operationId: get_api_workers_id_update-check
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "401":
+          description: Error
+          content:
+            application/json:
+              schema: {}
   /api/workflows/analytics:
     get:
       summary: GET /api/workflows/analytics?projectId=

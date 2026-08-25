@@ -39,6 +39,7 @@ import WebSocket from "ws";
 import {
   parseBoardToWorkerMessage,
   WORKER_PROTOCOL_VERSION,
+  WORKER_UPDATE_REMEDIATION,
   type WorkerCapabilities,
   type WorkerToBoardMessage,
 } from "@agentic-kanban/shared/lib/worker-protocol";
@@ -532,10 +533,11 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
         return;
       }
       if (status === 409) {
+        // The steps are the shared WORKER_UPDATE_REMEDIATION (#880), so this refusal and
+        // `worker update-check` cannot drift on what the fix is.
         giveUp(
           `board refuses this worker build on the WebSocket upgrade (409). This worker speaks ` +
-            `protocol ${WORKER_PROTOCOL_VERSION}; rebuild the tarball from the board's checkout ` +
-            `(node scripts/pack-worker.mjs) and reinstall.`,
+            `protocol ${WORKER_PROTOCOL_VERSION}; ${WORKER_UPDATE_REMEDIATION}.`,
         );
       }
       // Anything else falls through to close/reconnect, which is the right response to a
@@ -579,7 +581,8 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
       giveUp(
         `board refuses this worker build: ${body.error ?? "protocol mismatch"} ` +
           `(worker protocol ${WORKER_PROTOCOL_VERSION}, board ${body.boardProtocolVersion ?? "?"}). ` +
-          `Rebuild the worker tarball from the board's checkout and reinstall.`,
+          // Shared with `worker update-check` (#880) so the two never drift on the fix.
+          `To fix: ${WORKER_UPDATE_REMEDIATION}.`,
       );
     }
   }

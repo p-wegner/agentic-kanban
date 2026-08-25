@@ -186,6 +186,7 @@ Fleet worker: connect this machine to a board and execute assigned agent session
 | `worker placements` | Which machine each recent session actually ran on (host, or a named worker) |
 | `worker doctor` | Run ON THE WORKER MACHINE: self-test the whole chain to the board — fleet port reachable, |
 | `worker doctor-board` | Run ON THE BOARD MACHINE: the other half of `worker doctor` |
+| `worker update-check` | Run ON THE WORKER MACHINE: report whether this install's build is behind the board's, and |
 | `worker cleanup` | Run ON THE WORKER MACHINE: remove checkout directories under <work-root>/checkouts/ whose git |
 | `worker events <workerId>` | The board's recorded timeline for one worker (#774): registration, protocol mismatches and |
 
