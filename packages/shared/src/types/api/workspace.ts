@@ -36,6 +36,16 @@ export interface MainWorkspaceInfo {
    * says so instead of showing a zero that reads as "nothing happening".
    */
   remoteUnlanded?: { workerId: string; sessionId: string; label: string } | null;
+  /**
+   * Set when the LATEST session of this workspace ran on a fleet worker (#898, #861 remainder).
+   *
+   * The board's picked profile was never sent there — a worker authenticates its agent with
+   * its own local login (decision 012/#244) and nothing attests which profile it actually used
+   * (#895). So the card's profile chip must not present the board pick as the effective login;
+   * it names the worker and demotes the pick to a tooltip, exactly as the detail chip does.
+   */
+  remotePlacement?: { workerId: string } | null;
+
   pendingPlanPath?: string | null;
   scorecard?: { score: number } | null;
   codeMetrics?: WorkspaceCodeMetrics | null;

@@ -160,6 +160,9 @@ export async function getSessionsForWorkspaces(workspaceIds: string[], database:
     .select({
       ...sessionLifecycleColumns,
       triggerType: sessions.triggerType,
+      // #898: which worker ran it, if any. One nullable text column, and it is what stops the
+      // card claiming the board's profile pick was the login a remote agent actually used.
+      workerId: sessions.workerId,
     })
     .from(sessions)
     .where(inArray(sessions.workspaceId, workspaceIds))
