@@ -22,7 +22,7 @@
  *      budget still lets the critical gate report before it is exhausted.
  */
 import { describe, expect, it } from "vitest";
-import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -154,10 +154,15 @@ describe("Stop hook chain — check-uncommitted actually blocks agent exit on a 
   it("blocks agent exit when tracked source changes are uncommitted", () => {
     const dir = makeFixture();
     try {
-      writeFileSync(
-        join(dir, "packages", "shared", "src", "lib", "foo.ts"),
-        "export const foo = 2; // uncommitted edit\n",
-      );
+      const edited = join(dir, "packages", "shared", "src", "lib", "foo.ts");
+      writeFileSync(edited, "export const foo = 2; // uncommitted edit\n");
+      // Age the edit past #884's fresh-foreign window (2 min): a just-written file with no
+      // strong attribution is deliberately not demanded (it may be another live session's
+      // hand mid-edit); PAST the window it returns to stranded — which is the #480 property
+      // this test pins. The blocking path for a real builder is unaffected: its Write-tool
+      // edits carry strong attribution and are demanded regardless of mtime.
+      const aged = (Date.now() - 3 * 60 * 1000) / 1000;
+      utimesSync(edited, aged, aged);
       const result = runStop(dir);
       expect(result.status).toBe(2);
       expect(result.stdout).toContain("CHECKS FAILED");

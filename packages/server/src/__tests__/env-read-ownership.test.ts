@@ -153,6 +153,7 @@ const FOREIGN: Record<string, string> = {
   npm_execpath: "npm/pnpm — the package manager that invoked us, so a re-invocation uses the same one",
   // Agent CLIs: their config roots. Renaming any of these would break the CLI, not us.
   CLAUDE_CONFIG_DIR: "Claude Code — its config root; the board reads it to find session state",
+  CODEX_HOME: "Codex CLI — its config/credential root; worker doctor consults it for provider login (#875)",
   CLAUDE_PROJECT_DIR: "Claude Code — the repo root it sets for hook execution; a scaffolded hook self-locates with it",
   PI_CODING_AGENT_DIR: "Pi — its config/credential root",
   // Other tools the board shells out to

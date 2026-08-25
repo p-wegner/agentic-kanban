@@ -50,6 +50,11 @@ const KNOWN_LADDERS: Record<string, string> = {
     "the canonical detector has no profile for yet. It calls the detector FIRST and only " +
     "falls through to these, so it is a shrinking remainder, not a rival detector. Each " +
     "branch disappears when the detector grows that profile.",
+  "server/src/worker/worker-repo.ts":
+    "`deriveFallbackSetupCommand` (#852): the install command for a worker checkout whose " +
+    "assignment carries no setup script. The worker binary is import-isolated from the " +
+    "board's detector (worker-cli-isolation.test.ts — it must never open a database), so " +
+    "it keeps a minimal Node-only lockfile ladder instead of importing the canonical one.",
   "server/src/services/project-scaffold/buildable-from-clean.ts":
     "Lockfile-only subset: decides which install command a scaffolded project needs. " +
     "Not a stack detector; it never asks what ecosystem the repo is.",

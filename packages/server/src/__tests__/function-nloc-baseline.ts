@@ -48,6 +48,23 @@
  *
  * There is deliberately NO `SHRINK_GRACE` here: #800's other half was emptying the client's,
  * and re-introducing the escape hatch on a fresh baseline would recreate what it removed.
+ *
+ * ── Second disclosed re-baseline (2026-08-25, the direct-master fleet batch) ────────────
+ *
+ * Five factories grew with feature code landed in one batch; disclosed here rather than
+ * silently, per this file's own precedent above:
+ *
+ *   createWorkspaceCreateService  623 -> 627  (#859: deferred launch failures persist)
+ *   createIssueService            615 -> 616  (#861: remotePlacement on the workspace DTO)
+ *   createRemoteAgentService      594 -> 609  (#871: undelivered_result dispatch; already
+ *                                              split twice — agent-remote-undelivered.ts,
+ *                                              agent-remote.types.ts — to stay under the
+ *                                              file ceiling)
+ *   createWorkspaceActionsRoute   399 -> 414  (#893: persisted-gate-verdict merge-status)
+ *   createWorkerAgentRunner       406 -> 469  (#870/#871: push retry + undelivered
+ *                                              retention/restore. The biggest jump of the
+ *                                              batch; a shrink ticket is filed — the
+ *                                              retention machinery is an extractable leaf.)
  */
 export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "cli/commands/issue.ts::registerIssueCommand": 718,
@@ -57,12 +74,12 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // Raised rather than worked around: the ring exists to stop unmanaged growth, not to make a
   // sanctioned extraction unlandable, and 2 nloc here bought 8 columns off the hottest table
   // in the board. It is still the largest entry in this ring and still wants splitting.
-  "services/workspace-create.service.ts::createWorkspaceCreateService": 623,
-  "services/issue.service.ts::createIssueService": 615,
+  "services/workspace-create.service.ts::createWorkspaceCreateService": 627,
+  "services/issue.service.ts::createIssueService": 616,
   "services/session-manager/session-lifecycle.ts::createSessionLifecycle": 615,
   "services/workflow-fork.service.ts::createWorkflowForkService": 581,
   "cli/commands/workspace.ts::registerWorkspaceCommand": 573,
-  "services/agent-remote.service.ts::createRemoteAgentService": 594,
+  "services/agent-remote.service.ts::createRemoteAgentService": 609,
   "cli/commands/session.ts::registerSessionCommand": 569,
   "services/project.service.ts::createProjectService": 564,
   // 529 -> 534, a DELIBERATE raise (#835). `mergeWorkspace` used to return the lock's
@@ -85,8 +102,8 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // re-growing every time that shared logic changes. The factory now holds thin delegators.
   "services/workspace-provision.service.ts::createWorkspaceProvisionService": 409,
   // 404 -> 399, banked (#806): five hand-written body guards became one schema parse each.
-  "routes/workspace-actions.ts::createWorkspaceActionsRoute": 399,
-  "worker/worker-agent-runner.ts::createWorkerAgentRunner": 406,
+  "routes/workspace-actions.ts::createWorkspaceActionsRoute": 414,
+  "worker/worker-agent-runner.ts::createWorkerAgentRunner": 469,
 };
 
 /**
