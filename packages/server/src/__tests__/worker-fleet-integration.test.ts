@@ -124,6 +124,8 @@ describe("worker fleet integration (board <-> daemon <-> agent)", () => {
       name: "test-worker",
       labels: ["test"],
       providers: ["claude"],
+      // #895: skip the real-machine auth probe — this test's login state is irrelevant.
+      attestProviders: false,
       stateFile,
       // Temp work root (#871): keep the undelivered-results file out of the real one.
       workRoot: mkdtempSync(join(tmpdir(), "ak-worker-root-")),

@@ -45,6 +45,7 @@ import {
 } from "@agentic-kanban/shared/lib/worker-protocol";
 import { createWorkerAgentRunner } from "./worker-agent-runner.js";
 import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "./worker-repo.js";
+import { attestProviderAuth } from "../cli/commands/worker-doctor.js";
 
 const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 const RECONNECT_MIN_MS = 1000;
@@ -77,6 +78,14 @@ export interface WorkerDaemonOptions {
   name?: string;
   labels?: string[];
   providers?: string[];
+  /**
+   * Verify each declared provider can actually authenticate on THIS machine (#895) before
+   * advertising it to the board, narrowing `providers` down to what `checkProvider` can
+   * prove. Default true. Set false only when a provider is known-authenticated purely via
+   * an env API key the doctor check cannot see (its "unknown" case) — this is the
+   * operator asserting that a false negative, not a real gap.
+   */
+  attestProviders?: boolean;
   maxConcurrency?: number;
   /** Defaults to ~/.agentic-kanban/worker-state.json. */
   stateFile?: string;
@@ -138,6 +147,32 @@ function capabilitiesOf(opts: WorkerDaemonOptions): WorkerCapabilities {
     ...(opts.providers ? { providers: opts.providers } : {}),
     ...(opts.maxConcurrency !== undefined ? { maxConcurrency: opts.maxConcurrency } : {}),
   };
+}
+
+/**
+ * Narrow a worker's declared `--providers` down to the ones this machine can actually PROVE
+ * it is authenticated for (#895). Before this, `providers` was advertised exactly like
+ * `--labels` — pure operator declaration, never checked — so a login that lapsed (as in the
+ * live #895 repro) kept being advertised as eligible with a 100% dispatch-failure rate and no
+ * signal anywhere. `log` receives one line per EXCLUDED provider, naming the reason
+ * `checkProvider` found; a provider that attests is not logged here (see call sites for the
+ * change-only summary line used on re-checks).
+ */
+export async function attestProviders(requested: string[], log: (line: string) => void): Promise<string[]> {
+  const attested: string[] = [];
+  for (const provider of requested) {
+    const result = await attestProviderAuth(provider);
+    if (result.attested) {
+      attested.push(provider);
+      continue;
+    }
+    const reason = result.checks.find((c) => c.status !== "pass")?.detail ?? "could not be confirmed";
+    log(
+      `[worker] NOT advertising provider '${provider}': ${reason}. This worker will not be dispatched ` +
+        `'${provider}' sessions until it re-attests as logged in (run 'agentic-kanban-worker doctor' for detail).`,
+    );
+  }
+  return attested;
 }
 
 /** This build's own version — the same value `--version` reports. Never fabricated. */
@@ -282,6 +317,17 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   const boardUrl = normalizeBoardUrl(opts.boardUrl);
   const stateFile = opts.stateFile ?? defaultWorkerStateFile();
   const name = opts.name ?? hostname();
+
+  // #895: `providers` as DECLARED (--providers) is kept separate from `providers` as
+  // ADVERTISED (opts.providers, mutated below) so a re-check can always re-attest the full
+  // requested set — a provider excluded now may attest again later (login restored) without
+  // needing a restart.
+  const declaredProviders = opts.providers;
+  let advertisedProviders = declaredProviders;
+  if (opts.attestProviders !== false && declaredProviders && declaredProviders.length > 0) {
+    advertisedProviders = await attestProviders(declaredProviders, log);
+    opts = { ...opts, providers: advertisedProviders };
+  }
 
   // #850: a checkout whose worktree registration is gone (a prior daemon that stopped,
   // disconnected, or crashed mid-session) is reaped before anything else runs, so a
@@ -630,6 +676,22 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
    */
   async function sendHeartbeat(): Promise<void> {
     if (stopped || fatal) return;
+    // #895: re-attest on every beat, not just at startup — the ticket's own example is a
+    // login that lapsed silently on a previously-healthy worker. Silent on an unchanged
+    // result; a changed result gets exactly one summary line rather than re-explaining every
+    // excluded provider's reason each beat (attestProviders already did that once, at
+    // startup, and `worker doctor` gives the detail on demand).
+    if (opts.attestProviders !== false && declaredProviders && declaredProviders.length > 0) {
+      const reattested = await attestProviders(declaredProviders, () => {});
+      if (reattested.join(",") !== (advertisedProviders ?? []).join(",")) {
+        log(
+          `[worker] provider attestation changed: now advertising [${reattested.join(", ") || "none"}] ` +
+            `(was [${(advertisedProviders ?? []).join(", ") || "none"}])`,
+        );
+        advertisedProviders = reattested;
+        opts.providers = advertisedProviders;
+      }
+    }
     let res: Response;
     try {
       res = await fetch(`${boardUrl}/api/workers/${identity.workerId}/heartbeat`, {

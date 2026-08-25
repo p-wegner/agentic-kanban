@@ -72,7 +72,9 @@ describe("worker dispatch e2e (phase 1c)", () => {
       // maxConcurrency: 1 is the runner's default already; stated explicitly because the
       // slot-release case below only means something against a KNOWN ceiling — with a
       // ceiling of 2 a leaked slot from the previous case would still be tolerated (#777).
-      boardUrl, pairingToken, name: "e2e-worker", providers: ["claude"], stateFile,
+      boardUrl, pairingToken, name: "e2e-worker", providers: ["claude"],
+      // #895: skip the real-machine auth probe — this test's login state is irrelevant.
+      attestProviders: false, stateFile,
       maxConcurrency: 1, log: () => {},
       // Temp work root (#871): keep the undelivered-results file out of the real one.
       workRoot: mkdtempSync(join(tmpdir(), "ak-worker-root-")),

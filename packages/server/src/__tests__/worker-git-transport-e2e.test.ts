@@ -105,6 +105,8 @@ describe("worker git transport e2e (phase 2)", () => {
     // NO shares-filesystem label => a true remote worker.
     daemon = await startWorkerDaemon({
       boardUrl, pairingToken, name: "remote-worker", providers: ["claude"],
+      // #895: skip the real-machine auth probe — this test's login state is irrelevant.
+      attestProviders: false,
       stateFile, workRoot: workerRoot, log: () => {},
     });
     await daemon.connected;
