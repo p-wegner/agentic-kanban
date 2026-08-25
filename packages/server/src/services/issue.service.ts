@@ -818,6 +818,11 @@ export function createIssueService(deps: {
         lastSessionAt: sess ? (sess.status === "running" ? sess.startedAt : sess.endedAt) : null,
         sessionStatus: sess?.status ?? null,
         lastSessionTriggerType: sess?.triggerType ?? null,
+        // #861 — the latest session ran on a remote fleet worker, which authenticates
+        // with its OWN local login (decision 012/#244): the workspace's claudeProfile/
+        // provider are the board's PICK, not the login used. The client demotes the
+        // board pick to a tooltip when this is set.
+        remotePlacement: sess?.workerId ? { workerId: sess.workerId } : null,
         latestSetup: latestSetupState ? {
           command: latestSetupCommand,
           state: latestSetupState,

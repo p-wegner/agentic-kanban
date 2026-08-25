@@ -75,6 +75,34 @@ export type AvailableSkill = {
   description: string;
 };
 
+/**
+ * The provider/profile chip (#861). When the latest session ran on a REMOTE fleet
+ * worker, the board's picked profile was NEVER sent there — the worker authenticates
+ * with its own local login (decision 012/#244), and no attestation reports back which
+ * profile it actually used (#895). So for a remote workspace the chip must not claim
+ * the board's pick as the effective login: it shows "worker-local profile" and demotes
+ * the board's preference to the tooltip.
+ */
+function WorkspaceProfileChip({ ws, provider, profile }: { ws: WorkspaceResponse; provider?: string | null; profile?: string | null }) {
+  if (!provider) return null;
+  const boardPick = `${providerLabel(provider)}${profile ? `:${profile}` : ""}`;
+  if (ws.remotePlacement) {
+    return (
+      <span
+        className="ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300"
+        title={`Ran on remote worker ${ws.remotePlacement.workerId}, which authenticates with its own local login. Board preference: ${boardPick} — not sent to the worker; the profile actually used is unknown to the board.`}
+      >
+        {providerLabel(provider)}: worker-local profile
+      </span>
+    );
+  }
+  return (
+    <span className="ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300">
+      {boardPick}
+    </span>
+  );
+}
+
 export interface WorkspaceQuickActionsProps {
   workspace: WorkspaceResponse;
   completedSessions: SessionInfo[];
@@ -463,11 +491,8 @@ export function WorkspaceCard({
             </select>
           ) : (
             <>
-              {workspaceProvider && (
-                <span className="ml-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300">
-                  {providerLabel(workspaceProvider)}{workspaceProfile ? `:${workspaceProfile}` : ""}
-                </span>
-              )}
+              <WorkspaceProfileChip ws={ws} provider={workspaceProvider} profile={workspaceProfile} />
+
               {(ws.status === "idle" || ws.status === "error") && availableProfileOptions.length > 0 && (
                 <button
                   title="Change agent profile"
