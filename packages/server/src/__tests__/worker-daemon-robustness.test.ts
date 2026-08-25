@@ -241,6 +241,9 @@ describe("the daemon against a real board socket (#754 items 2,4,5,6)", () => {
       name: "cap-worker",
       labels: ["docker", "linux"],
       providers: ["claude"],
+      // #895 attestation probes the real machine's login state, which this test must not
+      // depend on — it is testing capability propagation, not whether THIS box is logged in.
+      attestProviders: false,
       maxConcurrency: 3,
       stateFile: stateFile(),
       workRoot: freshWorkRoot(),

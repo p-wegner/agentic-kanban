@@ -81,7 +81,9 @@ describe("session probe e2e (#887)", () => {
 
     const { pairingToken } = fleet.registry.mintPairingToken();
     daemon = await startWorkerDaemon({
-      boardUrl, pairingToken, name: "probe-e2e-worker", providers: ["claude"], stateFile,
+      boardUrl, pairingToken, name: "probe-e2e-worker", providers: ["claude"],
+      // #895: skip the real-machine auth probe — this test's login state is irrelevant.
+      attestProviders: false, stateFile,
       maxConcurrency: 1, log: () => {},
       workRoot: mkdtempSync(join(tmpdir(), "ak-worker-root-")),
     });

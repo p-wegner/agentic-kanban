@@ -656,6 +656,27 @@ export async function checkProvider(
   return checks;
 }
 
+/**
+ * Whether `checkProvider`'s checks amount to PROOF this machine can authenticate as
+ * `provider` — not merely "not disproved" (#895).
+ *
+ * A doctor REPORT is read by a human who can weigh `unknown` (files absent, but an env API
+ * key might be set) against what they know about the machine. Advertising a provider to the
+ * board is an UNATTENDED claim the board will act on by dispatching real work, so it needs
+ * the stronger bar: every check for this provider must be `pass`. This is what would have
+ * caught the live #895 repro — a worker whose `claude` login had lapsed reported `unknown`
+ * (a real, non-actionable possibility for a doctor report), and `unknown` must not be read as
+ * "fine" by the thing that decides what gets dispatched.
+ */
+export async function attestProviderAuth(
+  provider: string,
+  home: string = homedir(),
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<{ attested: boolean; checks: DoctorCheck[] }> {
+  const checks = await checkProvider(provider, home, env);
+  return { attested: checks.length > 0 && checks.every((c) => c.status === "pass"), checks };
+}
+
 export interface WorkerDoctorOptions {
   boardUrl: string;
   stateFile: string;

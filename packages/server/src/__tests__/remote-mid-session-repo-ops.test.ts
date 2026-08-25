@@ -143,6 +143,8 @@ describe("mid-session repo operations against a live remote worker (#783, #784)"
     // No shares-filesystem label => a TRUE remote worker with its own checkout.
     daemon = await startWorkerDaemon({
       boardUrl, pairingToken, name: "mid-session-worker", providers: ["claude"],
+      // #895: skip the real-machine auth probe — this test's login state is irrelevant.
+      attestProviders: false,
       stateFile, workRoot: workerRoot, log: () => {}, maxConcurrency: 4,
     });
     await daemon.connected;

@@ -391,6 +391,11 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         "instead of cloning over git transport. Only correct when board and worker share a disk.",
     )
     .option("--providers <csv>", "Agent providers available here, e.g. claude,codex")
+    .option(
+      "--skip-provider-attestation",
+      "Advertise --providers as declared, without an on-machine auth probe (#895). Use only " +
+        "when a provider authenticates purely via an env API key 'worker doctor' cannot see.",
+    )
     .option("--max-concurrency <n>", "Max parallel agent sessions", (v) => parseInt(v, 10))
     .option("--state-file <path>", `Pairing state file (default: ${defaultWorkerStateFile()})`)
     .option("--work-root <path>", "Root for git-transport clones/checkouts (default: ~/.agentic-kanban/worker)")
@@ -407,6 +412,7 @@ export function registerWorkerSubcommands(workerCmd: Command) {
       name?: string;
       labels?: string;
       providers?: string;
+      skipProviderAttestation?: boolean;
       maxConcurrency?: number;
       stateFile?: string;
       workRoot?: string;
@@ -430,6 +436,7 @@ export function registerWorkerSubcommands(workerCmd: Command) {
           name: options.name,
           labels: labels.length > 0 ? labels : undefined,
           providers: splitList(options.providers),
+          attestProviders: !options.skipProviderAttestation,
           maxConcurrency: options.maxConcurrency,
           stateFile: options.stateFile,
           workRoot: options.workRoot,

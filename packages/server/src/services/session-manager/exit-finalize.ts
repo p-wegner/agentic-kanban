@@ -1,6 +1,7 @@
 import { buildUsageLimitStats } from "@agentic-kanban/shared/lib/session-stats-blob";
 import type { Database } from "../../db/index.js";
 import * as lifecycleRepo from "../../repositories/session-lifecycle.repository.js";
+import { updateWorkspaceLaunchFailure } from "../../repositories/workspace-crud.repository.js";
 import { recordAgentProfileLaunchFailure } from "../agent-profile-health.service.js";
 import { recordAgentProfileLaunchSuccess } from "../agent-profile-failure-record.js";
 import { applyAuthFailureRecovery } from "../provider-auth-recovery.js";
@@ -124,6 +125,14 @@ export interface LaunchFailureFinalizeResult {
  * The `idle` write is conditional on `authHandled` because `applyAuthFailureRecovery`
  * returns true only when it has ALREADY parked the workspace `blocked` (#430); overwriting
  * that with `idle` is what let the monitor relaunch onto a dead login in a loop.
+ *
+ * That `idle` write also persists `latestLaunchError` (#859/#895) — it used to be a bare
+ * status write, so a launch failure discovered at session-exit time (as opposed to preflight
+ * time) left the workspace looking exactly like one that finished cleanly: `idle`, with
+ * `latestLaunchError` untouched. The failure reason was already computed a few lines above
+ * (`stats.failureReason`) and even persisted onto the SESSION's stats blob; it just never
+ * reached the workspace row, which is what `workspace-launch-failures.service.ts` and any
+ * other direct reader of the workspace consult first.
  */
 export async function finalizeLaunchFailureRoute(
   route: LaunchFailureRoute,
@@ -162,7 +171,11 @@ export async function finalizeLaunchFailureRoute(
     : false;
 
   if (!isStaleResume && wsId && !authHandled) {
-    await lifecycleRepo.updateWorkspaceStatus(wsId, "idle", ctx.now, ctx.db);
+    await updateWorkspaceLaunchFailure(
+      wsId,
+      { status: "idle", latestLaunchError: stats.failureReason, updatedAt: ctx.now },
+      ctx.db,
+    );
   }
 
   if (ctx.projectId && wsId) {
