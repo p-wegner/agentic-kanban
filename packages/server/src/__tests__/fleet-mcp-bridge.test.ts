@@ -207,6 +207,41 @@ describe("fleet MCP bridge — the config the worker receives", () => {
   });
 });
 
+describe("fleet MCP bridge — the provider the CALLER actually passes (#857)", () => {
+  /**
+   * Every case above passes a `ProviderName` ("claude"). The production call site
+   * (`agent-remote.service.ts`) passes an `AgentLaunchRequest.provider`, which is a
+   * `ProviderId` — and claude's id is `"claude-code"`. All three predicates compared a raw
+   * `provider ?? "claude"` against name spellings, so `"claude-code"` fell to the default arm
+   * and every remote CLAUDE builder was told the bridge was unsupported: no MCP config, no
+   * board tools, and a brief asserting it had none. The bug survived because the tests spoke a
+   * vocabulary the caller never used, so the ids are pinned here explicitly.
+   */
+  it("supports the claude-code ID, not just the claude NAME", () => {
+    expect(providerSupportsRemoteMcp("claude-code")).toBe(true);
+    expect(remoteMcpConfigArgs("claude-code")).toEqual(["--mcp-config", REMOTE_MCP_CONFIG_FILENAME]);
+    // claude keeps the FILE channel whichever spelling arrives.
+    expect(providerNeedsMcpTokenEnv("claude-code")).toBe(false);
+  });
+
+  it("answers identically for every id/name pair, so the spelling cannot change a decision", () => {
+    for (const [id, name] of [["claude-code", "claude"], ["codex", "codex"], ["copilot", "copilot"], ["pi", "pi"]]) {
+      expect(providerSupportsRemoteMcp(id)).toBe(providerSupportsRemoteMcp(name));
+      expect(providerNeedsMcpTokenEnv(id)).toBe(providerNeedsMcpTokenEnv(name));
+      expect(remoteMcpConfigArgs(id, { url: "http://board:9100/mcp" }))
+        .toEqual(remoteMcpConfigArgs(name, { url: "http://board:9100/mcp" }));
+    }
+  });
+
+  it("treats an unrecognised provider as claude, the way narrowProviderName does", () => {
+    // Not permissiveness for its own sake: the ONE normalizer defaults to claude, and a second
+    // opinion here is how the two drift apart again.
+    expect(providerSupportsRemoteMcp(undefined)).toBe(true);
+    expect(providerSupportsRemoteMcp("something-else")).toBe(true);
+    expect(remoteMcpConfigArgs(undefined)).toEqual(["--mcp-config", REMOTE_MCP_CONFIG_FILENAME]);
+  });
+});
+
 describe("fleet MCP bridge — token scoping and lifetime", () => {
   let db: Database;
   let bridge: ReturnType<typeof getFleetMcpBridge>;
