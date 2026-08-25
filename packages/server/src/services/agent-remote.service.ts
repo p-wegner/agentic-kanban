@@ -51,6 +51,7 @@ import { resolveWorktreeDevPorts } from "./worktree-ports.js";
 import { db as realDb } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { updateSessionWorkerId, getSessionLiveness } from "../repositories/worker.repository.js";
+import { insertSessionMessages } from "../repositories/broadcast.repository.js";
 import type { AgentExecutionService, AgentHandle, DeferredLaunchFailure } from "./agent-dispatch.service.js";
 import type { AgentOutputCallback } from "./agent.service.js";
 import { classifyAssignFailure, type WorkerConnectionManager } from "./worker-connection.service.js";
@@ -219,7 +220,7 @@ export function createRemoteAgentService(
   let repoOpSeq = 0;
 
   // #801 — the assignment's opening and closing rows. A separate module: see its header.
-  const { noteAssigned, noteSessionExit } = createRemoteSessionEventRecorder(database);
+  const { noteAssigned, noteSessionExit, noteUndeliveredResult } = createRemoteSessionEventRecorder(database);
 
   function finishSession(sessionId: string, session: RemoteSession, stderr: string, exitCode: number | null): void {
     sessions.delete(sessionId);
@@ -478,6 +479,46 @@ export function createRemoteAgentService(
               error: error ?? `worker ${workerId} refused the ${pending.op} with status ${status}`,
             },
       );
+      return;
+    }
+    if (message.type === "undelivered_result") {
+      // #871: a COMPLETED run whose result never arrived — even after the worker's
+      // reconnect retry. The session was long finalized (its exit was downgraded when the
+      // in-run retries exhausted), so without this the finished work is invisible: it
+      // sits in a checkout on the worker's disk, which this machine cannot enumerate.
+      console.error(
+        `[agent-remote] worker ${workerId} holds a COMPLETED but UNDELIVERED result for session ` +
+          `${message.sessionId}: push to ${message.incomingRef} failed ${message.attempts} time(s) ` +
+          `(last error: ${message.lastError}). The work is KEPT on the worker at ${message.checkoutPath}. ` +
+          `Once a push lands, use the Worker Fleet incoming view (POST /api/workers/incoming/land) to ` +
+          `bring it onto ${message.branch}.`,
+      );
+      // The durable record — visible in `worker events <id>` and the fleet panel timeline.
+      noteUndeliveredResult(workerId, message);
+      const text =
+        `Fleet worker ${workerId} reports this session COMPLETED but its result is still UNDELIVERED: ` +
+        `the push to ${message.incomingRef} failed ${message.attempts} time(s) ` +
+        `(last error: ${message.lastError}). The work is not lost — it is kept on the worker at ` +
+        `${message.checkoutPath} — but it has not reached the board.`;
+      const session = sessions.get(message.sessionId);
+      if (session && session.workerId === workerId) {
+        report(message.sessionId, session, text);
+        return;
+      }
+      // Finalized (the normal case): stamp the transcript directly, IF the session row
+      // exists — the undelivered state must be visible on the session, not only in a log.
+      void (async () => {
+        const live = await getSessionLiveness(message.sessionId, database).catch(() => null);
+        if (!live) return;
+        await insertSessionMessages(
+          message.sessionId,
+          [{ type: "stderr", data: text, exitCode: null }],
+          null,
+          database,
+        ).catch((err: unknown) => {
+          console.error(`[agent-remote] could not record the undelivered state on session ${message.sessionId}`, err);
+        });
+      })();
       return;
     }
     if (message.type === "assign_failed") {

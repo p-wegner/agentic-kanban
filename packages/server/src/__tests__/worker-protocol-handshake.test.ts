@@ -116,6 +116,29 @@ describe("hello carries the version and the capabilities (#754)", () => {
     expect(parsed).toEqual({ type: "hello", workerId: "w1", runningSessionIds: [] });
   });
 
+  it("parses a worker's undelivered-result report (#871)", () => {
+    const parsed = parseWorkerToBoardMessage(JSON.stringify({
+      type: "undelivered_result",
+      sessionId: "s1",
+      branch: "feature/ak-871",
+      incomingRef: "refs/kanban/incoming/feature/ak-871",
+      checkoutPath: "C:\\work\\checkouts\\s1",
+      attempts: 6,
+      lastError: "connect timeout",
+    }));
+    expect(parsed).toEqual({
+      type: "undelivered_result",
+      sessionId: "s1",
+      branch: "feature/ak-871",
+      incomingRef: "refs/kanban/incoming/feature/ak-871",
+      checkoutPath: "C:\\work\\checkouts\\s1",
+      attempts: 6,
+      lastError: "connect timeout",
+    });
+    // Missing fields drop the message rather than fabricating a report.
+    expect(parseWorkerToBoardMessage(JSON.stringify({ type: "undelivered_result", sessionId: "s1" }))).toBeNull();
+  });
+
   it("drops ill-typed capability fields rather than trusting them", () => {
     expect(parseWorkerCapabilities({ labels: "docker" })).toBeUndefined();
     expect(parseWorkerCapabilities({ maxConcurrency: 0 })).toBeUndefined();
