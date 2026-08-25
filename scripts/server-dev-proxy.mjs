@@ -141,11 +141,47 @@ function proxyOnce(req, res, body, opts, client) {
   });
 }
 
+// #893: how long a MERGE request may wait for the backend to come back. A merge POST held
+// its gate verdict hostage to one HTTP connection: the request runs a 30-45 min pre-merge
+// gate inline, and a tsx-watch restart (~5s) killed the response AFTER the gate had passed.
+// Re-sending the request is safe at that point — the restarted backend's merge path reuses
+// the PERSISTED gate verdict (workspace_merge_gate, keyed by branch/base tips + verification
+// tier) instead of starting the run over, so the retry costs seconds, not the gate.
+const MERGE_RETRY_TIMEOUT_MS = 60_000;
+// Backoff cap: a restarting backend takes seconds, and hammering it every 100ms for a full
+// minute buys nothing over probing it every couple of seconds once the quick retries failed.
+const MAX_RETRY_DELAY_MS = 2_000;
+
+const MERGE_REQUEST_PATTERN = /^\/api\/workspaces\/[^/]+\/merge(?:\?|$)/;
+
+/**
+ * Is this request a workspace-merge POST — the one request whose retry budget must span a
+ * whole backend restart (#893)? Deliberately narrow: merge is idempotent-at-that-point on the
+ * server side (in-flight dedupe + already-merged detection + the persisted gate verdict), which
+ * is what makes a blind re-send safe. Other POSTs get no such guarantee and keep the default.
+ */
+export function isMergeRequest(method, url) {
+  return method === "POST" && MERGE_REQUEST_PATTERN.test(url ?? "");
+}
+
+export function resolveRetryBudgetMs(req, opts) {
+  return isMergeRequest(req.method, req.url)
+    ? (opts.mergeRetryTimeoutMs ?? MERGE_RETRY_TIMEOUT_MS)
+    : opts.retryTimeoutMs;
+}
+
 async function proxyWithRetry(req, res, body, opts, client) {
-  const deadline = Date.now() + opts.retryTimeoutMs;
+  const budgetMs = resolveRetryBudgetMs(req, opts);
+  // #893: the retry window opens at the FIRST FAILURE, not at request start. The old
+  // `Date.now() + retryTimeoutMs` deadline was computed when the request ARRIVED — correct
+  // for a request that fails to connect, but a long-held response (a merge running its gate
+  // for ~40 minutes) that then lost its backend was already far past the deadline and got an
+  // instant 503 with zero retries, discarding the whole run.
+  let deadline = null;
+  let delayMs = opts.retryDelayMs;
   let lastError = null;
 
-  while (Date.now() <= deadline) {
+  for (;;) {
     try {
       await proxyOnce(req, res, body, opts, client);
       return;
@@ -153,16 +189,32 @@ async function proxyWithRetry(req, res, body, opts, client) {
       // Nobody is waiting for this response any more — retrying would only burn
       // backend connections during exactly the bursts that trigger the aborts.
       if (err === CLIENT_GONE) return;
-      // err is inspected by the retry loop's own logging; the binding was never read.
+      // A response whose headers already went out cannot be replayed — bail as before.
       if (res.headersSent || res.writableEnded || res.destroyed) return;
-      await wait(opts.retryDelayMs);
+      lastError = err;
+      const now = Date.now();
+      if (deadline === null) deadline = now + budgetMs;
+      if (now + delayMs > deadline) break;
+      await wait(delayMs);
+      delayMs = Math.min(delayMs * 2, MAX_RETRY_DELAY_MS);
     }
   }
 
   if (res.headersSent || res.writableEnded || res.destroyed) return;
   const message = lastError instanceof Error ? lastError.message : String(lastError ?? "backend unavailable");
+  const payload = { error: "dev_server_backend_unavailable", message };
+  if (isMergeRequest(req.method, req.url)) {
+    // #893 part 3: after a merge died on TRANSPORT, the caller must be able to tell "the gate
+    // failed" from "the gate passed and only the connection died". The proxy cannot know which
+    // happened — but it can say where the answer lives and that a retry is cheap either way.
+    payload.hint =
+      "The backend was unavailable while this merge request was in flight (e.g. a tsx-watch restart) — "
+      + "this is a TRANSPORT failure, not a merge-gate verdict. If the pre-merge gate had already passed, "
+      + "its verdict is persisted server-side and re-POSTing /merge will reuse it instead of re-running the gate; "
+      + "GET /api/workspaces/:id/merge-status reports whether a passing verdict is stored (#893).";
+  }
   res.writeHead(503, { "content-type": "application/json" });
-  res.end(JSON.stringify({ error: "dev_server_backend_unavailable", message }));
+  res.end(JSON.stringify(payload));
 }
 
 // Mirrors watchClient() for a raw upgrade socket: one 'error'/'close' pair for
@@ -272,6 +324,8 @@ export function createStableDevProxy(options) {
     publicPort: options.publicPort,
     backendPort: options.backendPort,
     retryTimeoutMs: options.retryTimeoutMs ?? 10_000,
+    // #893: merge POSTs ride out a full backend restart (see resolveRetryBudgetMs).
+    mergeRetryTimeoutMs: options.mergeRetryTimeoutMs ?? MERGE_RETRY_TIMEOUT_MS,
     retryDelayMs: options.retryDelayMs ?? 100,
   };
 

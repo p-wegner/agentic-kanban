@@ -10,7 +10,7 @@ import { checkSharedPackage, isTsxMissing, repairSharedIfNeeded } from "../../..
 import { checkBinShims, repairBinShims } from "../../../../scripts/bin-shims-preflight.mjs";
 import { buildDevPortEnv } from "../../../../scripts/dev-env.mjs";
 import { resolveDevPorts } from "../../../../scripts/dev-port-plan.mjs";
-import { buildBackendEnv, createStableDevProxy, listen, preferredInternalPort, resolvePublicServerPort } from "../../../../scripts/server-dev-proxy.mjs";
+import { buildBackendEnv, createStableDevProxy, isMergeRequest, listen, preferredInternalPort, resolvePublicServerPort, resolveRetryBudgetMs } from "../../../../scripts/server-dev-proxy.mjs";
 import {
   classifyProcessExit,
   HEALTHY_UPTIME_MS,
@@ -46,6 +46,22 @@ function requestText(port, path = "/health") {
 function requestTextOn(hostname, port, path = "/health") {
   return new Promise((resolveRequest, rejectRequest) => {
     const req = httpRequest({ hostname, port, path, timeout: 5000 }, (res) => {
+      const chunks = [];
+      res.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+      res.on("end", () => resolveRequest({ status: res.statusCode, body: Buffer.concat(chunks).toString("utf8") }));
+    });
+    req.on("error", rejectRequest);
+    req.on("timeout", () => {
+      req.destroy(new Error("request timed out"));
+    });
+    req.end();
+  });
+}
+
+/** Like requestText, but with a method — the #893 tests need POSTs. */
+function requestWith(port, { method = "GET", path = "/health", timeout = 15000 } = {}) {
+  return new Promise((resolveRequest, rejectRequest) => {
+    const req = httpRequest({ hostname: "127.0.0.1", port, path, method, timeout }, (res) => {
       const chunks = [];
       res.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
       res.on("end", () => resolveRequest({ status: res.statusCode, body: Buffer.concat(chunks).toString("utf8") }));
@@ -205,6 +221,124 @@ describe("server dev proxy", () => {
       if (proxy) await closeServer(proxy).catch(() => {});
       if (backend.listening) await closeServer(backend).catch(() => {});
       if (restartedBackend?.listening) await closeServer(restartedBackend).catch(() => {});
+    }
+  });
+
+  it("retries a LONG-HELD merge POST through a backend restart instead of discarding it (#893)", async () => {
+    // The incident: POST /:id/merge held its connection open for ~40 minutes while the gate
+    // ran; a tsx-watch restart killed the backend; the proxy's retry deadline had been
+    // computed at REQUEST START, so it was long spent and the caller got an instant 503 —
+    // discarding a gate verdict that had already passed. The retry window must open at the
+    // FIRST FAILURE, and a merge POST must get a restart-sized budget.
+    const heldSockets = new Set();
+    const stalledBackend = createHttpServer(() => {
+      // Accept the merge request and never respond — the gate is "running".
+    });
+    stalledBackend.on("connection", (socket) => {
+      heldSockets.add(socket);
+      socket.on("close", () => heldSockets.delete(socket));
+    });
+    let restartedBackend = null;
+    let proxy = null;
+
+    try {
+      await listen(stalledBackend, 0);
+      const backendPort = serverPort(stalledBackend);
+      proxy = createStableDevProxy({
+        publicPort: 0,
+        backendPort,
+        // The DEFAULT budget is deliberately smaller than the time the request is held below,
+        // so this test fails against deadline-from-request-start logic.
+        retryTimeoutMs: 200,
+        mergeRetryTimeoutMs: 5000,
+        retryDelayMs: 25,
+      });
+      await listen(proxy, 0);
+      const publicPort = serverPort(proxy);
+
+      const inFlight = requestWith(publicPort, { method: "POST", path: "/api/workspaces/ws-1/merge" });
+      // Hold the request open well past retryTimeoutMs — the stand-in for the 40-minute gate.
+      await new Promise((r) => setTimeout(r, 500));
+
+      // tsx watch restarts the backend: in-flight sockets die and the listener goes away.
+      // (Destroy before close — close() waits for open connections, which is a deadlock here.)
+      for (const socket of heldSockets) socket.destroy();
+      await closeServer(stalledBackend);
+      await new Promise((resolveRestart) => {
+        setTimeout(async () => {
+          restartedBackend = createHttpServer((_req, res) => {
+            // The restarted backend's merge path reuses the persisted gate verdict — here it
+            // just answers, which is all the proxy layer needs to prove.
+            res.writeHead(200, { "content-type": "application/json" });
+            res.end(JSON.stringify({ merged: true, via: "restarted-backend" }));
+          });
+          await listen(restartedBackend, backendPort);
+          resolveRestart();
+        }, 150);
+      });
+
+      const result = await inFlight;
+      expect(result.status).toBe(200);
+      expect(result.body).toContain("restarted-backend");
+    } finally {
+      if (proxy) await closeServer(proxy).catch(() => {});
+      if (stalledBackend.listening) await closeServer(stalledBackend).catch(() => {});
+      for (const socket of heldSockets) socket.destroy();
+      if (restartedBackend?.listening) await closeServer(restartedBackend).catch(() => {});
+    }
+  });
+
+  it("gives only merge POSTs the restart-sized retry budget (#893)", () => {
+    expect(isMergeRequest("POST", "/api/workspaces/abc-123/merge")).toBe(true);
+    expect(isMergeRequest("POST", "/api/workspaces/abc-123/merge?async=1")).toBe(true);
+    // Everything else keeps the default budget — the merge budget rests on the merge route
+    // being idempotent-at-that-point, a guarantee no other POST has.
+    expect(isMergeRequest("GET", "/api/workspaces/abc-123/merge")).toBe(false);
+    expect(isMergeRequest("POST", "/api/workspaces/abc-123/merge-status")).toBe(false);
+    expect(isMergeRequest("POST", "/api/workspaces")).toBe(false);
+    expect(isMergeRequest("POST", "/api/issues")).toBe(false);
+
+    const opts = { retryTimeoutMs: 10_000, mergeRetryTimeoutMs: 60_000 };
+    expect(resolveRetryBudgetMs({ method: "POST", url: "/api/workspaces/x/merge" }, opts)).toBe(60_000);
+    expect(resolveRetryBudgetMs({ method: "GET", url: "/api/board" }, opts)).toBe(10_000);
+    // Without an explicit override the merge budget defaults to ~60s — a restart is ~5s.
+    expect(resolveRetryBudgetMs({ method: "POST", url: "/api/workspaces/x/merge" }, { retryTimeoutMs: 10_000 })).toBe(60_000);
+  });
+
+  it("a merge 503 says the failure was TRANSPORT, not a gate verdict (#893 part 3)", async () => {
+    // Nothing ever listens on this port, so retries exhaust.
+    const deadBackend = createHttpServer(() => {});
+    await listen(deadBackend, 0);
+    const deadPort = serverPort(deadBackend);
+    await closeServer(deadBackend);
+
+    let proxy = null;
+    try {
+      proxy = createStableDevProxy({
+        publicPort: 0,
+        backendPort: deadPort,
+        retryTimeoutMs: 200,
+        mergeRetryTimeoutMs: 300,
+        retryDelayMs: 20,
+      });
+      await listen(proxy, 0);
+      const publicPort = serverPort(proxy);
+
+      const mergeResult = await requestWith(publicPort, { method: "POST", path: "/api/workspaces/ws-1/merge" });
+      expect(mergeResult.status).toBe(503);
+      const mergeBody = JSON.parse(mergeResult.body);
+      expect(mergeBody.error).toBe("dev_server_backend_unavailable");
+      // The caller must be able to tell "gate failed" from "gate passed, transport died".
+      expect(mergeBody.hint).toContain("TRANSPORT");
+      expect(mergeBody.hint).toContain("merge-status");
+      expect(mergeBody.hint).toContain("persisted");
+
+      // A non-merge request keeps the terse body — the hint is merge-specific.
+      const plainResult = await requestWith(publicPort, { path: "/api/board" });
+      expect(plainResult.status).toBe(503);
+      expect(JSON.parse(plainResult.body).hint).toBeUndefined();
+    } finally {
+      if (proxy) await closeServer(proxy).catch(() => {});
     }
   });
 
