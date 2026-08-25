@@ -1,0 +1,159 @@
+/**
+ * What to do when `verify_script` comes back non-zero (#169, #192, #894).
+ *
+ * This is one responsibility with three answers — "inconclusive", "retry, it may not be the
+ * code", and "genuinely red" — and it had grown into the middle of `runPreMergeGate`, which
+ * the god-module gate flagged at 47 branches. Extracting it is what that gate asks for:
+ * relocating a branchy function does not clear the signal, restructuring it does. The two
+ * retry strategies belong together because they answer the same question and differ only in
+ * the evidence they read:
+ *
+ *  - **missing deps** (#169): the failure text looks like an unresolved import rather than a
+ *    real regression — the shape a silently-failed worktree setup script produces hours
+ *    later. Run the project's install command once, then re-run the whole verify.
+ *  - **flake** (#894): the run failed on a SMALL, identifiable set of suites, which is the
+ *    shape of machine contention rather than of a bad diff. Re-run only those suites.
+ *
+ * Both are ONE-SHOT by construction: each is attempted at most once per gate, and neither can
+ * re-enter the other. That matters more than it looks — #894's whole finding was a retry loop
+ * whose retries CAUSED the failure they were retrying (a full gate is itself the load that
+ * makes the next gate flake), so a retry mechanism that can iterate would recreate the bug it
+ * exists to fix.
+ *
+ * Everything the caller needs is injected as a callback, so this module reaches no database,
+ * spawns no process of its own, and is exercised without a worktree.
+ */
+import { type FailedSuite, decideFlakeRetry, retryScopeEnvValue } from "./verify-flake-retry.js";
+
+export interface VerifyRunResult {
+  exitCode: number;
+  stdout?: string;
+  stderr?: string;
+  timedOut?: boolean;
+}
+
+export interface VerifyFailure {
+  timedOut?: boolean;
+  message: string;
+}
+
+export interface VerifyOutcome {
+  /** Null when the verify stage ended up passing — possibly only after a retry. */
+  failure: VerifyFailure | null;
+  /**
+   * Set when a targeted re-run cleared load-induced failures. The caller MUST surface it on
+   * the passing gate message: a level may only weaken verification visibly, so a merge
+   * cleared by a second narrower run must say so.
+   */
+  flakeRetryNote?: string;
+}
+
+export interface ResolveVerifyOutcomeInput {
+  /** The first run's result. */
+  result: VerifyRunResult;
+  /** Re-run the full verify script (used after an install). */
+  runVerify: () => Promise<VerifyRunResult>;
+  /** Re-run the verify script scoped to the named suites (`KANBAN_RETRY_TEST_FILES`). */
+  runVerifyWithRetryScope: (retryScope: string) => Promise<VerifyRunResult>;
+  /** The project's install command, or null when it has none configured. */
+  getInstallCommand: () => Promise<string | null>;
+  /** Run the install command. */
+  runInstall: (command: string) => Promise<void>;
+  /** Does the failure text look like missing dependencies rather than a regression? */
+  looksLikeMissingDeps: (output: string) => boolean;
+  /** Whether this project's verify_script honours a suite scope at all. */
+  scoped: boolean;
+  verifyTimeoutMs: number;
+  projectId: string;
+  workspaceId: string;
+  /** Shape a failure's output into the operator-facing summary. */
+  summarize: (stdout: string, stderr: string) => string;
+  log?: (message: string) => void;
+}
+
+const combinedOutput = (r: VerifyRunResult) => `${r.stderr || ""}\n${r.stdout || ""}`;
+
+function timeoutFailure(input: { verifyTimeoutMs: number; projectId: string; afterInstall: boolean }): VerifyFailure {
+  // A wall-clock kill is NOT a build/test failure (#192) — the same commit can be killed now
+  // and pass minutes later purely because the build cache warmed up in the meantime.
+  const suffix = input.afterInstall ? " (after an auto-install retry)" : "";
+  return {
+    timedOut: true,
+    message:
+      `verify_script timed out after ${input.verifyTimeoutMs}ms${suffix} — inconclusive (not a build/test ` +
+      `failure); merge withheld pending a retry. Increase verify_timeout_ms_${input.projectId} if this ` +
+      `stack's clean build genuinely needs longer.`,
+  };
+}
+
+const suiteNames = (suites: FailedSuite[]) => suites.map((s) => `${s.packageLabel}/${s.file}`).join(", ");
+
+/**
+ * Decide the verify stage's verdict, applying at most one install retry and at most one
+ * targeted flake retry.
+ */
+export async function resolveVerifyOutcome(input: ResolveVerifyOutcomeInput): Promise<VerifyOutcome> {
+  const log = input.log ?? ((m: string) => console.warn(`[pre-merge-gate] ${m}`));
+  let result = input.result;
+  if (result.exitCode === 0) return { failure: null };
+  // A timeout carries no signal about missing dependencies, so it skips both retries.
+  if (result.timedOut) {
+    return { failure: timeoutFailure({ ...input, afterInstall: false }) };
+  }
+
+  // ---- #169 missing-deps install retry ----------------------------------------------------
+  let installed = false;
+  if (input.looksLikeMissingDeps(combinedOutput(result))) {
+    const installCommand = await input.getInstallCommand();
+    if (installCommand && installCommand.trim()) {
+      log(
+        `verify_script failed with a missing-deps signature for workspace ${input.workspaceId} — ` +
+          "retrying once after running the project's install command",
+      );
+      await input.runInstall(installCommand);
+      installed = true;
+      result = await input.runVerify();
+    }
+  }
+  if (result.exitCode === 0) return { failure: null };
+  if (result.timedOut) {
+    return { failure: timeoutFailure({ ...input, afterInstall: installed }) };
+  }
+
+  // ---- #894 targeted flake retry -----------------------------------------------------------
+  const flake = decideFlakeRetry({ output: combinedOutput(result), timedOut: result.timedOut, scoped: input.scoped });
+  if (flake.retry) {
+    const names = suiteNames(flake.suites);
+    log(
+      `verify_script failed on ${flake.suites.length} suite(s) for workspace ${input.workspaceId} — ` +
+        `re-running only those to tell contention from a regression: ${names}`,
+    );
+    const retryResult = await input.runVerifyWithRetryScope(retryScopeEnvValue(flake.suites));
+    if (retryResult.exitCode === 0 && !retryResult.timedOut) {
+      return {
+        failure: null,
+        flakeRetryNote: `— ${flake.suites.length} suite(s) failed under load and PASSED on a targeted re-run: ${names}`,
+      };
+    }
+    // Failed twice, the second time nearly alone on the machine. That is a much stronger
+    // signal than the first failure was, and the message says so rather than repeating the
+    // first verdict — an operator should not have to re-derive that it was confirmed.
+    return {
+      failure: {
+        message:
+          `verify_script failed (exit ${result.exitCode}) and the same ${flake.suites.length} suite(s) failed ` +
+          `again on a targeted re-run (${names}) — this is a real failure, not machine load: ` +
+          input.summarize(result.stdout || "", result.stderr || ""),
+      },
+    };
+  }
+
+  const suffix = installed ? " (retried once after an auto-install; still failing)" : "";
+  return {
+    failure: {
+      message:
+        `verify_script failed (exit ${result.exitCode})${suffix}: ` +
+        input.summarize(result.stdout || "", result.stderr || ""),
+    },
+  };
+}

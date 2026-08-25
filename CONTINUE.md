@@ -3,6 +3,43 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## #894 done: the gate re-runs the FLAKES, not the suite (2026-08-25)
+
+The gate ran a full 7,183-test suite fifteen times on one workspace and merged zero times,
+failing each round on ~3 timing-shaped suites that passed in 21.9s when re-run on a quiet box.
+The retry was the load: a full gate run is itself what makes the next gate flake.
+
+**What landed.** A failure on a SMALL, nameable set of suites now triggers ONE re-run of just
+those suites before the merge is withheld.
+
+- `services/verify-flake-retry.ts` — the classifier. `parseFailedSuites` pulls `FAIL <path>`
+  lines out of `test-mine.mjs` output and attributes each to its `[test:mine] <pkg>:` header;
+  `decideFlakeRetry` refuses to retry on a timeout, on an unscopable project, when nothing is
+  nameable, when a suite cannot be attributed to a package, or above 5 suites (that shape is a
+  regression, not contention).
+- `services/verify-retry-strategies.ts` — the orchestration, holding BOTH retries (#169's
+  install retry and #894's flake retry). It was extracted rather than inlined because
+  `runPreMergeGate` had grown to 47 branches and the god-module gate correctly said restructure,
+  not relocate. **Its baseline moved 43 -> 37**, so this is a net reduction, not a bump.
+- `scripts/test-mine.mjs` — `KANBAN_RETRY_TEST_FILES="server:a.test.ts,client:b.test.ts"` runs
+  exactly those suites. Deliberately WITHOUT `--passWithNoTests`, so a suite that fails to be
+  selected fails the run instead of reporting a false green.
+- The passing gate message names the retry (`GateTierInfo.flakeRetryNote`) — a level may only
+  weaken verification visibly.
+
+**Verified by:** `verify-flake-retry.test.ts` (14, incl. a real #846 output fixture),
+`verify-retry-strategies.test.ts` (11, counting CALLS so a retry that could iterate fails),
+`pre-merge-gate.service.test.ts` + `pre-merge-gate-install-block.test.ts` (37, unchanged),
+`max-file-size.test.ts`, `console-tag-ratchet`, `always-run-marker-ratchet`,
+`decision-function-purity`, `service-wiring-ratchet`, `git-exec-single-spawn`,
+`wire-dto-single-declaration`, `time-injection-spelling-ratchet`, and server `tsc --noEmit`.
+End-to-end: a real `KANBAN_RETRY_TEST_FILES` run executed the two named suites and nothing else.
+
+**NOT verified:** the retry has not yet fired on a live gate — the classifier and the runner
+are each proven, their junction inside a real merge is not. The machine has been RAM-blocked
+(`fleet gate` BLOCKED, ~2.9 GB free) for the whole of this work, so the full 152-suite
+always-run set has NOT been run; only the guards listed above were.
+
 ## #881 done: `offline` now says WHICH kind of offline, derived not probed (2026-08-25)
 
 A worker dropped mid-session and gave a live instance of #881. The finding: **#774's event
