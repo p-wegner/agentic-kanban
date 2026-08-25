@@ -138,6 +138,17 @@ export async function updateWorkspaceLaunchFailure(
   });
 }
 
+/**
+ * Clear a previously-recorded launch-failure error (#895 follow-up): `updateWorkspaceLaunchFailure`
+ * sets `latestLaunchError`, but nothing ever cleared it — and `workspace-launch-failures.service.ts`
+ * checks it FIRST, ahead of session state, so a workspace that failed once and then completed a
+ * session cleanly would still be reported as `preflight-failed` forever. Does not touch `status`,
+ * so it is safe to call from a route that already owns the status transition itself.
+ */
+export async function clearWorkspaceLaunchError(workspaceId: string, database: Database = db): Promise<void> {
+  await database.update(workspaces).set({ latestLaunchError: null }).where(eq(workspaces.id, workspaceId));
+}
+
 export async function getSessionsForWorkspace(
   workspaceId: string,
   database: Database = db,

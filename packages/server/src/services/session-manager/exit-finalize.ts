@@ -1,7 +1,7 @@
 import { buildUsageLimitStats } from "@agentic-kanban/shared/lib/session-stats-blob";
 import type { Database } from "../../db/index.js";
 import * as lifecycleRepo from "../../repositories/session-lifecycle.repository.js";
-import { updateWorkspaceLaunchFailure } from "../../repositories/workspace-crud.repository.js";
+import { updateWorkspaceLaunchFailure, clearWorkspaceLaunchError } from "../../repositories/workspace-crud.repository.js";
 import { recordAgentProfileLaunchFailure } from "../agent-profile-health.service.js";
 import { recordAgentProfileLaunchSuccess } from "../agent-profile-failure-record.js";
 import { applyAuthFailureRecovery } from "../provider-auth-recovery.js";
@@ -207,4 +207,12 @@ export async function finalizeCompletedRoute(ctx: ExitFinalizeContext, exitCode:
     provider: ctx.authProviderName,
     profileName: ctx.profileName,
   }).catch(() => {});
+  // A completed session PROVES this workspace can launch — clear any stale `latestLaunchError`
+  // from an earlier failure (#895 follow-up), or the launch-failures digest keeps reporting
+  // `preflight-failed` from a problem that no longer exists (see the field's write site above).
+  if (ctx.workspaceId) {
+    await clearWorkspaceLaunchError(ctx.workspaceId, ctx.db).catch((err) =>
+      console.error("Failed to clear workspace launch error:", err),
+    );
+  }
 }
