@@ -3,6 +3,39 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## #899, #898, #897 done: a fleet refactor and two honesty fixes in the UI (2026-08-25)
+
+Three landed back to back while the remote worker was unavailable (see the blocker below).
+
+- **#899** (`2226c6670c`) — `createWorkerAgentRunner` **469 → 332 nloc**, under the 406 the
+  #870/#871 disclosure promised, with the baseline lowered to match. The retention leaf
+  (`pushWithRetry`, `retain`, token-free persistence, `retryPending`, `suspendRetries`) is now
+  `worker/worker-undelivered-retry.ts`. It extracted cleanly because it holds no runner state:
+  the board `send`, the git transport and the work root are all injected. **Behaviour unchanged
+  by evidence, not assertion** — `worker-push-retry.test.ts` exercises it THROUGH the runner and
+  passed untouched, with 46 fleet tests green in total.
+- **#898** (`edf2131885`) — the board card's profile chip stops claiming a pick the worker never
+  got. `sessions.worker_id` threaded through the summary projection to
+  `MainWorkspaceInfo.remotePlacement`; a remote card now reads `worker-local profile` with the
+  board pick demoted to the tooltip, matching what #861 did for the detail view.
+- **#897** (`ab5c5170a0`) — the timeline's 48px horizontal scrollbar. **The filed diagnosis was
+  wrong**: `pctOf` clamps to 0–100, so the issue bars cannot overflow. The driver was the AXIS —
+  a date label centred on the range's final tick (always exactly 100%), a 1px gridline drawn at
+  `left: 100%`, and a tick container left at natural width whose shrink-wrapped box juts past its
+  own origin even though the transformed label does not. Verified live at 800/900/1100/1440/1920px,
+  at two zooms, and panned back a month: **overflow 0 everywhere**.
+
+**Blocked on a human, not on us:** `AO-PF38Z8R8` has been offline since 02:21Z and needs an
+interactive `claude /login` on that machine — the board cannot perform it by design (decision 012).
+Until it returns, nothing is dispatchable remotely, and #895/#874/#876/#857/#887 all wait on it
+for live verification rather than for code. #895 carries a comment recording exactly what is left
+and why neither of its two routes can be honestly closed today.
+
+**Machine caveat for all three:** `fleet gate` has been BLOCKED on RAM (~2.9 GB free) throughout,
+so the full 152-suite always-run set has NOT been run for any of them — only the targeted suites
+named in each commit. The four idle-looking `java` processes holding ~3.8 GB are live Gradle
+wrapper→daemon chains, not stale daemons, and were deliberately left alone.
+
 ## #894 done: the gate re-runs the FLAKES, not the suite (2026-08-25)
 
 The gate ran a full 7,183-test suite fifteen times on one workspace and merged zero times,
