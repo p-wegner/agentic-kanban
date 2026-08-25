@@ -59,8 +59,6 @@ export interface SessionRegistryDeps {
    * guessed, since a wrong `true` here is what makes a board deliver a turn into a dead pipe.
    */
   stdinOpenOf?: (sessionId: string) => boolean | undefined;
-  /** Injectable clock (`nowMs`, the sanctioned spelling for arithmetic). */
-  nowMs?: () => number;
 }
 
 export function createWorkerSessionRegistry(deps: SessionRegistryDeps) {
