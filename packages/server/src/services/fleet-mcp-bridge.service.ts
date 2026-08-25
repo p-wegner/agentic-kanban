@@ -46,6 +46,7 @@ import { ensureMcpHttpBridge } from "./mcp-http-bridge.service.js";
 import { getWorkerRegistry } from "./worker-registry.service.js";
 import { findFleetMcpAssignment, isWorkerAssignmentCurrent } from "../repositories/worker.repository.js";
 import { FLEET_MCP_TOKEN_ENV_VAR } from "@agentic-kanban/shared/lib/worker-protocol";
+import { narrowProviderName } from "./agent-provider.js";
 
 /** Path the bridge is mounted at on the fleet listener. */
 export const FLEET_MCP_PATH = "/mcp";
@@ -235,7 +236,7 @@ export function remoteMcpConfigArgs(
   // Back-compat with the #769 call shape `remoteMcpConfigArgs(provider, filename)`.
   const options: RemoteMcpConfigArgsOptions = typeof opts === "string" ? { filename: opts } : opts;
   const filename = options.filename ?? REMOTE_MCP_CONFIG_FILENAME;
-  switch (provider ?? "claude") {
+  switch (narrowProviderName(provider)) {
     case "claude":
       return ["--mcp-config", filename];
     case "copilot":
@@ -262,9 +263,20 @@ export function remoteMcpConfigArgs(
  *
  * Asked BEFORE a URL is known (the board decides whether to mint a token at all), so codex is
  * answered from the provider name rather than by calling {@link remoteMcpConfigArgs} with no URL.
+ *
+ * **Normalize through `narrowProviderName` — this is not decoration (#857).** The value that
+ * reaches here is an `AgentLaunchRequest.provider`, i.e. a `ProviderId`, whose claude spelling
+ * is `"claude-code"`. All three functions in this file used to compare a raw `provider ?? "claude"`
+ * against `ProviderName` spellings, so `"claude-code"` fell to the default arm and every remote
+ * CLAUDE builder — the overwhelmingly common case — was silently told the bridge was unsupported.
+ * It got no MCP config, no board tools, and a ticket brief that asserted it had none, which made
+ * the gap self-fulfilling: a remote builder could not file a ticket or comment a finding, so
+ * findings discovered remotely were structurally likelier to be lost than findings on the host.
+ * `narrowProviderName` is the ONE place the id→name mapping lives; hand-rolling `?? "claude"`
+ * beside it is what reintroduced the ladder it exists to replace.
  */
 export function providerSupportsRemoteMcp(provider: string | undefined): boolean {
-  const name = provider ?? "claude";
+  const name = narrowProviderName(provider);
   return name === "claude" || name === "copilot" || name === "codex";
 }
 
@@ -273,7 +285,7 @@ export function providerSupportsRemoteMcp(provider: string | undefined): boolean
  * checkout? Decides whether `WorkerRepoTransport.boardMcpToken` is populated for an assignment.
  */
 export function providerNeedsMcpTokenEnv(provider: string | undefined): boolean {
-  return (provider ?? "claude") === "codex";
+  return narrowProviderName(provider) === "codex";
 }
 
 type JsonRecord = Record<string, unknown>;

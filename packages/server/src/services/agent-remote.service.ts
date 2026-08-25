@@ -44,7 +44,7 @@ import { TICKET_CONTEXT_FILENAME, announceRemoteBoardTools } from "@agentic-kanb
 //    never arrive (the worker's pending-result queue is in-memory), so the session
 //    is finalized — but only after any pushed result is landed. See onHello.
 
-import { buildAgentLaunchConfig } from "./agent-provider.js";
+import { buildAgentLaunchConfig, narrowProviderName } from "./agent-provider.js";
 import { resolveLaunchPorts, buildAgentSpawnEnv, resolveAgentHangTimeoutMs } from "../lib/agent-launch-env.js";
 import { buildRemoteSpecEnv } from "../lib/remote-spec-env.js";
 import { resolveWorktreeDevPorts } from "./worktree-ports.js";
@@ -657,7 +657,7 @@ export function createRemoteAgentService(
           } else {
             console.log(
               `[agent-remote] no board MCP bridge for session ${sessionId} ` +
-                `(provider=${provider ?? "claude"}, fleet listener ${fleetMcp.endpointPort() === null ? "not running" : "up"}) — ` +
+                `(provider=${provider ?? "claude"} -> ${narrowProviderName(provider)}, fleet listener ${fleetMcp.endpointPort() === null ? "not running" : "up"}) — ` +
                 "the worker's brief keeps saying it has no board tools",
             );
           }
