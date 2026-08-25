@@ -41,6 +41,15 @@ export const workspaceMergeGate = sqliteTable("workspace_merge_gate", {
   branchSha: text("branch_sha"),
   /** The base tip the gate ran against. Same role as `branchSha` (0108). */
   baseSha: text("base_sha"),
+  /**
+   * Fingerprint of WHAT verification the pass bought — `gateVerificationKey(strategy,
+   * verifyCommand)`, the same key the in-memory tree memo is scoped by (#893). A pass earned
+   * under a weaker tier (or an older verify_script) must not be reused after the operator
+   * tightens either one, and unlike the tips, "the tier changed" is invisible to content.
+   * Nullable: evidence written before #893 (or by a writer that did not resolve it) simply
+   * cannot be reused by the bounded cross-restart reuse path, which fails safe into a re-run.
+   */
+  verificationKey: text("verification_key"),
 });
 
 export const workspaceMergeGateRelations = relations(workspaceMergeGate, ({ one }) => ({

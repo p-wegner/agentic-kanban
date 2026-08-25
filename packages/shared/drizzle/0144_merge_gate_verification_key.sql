@@ -1,0 +1,13 @@
+-- #893: a 5-second tsx-watch backend restart discarded a 39-minute pre-merge gate PASS,
+-- because the HTTP merge path (`runPreLockGate`) held its verdict only in the request's
+-- memory (and the #492 tree memo, also in-memory). The verdict now persists to
+-- `workspace_merge_gate` when the pre-lock gate passes, and a merge (re)attempt reuses it
+-- when the branch/base tips still match, the verification tier is unchanged, and the run is
+-- younger than the reuse bound.
+--
+-- `verification_key` is the missing piece of that key: `gateVerificationKey(strategy,
+-- verifyCommand)` — the same fingerprint the in-memory tree memo is scoped by — so a pass
+-- earned under `scoped` (or an older verify_script) is never replayed after the operator
+-- tightens the tier. Nullable: pre-#893 rows (and the review-exit writer until it resolves
+-- one) carry NULL, which the reuse path treats as "not reusable", never as "matches".
+ALTER TABLE `workspace_merge_gate` ADD `verification_key` text;

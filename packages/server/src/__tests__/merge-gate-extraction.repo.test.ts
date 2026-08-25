@@ -75,7 +75,7 @@ describe("merge-gate extraction (#815)", () => {
     expect(columnNames(info.rows).filter((n) => n.startsWith("merge_gate_"))).toEqual([]);
     const moved = await client.execute('PRAGMA table_info("workspace_merge_gate")');
     expect(columnNames(moved.rows).sort()).toEqual([
-      "base_sha", "branch_sha", "ran_at", "source", "stage", "workspace_id",
+      "base_sha", "branch_sha", "ran_at", "source", "stage", "verification_key", "workspace_id",
     ]);
   });
 
@@ -84,13 +84,28 @@ describe("merge-gate extraction (#815)", () => {
     const workspaceId = await seedWorkspace(db);
 
     await setMergeGateEvidence(workspaceId, EVIDENCE, db);
-    expect(await getMergeGateEvidence(workspaceId, db)).toEqual({ workspaceId, ...EVIDENCE });
+    expect(await getMergeGateEvidence(workspaceId, db)).toEqual({ workspaceId, ...EVIDENCE, verificationKey: null });
 
     // A second gate run on the same workspace: the record is LATEST-value, as the columns were.
     const regated = { ...EVIDENCE, ranAt: "2026-08-23T01:00:00.000Z", branchSha: "cccccccccccc" };
     await setMergeGateEvidence(workspaceId, regated, db);
     expect(await db.select().from(workspaceMergeGate).where(eq(workspaceMergeGate.workspaceId, workspaceId)))
-      .toEqual([{ workspaceId, ...regated }]);
+      .toEqual([{ workspaceId, ...regated, verificationKey: null }]);
+  });
+
+  it("re-gating without a verificationKey clears the previous run's key rather than keeping it (#893)", async () => {
+    const { db } = createTestDb();
+    const workspaceId = await seedWorkspace(db);
+
+    await setMergeGateEvidence(workspaceId, { ...EVIDENCE, verificationKey: "tier-key-1" }, db);
+    expect((await getMergeGateEvidence(workspaceId, db))?.verificationKey).toBe("tier-key-1");
+
+    // A writer that resolved no key (e.g. review-exit on a resolution failure) must not leave
+    // the OLD key beside the NEW tips — that would be a proof asserting a tier it never ran under.
+    await setMergeGateEvidence(workspaceId, { ...EVIDENCE, branchSha: "dddddddddddd" }, db);
+    const row = await getMergeGateEvidence(workspaceId, db);
+    expect(row?.branchSha).toBe("dddddddddddd");
+    expect(row?.verificationKey).toBeNull();
   });
 
   it("clearing deletes the row — the same state five nulled columns held", async () => {
@@ -175,8 +190,11 @@ describe("migration 0138 backfills the extracted family (#815)", () => {
     });
 
     for (const stmt of readMigrationStatements(MIGRATION_0138, MIGRATIONS_DIR)) await client.execute(stmt);
+    // 0144 adds `verification_key` (#893); the Drizzle schema knows it, so apply it before the
+    // schema-shaped select below. Independent of 0139-0143, which touch other tables.
+    for (const stmt of readMigrationStatements("0144_merge_gate_verification_key.sql", MIGRATIONS_DIR)) await client.execute(stmt);
 
-    expect(await db.select().from(workspaceMergeGate)).toEqual([{ workspaceId: gated, ...EVIDENCE }]);
+    expect(await db.select().from(workspaceMergeGate)).toEqual([{ workspaceId: gated, ...EVIDENCE, verificationKey: null }]);
     // The never-gated workspace gets NO row — the reads reconstruct that state anyway.
     const names = columnNames((await client.execute('PRAGMA table_info("workspaces")')).rows);
     expect(names.filter((n) => n.startsWith("merge_gate_"))).toEqual([]);
