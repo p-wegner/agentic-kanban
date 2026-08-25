@@ -51,7 +51,7 @@ import { resolveWorktreeDevPorts } from "./worktree-ports.js";
 import { db as realDb } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { updateSessionWorkerId, getSessionLiveness } from "../repositories/worker.repository.js";
-import { insertSessionMessages } from "../repositories/broadcast.repository.js";
+import { recordUndeliveredResult } from "./agent-remote-undelivered.js";
 import type { AgentExecutionService, AgentHandle, DeferredLaunchFailure } from "./agent-dispatch.service.js";
 import type { AgentOutputCallback } from "./agent.service.js";
 import { classifyAssignFailure, type WorkerConnectionManager } from "./worker-connection.service.js";
@@ -90,97 +90,11 @@ export const WORKER_RECONNECT_GRACE_MS = 2 * WORKER_HEARTBEAT_STALE_MS;
  */
 export const WORKER_ASSIGN_SETTLE_MS = 30 * 1000;
 
-interface RemoteSession {
-  workerId: string;
-  onOutput: AgentOutputCallback;
-  stdinOpen: boolean;
-  /** Set for git-transport sessions: sync the pushed branch back before exit. */
-  repo?: RemoteSessionRepo;
-  /**
-   * The dispatch proxy's late-launch-failure hook (#751). Held per session because
-   * `assign_failed` arrives on the manager's message channel, long after `launch`
-   * returned, and a launch failure must reach the proxy's placement rule rather than
-   * being flattened into an exit code here.
-   */
-  onDeferredLaunchFailure?: (failure: DeferredLaunchFailure) => void;
-  /** Has this worker ever spoken about this session? Positive proof it took the assign. */
-  observed?: boolean;
-  /** A deferred "is this really lost?" re-check, armed by a hello inside the settle window. */
-  lostCheckTimer?: ReturnType<typeof setTimeout>;
-  /**
-   * Epoch ms at which the board stopped being able to see this session (the
-   * reconnect grace expired). Non-null means DETACHED: held, reported, not
-   * finalized. Cleared on reconnect.
-   */
-  detachedSinceMs?: number;
-}
-
-/**
- * What the board knows about a git-transport session's repo.
- *
- * `projectId` was added for #783/#784: a mid-session repo operation needs a FRESH scoped
- * git token, and `issueToken` is scoped by project. It is optional because a session
- * ADOPTED after a board restart (#745) has only the path — see `resolveOpAuth`, which
- * recovers the project from `repoPath` rather than guessing.
- */
-export interface RemoteSessionRepo {
-  repoPath: string;
-  branch: string;
-  projectId?: string;
-  incomingRef?: string;
-}
-
-/** How a board-initiated repo operation on a live remote session ended (#783, #784). */
-export type RemoteRepoOpOutcome =
-  | { ok: true; status: WorkerRepoOpResult["status"]; sha?: string }
-  | { ok: false; status: WorkerRepoOpResult["status"] | "timeout" | "not-tracked" | "undeliverable"; error: string };
-
-/**
- * The remote execution service. A superset of `AgentExecutionService`: a remote
- * session outlives the board process, so it also needs to be ADOPTED back (#745).
- */
-export interface RemoteAgentService extends AgentExecutionService {
-  adoptSession(params: {
-    sessionId: string;
-    workerId: string;
-    onOutput: AgentOutputCallback;
-    repo?: RemoteSessionRepo;
-  }): void;
-  /** Session ids this process currently tracks (live or detached). */
-  trackedSessionIds(): string[];
-  /**
-   * What this process tracks about a session, for callers that must know whether it is
-   * remote AND whether it runs over git transport before acting (#783, #784). A
-   * filesystem-sharing worker has no `repo`: it works in the board's own worktree, so
-   * there is nothing to sync and nothing to push.
-   */
-  remoteSessionInfo(sessionId: string): { workerId: string; repo?: RemoteSessionRepo } | undefined;
-  /**
-   * Every session this process is running over GIT TRANSPORT right now (#790).
-   *
-   * The board's copy of such a branch is the base tip until something lands the worker's
-   * push, so any reader computing numbers from the board-side worktree is reading a zero
-   * that is not the truth. This is the cheap, synchronous way to ASK — no git, no push, no
-   * DB — which is what makes it usable from the board's hot per-card paths, where #784's
-   * on-demand landing deliberately is not.
-   *
-   * Filesystem-sharing workers are absent by construction: they have no `repo`, because
-   * they write into the board's own worktree and there is nothing unlanded.
-   */
-  remoteGitTransportSessions(): Array<{ sessionId: string; workerId: string; branch: string; repoPath: string }>;
-  /**
-   * Ask the worker to fast-forward its live checkout to the board's branch tip (#783) or
-   * to push its current HEAD to the incoming ref (#784), and WAIT for the answer.
-   *
-   * Bounded: an unanswered request resolves `{ok:false, status:"timeout"}` rather than
-   * hanging, because the caller refuses a turn on it.
-   */
-  requestRepoOp(
-    sessionId: string,
-    op: WorkerRepoOpKind,
-    opts?: { timeoutMs?: number },
-  ): Promise<RemoteRepoOpOutcome>;
-}
+// The session/service type declarations live in agent-remote.types.ts — this file
+// sits at the god-module ceiling, and the types are a cohesive leaf (see
+// placement-explain.types.ts for the precedent).
+import type { RemoteSession, RemoteSessionRepo, RemoteRepoOpOutcome, RemoteAgentService } from "./agent-remote.types.js";
+export type { RemoteSessionRepo, RemoteRepoOpOutcome, RemoteAgentService } from "./agent-remote.types.js";
 
 /**
  * How long the board waits for a worker's answer to a repo operation (#783).
@@ -482,43 +396,19 @@ export function createRemoteAgentService(
       return;
     }
     if (message.type === "undelivered_result") {
-      // #871: a COMPLETED run whose result never arrived — even after the worker's
-      // reconnect retry. The session was long finalized (its exit was downgraded when the
-      // in-run retries exhausted), so without this the finished work is invisible: it
-      // sits in a checkout on the worker's disk, which this machine cannot enumerate.
-      console.error(
-        `[agent-remote] worker ${workerId} holds a COMPLETED but UNDELIVERED result for session ` +
-          `${message.sessionId}: push to ${message.incomingRef} failed ${message.attempts} time(s) ` +
-          `(last error: ${message.lastError}). The work is KEPT on the worker at ${message.checkoutPath}. ` +
-          `Once a push lands, use the Worker Fleet incoming view (POST /api/workers/incoming/land) to ` +
-          `bring it onto ${message.branch}.`,
-      );
-      // The durable record — visible in `worker events <id>` and the fleet panel timeline.
-      noteUndeliveredResult(workerId, message);
-      const text =
-        `Fleet worker ${workerId} reports this session COMPLETED but its result is still UNDELIVERED: ` +
-        `the push to ${message.incomingRef} failed ${message.attempts} time(s) ` +
-        `(last error: ${message.lastError}). The work is not lost — it is kept on the worker at ` +
-        `${message.checkoutPath} — but it has not reached the board.`;
-      const session = sessions.get(message.sessionId);
-      if (session && session.workerId === workerId) {
-        report(message.sessionId, session, text);
-        return;
-      }
-      // Finalized (the normal case): stamp the transcript directly, IF the session row
-      // exists — the undelivered state must be visible on the session, not only in a log.
-      void (async () => {
-        const live = await getSessionLiveness(message.sessionId, database).catch(() => null);
-        if (!live) return;
-        await insertSessionMessages(
-          message.sessionId,
-          [{ type: "stderr", data: text, exitCode: null }],
-          null,
-          database,
-        ).catch((err: unknown) => {
-          console.error(`[agent-remote] could not record the undelivered state on session ${message.sessionId}`, err);
-        });
-      })();
+      // #871 — extracted to agent-remote-undelivered.ts (this file sits at the god-module ceiling).
+      recordUndeliveredResult({
+        workerId,
+        message,
+        database,
+        noteUndeliveredResult,
+        reportToLiveSession: (text) => {
+          const session = sessions.get(message.sessionId);
+          if (!session || session.workerId !== workerId) return false;
+          report(message.sessionId, session, text);
+          return true;
+        },
+      });
       return;
     }
     if (message.type === "assign_failed") {
