@@ -119,7 +119,16 @@ export function classifySessionExit(ctx: SessionExitContext): SessionExitRoute {
   const withinWindow = ctx.durationMs <= ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS;
   const isZeroOutput = !ctx.hadSubstantiveOutput;
   const isNonZeroExit = ctx.exitCode !== 0 && ctx.exitCode !== null;
-  if (withinWindow && (isZeroOutput || isNonZeroExit)) {
+  // #859/#895 — a NON-ZERO exit with ZERO substantive output is a launch failure at ANY
+  // duration: nothing ran, and the exit code says so explicitly. The 10s window assumed the
+  // agent starts when the session does, which stopped being true when placement moved
+  // off-host — a remote dispatch spends ~a minute on clone+checkout BEFORE the agent's
+  // instant "Not logged in" exit, so the discarded diagnosis routed to `completed` and the
+  // workspace reset to a bare idle. The window still bounds the two HEURISTIC cases, which
+  // genuinely need a time bound: zero-output-with-clean-exit (a long legitimate run can be
+  // quiet) and fast-non-zero-with-output (a long run that fails late is a failed run, not a
+  // launch failure — it keeps the completed path, which persists its real exit code).
+  if ((isNonZeroExit && isZeroOutput) || (withinWindow && (isZeroOutput || isNonZeroExit))) {
     const errorText = ctx.planText?.trim() || ctx.capturedStderr || "";
     const effectiveExitCode = isNonZeroExit ? (ctx.exitCode as number) : 1;
     return { phase: "launch-failure", isZeroOutput, isNonZeroExit, effectiveExitCode, errorText };
