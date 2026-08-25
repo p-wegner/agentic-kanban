@@ -17,6 +17,7 @@
 // the behaviour and imports its vocabulary from here, and the leaf consumers
 // depend only on this file. Keep this module free of anything that reaches the db.
 import type { ProviderName } from "../services/agent-provider/types.js";
+import type { WorkerBuildFreshness } from "@agentic-kanban/shared/lib/worker-build-freshness";
 
 /**
  * The chain's check ids, as DATA so the union and the runtime list cannot drift (#801).
@@ -132,6 +133,14 @@ export interface WorkerEligibility {
   /** In-memory, from the last heartbeat (#754) — `undefined` = not heard from since boot. */
   protocolVersion?: number;
   workerVersion?: string;
+  /**
+   * #879: the reported build against the board's own package version. Present only when
+   * the worker reported a build at all — an absent `workerVersion` stays a `?` at every
+   * renderer, never "current". "behind-board" and "ahead-of-board" are deliberately
+   * distinct words: ahead is a normal dev-machine state, not staleness. NON-BLOCKING —
+   * refusal is `protocolVersion`'s job.
+   */
+  buildFreshness?: WorkerBuildFreshness;
   /** Sessions the board currently has assigned to this worker. `load` is its length. */
   assignedSessionIds: string[];
   /** Free slots on THIS worker: `maxConcurrency - load`, floored at 0. */
@@ -154,6 +163,12 @@ export interface FleetSnapshot {
   provider: ProviderName;
   /** `worker_labels_<projectId>`, when a project was named. */
   requiredLabels: string[];
+  /**
+   * #879: the board's OWN package version — what each row's `buildFreshness` compares
+   * against, so renderers can say "behind board (board runs X)". Null when the board
+   * cannot resolve its own manifest.
+   */
+  boardWorkerVersion: string | null;
   workers: WorkerEligibility[];
 }
 

@@ -109,6 +109,9 @@ function registerOwnerRoutes(router: Hono, reg: WorkerRegistry, database: Databa
         freeSlots: fleet.freeSlots,
         provider: fleet.provider,
         requiredLabels: fleet.requiredLabels,
+        // #879: what each row's buildFreshness compares against, so the panel and
+        // `worker list` can say "behind board (board runs X)".
+        boardWorkerVersion: fleet.boardWorkerVersion,
       },
     });
   });

@@ -34,6 +34,8 @@ import {
   remoteDispatchBlockedByAllowlist,
 } from "@agentic-kanban/shared/lib/profile-allowlist";
 import { SHARES_FILESYSTEM_LABEL } from "@agentic-kanban/shared/lib/worker-protocol";
+import { compareWorkerBuild } from "@agentic-kanban/shared/lib/worker-build-freshness";
+import { resolveOwnPackageVersion } from "../lib/worker-build.js";
 
 import { db as realDb } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -249,7 +251,15 @@ async function describeWorkers(
       status: w.status,
       lastHeartbeatAt: w.lastHeartbeatAt,
       ...(w.protocolVersion === undefined ? {} : { protocolVersion: w.protocolVersion }),
-      ...(w.workerVersion === undefined ? {} : { workerVersion: w.workerVersion }),
+      // #879: freshness rides ONLY on a reported build. A worker that reported nothing
+      // keeps rendering as `?` — "we assumed" and "it said" are different facts, and a
+      // fabricated "current" here would launder the first into the second.
+      ...(w.workerVersion === undefined
+        ? {}
+        : {
+            workerVersion: w.workerVersion,
+            buildFreshness: compareWorkerBuild(w.workerVersion, resolveOwnPackageVersion()),
+          }),
       assignedSessionIds: fleet.connections.assignedSessionIds(w.id),
       freeSlots: Math.max(0, w.maxConcurrency - load),
     };
@@ -304,6 +314,7 @@ export async function describeFleet(params: {
     freeSlots: capacity.freeSlots,
     provider: providerName,
     requiredLabels,
+    boardWorkerVersion: resolveOwnPackageVersion() ?? null,
     workers,
   };
 }
