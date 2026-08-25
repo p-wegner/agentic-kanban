@@ -125,6 +125,8 @@ describe("worker fleet integration (board <-> daemon <-> agent)", () => {
       labels: ["test"],
       providers: ["claude"],
       stateFile,
+      // Temp work root (#871): keep the undelivered-results file out of the real one.
+      workRoot: mkdtempSync(join(tmpdir(), "ak-worker-root-")),
       log: () => {},
     });
     await daemon.connected;
@@ -175,7 +177,10 @@ describe("worker fleet integration (board <-> daemon <-> agent)", () => {
   it("re-registration is not needed on daemon restart (state file reuse)", async () => {
     const firstWorkerId = daemon!.workerId;
     daemon!.stop();
-    daemon = await startWorkerDaemon({ boardUrl, name: "test-worker", stateFile, log: () => {} });
+    daemon = await startWorkerDaemon({
+      boardUrl, name: "test-worker", stateFile, log: () => {},
+      workRoot: mkdtempSync(join(tmpdir(), "ak-worker-root-")), // #871 — see above
+    });
     await daemon.connected;
     expect(daemon.workerId).toBe(firstWorkerId);
     expect((await registry.listWorkersView()).length).toBe(1);

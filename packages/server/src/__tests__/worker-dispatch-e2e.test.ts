@@ -74,6 +74,8 @@ describe("worker dispatch e2e (phase 1c)", () => {
       // ceiling of 2 a leaked slot from the previous case would still be tolerated (#777).
       boardUrl, pairingToken, name: "e2e-worker", providers: ["claude"], stateFile,
       maxConcurrency: 1, log: () => {},
+      // Temp work root (#871): keep the undelivered-results file out of the real one.
+      workRoot: mkdtempSync(join(tmpdir(), "ak-worker-root-")),
     });
     await daemon.connected;
   });

@@ -21,6 +21,7 @@ import type {
   WorkerToBoardMessage,
 } from "@agentic-kanban/shared/lib/worker-protocol";
 import {
+  defaultWorkerWorkRoot,
   provisionWorkerCheckout,
   pushWorkerResult,
   pushWorkerHead,
@@ -29,6 +30,11 @@ import {
   type WorkerCheckout,
   type WorkerRepoOpOutcome,
 } from "./worker-repo.js";
+import {
+  loadUndelivered,
+  removeUndelivered,
+  upsertUndelivered,
+} from "./worker-undelivered.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { resolveSpecCommand } from "./worker-command-resolver.js";
 import { FLEET_MCP_TOKEN_ENV_VAR } from "@agentic-kanban/shared/lib/worker-protocol";
@@ -66,14 +72,17 @@ export interface WorkerAgentRunnerOptions {
 }
 
 /**
- * How long the worker waits before each retry of a failed result push (#750).
+ * How long the worker waits before each retry of a failed result push (#750, #870).
  *
- * Short on purpose: the board does not see the session's `exit` until the push resolves,
- * so this list is the delay a completed-but-undelivered run adds to the board's view. It
- * covers a restarting board and a briefly-dropped link; a longer outage is covered by
- * `retryPendingPushes` on the next reconnect instead of by waiting here.
+ * Bounded on purpose: the board does not see the session's `exit` until the push resolves,
+ * so this list is the delay a completed-but-undelivered run adds to the board's view. Five
+ * attempts spread over roughly two minutes (#870) — enough to ride out a board restart or a
+ * connect timeout (the observed failure burned 21 s on ONE attempt) without holding the
+ * exit hostage forever; a longer outage is covered by `retryPendingPushes` on the next
+ * reconnect (with the entry persisted across a daemon restart, #871) instead of by
+ * waiting here.
  */
-export const DEFAULT_PUSH_RETRY_DELAYS_MS = [2_000, 10_000, 30_000];
+export const DEFAULT_PUSH_RETRY_DELAYS_MS = [2_000, 10_000, 30_000, 75_000];
 
 type PushOutcome =
   | { ok: true; attempts: number }
@@ -142,13 +151,43 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
   const inFlightPushes = new Map<string, Promise<void>>();
   /**
    * Finished results this worker could not push, kept WITH their checkout (#750, #775).
-   * In memory only, and deliberately so: the per-assignment git token is what a retry
-   * needs, and persisting it would write a credential to this machine's disk.
+   *
+   * The live entries are in memory (the per-assignment git token a retry needs must never
+   * be written to this machine's disk), but the FACT that a session is undelivered is
+   * persisted token-free under the work root (#871) — the supervisor restarts a dead
+   * daemon within seconds, and a fresh process that does not know the entry exists loses
+   * the run in every practical sense. Restored entries carry an EMPTY token: their retry
+   * fails against the token-authed transport, which is what routes them to the
+   * `undelivered_result` report instead.
    */
   const unpushed = new Map<
     string,
     { pending: { checkout: WorkerCheckout; repo: WorkerRepoTransport }; attempts: number; lastError: string }
   >();
+  const workRoot = options.workRoot ?? defaultWorkerWorkRoot();
+  // #871: adopt the previous daemon's undelivered results. In-memory entries cannot exist
+  // yet (this map was created two lines up), so every persisted record is adopted as-is.
+  for (const record of loadUndelivered(workRoot)) {
+    unpushed.set(record.sessionId, {
+      pending: {
+        checkout: { cwd: record.checkoutPath, cacheDir: record.cacheDir },
+        repo: {
+          projectId: record.projectId,
+          gitPort: record.gitPort,
+          gitToken: "", // never persisted — see worker-undelivered.ts
+          branch: record.branch,
+          baseBranch: record.baseBranch,
+          incomingRef: record.incomingRef,
+        },
+      },
+      attempts: record.attempts,
+      lastError: record.lastError || "restored after a daemon restart; not yet retried by this process",
+    });
+    console.warn(
+      `[worker] restored an undelivered result from ${workRoot}: sessionId=${record.sessionId} ` +
+        `checkout=${record.checkoutPath} target=${record.incomingRef} — retrying on the next connect`,
+    );
+  }
   const retryDelaysMs = options.pushRetryDelaysMs ?? DEFAULT_PUSH_RETRY_DELAYS_MS;
   /**
    * Set once a drain starts: the current push attempt finishes, but no further backoff is
@@ -208,6 +247,39 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
   }
 
   /**
+   * `send` that cannot throw into a push path (#870). The push/retain flow runs on the
+   * child's `exit` event and inside detached promises, so an exception out of the daemon's
+   * send callback here is a process-level uncaught exception — the exact "daemon threw ...
+   * daemon exited" that turned one failed push into every agent on the machine dying.
+   */
+  function safeSend(message: WorkerToBoardMessage): void {
+    try {
+      send(message);
+    } catch (err) {
+      console.error(`[worker] could not send a ${message.type} message to the board: ${errorMessage(err)}`);
+    }
+  }
+
+  /** Persist an undelivered entry token-free (#871). Best-effort by contract. */
+  function persistUnpushed(sessionId: string): void {
+    const entry = unpushed.get(sessionId);
+    if (!entry) return;
+    upsertUndelivered(workRoot, {
+      sessionId,
+      branch: entry.pending.repo.branch,
+      baseBranch: entry.pending.repo.baseBranch,
+      incomingRef: entry.pending.repo.incomingRef,
+      checkoutPath: entry.pending.checkout.cwd,
+      cacheDir: entry.pending.checkout.cacheDir,
+      projectId: entry.pending.repo.projectId,
+      gitPort: entry.pending.repo.gitPort,
+      attempts: entry.attempts,
+      lastError: entry.lastError,
+      recordedAt: new Date().toISOString(),
+    });
+  }
+
+  /**
    * Push the result, retrying a FAILED push on the configured backoff (#750).
    *
    * A single-shot push made every transient failure terminal: the board's fleet port
@@ -234,7 +306,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
       }
       const delay = retryDelaysMs[attempts - 1];
       if (delay === undefined || retriesSuspended) break;
-      send({
+      safeSend({
         type: "event",
         event: {
           type: "stderr",
@@ -259,8 +331,9 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
    * save a push whose failure was the board being unreachable, since the in-run backoff is
    * bounded by design. The git token is kept in memory only: it is per-assignment and
    * writing it to the worker's state file would put a credential on that machine's disk,
-   * which is exactly what `worker-repo.ts` goes out of its way to avoid. So a retained
-   * result does NOT survive a daemon restart — see #775.
+   * which is exactly what `worker-repo.ts` goes out of its way to avoid. The token-free
+   * FACT of the entry IS persisted (#871), so a daemon restart restores it — with an empty
+   * token, whose failed retry routes it to the board as an `undelivered_result` report.
    */
   function retainUnpushed(
     sessionId: string,
@@ -268,8 +341,11 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     outcome: PushOutcome & { ok: false },
   ): void {
     unpushed.set(sessionId, { pending, attempts: outcome.attempts, lastError: outcome.lastError });
+    // #871: the FACT (not the token) also goes to disk, so the entry survives the daemon
+    // restart the supervisor performs 2 s after a crash.
+    persistUnpushed(sessionId);
     const localBranch = `kanban/${sessionId}`;
-    send({
+    safeSend({
       type: "event",
       event: {
         type: "stderr",
@@ -301,14 +377,16 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
       } catch (err) {
         entry.attempts += 1;
         entry.lastError = errorMessage(err);
+        persistUnpushed(sessionId); // keep the on-disk attempt count/error honest (#871)
         console.warn(`[worker] retained result still cannot be pushed: sessionId=${sessionId}: ${entry.lastError}`);
         continue;
       }
       unpushed.delete(sessionId);
+      removeUndelivered(workRoot, sessionId); // delivered — the persisted entry is cleared (#871)
       pushed.push(sessionId);
       await repoOps.cleanup(entry.pending.checkout).catch(() => {});
       console.log(`[worker] retained result pushed on reconnect: sessionId=${sessionId}`);
-      send({
+      safeSend({
         type: "event",
         event: {
           type: "stderr",
@@ -347,7 +425,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
    */
   function repoOp(op: WorkerRepoOpKind, sessionId: string, requestId: string, auth: WorkerRepoOpAuth): void {
     const answer = (outcome: WorkerRepoOpOutcome): void => {
-      send({ type: "repo_op_result", sessionId, result: { requestId, op, ...outcome } });
+      safeSend({ type: "repo_op_result", sessionId, result: { requestId, op, ...outcome } });
     };
     const pending = checkouts.get(sessionId);
     if (!pending) {
@@ -384,7 +462,9 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     closeWatchdog(sessionId);
     const pending = checkouts.get(sessionId);
     if (!pending) {
-      send({ type: "event", event: { type: "exit", sessionId, exitCode } });
+      // safeSend, not send: this runs synchronously on the child's `exit` event, where a
+      // throw is a process-level uncaught exception (#870).
+      safeSend({ type: "event", event: { type: "exit", sessionId, exitCode } });
       return;
     }
     // Git transport: the board must not see `exit` until the work is actually
@@ -394,20 +474,38 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     checkouts.delete(sessionId);
     const push = (async () => {
       let effectiveExit = exitCode;
-      const outcome = await pushWithRetry(sessionId, pending);
-      if (outcome.ok) {
+      try {
+        const outcome = await pushWithRetry(sessionId, pending);
+        if (outcome.ok) {
+          try {
+            await repoOps.cleanup(pending.checkout);
+          } catch { /* best-effort */ }
+        } else {
+          // #750/#775 item 2: the checkout is NOT removed. A `git worktree remove --force`
+          // here leaves the commits only on the `kanban/<sessionId>` branch of the cache
+          // clone, which nothing on either machine enumerates — so a failed push used to
+          // cost the whole run in every practical sense.
+          retainUnpushed(sessionId, pending, outcome);
+          effectiveExit = exitCode === 0 || exitCode === null ? 1 : exitCode;
+        }
+      } catch (err) {
+        // #870: NOTHING on this path may escape. This IIFE runs detached off the child's
+        // exit event, so an exception here was an unhandled rejection — and observed live,
+        // one failed push took the whole daemon (and every other agent on the machine)
+        // down with "[run] daemon threw". Retain the result like any exhausted retry and
+        // hand it to the #871 undelivered tracking; the daemon stays up.
+        const message = errorMessage(err);
+        console.error(
+          `[worker] result push path failed unexpectedly (daemon staying up): sessionId=${sessionId}: ${message}`,
+        );
         try {
-          await repoOps.cleanup(pending.checkout);
-        } catch { /* best-effort */ }
-      } else {
-        // #750/#775 item 2: the checkout is NOT removed. A `git worktree remove --force`
-        // here leaves the commits only on the `kanban/<sessionId>` branch of the cache
-        // clone, which nothing on either machine enumerates — so a failed push used to
-        // cost the whole run in every practical sense.
-        retainUnpushed(sessionId, pending, outcome);
+          retainUnpushed(sessionId, pending, { ok: false, attempts: 0, lastError: message });
+        } catch (retainErr) {
+          console.error(`[worker] could not retain the unpushed result: sessionId=${sessionId}`, retainErr);
+        }
         effectiveExit = exitCode === 0 || exitCode === null ? 1 : exitCode;
       }
-      send({ type: "event", event: { type: "exit", sessionId, exitCode: effectiveExit } });
+      safeSend({ type: "event", event: { type: "exit", sessionId, exitCode: effectiveExit } });
     })().finally(() => {
       inFlightPushes.delete(sessionId);
     });
@@ -468,7 +566,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
         provisioning.delete(sessionId);
         const message = errorMessage(err);
         console.error(`[worker] repo provisioning failed: sessionId=${sessionId}: ${message}`);
-        send({ type: "assign_failed", sessionId, error: `repo provisioning failed: ${message}` });
+        safeSend({ type: "assign_failed", sessionId, error: `repo provisioning failed: ${message}` });
       }
     })();
   }
@@ -547,7 +645,9 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
       const data = sanitizeUtf8(chunk.toString());
       if (!data) return;
       hangWatchdogs.get(sessionId)?.reset();
-      send({ type: "event", event: { type, sessionId, data } });
+      // safeSend: this runs on the child's stream 'data' events, where a throw out of the
+      // send seam is a process-level uncaught exception (#870).
+      safeSend({ type: "event", event: { type, sessionId, data } });
     };
     proc.stdout?.on("data", (chunk: Buffer) => emitOutput("stdout", chunk));
     proc.stderr?.on("data", (chunk: Buffer) => emitOutput("stderr", chunk));
@@ -567,7 +667,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
       // evidence, and a synthesized line here would read like agent output that is not.
     });
     proc.on("error", (err) => {
-      send({ type: "event", event: { type: "stderr", sessionId, data: `Process error: ${err.message}` } });
+      safeSend({ type: "event", event: { type: "stderr", sessionId, data: `Process error: ${err.message}` } });
       emitExit(sessionId, 1);
     });
     proc.on("exit", (code) => {
@@ -587,7 +687,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
       hangWatchdogs.set(sessionId, startHangWatchdog(`sessionId=${sessionId}`, hangTimeoutMs, () => {
         const seconds = Math.round(hangTimeoutMs / 1000);
         console.warn(`[worker] hang watchdog fired: sessionId=${sessionId} pid=${proc.pid} — no output for ${seconds}s; killing`);
-        send({
+        safeSend({
           type: "event",
           event: {
             type: "stderr",
