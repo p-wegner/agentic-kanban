@@ -154,7 +154,10 @@ describe("pruneStaleWorktrees", () => {
    * Query order in the guarded path: closed workspaces -> issue -> project -> the guard's
    * own unfiltered claim read.
    */
-  function seedOneStaleWorkspace(claims: { id: string; status: string; workingDir: string }[]) {
+  function seedOneStaleWorkspace(
+    claims: { id: string; status: string; workingDir: string }[],
+    opts: { reachesProvisioningRead?: boolean } = {},
+  ) {
     mockDb.select
       .mockReturnValueOnce({
         from: vi.fn(() => ({
@@ -176,10 +179,22 @@ describe("pruneStaleWorktrees", () => {
       .mockReturnValueOnce({
         from: vi.fn(() => ({ where: vi.fn(() => Promise.resolve(claims)) })),
       });
+    // #859: the guard now ALSO asks whether an in-flight workspace create claims the path
+    // (`findInFlightProvisioningClaims` — the workspace_provisioning read). Seeded ONLY for
+    // tests that get past the sharer check: vi.clearAllMocks() does NOT drop unconsumed
+    // once-queues, so an unconditional extra seed here leaks into the next test's chain.
+    if (opts.reachesProvisioningRead) {
+      mockDb.select.mockReturnValueOnce({
+        from: vi.fn(() => ({ where: vi.fn(() => Promise.resolve([])) })),
+      });
+    }
   }
 
   it("removes the stale worktree when nothing live claims it", async () => {
-    seedOneStaleWorkspace([{ id: "ws-1", status: "closed", workingDir: "C:/wt/x" }]);
+    seedOneStaleWorkspace(
+      [{ id: "ws-1", status: "closed", workingDir: "C:/wt/x" }],
+      { reachesProvisioningRead: true },
+    );
 
     await pruneStaleWorktrees();
 
