@@ -36,6 +36,11 @@ function base(overrides: Partial<Parameters<typeof resolveDbLocation>[0]> = {}) 
     // Hermetic by default: the real probe would open (nonexistent) fake paths. Tests
     // that care about the content check inject their own.
     hasBoardContent: () => true,
+    // Hermetic by default too (#854): the real renameSync would throw ENOENT on the
+    // fake candidate paths and the default warn would spam the test output. Tests
+    // that care about the stub self-heal inject recording versions.
+    renameSync: () => {},
+    warn: () => {},
     ...overrides,
   };
 }
@@ -268,6 +273,84 @@ describe("resolveDbLocation rule 3 never adopts an empty/invalid local file (#16
       }),
     );
     expect(calls).toEqual([`exists:${SERVER_CANDIDATES[0]}`]);
+  });
+});
+
+// #854 — the size floor only protects callers that resolve THROUGH the resolver. A naive
+// caller (a bare `existsSync` probe, a hardcoded `file:kanban.db` open) still adopts a
+// sub-floor stub, so the resolver now RENAMES the stub aside (`kanban.db.stub-<timestamp>`)
+// instead of leaving the trap in place. Rename, never delete — guard-compatible, and the
+// file stays inspectable. Rename failure degrades to the pre-#854 warn-and-fall-through.
+describe("resolveDbLocation renames a sub-floor stub aside (#854)", () => {
+  it("renames the stub to kanban.db.stub-<timestamp> and logs loudly", () => {
+    const renames: Array<{ from: string; to: string }> = [];
+    const warnings: string[] = [];
+    const loc = resolveDbLocation(
+      base({
+        existsSync: () => true,
+        statSync: () => ({ size: 0 }),
+        localDbCandidates: SERVER_CANDIDATES,
+        renameSync: (from: string, to: string) => renames.push({ from, to }),
+        warn: (m: string) => warnings.push(m),
+        nowMs: Date.UTC(2026, 0, 2, 3, 4, 5),
+      }),
+    );
+    expect(loc.source).toBe("home-fallback");
+    expect(renames).toHaveLength(1);
+    expect(renames[0]?.from).toBe(SERVER_CANDIDATES[0]);
+    expect(renames[0]?.to).toBe(`${SERVER_CANDIDATES[0]}.stub-2026-01-02T03-04-05-000Z`);
+    // Windows-safe filename: no `:` from the ISO timestamp survives.
+    expect(renames[0]?.to.slice(2)).not.toContain(":");
+    expect(warnings.some((m) => m.includes("RENAMED") && m.includes("#854"))).toBe(true);
+    // The candidate is still REPORTED as rejected — the rename is remediation, not concealment.
+    expect(loc.rejectedLocalCandidates).toEqual([SERVER_CANDIDATES[0]]);
+  });
+
+  it("keeps the warn-and-fall-through behaviour when the rename fails (file locked)", () => {
+    const warnings: string[] = [];
+    const loc = resolveDbLocation(
+      base({
+        existsSync: () => true,
+        statSync: () => ({ size: 4096 }),
+        localDbCandidates: SERVER_CANDIDATES,
+        renameSync: () => {
+          throw new Error("EBUSY: resource busy or locked");
+        },
+        warn: (m: string) => warnings.push(m),
+      }),
+    );
+    expect(loc.source).toBe("home-fallback");
+    expect(loc.rejectedLocalCandidates).toEqual([SERVER_CANDIDATES[0]]);
+    expect(warnings.some((m) => m.includes("could not rename") && m.includes("EBUSY"))).toBe(true);
+  });
+
+  it("does NOT rename a #663 content-empty rejection — that is a real, full-sized database", () => {
+    const renames: string[] = [];
+    const loc = resolveDbLocation(
+      base({
+        existsSync: () => true,
+        statSync: () => ({ size: 847_872 }),
+        hasBoardContent: () => false,
+        localDbCandidates: SERVER_CANDIDATES,
+        renameSync: (from: string) => renames.push(from),
+      }),
+    );
+    expect(loc.source).toBe("home-fallback");
+    expect(loc.rejectedLocalCandidates).toEqual([SERVER_CANDIDATES[0]]);
+    expect(renames).toEqual([]);
+  });
+
+  it("does NOT rename an adopted (valid) in-checkout DB", () => {
+    const renames: string[] = [];
+    const loc = resolveDbLocation(
+      base({
+        existsSync: () => true,
+        localDbCandidates: SERVER_CANDIDATES,
+        renameSync: (from: string) => renames.push(from),
+      }),
+    );
+    expect(loc.source).toBe("local-checkout");
+    expect(renames).toEqual([]);
   });
 });
 
