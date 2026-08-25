@@ -10,6 +10,8 @@ vi.mock("node:fs", () => ({
   writeFileSync: vi.fn(),
   existsSync: vi.fn(() => false),
   readFileSync: vi.fn(),
+  // #854: db-path.ts now also imports renameSync at module level (stub-rename-aside).
+  renameSync: vi.fn(),
   // resolveDbLocation (db-path.ts, #165) statSync's a local-checkout DB to detect an
   // empty stub; never called when existsSync is false, but the module import chain
   // still needs the export present.
