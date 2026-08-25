@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import tailwindcss from "@tailwindcss/vite";
+import { rejectNonLoopback } from "./src/lib/devProxyGuard";
 
 const serverPort = Number(process.env.SERVER_PORT) || 3001;
 const clientPort = Number(process.env.VITE_PORT) || 5173;
@@ -49,10 +50,15 @@ export default defineConfig(({ command }) => ({
     port: clientPort,
     strictPort: true,
     allowedHosts: [".ts.net"],
+    // #866: `host` above deliberately binds beyond loopback so the UI is reachable over
+    // Tailscale (see the .ts.net entry). The board API has no auth of its own — its threat
+    // model is "only this machine can reach it" — so widening the UI's bind must not widen
+    // the API's. `bypass` runs before proxying and rejects (404) any request whose TCP peer
+    // isn't loopback, regardless of which interface `host` is bound to. See devProxyGuard.ts.
     proxy: {
-      "/api": `http://127.0.0.1:${serverPort}`,
-      "/health": `http://127.0.0.1:${serverPort}`,
-      "/ws": { target: `http://127.0.0.1:${serverPort}`, ws: true },
+      "/api": { target: `http://127.0.0.1:${serverPort}`, bypass: rejectNonLoopback },
+      "/health": { target: `http://127.0.0.1:${serverPort}`, bypass: rejectNonLoopback },
+      "/ws": { target: `http://127.0.0.1:${serverPort}`, ws: true, bypass: rejectNonLoopback },
     },
   },
   test: {
