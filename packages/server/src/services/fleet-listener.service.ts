@@ -8,9 +8,10 @@
 // credential. A warning in the docs is not a control.
 //
 // So the worker-facing endpoints get their own listener, and ONLY those:
-//   POST /api/workers/register        (pairing token -> per-worker token)
-//   POST /api/workers/:id/heartbeat   (per-worker bearer token)
-//   GET  /ws/workers/:id              (per-worker bearer token, checked pre-upgrade)
+//   POST /api/workers/register           (pairing token -> per-worker token)
+//   POST /api/workers/:id/heartbeat      (per-worker bearer token)
+//   GET  /api/workers/:id/update-check   (per-worker bearer token — the board's build, #880)
+//   GET  /ws/workers/:id                 (per-worker bearer token, checked pre-upgrade)
 //   ALL  /mcp                         (per-ASSIGNMENT token, allowlisted board tools — #769)
 //   GET  /health, /api/health         (unauthenticated liveness, like the others)
 // Every one of them authenticates for itself, so this surface is safe to expose

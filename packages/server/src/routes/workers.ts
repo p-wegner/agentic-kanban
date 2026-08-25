@@ -31,6 +31,7 @@ import {
 import { getPreferenceValue } from "../repositories/session-lifecycle.repository.js";
 import { listWorkerBranchAssignments } from "../repositories/worker.repository.js";
 import type { ProviderName } from "../services/agent-provider.js";
+import { resolveOwnPackageVersion } from "../lib/worker-build.js";
 
 function bearerFrom(c: Context): string | null {
   return extractBearer(c.req.header("authorization"));
@@ -317,6 +318,27 @@ function registerWorkerFacingRoutes(router: Hono, reg: WorkerRegistry, database:
       },
     });
     return c.json(result, 201);
+  });
+
+  // #880 — the READ-ONLY update-check surface: what build is the board itself running?
+  // Rides the worker-facing router so it is reachable from the FLEET port (a remote worker
+  // never sees the board API), and it authenticates with the per-worker bearer token
+  // rather than answering anonymously: version negotiation is a capability answer, and an
+  // unauthenticated caller must not be able to fingerprint the board's build (#754 — the
+  // same reason register checks the pairing token before judging the protocol).
+  // Report-only by design: the board never pushes an update, and the caller never applies
+  // one — `worker update-check` prints the diff and the manual steps, nothing more.
+  //
+  // Answers the board's own worker build + protocol version, for `worker update-check` (#880).
+  router.get("/:id/update-check", async (c) => {
+    const token = bearerFrom(c);
+    if (!(await reg.authenticateWorker(c.req.param("id"), token ?? ""))) {
+      return c.json({ error: "unauthorized" }, 401);
+    }
+    return c.json({
+      boardProtocolVersion: reg.boardProtocolVersion(),
+      boardWorkerVersion: resolveOwnPackageVersion() ?? null,
+    });
   });
 
   router.post("/:id/heartbeat", async (c) => {

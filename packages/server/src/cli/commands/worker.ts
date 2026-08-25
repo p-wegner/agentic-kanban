@@ -20,6 +20,9 @@ import type { IssuePlacementReport, SessionPlacementRecord } from "../../lib/pla
 // #774 — the connectivity self-test. Db-free on purpose: this module is also the standalone
 // worker binary's entry point (docs/worker-fleet.md §3).
 import { renderDoctorReport, runBoardDoctor, runWorkerDoctor } from "./worker-doctor.js";
+// #880 — the read-only update-check. Db-free like the doctor: also part of the
+// standalone worker binary.
+import { renderUpdateCheckReport, runWorkerUpdateCheck } from "./worker-update-check.js";
 
 const DEFAULT_BOARD_URL = "http://127.0.0.1:3001";
 
@@ -336,7 +339,7 @@ export function renderWorkerConnectMarkdown(
 export function registerWorkerCommand(program: Command) {
   const workerCmd = program
     .command("worker")
-    .description("Fleet worker: connect this machine to a board and execute assigned agent sessions.\n\nSubcommands: pair, start, instructions, list, explain, placements, doctor, doctor-board, cleanup, events");
+    .description("Fleet worker: connect this machine to a board and execute assigned agent sessions.\n\nSubcommands: pair, start, instructions, list, explain, placements, doctor, doctor-board, update-check, cleanup, events");
   registerWorkerSubcommands(workerCmd);
 }
 
@@ -678,6 +681,31 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         ...(options.provider ? { provider: options.provider } : {}),
       });
       console.log(options.json ? JSON.stringify(report, null, 2) : renderDoctorReport(report));
+      if (!report.ok) process.exit(1);
+    });
+
+  // #880 — the READ-ONLY update path for a standing worker runner. The 409 handshake only
+  // fires on a breaking wire change; this answers the far more common "just some bug fixes
+  // behind" case, which otherwise stays invisible forever on a supervised install.
+  workerCmd
+    .command("update-check")
+    .description(
+      "Run ON THE WORKER MACHINE: report whether this install's build is behind the board's, and " +
+        "print the exact manual update steps if so. Read-only — never downloads, installs, or " +
+        "restarts anything (the process running this may be executing on the very worker it would " +
+        "update). Exits non-zero only when the check itself could not be completed.",
+    )
+    .option("--board <url>", "Board base URL — the FLEET port on a cross-machine setup", DEFAULT_BOARD_URL)
+    .option("--state-file <path>", `Pairing state file (default: ${defaultWorkerStateFile()})`)
+    .option("--json", "Output the report as JSON")
+    .action(async (options: { board: string; stateFile?: string; json?: boolean }) => {
+      const report = await runWorkerUpdateCheck({
+        boardUrl: options.board,
+        stateFile: options.stateFile ?? defaultWorkerStateFile(),
+      });
+      console.log(options.json ? JSON.stringify(report, null, 2) : renderUpdateCheckReport(report));
+      // Non-zero for a FAILED CHECK only. A stale build exits 0: this is visibility, not a
+      // gate, and a supervisor must not treat "behind" as a crash.
       if (!report.ok) process.exit(1);
     });
 

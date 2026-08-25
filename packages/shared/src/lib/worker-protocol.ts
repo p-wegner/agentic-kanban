@@ -217,6 +217,22 @@ export const WORKER_PROTOCOL_VERSION = 1;
 export const MIN_SUPPORTED_WORKER_PROTOCOL_VERSION = 1;
 
 /**
+ * The manual steps that bring a stale worker install up to the board's build (#880).
+ *
+ * ONE copy on purpose: this text used to live only inside the 409 protocol-refusal
+ * message below, and `worker update-check` needs the same steps for the far more common
+ * case of a compatible-but-old build — a second hand-written copy is exactly the kind
+ * that drifts. Deliberately DESCRIBES and never performs: there is no update mechanism
+ * (docs/fleet-version-freshness.md §2.2), and the process printing this may be running
+ * on the very worker it would update.
+ */
+export const WORKER_UPDATE_REMEDIATION =
+  "on the board machine run 'node scripts/pack-worker.mjs', copy the tarball to the worker " +
+  "machine and reinstall it there (npm i -g <path-to-tarball>), then restart the worker " +
+  "daemon (ak-worker-service.ps1 -Restart on a Windows service install, or re-run " +
+  "'worker start')";
+
+/**
  * What a worker that reports NO version is assumed to speak (#754).
  *
  * This is the deliberate compatibility window, and the reasoning is factual rather than
@@ -286,8 +302,10 @@ export function checkProtocolCompatibility(
       ok: false,
       reason:
         `${what}, which is older than this board supports (${min}..${current}). ` +
-        `UPGRADE THE WORKER: on the board machine run 'node scripts/pack-worker.mjs', copy the ` +
-        `tarball to the worker, reinstall it there, then re-pair with a fresh token from ` +
+        // The steps are the shared constant so `worker update-check` prints the same ones
+        // (#880); the re-pair tail is refusal-specific — a refused registration consumed
+        // its single-use pairing token, a merely-stale worker keeps its pairing.
+        `UPGRADE THE WORKER: ${WORKER_UPDATE_REMEDIATION}, and re-pair with a fresh token from ` +
         `'agentic-kanban worker pair'`,
     };
   }
