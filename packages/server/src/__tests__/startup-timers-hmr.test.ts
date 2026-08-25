@@ -22,13 +22,23 @@ vi.mock("../repositories/preferences.repository.js", () => ({
   getAllPreferencesCached: vi.fn(async () => []),
 }));
 
-vi.mock("../db/index.js", () => ({
-  db: {
-    select: () => ({
-      from: () => Promise.resolve([]),
-    }),
-  },
-}));
+vi.mock("../db/index.js", () => {
+  // Full drizzle-style chain resolving []. The old `{from: () => Promise.resolve([])}`
+  // stub had no `.innerJoin`/`.where`, so the ancestor-branch reconciler's REAL
+  // fire-and-forget tick (driven by the #151 test) threw
+  // `database.select(...).from(...).innerJoin is not a function` AFTER its test
+  // completed — an Unhandled Rejection that failed whole gate runs whose every test
+  // passed, and (being a "crash") disqualified the #894 flake retry. See #921.
+  const chain: Record<string, unknown> = {};
+  for (const fn of ["from", "innerJoin", "leftJoin", "where", "orderBy", "groupBy"]) {
+    chain[fn] = () => chain;
+  }
+  chain.limit = () => Promise.resolve([]);
+  chain.then = (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
+    Promise.resolve([]).then(resolve, reject);
+  chain.catch = (fn: (e: unknown) => unknown) => Promise.resolve([]).catch(fn);
+  return { db: { select: () => chain } };
+});
 
 // Every export the module has, not just the one this test drives: the mock replaces the
 // WHOLE module, so an unmocked export is a hard load error for any importer in the graph
