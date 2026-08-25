@@ -212,7 +212,7 @@ export async function finalizeCompletedRoute(ctx: ExitFinalizeContext, exitCode:
   // `preflight-failed` from a problem that no longer exists (see the field's write site above).
   if (ctx.workspaceId) {
     await clearWorkspaceLaunchError(ctx.workspaceId, ctx.db).catch((err) =>
-      console.error("Failed to clear workspace launch error:", err),
+      console.error(`[session] failed to clear workspace launch error: workspaceId=${ctx.workspaceId}`, err),
     );
   }
 }
