@@ -19,7 +19,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { IssueWithStatus, StatusWithIssues } from "@agentic-kanban/shared";
-import { TimelineView } from "./TimelineView.js";
+import { TimelineView, axisAnchor, axisLabelShift } from "./TimelineView.js";
 
 const DAY = 86_400_000;
 
@@ -160,5 +160,47 @@ describe("TimelineView — issues the range has to cope with", () => {
     const html = render([column("Done", [issue({ id: "a", title: "Shipped it" })])]);
     expect(html).toContain("Shipped it");
     expect(html).toContain("Done");
+  });
+});
+
+/**
+ * #897 — the axis label anchoring that stops the view painting a horizontal scrollbar.
+ *
+ * Measured at 1440x900 before the fix: 48px of overflow on a view that otherwise fits. The
+ * ticket blamed 90px issue-bar "markers"; the actual driver was the AXIS — `pctOf` already
+ * clamps to 0-100, so a bar's percentages cannot overflow, but a label centred on the range's
+ * final tick (always exactly 100%) hangs half its own width outside the track.
+ *
+ * Geometry is CSS, so this pins the two decisions rather than pixels: where the container is
+ * anchored, and whether the label is centred. The `width: 0` in the middle branch is the part
+ * that regressed once already during this fix — a container left at its natural width juts
+ * past its own `left` origin and overflows even though the transformed label does not, which
+ * was invisible at 1440px and a 6px scrollbar at 900px.
+ */
+describe("timeline axis anchoring (#897)", () => {
+  it("pins the final tick by its RIGHT edge, so its label cannot leave the track", () => {
+    expect(axisAnchor(100)).toEqual({ right: 0 });
+    expect(axisLabelShift(100)).toBe("");
+  });
+
+  it("treats a tick NEAR the end as a final tick — the range end is rarely exactly 100", () => {
+    expect(axisAnchor(98.4)).toEqual({ right: 0 });
+  });
+
+  it("leaves the first tick's label flush left instead of centring it off the track", () => {
+    expect(axisAnchor(0)).toEqual({ left: "0%", width: 0 });
+    expect(axisLabelShift(0)).toBe("");
+  });
+
+  it("centres every interior label on its own tick", () => {
+    expect(axisAnchor(50)).toEqual({ left: "50%", width: 0 });
+    expect(axisLabelShift(50)).toBe("-translate-x-1/2");
+  });
+
+  it("gives every non-final container zero width, since the transform moves only the label", () => {
+    for (const p of [0, 5, 25, 50, 75, 96]) {
+      const anchor = axisAnchor(p);
+      expect(anchor, `p=${p}`).toHaveProperty("width", 0);
+    }
   });
 });

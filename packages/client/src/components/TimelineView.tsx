@@ -29,6 +29,8 @@ interface TimelineViewProps {
 
 const LABEL_W = 220;
 const BAR_H = 30;
+/** Floor on a bar's rendered width: a same-day issue is 0% wide and would be invisible. */
+const MIN_BAR_W = 90;
 const ROW_H = 46;
 const AXIS_H = 28;
 
@@ -38,17 +40,52 @@ interface TooltipState {
   y: number;
 }
 
+/**
+ * How close to an end of the track a tick has to be before its label is anchored to that end
+ * rather than centred (#897). A percentage, not a pixel count, because the label's own width is
+ * unknown at render time — 3% of a ~1150px track is ~35px, comfortably more than the half-width
+ * of the widest date format the axis emits.
+ */
+const AXIS_EDGE_PCT = 3;
+
+/**
+ * Position the tick's container.
+ *
+ * `width: 0` off the right edge is the part that is easy to get wrong: `-translate-x-1/2`
+ * moves the LABEL but not its shrink-wrapped parent, so a container left at its natural width
+ * still juts `labelWidth` px past its `left: p%` origin and overflows on its own — invisible
+ * at 1440px, a 6px scrollbar at 900px. Collapsing it to zero width makes the transformed label
+ * the only box that can define the track's scroll extent. The final tick keeps a real width
+ * because it is pinned by its RIGHT edge, where a zero-width box would put the label outside.
+ */
+export function axisAnchor(p: number): { left: string; width: number } | { right: number } {
+  return p >= 100 - AXIS_EDGE_PCT ? { right: 0 } : { left: `${p}%`, width: 0 };
+}
+
+/** Centre the label on its tick, except at the two ends where it would leave the track. */
+export function axisLabelShift(p: number): string {
+  if (p >= 100 - AXIS_EDGE_PCT) return "";
+  if (p <= AXIS_EDGE_PCT) return "";
+  return "-translate-x-1/2";
+}
+
 /** Vertical tick gridlines + the "today" marker, shared by the lane header and issue rows. */
 function GridLines({ ticks, range, nowPct, strong }: { ticks: Date[]; range: DateRange; nowPct: number; strong?: boolean }) {
   return (
     <>
+      {/*
+        #897: `min(…, calc(100% - 1px))` keeps the rule ON the track. A 1px border drawn at
+        exactly left:100% sits one pixel outside its container, and one pixel of scrollable
+        overflow paints a full scrollbar — the range's last tick is always at 100%, so this
+        fired on every render.
+      */}
       {ticks.map((tick, i) => (
-        <div key={i} className="absolute top-0 h-full border-l border-gray-100 dark:border-gray-800" style={{ left: `${pctOf(tick.getTime(), range)}%` }} />
+        <div key={i} className="absolute top-0 h-full border-l border-gray-100 dark:border-gray-800" style={{ left: `min(${pctOf(tick.getTime(), range)}%, calc(100% - 1px))` }} />
       ))}
       {nowPct >= 0 && nowPct <= 100 && (
         <div
           className={`absolute top-0 h-full ${strong ? "border-l-2 border-red-400/30" : "border-l border-red-300/30 dark:border-red-500/20"}`}
-          style={{ left: `${nowPct}%` }}
+          style={{ left: `min(${nowPct}%, calc(100% - 2px))` }}
         />
       )}
     </>
@@ -177,7 +214,29 @@ function TimelineLane({
                   transition-all hover:shadow-md hover:brightness-95 dark:hover:brightness-110
                   flex items-center gap-1.5 px-2 overflow-hidden select-none
                   ${cls.bg} ${cls.border}`}
-                style={{ left: `${startP}%`, width: `max(90px, ${spanP}%)`, height: BAR_H }}
+                /*
+                  #897: the bar is clamped so it cannot spill past the track.
+                  `pctOf` already clamps to 0-100, so the percentages alone never overflow —
+                  the sole cause was the `max(MIN_BAR_W, …)` readability floor, which widens a
+                  short bar beyond its true span while still anchoring it by its LEFT edge. An
+                  issue created near the right end of the range therefore painted up to
+                  MIN_BAR_W past 100% and gave the whole view a horizontal scrollbar for ~48px
+                  of nothing. Measured on /p/agentic-kanban/timeline at 1440x900.
+
+                  The floor is kept — it is what makes a same-day issue readable at all — so
+                  the fix clamps both ends instead of dropping it: the left edge never gets
+                  closer than MIN_BAR_W to the track's right edge (so the floor always fits),
+                  and max-width caps the bar at whatever track remains. The `max(0px, …)` is
+                  for a track narrower than MIN_BAR_W, where the inner clamp would otherwise
+                  go negative and push the bar off the LEFT edge instead.
+                */
+                style={{
+                  ["--bar-left" as string]: `min(${startP}%, max(0px, calc(100% - ${MIN_BAR_W}px)))`,
+                  left: "var(--bar-left)",
+                  width: `max(${MIN_BAR_W}px, ${spanP}%)`,
+                  maxWidth: "calc(100% - var(--bar-left))",
+                  height: BAR_H,
+                }}
                 onClick={() => onIssueClick(issue)}
                 onMouseEnter={(e) => {
                   const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -318,23 +377,25 @@ export function TimelineView({ columns, onIssueClick, searchQuery }: TimelineVie
           <div className="flex sticky top-0 z-10 bg-surface-raised dark:bg-surface-raised-dark border-b border-gray-200 dark:border-gray-700" style={{ height: AXIS_H }}>
             <div style={{ width: LABEL_W, minWidth: LABEL_W }} className="border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800" />
             <div className="flex-1 relative">
+              {/*
+                #897: an axis label is centred on its tick, so at the range's FIRST and LAST
+                tick half of it hangs outside the track — measured as the 48px horizontal
+                scrollbar this view painted at 1440x900. Clipping the strip would hide half a
+                date; nudging the tick would put the label under the wrong day. So only the
+                LABEL's anchor changes at the two edges: flush-left at the start, flush-right
+                at the end, centred everywhere in between. Every date stays fully readable and
+                none of them leaves the track.
+              */}
               {ticks.map((tick, i) => (
-                <div
-                  key={i}
-                  className="absolute top-0 h-full flex items-center"
-                  style={{ left: `${pct(tick.getTime())}%` }}
-                >
-                  <span className="text-xs text-gray-400 dark:text-gray-500 -translate-x-1/2 whitespace-nowrap select-none px-1">
+                <div key={i} className="absolute top-0 h-full flex items-center" style={axisAnchor(pct(tick.getTime()))}>
+                  <span className={`text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap select-none px-1 shrink-0 ${axisLabelShift(pct(tick.getTime()))}`}>
                     {fmtAxisDate(tick, span)}
                   </span>
                 </div>
               ))}
               {nowPct >= 0 && nowPct <= 100 && (
-                <div
-                  className="absolute top-0 h-full flex items-end pb-0.5"
-                  style={{ left: `${nowPct}%` }}
-                >
-                  <span className="text-[10px] font-bold text-red-500 -translate-x-1/2 whitespace-nowrap select-none">
+                <div className="absolute top-0 h-full flex items-end pb-0.5" style={axisAnchor(nowPct)}>
+                  <span className={`text-[10px] font-bold text-red-500 whitespace-nowrap select-none shrink-0 ${axisLabelShift(nowPct)}`}>
                     Today
                   </span>
                 </div>
