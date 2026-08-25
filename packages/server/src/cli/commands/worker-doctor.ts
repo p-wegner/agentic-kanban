@@ -63,8 +63,14 @@ export interface DoctorReport {
  * `authFiles: ["auth.json"]`) rather than imported, because those modules reach the
  * database and this file is part of the standalone worker binary, which "never opens or
  * creates a database" (docs/worker-fleet.md §3). The duplication is PINNED:
- * `worker-doctor-auth-parity.test.ts` reads those two source files and fails if either
- * list changes without this one.
+ * `worker-doctor.test.ts` (provider auth parity) reads those two source files and fails
+ * if either list changes without this one.
+ *
+ * `dir` is the home-relative DEFAULT only (#875): a provider whose login is relocated
+ * wholesale by an env var (claude → `CLAUDE_CONFIG_DIR`, codex → `CODEX_HOME` — the same
+ * levers the rotation rings and the Windows service pin) resolves through its own rule in
+ * `worker-doctor-provider-auth.ts`, and the env-named directory then holds the files
+ * DIRECTLY — this fragment stops applying there.
  */
 export const PROVIDER_AUTH_FILES: Record<string, { dir: string; files: string[]; loginCommand: string }> = {
   claude: { dir: ".claude", files: [".credentials.json", "settings.json"], loginCommand: "claude /login" },
@@ -580,6 +586,8 @@ async function checkGit(): Promise<DoctorCheck> {
 // god-module gate's 20-declaration ceiling (#889), and the check pushed it to 21.
 import { checkNodeVersion } from "./worker-doctor-node-check.js";
 export { MIN_SUPPORTED_NODE_MAJOR, checkNodeVersion } from "./worker-doctor-node-check.js";
+// #875's env-aware auth-dir resolution lives in its own module for the same reason.
+import { resolveProviderAuthDir } from "./worker-doctor-provider-auth.js";
 
 /**
  * Check 7 — the provider CLI, installed AND logged in.
@@ -591,7 +599,13 @@ export { MIN_SUPPORTED_NODE_MAJOR, checkNodeVersion } from "./worker-doctor-node
  * auth files the board's own rotation ring uses, and reported as `unknown` rather than
  * `pass` when they are absent but an API key may be in the environment instead.
  */
-export async function checkProvider(provider: string, home: string = homedir()): Promise<DoctorCheck[]> {
+export async function checkProvider(
+  provider: string,
+  home: string = homedir(),
+  // #875: injectable so tests stay hermetic (the live env on a profile machine carries a
+  // real CLAUDE_CONFIG_DIR — the exact condition this parameter exists to control).
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<DoctorCheck[]> {
   const checks: DoctorCheck[] = [];
   const version = await probeCommand(provider, ["--version"]);
   if (!version.found) {
@@ -616,10 +630,16 @@ export async function checkProvider(provider: string, home: string = homedir()):
     });
     return checks;
   }
-  const dir = join(home, auth.dir);
+  // #875: the login can be relocated wholesale by an env var (CLAUDE_CONFIG_DIR /
+  // CODEX_HOME) — which is how a fleet worker is actually configured — so the consulted
+  // directory comes from the provider's own rule, and the output ALWAYS names both the
+  // path and what selected it: a check that inspects ~/.claude while the dispatched agent
+  // authenticates from $CLAUDE_CONFIG_DIR is wrong precisely on the machines it is for.
+  const resolved = resolveProviderAuthDir(provider, auth.dir, home, env);
+  const dir = resolved.dir;
   const present = auth.files.filter((f) => existsSync(join(dir, f)));
   if (present.length > 0) {
-    checks.push(ok(`${provider} logged in`, `${dir} holds ${present.join(", ")}`));
+    checks.push(ok(`${provider} logged in`, `${dir} holds ${present.join(", ")} (consulted via ${resolved.source})`));
     return checks;
   }
   checks.push({
@@ -628,7 +648,9 @@ export async function checkProvider(provider: string, home: string = homedir()):
     // authenticated, and this check cannot see one. Saying "fail" would send an operator
     // chasing a login that is already fine.
     status: "unknown",
-    detail: `none of ${auth.files.join(", ")} found in ${dir} — either not logged in, or authenticated by an env API key this check cannot see`,
+    detail:
+      `none of ${auth.files.join(", ")} found in ${dir} (consulted via ${resolved.source}) — ` +
+      `either not logged in, or authenticated by an env API key this check cannot see`,
     remedy: `If sessions fail with an auth error, run: ${auth.loginCommand}`,
   });
   return checks;
