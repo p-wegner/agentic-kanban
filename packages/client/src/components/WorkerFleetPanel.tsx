@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { apiFetch, apiPost, apiDelete } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { formatBuildFreshness, type WorkerBuildFreshness } from "@agentic-kanban/shared/lib/worker-build-freshness";
 import { startStaggeredPoll } from "../lib/pollScheduler.js";
 import { WorkerEventTimeline } from "./WorkerEventTimeline.js";
 import { WorkerDispatchPrefs } from "./WorkerDispatchPrefs.js";
@@ -39,6 +40,12 @@ interface WorkerRow {
   assignedSessionIds: string[];
   protocolVersion?: number;
   workerVersion?: string;
+  /**
+   * #879: the reported build against the board's own — present only when the worker
+   * reported a build at all. An absent build keeps rendering as `?`, never "current";
+   * "ahead-of-board" is a normal dev-machine state and must not read as staleness.
+   */
+  buildFreshness?: WorkerBuildFreshness;
 }
 
 interface FleetSummary {
@@ -49,6 +56,8 @@ interface FleetSummary {
   freeSlots: number;
   provider: string;
   requiredLabels: string[];
+  /** #879: the board's own package version, for "behind board (board runs X)". */
+  boardWorkerVersion?: string | null;
 }
 
 /** One held incoming ref, from the existing `GET /api/workers/incoming` (#752). */
@@ -309,6 +318,19 @@ export function WorkerFleetPanel({ onClose }: WorkerFleetPanelProps) {
                           `sessions.worker_id` in a placement listing. */}
                       id <code>{worker.id}</code> · protocol {worker.protocolVersion ?? "?"} · build{" "}
                       {worker.workerVersion ?? "?"}
+                      {/* #879: NON-BLOCKING staleness visibility. The two directions carry
+                          distinct words — "ahead of board" is a normal dev-machine state,
+                          so only "behind board" gets the warning tone. An absent build
+                          stays the bare `?` above, with no badge at all. */}
+                      {(() => {
+                        const label = formatBuildFreshness(worker.buildFreshness, fleet?.boardWorkerVersion);
+                        if (!label) return null;
+                        const tone =
+                          worker.buildFreshness === "behind-board"
+                            ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+                            : "bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400";
+                        return <span className={`ml-1.5 rounded px-1.5 py-0.5 text-xs ${tone}`}>{label}</span>;
+                      })()}
                     </div>
                     {!worker.eligible && worker.ineligibleReason && (
                       <div className="mt-1 text-xs text-amber-700 dark:text-amber-300">

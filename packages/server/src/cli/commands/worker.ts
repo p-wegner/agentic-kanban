@@ -10,6 +10,8 @@ import {
 } from "../../worker/worker-daemon.js";
 import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "../../worker/worker-repo.js";
 import { SHARES_FILESYSTEM_LABEL } from "@agentic-kanban/shared/lib/worker-protocol";
+// #879 — pure, so it stays safe for the standalone worker binary (no db graph).
+import { formatBuildFreshness, type WorkerBuildFreshness } from "@agentic-kanban/shared/lib/worker-build-freshness";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 // Type-only + a db-free formatter: this module is also the standalone worker
 // binary's entry point, which must never pull in the database graph.
@@ -514,7 +516,10 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         console.error(describeWorkerListFailure(res.status, options.board));
         process.exit(1);
       }
-      const body = await res.json() as { workers: Array<{ id: string; name: string; effectiveStatus: string; status: string; os: string | null; labels: string | null; maxConcurrency: number; lastHeartbeatAt: string | null; protocolVersion?: number; workerVersion?: string }> };
+      const body = await res.json() as {
+        workers: Array<{ id: string; name: string; effectiveStatus: string; status: string; os: string | null; labels: string | null; maxConcurrency: number; lastHeartbeatAt: string | null; protocolVersion?: number; workerVersion?: string; buildFreshness?: WorkerBuildFreshness }>;
+        fleet?: { boardWorkerVersion?: string | null };
+      };
       if (options.json) {
         console.log(JSON.stringify(body, null, 2));
         return;
@@ -528,7 +533,11 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         // #754: "which build is that machine running" was unanswerable from the board, and
         // with dev tarballs it is the first question a skew bug raises. `?` means the
         // worker has not spoken since this board started — not that it is old.
-        const build = ` protocol=${w.protocolVersion ?? "?"} build=${w.workerVersion ?? "?"}`;
+        // #879: when it HAS spoken, say which way it diverges from the board's own build —
+        // "behind board" vs "ahead of board" stay distinct words (ahead is a normal
+        // dev-machine state, not staleness), and a `?` build gets no verdict at all.
+        const freshness = formatBuildFreshness(w.buildFreshness, body.fleet?.boardWorkerVersion);
+        const build = ` protocol=${w.protocolVersion ?? "?"} build=${w.workerVersion ?? "?"}${freshness ? ` (${freshness})` : ""}`;
         console.log(`  ${w.name} [${w.effectiveStatus}] id=${w.id} os=${w.os ?? "?"} maxConcurrency=${w.maxConcurrency}${labels}${build} lastHeartbeat=${w.lastHeartbeatAt ?? "never"}`);
       }
     });
