@@ -179,8 +179,24 @@ export function WorkspaceSummarySection(props: {
               "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400"
             }`}>{ws.main.profile.provider === "copilot" ? "Copilot" : ws.main.profile.provider === "codex" ? "Codex" : ws.main.profile.provider}</span>
           )}
-          {(ws.main.profile?.name ?? ws.main.claudeProfile) && (
-            <span className="order-last inline-flex max-w-full items-center truncate px-1 rounded bg-brand-50 dark:bg-brand-900/40 text-brand-600 dark:text-brand-400 font-medium shrink">{ws.main.profile?.name ?? ws.main.claudeProfile}</span>
+          {/*
+            #898 (#861 remainder): for a REMOTE placement the board's profile pick was never
+            sent to the worker — it authenticates with its own local login (decision 012/#244)
+            and nothing attests what it used (#895). Showing the pick here read as the
+            effective login. Name the worker instead, and demote the pick to the tooltip,
+            matching WorkspaceProfileChip on the detail view.
+          */}
+          {ws.main.remotePlacement ? (
+            <span
+              className="order-last inline-flex max-w-full items-center truncate px-1 rounded bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 font-medium shrink"
+              title={`Ran on remote worker ${ws.main.remotePlacement.workerId}, which authenticates with its own local login. Board preference: ${ws.main.profile?.name ?? ws.main.claudeProfile ?? "(none)"} — not sent to the worker; the profile actually used is unknown to the board.`}
+            >
+              worker-local profile
+            </span>
+          ) : (
+            (ws.main.profile?.name ?? ws.main.claudeProfile) && (
+              <span className="order-last inline-flex max-w-full items-center truncate px-1 rounded bg-brand-50 dark:bg-brand-900/40 text-brand-600 dark:text-brand-400 font-medium shrink">{ws.main.profile?.name ?? ws.main.claudeProfile}</span>
+            )
           )}
           {!ws.main.profile?.name && !ws.main.claudeProfile && ws.main.agentCommand && ws.main.agentCommand !== "claude" && (
             <span className="order-last inline-flex max-w-full items-center truncate px-1 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 font-mono text-[10px] shrink">{ws.main.agentCommand}</span>

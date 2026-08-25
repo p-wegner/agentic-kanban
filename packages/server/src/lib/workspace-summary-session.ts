@@ -13,10 +13,18 @@ export interface LatestSession {
   startedAt: string;
   endedAt: string | null;
   triggerType: string | null;
+  /** The fleet worker this session ran on, if any (#898). Null for a board-host session. */
+  workerId: string | null;
 }
 
-interface SessionRow extends LatestSession {
+/**
+ * `workerId` is optional on the INPUT row but required on the projected `LatestSession`:
+ * a board-host session simply has no worker column value, while a projection that forgot
+ * to carry it would silently make every remote placement look local (#898).
+ */
+interface SessionRow extends Omit<LatestSession, "workerId"> {
   workspaceId: string;
+  workerId?: string | null;
 }
 
 /**
@@ -43,6 +51,7 @@ export function selectLatestSessionsByWorkspace(
       startedAt: s.startedAt,
       endedAt: s.endedAt,
       triggerType: s.triggerType ?? null,
+      workerId: s.workerId ?? null,
     };
     if (isNoise(s)) {
       latestNoiseByWs.set(s.workspaceId, entry);

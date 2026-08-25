@@ -4,7 +4,7 @@ import {
   parseContextTokensFromStats,
 } from "../lib/workspace-summary-session.js";
 
-function row(over: Partial<{ id: string; workspaceId: string; status: string; startedAt: string; endedAt: string | null; stats: string | null; triggerType: string | null }> = {}) {
+function row(over: Partial<{ id: string; workspaceId: string; status: string; startedAt: string; endedAt: string | null; stats: string | null; triggerType: string | null; workerId: string | null }> = {}) {
   return {
     id: over.id ?? "s1",
     workspaceId: over.workspaceId ?? "w1",
@@ -13,6 +13,7 @@ function row(over: Partial<{ id: string; workspaceId: string; status: string; st
     endedAt: over.endedAt ?? "2026-01-01T00:01:00.000Z",
     stats: over.stats ?? null,
     triggerType: over.triggerType ?? null,
+    workerId: over.workerId ?? null,
   };
 }
 
@@ -56,6 +57,22 @@ describe("selectLatestSessionsByWorkspace", () => {
   it("normalizes undefined triggerType to null", () => {
     const out = selectLatestSessionsByWorkspace([row({ workspaceId: "w1", triggerType: undefined })], noiseTrigger);
     expect(out.get("w1")?.triggerType).toBeNull();
+  });
+
+  // #898: the projected winner must carry which worker ran it. If this link drops, every
+  // remote placement silently looks board-local and the card claims a profile pick that was
+  // never sent to the worker.
+  it("carries the winning session's workerId through to the projection", () => {
+    const out = selectLatestSessionsByWorkspace(
+      [row({ workspaceId: "w1", workerId: "AO-PF38Z8R8" })],
+      noiseTrigger,
+    );
+    expect(out.get("w1")?.workerId).toBe("AO-PF38Z8R8");
+  });
+
+  it("normalizes a board-host session's absent workerId to null, not undefined", () => {
+    const out = selectLatestSessionsByWorkspace([row({ workspaceId: "w1" })], noiseTrigger);
+    expect(out.get("w1")?.workerId).toBeNull();
   });
 });
 

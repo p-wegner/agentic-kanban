@@ -112,3 +112,58 @@ describe("IssueCard setup/pending feedback", () => {
     expect(html).not.toContain("Setting up workspace");
   });
 });
+
+/**
+ * #898 (#861 remainder) — the board card's profile chip.
+ *
+ * The board picks a profile, but for a REMOTE placement it is never sent: a fleet worker
+ * authenticates its agent with its own local login (decision 012/#244) and nothing attests
+ * what it used (#895). The detail chip was made honest in #861; the card was not, so the
+ * same board pick kept reading as the effective login in the place people actually scan.
+ */
+function workspaceWithProfile(overrides: Partial<MainWorkspaceInfo>): WorkspaceSummary {
+  return {
+    total: 1,
+    active: 1,
+    idle: 0,
+    closed: 0,
+    branches: ["feature/ak-7"],
+    main: {
+      id: "ws-1",
+      branch: "feature/ak-7",
+      workingDir: "/tmp/wt",
+      status: "active",
+      profile: { provider: "claude", name: "anth-team-5x" },
+      ...overrides,
+    },
+  };
+}
+
+describe("IssueCard profile chip honesty for remote placements (#898)", () => {
+  it("names the board's profile pick for a session that ran on the board host", () => {
+    const html = render(issue({ workspaceSummary: workspaceWithProfile({ remotePlacement: null }) }));
+    expect(html).toContain("anth-team-5x");
+    expect(html).not.toContain("worker-local profile");
+  });
+
+  it("says 'worker-local profile' when the latest session ran on a fleet worker", () => {
+    const html = render(
+      issue({ workspaceSummary: workspaceWithProfile({ remotePlacement: { workerId: "AO-PF38Z8R8" } }) }),
+    );
+    expect(html).toContain("worker-local profile");
+    // The pick is not erased — it is demoted to the tooltip, where it is still the answer to
+    // "what did the board ask for?" without claiming to be what the worker logged in as.
+    expect(html).toContain("AO-PF38Z8R8");
+    expect(html).toMatch(/title="[^"]*anth-team-5x[^"]*not sent to the worker/);
+  });
+
+  it("still says worker-local when the board had no profile pick at all", () => {
+    const html = render(
+      issue({
+        workspaceSummary: workspaceWithProfile({ profile: null, remotePlacement: { workerId: "W-2" } }),
+      }),
+    );
+    expect(html).toContain("worker-local profile");
+    expect(html).toContain("(none)");
+  });
+});

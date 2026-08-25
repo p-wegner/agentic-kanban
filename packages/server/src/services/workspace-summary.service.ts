@@ -589,6 +589,8 @@ async function attachSessionData(
     summary.main.lastSessionAt = sess.status === "running" ? sess.startedAt : sess.endedAt;
     summary.main.sessionStatus = sess.status;
     summary.main.lastSessionTriggerType = sess.triggerType;
+    // #898: a remote-placed latest session makes the board's profile pick non-effective.
+    summary.main.remotePlacement = sess.workerId ? { workerId: sess.workerId } : null;
     const stats = statsBySession.get(sess.id) ?? null;
     if (stats) summary.main.contextTokens = parseContextTokensFromStats(stats);
     summary.main.lastTool = lastToolBySession.get(sess.id) ?? null;
