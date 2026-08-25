@@ -31,10 +31,11 @@ import {
   type WorkerRepoOpOutcome,
 } from "./worker-repo.js";
 import {
-  loadUndelivered,
-  removeUndelivered,
-  upsertUndelivered,
-} from "./worker-undelivered.js";
+  type PendingResult,
+  type PushOutcome,
+  type UnpushedResult,
+  createUndeliveredStore,
+} from "./worker-undelivered-retry.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { resolveSpecCommand } from "./worker-command-resolver.js";
 import { FLEET_MCP_TOKEN_ENV_VAR } from "@agentic-kanban/shared/lib/worker-protocol";
@@ -84,26 +85,6 @@ export interface WorkerAgentRunnerOptions {
  */
 export const DEFAULT_PUSH_RETRY_DELAYS_MS = [2_000, 10_000, 30_000, 75_000];
 
-type PushOutcome =
-  | { ok: true; attempts: number }
-  | { ok: false; attempts: number; lastError: string };
-
-/** A finished result the worker is still holding because it could not push it (#750). */
-export interface UnpushedResult {
-  sessionId: string;
-  /** The per-session checkout, kept rather than force-removed, so the work is reachable. */
-  checkoutPath: string;
-  /** The cache clone that also holds `localBranch`. */
-  cacheDir: string;
-  /** Local branch carrying the commits: `kanban/<sessionId>`. */
-  localBranch: string;
-  /** Where the push was aimed: `refs/kanban/incoming/<branch>`. */
-  incomingRef: string;
-  branch: string;
-  attempts: number;
-  lastError: string;
-}
-
 /** The worker's git-transport boundary: get a checkout, push it back, tear it down. */
 export interface WorkerRepoOps {
   provision: (
@@ -138,7 +119,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
   const processes = new Map<string, ChildProcess>();
   const exited = new Set<string>();
   /** Sessions whose work lives in a worker-side checkout that must be pushed back. */
-  const checkouts = new Map<string, { checkout: WorkerCheckout; repo: WorkerRepoTransport }>();
+  const checkouts = new Map<string, PendingResult>();
   /**
    * Result pushes currently in flight, by session (#754).
    *
@@ -149,55 +130,8 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
    * drain possible at all.
    */
   const inFlightPushes = new Map<string, Promise<void>>();
-  /**
-   * Finished results this worker could not push, kept WITH their checkout (#750, #775).
-   *
-   * The live entries are in memory (the per-assignment git token a retry needs must never
-   * be written to this machine's disk), but the FACT that a session is undelivered is
-   * persisted token-free under the work root (#871) — the supervisor restarts a dead
-   * daemon within seconds, and a fresh process that does not know the entry exists loses
-   * the run in every practical sense. Restored entries carry an EMPTY token: their retry
-   * fails against the token-authed transport, which is what routes them to the
-   * `undelivered_result` report instead.
-   */
-  const unpushed = new Map<
-    string,
-    { pending: { checkout: WorkerCheckout; repo: WorkerRepoTransport }; attempts: number; lastError: string }
-  >();
   const workRoot = options.workRoot ?? defaultWorkerWorkRoot();
-  // #871: adopt the previous daemon's undelivered results. In-memory entries cannot exist
-  // yet (this map was created two lines up), so every persisted record is adopted as-is.
-  for (const record of loadUndelivered(workRoot)) {
-    unpushed.set(record.sessionId, {
-      pending: {
-        checkout: { cwd: record.checkoutPath, cacheDir: record.cacheDir },
-        repo: {
-          projectId: record.projectId,
-          gitPort: record.gitPort,
-          gitToken: "", // never persisted — see worker-undelivered.ts
-          branch: record.branch,
-          baseBranch: record.baseBranch,
-          incomingRef: record.incomingRef,
-        },
-      },
-      attempts: record.attempts,
-      lastError: record.lastError || "restored after a daemon restart; not yet retried by this process",
-    });
-    console.warn(
-      `[worker] restored an undelivered result from ${workRoot}: sessionId=${record.sessionId} ` +
-        `checkout=${record.checkoutPath} target=${record.incomingRef} — retrying on the next connect`,
-    );
-  }
   const retryDelaysMs = options.pushRetryDelaysMs ?? DEFAULT_PUSH_RETRY_DELAYS_MS;
-  /**
-   * Set once a drain starts: the current push attempt finishes, but no further backoff is
-   * waited out. A 30 s retry sleep inside a 30 s bounded drain would otherwise turn a
-   * saveable result into an "abandoned" one for no gain — the result is retained instead.
-   */
-  let retriesSuspended = false;
-  /** Resolved when retries are suspended, so a backoff already in progress is cut short. */
-  let wakeSuspended!: () => void;
-  const suspendSignal = new Promise<void>((resolve) => { wakeSuspended = resolve; });
   /** Sessions provisioning a checkout — running for bookkeeping before a pid exists. */
   const provisioning = new Set<string>();
   /** Per-session silence watchdogs; reset on every byte of agent output. */
@@ -260,161 +194,20 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     }
   }
 
-  /** Persist an undelivered entry token-free (#871). Best-effort by contract. */
-  function persistUnpushed(sessionId: string): void {
-    const entry = unpushed.get(sessionId);
-    if (!entry) return;
-    upsertUndelivered(workRoot, {
-      sessionId,
-      branch: entry.pending.repo.branch,
-      baseBranch: entry.pending.repo.baseBranch,
-      incomingRef: entry.pending.repo.incomingRef,
-      checkoutPath: entry.pending.checkout.cwd,
-      cacheDir: entry.pending.checkout.cacheDir,
-      projectId: entry.pending.repo.projectId,
-      gitPort: entry.pending.repo.gitPort,
-      attempts: entry.attempts,
-      lastError: entry.lastError,
-      recordedAt: new Date().toISOString(),
-    });
-  }
-
   /**
-   * Push the result, retrying a FAILED push on the configured backoff (#750).
-   *
-   * A single-shot push made every transient failure terminal: the board's fleet port
-   * bouncing, ten seconds of lost link, or the 401 a board restart produces (#775) all
-   * cost a completed agent run. The board must still not see `exit` until this resolves —
-   * review/merge would otherwise run against a branch that has not arrived — so the
-   * backoff list is deliberately short and a drain can cut it (see `retriesSuspended`).
+   * Delivering a finished result — retry, retain, persist, re-retry on reconnect — is its own
+   * leaf (#899). It holds no runner state: everything it needs is right here in the argument
+   * list, which is why it extracts at all.
    */
-  async function pushWithRetry(
-    sessionId: string,
-    pending: { checkout: WorkerCheckout; repo: WorkerRepoTransport },
-  ): Promise<PushOutcome> {
-    let attempts = 0;
-    let lastError = "";
-    for (;;) {
-      attempts += 1;
-      try {
-        await repoOps.push(options.boardUrl ?? "", pending.repo, pending.checkout);
-        console.log(`[worker] pushed session result: sessionId=${sessionId} ref=${pending.repo.incomingRef}`);
-        return { ok: true, attempts };
-      } catch (err) {
-        lastError = errorMessage(err);
-        console.error(`[worker] push failed (attempt ${attempts}): sessionId=${sessionId}: ${lastError}`);
-      }
-      const delay = retryDelaysMs[attempts - 1];
-      if (delay === undefined || retriesSuspended) break;
-      safeSend({
-        type: "event",
-        event: {
-          type: "stderr",
-          sessionId,
-          data:
-            `Worker could not push its result (attempt ${attempts} of ${retryDelaysMs.length + 1}): ` +
-            `${lastError}. Retrying in ${Math.round(delay / 1000)}s.`,
-        },
-      });
-      // Race the suspend signal: a drain that arrives mid-backoff must not have to wait
-      // the sleep out — bounding the drain is the whole point of #754's timeout.
-      await Promise.race([wait(delay), suspendSignal]);
-      if (retriesSuspended) break;
-    }
-    return { ok: false, attempts, lastError };
-  }
-
-  /**
-   * Hold on to a result that could not be pushed, and SAY where it is (#750, #775 item 2).
-   *
-   * The retained entry is retried on the daemon's next reconnect — the only thing that can
-   * save a push whose failure was the board being unreachable, since the in-run backoff is
-   * bounded by design. The git token is kept in memory only: it is per-assignment and
-   * writing it to the worker's state file would put a credential on that machine's disk,
-   * which is exactly what `worker-repo.ts` goes out of its way to avoid. The token-free
-   * FACT of the entry IS persisted (#871), so a daemon restart restores it — with an empty
-   * token, whose failed retry routes it to the board as an `undelivered_result` report.
-   */
-  function retainUnpushed(
-    sessionId: string,
-    pending: { checkout: WorkerCheckout; repo: WorkerRepoTransport },
-    outcome: PushOutcome & { ok: false },
-  ): void {
-    unpushed.set(sessionId, { pending, attempts: outcome.attempts, lastError: outcome.lastError });
-    // #871: the FACT (not the token) also goes to disk, so the entry survives the daemon
-    // restart the supervisor performs 2 s after a crash.
-    persistUnpushed(sessionId);
-    const localBranch = `kanban/${sessionId}`;
-    safeSend({
-      type: "event",
-      event: {
-        type: "stderr",
-        sessionId,
-        data:
-          `Worker could not push its result after ${outcome.attempts} attempt(s): ${outcome.lastError}. ` +
-          `The work is NOT lost: the checkout is KEPT at ${pending.checkout.cwd} with the commits on ` +
-          `local branch ${localBranch} (also in the cache clone at ${pending.checkout.cacheDir}), and ` +
-          `the worker retries the push to ${pending.repo.incomingRef} on its next reconnect to the board.`,
-      },
-    });
-  }
-
-  /**
-   * Retry every retained result once. Called by the daemon when its socket comes back
-   * (#750): a push that failed because the board was gone can only be saved by an attempt
-   * made after it is back.
-   *
-   * The session's `exit` has already been delivered (downgraded to non-zero, because the
-   * board never saw the work), so a late success does not un-fail it — it lands the commits
-   * in the incoming namespace, where the #752 operator surface
-   * (`GET/POST /api/workers/incoming`) can land them deliberately.
-   */
-  async function retryPendingPushes(): Promise<{ pushed: string[]; stillPending: string[] }> {
-    const pushed: string[] = [];
-    for (const [sessionId, entry] of [...unpushed]) {
-      try {
-        await repoOps.push(options.boardUrl ?? "", entry.pending.repo, entry.pending.checkout);
-      } catch (err) {
-        entry.attempts += 1;
-        entry.lastError = errorMessage(err);
-        persistUnpushed(sessionId); // keep the on-disk attempt count/error honest (#871)
-        console.warn(`[worker] retained result still cannot be pushed: sessionId=${sessionId}: ${entry.lastError}`);
-        continue;
-      }
-      unpushed.delete(sessionId);
-      removeUndelivered(workRoot, sessionId); // delivered — the persisted entry is cleared (#871)
-      pushed.push(sessionId);
-      await repoOps.cleanup(entry.pending.checkout).catch(() => {});
-      console.log(`[worker] retained result pushed on reconnect: sessionId=${sessionId}`);
-      safeSend({
-        type: "event",
-        event: {
-          type: "stderr",
-          sessionId,
-          data:
-            `The worker's retained result for this session has now been pushed to ` +
-            `${entry.pending.repo.incomingRef}. This session was already closed as failed because the ` +
-            `board never saw the work — land the ref from the Worker Fleet incoming view ` +
-            `(POST /api/workers/incoming/land) to bring it onto ${entry.pending.repo.branch}.`,
-        },
-      });
-    }
-    return { pushed, stillPending: [...unpushed.keys()] };
-  }
-
-  /** Results this worker is still holding, for the daemon's logs and for tests. */
-  function unpushedResults(): UnpushedResult[] {
-    return [...unpushed].map(([sessionId, entry]) => ({
-      sessionId,
-      checkoutPath: entry.pending.checkout.cwd,
-      cacheDir: entry.pending.checkout.cacheDir,
-      localBranch: `kanban/${sessionId}`,
-      incomingRef: entry.pending.repo.incomingRef,
-      branch: entry.pending.repo.branch,
-      attempts: entry.attempts,
-      lastError: entry.lastError,
-    }));
-  }
+  const undelivered = createUndeliveredStore({
+    workRoot,
+    boardUrl: options.boardUrl ?? "",
+    retryDelaysMs,
+    push: repoOps.push,
+    cleanup: repoOps.cleanup,
+    safeSend,
+    wait,
+  });
 
   /**
    * Answer one board-initiated repo operation on a LIVE session's checkout (#783, #784).
@@ -475,7 +268,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     const push = (async () => {
       let effectiveExit = exitCode;
       try {
-        const outcome = await pushWithRetry(sessionId, pending);
+        const outcome = await undelivered.pushWithRetry(sessionId, pending);
         if (outcome.ok) {
           try {
             await repoOps.cleanup(pending.checkout);
@@ -485,7 +278,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
           // here leaves the commits only on the `kanban/<sessionId>` branch of the cache
           // clone, which nothing on either machine enumerates — so a failed push used to
           // cost the whole run in every practical sense.
-          retainUnpushed(sessionId, pending, outcome);
+          undelivered.retain(sessionId, pending, outcome);
           effectiveExit = exitCode === 0 || exitCode === null ? 1 : exitCode;
         }
       } catch (err) {
@@ -499,7 +292,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
           `[worker] result push path failed unexpectedly (daemon staying up): sessionId=${sessionId}: ${message}`,
         );
         try {
-          retainUnpushed(sessionId, pending, { ok: false, attempts: 0, lastError: message });
+          undelivered.retain(sessionId, pending, { ok: false, attempts: 0, lastError: message });
         } catch (retainErr) {
           console.error(`[worker] could not retain the unpushed result: sessionId=${sessionId}`, retainErr);
         }
@@ -790,8 +583,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
   async function drainPushes(timeoutMs: number): Promise<{ completed: number; abandoned: number }> {
     // #750: stop waiting out retry backoffs. The attempt in flight still finishes, and a
     // result that ends up unpushed is retained (with its checkout) rather than deleted.
-    retriesSuspended = true;
-    wakeSuspended();
+    undelivered.suspendRetries();
     const started = inFlightPushes.size;
     if (started === 0) return { completed: 0, abandoned: 0 };
     let timer: NodeJS.Timeout | undefined;
@@ -817,8 +609,14 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
 
   return {
     assign, assignWithRepo, input, closeStdin, stop, stopAll, runningSessionIds,
-    drainPushes, pendingPushCount, retryPendingPushes, unpushedResults, repoOp,
+    drainPushes, pendingPushCount, repoOp,
+    retryPendingPushes: undelivered.retryPending,
+    unpushedResults: undelivered.list,
   };
 }
 
 export type WorkerAgentRunner = ReturnType<typeof createWorkerAgentRunner>;
+
+// Re-exported so existing importers keep their path; the declarations moved to the
+// retention leaf (#899), which is where they are actually used.
+export type { PushOutcome, UnpushedResult };
