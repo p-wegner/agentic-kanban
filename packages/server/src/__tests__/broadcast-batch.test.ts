@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from "vitest";
 import { createSessionState } from "../services/session-manager/types.js";
 
 vi.useFakeTimers();
@@ -41,6 +41,14 @@ describe("broadcast DB batching", () => {
 
   afterEach(() => {
     vi.clearAllTimers();
+  });
+
+  afterAll(() => {
+    // #921: `vi.useFakeTimers()` above is module-scoped, not per-test — left active,
+    // it leaks into whichever test file vitest runs next in this worker/fork, which is
+    // how `worker-running-session-silence-ttl.test.ts`'s real-`Date.now()` assertions
+    // went order-dependent (passed alone, failed only in the full run).
+    vi.useRealTimers();
   });
 
   it("does not write stdout messages to DB", () => {
