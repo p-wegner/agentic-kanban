@@ -108,6 +108,13 @@ jobs:
         # three on the co-change proxy — which is the state #797 existed to end.
         if: always()
         run: pnpm coverage:merge
+      - name: per-package floor ratchet (#902 — signal only, does not fail the job)
+        # #807 rejected a flat --min floor: mcp-server (48.85%) and client (48.98%) sit far
+        # below repo-wide (71.87%), and a floor pinned to today's numbers never rises on its
+        # own. This is the same shrink/grow-only ratchet shape as the repo's other guard
+        # suites, applied per package, and it is a red/green SIGNAL, not a merge gate — this
+        # job already runs only on push/workflow_dispatch (#807), never on pull_request.
+        run: pnpm coverage:check-floors || echo "::warning::per-package coverage floor ratchet is red — see the step output above"
       - name: upload lcov + summaries
         if: always()
         uses: actions/upload-artifact@v4

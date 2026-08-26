@@ -1,0 +1,7 @@
+{
+  "$comment": "Per-package line-coverage floor ratchet (#902, #807 follow-up). May only be RAISED — see scripts/coverage-report.mjs --check-floors and docs/line-coverage.md. Values are the last-measured `pnpm coverage:report --json` lines.pct per package, from the #797 run recorded in docs/line-coverage.md.",
+  "shared": 76.37,
+  "server": 79.14,
+  "mcp-server": 48.85,
+  "client": 48.98
+}
