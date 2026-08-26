@@ -61,6 +61,7 @@ import { getBaseBranchHealthAtMergeBase, describeRedBaseAttribution, verifyBaseB
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { inspectRepoLock } from "@agentic-kanban/shared/lib/repo-lock";
 import { describeCrossProcessMergeHolder } from "./workspace-merge-lock-precheck.js";
+import { getMergeJob } from "./merge-job.service.js";
 
 export function createWorkspaceMergeService(deps: {
   database: Database;
@@ -840,7 +841,21 @@ export function createWorkspaceMergeService(deps: {
 
   function mergeWorkspaceDeduped(id: string, opts: MergeOptions = {}): Promise<Awaited<ReturnType<typeof mergeWorkspace>>> {
     const existing = activeRequests.get(id);
-    if (existing) return existing;
+    if (existing) {
+      // #903 — a wedged verify child leaves this promise NEVER settling, so `activeRequests`
+      // would otherwise pin every retry onto the same dead promise forever (the exact failure
+      // mode this ticket reports: only a backend restart ever cleared it). The merge-job record
+      // is the independent clock that says whether this is still a legitimate long-running gate
+      // or a zombie — once it is, drop the stale entry and let this call start a fresh merge
+      // instead of joining a promise that will never resolve.
+      // `getMergeJob` self-heals a zombied job to "failed" AS PART OF THIS CALL (#903), so by
+      // the time it returns, a zombie's `state` already reads "failed" rather than "running" —
+      // checking `isZombieMergeJob` on the returned object would always be false for exactly
+      // the case this handles. `reason === "merge_job_zombied"` is what actually happened.
+      const job = getMergeJob(id);
+      if (!job || job.reason !== "merge_job_zombied") return existing;
+      activeRequests.delete(id);
+    }
 
     const promise = mergeWorkspace(id, opts);
     const tracked = promise.finally(() => {

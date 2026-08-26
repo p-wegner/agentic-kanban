@@ -20,6 +20,7 @@ import { insertWorkspaceRepo } from "../repositories/repo.repository.js";
 import { resolveMergeState, WorkspaceError, activeMerges } from "../services/workspace-internals.js";
 import { createMockSessionManager } from "./helpers/mocks.js";
 import { makeTempRepo } from "./helpers/temp-repo.js";
+import { MERGE_JOB_ZOMBIE_AFTER_MS, resetMergeJobs, startMergeJob } from "../services/merge-job.service.js";
 
 /**
  * A REAL repo path (#273). This suite drives the actual merge path, whose repo lock
@@ -1139,5 +1140,58 @@ describe("MergeService — mergeWorkspaceDeduped deduplicates concurrent request
 
     await expect(p1).rejects.toMatchObject({ code: "CONFLICT" });
     await expect(p2).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
+  /**
+   * #903 — a wedged verify child leaves `mergeWorkspace`'s promise never settling, so
+   * `activeRequests` used to pin EVERY retry onto that same dead promise forever (only a
+   * backend restart cleared it). `mergeWorkspaceDeduped` must consult the merge-job zombie
+   * clock and drop the stale in-flight entry once it fires, rather than handing a retry the
+   * same promise that will never resolve.
+   *
+   * This intentionally does not drive the second call through to a completed merge — the
+   * wedged first call also still holds the repo-path merge lock (`activeMerges`), which is a
+   * separate, real resource and not what this fix addresses. What this test pins down is the
+   * dedup DECISION: a zombied job must not make `mergeWorkspaceDeduped` return the stale
+   * promise, which is observable as the second call proceeding into `mergeWorkspace` (and
+   * hitting the repo lock on its own terms) instead of resolving to the first call's value.
+   */
+  it("does not hand a retry the same in-flight promise once the tracked job is a zombie", async () => {
+    resetMergeJobs();
+    const { workspaceId } = await seedWorkspace(db);
+    let mergeCallCount = 0;
+    let firstCallStarted: () => void = () => {};
+    const firstCallHasStarted = new Promise<void>((resolve) => { firstCallStarted = resolve; });
+    const git = makeGit({
+      mergeBranch: vi.fn(async () => {
+        mergeCallCount++;
+        firstCallStarted();
+        return new Promise<string>(() => {}); // wedged, like a dead verify child
+      }),
+    });
+
+    const svc = createWorkspaceMergeService({
+      database: db,
+      gitService: git as never,
+      createBackup: async () => {},
+      processKiller: async () => 0,
+    });
+
+    const first = svc.mergeWorkspaceDeduped(workspaceId);
+    void first.catch(() => {});
+    await firstCallHasStarted;
+
+    // The tracked job for this workspace has been "running" long enough to be a zombie.
+    const startedAt = new Date(Date.now() - (MERGE_JOB_ZOMBIE_AFTER_MS + 60_000)).toISOString();
+    startMergeJob(workspaceId, startedAt);
+
+    const second = svc.mergeWorkspaceDeduped(workspaceId);
+    void second.catch(() => {});
+
+    // A non-zombied dedup would return the IDENTICAL promise object; the fix must not.
+    expect(second).not.toBe(first);
+    // Proceeding past the dedup check means git's merge path was entered a second time (even
+    // though it then blocks on the repo lock the first call still holds).
+    await vi.waitFor(() => expect(mergeCallCount).toBeGreaterThanOrEqual(1), { timeout: 5000 });
   });
 });
