@@ -31,6 +31,7 @@ import type { WorkerBuildFreshness } from "@agentic-kanban/shared/lib/worker-bui
 export const PLACEMENT_CHECK_IDS = [
   "dispatch_opt_in",
   "profile_allowlist",
+  "data_handling_requirement",
   "eligible_worker",
   "branch_for_transport",
   "project_repo_path",

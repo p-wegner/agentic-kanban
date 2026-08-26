@@ -482,6 +482,12 @@ export function createWorkspaceProvisionService(deps: {
      * another one.
      */
     profileClamped: boolean;
+    /**
+     * Non-null when the project's required data-handling tags (#876, e.g. "no-training")
+     * are not satisfied by the resolved profile. Same "launch must refuse, preview may
+     * warn" contract as `profileHold`.
+     */
+    dataHandlingHold: string | null;
   }> {
     const runtime = await loadProjectRuntimeConfig(database, {
       projectId: projectId ?? "",
@@ -509,6 +515,7 @@ export function createWorkspaceProvisionService(deps: {
       systemInstructions: runtime.systemInstructions,
       profileHold: runtime.provider.profileHold,
       profileClamped: runtime.provider.profileClamped,
+      dataHandlingHold: runtime.provider.dataHandlingHold,
     };
   }
 

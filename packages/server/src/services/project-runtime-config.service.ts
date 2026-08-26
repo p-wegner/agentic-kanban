@@ -16,6 +16,7 @@ import { providerProfilePrefKey, readSettingsProviderSelection, resolveProviderD
 import { resolveStartPolicy, startModePrefKey, type StartPolicy } from "./start-policy.service.js";
 import type { ParsedProfileAllowlist } from "@agentic-kanban/shared/lib/profile-allowlist";
 import { allowedProfilesPrefKey, parseProfileAllowlist } from "@agentic-kanban/shared/lib/profile-allowlist";
+import { requiredDataLabelsPrefKey } from "@agentic-kanban/shared/lib/profile-capabilities";
 import { HARNESS_IDS, harnessSettingKey } from "./harness-settings.js";
 
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
@@ -133,6 +134,7 @@ export function resolveProjectRuntimeConfig(input: ProjectRuntimeConfigInput): P
     commandOverride: input.commandOverride,
     allowlist,
     nowMs: input.nowMs,
+    requiredDataLabels: input.prefMap.get(requiredDataLabelsPrefKey(input.projectId)),
   });
   const startPolicy = resolveStartPolicy(input.prefMap, input.projectId);
   // #546: this read `auto_merge` ALONE while every other owner predicate also required a
