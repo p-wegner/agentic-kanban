@@ -20,7 +20,7 @@ const SHARED_DRIZZLE = resolve(MONOREPO_ROOT, "packages/shared/drizzle");
 // measures machine load, not correctness — a cold node+tsx start plus the migration
 // replay legitimately exceeds it on Windows. Scoped to the spawn-based suites so the
 // pure-unit suites keep their tight (genuinely meaningful) defaults (#46).
-const SPAWN_HOOK_TIMEOUT_MS = 60_000;
+const SPAWN_HOOK_TIMEOUT_MS = 120_000;
 const SPAWN_TEST_TIMEOUT_MS = 20_000;
 
 function createTestDb(dbPath: string): void {

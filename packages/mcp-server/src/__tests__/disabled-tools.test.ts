@@ -23,7 +23,7 @@ const SHARED_DRIZZLE = resolve(MONOREPO_ROOT, "packages/shared/drizzle");
 
 // Real server launch — see helpers/server-process.ts. Not vitest's 10s default, which
 // measures machine load rather than the gate under test (#46).
-const SPAWN_HOOK_TIMEOUT_MS = 60_000;
+const SPAWN_HOOK_TIMEOUT_MS = 120_000;
 
 // The two tools we declare disabled for this session, and one control that stays live.
 // NOTE: getDisabledTools (index.ts) now trims + lowercases each entry, so the gate accepts

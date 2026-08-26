@@ -19,6 +19,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createTestDb } from "./helpers/test-db.js";
 import type { Database } from "../db/index.js";
 import type { WorkerConnectionManager } from "../services/worker-connection.service.js";
+import type { BoardToWorkerMessage, WorkerToBoardMessage } from "@agentic-kanban/shared/lib/worker-protocol";
 import { createAgentDispatch, type AgentExecutionService } from "../services/agent-dispatch.service.js";
 import { createRemoteAgentService } from "../services/agent-remote.service.js";
 import { createSessionState } from "../services/session-manager/types.js";
@@ -161,5 +162,123 @@ describe("the turn refusal tells the truth about placement (#874)", () => {
     } as Partial<AgentService>);
     const result = lifecycle.sendTurn("sess-host", "carry on");
     expect(result).toMatchObject({ ok: false, error: "Session not found or not in multi-turn mode" });
+  });
+});
+
+/**
+ * #900 — recovering stdin state by asking the worker.
+ *
+ * A scripted `WorkerConnectionManager`: `send` records what was sent (so a test can pull
+ * the `requestId` back out) and `emit` feeds a `session_probe_result` straight into the
+ * remote service's own message handler, exactly as a real WebSocket frame would.
+ */
+function scriptedManager() {
+  const sent: BoardToWorkerMessage[] = [];
+  let handler: ((workerId: string, message: WorkerToBoardMessage) => void) | null = null;
+  const manager = {
+    send: (_workerId: string, message: BoardToWorkerMessage) => {
+      sent.push(message);
+      return true;
+    },
+    isConnected: () => true,
+    connectedWorkerIds: () => ["w1"],
+    runningSessionIds: () => [],
+    onMessage: (cb: (workerId: string, message: WorkerToBoardMessage) => void) => {
+      handler = cb;
+      return () => {};
+    },
+    onConnect: () => () => {},
+    onDisconnect: () => () => {},
+  } as unknown as WorkerConnectionManager;
+  return {
+    manager,
+    sent,
+    emitProbeResult: (probe: { requestId: string; state: "unknown" | "running" | "exited"; stdinOpen?: boolean }) =>
+      handler?.("w1", { type: "session_probe_result", sessionId: "sess-adopted", probe }),
+  };
+}
+
+function lastProbeRequestId(sent: BoardToWorkerMessage[]): string {
+  const probe = [...sent].reverse().find((m): m is Extract<BoardToWorkerMessage, { type: "probe_session" }> => m.type === "probe_session");
+  if (!probe) throw new Error("no probe_session message was sent");
+  return probe.requestId;
+}
+
+describe("recoverRemoteTurnState — asking the worker before refusing a turn (#900)", () => {
+  let db: Database;
+  beforeEach(() => {
+    db = createTestDb().db as unknown as Database;
+  });
+
+  function adoptedLifecycle() {
+    const { manager, sent, emitProbeResult } = scriptedManager();
+    const remote = createRemoteAgentService(manager, db);
+    remote.adoptSession({ sessionId: "sess-adopted", workerId: "w1", onOutput: () => {} });
+    const dispatch = createAgentDispatch({ host: hostStub(), remote });
+    const lifecycle = createSessionLifecycle(createSessionState(), undefined, vi.fn(), { db, agentService: dispatch });
+    return { lifecycle, sent, emitProbeResult };
+  }
+
+  it("seeds a waiting turn state and lets the follow-up turn through when the worker attests stdin is open", async () => {
+    const { lifecycle, sent, emitProbeResult } = adoptedLifecycle();
+
+    // Before recovery: refused exactly as #874 established.
+    expect(lifecycle.sendTurn("sess-adopted", "carry on")).toMatchObject({
+      ok: false,
+      error: REMOTE_TURN_AFTER_RESTART,
+    });
+
+    const recovery = lifecycle.recoverRemoteTurnState("sess-adopted");
+    emitProbeResult({ requestId: lastProbeRequestId(sent), state: "running", stdinOpen: true });
+    await recovery;
+
+    const result = lifecycle.sendTurn("sess-adopted", "carry on");
+    expect(result.ok).toBe(true);
+  });
+
+  it("leaves the refusal in place, naming what the worker reported, when stdin is closed", async () => {
+    const { lifecycle, sent, emitProbeResult } = adoptedLifecycle();
+
+    const recovery = lifecycle.recoverRemoteTurnState("sess-adopted");
+    emitProbeResult({ requestId: lastProbeRequestId(sent), state: "running", stdinOpen: false });
+    await recovery;
+
+    const result = lifecycle.sendTurn("sess-adopted", "carry on");
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain(REMOTE_TURN_AFTER_RESTART);
+    expect(result.error).toMatch(/stdin is closed/);
+    // Not stale: still a refusal, never a cue to relaunch beside a live agent.
+    expect(result.stale).toBeFalsy();
+  });
+
+  it("never reads silence as an open stdin — an unanswered probe leaves the same refusal", async () => {
+    // A separate service instance with a short probe timeout, so the test does not wait
+    // out the real 30s default. Nothing ever calls emitProbeResult: this IS the silence.
+    const manager = scriptedManager().manager;
+    const remote = createRemoteAgentService(manager, db, { probeTimeoutMs: 20 });
+    remote.adoptSession({ sessionId: "sess-adopted", workerId: "w1", onOutput: () => {} });
+    const dispatch = createAgentDispatch({ host: hostStub(), remote });
+    const lifecycle = createSessionLifecycle(createSessionState(), undefined, vi.fn(), { db, agentService: dispatch });
+
+    await lifecycle.recoverRemoteTurnState("sess-adopted");
+
+    const result = lifecycle.sendTurn("sess-adopted", "carry on");
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain(REMOTE_TURN_AFTER_RESTART);
+    expect(result.error).toMatch(/did not answer/);
+    expect(result.stale).toBeFalsy();
+  });
+
+  it("does nothing for a HOST session — never asks the worker anything", async () => {
+    const host = hostStub();
+    const { manager, sent } = scriptedManager();
+    const dispatch = createAgentDispatch({ host, remote: createRemoteAgentService(manager, db) });
+    dispatch.launch({
+      worktreePath: "/tmp", sessionId: "sess-host", prompt: "p", agentArgs: undefined, onOutput: () => {},
+    });
+    const lifecycle = createSessionLifecycle(createSessionState(), undefined, vi.fn(), { db, agentService: dispatch });
+    await lifecycle.recoverRemoteTurnState("sess-host");
+    expect(sent).toEqual([]);
+    expect(host.sendInput).not.toHaveBeenCalled();
   });
 });

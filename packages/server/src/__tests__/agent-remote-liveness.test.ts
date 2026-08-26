@@ -154,6 +154,66 @@ describe("the silence-after-assign probe (#887)", () => {
   });
 });
 
+describe("requestProbe — an on-demand ask for a turn about to be delivered (#900)", () => {
+  it("resolves with the worker's answer, asking immediately rather than waiting out the silence timer", async () => {
+    const h = harness();
+    h.track("s1");
+    const promise = h.liveness.requestProbe("s1");
+    expect(h.sent).toHaveLength(1);
+    expect(h.sent[0].message).toMatchObject({ type: "probe_session", sessionId: "s1" });
+    const requestId = h.requestIdFor("s1");
+    h.liveness.handleProbeResult("w1", "s1", { requestId, state: "running", stdinOpen: true });
+    await expect(promise).resolves.toEqual({ requestId, state: "running", stdinOpen: true });
+  });
+
+  it("resolves null on silence — never mistaken for `unknown`", async () => {
+    const h = harness();
+    h.track("s1");
+    const promise = h.liveness.requestProbe("s1");
+    vi.advanceTimersByTime(PROBE_TIMEOUT);
+    await expect(promise).resolves.toBeNull();
+    expect(h.calls.assignmentLost).toEqual([]);
+  });
+
+  it("resolves null immediately when the worker's socket is gone", async () => {
+    const h = harness();
+    h.track("s1");
+    h.disconnect();
+    await expect(h.liveness.requestProbe("s1")).resolves.toBeNull();
+  });
+
+  it("resolves null for a session this process does not track", async () => {
+    const h = harness();
+    await expect(h.liveness.requestProbe("never-tracked")).resolves.toBeNull();
+  });
+
+  it("still runs the normal side effects (finalize on EXITED) alongside answering the caller", async () => {
+    const h = harness();
+    h.track("s1");
+    const promise = h.liveness.requestProbe("s1");
+    const requestId = h.requestIdFor("s1");
+    h.liveness.handleProbeResult("w1", "s1", { requestId, state: "exited", exitCode: 0 });
+    await promise;
+    expect(h.calls.exited).toEqual([["s1", 0]]);
+  });
+
+  it("supersedes an in-flight silence probe rather than racing it", async () => {
+    const h = harness();
+    h.track("s1");
+    h.liveness.armAssignProbe("s1");
+    vi.advanceTimersByTime(PROBE_AFTER); // the silence probe goes out
+    const staleRequestId = h.requestIdFor("s1");
+    const promise = h.liveness.requestProbe("s1"); // superseded by a fresh, on-demand ask
+    const freshRequestId = h.requestIdFor("s1");
+    expect(freshRequestId).not.toBe(staleRequestId);
+    // A late answer to the SUPERSEDED request must not resolve the fresh caller.
+    h.liveness.handleProbeResult("w1", "s1", { requestId: staleRequestId, state: "unknown" });
+    h.liveness.handleProbeResult("w1", "s1", { requestId: freshRequestId, state: "running", stdinOpen: false });
+    await expect(promise).resolves.toEqual({ requestId: freshRequestId, state: "running", stdinOpen: false });
+    expect(h.calls.assignmentLost).toEqual([]); // the stale "unknown" was correctly ignored
+  });
+});
+
 describe("the hello reverse-reconcile (#746, moved here in #887)", () => {
   it("loses a session the worker has spoken about and no longer lists", () => {
     const h = harness();

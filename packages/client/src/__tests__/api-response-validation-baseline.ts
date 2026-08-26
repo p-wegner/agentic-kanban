@@ -6,8 +6,10 @@
  *
  * 240 at the ratchet's first commit; 221 after #806's first outbound batch registered the tag
  * family, issue tags/dependencies, the workspace lifecycle actions and the project list;
- * **211** after batch 2 took the ten deepest READS — the board, the issue detail-bundle, the
- * workspace diff, and the status/repo/session/issue/workspace lists.
+ * 211 after batch 2 took the ten deepest READS — the board, the issue detail-bundle, the
+ * workspace diff, and the status/repo/session/issue/workspace lists; **208** after batch 3
+ * registered the slow-request panel, the workspace scorecard, and the issue's workspace list
+ * (`GET /api/issues/:id/workspaces`, read by both `CompareAttemptsPanel` and `WorkspacePanel`).
  *
  * The two batches are deliberately different in kind. Batch 1 registered MUTATIONS, whose
  * responses are mostly a handle: a wrong shape there is loud and immediate. Batch 2 is the
@@ -71,7 +73,6 @@ export const UNVALIDATED_API_RESPONSES: readonly string[] = [
   "GET /api/issues/:param/dependencies",
   "GET /api/issues/:param/showdown",
   "GET /api/issues/:param/time-entries",
-  "GET /api/issues/:param/workspaces",
   "GET /api/issues/cfd",
   "POST /api/issues/:param/analyze-touched-files",
   "POST /api/issues/:param/artifacts",
@@ -89,8 +90,6 @@ export const UNVALIDATED_API_RESPONSES: readonly string[] = [
   // ── /api/merge-queue ──
   "POST /api/merge-queue",
   "POST /api/merge-queue/preview/:param",
-  // ── /api/metrics ──
-  "GET /api/metrics/slow-requests",
   // ── /api/plugins ──
   "DELETE /api/plugins/:param",
   "GET /api/plugins",
@@ -243,7 +242,6 @@ export const UNVALIDATED_API_RESPONSES: readonly string[] = [
   "GET /api/workspaces/:param/github-handoff-draft",
   "GET /api/workspaces/:param/latest-commit",
   "GET /api/workspaces/:param/plan",
-  "GET /api/workspaces/:param/scorecard",
   "GET /api/workspaces/:param/services/logs",
   "GET /api/workspaces/:param/timeline",
   "GET /api/workspaces/:param/visual-proof",

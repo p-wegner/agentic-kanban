@@ -80,6 +80,13 @@ export function createRemoteLiveness(deps: RemoteLivenessDeps) {
   const probeTimeoutMs = deps.probeTimeoutMs ?? SESSION_PROBE_TIMEOUT_MS;
   const log = deps.log ?? ((message: string) => console.warn(`[agent-remote] ${message}`));
   let probeSeq = 0;
+  /**
+   * On-demand probes awaiting an answer, by `requestId` (#900). Separate from the
+   * silence-triggered flow above: a follow-up turn needs the answer NOW, not after
+   * `ASSIGN_SILENCE_PROBE_MS` of nothing, and it needs the answer delivered TO IT rather
+   * than only acted on as a side effect.
+   */
+  const pendingOnDemand = new Map<string, (probe: WorkerSessionProbe | null) => void>();
 
   /** Drop every timer this module armed for a session. Idempotent. */
   function cancel(sessionId: string): void {
@@ -142,11 +149,53 @@ export function createRemoteLiveness(deps: RemoteLivenessDeps) {
     }, probeTimeoutMs));
   }
 
+  /**
+   * Ask the worker about a session RIGHT NOW rather than waiting for the silence timer
+   * (#900): a follow-up turn needs the answer before it can be delivered. Supersedes any
+   * in-flight silence probe for this session — only the freshest answer matters, and the
+   * old timer's own stale-id check makes it a silent no-op once this overwrites the id.
+   *
+   * Resolves `null` on no socket or no answer within the bound. Deliberately NOT `unknown`:
+   * silence is not `unknown` here either, for the same reason as the passive probe above.
+   */
+  function requestProbe(sessionId: string, opts?: { timeoutMs?: number }): Promise<WorkerSessionProbe | null> {
+    const session = sessions.get(sessionId);
+    if (!session) return Promise.resolve(null);
+    cancel(sessionId);
+    const requestId = `probe-ondemand-${++probeSeq}-${sessionId}`;
+    session.probeRequestId = requestId;
+    if (!deps.send(session.workerId, { type: "probe_session", sessionId, requestId })) {
+      session.probeRequestId = undefined;
+      return Promise.resolve(null);
+    }
+    const timeoutMs = opts?.timeoutMs ?? probeTimeoutMs;
+    return new Promise((resolve) => {
+      let settled = false;
+      const timer = unrefed(setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        pendingOnDemand.delete(requestId);
+        resolve(null);
+      }, timeoutMs));
+      pendingOnDemand.set(requestId, (probe) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(probe);
+      });
+    });
+  }
+
   /** One `session_probe_result`. Trusted only from the worker the session was assigned to. */
   function handleProbeResult(workerId: string, sessionId: string, probe: WorkerSessionProbe): void {
     const session = sessions.get(sessionId);
     if (!session || session.workerId !== workerId) return;
     if (session.probeRequestId !== probe.requestId) return; // stale or unsolicited
+    const onDemand = pendingOnDemand.get(probe.requestId);
+    if (onDemand) {
+      pendingOnDemand.delete(probe.requestId);
+      onDemand(probe);
+    }
     cancel(sessionId);
     if (probe.state === "unknown") {
       const reason =
@@ -217,7 +266,7 @@ export function createRemoteLiveness(deps: RemoteLivenessDeps) {
     }
   }
 
-  return { armAssignProbe, noteObserved, handleProbeResult, reconcileHello, cancel };
+  return { armAssignProbe, noteObserved, handleProbeResult, reconcileHello, cancel, requestProbe };
 }
 
 export type RemoteLiveness = ReturnType<typeof createRemoteLiveness>;

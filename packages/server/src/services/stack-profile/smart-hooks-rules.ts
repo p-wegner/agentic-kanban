@@ -80,7 +80,12 @@ export function buildSmartHooksRules(profile: StackProfile): SmartHooksRulesFile
   // (node/rust/go/python) keep the blocking per-edit loop, which is cheap there.
   const isSlowJvm = profile.stack === "java";
 
-  // Typecheck is the cheapest correctness signal — run it per-edit when present.
+  // Typecheck is the cheapest correctness signal — but a profile's typecheckCommand is the
+  // WHOLE project's (`pnpm typecheck`, `cargo check`), never scoped to the edited file, so
+  // per-edit it is the same full run the test rule was moved off of. Measured over 7 days on
+  // this repo: 207 PostToolUse runs, median 5m37s each, killed at their timeout — 47.9% of
+  // all hook wall-clock for no signal. Stop-only, like the test rules below; the runner
+  // defaults an absent `events` to both, which is exactly what this avoids.
   if (profile.typecheckCommand) {
     rules.push({
       name: "Typecheck",
@@ -88,6 +93,7 @@ export function buildSmartHooksRules(profile: StackProfile): SmartHooksRulesFile
       filePatterns: patterns,
       blocking: !isSlowJvm,
       timeout: 120,
+      events: ["Stop"],
     });
   }
 

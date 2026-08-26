@@ -186,6 +186,19 @@ High-level git ops in `packages/shared/src/lib/git-service.ts`; `server/src/serv
 
 **Spawning git — the adapter.** The ONLY sanctioned place to spawn the `git` CLI is `packages/shared/src/lib/git-exec.ts` (the adapter/port). Use its `gitExec` (never-throws, returns `{stdout,stderr,code,error}`), `gitExecOrThrow` (normalised error), or `gitExecSync`; import via the deep path `@agentic-kanban/shared/lib/git-exec` (node-only — never the client-reachable barrel). **Do NOT write a private `execGit`/`execFile("git", …)` helper** — that drift is what made the "single source of truth" a lie across ~17 files. Enforced by `packages/shared/__tests__/git-exec-single-spawn.test.ts`, which scans all package `src/` (tests excluded) and fails on any raw git spawn outside the adapter.
 
+### Vite dev server bind — UI is wide, the API is not (#866)
+`packages/client/vite.config.ts` binds `server.host` to `"::"` (all interfaces, not loopback) so
+`http://localhost:5173` works on Windows (browsers resolve `localhost` to `::1` first; an
+IPv4-only bind fails) and so the UI is reachable over Tailscale (`allowedHosts: [".ts.net"]`,
+`73e4bf03fb`). The board API behind the `/api`/`/health`/`/ws` proxies has **no authentication of
+its own** — same shape as the concern `KANBAN_FLEET_HOST`/`KANBAN_GIT_HTTP_HOST` exist for in the
+Worker Fleet section above. Binding the UI wide would otherwise hand every device on the tailnet
+full unauthenticated read+write on the board. **Fix: the proxy's `bypass` (`devProxyGuard.ts`)
+rejects any `/api`/`/health`/`/ws` request whose TCP peer isn't loopback (`127.0.0.1`/`::1`/the
+IPv4-mapped form), independent of what `host` is bound to** — so the UI stays reachable from
+another device but the API behind it does not. `VITE_HOST` remains the escape hatch to restrict
+the UI bind itself (e.g. `VITE_HOST=127.0.0.1`).
+
 ### Pre-merge gate — tiered, and the always-run guard set is DECLARED, not hand-listed
 `packages/server/src/services/pre-merge-gate.service.ts` runs `verify_script` (+ the boot/render
 smoke check) before a merge lands. Its test half can be scoped to the packages/files a diff
