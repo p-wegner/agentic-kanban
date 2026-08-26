@@ -100,6 +100,8 @@ function riskClasses(label: MergeQueueItem["riskLabel"]): string {
   }
 }
 
+type MergeQueueStrategy = "auto" | "sequential" | "train";
+
 export function MergeQueuePanel({ columns, projectId: _projectId, onClose, onIssueClick, onMerged }: MergeQueuePanelProps) {
   const items = useMemo(() => buildMergeQueueItems(columns), [columns]);
   const [mergingId, setMergingId] = useState<string | null>(null);
@@ -107,6 +109,9 @@ export function MergeQueuePanel({ columns, projectId: _projectId, onClose, onIss
   const [previewByWorkspace, setPreviewByWorkspace] = useState<Record<string, ConflictPreview>>({});
   const [checkingId, setCheckingId] = useState<string | null>(null);
   const [checkingAll, setCheckingAll] = useState(false);
+  // #904 — "auto" omits `strategy` on the wire so the server decides (classifier recommendation
+  // or the project's train_max_size opt-in); the other two are explicit overrides.
+  const [strategy, setStrategy] = useState<MergeQueueStrategy>("auto");
 
   async function handleMerge(workspaceId: string) {
     const confirmed = window.confirm("Trigger merge for this workspace?");
@@ -158,7 +163,11 @@ export function MergeQueuePanel({ columns, projectId: _projectId, onClose, onIss
     if (workspaceIds.length === 0) return;
     setCheckingAll(true);
     try {
-      const result = await apiPost<{ ok: boolean; dryRun: boolean; plan: { conflictPreviews: ConflictPreview[] } }>("/api/merge-queue", { workspaceIds, dryRun: true });
+      const result = await apiPost<{ ok: boolean; dryRun: boolean; plan: { conflictPreviews: ConflictPreview[] } }>("/api/merge-queue", {
+        workspaceIds,
+        dryRun: true,
+        ...(strategy === "auto" ? {} : { strategy }),
+      });
       const map: Record<string, ConflictPreview> = {};
       for (const preview of result.plan.conflictPreviews) {
         map[preview.workspaceId] = preview;
@@ -185,6 +194,19 @@ export function MergeQueuePanel({ columns, projectId: _projectId, onClose, onIss
             <span className="text-sm text-gray-500 dark:text-gray-400">({items.length})</span>
           </div>
           <div className="flex items-center gap-2">
+            {items.length > 0 && (
+              <select
+                value={strategy}
+                onChange={(e) => setStrategy(e.target.value as MergeQueueStrategy)}
+                className="text-xs px-2 py-1 rounded border border-gray-200 dark:border-gray-700 bg-transparent text-gray-600 dark:text-gray-300"
+                title="Merge queue strategy for the next plan/execute"
+                aria-label="Merge queue strategy"
+              >
+                <option value="auto">Strategy: Auto</option>
+                <option value="train">Strategy: Train</option>
+                <option value="sequential">Strategy: Sequential</option>
+              </select>
+            )}
             {items.length > 0 && (
               <button
                 type="button"

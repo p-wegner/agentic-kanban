@@ -41,10 +41,13 @@ export function createMergeQueueRoute(
   /**
    * POST /api/merge-queue
    *
-   * body: { workspaceIds: string[], dryRun?: boolean, skipOnConflict?: boolean }
+   * body: { workspaceIds: string[], dryRun?: boolean, skipOnConflict?: boolean, strategy?: "sequential" | "train" }
    *
    * - dryRun: true  → returns JSON plan (sorted order + conflict matrix + per-workspace conflictPreviews)
    * - dryRun: false → streams SSE events while executing the queue
+   * - strategy: explicit override; "sequential" always wins, "train" opts in regardless of
+   *   project defaults. Omitted → `executeQueue` decides (classifier recommendation or the
+   *   project's `train_max_size` opt-in, #904).
    */
   router.post("/", async (c) => {
     const body = await parseJsonBody(c, mergeQueueBody);
@@ -59,6 +62,7 @@ export function createMergeQueueRoute(
       try {
         for await (const event of queueService.executeQueue(body.workspaceIds, {
           skipOnConflict: body.skipOnConflict ?? false,
+          strategy: body.strategy,
         })) {
           await stream.writeSSE({ data: JSON.stringify(event) });
           if (event.type === "done") break;

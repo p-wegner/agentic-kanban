@@ -55,6 +55,7 @@ import {
   getMergeQueueIssueRows,
   getWorkspaceStatus,
   getWorkspaceMergeState,
+  getMergeTrainMaxSizePref,
 } from "../repositories/merge-queue.repository.js";
 import { getProjectsByIds } from "../repositories/project.repository.js";
 import { listWorkspaceRepos } from "../repositories/repo.repository.js";
@@ -65,6 +66,18 @@ import { isPreMergeGateFailure } from "./workspace-merge-gate.js";
 import type { BoardEventSink } from "./board-events.js";
 import type { SessionLauncher } from "./session.manager.js";
 import { resolveWorktreeClaims } from "@agentic-kanban/shared/lib/worktree-claim";
+
+/**
+ * How many ready members a project wants batched onto one train before it opts into the
+ * train strategy at all (#904). `> 1` is the signal — a project that has never touched this
+ * knob defaults to 1 (i.e. stays on the sequential path unless the caller explicitly asks
+ * for `strategy: "train"`), since #905 owns the actual batching-window default of 4.
+ */
+async function resolveProjectTrainMaxSize(projectId: string, database: Database): Promise<number> {
+  const raw = await getMergeTrainMaxSizePref(projectId, database);
+  const parsed = Number.parseInt(raw ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
 
 export interface WorkspaceConflictPreview {
   workspaceId: string;
@@ -676,11 +689,23 @@ export function createMergeQueueService(deps: {
     const plan = await computePlan(workspaceIds);
     yield { type: "planned", plan };
 
-    // Release train (#throughput): gate the assembled batch ONCE instead of once per member.
-    // Chosen when the caller asks for it, or when the planner's own classifier already says
-    // `integration-union` — the recommendation it has been computing and nobody dispatched on.
-    const wantsTrain = opts.strategy === "train" || plan.recommendedStrategy === "integration-union";
-    if (wantsTrain && opts.strategy !== "sequential" && trainEligible(plan.order)) {
+    // Release train (#904): gate the assembled batch ONCE instead of once per member.
+    // Eligibility (`trainEligible`) is about SHAPE (one repo, one base, all branches) and is
+    // independent of the classifier — an overlap-free, fully independent batch is exactly as
+    // eligible as an `integration-union` cluster, and used to never take this path because
+    // nothing dispatched on it. `opts.strategy === "sequential"` is an explicit escape hatch
+    // that always wins; short of that, the train is taken when the caller asks for it, the
+    // classifier already recommends it, OR the project has opted in via `train_max_size`.
+    const eligible = trainEligible(plan.order);
+    let wantsTrain = opts.strategy === "train" || plan.recommendedStrategy === "integration-union";
+    if (!wantsTrain && eligible && opts.strategy !== "sequential") {
+      const first = plan.order[0];
+      const issueRows = await getMergeQueueIssueRows([first.issueId], database);
+      const projectId = issueRows[0]?.projectId ?? null;
+      const projectTrainMaxSize = projectId ? await resolveProjectTrainMaxSize(projectId, database) : 1;
+      wantsTrain = projectTrainMaxSize > 1;
+    }
+    if (wantsTrain && opts.strategy !== "sequential" && eligible) {
       yield* runTrainStrategy(plan);
       return;
     }

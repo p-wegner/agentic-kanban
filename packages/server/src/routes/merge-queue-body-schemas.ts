@@ -21,4 +21,7 @@ export const mergeQueueBody = z.object({
   ),
   dryRun: unchecked<boolean>(),
   skipOnConflict: unchecked<boolean>(),
+  // #904 — new field, not a guard migration, so it gets a real predicate rather than
+  // `unchecked`: an invalid value should 400 rather than silently reach `executeQueue`.
+  strategy: z.enum(["sequential", "train"]).optional(),
 }).passthrough();

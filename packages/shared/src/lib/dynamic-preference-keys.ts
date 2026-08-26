@@ -134,6 +134,12 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // see `profile-capabilities.ts`. Absent/empty = unrestricted, same default-safe shape
   // as `allowed_profiles_<projectId>`.
   "required_data_labels",
+  // Merge train (#904/#905): `train_max_size_<id>` is the batching cap `executeQueue` reads
+  // to decide whether an eligible independent batch defaults to the train strategy — >1 opts
+  // the project in. `train_max_wait_ms_<id>` (introduced alongside it, consumed by #905's
+  // batching window) is registered here too so both land in the same allow-list edit.
+  "train_max_size",
+  "train_max_wait_ms",
 ] as const;
 
 // Deliberately NOT registered, though both are per-project keys that exist on disk (#496):
