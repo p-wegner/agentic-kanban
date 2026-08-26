@@ -5,7 +5,7 @@ import { Icon } from "./Icon.js";
  * Follow the board's theme, which lives as a `dark` class on <html> (useTheme). Read at
  * mount and watched, so toggling the theme re-renders the framed doc without a reload.
  */
-function useBoardIsDark(): boolean {
+export function useBoardIsDark(): boolean {
   const read = () => typeof document !== "undefined" && document.documentElement.classList.contains("dark");
   const [isDark, setIsDark] = useState(read);
   useEffect(() => {
@@ -15,6 +15,23 @@ function useBoardIsDark(): boolean {
     return () => obs.disconnect();
   }, []);
   return isDark;
+}
+
+/**
+ * A plugin VIEW is served from its own process and cannot see the board's `dark` class, so
+ * without a hint it can only follow the OS scheme — which is wrong whenever the board's toggle
+ * disagrees with it. Tell it, the same way the docs route is told: `?theme=dark|light`. A view
+ * that already carries a `theme` param (its own navigation) is left alone.
+ */
+export function withThemeParam(url: string, isDark: boolean): string {
+  try {
+    const u = new URL(url, "http://localhost");
+    if (u.searchParams.has("theme")) return url;
+    u.searchParams.set("theme", isDark ? "dark" : "light");
+    return u.toString();
+  } catch {
+    return url;
+  }
 }
 
 export function pluginGuideUrl(isDark: boolean, pluginId: string, file: string): string {
