@@ -4,6 +4,7 @@ import path from "node:path";
 import ts from "typescript";
 import { walkTestFiles, parseGuardSource, forEachNode, lineOf } from "../../../shared/__tests__/helpers/guard-scan.js";
 
+
 /**
  * #921: `vi.useFakeTimers()` called at MODULE scope (outside any `beforeEach`/`it`) with no
  * matching `vi.useRealTimers()` anywhere in the file leaves fake timers installed for the rest
@@ -21,34 +22,21 @@ import { walkTestFiles, parseGuardSource, forEachNode, lineOf } from "../../../s
  */
 const SRC = path.join(import.meta.dirname!, "..");
 
-function isModuleScopeFakeTimersCall(node: ts.Node, sf: ts.SourceFile): boolean {
+function isViCall(node: ts.Node, methodName: string): boolean {
   if (!ts.isCallExpression(node)) return false;
   if (!ts.isPropertyAccessExpression(node.expression)) return false;
-  if (node.expression.name.text !== "useFakeTimers") return false;
-  if (!ts.isIdentifier(node.expression.expression) || node.expression.expression.text !== "vi") return false;
-  // Walk up: if any ancestor is a function body (arrow/function expression passed to
-  // `it`/`beforeEach`/etc., or any other function), this call is scoped to that function
-  // and its lifetime is not "for the rest of the file/worker".
-  let cur: ts.Node = node;
-  while (cur.parent) {
-    cur = cur.parent;
-    if (ts.isFunctionLike(cur)) return false;
-    if (ts.isSourceFile(cur)) break;
-  }
-  return true;
+  if (node.expression.name.text !== methodName) return false;
+  return ts.isIdentifier(node.expression.expression) && node.expression.expression.text === "vi";
 }
 
-function hasUseRealTimersCall(sf: ts.SourceFile): boolean {
-  let found = false;
-  forEachNode(sf, (node) => {
-    if (found) return;
-    if (!ts.isCallExpression(node)) return;
-    if (!ts.isPropertyAccessExpression(node.expression)) return;
-    if (node.expression.name.text !== "useRealTimers") return;
-    if (!ts.isIdentifier(node.expression.expression) || node.expression.expression.text !== "vi") return;
-    found = true;
-  });
-  return found;
+// `setParentNodes: false` (see guard-scan.ts) means `node.parent` is undefined, so ancestry
+// has to come from forEachNode's own parent-tracking walk, not from the node itself.
+function isScopedToAFunction(node: ts.Node, parentOf: Map<ts.Node, ts.Node>): boolean {
+  let cur: ts.Node | undefined = node;
+  while ((cur = parentOf.get(cur))) {
+    if (ts.isFunctionLike(cur)) return true;
+  }
+  return false;
 }
 
 describe("a module-scope vi.useFakeTimers() is always paired with vi.useRealTimers() (#921)", () => {
@@ -56,12 +44,20 @@ describe("a module-scope vi.useFakeTimers() is always paired with vi.useRealTime
     const offenders: string[] = [];
     for (const file of walkTestFiles(SRC)) {
       const sf = parseGuardSource(file);
+      const parentOf = new Map<ts.Node, ts.Node>();
       let moduleScopeCall: ts.Node | null = null;
-      forEachNode(sf, (node) => {
-        if (!moduleScopeCall && isModuleScopeFakeTimersCall(node, sf)) moduleScopeCall = node;
+      let hasRealTimersAnywhere = false;
+      forEachNode(sf, (node, parent) => {
+        if (parent) parentOf.set(node, parent);
+        if (isViCall(node, "useRealTimers")) hasRealTimersAnywhere = true;
+        // Only the FIRST module-scope offender per file needs reporting; a function-scoped
+        // call (inside `it`/`beforeEach`/etc.) is not what this guards against.
+        if (!moduleScopeCall && isViCall(node, "useFakeTimers") && !isScopedToAFunction(node, parentOf)) {
+          moduleScopeCall = node;
+        }
       });
       if (!moduleScopeCall) continue;
-      if (!hasUseRealTimersCall(sf)) {
+      if (!hasRealTimersAnywhere) {
         offenders.push(`${path.relative(SRC, file)}:${lineOf(sf, moduleScopeCall)}`);
       }
     }
