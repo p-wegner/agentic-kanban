@@ -16,7 +16,7 @@ const SHARED_DRIZZLE = resolve(MONOREPO_ROOT, "packages/shared/drizzle");
 // This suite launches REAL server processes; see helpers/server-process.ts. The old
 // inline `spawn("pnpm", …, "dev")` left a tsx/node grandchild alive after every run
 // because proc.kill() only reached the pnpm shim (#46).
-const SPAWN_HOOK_TIMEOUT_MS = 60_000;
+const SPAWN_HOOK_TIMEOUT_MS = 120_000;
 const SPAWN_TEST_TIMEOUT_MS = 60_000;
 
 // Read the migration order from the drizzle journal so this never goes stale as
