@@ -24,12 +24,14 @@
 //   node scripts/coverage-report.mjs --lcov-paths  # just the lcov files, one per line
 //   node scripts/coverage-report.mjs --allow-missing   # report what is there, never fail on absence
 //   node scripts/coverage-report.mjs --merge [out]  # ONE repo-root-relative lcov for the analyzer
+//   node scripts/coverage-report.mjs --check-floors  # per-package shrink-proof floor ratchet (#902)
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const FLOORS_PATH = join(REPO_ROOT, "scripts", "coverage-floors.json");
 
 // The packages `pnpm test:coverage` runs, in its order. Kept here (not derived from the
 // workspace) so a NEW package that ships tests without a coverage block is a visible
@@ -130,6 +132,61 @@ export function aggregate(reports) {
   return totals;
 }
 
+/** Read the stored per-package floors. Never throws — a missing/unreadable file is a finding. */
+export function readFloors(floorsPath) {
+  if (!existsSync(floorsPath)) return {};
+  const parsed = JSON.parse(readFileSync(floorsPath, "utf8"));
+  const out = {};
+  for (const [pkg, value] of Object.entries(parsed)) {
+    if (pkg.startsWith("$")) continue; // "$comment" etc — not a package
+    if (typeof value === "number") out[pkg] = value;
+  }
+  return out;
+}
+
+/**
+ * The per-package floor ratchet (#902, #807 follow-up).
+ *
+ * Same shape as this repo's other shrink/grow-only ratchets (`compareRatchet` in
+ * `packages/shared/__tests__/helpers/guard-scan.ts`), but inverted: those freeze a count that
+ * may only SHRINK, this freezes a floor that may only RISE. Two ways to fail:
+ *
+ *   - `regressions` — measured coverage dropped below its stored floor. The floor is a promise
+ *     that coverage will not get worse than this; a run below it broke that promise.
+ *   - `stale` — measured coverage is now MORE than `slackPct` above its stored floor. #807
+ *     rejected a floor pinned to today's numbers because nothing forces it to rise — this is
+ *     that force: a floor that is allowed to sit arbitrarily far below reality is not a floor,
+ *     it is a number nobody looks at again.
+ *
+ * A package with no measured report and no stored floor is silently skipped (nothing to ratchet
+ * yet); a package with a stored floor but no report is a `missingReport` finding, since the
+ * floor becomes unverifiable rather than passing vacuously.
+ */
+export function checkFloors(reports, floors, slackPct = 2) {
+  const regressions = [];
+  const stale = [];
+  const missingReport = [];
+  const unfloored = [];
+  for (const r of reports) {
+    const floor = floors[r.pkg];
+    if (!r.present) {
+      if (floor !== undefined) missingReport.push(r.pkg);
+      continue;
+    }
+    const measured = r.total.lines.pct;
+    if (floor === undefined) {
+      unfloored.push(r.pkg);
+      continue;
+    }
+    if (measured < floor) {
+      regressions.push(`${r.pkg}: measured ${measured}% < floor ${floor}%`);
+    } else if (measured - floor > slackPct) {
+      stale.push(`${r.pkg}: measured ${measured}% is ${(measured - floor).toFixed(2)}pt above floor ${floor}% (> ${slackPct}pt slack) — raise the floor in ${FLOORS_PATH}`);
+    }
+  }
+  return { ok: regressions.length === 0 && stale.length === 0 && missingReport.length === 0, regressions, stale, missingReport, unfloored };
+}
+
 function numArg(argv, flag) {
   const i = argv.indexOf(flag);
   if (i === -1) return null;
@@ -144,10 +201,41 @@ function main() {
   const allowMissing = argv.includes("--allow-missing");
   const mergeIdx = argv.indexOf("--merge");
   const min = numArg(argv, "--min");
+  const checkFloorsFlag = argv.includes("--check-floors");
+  const slackArg = numArg(argv, "--floor-slack");
 
   const reports = COVERED_PACKAGES.map((pkg) => readPackageCoverage(REPO_ROOT, pkg));
   const totals = aggregate(reports);
   const missing = reports.filter((r) => !r.present);
+
+  if (checkFloorsFlag) {
+    const floors = readFloors(FLOORS_PATH);
+    const verdict = checkFloors(reports, floors, slackArg ?? undefined);
+    if (asJson) {
+      console.log(JSON.stringify(verdict, null, 2));
+    } else {
+      console.log(`coverage floor ratchet (source: ${FLOORS_PATH})\n`);
+      for (const r of reports) {
+        const floor = floors[r.pkg];
+        const measured = r.present ? `${r.total.lines.pct}%` : "MISSING";
+        console.log(`${r.pkg.padEnd(12)} measured ${measured.padEnd(9)} floor ${floor === undefined ? "(none)" : floor + "%"}`);
+      }
+      if (verdict.unfloored.length) {
+        console.log(`\nNo stored floor yet (not a failure, but nothing is ratcheted): ${verdict.unfloored.join(", ")}`);
+      }
+      if (verdict.missingReport.length) {
+        console.log(`\nFAIL: floor exists but no report was produced for: ${verdict.missingReport.join(", ")}. Run \`pnpm test:coverage\` first.`);
+      }
+      if (verdict.regressions.length) {
+        console.log(`\nFAIL: coverage dropped below its stored floor:\n  ${verdict.regressions.join("\n  ")}`);
+      }
+      if (verdict.stale.length) {
+        console.log(`\nFAIL: stored floor is stale (measured coverage moved on without it):\n  ${verdict.stale.join("\n  ")}`);
+      }
+      if (verdict.ok) console.log("\nAll floored packages are within slack of their stored floor.");
+    }
+    process.exit(verdict.ok ? 0 : 1);
+  }
 
   if (mergeIdx !== -1) {
     const outPath = resolve(

@@ -240,3 +240,28 @@ NOT settle is whether the arch-gate `coverage` job belongs on `pull_request` (23
 `server` on a loaded dev box is not a CI timing) or whether `coverage-report.mjs --min <pct>`
 should become a floor. There is now a baseline — 71.87% repo-wide — so setting one is a
 decision someone can make, but it has not been made.
+
+## Per-package floor ratchet (#902, #807 follow-up)
+
+#807 rejected a flat `--min` floor: `mcp-server` (48.85%) and `client` (48.98%) sit far below
+`server` (79.14%) and `shared` (76.37%), and a floor pinned to today's numbers never rises by
+itself. `scripts/coverage-report.mjs --check-floors` is the follow-up — a floor **per package**,
+stored in `scripts/coverage-floors.json`, shaped like this repo's other shrink/grow-only ratchets
+(`compareRatchet` in `packages/shared/__tests__/helpers/guard-scan.ts`), but inverted: those
+freeze a count that may only shrink, this freezes a floor that may only rise.
+
+Two ways it fails:
+- **regression** — measured coverage for a package dropped below its stored floor.
+- **stale** — measured coverage is now more than the slack (default 2 points) above its stored
+  floor. Without this half the floor would sit wherever it started, exactly the #807 objection.
+
+```bash
+pnpm test:coverage             # produce the reports first
+pnpm coverage:check-floors     # node scripts/coverage-report.mjs --check-floors
+```
+
+**Not merge-blocking.** Wired into `.github/workflows/arch-gate.yml`'s `coverage` job, which
+already runs only on `push`/`workflow_dispatch` (#807) — this is a red/green *signal* there, not
+a new PR gate. When it goes red, raise the offending package's floor in
+`scripts/coverage-floors.json` (never lower one except to fix a genuine regression) and land that
+alongside the change that raised coverage.
