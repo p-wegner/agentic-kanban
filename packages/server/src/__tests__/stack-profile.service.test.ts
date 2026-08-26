@@ -331,6 +331,24 @@ describe("buildSmartHooksRules", () => {
     expect(out.rules.map((r) => r.name)).toEqual(["Typecheck"]); // no per-edit Tests rule
     expect(out.rules[0].blocking).toBe(false);
   });
+
+  it("gives the Typecheck rule a 120s budget for a single-package project", () => {
+    const out = buildSmartHooksRules(
+      profile({ stack: "node", isMonorepo: false, typecheckCommand: "tsc --noEmit" }),
+    );
+    expect(out.rules.find((r) => r.name === "Typecheck")!.timeout).toBe(120);
+  });
+
+  it("widens the Typecheck budget on a monorepo — a flat 120s can only ever be killed there (#868)", () => {
+    // #868: on a slow monorepo `pnpm typecheck` routinely exceeds the flat 120s budget, so the
+    // rule was killed on every single run and never produced a verdict (SKIPPED "inconclusive"
+    // every time). isMonorepo is an already-detected profile field; use it to widen the budget
+    // rather than leaving a check that is structurally unable to finish.
+    const out = buildSmartHooksRules(
+      profile({ stack: "node", isMonorepo: true, typecheckCommand: "pnpm typecheck" }),
+    );
+    expect(out.rules.find((r) => r.name === "Typecheck")!.timeout).toBe(600);
+  });
 });
 
 describe("deriveTestScaffold (Kotlin)", () => {

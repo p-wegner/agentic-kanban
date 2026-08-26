@@ -86,13 +86,21 @@ export function buildSmartHooksRules(profile: StackProfile): SmartHooksRulesFile
   // this repo: 207 PostToolUse runs, median 5m37s each, killed at their timeout — 47.9% of
   // all hook wall-clock for no signal. Stop-only, like the test rules below; the runner
   // defaults an absent `events` to both, which is exactly what this avoids.
+  //
+  // #868 — a flat 120s budget is a fine default for a small single-package repo but is
+  // structurally unusable on a monorepo, where a whole-project typecheck routinely exceeds
+  // it: the rule can then only ever be killed (SKIPPED "inconclusive" on every run) and never
+  // produces a verdict. `isMonorepo` is already a reliably-detected profile field (used by
+  // the verify-gate/dev-server derivation elsewhere), so it is the cheapest available signal
+  // for "this typecheck spans multiple packages" without inventing a new measured-runtime
+  // mechanism. A monorepo gets a 5x budget instead of a doomed 120s one.
   if (profile.typecheckCommand) {
     rules.push({
       name: "Typecheck",
       command: profile.typecheckCommand,
       filePatterns: patterns,
       blocking: !isSlowJvm,
-      timeout: 120,
+      timeout: profile.isMonorepo ? 600 : 120,
       events: ["Stop"],
     });
   }
