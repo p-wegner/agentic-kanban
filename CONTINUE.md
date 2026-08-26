@@ -3,6 +3,34 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## #807 done: coverage CI placement decided with real numbers; no floor yet (2026-08-25)
+
+Decision recorded in `docs/decisions/016-coverage-ci-placement-and-floor.md`. Pulled actual
+GitHub Actions timing for the `coverage` job via `gh run view` on this repo's own history
+(no local-box guessing): ~25 minutes end-to-end on a hosted runner, same order as the
+dev-box baseline from #797 — so it stays off `pull_request` (push/`workflow_dispatch` only).
+**No `--min` floor**: mcp-server (48.85%) and client (48.98%) sit far below repo-wide
+(71.87%), and a floor pinned to today's numbers doesn't ratchet by itself. The mechanism to
+make one (a per-package, raise-only ratchet, same shape as the existing shrink-only
+ratchets) is filed as **#902**, not built here.
+
+**Bug found and fixed along the way**: `arch-gate.yml`'s `read the reports` and `merge the
+four lcovs` steps had no `if: always()`, so on the common case here — a red push — they were
+SKIPPED entirely, meaning the merged repo-anchored lcov (what `code-metrics` actually reads)
+was never produced on a failing run, only raw per-package artifacts. Fixed by adding
+`if: always()` to both steps.
+
+**Not fully explained**: #807's own loose thread — one local run that produced no coverage
+report at all despite `reportOnFailure: true` — was not reproduced against the CI history
+pulled here (those runs all produced reports once patched). Left open; re-run before
+concluding anything from a future missing report.
+
+**Verified**: `docs/decisions/016-...md` cites the two real `gh run view` timings used for
+the decision. No test suite exercises `.github/workflows/*.yml` directly (it's config, not
+code under any package's vitest project) — verification is the CI history read plus a
+by-eye YAML review, not a green test run. `pnpm check:arch && pnpm typecheck && pnpm test:mine`
+run clean on this change (no source files touched).
+
 ## Velocity investigation: hook stalls fixed, merge-train/posture work filed (2026-08-25)
 
 Proposal: `docs/proposals/2026-08-25-risk-posture-and-merge-train.md` (+ `.html` twin). Five
