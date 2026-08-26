@@ -3,6 +3,8 @@ import {
   completeMergeJob,
   failMergeJob,
   getMergeJob,
+  isZombieMergeJob,
+  MERGE_JOB_ZOMBIE_AFTER_MS,
   resetMergeJobs,
   startMergeJob,
 } from "../services/merge-job.service.js";
@@ -118,5 +120,62 @@ describe("merge job tracking", () => {
     expect(survivor!.jobId).toBe(second.jobId);
     expect(survivor!.state).toBe("failed");
     expect(survivor!.error).toContain("conflict on retry");
+  });
+});
+
+/**
+ * #903 — a merge job whose verify children died (or whose process wedged outright) must not
+ * sit `"running"` forever: `mergeWorkspaceDeduped` made every retry join the same dead promise,
+ * and only a backend restart ever cleared it. `getMergeJob` self-heals a stuck job into
+ * `"failed"` once it has been `"running"` for longer than any legitimate gate chain could take.
+ */
+describe("merge job zombie detection (#903)", () => {
+  beforeEach(() => resetMergeJobs());
+
+  it("isZombieMergeJob is false for a running job well within the budget", () => {
+    const job = startMergeJob("ws-live", new Date(Date.now() - 5000).toISOString());
+    expect(isZombieMergeJob(job)).toBe(false);
+  });
+
+  it("isZombieMergeJob is false for a job that already finished, however old", () => {
+    const job = startMergeJob("ws-done", new Date(Date.now() - MERGE_JOB_ZOMBIE_AFTER_MS * 5).toISOString());
+    completeMergeJob(job.jobId, "ws-done", { merged: true });
+    const done = getMergeJob("ws-done")!;
+    expect(isZombieMergeJob(done)).toBe(false);
+  });
+
+  it("isZombieMergeJob is true once a running job exceeds the zombie budget", () => {
+    const startedAt = new Date(Date.now() - (MERGE_JOB_ZOMBIE_AFTER_MS + 60_000)).toISOString();
+    const job = startMergeJob("ws-stuck", startedAt);
+    expect(isZombieMergeJob(job)).toBe(true);
+  });
+
+  it("getMergeJob self-heals a zombied running job into failed, with a machine-readable reason", () => {
+    const startedAt = new Date(Date.now() - (MERGE_JOB_ZOMBIE_AFTER_MS + 60_000)).toISOString();
+    startMergeJob("ws-zombie", startedAt);
+
+    const healed = getMergeJob("ws-zombie");
+    expect(healed?.state).toBe("failed");
+    expect(healed?.reason).toBe("merge_job_zombied");
+    expect(healed?.error).toContain("zombied");
+    expect(healed?.finishedAt).toBeTruthy();
+  });
+
+  it("a healed zombie stays failed on a later read (does not re-heal or flip state)", () => {
+    const startedAt = new Date(Date.now() - (MERGE_JOB_ZOMBIE_AFTER_MS + 60_000)).toISOString();
+    startMergeJob("ws-zombie-2", startedAt);
+    const first = getMergeJob("ws-zombie-2");
+    const second = getMergeJob("ws-zombie-2");
+    expect(first?.state).toBe("failed");
+    expect(second?.state).toBe("failed");
+    expect(second?.finishedAt).toBe(first?.finishedAt);
+  });
+
+  it("a genuinely long-running (not zombied) job survives a read unchanged", () => {
+    // Just under the budget: a slow-but-alive multi-hour verify chain must not be misreported.
+    const startedAt = new Date(Date.now() - (MERGE_JOB_ZOMBIE_AFTER_MS - 60_000)).toISOString();
+    const job = startMergeJob("ws-slow", startedAt);
+    expect(getMergeJob("ws-slow")?.state).toBe("running");
+    expect(getMergeJob("ws-slow")?.jobId).toBe(job.jobId);
   });
 });
