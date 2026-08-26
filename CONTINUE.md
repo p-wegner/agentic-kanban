@@ -31,6 +31,43 @@ code under any package's vitest project) — verification is the CI history read
 by-eye YAML review, not a green test run. `pnpm check:arch && pnpm typecheck && pnpm test:mine`
 run clean on this change (no source files touched).
 
+## #903 done: gate-run semaphore, no-progress watchdog, zombie merge-job self-heal (2026-08-26)
+
+Five commits on `feature/ak-903-pre-merge-gate-no-cross-workspace-serial`, all three ticket asks
+landed plus two bugs found and fixed in self-review of the first cut:
+
+- **`576167a354`** — the three original asks: (1) `verify-chain-semaphore.ts`, FIFO,
+  concurrency 1 (`KANBAN_VERIFY_CHAIN_CONCURRENCY`), wraps the WHOLE verify chain (initial +
+  install retry + flake retry) in `pre-merge-gate.service.ts`, not just each inner invocation
+  under the existing build-semaphore cap of 2. (2) a no-progress watchdog in
+  `setup-script.ts`'s `runSetupScript` — kills and resolves `noProgress: true` after
+  `noProgressTimeoutMs` (default 15 min) of zero stdout/stderr, independent of the existing
+  wall-clock `timeoutMs` (up to 3h). (3) `merge-job.service.ts`'s `getMergeJob` self-heals a
+  job stuck `running` past `MERGE_JOB_ZOMBIE_AFTER_MS` (4h) to `failed` /
+  `merge_job_zombied`.
+- **`ef66814897`** — `noProgress` wasn't threaded into `resolveVerifyOutcome`'s retry
+  decisions, so a silent-kill could still trigger a spurious install retry or get reported as a
+  confirmed regression from a killed process's truncated output. Fixed to treat `noProgress`
+  like `timedOut` at every retry decision point.
+- **`42d7fdb6a2`** — the zombie detection never reached `mergeWorkspaceDeduped`'s
+  `activeRequests` dedup map, the exact root cause named in the ticket. Fixed: a zombied job now
+  drops the stale in-flight promise instead of a retry joining it forever.
+- **`6a53b3975e`** — the route (`POST /:id/merge`) called `startMergeJob` unconditionally on
+  every request, resetting `startedAt` (and the 4h clock) on every retry — so the clock could
+  never actually reach 4h against one start time. Fixed to reuse the existing running job's
+  record when joining rather than starting fresh.
+- **`9546a51719`** — the route's own unconditional `startMergeJob` call still ran *before*
+  `mergeWorkspaceDeduped` could read the healed zombie record, overwriting it first. Fixed: the
+  route now determines "was zombied" from its own read before calling `startMergeJob`, and
+  passes that through explicitly as `dropStaleActiveRequest`.
+
+**Verified**: `check:arch` (0 errors), full `pnpm typecheck` (all packages, exit 0), and every
+new/touched test file run directly and green — `verify-chain-semaphore.test.ts` +
+`merge-job-tracking.test.ts` + `workspace-merge-service.test.ts` (61 tests),
+`verify-retry-strategies.test.ts` (11 tests), `setup-script-no-progress.test.ts` (4 tests). 76
+tests total, all passing. Full `pnpm gate:always-run` NOT run — box was RAM-bound throughout
+(`fleet gate` reported room for 1 worker, 3.6 GB free).
+
 ## Velocity investigation: hook stalls fixed, merge-train/posture work filed (2026-08-25)
 
 Proposal: `docs/proposals/2026-08-25-risk-posture-and-merge-train.md` (+ `.html` twin). Five
