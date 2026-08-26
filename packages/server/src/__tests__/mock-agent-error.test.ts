@@ -23,7 +23,8 @@ function runMockAgent(args: string[] = []): Promise<{ stdout: string; stderr: st
     proc.on("exit", (code) => resolve({ stdout, stderr, exitCode: code ?? 1 }));
     proc.on("error", reject);
 
-    setTimeout(() => { proc.kill(); reject(new Error("mock-agent timed out")); }, 10000);
+    // 60s, not 10s: same spawn-latency class as mock-agent-standard/multiturn (1e96bdd583).
+    setTimeout(() => { proc.kill(); reject(new Error("mock-agent timed out")); }, 60000);
   });
 }
 
