@@ -30,6 +30,15 @@ export interface VerifyRunResult {
   stdout?: string;
   stderr?: string;
   timedOut?: boolean;
+  /**
+   * Set when the process was killed by the no-progress watchdog (#903) rather than run to
+   * completion or wall-clock timed out. Treated the same as `timedOut` here: it carries no
+   * signal about missing dependencies or which suites are flaky, so it must skip both retries
+   * exactly like a timeout does — otherwise a silently-killed process's (partial, truncated)
+   * stdout/stderr gets fed to the missing-deps sniff and the flake-retry "real failure" message
+   * as if the run had actually finished and failed.
+   */
+  noProgress?: boolean;
 }
 
 export interface VerifyFailure {
@@ -86,6 +95,19 @@ function timeoutFailure(input: { verifyTimeoutMs: number; projectId: string; aft
   };
 }
 
+function noProgressFailure(input: { projectId: string; afterInstall: boolean }): VerifyFailure {
+  // Same "inconclusive, not a verdict on the code" contract as a wall-clock timeout (#903) —
+  // the process was killed for producing no output, not because it ran and failed.
+  const suffix = input.afterInstall ? " (after an auto-install retry)" : "";
+  return {
+    timedOut: true,
+    message:
+      `verify_script was killed by the no-progress watchdog${suffix} — inconclusive (not a build/test ` +
+      `failure); merge withheld pending a retry. This means the process produced no output for the ` +
+      `configured budget, not that the build/tests failed.`,
+  };
+}
+
 const suiteNames = (suites: FailedSuite[]) => suites.map((s) => `${s.packageLabel}/${s.file}`).join(", ");
 
 /**
@@ -99,6 +121,10 @@ export async function resolveVerifyOutcome(input: ResolveVerifyOutcomeInput): Pr
   // A timeout carries no signal about missing dependencies, so it skips both retries.
   if (result.timedOut) {
     return { failure: timeoutFailure({ ...input, afterInstall: false }) };
+  }
+  // Same treatment for a no-progress kill (#903) — it is not evidence about the code either.
+  if (result.noProgress) {
+    return { failure: noProgressFailure({ ...input, afterInstall: false }) };
   }
 
   // ---- #169 missing-deps install retry ----------------------------------------------------
@@ -119,6 +145,9 @@ export async function resolveVerifyOutcome(input: ResolveVerifyOutcomeInput): Pr
   if (result.timedOut) {
     return { failure: timeoutFailure({ ...input, afterInstall: installed }) };
   }
+  if (result.noProgress) {
+    return { failure: noProgressFailure({ ...input, afterInstall: installed }) };
+  }
 
   // ---- #894 targeted flake retry -----------------------------------------------------------
   const flake = decideFlakeRetry({ output: combinedOutput(result), timedOut: result.timedOut, scoped: input.scoped });
@@ -129,11 +158,14 @@ export async function resolveVerifyOutcome(input: ResolveVerifyOutcomeInput): Pr
         `re-running only those to tell contention from a regression: ${names}`,
     );
     const retryResult = await input.runVerifyWithRetryScope(retryScopeEnvValue(flake.suites));
-    if (retryResult.exitCode === 0 && !retryResult.timedOut) {
+    if (retryResult.exitCode === 0 && !retryResult.timedOut && !retryResult.noProgress) {
       return {
         failure: null,
         flakeRetryNote: `— ${flake.suites.length} suite(s) failed under load and PASSED on a targeted re-run: ${names}`,
       };
+    }
+    if (retryResult.noProgress) {
+      return { failure: noProgressFailure({ ...input, afterInstall: installed }) };
     }
     // Failed twice, the second time nearly alone on the machine. That is a much stronger
     // signal than the first failure was, and the message says so rather than repeating the
