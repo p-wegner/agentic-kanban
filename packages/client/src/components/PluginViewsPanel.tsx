@@ -14,6 +14,7 @@ import {
 import { PluginSkillPane } from "./PluginSkillPane.js";
 import { PluginScaffoldPane, type ScaffoldForm } from "./PluginScaffoldPane.js";
 import { Icon } from "./Icon.js";
+import { useBoardIsDark, withThemeParam } from "./PluginGuidePanel.js";
 
 /**
  * Who a rail entry is for (#456). Mirrors `PluginAudience` in the manifest contract; the
@@ -145,6 +146,7 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
   const loopFocus = usePluginViewStore((s) => s.loopFocus);
   const clearLoopFocus = usePluginViewStore((s) => s.clearLoopFocus);
   const startLatch = useRef(createStartLatch());
+  const isDark = useBoardIsDark();
 
   /**
    * Capability-rail visibility (#432). The rail was a hard `w-56` column with no way to
@@ -748,10 +750,10 @@ export function PluginViewsPanel({ projectId, pluginSlug }: PluginViewsPanelProp
               </div>
             ) : activeUrl ? (
               <iframe
-                key={frameKey}
-                src={activeUrl}
+                key={`${frameKey}:${isDark}`}
+                src={withThemeParam(activeUrl, isDark)}
                 title={`${activeView.pluginName} — ${activeView.label}`}
-                className="flex-1 w-full bg-white"
+                className="flex-1 w-full bg-white dark:bg-gray-950"
                 sandbox="allow-forms allow-modals allow-popups allow-same-origin allow-scripts"
                 // A view is a whole tool inside a panel — a graph, a dashboard — and the panel is
                 // the smallest part of the screen. Without this, requestFullscreen() REJECTS in
