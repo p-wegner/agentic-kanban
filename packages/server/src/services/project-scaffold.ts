@@ -151,6 +151,12 @@ function getSmartRunnerSource(): string | null {
   return _smartRunnerSource;
 }
 
+let _discloseContextSource: string | null | undefined = undefined;
+function getDiscloseContextSource(): string | null {
+  if (_discloseContextSource === undefined) _discloseContextSource = resolveHookSource("disclose-context.mjs");
+  return _discloseContextSource;
+}
+
 /**
  * `git-topology-cache.js` — a hard dependency of `smart-hooks-runner.js` (#392/#279).
  *
@@ -221,6 +227,17 @@ stack profile whenever the profile changes. To refresh it, re-detect the stack p
 Optional hand-authored hooks for the runner (PreToolUse / Stop entries), merged with the
 generated rules. Currently empty — add entries here for project-specific checks the generated
 rules don't cover.
+
+## disclose-context.mjs
+
+A nested \`CLAUDE.md\` and a path-scoped \`.claude/rules/*.md\` are auto-loaded by Claude Code
+only when the agent reads a matching file through the **Read** tool. Grep/Glob and shell reads
+(\`cat\`, \`sed -n\`, \`grep\`, \`rg\`, \`Get-Content\`) touch the same files but trigger nothing, so
+that guidance never arrives for an agent that works a subtree without ever \`Read\`-ing a file
+in it. This is a PostToolUse hook on Bash/PowerShell/Grep/Glob that resolves the paths a call
+touched (from its command line and its output) to nested CLAUDE.md files and matching-path
+rules, and injects each one, once per session, as \`additionalContext\` — the same guidance a
+Read would have delivered. Zero dependencies, never blocks a tool call.
 
 ## settings.json entries
 
@@ -391,6 +408,14 @@ export function ensureHookScaffold(repoPath: string, options: HookScaffoldOption
     writeBoardHookIfOutdated(smartRunnerPath, getSmartRunnerSource());
     const smartRunnerWritten = existsSync(smartRunnerPath);
 
+    // --- disclose-context.mjs (#922) ---
+    // Closes the progressive-disclosure gap: nested CLAUDE.md / path-scoped rules load only
+    // on Read, so a Grep/shell-only builder never sees them. Wired unconditionally — it is a
+    // pure PostToolUse observer with no dependency on worktrees or the stack profile.
+    const discloseContextPath = join(hooksDir, "disclose-context.mjs");
+    writeBoardHookIfOutdated(discloseContextPath, getDiscloseContextSource());
+    const discloseContextWritten = existsSync(discloseContextPath);
+
     // --- hooks README ---
     const readmePath = join(hooksDir, "README.md");
     if (!existsSync(readmePath)) {
@@ -432,6 +457,20 @@ export function ensureHookScaffold(repoPath: string, options: HookScaffoldOption
       newEntries.push({
         event: "Stop",
         command: "node $CLAUDE_PROJECT_DIR/.claude/hooks/smart-hooks-runner.js Stop",
+      });
+    }
+    // disclose-context.mjs (#922) — deliberately a PLAIN RELATIVE path, not
+    // $CLAUDE_PROJECT_DIR: that variable is empty in `claude -p` sessions (used by review/
+    // one-shot/Pi task agents) and Claude Code pre-expands it textually before spawn, so node
+    // would look for the hook under the shell's cwd root (e.g. C:\.claude\hooks\...) and fail
+    // with a non-blocking hook error. A relative path resolves against the hook's actual cwd
+    // (the worktree) in every launch mode; the hook itself self-locates its project root via
+    // a `.claude`/`.git` walk-up rather than trusting the env var either.
+    if (discloseContextWritten) {
+      newEntries.push({
+        event: "PostToolUse",
+        matcher: "Bash|PowerShell|Grep|Glob",
+        command: "node .claude/hooks/disclose-context.mjs",
       });
     }
     mergeSettingsHooks(settingsPath, newEntries);
