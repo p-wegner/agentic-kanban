@@ -403,10 +403,12 @@ interface AutoStartCycle {
 }
 
 /**
- * Is the HOST too tight to add another agent process right now (#908)? Tier 1
- * (`fleet snapshot --json`) answers with a process count — `headroomProcesses <= 0` means
- * zero room for one more `claude.exe`; Tier 0 (`os.freemem()`) has no process-count signal
- * at all, only a floor, so its `hold` is the whole answer there.
+ * Is the HOST too tight to add another agent process right now (#908)? Delegates to the
+ * snapshot's own normalized `hold` (Tier 1: `!verdict.canStartAnother`; Tier 0: the freemem
+ * floor) rather than re-deriving from `headroomProcesses` — the fleet tool's
+ * `canStartAnother` verdict can weigh signals (e.g. thrashing) that a bare process-headroom
+ * count does not, so recomputing from a different field than `resolveMachineCapacity`
+ * normalizes could disagree with it and silently decide on the wrong number.
  *
  * This function decides whether the host is full, NOT whether a start happens — that is
  * the placement-not-a-gate distinction the ticket draws. A saturated host still starts the
@@ -415,7 +417,7 @@ interface AutoStartCycle {
  * is what steers such a launch there and records why.
  */
 function isHostSaturated(capacity: MachineCapacitySnapshot): boolean {
-  return capacity.tier === "1" ? capacity.headroomProcesses <= 0 : capacity.hold;
+  return capacity.hold;
 }
 
 type ContentionGate = Awaited<ReturnType<BuildFileContentionGate>>;
