@@ -7,13 +7,15 @@ import { describe, expect, it } from "vitest";
 import type { WorkerToBoardMessage } from "@agentic-kanban/shared/lib/worker-protocol";
 import { MAX_REMEMBERED, createWorkerSessionRegistry } from "../worker/worker-session-registry.js";
 
-function harness(opts: { live?: Set<string>; pids?: Map<string, number> } = {}) {
+function harness(opts: { live?: Set<string>; pids?: Map<string, number>; stdinOpen?: Map<string, boolean> } = {}) {
   const live = opts.live ?? new Set<string>();
   const pids = opts.pids ?? new Map<string, number>();
+  const stdinOpen = opts.stdinOpen;
   const sent: WorkerToBoardMessage[] = [];
   const registry = createWorkerSessionRegistry({
     isLive: (id) => live.has(id),
     pidOf: (id) => pids.get(id),
+    ...(stdinOpen ? { stdinOpenOf: (id: string) => stdinOpen.get(id) } : {}),
     safeSend: (message) => void sent.push(message),
   });
   return { registry, live, pids, sent };
@@ -94,6 +96,18 @@ describe("createWorkerSessionRegistry", () => {
     expect(h.sent).toEqual([
       { type: "session_probe_result", sessionId: "never-assigned", probe: { requestId: "req-1", state: "unknown" } },
     ]);
+  });
+
+  it("carries stdinOpen for a running session when the caller tracks it (#900)", () => {
+    const h = harness({ live: new Set(["s1"]), stdinOpen: new Map([["s1", true]]) });
+    h.registry.noteAssigned("s1");
+    expect(h.registry.probe("s1")).toMatchObject({ state: "running", stdinOpen: true });
+  });
+
+  it("omits stdinOpen rather than guessing when the caller does not track it", () => {
+    const h = harness({ live: new Set(["s1"]) });
+    h.registry.noteAssigned("s1");
+    expect(h.registry.probe("s1").stdinOpen).toBeUndefined();
   });
 
   it("echoes the requestId back so a stale answer can be told from a fresh one", () => {
