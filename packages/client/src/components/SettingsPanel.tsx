@@ -1,23 +1,22 @@
 import { useEffect, useState } from "react";
 import { isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import { apiFetch, apiPost, apiPut, apiPatch } from "../lib/api.js";
-import { setSettings as savePreferences } from "../lib/settingsStore.js";
 import { invalidateClientSurfaceLocal } from "../lib/clientInvalidation.js";
 import { showToast } from "../lib/toast.js";
 import { useIssueTemplates } from "../hooks/useIssueTemplates.js";
 import { useConfigImportExport } from "../hooks/useConfigImportExport.js";
 import { applyPreflightResult, CODEX_DEFAULT_PROFILE, COPILOT_DEFAULT_PROFILE, DEFAULT_SETTINGS, PI_DEFAULT_PROFILE, TABS, uniqueProfiles, type AgentProfileHealth, type McpHealth, type ProjectSettingsState, type Settings, type SettingsPanelProps, type Tab } from "./SettingsPanel.shared.js";
-import { normalizeConfig, setProviderFillPolicy, clearProviderFillPolicy, settingsKey, type ConcreteProvider } from "../lib/strategy-targets.js";
 // Pure core of this panel — the project-row projection, the PATCH body, the settings blob and
 // the default-branch rule (#782). This is the client's most-reworked file; those four were the
 // parts of it that never needed React, and they now have tests.
 import { buildProjectPatchBody, buildProjectSettingsState, buildSettingsToSave, isDefaultBranchInvalid, verifyScriptKey, type SettingsProjectRow } from "../lib/settingsPanelState.js";
-import { allowedProfilesPrefKey, parseProfileAllowlist, serializeProfileAllowlist, type AllowedProfile } from "@agentic-kanban/shared/lib/profile-allowlist";
+import { allowedProfilesPrefKey, parseProfileAllowlist } from "@agentic-kanban/shared/lib/profile-allowlist";
 import { parseDisabledTools, withToolDisabled } from "../lib/mcp-tool-toggle.js";
 import { useTagsEditor } from "../hooks/useTagsEditor.js";
 import { useTemplateEditorState } from "../hooks/useTemplateEditorState.js";
 import { useSkillsManager } from "../hooks/useSkillsManager.js";
 import { useMonitorControls } from "../hooks/useMonitorControls.js";
+import { useProjectProviderControls } from "../hooks/useProjectProviderControls.js";
 
 import { AgentSettings } from "./settings/AgentSettings.js";
 import { WorkflowSettings } from "./settings/WorkflowSettings.js";
@@ -114,86 +113,17 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
     handleMonitorRunNow,
   } = useMonitorControls(activeProjectId, settings.nudge_wip_limit);
 
-  // Provider divergence: global settings prefs vs the project's Strategy Bullseye
-  type ProviderDivergence = {
-    hasBullseye: boolean;
-    bullseyeProvider: string | null;
-    bullseyeProfile: string | null;
-    settingsProvider: string | null;
-    settingsProfile: string | null;
-    diverged: boolean;
-  };
-  const [providerDivergence, setProviderDivergence] = useState<ProviderDivergence | null>(null);
-  const [savingProjectProvider, setSavingProjectProvider] = useState(false);
-  const [savingAllowedProfiles, setSavingAllowedProfiles] = useState(false);
-
-  async function refetchProviderDivergence() {
-    if (!activeProjectId) return;
-    try {
-      const div = await apiFetch<ProviderDivergence>(`/api/preferences/provider-divergence?projectId=${activeProjectId}`);
-      setProviderDivergence(div);
-    } catch { /* non-fatal */ }
-  }
-
-  /**
-   * Per-project profile allowlist — a HARD constraint, unlike the provider control
-   * below it. Written to `allowed_profiles_<projectId>` in the canonical serialization
-   * so the server's `parseProfileAllowlist` and this editor cannot drift.
-   *
-   * An empty selection stores `[]`, which the parser reads as "restriction lifted".
-   * Deleting the row would mean the same thing, but writing `[]` keeps the preference
-   * visible in an exported config, so a project that USED to be restricted doesn't look
-   * like one that never was.
-   */
-  async function handleAllowedProfilesChange(entries: AllowedProfile[]) {
-    if (!activeProjectId || savingAllowedProfiles) return;
-    setSavingAllowedProfiles(true);
-    try {
-      const key = allowedProfilesPrefKey(activeProjectId);
-      const serialized = serializeProfileAllowlist(entries);
-      await savePreferences({ [key]: serialized });
-      setSettings((s) => ({ ...s, [key]: serialized }));
-      showToast(
-        entries.length === 0
-          ? "Project may use any profile"
-          : `Project restricted to ${entries.length} profile${entries.length === 1 ? "" : "s"}`,
-        "success",
-      );
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Failed to update allowed profiles", "error");
-    } finally {
-      setSavingAllowedProfiles(false);
-    }
-  }
-
-  // First-class per-project provider control (#925): persist the selection as a
-  // single Strategy-Bullseye `fill` policy on board_strategy_<projectId>, NOT the
-  // global provider pref — so the write never trips the divergence guard and the
-  // simple control round-trips with the advanced Provider-policies editor.
-  async function handleProjectProviderChange(provider: ConcreteProvider | null, profileName: string) {
-    if (!activeProjectId || savingProjectProvider) return;
-    setSavingProjectProvider(true);
-    try {
-      const key = settingsKey(activeProjectId);
-      // `board_strategy_<projectId>` is a dynamic per-project key, not a static
-      // member of the Settings type — index it the same way the verify_script_<id>
-      // save path does.
-      const rawCurrent = settings[key as keyof Settings];
-      const currentConfig = normalizeConfig(rawCurrent ? JSON.parse(rawCurrent) : null);
-      const nextConfig = provider
-        ? setProviderFillPolicy(currentConfig, provider, profileName)
-        : clearProviderFillPolicy(currentConfig);
-      const serialized = JSON.stringify(nextConfig);
-      await savePreferences({ [key]: serialized });
-      setSettings((s) => ({ ...s, [key]: serialized }));
-      await refetchProviderDivergence();
-      showToast(provider ? "Project provider updated" : "Project now uses the global default provider", "success");
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Failed to update project provider", "error");
-    } finally {
-      setSavingProjectProvider(false);
-    }
-  }
+  // Provider divergence + per-project provider/allowlist controls (state + handlers
+  // self-contained in the hook; settings is read for the current Strategy config and
+  // written back after each save).
+  const {
+    providerDivergence,
+    setProviderDivergence,
+    savingProjectProvider,
+    savingAllowedProfiles,
+    handleProjectProviderChange,
+    handleAllowedProfilesChange,
+  } = useProjectProviderControls(activeProjectId, settings, setSettings);
 
   // Config export/import flow (state + handlers self-contained in the hook).
   const {
