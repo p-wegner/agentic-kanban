@@ -128,6 +128,12 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // constrains nothing in repo B.
   "sibling_install_mode",
   "sibling_install_timeout_ms",
+  // Data-handling capability requirement (#876): a CSV of tags (e.g. "no-training,
+  // eu-data-residency") the project requires of whichever provider PROFILE a session
+  // launches under. Checked against `profile_capabilities_<provider:profile>` (below) —
+  // see `profile-capabilities.ts`. Absent/empty = unrestricted, same default-safe shape
+  // as `allowed_profiles_<projectId>`.
+  "required_data_labels",
 ] as const;
 
 // Deliberately NOT registered, though both are per-project keys that exist on disk (#496):
@@ -147,6 +153,9 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
 export const FREEFORM_SUFFIX_KEY_PREFIXES = [
   "codex_cooldown",
   "claude_cooldown",
+  // Data-handling capability tags for one PROFILE (#876), suffix `<provider>:<name>`
+  // (e.g. "claude:andrena_team_5x_2") — see `profile-capabilities.ts`.
+  "profile_capabilities",
 ] as const;
 
 const PROJECT_ID_SUFFIX = /^[0-9a-f-]+$/;

@@ -364,7 +364,7 @@ describe("placement observability over HTTP (#755)", () => {
     expect(body.explanation.agreesWithResolver).toBe(true);
     // Every check is reported, including the ones that were never reached — an
     // operator must be able to see WHERE the chain stopped, not just why.
-    expect(body.explanation.chain).toHaveLength(6);
+    expect(body.explanation.chain).toHaveLength(7);
 
     const missing = await app.request(`/api/workers/explain?issue=999&projectId=${PROJECT_ID}`);
     expect(missing.status).toBe(404);

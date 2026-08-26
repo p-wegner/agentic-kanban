@@ -52,6 +52,11 @@ export type DomainErrorCode = (typeof DOMAIN_ERROR_CODES)[number];
 export const WORKSPACE_REFUSAL_CODES = [
   "STALE_SAFETY_POLICY",
   "PROFILE_ALLOWLIST_HOLD",
+  // #876: the project's required data-handling tags (e.g. "no-training") are not
+  // satisfied by the profile that would launch. Same shape as PROFILE_ALLOWLIST_HOLD —
+  // a launch-time hold rather than a fallback, because there is no "pick a compliant
+  // profile instead" to fall back to here.
+  "DATA_HANDLING_REQUIREMENT_HOLD",
   "ISOLATION_REFUSED",
   "OPEN_DIRECT_WORKSPACE",
   "UNSAFE_CODEX_MODEL",

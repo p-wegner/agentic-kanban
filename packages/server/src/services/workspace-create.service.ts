@@ -645,6 +645,19 @@ export function createWorkspaceCreateService(deps: {
           { code: "PROFILE_ALLOWLIST_HOLD", projectId: issue.projectId },
         );
       }
+      // #876: the resolved profile does not carry a data-handling tag the project
+      // requires (e.g. "no-training"). Refused the same way as the allowlist hold above
+      // and for the same reason — the profile pool that satisfies this is an operator
+      // decision (tag the profile, or change the requirement), not something a launch
+      // can silently work around.
+      if (agentConfig.dataHandlingHold) {
+        throw new WorkspaceError(
+          `Data-handling requirement blocks this launch: ${agentConfig.dataHandlingHold}. Tag a compliant profile ` +
+            `via its profile_capabilities preference, or change the project's required data labels.`,
+          "CONFLICT",
+          { code: "DATA_HANDLING_REQUIREMENT_HOLD", projectId: issue.projectId },
+        );
+      }
       claudeProfile = agentConfig.claudeProfile;
       agentCommand = agentConfig.agentCommand;
       resolvedProvider = agentConfig.resolvedProvider;

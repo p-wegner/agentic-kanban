@@ -29,6 +29,7 @@ import { applyProviderSelectionToPrefMap } from "./strategy-objective.service.js
 import { resolveEffectiveModel } from "./effective-config.service.js";
 import type { ParsedProfileAllowlist } from "@agentic-kanban/shared/lib/profile-allowlist";
 import { clampProfileToAllowlist } from "@agentic-kanban/shared/lib/profile-allowlist";
+import { dataHandlingBlockedByRequirement, profileCapabilitiesPrefKey } from "@agentic-kanban/shared/lib/profile-capabilities";
 
 export interface ProviderConfigInput {
   prefMap: Map<string, string>;
@@ -47,6 +48,13 @@ export interface ProviderConfigInput {
   allowlist?: ParsedProfileAllowlist | null;
   /** Injected clock for the allowlist's cooldown checks (`nowMs` spelling, #614). */
   nowMs?: number;
+  /**
+   * The project's `required_data_labels_<projectId>` value (#876) — a CSV of
+   * data-handling tags (e.g. "no-training,eu-data-residency") the resolved profile must
+   * carry. Checked AFTER the allowlist clamp, against that profile's own
+   * `profile_capabilities_<provider:name>` tags. Omit to keep unrestricted behaviour.
+   */
+  requiredDataLabels?: string | null;
 }
 
 export interface ResolvedProviderConfig {
@@ -70,6 +78,14 @@ export interface ResolvedProviderConfig {
   profileHold: string | null;
   /** True when the allowlist overrode the selection the precedence chain produced. */
   profileClamped: boolean;
+  /**
+   * Set when the project's required-data-labels constraint (#876) is not satisfied by
+   * the resolved profile — e.g. the project requires "no-training" and the profile that
+   * would launch carries no such tag. Same "caller MUST refuse to launch" contract as
+   * `profileHold`: the other fields still hold the resolution, so ignoring this silently
+   * defeats the requirement.
+   */
+  dataHandlingHold: string | null;
   /** Diagnostics for the caller to log (kept side-effect-free here). */
   notes: string[];
 }
@@ -149,6 +165,26 @@ export function resolveProviderConfig(input: ProviderConfigInput): ResolvedProvi
   });
   notes.push(...effectiveModel.notes);
 
+  // Data-handling requirement (#876) — runs LAST, against whichever profile the
+  // allowlist clamp settled on, for the same reason the allowlist itself runs after the
+  // precedence chain: it is a constraint on the final answer, not another selector.
+  let dataHandlingHold: string | null = null;
+  if (input.requiredDataLabels && !profileHold) {
+    const capabilitiesRaw = profileName
+      ? prefMap.get(profileCapabilitiesPrefKey(provider, profileName))
+      : undefined;
+    const block = dataHandlingBlockedByRequirement({
+      requiredRaw: input.requiredDataLabels,
+      provider,
+      profileName,
+      profileTagsRaw: capabilitiesRaw,
+    });
+    if (block.blocked) {
+      dataHandlingHold = block.reason;
+      notes.push(`data-handling requirement: ${block.reason}`);
+    }
+  }
+
   return {
     provider,
     profileName,
@@ -160,6 +196,7 @@ export function resolveProviderConfig(input: ProviderConfigInput): ResolvedProvi
     profileSelection,
     profileHold,
     profileClamped,
+    dataHandlingHold,
     notes,
   };
 }

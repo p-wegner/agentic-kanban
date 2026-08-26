@@ -210,6 +210,16 @@ holds with the restriction as the reason rather than with a capacity message. Wo
 profile attestation would narrow this from "never" to "only to a worker that can prove it
 qualifies" — that is not implemented.
 
+**The same is true of a data-handling requirement (#876).** `required_data_labels_<projectId>`
+(a CSV of tags such as `no-training`, `eu-data-residency`) names a property a launch's
+resolved *profile* must carry — set per profile via `profile_capabilities_<provider>:<name>`.
+A fleet worker cannot prove which profile tags the account it authenticates as actually
+carries any more than it can prove which allowlisted profile it is using, so a project with
+this requirement set never goes remote either, for exactly the same reason and checked
+immediately after the allowlist (§7 below). The local (host) half of this mechanism IS
+enforced: `resolveProviderConfig` holds a launch with `DATA_HANDLING_REQUIREMENT_HOLD` when
+the resolved profile is untagged or missing a required tag.
+
 ## 6. The two network listeners
 
 The board API has **no authentication**; its defence is that it binds `127.0.0.1`, and it
@@ -324,10 +334,12 @@ is a **silent host fallback** with a `[worker-fleet]` warning in the server log;
 mode each becomes a refusal the monitor reports as `no_available_worker`.
 
 1. **`worker_dispatch_<projectId>` is not `true`.** Everything runs on the host, with no
-   log line at all — this is the quietest of the six.
+   log line at all — this is the quietest of the seven.
 2. **The project has a profile allowlist.** `allowed_profiles_<projectId>` non-empty or
    unparseable → never remote (§5).
-3. **No eligible worker.** All of these must hold, and any one of them failing looks
+3. **The project has a data-handling requirement.** `required_data_labels_<projectId>`
+   non-empty → never remote, same reasoning as check 2 (#876, §5).
+4. **No eligible worker.** All of these must hold, and any one of them failing looks
    identical from the outside:
    - the worker's `effectiveStatus` is `online` — heartbeat newer than 90 s;
    - the board still holds its WebSocket (`isConnected`) — a worker whose heartbeat is
@@ -335,19 +347,19 @@ mode each becomes a refusal the monitor reports as `no_available_worker`.
    - the launch's provider is in the worker's `--providers` (empty list = any);
    - `worker_labels_<projectId>` ⊆ the worker's `--labels`;
    - it has a free slot against `--max-concurrency` (least-loaded worker wins).
-4. **No branch to push back.** A true remote worker needs git transport, and a workspace
+5. **No branch to push back.** A true remote worker needs git transport, and a workspace
    with no feature branch has nothing safe to land — host.
-5. **The project has no `repoPath`.** Nothing to serve over git transport — host.
-6. **The repository shape does not fit the transport.** The board's git transport carries ONE
+6. **The project has no `repoPath`.** Nothing to serve over git transport — host.
+7. **The repository shape does not fit the transport.** The board's git transport carries ONE
    repository per assignment, without LFS objects and without submodules, so a project with
    sibling repos, LFS or submodules is refused rather than dispatched against an incomplete
    checkout (#748). A layout that cannot be read at all fails closed the same way.
 
-A worker carrying the `shares-filesystem` label skips 4, 5 and 6 entirely — it reads the
+A worker carrying the `shares-filesystem` label skips 5, 6 and 7 entirely — it reads the
 board's own worktrees, siblings and LFS objects included.
 
 **Ask the board instead of reading this list.** `agentic-kanban worker explain <N>` (and
-`GET /api/workers/explain?issue=<N>`) walks these same six checks against live state and
+`GET /api/workers/explain?issue=<N>`) walks these same seven checks against live state and
 names the one that decided, with the values it read (#755). The chain it walks is pinned to
 `resolveWorkerPlacement`'s source order and to this section's numbering by
 `placement-chain-parity.test.ts`, and every answer carries `agreesWithResolver` — so if the

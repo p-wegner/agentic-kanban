@@ -25,6 +25,10 @@ import {
   remoteDispatchBlockedByAllowlist,
 } from "@agentic-kanban/shared/lib/profile-allowlist";
 import {
+  remoteDispatchBlockedByDataHandling,
+  requiredDataLabelsPrefKey,
+} from "@agentic-kanban/shared/lib/profile-capabilities";
+import {
   releaseWorkerSlot,
   reserveWorkerSlot,
   reservedSlotCount,
@@ -377,6 +381,19 @@ async function resolvePlacementWithReservation(
       );
       return hostBecause("profile_allowlist", allowlistBlock.reason);
     }
+    // #876: same reasoning as the allowlist check above — a fleet worker authenticates with
+    // its own local login, so a project requiring data-handling tags (no-training,
+    // eu-data-residency, ...) cannot have that requirement enforced remotely either.
+    const dataHandlingBlock = remoteDispatchBlockedByDataHandling(
+      await getPreferenceValue(requiredDataLabelsPrefKey(projectId), database),
+    );
+    if (dataHandlingBlock.blocked) {
+      if (strict) refuseHost(`project ${projectId} cannot dispatch remotely: ${dataHandlingBlock.reason}`);
+      console.warn(
+        `[worker-fleet] project ${projectId} wants worker dispatch but ${dataHandlingBlock.reason}; launching on host`,
+      );
+      return hostBecause("data_handling_requirement", dataHandlingBlock.reason);
+    }
     const requiredLabels = parseRequiredLabels(await getPreferenceValue(workerLabelsPrefKey(projectId), database));
     // #751: select AND reserve atomically. Reading the load and then reserving after
     // another `await` would leave the same window this fixes.
@@ -501,6 +518,11 @@ export async function projectCanDispatch(params: {
       await getPreferenceValue(allowedProfilesPrefKey(projectId), database),
     );
     if (allowlistBlock.blocked) return { available: false, reason: allowlistBlock.reason };
+    // #876: same refusal the placement makes, surfaced one step earlier.
+    const dataHandlingBlock = remoteDispatchBlockedByDataHandling(
+      await getPreferenceValue(requiredDataLabelsPrefKey(projectId), database),
+    );
+    if (dataHandlingBlock.blocked) return { available: false, reason: dataHandlingBlock.reason };
     const fleet = getWorkerFleet(database);
     const requiredLabels = parseRequiredLabels(await getPreferenceValue(workerLabelsPrefKey(projectId), database));
     // #748: same refusal the placement makes, one step earlier, so the monitor skips

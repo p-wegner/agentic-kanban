@@ -114,6 +114,9 @@ export function createLaunchPreviewService(deps: LaunchPreviewDeps) {
             : `Profile allowlist: launching on ${agentConfig.resolvedProfile}.`,
         );
       }
+      if (agentConfig.dataHandlingHold) {
+        warnings.push(`Data-handling requirement blocks this launch: ${agentConfig.dataHandlingHold}.`);
+      }
 
       // 5. Skill resolution (name only, no file writes)
       const skillId = input.skillId || null;
