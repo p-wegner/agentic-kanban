@@ -101,5 +101,11 @@ export interface RemoteAgentService extends AgentExecutionService {
     op: WorkerRepoOpKind,
     opts?: { timeoutMs?: number },
   ): Promise<RemoteRepoOpOutcome>;
+  /**
+   * Always implemented here (#900) — narrows the optional signature on
+   * {@link AgentExecutionService}, which leaves it optional only because a HOST
+   * implementation has no worker to ask. The remote implementation always has one.
+   */
+  probeStdinIdle(sessionId: string): Promise<{ ok: true; stdinOpen: boolean } | { ok: false; reason: string }>;
 }
 

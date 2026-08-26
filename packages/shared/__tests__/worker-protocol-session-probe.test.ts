@@ -75,4 +75,16 @@ describe("session_probe_result (worker -> board)", () => {
     const probe = parseWorkerSessionProbe({ requestId: "r1", state: "running", pid: "4242", startedAtMs: NaN });
     expect(probe).toEqual({ requestId: "r1", state: "running" });
   });
+
+  it("carries stdinOpen for a running session (#900)", () => {
+    const open = parseWorkerSessionProbe({ requestId: "r1", state: "running", stdinOpen: true });
+    expect(open).toEqual({ requestId: "r1", state: "running", stdinOpen: true });
+    const closed = parseWorkerSessionProbe({ requestId: "r1", state: "running", stdinOpen: false });
+    expect(closed).toEqual({ requestId: "r1", state: "running", stdinOpen: false });
+  });
+
+  it("drops a non-boolean stdinOpen rather than coercing it", () => {
+    const probe = parseWorkerSessionProbe({ requestId: "r1", state: "running", stdinOpen: "yes" });
+    expect(probe).toEqual({ requestId: "r1", state: "running" });
+  });
 });

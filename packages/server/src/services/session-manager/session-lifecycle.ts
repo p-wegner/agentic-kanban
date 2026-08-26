@@ -57,6 +57,7 @@ import { buildIndeterminateExitStats } from "./session-exit-stats.js";
 import { CODEX_SPARK_MODEL, CODEX_SAFE_DEFAULT_MODEL, isBuilderSession, buildStaleResumeHandoffPrompt, instructionFingerprint, mergeExistingSessionStats, lifecycleProviderName, resolveProviderRotation } from "./session-launch-helpers.js";
 import { finalizePlanModeExit } from "./plan-mode-exit.js";
 import { finalizeUsageLimitRoute, finalizeLaunchFailureRoute, finalizeCompletedRoute, type ExitFinalizeContext } from "./exit-finalize.js";
+import { createRemoteTurnRecovery } from "./remote-turn-recovery.js";
 
 /**
  * Why a follow-up turn is refused for a session running on a fleet worker that this board
@@ -108,6 +109,8 @@ export function createSessionLifecycle(
   const agentService = deps.agentService
     ?? createAgentDispatch({ host: realAgentService, remote: getWorkerFleet().remoteAgentService });
   const launchPreflight = deps.preflight ?? workspaceLaunchPreflight;
+  /** #900: recover a follow-up turn's stdin state for a session adopted after a restart. */
+  const remoteTurnRecovery = createRemoteTurnRecovery(state, agentService);
   /** Create a session DB row and launch the agent process. */
   async function startSession(opts: StartSessionOptions): Promise<string> {
     // The whole body, not just the spawn, runs inside one failure path (#876) — see
@@ -557,6 +560,7 @@ export function createSessionLifecycle(
       state.turnStates.delete(sessionId);
       state.sessionProviders.delete(sessionId);
       state.sessionExitPlanModeDenied.delete(sessionId);
+      remoteTurnRecovery.forget(sessionId);
 
       const stoppedByUser = state.stoppedByUser.has(sessionId);
       const messages = state.messageBuffer.get(sessionId) ?? [];
@@ -766,7 +770,15 @@ export function createSessionLifecycle(
       // of the messages below are false about it, and "the process has exited" is the one
       // an operator acts on. `stale` is deliberately NOT set: relaunching would run a
       // second agent alongside the one still working.
-      if (agentService.placementOf?.(sessionId) === "remote") return { ok: false, error: REMOTE_TURN_AFTER_RESTART };
+      if (agentService.placementOf?.(sessionId) === "remote") {
+        // #900: recoverRemoteTurnState() may have already asked the worker and come back
+        // empty-handed — say what it learned rather than repeating the bare #874 sentence.
+        const reason = remoteTurnRecovery.reasonFor(sessionId);
+        return {
+          ok: false,
+          error: reason ? `${REMOTE_TURN_AFTER_RESTART} Worker check: ${reason}.` : REMOTE_TURN_AFTER_RESTART,
+        };
+      }
       // Session exited (turnStates cleared on exit) — treat as stale so caller can --resume
       if (!isProcessAlive(sessionId)) {
         return { ok: false, error: "Agent process has exited", stale: true };
@@ -811,6 +823,7 @@ export function createSessionLifecycle(
     // leaked its messageBuffer, sessionTextParts, sessionFinalText, stoppedByUser and
     // sessionExitPlanModeDenied for the lifetime of the process.
     teardownSessionState(state, sessionId);
+    remoteTurnRecovery.forget(sessionId);
     const now = new Date().toISOString();
     await lifecycleRepo.updateSessionStoppedNoStats(sessionId, now, db);
     // Also reset workspace status to idle
@@ -862,6 +875,7 @@ export function createSessionLifecycle(
     // #543: read `ctx` FIRST — teardown clears sessionContexts, and the activity/todo
     // clears below need the project/issue ids off it.
     teardownSessionState(state, sessionId);
+    remoteTurnRecovery.forget(sessionId);
 
     const existing = await lifecycleRepo.getSessionStatus(sessionId, db);
     if (!existing || existing.status !== "running") {
@@ -968,5 +982,6 @@ export function createSessionLifecycle(
     cleanupStaleSession,
     reattachSession,
     notifyExternalExit,
+    recoverRemoteTurnState: remoteTurnRecovery.recover,
   };
 }

@@ -222,6 +222,10 @@ export function createWorkspaceSessionService(deps: {
     }
 
     if (resumable.session.status === "running") {
+      // #900: a session ADOPTED after a board restart has no in-memory turn state — ask the
+      // worker whether its stdin is still open before refusing outright. A no-op for every
+      // other case (host session, already has a turn state, worker says closed/unreachable).
+      await getSessionManager().recoverRemoteTurnState?.(resumable.session.id);
       const result = getSessionManager().sendTurn(resumable.session.id, content);
       if (!result.ok) {
         throw new WorkspaceError(result.error || "Agent is busy", "CONFLICT");
