@@ -199,7 +199,7 @@ export function MergeQueuePanel({ columns, projectId: _projectId, onClose, onIss
                 value={strategy}
                 onChange={(e) => setStrategy(e.target.value as MergeQueueStrategy)}
                 className="text-xs px-2 py-1 rounded border border-gray-200 dark:border-gray-700 bg-transparent text-gray-600 dark:text-gray-300"
-                title="Merge queue strategy for the next plan/execute"
+                title="Merge queue strategy used by Check All (this panel has no batch-execute action; per-row Merge is unaffected)"
                 aria-label="Merge queue strategy"
               >
                 <option value="auto">Strategy: Auto</option>
