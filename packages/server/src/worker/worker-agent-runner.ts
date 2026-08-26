@@ -411,32 +411,18 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
       );
     }
 
-    // #836 — why there is no `detached: true` here, and what that costs.
-    //
-    // On POSIX a `useShell` launch makes the child `sh -c "<command>"`. `sh` execs through
-    // for a single simple command, but a pipeline, an `&&` or a trailing redirect leaves it
-    // a real parent — the #833 shape. Closing that needs the child to LEAD its own process
-    // group (`detached: true`), because `killProcessTree`'s `group` arm signals `-pid` and
-    // falls back to the bare pid on ESRCH when there is no such group. So `group: true` in
-    // `stop()` below is honest but currently INERT on POSIX: it is the seam call the fix
-    // needs, not the fix itself.
-    //
-    // Detaching was rejected here, for reasons that are the worker's and not the host's:
-    //   - **Measured**: `detached: true` + `shell: true` on win32 hangs — the child never
-    //     reaches its `exit` and its piped stdout never closes (a 4-cell probe of
-    //     detached x shell; the other three cells stream and exit normally). That is the
-    //     same combination `shouldDetachAgent` refuses on the host, and on THIS module it is
-    //     the common Windows path: `resolveSpecCommand` returns `useShell: true` for every
-    //     `.cmd`/`.bat`/`.ps1` shim. Any detach here must therefore be POSIX-gated.
-    //   - A POSIX-gated detach cannot be exercised on the board's Windows box at all, and it
-    //     contradicts this module's stated invariant (see the file header): the daemon owns
-    //     its children for their whole life — there is no pid persistence and no reattach, so
-    //     a child that outlives the daemon is unreapable and its output conduit is gone.
-    //   - The exposure is narrow. `resolveSpecCommand` returns `useShell: false` for EVERY
-    //     intent-carrying spec on POSIX, so the shell only appears for a same-filesystem or
-    //     legacy-board spec that sent `useShell` verbatim.
-    // Detaching POSIX-only, verified on Linux, is tracked as #841 (and #834 is the Linux CI
-    // run that would give it evidence).
+    // #841 (closes the #836 remainder) — `detached: true`, POSIX-only, shell launches only.
+    // On POSIX a `useShell` launch is `sh -c "<command>"`; a pipeline/`&&`/redirect leaves
+    // `sh` a real parent (the #833 shape), so the child must LEAD its own process group for
+    // `killProcessTree`'s `group: true` arm to reach it instead of falling back to the bare
+    // (shell) pid. win32 is excluded: `detached: true` + `shell: true` measured HANGS there
+    // (child never exits, stdout never closes) — the same combo `shouldDetachAgent` refuses
+    // on the host, and the common Windows path here since `resolveSpecCommand` returns
+    // `useShell: true` for every `.cmd`/`.bat`/`.ps1` shim. A detached child that outlives
+    // the daemon (SIGKILL, crash) is unreapable — `stopAll()` still reaches it via the group
+    // kill on a graceful shutdown, but there is no recovery otherwise; accepted, since the
+    // alternative leaves the #833 gap open on every POSIX pipeline/`&&`/redirect launch.
+    const detach = process.platform !== "win32" && launch.useShell;
     let proc: ChildProcess;
     try {
       proc = spawn(launch.command, spec.args, {
@@ -447,6 +433,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
         // provider config dir must stay this machine's (decision 012).
         env: { ...process.env, ...spec.env },
         shell: launch.useShell,
+        detached: detach,
         windowsHide: true,
         stdio: ["pipe", "pipe", "pipe"],
       });
