@@ -28,7 +28,10 @@ function runMultiTurnAgent(
     proc.on("exit", (code) => resolve({ stdout, stderr, exitCode: code ?? 1 }));
     proc.on("error", reject);
 
-    setTimeout(() => { proc.kill(); reject(new Error("mock-agent timed out")); }, 10000);
+    // 60s, not 10s (2026-08-26): the harness spawns a real node child, and Windows process-
+    // spawn latency under a loaded gate run exceeded 10s in three all-green runs (same
+    // class as the client fork-pool timeouts). The test asserts BEHAVIOUR, not speed.
+    setTimeout(() => { proc.kill(); reject(new Error("mock-agent timed out")); }, 60000);
 
     // Write turns then close stdin
     for (const turn of turns) {
