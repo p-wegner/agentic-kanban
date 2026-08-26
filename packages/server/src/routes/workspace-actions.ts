@@ -333,7 +333,17 @@ export function createWorkspaceActionsRoute(
   router.post("/:id/merge", async (c) => {
     const id = c.req.param("id");
     const wantsAsync = ["1", "true", "yes"].includes((c.req.query("async") || "").toLowerCase());
-    const job = startMergeJob(id);
+    // #903 — a retried POST while a merge is already in-flight (double-click, a monitor's own
+    // retry loop) used to call `startMergeJob` unconditionally, REPLACING the tracked job's
+    // `startedAt` on every retry. That reset the zombie clock indefinitely — exactly the "only
+    // a backend restart ever cleared it" failure the zombie detector exists to fix, since a
+    // caller that keeps retrying never lets 4h elapse against a single start time. Only start a
+    // fresh job (and only this call may complete/fail it) when we are not joining an existing
+    // running job for this workspace.
+    const existingJob = getMergeJob(id);
+    const joiningExisting = existingJob !== null && existingJob.state === "running";
+    const job = joiningExisting ? existingJob : startMergeJob(id);
+    const ownsJob = !joiningExisting;
     const run = workspaceService
       // Only THIS caller defers the main checkout's `git reset --hard` past the merge result
       // (#686: the reset rewrites files → tsx hot-reload → the in-flight response is dropped).
@@ -341,11 +351,11 @@ export function createWorkspaceActionsRoute(
       // the main checkout showing the merged files as staged deletions for ~32s (#350).
       .mergeWorkspaceDeduped(id, { deferMainCheckoutSync: true })
       .then((result) => {
-        completeMergeJob(job.jobId, id, result);
+        if (ownsJob) completeMergeJob(job.jobId, id, result);
         return result;
       })
       .catch((err) => {
-        failMergeJob(job.jobId, id, err);
+        if (ownsJob) failMergeJob(job.jobId, id, err);
         throw err;
       });
 
