@@ -25,7 +25,7 @@ This is a FRESH session every run — you have NO memory of previous runs. The k
 ## TUNABLE TARGETS - generated from Strategy Bullseye
 <!-- STRATEGY_BULLSEYE_GENERATED_START -->
 > The loop re-reads this file at the START of every iteration, so changes here take effect on the next cycle with **NO restart**. This block is generated from the Strategy Bullseye preference; edit the bullseye in the board UI instead of hand-editing these values.
-- **ACTIVE_AGENTS_TARGET = 4** - keep this many workspaces actively In Progress at all times.
+- **ACTIVE_AGENTS_TARGET = 3** - keep this many workspaces actively In Progress at all times.
 - **BACKLOG_FLOOR = 0** - never let the backlog drop below this; refill before it does.
 - **MAX_NEW_STARTS_PER_CYCLE = 3** - cap on how many NEW workspaces to launch in a single cycle.
 - **REFILL_FOCUS = balanced** - derived from work-type marker weights; `bugfix-only` emphasizes reproducible bugs, `balanced` allows feature/quality mix.
@@ -43,9 +43,7 @@ When selecting a provider for a new workspace, apply these rules in priority ord
 1. **FILL** profiles should always have capacity — start work on them first.
 2. **THROTTLE** profiles are preferred for main work. Respect their headroom percentage.
 3. **FALLBACK-ONLY** profiles are last resort — only use if all others are exhausted or the user explicitly selects them.
-- **claude:andrena_team_5x_3** [claude:andrena_team_5x_3]: FILL — use aggressively, keep busy at all times (Primary. Operator directive 2026-08-25: profiles 1-3 usable; _4 OAuth expired, needs interactive login before reuse.)
-- **claude:andrena_team_5x** [claude:andrena_team_5x]: THROTTLE — use for main work but preserve headroom, headroom 20% (Second in line when _3 cools.)
-- **claude:andrena_team_5x_2** [claude:andrena_team_5x_2]: FALLBACK-ONLY — use only when no better option exists or on explicit user request (Last resort - the operator/butler session seat.)
+- **claude:anth** [claude:anth]: FILL — use aggressively, keep busy at all times (Primary harness - operator directive 2026-08-26: anth, 3 parallel agents, drain the backlog.)
 <!-- STRATEGY_BULLSEYE_GENERATED_END -->
 
 ## FOCUS POLICY (operator directive 2026-08-25 — authoritative; overrides the REFILL_FOCUS wording above)
