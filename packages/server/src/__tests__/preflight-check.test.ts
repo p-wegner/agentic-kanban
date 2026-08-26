@@ -175,6 +175,95 @@ describe("workspaceLaunchPreflight", () => {
     expect(calls.some((args) => args[0] === "rebase" && args.includes("main"))).toBe(true);
   });
 
+  // #920: a branch containing merge commits can never replay linearly, so a rebase forced
+  // regardless of `auto_rebase_on_continue=false` makes such a workspace permanently
+  // unrelaunchable. `allowRebase: false` must skip the update-base step entirely — no rebase
+  // is attempted at all, and a worktree that is already on the right branch still launches.
+  it("skips the update-base rebase entirely when allowRebase is false", async () => {
+    const calls: string[][] = [];
+    const files = new Map<string, string>([
+      ["main:.codex/hooks.json", "hooks"],
+      ["worktree:.codex/hooks.json", "hooks"],
+      ["main:.claude/hooks/smart-hooks-runner.js", "runner"],
+      ["worktree:.claude/hooks/smart-hooks-runner.js", "runner"],
+      ["main:.claude/hooks/validate-command-safety.js", "validator"],
+      ["worktree:.claude/hooks/validate-command-safety.js", "validator"],
+      ["main:.claude/hooks/prevent-cross-worktree-writes.js", "cross-worktree"],
+      ["worktree:.claude/hooks/prevent-cross-worktree-writes.js", "cross-worktree"],
+      ["main:CLAUDE.md", "guidance"],
+      ["worktree:CLAUDE.md", "guidance"],
+    ]);
+
+    const result = await workspaceLaunchPreflight({
+      repoPath: "main",
+      worktreePath: "worktree",
+      baseBranch: "master",
+      branch: "feature/test",
+      isDirect: false,
+      allowRebase: false,
+      execGit: async (args) => {
+        calls.push(args);
+        if (args[0] === "status") return "";
+        if (args[0] === "rev-parse") return "feature/test\n";
+        if (args[0] === "rebase") {
+          // A branch with merge commits cannot replay linearly — simulate the real failure
+          // reported live to prove it is never even attempted.
+          throw new Error("could not apply ... Rebasing (1/3)");
+        }
+        return "";
+      },
+      readFile: async (root, path) => files.get(`${root}:${path}`) ?? "",
+      exists: async (root, path) => (path === ".git" ? root === "worktree" : files.has(`${root}:${path}`)),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.errors).toEqual([]);
+    expect(result.refreshed).toBe(false);
+    expect(calls.some((args) => args[0] === "rebase")).toBe(false);
+    expect(calls.some((args) => args[0] === "fetch")).toBe(false);
+  });
+
+  it("still reconciles stale safety files from base when allowRebase is false (no rebase needed to reconcile)", async () => {
+    const calls: string[][] = [];
+    const files = new Map<string, string>([
+      ["main:.codex/hooks.json", "new codex hooks"],
+      ["worktree:.codex/hooks.json", "old codex hooks"],
+      ["main:.claude/hooks/smart-hooks-runner.js", "runner"],
+      ["worktree:.claude/hooks/smart-hooks-runner.js", "runner"],
+      ["main:.claude/hooks/validate-command-safety.js", "validator"],
+      ["worktree:.claude/hooks/validate-command-safety.js", "validator"],
+      ["main:.claude/hooks/prevent-cross-worktree-writes.js", "cross-worktree"],
+      ["worktree:.claude/hooks/prevent-cross-worktree-writes.js", "cross-worktree"],
+      ["main:CLAUDE.md", "guidance"],
+      ["worktree:CLAUDE.md", "guidance"],
+    ]);
+
+    const result = await workspaceLaunchPreflight({
+      repoPath: "main",
+      worktreePath: "worktree",
+      baseBranch: "master",
+      branch: "feature/test",
+      isDirect: false,
+      allowRebase: false,
+      execGit: async (args) => {
+        calls.push(args);
+        if (args[0] === "status") return "";
+        if (args[0] === "rev-parse") return "feature/test\n";
+        if (args[0] === "rebase") throw new Error("must not rebase when allowRebase is false");
+        if (args[0] === "checkout" && args[1] === "master" && args[2] === "--") {
+          files.set("worktree:.codex/hooks.json", "new codex hooks");
+          return "";
+        }
+        return "";
+      },
+      readFile: async (root, path) => files.get(`${root}:${path}`) ?? "",
+      exists: async (root, path) => (path === ".git" ? root === "worktree" : files.has(`${root}:${path}`)),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(calls.some((a) => a[0] === "checkout" && a[1] === "master" && a[2] === "--" && a[3] === ".codex/hooks.json")).toBe(true);
+  });
+
   it("blocks a dirty stale worktree with a checkpoint-first error", async () => {
     const files = new Map<string, string>([
       ["main:.codex/hooks.json", "new codex hooks"],

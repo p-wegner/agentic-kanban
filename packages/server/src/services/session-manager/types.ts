@@ -49,6 +49,16 @@ export interface StartSessionOptions {
   workingDirOverride?: string;
   /** Skip the generic launch preflight when the caller already prepared the worktree. */
   skipLaunchPreflight?: boolean;
+  /**
+   * #920: forbid the launch preflight's own update-base rebase (`git rebase --autostash
+   * <baseBranch>`) even when the rest of the preflight still runs. When omitted, the
+   * lifecycle resolves this from the `auto_rebase_on_continue` preference so the preflight's
+   * rebase and the caller's own auto-rebase gate agree — previously the preflight rebased
+   * unconditionally, so disabling `auto_rebase_on_continue` never actually stopped it, and a
+   * branch containing merge commits (which cannot replay linearly) became permanently
+   * unrelaunchable.
+   */
+  allowUpdateBaseRebase?: boolean;
   skipPermissions?: boolean;
   /**
    * Where this session's agent should execute (worker-fleet seam, epic #1).
