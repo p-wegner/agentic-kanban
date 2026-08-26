@@ -17,6 +17,8 @@ const HOOKS = [
   // did not — so scaffolded projects were getting the SLOW runner. Pinned here so the pair
   // cannot separate again.
   "git-topology-cache.js",
+  // #922: same dual-copy shape as the others above.
+  "disclose-context.mjs",
 ];
 
 const SCAFFOLD_DIR = join(__dirname, "../scaffold");
@@ -53,6 +55,7 @@ describe("board-owned hooks refresh when the shipped version is newer (#472)", (
     "prevent-cross-worktree-writes.js",
     "smart-hooks-runner.js",
     "git-topology-cache.js",
+    "disclose-context.mjs",
   ];
 
   it("every shipped hook source carries a version banner", () => {
@@ -97,7 +100,10 @@ describe("board-owned hooks refresh when the shipped version is newer (#472)", (
     } finally {
       rmSync(repo, { recursive: true, force: true });
     }
-  });
+    // #922 added a 6th hook write (disclose-context.mjs) to ensureHookScaffold; the extra
+    // resolveHookSource/fs + settings-merge work pushed this past vitest's 5000ms default
+    // under load (mirrors the mock-agent timeout bumps elsewhere in this repo).
+  }, 20000);
 
   it("does not downgrade a copy that is somehow AHEAD of the shipped source", async () => {
     const { ensureHookScaffold } = await import("../services/project-scaffold.js");
@@ -112,5 +118,5 @@ describe("board-owned hooks refresh when the shipped version is newer (#472)", (
     } finally {
       rmSync(repo, { recursive: true, force: true });
     }
-  });
+  }, 20000);
 });
