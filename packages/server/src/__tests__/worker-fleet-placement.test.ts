@@ -106,6 +106,23 @@ describe("worker-fleet placement (phase 1c)", () => {
     });
   });
 
+  // #908: the same chain, landing on the same worker, records a DIFFERENT reason when the
+  // caller says the host is saturated — a session placed remotely because the host was full
+  // must be distinguishable from one placed remotely because that is simply where the work
+  // always goes for this project.
+  it("records machine_saturated instead of eligible_worker when the caller reports the host is saturated", async () => {
+    await optIn();
+    const workerId = await registerLocalWorker({ providers: ["claude"] });
+    fleet.connections.handleOpen(workerId, fakeWs());
+    const placement = await resolveWorkerPlacement({
+      database: db, projectId: PROJECT_ID, providerName: "claude", hostSaturated: true,
+    });
+    expect(placement).toEqual({
+      kind: "remote", workerId, strict: false, reservationId: expect.any(String),
+      reason: { id: "machine_saturated", detail: expect.stringContaining("host is saturated") },
+    });
+  });
+
   it("gives a TRUE remote worker git transport with the branch and repo", async () => {
     await optIn();
     await seedProject("C:/repos/fixture");

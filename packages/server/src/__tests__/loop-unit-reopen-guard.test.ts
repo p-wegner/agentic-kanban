@@ -32,6 +32,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../db/index.js", () => ({ db: { select: vi.fn() } }));
 vi.mock("../services/worker-fleet.service.js", () => ({
   projectCanDispatch: vi.fn(async () => ({ available: true })),
+  hostOverflowHasFleetCapacity: vi.fn(async () => true),
 }));
 const reconcileMergedIssueMock = vi.fn();
 vi.mock("../services/merge-cleanup.service.js", () => ({
@@ -68,6 +69,9 @@ function makeDeps(overrides: Partial<AutoStartDeps> = {}): AutoStartDeps {
     logMonitorAction: vi.fn(),
     allowProject: () => true,
     buildContentionGate: async () => openFileContentionGate(),
+    // #908: pin a deterministic "plenty of room" capacity read — see the identical note
+    // in monitor-auto-start.test.ts's makeDeps for why this must not read the real machine.
+    readMachineCapacity: async () => ({ tier: "0", hold: false, reason: "test fixture", freeGb: 99 }),
     ...overrides,
   };
 }

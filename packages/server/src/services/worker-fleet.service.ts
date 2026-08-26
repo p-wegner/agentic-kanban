@@ -313,6 +313,15 @@ export async function resolveWorkerPlacement(params: {
   resumeProviderSessionId?: string;
   now?: string;
   nowMs?: number;
+  /**
+   * The board host is too tight on RAM/CPU to take another agent right now (#908, Tier 0/1
+   * `machine-capacity.ts`). This does NOT gate the launch — it only changes which reason is
+   * recorded when the chain lands on a worker anyway: `machine_saturated` instead of
+   * `eligible_worker`, so a session record and the monitor's skip tally can both say WHY the
+   * host was avoided instead of just THAT it was. A caller with no capacity signal simply
+   * omits this, and every existing behaviour is unchanged.
+   */
+  hostSaturated?: boolean;
 }): Promise<Placement> {
   // #751: a remote decision claims a capacity slot, and EVERY exit from this
   // function that is not a remote placement has to give it back — including the
@@ -354,7 +363,13 @@ async function resolvePlacementWithReservation(
   params: Parameters<typeof resolveWorkerPlacement>[0],
   reservation: { id?: string },
 ): Promise<Placement> {
-  const { database, projectId, providerName, branch, baseBranch, resumeProviderSessionId, now, nowMs } = params;
+  const { database, projectId, providerName, branch, baseBranch, resumeProviderSessionId, now, nowMs, hostSaturated } = params;
+  // #908: when the host is saturated, a remote landing is BECAUSE of that — not just
+  // because a worker happened to be eligible — so the recorded reason should say so.
+  const remoteReason = (detail: string): PlacementReason =>
+    hostSaturated
+      ? because("machine_saturated", `host is saturated; ${detail}`)
+      : because("eligible_worker", detail);
   try {
     const pref = await getPreferenceValue(workerDispatchPrefKey(projectId), database);
     if (pref !== "true") {
@@ -433,7 +448,7 @@ async function resolvePlacementWithReservation(
         workerId,
         strict,
         reservationId: reservation.id,
-        reason: because("eligible_worker", `worker ${workerId} shares this filesystem — no git transport needed`),
+        reason: remoteReason(`worker ${workerId} shares this filesystem — no git transport needed`),
       };
     }
 
@@ -478,7 +493,7 @@ async function resolvePlacementWithReservation(
       workerId,
       strict,
       reservationId: reservation.id,
-      reason: because("eligible_worker", `worker ${workerId} took it over git transport on ${branch}`),
+      reason: remoteReason(`worker ${workerId} took it over git transport on ${branch}`),
       repo: {
         projectId,
         repoPath: project.repoPath,
@@ -549,5 +564,33 @@ export async function projectCanDispatch(params: {
   } catch (err) {
     console.error(`[worker-fleet] dispatch availability check failed; treating as available`, err);
     return { available: true };
+  }
+}
+
+/**
+ * Can this project's fleet absorb the overflow from a SATURATED host right now (#908)?
+ *
+ * Distinct from `projectCanDispatch`, which answers "would the next launch find a worker"
+ * for a project that may not even have opted in — and for exactly that project shape
+ * answers `available: true` (nothing here would refuse a host launch), which is the right
+ * answer to ITS question and the wrong one to this one. A saturated host with no opt-in has
+ * no fleet at all, so the monitor must not read "available" as "can route the overflow".
+ */
+export async function hostOverflowHasFleetCapacity(params: {
+  database: Database;
+  projectId: string;
+  providerName: ProviderName;
+  now?: string;
+}): Promise<boolean> {
+  const { database, projectId, providerName, now } = params;
+  try {
+    if ((await getPreferenceValue(workerDispatchPrefKey(projectId), database)) !== "true") return false;
+    const fleet = getWorkerFleet(database);
+    const requiredLabels = parseRequiredLabels(await getPreferenceValue(workerLabelsPrefKey(projectId), database));
+    const capacity = await resolveFleetCapacity(fleet, providerName, requiredLabels, now);
+    return capacity.freeSlots > 0;
+  } catch (err) {
+    console.error(`[worker-fleet] host-overflow fleet-capacity check failed; treating as no fleet`, err);
+    return false;
   }
 }

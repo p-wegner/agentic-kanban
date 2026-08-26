@@ -43,17 +43,19 @@ export type PlacementCheckId = (typeof PLACEMENT_CHECK_IDS)[number];
 /**
  * What a recorded placement DECISION can name (#801).
  *
- * Every id is a check in the chain above, plus one that is not a check at all:
+ * Every id is a check in the chain above, plus two that are not checks in that chain:
  * `resolver_error`, the catch-all host fallback `resolveWorkerPlacement` takes when the
- * resolution itself threw. Folding that into a check id would file a crash under whichever
- * step happened to be nearby, which is the kind of confidently-wrong record that sends the
- * next reader after the wrong bug.
+ * resolution itself threw, and `machine_saturated` (#908) — the host was too tight on
+ * capacity to take the session and it placed remotely instead. Folding either into a check
+ * id would file the decision under whichever step happened to be nearby, which is the kind
+ * of confidently-wrong record that sends the next reader after the wrong bug.
  */
-export type PlacementReasonId = PlacementCheckId | "resolver_error";
+export type PlacementReasonId = PlacementCheckId | "resolver_error" | "machine_saturated";
 
 export const PLACEMENT_REASON_IDS: readonly PlacementReasonId[] = [
   ...PLACEMENT_CHECK_IDS,
   "resolver_error",
+  "machine_saturated",
 ];
 
 /**

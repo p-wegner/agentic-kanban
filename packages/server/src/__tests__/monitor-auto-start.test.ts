@@ -39,6 +39,12 @@ function makeDeps(overrides: Partial<AutoStartDeps> = {}): AutoStartDeps {
     // ORDERED mockReturnValueOnce chain. Letting the real one run consumes an entry and
     // shifts every subsequent mock, which silently breaks the launch assertions.
     canDispatch: async () => ({ available: true }) as const,
+    // #908: pin a deterministic "plenty of room" capacity read. The REAL Tier 0 reads
+    // this machine's actual os.freemem() against a 2GB floor — a shared dev/CI box has
+    // no such guarantee, and a suite that non-deterministically hit the floor would start
+    // calling `hostOverflowHasFleetCapacity` (another `db.select` reader), desyncing every
+    // ordered mock chain in this file.
+    readMachineCapacity: async () => ({ tier: "0", hold: false, reason: "test fixture", freeGb: 99 }),
     ...overrides,
   };
 }
@@ -625,5 +631,54 @@ describe("runAutoStart skip-reason tallies (#179 observability)", () => {
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
     expect(skips.get("proj-1")?.reasonCounts.contention_gate).toBe(1);
     expect(skips.get("proj-1")?.issueNumbers).toEqual([11]);
+  });
+});
+
+// #908: a saturated host is a PLACEMENT input, not a gate — it only skips a start when
+// there is nowhere else to route the work. These fix the capacity read AND the fleet-
+// overflow check via injected deps so the outcome is deterministic regardless of the
+// real machine's memory or whether a `fleet` binary happens to be on PATH.
+describe("runAutoStart machine_saturated skip (#908)", () => {
+  const SATURATED = { tier: "0" as const, hold: true, reason: "only 1.0GB free (floor 2GB)", freeGb: 1 };
+
+  it("skips with machine_saturated when the host is saturated and no worker can take the overflow", async () => {
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }])) // inProgressStatuses
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }])) // loop1 activeWip -- saturation check ends the backfill loop
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }])); // loop2 capacity -- saturation check ends the pull loop too
+
+    const skips = await runAutoStart(
+      new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "5"]]),
+      makeDeps({ readMachineCapacity: async () => SATURATED, hostOverflowHasFleetCapacity: async () => false }),
+    );
+
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+    // Both loops hit the same saturation hold for the same project, but noteSkip tallies
+    // once per call site — two calls this cycle (backfill + pull), hence count 2.
+    expect(skips.get("proj-1")?.reasonCounts.machine_saturated).toBe(2);
+    expect(skips.get("proj-1")?.machineSaturation).toEqual({ tier: "0", reason: SATURATED.reason, freeGb: 1 });
+  });
+
+  it("does NOT skip when the host is saturated but an eligible worker can take the overflow", async () => {
+    vi.mocked(db.select)
+      .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }])) // inProgressStatuses
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }])) // loop1 activeWip
+      .mockReturnValueOnce(makeSelectChain([])) // loop1 inProgressIssues (none)
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }])) // loop2 inProgressCount
+      .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }])) // todoStatus
+      .mockReturnValueOnce(makeSelectChain([{ id: "issue-1", title: "Overflow", projectId: "proj-1", issueNumber: 7 }])) // todoIssues
+      .mockReturnValueOnce(makeSelectChain([{ id: "done-1" }])) // doneStatuses
+      .mockReturnValueOnce(makeSelectChain([])) // existingWs (none)
+      .mockReturnValueOnce(makeSelectChain([])) // no-auto-start tag (none)
+      .mockReturnValueOnce(makeSelectChain([])); // deps (none) -- passesDependencyGate short-circuits true
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ id: "ws-new" }) } as Response);
+
+    const skips = await runAutoStart(
+      new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "5"]]),
+      makeDeps({ readMachineCapacity: async () => SATURATED, hostOverflowHasFleetCapacity: async () => true }),
+    );
+
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith("http://127.0.0.1:3001/api/workspaces?async=1&autoStart=1", expect.any(Object));
+    expect(skips.get("proj-1")?.reasonCounts.machine_saturated).toBeUndefined();
   });
 });
