@@ -44,6 +44,22 @@ export interface MergeJob {
 /** How many finished jobs to retain before evicting the oldest. */
 const MAX_FINISHED_JOBS = 50;
 
+/**
+ * How long a job may sit `"running"` with the record never updated before it is treated as a
+ * ZOMBIE (#903) — its verify children died (or the process wedged) without the merge code path
+ * ever reaching a `completeMergeJob`/`failMergeJob` call. Measured live: a merge job's children
+ * exited, the job stayed `"running"` forever, and `mergeWorkspaceDeduped`'s in-memory dedupe map
+ * made every retry join the same dead promise — only a backend restart cleared it.
+ *
+ * Set comfortably above the largest legitimate gate: `MAX_TIMEOUT_MS` in
+ * `pre-merge-gate.service.ts` bounds a single verify run at 3h, and a chain can retry once
+ * (install) plus a targeted flake re-run — so a genuinely still-running (not zombied) job can
+ * legitimately take multiple hours. This is a BACKSTOP for the case where the process running
+ * the chain died outright (no timeout ever fires because nothing is left to fire it), not a
+ * tighter budget than the gate's own timeouts.
+ */
+export const MERGE_JOB_ZOMBIE_AFTER_MS = 4 * 60 * 60 * 1000;
+
 const jobsByWorkspace = new Map<string, MergeJob>();
 /** Insertion order of FINISHED jobs, for bounded eviction. Running jobs are never evicted. */
 const finishedOrder: string[] = [];
@@ -112,9 +128,39 @@ export function failMergeJob(jobId: string, workspaceId: string, error: unknown)
   finish(jobId, workspaceId, { state: "failed", error: message, reason });
 }
 
-/** The latest merge job for a workspace, or null if none is known to this process. */
-export function getMergeJob(workspaceId: string): MergeJob | null {
-  return jobsByWorkspace.get(workspaceId) ?? null;
+/**
+ * True when a `"running"` job has sat that way longer than {@link MERGE_JOB_ZOMBIE_AFTER_MS}
+ * (#903) — its children died without the merge code path ever reaching a
+ * `complete`/`failMergeJob` call, so nothing else will ever transition this record.
+ */
+export function isZombieMergeJob(job: MergeJob, nowMs: number = Date.now()): boolean {
+  if (job.state !== "running") return false;
+  const startedAtMs = Date.parse(job.startedAt);
+  if (Number.isNaN(startedAtMs)) return false;
+  return nowMs - startedAtMs >= MERGE_JOB_ZOMBIE_AFTER_MS;
+}
+
+/**
+ * The latest merge job for a workspace, or null if none is known to this process.
+ *
+ * Self-heals a ZOMBIE on read (#903): a job stuck `"running"` past
+ * {@link MERGE_JOB_ZOMBIE_AFTER_MS} is transitioned to `"failed"` here rather than left for a
+ * caller to notice never changes — `getMergeJob` is what the merge-status endpoint (and any
+ * future zombie-sweep) both read, so healing it here means every consumer sees the same
+ * corrected state without needing its own staleness check.
+ */
+export function getMergeJob(workspaceId: string, nowMs: number = Date.now()): MergeJob | null {
+  const job = jobsByWorkspace.get(workspaceId);
+  if (!job) return null;
+  if (isZombieMergeJob(job, nowMs)) {
+    finish(job.jobId, workspaceId, {
+      state: "failed",
+      error: `merge job zombied — stuck "running" for over ${Math.round(MERGE_JOB_ZOMBIE_AFTER_MS / 60_000)} minutes with no completion (#903)`,
+      reason: "merge_job_zombied",
+    });
+    return jobsByWorkspace.get(workspaceId) ?? null;
+  }
+  return job;
 }
 
 /** Test seam: drop all tracked jobs. */

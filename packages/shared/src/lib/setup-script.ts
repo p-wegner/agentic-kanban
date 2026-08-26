@@ -11,10 +11,29 @@ export interface SetupScriptResult {
    * dependent, retryable), not "the build/tests are broken".
    */
   timedOut?: boolean;
+  /**
+   * True when the process was killed by the NO-PROGRESS watchdog rather than the wall-clock
+   * timeout (#903). A hung verify child (workers idle, no stdout/stderr) is invisible below
+   * the (up to 3h) wall-clock ceiling — this is the earlier, cheaper backstop. Like
+   * `timedOut`, this is NOT a build/test failure verdict: it means the process stopped making
+   * progress, not that it ran and failed.
+   */
+  noProgress?: boolean;
 }
 
 /** Fallback timeout when a caller doesn't pass `timeoutMs` (#192 — was a non-configurable constant). */
 export const DEFAULT_SETUP_SCRIPT_TIMEOUT_MS = 5 * 60 * 1000;
+
+/**
+ * Default no-progress budget (#903): kill+fail a verify/setup child after this many ms with
+ * NO stdout/stderr output at all, far below the up-to-3h wall-clock `timeoutMs` ceiling.
+ * Measured live: a hung merge-gate vitest run sat with idle workers for 47 minutes of wall
+ * clock before anything noticed — the only backstop was the 90-minute `verify_timeout_ms`.
+ * 15 minutes comfortably covers legitimate silent stretches (a cold package-manager install,
+ * a compile step with no progress output) while catching a genuinely stuck process an order
+ * of magnitude sooner than the wall-clock ceiling.
+ */
+export const DEFAULT_NO_PROGRESS_TIMEOUT_MS = 15 * 60 * 1000;
 
 /**
  * The container a setup script must run inside, when the workspace's builder is
@@ -77,6 +96,13 @@ export interface RunSetupScriptOptions {
    * exceeds it from a cold cache gets killed and misreported as a failure).
    */
   timeoutMs?: number;
+  /**
+   * No-progress budget in ms (#903): the process is killed if it produces NO stdout/stderr
+   * for this long, independent of the wall-clock `timeoutMs`. Defaults to
+   * {@link DEFAULT_NO_PROGRESS_TIMEOUT_MS}. Pass `0` (or a negative number) to disable the
+   * watchdog entirely — used by callers that intentionally run a silent command.
+   */
+  noProgressTimeoutMs?: number;
   /**
    * Extra env vars layered onto `process.env` for this invocation (e.g. a per-worktree
    * `GRADLE_USER_HOME`, #194) — applied AFTER the process env copy so a caller's value wins.
@@ -144,11 +170,14 @@ export function runSetupScript(
 
     let stdout = "";
     let stderr = "";
+    let lastOutputAt = Date.now();
 
-    proc.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
-    proc.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+    proc.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); lastOutputAt = Date.now(); });
+    proc.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); lastOutputAt = Date.now(); });
 
     const timeoutMs = options.timeoutMs ?? DEFAULT_SETUP_SCRIPT_TIMEOUT_MS;
+    const noProgressTimeoutMs = options.noProgressTimeoutMs ?? DEFAULT_NO_PROGRESS_TIMEOUT_MS;
+
     const timeout = setTimeout(() => {
       proc.kill();
       // Resolve (never reject) on timeout — a kill is NOT the same verdict as a
@@ -157,13 +186,36 @@ export function runSetupScript(
       resolve({ exitCode: 124, stdout, stderr, timedOut: true });
     }, timeoutMs);
 
+    // #903 — a hung child (idle workers, no output) is invisible below the (up to 3h)
+    // wall-clock `timeout` above. Poll at a fraction of the budget rather than setting a
+    // single deferred timer, so output that arrives just before a naive deadline can't
+    // leave a STALE timer that fires anyway; checking "how long since the last byte"
+    // against the CURRENT time on each tick is self-correcting regardless of tick cadence.
+    let noProgressInterval: ReturnType<typeof setInterval> | undefined;
+    if (noProgressTimeoutMs > 0) {
+      const pollMs = Math.max(1000, Math.min(60_000, Math.floor(noProgressTimeoutMs / 10)));
+      noProgressInterval = setInterval(() => {
+        if (Date.now() - lastOutputAt >= noProgressTimeoutMs) {
+          clearTimeout(timeout);
+          clearInterval(noProgressInterval);
+          proc.kill();
+          // Same never-reject contract as the wall-clock timeout: a no-progress kill is
+          // "stopped producing evidence", not "ran and failed".
+          resolve({ exitCode: 124, stdout, stderr, noProgress: true });
+        }
+      }, pollMs);
+      noProgressInterval.unref?.();
+    }
+
     proc.on("exit", (code: number | null) => {
       clearTimeout(timeout);
+      if (noProgressInterval) clearInterval(noProgressInterval);
       resolve({ exitCode: code ?? 1, stdout, stderr, timedOut: false });
     });
 
     proc.on("error", (err: Error) => {
       clearTimeout(timeout);
+      if (noProgressInterval) clearInterval(noProgressInterval);
       reject(err);
     });
   });

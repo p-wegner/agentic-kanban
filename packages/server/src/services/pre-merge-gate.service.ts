@@ -24,6 +24,7 @@ import { quiesceBuildersEnabled } from "./gate-quiesce.js";
 import { isSelfProjectRepo } from "./self-project.js";
 import { getProjectRepoPath } from "../repositories/project.repository.js";
 import { runUnderBuildSemaphore } from "./jvm-build-semaphore.js";
+import { runUnderVerifyChainSemaphore } from "./verify-chain-semaphore.js";
 import { runE2ESmokeGateStage } from "./e2e-smoke-lane.js";
 import {
   resolveGateVerification,
@@ -496,34 +497,41 @@ export async function runPreMergeGate(
     // failure the code's fault?" - and inlined here they took runPreMergeGate past the
     // god-module gate's branch ceiling. They live in verify-retry-strategies.ts now; everything
     // that needs a worktree, the database or the build semaphore is injected below.
-    const outcome = await resolveVerifyOutcome({
-      result: await runVerify(),
-      runVerify,
-      runVerifyWithRetryScope: (retryScope) =>
-        runUnderBuildSemaphore(() =>
-          runSetupScript(workingDir, verifyScript!, {
-            timeoutMs: verifyTimeoutMs,
-            env: { ...verifyEnv, KANBAN_RETRY_TEST_FILES: retryScope },
-          }).catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e), timedOut: false })),
-        ),
-      getInstallCommand: () => getProjectSetupScript(projectId, database).catch(() => null),
-      runInstall: async (command) => {
-        await runUnderBuildSemaphore(() =>
-          runSetupScript(workingDir, command, {
-            timeoutMs: DEFAULT_SETUP_SCRIPT_TIMEOUT_MS,
-            env: gradleEnv,
-          }).catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e), timedOut: false })),
-        );
-      },
-      looksLikeMissingDeps: looksLikeMissingDepsFailure,
-      // Only this repo's `scripts/test-mine.mjs` honours a suite scope; for any other project
-      // the env var is inert and the "targeted re-run" would be a second FULL run.
-      scoped: isSelfRepo,
-      verifyTimeoutMs,
-      projectId,
-      workspaceId: workspace.id,
-      summarize: (stdout, stderr) => summarizeVerifyFailure(stdout, stderr, workspace.id),
-    });
+    //
+    // #903 — the WHOLE chain (first run + any install/flake retry) runs under the
+    // cross-workspace verify-chain semaphore, not just each individual invocation. Two
+    // different workspaces' chains used to freely interleave inside `runUnderBuildSemaphore`'s
+    // own cap (default 2), which is what let three full-suite runs contend on one box at once.
+    const outcome = await runUnderVerifyChainSemaphore(async () =>
+      resolveVerifyOutcome({
+        result: await runVerify(),
+        runVerify,
+        runVerifyWithRetryScope: (retryScope) =>
+          runUnderBuildSemaphore(() =>
+            runSetupScript(workingDir, verifyScript!, {
+              timeoutMs: verifyTimeoutMs,
+              env: { ...verifyEnv, KANBAN_RETRY_TEST_FILES: retryScope },
+            }).catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e), timedOut: false })),
+          ),
+        getInstallCommand: () => getProjectSetupScript(projectId, database).catch(() => null),
+        runInstall: async (command) => {
+          await runUnderBuildSemaphore(() =>
+            runSetupScript(workingDir, command, {
+              timeoutMs: DEFAULT_SETUP_SCRIPT_TIMEOUT_MS,
+              env: gradleEnv,
+            }).catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e), timedOut: false })),
+          );
+        },
+        looksLikeMissingDeps: looksLikeMissingDepsFailure,
+        // Only this repo's `scripts/test-mine.mjs` honours a suite scope; for any other project
+        // the env var is inert and the "targeted re-run" would be a second FULL run.
+        scoped: isSelfRepo,
+        verifyTimeoutMs,
+        projectId,
+        workspaceId: workspace.id,
+        summarize: (stdout, stderr) => summarizeVerifyFailure(stdout, stderr, workspace.id),
+      }),
+    );
     if (outcome.failure) {
       return { passed: false, skipped: false, stage: "verify", ...outcome.failure };
     }
