@@ -25,9 +25,9 @@ This is a FRESH session every run — you have NO memory of previous runs. The k
 ## TUNABLE TARGETS - generated from Strategy Bullseye
 <!-- STRATEGY_BULLSEYE_GENERATED_START -->
 > The loop re-reads this file at the START of every iteration, so changes here take effect on the next cycle with **NO restart**. This block is generated from the Strategy Bullseye preference; edit the bullseye in the board UI instead of hand-editing these values.
-- **ACTIVE_AGENTS_TARGET = 4** - keep this many workspaces actively In Progress at all times.
+- **ACTIVE_AGENTS_TARGET = 3** - keep this many workspaces actively In Progress at all times.
 - **BACKLOG_FLOOR = 0** - never let the backlog drop below this; refill before it does.
-- **MAX_NEW_STARTS_PER_CYCLE = 3** - cap on how many NEW workspaces to launch in a single cycle.
+- **MAX_NEW_STARTS_PER_CYCLE = 1** - cap on how many NEW workspaces to launch in a single cycle.
 - **REFILL_FOCUS = balanced** - derived from work-type marker weights; `bugfix-only` emphasizes reproducible bugs, `balanced` allows feature/quality mix.
 
 ## STRATEGY WEIGHTS (generated - do not hand-edit)
@@ -43,24 +43,32 @@ When selecting a provider for a new workspace, apply these rules in priority ord
 1. **FILL** profiles should always have capacity — start work on them first.
 2. **THROTTLE** profiles are preferred for main work. Respect their headroom percentage.
 3. **FALLBACK-ONLY** profiles are last resort — only use if all others are exhausted or the user explicitly selects them.
-- **claude:andrena_team_5x_4** [claude:andrena_team_5x_4]: FILL — use aggressively, keep busy at all times (Primary harness - all new workspaces launch on claude:andrena_team_5x_4. Single source of truth (set-provider-default skill). Switched from andrena_team_5x_3 (rate-limited) 2026-08-25.)
+- **claude:anth** [claude:anth]: FILL — use aggressively, keep busy at all times (Primary harness - operator directive 2026-08-26: anth, 3 parallel agents, drain the backlog.)
 <!-- STRATEGY_BULLSEYE_GENERATED_END -->
 
-## FOCUS POLICY (operator directive 2026-08-25 — authoritative; overrides the REFILL_FOCUS wording above)
-**FLEET-DISPATCH BUGS FIRST: land #895 and #900 before anything else, then drain the remaining Todo queue. Do NOT refill.**
+## FOCUS POLICY (operator directive 2026-08-26 — authoritative; overrides the REFILL_FOCUS wording above)
+**DRAIN THE BACKLOG: run 3 builders in parallel on profile `anth` until Todo (and Backlog #841) is empty. Do NOT refill.**
 
-Context: real dispatches to the worker fleet failed silently (agent dies, workspace goes `idle`, no
-`lastError`) and remote turn state does not survive a board restart. **Worker dispatch is therefore
-DISABLED for this project** (`worker_dispatch_*=false` since 2026-08-25) — all builders run on the
-host until both tickets are merged. Do not re-enable dispatch; the operator will, after verifying.
+Context: #900 merged 2026-08-26 02:20 after master was healed three times (08f13d5ee0, bc7eb77b2b,
+49d36f82e6 — the last one fixed the unhandled-rejection saboteur #921 that failed all-green gate
+runs). The merge recipe that works: keep a branch synced with master (update-base/merge), then run
+its gate SOLO — avoid two verify chains at once where possible (#903).
 
-1. **Start #895 and #900 first** (both `high`). They are independent — may run concurrently within WIP.
-   - #895: a worker must not advertise providers it cannot authenticate as; a failed dispatch must set `lastError`.
-   - #900: recover remote-turn stdin state after a board restart (the #874 remainder).
-2. **Then the rest of Todo** in priority order (#866 is in flight with one commit — finish/merge it; #806/#807 relaunch on host). **Never start #834** (`no-auto-start`, needs a Linux CI run).
-3. **Keep the board healthy** (priorities 1–2 above): merge finished work, unstick stale sessions.
-4. **Do NOT refill the backlog.** When Todo drains and the board is green, stop and report.
-- **WIP limit = 4**, MAX_NEW_STARTS_PER_CYCLE = 3. Provider/profile per the generated PROVIDER POLICY block above.
+1. **Merge-first**: land finished In-Review work before starting new tickets. #866/#806/#807 are
+   next (update-base then merge). #895's branch has its own defects (untagged console call, a new
+   unseeded DB read breaking monitor-cycle tests) — relaunch its builder to fix them on the branch.
+2. **Start new Todo tickets up to WIP 3** on `anth` (Bullseye is the source of truth; do not
+   hand-pick another profile). **Never start #834** (`no-auto-start`, needs a Linux CI run).
+   **MEMORY HOLD (2026-08-26 09:15): the machine is at <1 GB usable RAM (kernel-pool leak,
+   needs a reboot only the operator can do) and swapping. Until that clears (fleet gate says
+   healthy again): start ZERO new builders. Do not relaunch idle builders either. Let running
+   sessions finish, keep exactly ONE merge-gate run in flight at a time, nothing else. A gate
+   run under this load dies on mock-agent/fork-worker timeouts (merge-91df24ea-17 failed 781/783
+   this way with the 60s harness fix already in) — starting more work makes every lane lose.**
+3. **Keep the board healthy**: unstick stale sessions, relaunch dead builders on host
+   (worker dispatch stays OFF until #895/#900-class fleet bugs are verified fixed).
+4. **Do NOT refill.** When Todo+Backlog is drained and In Review is empty, stop and report.
+- **WIP limit = 3**, MAX_NEW_STARTS_PER_CYCLE = 3. Provider/profile per the generated PROVIDER POLICY block above.
 
 ## REFILL STRATEGY BULLSEYE (agent-metrics-derived, 2026-06-05)
 Based on state.md recurring failure patterns from recent agent cycles, prioritize tickets in these areas:

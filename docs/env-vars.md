@@ -125,6 +125,7 @@ Set by the board on an agent subprocess; read by hooks and skills inside a workt
 |---|---|
 | `KANBAN_TEST_PACKAGES` | Restrict the pre-merge gate's test half to these packages. |
 | `KANBAN_TEST_FILES` | Restrict it to these files. |
+| `KANBAN_RETRY_TEST_FILES` | Flake-retry scope (#894): comma-separated `package:path` entries (e.g. `server:src/__tests__/x.test.ts`) — `test:mine` re-runs ONLY these files instead of the whole suite. Set by `verify-flake-retry.ts` for the gate's retry pass; the package label is required because vitest runs with the package as cwd, and an unlabeled entry is skipped rather than guessed. |
 | `KANBAN_TEST_MAX_WORKERS` | Cap vitest workers. |
 | `KANBAN_TEST_GUARDS_ONLY` | Set to 1 to make `test:mine` run ONLY the `@gate:always-run` guard suites — the narrowest verify tier. |
 | `KANBAN_TEST_NO_COVERAGE_PROBE` | Set to 1 to skip `test:mine`'s per-file coverage probe (#762), which forces a package's full suite when a changed source file is imported by no suite. See [gate-test-selection.md](gate-test-selection.md). |

@@ -135,6 +135,14 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
   const retryDelaysMs = options.pushRetryDelaysMs ?? DEFAULT_PUSH_RETRY_DELAYS_MS;
   /** Sessions provisioning a checkout — running for bookkeeping before a pid exists. */
   const provisioning = new Set<string>();
+  /**
+   * Can this session's stdin still receive input (#900)? Set from the spec at launch
+   * (`keepStdinOpen && !suppressStdinPrompt`, the same rule `agent-remote.service.ts` uses
+   * board-side), cleared on `closeStdin` and on exit. This is what makes a `probe_session`
+   * answer for an ADOPTED session trustworthy — the board's own copy of this flag died with
+   * the process that launched it, but the worker actually holds the child's stdin.
+   */
+  const stdinOpen = new Map<string, boolean>();
   /** Per-session silence watchdogs; reset on every byte of agent output. */
   const hangWatchdogs = new Map<string, { reset(): void; close(): void }>();
   const maxConcurrency = options.maxConcurrency && options.maxConcurrency > 0 ? options.maxConcurrency : 1;
@@ -218,6 +226,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
   const seen = createWorkerSessionRegistry({
     isLive: (sessionId) => processes.has(sessionId) || provisioning.has(sessionId),
     pidOf: (sessionId) => processes.get(sessionId)?.pid,
+    stdinOpenOf: (sessionId) => stdinOpen.get(sessionId),
     safeSend,
   });
 
@@ -265,6 +274,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     seen.noteExit(sessionId, exitCode);
     processes.delete(sessionId);
     provisioning.delete(sessionId);
+    stdinOpen.delete(sessionId);
     closeWatchdog(sessionId);
     const pending = checkouts.get(sessionId);
     if (!pending) {
@@ -524,6 +534,11 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     } catch (err) {
       console.warn(`[worker] could not write the prompt to sessionId=${sessionId}: ${errorMessage(err)}`);
     }
+    // #900: mirrors the board's own `Boolean(config.keepStdinOpen && !config.suppressStdinPrompt)`
+    // (agent-remote.service.ts) — the same rule, recorded on the machine that actually holds
+    // the pipe, so a `probe_session` answer for a session ADOPTED after a board restart is
+    // trustworthy even though the board's own copy of this flag died with the old process.
+    stdinOpen.set(sessionId, Boolean(spec.keepStdinOpen && !spec.suppressStdinPrompt));
   }
 
   function input(sessionId: string, data: string): boolean {
@@ -538,6 +553,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
   }
 
   function closeStdin(sessionId: string): boolean {
+    stdinOpen.set(sessionId, false);
     const proc = processes.get(sessionId);
     if (!proc?.stdin || proc.stdin.destroyed) return false;
     proc.stdin.end();

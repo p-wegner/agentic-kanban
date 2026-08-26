@@ -7,16 +7,16 @@ import { describe, expect, it } from "vitest";
 import type { WorkerToBoardMessage } from "@agentic-kanban/shared/lib/worker-protocol";
 import { MAX_REMEMBERED, createWorkerSessionRegistry } from "../worker/worker-session-registry.js";
 
-function harness(opts: { live?: Set<string>; pids?: Map<string, number> } = {}) {
+function harness(opts: { live?: Set<string>; pids?: Map<string, number>; stdinOpen?: Map<string, boolean> } = {}) {
   const live = opts.live ?? new Set<string>();
   const pids = opts.pids ?? new Map<string, number>();
+  const stdinOpen = opts.stdinOpen;
   const sent: WorkerToBoardMessage[] = [];
-  let clock = 1_000;
   const registry = createWorkerSessionRegistry({
     isLive: (id) => live.has(id),
     pidOf: (id) => pids.get(id),
+    ...(stdinOpen ? { stdinOpenOf: (id: string) => stdinOpen.get(id) } : {}),
     safeSend: (message) => void sent.push(message),
-    nowMs: () => (clock += 1_000),
   });
   return { registry, live, pids, sent };
 }
@@ -29,8 +29,8 @@ describe("createWorkerSessionRegistry", () => {
 
   it("answers RUNNING with the pid for a live session", () => {
     const h = harness({ live: new Set(["s1"]), pids: new Map([["s1", 4242]]) });
-    h.registry.noteAssigned("s1");
-    h.registry.noteOutput("s1");
+    h.registry.noteAssigned("s1", 1_000);
+    h.registry.noteOutput("s1", 2_000);
     const answer = h.registry.probe("s1");
     expect(answer.state).toBe("running");
     expect(answer.pid).toBe(4242);
@@ -76,9 +76,9 @@ describe("createWorkerSessionRegistry", () => {
 
   it("does not restart a session's clock when the same id is assigned twice", () => {
     const h = harness();
-    h.registry.noteAssigned("s1");
+    h.registry.noteAssigned("s1", 1_000);
     const first = h.registry.probe("s1").startedAtMs;
-    h.registry.noteAssigned("s1");
+    h.registry.noteAssigned("s1", 2_000);
     expect(h.registry.probe("s1").startedAtMs).toBe(first);
   });
 
@@ -96,6 +96,18 @@ describe("createWorkerSessionRegistry", () => {
     expect(h.sent).toEqual([
       { type: "session_probe_result", sessionId: "never-assigned", probe: { requestId: "req-1", state: "unknown" } },
     ]);
+  });
+
+  it("carries stdinOpen for a running session when the caller tracks it (#900)", () => {
+    const h = harness({ live: new Set(["s1"]), stdinOpen: new Map([["s1", true]]) });
+    h.registry.noteAssigned("s1");
+    expect(h.registry.probe("s1")).toMatchObject({ state: "running", stdinOpen: true });
+  });
+
+  it("omits stdinOpen rather than guessing when the caller does not track it", () => {
+    const h = harness({ live: new Set(["s1"]) });
+    h.registry.noteAssigned("s1");
+    expect(h.registry.probe("s1").stdinOpen).toBeUndefined();
   });
 
   it("echoes the requestId back so a stale answer can be told from a fresh one", () => {

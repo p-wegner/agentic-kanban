@@ -212,6 +212,15 @@ export interface WorkerSessionProbe {
   /** `exited`: what the agent returned, and when. The board finalizes on this. */
   exitCode?: number | null;
   exitedAtMs?: number;
+  /**
+   * `running` only (#900): can this session's stdin still receive a follow-up turn RIGHT
+   * NOW? A board process that ADOPTED this session after a restart has no memory of
+   * whether the launch kept stdin open — `state.turnStates` and the launch-time
+   * `keepStdinOpen` flag both die with the process that launched it. Only the worker,
+   * which actually holds the child's stdin, can answer. Absent on an older worker build;
+   * absence must never be read as `true` (same rule as `unknown` vs. silence above).
+   */
+  stdinOpen?: boolean;
 }
 
 /** Mirrors agent.service's AgentOutputEvent so events plug into broadcast as-is. */
@@ -608,6 +617,7 @@ export function parseWorkerSessionProbe(raw: unknown): WorkerSessionProbe | null
     // `null` is meaningful here (killed by signal), so it is kept while `undefined` is not.
     ...(probe.exitCode === null || num(probe.exitCode) !== undefined ? { exitCode: probe.exitCode as number | null } : {}),
     ...(exitedAtMs !== undefined ? { exitedAtMs } : {}),
+    ...(typeof probe.stdinOpen === "boolean" ? { stdinOpen: probe.stdinOpen } : {}),
   };
 }
 

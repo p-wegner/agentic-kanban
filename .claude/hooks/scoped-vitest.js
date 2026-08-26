@@ -30,7 +30,13 @@
 const fs = require("fs");
 const path = require("path");
 const { spawnSync } = require("child_process");
-const { capacityHold } = require("./machine-capacity.js");
+const {
+  capacityHold,
+  budgetMs,
+  hitBudget,
+  killTree,
+  budgetMessage,
+} = require("./machine-capacity.js");
 
 // Repo-relative package dir -> pnpm filter name. Longest prefix wins, so
 // `packages/server/...` never matches a shorter sibling by accident.
@@ -101,8 +107,21 @@ function main() {
     process.exit(0);
   }
 
+  // Wall-clock budget across all packages. Without `timeout` the spawn relied on
+  // the runner's outer 300s kill, which reaps cmd.exe and leaves the vitest fork
+  // workers alive, reparented — the leak machine-capacity.js documents. Budget
+  // here, kill the tree ourselves, and report the stand-down honestly.
+  const budget = budgetMs("SCOPED_VITEST_BUDGET_MS", 120_000);
+  const startedAt = Date.now();
+  let overBudget = false;
+
   const failures = [];
   for (const [filter, relFiles] of byPackage) {
+    const remaining = budget - (Date.now() - startedAt);
+    if (remaining <= 0) {
+      overBudget = true;
+      break;
+    }
     const args = [
       "--filter",
       filter,
@@ -130,7 +149,13 @@ function main() {
       encoding: "utf8",
       windowsHide: true,
       shell: process.platform === "win32",
+      timeout: remaining,
     });
+    if (hitBudget(result)) {
+      overBudget = true;
+      killTree(result.pid);
+      break;
+    }
     if (result.status !== 0) {
       failures.push(
         `--- ${filter} (${relFiles.length} edited file(s)) ---\n` +

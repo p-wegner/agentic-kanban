@@ -926,6 +926,46 @@ export function createRemoteAgentService(
     });
   }
 
+  /**
+   * On-demand: can this session's stdin still receive a follow-up turn RIGHT NOW (#900)?
+   *
+   * `adoptSession` defaults a re-adopted session's `stdinOpen` to `false` because the board
+   * genuinely cannot know from the DB whether the launch that died with the old process
+   * passed `keepStdinOpen` — the honest default, not a bug. The worker actually holds the
+   * child's stdin, so it can answer for real. A successful `running` answer UPDATES
+   * `session.stdinOpen` from the worker's report, so a subsequent `sendInput` is not
+   * refused on the board's own stale default.
+   *
+   * Silence is never read as open (#887's rule): a timeout or a missing socket answers
+   * `{ok:false}`, never a guessed `true`.
+   */
+  async function probeStdinIdle(
+    sessionId: string,
+  ): Promise<{ ok: true; stdinOpen: boolean } | { ok: false; reason: string }> {
+    const session = sessions.get(sessionId);
+    if (!session) {
+      return { ok: false, reason: `this board process does not track session ${sessionId} as remote` };
+    }
+    const probe = await liveness.requestProbe(sessionId);
+    if (!probe) {
+      return {
+        ok: false,
+        reason:
+          `fleet worker ${session.workerId} did not answer whether session ${sessionId} can still receive ` +
+          "input — it may be busy, unreachable, or a build that predates this check (such a worker drops " +
+          "the request silently)",
+      };
+    }
+    if (probe.state !== "running") {
+      return {
+        ok: false,
+        reason: `fleet worker ${session.workerId} reports session ${sessionId} is ${probe.state}, not running`,
+      };
+    }
+    session.stdinOpen = probe.stdinOpen === true;
+    return { ok: true, stdinOpen: session.stdinOpen };
+  }
+
   function trackedSessionIds(): string[] {
     return [...sessions.keys()];
   }
@@ -936,6 +976,7 @@ export function createRemoteAgentService(
   // rather than re-deriving is what keeps the two answers from ever disagreeing.
   return {
     launch, kill, sendInput, closeStdin, isStdinOpen, getProcess, getPid, isPidAlive,
-    adoptSession, trackedSessionIds, remoteSessionInfo, remoteGitTransportSessions, requestRepoOp, tracksSession: isPidAlive,
+    adoptSession, trackedSessionIds, remoteSessionInfo, remoteGitTransportSessions, requestRepoOp,
+    probeStdinIdle, tracksSession: isPidAlive,
   };
 }

@@ -31,6 +31,30 @@ code under any package's vitest project) — verification is the CI history read
 by-eye YAML review, not a green test run. `pnpm check:arch && pnpm typecheck && pnpm test:mine`
 run clean on this change (no source files touched).
 
+## Velocity investigation: hook stalls fixed, merge-train/posture work filed (2026-08-25)
+
+Proposal: `docs/proposals/2026-08-25-risk-posture-and-merge-train.md` (+ `.html` twin). Five
+parallel investigations, numbers not opinions: hooks = 17.4% of session wall-clock; a full gate
+26–44 min; the merge train (`merge-train.service.ts`) exists, is tested, and has run 0 times in
+production because `executeQueue` only picks it for file-overlapping clusters; nothing in the
+server reads RAM/CPU; selection is FIFO by issue number.
+
+**Landed direct-master `4fa6d0fee7`** (hook bugs): `scoped-vitest.js` threw `ReferenceError` on
+the green path (undeclared `overBudget`) so every passing Stop was blocked — fixed, plus a real
+spawn `timeout` + `killTree`; `remind-cleanup.js` gets the `stop_hook_active` bail; generated
+Typecheck rule is now Stop-only (#868 fixed at the generator — measured 207 runs / median 5m37s
+per edit); explicit `timeout` on every `settings.json` hook; `check-skill-frontmatter.js` exits 2.
+**Verified**: `stack-profile.service.test.ts` 32/32 single-worker, `node --check`, synthetic
+`stop_hook_active` payload exits 0. **`gate:always-run` NOT run** — `fleet gate` RAM-blocked
+(2.0 GB free); run it when the box frees up: `pnpm gate:always-run`.
+
+**Filed (Backlog, 6 coupled groups, 24 edges)**: G1 merge train #904–#907; G2 host capacity as a
+PLACEMENT input #908/#909 (+ #910 worker headroom, after #895/#900); G3 `risk_posture` #911/#912;
+G4 adaptive hooks #913/#914; G5 red-debt ledger #915/#916; G6 scheduling #917–#919. Operator
+constraint baked into every ticket: with the worker fleet coming (`docs/worker-fleet.md`), a
+saturated host means *prefer remote*, and holds only when no eligible worker exists / strict.
+Deliberately NOT filed: the refill floor excluding features — that is `objective.md` policy.
+
 ## #901 done: worker health is now a capability question, not a transport one (2026-08-25)
 
 `150617ea91`. Filed and fixed from a live cross-machine report. `filterEligibleWorkers`

@@ -18,7 +18,24 @@ function getProjectDir() {
   return process.env.CLAUDE_PROJECT_DIR || process.cwd();
 }
 
+function readStdinJson() {
+  try {
+    const raw = fs.readFileSync(0, "utf8");
+    return raw.trim() ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
 function main() {
+  // Loop safety: this check is `alwaysRun` in smart-hooks-config.json, so the
+  // runner re-fires it on every re-prompt. Without this bail an agent that
+  // started `pnpm dev` (as the dev-server skill suggests) was blocked, told to
+  // kill the server, blocked again on re-entry, and could not terminate until it
+  // did. Nudge once; on re-entry let the agent through (same rule as
+  // check-uncommitted.js).
+  if (readStdinJson().stop_hook_active === true) process.exit(0);
+
   // Only fire in worktrees — skip main checkout where .git is a directory
   try {
     const gitPath = path.join(getProjectDir(), ".git");
