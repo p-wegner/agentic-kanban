@@ -113,6 +113,16 @@ export function createWorkspaceMergeService(deps: {
      * syncs inline so the main checkout can never be observed contradicting HEAD (#350).
      */
     deferMainCheckoutSync?: boolean;
+    /**
+     * The caller already determined (via its OWN `getMergeJob` read, before this call) that the
+     * previously-tracked job for this workspace was a zombie (#903). Set this instead of relying
+     * on `mergeWorkspaceDeduped` to re-derive that from the CURRENT job record — a caller that
+     * itself calls `startMergeJob` to take ownership of a fresh job (as `POST /:id/merge` does)
+     * overwrites the healed `reason: "merge_job_zombied"` record before this function ever reads
+     * it, which would otherwise make the re-check here always see an ordinary running job and
+     * hand back the stale, never-resolving promise anyway.
+     */
+    dropStaleActiveRequest?: boolean;
   };
 
   function warningMessage(err: unknown): string {
@@ -852,8 +862,15 @@ export function createWorkspaceMergeService(deps: {
       // the time it returns, a zombie's `state` already reads "failed" rather than "running" —
       // checking `isZombieMergeJob` on the returned object would always be false for exactly
       // the case this handles. `reason === "merge_job_zombied"` is what actually happened.
+      //
+      // `opts.dropStaleActiveRequest` covers the caller that already consumed that signal: the
+      // HTTP merge route reads the job first (healing it), sees it is no longer "running", and
+      // calls `startMergeJob` to own a FRESH job before calling in here — which means the record
+      // this function would read is already the fresh one, with no `merge_job_zombied` reason on
+      // it. Without the explicit flag this re-check would silently hand back the stale promise.
       const job = getMergeJob(id);
-      if (!job || job.reason !== "merge_job_zombied") return existing;
+      const zombied = opts.dropStaleActiveRequest || job?.reason === "merge_job_zombied";
+      if (!zombied) return existing;
       activeRequests.delete(id);
     }
 

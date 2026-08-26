@@ -342,6 +342,12 @@ export function createWorkspaceActionsRoute(
     // running job for this workspace.
     const existingJob = getMergeJob(id);
     const joiningExisting = existingJob !== null && existingJob.state === "running";
+    // #903 — if we are NOT joining a running job because `getMergeJob` just healed a zombie
+    // (rather than because there was never a job at all), say so explicitly: the `startMergeJob`
+    // call below overwrites that healed record with a fresh "running" job before
+    // `mergeWorkspaceDeduped` gets a chance to read it, which would otherwise erase the very
+    // signal it needs to drop the stale in-flight promise (see `dropStaleActiveRequest`).
+    const wasZombied = existingJob?.reason === "merge_job_zombied";
     const job = joiningExisting ? existingJob : startMergeJob(id);
     const ownsJob = !joiningExisting;
     const run = workspaceService
@@ -349,7 +355,7 @@ export function createWorkspaceActionsRoute(
       // (#686: the reset rewrites files → tsx hot-reload → the in-flight response is dropped).
       // Every non-interactive caller syncs inline instead, because that deferral is what left
       // the main checkout showing the merged files as staged deletions for ~32s (#350).
-      .mergeWorkspaceDeduped(id, { deferMainCheckoutSync: true })
+      .mergeWorkspaceDeduped(id, { deferMainCheckoutSync: true, dropStaleActiveRequest: wasZombied })
       .then((result) => {
         if (ownsJob) completeMergeJob(job.jobId, id, result);
         return result;
