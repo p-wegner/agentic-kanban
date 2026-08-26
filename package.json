@@ -45,6 +45,7 @@
     "test:coverage": "pnpm -r --no-bail --workspace-concurrency=1 --filter @agentic-kanban/shared --filter agentic-kanban --filter @agentic-kanban/mcp-server --filter @agentic-kanban/client exec vitest run --coverage",
     "coverage:report": "node scripts/coverage-report.mjs",
     "coverage:merge": "node scripts/coverage-report.mjs --merge",
+    "coverage:check-floors": "node scripts/coverage-report.mjs --check-floors",
     "security": "node scripts/security-scan.mjs",
     "security:json": "node scripts/security-scan.mjs --json",
     "temp:sweep": "node scripts/sweep-temp-dirs.mjs",
