@@ -37,6 +37,16 @@ interface WorkspaceLaunchPreflightOptions {
    * command. Only tests should shrink this; see {@link WORKTREE_READY_DEFAULT_TIMEOUT_MS}.
    */
   worktreeReadyTimeoutMs?: number;
+  /**
+   * #920: whether the update-base step (`git rebase --autostash <baseBranch>`) may run at
+   * all. Defaults to `true` for back-compat. The caller (`startSession`) resolves this from
+   * the `auto_rebase_on_continue` preference — that preference already gates the OTHER
+   * auto-rebase call site (`workspace-session.service.ts`), but this preflight rebased
+   * unconditionally, so setting the pref to `false` never actually stopped it. A branch that
+   * legitimately contains merge commits can never replay linearly, so a forced rebase here
+   * makes every turn/relaunch fail forever with no way to opt out.
+   */
+  allowRebase?: boolean;
 }
 
 export interface WorkspaceLaunchPreflightResult extends PreflightResult {
@@ -358,7 +368,8 @@ export async function workspaceLaunchPreflight(
   repairedSymlinks = symlinkRepair.repaired;
   let refreshed = symlinkRepair.refreshed;
 
-  if (dirtyFiles.length === 0 && baseBranch) {
+  const allowRebase = options.allowRebase ?? true;
+  if (dirtyFiles.length === 0 && baseBranch && allowRebase) {
     try {
       await git(["fetch", "origin", baseBranch], options.worktreePath).catch(() => "");
       // `--autostash` because `dirtyFiles` is deliberately NOT the whole truth: it excludes

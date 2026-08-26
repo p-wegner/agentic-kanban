@@ -384,6 +384,52 @@ describe("session-lifecycle", () => {
     expect(rows).toHaveLength(0);
   });
 
+  // #920: the preflight's own update-base rebase must respect `auto_rebase_on_continue`.
+  // Previously it rebased unconditionally, so a branch containing merge commits (which
+  // cannot replay linearly) failed on every turn/relaunch even with the preference off.
+  it("resolves allowRebase=false from auto_rebase_on_continue=false (default) and passes it to the preflight", async () => {
+    const workspaceId = await seedWorkspace(db);
+    const { service: agentService } = createFakeAgentService();
+    const preflight = okPreflight();
+
+    const lifecycle = createSessionLifecycle(createSessionState(), undefined, vi.fn(), { db, agentService, preflight });
+    await lifecycle.startSession({ workspaceId, prompt: "do it" });
+
+    expect(preflight).toHaveBeenCalledOnce();
+    const callArgs = (preflight as unknown as { mock: { calls: Array<[{ allowRebase?: boolean }]> } }).mock.calls[0][0];
+    expect(callArgs.allowRebase).toBe(false);
+  });
+
+  it("resolves allowRebase=true from auto_rebase_on_continue=true", async () => {
+    const workspaceId = await seedWorkspace(db);
+    const { service: agentService } = createFakeAgentService();
+    const preflight = okPreflight();
+    const now = new Date().toISOString();
+    await db.insert(preferences).values({ key: "auto_rebase_on_continue", value: "true", updatedAt: now });
+
+    const lifecycle = createSessionLifecycle(createSessionState(), undefined, vi.fn(), { db, agentService, preflight });
+    await lifecycle.startSession({ workspaceId, prompt: "do it" });
+
+    expect(preflight).toHaveBeenCalledOnce();
+    const callArgs = (preflight as unknown as { mock: { calls: Array<[{ allowRebase?: boolean }]> } }).mock.calls[0][0];
+    expect(callArgs.allowRebase).toBe(true);
+  });
+
+  it("an explicit allowUpdateBaseRebase option overrides the auto_rebase_on_continue preference", async () => {
+    const workspaceId = await seedWorkspace(db);
+    const { service: agentService } = createFakeAgentService();
+    const preflight = okPreflight();
+    const now = new Date().toISOString();
+    await db.insert(preferences).values({ key: "auto_rebase_on_continue", value: "true", updatedAt: now });
+
+    const lifecycle = createSessionLifecycle(createSessionState(), undefined, vi.fn(), { db, agentService, preflight });
+    await lifecycle.startSession({ workspaceId, prompt: "do it", allowUpdateBaseRebase: false });
+
+    expect(preflight).toHaveBeenCalledOnce();
+    const callArgs = (preflight as unknown as { mock: { calls: Array<[{ allowRebase?: boolean }]> } }).mock.calls[0][0];
+    expect(callArgs.allowRebase).toBe(false);
+  });
+
   // --- Session state machine transitions ---
 
   it("flags a short non-zero exit with substantive output as a model-error launch failure (#699)", async () => {

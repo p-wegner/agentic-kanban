@@ -128,7 +128,7 @@ export function createSessionLifecycle(
     const {
       workspaceId, prompt, agentCommand, agentArgs, resumeFromId, multiTurn,
       permissionPromptTool, planMode, resumeWithNewModel, provider, triggerType, profile,
-      model, contextFiles, extraEnv, workingDirOverride, skipLaunchPreflight,
+      model, contextFiles, extraEnv, workingDirOverride, skipLaunchPreflight, allowUpdateBaseRebase,
       skipPermissions: skipPermissionsOpt, systemInstructions, placement,
     } = opts;
 
@@ -191,6 +191,13 @@ export function createSessionLifecycle(
     if (!skipLaunchPreflight && !workspace.isDirect && !workingDirOverride && projectId) {
       const project = await lifecycleRepo.getProjectPreflightInfo(projectId, db);
       if (project?.repoPath) {
+        // #920: the preflight's own update-base rebase must agree with the
+        // `auto_rebase_on_continue` preference — otherwise disabling that preference in
+        // Settings does not actually stop the rebase, since this preflight ran it
+        // unconditionally. An explicit `allowUpdateBaseRebase` on the call wins (e.g. a
+        // caller that already handled rebasing itself and wants the preflight to skip it).
+        const resolvedAllowRebase = allowUpdateBaseRebase
+          ?? (await lifecycleRepo.getPreferenceValue("auto_rebase_on_continue", db)) === "true";
         const preflight = await launchPreflight({
           repoPath: project.repoPath,
           worktreePath: effectiveWorkingDir,
@@ -198,6 +205,7 @@ export function createSessionLifecycle(
           branch: workspace.branch,
           isDirect: workspace.isDirect ?? false,
           symlinkDirs: project.symlinkEnabled ? parseSymlinkDirs(project.symlinkDirs) : [],
+          allowRebase: resolvedAllowRebase,
         });
         if (!preflight.ok) {
           throw new WorkspaceError(preflight.errors.join("\n"), "CONFLICT", {
