@@ -27,14 +27,17 @@ import type { WorkerToBoardMessage, WorkerLaunchSpec } from "@agentic-kanban/sha
  * - **Not claimed anywhere:** that SIGTERM lands on a Linux process or process group.
  *   Nothing here can observe that; #834 is the Linux CI run that would.
  *
- * ## The honest gap this suite pins, deliberately
+ * ## #841 — the POSIX detach gap is now closed for the shell case
  *
- * `group: true` is currently INERT on POSIX for this runner, because `assign` spawns
- * WITHOUT `detached: true` — so the child leads no process group, `-pid` is ESRCH, and the
- * seam falls back to the bare pid. That is the pre-#833 reach, not a regression, and the
- * last test below pins exactly that so nobody reads the option as a closed gap. Detaching
- * (POSIX-only) is the remaining half — tracked as #841; see the rationale block above `assign`'s spawn for why
- * it was not done here — including the measured win32 `detached` + `shell` hang.
+ * `assign` now spawns with `detached: true` on POSIX when `launch.useShell` is true (a
+ * `sh -c "<command>"` child), so `group: true` in `stop()` actually reaches the child's
+ * process group there instead of falling back to the bare pid. Windows stays undetached
+ * (measured: `detached: true` + `shell: true` hangs on win32), and a POSIX launch that does
+ * NOT go through a shell still spawns without `detached` — there is no shell parent to
+ * outlive its child, so a group is not needed. The last describe below still pins the
+ * fallback-to-bare-pid behaviour of the SEAM itself (`killProcessTree`) for a genuinely
+ * non-detached child, which is what a non-shell POSIX launch, or a still-undetached Windows
+ * launch, gets.
  */
 
 const { killProcessTree } = vi.hoisted(() => ({
@@ -210,8 +213,10 @@ describe("worker stop() really terminates the child on this platform (#836)", ()
 });
 
 /**
- * `group: true` is INERT for this runner today — pinned so the option is not misread as a
- * closed gap. `assign` spawns without `detached: true`, so the child leads no process group.
+ * The seam's own fallback order, for a genuinely non-detached child — what a non-shell POSIX
+ * launch (`resolveSpecCommand` returns `useShell: false` for every intent-carrying spec) or an
+ * un-detached Windows launch still gets, since `assign` only sets `detached: true` when
+ * `launch.useShell` is true on POSIX.
  *
  * Platform-FORCED: `process.platform` is overridden to "linux" and `process.kill` is spied,
  * so nothing is signalled. This pins the branching and the fallback ORDER — which is what a
