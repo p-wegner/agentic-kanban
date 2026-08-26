@@ -59,6 +59,12 @@ its gate SOLO — avoid two verify chains at once where possible (#903).
    unseeded DB read breaking monitor-cycle tests) — relaunch its builder to fix them on the branch.
 2. **Start new Todo tickets up to WIP 3** on `anth` (Bullseye is the source of truth; do not
    hand-pick another profile). **Never start #834** (`no-auto-start`, needs a Linux CI run).
+   **MEMORY HOLD (2026-08-26 09:15): the machine is at <1 GB usable RAM (kernel-pool leak,
+   needs a reboot only the operator can do) and swapping. Until that clears (fleet gate says
+   healthy again): start ZERO new builders. Do not relaunch idle builders either. Let running
+   sessions finish, keep exactly ONE merge-gate run in flight at a time, nothing else. A gate
+   run under this load dies on mock-agent/fork-worker timeouts (merge-91df24ea-17 failed 781/783
+   this way with the 60s harness fix already in) — starting more work makes every lane lose.**
 3. **Keep the board healthy**: unstick stale sessions, relaunch dead builders on host
    (worker dispatch stays OFF until #895/#900-class fleet bugs are verified fixed).
 4. **Do NOT refill.** When Todo+Backlog is drained and In Review is empty, stop and report.
