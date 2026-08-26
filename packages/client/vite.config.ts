@@ -56,6 +56,14 @@ export default defineConfig(({ command }) => ({
     },
   },
   test: {
+    // Threads, not forks (2026-08-26): the default forks pool spawns a process per test
+    // file (175 files), and on this Windows box worker-START timeouts under load failed
+    // gate runs whose every test passed ("[vitest-pool]: Failed to start forks worker",
+    // 3 distinct all-green runs killed on it — see #921's evidence trail). Client tests
+    // are browser-domain and need no process isolation; worker_threads spawn no process,
+    // so the timeout class disappears. The server package keeps forks (its fixtures need
+    // real process isolation).
+    pool: "threads",
     // #688: see packages/server/vitest.config.ts for rationale — no threshold yet,
     // this only makes coverage measurable and reportable.
     coverage: {
