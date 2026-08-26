@@ -109,6 +109,24 @@ If a duplicate is found the hook blocks agent exit, lists the affected file(s), 
 asks the agent to revert to master and commit the fix. Wired as a direct Stop hook in
 both `.claude/settings.json` (Claude) and `.codex/hooks.json` (Codex).
 
+## disclose-context.mjs
+
+PostToolUse hook on `Bash|PowerShell|Grep|Glob`. A nested `CLAUDE.md` and a path-scoped
+`.claude/rules/*.md` are auto-loaded by Claude Code only when the agent reads a matching
+file through the **Read** tool; Grep/Glob and shell reads (`cat`, `sed -n`, `grep`, `rg`,
+`Get-Content`) touch the same files but trigger nothing (#922). This hook resolves the
+paths a call touched (from its command line and its output) to nested CLAUDE.md files and
+matching-path rules, and injects each one — once per session — as `additionalContext`, the
+same guidance a Read would have delivered.
+
+Wired with a **plain relative path** (`node .claude/hooks/disclose-context.mjs`), not
+`$CLAUDE_PROJECT_DIR`: that variable is empty in `claude -p` sessions and Claude Code
+pre-expands it textually before spawn, so a relative path is what actually resolves in
+every launch mode. The hook self-locates its project root via a `.claude`/`.git` walk-up.
+
+Zero dependencies, never blocks a tool call. `DISCLOSE_LOG=1` prints a one-line stderr
+trace per invocation; `DISCLOSE_DISABLED=1` no-ops it.
+
 ## settings.json entries
 
 Hook entries were **appended** to `.claude/settings.json` (never overwritten). The

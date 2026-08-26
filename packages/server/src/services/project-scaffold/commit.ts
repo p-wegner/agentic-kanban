@@ -22,6 +22,7 @@ export const DURABLE_CLAUDE_SCAFFOLD_PATHS = [
   ".claude/hooks/smart-hooks-config.json",
   ".claude/hooks/verify-gate-runner.js",
   ".claude/hooks/verify-gate.config.json",
+  ".claude/hooks/disclose-context.mjs",
   // .claude/smart-hooks-rules.json is deliberately ABSENT: it is machine-regenerated
   // per checkout and gitignored (ca79487c). Force-committing it here put a volatile
   // file on master AND every branch, which made every merge conflict on it.
