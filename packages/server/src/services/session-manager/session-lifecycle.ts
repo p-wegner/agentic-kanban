@@ -7,6 +7,7 @@ import * as realAgentService from "../agent.service.js";
 import { createAgentDispatch, type AgentExecutionService } from "../agent-dispatch.service.js";
 import { getWorkerFleet, resolveWorkerPlacement, WorkerDispatchUnavailableError } from "../worker-fleet.service.js";
 import { updateSessionPlacementReason } from "../../repositories/placement-observability.repository.js";
+import { readTier0Capacity } from "@agentic-kanban/shared/lib/machine-capacity";
 import { failLaunch, newLaunchTrace, type LaunchTrace } from "./launch-failure.js";
 import type { Placement } from "../agent-dispatch.service.js";
 
@@ -663,6 +664,11 @@ export function createSessionLifecycle(
         // it, so placement prefers that worker. `resumeWithNewModel` drops --resume, so
         // there is nothing to be near in that case — same condition as the launch below.
         resumeProviderSessionId: resumedProviderSessionId(resumeWithNewModel, providerSessionId),
+        // #908: Tier 0 is one in-process `os.freemem()` read — cheap enough to check on
+        // every launch, not just once per monitor cycle. A saturated host does not block
+        // this launch (that would turn a placement input into a gate); it only changes
+        // which reason lands on the session record when the chain picks a worker anyway.
+        hostSaturated: readTier0Capacity().hold,
       }).catch((err) => {
         if (err instanceof WorkerDispatchUnavailableError) {
           throw new WorkspaceError(err.message, "CONFLICT", { code: "NO_AVAILABLE_WORKER" });

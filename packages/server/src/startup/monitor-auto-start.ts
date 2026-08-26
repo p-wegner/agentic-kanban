@@ -10,7 +10,7 @@ import { reconcileMergedIssue } from "../services/merge-cleanup.service.js";
 import type { MonitorActionName } from "../services/monitor-nudge.js";
 import { resolveMonitorTunables } from "../services/strategy-objective.service.js";
 import { narrowProviderName } from "../services/agent-provider.js";
-import { projectCanDispatch } from "../services/worker-fleet.service.js";
+import { projectCanDispatch, hostOverflowHasFleetCapacity as defaultHasFleetOverflowCapacity } from "../services/worker-fleet.service.js";
 // #774 — the fleet shape behind a `no_available_worker` skip, so the reason is not a
 // single collapsed token. Same computation `GET /api/workers` serves.
 import { describeFleet } from "../services/placement-explain.service.js";
@@ -18,6 +18,7 @@ import { shouldQuiesceBuildersForGate } from "../services/gate-quiesce.js";
 import { isMonitorEligibleIssue, monitorEligibleIssueSql } from "./monitor-eligibility.js";
 import { buildFileContentionGate, shouldDeferForContention, type BuildFileContentionGate } from "./monitor-file-contention.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { resolveMachineCapacity, type MachineCapacitySnapshot } from "@agentic-kanban/shared/lib/machine-capacity";
 import {
   AUTO_START_WIP_STATUSES,
   SKIP_AUTO_START_TAG,
@@ -124,6 +125,23 @@ export type AutoStartSkipReason =
    */
   | "loop_unit_reopen_declined"
   /**
+   * The board HOST is too tight on RAM/CPU to take another agent right now (#908,
+   * `machine-capacity.ts`), and no eligible fleet worker can take the session instead (or
+   * the project forbids the host fallback, `worker_dispatch_strict`). Deliberately NOT
+   * named with "fleet" in it — `fleetHold` (#774/#801) already means the worker-fleet's
+   * OWN hold (no worker registered/connected/eligible for a strict project), a completely
+   * different cause with a completely different remedy. This reason means the opposite
+   * problem: the fleet may be fine, but there is nowhere to put MORE work — the host is
+   * full and either no worker exists to take the overflow or dispatch was never opted in.
+   *
+   * This is a PLACEMENT input, not a hard gate: a saturated host with a connected,
+   * eligible worker does not skip at all — the session starts and lands on that worker
+   * (recorded as `machine_saturated` on ITS OWN session row via `resolveWorkerPlacement`'s
+   * `hostSaturated` parameter, a different write path from this skip tally). This skip
+   * reason only fires when saturation actually stopped a start from happening this cycle.
+   */
+  | "machine_saturated"
+  /**
    * Another AUTOMATIC starter already holds the per-issue auto-start claim and is provisioning a
    * workspace for this issue right now (#366).
    *
@@ -167,11 +185,30 @@ export interface FleetHoldDetail {
   explain: string;
 }
 
+/**
+ * What the machine looked like when a project's start was held for `machine_saturated`
+ * (#908). Mirrors `FleetHoldDetail`'s reasoning: the collapsed skip-reason token alone
+ * cannot tell an operator "Tier 1 measured true thrashing" from "Tier 0's cheap freemem
+ * floor tripped because Tier 1 was unavailable", and those have different remedies (wait
+ * out the real load, vs. install/reach `fleet` for a sharper answer).
+ */
+export interface MachineSaturationDetail {
+  /** Which tier answered: "1" when the `fleet` tool was reachable, "0" otherwise. */
+  tier: "0" | "1";
+  /** The capacity read's own wording. */
+  reason: string;
+  freeGb?: number | null;
+  headroomProcesses?: number;
+  thrashing?: string;
+}
+
 export interface AutoStartSkipInfo {
   issueNumbers: number[];
   reasonCounts: Partial<Record<AutoStartSkipReason, number>>;
   /** Present only when this project was held by the fleet gate this cycle. */
   fleetHold?: FleetHoldDetail;
+  /** Present only when this project was held by `machine_saturated` this cycle (#908). */
+  machineSaturation?: MachineSaturationDetail;
 }
 
 export interface AutoStartDeps {
@@ -209,6 +246,22 @@ export interface AutoStartDeps {
    * "starts X" tests fail AND "does NOT start X" tests pass vacuously.
    */
   canDispatch?: typeof projectCanDispatch;
+  /**
+   * One machine-capacity read for the whole cycle (#908). Defaults to the real
+   * `resolveMachineCapacity`, so production needs no wiring; injectable for the same
+   * reason as `canDispatch` above — the real Tier 0 reads this MACHINE'S actual free
+   * memory, which a shared dev/CI box cannot guarantee stays above the 2GB default floor,
+   * and a suite that hit that floor would non-deterministically start calling
+   * `hostOverflowHasFleetCapacity` (another `db.select` reader) and desync every ordered
+   * mock chain in this file's other test suites.
+   */
+  readMachineCapacity?: typeof resolveMachineCapacity;
+  /**
+   * Can this project's fleet absorb overflow from a saturated host (#908)? Defaults to
+   * the real implementation; injectable for the same ordered-mock-chain reason as
+   * `canDispatch` — it reads preferences from the DB.
+   */
+  hostOverflowHasFleetCapacity?: typeof defaultHasFleetOverflowCapacity;
 }
 
 /**
@@ -333,11 +386,36 @@ interface AutoStartCycle {
   isAutoDrivenProject: (projectId: string) => boolean;
   buildContentionGate: BuildFileContentionGate;
   canDispatch: typeof projectCanDispatch;
+  hasFleetOverflowCapacity: typeof defaultHasFleetOverflowCapacity;
   skipInfo: Map<string, AutoStartSkipInfo>;
   noteSkip: (projectId: string, issueNumber: number | null | undefined, reason: AutoStartSkipReason, count?: number) => void;
   tunablesFor: (projectId: string) => ReturnType<typeof resolveMonitorTunables>["tunables"];
   startsRemaining: (projectId: string) => number;
   noteStart: (projectId: string) => void;
+  /**
+   * One machine-capacity read for the whole cycle (#908) — Tier 1 (`fleet snapshot --json`)
+   * when reachable, degrading to Tier 0 (`os.freemem()`) otherwise. Cached rather than read
+   * per project: a monitor cycle can iterate many projects, and Tier 1 spawns a process, so
+   * re-reading it per project would multiply that spawn by the project count for an answer
+   * that cannot have changed within the same cycle.
+   */
+  machineCapacity: MachineCapacitySnapshot;
+}
+
+/**
+ * Is the HOST too tight to add another agent process right now (#908)? Tier 1
+ * (`fleet snapshot --json`) answers with a process count — `headroomProcesses <= 0` means
+ * zero room for one more `claude.exe`; Tier 0 (`os.freemem()`) has no process-count signal
+ * at all, only a floor, so its `hold` is the whole answer there.
+ *
+ * This function decides whether the host is full, NOT whether a start happens — that is
+ * the placement-not-a-gate distinction the ticket draws. A saturated host still starts the
+ * work when an eligible worker can take it; `resolveWorkerPlacement`'s own `hostSaturated`
+ * flag (read fresh per launch via Tier 0, cheap enough to not need this cached snapshot)
+ * is what steers such a launch there and records why.
+ */
+function isHostSaturated(capacity: MachineCapacitySnapshot): boolean {
+  return capacity.tier === "1" ? capacity.headroomProcesses <= 0 : capacity.hold;
 }
 
 type ContentionGate = Awaited<ReturnType<BuildFileContentionGate>>;
@@ -441,6 +519,32 @@ async function recordFleetHold(ctx: AutoStartCycle, projectId: string, dispatchR
     const info = ctx.skipInfo.get(projectId);
     if (info) info.fleetHold = fleetHold;
   }
+}
+
+/**
+ * Record a `machine_saturated` hold, WITH the capacity read behind it (#908) — same
+ * reasoning as `recordFleetHold`: the collapsed token in `reasonCounts` cannot carry the
+ * measured numbers an operator would need to judge "is this real load or a stale floor",
+ * so the shape travels alongside it.
+ */
+function recordMachineSaturationHold(ctx: AutoStartCycle, projectId: string): void {
+  const capacity = ctx.machineCapacity;
+  const detail: MachineSaturationDetail =
+    capacity.tier === "1"
+      ? {
+          tier: "1",
+          reason: `${capacity.headroomProcesses} headroom process(es), thrashing=${capacity.thrashing}`,
+          headroomProcesses: capacity.headroomProcesses,
+          thrashing: capacity.thrashing,
+        }
+      : { tier: "0", reason: capacity.reason, freeGb: capacity.freeGb };
+  console.log(
+    `[monitor] auto-start held for project ${projectId}: host is saturated (tier ${detail.tier}: ${detail.reason}) ` +
+      `and no eligible worker can take the overflow`,
+  );
+  ctx.noteSkip(projectId, null, "machine_saturated");
+  const info = ctx.skipInfo.get(projectId);
+  if (info) info.machineSaturation = detail;
 }
 
 /**
@@ -585,6 +689,18 @@ async function runInProgressBackfill(ctx: AutoStartCycle, inProgressSt: { id: st
     return;
   }
 
+  // #908: the host is a PLACEMENT input, not a gate — a saturated host still starts work
+  // when this project's fleet can absorb it. Only skip when the host is tight AND there is
+  // nowhere else to route the overflow.
+  if (isHostSaturated(ctx.machineCapacity) && !(await ctx.hasFleetOverflowCapacity({
+    database: db,
+    projectId: inProgressSt.projectId,
+    providerName: narrowProviderName(ctx.prefMap.get("provider")),
+  }))) {
+    recordMachineSaturationHold(ctx, inProgressSt.projectId);
+    return;
+  }
+
   // #119: one snapshot per project per loop, then a cheap synchronous check per candidate.
   const contentionGate = await ctx.buildContentionGate(ctx.prefMap, inProgressSt.projectId);
 
@@ -674,6 +790,17 @@ async function runTodoPull(ctx: AutoStartCycle, inProgressSt: { id: string; proj
 
   if (currentWip >= wipLimit) {
     await noteWipCapSkip(ctx, inProgressSt.projectId, allowFeatureTypes);
+    return;
+  }
+
+  // #908: same placement-not-a-gate check as the backfill loop above — a saturated host
+  // still pulls new work when this project's fleet can take it; only skip when neither can.
+  if (isHostSaturated(ctx.machineCapacity) && !(await ctx.hasFleetOverflowCapacity({
+    database: db,
+    projectId: inProgressSt.projectId,
+    providerName: narrowProviderName(ctx.prefMap.get("provider")),
+  }))) {
+    recordMachineSaturationHold(ctx, inProgressSt.projectId);
     return;
   }
 
@@ -792,7 +919,11 @@ async function runTodoPull(ctx: AutoStartCycle, inProgressSt: { id: string; proj
   }
 }
 
-export async function runAutoStart(prefMap: Map<string, string>, { serverPort, boardEvents, logMonitorAction, allowProject, isAutoDrivenProject = () => false, buildContentionGate = buildFileContentionGate, canDispatch = projectCanDispatch }: AutoStartDeps): Promise<Map<string, AutoStartSkipInfo>> {
+export async function runAutoStart(prefMap: Map<string, string>, {
+  serverPort, boardEvents, logMonitorAction, allowProject, isAutoDrivenProject = () => false,
+  buildContentionGate = buildFileContentionGate, canDispatch = projectCanDispatch,
+  readMachineCapacity = resolveMachineCapacity, hostOverflowHasFleetCapacity: hasFleetOverflowCapacity = defaultHasFleetOverflowCapacity,
+}: AutoStartDeps): Promise<Map<string, AutoStartSkipInfo>> {
   const skipInfo = new Map<string, AutoStartSkipInfo>();
   const noteSkip = (projectId: string, issueNumber: number | null | undefined, reason: AutoStartSkipReason, count = 1) => {
     let info = skipInfo.get(projectId);
@@ -821,9 +952,14 @@ export async function runAutoStart(prefMap: Map<string, string>, { serverPort, b
   const startsRemaining = (projectId: string) => tunablesFor(projectId).maxNewStartsPerCycle - (startedByProject.get(projectId) ?? 0);
   const noteStart = (projectId: string) => startedByProject.set(projectId, (startedByProject.get(projectId) ?? 0) + 1);
 
+  // #908: ONE machine-capacity read for the whole cycle — see `AutoStartCycle.machineCapacity`
+  // for why this is cached instead of read per project.
+  const machineCapacity = await readMachineCapacity();
+
   const ctx: AutoStartCycle = {
     prefMap, baseUrl, boardEvents, logMonitorAction, isAutoDrivenProject,
-    buildContentionGate, canDispatch, skipInfo, noteSkip, tunablesFor, startsRemaining, noteStart,
+    buildContentionGate, canDispatch, hasFleetOverflowCapacity, skipInfo, noteSkip, tunablesFor, startsRemaining, noteStart,
+    machineCapacity,
   };
 
   // Two passes, in this order and NOT interleaved — unchanged from when both loop bodies
