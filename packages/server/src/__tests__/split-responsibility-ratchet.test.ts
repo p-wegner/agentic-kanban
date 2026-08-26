@@ -87,7 +87,68 @@ const BASELINE: Record<string, number> = {
   "services/butler-definitions.service.ts": 0,
   "services/butler-definitions/definitions-store.ts": 12,
   "services/butler-definitions/launch-config.ts": 9,
+
+  // --- split in #831 batch 3 (re-derived from a fresh code-metrics run — see below) ---
+  // insights.service.ts: 45 fns -> the DB-touching orchestrator (computeInsights/
+  // parseRange/types) + a pure single-pass aggregation engine. Consumer evidence, not
+  // just naming: `insights-accumulator.test.ts` already imported ONLY
+  // createInsightsAccumulator/accumulateInsightsRow (built its own rows by hand, no
+  // database), while `routes/insights.ts` imports only computeInsights/parseRange and
+  // never reaches the accumulator internals — disjoint consumer sets. The module's own
+  // pre-existing comment on InsightsAccumulator already claimed the split was safe
+  // ("split out so the aggregation is unit-testable without a database"); this makes
+  // that claim physically true instead of aspirational.
+  //
+  // The extraction itself needed a THIRD cut: pulling the accumulator machinery out of
+  // insights.service.ts in one piece landed 21 top-level function/class declarations in
+  // accumulator.ts, one over the god-module gate's flat 20-declaration ceiling (#889).
+  // The eight per-dimension fold functions (accumulateFriction, accumulateSkillBucket,
+  // …) — independent, single-caller writers with no fan-in among themselves — moved to
+  // dimension-folds.ts, and the shared bucket types + pure primitives (parseStats,
+  // applyAggregate, createAggregateBucket, the date-math helpers) moved to types.ts to
+  // break the two-file import cycle that would otherwise exist between accumulator.ts
+  // and dimension-folds.ts. accumulator.ts now holds only accumulateInsightsRow and its
+  // private deriveSessionRowFacts helper.
+  "services/insights.service.ts": 6,
+  "services/insights/accumulator.ts": 3,
+  "services/insights/types.ts": 25,
+  "services/insights/dimension-folds.ts": 8,
 };
+
+/**
+ * ## #831 note: how the other ~89 remaining candidates were triaged
+ *
+ * #819's cached `analysis.json` was too shallow to drive `--move split_responsibility`
+ * (zero function counts on every file entry, so the detector's preconditions could never
+ * fire). The MAIN CHECKOUT already held a deep run (`code-metrics-out/analysis.json`,
+ * dated 2026-08-24) with real function/CC/LCOM data — copied into this worktree rather
+ * than re-run, since the machine was RAM-critical (0.7 GB usable, actively swapping) when
+ * this ticket ran. Re-deriving with `code-metrics refactor analysis.json --move
+ * split_responsibility` against that deep run returns 175 opportunities across 59 unique
+ * files — a different set from #728's original 95, because the tree has moved.
+ *
+ * Reading several of those 59 by CONSUMERS (not the tool's identifier-vocabulary seams)
+ * found most are NOT genuine split candidates:
+ *  - Already-split facades the tool still flags on residual size
+ *    (`devcontainer-workspace.service.ts`, `butler-definitions/launch-config.ts`,
+ *    `workspace-services.service.ts`, `plugin-fs.ts` — the last is itself an extraction
+ *    already, per its own header comment).
+ *  - Small (100-300 line) factory-shaped services where "many functions" is one closure's
+ *    private helpers around a handful of exported operations, not a bridge between
+ *    disjoint consumer groups (`plugin-enabled.ts`, `onboarding.service.ts`,
+ *    `service-stack-reaper.ts` all checked directly — genuinely cohesive, no disjoint
+ *    consumer sets found).
+ *
+ * `insights.service.ts` above is the one file checked so far with a real, evidence-backed
+ * seam. The remainder (most of the 59) has NOT been individually verified by consumers —
+ * doing that exhaustively (one file per commit, per the ticket's own mechanics) is a
+ * multi-session effort this run did not have budget to finish. Filed as a follow-up:
+ * see #728/#819/#831's tracking chain — file the next slice against the same chain rather
+ * than re-deriving the list from scratch, since the file set moves every time the tree
+ * does. A future agent re-running the `--move split_responsibility` command should expect
+ * a still-different list than either 95 or 59, and must re-verify by consumers again
+ * rather than trusting either historical count.
+ */
 
 /**
  * Every top-level declaration in a module: functions, classes, interfaces, type aliases,
