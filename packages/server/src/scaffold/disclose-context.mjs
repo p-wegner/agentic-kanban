@@ -22,11 +22,11 @@
  * fail non-blockingly. `projectRoot()` below self-locates via `.claude`/`.git` walk-up
  * instead of trusting the env var.
  *
- * Env knobs:
- *   DISCLOSE_STATE_DIR   where per-session "already injected" state lives (default: os tmpdir)
- *   DISCLOSE_LOG=1       one-line stderr trace per invocation (visible in `claude --debug`)
- *   DISCLOSE_ALL_TOOLS=1 also handle Read/Edit/Write (normally Claude Code covers those)
- *   DISCLOSE_DISABLED=1  no-op (the control arm of the eval)
+ * Env knobs (KANBAN_ prefixed — see docs/env-vars.md):
+ *   KANBAN_DISCLOSE_STATE_DIR   where per-session "already injected" state lives (default: os tmpdir)
+ *   KANBAN_DISCLOSE_LOG=1       one-line stderr trace per invocation (visible in `claude --debug`)
+ *   KANBAN_DISCLOSE_ALL_TOOLS=1 also handle Read/Edit/Write (normally Claude Code covers those)
+ *   KANBAN_DISCLOSE_DISABLED=1  no-op (the control arm of the eval)
  */
 import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, mkdirSync, rmdirSync } from "node:fs";
 import { dirname, join, resolve, relative, sep, isAbsolute } from "node:path";
@@ -39,10 +39,10 @@ const READ_TOOLS = new Set(["Read", "Edit", "Write", "MultiEdit", "NotebookEdit"
 main().catch((e) => { log(`error: ${e?.stack || e}`); process.exit(0); });
 
 async function main() {
-  if (process.env.DISCLOSE_DISABLED) return;
+  if (process.env.KANBAN_DISCLOSE_DISABLED) return;
   const input = JSON.parse(await readStdin() || "{}");
   const tool = input.tool_name || "";
-  const handled = SHELL_TOOLS.has(tool) || SEARCH_TOOLS.has(tool) || (process.env.DISCLOSE_ALL_TOOLS && READ_TOOLS.has(tool));
+  const handled = SHELL_TOOLS.has(tool) || SEARCH_TOOLS.has(tool) || (process.env.KANBAN_DISCLOSE_ALL_TOOLS && READ_TOOLS.has(tool));
   if (!handled) return;
 
   const cwd = input.cwd || process.cwd();
@@ -205,7 +205,7 @@ const esc = (s) => s.replace(/[.+^$()|[\]\\]/g, "\\$&");
 // ---------- state ----------
 
 function stateFile(sid) {
-  const dir = process.env.DISCLOSE_STATE_DIR || join(tmpdir(), "claude-disclose-context");
+  const dir = process.env.KANBAN_DISCLOSE_STATE_DIR || join(tmpdir(), "claude-disclose-context");
   mkdirSync(dir, { recursive: true });
   return join(dir, `${(sid || "nosession").replace(/[^\w-]/g, "_")}.json`);
 }
@@ -243,4 +243,4 @@ function rel(root, p) { return relative(root, p).split(sep).join("/"); }
 function statSafe(p) { try { return statSync(p); } catch { return null; } }
 function* walk(dir) { if (!existsSync(dir)) return; for (const e of readdirSync(dir, { withFileTypes: true })) { const f = join(dir, e.name); if (e.isDirectory()) yield* walk(f); else yield f; } }
 function readStdin() { return new Promise((res) => { let d = ""; process.stdin.setEncoding("utf8"); process.stdin.on("data", (c) => (d += c)); process.stdin.on("end", () => res(d)); if (process.stdin.isTTY) res(""); }); }
-function log(m) { if (process.env.DISCLOSE_LOG) process.stderr.write(`[disclose-context] ${m}\n`); }
+function log(m) { if (process.env.KANBAN_DISCLOSE_LOG) process.stderr.write(`[disclose-context] ${m}\n`); }

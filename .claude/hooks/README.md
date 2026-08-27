@@ -124,8 +124,9 @@ Wired with a **plain relative path** (`node .claude/hooks/disclose-context.mjs`)
 pre-expands it textually before spawn, so a relative path is what actually resolves in
 every launch mode. The hook self-locates its project root via a `.claude`/`.git` walk-up.
 
-Zero dependencies, never blocks a tool call. `DISCLOSE_LOG=1` prints a one-line stderr
-trace per invocation; `DISCLOSE_DISABLED=1` no-ops it.
+Zero dependencies, never blocks a tool call. `KANBAN_DISCLOSE_LOG=1` prints a one-line
+stderr trace per invocation; `KANBAN_DISCLOSE_DISABLED=1` no-ops it. See
+`docs/env-vars.md` for the full env-knob list.
 
 ## settings.json entries
 

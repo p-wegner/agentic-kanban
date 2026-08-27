@@ -149,6 +149,18 @@ unambiguous prefix" is an argument about the NAME and says nothing about what ea
 | `AGENTIC_KANBAN_CONTAINER` | Set inside a containerized builder, so code can tell it is not on the host. |
 | `AGENTIC_KANBAN_SESSION_ID` | The board session an agent subprocess belongs to. |
 
+## disclose-context.mjs hook
+
+Env knobs for the `.claude/hooks/disclose-context.mjs` PostToolUse hook (#922) — see its
+file header for what the hook does.
+
+| Variable | Purpose |
+|---|---|
+| `KANBAN_DISCLOSE_STATE_DIR` | Where per-session "already injected" state lives. Default: OS tmpdir. |
+| `KANBAN_DISCLOSE_LOG` | Set to 1 for a one-line stderr trace per invocation (visible in `claude --debug`). |
+| `KANBAN_DISCLOSE_ALL_TOOLS` | Set to 1 to also handle Read/Edit/Write (normally Claude Code's own progressive disclosure covers those). |
+| `KANBAN_DISCLOSE_DISABLED` | Set to 1 to no-op the hook (the control arm of the eval). |
+
 ## Runtime tuning
 
 | Variable | Purpose |
