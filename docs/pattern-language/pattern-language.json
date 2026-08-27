@@ -17,7 +17,7 @@
         "packages/server/src/index\\.ts$",
         "packages/server/src/server-start\\.ts$",
         "packages/server/src/uv-threadpool\\.ts$",
-        "packages/server/src/startup/(route-setup|process-handlers|background-services|startup-tasks|readiness|session-restore|scheduled-tasks|fk-alignment|service-stack-preflight|monitor-setup)\\.ts$"
+        "packages/server/src/startup/(route-setup|process-handlers|background-services|startup-tasks|readiness|session-restore|scheduled-tasks|fk-alignment|service-stack-preflight|monitor-setup|app-bootstrap|boot-sequence)\\.ts$"
       ],
       "intent": "Composition root — boots the server: migrations, startup tasks, route mount, background-service registry, process handlers, readiness. The only place that wires everything together."
     },
