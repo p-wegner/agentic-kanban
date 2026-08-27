@@ -46,6 +46,26 @@ export async function listMemberIssues(
 }
 
 /**
+ * The GROUP LEAD issue's own number/title/description, in the same shape as
+ * {@link listMemberIssues} — so a train review can render it into `{{members}}`
+ * alongside the additional members. `workspaces.issue_id` never appears in
+ * `workspace_issue_members` (that table holds only the ADDITIONAL tickets), so
+ * without this a train review's own lead ticket carries no acceptance criteria
+ * in the rendered block even though every other member does.
+ */
+export async function getLeadIssueForMembersBlock(
+  issueId: string,
+  database: Database = db,
+): Promise<{ id: string; issueNumber: number | null; title: string; description: string | null } | undefined> {
+  const rows = await database
+    .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, description: issues.description })
+    .from(issues)
+    .where(eq(issues.id, issueId))
+    .limit(1);
+  return rows[0];
+}
+
+/**
  * Of the given issues, the ones currently served as a MEMBER of a live (non-closed)
  * group workspace. The auto-starters must treat these exactly like issues with an
  * open workspace of their own — a member issue sits In Progress with no row in
