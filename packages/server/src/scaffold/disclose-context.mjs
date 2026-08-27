@@ -228,8 +228,15 @@ function acquireStateLock(sid) {
       return () => { try { rmdirSync(lockDir); } catch { /* ignore */ } };
     } catch {
       if (Date.now() > deadline) return () => {}; // proceed unlocked rather than hang the tool call
+      // Yield between retries — a tight mkdirSync spin pins a core and blocks this
+      // single-threaded process's own event loop for the whole contention window.
+      sleepSync(10);
     }
   }
+}
+function sleepSync(ms) {
+  const sab = new Int32Array(new SharedArrayBuffer(4));
+  Atomics.wait(sab, 0, 0, ms);
 }
 
 // ---------- utils ----------
