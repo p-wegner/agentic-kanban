@@ -34,6 +34,13 @@ export interface MergeGateEvidenceValues {
    * key is WRITTEN as null, never left as the previous row's value.
    */
   verificationKey?: string | null;
+  /**
+   * Wall-clock milliseconds the run took (#906). Optional for the same reason as
+   * `verificationKey` — an older or injected writer may not have one — but the same
+   * normalization rule applies at write time: omitted is written as null, never left as the
+   * previous row's value.
+   */
+  durationMs?: number | null;
 }
 
 /**
@@ -50,7 +57,7 @@ export async function setMergeGateEvidence(
   // Normalize the optional field: an upsert whose SET omits `verification_key` would keep the
   // PREVIOUS run's key beside this run's tips — a proof asserting a tier it never ran under.
   // Every write therefore overwrites the whole row.
-  const row = { ...values, verificationKey: values.verificationKey ?? null };
+  const row = { ...values, verificationKey: values.verificationKey ?? null, durationMs: values.durationMs ?? null };
   await database.insert(workspaceMergeGate).values({ workspaceId, ...row })
     .onConflictDoUpdate({ target: workspaceMergeGate.workspaceId, set: { ...row } });
 }

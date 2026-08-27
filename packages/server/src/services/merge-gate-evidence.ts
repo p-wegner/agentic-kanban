@@ -57,6 +57,12 @@ export interface GateWithEvidence {
    * must let the merge executor gate again rather than assert verification it does not have.
    */
   token: MergeGateToken | null;
+  /**
+   * Wall-clock milliseconds the gate run took (#906) — bracketed around `runGate` here, the
+   * one choke point every caller already goes through, so gate cost is measurable without
+   * hand-copying `Date.now()` pairs into four call sites again.
+   */
+  durationMs: number;
 }
 
 /**
@@ -98,7 +104,9 @@ export async function runGateWithEvidence(args: {
   const runGate = args.runGate ?? ((workspace_, projectId_, database_) =>
     resolveMergeGate({ token: RUN_GATE, workspace: workspace_, projectId: projectId_, database: database_ }));
   const shasBefore = await readShas(workspace);
+  const startedAtMs = Date.now();
   const result = await runGate(workspace, projectId, database);
+  const durationMs = Date.now() - startedAtMs;
   const ranAt = new Date().toISOString();
   const shasAfter = await readShas(workspace);
   const moved = movedDuringGate(shasBefore, shasAfter);
@@ -111,5 +119,5 @@ export async function runGateWithEvidence(args: {
     ? gateAlreadyPassed({ ranAt, stage: result.stage, source, branchSha: shasBefore.branchSha, baseSha: shasBefore.baseSha })
     : null;
 
-  return { ...result, shasBefore, moved, ranAt, token };
+  return { ...result, shasBefore, moved, ranAt, token, durationMs };
 }
