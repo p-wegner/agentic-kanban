@@ -35,6 +35,12 @@ interface PluginViewState {
    * had. Switching projects therefore DROPS a plugin pick (the panel re-resolves
    * a default from the new project's surface). A marketplace pick survives — the
    * marketplace is not project-scoped.
+   *
+   * The FIRST announcement is not a switch (#925): on a cold page load the
+   * toolbar menu writes its pick before the panel has mounted and announced the
+   * project, so `projectId` is still null. That pick was made on the page that
+   * is about to announce itself — dropping it here is what let the panel's
+   * adopt-first-plugin default overwrite an explicit menu choice.
    */
   setActiveProject: (projectId: string | null) => void;
 }
@@ -54,6 +60,8 @@ export const usePluginViewStore = create<PluginViewState>((set) => ({
   setActiveProject: (projectId) =>
     set((s) => {
       if (s.projectId === projectId) return s;
+      const adoptsPendingPick = s.projectId === null && projectId !== null;
+      if (adoptsPendingPick) return { projectId };
       return { projectId, selection: s.selection?.kind === "plugin" ? null : s.selection };
     }),
   openMarketplace: (opts) =>
