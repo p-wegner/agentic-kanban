@@ -134,10 +134,13 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // see `profile-capabilities.ts`. Absent/empty = unrestricted, same default-safe shape
   // as `allowed_profiles_<projectId>`.
   "required_data_labels",
-  // Merge train (#904/#905): `train_max_size_<id>` is the batching cap `executeQueue` reads
-  // to decide whether an eligible independent batch defaults to the train strategy — >1 opts
-  // the project in. `train_max_wait_ms_<id>` (introduced alongside it, consumed by #905's
-  // batching window) is registered here too so both land in the same allow-list edit.
+  // Merge train batching window (#904/#905): `train_max_size_<id>` caps how many ready
+  // workspaces the auto-merge orchestrator collects before releasing them as one train
+  // (default 4) — it's also the batching cap `executeQueue` reads to decide whether an
+  // eligible independent batch defaults to the train strategy (>1 opts the project in).
+  // `train_max_wait_ms_<id>` bounds how long the oldest of them waits regardless of size
+  // (default 10 min). Both are read together by `decideMergeTrainRelease` — registering only
+  // one would let an operator set a size cap with no wait bound (or vice versa) with no error.
   "train_max_size",
   "train_max_wait_ms",
 ] as const;
