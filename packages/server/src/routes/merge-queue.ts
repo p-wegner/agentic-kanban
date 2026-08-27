@@ -7,6 +7,7 @@ import type { Database } from "../db/index.js";
 import type { BoardEventSink } from "../services/board-events.js";
 import type { SessionLauncher } from "../services/session.manager.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { listMergeTrainsForProject } from "../repositories/merge-train.repository.js";
 
 export function createMergeQueueRoute(
   database: Database,
@@ -87,6 +88,21 @@ export function createMergeQueueRoute(
         }
       }
     });
+  });
+
+  /**
+   * GET /api/merge-queue/trains?projectId=
+   *
+   * History of persisted release trains for a project (#906) — newest first, including
+   * `abandoned` rows the startup reconciler left behind. What a "Merge train" panel reads.
+   */
+  router.get("/trains", async (c) => {
+    const projectId = c.req.query("projectId");
+    if (!projectId) {
+      return c.json({ ok: false, error: "projectId query parameter is required" }, 400);
+    }
+    const trains = await listMergeTrainsForProject(projectId, database);
+    return c.json({ ok: true, trains });
   });
 
   return router;
