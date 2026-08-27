@@ -22,6 +22,7 @@ import { startBaseBranchHealthReconciler, stopBaseBranchHealthReconciler } from 
 import { startWorkerConnectionReaper, stopWorkerConnectionReaper } from "../services/worker-connection-reaper.service.js";
 import { getWorkerFleet } from "../services/worker-fleet.service.js";
 import { startInstallStalenessReconciler, stopInstallStalenessReconciler } from "./install-staleness-reconciler.js";
+import { startMergeTrainReconciler, stopMergeTrainReconciler } from "./merge-train-reconciler.js";
 import { startAgentSessionRegistryReaper, stopAgentSessionRegistryReaper } from "./agent-session-registry-reaper.js";
 import { startWorkerHealthProbe, stopWorkerHealthProbe } from "../services/worker-health-probe.service.js";
 import { getPreference } from "../repositories/preferences.repository.js";
@@ -239,6 +240,17 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
     start() {
       startInstallStalenessReconciler();
       return stopInstallStalenessReconciler;
+    },
+  },
+  {
+    // #906 — a `merge_trains` row left `assembling`/`gating` when the process running it died
+    // (tsx-watch reload, crash, restart mid-gate). No live-job check is needed: the row's
+    // whole lifecycle is one in-process request, so anything found at boot is orphaned by
+    // construction. Resumed or marked `abandoned` with a reason — never silently dropped.
+    name: "merge-train-reconciler",
+    start() {
+      startMergeTrainReconciler();
+      return stopMergeTrainReconciler;
     },
   },
   {

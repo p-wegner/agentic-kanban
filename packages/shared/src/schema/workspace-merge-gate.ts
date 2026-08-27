@@ -1,4 +1,4 @@
-import { sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 import { relations } from "drizzle-orm";
 import { workspaces } from "./workspaces.js";
 
@@ -50,6 +50,13 @@ export const workspaceMergeGate = sqliteTable("workspace_merge_gate", {
    * cannot be reused by the bounded cross-restart reuse path, which fails safe into a re-run.
    */
   verificationKey: text("verification_key"),
+  /**
+   * Wall-clock milliseconds the gate run took (#906). Gate cost was previously unmeasured —
+   * this table stored verdicts only. Nullable: evidence written before #906, or by a writer
+   * that could not resolve a duration (e.g. a reused persisted verdict that paid no new run),
+   * simply carries no cost figure.
+   */
+  durationMs: integer("duration_ms"),
 });
 
 export const workspaceMergeGateRelations = relations(workspaceMergeGate, ({ one }) => ({

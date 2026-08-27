@@ -66,6 +66,8 @@ import { isPreMergeGateFailure } from "./workspace-merge-gate.js";
 import type { BoardEventSink } from "./board-events.js";
 import type { SessionLauncher } from "./session.manager.js";
 import { resolveWorktreeClaims } from "@agentic-kanban/shared/lib/worktree-claim";
+import { randomUUID } from "node:crypto";
+import { createMergeTrain, updateMergeTrainState } from "../repositories/merge-train.repository.js";
 
 /**
  * How many ready members a project wants batched onto one train before it opts into the
@@ -588,6 +590,17 @@ export function createMergeQueueService(deps: {
       return;
     }
 
+    // #906: persist the train BEFORE any git/gate work, so a crash mid-assembly still leaves a
+    // row the startup reconciler can find (rather than the old scratch label, which existed
+    // only in this generator's closure and vanished with the process).
+    const trainId = randomUUID();
+    await createMergeTrain({
+      id: trainId,
+      projectId,
+      label,
+      memberWorkspaceIds: members.map((m) => m.workspaceId),
+    }, database);
+
     const repoLock = await acquireQueueRepoLock(repoPath, `merge-train:${label}`);
     const heartbeat = setInterval(() => repoLock.heartbeat(), 15_000);
 
@@ -603,6 +616,7 @@ export function createMergeQueueService(deps: {
           // how two individually-green branches can produce a red base with no conflict.
           let gateWorktree: string | null = null;
           try {
+            await updateMergeTrainState(trainId, { state: "gating" }, database).catch(() => undefined);
             // #713: DB-backed claim guard alongside the namespace — the train leaf lives
             // under the same `.worktrees` root as every live workspace's.
             gateWorktree = await gitService.createWorktree(repoPath, trainRef, undefined, {
@@ -641,6 +655,24 @@ export function createMergeQueueService(deps: {
       clearInterval(heartbeat);
       repoLock.release();
     }
+
+    // #906: the final state, plus the evidence a "Merge train" panel/history view reads. Best
+    // effort — a bookkeeping failure here must never be reported as the train itself failing;
+    // the git-level outcome above already happened and is what the caller's events describe.
+    await updateMergeTrainState(trainId, {
+      state: result.landed.length > 0 ? "landed" : "red",
+      gateEvidence: {
+        gateRuns: result.gateRuns,
+        gateFailure: result.gateFailure ?? null,
+        landed: result.landed.map((m) => m.workspaceId),
+        dropped: result.dropped.map((d) => ({ workspaceId: d.member.workspaceId, reason: d.reason })),
+        mergeSha: result.mergeSha ?? null,
+      },
+      bisectResult: result.gateRejected.length > 0
+        ? { gateRejected: result.gateRejected.map((r) => ({ workspaceId: r.member.workspaceId, reason: r.reason })) }
+        : null,
+      finishedAt: new Date().toISOString(),
+    }, database).catch((err) => console.warn(`[merge-train] failed to persist final state for ${trainId} (non-fatal):`, errorMessage(err)));
 
     for (const d of result.dropped) {
       yield { type: "skipped", workspaceId: d.member.workspaceId, issueNumber: d.member.issueNumber ?? null, issueTitle: "", reason: `dropped from train: ${d.reason.slice(0, 200)}` };
