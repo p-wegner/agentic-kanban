@@ -22,6 +22,21 @@ describe("pluginViewStore", () => {
     expect(usePluginViewStore.getState().projectId).toBe("project-b");
   });
 
+  it("adopts a pick made before any project was announced (#925 cold-load menu pick)", () => {
+    // Fresh page: the toolbar menu writes its selection before the panel mounts
+    // and announces the project. That first announcement must not drop the pick,
+    // or the adopt-first-plugin default overwrites what the user chose.
+    const { setActiveProject, setSelection } = usePluginViewStore.getState();
+    setSelection({ kind: "plugin", slug: "test-impact" });
+    setActiveProject("project-a");
+    expect(usePluginViewStore.getState().selection).toEqual({ kind: "plugin", slug: "test-impact" });
+    expect(usePluginViewStore.getState().projectId).toBe("project-a");
+
+    // ...but a real switch afterwards still drops it.
+    setActiveProject("project-b");
+    expect(usePluginViewStore.getState().selection).toBeNull();
+  });
+
   it("keeps the pick when the same project is re-announced", () => {
     const { setActiveProject, setSelection } = usePluginViewStore.getState();
     setActiveProject("project-a");
