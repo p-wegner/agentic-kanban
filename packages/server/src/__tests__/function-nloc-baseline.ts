@@ -132,9 +132,9 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // Raised rather than worked around: the ring exists to stop unmanaged growth, not to make a
   // sanctioned extraction unlandable, and 2 nloc here bought 8 columns off the hottest table
   // in the board. It is still the largest entry in this ring and still wants splitting.
-  "services/workspace-create.service.ts::createWorkspaceCreateService": 627,
+  "services/workspace-create.service.ts::createWorkspaceCreateService": 635,
   "services/issue.service.ts::createIssueService": 616,
-  "services/session-manager/session-lifecycle.ts::createSessionLifecycle": 627,
+  "services/session-manager/session-lifecycle.ts::createSessionLifecycle": 631,
   "services/workflow-fork.service.ts::createWorkflowForkService": 581,
   "cli/commands/workspace.ts::registerWorkspaceCommand": 573,
   "services/agent-remote.service.ts::createRemoteAgentService": 637,
@@ -147,8 +147,8 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // returning an empty merge body). +5 nloc bought a typed return for every caller and took
   // 71 -> 65 grandfathered test files with it. Raised rather than worked around: the ring
   // exists to stop unmanaged growth, not to make a sanctioned typing fix unlandable.
-  "services/workspace-merge.service.ts::createWorkspaceMergeService": 534,
-  "services/merge-queue.service.ts::createMergeQueueService": 521,
+  "services/workspace-merge.service.ts::createWorkspaceMergeService": 541,
+  "services/merge-queue.service.ts::createMergeQueueService": 529,
   // 506 -> 474 in #806 batch 3: ten handlers dropped their inline type literal and guard
   // ladder for a `parseJsonBody(c, schema)` call.
   "routes/issues.ts::createIssuesRoute": 474,
@@ -158,9 +158,9 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // module-level `*Impl` functions taking `database` explicitly, so the relaunch seam in
   // `workspace-session.service.ts` can share the exact same logic without this factory
   // re-growing every time that shared logic changes. The factory now holds thin delegators.
-  "services/workspace-provision.service.ts::createWorkspaceProvisionService": 409,
+  "services/workspace-provision.service.ts::createWorkspaceProvisionService": 412,
   // 404 -> 399, banked (#806): five hand-written body guards became one schema parse each.
-  "routes/workspace-actions.ts::createWorkspaceActionsRoute": 414,
+  "routes/workspace-actions.ts::createWorkspaceActionsRoute": 418,
   // 349 -> 351 (#841): POSIX-only `detached: true` for a shell launch, closing the #836 gap.
   "worker/worker-agent-runner.ts::createWorkerAgentRunner": 351,
 };

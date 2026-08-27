@@ -9,6 +9,7 @@ servers:
 x-coverage:
   scanned:
     - src/routes/*.ts
+    - src/startup/app-bootstrap.ts
     - src/startup/route-setup.ts
     - src/server-start.ts
   notDocumented:
@@ -2879,10 +2880,13 @@ paths:
       summary: |-
         * POST /api/merge-queue
            *
-           * body: { workspaceIds: string[], dryRun?: boolean, skipOnConflict?: boolean }
+           * body: { workspaceIds: string[], dryRun?: boolean, skipOnConflict?: boolean, strategy?: "sequential" | "train" }
            *
            * - dryRun: true  → returns JSON plan (sorted order + conflict matrix + per-workspace conflictPreviews)
            * - dryRun: false → streams SSE events while executing the queue
+           * - strategy: explicit override; "sequential" always wins, "train" opts in regardless of
+           *   project defaults. Omitted → `executeQueue` decides (classifier recommendation or the
+           *   project's `train_max_size` opt-in, #904).
       tags:
         - merge-queue
       operationId: post_api_merge-queue
@@ -2901,6 +2905,11 @@ paths:
                   type: boolean
                 skipOnConflict:
                   type: boolean
+                strategy:
+                  type: string
+                  enum:
+                    - sequential
+                    - train
               required:
                 - workspaceIds
               additionalProperties: true
@@ -11047,7 +11056,7 @@ paths:
     get:
       summary: (notably shared dist) is absent.
       tags:
-        - server-start
+        - app-bootstrap
       operationId: get_health
       responses:
         "200":

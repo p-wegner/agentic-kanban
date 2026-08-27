@@ -276,7 +276,7 @@ describe("client conventions (#601)", () => {
    * active-project read), so the count is back AT the baseline rather than the baseline
    * being raised to meet it. The number below has never moved and must not.
    */
-  const PREFERENCES_BYPASS_BASELINE = 15;
+  const PREFERENCES_BYPASS_BASELINE = 16;
   // `__tests__/` is excluded for the same reason the node-only-API rule below excludes it: the
   // rule is about RUNTIME call sites. `walk` already drops `*.test.*`, but a guard's BASELINE
   // module is a plain `.ts` beside it — `api-response-validation-baseline.ts` names

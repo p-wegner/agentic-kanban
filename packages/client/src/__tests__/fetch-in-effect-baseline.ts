@@ -61,7 +61,7 @@ export const FETCH_IN_EFFECT_BASELINE: Record<string, number> = {
   "components/RunbooksView.tsx": 2,
   "components/SessionReplay.tsx": 1,
   "components/SessionTranscriptPanel.tsx": 3,
-  "components/SettingsPanel.tsx": 4,
+  "components/SettingsPanel.tsx": 3,
   "components/ShowdownPanel.tsx": 2,
   "components/SlowRequestsPanel.tsx": 1,
   "components/SpecPhasePanel.tsx": 2,

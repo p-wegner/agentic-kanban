@@ -161,7 +161,7 @@ const COMPLEXITY_BASELINE: Record<string, number> = {
   "packages/server/src/routes/projects.ts": 30,
   "packages/server/src/services/backlog-markdown.service.ts": 41,
   "packages/server/src/services/pre-merge-gate.service.ts": 37,
-  "packages/server/src/services/preflight-check.ts": 26,
+  "packages/server/src/services/preflight-check.ts": 23,
   "packages/server/src/services/session-manager/session-lifecycle.ts": 38,
   "packages/server/src/services/workspace-scorecard.service.ts": 27,
   "packages/server/src/startup/ancestor-branch-reconciler.ts": 26,

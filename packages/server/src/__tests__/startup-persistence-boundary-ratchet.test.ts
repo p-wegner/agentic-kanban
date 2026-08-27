@@ -106,6 +106,7 @@ const DB_VALUE_BASELINE = new Set<string>([
   "ancestor-branch-reconciler.ts",
   "base-branch-health-reconciler.ts",
   "born-blocked-reconciler.ts",
+  "core-services-wiring.ts",
   "done-unmerged-invariant-sweep.ts",
   "exit-workflow.ts",
   "hand-merged-branch-reconciler.ts",

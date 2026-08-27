@@ -44,7 +44,7 @@ export function maybeStartIpv6CompanionListener(
 
   try {
     const companion = serve({ fetch: app.fetch, port: serverPort, hostname: "::1" }, () => {
-      console.log(`Server also running at http://[::1]:${serverPort} (removes the ~206ms IPv6-fallback tax on \`localhost\`)`);
+      console.log(`[server] also running at http://[::1]:${serverPort} (removes the ~206ms IPv6-fallback tax on \`localhost\`)`);
     });
     (companion as { keepAliveTimeout?: number }).keepAliveTimeout = 1000;
     // Same fetch handler, so WS upgrades must work on this listener too — a browser

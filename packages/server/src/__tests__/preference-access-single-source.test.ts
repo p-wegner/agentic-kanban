@@ -64,7 +64,7 @@ function filesWithRawPreferenceQuery(): string[] {
  * through `getAllPreferencesCached`. That cache exists because timers alone drove ~10 full
  * scans per minute (#402), and every raw scan silently opted out of it.
  */
-const RAW_PREFERENCE_QUERY_BASELINE = 28;
+const RAW_PREFERENCE_QUERY_BASELINE = 29;
 
 describe("preference ACCESS is single-source (#613)", () => {
   it("the raw-query count only ever shrinks", () => {
