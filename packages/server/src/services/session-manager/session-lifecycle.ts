@@ -946,7 +946,6 @@ export function createSessionLifecycle(
     const fireExit = (code: number | null) => {
       if (wsId) options?.onSessionExit?.(wsId, sessionId, code, false);
     };
-
     switch (route.phase) {
       case "stopped":
         // The user stopped it; stopSession already wrote "stopped". Just fire the callback.
