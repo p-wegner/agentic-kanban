@@ -69,7 +69,7 @@ const routesDir = path.join(srcDir, "routes");
  * both. Route DEFINITIONS still belong in `src/routes/` - that rule is what #805 restored by
  * moving the review handler out of `route-setup.ts`.
  */
-const COMPOSITION_ROOTS = ["src/startup/route-setup.ts", "src/server-start.ts"] as const;
+const COMPOSITION_ROOTS = ["src/startup/app-bootstrap.ts", "src/startup/route-setup.ts", "src/server-start.ts"] as const;
 
 export interface BlindSpot {
   /** Path relative to `packages/server`, e.g. `src/services/fleet-listener.service.ts`. */

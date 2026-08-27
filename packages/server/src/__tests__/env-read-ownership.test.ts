@@ -173,6 +173,8 @@ const FOREIGN: Record<string, string> = {
   VITAL_FILES: "scaffold hook contract — which files the vital-file guard protects, frozen for scaffolded checkouts",
   VERIFY_GATE_COMMAND: "scaffold hook contract — the verify command the gate runner invokes, frozen for scaffolded checkouts",
   VERIFY_GATE_MAX_REPAIR_ATTEMPTS: "scaffold hook contract — repair-attempt cap in the gate runner, frozen for scaffolded checkouts",
+  SMART_HOOKS_FORCE: "capacity hook/server compatibility — legacy force switch shared with the existing smart-hooks heuristic",
+  SMART_HOOKS_MIN_FREE_GB: "capacity hook/server compatibility — legacy memory floor shared with the existing smart-hooks heuristic",
   // Ports the ecosystem already names. Renaming them would break every convention that sets them.
   PORT: "hosting convention — the server port when no KANBAN_* port is set",
   VITE_PORT: "Vite convention",
