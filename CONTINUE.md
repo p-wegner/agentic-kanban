@@ -40,12 +40,14 @@ three of its five items were already closed. Standing state lives here and nowhe
 The full suite is not deferred out of preference — starting it here takes the box down along
 with every other session on it. Run it when `fleet gate` clears, capped (`--maxWorkers=4`).
 
-### Operator flag, still open
+### Operator flag — RESOLVED, not open (corrected 2026-08-27)
 
-`packages/server/kanban.db` is a **schema-only stub**. The CLI says so on every invocation
-(`[db] opening C:\Users\pwegner\.agentic-kanban\kanban.db (source: home-fallback)`) — that
-home-fallback file is the real board. Tools that pick the checkout path on presence alone
-silently address an empty database. Not deleted (DB hard rule); needs a human decision.
+Earlier passes recorded `packages/server/kanban.db` as a **schema-only stub** causing a
+split-brain with the home-fallback DB. **That file does not exist any more** (checked
+2026-08-27), so there is no second database to address by mistake: the CLI and the server both
+open `C:\Users\pwegner\.agentic-kanban\kanban.db`, which is the real board (192 MB, live).
+The `[db] opening ... (source: home-fallback)` line the CLI prints on every invocation is the
+NORMAL path now, not a warning about a stub — do not re-file this as a defect.
 
 ## Archive
 
