@@ -331,8 +331,8 @@ export function createAutoMergeOrchestrator(deps: {
       }
 
       const config = {
-        maxSize: getNumber(prefMap, trainMaxSizePref.key(projectId), DEFAULT_TRAIN_MAX_SIZE) || DEFAULT_TRAIN_MAX_SIZE,
-        maxWaitMs: getNumber(prefMap, trainMaxWaitMsPref.key(projectId), DEFAULT_TRAIN_MAX_WAIT_MS) || DEFAULT_TRAIN_MAX_WAIT_MS,
+        maxSize: getNumber(prefMap, trainMaxSizePref.key(projectId), DEFAULT_TRAIN_MAX_SIZE),
+        maxWaitMs: getNumber(prefMap, trainMaxWaitMsPref.key(projectId), DEFAULT_TRAIN_MAX_WAIT_MS),
       };
       // Preserve the ORIGINAL firstSeenAt across ticks so the wait bound is measured from when
       // the set first started accumulating, not re-armed every tick a new member joins.
