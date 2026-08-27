@@ -140,6 +140,11 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // batching window) is registered here too so both land in the same allow-list edit.
   "train_max_size",
   "train_max_wait_ms",
+  // Merge train review (#907): `review_mode_<id>` is `per-ticket` (default) | `per-train` —
+  // a stand-in for the risk-posture resolver (#911). `per-train` reviews a ticket-group
+  // workspace's assembled diff once, with every member's acceptance criteria, instead of
+  // reviewing each ticket separately. See shared/lib/review-mode-pref.ts.
+  "review_mode",
 ] as const;
 
 // Deliberately NOT registered, though both are per-project keys that exist on disk (#496):

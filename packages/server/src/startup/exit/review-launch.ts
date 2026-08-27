@@ -21,7 +21,9 @@ import { setWorkspaceStatus } from "../../repositories/workspace-status.reposito
 import { applyWorkspaceProfileToPrefs, resolveWorkspaceLaunchSettings, toExecutorProvider } from "../../services/agent-settings.service.js";
 import { emitButlerSystemEvent } from "../../services/butler-event-feed.js";
 import { buildReviewContext } from "../../services/phase-context.service.js";
-import { buildReviewPrompt, releaseReviewLaunch, tryReserveReviewLaunch } from "../../services/review.service.js";
+import { buildMembersBlock, buildReviewPrompt, releaseReviewLaunch, tryReserveReviewLaunch } from "../../services/review.service.js";
+import { listMemberIssues } from "../../repositories/workspace-issue-members.repository.js";
+import { resolveReviewMode, reviewModePref } from "@agentic-kanban/shared/lib/review-mode-pref";
 import type { Database } from "../../db/index.js";
 import type { createBoardEvents } from "../../services/board-events.js";
 import type { createSessionManager } from "../../services/session.manager.js";
@@ -68,7 +70,17 @@ export function createReviewLauncher({ database: db, gitService, sessionManager,
     const precomputedContext = workspace.workingDir && diffRef && !conflictingFiles && !uncommittedChanges
       ? await buildReviewContext({ workingDir: workspace.workingDir, baseRef: diffRef, isDirect: workspace.isDirect })
       : null;
-    const { prompt, model } = await buildReviewPrompt(db, workspace.branch, diffRef, issueId, autoFix, projectId, conflictingFiles, uncommittedChanges, workspaceId, reviewSkillName, verifyAgent, precomputedContext);
+    // Merge train review (#907): a ticket-group workspace's lead issue is `issueId` above;
+    // its additional tickets live in `workspace_issue_members`. When the project opts into
+    // `per-train` review AND this workspace actually has members, render them into
+    // `{{members}}` so one reviewer session judges the assembled diff against every
+    // member's acceptance criteria instead of reviewing each ticket separately. A
+    // workspace with no members is unaffected regardless of the pref value.
+    const reviewMode = resolveReviewMode(prefMap.get(reviewModePref.key(projectId)));
+    const membersBlock = reviewMode === "per-train"
+      ? buildMembersBlock(await listMemberIssues(workspaceId, db))
+      : "";
+    const { prompt, model } = await buildReviewPrompt(db, workspace.branch, diffRef, issueId, autoFix, projectId, conflictingFiles, uncommittedChanges, workspaceId, reviewSkillName, verifyAgent, precomputedContext, membersBlock);
     const reviewArgsWithModel = model && reviewProvider === "claude" ? `${reviewArgs ?? ""} --model ${model}`.trim() : reviewArgs;
     try {
       await setWorkspaceStatus(db, workspaceId, "reviewing", { now });
