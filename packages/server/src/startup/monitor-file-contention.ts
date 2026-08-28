@@ -6,11 +6,15 @@ import {
   type ContentionVerdict,
   type FileContentionMode,
 } from "@agentic-kanban/shared/lib/file-contention";
+import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { issues, projectStatuses, workspaces } from "@agentic-kanban/shared/schema";
 import { and, eq, notInArray, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { parseTouchedFilePaths } from "../services/issue-ai.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { resolveRiskPosture } from "../services/risk-posture.service.js";
+
+const fileContentionPrefDef = projectPref("file_contention");
 
 /**
  * Auto-start gate for shared-registration-file contention (#119).
@@ -31,8 +35,6 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
  * on cache miss, so the gate reads only what is already cached and never
  * triggers analysis from inside the monitor cycle.
  */
-
-const CONTENTION_PREF_PREFIX = "file_contention_";
 
 /**
  * SQL predicate matching workspaces that hold an UNMERGED edit to the shared file.
@@ -88,8 +90,17 @@ export type BuildFileContentionGate = (
   projectId: string,
 ) => Promise<FileContentionGate>;
 
+/**
+ * Contention mode for a project's auto-start gate. Routes through `resolveRiskPosture` (#911) —
+ * an explicit `file_contention_<projectId>` pref still wins when set (an operator's deliberate
+ * finer-grained override), falling back to the resolved posture's `contentionMode` otherwise, so
+ * `standard` reproduces today's default (`serialize`) exactly and a project on `fast`/`sprint`
+ * gets that posture's mode without needing its own `file_contention_<projectId>` write.
+ */
 export function resolveProjectContentionMode(prefMap: Map<string, string>, projectId: string): FileContentionMode {
-  return resolveFileContentionMode(prefMap.get(`${CONTENTION_PREF_PREFIX}${projectId}`));
+  const explicit = prefMap.get(fileContentionPrefDef.key(projectId));
+  if (explicit !== undefined) return resolveFileContentionMode(explicit);
+  return resolveRiskPosture(prefMap, projectId).contentionMode;
 }
 
 /**
