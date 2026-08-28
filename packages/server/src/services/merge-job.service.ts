@@ -22,7 +22,6 @@
  */
 
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-import { buildGateBusy } from "./jvm-build-semaphore.js";
 
 export type MergeJobState = "running" | "succeeded" | "failed";
 
@@ -153,10 +152,26 @@ export function startMergeJob(workspaceId: string, nowIso = new Date().toISOStri
 }
 
 /**
+ * Handle identifying one in-flight gate attempt (#936).
+ *
+ * It carries the `jobId`, not just the attempt number, for the same reason {@link finish} takes
+ * one: a gate run is 20-40 MINUTES, and nothing stops the job it started under finishing and
+ * being replaced by a fresh job for the same workspace before it returns. Attempt numbers
+ * restart at 1 per job, so a bare number would make the late finisher write its verdict into
+ * the NEW job's attempt 1 — inventing a completed attempt that job never made and, worse,
+ * stamping its `lastActivityAt`, which is exactly the liveness signal the zombie detector
+ * trusts. The job id makes that stale write a no-op.
+ */
+export interface MergeGateAttemptHandle {
+  jobId: string;
+  attempt: number;
+}
+
+/**
  * Record that a gate attempt has STARTED for this workspace's running merge job (#936), and
- * return its attempt number so the finisher can address it. Returns null when no running job
- * is tracked — a gate can legitimately run outside a merge job (the monitor's own cycle gate,
- * a review-exit gate), and that must be a no-op rather than an error.
+ * return a handle so the finisher can address it. Returns null when no running job is tracked
+ * — a gate can legitimately run outside a merge job (the monitor's own cycle gate, a
+ * review-exit gate), and that must be a no-op rather than an error.
  *
  * Doubles as the liveness heartbeat the zombie detector reads: an attempt boundary is the one
  * moment a merge is unambiguously observed to be progressing.
@@ -165,31 +180,34 @@ export function noteMergeGateAttemptStarted(
   workspaceId: string,
   source: string,
   nowIso = new Date().toISOString(),
-): number | null {
+): MergeGateAttemptHandle | null {
   const job = jobsByWorkspace.get(workspaceId);
   if (!job || job.state !== "running") return null;
   const attempt: MergeJobAttempt = { attempt: job.attempts.length + 1, source, startedAt: nowIso };
   job.attempts.push(attempt);
   job.attemptCount = job.attempts.length;
   job.lastActivityAt = nowIso;
-  return attempt.attempt;
+  return { jobId: job.jobId, attempt: attempt.attempt };
 }
 
 /**
  * Record how a gate attempt ENDED (#936). `outcome: "discarded"` is the case this ticket
  * exists for — a gate that ran to completion and whose verdict then went nowhere; `detail`
  * must say why, because that reason was previously in nobody's reach but the OS process tree.
+ *
+ * A handle whose job has since been replaced is DROPPED, not applied to the successor — see
+ * {@link MergeGateAttemptHandle}.
  */
 export function noteMergeGateAttemptFinished(
   workspaceId: string,
-  attemptNumber: number | null,
+  handle: MergeGateAttemptHandle | null,
   patch: { outcome: MergeJobAttempt["outcome"]; detail?: string; stage?: string },
   nowIso = new Date().toISOString(),
 ): void {
-  if (attemptNumber === null) return;
+  if (handle === null) return;
   const job = jobsByWorkspace.get(workspaceId);
-  if (!job) return;
-  const attempt = job.attempts.find((a) => a.attempt === attemptNumber);
+  if (!job || job.jobId !== handle.jobId) return;
+  const attempt = job.attempts.find((a) => a.attempt === handle.attempt);
   if (!attempt || attempt.finishedAt) return;
   attempt.finishedAt = nowIso;
   attempt.durationMs = Date.parse(nowIso) - Date.parse(attempt.startedAt);
@@ -236,17 +254,44 @@ export function failMergeJob(jobId: string, workspaceId: string, error: unknown)
 }
 
 /**
- * Is a verify gate running right now (#936)?
+ * Is a verify gate running FOR THIS JOB right now (#936)?
  *
- * Defaults to the build semaphore, which is the process's own answer to that question and is
- * free to ask (an integer read, no spawn) — deliberately NOT left to composition-root wiring,
- * because a probe nobody installs silently degrades this back to the stopwatch #936 is about.
+ * The probe takes the job, and that is the whole point. The build semaphore
+ * ({@link buildGateBusy}) answers a PROCESS-GLOBAL question — "is any heavyweight
+ * build/verify/smoke task running anywhere" — and it is held by every project's gate, by the
+ * cold-clone check and by the e2e smoke lane. Consulting it per job would mean that on a board
+ * with ten monitor-mode projects gating more or less continuously, a genuinely wedged job could
+ * never be zombied at all: some unrelated project's gate is essentially always in flight, so
+ * the backstop #903 exists for (the process running the chain died outright, nothing is left to
+ * fire a timeout) would never fire again. That is a strictly worse failure than the one #936
+ * fixes, because nothing else ever clears a wedged job.
+ *
+ * The correct per-job signal is already recorded here: an attempt that STARTED and has not
+ * finished. That is this job's own gate, not the box's. It cannot outlive the process (the map
+ * is in-memory), and combined with the `lastActivityAt` clock below it means a job is declared
+ * dead only when it has both been silent for the full threshold AND has no attempt of its own
+ * outstanding.
+ *
  * Overridable so a test can drive both answers.
  */
-let gateIsAlive: () => boolean = buildGateBusy;
+function gateIsAliveForJob(job: MergeJob, nowMs: number): boolean {
+  // An UNFINISHED attempt is only evidence of life while it is plausibly still running. A gate
+  // whose process died mid-attempt never stamps `finishedAt`, so treating "unfinished" as alive
+  // unconditionally would grant that job permanent immunity — the exact #903 wedge this
+  // backstop exists for, reintroduced through the liveness check. An attempt that has itself
+  // been silent for the full threshold is therefore no longer counted as alive.
+  return job.attempts.some((a) => {
+    if (a.finishedAt) return false;
+    const startedMs = Date.parse(a.startedAt);
+    if (Number.isNaN(startedMs)) return false;
+    return nowMs - startedMs < MERGE_JOB_ZOMBIE_AFTER_MS;
+  });
+}
+
+let gateIsAlive: (job: MergeJob, nowMs: number) => boolean = gateIsAliveForJob;
 
 /** Test seam: replace the liveness probe the zombie detector consults. */
-export function setMergeGateLivenessProbe(probe: () => boolean): void {
+export function setMergeGateLivenessProbe(probe: (job: MergeJob, nowMs: number) => boolean): void {
   gateIsAlive = probe;
 }
 
@@ -274,8 +319,8 @@ export function isZombieMergeJob(job: MergeJob, nowMs: number = Date.now()): boo
   const sinceMs = lastActivityMs(job);
   if (Number.isNaN(sinceMs)) return false;
   if (nowMs - sinceMs < MERGE_JOB_ZOMBIE_AFTER_MS) return false;
-  // Alive gate ⇒ not a zombie, regardless of how long the record has been quiet.
-  if (gateIsAlive()) return false;
+  // This job's own gate still plausibly in flight ⇒ not a zombie.
+  if (gateIsAlive(job, nowMs)) return false;
   return true;
 }
 
@@ -349,5 +394,5 @@ export function resetMergeJobs(): void {
   jobsByWorkspace.clear();
   finishedOrder.length = 0;
   counter = 0;
-  gateIsAlive = buildGateBusy;
+  gateIsAlive = gateIsAliveForJob;
 }
