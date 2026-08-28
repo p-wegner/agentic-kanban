@@ -64,6 +64,16 @@ export interface RiskPosture {
   redBasePolicy: "block" | "allow-known-debt" | "allow-file-debt-ticket";
   trainMaxSize: number;
   trainMaxWaitMs: number;
+  /**
+   * How many MERGES one monitor cycle may attempt for this project (#919). Was the
+   * board-wide constant `MAX_MONITOR_MERGES_PER_CYCLE = 2`, which put a ~30 merges/hour
+   * ceiling on every project regardless of how much verification it had already paid for —
+   * a `sprint` project that batches a train has already done the expensive part and should
+   * not then land it two tickets at a time.
+   */
+  mergesPerCycle: number;
+  /** How many stalled builders one monitor cycle may relaunch for this project (#919). */
+  relaunchesPerCycle: number;
   /** What the builder's own Stop hook checks before allowing exit. */
   builderStopChecks: "tests-and-typecheck" | "tests-capacity-gated" | "typecheck-only" | "none";
   contentionMode: "off" | "warn" | "serialize";

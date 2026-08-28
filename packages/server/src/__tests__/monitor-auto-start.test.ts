@@ -3,6 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../db/index.js", () => ({
   db: {
     select: vi.fn(),
+    // #919: the end-of-cycle flush stamps the per-issue skip reason. It is a decoration on a
+    // decision already taken (and never-throwing), so it is stubbed rather than asserted here —
+    // `monitor-auto-start-skip-reason.test.ts` is where the write itself is checked.
+    update: vi.fn(() => ({ set: () => ({ where: async () => undefined }) })),
   },
 }));
 
@@ -587,7 +591,9 @@ describe("runAutoStart skip-reason tallies (#179 observability)", () => {
       .mockReturnValueOnce(makeSelectChain([])) // loop1 inProgressIssues (none)
       .mockReturnValueOnce(makeSelectChain([{ count: 1 }])) // loop2 capacity: active=1, at cap (limit 1)
       .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }])) // todoStatus
-      .mockReturnValueOnce(makeSelectChain([{ count: 3 }])); // waiting-count query
+      // #919: the hold now enumerates the held tickets by ID rather than counting them, so the
+      // same hold can be attributed to each one. The tally is their count, as before.
+      .mockReturnValueOnce(makeSelectChain([{ id: "held-1" }, { id: "held-2" }, { id: "held-3" }]));
 
     const skips = await runAutoStart(new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "1"]]), makeDeps());
 
@@ -602,7 +608,7 @@ describe("runAutoStart skip-reason tallies (#179 observability)", () => {
       .mockReturnValueOnce(makeSelectChain([])) // loop1 inProgressIssues (none)
       .mockReturnValueOnce(makeSelectChain([{ count: 1 }])) // loop2 capacity: at cap
       .mockReturnValueOnce(makeSelectChain([{ id: "todo-1" }])) // todoStatus
-      .mockReturnValueOnce(makeSelectChain([{ count: 0 }])); // waiting-count query: nothing queued
+      .mockReturnValueOnce(makeSelectChain([])); // #919: held-ticket query — nothing queued
 
     const skips = await runAutoStart(new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "1"]]), makeDeps());
 
@@ -650,7 +656,11 @@ describe("runAutoStart machine_saturated skip (#908)", () => {
     vi.mocked(db.select)
       .mockReturnValueOnce(makeSelectChain([{ id: "ip-1", projectId: "proj-1" }])) // inProgressStatuses
       .mockReturnValueOnce(makeSelectChain([{ count: 0 }])) // loop1 activeWip -- saturation check ends the backfill loop
-      .mockReturnValueOnce(makeSelectChain([{ count: 0 }])); // loop2 capacity -- saturation check ends the pull loop too
+      // #919: each hold now also attributes itself to the tickets it holds — a Todo-status
+      // lookup plus the held-id query, per hold. Empty here: this test is about the tally.
+      .mockReturnValueOnce(makeSelectChain([])) // loop1 hold: todoStatus (none -> no attribution)
+      .mockReturnValueOnce(makeSelectChain([{ count: 0 }])) // loop2 capacity -- saturation check ends the pull loop too
+      .mockReturnValueOnce(makeSelectChain([])); // loop2 hold: todoStatus (none)
 
     const skips = await runAutoStart(
       new Map([["nudge_auto_start", "true"], ["nudge_wip_limit", "5"]]),

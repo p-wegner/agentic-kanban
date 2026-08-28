@@ -44,6 +44,13 @@ export const issues = sqliteTable("issues", {
   lastStartScore: real("last_start_score"),
   lastStartScoreComponentsJson: text("last_start_score_components_json"),
   lastStartScoredAt: text("last_start_scored_at"),
+  // #919 — why the monitor did NOT start this issue on its most recent pass. An
+  // `AutoStartSkipReason` (`wip_cap` / `machine_saturated` / `contention_gate` / ...), or null
+  // when the monitor has never declined it. Previously the skip reasons existed only as
+  // PER-PROJECT tallies inside one cycle's return value, so "why is #57 not running" had no
+  // answer once the cycle ended — the tally said `wip_cap: 7` without naming a single ticket.
+  lastAutoStartSkipReason: text("last_auto_start_skip_reason"),
+  lastAutoStartSkipAt: text("last_auto_start_skip_at"),
 }, (table) => ({
   milestoneIdIdx: index("idx_issues_milestone_id").on(table.milestoneId),
   statusIdStatusChangedAtIdx: index("idx_issues_status_id_status_changed_at").on(table.statusId, table.statusChangedAt),
