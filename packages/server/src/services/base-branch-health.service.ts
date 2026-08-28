@@ -214,7 +214,7 @@ ${tail(combined)}`,
     // #931: this probe runs the same verify script the gate does, on the same box, and had
     // no worker cap of its own — sharing the gate's resolved cap keeps the two from
     // independently defaulting to one vitest worker per core.
-    const probeMaxWorkers = await resolveVerifyMaxWorkers(projectId, database);
+    const probeMaxWorkers = (await resolveVerifyMaxWorkers(projectId, database)).workers;
     const run = await runSetupScript(dest, verifyScript, {
       timeoutMs: VERIFY_TIMEOUT_MS,
       env: { ...VERIFY_NEUTRALIZED_LISTENER_ENV, KANBAN_TEST_MAX_WORKERS: String(probeMaxWorkers) },

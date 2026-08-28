@@ -51,11 +51,23 @@ describe("buildGateBusy (#581)", () => {
   });
 });
 
-describe("builder quiescing (#581)", () => {
+describe("builder quiescing (#581, host-saturation-scoped since #909)", () => {
   let db: Database;
+  let originalMinFreeGb: string | undefined;
+  let originalForce: string | undefined;
 
   beforeEach(() => {
     db = createTestDb().db as unknown as Database;
+    originalMinFreeGb = process.env.SMART_HOOKS_MIN_FREE_GB;
+    originalForce = process.env.SMART_HOOKS_FORCE;
+    delete process.env.SMART_HOOKS_FORCE;
+  });
+
+  afterEach(() => {
+    if (originalMinFreeGb === undefined) delete process.env.SMART_HOOKS_MIN_FREE_GB;
+    else process.env.SMART_HOOKS_MIN_FREE_GB = originalMinFreeGb;
+    if (originalForce === undefined) delete process.env.SMART_HOOKS_FORCE;
+    else process.env.SMART_HOOKS_FORCE = originalForce;
   });
 
   it("defaults ON — a trustworthy gate result is worth one cycle of start latency", async () => {
@@ -71,7 +83,9 @@ describe("builder quiescing (#581)", () => {
     await expect(shouldQuiesceBuildersForGate(PROJECT_ID, db)).resolves.toBe(false);
   });
 
-  it("holds starts while a gate is in flight", async () => {
+  it("holds starts while a gate is in flight AND the host is saturated (#909)", async () => {
+    // Force Tier 0 to report "tight" regardless of this machine's real free RAM.
+    process.env.SMART_HOOKS_MIN_FREE_GB = "999999";
     let heldDuringGate: boolean | null = null;
     await runUnderBuildSemaphore(async () => {
       heldDuringGate = await shouldQuiesceBuildersForGate(PROJECT_ID, db);
@@ -79,7 +93,18 @@ describe("builder quiescing (#581)", () => {
     expect(heldDuringGate).toBe(true);
   });
 
-  it("respects the opt-out even during a gate", async () => {
+  it("holds NOTHING while a gate is in flight but the host has room (#909) — the 44-minute-gate/13-project freeze this ticket fixes", async () => {
+    // Force Tier 0 to report "plenty of room" regardless of this machine's real free RAM.
+    process.env.SMART_HOOKS_FORCE = "1";
+    let heldDuringGate: boolean | null = null;
+    await runUnderBuildSemaphore(async () => {
+      heldDuringGate = await shouldQuiesceBuildersForGate(PROJECT_ID, db);
+    });
+    expect(heldDuringGate).toBe(false);
+  });
+
+  it("respects the opt-out even during a saturated gate", async () => {
+    process.env.SMART_HOOKS_MIN_FREE_GB = "999999";
     await db.insert(preferences).values({ key: quiesceBuildersDuringGatePrefKey(PROJECT_ID), value: "false" });
     let heldDuringGate: boolean | null = null;
     await runUnderBuildSemaphore(async () => {
@@ -111,5 +136,27 @@ describe("the gate message says whether it ran protected (#581)", () => {
     const message = buildGateTierMessage(base);
     expect(message).not.toContain("builders");
     expect(message).toContain("workers 6");
+  });
+});
+
+describe("the gate message names a DERIVED worker count (#909)", () => {
+  const base = {
+    strategy: "full" as const,
+    packageScoped: false,
+    fileScoped: false,
+    changedFileCount: 3,
+    guardSuiteCount: 0,
+    maxWorkers: 6,
+  };
+
+  it("says 'derived' plus free RAM when the count came from live capacity", () => {
+    const message = buildGateTierMessage({ ...base, maxWorkersDerived: true, hostFreeGb: 12.3 });
+    expect(message).toContain("workers 6 (derived, host free 12.3 GB)");
+  });
+
+  it("reports a bare number when the count was pinned (env override / fallback)", () => {
+    const message = buildGateTierMessage({ ...base, maxWorkersDerived: false, hostFreeGb: null });
+    expect(message).toContain("workers 6");
+    expect(message).not.toContain("derived");
   });
 });

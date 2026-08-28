@@ -214,6 +214,15 @@ export interface GateTierInfo {
   guardSuiteCount: number;
   maxWorkers: number;
   /**
+   * Was `maxWorkers` DERIVED from live capacity (#909), or pinned (env override, or a
+   * capacity-read failure that fell back to the pref/shipped default)? Undefined for a caller
+   * that never resolved capacity at all (kept optional for back-compat with any pre-#909 test
+   * fixture that constructs a `GateTierInfo` by hand).
+   */
+  maxWorkersDerived?: boolean;
+  /** Free RAM (GB) observed when `maxWorkers` was derived; null when not derived or unread. */
+  hostFreeGb?: number | null;
+  /**
    * Were new builder starts held for the duration of this gate (#581)? An operator reading
    * a merge comment has to be able to tell a result produced on a quiet box from one
    * produced while builders were competing for the same cores — the second kind is where
@@ -260,11 +269,14 @@ export function buildGateTierMessage(tierInfo: GateTierInfo | null): string {
       : tierInfo.packageScoped
         ? "package-scoped"
         : "full";
+  const workersLabel = tierInfo.maxWorkersDerived
+    ? `workers ${tierInfo.maxWorkers} (derived, host free ${(tierInfo.hostFreeGb ?? 0).toFixed(1)} GB)`
+    : `workers ${tierInfo.maxWorkers}`;
   const parts = [
     `tier: ${tier}`,
     `${tierInfo.changedFileCount} changed file(s)`,
     ...(tierInfo.fileScoped || tierInfo.guardsOnly ? [`${tierInfo.guardsOnly ? "" : "+"}${tierInfo.guardSuiteCount} guard suites`] : []),
-    `workers ${tierInfo.maxWorkers}`,
+    workersLabel,
     ...(tierInfo.buildersQuiesced === undefined
       ? []
       : [tierInfo.buildersQuiesced ? "builders held" : "builders NOT held"]),

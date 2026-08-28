@@ -44,114 +44,35 @@ import { resolveVerifyOutcome } from "./verify-retry-strategies.js";
 import type { FailedSuite } from "./verify-flake-retry.js";
 import { openRedDebtEntry } from "../repositories/red-debt.repository.js";
 
-/**
- * Default verify-gate timeout (#192). The verify gate runs a full build+test suite in a
- * fresh worktree (cold daemon/cache), a materially heavier job than the setup/install
- * script `DEFAULT_SETUP_SCRIPT_TIMEOUT_MS` budgets — so it gets its own, larger default
- * budget rather than sharing the 5-minute setup-script constant. Still overridable per
- * project via `verify_timeout_ms_<projectId>`.
- *
- * The number itself now comes from `verify-budget.ts`, shared with base-branch-health: both
- * run the SAME `verify_script`, and while they held separate budgets (20 vs 45 minutes) the
- * base probe could answer green where every branch gate timed out.
- */
-export const DEFAULT_VERIFY_TIMEOUT_MS = VERIFY_SCRIPT_TIMEOUT_MS;
+// The verify TUNABLES (timeout / worker cap / file-scope prefs, and #909's capacity
+// derivation) live in `verify-tunables.ts` — same reason as the two extractions above this
+// one: this file sits against the 1000-line god-module ceiling. Re-exported so importers,
+// including `base-branch-health.service.ts` and `verify-budget-parity.test.ts`, are unchanged.
+import {
+  DEFAULT_VERIFY_TIMEOUT_MS,
+  DEFAULT_VERIFY_MAX_WORKERS,
+  verifyTimeoutPrefKey,
+  verifyMaxWorkersPrefKey,
+  verifyFileScopePrefKey,
+  resolveVerifyTimeoutMs,
+  resolveVerifyFileScope,
+  resolveVerifyMaxWorkers,
+  type ResolvedVerifyWorkers,
+} from "./verify-tunables.js";
 
-/** Preference key for a per-project override of the verify-gate timeout (ms). */
-// #496: built from the registry, so an unregistered prefix is a COMPILE error.
-const verifyTimeoutPrefDef = projectPref("verify_timeout_ms");
-const verifyMaxWorkersPrefDef = projectPref("verify_max_workers");
-const verifyFileScopePrefDef = projectPref("verify_file_scope");
-
-export function verifyTimeoutPrefKey(projectId: string): string {
-  return verifyTimeoutPrefDef.key(projectId);
-}
-
-/** Bounds a parsed timeout override to something sane: at least 30s, at most 3 hours. */
-const MIN_TIMEOUT_MS = 30 * 1000;
-const MAX_TIMEOUT_MS = 3 * 60 * 60 * 1000;
-
-async function resolveVerifyTimeoutMs(projectId: string, database: Database): Promise<number> {
-  const raw = await getPreference(verifyTimeoutPrefKey(projectId), database).catch(() => null);
-  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
-  if (Number.isFinite(parsed) && parsed >= MIN_TIMEOUT_MS && parsed <= MAX_TIMEOUT_MS) return parsed;
-  return DEFAULT_VERIFY_TIMEOUT_MS;
-}
-
-/**
- * Default vitest worker cap for gate runs (#278). Two forks still overlap I/O-bound
- * suites while leaving the box responsive; the pre-fix default was `cpus/2`.
- */
-export const DEFAULT_VERIFY_MAX_WORKERS = 2;
-
-/**
- * Preference key for a per-project override of the verify-gate vitest worker cap
- * (integer, clamped to 1..{@link MAX_VERIFY_WORKERS}; anything unparseable falls back to
- * {@link DEFAULT_VERIFY_MAX_WORKERS}).
- *
- * **There is no UI for this** — it is set through the preferences API/CLI/MCP like any other
- * project-scoped pref, which is why the revert procedure is written down here rather than in a
- * settings panel description.
- *
- * **What raising it buys, measured (#536).** This repo's gate was CPU-bound at the 2-worker
- * cap: 4127s of test CPU against 2380s wall, i.e. both workers ~87% busy on a 16-core box with
- * 14 cores idle. Raising it to 6 cut the run to 1564s. Two effects made that safe rather than
- * flaky: the 60s per-test timeouts were already in place, and #581 now holds builder launches
- * while a gate runs (`quiesce_builders_during_gate`), so the six forks are not competing with
- * an agent's own test run for the same box.
- *
- * **Revert procedure — one pref write, no deploy, no restart.** The value is read fresh on
- * every gate run (`resolveVerifyMaxWorkers` below), so clearing the override takes effect on
- * the next merge — set `verify_max_workers_<projectId>` back to `2` (the shipped default), or
- * to the empty string, which the clamp turns into the same thing.
- *
- * **Revert when** the gate starts failing with timeout-class errors that pass on a re-run and
- * on a solo run of the same suite — that is fork contention, not a real defect. Step down to 4
- * before going back to 2; the win is sublinear, so half the workers is nowhere near half the
- * benefit. A raise is per-project on purpose: it is a statement about THIS box's core count and
- * what else runs on it, not about the code.
- */
-export function verifyMaxWorkersPrefKey(projectId: string): string {
-  return verifyMaxWorkersPrefDef.key(projectId);
-}
-
-/**
- * Preference key for turning the gate's file-level test scoping OFF per project (#278).
- *
- * Defaults to ON. It is a real narrowing of what the gate proves — `vitest related` selects
- * suites by import graph, so a test that exercises a change through a mechanism vitest cannot
- * see (a spawned process, a fixture read off disk) is no longer selected. The filesystem
- * ASSERTION suites, which are the ones that provably cannot be reached by import, are
- * force-run by `scripts/test-mine.mjs` (`ALWAYS_RUN_TESTS`), so the residual gap is narrower
- * than "everything not imported". A project that would rather pay the full suite sets this to
- * "false".
- */
-export function verifyFileScopePrefKey(projectId: string): string {
-  return verifyFileScopePrefDef.key(projectId);
-}
-
-async function resolveVerifyFileScope(projectId: string, database: Database): Promise<boolean> {
-  const raw = await getPreference(verifyFileScopePrefKey(projectId), database).catch(() => null);
-  return raw?.trim().toLowerCase() !== "false";
-}
+export {
+  DEFAULT_VERIFY_TIMEOUT_MS,
+  DEFAULT_VERIFY_MAX_WORKERS,
+  verifyTimeoutPrefKey,
+  verifyMaxWorkersPrefKey,
+  verifyFileScopePrefKey,
+  resolveVerifyMaxWorkers,
+  type ResolvedVerifyWorkers,
+};
 
 // `verify_gate_strategy` (the named tier pref), the always-run guard-suite scan, and the
 // pass-message builder live in `pre-merge-gate-tier.ts` (#538) — kept out of this file to stay
 // under the god-module cohesion ceiling (`max-file-size.test.ts` / `check-god-modules.mjs`).
-
-const MAX_VERIFY_WORKERS = 32;
-
-/**
- * Exported for the base-branch health probe (#931): it spawns the same `verify_script` on
- * the same box and had no worker cap of its own, so it could default to one vitest worker
- * per core just like an unconfigured gate — the SAME budget applies to both.
- */
-export async function resolveVerifyMaxWorkers(projectId: string, database: Database): Promise<number> {
-  const raw = await getPreference(verifyMaxWorkersPrefKey(projectId), database).catch(() => null);
-  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
-  if (Number.isFinite(parsed) && parsed >= 1 && parsed <= MAX_VERIFY_WORKERS) return parsed;
-  return DEFAULT_VERIFY_MAX_WORKERS;
-}
 
 /**
  * Failure-message signature of a verify_script that couldn't even resolve its own
@@ -448,7 +369,8 @@ export async function runPreMergeGate(
     // out — which fails the gate and triggers a full retry (#218: 7 failed attempts
     // over 4 days). Honoured by `scripts/test-mine.mjs`; inert for any other
     // verify_script, and unset for interactive runs so `pnpm test:mine` is unchanged.
-    const gateMaxWorkers = await resolveVerifyMaxWorkers(projectId, database);
+    const resolvedWorkers = await resolveVerifyMaxWorkers(projectId, database);
+    const gateMaxWorkers = resolvedWorkers.workers;
     const isolationEnv = {
       ...gradleEnv,
       AGENTIC_KANBAN_DIR: gateDataDir,
@@ -519,6 +441,11 @@ export async function runPreMergeGate(
       changedFileCount: changedFiles.length,
       guardSuiteCount: countAlwaysRunGuardSuites(workingDir),
       maxWorkers: gateMaxWorkers,
+      // #909: was the worker count DERIVED from live capacity, or pinned (env override / a
+      // capacity-read failure that fell back to the pref)? A level may only weaken
+      // verification visibly — the same rule that makes `buildersQuiesced` explicit below.
+      maxWorkersDerived: resolvedWorkers.derived,
+      hostFreeGb: resolvedWorkers.hostFreeGb,
       // #581: say whether this run was protected from builder contention. A gate that
       // failed with builders competing for the box is a different claim from one that
       // failed on a quiet machine, and the failure text alone never distinguishes them.

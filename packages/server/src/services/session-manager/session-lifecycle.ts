@@ -55,7 +55,7 @@ import { loadCodexLicenseRing } from "../codex-license-ring.js";
 import { loadClaudeSubscriptionRing } from "../claude-subscription-ring.js";
 import { classifySessionExit as classifySessionExitRoute, extractCapturedStderr, ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS as EXIT_WINDOW_MS } from "./session-exit-state-machine.js";
 import { buildIndeterminateExitStats } from "./session-exit-stats.js";
-import { CODEX_SPARK_MODEL, CODEX_SAFE_DEFAULT_MODEL, isBuilderSession, buildStaleResumeHandoffPrompt, instructionFingerprint, mergeExistingSessionStats, lifecycleProviderName, resolveProviderRotation } from "./session-launch-helpers.js";
+import { CODEX_SPARK_MODEL, CODEX_SAFE_DEFAULT_MODEL, isBuilderSession, buildStaleResumeHandoffPrompt, instructionFingerprint, mergeExistingSessionStats, lifecycleProviderName, resolveProviderRotation, withBuilderTestWorkerCap } from "./session-launch-helpers.js";
 import { finalizePlanModeExit } from "./plan-mode-exit.js";
 import { finalizeUsageLimitRoute, finalizeLaunchFailureRoute, finalizeCompletedRoute, type ExitFinalizeContext } from "./exit-finalize.js";
 import { createRemoteTurnRecovery } from "./remote-turn-recovery.js";
@@ -352,7 +352,7 @@ export function createSessionLifecycle(
     // profile resolves to a separate CODEX_HOME / CLAUDE_CONFIG_DIR, point the env
     // var at it and drop the profile name from the launch. Best-effort — see
     // resolveProviderRotation for why a failure must never block a launch.
-    const rotation = await resolveProviderRotation(db, profile, extraEnv, {
+    const rotation = await resolveProviderRotation(db, profile, withBuilderTestWorkerCap(extraEnv, builderSession) /* #909 */, {
       loadCodexLicenseRing,
       loadClaudeSubscriptionRing,
       getProviderExitBehavior,

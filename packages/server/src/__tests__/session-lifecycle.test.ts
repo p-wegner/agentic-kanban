@@ -145,6 +145,30 @@ describe("session-lifecycle", () => {
     expect(rows[0].workspaceId).toBe(workspaceId);
   });
 
+  it("caps a builder's own test:mine via KANBAN_TEST_MAX_WORKERS, derived from live capacity (#909)", async () => {
+    const workspaceId = await seedWorkspace(db);
+    const { service: agentService } = createFakeAgentService();
+
+    const lifecycle = createSessionLifecycle(createSessionState(), undefined, vi.fn(), { db, agentService, preflight: okPreflight() });
+    await lifecycle.startSession({ workspaceId, prompt: "do it", triggerType: "agent" });
+
+    const request = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const capped = Number(request.extraEnv?.KANBAN_TEST_MAX_WORKERS);
+    expect(Number.isInteger(capped)).toBe(true);
+    expect(capped).toBeGreaterThanOrEqual(1);
+  });
+
+  it("does NOT cap a non-builder (review) session's test run — it never ran an uncapped one anyway", async () => {
+    const workspaceId = await seedWorkspace(db);
+    const { service: agentService } = createFakeAgentService();
+
+    const lifecycle = createSessionLifecycle(createSessionState(), undefined, vi.fn(), { db, agentService, preflight: okPreflight() });
+    await lifecycle.startSession({ workspaceId, prompt: "review it", triggerType: "review" });
+
+    const request = (agentService.launch as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(request.extraEnv?.KANBAN_TEST_MAX_WORKERS).toBeUndefined();
+  });
+
   it("records the workspace's skill (id + snapshotted name) on the session row", async () => {
     const skill = { id: randomUUID(), name: "code-review" };
     const workspaceId = await seedWorkspace(db, skill);
