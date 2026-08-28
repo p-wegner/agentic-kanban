@@ -7,14 +7,18 @@
  * `ORDER BY issue_number`; `previewNextStartCandidates` is the read-only twin behind
  * `GET /api/projects/:id/board-monitor/next` — same score, no persistence, no launch.
  */
-import { and, eq, inArray, sql } from "drizzle-orm";
-import { issues, projectStatuses } from "@agentic-kanban/shared/schema";
 import { normalizeIssuePriority } from "@agentic-kanban/shared/lib/issue-priority";
 import { readStrategyBullseye } from "@agentic-kanban/shared/lib/strategy-objective-file";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-import { db, type Database } from "../db/index.js";
+import type { Database } from "../db/index.js";
 import { computeStartScore, hoursSince, matchBullseyeSegment, type StartScoreComponents, type StartScoreResult } from "../lib/start-scoring.js";
-import { computeUnblockCounts } from "../repositories/start-scoring.repository.js";
+import {
+  computeUnblockCounts,
+  findProjectStatusIdByName,
+  findStatusIdsByNames,
+  persistStartScore,
+  selectScorableCandidates,
+} from "../repositories/start-scoring.repository.js";
 import { resolveStartPolicy } from "../services/start-policy.service.js";
 import { monitorEligibleIssueSql, notDriveOrEpicMetaSql, resolveCandidateStatusIds } from "./monitor-eligibility.js";
 
@@ -52,7 +56,7 @@ export async function orderCandidatesByStartScore<T extends ScorableCandidate>(
   projectId: string,
   doneStatusIds: ReadonlySet<string>,
   prefMap: Map<string, string>,
-  database: Database = db,
+  database: Database,
 ): Promise<void> {
   if (candidates.length === 0) return;
   const nowMs = Date.now();
@@ -75,15 +79,14 @@ export async function orderCandidatesByStartScore<T extends ScorableCandidate>(
   });
 
   // Best-effort persistence: a write failure must never block the ordering it decorates.
-  await Promise.all(scored.map(({ issue, result }) => {
+  await Promise.all(scored.map(async ({ issue, result }) => {
     const components: StartScoreComponents = result;
-    return database.update(issues).set({
-      lastStartScore: result.score,
-      lastStartScoreComponentsJson: JSON.stringify(components),
-      lastStartScoredAt: nowIso,
-    }).where(eq(issues.id, issue.id)).catch((err) => {
-      console.warn(`[monitor] failed to persist start score for issue ${issue.id}: ${errorMessage(err)}`);
-    });
+    const err = await persistStartScore(
+      issue.id,
+      { score: result.score, componentsJson: JSON.stringify(components), scoredAt: nowIso },
+      database,
+    );
+    if (err) console.warn(`[monitor] failed to persist start score for issue ${issue.id}: ${errorMessage(err)}`);
   }));
 
   const scoreById = new Map(scored.map(({ issue, result }) => [issue.id, result.score]));
@@ -109,24 +112,21 @@ export async function previewNextStartCandidates(
   projectId: string,
   prefMap: Map<string, string>,
   limit: number,
-  database: Database = db,
+  database: Database,
 ): Promise<StartScorePreviewRow[]> {
   const allowFeatureTypes = resolveStartPolicy(prefMap, projectId).mode !== "manual";
-  const todoStatus = await database.select({ id: projectStatuses.id }).from(projectStatuses)
-    .where(sql`${projectStatuses.name} = 'Todo' AND ${projectStatuses.projectId} = ${projectId}`).limit(1);
-  if (todoStatus.length === 0) return [];
+  const todoStatusId = await findProjectStatusIdByName(projectId, "Todo", database);
+  if (!todoStatusId) return [];
 
-  const candidateStatusIds = await resolveCandidateStatusIds(projectId, todoStatus[0].id, allowFeatureTypes);
-  const candidates = await database.select({
-    id: issues.id, title: issues.title, description: issues.description, issueType: issues.issueType,
-    issueNumber: issues.issueNumber, priority: issues.priority, createdAt: issues.createdAt, statusChangedAt: issues.statusChangedAt,
-  }).from(issues)
-    .where(and(inArray(issues.statusId, candidateStatusIds), monitorEligibleIssueSql(allowFeatureTypes), notDriveOrEpicMetaSql()));
+  const candidateStatusIds = await resolveCandidateStatusIds(projectId, todoStatusId, allowFeatureTypes, database);
+  const candidates = await selectScorableCandidates(
+    candidateStatusIds,
+    [monitorEligibleIssueSql(allowFeatureTypes), notDriveOrEpicMetaSql()],
+    database,
+  );
   if (candidates.length === 0) return [];
 
-  const doneStatuses = await database.select({ id: projectStatuses.id }).from(projectStatuses)
-    .where(sql`${projectStatuses.name} IN ('Done', 'Cancelled')`);
-  const doneStatusIds = new Set(doneStatuses.map((s) => s.id));
+  const doneStatusIds = await findStatusIdsByNames(["Done", "Cancelled"], database);
 
   const nowMs = Date.now();
   const unblockCounts = await computeUnblockCounts(projectId, candidates.map((c) => c.id), doneStatusIds, database);

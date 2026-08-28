@@ -566,7 +566,7 @@ async function noteWipCapSkip(ctx: AutoStartCycle, projectId: string, allowFeatu
   const waitingTodoStatus = await db.select({ id: projectStatuses.id }).from(projectStatuses)
     .where(sql`${projectStatuses.name} = 'Todo' AND ${projectStatuses.projectId} = ${projectId}`).limit(1);
   if (waitingTodoStatus.length === 0) return;
-  const waitingStatusIds = await resolveCandidateStatusIds(projectId, waitingTodoStatus[0].id, allowFeatureTypes);
+  const waitingStatusIds = await resolveCandidateStatusIds(projectId, waitingTodoStatus[0].id, allowFeatureTypes, db);
   const waitingCount = await db.select({ count: sql<number>`count(*)` }).from(issues)
     .where(and(inArray(issues.statusId, waitingStatusIds), monitorEligibleIssueSql(allowFeatureTypes), notDriveOrEpicMetaSql()));
   const waiting = Number(waitingCount[0]?.count ?? 0);
@@ -812,7 +812,7 @@ async function runTodoPull(ctx: AutoStartCycle, inProgressSt: { id: string; proj
 
   // For auto-driven projects, also pull Backlog issues so newly-created tickets
   // start without requiring a manual Backlog→Todo promotion (#536).
-  const candidateStatusIds = await resolveCandidateStatusIds(inProgressSt.projectId, todoStatus[0].id, allowFeatureTypes);
+  const candidateStatusIds = await resolveCandidateStatusIds(inProgressSt.projectId, todoStatus[0].id, allowFeatureTypes, db);
 
   // #774: do NOT pre-truncate the candidate set with an UNORDERED `limit(fetchLimit)`.
   // SQLite returns rows in an arbitrary order, so a small fetchLimit could return only
@@ -836,7 +836,7 @@ async function runTodoPull(ctx: AutoStartCycle, inProgressSt: { id: string; proj
     .where(sql`${projectStatuses.name} IN ('Done', 'Cancelled')`);
   const doneStatusIds = new Set(doneStatuses.map((s) => s.id));
 
-  await ctx.orderStartCandidates(todoIssues, inProgressSt.projectId, doneStatusIds, ctx.prefMap);
+  await ctx.orderStartCandidates(todoIssues, inProgressSt.projectId, doneStatusIds, ctx.prefMap, db);
 
   // Candidates consumed as GROUP MEMBERS this cycle: their workspace row is minutes
   // away (async provisioning), so only this in-cycle set stops the loop from also

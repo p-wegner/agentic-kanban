@@ -1,6 +1,7 @@
-import { drives, issueDependencies, issues, projectStatuses } from "@agentic-kanban/shared/schema";
+import { drives, issueDependencies, issues } from "@agentic-kanban/shared/schema";
 import { sql, type SQL } from "drizzle-orm";
-import { db } from "../db/index.js";
+import type { Database } from "../db/index.js";
+import { findProjectStatusIdByName } from "../repositories/start-scoring.repository.js";
 
 type MonitorIssueLike = {
   issueType?: string | null;
@@ -69,12 +70,16 @@ export function notDriveOrEpicMetaSql(): SQL {
  * from (#536). Returned as one list so the WIP-cap tally and the candidate query cannot
  * disagree about what "queued work" means.
  */
-export async function resolveCandidateStatusIds(projectId: string, todoStatusId: string, allowFeatureTypes: boolean): Promise<string[]> {
+export async function resolveCandidateStatusIds(
+  projectId: string,
+  todoStatusId: string,
+  allowFeatureTypes: boolean,
+  database: Database,
+): Promise<string[]> {
   const ids = [todoStatusId];
   if (allowFeatureTypes) {
-    const backlogStatus = await db.select({ id: projectStatuses.id }).from(projectStatuses)
-      .where(sql`${projectStatuses.name} = 'Backlog' AND ${projectStatuses.projectId} = ${projectId}`).limit(1);
-    if (backlogStatus.length > 0) ids.push(backlogStatus[0].id);
+    const backlogStatusId = await findProjectStatusIdByName(projectId, "Backlog", database);
+    if (backlogStatusId) ids.push(backlogStatusId);
   }
   return ids;
 }
