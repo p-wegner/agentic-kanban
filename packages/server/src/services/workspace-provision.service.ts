@@ -25,6 +25,7 @@ import type { ProviderName } from "./agent-provider.js";
 import { runSetupScript } from "./setup-script.js";
 import type { SetupScriptContainer } from "@agentic-kanban/shared/lib/setup-script";
 import { getPreference } from "../repositories/preferences.repository.js";
+import { resolveRiskPosture, riskPosturePref } from "@agentic-kanban/shared/lib/risk-posture";
 import { provisionContainerForWorkspace, resolveDevcontainerProvisionOptions } from "./devcontainer-workspace.service.js";
 import {
   buildSetupRunFromResult,
@@ -624,6 +625,15 @@ exit 1
     } catch (err) {
       console.warn(`[workspaces] board-feedback routing failed (non-fatal): ${errorMessage(err)}`);
     }
+    // #912: resolved posture, so the builder and its hooks see the same value the
+    // header chip and objective.md render — fail closed to "standard" on any read error.
+    let riskPosture = resolveRiskPosture(null);
+    try {
+      const raw = await getPreference(riskPosturePref.key(issue.projectId), database);
+      riskPosture = resolveRiskPosture(raw);
+    } catch (err) {
+      console.warn(`[workspaces] risk-posture read failed (non-fatal): ${errorMessage(err)}`);
+    }
     return writeTicketContextFile(worktreePath, {
       issueNumber: issue.issueNumber,
       title: issue.title,
@@ -635,6 +645,7 @@ exit 1
       serviceStack,
       boardFeedback,
       groupTickets,
+      riskPosture,
     });
   }
 

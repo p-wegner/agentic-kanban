@@ -1,5 +1,6 @@
 import { isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import { DEFAULT_SETTINGS, getBool } from "@agentic-kanban/shared/lib/settings-registry";
+import { RISK_POSTURES, RISK_POSTURE_DEFAULT, RISK_POSTURE_DESCRIPTIONS, RISK_POSTURE_LABELS, resolveRiskPosture } from "@agentic-kanban/shared/lib/risk-posture";
 import { Field, Toggle } from "./SettingsPrimitives.js";
 import { SlowRequestsPanel } from "./SlowRequestsPanel.js";
 import type { Settings, MonitorTunables } from "../lib/settings-shared.js";
@@ -38,6 +39,41 @@ export function WorkflowProcessPipelineSection({ settings }: { settings: Setting
         ))}
       </div>
       <div className="text-xs text-gray-400 dark:text-gray-500 mt-1.5">Green steps are optional — toggle them below to add/remove from pipeline.</div>
+    </div>
+  );
+}
+
+export function WorkflowRiskPostureSection({
+  settings,
+  set,
+  activeProjectId,
+}: WorkflowSectionProps & { activeProjectId?: string | null }) {
+  if (!activeProjectId) return null;
+  const key = `risk_posture_${activeProjectId}` as keyof Settings;
+  const current = resolveRiskPosture(settings[key]);
+  return (
+    <div className="pt-2">
+      <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Risk posture</div>
+      <Field
+        label="Posture"
+        hint="One dial for the risk/speed trade-off. A weaker posture only weakens verification VISIBLY — every merge names the posture, and skipped debt is tracked, never hidden."
+      >
+        <select
+          value={current}
+          onChange={(e) => set(key)(e.target.value)}
+          className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-1 focus:ring-brand-500"
+        >
+          {RISK_POSTURES.map((p) => (
+            <option key={p} value={p}>
+              {RISK_POSTURE_LABELS[p]}
+              {p === RISK_POSTURE_DEFAULT ? " (default)" : ""}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <p className="mt-1.5 text-[11px] text-gray-400 dark:text-gray-500 leading-snug">
+        {RISK_POSTURE_DESCRIPTIONS[current]}
+      </p>
     </div>
   );
 }
