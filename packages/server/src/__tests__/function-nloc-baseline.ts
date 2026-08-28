@@ -158,7 +158,7 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // module-level `*Impl` functions taking `database` explicitly, so the relaunch seam in
   // `workspace-session.service.ts` can share the exact same logic without this factory
   // re-growing every time that shared logic changes. The factory now holds thin delegators.
-  "services/workspace-provision.service.ts::createWorkspaceProvisionService": 412,
+  "services/workspace-provision.service.ts::createWorkspaceProvisionService": 408,
   // 404 -> 399, banked (#806): five hand-written body guards became one schema parse each.
   "routes/workspace-actions.ts::createWorkspaceActionsRoute": 418,
   // 349 -> 351 (#841): POSIX-only `detached: true` for a shell launch, closing the #836 gap.

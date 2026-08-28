@@ -10,7 +10,7 @@
  * function that has vanished, and on a number that has become stale.
  */
 export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
-  "components/Layout.tsx::Layout": 708,
+  "components/Layout.tsx::Layout": 691,
   "components/ButlerView.tsx::ButlerView": 693,
   "components/CreateWorkspaceForm.tsx::CreateWorkspaceForm": 694,
   "routes/BoardPage.tsx::BoardPage": 627,

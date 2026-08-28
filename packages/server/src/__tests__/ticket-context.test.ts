@@ -7,6 +7,7 @@ import {
   buildStackProfileSection,
   buildServiceStackSection,
   buildBoardFeedbackSection,
+  buildRiskPostureSection,
   writeTicketContextFile,
   TICKET_CONTEXT_FILENAME,
 } from "@agentic-kanban/shared/lib/ticket-context";
@@ -400,6 +401,42 @@ describe("ticket-context", () => {
       expect(md).toContain("# Ticket #7: Build a thing");
       expect(md).toContain("## If you hit a bug in the kanban board itself");
       expect(md).toContain('projectId: "board-uuid"');
+    });
+  });
+
+  describe("risk posture section (#912)", () => {
+    const fileTicket = {
+      kind: "file-ticket" as const,
+      projectId: "board-uuid",
+      projectName: "agentic-kanban",
+      isCurrentProject: false,
+    };
+
+    it("is omitted when no posture is supplied", () => {
+      expect(buildRiskPostureSection(null)).toBeNull();
+      expect(buildRiskPostureSection(undefined)).toBeNull();
+      const md = buildTicketContextMarkdown({ title: "t", description: "d" });
+      expect(md).not.toContain("## Risk posture");
+    });
+
+    it("names the posture and quotes its skip description", () => {
+      const section = buildRiskPostureSection("fast")!;
+      expect(section).toContain("## Risk posture");
+      expect(section).toContain("Fast");
+      expect(section).toContain("one review per train");
+    });
+
+    it("is rendered into the generated ticket file BEFORE the board-feedback section", () => {
+      const md = buildTicketContextMarkdown({
+        issueNumber: 9,
+        title: "Ship it",
+        description: "d",
+        riskPosture: "sprint",
+        boardFeedback: fileTicket,
+      });
+      expect(md).toContain("## Risk posture");
+      expect(md).toContain("Sprint");
+      expect(md.indexOf("## Risk posture")).toBeLessThan(md.indexOf("## If you hit a bug in the kanban board itself"));
     });
   });
 });

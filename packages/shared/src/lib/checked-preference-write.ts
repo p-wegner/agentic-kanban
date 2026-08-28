@@ -37,6 +37,7 @@ import {
   commitObjectiveFile,
   PROJECT_CONDUCTOR_OBJECTIVE_RELATIVE_PATH,
 } from "./strategy-objective-file.js";
+import { readRiskPosture, riskPosturePref } from "./risk-posture.js";
 
 /** Drizzle handle over the shared schema — what both the server and MCP DBs are. */
 export type PreferenceWriteDb = ReturnType<typeof drizzle<typeof schemaNs>>;
@@ -210,29 +211,50 @@ export async function setPreferenceChecked(
   }
   notifyPreferenceWrite();
 
-  // 3. Regenerate objective.md for any board_strategy write.
+  // 3. Regenerate objective.md for any board_strategy OR risk_posture write — both
+  //    feed the same generated block, so either one changing must re-render it (the
+  //    RISK POSTURE line would otherwise go stale on a posture-only save).
   const objectivesRegenerated: string[] = [];
   const strategyEntries = entries.filter((e) => isBoardStrategyKey(e.key));
-  if (strategyEntries.length > 0) {
+  const postureProjectIds = entries
+    .map((e) => riskPosturePref.projectIdOf(e.key))
+    .filter((id): id is string => id !== null);
+  const strategyProjectIds = new Set(strategyEntries.map((e) => projectIdFromBoardStrategyKey(e.key)).filter((id): id is string => id !== null));
+  // A posture-only write (no accompanying board_strategy entry) still needs a regen,
+  // using the project's CURRENT strategy config from `projected` rather than a raw
+  // entry value.
+  const postureOnlyProjectIds = postureProjectIds.filter((id) => !strategyProjectIds.has(id));
+
+  if (strategyEntries.length > 0 || postureOnlyProjectIds.length > 0) {
     // Default ON: a Bullseye save regenerates the git-tracked objective.md, and an
     // uncommitted main checkout blocks the auto-merge queue. Opt out via the setting.
     const autoCommit = parseBoolSetting("auto_commit_strategy_objective", projected.get("auto_commit_strategy_objective"));
-    for (const entry of strategyEntries) {
-      const projectId = projectIdFromBoardStrategyKey(entry.key);
-      if (!projectId) continue;
+
+    const regenerate = async (projectId: string, rawConfig: string) => {
       const projectRow = (await db.select().from(projects).where(eq(projects.id, projectId)))[0];
       const repoPath = projectRow?.repoPath;
-      if (!repoPath) continue;
+      if (!repoPath) return;
       const conductorEnabled = isConductorEnabledPreference(projected.get(`board_conductor_${projectId}`));
+      const posture = readRiskPosture(projected, projectId);
       const changed = conductorEnabled
-        ? writeStrategyObjective(repoPath, entry.value, {
+        ? writeStrategyObjective(repoPath, rawConfig, {
             objectiveRelativePath: PROJECT_CONDUCTOR_OBJECTIVE_RELATIVE_PATH,
             createIfMissing: true,
             project: projectRow,
+            posture,
           })
-        : writeStrategyObjective(repoPath, entry.value);
+        : writeStrategyObjective(repoPath, rawConfig, { posture });
       if (changed) objectivesRegenerated.push(projectId);
       if (changed && autoCommit && !conductorEnabled) commitObjectiveFile(repoPath);
+    };
+
+    for (const entry of strategyEntries) {
+      const projectId = projectIdFromBoardStrategyKey(entry.key);
+      if (!projectId) continue;
+      await regenerate(projectId, entry.value);
+    }
+    for (const projectId of postureOnlyProjectIds) {
+      await regenerate(projectId, projected.get(`board_strategy_${projectId}`) ?? "");
     }
   }
 

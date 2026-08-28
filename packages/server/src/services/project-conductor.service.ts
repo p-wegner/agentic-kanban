@@ -12,6 +12,7 @@ import {
   writeStrategyObjective,
 } from "./strategy-objective.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { readRiskPosture } from "@agentic-kanban/shared/lib/risk-posture";
 
 export interface ProjectConductorConfig {
   enabled: boolean;
@@ -58,10 +59,12 @@ async function enabledProjectConductors(database: Database): Promise<Map<string,
 async function ensureObjective(database: Database, project: typeof projects.$inferSelect): Promise<void> {
   const rows = await database.select().from(preferences);
   const strategyRaw = rows.find((row) => row.key === strategyPrefKey(project.id))?.value ?? "{}";
+  const prefMap = new Map(rows.map((row) => [row.key, row.value]));
   writeStrategyObjective(project.repoPath, strategyRaw, {
     objectiveRelativePath: PROJECT_CONDUCTOR_OBJECTIVE_RELATIVE_PATH,
     createIfMissing: true,
     project,
+    posture: readRiskPosture(prefMap, project.id),
   });
 }
 

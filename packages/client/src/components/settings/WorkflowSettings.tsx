@@ -1,5 +1,5 @@
 import type { Dispatch, SetStateAction } from "react";
-import { WorkflowAgentBehaviourSection, WorkflowBoardMonitorSection, WorkflowFollowUpSection, WorkflowLearningSection, WorkflowProcessPipelineSection, WorkflowReviewMergeSection, type MonitorTunables, type Settings, type SettingsBoolSetter, type SettingsTextSetter, type SkillSetting } from "../SettingsPanel.shared.js";
+import { WorkflowAgentBehaviourSection, WorkflowBoardMonitorSection, WorkflowFollowUpSection, WorkflowLearningSection, WorkflowProcessPipelineSection, WorkflowReviewMergeSection, WorkflowRiskPostureSection, type MonitorTunables, type Settings, type SettingsBoolSetter, type SettingsTextSetter, type SkillSetting } from "../SettingsPanel.shared.js";
 import type { MonitorAction } from "../MonitorPopover.js";
 
 type WorkflowSettingsProps = {
@@ -22,6 +22,7 @@ export function WorkflowSettings({ settings, set, setBool, setSettings, activePr
   return (
 <>
                   <WorkflowProcessPipelineSection settings={settings} />
+                  <WorkflowRiskPostureSection settings={settings} set={set} setBool={setBool} activeProjectId={activeProjectId} />
                   <WorkflowAgentBehaviourSection settings={settings} set={set} setBool={setBool} />
                   <WorkflowReviewMergeSection
                     settings={settings}
