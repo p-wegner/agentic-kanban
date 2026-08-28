@@ -41,6 +41,8 @@ import { VERIFY_SCRIPT_TIMEOUT_MS } from "./verify-budget.js";
 import { summarizeVerifyFailure } from "./verify-failure-summary.js";
 import { VERIFY_NEUTRALIZED_LISTENER_ENV } from "../lib/verify-env.js";
 import { resolveVerifyOutcome } from "./verify-retry-strategies.js";
+import type { FailedSuite } from "./verify-flake-retry.js";
+import { openRedDebtEntry } from "../repositories/red-debt.repository.js";
 
 /**
  * Default verify-gate timeout (#192). The verify gate runs a full build+test suite in a
@@ -166,6 +168,39 @@ const MISSING_DEPS_SIGNATURE =
 
 function looksLikeMissingDepsFailure(output: string): boolean {
   return MISSING_DEPS_SIGNATURE.test(output);
+}
+
+/**
+ * Open a `flaky`-tagged red-debt ledger entry for every suite #894's targeted re-run just
+ * cleared (#915). Recording it here means the NEXT gate can consult the ledger's subset rule
+ * instead of paying for another 45-minute full re-run to rediscover the same load-induced
+ * flake. Best-effort by construction: an unrecordable entry must never turn a passing gate red.
+ *
+ * The subset rule (#915) compares ledger suite names against `failedSuitesForOutcome`'s output
+ * (`failed-suite-parse.ts`), which never carries a package prefix — it normalizes to a bare
+ * forward-slash path. `FailedSuite.file` here is ALREADY in that shape (`verify-flake-retry.ts`
+ * strips ANSI and backslashes the same way); `packageLabel` exists only to disambiguate
+ * same-named files across packages during the retry itself and must NOT be prepended here, or a
+ * suite this ledgers as `flaky` would never string-match the base-health probe's un-prefixed
+ * name on the next gate run — silently defeating the exact quarantine this exists to provide.
+ */
+async function recordFlakySuitesAsRedDebt(args: {
+  flakySuites: FailedSuite[] | undefined;
+  projectId: string;
+  workingDir: string | null;
+  database: Database;
+}): Promise<void> {
+  const { flakySuites, projectId, workingDir, database } = args;
+  if (!flakySuites || flakySuites.length === 0) return;
+  const sinceCommit = workingDir
+    ? ((await revParse(workingDir, "HEAD").catch(() => null)) ?? "unknown")
+    : "unknown";
+  for (const suite of flakySuites) {
+    const suiteName = suite.file;
+    await openRedDebtEntry({ projectId, suite: suiteName, sinceCommit, tag: "flaky" }, database).catch((err) => {
+      console.warn(`[pre-merge-gate] failed to open flaky red-debt entry for ${suiteName} (non-fatal):`, errorMessage(err));
+    });
+  }
 }
 
 /** The workspace fields the pre-merge gate needs. A thin shape so any caller (exit-workflow's
@@ -542,6 +577,10 @@ export async function runPreMergeGate(
     }
     // Carried on the tier info so the PASSING message names it (see GateTierInfo).
     if (gateTierInfo && outcome.flakeRetryNote) gateTierInfo.flakeRetryNote = outcome.flakeRetryNote;
+    // #915 — a suite #894 just cleared with a targeted re-run is exactly what the red-debt
+    // ledger's `flaky` tag exists for. Extracted (rather than inlined) so this branchy-by-nature
+    // best-effort loop does not count against `runPreMergeGate`'s own god-module branch budget.
+    await recordFlakySuitesAsRedDebt({ flakySuites: outcome.flakySuites, projectId, workingDir, database });
     } finally {
       // Best-effort by design (#352's root cause): on Windows the directory cannot be removed
       // while any surviving grandchild of the verify run still holds it as its cwd. Log it so a

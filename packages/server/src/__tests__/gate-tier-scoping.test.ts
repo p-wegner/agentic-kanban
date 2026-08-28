@@ -17,7 +17,10 @@ import { describe, it, expect } from "vitest";
 import {
   resolveGateScoping,
   buildGateTierMessage,
+  resolveBaseProbeDue,
   DEFAULT_VERIFY_GATE_STRATEGY,
+  DEFAULT_BASE_PROBE_INTERVAL_MS,
+  DEFAULT_BASE_PROBE_EVERY_N_TRAINS,
 } from "../services/pre-merge-gate-tier.js";
 
 const SCOPE = "shared,client";
@@ -41,7 +44,10 @@ describe("resolveGateScoping", () => {
       .toEqual({ packagesEnv: SCOPE, fileScoped: true });
   });
 
-  it("`scoped-base-watch` behaves as `scoped` until a base-health backstop exists", () => {
+  it("`scoped-base-watch` scopes the per-train gate exactly like `scoped`", () => {
+    // The per-train gate itself stays narrow under scoped-base-watch (#916) — what makes the
+    // strategy REAL is the separate scheduled base probe (resolveBaseProbeDue below), not a
+    // difference in this function's output.
     expect(resolveGateScoping({ strategy: "scoped-base-watch", testScope: SCOPE, fileScopePref: true, changedFileCount: 3 }))
       .toEqual(resolveGateScoping({ strategy: "scoped", testScope: SCOPE, fileScopePref: true, changedFileCount: 3 }));
   });
@@ -63,6 +69,48 @@ describe("resolveGateScoping", () => {
   it("does not file-scope on an empty changed-file list (nothing to relate against)", () => {
     expect(resolveGateScoping({ strategy: "scoped", testScope: SCOPE, fileScopePref: true, changedFileCount: 0 }).fileScoped)
       .toBe(false);
+  });
+});
+
+describe("resolveBaseProbeDue (#916 — scoped-base-watch's actual backstop)", () => {
+  it("is never due for any strategy other than scoped-base-watch", () => {
+    expect(resolveBaseProbeDue({ strategy: "full", lastProbeAgeMs: null, trainsSinceLastProbe: 999 }).due).toBe(false);
+    expect(resolveBaseProbeDue({ strategy: "scoped", lastProbeAgeMs: null, trainsSinceLastProbe: 999 }).due).toBe(false);
+  });
+
+  it("is due when no probe has ever run — 'never' must not read as 'recent'", () => {
+    const result = resolveBaseProbeDue({ strategy: "scoped-base-watch", lastProbeAgeMs: null, trainsSinceLastProbe: 0 });
+    expect(result.due).toBe(true);
+    expect(result.ageLabel).toBe("never");
+  });
+
+  it("is due once the interval elapses", () => {
+    expect(resolveBaseProbeDue({
+      strategy: "scoped-base-watch", lastProbeAgeMs: DEFAULT_BASE_PROBE_INTERVAL_MS + 1, trainsSinceLastProbe: 0,
+    }).due).toBe(true);
+    expect(resolveBaseProbeDue({
+      strategy: "scoped-base-watch", lastProbeAgeMs: DEFAULT_BASE_PROBE_INTERVAL_MS - 1, trainsSinceLastProbe: 0,
+    }).due).toBe(false);
+  });
+
+  it("is due once N trains have landed since the last probe, even if recent", () => {
+    expect(resolveBaseProbeDue({
+      strategy: "scoped-base-watch", lastProbeAgeMs: 1000, trainsSinceLastProbe: DEFAULT_BASE_PROBE_EVERY_N_TRAINS,
+    }).due).toBe(true);
+    expect(resolveBaseProbeDue({
+      strategy: "scoped-base-watch", lastProbeAgeMs: 1000, trainsSinceLastProbe: DEFAULT_BASE_PROBE_EVERY_N_TRAINS - 1,
+    }).due).toBe(false);
+  });
+
+  it("honours explicit interval/count overrides", () => {
+    expect(resolveBaseProbeDue({
+      strategy: "scoped-base-watch", lastProbeAgeMs: 5000, trainsSinceLastProbe: 0, intervalMs: 1000,
+    }).due).toBe(true);
+  });
+
+  it("formats the age label for the gate message", () => {
+    expect(resolveBaseProbeDue({ strategy: "scoped-base-watch", lastProbeAgeMs: 5 * 60_000, trainsSinceLastProbe: 0 }).ageLabel).toBe("5m");
+    expect(resolveBaseProbeDue({ strategy: "scoped-base-watch", lastProbeAgeMs: 3 * 60 * 60_000, trainsSinceLastProbe: 0 }).ageLabel).toBe("3h");
   });
 });
 
@@ -95,6 +143,33 @@ describe("the tier MESSAGE agrees with the tier that ran", () => {
   // docs-only diff", which read as "nothing could have broken" while the markdown-reading
   // @gate:always-run suites were exactly what went unrun. It now runs those guards, so the
   // message must name the narrower tier rather than passing as an ordinary run.
+  it("names `base probe <age>` under scoped-base-watch (#916 acceptance criterion)", () => {
+    const msg = buildGateTierMessage({
+      strategy: "scoped-base-watch", packageScoped: true, fileScoped: true,
+      changedFileCount: 3, guardSuiteCount: 14, maxWorkers: 6,
+      baseProbeAgeLabel: "2h", baseProbeDue: false,
+    });
+    expect(msg).toContain("base probe 2h");
+    expect(msg).not.toContain("due now");
+  });
+
+  it("says 'due now' when the base probe backstop is overdue", () => {
+    const msg = buildGateTierMessage({
+      strategy: "scoped-base-watch", packageScoped: true, fileScoped: true,
+      changedFileCount: 3, guardSuiteCount: 14, maxWorkers: 6,
+      baseProbeAgeLabel: "never", baseProbeDue: true,
+    });
+    expect(msg).toContain("base probe never, due now");
+  });
+
+  it("does not mention a base probe for `scoped` — that backstop is scoped-base-watch only", () => {
+    const msg = buildGateTierMessage({
+      strategy: "scoped", packageScoped: true, fileScoped: true,
+      changedFileCount: 3, guardSuiteCount: 14, maxWorkers: 6,
+    });
+    expect(msg).not.toContain("base probe");
+  });
+
   it("names the guards-only tier for a docs-only diff", () => {
     const msg = buildGateTierMessage({
       strategy: "full", packageScoped: false, fileScoped: false, guardsOnly: true,

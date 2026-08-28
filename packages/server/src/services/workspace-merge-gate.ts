@@ -44,6 +44,15 @@ import { runGateWithEvidence } from "./merge-gate-evidence.js";
 export { movedDuringGate } from "./merge-gate-evidence.js";
 import { getBaseBranchHealthAtMergeBase, describeRedBaseAttribution } from "./base-branch-health.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { getPreference } from "../repositories/preferences.repository.js";
+import { listRedDebt, openRedDebtEntry } from "../repositories/red-debt.repository.js";
+import {
+  redDebtMaxPrefKey,
+  redDebtMaxAgePrefKey,
+  resolveEffectiveRedDebtPosture,
+} from "../lib/red-debt-cap.js";
+import { resolveRedDebtGateVerdict, type RedDebtGatePosture } from "../lib/red-debt-gate.js";
+import { riskPosturePref, resolveRiskPosture } from "@agentic-kanban/shared/lib/risk-posture";
 
 type WorkspaceRow = typeof workspaces.$inferSelect;
 
@@ -394,6 +403,8 @@ export async function runPreLockGate(args: {
     // branch's merge-base. Best-effort: a failure here must never mask the real gate failure,
     // it can only ADD attribution to it.
     let gateMessage = preGate.message;
+    let failedSuites: string[] | null = null;
+    let baseHealthRecordedSha: string | null = null;
     if (workspace.workingDir) {
       try {
         const baseHealth = await getBaseBranchHealthAtMergeBase(
@@ -403,8 +414,16 @@ export async function runPreLockGate(args: {
           baseBranch,
           database,
         );
+        baseHealthRecordedSha = baseHealth.recordedSha ?? null;
         const attribution = describeRedBaseAttribution(baseHealth);
         if (attribution) gateMessage = `${attribution}\n\n${preGate.message}`;
+        if (baseHealth.health?.failedSuites) {
+          try {
+            failedSuites = JSON.parse(baseHealth.health.failedSuites) as string[];
+          } catch {
+            failedSuites = null;
+          }
+        }
       } catch (err) {
         console.warn(
           "[workspace-merge] failed to resolve base-branch health attribution (non-fatal):",
@@ -412,6 +431,79 @@ export async function runPreLockGate(args: {
         );
       }
     }
+
+    // #915 — the red-debt subset rule. A known-red suite must no longer block a `fast`/`sprint`
+    // train; a NEW red suite still does. Only meaningful when the base-health probe could name
+    // WHICH suites failed (`failedSuites`) — a gate failure with no suite list (a smoke/install
+    // failure, or a base probe that never ran) carries no evidence a ledger entry could match,
+    // so it is never softened.
+    if (failedSuites && failedSuites.length > 0) {
+      try {
+        const postureRaw = await getPreference(riskPosturePref.key(projectId), database).catch(() => null);
+        const requestedPosture = resolveRiskPosture(postureRaw);
+        // #916 — a ledger over its cap must not let `sprint`/`fast` keep softening verdicts
+        // forever; it degrades the EFFECTIVE posture one step (sprint -> fast -> standard)
+        // instead. Evaluated against the SAME open-ledger snapshot the verdict itself reads
+        // below, so a degrade to `standard` reliably falls out of the `fast || sprint` gate.
+        const ledger = await listRedDebt(projectId, {}, database);
+        const oldestOpenEntryAgeMs = ledger.length > 0
+          ? Date.now() - Math.min(...ledger.map((e) => Date.parse(e.openedAt)).filter((n) => !Number.isNaN(n)))
+          : null;
+        const [maxEntriesRaw, maxAgeMsRaw] = await Promise.all([
+          getPreference(redDebtMaxPrefKey(projectId), database).catch(() => null),
+          getPreference(redDebtMaxAgePrefKey(projectId), database).catch(() => null),
+        ]);
+        const capResult = resolveEffectiveRedDebtPosture({
+          posture: requestedPosture,
+          openEntryCount: ledger.length,
+          oldestOpenEntryAgeMs,
+          maxEntriesRaw,
+          maxAgeMsRaw,
+        });
+        const posture = capResult.effectivePosture;
+        if (capResult.degraded) {
+          console.log(`[workspace-merge] ${capResult.note}`);
+        }
+        if (posture === "fast" || posture === "sprint") {
+          const verdict = resolveRedDebtGateVerdict({
+            failedSuites,
+            ledger: ledger.map((e) => ({ suite: e.suite, tag: e.tag as "flaky" | "real" })),
+            posture: posture as RedDebtGatePosture,
+          });
+          if (verdict.outcome === "pass-with-debt" || verdict.outcome === "pass-with-new-debt") {
+            if (verdict.outcome === "pass-with-new-debt") {
+              const sinceCommit = baseHealthRecordedSha ?? "unknown";
+              for (const suite of verdict.newRed) {
+                await openRedDebtEntry({ projectId, suite, sinceCommit, tag: "real" }, database).catch((err) => {
+                  console.warn(`[workspace-merge] failed to open red-debt entry for ${suite} (non-fatal):`, errorMessage(err));
+                });
+              }
+            }
+            console.log(
+              `[workspace-merge] pre-lock gate softened by red-debt subset rule (#915) for workspace ${workspaceId}: ${verdict.message}`,
+            );
+            // Mint proof, exactly as a genuine pass does (`runGateWithEvidence`'s `token`
+            // field) — returning the caller's original `run-gate` token here would let the
+            // executor's in-lock `resolveMergeGate` call re-run `runPreMergeGate`, which has
+            // no knowledge of this subset rule and would fail on the SAME suites again,
+            // silently discarding the softened verdict this block just decided on.
+            return gateAlreadyPassed({
+              ranAt: new Date().toISOString(),
+              stage: preGate.stage,
+              source: `pre-lock-merge (red-debt subset rule #915: ${verdict.message})`,
+              branchSha: preGate.shasBefore.branchSha ?? undefined,
+              baseSha: preGate.shasBefore.baseSha ?? undefined,
+            });
+          }
+        }
+      } catch (err) {
+        console.warn(
+          "[workspace-merge] red-debt subset-rule check failed (non-fatal, gate stays withheld):",
+          errorMessage(err),
+        );
+      }
+    }
+
     await recordGateFailureNote({
       workspace,
       stage: preGate.stage,

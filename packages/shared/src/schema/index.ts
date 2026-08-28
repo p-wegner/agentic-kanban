@@ -36,6 +36,8 @@ export {
   testRetryDecisionsRelations,
 } from "./flaky-tests.js";
 export { showdowns, showdownsRelations } from "./showdowns.js";
+export { redDebt, redDebtRelations, RED_DEBT_TAGS } from "./red-debt.js";
+export type { RedDebtTag } from "./red-debt.js";
 export {
   workflowTemplates,
   workflowNodes,
