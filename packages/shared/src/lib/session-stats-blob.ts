@@ -54,6 +54,10 @@ export interface SessionStatsBlob {
   model?: string;
   agentSummary?: string;
   friction?: unknown;
+  /** Name of the most recently invoked tool, updated live as tool_use events arrive (#930). */
+  lastTool?: string;
+  /** ISO timestamp of the newest stream event applied (assistant/tool/live-stats), updated live (#930). */
+  lastActivityAt?: string;
   /** Anything a provider writes that this list has not caught up with yet. */
   [key: string]: unknown;
 }
