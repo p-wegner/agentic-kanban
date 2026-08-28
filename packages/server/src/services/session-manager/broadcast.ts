@@ -76,6 +76,23 @@ async function mergeExistingStats(sessionId: string, statsToSave: Record<string,
   return mergeSessionStats(rows[0]?.stats, statsToSave);
 }
 
+/**
+ * Persist live activity (contextTokens/lastTool/lastActivityAt) into the session's
+ * `stats` blob as it happens, instead of only at the terminal `stats` event (#930).
+ *
+ * Before this, a healthy RUNNING session read back `contextTokens: null` and
+ * `lastTool: null` from the API — those only ever got written once the session
+ * finished — so a live session was indistinguishable from a launch-failed one from
+ * the cheap fields every operator/skill/monitor checks first. Fire-and-forget,
+ * merged (never clobbers fields the terminal stats event owns).
+ */
+function persistLiveActivity(sessionId: string, patch: { contextTokens?: number; lastTool?: string }): void {
+  const statsToSave = { ...patch, lastActivityAt: new Date().toISOString() };
+  mergeExistingStats(sessionId, statsToSave)
+    .then((mergedStats) => updateSessionStats(sessionId, JSON.stringify(mergedStats)))
+    .catch((err) => console.error("Failed to persist live session activity:", err));
+}
+
 const DB_FLUSH_INTERVAL_MS = 250;
 const DB_FLUSH_BATCH_SIZE = 50;
 
@@ -249,6 +266,9 @@ export function applyStreamEvent(
   if (evt.assistantText) {
     if (!state.sessionTextParts.has(sessionId)) state.sessionTextParts.set(sessionId, []);
     state.sessionTextParts.get(sessionId)!.push(evt.assistantText);
+    // Bump lastActivityAt even with no tool/token delta, so a session that is purely
+    // narrating (no tool calls yet) still reads as fresh rather than stale (#930).
+    emitActivityThrottled(state, `${sessionId}:live-persist`, () => persistLiveActivity(sessionId, {}));
   }
 
   // Persist session stats from result events
@@ -298,7 +318,12 @@ function applyLiveStats(
   ctx: SessionContext | undefined,
 ): void {
   if (ls.model) state.sessionModels.set(sessionId, ls.model);
-  if (ls.contextTokens > 0) state.sessionContextTokens.set(sessionId, ls.contextTokens);
+  if (ls.contextTokens > 0) {
+    state.sessionContextTokens.set(sessionId, ls.contextTokens);
+    emitActivityThrottled(state, `${sessionId}:live-persist`, () =>
+      persistLiveActivity(sessionId, { contextTokens: ls.contextTokens }),
+    );
+  }
   if (ls.toolUses !== undefined) state.sessionToolUses.set(sessionId, ls.toolUses);
 
   if (ls.subagentDelta === 1) {
@@ -325,6 +350,9 @@ function applyToolActivity(
   ctx: SessionContext,
 ): void {
   state.sessionLastTool.set(sessionId, toolActivity.name);
+  emitActivityThrottled(state, `${sessionId}:live-persist`, () =>
+    persistLiveActivity(sessionId, { lastTool: toolActivity.name }),
+  );
   const activity = formatToolActivity(toolActivity.name, toolActivity.input);
   if (activity) {
     emitActivityThrottled(state, sessionId, () =>
