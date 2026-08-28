@@ -29,8 +29,13 @@ import {
   recordBaseBranchHealth,
   getLatestBaseBranchHealth,
   getBaseBranchHealthForSha,
+  isBaseHealthAnswer,
   type BaseBranchHealthOutcome,
 } from "../repositories/base-branch-health.repository.js";
+
+// Re-exported so the attribution logic and its predicate read as one unit at the call sites
+// that already import from this service (#935).
+export { isBaseHealthAnswer };
 
 const CLONE_TIMEOUT_MS = 5 * 60 * 1000;
 // Measured on this repo (#674): the scoped verify alone reported 974s of tests, and the base
@@ -232,7 +237,14 @@ ${tail(combined)}`,
         sha,
         branch,
         durationMs,
-        message: `verify_script timed out after ${VERIFY_TIMEOUT_MS}ms`,
+        // #935 — provenance, so a starved probe is distinguishable from a genuinely slow base.
+        // The observed failure was a 45-minute budget spent on a box where Windows Defender,
+        // an unrelated Kotlin daemon and SearchIndexer had the cores and only 3 vitest workers
+        // existed at all; the verdict recorded nothing that would have said so. A reader (or a
+        // future heuristic) needs the budget and the worker cap the probe actually ran under.
+        message: `verify_script timed out after ${VERIFY_TIMEOUT_MS}ms `
+          + `(probe ran ${durationMs}ms with KANBAN_TEST_MAX_WORKERS=${probeMaxWorkers}). `
+          + `This is NOT a verdict about the base: the probe could not answer, so the base's health is UNKNOWN.`,
         failedSuites: failedSuitesForOutcome("timeout", combined),
       };
     } else if (run.exitCode !== 0) {
@@ -383,17 +395,25 @@ function formatAge(ms: number): string {
  *
  * Returns `null` when there's nothing to attribute — no recorded base health, or the base was
  * green — leaving the caller's own message untouched.
+ *
+ * A NON-ANSWER (`timeout`/`unverified`) never produces an ALREADY-<outcome> accusation (#935);
+ * it produces an explicitly-neutral note that says the base was not measured.
  */
 export function describeRedBaseAttribution(info: BaseBranchHealthAtMergeBase): string | null {
   const { health, mergeBaseSha, ageMs } = info;
   if (!health || health.outcome === "green") return null;
   const ageNote = ageMs !== undefined ? `, checked ${formatAge(ageMs)} ago` : "";
-  // "unverified" means the probe could not even prepare the clone (#674). Saying
-  // "BASE BRANCH ALREADY UNVERIFIED" reads as an accusation against the base; it is
-  // an admission about the probe, and the caller's own failure stands unattributed.
-  if (health.outcome === "unverified") {
-    return `BASE BRANCH HEALTH UNKNOWN (${health.sha.slice(0, 8)}${ageNote}) — the base was never verified, so this failure is NOT attributed to it. `
-      + `Probe result: ${health.message ?? "unverified"}`;
+  // A non-answer is an admission about the PROBE, not an accusation against the base. Saying
+  // "BASE BRANCH ALREADY TIMEOUT"/"ALREADY UNVERIFIED" reads as the latter, and — worse — the
+  // downstream readers of that verdict treat it as a red base: they suppress #638 fix-and-merge
+  // routing and tell a genuinely-broken branch that "this failure may not be caused by this
+  // branch". Both are wrong when the probe simply could not answer.
+  if (!isBaseHealthAnswer(health.outcome)) {
+    const what = health.outcome === "timeout"
+      ? "the base-health probe TIMED OUT rather than returning a verdict"
+      : "the base was never verified";
+    return `BASE BRANCH HEALTH UNKNOWN (${health.sha.slice(0, 8)}${ageNote}) — ${what}, so this failure is NOT attributed to it. `
+      + `Probe result: ${health.message ?? health.outcome}`;
   }
   const shaNote = mergeBaseSha && mergeBaseSha === health.sha
     ? `at the branch's merge-base (${health.sha.slice(0, 8)}${ageNote})`

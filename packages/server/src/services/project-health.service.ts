@@ -7,7 +7,7 @@ import {
   getIssueCountsByStatus,
 } from "../repositories/project-health.repository.js";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
-import { getLatestBaseBranchHealth } from "../repositories/base-branch-health.repository.js";
+import { getLatestBaseBranchHealth, isBaseHealthAnswer } from "../repositories/base-branch-health.repository.js";
 import { listProjectRepos } from "../repositories/repo.repository.js";
 
 /** Last path segment, for labelling a sibling repo whose row carries no name. */
@@ -126,8 +126,14 @@ export async function getProjectHealth(database: Database = db): Promise<Project
       try {
         const baseHealth = await getLatestBaseBranchHealth(project.id, database);
         if (baseHealth && baseHealth.outcome !== "green") {
+          // #935 — a `timeout`/`unverified` probe never reached a verdict, so reporting the
+          // base as "TIMEOUT ... verify failed" states as fact something nobody measured. Say
+          // which of the two it is, and point at the re-probe route rather than leaving a
+          // reader with a scary word and no way to resolve it.
           warnings.push(
-            `Base branch '${baseHealth.branch}' is ${baseHealth.outcome.toUpperCase()} (verify failed at ${baseHealth.sha.slice(0, 8)}) — merges into it may fail through no fault of the branch.`,
+            isBaseHealthAnswer(baseHealth.outcome)
+              ? `Base branch '${baseHealth.branch}' is ${baseHealth.outcome.toUpperCase()} (verify failed at ${baseHealth.sha.slice(0, 8)}) — merges into it may fail through no fault of the branch.`
+              : `Base branch '${baseHealth.branch}' health is UNKNOWN — the last probe ended in '${baseHealth.outcome}' at ${baseHealth.sha.slice(0, 8)} without returning a verdict, so this is NOT a claim that the base is broken. Re-measure with POST /api/projects/${project.id}/base-branch-health/reprobe.`,
           );
         }
       } catch {

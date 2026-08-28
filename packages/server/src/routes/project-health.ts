@@ -10,6 +10,7 @@ import {
 } from "../lib/board-health-events-format.js";
 import { getProjectHealth } from "../services/project-health.service.js";
 import { listBaseBranchHealth, getLatestBaseBranchHealth } from "../repositories/base-branch-health.repository.js";
+import { verifyBaseBranchHealth, inFlightBaseBranchProbeCount } from "../services/base-branch-health.service.js";
 
 import { queryInt } from "../middleware/query-params.js";
 /**
@@ -54,6 +55,40 @@ export function createProjectHealthRoute(database: Database) {
       listBaseBranchHealth(projectId, limit, database),
     ]);
     return c.json({ latest, history });
+  });
+
+  // POST /api/projects/:id/base-branch-health/reprobe — invalidate the cached verdict and
+  // re-measure the base on demand (#935).
+  //
+  // Why this needs to exist: a probe that ran under machine saturation caches a TIMEOUT/RED
+  // for the base, and until the periodic sweep next comes round (30 min, plus a full
+  // PROBE_MAX_DURATION_MS extra back-off after a timeout — so up to ~90 minutes) every gate
+  // failure in that window is prefixed with a verdict that a green master contradicts. There
+  // was no way to say "that verdict was starved, measure again".
+  //
+  // Deliberately fire-and-forget: a probe is a clone + install + full verify, minutes to an
+  // hour. Blocking the request on it would hold an HTTP connection for the whole run and time
+  // out long before the answer. `verifyBaseBranchHealth` is per-project idempotent (the
+  // in-flight map, #712), so a double-click JOINS the running probe rather than starting a
+  // rival one — which is exactly what must not happen on an already-loaded box.
+  router.post("/:id/base-branch-health/reprobe", async (c) => {
+    const projectId = c.req.param("id");
+    const previous = await getLatestBaseBranchHealth(projectId, database).catch(() => null);
+    const alreadyRunning = inFlightBaseBranchProbeCount() > 0;
+    void verifyBaseBranchHealth(projectId, database).catch((err) => {
+      console.warn(
+        `[base-branch-health] on-demand re-probe failed for project ${projectId} (non-fatal):`,
+        err instanceof Error ? err.message : String(err),
+      );
+    });
+    return c.json({
+      started: true,
+      joinedRunningProbe: alreadyRunning,
+      // What the caller is replacing, so the response is self-explanatory in a log.
+      previousOutcome: previous?.outcome ?? null,
+      previousSha: previous?.sha ?? null,
+      previousAt: previous?.createdAt ?? null,
+    });
   });
 
   return router;
