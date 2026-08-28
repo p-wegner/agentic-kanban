@@ -415,7 +415,7 @@ const projectStatus = looseObject({ id: str, name: str, projectId: str, sortOrde
  */
 /**
  * `GET /api/projects/:id/board-monitor/next` (#917) -> `{ projectId, candidates }`, where
- * each candidate is a `StartScorePreviewRow` (`startup/monitor-start-scoring.ts`). The
+ * each candidate is a `StartScorePreviewRow` (`services/start-score-preview.service.ts`). The
  * score block is the point of the endpoint -- the Monitor popover renders every one of its
  * numbers -- so it is asserted field by field rather than left as an opaque object.
  * `issueNumber` and `bullseyeSegmentId` are genuinely nullable on the server row.
