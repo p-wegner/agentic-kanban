@@ -139,7 +139,12 @@ async function resolveVerifyFileScope(projectId: string, database: Database): Pr
 
 const MAX_VERIFY_WORKERS = 32;
 
-async function resolveVerifyMaxWorkers(projectId: string, database: Database): Promise<number> {
+/**
+ * Exported for the base-branch health probe (#931): it spawns the same `verify_script` on
+ * the same box and had no worker cap of its own, so it could default to one vitest worker
+ * per core just like an unconfigured gate — the SAME budget applies to both.
+ */
+export async function resolveVerifyMaxWorkers(projectId: string, database: Database): Promise<number> {
   const raw = await getPreference(verifyMaxWorkersPrefKey(projectId), database).catch(() => null);
   const parsed = raw ? Number.parseInt(raw, 10) : NaN;
   if (Number.isFinite(parsed) && parsed >= 1 && parsed <= MAX_VERIFY_WORKERS) return parsed;

@@ -22,6 +22,7 @@ import type { Database } from "../db/index.js";
 import { getPreference, setPreference } from "../repositories/preferences.repository.js";
 import { getProjectById } from "../repositories/project.repository.js";
 import { VERIFY_SCRIPT_TIMEOUT_MS } from "./verify-budget.js";
+import { resolveVerifyMaxWorkers } from "./pre-merge-gate.service.js";
 import { failedSuitesForOutcome } from "./failed-suite-parse.js";
 import { resolveEffectiveVerify, deriveSetupScriptFromProfile, getStackProfile } from "./stack-profile.service.js";
 import {
@@ -210,7 +211,14 @@ ${tail(combined)}`,
         return result;
       }
     }
-    const run = await runSetupScript(dest, verifyScript, { timeoutMs: VERIFY_TIMEOUT_MS, env: { ...VERIFY_NEUTRALIZED_LISTENER_ENV } }).catch((e) => ({
+    // #931: this probe runs the same verify script the gate does, on the same box, and had
+    // no worker cap of its own — sharing the gate's resolved cap keeps the two from
+    // independently defaulting to one vitest worker per core.
+    const probeMaxWorkers = await resolveVerifyMaxWorkers(projectId, database);
+    const run = await runSetupScript(dest, verifyScript, {
+      timeoutMs: VERIFY_TIMEOUT_MS,
+      env: { ...VERIFY_NEUTRALIZED_LISTENER_ENV, KANBAN_TEST_MAX_WORKERS: String(probeMaxWorkers) },
+    }).catch((e) => ({
       exitCode: 1,
       stdout: "",
       stderr: String(e),
