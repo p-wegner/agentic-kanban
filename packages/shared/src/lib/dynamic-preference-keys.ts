@@ -148,9 +148,12 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // ticket-group workspace's assembled diff once, with every member's acceptance criteria,
   // instead of reviewing each ticket separately. See server/lib/review-mode-pref.ts.
   "review_mode",
-  // Risk posture (#912): `risk_posture_<id>` is one of `strict|standard|fast|sprint`
-  // (default `standard`) — the resolver every downstream consumer reads instead of
-  // hand-aligning the 8 prefs the proposal names. See shared/lib/risk-posture.ts.
+  // Risk posture (#911/#912): `risk_posture_<id>` is the ONE dial (`strict | standard | fast |
+  // sprint`, default `standard`) that fans out into the gate tier, review mode, train
+  // size/wait, contention mode, builder stop-checks and placement bias — replacing the ~8
+  // prefs an operator previously had to align by hand to change how fast a project moves.
+  // Levels + resolver: shared/lib/risk-posture.ts; the fan-out:
+  // server/services/risk-posture.service.ts. See decision 017.
   "risk_posture",
   // Red-debt ledger (#915/#916): `red_debt_max_<id>` / `red_debt_max_age_<id>` cap how many
   // OPEN ledger entries (or how old the oldest one) a `sprint`/`fast` posture may carry
