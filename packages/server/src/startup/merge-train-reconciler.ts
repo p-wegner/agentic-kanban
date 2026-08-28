@@ -32,6 +32,7 @@
  */
 import type { Database } from "../db/index.js";
 import {
+  getMergeTrain,
   listMergeTrainsInStates,
   updateMergeTrainState,
   type MergeTrainRow,
@@ -140,10 +141,16 @@ export async function reconcileStrandedMergeTrains(
       result.resumed.push(row.id);
       recordActed(result, row.id, "resumed");
       // A successful `runTrain` is expected to drive the row to its own terminal state
-      // (landed/red) itself — it is the same code path a fresh request takes. Stamp the
-      // attempt marker only if it is SOMEHOW still non-terminal afterwards, so a future sweep
-      // can see this was already tried once.
-      await updateMergeTrainState(row.id, { state: row.state, reconciledReason: resumeReason }, database).catch(() => undefined);
+      // (landed/red) itself — it is the same code path a fresh request takes. Only stamp the
+      // attempt marker if it is SOMEHOW still non-terminal afterwards (re-read from the DB,
+      // not the stale `row` captured before the resume ran), so a future sweep can see this
+      // was already tried once — and so we never clobber a terminal state `runTrain` just
+      // persisted back to `assembling`/`gating`, which would re-queue an already-landed train
+      // for resume forever.
+      const after = await getMergeTrain(row.id, database).catch(() => undefined);
+      if (after && (after.state === "assembling" || after.state === "gating")) {
+        await updateMergeTrainState(row.id, { state: after.state, reconciledReason: resumeReason }, database).catch(() => undefined);
+      }
     } catch (err) {
       const failReason = `resume attempt ${priorAttempts + 1} failed: ${errorMessage(err)}`;
       await updateMergeTrainState(row.id, {
