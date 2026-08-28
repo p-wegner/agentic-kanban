@@ -152,6 +152,13 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // (default `standard`) — the resolver every downstream consumer reads instead of
   // hand-aligning the 8 prefs the proposal names. See shared/lib/risk-posture.ts.
   "risk_posture",
+  // Red-debt ledger (#915/#916): `red_debt_max_<id>` / `red_debt_max_age_<id>` cap how many
+  // OPEN ledger entries (or how old the oldest one) a `sprint`/`fast` posture may carry
+  // before it is forced to degrade one step (sprint -> fast -> standard) — the
+  // profile-allowlist-hold shape, applied to a downgrade instead of a full stop. See
+  // shared/lib/red-debt-cap.ts.
+  "red_debt_max",
+  "red_debt_max_age",
 ] as const;
 
 // Deliberately NOT registered, though both are per-project keys that exist on disk (#496):
