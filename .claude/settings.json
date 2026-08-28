@@ -82,6 +82,16 @@
             "command": "node $CLAUDE_PROJECT_DIR/.claude/hooks/smart-hooks-runner.js PostToolUse"
           }
         ]
+      },
+      {
+        "matcher": "Bash|PowerShell|Grep|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/disclose-context.mjs",
+            "timeout": 15
+          }
+        ]
       }
     ],
     "Stop": [

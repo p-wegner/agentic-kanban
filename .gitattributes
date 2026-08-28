@@ -43,6 +43,7 @@ packages/server/plugins/**/tools/*.mjs text eol=lf
 packages/server/scripts/*.mjs text eol=lf
 packages/server/src/cli/index.ts text eol=lf
 packages/server/src/scaffold/*.js text eol=lf
+packages/server/src/scaffold/*.mjs text eol=lf
 packages/server/src/worker/worker-cli.ts text eol=lf
 
 # The OpenAPI spec is GENERATED (scripts/generate-openapi.ts writes LF) and then asserted on
