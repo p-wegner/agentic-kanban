@@ -1,6 +1,7 @@
 import { issues, workspaceIssueMembers, workspaces } from "@agentic-kanban/shared/schema";
 import { and, eq, inArray, ne } from "drizzle-orm";
 import { db } from "../db/index.js";
+import { issueTextColumns } from "./projections.js";
 import type { Database, TransactionClient } from "../db/index.js";
 
 /**
@@ -39,7 +40,7 @@ export async function listMemberIssues(
   database: Database = db,
 ): Promise<Array<{ id: string; issueNumber: number | null; title: string; description: string | null }>> {
   return database
-    .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, description: issues.description })
+    .select({ ...issueTextColumns })
     .from(workspaceIssueMembers)
     .innerJoin(issues, eq(workspaceIssueMembers.issueId, issues.id))
     .where(eq(workspaceIssueMembers.workspaceId, workspaceId));
@@ -58,7 +59,7 @@ export async function getLeadIssueForMembersBlock(
   database: Database = db,
 ): Promise<{ id: string; issueNumber: number | null; title: string; description: string | null } | undefined> {
   const rows = await database
-    .select({ id: issues.id, issueNumber: issues.issueNumber, title: issues.title, description: issues.description })
+    .select({ ...issueTextColumns })
     .from(issues)
     .where(eq(issues.id, issueId))
     .limit(1);
