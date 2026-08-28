@@ -17,6 +17,7 @@ import { validateCronExpression } from "@agentic-kanban/shared/lib/cron-utils";
 
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import { requireProject } from "../services/require-project.js";
+import { previewNextStartCandidates } from "../startup/monitor-start-scoring.js";
 /**
  * Read-only observability for the detached board-monitor orchestrator loop
  * (scripts/board-monitor/). Mounted under /projects.
@@ -49,6 +50,20 @@ export function createBoardMonitorRoute(database: Database) {
     const { tunables, source } = resolveMonitorTunables(prefMap, projectId);
     const runtime = resolveProjectRuntimeConfig({ projectId, prefMap });
     return c.json({ tunables, source, startPolicy: runtime.startPolicy });
+  });
+
+  // #917: top-N ranked Todo-pull candidates for this project, by the same score the
+  // pull loop actually uses — makes the FIFO-replacement decision explainable in the
+  // Monitor view instead of a number nobody can audit. Read-only: never persists a score.
+  router.get("/:id/board-monitor/next", async (c) => {
+    const projectId = c.req.param("id");
+    await requireProject(projectId, database);
+    const rows = await getAllPreferences(database);
+    const prefMap = toPrefMap(rows);
+    const limitParam = Number(c.req.query("limit"));
+    const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 50) : 10;
+    const candidates = await previewNextStartCandidates(projectId, prefMap, limit, database);
+    return c.json({ projectId, candidates });
   });
 
   // Start/stop the out-of-process Conductor loop (dogfood board only). The Start Mode UI

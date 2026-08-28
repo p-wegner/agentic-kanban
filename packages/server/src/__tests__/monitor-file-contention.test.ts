@@ -246,6 +246,10 @@ describe("runAutoStart serializes on a shared registration file (#119 reproducti
       // the real one run consumes an entry and shifts every subsequent mock, so no launch
       // ever happens. Same reason `buildContentionGate` is injected elsewhere.
       canDispatch: async () => ({ available: true }) as const,
+      // #917: the real scorer's `computeUnblockCounts` read + per-candidate `db.update`
+      // would shift this suite's scripted `db.select` sequence onto the trailing
+      // catch-all mock — leave `candidates` in query order instead.
+      orderStartCandidates: async () => {},
       ...overrides,
     };
   }

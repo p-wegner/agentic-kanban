@@ -1777,7 +1777,7 @@ paths:
               schema: {}
   /api/issues/group-scan:
     post:
-      summary: "group as ONE workspace. Preview by default; `apply: true` creates the edges."
+      summary: call, grouped by shared predicted files (excluding hot/registration files).
       tags:
         - issues
       operationId: post_api_issues_group-scan
@@ -1787,16 +1787,7 @@ paths:
           application/json:
             schema:
               type: object
-              properties:
-                projectId:
-                  type: string
-                  minLength: 1
-                apply:
-                  type: boolean
-              required:
-                - projectId
               additionalProperties: true
-              x-unknown-keys: stripped
       responses:
         "200":
           description: Success
@@ -4966,6 +4957,34 @@ paths:
               schema: {}
         "404":
           description: Error
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/board-monitor/next:
+    get:
+      summary: "Monitor view instead of a number nobody can audit. Read-only: never persists a score."
+      tags:
+        - board-monitor
+      operationId: get_api_projects_id_board-monitor_next
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
           content:
             application/json:
               schema: {}

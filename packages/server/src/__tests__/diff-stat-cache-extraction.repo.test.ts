@@ -173,18 +173,24 @@ describe("migration 0142 backfills the extracted family (#815)", () => {
     const memoized = randomUUID();
     const zeroDiff = randomUUID();
     const never = randomUUID();
-    await db.insert(projects).values({
-      id: projectId, name: "Test", repoPath: "/repo", repoName: "repo",
-      defaultBranch: "master", createdAt: T0, updatedAt: T0,
+    // Raw SQL on purpose: the live Drizzle schema binds every column it declares (including
+    // ones added to `issues` after this migration's cutoff, e.g. #917's start-score columns),
+    // so `db.insert(issues)` here would fail with "table issues has no column named ...".
+    await client.execute({
+      sql: `INSERT INTO projects (id, name, repo_path, repo_name, default_branch, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      args: [projectId, "Test", "/repo", "repo", "master", T0, T0],
     });
-    await db.insert(projectStatuses).values({
-      id: statusId, projectId, name: "In Progress", sortOrder: 1, isDefault: false, createdAt: T0,
+    await client.execute({
+      sql: `INSERT INTO project_statuses (id, project_id, name, sort_order, is_default, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)`,
+      args: [statusId, projectId, "In Progress", 1, 0, T0],
     });
-    await db.insert(issues).values({
-      id: issueId, issueNumber: 1, title: "Issue 1", priority: "medium", sortOrder: 0,
-      statusId, projectId, createdAt: T0, updatedAt: T0,
+    await client.execute({
+      sql: `INSERT INTO issues (id, issue_number, title, priority, sort_order, status_id, project_id, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [issueId, 1, "Issue 1", "medium", 0, statusId, projectId, T0, T0],
     });
-    // Raw SQL on purpose: the Drizzle schema no longer knows these columns.
     for (const [id, branch] of [[memoized, "a"], [zeroDiff, "b"], [never, "c"]]) {
       await client.execute({
         sql: "INSERT INTO workspaces (id, issue_id, branch, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",

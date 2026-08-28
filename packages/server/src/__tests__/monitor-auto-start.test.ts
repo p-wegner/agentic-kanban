@@ -45,6 +45,11 @@ function makeDeps(overrides: Partial<AutoStartDeps> = {}): AutoStartDeps {
     // calling `hostOverflowHasFleetCapacity` (another `db.select` reader), desyncing every
     // ordered mock chain in this file.
     readMachineCapacity: async () => ({ tier: "0", hold: false, reason: "test fixture", freeGb: 99 }),
+    // #917: the real scorer reads `issueDependencies` (via `computeUnblockCounts`) and
+    // writes back per candidate via `db.update` — both would shift this suite's ordered
+    // `db.select` mock chains. These suites exercise dependency/eligibility/launch logic,
+    // not scoring, so leave `candidates` in query order (a no-op sort/no DB access).
+    orderStartCandidates: async () => {},
     ...overrides,
   };
 }
