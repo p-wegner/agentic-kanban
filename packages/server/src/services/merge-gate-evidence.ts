@@ -114,12 +114,12 @@ export async function runGateWithEvidence(args: {
   // `{"state":"running"}` for hours across multiple complete 20-minute suite runs, which is
   // indistinguishable from a hang. A gate that runs outside a merge job (the monitor's own
   // cycle gate, review-exit) records nothing — `noteMergeGateAttemptStarted` returns null.
-  const attemptNumber = noteMergeGateAttemptStarted(workspace.id, source);
+  const attempt = noteMergeGateAttemptStarted(workspace.id, source);
   let result: Omit<ResolvedMergeGate, "decision">;
   try {
     result = await runGate(workspace, projectId, database);
   } catch (err) {
-    noteMergeGateAttemptFinished(workspace.id, attemptNumber, {
+    noteMergeGateAttemptFinished(workspace.id, attempt, {
       outcome: "failed",
       detail: `gate run threw: ${err instanceof Error ? err.message : String(err)}`,
     });
@@ -144,12 +144,12 @@ export async function runGateWithEvidence(args: {
   // "gate #1 completed, no merge, job still running" step nothing accounted for on #926.
   if (result.passed && moved) {
     console.warn(
-      `[merge-gate] workspace ${workspace.id}: gate attempt ${attemptNumber ?? "?"} (${source}) PASSED after `
+      `[merge-gate] workspace ${workspace.id}: gate attempt ${attempt?.attempt ?? "?"} (${source}) PASSED after `
         + `${Math.round(durationMs / 1000)}s but its verdict is DISCARDED — the ${moved} tip moved during the run `
         + `(#243), so nothing proves the state about to merge was tested. The gate will run again (#936).`,
     );
   }
-  noteMergeGateAttemptFinished(workspace.id, attemptNumber, {
+  noteMergeGateAttemptFinished(workspace.id, attempt, {
     outcome: !result.passed
       ? "failed"
       : moved
