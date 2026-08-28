@@ -1,5 +1,5 @@
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
-import { RISK_POSTURE_VALUES } from "@agentic-kanban/shared/lib/risk-posture-values";
+import { RISK_POSTURES } from "@agentic-kanban/shared/lib/risk-posture";
 import type { RiskPosture, RiskPostureLevel } from "@agentic-kanban/shared/types";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -38,7 +38,7 @@ export function riskPosturePrefKey(projectId: string): string {
   return riskPosturePrefDef.key(projectId);
 }
 
-const VALID_LEVELS: ReadonlySet<string> = new Set<RiskPostureLevel>(RISK_POSTURE_VALUES);
+const VALID_LEVELS: ReadonlySet<string> = new Set<RiskPostureLevel>(RISK_POSTURES);
 
 /** Per-ticket override prefix — an issue tag `risk:strict|standard|fast|sprint` wins for its
  *  workspace over the project's `risk_posture_<projectId>` pref. */

@@ -14,7 +14,7 @@
  */
 import type { MonitorActionName } from "../../lib/monitor-action.js";
 import type { MonitorTunables } from "../../lib/strategy-objective-file.js";
-import type { RISK_POSTURE_VALUES } from "../../lib/risk-posture-values.js";
+import type { RISK_POSTURES } from "../../lib/risk-posture.js";
 
 // Re-exported so consumers take it from the wire-contract barrel. The client used to
 // deep-import lib/strategy-objective-file for it, which drags a Node-builtin chain into
@@ -43,7 +43,7 @@ export interface StartPolicy {
   source: "start_mode" | "derived";
 }
 
-export type RiskPostureLevel = (typeof RISK_POSTURE_VALUES)[number];
+export type RiskPostureLevel = (typeof RISK_POSTURES)[number];
 
 /**
  * The one-dial risk posture (#911, decision 017), fanned out from `risk_posture_<projectId>`
