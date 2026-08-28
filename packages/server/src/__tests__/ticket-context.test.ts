@@ -405,6 +405,13 @@ describe("ticket-context", () => {
   });
 
   describe("risk posture section (#912)", () => {
+    const fileTicket = {
+      kind: "file-ticket" as const,
+      projectId: "board-uuid",
+      projectName: "agentic-kanban",
+      isCurrentProject: false,
+    };
+
     it("is omitted when no posture is supplied", () => {
       expect(buildRiskPostureSection(null)).toBeNull();
       expect(buildRiskPostureSection(undefined)).toBeNull();
