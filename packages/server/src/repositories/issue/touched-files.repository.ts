@@ -49,11 +49,15 @@ export async function getIssueTouchedFilesWithProject(
   );
 }
 
-/** All issues in a project with their touched-files JSON (related-issues file-overlap scan). */
+/**
+ * All issues in a project with their touched-files JSON and status id — the related-issues
+ * file-overlap scan ignores `statusId`; the #918 ticket-group seed restricts on it.
+ */
 export async function getProjectIssuesTouchedFiles(projectId: string, database: Database = db) {
   return database
     .select({
       ...issueIdentityColumns,
+      statusId: issues.statusId,
       touchedFilesJson: issues.touchedFilesJson,
     })
     .from(issues)

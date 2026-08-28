@@ -36,6 +36,24 @@ export const START_MODE_HINT: Record<StartMode, string> = {
 
 
 
+/** One ranked row from `GET /api/projects/:id/board-monitor/next` (#917). */
+export interface NextStartCandidate {
+  id: string;
+  issueNumber: number | null;
+  title: string;
+  score: {
+    score: number;
+    priority: string;
+    priorityWeight: number;
+    unblockCount: number;
+    ageHours: number;
+    ageFactor: number;
+    predictedCost: number;
+    bullseyeMultiplier: number;
+    bullseyeSegmentId: string | null;
+  };
+}
+
 export function parseCycleLine(line: string): { age: string | null; text: string } {
   // Format: "<ISO time> | <action> | <items>". Be lenient.
   const parts = line.split("|").map((p) => p.trim());

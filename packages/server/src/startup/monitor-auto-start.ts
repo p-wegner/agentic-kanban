@@ -3,7 +3,7 @@ import { drives, issueDependencies, issues, issueTags, projectStatuses, tags, wo
 import { and, eq, or, sql, inArray } from "drizzle-orm";
 import { resolveCoupledComponent } from "@agentic-kanban/shared/lib/dependency-graph";
 import { MAX_TICKET_GROUP_SIZE, isAutoGroupEnabled } from "@agentic-kanban/shared/lib/ticket-group";
-import { db } from "../db/index.js";
+import { db, type Database } from "../db/index.js";
 import { createBoardEvents } from "../services/board-events.js";
 import { parsePluginLoopUnitKey } from "@agentic-kanban/shared/lib/plugin-manifest";
 import { reconcileMergedIssue } from "../services/merge-cleanup.service.js";
@@ -15,7 +15,7 @@ import { projectCanDispatch, hostOverflowHasFleetCapacity as defaultHasFleetOver
 // single collapsed token. Same computation `GET /api/workers` serves.
 import { describeFleet } from "../services/placement-explain.service.js";
 import { shouldQuiesceBuildersForGate } from "../services/gate-quiesce.js";
-import { isMonitorEligibleIssue, monitorEligibleIssueSql } from "./monitor-eligibility.js";
+import { isMonitorEligibleIssue, monitorEligibleIssueSql, notDriveOrEpicMetaSql, resolveCandidateStatusIds } from "./monitor-eligibility.js";
 import { buildFileContentionGate, shouldDeferForContention, type BuildFileContentionGate } from "./monitor-file-contention.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { resolveMachineCapacity, type MachineCapacitySnapshot } from "@agentic-kanban/shared/lib/machine-capacity";
@@ -27,6 +27,7 @@ import {
   countWipCapacity,
   type WipCapacitySnapshot,
 } from "../repositories/wip-capacity.repository.js";
+import { orderCandidatesByStartScore } from "./monitor-start-scoring.js";
 
 async function hasSkipAutoStartTag(issueId: string): Promise<boolean> {
   const rows = await db.select({ id: tags.id }).from(issueTags)
@@ -59,14 +60,11 @@ export async function isDriveOrEpicMeta(issueId: string, database = db): Promise
 }
 
 /**
- * SQL predicate that EXCLUDES drive/epic metas from the auto-start candidate query (#824). This is
- * the in-query enforcement of the same rule {@link isDriveOrEpicMeta} documents — applied as a WHERE
- * condition so a meta is never even a candidate (no per-issue query, no stray builder workspace).
+ * #917: re-exported so existing importers (and `monitor-start-scoring.ts`, which needs it
+ * for the read-only score preview) keep this path — the implementation moved to
+ * `monitor-eligibility.ts` alongside `resolveCandidateStatusIds`, its usual co-caller.
  */
-export function notDriveOrEpicMetaSql() {
-  return sql`NOT EXISTS (SELECT 1 FROM ${drives} WHERE ${drives.metaIssueId} = ${issues.id})
-    AND NOT EXISTS (SELECT 1 FROM ${issueDependencies} WHERE (${issueDependencies.issueId} = ${issues.id} AND ${issueDependencies.type} = 'parent_of') OR (${issueDependencies.dependsOnId} = ${issues.id} AND ${issueDependencies.type} = 'child_of'))`;
-}
+export { notDriveOrEpicMetaSql };
 
 /**
  * Reasons the Backlog/Todo pull loop declined to start an otherwise-unblocked issue this
@@ -262,6 +260,16 @@ export interface AutoStartDeps {
    * `canDispatch` — it reads preferences from the DB.
    */
   hostOverflowHasFleetCapacity?: typeof defaultHasFleetOverflowCapacity;
+  /**
+   * #917: scores and sorts the Todo-pull candidate list in place. Defaults to the real
+   * DB-backed `orderCandidatesByStartScore`, so production needs no wiring; injectable
+   * for the same ordered-mock-chain reason as `buildContentionGate`/`canDispatch` above
+   * — it reads `issueDependencies` (via `computeUnblockCounts`) and writes the score back
+   * per candidate, and a suite modelling `db.select`/`db.update` as ordered mocks would
+   * otherwise have its sequence shifted by those calls. Tests of unrelated auto-start
+   * logic inject a no-op that leaves `candidates` in query order.
+   */
+  orderStartCandidates?: typeof orderCandidatesByStartScore;
 }
 
 /**
@@ -387,6 +395,7 @@ interface AutoStartCycle {
   buildContentionGate: BuildFileContentionGate;
   canDispatch: typeof projectCanDispatch;
   hasFleetOverflowCapacity: typeof defaultHasFleetOverflowCapacity;
+  orderStartCandidates: typeof orderCandidatesByStartScore;
   skipInfo: Map<string, AutoStartSkipInfo>;
   noteSkip: (projectId: string, issueNumber: number | null | undefined, reason: AutoStartSkipReason, count?: number) => void;
   tunablesFor: (projectId: string) => ReturnType<typeof resolveMonitorTunables>["tunables"];
@@ -550,21 +559,6 @@ function recordMachineSaturationHold(ctx: AutoStartCycle, projectId: string): vo
 }
 
 /**
- * The Todo (and, for auto-driven projects, Backlog) status ids a project pulls candidates
- * from (#536). Returned as one list so the WIP-cap tally and the candidate query cannot
- * disagree about what "queued work" means.
- */
-async function resolveCandidateStatusIds(projectId: string, todoStatusId: string, allowFeatureTypes: boolean): Promise<string[]> {
-  const ids = [todoStatusId];
-  if (allowFeatureTypes) {
-    const backlogStatus = await db.select({ id: projectStatuses.id }).from(projectStatuses)
-      .where(sql`${projectStatuses.name} = 'Backlog' AND ${projectStatuses.projectId} = ${projectId}`).limit(1);
-    if (backlogStatus.length > 0) ids.push(backlogStatus[0].id);
-  }
-  return ids;
-}
-
-/**
  * #179: WIP is full — but only worth surfacing as a "skipped" cause if there is actually
  * queued Todo/Backlog work waiting behind it, not on every idle project.
  */
@@ -572,7 +566,7 @@ async function noteWipCapSkip(ctx: AutoStartCycle, projectId: string, allowFeatu
   const waitingTodoStatus = await db.select({ id: projectStatuses.id }).from(projectStatuses)
     .where(sql`${projectStatuses.name} = 'Todo' AND ${projectStatuses.projectId} = ${projectId}`).limit(1);
   if (waitingTodoStatus.length === 0) return;
-  const waitingStatusIds = await resolveCandidateStatusIds(projectId, waitingTodoStatus[0].id, allowFeatureTypes);
+  const waitingStatusIds = await resolveCandidateStatusIds(projectId, waitingTodoStatus[0].id, allowFeatureTypes, db);
   const waitingCount = await db.select({ count: sql<number>`count(*)` }).from(issues)
     .where(and(inArray(issues.statusId, waitingStatusIds), monitorEligibleIssueSql(allowFeatureTypes), notDriveOrEpicMetaSql()));
   const waiting = Number(waitingCount[0]?.count ?? 0);
@@ -818,23 +812,31 @@ async function runTodoPull(ctx: AutoStartCycle, inProgressSt: { id: string; proj
 
   // For auto-driven projects, also pull Backlog issues so newly-created tickets
   // start without requiring a manual Backlog→Todo promotion (#536).
-  const candidateStatusIds = await resolveCandidateStatusIds(inProgressSt.projectId, todoStatus[0].id, allowFeatureTypes);
+  const candidateStatusIds = await resolveCandidateStatusIds(inProgressSt.projectId, todoStatus[0].id, allowFeatureTypes, db);
 
   // #774: do NOT pre-truncate the candidate set with an UNORDERED `limit(fetchLimit)`.
   // SQLite returns rows in an arbitrary order, so a small fetchLimit could return only
   // dep-blocked / already-workspaced candidates and silently DROP the one ticket whose
   // blockers are all Done+merged — exactly the ticket `dependency-waves/start-next`
-  // launches correctly (it scans ALL issues, orders them, then filters). Fetch all
-  // eligible candidates ordered by issue number (deterministic, FIFO-ish) and let the
-  // per-issue gates below decide; the slotsAvailable / startsRemaining caps still bound
-  // how many actually launch this cycle.
+  // launches correctly (it scans ALL issues, orders them, then filters). Fetch ALL
+  // eligible candidates (unordered) and let the per-issue gates below decide; the
+  // slotsAvailable / startsRemaining caps still bound how many actually launch this cycle.
   // #773: skip the feature/enhancement type-exclusion for auto-driven projects.
-  const todoIssues = await db.select({ id: issues.id, title: issues.title, description: issues.description, issueType: issues.issueType, projectId: issues.projectId, issueNumber: issues.issueNumber, externalKey: issues.externalKey }).from(issues)
-    .where(and(inArray(issues.statusId, candidateStatusIds), monitorEligibleIssueSql(allowFeatureTypes), notDriveOrEpicMetaSql()))
-    .orderBy(issues.issueNumber);
+  // #917: the iteration order used to be `ORDER BY issue_number` (FIFO). It is now a
+  // computed SCORE (`orderCandidatesByStartScore` below) — priority x unblock-count x
+  // age / predicted-cost x Bullseye segment weight — so a high-priority ticket that
+  // unblocks several others starts before an older, lower-priority leaf.
+  const todoIssues = await db.select({
+    id: issues.id, title: issues.title, description: issues.description, issueType: issues.issueType,
+    projectId: issues.projectId, issueNumber: issues.issueNumber, externalKey: issues.externalKey,
+    priority: issues.priority, createdAt: issues.createdAt, statusChangedAt: issues.statusChangedAt,
+  }).from(issues)
+    .where(and(inArray(issues.statusId, candidateStatusIds), monitorEligibleIssueSql(allowFeatureTypes), notDriveOrEpicMetaSql()));
   const doneStatuses = await db.select({ id: projectStatuses.id }).from(projectStatuses)
     .where(sql`${projectStatuses.name} IN ('Done', 'Cancelled')`);
   const doneStatusIds = new Set(doneStatuses.map((s) => s.id));
+
+  await ctx.orderStartCandidates(todoIssues, inProgressSt.projectId, doneStatusIds, ctx.prefMap, db);
 
   // Candidates consumed as GROUP MEMBERS this cycle: their workspace row is minutes
   // away (async provisioning), so only this in-cycle set stops the loop from also
@@ -925,6 +927,7 @@ export async function runAutoStart(prefMap: Map<string, string>, {
   serverPort, boardEvents, logMonitorAction, allowProject, isAutoDrivenProject = () => false,
   buildContentionGate = buildFileContentionGate, canDispatch = projectCanDispatch,
   readMachineCapacity = resolveMachineCapacity, hostOverflowHasFleetCapacity: hasFleetOverflowCapacity = defaultHasFleetOverflowCapacity,
+  orderStartCandidates = orderCandidatesByStartScore,
 }: AutoStartDeps): Promise<Map<string, AutoStartSkipInfo>> {
   const skipInfo = new Map<string, AutoStartSkipInfo>();
   const noteSkip = (projectId: string, issueNumber: number | null | undefined, reason: AutoStartSkipReason, count = 1) => {
@@ -960,7 +963,7 @@ export async function runAutoStart(prefMap: Map<string, string>, {
 
   const ctx: AutoStartCycle = {
     prefMap, baseUrl, boardEvents, logMonitorAction, isAutoDrivenProject,
-    buildContentionGate, canDispatch, hasFleetOverflowCapacity, skipInfo, noteSkip, tunablesFor, startsRemaining, noteStart,
+    buildContentionGate, canDispatch, hasFleetOverflowCapacity, orderStartCandidates, skipInfo, noteSkip, tunablesFor, startsRemaining, noteStart,
     machineCapacity,
   };
 

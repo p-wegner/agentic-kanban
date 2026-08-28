@@ -54,6 +54,9 @@ function makeDeps(overrides: Partial<AutoStartDeps> = {}): AutoStartDeps {
     // #908: pin a deterministic "plenty of room" capacity read — see the identical note
     // in monitor-auto-start.test.ts's makeDeps for why this must not read the real machine.
     readMachineCapacity: async () => ({ tier: "0", hold: false, reason: "test fixture", freeGb: 99 }),
+    // #917: see the identical note in monitor-auto-start.test.ts's makeDeps — the real
+    // scorer's DB reads/writes would shift this suite's ordered `db.select` mock chains.
+    orderStartCandidates: async () => {},
     ...overrides,
   };
 }

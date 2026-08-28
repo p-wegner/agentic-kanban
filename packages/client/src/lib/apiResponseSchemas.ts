@@ -412,6 +412,32 @@ const projectStatus = looseObject({ id: str, name: str, projectId: str, sortOrde
  * `string | null` on the DTO and in the column; modelling them as plain `str` would have
  * reddened every project whose sibling repo has no configured branch.
  */
+/**
+ * `GET /api/projects/:id/board-monitor/next` (#917) -> `{ projectId, candidates }`, where
+ * each candidate is a `StartScorePreviewRow` (`startup/monitor-start-scoring.ts`). The
+ * score block is the point of the endpoint -- the Monitor popover renders every one of its
+ * numbers -- so it is asserted field by field rather than left as an opaque object.
+ * `issueNumber` and `bullseyeSegmentId` are genuinely nullable on the server row.
+ */
+const nextStartCandidate = looseObject({
+  id: str,
+  issueNumber: nullable(num),
+  title: str,
+  score: nested(looseObject({
+    score: num,
+    priority: str,
+    priorityWeight: num,
+    unblockCount: num,
+    ageHours: num,
+    ageFactor: num,
+    predictedCost: num,
+    bullseyeMultiplier: num,
+    bullseyeSegmentId: nullable(str),
+  })),
+});
+
+const nextStartCandidates = looseObject({ projectId: str, candidates: arrayOf(nested(nextStartCandidate)) });
+
 const projectRepo = dtoObject<ProjectRepoResponse>({
   id: str,
   projectId: str,
@@ -636,6 +662,7 @@ export const API_RESPONSE_SCHEMAS: readonly ApiResponseRoute[] = [
   { method: "GET", template: "/api/projects/:id/board", schema: arrayRoot(boardColumn) },
   { method: "GET", template: "/api/projects/:id/statuses", schema: arrayRoot(projectStatus) },
   { method: "GET", template: "/api/projects/:id/repos", schema: arrayRoot(projectRepo) },
+  { method: "GET", template: "/api/projects/:id/board-monitor/next", schema: nextStartCandidates },
   // `all` is a LITERAL segment, not a project id. It has the same segment count as
   // `/:id/statuses`, and `findApiResponseSchema` prefers the more literal template — but the
   // last segments differ anyway, so neither can shadow the other.
