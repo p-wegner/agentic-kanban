@@ -9,7 +9,7 @@ import type { createSessionManager } from "../services/session.manager.js";
 import type { MonitorAction } from "./monitor-helpers.js";
 import { NOISE_TRIGGER_TYPES } from "../services/session-filter.js";
 import { commitLeftoverChanges, countBehindCommits, getCommitCountAhead, getWorkingTreeDiff } from "../services/git.service.js";
-import { startManualReview } from "../services/review.service.js";
+import { isReviewLaunchPending, startManualReview } from "../services/review.service.js";
 import { readUsageLimitStats } from "@agentic-kanban/shared/lib/session-stats-blob";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { getStackProfile, verifyScriptPrefKey } from "../services/stack-profile.service.js";
@@ -363,6 +363,115 @@ async function mergeBlockedByBackoff(ws: WorkspaceCandidate, deps: ProcessWorksp
   return false;
 }
 
+/**
+ * #932 — an idle, In-Review, not-ready workspace whose builder FINISHED cleanly but was never
+ * reviewed. Before this the cycle only logged "skipping relaunch … is in review" and moved on,
+ * so the sole recovery was the 60s stranded-review sweep; when that sweep was held (or the
+ * builder exit's own auto-review launch never fired) the workspace sat idle indefinitely.
+ * Observed live: #905/#926/#927 all exited 0 with commits on their branch and were picked up by
+ * nothing until a hand-fired `POST /:id/review`.
+ *
+ * Deliberately NOT gated on the build semaphore: a review is an agent session, not a
+ * build/verify invocation, so `buildGateBusy()` has no claim on it — that semaphore governs
+ * backend-spawned build load, and holding reviews behind it is what let one long gate freeze
+ * every project's non-gate progress.
+ *
+ * Returns true when a review was launched (the caller then stops handling this candidate).
+ */
+async function launchStrandedReview(ws: WorkspaceCandidate, ctx: CycleContext): Promise<boolean> {
+  const { deps, logAction } = ctx;
+  if (ws.isDirect || !ws.workingDir || !ws.baseBranch) return false;
+  // Another path (exit-workflow auto-review, manual review, the reconciler) is mid-launch —
+  // its session row may not exist yet, so the query below cannot see it (#270).
+  if (isReviewLaunchPending(ws.wsId)) return false;
+  // Only the never-reviewed shape belongs here. A workspace that HAS been reviewed but was
+  // never armed is the reconciler's shape 2 (#932) — it owns that repair, and duplicating
+  // the arming here would mean two paths racing to write the same flag.
+  const priorReview = await db.select({ id: sessions.id }).from(sessions)
+    .where(and(eq(sessions.workspaceId, ws.wsId), eq(sessions.triggerType, "review"))).limit(1);
+  if (priorReview.length > 0) return false;
+  try {
+    const { sessionId } = await (deps.startReview ?? startManualReview)(db, () => deps.sessionManager, deps.boardEvents, deps.reviewSessionIds, ws.wsId, false);
+    logAction("mark_idle", ws.wsId, ws.issueId, {
+      endpoint: `POST /api/workspaces/${ws.wsId}/review`,
+      responseSummary: `Launched review for unreviewed In-Review workspace (session ${sessionId})`,
+      verificationResult: "ok",
+    });
+    console.log(`[monitor] Launched review for idle unreviewed In-Review workspace ${ws.wsId} (issue #${ws.issueNumber ?? "?"}) session=${sessionId}`);
+    deps.boardEvents.broadcast(ws.projectId, "board_changed");
+    return true;
+  } catch (err) {
+    console.warn(`[monitor] Failed to launch review for idle In-Review workspace ${ws.wsId}:`, errorMessage(err));
+    return false;
+  }
+}
+
+/**
+ * The idle + issue-is-"In Review" arm, extracted from `handleIdleWorkspace` (#932).
+ *
+ * Two dispositions, and until #932 only the first existed:
+ *  - `auto_merge_in_review` ON  — gate and land the un-ready work (#821).
+ *  - otherwise                  — if it was never reviewed, REVIEW it; only then log and wait.
+ *    The bare log was the whole behaviour before, which is why three finished workspaces sat
+ *    idle across cycles with nothing to move them.
+ */
+async function handleIdleInReviewWorkspace(ws: WorkspaceCandidate, ctx: CycleContext): Promise<void> {
+  const { deps, logAction, canStartMerge } = ctx;
+  if (!(deps.autoMergeEnabled && deps.autoMergeInReview && !deps.autoMergeDisabledProjectIds?.has(ws.projectId))) {
+    if (await launchStrandedReview(ws, ctx)) return;
+    console.log(`[monitor] Skipping relaunch for idle workspace ${ws.wsId}  issue #${ws.issueNumber} is in review (committed work awaiting merge; enable auto_merge_in_review to land it)`);
+    return;
+  }
+  // #417: the backoff check runs BEFORE the pre-merge gate below — the gate is the
+  // expensive verify/smoke run this circuit breaker exists to stop repeating.
+  if (await mergeBlockedByBackoff(ws, deps)) return;
+  // #821: the auto_merge_in_review path merges idle In-Review workspaces that are NOT
+  // readyForMerge. The verify_script + smoke quality gate lived ONLY in the review-exit handler,
+  // so this path bypassed it entirely — unverified/un-rendered code merged on hands-off projects.
+  // Run the shared pre-merge gate HERE before merging un-ready work; on failure, WITHHOLD the
+  // merge (leave In Review + log) rather than silently land it. (Work the review already approved
+  // — readyForMerge=true — has passed the gate at review-exit, so skip the re-run for it.)
+  // Build the explicit merge-gate PROOF token (arch-review §1.2): either the gate we run
+  // right here for un-ready work, or the review-exit gate that set readyForMerge.
+  let gateToken: MergeGateToken = gateTokenFromWorkspaceEvidence(ws, "review-exit gate (readyForMerge, auto_merge_in_review)");
+  if (!ws.readyForMerge) {
+    // #540/#573: the #243 protocol via its ONE owner — pin the state the gate is ABOUT to
+    // test, run, re-pin, and mint proof only for a tip that did not move. Evidence minted
+    // WITHOUT tips falls back to `evidenceIsValid`'s 15-minute age check with a `ranAt`
+    // stamped at gate END, so a commit landing mid-gate produced evidence that looked FRESH
+    // and the moved tip merged having never been tested.
+    const gateWorkspace = { id: ws.wsId, workingDir: ws.workingDir, baseBranch: ws.baseBranch };
+    const gate = await runGateWithEvidence({
+      workspace: gateWorkspace,
+      projectId: ws.projectId,
+      source: "monitor-cycle gate (auto_merge_in_review)",
+      database: db,
+    });
+    if (!gate.passed) {
+      console.log(`[monitor] Withholding auto_merge_in_review for idle In-Review workspace ${ws.wsId}  pre-merge gate failed (${gate.stage}): ${gate.message}`);
+      emitButlerSystemEvent({
+        projectId: ws.projectId,
+        kind: "merge_failed",
+        workspaceId: ws.wsId,
+        issueNumber: ws.issueNumber ?? undefined,
+        text: `Held idle In-Review workspace ${ws.wsId} (issue #${ws.issueNumber ?? "?"}): pre-merge gate failed (${gate.stage}). ${gate.message.slice(0, 300)}`,
+      });
+      deps.boardEvents.broadcast(ws.projectId, "workflow_error");
+      return;
+    }
+    if (gate.ran) console.log(`[monitor] Pre-merge gate passed for idle In-Review workspace ${ws.wsId} (${gate.stage}); proceeding with auto_merge_in_review`);
+    // Null when a tip moved during the run (or nothing was gated) — then the merge executor
+    // gates for itself rather than being handed proof for a state that no longer exists.
+    gateToken = gate.token ?? RUN_GATE;
+  }
+  if (!canStartMerge(ws)) return;
+  await mergeWorkspaceWithFixFallback(ws, deps.workspaceActions, logAction, {
+    conflictMsg: `[monitor] Merge conflict for idle In-Review workspace ${ws.wsId} (auto_merge_in_review)  triggered fix-and-merge`,
+    successMsg: `[monitor] Auto-merged idle In-Review workspace ${ws.wsId} (auto_merge_in_review, not marked ready)`,
+  }, gateToken, mergeBackoffDeps(deps));
+  deps.boardEvents.broadcast(ws.projectId, "board_changed");
+}
+
 async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession | undefined, sessionCount: number, ctx: CycleContext): Promise<void> {
   const { deps, logAction, canStartRelaunch, canStartMerge } = ctx;
   // Provider-neutral since #542. This site (and the stopped-workspace one below) used to
@@ -451,58 +560,7 @@ async function handleIdleWorkspace(ws: WorkspaceCandidate, sess: LatestSession |
     console.log(`[monitor] Workspace ${ws.wsId} has ${sessionCount} sessions with issue in review  closing to break review loop (merge or create new workspace)`);
     deps.boardEvents.broadcast(ws.projectId, "board_changed");
   } else if (ws.issueStatusName === "In Review") {
-    if (deps.autoMergeEnabled && deps.autoMergeInReview && !deps.autoMergeDisabledProjectIds?.has(ws.projectId)) {
-      // #417: the backoff check runs BEFORE the pre-merge gate below — the gate is the
-      // expensive verify/smoke run this circuit breaker exists to stop repeating.
-      if (await mergeBlockedByBackoff(ws, deps)) return;
-      // #821: the auto_merge_in_review path merges idle In-Review workspaces that are NOT
-      // readyForMerge. The verify_script + smoke quality gate lived ONLY in the review-exit handler,
-      // so this path bypassed it entirely — unverified/un-rendered code merged on hands-off projects.
-      // Run the shared pre-merge gate HERE before merging un-ready work; on failure, WITHHOLD the
-      // merge (leave In Review + log) rather than silently land it. (Work the review already approved
-      // — readyForMerge=true — has passed the gate at review-exit, so skip the re-run for it.)
-      // Build the explicit merge-gate PROOF token (arch-review §1.2): either the gate we run
-      // right here for un-ready work, or the review-exit gate that set readyForMerge.
-      let gateToken: MergeGateToken = gateTokenFromWorkspaceEvidence(ws, "review-exit gate (readyForMerge, auto_merge_in_review)");
-      if (!ws.readyForMerge) {
-        // #540/#573: the #243 protocol via its ONE owner — pin the state the gate is ABOUT to
-        // test, run, re-pin, and mint proof only for a tip that did not move. Evidence minted
-        // WITHOUT tips falls back to `evidenceIsValid`'s 15-minute age check with a `ranAt`
-        // stamped at gate END, so a commit landing mid-gate produced evidence that looked FRESH
-        // and the moved tip merged having never been tested.
-        const gateWorkspace = { id: ws.wsId, workingDir: ws.workingDir, baseBranch: ws.baseBranch };
-        const gate = await runGateWithEvidence({
-          workspace: gateWorkspace,
-          projectId: ws.projectId,
-          source: "monitor-cycle gate (auto_merge_in_review)",
-          database: db,
-        });
-        if (!gate.passed) {
-          console.log(`[monitor] Withholding auto_merge_in_review for idle In-Review workspace ${ws.wsId}  pre-merge gate failed (${gate.stage}): ${gate.message}`);
-          emitButlerSystemEvent({
-            projectId: ws.projectId,
-            kind: "merge_failed",
-            workspaceId: ws.wsId,
-            issueNumber: ws.issueNumber ?? undefined,
-            text: `Held idle In-Review workspace ${ws.wsId} (issue #${ws.issueNumber ?? "?"}): pre-merge gate failed (${gate.stage}). ${gate.message.slice(0, 300)}`,
-          });
-          deps.boardEvents.broadcast(ws.projectId, "workflow_error");
-          return;
-        }
-        if (gate.ran) console.log(`[monitor] Pre-merge gate passed for idle In-Review workspace ${ws.wsId} (${gate.stage}); proceeding with auto_merge_in_review`);
-        // Null when a tip moved during the run (or nothing was gated) — then the merge executor
-        // gates for itself rather than being handed proof for a state that no longer exists.
-        gateToken = gate.token ?? RUN_GATE;
-      }
-      if (!canStartMerge(ws)) return;
-      await mergeWorkspaceWithFixFallback(ws, deps.workspaceActions, logAction, {
-        conflictMsg: `[monitor] Merge conflict for idle In-Review workspace ${ws.wsId} (auto_merge_in_review)  triggered fix-and-merge`,
-        successMsg: `[monitor] Auto-merged idle In-Review workspace ${ws.wsId} (auto_merge_in_review, not marked ready)`,
-      }, gateToken, mergeBackoffDeps(deps));
-      deps.boardEvents.broadcast(ws.projectId, "board_changed");
-    } else {
-      console.log(`[monitor] Skipping relaunch for idle workspace ${ws.wsId}  issue #${ws.issueNumber} is in review (committed work awaiting merge; enable auto_merge_in_review to land it)`);
-    }
+    await handleIdleInReviewWorkspace(ws, ctx);
   } else {
     if (!canStartRelaunch(ws)) return;
     // #324: an empty workspace whose base moved gets rebased BEFORE the relaunch —

@@ -168,7 +168,7 @@ const COMPLEXITY_BASELINE = {
   // monitor-auto-start.ts: runAutoStart restructured into runInProgressBackfill /
   // runTodoPull / evaluateStartCandidate (#802) — 59 branches down to 4, and the file's
   // worst function is now 17, under the flat threshold. Entry REMOVED, not lowered.
-  "packages/server/src/startup/monitor-cycle.ts": 30,
+  "packages/server/src/startup/monitor-cycle.ts": 24,
   "packages/server/src/startup/monitor-setup.ts": 26,
   "packages/shared/src/lib/agent-stream/copilot.ts": 41,
   "packages/shared/src/lib/backlog-markdown.ts": 41,
