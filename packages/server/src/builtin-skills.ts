@@ -62,6 +62,8 @@ Todo → In Progress → In Review → AI Reviewed → Done / Cancelled
 
 {{precomputedContext}}
 
+{{members}}
+
 Analyze deeply, report narrowly. Read as much as you need to be sure; write down only what survives the gate below.
 
 Look for: correctness bugs, security vulnerabilities, logic errors, and missing error handling.

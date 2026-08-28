@@ -123,7 +123,6 @@ const RESPELLING_BASELINE: Record<string, number> = {
   "session/analytics.ts::sessionLifecycleColumns": 1,
   "showdown.repository.ts::issueIdentityColumns": 1,
   "voice-capture.repository.ts::issueIdentityColumns": 1,
-  "workspace-issue-members.repository.ts::issueIdentityColumns": 1,
   "workspace-launch-failures.repository.ts::issueIdentityColumns": 1,
   "workspace-risk.repository.ts::issueIdentityColumns": 1,
 };
