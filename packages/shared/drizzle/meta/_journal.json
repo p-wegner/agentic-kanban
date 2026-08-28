@@ -1016,6 +1016,13 @@
       "when": 1787503693971,
       "tag": "0144_merge_gate_verification_key",
       "breakpoints": true
+    },
+    {
+      "idx": 145,
+      "version": "6",
+      "when": 1787504693971,
+      "tag": "0145_issue_start_score",
+      "breakpoints": true
     }
   ]
 }
