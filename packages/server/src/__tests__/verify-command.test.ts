@@ -259,6 +259,11 @@ describe("deriveVerifyCommandPlan (#124)", () => {
     expect(deriveVerifyCommandPlan(GRADLE)!.onFailure).toContain("--tests");
     expect(deriveVerifyCommandPlan(PYTHON)!.onFailure).toContain("--tb=long");
   });
+
+  it("tells a node builder to cap vitest workers, since the box runs a gate + base-health probe too (#931)", () => {
+    const rules = deriveVerifyCommandPlan(makeProfile())!.rules.join(" ");
+    expect(rules).toMatch(/--maxWorkers/);
+  });
 });
 
 describe("buildStackProfileSection verify block (#124)", () => {
