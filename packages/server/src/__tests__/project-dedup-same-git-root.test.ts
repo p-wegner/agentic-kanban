@@ -296,7 +296,7 @@ describe("deduplicateProjects — lossless across the FULL project-child FK grap
       obstacleId: randomUUID(), templateId: randomUUID(), healthId: randomUUID(),
       flakyId: randomUUID(), shortcutId: randomUUID(), metricId: randomUUID(),
       viewProcessId: randomUUID(), baseBranchHealthId: randomUUID(),
-      provisioningId: randomUUID(), gitTokenHash: randomUUID(),
+      provisioningId: randomUUID(), gitTokenHash: randomUUID(), redDebtId: randomUUID(),
     };
     const earlier = new Date(Date.now() - 60_000).toISOString();
     const later = new Date().toISOString();
@@ -353,6 +353,11 @@ describe("deduplicateProjects — lossless across the FULL project-child FK grap
       branch: "feature/provisioning", worktreePath: null, serverPid: 1234,
       phase: "worktree", startedAt: earlier,
     });
+    // #915 — red_debt joined the project-child FK graph.
+    await d.insert(schema.redDebt).values({
+      id: ids.redDebtId, projectId: ids.dupId, suite: "server/foo.test.ts",
+      sinceCommit: "deadbeef", tag: "real", openedAt: earlier,
+    });
     await d.insert(schema.preferences).values({ key: "activeProjectId", value: ids.dupId, updatedAt: later });
     return ids;
   }
@@ -379,6 +384,8 @@ describe("deduplicateProjects — lossless across the FULL project-child FK grap
       // project, so on a dedup it must follow the survivor rather than be stranded on a row
       // about to be deleted.
       "worker_git_tokens",
+      // #915 — red_debt joined the project-child FK graph (the ledger cascades on project_id).
+      "red_debt",
     ]);
     expect(exercised).toEqual(schemaChildren);
   });
