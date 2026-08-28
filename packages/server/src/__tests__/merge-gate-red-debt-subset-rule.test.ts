@@ -125,7 +125,10 @@ describe("runPreLockGate applies the red-debt subset rule (#915)", () => {
     const recordMergeAttempt = vi.fn(async () => {});
     const result = await callRunPreLockGate(recordMergeAttempt);
 
-    expect(result).toEqual(RUN_GATE_TOKEN);
+    // Softened by the subset rule, so the executor must NOT re-run the gate under the lock —
+    // that would fail on the exact same suites and silently discard this verdict. Proof is
+    // minted (`already-passed`), not the caller's original `run-gate` token.
+    expect(result.kind).toBe("already-passed");
     expect(recordMergeAttempt).not.toHaveBeenCalled();
     expect(openRedDebtEntry).not.toHaveBeenCalled();
   });
@@ -159,7 +162,7 @@ describe("runPreLockGate applies the red-debt subset rule (#915)", () => {
     const recordMergeAttempt = vi.fn(async () => {});
     const result = await callRunPreLockGate(recordMergeAttempt);
 
-    expect(result).toEqual(RUN_GATE_TOKEN);
+    expect(result.kind).toBe("already-passed");
     expect(recordMergeAttempt).not.toHaveBeenCalled();
     expect(openRedDebtEntry).toHaveBeenCalledWith(
       expect.objectContaining({ projectId: "project-1", suite: "suite-new", tag: "real" }),

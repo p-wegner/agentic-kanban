@@ -483,7 +483,18 @@ export async function runPreLockGate(args: {
             console.log(
               `[workspace-merge] pre-lock gate softened by red-debt subset rule (#915) for workspace ${workspaceId}: ${verdict.message}`,
             );
-            return token;
+            // Mint proof, exactly as a genuine pass does (`runGateWithEvidence`'s `token`
+            // field) — returning the caller's original `run-gate` token here would let the
+            // executor's in-lock `resolveMergeGate` call re-run `runPreMergeGate`, which has
+            // no knowledge of this subset rule and would fail on the SAME suites again,
+            // silently discarding the softened verdict this block just decided on.
+            return gateAlreadyPassed({
+              ranAt: new Date().toISOString(),
+              stage: preGate.stage,
+              source: `pre-lock-merge (red-debt subset rule #915: ${verdict.message})`,
+              branchSha: preGate.shasBefore.branchSha ?? undefined,
+              baseSha: preGate.shasBefore.baseSha ?? undefined,
+            });
           }
         }
       } catch (err) {
