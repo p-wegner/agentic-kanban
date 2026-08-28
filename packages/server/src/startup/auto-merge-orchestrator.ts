@@ -13,7 +13,14 @@ import type { SessionLauncher } from "../services/session.manager.js";
 import { resolveMergePolicy } from "./merge-strategy.js";
 import { resolveMergeGateConfig } from "../services/pre-merge-gate.service.js";
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
+import { getNumber } from "@agentic-kanban/shared/lib/settings-registry";
 import type { StackProfile } from "@agentic-kanban/shared";
+import {
+  decideMergeTrainRelease,
+  DEFAULT_TRAIN_MAX_SIZE,
+  DEFAULT_TRAIN_MAX_WAIT_MS,
+  type MergeTrainWindowState,
+} from "../services/merge-train-window.js";
 import { reconcileCompletionStates } from "./completion-state-reconciler.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { reconcileDriveCompletion } from "./drive-completion-reconciler.js";
@@ -43,6 +50,8 @@ const verifyScriptPref = projectPref("verify_script");
 const stackProfilePref = projectPref("project_stack_profile");
 const devCommandPref = projectPref("dev_command");
 const healthUrlPref = projectPref("health_url");
+const trainMaxSizePref = projectPref("train_max_size");
+const trainMaxWaitMsPref = projectPref("train_max_wait_ms");
 
 export interface AutoMergeOrchestratorState {
   running: boolean;
@@ -55,6 +64,13 @@ export interface AutoMergeOrchestratorState {
   reconciler: { sessionId: string; integrationWorkspaceId: string; baseBranch: string; strandedKey: string; launchedAt: string } | null;
   /** Per-stranded-set attempt counter (key = sorted workspace ids) backing the reconciler cap. */
   reconcilerAttempts: Map<string, number>;
+  /**
+   * Merge-train batching window (#905): ready workspaces are held here, keyed per project,
+   * until `decideMergeTrainRelease` says the window has closed (max size or max wait). In
+   * memory only — a restart loses the accumulator and simply starts a fresh window, which is
+   * no worse than every workspace re-appearing as "just became ready" on the next tick.
+   */
+  trainWindows: Map<string, MergeTrainWindowState>;
 }
 
 let activeAutoMergeSweep: PeriodicSweepHandle | null = null;
@@ -114,6 +130,7 @@ export function createAutoMergeOrchestrator(deps: {
     lastSkipped: 0,
     reconciler: null,
     reconcilerAttempts: new Map(),
+    trainWindows: new Map(),
   };
 
   const queueService = createMergeQueueService({
@@ -131,7 +148,8 @@ export function createAutoMergeOrchestrator(deps: {
     return resolveMergePolicy(prefMap).owner === "merge_queue";
   }
 
-  async function findCompletedWorkspaceIds(): Promise<string[]> {
+  /** `{workspaceId, projectId}` for every ready workspace — the batching window partitions by projectId. */
+  async function findCompletedWorkspaceRows(): Promise<{ workspaceId: string; projectId: string }[]> {
     const prefRows = await getAllPreferencesCached(database);
     const prefMap = toPrefMap(prefRows);
     const autoMergeInReview = getBool(prefMap, "auto_merge_in_review");
@@ -214,7 +232,11 @@ export function createAutoMergeOrchestrator(deps: {
       // NOT for a gated project, where readyForMerge means "the verify/smoke gate passed". Gated
       // un-ready In-Review work waits for its review's gate instead of being merged unverified (#821).
       .filter((row) => row.readyForMerge || row.issueStatusName === "AI Reviewed" || (autoMergeInReview && !gatedProjectIds.has(row.projectId)))
-      .map((row) => row.workspaceId);
+      .map((row) => ({ workspaceId: row.workspaceId, projectId: row.projectId }));
+  }
+
+  async function findCompletedWorkspaceIds(): Promise<string[]> {
+    return (await findCompletedWorkspaceRows()).map((row) => row.workspaceId);
   }
 
   /**
@@ -269,6 +291,69 @@ export function createAutoMergeOrchestrator(deps: {
     }
   }
 
+  /**
+   * The batching window (#905): partitions ready workspaces by project, folds each project's
+   * ready set into its accumulator (`state.trainWindows`), and returns only the ids from
+   * projects whose window has closed this tick — max size or max wait, whichever comes first.
+   * A project with no accumulator yet starts one now, `firstSeenAt = now`, and never
+   * releases on the very tick it first sees a candidate unless that candidate set alone
+   * already reaches `train_max_size`.
+   *
+   * Read once per tick with the same cached prefMap `findCompletedWorkspaceRows` reads.
+   */
+  async function applyTrainWindow(rows: { workspaceId: string; projectId: string }[], now: string): Promise<string[]> {
+    const prefRows = await getAllPreferencesCached(database);
+    const prefMap = toPrefMap(prefRows);
+    const nowMs = new Date(now).getTime();
+
+    const byProject = new Map<string, string[]>();
+    for (const row of rows) {
+      const list = byProject.get(row.projectId) ?? [];
+      list.push(row.workspaceId);
+      byProject.set(row.projectId, list);
+    }
+
+    // A project whose accumulator has crossed max-wait must still release even on a tick where
+    // nothing NEW arrived for it — otherwise a batch smaller than max_size that stops growing
+    // waits forever instead of timing out. Union today's ready set with every project currently
+    // being accumulated so `decideMergeTrainRelease` gets a chance to fire for both.
+    const projectIds = new Set([...byProject.keys(), ...state.trainWindows.keys()]);
+
+    const released: string[] = [];
+    for (const projectId of projectIds) {
+      const ids = byProject.get(projectId) ?? [];
+      const existing = state.trainWindows.get(projectId);
+      if (ids.length === 0) {
+        // Nothing ready for this project right now — the reconcile passes may have healed or
+        // parked away everything that was pending. Nothing left to wait for.
+        if (existing) state.trainWindows.delete(projectId);
+        continue;
+      }
+
+      const config = {
+        maxSize: getNumber(prefMap, trainMaxSizePref.key(projectId), DEFAULT_TRAIN_MAX_SIZE),
+        maxWaitMs: getNumber(prefMap, trainMaxWaitMsPref.key(projectId), DEFAULT_TRAIN_MAX_WAIT_MS),
+      };
+      // Preserve the ORIGINAL firstSeenAt across ticks so the wait bound is measured from when
+      // the set first started accumulating, not re-armed every tick a new member joins.
+      const windowState: MergeTrainWindowState = {
+        pendingIds: ids,
+        firstSeenAt: existing?.firstSeenAt ?? now,
+      };
+
+      const verdict = decideMergeTrainRelease(windowState, config, nowMs);
+      if (verdict.release) {
+        console.log(`[auto-merge] train window closed for project ${projectId} (${verdict.reason}): releasing ${ids.length} workspace(s)`);
+        released.push(...ids);
+        state.trainWindows.delete(projectId);
+      } else {
+        state.trainWindows.set(projectId, windowState);
+      }
+    }
+
+    return released;
+  }
+
   async function runOnce(force = false): Promise<AutoMergeOrchestratorState> {
     if (state.running) return state;
 
@@ -320,9 +405,9 @@ export function createAutoMergeOrchestrator(deps: {
       // so candidates are re-queried after the passes.
       reconcileTick++;
       const fallbackDue = force || reconcileFallbackEveryTicks <= 1 || reconcileTick % reconcileFallbackEveryTicks === 1;
-      let workspaceIds = await findCompletedWorkspaceIds();
+      let completedRows = await findCompletedWorkspaceRows();
 
-      if (workspaceIds.length > 0 || fallbackDue) {
+      if (completedRows.length > 0 || fallbackDue) {
         const reconciled = await reconcileCompletionStates(database);
         if (reconciled > 0) {
           console.log(`[auto-merge] reconcileCompletionStates: unblocked ${reconciled} stuck workspace(s)`);
@@ -351,8 +436,14 @@ export function createAutoMergeOrchestrator(deps: {
         // The passes may have unblocked/reclassified workspaces — re-query so this
         // tick still merges what they just healed (previous behaviour, where the
         // passes always ran before the candidate query).
-        workspaceIds = await findCompletedWorkspaceIds();
+        completedRows = await findCompletedWorkspaceRows();
       }
+
+      // Merge-train batching window (#905): hold ready workspaces per project until the window
+      // closes (train_max_size / train_max_wait_ms), instead of landing whatever is ready on
+      // the very tick it became ready. A project whose window is still open contributes nothing
+      // this tick even though its workspaces are individually ready.
+      const workspaceIds = await applyTrainWindow(completedRows, state.lastRunAt);
 
       if (workspaceIds.length === 0) return state;
 
@@ -364,8 +455,14 @@ export function createAutoMergeOrchestrator(deps: {
         console.log(`[auto-merge] migration collision candidates detected; queue will merge sequentially and renumber as needed (${summary})`);
       }
 
+      // A window-released batch of >=2 is exactly what the batching window exists to gate ONCE
+      // as a train (`trainEligible` still applies its own repo/base/direct-workspace checks and
+      // falls back to sequential when they don't hold — this only expresses the PREFERENCE).
       const strandedIds: string[] = [];
-      for await (const event of queueService.executeQueue(workspaceIds, { skipOnConflict: true })) {
+      for await (const event of queueService.executeQueue(workspaceIds, {
+        skipOnConflict: true,
+        strategy: workspaceIds.length >= 2 ? "train" : undefined,
+      })) {
         if (event.type === "merged") {
           state.lastMerged++;
           console.log(`[auto-merge] merged workspace ${event.workspaceId} (#${event.issueNumber ?? "?"})`);
@@ -402,6 +499,8 @@ export function createAutoMergeOrchestrator(deps: {
   return {
     state,
     findCompletedWorkspaceIds,
+    findCompletedWorkspaceRows,
+    applyTrainWindow,
     runOnce,
   };
 }
