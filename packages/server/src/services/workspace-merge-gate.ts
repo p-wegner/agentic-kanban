@@ -46,7 +46,13 @@ import { getBaseBranchHealthAtMergeBase, describeRedBaseAttribution } from "./ba
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { listRedDebt, openRedDebtEntry } from "../repositories/red-debt.repository.js";
-import { redDebtPosturePrefKey, resolveRedDebtGatePosture } from "@agentic-kanban/shared/lib/red-debt-cap";
+import {
+  redDebtPosturePrefKey,
+  redDebtMaxPrefKey,
+  redDebtMaxAgePrefKey,
+  resolveRedDebtGatePosture,
+  resolveEffectiveRedDebtPosture,
+} from "@agentic-kanban/shared/lib/red-debt-cap";
 import { resolveRedDebtGateVerdict, type RedDebtGatePosture } from "@agentic-kanban/shared/lib/red-debt-gate";
 
 type WorkspaceRow = typeof workspaces.$inferSelect;
@@ -399,6 +405,7 @@ export async function runPreLockGate(args: {
     // it can only ADD attribution to it.
     let gateMessage = preGate.message;
     let failedSuites: string[] | null = null;
+    let baseHealthRecordedSha: string | null = null;
     if (workspace.workingDir) {
       try {
         const baseHealth = await getBaseBranchHealthAtMergeBase(
@@ -408,6 +415,7 @@ export async function runPreLockGate(args: {
           baseBranch,
           database,
         );
+        baseHealthRecordedSha = baseHealth.recordedSha ?? null;
         const attribution = describeRedBaseAttribution(baseHealth);
         if (attribution) gateMessage = `${attribution}\n\n${preGate.message}`;
         if (baseHealth.health?.failedSuites) {
@@ -433,9 +441,31 @@ export async function runPreLockGate(args: {
     if (failedSuites && failedSuites.length > 0) {
       try {
         const postureRaw = await getPreference(redDebtPosturePrefKey(projectId), database).catch(() => null);
-        const posture = resolveRedDebtGatePosture(postureRaw);
+        const requestedPosture = resolveRedDebtGatePosture(postureRaw);
+        // #916 — a ledger over its cap must not let `sprint`/`fast` keep softening verdicts
+        // forever; it degrades the EFFECTIVE posture one step (sprint -> fast -> standard)
+        // instead. Evaluated against the SAME open-ledger snapshot the verdict itself reads
+        // below, so a degrade to `standard` reliably falls out of the `fast || sprint` gate.
+        const ledger = await listRedDebt(projectId, {}, database);
+        const oldestOpenEntryAgeMs = ledger.length > 0
+          ? Date.now() - Math.min(...ledger.map((e) => Date.parse(e.openedAt)).filter((n) => !Number.isNaN(n)))
+          : null;
+        const [maxEntriesRaw, maxAgeMsRaw] = await Promise.all([
+          getPreference(redDebtMaxPrefKey(projectId), database).catch(() => null),
+          getPreference(redDebtMaxAgePrefKey(projectId), database).catch(() => null),
+        ]);
+        const capResult = resolveEffectiveRedDebtPosture({
+          posture: requestedPosture,
+          openEntryCount: ledger.length,
+          oldestOpenEntryAgeMs,
+          maxEntriesRaw,
+          maxAgeMsRaw,
+        });
+        const posture = capResult.effectivePosture;
+        if (capResult.degraded) {
+          console.log(`[workspace-merge] ${capResult.note}`);
+        }
         if (posture === "fast" || posture === "sprint") {
-          const ledger = await listRedDebt(projectId, {}, database);
           const verdict = resolveRedDebtGateVerdict({
             failedSuites,
             ledger: ledger.map((e) => ({ suite: e.suite, tag: e.tag as "flaky" | "real" })),
@@ -443,7 +473,7 @@ export async function runPreLockGate(args: {
           });
           if (verdict.outcome === "pass-with-debt" || verdict.outcome === "pass-with-new-debt") {
             if (verdict.outcome === "pass-with-new-debt") {
-              const sinceCommit = (await getBaseBranchHealthAtMergeBase(projectId, workspace.workingDir!, "HEAD", baseBranch, database).catch(() => null))?.recordedSha ?? "unknown";
+              const sinceCommit = baseHealthRecordedSha ?? "unknown";
               for (const suite of verdict.newRed) {
                 await openRedDebtEntry({ projectId, suite, sinceCommit, tag: "real" }, database).catch((err) => {
                   console.warn(`[workspace-merge] failed to open red-debt entry for ${suite} (non-fatal):`, errorMessage(err));
