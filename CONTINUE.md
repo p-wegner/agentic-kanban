@@ -30,7 +30,10 @@ three of its five items were already closed. Standing state lives here and nowhe
    gate. See "Deferred on machine load" below; this has been deferred across several sessions
    and is genuinely unverified, not merely unrecorded.
 3. **#922** (In Review) — disclose-context PostToolUse hook into the worktree scaffold.
-4. **#924** — merge job is in-memory only; a `tsx watch` restart mid-gate loses it.
+4. **#924** — investigated 2026-08-28: already fully solved by #893 (`4ce27bb3dd`,
+   `workspace_merge_gate` persisted verdict + `describePersistedGateVerdict` on
+   `GET /merge-status`), inherited on this branch from master. No code change made;
+   closing as a duplicate rather than re-implementing. See the dated section below.
 5. **#905–#907** (In Progress) — the merge-train batching/persistence/one-review-per-train trio.
 
 ### Deferred on machine load, with the reason
@@ -57,6 +60,42 @@ Passes older than 2026-08-25 have been moved **verbatim, newest first** into
 records what each session believed at the time. Look there for the #680 gate-hermeticity
 history, the "batch 1 of N" true-state table (#691), the 2026-08-21/22/23 waves, the
 adversarial review, and the hook-cost investigations.
+
+## #924 investigated: duplicate of #893, already fully solved (2026-08-28)
+
+Ticket asked to persist the merge job (DB row with state + gate result) or make the gate
+resumable across a restart, so a `tsx watch` restart mid-gate does not throw away a 45-minute
+gate run, and a gate that completed before the restart should be reusable for the same head sha.
+
+**All of that already exists**, landed by #893 (`4ce27bb3dd fix(#893): a passing gate verdict
+is persisted per head+base SHA and tier, and reused, so a restart costs seconds`), which is on
+this branch's history (inherited from master, not something to re-derive):
+
+- `packages/shared/src/schema/workspace-merge-gate.ts` + migration `0144_merge_gate_verification_key.sql`
+  — a real DB table (`workspace_merge_gate`), not in-memory.
+- `packages/server/src/repositories/merge-gate.repository.ts` — `setMergeGateEvidence` /
+  `getMergeGateEvidence` (upsert-by-workspaceId).
+- `packages/server/src/services/workspace-merge-gate.ts` — `persistGateVerdict` (writes on a
+  PASS only, keyed on branchSha+baseSha+`gateVerificationKey`) and
+  `reusePersistedGateVerdict` (reuse requires stage∈{verify,smoke}, both tips present and
+  equal to the CURRENT tips, unchanged verification tier, age ≤ 3h). `runPreLockGate` — the
+  function `mergeWorkspaceDeduped` calls on every `POST /:id/merge` — checks this BEFORE
+  paying for a gate run.
+- `packages/server/src/routes/workspace-actions.ts` `GET /:id/merge-status` — when this
+  process has no in-memory `MergeJob` record (the literal "no merge job recorded ... in the
+  current server process" case this ticket quotes), it now separately reports
+  `persistedGateVerdict` and says explicitly whether a retry will reuse it.
+- Tested: `persisted-gate-verdict.test.ts`, `merge-gate-evidence-pinned-before-run.test.ts`,
+  `merge-job-tracking.test.ts` — 39/39 green, run directly on this branch 2026-08-28.
+
+**Why the in-memory `MergeJob` itself (`merge-job.service.ts`) is untouched and correctly so**:
+its own header comment says this is deliberate — it is diagnostic state about the live HTTP
+call, not the durable record, and #893 is exactly the durable record the header points at.
+Nothing in #924 survives as an open gap once #893 is accounted for.
+
+**No code change made on this ticket.** Writing a second persistence mechanism would
+duplicate #893's; the honest outcome is to close #924 as a duplicate, not to invent
+busy-work. Propose-transition summary says the same.
 
 ## #807 done: coverage CI placement decided with real numbers; no floor yet (2026-08-25)
 
