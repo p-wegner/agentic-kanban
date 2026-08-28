@@ -297,6 +297,7 @@ describe("deduplicateProjects — lossless across the FULL project-child FK grap
       flakyId: randomUUID(), shortcutId: randomUUID(), metricId: randomUUID(),
       viewProcessId: randomUUID(), baseBranchHealthId: randomUUID(),
       provisioningId: randomUUID(), gitTokenHash: randomUUID(), redDebtId: randomUUID(),
+      mergeTrainId: randomUUID(),
     };
     const earlier = new Date(Date.now() - 60_000).toISOString();
     const later = new Date().toISOString();
@@ -353,6 +354,12 @@ describe("deduplicateProjects — lossless across the FULL project-child FK grap
       branch: "feature/provisioning", worktreePath: null, serverPid: 1234,
       phase: "worktree", startedAt: earlier,
     });
+    // #906 — a persisted release train cascades on project_id, so on a dedup it must
+    // follow the survivor rather than be stranded on the row about to be deleted.
+    await d.insert(schema.mergeTrains).values({
+      id: ids.mergeTrainId, projectId: ids.dupId, label: "q1",
+      memberWorkspaceIds: "[]", state: "landed", startedAt: earlier,
+    });
     // #915 — red_debt joined the project-child FK graph.
     await d.insert(schema.redDebt).values({
       id: ids.redDebtId, projectId: ids.dupId, suite: "server/foo.test.ts",
@@ -384,6 +391,8 @@ describe("deduplicateProjects — lossless across the FULL project-child FK grap
       // project, so on a dedup it must follow the survivor rather than be stranded on a row
       // about to be deleted.
       "worker_git_tokens",
+      // #906 — persisted release trains (the ledger cascades on project_id).
+      "merge_trains",
       // #915 — red_debt joined the project-child FK graph (the ledger cascades on project_id).
       "red_debt",
     ]);
