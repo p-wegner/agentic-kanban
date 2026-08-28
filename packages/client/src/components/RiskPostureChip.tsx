@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { RISK_POSTURE_DESCRIPTIONS, RISK_POSTURE_LABELS, resolveRiskPosture, type RiskPosture } from "@agentic-kanban/shared/lib/risk-posture";
+import { RISK_POSTURE_DESCRIPTIONS, RISK_POSTURE_LABELS, resolveRiskPosture, riskPosturePref, type RiskPosture } from "@agentic-kanban/shared/lib/risk-posture";
 import { getSettings } from "../lib/settingsStore.js";
 
 const POSTURE_DOT: Record<RiskPosture, string> = {
@@ -12,8 +12,9 @@ const POSTURE_DOT: Record<RiskPosture, string> = {
 /**
  * Per-project risk posture chip (#912) — the board header always names which
  * posture is active, per the proposal's honesty rule: a weaker posture may only
- * weaken verification VISIBLY, never silently. Reads the same `risk_posture_<id>`
- * preference the Settings -> Workflow selector writes.
+ * weaken verification VISIBLY, never silently. Reads the same per-project posture
+ * preference the Settings -> Workflow selector writes, via `riskPosturePref` — the
+ * one place the key is built (#911).
  */
 export function RiskPostureChip({ activeProjectId }: { activeProjectId: string | null }) {
   const [posture, setPosture] = useState<RiskPosture | null>(null);
@@ -26,7 +27,7 @@ export function RiskPostureChip({ activeProjectId }: { activeProjectId: string |
     }
     getSettings()
       .then((s) => {
-        if (!cancelled) setPosture(resolveRiskPosture(s[`risk_posture_${activeProjectId}`]));
+        if (!cancelled) setPosture(resolveRiskPosture(s[riskPosturePref.key(activeProjectId)]));
       })
       .catch(() => {
         if (!cancelled) setPosture(null);
