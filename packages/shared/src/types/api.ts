@@ -38,6 +38,7 @@ export type * from "./api/monitor.js";
 export type * from "./api/agent-questions.js";
 export type * from "./api/plugin.js";
 export type * from "./api/preflight.js";
+export type * from "./api/merge-train.js";
 export type * from "./api/scorecard.js";
 export type * from "./api/orchestrator.js";
 export type * from "./api/issue-comment.js";

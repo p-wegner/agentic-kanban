@@ -70,6 +70,7 @@ import type { RepoMergeStatusResponse } from "@agentic-kanban/shared/types";
 import type { StatusWithIssues, IssueWithStatus } from "@agentic-kanban/shared/types";
 import type { DiffResponse, DiffStatsResponse } from "@agentic-kanban/shared/types";
 import type { ScorecardResult } from "@agentic-kanban/shared/types";
+import type { MergeTrainRowDto } from "@agentic-kanban/shared/types";
 
 export type ApiMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -584,6 +585,23 @@ const workspaceAttempt = looseObject({
   lastSessionAt: nullable(str),
 });
 
+/**
+ * `GET /api/merge-queue/trains` (#906) → `listMergeTrainsForProject`. The "Merge train"
+ * summary bar (`lib/mergeTrainSummary.ts`) reads every field below off each row.
+ */
+const mergeTrainRow = dtoObject<MergeTrainRowDto>({
+  id: str,
+  // `state` is a narrow union server-side; checked as a string at runtime (any value the
+  // server sends here is already meaningful to log/display) per this file's own loosest-
+  // check convention — see the file header.
+  state: str as Check<MergeTrainRowDto["state"]>,
+  memberWorkspaceIds: str,
+  gateEvidence: nullable(str),
+  startedAt: str,
+  finishedAt: nullable(str),
+});
+const mergeTrainsResult = looseObject({ ok: bool, trains: arrayOf(nested(mergeTrainRow)) });
+
 export interface ApiResponseRoute {
   method: ApiMethod;
   /** Express-style template with `:param` segments, matched against the request path. */
@@ -680,6 +698,9 @@ export const API_RESPONSE_SCHEMAS: readonly ApiResponseRoute[] = [
   { method: "GET", template: "/api/metrics/slow-requests", schema: slowRequestsResult },
   { method: "GET", template: "/api/workspaces/:id/scorecard", schema: scorecardResult },
   { method: "GET", template: "/api/issues/:id/workspaces", schema: arrayRoot(workspaceAttempt) },
+
+  // ── #906 ──
+  { method: "GET", template: "/api/merge-queue/trains", schema: mergeTrainsResult },
 ];
 
 export const API_RESPONSE_SCHEMA_COUNT = API_RESPONSE_SCHEMAS.length;

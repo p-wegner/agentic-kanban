@@ -280,15 +280,16 @@ async function persistGateVerdict(args: {
   source: string;
   branchSha: string | null;
   baseSha: string | null;
+  durationMs?: number | null;
   database: Database;
 }): Promise<void> {
-  const { workspaceId, projectId, ranAt, stage, source, branchSha, baseSha, database } = args;
+  const { workspaceId, projectId, ranAt, stage, source, branchSha, baseSha, durationMs, database } = args;
   try {
     // Resolved AFTER the run, so the key names the tier in force now — the one the reuse
     // check will compare against. (A mid-run tier change makes the key mismatch and the
     // verdict unreusable, which errs on re-running: the safe direction.)
     const { verificationKey } = await resolveGateVerification(projectId, database);
-    await setMergeGateEvidence(workspaceId, { ranAt, stage, source, branchSha, baseSha, verificationKey }, database);
+    await setMergeGateEvidence(workspaceId, { ranAt, stage, source, branchSha, baseSha, verificationKey, durationMs: durationMs ?? null }, database);
   } catch (err) {
     console.warn(
       `[workspace-merge] failed to persist gate verdict for workspace ${workspaceId} (non-fatal):`,
@@ -560,6 +561,7 @@ export async function runPreLockGate(args: {
     source: "pre-lock-merge",
     branchSha: preGate.shasBefore.branchSha ?? null,
     baseSha: preGate.shasBefore.baseSha ?? null,
+    durationMs: preGate.durationMs,
     database,
   });
   return preGate.token;

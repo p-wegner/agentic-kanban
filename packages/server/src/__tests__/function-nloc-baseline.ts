@@ -148,7 +148,11 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // 71 -> 65 grandfathered test files with it. Raised rather than worked around: the ring
   // exists to stop unmanaged growth, not to make a sanctioned typing fix unlandable.
   "services/workspace-merge.service.ts::createWorkspaceMergeService": 541,
-  "services/merge-queue.service.ts::createMergeQueueService": 529,
+  // 529 -> 430 (#906 fix-and-merge, god-module split): the whole train-strategy generator
+  // (`runTrainStrategy` plus its `beginMergeTrain`/`finishMergeTrain`/`trainEligible` helpers)
+  // moved to `services/merge-queue-train.ts` once the train-persistence work pushed this file
+  // past the 1000-line hard ceiling. The factory still holds the sequential path in full.
+  "services/merge-queue.service.ts::createMergeQueueService": 430,
   // 506 -> 474 in #806 batch 3: ten handlers dropped their inline type literal and guard
   // ladder for a `parseJsonBody(c, schema)` call.
   "routes/issues.ts::createIssuesRoute": 473,
