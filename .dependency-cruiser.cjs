@@ -241,7 +241,8 @@ module.exports = {
         "asserted file-by-file (and against this very number) by " +
         "packages/server/src/__tests__/startup-persistence-boundary-ratchet.test.ts - so it now " +
         "fails on a 32nd offender, and fails again if a drain lands without lowering it here. " +
-        "Backlog: 30.",
+        "#942 drained monitor-eligibility.ts (its SQL fragments moved into " +
+        "repositories/start-scoring.repository.ts). Backlog: 29.",
       severity: "warn",
       from: { path: "^packages/server/src/startup/" },
       to: { path: "drizzle-orm" },
