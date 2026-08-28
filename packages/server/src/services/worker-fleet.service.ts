@@ -19,7 +19,7 @@ import { getProjectById } from "../repositories/project.repository.js";
 // Canonical home is the dependency-free protocol module, so the worker CLI can
 // name the label without importing this service's graph. Re-exported here for
 // existing importers.
-import { SHARES_FILESYSTEM_LABEL } from "@agentic-kanban/shared/lib/worker-protocol";
+import { SHARES_FILESYSTEM_LABEL, type WorkerCapacityInfo } from "@agentic-kanban/shared/lib/worker-protocol";
 import {
   allowedProfilesPrefKey,
   remoteDispatchBlockedByAllowlist,
@@ -175,7 +175,8 @@ export async function workerSharesFilesystem(fleet: WorkerFleet, workerId: strin
 /**
  * Pick the worker for a new launch: connected + effectively online (not
  * draining), provider available (an empty/absent provider list means "any"),
- * free capacity — least-loaded first. Empty = no eligible worker.
+ * free capacity — highest reported headroom first, then least-loaded (#910).
+ * Empty = no eligible worker.
  *
  * SPLIT INTO AN AWAIT AND A SYNCHRONOUS FILTER on purpose (#751). The reservation
  * that makes concurrent selection safe has to be taken in the same synchronous turn
@@ -184,7 +185,40 @@ export async function workerSharesFilesystem(fleet: WorkerFleet, workerId: strin
  * reserves. That was the actual defect — a reservation placed after this function
  * returned would have looked correct and fixed nothing.
  */
-type WorkerCandidate = { id: string; load: number; cap: number };
+type WorkerCandidate = {
+  id: string;
+  load: number;
+  cap: number;
+  /** #910: this worker's last reported headroom. Undefined = unknown (older build). */
+  capacity?: WorkerCapacityInfo;
+};
+
+/**
+ * Rank two candidates by headroom, then load (#910).
+ *
+ * `--max-concurrency` is a self-declared slot count — a 4-core and a 64-core worker
+ * are indistinguishable by `cap`/`load` alone, so a worker that REPORTS its actual
+ * free RAM sorts ahead of one that doesn't, all else equal. A worker with no capacity
+ * report (absent = unknown, an older build) is treated exactly as before this field
+ * existed: neither preferred nor penalised by headroom, so it falls straight through
+ * to the load tiebreak. THRASHING DEPRIORITISES, IT DOES NOT EXCLUDE — a thrashing
+ * worker still sorts behind every non-thrashing candidate but ahead of nothing being
+ * available at all, which is the difference between "avoid if there's a choice" and
+ * "refuse".
+ */
+function compareCandidates(a: WorkerCandidate, b: WorkerCandidate): number {
+  const aThrashing = a.capacity?.thrashing === "heavy" || a.capacity?.thrashing === "light";
+  const bThrashing = b.capacity?.thrashing === "heavy" || b.capacity?.thrashing === "light";
+  if (aThrashing !== bThrashing) return aThrashing ? 1 : -1;
+  const aHeadroom = a.capacity?.freeRamGb;
+  const bHeadroom = b.capacity?.freeRamGb;
+  if (aHeadroom !== undefined && bHeadroom !== undefined && aHeadroom !== bHeadroom) {
+    return bHeadroom - aHeadroom; // higher headroom first
+  }
+  if (aHeadroom !== undefined && bHeadroom === undefined) return -1;
+  if (aHeadroom === undefined && bHeadroom !== undefined) return 1;
+  return a.load - b.load;
+}
 
 function filterEligibleWorkers(
   fleet: WorkerFleet,
@@ -225,10 +259,11 @@ function filterEligibleWorkers(
         id: w.id,
         load: assigned.length + reservedSlotCount(w.id, assigned, nowMs),
         cap: w.maxConcurrency,
+        capacity: w.capacity,
       };
     })
     .filter((w) => w.load < w.cap)
-    .sort((a, b) => a.load - b.load);
+    .sort(compareCandidates);
 }
 
 async function eligibleWorkers(
@@ -278,7 +313,10 @@ export async function selectAndReserveWorkerForLaunch(
    * list — so a holder with no free slot cannot be over-assigned, it is simply not there.
    */
   preferWorkerId?: string,
-): Promise<{ workerId: string; reservationId: string; honouredAffinity?: boolean } | null> {
+): Promise<
+  | { workerId: string; reservationId: string; honouredAffinity?: boolean; capacity?: WorkerCapacityInfo }
+  | null
+> {
   const workers = await fleet.registry.listWorkersView(now);
   // --- no `await` past this line, or the reservation proves nothing ---
   const candidates = filterEligibleWorkers(fleet, workers, providerName, requiredLabels, nowMs);
@@ -289,6 +327,8 @@ export async function selectAndReserveWorkerForLaunch(
     workerId: chosen.id,
     reservationId: reserveWorkerSlot(chosen.id, nowMs),
     ...(preferWorkerId ? { honouredAffinity: chosen.id === preferWorkerId } : {}),
+    // #910: the headroom that decided the choice, so a caller can name it in the recorded reason.
+    ...(chosen.capacity ? { capacity: chosen.capacity } : {}),
   };
 }
 
@@ -366,10 +406,16 @@ async function resolvePlacementWithReservation(
   const { database, projectId, providerName, branch, baseBranch, resumeProviderSessionId, now, nowMs, hostSaturated } = params;
   // #908: when the host is saturated, a remote landing is BECAUSE of that — not just
   // because a worker happened to be eligible — so the recorded reason should say so.
-  const remoteReason = (detail: string): PlacementReason =>
-    hostSaturated
-      ? because("machine_saturated", `host is saturated; ${detail}`)
-      : because("eligible_worker", detail);
+  // #910: name the headroom that decided, when the worker reported one — `worker
+  // placements` shows this string, so "why THIS worker" must not require a separate lookup.
+  const remoteReason = (detail: string, capacity?: WorkerCapacityInfo): PlacementReason => {
+    const headroom = capacity
+      ? ` (${capacity.freeRamGb.toFixed(1)}GB free${capacity.thrashing !== "none" ? `, thrashing=${capacity.thrashing}` : ""})`
+      : "";
+    return hostSaturated
+      ? because("machine_saturated", `host is saturated; ${detail}${headroom}`)
+      : because("eligible_worker", `${detail}${headroom}`);
+  };
   try {
     const pref = await getPreferenceValue(workerDispatchPrefKey(projectId), database);
     if (pref !== "true") {
@@ -448,7 +494,10 @@ async function resolvePlacementWithReservation(
         workerId,
         strict,
         reservationId: reservation.id,
-        reason: remoteReason(`worker ${workerId} shares this filesystem — no git transport needed`),
+        reason: remoteReason(
+          `worker ${workerId} shares this filesystem — no git transport needed`,
+          placed.capacity,
+        ),
       };
     }
 
@@ -493,7 +542,7 @@ async function resolvePlacementWithReservation(
       workerId,
       strict,
       reservationId: reservation.id,
-      reason: remoteReason(`worker ${workerId} took it over git transport on ${branch}`),
+      reason: remoteReason(`worker ${workerId} took it over git transport on ${branch}`, placed.capacity),
       repo: {
         projectId,
         repoPath: project.repoPath,

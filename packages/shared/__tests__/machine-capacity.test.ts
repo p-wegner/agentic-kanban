@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { DEFAULT_MIN_FREE_GB, readTier0Capacity } from "../src/lib/machine-capacity.js";
+import {
+  DEFAULT_MIN_FREE_GB,
+  readTier0Capacity,
+  resolveSpareCores,
+  toWorkerCapacitySnapshot,
+} from "../src/lib/machine-capacity.js";
 
 const ENV_KEYS = ["SMART_HOOKS_FORCE", "SMART_HOOKS_MIN_FREE_GB"] as const;
 const savedEnv: Record<string, string | undefined> = {};
@@ -46,5 +51,37 @@ describe("readTier0Capacity", () => {
   it("falls back to the default floor when minFreeGb is negative", () => {
     const result = readTier0Capacity({ minFreeGb: -5 });
     expect(result.reason.includes(`floor ${DEFAULT_MIN_FREE_GB}GB`) || result.reason.includes("GB free")).toBe(true);
+  });
+});
+
+// #910: the worker-heartbeat capacity shape (free RAM, spare cores, thrashing).
+describe("resolveSpareCores", () => {
+  it("never returns a negative count", () => {
+    expect(resolveSpareCores({ usedCores: 1_000_000 })).toBe(0);
+  });
+
+  it("subtracts the reported used cores from the machine's total", () => {
+    const total = resolveSpareCores({ usedCores: 0 });
+    expect(total).toBeGreaterThan(0);
+    expect(resolveSpareCores({ usedCores: 1 })).toBe(total - 1);
+  });
+});
+
+describe("toWorkerCapacitySnapshot", () => {
+  it("folds a Tier 0 snapshot into the heartbeat shape with thrashing 'none'", () => {
+    const snapshot = toWorkerCapacitySnapshot({ tier: "0", hold: false, reason: "3.0GB free", freeGb: 3 });
+    expect(snapshot).toEqual({ freeRamGb: 3, spareCores: expect.any(Number), thrashing: "none" });
+  });
+
+  it("falls back to 0 free RAM when Tier 0 could not read memory", () => {
+    const snapshot = toWorkerCapacitySnapshot({ tier: "0", hold: false, reason: "freemem unreadable", freeGb: null });
+    expect(snapshot.freeRamGb).toBe(0);
+  });
+
+  it("carries Tier 1's own thrashing value through unchanged", () => {
+    const snapshot = toWorkerCapacitySnapshot({
+      tier: "1", hold: true, canStartAnother: false, headroomProcesses: 0, thrashing: "heavy",
+    });
+    expect(snapshot.thrashing).toBe("heavy");
   });
 });
