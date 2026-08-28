@@ -36,6 +36,8 @@ import {
 } from "./pre-merge-gate-tier.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { VERIFY_SCRIPT_TIMEOUT_MS } from "./verify-budget.js";
+import * as os from "node:os";
+import { readTier0Capacity, deriveVerifyWorkers } from "@agentic-kanban/shared/lib/machine-capacity";
 // #221/#490's failure-message shaping lives in its own module now (this file crossed the
 // 1000-line god-module ceiling). Re-exported below so its importers are unchanged.
 import { summarizeVerifyFailure } from "./verify-failure-summary.js";
@@ -79,37 +81,39 @@ async function resolveVerifyTimeoutMs(projectId: string, database: Database): Pr
 }
 
 /**
- * Default vitest worker cap for gate runs (#278). Two forks still overlap I/O-bound
- * suites while leaving the box responsive; the pre-fix default was `cpus/2`.
+ * Fallback vitest worker cap when neither a live capacity read nor the pref override is
+ * available (#278; degraded from a fixed default to a fallback by #909). Two forks still
+ * overlap I/O-bound suites while leaving the box responsive; the pre-fix default was `cpus/2`.
  */
 export const DEFAULT_VERIFY_MAX_WORKERS = 2;
 
 /**
- * Preference key for a per-project override of the verify-gate vitest worker cap
- * (integer, clamped to 1..{@link MAX_VERIFY_WORKERS}; anything unparseable falls back to
+ * Preference key for a per-project CEILING on the verify-gate vitest worker cap (integer,
+ * clamped to 1..{@link MAX_VERIFY_WORKERS}; anything unparseable falls back to
  * {@link DEFAULT_VERIFY_MAX_WORKERS}).
  *
  * **There is no UI for this** — it is set through the preferences API/CLI/MCP like any other
  * project-scoped pref, which is why the revert procedure is written down here rather than in a
  * settings panel description.
  *
- * **What raising it buys, measured (#536).** This repo's gate was CPU-bound at the 2-worker
- * cap: 4127s of test CPU against 2380s wall, i.e. both workers ~87% busy on a 16-core box with
- * 14 cores idle. Raising it to 6 cut the run to 1564s. Two effects made that safe rather than
- * flaky: the 60s per-test timeouts were already in place, and #581 now holds builder launches
- * while a gate runs (`quiesce_builders_during_gate`), so the six forks are not competing with
- * an agent's own test run for the same box.
+ * **Since #909 this is a CEILING, not the worker count itself.** `resolveVerifyMaxWorkers`
+ * derives the actual number from live capacity (spare cores, free RAM via
+ * `deriveVerifyWorkers`/`machine-capacity.ts`) and never exceeds this pref. `KANBAN_VERIFY_CONCURRENCY`
+ * remains an unconditional env override on top of both, for an operator who wants to pin an
+ * exact number regardless of what the box looks like at gate time.
+ *
+ * **What raising the ceiling buys, measured (#536).** This repo's gate was CPU-bound at the
+ * 2-worker cap: 4127s of test CPU against 2380s wall, i.e. both workers ~87% busy on a 16-core
+ * box with 14 cores idle. Raising it to 6 cut the run to 1564s. Two effects made that safe
+ * rather than flaky: the 60s per-test timeouts were already in place, and #581 now holds
+ * builder launches while a gate runs (`quiesce_builders_during_gate`), so the forks are not
+ * competing with an agent's own test run for the same box. The same 6 flakes on a loaded box —
+ * which is exactly why #909 makes the LIVE number, not just the ceiling, capacity-derived.
  *
  * **Revert procedure — one pref write, no deploy, no restart.** The value is read fresh on
  * every gate run (`resolveVerifyMaxWorkers` below), so clearing the override takes effect on
  * the next merge — set `verify_max_workers_<projectId>` back to `2` (the shipped default), or
  * to the empty string, which the clamp turns into the same thing.
- *
- * **Revert when** the gate starts failing with timeout-class errors that pass on a re-run and
- * on a solo run of the same suite — that is fork contention, not a real defect. Step down to 4
- * before going back to 2; the win is sublinear, so half the workers is nowhere near half the
- * benefit. A raise is per-project on purpose: it is a statement about THIS box's core count and
- * what else runs on it, not about the code.
  */
 export function verifyMaxWorkersPrefKey(projectId: string): string {
   return verifyMaxWorkersPrefDef.key(projectId);
@@ -141,16 +145,46 @@ async function resolveVerifyFileScope(projectId: string, database: Database): Pr
 
 const MAX_VERIFY_WORKERS = 32;
 
+/** Result of {@link resolveVerifyMaxWorkers} — the chosen width plus how it was chosen, so the
+ *  passing gate message can say `workers N (derived, host free X GB)` rather than a bare number
+ *  (#909's acceptance criterion: a level/number may only ever be reported, never assumed). */
+export interface ResolvedVerifyWorkers {
+  workers: number;
+  /** True when `workers` came from live capacity rather than an env-var pin. */
+  derived: boolean;
+  /** Free RAM (GB) observed at derivation time, when available. */
+  hostFreeGb: number | null;
+}
+
 /**
  * Exported for the base-branch health probe (#931): it spawns the same `verify_script` on
  * the same box and had no worker cap of its own, so it could default to one vitest worker
- * per core just like an unconfigured gate — the SAME budget applies to both.
+ * per core just like an unconfigured gate � the SAME budget applies to both. It reads
+ * `.workers` off the result; the rest is #909's provenance for the gate message.
  */
-export async function resolveVerifyMaxWorkers(projectId: string, database: Database): Promise<number> {
+export async function resolveVerifyMaxWorkers(projectId: string, database: Database): Promise<ResolvedVerifyWorkers> {
+  // `KANBAN_VERIFY_CONCURRENCY`-style unconditional override, but for the vitest fork count:
+  // an operator who wants an exact number regardless of the box gets one, same escape hatch as
+  // the build semaphore (jvm-build-semaphore.ts).
+  const envOverride = Number.parseInt(process.env.KANBAN_VERIFY_MAX_WORKERS ?? "", 10);
+  if (Number.isFinite(envOverride) && envOverride >= 1) {
+    return { workers: envOverride, derived: false, hostFreeGb: null };
+  }
+
   const raw = await getPreference(verifyMaxWorkersPrefKey(projectId), database).catch(() => null);
   const parsed = raw ? Number.parseInt(raw, 10) : NaN;
-  if (Number.isFinite(parsed) && parsed >= 1 && parsed <= MAX_VERIFY_WORKERS) return parsed;
-  return DEFAULT_VERIFY_MAX_WORKERS;
+  const ceiling = Number.isFinite(parsed) && parsed >= 1 && parsed <= MAX_VERIFY_WORKERS ? parsed : MAX_VERIFY_WORKERS;
+
+  try {
+    const tier0 = readTier0Capacity();
+    const workers = deriveVerifyWorkers({ cpuCount: os.cpus().length, freeGb: tier0.freeGb, ceiling });
+    return { workers, derived: true, hostFreeGb: tier0.freeGb };
+  } catch {
+    // Capacity read failed — fall back to the pref (or its shipped default) exactly as before
+    // #909, rather than letting a diagnostic failure block or misreport the gate.
+    const fallback = Number.isFinite(parsed) && parsed >= 1 && parsed <= MAX_VERIFY_WORKERS ? parsed : DEFAULT_VERIFY_MAX_WORKERS;
+    return { workers: fallback, derived: false, hostFreeGb: null };
+  }
 }
 
 /**
@@ -448,7 +482,8 @@ export async function runPreMergeGate(
     // out — which fails the gate and triggers a full retry (#218: 7 failed attempts
     // over 4 days). Honoured by `scripts/test-mine.mjs`; inert for any other
     // verify_script, and unset for interactive runs so `pnpm test:mine` is unchanged.
-    const gateMaxWorkers = await resolveVerifyMaxWorkers(projectId, database);
+    const resolvedWorkers = await resolveVerifyMaxWorkers(projectId, database);
+    const gateMaxWorkers = resolvedWorkers.workers;
     const isolationEnv = {
       ...gradleEnv,
       AGENTIC_KANBAN_DIR: gateDataDir,
@@ -519,6 +554,11 @@ export async function runPreMergeGate(
       changedFileCount: changedFiles.length,
       guardSuiteCount: countAlwaysRunGuardSuites(workingDir),
       maxWorkers: gateMaxWorkers,
+      // #909: was the worker count DERIVED from live capacity, or pinned (env override / a
+      // capacity-read failure that fell back to the pref)? A level may only weaken
+      // verification visibly — the same rule that makes `buildersQuiesced` explicit below.
+      maxWorkersDerived: resolvedWorkers.derived,
+      hostFreeGb: resolvedWorkers.hostFreeGb,
       // #581: say whether this run was protected from builder contention. A gate that
       // failed with builders competing for the box is a different claim from one that
       // failed on a quiet machine, and the failure text alone never distinguishes them.
