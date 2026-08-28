@@ -295,16 +295,16 @@ export function createAutoMergeOrchestrator(deps: {
    * The batching window (#905): partitions ready workspaces by project, folds each project's
    * ready set into its accumulator (`state.trainWindows`), and returns only the ids from
    * projects whose window has closed this tick — max size or max wait, whichever comes first.
-   * A project with no accumulator yet starts one now, `firstSeenAt = nowIso`, and never
+   * A project with no accumulator yet starts one now, `firstSeenAt = now`, and never
    * releases on the very tick it first sees a candidate unless that candidate set alone
    * already reaches `train_max_size`.
    *
    * Read once per tick with the same cached prefMap `findCompletedWorkspaceRows` reads.
    */
-  async function applyTrainWindow(rows: { workspaceId: string; projectId: string }[], nowIso: string): Promise<string[]> {
+  async function applyTrainWindow(rows: { workspaceId: string; projectId: string }[], now: string): Promise<string[]> {
     const prefRows = await getAllPreferencesCached(database);
     const prefMap = toPrefMap(prefRows);
-    const nowMs = new Date(nowIso).getTime();
+    const nowMs = new Date(now).getTime();
 
     const byProject = new Map<string, string[]>();
     for (const row of rows) {
@@ -338,7 +338,7 @@ export function createAutoMergeOrchestrator(deps: {
       // the set first started accumulating, not re-armed every tick a new member joins.
       const windowState: MergeTrainWindowState = {
         pendingIds: ids,
-        firstSeenAt: existing?.firstSeenAt ?? nowIso,
+        firstSeenAt: existing?.firstSeenAt ?? now,
       };
 
       const verdict = decideMergeTrainRelease(windowState, config, nowMs);
