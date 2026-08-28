@@ -46,7 +46,7 @@ describe("worker-fleet placement (phase 1c)", () => {
     await db.insert(preferences).values({ key: workerDispatchPrefKey(PROJECT_ID), value: "true" });
   }
 
-  async function registerWorker(overrides?: {
+  async function registerWorkerFull(overrides?: {
     providers?: string[];
     maxConcurrency?: number;
     name?: string;
@@ -62,12 +62,19 @@ describe("worker-fleet placement (phase 1c)", () => {
       ...SPEAKS_CURRENT_PROTOCOL,
     });
     if (!result.ok) throw new Error(result.error);
-    return result.workerId;
+    return result;
+  }
+
+  async function registerWorker(overrides?: Parameters<typeof registerWorkerFull>[0]) {
+    return (await registerWorkerFull(overrides)).workerId;
   }
 
   /** A worker that shares the board's filesystem — the phase-1c direct path. */
   const registerLocalWorker = (overrides?: Parameters<typeof registerWorker>[0]) =>
     registerWorker({ ...overrides, labels: [...(overrides?.labels ?? []), SHARES_FILESYSTEM_LABEL] });
+
+  const registerLocalWorkerFull = (overrides?: Parameters<typeof registerWorkerFull>[0]) =>
+    registerWorkerFull({ ...overrides, labels: [...(overrides?.labels ?? []), SHARES_FILESYSTEM_LABEL] });
 
   async function seedProject(repoPath = "C:/some/repo") {
     await db.insert(projectsTable).values({
@@ -177,5 +184,71 @@ describe("worker-fleet placement (phase 1c)", () => {
 
     fleet.connections.handleMessage(idle, JSON.stringify({ type: "hello", workerId: idle, runningSessionIds: ["s2"] }));
     expect(await selectWorkerForLaunch(fleet, "claude")).toBeNull();
+  });
+
+  // #910: `--max-concurrency` is a self-declared slot count that cannot tell a 4-core
+  // worker from a 64-core one apart. Once both report real headroom, a load tie breaks by
+  // headroom instead of registration order — and a thrashing worker is deprioritised, not
+  // excluded, so it is still picked when it is the only option.
+  describe("headroom-aware selection (#910)", () => {
+    async function heartbeatCapacity(
+      workerId: string,
+      workerToken: string,
+      capacity: { freeRamGb: number; spareCores: number; thrashing: "none" | "light" | "heavy" },
+    ) {
+      const result = await fleet.registry.heartbeat(workerId, workerToken, { capabilities: { capacity } });
+      expect(result.ok).toBe(true);
+    }
+
+    it("prefers the worker with more reported headroom on an equal-load tie", async () => {
+      const low = await registerLocalWorkerFull({ name: "low-ram" });
+      const high = await registerLocalWorkerFull({ name: "high-ram" });
+      fleet.connections.handleOpen(low.workerId, fakeWs());
+      fleet.connections.handleOpen(high.workerId, fakeWs());
+      await heartbeatCapacity(low.workerId, low.workerToken, { freeRamGb: 1, spareCores: 1, thrashing: "none" });
+      await heartbeatCapacity(high.workerId, high.workerToken, { freeRamGb: 30, spareCores: 12, thrashing: "none" });
+
+      // Both workers are idle (equal load) — headroom alone decides.
+      expect(await selectWorkerForLaunch(fleet, "claude")).toBe(high.workerId);
+    });
+
+    it("treats an absent capacity report as unknown, not as zero headroom", async () => {
+      const unknown = await registerLocalWorkerFull({ name: "no-report" });
+      const reporting = await registerLocalWorkerFull({ name: "low-ram" });
+      fleet.connections.handleOpen(unknown.workerId, fakeWs());
+      fleet.connections.handleOpen(reporting.workerId, fakeWs());
+      // Only one worker ever heartbeats capacity; the other stays "unknown".
+      await heartbeatCapacity(reporting.workerId, reporting.workerToken, {
+        freeRamGb: 0.5, spareCores: 0, thrashing: "none",
+      });
+
+      // A worker that reported real headroom is preferred over one whose headroom is
+      // unknown, even though the unknown one might in fact have more room — the resolver
+      // can only rank what it was told.
+      expect(await selectWorkerForLaunch(fleet, "claude")).toBe(reporting.workerId);
+    });
+
+    it("deprioritises a thrashing worker but still selects it when it is the only option", async () => {
+      const thrashing = await registerLocalWorkerFull({ name: "thrashing" });
+      fleet.connections.handleOpen(thrashing.workerId, fakeWs());
+      await heartbeatCapacity(thrashing.workerId, thrashing.workerToken, {
+        freeRamGb: 40, spareCores: 16, thrashing: "heavy",
+      });
+
+      expect(await selectWorkerForLaunch(fleet, "claude")).toBe(thrashing.workerId);
+    });
+
+    it("prefers a calm low-headroom worker over a thrashing high-headroom one", async () => {
+      const calm = await registerLocalWorkerFull({ name: "calm" });
+      const thrashing = await registerLocalWorkerFull({ name: "thrashing" });
+      fleet.connections.handleOpen(calm.workerId, fakeWs());
+      fleet.connections.handleOpen(thrashing.workerId, fakeWs());
+      await heartbeatCapacity(calm.workerId, calm.workerToken, { freeRamGb: 1, spareCores: 1, thrashing: "none" });
+      await heartbeatCapacity(thrashing.workerId, thrashing.workerToken, {
+        freeRamGb: 40, spareCores: 16, thrashing: "heavy",
+      });
+
+      expect(await selectWorkerForLaunch(fleet, "claude")).toBe(calm.workerId);
+    });
   });
 });

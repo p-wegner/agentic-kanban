@@ -41,8 +41,10 @@ import {
   WORKER_PROTOCOL_VERSION,
   WORKER_UPDATE_REMEDIATION,
   type WorkerCapabilities,
+  type WorkerCapacityInfo,
   type WorkerToBoardMessage,
 } from "@agentic-kanban/shared/lib/worker-protocol";
+import { readTier0Capacity, toWorkerCapacitySnapshot } from "@agentic-kanban/shared/lib/machine-capacity";
 import { createWorkerAgentRunner } from "./worker-agent-runner.js";
 import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "./worker-repo.js";
 import { attestProviderAuth } from "../cli/commands/worker-doctor.js";
@@ -140,12 +142,24 @@ function saveIdentity(stateFile: string, boardUrl: string, identity: WorkerIdent
   writeFileSync(stateFile, JSON.stringify(state, null, 2));
 }
 
+/**
+ * This machine's live headroom (#910), folded onto every heartbeat. Tier 0 only — a
+ * single sync `os.freemem()` read, cheap enough for the 30s heartbeat and the `hello`
+ * handshake alike, unlike Tier 1's process spawn. Never throws: `readTier0Capacity`
+ * and `resolveSpareCores` both fail open, so a capacity read never blocks a heartbeat.
+ */
+function capacityOf(): WorkerCapacityInfo {
+  const snapshot = toWorkerCapacitySnapshot(readTier0Capacity());
+  return snapshot;
+}
+
 /** What this machine declares about itself, on every registration AND every beat (#754). */
 function capabilitiesOf(opts: WorkerDaemonOptions): WorkerCapabilities {
   return {
     ...(opts.labels ? { labels: opts.labels } : {}),
     ...(opts.providers ? { providers: opts.providers } : {}),
     ...(opts.maxConcurrency !== undefined ? { maxConcurrency: opts.maxConcurrency } : {}),
+    capacity: capacityOf(),
   };
 }
 
