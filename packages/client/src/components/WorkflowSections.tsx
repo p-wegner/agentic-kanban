@@ -1,6 +1,6 @@
 import { isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import { DEFAULT_SETTINGS, getBool } from "@agentic-kanban/shared/lib/settings-registry";
-import { RISK_POSTURES, RISK_POSTURE_DEFAULT, RISK_POSTURE_DESCRIPTIONS, RISK_POSTURE_LABELS, resolveRiskPosture } from "@agentic-kanban/shared/lib/risk-posture";
+import { RISK_POSTURES, RISK_POSTURE_DEFAULT, RISK_POSTURE_DESCRIPTIONS, RISK_POSTURE_LABELS, resolveRiskPosture, riskPosturePref } from "@agentic-kanban/shared/lib/risk-posture";
 import { Field, Toggle } from "./SettingsPrimitives.js";
 import { SlowRequestsPanel } from "./SlowRequestsPanel.js";
 import type { Settings, MonitorTunables } from "../lib/settings-shared.js";
@@ -49,7 +49,7 @@ export function WorkflowRiskPostureSection({
   activeProjectId,
 }: WorkflowSectionProps & { activeProjectId?: string | null }) {
   if (!activeProjectId) return null;
-  const key = `risk_posture_${activeProjectId}` as keyof Settings;
+  const key = riskPosturePref.key(activeProjectId) as keyof Settings;
   const current = resolveRiskPosture(settings[key]);
   return (
     <div className="pt-2">
