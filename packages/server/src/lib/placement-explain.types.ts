@@ -18,6 +18,7 @@
 // depend only on this file. Keep this module free of anything that reaches the db.
 import type { ProviderName } from "../services/agent-provider/types.js";
 import type { WorkerBuildFreshness } from "@agentic-kanban/shared/lib/worker-build-freshness";
+import type { WorkerCapacityInfo } from "@agentic-kanban/shared/lib/worker-protocol";
 
 /**
  * The chain's check ids, as DATA so the union and the runtime list cannot drift (#801).
@@ -148,6 +149,12 @@ export interface WorkerEligibility {
   assignedSessionIds: string[];
   /** Free slots on THIS worker: `maxConcurrency - load`, floored at 0. */
   freeSlots: number;
+  /**
+   * #910: this worker's headroom as of its last heartbeat — the values placement actually
+   * compared, not a number `worker explain` has to take on trust. Absent = unknown (a
+   * worker build that predates this field, or one that hasn't beaten yet).
+   */
+  capacity?: WorkerCapacityInfo;
 }
 
 /**

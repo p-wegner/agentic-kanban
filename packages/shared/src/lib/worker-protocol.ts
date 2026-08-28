@@ -296,6 +296,25 @@ export interface WorkerIdentityInfo {
 }
 
 /**
+ * What a worker machine has room for RIGHT NOW (#910). `--max-concurrency` is a
+ * self-declared slot count — a 4-core and a 64-core worker look identical to
+ * placement, and a worker that is swapping still takes assignments. This is the
+ * same shape as Tier 0/1 of `machine-capacity.ts` (free RAM, spare cores, a
+ * thrashing flag), reported by the worker about ITS OWN machine on every
+ * heartbeat. Absent entirely (an older worker build) means "unknown" —
+ * placement treats it exactly as it did before this field existed, never as
+ * zero headroom.
+ */
+export interface WorkerCapacityInfo {
+  /** `os.freemem()` in GB, Tier 0's own unit. */
+  freeRamGb: number;
+  /** Whole CPU cores judged free — `os.cpus().length` minus a reported load estimate. */
+  spareCores: number;
+  /** Tier 1's own vocabulary; "none" when only Tier 0 (RAM-only) is available. */
+  thrashing: "none" | "light" | "heavy" | string;
+}
+
+/**
  * What a worker machine can do. Sent at registration AND on every heartbeat (#754):
  * they used to travel only at first registration, so re-running
  * `start --labels docker --max-concurrency 4` changed nothing on the board while the
@@ -306,6 +325,8 @@ export interface WorkerCapabilities {
   labels?: string[];
   providers?: string[];
   maxConcurrency?: number;
+  /** #910: this worker's live headroom. Absent = unknown, not zero. */
+  capacity?: WorkerCapacityInfo;
 }
 
 export type ProtocolCompatibility =
@@ -354,6 +375,18 @@ export function checkProtocolCompatibility(
   return { ok: true, version: effective };
 }
 
+/** Shape-check a capacity blob off the wire (#910). Anything malformed reads as absent/unknown. */
+function parseWorkerCapacityInfo(raw: unknown): WorkerCapacityInfo | undefined {
+  const rec = asRecord(raw);
+  if (!rec) return undefined;
+  const freeRamGb = typeof rec.freeRamGb === "number" && Number.isFinite(rec.freeRamGb) ? rec.freeRamGb : undefined;
+  const spareCores =
+    typeof rec.spareCores === "number" && Number.isFinite(rec.spareCores) ? rec.spareCores : undefined;
+  const thrashing = typeof rec.thrashing === "string" ? rec.thrashing : undefined;
+  if (freeRamGb === undefined || spareCores === undefined || thrashing === undefined) return undefined;
+  return { freeRamGb, spareCores, thrashing };
+}
+
 /** Shape-check a capabilities blob off the wire. Unknown/ill-typed fields are dropped. */
 export function parseWorkerCapabilities(raw: unknown): WorkerCapabilities | undefined {
   const rec = asRecord(raw);
@@ -366,11 +399,20 @@ export function parseWorkerCapabilities(raw: unknown): WorkerCapabilities | unde
     typeof rec.maxConcurrency === "number" && Number.isInteger(rec.maxConcurrency) && rec.maxConcurrency > 0
       ? rec.maxConcurrency
       : undefined;
-  if (labels === undefined && providers === undefined && maxConcurrency === undefined) return undefined;
+  const capacity = parseWorkerCapacityInfo(rec.capacity);
+  if (
+    labels === undefined &&
+    providers === undefined &&
+    maxConcurrency === undefined &&
+    capacity === undefined
+  ) {
+    return undefined;
+  }
   return {
     ...(labels ? { labels } : {}),
     ...(providers ? { providers } : {}),
     ...(maxConcurrency !== undefined ? { maxConcurrency } : {}),
+    ...(capacity ? { capacity } : {}),
   };
 }
 

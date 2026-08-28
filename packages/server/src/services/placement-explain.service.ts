@@ -281,6 +281,8 @@ async function describeWorkers(
           }),
       assignedSessionIds: fleet.connections.assignedSessionIds(w.id),
       freeSlots: Math.max(0, w.maxConcurrency - load),
+      // #910: the headroom placement actually compared, not just its outcome.
+      ...(w.capacity ? { capacity: w.capacity } : {}),
     };
   });
 }

@@ -26,6 +26,7 @@ import {
   checkProtocolCompatibility,
   WORKER_PROTOCOL_VERSION,
   type WorkerCapabilities,
+  type WorkerCapacityInfo,
 } from "@agentic-kanban/shared/lib/worker-protocol";
 import { recordWorkerEvent } from "./worker-events.service.js";
 
@@ -77,6 +78,15 @@ export interface WorkerView extends Omit<WorkerRow, "tokenHash"> {
    */
   protocolVersion?: number;
   workerVersion?: string;
+  /**
+   * This worker's live headroom, as of its last heartbeat (#910). In memory for the same
+   * reason `protocolVersion`/`workerVersion` are: it is a property of the running peer's
+   * CURRENT state, not of the pairing, and stamping it into a `workers` column would show
+   * a number that is already a heartbeat interval stale after a board restart. Absent =
+   * unknown — a worker build older than #910, or one that hasn't beaten yet — and
+   * placement must treat that exactly as it did before this field existed.
+   */
+  capacity?: WorkerCapacityInfo;
 }
 
 /** Constant-time compare that does not leak length via an early return. */
@@ -112,6 +122,9 @@ export function createWorkerRegistry(database: Database = realDb) {
 
   /** What each worker last told us about itself (#754). See WorkerView for why not a column. */
   const reportedVersions = new Map<string, { protocolVersion?: number; workerVersion?: string }>();
+
+  /** This worker's headroom as of its last heartbeat (#910). See WorkerView for why not a column. */
+  const reportedCapacity = new Map<string, WorkerCapacityInfo>();
 
   /**
    * Last EFFECTIVE status observed per worker, so `status_change` can be emitted on a
@@ -252,6 +265,13 @@ export function createWorkerRegistry(database: Database = realDb) {
     await workerRepo.updateWorkerHeartbeat(workerId, now, opts?.status, database);
     if (opts?.capabilities) {
       await workerRepo.updateWorkerCapabilities(workerId, opts.capabilities, now, database);
+      // #910: capacity is volatile machine state, not a pairing fact — kept in memory like
+      // protocol/version above, not persisted to the `workers` row.
+      if (opts.capabilities.capacity) {
+        reportedCapacity.set(workerId, opts.capabilities.capacity);
+      } else {
+        reportedCapacity.delete(workerId);
+      }
     }
     return { ok: true };
   }
@@ -264,11 +284,13 @@ export function createWorkerRegistry(database: Database = realDb) {
       const reported = reportedVersions.get(row.id);
       const current = effectiveStatus(row, nowMs);
       noteEffectiveStatus(row, current);
+      const capacity = reportedCapacity.get(row.id);
       return {
         ...safe,
         effectiveStatus: current,
         ...(reported?.protocolVersion !== undefined ? { protocolVersion: reported.protocolVersion } : {}),
         ...(reported?.workerVersion !== undefined ? { workerVersion: reported.workerVersion } : {}),
+        ...(capacity ? { capacity } : {}),
       };
     });
   }
@@ -299,6 +321,7 @@ export function createWorkerRegistry(database: Database = realDb) {
     if (!row) return false;
     await workerRepo.deleteWorker(workerId, database);
     reportedVersions.delete(workerId);
+    reportedCapacity.delete(workerId);
     lastEffectiveStatus.delete(workerId);
     // Deleting the row only stops NEW authentications. A revoked worker also
     // holds a live socket and (for git transport) working git tokens — both must
