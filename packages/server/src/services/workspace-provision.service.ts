@@ -25,7 +25,7 @@ import type { ProviderName } from "./agent-provider.js";
 import { runSetupScript } from "./setup-script.js";
 import type { SetupScriptContainer } from "@agentic-kanban/shared/lib/setup-script";
 import { getPreference } from "../repositories/preferences.repository.js";
-import { resolveRiskPosture, riskPosturePref } from "@agentic-kanban/shared/lib/risk-posture";
+import { resolveRiskPosture, riskPosturePref, type RiskPosture } from "@agentic-kanban/shared/lib/risk-posture";
 import { provisionContainerForWorkspace, resolveDevcontainerProvisionOptions } from "./devcontainer-workspace.service.js";
 import {
   buildSetupRunFromResult,
@@ -46,6 +46,7 @@ import { loadProjectRuntimeConfig } from "./project-runtime-config.service.js";
 import { WorkspaceError, type CreateWorkspaceInput, type GitService } from "./workspace-internals.js";
 import { buildContextPrimer } from "./context-packer.service.js";
 import { getStackProfile, resolveEffectiveVerify } from "./stack-profile.service.js";
+import type { StackProfile } from "@agentic-kanban/shared";
 import { resolveBoardFeedbackRouting } from "./board-feedback-routing.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
@@ -165,6 +166,43 @@ async function materializeWorkspaceSkillsImpl(
   const skillName = await resolveSkillFileImpl(database, skillId, diskSkillName, worktreePath, repoPath);
   await materializeEnabledPluginSkillsImpl(database, worktreePath, repoPath, projectId);
   return { skillName };
+}
+
+/**
+ * #912 — the posture the builder and its hooks must see, matching what the header chip
+ * and `objective.md` render. Fails closed to "standard" on any read error: a ticket
+ * context written without a posture is better than a provisioning run that dies over one.
+ *
+ * Module scope rather than inline, because `createWorkspaceProvisionService` is on the
+ * shrink-only nloc ring (#800) at 412 nloc and the inline form pushed it to 420.
+ */
+/**
+ * The exact verify command the board will run, for the ticket-context file. Best-effort:
+ * a resolve failure means the context omits the command, not that provisioning fails.
+ *
+ * Module scope for the same reason as {@link readRiskPosture} — the caller is on the
+ * shrink-only nloc ring (#800).
+ */
+async function readVerifyCommandOverride(
+  projectId: string,
+  stackProfile: StackProfile | null,
+  database: Database,
+): Promise<string | null> {
+  try {
+    return (await resolveEffectiveVerify(projectId, database, { profile: stackProfile }))?.command ?? null;
+  } catch (err) {
+    console.warn(`[workspaces] verify command resolve failed (non-fatal): ${errorMessage(err)}`);
+    return null;
+  }
+}
+
+async function readRiskPosture(projectId: string, database: Database): Promise<RiskPosture> {
+  try {
+    return resolveRiskPosture(await getPreference(riskPosturePref.key(projectId), database));
+  } catch (err) {
+    console.warn(`[workspaces] risk-posture read failed (non-fatal): ${errorMessage(err)}`);
+    return resolveRiskPosture(null);
+  }
 }
 
 export function createWorkspaceProvisionService(deps: {
@@ -610,13 +648,7 @@ exit 1
     // derivation, then the marker-rule fallback. Reading only the profile here (as this did
     // before #575) or only the pref (as it did after) both leave cases where the ticket's
     // "this is the exact command the board runs" promise is false.
-    let verifyCommandOverride: string | null = null;
-    try {
-      const effective = await resolveEffectiveVerify(issue.projectId, database, { profile: stackProfile });
-      verifyCommandOverride = effective?.command ?? null;
-    } catch (err) {
-      console.warn(`[workspaces] verify command resolve failed (non-fatal): ${errorMessage(err)}`);
-    }
+    const verifyCommandOverride = await readVerifyCommandOverride(issue.projectId, stackProfile, database);
     // Best-effort like the stack profile: a builder still gets its ticket even if we
     // can't tell it where to route board feedback.
     let boardFeedback = null;
@@ -625,15 +657,7 @@ exit 1
     } catch (err) {
       console.warn(`[workspaces] board-feedback routing failed (non-fatal): ${errorMessage(err)}`);
     }
-    // #912: resolved posture, so the builder and its hooks see the same value the
-    // header chip and objective.md render — fail closed to "standard" on any read error.
-    let riskPosture = resolveRiskPosture(null);
-    try {
-      const raw = await getPreference(riskPosturePref.key(issue.projectId), database);
-      riskPosture = resolveRiskPosture(raw);
-    } catch (err) {
-      console.warn(`[workspaces] risk-posture read failed (non-fatal): ${errorMessage(err)}`);
-    }
+    const riskPosture = await readRiskPosture(issue.projectId, database);
     return writeTicketContextFile(worktreePath, {
       issueNumber: issue.issueNumber,
       title: issue.title,
