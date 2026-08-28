@@ -14,6 +14,7 @@
  */
 import type { MonitorActionName } from "../../lib/monitor-action.js";
 import type { MonitorTunables } from "../../lib/strategy-objective-file.js";
+import type { RISK_POSTURE_VALUES } from "../../lib/risk-posture-values.js";
 
 // Re-exported so consumers take it from the wire-contract barrel. The client used to
 // deep-import lib/strategy-objective-file for it, which drags a Node-builtin chain into
@@ -40,6 +41,36 @@ export interface StartPolicy {
   wip: MonitorTunables;
   /** Whether the mode came from an explicit per-project `start_mode_<id>` or was derived. */
   source: "start_mode" | "derived";
+}
+
+export type RiskPostureLevel = (typeof RISK_POSTURE_VALUES)[number];
+
+/**
+ * The one-dial risk posture (#911, decision 017), fanned out from `risk_posture_<projectId>`
+ * (or a per-ticket `risk:<level>` tag override) into every consumer that previously had to be
+ * aligned by hand: pre-merge gate tier, review launch, merge-train sizing, file-contention
+ * mode, the builder's Stop-hook checks, and worker placement bias.
+ *
+ * `standard` is defined to reproduce today's behaviour exactly — see `resolveRiskPosture`.
+ */
+export interface RiskPosture {
+  level: RiskPostureLevel;
+  /** Whether the level came from an explicit per-project pref, a per-ticket `risk:` tag
+   *  override, or fell back to the default. */
+  source: "risk_posture" | "issue_tag" | "default";
+  gateTier: "full" | "scoped" | "scoped-base-watch";
+  reviewMode: "thorough" | "standard" | "train-only" | "none";
+  /** Whether a merge is allowed to land on top of a red base branch. */
+  redBasePolicy: "block" | "allow-known-debt" | "allow-file-debt-ticket";
+  trainMaxSize: number;
+  trainMaxWaitMs: number;
+  /** What the builder's own Stop hook checks before allowing exit. */
+  builderStopChecks: "tests-and-typecheck" | "tests-capacity-gated" | "typecheck-only" | "none";
+  contentionMode: "off" | "warn" | "serialize";
+  placementBias: "host-half" | "host-preferred" | "remote-preferred";
+  /** One line naming what this posture skips relative to `standard`, for gate/merge
+   *  messages — the visibility rule (#911): a weaker posture may only weaken visibly. */
+  summary: string;
 }
 
 /** `GET /api/board-monitor/tunables` — the resolved WIP/refill numbers and where they came from. */
