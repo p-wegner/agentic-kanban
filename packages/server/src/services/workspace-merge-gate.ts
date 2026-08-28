@@ -42,7 +42,12 @@ import { runGateWithEvidence } from "./merge-gate-evidence.js";
 // The #243 sha comparison moved next to the protocol that uses it (#540). Re-exported here
 // because this is the path callers and suites already import it from.
 export { movedDuringGate } from "./merge-gate-evidence.js";
-import { getBaseBranchHealthAtMergeBase, describeRedBaseAttribution } from "./base-branch-health.service.js";
+import {
+  getBaseBranchHealthAtMergeBase,
+  describeRedBaseAttribution,
+  isBaseHealthAnswer,
+  verifyBaseBranchHealth,
+} from "./base-branch-health.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { listRedDebt, openRedDebtEntry } from "../repositories/red-debt.repository.js";
@@ -418,6 +423,23 @@ export async function runPreLockGate(args: {
         baseHealthRecordedSha = baseHealth.recordedSha ?? null;
         const attribution = describeRedBaseAttribution(baseHealth);
         if (attribution) gateMessage = `${attribution}\n\n${preGate.message}`;
+        // #935 — a NON-ANSWER record (`timeout`/`unverified`) is a probe that could not speak,
+        // and it is sticky: the periodic sweep backs a timeout off by a full
+        // PROBE_MAX_DURATION_MS on top of its interval, so an hour-plus of gates can run
+        // against a verdict nobody measured. A gate failing here is the moment we most want
+        // the base's real state, so ask for a fresh probe rather than waiting the sweep out.
+        //
+        // Fire-and-forget, and safe to call unconditionally: `verifyBaseBranchHealth` joins an
+        // already-running probe per project (#712) instead of starting a rival one, and yields
+        // to a busy build semaphore on its own schedule. It must never delay or fail this
+        // gate — the withhold below stands either way.
+        if (baseHealth.health && !isBaseHealthAnswer(baseHealth.health.outcome)) {
+          console.log(
+            `[workspace-merge] base health for project ${projectId} is a non-answer `
+              + `('${baseHealth.health.outcome}') — requesting a fresh probe (#935)`,
+          );
+          void verifyBaseBranchHealth(projectId, database).catch(() => {});
+        }
         if (baseHealth.health?.failedSuites) {
           try {
             failedSuites = JSON.parse(baseHealth.health.failedSuites) as string[];

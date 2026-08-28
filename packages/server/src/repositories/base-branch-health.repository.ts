@@ -7,6 +7,30 @@ import { firstRow } from "../lib/first-row.js";
 
 export type BaseBranchHealthOutcome = "green" | "red" | "timeout" | "unverified";
 
+/**
+ * Is this outcome a VERDICT about the base, or a non-answer about the probe (#935)?
+ *
+ * `green`/`red` are verdicts: the probe ran the verify script to completion and the base
+ * either passed or failed. `timeout`/`unverified` are non-answers — the probe was cut off at
+ * its budget, or never got far enough to install the clone. Neither says anything about the
+ * base's health, and treating them as if they did is what this ticket exists to stop:
+ *
+ * Measured on this board 2026-08-27/28 — a full `pnpm test:mine` on master was green (9297
+ * tests, exit 0) while the recorded verdict said TIMEOUT, produced on a box where Windows
+ * Defender held 336% CPU, an unrelated Kotlin daemon 207%, and only 3 vitest workers existed
+ * at all. Under that load the 45-minute budget is not enough, and the starved run was cached
+ * as the base's health, prefixing every subsequent gate failure with a false accusation
+ * against master.
+ *
+ * It lives here, next to the outcome type it classifies, rather than in the service: it is a
+ * pure predicate over one string, and its consumers (attribution, project health, the monitor
+ * warnings) would otherwise each have to import the probe service — which pulls in git,
+ * clone and setup-script machinery — to ask a question about an enum.
+ */
+export function isBaseHealthAnswer(outcome: string | null | undefined): boolean {
+  return outcome === "green" || outcome === "red";
+}
+
 export interface RecordBaseBranchHealthInput {
   projectId: string;
   sha: string;
