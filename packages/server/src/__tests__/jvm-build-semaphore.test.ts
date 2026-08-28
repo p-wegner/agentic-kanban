@@ -5,13 +5,20 @@ afterEach(() => {
   delete process.env.KANBAN_VERIFY_CONCURRENCY;
 });
 
-describe("jvm-build-semaphore (#823)", () => {
-  it("defaults to a concurrency of 2 and honors KANBAN_VERIFY_CONCURRENCY", () => {
-    expect(buildSemaphoreConcurrency()).toBe(2);
+describe("jvm-build-semaphore (#823, derived from capacity since #909)", () => {
+  it("honors KANBAN_VERIFY_CONCURRENCY as an unconditional override", () => {
     process.env.KANBAN_VERIFY_CONCURRENCY = "5";
     expect(buildSemaphoreConcurrency()).toBe(5);
-    process.env.KANBAN_VERIFY_CONCURRENCY = "0"; // invalid → clamp to default
-    expect(buildSemaphoreConcurrency()).toBe(2);
+  });
+
+  it("derives a positive width from live capacity when no override is set", () => {
+    delete process.env.KANBAN_VERIFY_CONCURRENCY;
+    expect(buildSemaphoreConcurrency()).toBeGreaterThanOrEqual(1);
+  });
+
+  it("an invalid override (0) falls through to the derived value, not a fixed constant", () => {
+    process.env.KANBAN_VERIFY_CONCURRENCY = "0"; // invalid → derive instead
+    expect(buildSemaphoreConcurrency()).toBeGreaterThanOrEqual(1);
   });
 
   it("never runs more than the cap concurrently; the rest queue FIFO", async () => {
