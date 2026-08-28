@@ -2967,6 +2967,33 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/merge-queue/trains:
+    get:
+      summary: |-
+        * GET /api/merge-queue/trains?projectId=
+           *
+           * History of persisted release trains for a project (#906) — newest first, including
+           * `abandoned` rows the startup reconciler left behind. What a "Merge train" panel reads.
+      tags:
+        - merge-queue
+      operationId: get_api_merge-queue_trains
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
   /api/metrics/loop-lag:
     get:
       summary: GET /api/metrics/loop-lag

@@ -31,7 +31,6 @@
  * history a "Merge train" panel shows includes the abandonment.
  */
 import type { Database } from "../db/index.js";
-import { db } from "../db/index.js";
 import {
   listMergeTrainsInStates,
   updateMergeTrainState,
@@ -100,15 +99,15 @@ export interface MergeTrainSweepResult extends PassReport {
 export async function reconcileStrandedMergeTrains(
   opts: {
     database?: Database;
-    now?: number;
+    now?: string;
     maxResumeAttempts?: number;
     log?: (message: string) => void;
     /** Re-run the batch for a stranded row's member set. Returning normally means "resumed". */
     runTrain?: (row: MergeTrainRow) => Promise<void>;
   } = {},
 ): Promise<MergeTrainSweepResult> {
-  const database = opts.database ?? db;
-  const now = new Date(opts.now ?? Date.now()).toISOString();
+  const database = opts.database;
+  const now = opts.now ?? new Date().toISOString();
   const log = opts.log ?? ((message: string) => console.log(`[merge-train-reconciler] ${message}`));
 
   const rows = await listMergeTrainsInStates(["assembling", "gating"], database).catch(() => [] as MergeTrainRow[]);
