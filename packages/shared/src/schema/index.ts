@@ -91,3 +91,6 @@ export { workspaceSummary, workspaceSummaryRelations } from "./workspace-summary
 export { workspaceDiffStatCache, workspaceDiffStatCacheRelations } from "./workspace-diff-stat-cache.js";
 // #815: the tenth — the computed PR-quality scorecard artifact.
 export { workspaceScorecard, workspaceScorecardRelations } from "./workspace-scorecard.js";
+// #906: persisted release trains — survives a restart mid-gate, see the module header.
+export { mergeTrains, mergeTrainsRelations, MERGE_TRAIN_STATES } from "./merge-trains.js";
+export type { MergeTrainState } from "./merge-trains.js";

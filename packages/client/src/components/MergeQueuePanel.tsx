@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
-import { apiPost } from "../lib/api.js";
+import { useEffect, useMemo, useState } from "react";
+import { apiFetch, apiPost } from "../lib/api.js";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
+import { summarizeMergeTrains, type MergeTrainRowDto } from "../lib/mergeTrainSummary.js";
 import type { IssueWithStatus, MainWorkspaceInfo, StatusWithIssues } from "@agentic-kanban/shared";
 import { Icon } from "./Icon.js";
 
@@ -102,7 +103,70 @@ function riskClasses(label: MergeQueueItem["riskLabel"]): string {
 
 type MergeQueueStrategy = "auto" | "sequential" | "train";
 
-export function MergeQueuePanel({ columns, projectId: _projectId, onClose, onIssueClick, onMerged }: MergeQueuePanelProps) {
+/**
+ * "Merge train" panel (#906) — aboard / waiting / last gate / red-debt delta, reachable from
+ * the merge-queue view. Reads the persisted `merge_trains` history instead of the old
+ * per-request scratch state, so it survives a server restart mid-train.
+ */
+function MergeTrainSummaryBar({ projectId }: { projectId: string }) {
+  const [trains, setTrains] = useState<MergeTrainRowDto[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<{ ok: boolean; trains: MergeTrainRowDto[] }>(`/api/merge-queue/trains?projectId=${encodeURIComponent(projectId)}`)
+      .then((result) => {
+        if (!cancelled) setTrains(result.trains);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load merge train history");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  if (error) {
+    return (
+      <div className="px-4 py-2 border-b border-gray-100 dark:border-gray-800 text-xs text-red-600 dark:text-red-400">
+        Merge train: {error}
+      </div>
+    );
+  }
+
+  if (!trains) {
+    return (
+      <div className="px-4 py-2 border-b border-gray-100 dark:border-gray-800 text-xs text-gray-400 dark:text-gray-500">
+        Merge train: loading…
+      </div>
+    );
+  }
+
+  const summary = summarizeMergeTrains(trains);
+  const aboardLabel = summary.aboard.length === 0
+    ? "none"
+    : `${summary.aboard.length} (${summary.aboardMemberCount} member${summary.aboardMemberCount === 1 ? "" : "s"})`;
+  const lastGateLabel = summary.lastGate
+    ? `${summary.lastGate.state}${summary.lastGate.gateRuns != null ? ` (${summary.lastGate.gateRuns} run${summary.lastGate.gateRuns === 1 ? "" : "s"})` : ""}`
+    : "none yet";
+
+  return (
+    <div className="px-4 py-2 border-b border-gray-100 dark:border-gray-800 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-600 dark:text-gray-300">
+      <span className="font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide text-[11px]">Merge train</span>
+      <span>Aboard: <strong className="font-medium text-gray-800 dark:text-gray-100">{aboardLabel}</strong></span>
+      <span>Waiting: <strong className="font-medium text-gray-800 dark:text-gray-100">{summary.waitingCount}</strong></span>
+      <span>Last gate: <strong className="font-medium text-gray-800 dark:text-gray-100">{lastGateLabel}</strong></span>
+      <span
+        className={summary.redDebtDelta > 0 ? "text-red-600 dark:text-red-400" : "text-gray-600 dark:text-gray-300"}
+        title="Members dropped or gate-rejected minus members landed, across the last 10 finished trains"
+      >
+        Red-debt Δ: <strong className="font-medium">{summary.redDebtDelta > 0 ? `+${summary.redDebtDelta}` : summary.redDebtDelta}</strong>
+      </span>
+    </div>
+  );
+}
+
+export function MergeQueuePanel({ columns, projectId, onClose, onIssueClick, onMerged }: MergeQueuePanelProps) {
   const items = useMemo(() => buildMergeQueueItems(columns), [columns]);
   const [mergingId, setMergingId] = useState<string | null>(null);
   const [errorByWorkspace, setErrorByWorkspace] = useState<Record<string, string>>({});
@@ -227,6 +291,8 @@ export function MergeQueuePanel({ columns, projectId: _projectId, onClose, onIss
             </button>
           </div>
         </div>
+
+        <MergeTrainSummaryBar projectId={projectId} />
 
         <div className="px-4 py-2 border-b border-gray-100 dark:border-gray-800 grid grid-cols-[1fr_auto_auto_auto] gap-3 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
           <span>Workspace</span>

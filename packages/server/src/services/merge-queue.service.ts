@@ -1,83 +1,21 @@
-import { RepoLockUnavailableError, waitForRepoLock } from "@agentic-kanban/shared/lib/repo-lock";
-import type { RepoLockHandle, RepoLockWaitOptions } from "@agentic-kanban/shared/lib/repo-lock";
 import type { Database } from "../db/index.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-
-/**
- * How long a queue member waits for the repo lock before failing loudly (#230).
- * Must exceed a legitimate holder's verify gate — see the matching constant in
- * `workspace-internals.ts`. Exported so a test can drive the bound (a module-private
- * const with a module-private clock made it unfalsifiable).
- */
-export const MERGE_QUEUE_REPO_LOCK_TIMEOUT_MS = 90 * 60 * 1000;
-
-/**
- * Acquire the repo lock for a queue step: bounded, periodically logged, and failing FAST
- * when the path cannot be locked at all rather than polling a permanently-unlockable
- * repoPath as if it were merely busy (#230). Both queue sites go through this one helper
- * so the classification cannot drift between them.
- */
-export async function acquireQueueRepoLock(
-  repoPath: string,
-  holder: string,
-  opts: Partial<RepoLockWaitOptions> = {},
-): Promise<RepoLockHandle> {
-  const timeoutMs = opts.timeoutMs ?? MERGE_QUEUE_REPO_LOCK_TIMEOUT_MS;
-  let lastLoggedMs = 0;
-  try {
-    return await waitForRepoLock(repoPath, holder, {
-      ...opts,
-      timeoutMs,
-      pollMs: opts.pollMs ?? 500,
-      onContended: (attempt, waitedMs) => {
-        opts.onContended?.(attempt, waitedMs);
-        if (waitedMs - lastLoggedMs < 60_000) return;
-        lastLoggedMs = waitedMs;
-        console.warn(
-          `[merge-queue] still waiting for the repo lock on ${repoPath} (${holder}) after ` +
-            `${Math.round(waitedMs / 1000)}s of ${Math.round(timeoutMs / 1000)}s — ${attempt.reason}`,
-        );
-      },
-    });
-  } catch (err) {
-    if (err instanceof RepoLockUnavailableError) {
-      throw new Error(
-        `[merge-queue] cannot lock ${repoPath} (${holder}) — ${err.message}. ` +
-          `This is not lock contention (code ${err.code}); waiting would never have succeeded.`,
-      );
-    }
-    throw err;
-  }
-}
+import { acquireQueueRepoLock } from "./merge-queue-repo-lock.js";
+export { MERGE_QUEUE_REPO_LOCK_TIMEOUT_MS, acquireQueueRepoLock } from "./merge-queue-repo-lock.js";
 import * as gitService from "./git.service.js";
 import {
   getMergeQueueWorkspaceRows,
   getMergeQueueIssueRows,
   getWorkspaceStatus,
   getWorkspaceMergeState,
-  getMergeTrainMaxSizePref,
 } from "../repositories/merge-queue.repository.js";
 import { getProjectsByIds } from "../repositories/project.repository.js";
 import { listWorkspaceRepos } from "../repositories/repo.repository.js";
 import { createWorkspaceMergeService } from "./workspace-merge.service.js";
-import { runMergeTrain } from "./merge-train.service.js";
-import { runPreMergeGate } from "./pre-merge-gate.service.js";
 import { isPreMergeGateFailure } from "./workspace-merge-gate.js";
 import type { BoardEventSink } from "./board-events.js";
 import type { SessionLauncher } from "./session.manager.js";
-import { resolveWorktreeClaims } from "@agentic-kanban/shared/lib/worktree-claim";
-
-/**
- * How many ready members a project wants batched onto one train before it opts into the
- * train strategy at all (#904). `> 1` is the signal — a project that has never touched this
- * knob defaults to 1 (i.e. stays on the sequential path unless the caller explicitly asks
- * for `strategy: "train"`), since #905 owns the actual batching-window default of 4.
- */
-async function resolveProjectTrainMaxSize(projectId: string, database: Database): Promise<number> {
-  const raw = await getMergeTrainMaxSizePref(projectId, database);
-  const parsed = Number.parseInt(raw ?? "", 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
-}
+import { createMergeTrainRunner, resolveProjectTrainMaxSize, trainEligible } from "./merge-queue-train.js";
 
 export interface WorkspaceConflictPreview {
   workspaceId: string;
@@ -292,6 +230,10 @@ export function createMergeQueueService(deps: {
     database,
     boardEvents,
     getSessionManager,
+  });
+  const trainRunner = createMergeTrainRunner({
+    database,
+    reconcileAlreadyMerged: (workspaceId) => mergeService.reconcileAlreadyMerged(workspaceId),
   });
 
   async function getWorkspaceQueueInfos(workspaceIds: string[]): Promise<WorkspaceQueueInfo[]> {
@@ -532,156 +474,6 @@ export function createMergeQueueService(deps: {
     }
   }
 
-  /**
-   * Are these members eligible for a single release train?
-   *
-   * v1 is deliberately narrow — a train must be provably one repo, one base. Multi-repo
-   * workspaces merge all-or-nothing across siblings (`prevalidateSiblingMerges` /
-   * `executeSiblingMerges`), and coordinating THAT across a batch is a separate problem; a
-   * direct workspace has no branch to put on a train at all. Anything ineligible falls back
-   * to the existing per-ticket path, which is slower but always correct.
-   */
-  function trainEligible(order: MergeQueuePlan["order"]): boolean {
-    if (order.length < 2) return false;
-    const first = order[0];
-    return order.every(
-      (ws) =>
-        !ws.isDirect &&
-        ws.workingDir &&
-        ws.branch &&
-        ws.repoPath === first.repoPath &&
-        ws.baseBranch === first.baseBranch,
-    );
-  }
-
-  /**
-   * Run the whole batch as one release train: assemble → gate ONCE → land → close each member.
-   *
-   * The gate needs a worktree whose tree IS the assembled train (not any member's branch), so
-   * one is created at the train ref, gated, and removed. That worktree is the only reason this
-   * lives here rather than in merge-train.service.ts — the service stays free of worktree and
-   * DB concerns so its logic can be tested without either.
-   *
-   * The whole run holds the repo lock: the train's value depends on its base not moving
-   * between assembly and landing, and `landMergeTrain` refuses (correctly) if it does.
-   */
-  async function* runTrainStrategy(plan: MergeQueuePlan): AsyncGenerator<MergeQueueEvent> {
-    const first = plan.order[0];
-    const repoPath = first.repoPath;
-    const baseBranch = first.baseBranch as string;
-    const label = `q${Date.now().toString(36)}`;
-    const members = plan.order.map((ws) => ({
-      workspaceId: ws.id,
-      branch: ws.branch as string,
-      issueNumber: ws.issueNumber,
-    }));
-
-    // The gate is per-PROJECT (it reads verify_script_<projectId>), and WorkspaceQueueInfo
-    // carries only issueId — resolve the project the same way computePlan does.
-    const issueRows = await getMergeQueueIssueRows([first.issueId], database);
-    const projectId = issueRows[0]?.projectId ?? null;
-    if (!projectId) {
-      // Fail closed rather than gate-less: without a project there is no verify_script to run,
-      // and a train that skips the gate is exactly what this feature must never become.
-      yield { type: "error", workspaceId: first.id, issueNumber: first.issueNumber, issueTitle: first.issueTitle, error: "train aborted: could not resolve the project for the batch, so the gate could not be run" };
-      yield { type: "done", merged: [], failed: members.map((m) => m.workspaceId), skipped: [] };
-      return;
-    }
-
-    const repoLock = await acquireQueueRepoLock(repoPath, `merge-train:${label}`);
-    const heartbeat = setInterval(() => repoLock.heartbeat(), 15_000);
-
-    let result: Awaited<ReturnType<typeof runMergeTrain>> | null = null;
-    try {
-      result = await runMergeTrain({
-        repoPath,
-        baseBranch,
-        members,
-        label,
-        runGate: async ({ trainRef, included }) => {
-          // Gate the TREE THAT LANDS. A per-member gate never tests the merge commit, which is
-          // how two individually-green branches can produce a red base with no conflict.
-          let gateWorktree: string | null = null;
-          try {
-            // #713: DB-backed claim guard alongside the namespace — the train leaf lives
-            // under the same `.worktrees` root as every live workspace's.
-            gateWorktree = await gitService.createWorktree(repoPath, trainRef, undefined, {
-              pathNamespace: "train",
-              ...(await resolveWorktreeClaims(database, { label: "merge-train-gate" })),
-            });
-            // `memberWorkspaceIds`: the synthetic `train:<label>` id matches no `repos` row, so
-            // without it the #628 deferred-install check passes vacuously for the whole train.
-            const gate = await runPreMergeGate(
-              {
-                id: `train:${label}`,
-                workingDir: gateWorktree,
-                baseBranch,
-                // The INCLUDED members (#676) — a member dropped during assembly is not in this
-                // tree, so its outstanding install must not withhold the train.
-                memberWorkspaceIds: included.map((m) => m.workspaceId),
-              },
-              projectId,
-              database,
-            );
-            return { passed: gate.passed, message: gate.message };
-          } catch (err) {
-            // Fail CLOSED: a gate we could not run is not a gate that passed.
-            return { passed: false, message: `train gate could not run: ${errorMessage(err)}` };
-          } finally {
-            if (gateWorktree) await gitService.removeWorktree(repoPath, gateWorktree).catch(() => undefined);
-          }
-        },
-        closeMember: async (workspaceId) => {
-          // Reuse the sanctioned already-merged path rather than reimplementing the
-          // mergedAt/status/comment bookkeeping the reconcilers depend on.
-          await mergeService.reconcileAlreadyMerged(workspaceId);
-        },
-      });
-    } finally {
-      clearInterval(heartbeat);
-      repoLock.release();
-    }
-
-    for (const d of result.dropped) {
-      yield { type: "skipped", workspaceId: d.member.workspaceId, issueNumber: d.member.issueNumber ?? null, issueTitle: "", reason: `dropped from train: ${d.reason.slice(0, 200)}` };
-    }
-    // #492 — a member the bisect individually proved red is attributed to ITSELF, not blamed
-    // on the batch. This is the difference between "your branch broke the gate" and "someone
-    // in a batch you were in broke the gate", and only the first is actionable by its author.
-    for (const r of result.gateRejected) {
-      yield { type: "error", workspaceId: r.member.workspaceId, issueNumber: r.member.issueNumber ?? null, issueTitle: "", error: `gate failed for this branch alone (bisected out of the train): ${r.reason.slice(0, 300)}` };
-    }
-    if (result.landed.length === 0) {
-      for (const m of members) {
-        if (result.dropped.some((d) => d.member.workspaceId === m.workspaceId)) continue;
-        if (result.gateRejected.some((r) => r.member.workspaceId === m.workspaceId)) continue;
-        yield { type: "error", workspaceId: m.workspaceId, issueNumber: m.issueNumber ?? null, issueTitle: "", error: `train gate failed — nothing landed: ${(result.gateFailure ?? "").slice(0, 300)}` };
-      }
-      yield { type: "done", merged: [], failed: members.map((m) => m.workspaceId), skipped: [] };
-      return;
-    }
-    console.log(`[merge-train] ${label}: ${result.landed.length}/${members.length} landed in ${result.gateRuns} gate run(s)` +
-      `${result.gateRejected.length > 0 ? `, ${result.gateRejected.length} bisected out` : ""}`);
-    for (const m of result.landed) {
-      const closeFailure = result.closeFailures.find((c) => c.member.workspaceId === m.workspaceId);
-      // A close-out failure is NOT a merge failure — the work IS on the base branch, only the
-      // bookkeeping lags, and the existing reconcilers recover that. Log it rather than
-      // emitting `error`, which callers treat as "this ticket did not land".
-      if (closeFailure) {
-        console.warn(`[merge-train] ${m.branch} landed via train ${result.mergeSha?.slice(0, 8)} but close-out lagged: ${closeFailure.reason.slice(0, 200)}`);
-      }
-      yield { type: "merged", workspaceId: m.workspaceId, issueNumber: m.issueNumber ?? null, issueTitle: "" };
-    }
-    yield {
-      type: "done",
-      merged: result.landed.map((m) => m.workspaceId),
-      // A bisected-out member did NOT land, so reporting it as anything but failed would tell
-      // the queue its work is on the base when it is not.
-      failed: result.gateRejected.map((r) => r.member.workspaceId),
-      skipped: result.dropped.map((d) => d.member.workspaceId),
-    };
-  }
-
   async function* executeQueue(
     workspaceIds: string[],
     opts: { skipOnConflict?: boolean; strategy?: "sequential" | "train" } = {},
@@ -706,7 +498,7 @@ export function createMergeQueueService(deps: {
       wantsTrain = projectTrainMaxSize > 1;
     }
     if (wantsTrain && opts.strategy !== "sequential" && eligible) {
-      yield* runTrainStrategy(plan);
+      yield* trainRunner.runTrainStrategy(plan);
       return;
     }
 
