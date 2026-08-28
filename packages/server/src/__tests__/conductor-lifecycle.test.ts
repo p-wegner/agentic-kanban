@@ -59,8 +59,14 @@ describe("conductor lifecycle (start no-op-if-alive, stop kills recorded PID)", 
   function writeFreshLog() {
     const p = join(dir, "loop.log");
     writeFileSync(p, "[2026-01-01T00:00:00+00:00] --- iteration 1 START ---\n", "utf8");
-    const now = new Date();
-    utimesSync(p, now, now);
+    // Fresh enough to read as alive (well under ALIVE_STALENESS_MS), but backdated a
+    // second so a stop-marker written moments later (real "now") is unambiguously
+    // newer — on a fast filesystem (Linux tmpfs) two writes issued back-to-back can
+    // otherwise land within the same mtime tick and the stopMtime >= logMtime check
+    // in readOrchestratorStatus races. Same pattern as
+    // orchestrator-monitor.service.test.ts's writeLog(ageMs).
+    const backdated = new Date(Date.now() - 1000);
+    utimesSync(p, backdated, backdated);
   }
 
   it("start is a NO-OP when a Conductor loop is already alive (never spawns a second driver)", () => {
