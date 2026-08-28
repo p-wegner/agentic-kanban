@@ -4,10 +4,16 @@ import { createBoardWsRoute } from "../routes/board-ws.js";
 import type { Context } from "hono";
 import type { UpgradeWebSocket, WSContext } from "hono/ws";
 
-/** The handler object createBoardWsRoute's callback returns. */
+/**
+ * The handler object createBoardWsRoute's callback returns. Hono's own WSEvents types
+ * onClose as (evt: CloseEvent, ...) — fine as a compile-time-only DOM lib type, but
+ * `CloseEvent` isn't a runtime global until Node 23, so constructing one here would
+ * ReferenceError on the Node 22 CI runner. The route ignores the event value, so a
+ * plain `Event` is a compatible enough stand-in for driving the callback directly.
+ */
 type BoardWsHandlers = {
   onOpen(event: Event, ws: WSContext): void;
-  onClose(event: CloseEvent, ws: WSContext): void;
+  onClose(event: Event, ws: WSContext): void;
 };
 
 function createMockWs(readyState = 1) {
@@ -211,7 +217,7 @@ describe("board-events", () => {
       boardEvents.broadcast("proj-1", "issue_created");
       expect(ws.send).toHaveBeenCalledTimes(1);
 
-      result.onClose(new CloseEvent("close"), ws);
+      result.onClose(new Event("close"), ws);
       // Should be unsubscribed
       boardEvents.broadcast("proj-1", "workspace_merged");
       expect(ws.send).toHaveBeenCalledTimes(1); // still 1, not 2
