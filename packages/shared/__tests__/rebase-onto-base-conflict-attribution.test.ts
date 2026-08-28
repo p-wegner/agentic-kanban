@@ -51,7 +51,20 @@ function routeGit(handlers: Record<string, (args: string[]) => string>) {
   });
 }
 
-const CLEAN_TREE = { "status --porcelain": () => "", "rev-parse": () => "sha" };
+/**
+ * The base is NOT yet integrated into the branch — i.e. there is genuinely something to
+ * rebase. `git merge-base --is-ancestor` signals its answer through the EXIT CODE, so "no"
+ * is a throw. Without this the #933 already-integrated guard reads the mock's default
+ * empty-success as "yes, already integrated" and skips the rebase these tests are about.
+ */
+const BASE_NOT_INTEGRATED = {
+  "merge-base": (args: string[]) => {
+    if (args[1] === "--is-ancestor") throw new Error("exit 1: not an ancestor");
+    return "mergebasesha";
+  },
+};
+
+const CLEAN_TREE = { ...BASE_NOT_INTEGRATED, "status --porcelain": () => "", "rev-parse": () => "sha" };
 
 describe("rebaseOntoBase conflict attribution (#274)", () => {
   beforeEach(() => {
@@ -132,6 +145,25 @@ describe("rebaseOntoBase conflict attribution (#274)", () => {
 
     expect(result.success).toBe(false);
     expect(result.conflictingFiles).toEqual(["packages/server/src/__tests__/merge-queue.service.test.ts"]);
+  });
+
+  it("#933 skips the rebase entirely when the base is already an ancestor of HEAD", async () => {
+    // The state fix-and-merge leaves behind: it resolved the conflict by MERGING the base into
+    // the branch. Replaying the branch's raw pre-resolution commits would re-hit that same
+    // conflict forever, so the rebase must not run at all.
+    const rebases: string[][] = [];
+    routeGit({
+      "status --porcelain": () => "",
+      "rev-parse": () => "sha",
+      "merge-base": () => "", // --is-ancestor succeeds => base IS already integrated
+      rebase: (args) => { rebases.push(args); return ""; },
+    });
+
+    const result = await rebaseOntoBase("/worktree", "master", "feature/x");
+
+    expect(result.success).toBe(true);
+    expect(result.conflictingFiles).toBeUndefined();
+    expect(rebases.filter((a) => a[1] !== "--abort")).toEqual([]);
   });
 
   it("carries the tips the verdict was computed against, so a stale one is visible", async () => {

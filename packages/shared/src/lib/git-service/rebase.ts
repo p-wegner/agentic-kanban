@@ -1,6 +1,31 @@
 import { execGit } from "./internal.js";
 import { ensureOnBranch } from "./branch-attach.js";
+import { isAncestor } from "./branch.js";
 import { errorMessage } from "../error-message.js";
+
+/**
+ * True when `baseRef` is already reachable from HEAD — i.e. the branch has ALREADY integrated
+ * the base, typically because something merged the base INTO the branch.
+ *
+ * Rebasing in that state is not just redundant, it is actively destructive (#933). A rebase
+ * replays the branch's ORIGINAL raw commits onto the base, discarding the merge commit that
+ * resolved them — so a conflict that a merge already settled comes straight back. That is a
+ * permanent deadlock between the board's two recovery paths: `fix-and-merge` resolves by
+ * MERGING master into the branch and reports success (clean tree, no conflict markers), then
+ * review preflight REBASES, re-hits the identical conflict, and routes back to fix-and-merge.
+ * Observed live on #905: `merge-base(master, branch) == master tip` (so `git merge-tree master
+ * branch` was CLEAN) while `git rebase master` still conflicted on the branch's own commit.
+ *
+ * When the base is an ancestor there is by definition nothing to bring in, so the only thing a
+ * rebase can do is flatten history — which is cosmetic when it succeeds and a deadlock when it
+ * does not. Skip it.
+ *
+ * Best-effort: any failure to resolve either ref answers `false`, so a repo we cannot inspect
+ * takes the ordinary rebase path rather than silently skipping it.
+ */
+export async function baseAlreadyIntegrated(worktreePath: string, baseRef: string): Promise<boolean> {
+  return isAncestor(worktreePath, baseRef, "HEAD");
+}
 
 /**
  * Commit any uncommitted changes in a worktree so a rebase/merge can run on a clean tree.
@@ -72,20 +97,28 @@ export async function prepareForReview(
     rebaseSource = `origin/${baseBranch}`;
   }
 
-  // Rebase the workspace branch onto the base branch
-  try {
-    await execGit(["rebase", rebaseSource], worktreePath);
-  } catch (err) {
-    // Rebase conflict — collect conflicting files, then abort to leave worktree clean
-    let conflictingFiles: string[] | undefined;
+  // #933: if the branch has ALREADY integrated the base (e.g. fix-and-merge resolved a conflict
+  // by merging base into it), rebasing would replay the raw pre-resolution commits and re-hit the
+  // conflict the merge already settled — the permanent review<->fix-and-merge deadlock. There is
+  // nothing to bring in, so fall through to the success return and review against the base as-is.
+  if (await baseAlreadyIntegrated(worktreePath, rebaseSource)) {
+    console.log(`[git] ${rebaseSource} is already an ancestor of HEAD in ${worktreePath} — skipping the review-preflight rebase (nothing to replay)`);
+  } else {
+    // Rebase the workspace branch onto the base branch
     try {
-      const unmerged = await execGit(["diff", "--name-only", "--diff-filter=U"], worktreePath);
-      conflictingFiles = unmerged.trim().split("\n").filter(Boolean);
-    } catch { /* best effort */ }
-    try {
-      await execGit(["rebase", "--abort"], worktreePath);
-    } catch { /* best effort */ }
-    return { diffRef: rebaseSource, success: false, conflictingFiles, error: errorMessage(err) };
+      await execGit(["rebase", rebaseSource], worktreePath);
+    } catch (err) {
+      // Rebase conflict — collect conflicting files, then abort to leave worktree clean
+      let conflictingFiles: string[] | undefined;
+      try {
+        const unmerged = await execGit(["diff", "--name-only", "--diff-filter=U"], worktreePath);
+        conflictingFiles = unmerged.trim().split("\n").filter(Boolean);
+      } catch { /* best effort */ }
+      try {
+        await execGit(["rebase", "--abort"], worktreePath);
+      } catch { /* best effort */ }
+      return { diffRef: rebaseSource, success: false, conflictingFiles, error: errorMessage(err) };
+    }
   }
 
   return { diffRef: rebaseSource, success: true };
@@ -148,8 +181,17 @@ export async function rebaseOntoBase(
   // stale one is visible instead of merely wrong.
   const tips = await resolveTips(worktreePath, source);
 
+  // #933: same guard as prepareForReview. A branch that already contains the base has nothing to
+  // replay, and replaying it would resurrect conflicts an earlier merge already resolved. The
+  // caller's postcondition ("branch is up to date with base") already holds, so skipping the
+  // rebase and reattaching is the same successful outcome, reached without touching history.
+  const alreadyIntegrated = await baseAlreadyIntegrated(worktreePath, source);
+  if (alreadyIntegrated) {
+    console.log(`[git] ${source} is already an ancestor of HEAD in ${worktreePath} — skipping rebase (nothing to replay)`);
+  }
+
   try {
-    await execGit(["rebase", source], worktreePath);
+    if (!alreadyIntegrated) await execGit(["rebase", source], worktreePath);
     // Rebase can leave worktree in detached HEAD — reattach
     if (branch) {
       await ensureOnBranch(worktreePath, branch);
