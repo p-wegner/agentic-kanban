@@ -2,6 +2,7 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { StackProfile } from "../types/api.js";
 import { deriveVerifyCommandPlan } from "./verify-command.js";
+import { RISK_POSTURE_DESCRIPTIONS, RISK_POSTURE_LABELS, type RiskPosture } from "./risk-posture.js";
 
 export type TicketContext = {
   issueNumber?: number | null;
@@ -75,6 +76,13 @@ export type TicketContext = {
    * commit per ticket, and the board closes ALL of them when this one branch lands.
    */
   groupTickets?: Array<{ issueNumber: number | null; title: string; description?: string | null }> | null;
+  /**
+   * The project's resolved risk posture (#912) — carried into the worktree so the
+   * builder AND its Stop hook agree on what verification tier applies, without either
+   * one re-reading preferences. Omitted (or null) renders no section, which is
+   * equivalent to "standard" (the resolver's fail-closed default).
+   */
+  riskPosture?: RiskPosture | null;
 };
 
 /**
@@ -288,6 +296,23 @@ export function fencedBlock(content: string): string[] {
   const longestRun = Math.max(0, ...[...content.matchAll(/`+/g)].map((m) => m[0].length));
   const fence = "`".repeat(Math.max(3, longestRun + 1));
   return [fence, content, fence];
+}
+
+/**
+ * Render the project's resolved risk posture, or null when absent (equivalent to
+ * "standard", so nothing actionable to say). Quotes the SAME one-line "what this
+ * posture skips" text the Settings selector and header chip show, so the disclosure
+ * is consistent everywhere a posture is surfaced (the proposal's honesty rule —
+ * a weaker posture may only weaken verification VISIBLY).
+ */
+export function buildRiskPostureSection(posture: RiskPosture | null | undefined): string | null {
+  if (!posture) return null;
+  return [
+    "## Risk posture",
+    "",
+    `This project runs under **${RISK_POSTURE_LABELS[posture]}** risk posture. ${RISK_POSTURE_DESCRIPTIONS[posture]}`,
+    "A ticket tagged `risk:<posture>` overrides the project default for that ticket only.",
+  ].join("\n");
 }
 
 /**
@@ -570,6 +595,11 @@ export function buildTicketContextMarkdown(ctx: TicketContext): string {
   }
   if (ctx.contextPrimer?.trim()) {
     lines.push(ctx.contextPrimer.trim());
+    lines.push("");
+  }
+  const riskPostureSection = buildRiskPostureSection(ctx.riskPosture);
+  if (riskPostureSection) {
+    lines.push(riskPostureSection);
     lines.push("");
   }
   const boardFeedback = buildBoardFeedbackSection(ctx.boardFeedback);

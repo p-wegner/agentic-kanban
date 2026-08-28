@@ -19,6 +19,7 @@ import { join } from "node:path";
 import { normalizeProviderPolicies, strategyPrefKey } from "./strategy-policy.js";
 import type { ProviderPolicyMode, ProviderProfilePolicy } from "./strategy-policy.js";
 import { isBoardStrategyPreferenceKey } from "./dynamic-preference-keys.js";
+import { readRiskPosture, RISK_POSTURE_DEFAULT, RISK_POSTURE_DESCRIPTIONS, type RiskPosture } from "./risk-posture.js";
 
 export type StrategySegmentKind = "work-type" | "provider" | "area" | "custom";
 
@@ -143,7 +144,7 @@ const MODE_DESCRIPTIONS: Record<ProviderPolicyMode, string> = {
   "fallback-only": "FALLBACK-ONLY — use only when no better option exists or on explicit user request",
 };
 
-export function renderGeneratedStrategyBlock(config: StrategyBullseyeConfig): string {
+export function renderGeneratedStrategyBlock(config: StrategyBullseyeConfig, posture: RiskPosture = RISK_POSTURE_DEFAULT): string {
   const tunables = deriveMonitorTunables(config);
   const segments = [...(config.segments ?? [])].sort((a, b) => segmentWeight(b) - segmentWeight(a));
   const weightedLines = segments.length === 0
@@ -183,6 +184,9 @@ export function renderGeneratedStrategyBlock(config: StrategyBullseyeConfig): st
     `- **MAX_NEW_STARTS_PER_CYCLE = ${tunables.maxNewStartsPerCycle}** - cap on how many NEW workspaces to launch in a single cycle.`,
     `- **REFILL_FOCUS = ${tunables.refillFocus}** - derived from work-type marker weights; \`bugfix-only\` emphasizes reproducible bugs, \`balanced\` allows feature/quality mix.`,
     "",
+    "## RISK POSTURE (generated - do not hand-edit)",
+    `- **RISK POSTURE = ${posture}** - ${RISK_POSTURE_DESCRIPTIONS[posture]} Set via Settings -> Workflow; a ticket may override with a \`risk:<posture>\` tag.`,
+    "",
     "## STRATEGY WEIGHTS (generated - do not hand-edit)",
     ...weightedLines,
     ...providerStrategyNote,
@@ -190,8 +194,12 @@ export function renderGeneratedStrategyBlock(config: StrategyBullseyeConfig): st
   ].join("\n");
 }
 
-export function updateObjectiveWithStrategy(objectiveText: string, config: StrategyBullseyeConfig): string {
-  const block = renderGeneratedStrategyBlock(config);
+export function updateObjectiveWithStrategy(
+  objectiveText: string,
+  config: StrategyBullseyeConfig,
+  posture: RiskPosture = RISK_POSTURE_DEFAULT,
+): string {
+  const block = renderGeneratedStrategyBlock(config, posture);
   const generatedPattern = new RegExp(`${GENERATED_START}[\\s\\S]*?${GENERATED_END}`);
   if (generatedPattern.test(objectiveText)) {
     return objectiveText.replace(/## TUNABLE TARGETS[^\n]*\n[\s\S]*?<!-- STRATEGY_BULLSEYE_GENERATED_END -->/, block);
@@ -262,7 +270,12 @@ export function renderProjectConductorObjective(project: { id: string; name?: st
 export function writeStrategyObjective(
   repoPath: string,
   rawConfig: string,
-  options: { objectiveRelativePath?: string; createIfMissing?: boolean; project?: { id: string; name?: string | null; repoPath: string; defaultBranch?: string | null } } = {},
+  options: {
+    objectiveRelativePath?: string;
+    createIfMissing?: boolean;
+    project?: { id: string; name?: string | null; repoPath: string; defaultBranch?: string | null };
+    posture?: RiskPosture;
+  } = {},
 ): boolean {
   const config = parseStrategyBullseyeConfig(rawConfig);
   const objectiveRelativePath = options.objectiveRelativePath ?? STRATEGY_RELATIVE_PATH;
@@ -273,7 +286,7 @@ export function writeStrategyObjective(
     writeFileSync(objectivePath, renderProjectConductorObjective(options.project), "utf8");
   }
   const current = readFileSync(objectivePath, "utf8");
-  const next = updateObjectiveWithStrategy(current, config);
+  const next = updateObjectiveWithStrategy(current, config, options.posture ?? RISK_POSTURE_DEFAULT);
   if (next !== current) {
     writeFileSync(objectivePath, next, "utf8");
     return true;
@@ -348,11 +361,14 @@ export function readStrategyBullseye(
 export function resolveMonitorTunables(
   prefMap: Map<string, string>,
   projectId: string,
-): { tunables: MonitorTunables; source: "strategy" | "prefs" } {
+): { tunables: MonitorTunables; source: "strategy" | "prefs"; posture: RiskPosture } {
+  // The risk posture is independent of the strategy-vs-legacy split above: it applies
+  // whether or not this project has ever opened the Strategy Bullseye.
+  const posture = readRiskPosture(prefMap, projectId);
   // Absent OR malformed both fall through to the legacy prefs below, exactly as the
   // hand-written try/catch did.
   const config = readStrategyBullseye(prefMap, projectId);
-  if (config) return { tunables: deriveMonitorTunables(config), source: "strategy" };
+  if (config) return { tunables: deriveMonitorTunables(config), source: "strategy", posture };
   const wipLimit = parseInt(prefMap.get("nudge_wip_limit") || "5", 10);
   return {
     tunables: {
@@ -367,6 +383,7 @@ export function resolveMonitorTunables(
       refillFocus: "balanced",
     },
     source: "prefs",
+    posture,
   };
 }
 

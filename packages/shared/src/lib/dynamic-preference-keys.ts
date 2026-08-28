@@ -144,10 +144,14 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   "train_max_size",
   "train_max_wait_ms",
   // Merge train review (#907): `review_mode_<id>` is `per-ticket` (default) | `per-train` —
-  // a stand-in for the risk-posture resolver (#911). `per-train` reviews a ticket-group
-  // workspace's assembled diff once, with every member's acceptance criteria, instead of
-  // reviewing each ticket separately. See server/lib/review-mode-pref.ts.
+  // was a stand-in for the risk-posture resolver before it landed. `per-train` reviews a
+  // ticket-group workspace's assembled diff once, with every member's acceptance criteria,
+  // instead of reviewing each ticket separately. See server/lib/review-mode-pref.ts.
   "review_mode",
+  // Risk posture (#912): `risk_posture_<id>` is one of `strict|standard|fast|sprint`
+  // (default `standard`) — the resolver every downstream consumer reads instead of
+  // hand-aligning the 8 prefs the proposal names. See shared/lib/risk-posture.ts.
+  "risk_posture",
 ] as const;
 
 // Deliberately NOT registered, though both are per-project keys that exist on disk (#496):

@@ -2,9 +2,9 @@ import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys"
 
 /**
  * Merge train review mode (#907): a project-scoped stand-in for the risk-posture
- * resolver (#911, not yet landed). `fast` posture will select train review by
- * default once the resolver exists; until then this is the one pref an operator
- * flips per project.
+ * resolver (`@agentic-kanban/shared/lib/risk-posture`, #912). `fast` posture is
+ * intended to select train review by default; that wiring is not done yet, so this
+ * remains the one pref an operator flips per project directly.
  *
  * `per-ticket` (default) reviews each workspace's own diff, one session per ticket —
  * today's behaviour, unchanged. `per-train` reviews the ASSEMBLED diff of a

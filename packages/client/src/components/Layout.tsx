@@ -7,6 +7,8 @@ import { ProjectTabs } from "./ProjectTabs.js";
 import { ProjectSelector } from "./ProjectSelector.js";
 import { NotificationBell } from "./NotificationBell.js";
 import { WaitingOnYouChip } from "./WaitingOnYouChip.js";
+import { RiskPostureChip } from "./RiskPostureChip.js";
+import { ProjectActionButtons } from "./ProjectActionButtons.js";
 import { useInboxCountsByProject } from "../hooks/useInbox.js";
 import type { NotificationEvent } from "../hooks/useActivityNotifications.js";
 import { useBoardFilterStore } from "../stores/boardFilterStore.js";
@@ -319,33 +321,16 @@ export function Layout({
             />
             {/* #411: what the ACTIVE project needs from a human, in every view. */}
             <WaitingOnYouChip activeProjectId={activeProjectId ?? null} />
-            {projects.length > 0 && onArchiveProject && (
-              <button
-                onClick={() => {
-                  const active = projects.find((p) => p.id === activeProjectId) ?? projects[0];
-                  setConfirmArchive(active);
-                }}
-                className="hidden sm:inline-flex p-2.5 sm:p-1 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 items-center justify-center text-gray-400 dark:text-gray-500 hover:text-amber-500 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
-                title="Archive project"
-              >
-                <Icon className="h-4 w-4" d="M21 8v13H3V8M1 3h22v5H1zM10 12h4" />
-              </button>
-            )}
-            {projects.length > 0 && onUnregisterProject && (
-              <button
-                onClick={() => {
-                  const active = projects.find((p) => p.id === activeProjectId) ?? projects[0];
-                  setConfirmUnregister(active);
-                }}
-                className="hidden sm:inline-flex p-2.5 sm:p-1 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 items-center justify-center text-gray-400 dark:text-gray-500 hover:text-red-500 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
-                title="Unregister project"
-              >
-                <Icon
-                  className="h-4 w-4"
-                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                />
-              </button>
-            )}
+            {/* #912: which risk posture governs this project's review/gate/merge trade-offs. */}
+            <RiskPostureChip activeProjectId={activeProjectId ?? null} />
+            <ProjectActionButtons
+              projects={projects}
+              activeProjectId={activeProjectId ?? null}
+              onArchiveProject={onArchiveProject}
+              onUnregisterProject={onUnregisterProject}
+              onConfirmArchive={setConfirmArchive}
+              onConfirmUnregister={setConfirmUnregister}
+            />
             <button
               onClick={openRegister}
               className="hidden sm:inline-flex p-2.5 sm:p-1 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 items-center justify-center text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
