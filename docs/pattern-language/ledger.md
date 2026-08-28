@@ -56,6 +56,27 @@ Round-1 method: caller ran Step 0 (`vocab.py` histograms + `.dependency-cruiser.
   `shared-barrel` allocates exactly 1 file, coverage still 100 %. `pnpm --filter
   @agentic-kanban/shared typecheck` clean.
 
+### 2026-08-27 — #926: the 4 `server-monitor→server-root` edges (ak-926, claude-sonnet-5)
+- **All 4 edges — BOUNDARY WRONG, same root cause.** `app-bootstrap.ts` (builds the Hono app +
+  its cross-cutting middleware chain) and `boot-sequence.ts` (runs the sequential
+  must-precede-serving boot phases) are both pure composition-root code — exactly the
+  `server-root` "composition root" kind `packages/server/CLAUDE.md`'s #595 table already names
+  (`route-setup`, `background-services`, `startup-tasks`, `readiness`, `process-handlers`,
+  `scheduled-tasks`, `session-restore`, `fk-alignment`). Both were extracted from
+  `server-start.ts` (their own header comments say so, `#873`) but were never added to
+  `server-root`'s match regex, so they fell through to `server-monitor`'s directory-wide
+  catch-all (`packages/server/src/startup/`) — first-match-wins, and the catch-all matched
+  first because the specific list didn't include them. Their imports of `readiness.ts`,
+  `startup-tasks.ts`, `service-stack-preflight.ts`, `session-restore.ts` (all four already
+  `server-root`) are then flagged as `server-monitor` reaching sideways into `server-root`,
+  when in reality it's `server-root` calling its own siblings.
+- **Fix:** added `app-bootstrap|boot-sequence` to `server-root`'s match regex in
+  `pattern-language.json`. No rule widened, no file moved — both files already live in
+  `packages/server/src/startup/`, alongside every other composition-root file.
+- Re-measured with `pattern_edges.py --scan --violations`: **rule violations 0** (was 4).
+  `server-root` allocation 13 → 15 (+2 reclassified files), `server-monitor` 55 → 53,
+  coverage still 100 %, no new violations introduced elsewhere.
+
 ### 2026-08-27 — #927: the 3 `server-monitor→server-middleware` edges (claude-sonnet-5)
 - **All 3 edges (`app-bootstrap.ts` → `error-handler.ts`/`compress.ts`/`slow-request-logger.ts`)
   — BOUNDARY WRONG, same root cause.** `server-monitor`'s `match` is the whole
@@ -77,6 +98,11 @@ Round-1 method: caller ran Step 0 (`vocab.py` histograms + `.dependency-cruiser.
 - Not fixed as code moves: both files already sit in `packages/server/src/startup/` next to
   their sibling `server-root` files (`route-setup.ts`, `background-services.ts`, …), so this is
   purely a spec `match` gap, not a misplaced file.
+- **Overlap note**: #926 (merged first) already reclassified `app-bootstrap.ts`/
+  `boot-sequence.ts` as `server-root` and added them to the enumerated list for the
+  `server-monitor→server-root` edges it found. This round's fix to `pattern-language.json` is
+  the same enumerated-list addition; the middleware edges above are the ones #926 did not
+  need to touch (it only measured the `→server-root` edges, not `→server-middleware`).
 
 ## Filed (exclusion list — same idea ⇒ reference, don't refile)
 | # | verb | title |
