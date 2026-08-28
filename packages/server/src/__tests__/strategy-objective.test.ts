@@ -277,3 +277,19 @@ describe("renderGeneratedStrategyBlock - provider policies", () => {
     expect(block).not.toContain("PROVIDER POLICY");
   });
 });
+
+describe("renderGeneratedStrategyBlock - risk posture (#912)", () => {
+  it("defaults to standard when no posture is passed", () => {
+    const config = parseStrategyBullseyeConfig(JSON.stringify({ version: 1, segments: [] }));
+    const block = renderGeneratedStrategyBlock(config);
+    expect(block).toContain("## RISK POSTURE (generated - do not hand-edit)");
+    expect(block).toContain("RISK POSTURE = standard");
+  });
+
+  it("renders the requested posture and its skip description", () => {
+    const config = parseStrategyBullseyeConfig(JSON.stringify({ version: 1, segments: [] }));
+    const block = renderGeneratedStrategyBlock(config, "fast");
+    expect(block).toContain("RISK POSTURE = fast");
+    expect(block).toContain("one review per train");
+  });
+});

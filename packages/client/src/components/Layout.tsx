@@ -7,6 +7,7 @@ import { ProjectTabs } from "./ProjectTabs.js";
 import { ProjectSelector } from "./ProjectSelector.js";
 import { NotificationBell } from "./NotificationBell.js";
 import { WaitingOnYouChip } from "./WaitingOnYouChip.js";
+import { RiskPostureChip } from "./RiskPostureChip.js";
 import { useInboxCountsByProject } from "../hooks/useInbox.js";
 import type { NotificationEvent } from "../hooks/useActivityNotifications.js";
 import { useBoardFilterStore } from "../stores/boardFilterStore.js";
@@ -319,6 +320,8 @@ export function Layout({
             />
             {/* #411: what the ACTIVE project needs from a human, in every view. */}
             <WaitingOnYouChip activeProjectId={activeProjectId ?? null} />
+            {/* #912: which risk posture governs this project's review/gate/merge trade-offs. */}
+            <RiskPostureChip activeProjectId={activeProjectId ?? null} />
             {projects.length > 0 && onArchiveProject && (
               <button
                 onClick={() => {

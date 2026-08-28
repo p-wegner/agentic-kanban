@@ -107,6 +107,14 @@ describe("writeStrategyObjective + commitObjectiveFile — auto-commit hook", ()
     expect(text).toContain("<!-- STRATEGY_BULLSEYE_GENERATED_START -->");
     expect(text).toContain("REST API Performance: weight 5/5");
     expect(text).toContain("FIRST, READ YOUR RECENT MEMORY: keep this prose");
+    // #912: default posture renders even when the caller passes none.
+    expect(text).toContain("RISK POSTURE = standard");
+  });
+
+  it("renders the requested posture (#912)", () => {
+    writeStrategyObjective(repo, config, { posture: "sprint" });
+    const text = readFileSync(join(repo, OBJECTIVE_REL), "utf8");
+    expect(text).toContain("RISK POSTURE = sprint");
   });
 
   it("returns false (no rewrite) when there is no objective.md", () => {
@@ -192,5 +200,11 @@ describe("resolveMonitorTunables — in-process monitor wiring", () => {
     const { tunables, source } = resolveMonitorTunables(prefMap, "proj-1");
     expect(source).toBe("prefs");
     expect(tunables.activeAgentsTarget).toBe(3);
+  });
+
+  it("exposes the resolved risk posture independently of the strategy-vs-legacy source (#912)", () => {
+    const prefMap = new Map<string, string>([["risk_posture_proj-1", "strict"]]);
+    expect(resolveMonitorTunables(prefMap, "proj-1").posture).toBe("strict");
+    expect(resolveMonitorTunables(new Map(), "proj-1").posture).toBe("standard");
   });
 });
