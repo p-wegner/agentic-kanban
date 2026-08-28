@@ -1,5 +1,7 @@
-import { issues } from "@agentic-kanban/shared/schema";
+import { drives, issueDependencies, issues } from "@agentic-kanban/shared/schema";
 import { sql, type SQL } from "drizzle-orm";
+import type { Database } from "../db/index.js";
+import { findProjectStatusIdByName } from "../repositories/start-scoring.repository.js";
 
 type MonitorIssueLike = {
   issueType?: string | null;
@@ -50,4 +52,34 @@ export function monitorEligibleIssueSql(allowFeatureTypes = false): SQL {
     AND lower(coalesce(${issues.description}, '')) NOT LIKE 'enhancement:%'
     AND lower(coalesce(${issues.description}, '')) NOT LIKE 'enhancement-%'
   `;
+}
+
+/**
+ * SQL predicate that EXCLUDES drive/epic metas from the auto-start candidate query (#824). This is
+ * the in-query enforcement of the same rule `isDriveOrEpicMeta` (`monitor-auto-start.ts`) documents —
+ * applied as a WHERE condition so a meta is never even a candidate (no per-issue query, no stray
+ * builder workspace).
+ */
+export function notDriveOrEpicMetaSql(): SQL {
+  return sql`NOT EXISTS (SELECT 1 FROM ${drives} WHERE ${drives.metaIssueId} = ${issues.id})
+    AND NOT EXISTS (SELECT 1 FROM ${issueDependencies} WHERE (${issueDependencies.issueId} = ${issues.id} AND ${issueDependencies.type} = 'parent_of') OR (${issueDependencies.dependsOnId} = ${issues.id} AND ${issueDependencies.type} = 'child_of'))`;
+}
+
+/**
+ * The Todo (and, for auto-driven projects, Backlog) status ids a project pulls candidates
+ * from (#536). Returned as one list so the WIP-cap tally and the candidate query cannot
+ * disagree about what "queued work" means.
+ */
+export async function resolveCandidateStatusIds(
+  projectId: string,
+  todoStatusId: string,
+  allowFeatureTypes: boolean,
+  database: Database,
+): Promise<string[]> {
+  const ids = [todoStatusId];
+  if (allowFeatureTypes) {
+    const backlogStatusId = await findProjectStatusIdByName(projectId, "Backlog", database);
+    if (backlogStatusId) ids.push(backlogStatusId);
+  }
+  return ids;
 }

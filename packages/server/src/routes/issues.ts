@@ -2,7 +2,7 @@ import type { Database } from "../db/index.js";
 import type { BoardEventSink } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
 import { analyzeDependencies, enhanceIssue, aiEstimateIssue, decomposeEpic, confirmEpicDecomposition, contractCoupledComponent, confirmContractComponent, analyzeTouchedFiles } from "../services/issue-ai.service.js";
-import { scanForTicketGroups } from "../services/ticket-group-scan.service.js";
+import { scanForTicketGroups, scanTouchedFilesForTicketGroups } from "../services/ticket-group-scan.service.js";
 import type { DecomposeChildProposal, DecomposeDependencyProposal } from "../services/issue-ai.service.js";
 import { createIssueService } from "../services/issue.service.js";
 import type { CreateIssueInput, BatchDependencyInput } from "../services/issue.service.js";
@@ -54,6 +54,18 @@ import { queryFlag } from "../middleware/query-params.js";
 import { getActiveProjectIdPref } from "../repositories/board-status.repository.js";
 import { setIssueReposTouched } from "../services/repo-tags.service.js";
 import { getIssueById } from "../repositories/followup-workspace.repository.js";
+/**
+ * The two halves of `POST /api/issues/group-scan` (#661, #918): the AI proposer, and the
+ * deterministic touched-files seed a cold backlog uses instead. Module-level rather than
+ * inline because `createIssuesRoute` is on the server shrink-only nloc ring (#800).
+ */
+function runGroupScan(projectId: string, database: Database, body: { mode?: string; apply?: boolean; minSharedFiles?: number }) {
+  const apply = body.apply === true;
+  return body.mode === "touched-files"
+    ? scanTouchedFilesForTicketGroups(projectId, database, { apply, minSharedFiles: body.minSharedFiles })
+    : wrapAiOperation("group-scan", () => scanForTicketGroups(projectId, database, { apply }));
+}
+
 export function createIssuesRoute(database: Database, options?: { boardEvents?: BoardEventSink; getSessionManager?: () => SessionManager }) {
   const router = createRouter();
 
@@ -169,15 +181,16 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     return c.json(result);
   });
 
-  // POST /api/issues/group-scan — AI-propose ticket GROUPS over the open backlog (#661).
+  // POST /api/issues/group-scan — propose ticket GROUPS over the open backlog (#661).
   // The non-destructive sibling of /contract: applying writes `coupled_with` edges only
   // (every ticket keeps its identity); the monitor's auto-group start then executes each
   // group as ONE workspace. Preview by default; `apply: true` creates the edges.
+  // `mode: "touched-files"` (#918) is the deterministic seed for a cold backlog — no LLM
+  // call, grouped by shared predicted files (excluding hot/registration files).
   router.post("/group-scan", async (c) => {
     const body = await parseJsonBody(c, groupScanBody);
-    const projectId = body.projectId;
-    const result = await wrapAiOperation("group-scan", () => scanForTicketGroups(projectId, database, { apply: body.apply === true }));
-    if (body.apply === true) options?.boardEvents?.broadcast(projectId, "dependency_added");
+    const result = await runGroupScan(body.projectId, database, body);
+    if (body.apply === true) options?.boardEvents?.broadcast(body.projectId, "dependency_added");
     return c.json(result);
   });
 

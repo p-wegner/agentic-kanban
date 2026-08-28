@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, index, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, index, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { relations } from "drizzle-orm";
 import { projectStatuses } from "./project-statuses.js";
 import { projects } from "./projects.js";
@@ -39,6 +39,11 @@ export const issues = sqliteTable("issues", {
   checklistJson: text("checklist_json"),
   pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
   milestoneId: text("milestone_id").references(() => milestones.id),
+  // #917 — scored ticket selection: the Todo-pull loop's most recent evaluation of this
+  // issue as a start candidate. Null until the issue has been scored once.
+  lastStartScore: real("last_start_score"),
+  lastStartScoreComponentsJson: text("last_start_score_components_json"),
+  lastStartScoredAt: text("last_start_scored_at"),
 }, (table) => ({
   milestoneIdIdx: index("idx_issues_milestone_id").on(table.milestoneId),
   statusIdStatusChangedAtIdx: index("idx_issues_status_id_status_changed_at").on(table.statusId, table.statusChangedAt),
