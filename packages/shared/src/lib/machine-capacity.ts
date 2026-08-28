@@ -210,3 +210,40 @@ export async function resolveMachineCapacity(opts: {
   const tier0 = readTier0Capacity({ minFreeGb: opts.minFreeGb });
   return { ...tier0, hold: tier0.hold };
 }
+
+/**
+ * Derive a verify-gate worker/semaphore width from live capacity instead of a hand-set
+ * constant (#909). `KANBAN_VERIFY_CONCURRENCY` was fixed at 2 and `verify_max_workers_<id>`
+ * was documented as "a statement about THIS box's core count" — i.e. a human doing this
+ * arithmetic by hand, once, and never again. Measured: 2380s -> 1564s at 6 workers on an
+ * idle box; the same 6 flakes on a loaded one, so the number that helps on one run is the
+ * number that hurts on the next.
+ *
+ * `ceiling` is the per-project pref (still 1..32, still meaningful — an operator who knows
+ * the box gets the last word) and the result never exceeds it. Callers layer an env-var
+ * override ON TOP of this (checked first, before ever calling in), exactly like every other
+ * semaphore in this codebase (`KANBAN_VERIFY_CONCURRENCY`, `KANBAN_VERIFY_CHAIN_CONCURRENCY`).
+ *
+ * The formula favors CPU (each vitest fork wants a core) and then clamps to what free RAM
+ * can actually hold, since a fork that swaps is slower than one fork that doesn't. `~300MB`
+ * per fork is a conservative estimate for a Node/vitest worker; a floor of 1 is always
+ * returned so a tight box still makes progress, just serialized.
+ */
+export interface DeriveVerifyWorkersInput {
+  /** Logical CPU count, e.g. `os.cpus().length`. */
+  cpuCount: number;
+  /** Free RAM in GB, e.g. from {@link Tier0Capacity.freeGb} or Tier 1's headroom. */
+  freeGb: number | null;
+  /** The per-project pref (already clamped 1..32) — a hard CEILING, never exceeded. */
+  ceiling: number;
+}
+
+/** RAM budget per vitest fork, in GB — conservative (a Node worker + its own module graph). */
+const RAM_PER_WORKER_GB = 0.3;
+
+export function deriveVerifyWorkers(input: DeriveVerifyWorkersInput): number {
+  const cpuBudget = Math.max(1, input.cpuCount - 2);
+  const ramBudget = input.freeGb == null ? cpuBudget : Math.max(1, Math.floor(input.freeGb / RAM_PER_WORKER_GB));
+  const derived = Math.min(cpuBudget, ramBudget);
+  return Math.max(1, Math.min(derived, input.ceiling));
+}

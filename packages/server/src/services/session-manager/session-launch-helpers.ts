@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import * as os from "node:os";
 import * as lifecycleRepo from "../../repositories/session-lifecycle.repository.js";
 import type { Database } from "../../db/index.js";
 import type { ProviderName } from "../agent-provider.js";
@@ -7,6 +8,7 @@ import type { RotationRings } from "../agent-provider/provider-exit-behavior.js"
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { mergeSessionStats } from "@agentic-kanban/shared/lib/session-stats-blob";
 import { isBuilderLaunchTrigger } from "@agentic-kanban/shared/lib/session-trigger";
+import { readTier0Capacity, deriveVerifyWorkers } from "@agentic-kanban/shared/lib/machine-capacity";
 
 /** Pure helpers for session launch that don't need the createSessionLifecycle closure. */
 
@@ -21,6 +23,40 @@ export const CODEX_SAFE_DEFAULT_MODEL = "gpt-5.5";
 export function isBuilderSession(triggerType: string | undefined, planMode: boolean | undefined): boolean {
   if (planMode) return false;
   return isBuilderLaunchTrigger(triggerType);
+}
+
+/**
+ * Ceiling for a builder's own derived `KANBAN_TEST_MAX_WORKERS` (#909). No per-project pref
+ * makes sense here — this isn't the merge gate, it's an agent's own interactive `pnpm
+ * test:mine` — so the ceiling is a flat constant rather than `verify_max_workers_<projectId>`,
+ * which stays scoped to the gate it was measured against.
+ */
+const BUILDER_TEST_WORKERS_CEILING = 8;
+
+/**
+ * #909: cap a BUILDER's own `pnpm test:mine` the same way the merge gate caps its verify run —
+ * derived from live capacity, never a bare `cpus/2`. Measured motivation: five agent worktrees
+ * each running their own uncapped vitest fan-out (1 parent + cpus/2 forks) is a multiplier the
+ * board's WIP/semaphore accounting never saw, because `KANBAN_TEST_MAX_WORKERS` used to be set
+ * ONLY inside the gate's own verify invocation.
+ *
+ * Merges into `extraEnv` only for a builder session (review/verify/reconcile sessions have
+ * their own env already, and inflating a review agent's test cap buys nothing) and only
+ * best-effort — a capacity-read failure just means the env var stays absent, exactly as it
+ * always was pre-#909, never a blocked launch.
+ */
+export function withBuilderTestWorkerCap(
+  extraEnv: Record<string, string> | undefined,
+  isBuilder: boolean,
+): Record<string, string> | undefined {
+  if (!isBuilder) return extraEnv;
+  try {
+    const tier0 = readTier0Capacity();
+    const workers = deriveVerifyWorkers({ cpuCount: os.cpus().length, freeGb: tier0.freeGb, ceiling: BUILDER_TEST_WORKERS_CEILING });
+    return { ...extraEnv, KANBAN_TEST_MAX_WORKERS: String(workers) };
+  } catch {
+    return extraEnv;
+  }
 }
 
 /** Handoff note prefixed onto the prompt when relaunching fresh after a missing-transcript resume failure (#26). */

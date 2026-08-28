@@ -14,19 +14,39 @@
  * Node backend into repeated wedges and two full crashes. WIP caps the *builders*, but nothing
  * capped the *backend-spawned* gradle — this does.
  *
- * A simple FIFO semaphore. Default cap is small (2) and overridable via KANBAN_VERIFY_CONCURRENCY;
- * set it from CPU count if you prefer (`max(1, cpus-2)`), but a low fixed default is the safe
- * choice on a shared dev box. The smoke check additionally serializes itself (one dev server up at
- * a time) because it binds a fixed port; this gate bounds the broader build load around it.
+ * A simple FIFO semaphore. Default width is DERIVED from live capacity (#909, via
+ * `deriveVerifyWorkers` in `machine-capacity.ts`) rather than a fixed constant — a box with 14
+ * idle cores and a box swapping under five agent worktrees do not deserve the same number.
+ * `KANBAN_VERIFY_CONCURRENCY` remains a hard override: set it and the derivation is never
+ * consulted, same escape hatch as before. The smoke check additionally serializes itself (one
+ * dev server up at a time) because it binds a fixed port; this gate bounds the broader build
+ * load around it.
  */
+import * as os from "node:os";
+import { readTier0Capacity, deriveVerifyWorkers } from "@agentic-kanban/shared/lib/machine-capacity";
 
 let active = 0;
 const waiters: Array<() => void> = [];
 
-/** Max concurrent backend build/verify invocations. Env-overridable; clamped to >= 1. */
+/** Ceiling on the derived semaphore width, absent an explicit env override — generous because
+ *  this bounds backend-spawned BUILD invocations (gradle/verify chains), not vitest forks. */
+const DEFAULT_CONCURRENCY_CEILING = 8;
+
+/**
+ * Max concurrent backend build/verify invocations. `KANBAN_VERIFY_CONCURRENCY` overrides
+ * outright; absent that, derived from live capacity (spare cores / free RAM), clamped to
+ * {@link DEFAULT_CONCURRENCY_CEILING}. Never throws — a capacity read failure degrades to the
+ * pre-#909 default of 2 rather than blocking a caller that only wanted a concurrency number.
+ */
 export function buildSemaphoreConcurrency(): number {
   const raw = Number.parseInt(process.env.KANBAN_VERIFY_CONCURRENCY ?? "", 10);
-  return Number.isFinite(raw) && raw >= 1 ? raw : 2;
+  if (Number.isFinite(raw) && raw >= 1) return raw;
+  try {
+    const tier0 = readTier0Capacity();
+    return deriveVerifyWorkers({ cpuCount: os.cpus().length, freeGb: tier0.freeGb, ceiling: DEFAULT_CONCURRENCY_CEILING });
+  } catch {
+    return 2;
+  }
 }
 
 /** Current number of in-flight gated tasks (for diagnostics/tests). */

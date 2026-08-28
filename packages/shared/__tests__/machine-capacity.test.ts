@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_MIN_FREE_GB,
+  deriveVerifyWorkers,
   readTier0Capacity,
   resolveSpareCores,
   toWorkerCapacitySnapshot,
@@ -83,5 +84,33 @@ describe("toWorkerCapacitySnapshot", () => {
       tier: "1", hold: true, canStartAnother: false, headroomProcesses: 0, thrashing: "heavy",
     });
     expect(snapshot.thrashing).toBe("heavy");
+  });
+});
+
+describe("deriveVerifyWorkers (#909)", () => {
+  it("scales with spare cores on an idle box with plenty of RAM", () => {
+    // 16 cores, 28GB free: RAM budget is far bigger than the CPU budget, so CPU decides.
+    expect(deriveVerifyWorkers({ cpuCount: 16, freeGb: 28, ceiling: 32 })).toBe(14);
+  });
+
+  it("never exceeds the pref ceiling even when the box has room for more", () => {
+    expect(deriveVerifyWorkers({ cpuCount: 16, freeGb: 28, ceiling: 6 })).toBe(6);
+  });
+
+  it("shrinks under tight RAM even on a many-core box — the loaded-box case measured in #909", () => {
+    // 16 cores would budget 14, but 1.5GB free only affords ~5 forks at 0.3GB each.
+    expect(deriveVerifyWorkers({ cpuCount: 16, freeGb: 1.5, ceiling: 32 })).toBe(5);
+  });
+
+  it("never goes below 1, however tight the box", () => {
+    expect(deriveVerifyWorkers({ cpuCount: 2, freeGb: 0.05, ceiling: 32 })).toBe(1);
+  });
+
+  it("falls back to the CPU budget when free RAM is unknown (null)", () => {
+    expect(deriveVerifyWorkers({ cpuCount: 4, freeGb: null, ceiling: 32 })).toBe(2);
+  });
+
+  it("a low ceiling (1) always wins regardless of capacity", () => {
+    expect(deriveVerifyWorkers({ cpuCount: 32, freeGb: 64, ceiling: 1 })).toBe(1);
   });
 });
