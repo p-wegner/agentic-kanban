@@ -10,7 +10,7 @@ import {
   MonitorButlerSection, OrchestratorSection, RecentBoardHealthEventsSection,
   MonitorHeader, AutoMonitorToggleRow, StartModeSection, ActiveAgentsSection,
   LastRunSection, MonitorWarningsSection, ResourceAuditSection, RecentActionsSection,
-  EffectiveTargetsSection, MonitorSettingsSection,
+  EffectiveTargetsSection, MonitorSettingsSection, NextStartCandidatesSection,
 } from "./MonitorSections.js";
 export { MonitorButlerSection, OrchestratorSection, RecentBoardHealthEventsSection } from "./MonitorSections.js";
 import type { StartMode, ResolvedTunables, MonitorStatus, BoardHealthEvent } from "../lib/monitor-popover.js";
@@ -265,6 +265,8 @@ export function MonitorPopover({
           />
 
           {resolvedTunables && <EffectiveTargetsSection resolvedTunables={resolvedTunables} />}
+
+          <NextStartCandidatesSection projectId={projectId} />
 
           <MonitorSettingsSection
             interval={interval}
