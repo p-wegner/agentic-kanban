@@ -1,4 +1,4 @@
-import { issues, projectStatuses, sessions, workflowNodes, workspaceReviewPreflight, workspaces } from "@agentic-kanban/shared/schema";
+import { issueComments, issues, projectStatuses, sessions, workflowNodes, workspaceReviewPreflight, workspaces } from "@agentic-kanban/shared/schema";
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import { graphOwnsPostExitReview } from "./exit/workflow-ownership.js";
@@ -141,10 +141,12 @@ function isOwnedByAnotherPath(c: ReconcilerCandidateOwnership): boolean {
  *     ready-for-merge, with committed changes ahead of base, NO running session, and NO
  *     prior review session. The review is (re-)launched.
  *  2. **Reviewed clean, never armed** (#932) — same, except a prior review session exited
- *     0 and `readyForMerge` is still false. The review-exit handler arms `readyForMerge`
- *     only after its own pre-merge gate returns, and that gate queues behind the build
- *     semaphore; while a long gate holds a slot, the arming never happens and the
- *     workspace is invisible to the monitor. Arm it rather than re-review it.
+ *     0, `readyForMerge` is still false, and NO merge has ever been attempted. The
+ *     review-exit handler arms `readyForMerge` only after its own pre-merge gate returns,
+ *     and that gate queues behind the build semaphore; while a long gate holds a slot, the
+ *     arming never happens and the workspace is invisible to the monitor. Arm it rather
+ *     than re-review it. The never-merge-attempted condition is load-bearing: a merge that
+ *     hit a conflict clears the flag ON PURPOSE, and re-arming that would loop.
  *
  * For shape 1 this re-launches the review (via startManualReview, which
  * registers in the shared reviewSessionIds so the normal review → ready-for-merge →
@@ -238,6 +240,23 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
     if (priorReviews.length > 0) {
       const cleanReview = priorReviews.some((r) => r.status !== "running" && r.exitCode === "0");
       if (!cleanReview) continue;
+      // `readyForMerge: false` after a CLEAN review has two causes, and only one of them is
+      // the #932 stranding. The other is a merge that was ATTEMPTED and deliberately
+      // un-armed the flag: `recordConflictAndClearReadyFlag` on a real conflict,
+      // `keepCleanAncestorInReview` on the 0-commit ancestor guard, and the fix-and-merge
+      // exit's #764 "did not land" path all clear it precisely so a conflicted branch is
+      // NOT silently re-queued as ready. Re-arming those would undo the guard and loop:
+      // arm → auto-merge → conflict → clear → arm again, once every 60s tick, forever.
+      //
+      // Every one of those paths runs only AFTER a merge attempt, and every merge attempt
+      // writes a `merge-attempt` comment for the workspace. So "no merge-attempt row" is
+      // the precise test for "nothing has ever cleared this flag" — which is exactly the
+      // shape #932 describes (a review that finished while a gate held the semaphore, with
+      // no merge yet tried). Conservative by construction: an un-armed workspace we cannot
+      // prove was never merge-attempted is left for the human, not auto-approved.
+      const mergeAttempt = await database.select({ id: issueComments.id }).from(issueComments)
+        .where(and(eq(issueComments.workspaceId, c.wsId), eq(issueComments.kind, "merge-attempt"))).limit(1);
+      if (mergeAttempt.length > 0) continue;
       armAfterCleanReview = true;
     }
 

@@ -36,7 +36,7 @@ vi.mock("../repositories/workspace-status.repository.js", () => ({
 
 import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { issues, projectStatuses, projects, sessions, workspaces } from "@agentic-kanban/shared/schema";
+import { issueComments, issues, projectStatuses, projects, sessions, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import { reconcileStrandedReviews } from "../startup/stranded-review-reconciler.js";
 import { buildSemaphoreActive, runUnderBuildSemaphore } from "../services/jvm-build-semaphore.js";
@@ -272,6 +272,29 @@ describe("#932 stranded-review reconciler — a clean review arms readyForMerge"
   it("leaves a workspace whose review is still RUNNING alone", async () => {
     const { db: testDb } = createTestDb();
     const { workspaceId } = await seedReviewedButUnarmedWorkspace(testDb, { exitCode: null, status: "running" });
+    const { deps } = makeReconcilerDeps(testDb);
+
+    const recovered = await reconcileStrandedReviews(deps);
+
+    expect(recovered).toBe(0);
+    const [row] = await testDb.select({ readyForMerge: workspaces.readyForMerge }).from(workspaces)
+      .where(eq(workspaces.id, workspaceId));
+    expect(row.readyForMerge).toBe(false);
+  });
+
+  it("does NOT re-arm a clean-reviewed workspace whose merge attempt cleared the flag on purpose", async () => {
+    // `recordConflictAndClearReadyFlag` (and the 0-commit ancestor guard, and fix-and-merge's
+    // #764 did-not-land path) clear `readyForMerge` precisely so a conflicted branch is not
+    // silently re-queued as ready. Its prior review still exited 0, so an arm-on-clean-review
+    // rule with no further condition would re-arm it every 60s tick: arm → auto-merge →
+    // conflict → clear → arm, forever. The merge-attempt trail is what distinguishes it.
+    const { db: testDb } = createTestDb();
+    const { workspaceId, issueId } = await seedReviewedButUnarmedWorkspace(testDb, { exitCode: "0", status: "stopped" });
+    await testDb.insert(issueComments).values({
+      id: randomUUID(), issueId, workspaceId, kind: "merge-attempt", author: "system",
+      body: "Merge attempt blocked by conflicts in 2 files: a.ts, b.ts",
+      createdAt: new Date().toISOString(),
+    });
     const { deps } = makeReconcilerDeps(testDb);
 
     const recovered = await reconcileStrandedReviews(deps);
