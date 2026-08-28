@@ -8084,6 +8084,34 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/red-debt:
+    get:
+      summary: GET / — list a project's red-debt ledger entries (open-only by default).
+      tags:
+        - red-debt
+      operationId: get_api_red-debt
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: includeResolved
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema: {}
   /api/scheduled-runs:
     get:
       summary: GET /api/scheduled-runs?projectId=

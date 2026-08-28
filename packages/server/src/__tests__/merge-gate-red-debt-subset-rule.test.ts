@@ -4,7 +4,7 @@
  * red suite — one the ledger has never seen — still blocks it, and the withheld message names it.
  *
  * This is the integration-level counterpart to the pure-function tests in
- * `packages/shared/__tests__/red-debt-gate.test.ts` and `red-debt-cap.test.ts` — those prove the
+ * `red-debt-gate.test.ts` and `red-debt-cap.test.ts` (both beside this one) — those prove the
  * decision function; this proves it is actually consulted by `runPreLockGate` with the right
  * inputs (posture pref, ledger snapshot, base-health failed-suite list) and actually short-circuits
  * the withhold.
@@ -116,7 +116,7 @@ describe("runPreLockGate applies the red-debt subset rule (#915)", () => {
 
   it("passes with debt under `fast` when every failing suite is already ledgered", async () => {
     mockBaseHealthFailedSuites(["suite-a", "suite-b"]);
-    stubPreferences({ "red_debt_posture_project-1": "fast" });
+    stubPreferences({ "risk_posture_project-1": "fast" });
     vi.mocked(listRedDebt).mockResolvedValue([
       { id: "d1", projectId: "project-1", suite: "suite-a", sinceCommit: "c1", attributedIssueId: null, ownerIssueId: null, tag: "real", openedAt: new Date().toISOString(), closedAt: null } as never,
       { id: "d2", projectId: "project-1", suite: "suite-b", sinceCommit: "c1", attributedIssueId: null, ownerIssueId: null, tag: "flaky", openedAt: new Date().toISOString(), closedAt: null } as never,
@@ -135,7 +135,7 @@ describe("runPreLockGate applies the red-debt subset rule (#915)", () => {
 
   it("still withholds under `fast` when a failing suite is NOT in the ledger, and names it", async () => {
     mockBaseHealthFailedSuites(["suite-a", "suite-new"]);
-    stubPreferences({ "red_debt_posture_project-1": "fast" });
+    stubPreferences({ "risk_posture_project-1": "fast" });
     vi.mocked(listRedDebt).mockResolvedValue([
       { id: "d1", projectId: "project-1", suite: "suite-a", sinceCommit: "c1", attributedIssueId: null, ownerIssueId: null, tag: "real", openedAt: new Date().toISOString(), closedAt: null } as never,
     ]);
@@ -154,7 +154,7 @@ describe("runPreLockGate applies the red-debt subset rule (#915)", () => {
 
   it("ledgers a new red suite and passes under `sprint`, opening a debt entry for it", async () => {
     mockBaseHealthFailedSuites(["suite-a", "suite-new"]);
-    stubPreferences({ "red_debt_posture_project-1": "sprint" });
+    stubPreferences({ "risk_posture_project-1": "sprint" });
     vi.mocked(listRedDebt).mockResolvedValue([
       { id: "d1", projectId: "project-1", suite: "suite-a", sinceCommit: "c1", attributedIssueId: null, ownerIssueId: null, tag: "real", openedAt: new Date().toISOString(), closedAt: null } as never,
     ]);
@@ -172,7 +172,7 @@ describe("runPreLockGate applies the red-debt subset rule (#915)", () => {
 
   it("does not soften the verdict under `standard` even when the failing set is fully ledgered", async () => {
     mockBaseHealthFailedSuites(["suite-a"]);
-    stubPreferences({ "red_debt_posture_project-1": "standard" });
+    stubPreferences({ "risk_posture_project-1": "standard" });
     vi.mocked(listRedDebt).mockResolvedValue([
       { id: "d1", projectId: "project-1", suite: "suite-a", sinceCommit: "c1", attributedIssueId: null, ownerIssueId: null, tag: "real", openedAt: new Date().toISOString(), closedAt: null } as never,
     ]);

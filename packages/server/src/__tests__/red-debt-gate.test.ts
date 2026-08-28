@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveRedDebtGateVerdict, isRedSetSubsetOfLedger } from "../src/lib/red-debt-gate.js";
+import { resolveRedDebtGateVerdict, isRedSetSubsetOfLedger } from "../lib/red-debt-gate.js";
 
 describe("isRedSetSubsetOfLedger", () => {
   it("is true for an empty failing set regardless of ledger", () => {

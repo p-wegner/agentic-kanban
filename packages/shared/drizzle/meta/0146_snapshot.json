@@ -1530,6 +1530,27 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "last_start_score": {
+          "name": "last_start_score",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "last_start_score_components_json": {
+          "name": "last_start_score_components_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "last_start_scored_at": {
+          "name": "last_start_scored_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {

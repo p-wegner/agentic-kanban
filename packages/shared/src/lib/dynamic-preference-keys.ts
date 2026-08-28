@@ -156,15 +156,9 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // OPEN ledger entries (or how old the oldest one) a `sprint`/`fast` posture may carry
   // before it is forced to degrade one step (sprint -> fast -> standard) — the
   // profile-allowlist-hold shape, applied to a downgrade instead of a full stop. See
-  // shared/lib/red-debt-cap.ts.
+  // server/lib/red-debt-cap.ts.
   "red_debt_max",
   "red_debt_max_age",
-  // `red_debt_posture_<id>` — a stand-in for the risk-posture resolver (#911), same shape as
-  // `review_mode`'s own stand-in comment above. Until #911 fans a real posture out to every
-  // consumer, this is the ONE place the merge gate reads "fast"/"sprint"/"standard"/"strict"
-  // from to decide whether the red-debt subset rule (#915) may soften a verdict. Defaults to
-  // "standard" (never softens) when unset or unparseable — see resolveRedDebtGatePosture.
-  "red_debt_posture",
 ] as const;
 
 // Deliberately NOT registered, though both are per-project keys that exist on disk (#496):
