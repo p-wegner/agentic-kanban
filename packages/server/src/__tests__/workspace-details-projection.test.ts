@@ -19,9 +19,11 @@ describe("parseJsonArray", () => {
 });
 
 describe("parseSessionContextAndTool", () => {
+  // #930 widened the return with lastActivityAt (null on both these paths), and this
+  // assertion is exhaustive, so it has to name the new field too.
   it("returns nulls for null/malformed stats", () => {
-    expect(parseSessionContextAndTool(null)).toEqual({ contextTokens: null, lastTool: null });
-    expect(parseSessionContextAndTool("{bad")).toEqual({ contextTokens: null, lastTool: null });
+    expect(parseSessionContextAndTool(null)).toEqual({ contextTokens: null, lastTool: null, lastActivityAt: null });
+    expect(parseSessionContextAndTool("{bad")).toEqual({ contextTokens: null, lastTool: null, lastActivityAt: null });
   });
   it("prefers explicit contextTokens, else input+cacheRead", () => {
     expect(parseSessionContextAndTool(JSON.stringify({ contextTokens: 999 })).contextTokens).toBe(999);

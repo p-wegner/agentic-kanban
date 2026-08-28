@@ -90,7 +90,7 @@ function persistLiveActivity(sessionId: string, patch: { contextTokens?: number;
   const statsToSave = { ...patch, lastActivityAt: new Date().toISOString() };
   mergeExistingStats(sessionId, statsToSave)
     .then((mergedStats) => updateSessionStats(sessionId, JSON.stringify(mergedStats)))
-    .catch((err) => console.error("Failed to persist live session activity:", err));
+    .catch((err) => console.error("[session] Failed to persist live session activity:", err));
 }
 
 const DB_FLUSH_INTERVAL_MS = 250;
