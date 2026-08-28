@@ -107,8 +107,6 @@ const BASELINE: Readonly<Record<string, number>> = {
   // INSIDE THE GUARDED HELPER — `removeWorktreeAndBranch`'s git call + its retrying
   // directory-removal fallback. Its callers pass through `removeWorktreeUnlessShared`.
   [rel("packages/server/src/services/workspace-cleanup.service.ts")]: 2,
-  // OWN RESOURCE — the merge-train gate worktree, created and destroyed in one try/finally.
-  [rel("packages/server/src/services/merge-queue.service.ts")]: 1,
   // OWN RESOURCE — rollback of the worktree `createWorkspace` just cut. Extracted out of
   // `workspace-create.service.ts` into the failure handler by #798's god-module split; the
   // call site is unchanged, only its file is.

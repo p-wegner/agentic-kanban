@@ -13,7 +13,7 @@ import { getMergeQueueIssueRows, getMergeTrainMaxSizePref } from "../repositorie
 import { createMergeTrain, updateMergeTrainState } from "../repositories/merge-train.repository.js";
 import { runMergeTrain } from "./merge-train.service.js";
 import { runPreMergeGate } from "./pre-merge-gate.service.js";
-import { resolveWorktreeClaims } from "@agentic-kanban/shared/lib/worktree-claim";
+import { resolveWorktreeClaims, removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
 import { randomUUID } from "node:crypto";
 import { acquireQueueRepoLock } from "./merge-queue-repo-lock.js";
 import type { MergeQueueEvent, MergeQueuePlan } from "./merge-queue.service.js";
@@ -185,7 +185,20 @@ export function createMergeTrainRunner(deps: {
             // Fail CLOSED: a gate we could not run is not a gate that passed.
             return { passed: false, message: `train gate could not run: ${errorMessage(err)}` };
           } finally {
-            if (gateWorktree) await gitService.removeWorktree(repoPath, gateWorktree).catch(() => undefined);
+            // Route the teardown through the #394 co-residency guard rather than deleting
+            // outright: this leaf lives under the same `.worktrees` root as every live
+            // workspace's, and it was created WITH a claim above — so the claim is exactly
+            // what must be consulted before removing it. Enforced by
+            // `worktree-delete-guard-ratchet`.
+            if (gateWorktree) {
+              const dir = gateWorktree;
+              await removeWorktreeUnlessShared({
+                database,
+                workingDir: dir,
+                label: "merge-train-gate",
+                removeWorktree: () => gitService.removeWorktree(repoPath, dir),
+              }).catch(() => undefined);
+            }
           }
         },
         closeMember: async (workspaceId) => {
