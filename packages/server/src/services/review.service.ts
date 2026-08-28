@@ -30,6 +30,8 @@ export const DEFAULT_REVIEW_PROMPT = `You are an AI code reviewer. Review the ch
 
 {{precomputedContext}}
 
+{{members}}
+
 Review for: correctness bugs, security vulnerabilities, logic errors, and missing error handling.
 Classify each issue as CRITICAL (must fix — bugs, security, data loss), MAJOR (should fix — broken edge cases, poor error handling), or MINOR (nice to have — style, naming).
 
@@ -48,6 +50,31 @@ Workspace ID: {{workspaceId}}`;
 export const REVIEW_CONTEXT_FALLBACK = `First, run 'git diff --stat {{baseBranch}}' to see an overview of changed files.
 Then review each file individually with 'git diff {{baseBranch}} -- <filepath>' — do NOT dump the entire diff at once.`;
 
+/** One train member as rendered into `{{members}}` — see `buildMembersBlock`. */
+export interface ReviewTrainMember {
+  issueNumber: number | null;
+  title: string;
+  /** Full issue description, which is where acceptance criteria live (no dedicated field). */
+  description: string | null;
+}
+
+/**
+ * Render the `{{members}}` placeholder for a merge-train review (#907): every member's
+ * number, title and full description (acceptance criteria live there, not in a
+ * dedicated field) so one reviewer session can judge the whole assembled diff against
+ * every ticket it closes. Empty string for a non-train (single-ticket) review — the
+ * placeholder then collapses to nothing rather than leaving a stray heading.
+ */
+export function buildMembersBlock(members: ReviewTrainMember[]): string {
+  if (members.length === 0) return "";
+  const entries = members.map((m) => {
+    const heading = m.issueNumber != null ? `#${m.issueNumber} — ${m.title}` : m.title;
+    const criteria = m.description?.trim() || "(no description)";
+    return `### ${heading}\n${criteria}`;
+  });
+  return `## Train members (${members.length})\n\nThis review covers the ASSEMBLED diff of a merge train. Every member below must be judged against its own acceptance criteria — a finding that fails one member's criteria is still a finding even if the others are satisfied.\n\n${entries.join("\n\n")}`;
+}
+
 export async function buildReviewPrompt(
   database: Database,
   branch: string,
@@ -61,6 +88,7 @@ export async function buildReviewPrompt(
   skillName = "code-review",
   verifyAgent?: string,
   precomputedContext?: string | null,
+  membersBlock?: string,
 ): Promise<{ prompt: string; model: string | null }> {
   let template: string | null = null;
   let skillModel: string | null = null;
@@ -179,7 +207,8 @@ Steps to resolve:
     .replace(/\{\{workspaceId}}/g, workspaceId ?? "")
     .replace(/\{\{serverPort}}/g, serverPort)
     .replace(/\{\{clientPort}}/g, clientPort)
-    .replace(/\{\{autoFixInstructions}}/g, autoFixInstructions);
+    .replace(/\{\{autoFixInstructions}}/g, autoFixInstructions)
+    .replace(/\{\{members}}/g, membersBlock ?? "");
   // Only the fallback text carries a placeholder; a real diff must be passed through verbatim.
   const renderedContext = precomputedContext?.trim()
     ? contextBlock
