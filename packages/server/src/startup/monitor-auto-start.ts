@@ -15,7 +15,7 @@ import { projectCanDispatch, hostOverflowHasFleetCapacity as defaultHasFleetOver
 // single collapsed token. Same computation `GET /api/workers` serves.
 import { describeFleet } from "../services/placement-explain.service.js";
 import { shouldQuiesceBuildersForGate } from "../services/gate-quiesce.js";
-import { isMonitorEligibleIssue, monitorEligibleIssueSql, notDriveOrEpicMetaSql, resolveCandidateStatusIds } from "./monitor-eligibility.js";
+import { isMonitorEligibleIssue, monitorEligibleIssueSql, notDriveOrEpicMetaSql, resolveCandidateStatusIds } from "../repositories/start-scoring.repository.js";
 import { buildFileContentionGate, shouldDeferForContention, type BuildFileContentionGate } from "./monitor-file-contention.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { resolveMachineCapacity, type MachineCapacitySnapshot } from "@agentic-kanban/shared/lib/machine-capacity";
@@ -60,9 +60,12 @@ export async function isDriveOrEpicMeta(issueId: string, database = db): Promise
 }
 
 /**
- * #917: re-exported so existing importers (and `monitor-start-scoring.ts`, which needs it
- * for the read-only score preview) keep this path — the implementation moved to
- * `monitor-eligibility.ts` alongside `resolveCandidateStatusIds`, its usual co-caller.
+ * #917: re-exported so existing importers keep this path — the implementation moved out
+ * alongside `resolveCandidateStatusIds`, its usual co-caller. #942 moved that pair on again,
+ * from `startup/monitor-eligibility.ts` into `repositories/start-scoring.repository.ts`: it
+ * is candidate-selection SQL, not monitor-engine code, and while it sat in `startup/` the
+ * read-only preview endpoint that needs it could only be reached through `startup/` — the
+ * `server-route -> server-monitor` edge the pattern language forbids.
  */
 export { notDriveOrEpicMetaSql };
 

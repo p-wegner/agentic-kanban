@@ -104,6 +104,42 @@ Round-1 method: caller ran Step 0 (`vocab.py` histograms + `.dependency-cruiser.
   the same enumerated-list addition; the middleware edges above are the ones #926 did not
   need to touch (it only measured the `→server-root` edges, not `→server-middleware`).
 
+### 2026-08-29 — #942: the 1 `server-route→server-monitor` edge (ak-942, claude-opus-5)
+- **`routes/board-monitor.ts → startup/monitor-start-scoring.ts` — REAL, fixed by moving the
+  code.** The route imported `previewNextStartCandidates`, the read-only backing function of
+  `GET /api/projects/:id/board-monitor/next`. It is not monitor-engine code and never was: it
+  persists nothing, launches nothing, and runs on no cycle — its own header called it "no
+  persistence, no launch". It sat in `startup/` only because #917 split it out of
+  `monitor-auto-start.ts` in the same commit as `orderCandidatesByStartScore`, the loop half
+  that *does* persist. Fix: `previewNextStartCandidates` + `StartScorePreviewRow` moved to
+  **`services/start-score-preview.service.ts`** (a `server-service`, which `server-route` already
+  allows); `monitor-start-scoring.ts` keeps only the loop half.
+- **Second move the first one forced — `startup/monitor-eligibility.ts` was MISPLACED.** The
+  preview needs `monitorEligibleIssueSql` / `notDriveOrEpicMetaSql` / `resolveCandidateStatusIds`,
+  so a naive move would have re-created the same edge one layer down as
+  `server-service→server-monitor`. Two candidate homes were ruled out by rules already in force:
+  `services/` cannot hold it (`services-bypass-repositories` is a **total error** gate and the
+  module value-imports `drizzle-orm`), and a standalone `*.repository.ts` cannot either
+  (`server-repository` has no `server-repository` in its allow-list, so its call to
+  `findProjectStatusIdByName` would be a fresh violation). It therefore merged INTO
+  **`repositories/start-scoring.repository.ts`** — the same use-case slice (start-candidate
+  selection), which already owned the query these fragments filter and already exported the
+  status lookup, making that call internal rather than a cross-repository edge. The module is
+  two drizzle SQL fragments, one pure predicate over an issue row, and one status-id lookup;
+  nothing about it was the monitor engine.
+- **Not a rule widening.** `pattern-language.json` is UNCHANGED — no `match` edit, no `rules`
+  edit. Both fixes are code moves, which is the verdict the brief asks for when the file
+  behaves like another element.
+- **Bonus drain, disclosed:** `startup/`'s raw-persistence backlog drops 30 → 29. The
+  `DRIZZLE_BASELINE` entry in `startup-persistence-boundary-ratchet.test.ts` is REMOVED (not
+  kept) and `.dependency-cruiser.cjs`'s stated `Backlog:` count lowered to match — that suite
+  fails on a baseline outliving its offender, and separately asserts the declared count against
+  what is on disk.
+- Re-measured with `pattern_edges.py --spec … --scan . --violations`: **rule violations 0**
+  (was 1), no new pair introduced, coverage still 100% / 0 unassigned. `pnpm check:arch`
+  0 errors, `pnpm typecheck` clean, `pnpm test:mine -- --changed HEAD` 92 files / 840 tests
+  green (incl. the always-run guard suites).
+
 ## Filed (exclusion list — same idea ⇒ reference, don't refile)
 | # | verb | title |
 |---|---|---|
