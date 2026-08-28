@@ -5,11 +5,17 @@ import type { ParsedStreamEvent } from "../services/agent-provider.js";
 // Mock the DB so the fire-and-forget persistence paths (stats, providerSessionId)
 // don't touch a real database — this test characterizes the synchronous state
 // mutations and option callbacks, not persistence (covered by broadcast-batch).
+const updateSetCalls: Record<string, unknown>[] = [];
 vi.mock("../db/index.js", () => {
   const mockDb = {
     insert: vi.fn(() => ({ values: vi.fn(() => ({ catch: vi.fn() })) })),
     select: vi.fn(() => ({ from: vi.fn(() => ({ where: vi.fn(() => ({ limit: vi.fn(() => Promise.resolve([{ stats: null }])) })) })) })),
-    update: vi.fn(() => ({ set: vi.fn(() => ({ where: vi.fn(() => Promise.resolve()) })) })),
+    update: vi.fn(() => ({
+      set: vi.fn((values: Record<string, unknown>) => {
+        updateSetCalls.push(values);
+        return { where: vi.fn(() => Promise.resolve()) };
+      }),
+    })),
   };
   return { db: mockDb, writeDb: mockDb };
 });
@@ -48,7 +54,10 @@ function apply(state: SessionState, options: SessionManagerOptions, evt: ParsedS
 }
 
 describe("applyStreamEvent", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    updateSetCalls.length = 0;
+  });
 
   it("flags substantive output for content-bearing events but not empty ones", () => {
     const { state, options } = setup();
@@ -132,5 +141,50 @@ describe("applyStreamEvent", () => {
     const { state, options } = setup();
     apply(state, options, { toolResult: { toolUseId: "unknown" } });
     expect(state.sessionSubagents.has(SID)).toBe(false);
+  });
+
+  // #930: a healthy running session used to persist contextTokens/lastTool only on the
+  // TERMINAL stats event, so the API read back null/null and a stale launch-time
+  // lastSessionAt for the entire lifetime of a still-running session — indistinguishable
+  // from a launch-failed/dead one. These drive a fake live stream through applyStreamEvent
+  // and assert the persisted `stats` blob (what the read-side projection consumes) advances.
+  describe("live activity persistence (#930)", () => {
+    it("persists lastTool to the stats blob as soon as a tool_use event arrives, not just at session end", async () => {
+      const { state, options } = setup();
+      apply(state, options, { toolActivity: { name: "Bash", input: { command: "git status" } } });
+      // persistLiveActivity's DB round-trip is async (mergeExistingStats then update); flush it.
+      await vi.waitFor(() => expect(updateSetCalls.length).toBeGreaterThan(0));
+
+      const persisted = updateSetCalls.find((c) => typeof c.stats === "string");
+      expect(persisted).toBeDefined();
+      const blob = JSON.parse(persisted!.stats as string);
+      expect(blob.lastTool).toBe("Bash");
+      expect(typeof blob.lastActivityAt).toBe("string");
+    });
+
+    it("persists contextTokens to the stats blob as liveStats events arrive", async () => {
+      const { state, options } = setup();
+      apply(state, options, { liveStats: { model: "opus", contextTokens: 4200 } });
+      await vi.waitFor(() => expect(updateSetCalls.length).toBeGreaterThan(0));
+
+      const persisted = updateSetCalls.find((c) => typeof c.stats === "string");
+      expect(persisted).toBeDefined();
+      const blob = JSON.parse(persisted!.stats as string);
+      expect(blob.contextTokens).toBe(4200);
+      expect(typeof blob.lastActivityAt).toBe("string");
+    });
+
+    it("VERIFY-IT-BITES: removing the live-persist call means no stats write happens before session end", async () => {
+      // Regression guard against re-introducing the #930 bug: a toolActivity/liveStats
+      // event with NO terminal `stats` event must still reach updateSessionStats. If the
+      // live-persist wiring in applyLiveStats/applyToolActivity were removed, this would
+      // fail because updateSetCalls would stay empty (the terminal stats path is the only
+      // other writer, and no `stats` event is emitted in this test).
+      const { state, options } = setup();
+      apply(state, options, { toolActivity: { name: "Read", input: { file_path: "a.ts" } } });
+      apply(state, options, { liveStats: { model: "opus", contextTokens: 999 } });
+
+      await vi.waitFor(() => expect(updateSetCalls.length).toBeGreaterThan(0));
+    });
   });
 });

@@ -37,6 +37,8 @@ export interface WorkspaceDetails {
   lastSessionTriggerType: string | null;
   contextTokens: number | null;
   lastTool: string | null;
+  /** True when a RUNNING session has emitted no persisted activity signal yet (#930) — distinguishes "no news" from "zero activity". */
+  activityUnknown: boolean;
   latestSetup: WorkspaceSetupRun | null;
   latestSymlink: WorkspaceSymlinkRun | null;
   serviceState: ServiceStackState | null;
@@ -146,9 +148,11 @@ export function mapSymlinkRun(row: {
   };
 }
 
-/** contextTokens (explicit, else input+cacheRead) and lastTool from a session stats blob. */
-export function parseSessionContextAndTool(stats: string | null): { contextTokens: number | null; lastTool: string | null } {
-  if (!stats) return { contextTokens: null, lastTool: null };
+/** contextTokens (explicit, else input+cacheRead), lastTool, and lastActivityAt from a session stats blob. */
+export function parseSessionContextAndTool(
+  stats: string | null,
+): { contextTokens: number | null; lastTool: string | null; lastActivityAt: string | null } {
+  if (!stats) return { contextTokens: null, lastTool: null, lastActivityAt: null };
   try {
     const p = JSON.parse(stats) as Record<string, unknown>;
     const explicit = (p.contextTokens as number) ?? 0;
@@ -156,9 +160,10 @@ export function parseSessionContextAndTool(stats: string | null): { contextToken
     return {
       contextTokens: tokens || null,
       lastTool: typeof p.lastTool === "string" && p.lastTool ? p.lastTool : null,
+      lastActivityAt: typeof p.lastActivityAt === "string" && p.lastActivityAt ? p.lastActivityAt : null,
     };
   } catch {
-    return { contextTokens: null, lastTool: null };
+    return { contextTokens: null, lastTool: null, lastActivityAt: null };
   }
 }
 
@@ -215,7 +220,17 @@ export function resolveWorkspaceSkillName(
 
 /** Assemble the WorkspaceDetails DTO from a joined row and its latest session (or null). */
 export function mapWorkspaceDetailsRow(row: WorkspaceDetailsRow, sess: WorkspaceDetailsSession | null): WorkspaceDetails {
-  const { contextTokens, lastTool } = parseSessionContextAndTool(sess?.stats ?? null);
+  const { contextTokens, lastTool, lastActivityAt } = parseSessionContextAndTool(sess?.stats ?? null);
+  const isRunning = sess?.status === "running";
+  // A running session's freshness is the newest STREAM EVENT we've seen, not launch time —
+  // startedAt only ever meant "1 minute stale" the instant the agent finished booting (#930).
+  const lastSessionAt = sess ? (isRunning ? (lastActivityAt ?? sess.startedAt) : sess.endedAt) : null;
+  // Distinguish "genuinely no news yet" from "zero activity": a running session with no
+  // persisted lastActivityAt has emitted no substantive event this server has recorded
+  // (e.g. a provider with no liveStats/toolActivity support), so the cheap fields alone
+  // cannot say whether it is healthy — callers should not read the null contextTokens/
+  // lastTool below as "hung" in that case.
+  const activityUnknown = isRunning && lastActivityAt === null;
   return {
     id: row.id,
     issueId: row.issueId,
@@ -242,11 +257,12 @@ export function mapWorkspaceDetailsRow(row: WorkspaceDetailsRow, sess: Workspace
     conflicts: mapCachedConflicts(row),
     diffStats: mapCachedDiffStats(row),
     scorecard: row.scorecardScore !== null && row.scorecardScore !== undefined ? { score: row.scorecardScore } : null,
-    lastSessionAt: sess ? (sess.status === "running" ? sess.startedAt : sess.endedAt) : null,
+    lastSessionAt,
     sessionStatus: sess?.status ?? null,
     lastSessionTriggerType: sess?.triggerType ?? null,
     contextTokens,
     lastTool,
+    activityUnknown,
     latestSetup: mapLatestSetup(row),
     latestSymlink: mapSymlinkRun(row),
     serviceState: mapServiceState(row),
