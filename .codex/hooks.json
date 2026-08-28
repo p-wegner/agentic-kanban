@@ -8,32 +8,8 @@
             "type": "command",
             "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/smart-hooks-runner.js\" PreToolUse",
             "commandWindows": "node .claude/hooks/smart-hooks-runner.js PreToolUse",
-            "timeout": 10,
-            "statusMessage": "Checking command safety"
-          }
-        ]
-      },
-      {
-        "matcher": "Bash|PowerShell|shell|shell_command|exec_command|command_execution",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/vital-file-guard.js\"",
-            "commandWindows": "node .claude/hooks/vital-file-guard.js",
-            "timeout": 10,
-            "statusMessage": "Checking vital-file safety"
-          }
-        ]
-      },
-      {
-        "matcher": "Bash|PowerShell|shell|shell_command|exec_command|command_execution",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"$(git rev-parse --show-toplevel)/.claude/hooks/prevent-cross-worktree-writes.js\"",
-            "commandWindows": "node .claude/hooks/prevent-cross-worktree-writes.js",
-            "timeout": 10,
-            "statusMessage": "Checking worktree scope of the command"
+            "timeout": 60,
+            "statusMessage": "Checking command safety, vital files and worktree scope"
           }
         ]
       },

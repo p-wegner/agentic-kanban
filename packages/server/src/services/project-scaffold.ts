@@ -268,6 +268,31 @@ vital-file guard runs on every Bash/PowerShell command; the worktree guard (if p
 runs on every structured file-write tool.
 `;
 
+/**
+ * The two shell guards the runner runs IN-PROCESS (#914), instead of each getting its own
+ * `Bash|PowerShell` settings.json entry and therefore its own node cold start. `alwaysRun`
+ * marks them SAFETY checks, which is what exempts them from the #913 posture and capacity
+ * gates: a guard that stands down because the box is busy is not a guard.
+ */
+const COLLAPSED_GUARD_CHECKS = [
+  {
+    name: "Vital-file guard",
+    command: "node .claude/hooks/vital-file-guard.js",
+    enabled: true,
+    blocking: true,
+    timeout: 30,
+    alwaysRun: true,
+  },
+  {
+    name: "Cross-worktree guard",
+    command: "node .claude/hooks/prevent-cross-worktree-writes.js",
+    enabled: true,
+    blocking: true,
+    timeout: 30,
+    alwaysRun: true,
+  },
+];
+
 const EMPTY_SMART_HOOKS_CONFIG = JSON.stringify(
   {
     version: "1.0.0",
@@ -279,6 +304,39 @@ const EMPTY_SMART_HOOKS_CONFIG = JSON.stringify(
   null,
   2
 ) + "\n";
+
+/**
+ * Merge the collapsed guard checks into `.claude/hooks/smart-hooks-config.json` (#914).
+ *
+ * Additive and idempotent, exactly like `mergeSettingsHooks` below: a project's own checks
+ * are preserved, and a check is matched by its COMMAND (not its name), so re-scaffolding a
+ * repo whose config already lists the guard adds nothing and a hand-renamed check is not
+ * duplicated. An unparseable existing config starts fresh rather than throwing — the same
+ * choice the settings merge makes, and the alternative is a scaffold that dies on a typo.
+ */
+function mergeSmartHooksGuardChecks(
+  configPath: string,
+  checks: { name: string; command: string; enabled: boolean; blocking: boolean; timeout: number; alwaysRun: boolean }[]
+): void {
+  let config: Record<string, unknown> = {};
+  try {
+    if (existsSync(configPath)) config = JSON.parse(readFileSync(configPath, "utf8")) as Record<string, unknown>;
+  } catch { /* start fresh */ }
+  if (typeof config.version !== "string") config.version = "1.0.0";
+
+  const hooks = (config.hooks ?? {}) as Record<string, unknown>;
+  config.hooks = hooks;
+  if (!Array.isArray(hooks.PreToolUse)) hooks.PreToolUse = [];
+  if (!Array.isArray(hooks.Stop)) hooks.Stop = [];
+  const preToolUse = hooks.PreToolUse as Record<string, unknown>[];
+
+  for (const check of checks) {
+    if (preToolUse.some((c) => c && c.command === check.command)) continue;
+    preToolUse.push({ ...check });
+  }
+
+  writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf8");
+}
 
 /**
  * Merge a hooks array from the scaffold into an existing .claude/settings.json without
@@ -410,10 +468,15 @@ export function ensureHookScaffold(repoPath: string, options: HookScaffoldOption
     }
 
     // --- smart-hooks-config.json ---
+    // Additive, like every other scaffold write (#914): a project's own checks are kept and
+    // the two collapsed guards are merged in by command, so re-running the scaffold cannot
+    // duplicate them and cannot clobber a hand-edited config. The cross-worktree guard is
+    // only merged when the project opted into it, matching the settings.json wiring below.
     const smartConfigPath = join(hooksDir, "smart-hooks-config.json");
-    if (!existsSync(smartConfigPath)) {
-      writeFileSync(smartConfigPath, EMPTY_SMART_HOOKS_CONFIG, "utf8");
-    }
+    mergeSmartHooksGuardChecks(
+      smartConfigPath,
+      COLLAPSED_GUARD_CHECKS.filter((c) => includeWorktree || !c.command.includes("prevent-cross-worktree-writes.js")),
+    );
 
     // --- smart-hooks-runner.js (#787) ---
     // The generic, project-agnostic runner that reads the generated smart-hooks-rules.json and
@@ -451,13 +514,26 @@ export function ensureHookScaffold(repoPath: string, options: HookScaffoldOption
 
     // --- .claude/settings.json — append hook entries ---
     const settingsPath = join(repoPath, ".claude", "settings.json");
-    const newEntries: { event: string; matcher?: string; command: string }[] = [
-      {
+    // #914 — the COLLAPSED form. The vital-file guard and the SHELL half of the cross-worktree
+    // guard used to be two more `Bash|PowerShell` entries here, each costing its own node cold
+    // start on every shell tool call (three in total with the runner). They are now checks in
+    // `smart-hooks-config.json` that the runner executes IN-PROCESS, so the one runner entry
+    // below covers all three questions with one process.
+    //
+    // The WRITE half of the cross-worktree guard stays a real settings.json entry: it fires on
+    // Write|Edit|MultiEdit|NotebookEdit, an event the runner's PreToolUse handler does not
+    // serve (it returns early for anything that is not a shell tool).
+    //
+    // When the runner was NOT delivered there is nothing to collapse INTO, so the two guards
+    // fall back to their own entries — a repo without the runner must not silently lose them.
+    const newEntries: { event: string; matcher?: string; command: string }[] = [];
+    if (!smartRunnerWritten) {
+      newEntries.push({
         event: "PreToolUse",
         matcher: "Bash|PowerShell",
         command: "node $CLAUDE_PROJECT_DIR/.claude/hooks/vital-file-guard.js",
-      },
-    ];
+      });
+    }
     if (includeWorktree) {
       newEntries.push({
         event: "PreToolUse",
@@ -465,17 +541,24 @@ export function ensureHookScaffold(repoPath: string, options: HookScaffoldOption
         command: "node $CLAUDE_PROJECT_DIR/.claude/hooks/prevent-cross-worktree-writes.js",
       });
       // Shell vector (#369): the incident commit was made by `cd <main checkout>; git commit -F`,
-      // which the Write/Edit matcher above never sees. The guard now inspects shell commands
-      // too, so it must ALSO be wired on the shell matcher or the vector stays open.
-      newEntries.push({
-        event: "PreToolUse",
-        matcher: "Bash|PowerShell",
-        command: "node $CLAUDE_PROJECT_DIR/.claude/hooks/prevent-cross-worktree-writes.js",
-      });
+      // which the Write/Edit matcher above never sees. With the runner present that vector is
+      // covered in-process; without it, the guard still needs its own shell entry.
+      if (!smartRunnerWritten) {
+        newEntries.push({
+          event: "PreToolUse",
+          matcher: "Bash|PowerShell",
+          command: "node $CLAUDE_PROJECT_DIR/.claude/hooks/prevent-cross-worktree-writes.js",
+        });
+      }
     }
     // Wire the edit-time feedback runner only when its source was actually delivered (#787),
     // so we never reference a runner the repo doesn't have.
     if (smartRunnerWritten) {
+      newEntries.push({
+        event: "PreToolUse",
+        matcher: "Bash|PowerShell",
+        command: "node $CLAUDE_PROJECT_DIR/.claude/hooks/smart-hooks-runner.js PreToolUse",
+      });
       newEntries.push({
         event: "PostToolUse",
         matcher: "Write|Edit|MultiEdit",

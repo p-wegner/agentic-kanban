@@ -80,28 +80,18 @@ export default function AgenticKanbanHooks(pi: ExtensionAPI) {
         },
         cwd: PROJECT_DIR,
       };
+      // ONE spawn for all three shell gates (#914). This used to be three separate
+      // `runHookScript` calls — command safety, the vital-file destruction guard (#972),
+      // and the cross-worktree SHELL guard (#369, the `cd <main checkout>; git commit -F`
+      // vector the write/edit gate below never sees). The runner now runs all three
+      // IN-PROCESS from its own `smart-hooks-config.json` PreToolUse list, so Pi pays one
+      // node cold start per bash call instead of three.
+      // (require-read-before-write is deliberately NOT wired here: Claude-Code-specific.)
       const result = await runHookScript(
         [join(HOOKS_DIR, "smart-hooks-runner.js"), "PreToolUse"],
         hookInput,
       );
       if (isBlocked(result)) return { block: true, reason: blockReason(result) };
-
-      // Vital-file destruction guard (#972) — same gate .claude/settings.json and
-      // .codex/hooks.json wire for shell commands. (require-read-before-write is
-      // deliberately NOT wired here: that constraint is Claude-Code-specific.)
-      const vitalResult = await runHookScript(
-        [join(HOOKS_DIR, "vital-file-guard.js")],
-        hookInput,
-      );
-      if (isBlocked(vitalResult)) return { block: true, reason: blockReason(vitalResult) };
-
-      // Cross-worktree SHELL guard (#369) — the incident commit was `cd <main checkout>;
-      // git commit -F`, which the write/edit gate below never sees. Same script, shell input.
-      const worktreeResult = await runHookScript(
-        [join(HOOKS_DIR, "prevent-cross-worktree-writes.js")],
-        hookInput,
-      );
-      if (isBlocked(worktreeResult)) return { block: true, reason: blockReason(worktreeResult) };
     }
 
     if (event.toolName === "write" || event.toolName === "edit") {

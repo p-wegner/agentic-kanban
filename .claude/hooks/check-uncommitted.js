@@ -619,6 +619,140 @@ function subagentTranscriptFiles(transcriptPath) {
   return found;
 }
 
+// ---------------------------------------------------------------------------
+// #914 — INCREMENTAL transcript parsing.
+//
+// `readSessionActivity` re-read the WHOLE session transcript plus up to 200 subagent
+// transcripts on every call, and the runner's `applyInFlightAwareness` calls it AGAIN
+// per failing check. A transcript is append-only and grows without bound (50 MB is a
+// normal long session), so the cost grew with session length — which is precisely when
+// the check matters most, and it timed out exactly there.
+//
+// A transcript only ever GROWS, so everything before a remembered byte offset has
+// already been parsed and cannot change. Cache the accumulated sink keyed by
+// (path, size, mtime) and parse only the appended tail.
+//
+// The three ways this could go wrong, and what is done about each:
+//   - TRUNCATION / rotation: the file is SHORTER than the cached offset, so the
+//     remembered prefix is not a prefix any more. Detected by comparing size, and the
+//     cache entry is discarded — a full re-parse, i.e. the old behaviour.
+//   - A PARTIAL LINE at the boundary: a live transcript's last line is often
+//     half-flushed. Resuming mid-line would corrupt the next entry, so the offset is
+//     advanced only to the last COMPLETE newline; the partial tail is re-read next time.
+//   - `turnClosed` is NOT monotonic (a later tool_use re-opens the turn), so it is
+//     carried in the cached sink and keeps being updated by the tail — never recomputed
+//     from scratch, and never frozen.
+// ---------------------------------------------------------------------------
+
+/** path -> { size, mtimeMs, offset, sink }. Process-lifetime; see `parsedCachePath` for cross-process. */
+const transcriptParseCache = new Map();
+
+function cloneSink(sink) {
+  return {
+    writtenAbs: new Set(sink.writtenAbs),
+    writtenRel: new Set(sink.writtenRel),
+    strongAbs: new Set(sink.strongAbs),
+    strongRel: new Set(sink.strongRel),
+    agentCalls: sink.agentCalls,
+    agentIds: new Set(sink.agentIds),
+    turnClosed: sink.turnClosed,
+  };
+}
+
+function mergeSink(target, source) {
+  for (const w of source.writtenAbs) target.writtenAbs.add(w);
+  for (const w of source.writtenRel) target.writtenRel.add(w);
+  for (const w of source.strongAbs) target.strongAbs.add(w);
+  for (const w of source.strongRel) target.strongRel.add(w);
+  for (const id of source.agentIds) target.agentIds.add(id);
+  target.agentCalls += source.agentCalls;
+  target.turnClosed = source.turnClosed;
+}
+
+/**
+ * Parse `path` into `sink`, reading only the bytes appended since the last call for this
+ * path. Returns false when the file could not be read at all — the same contract
+ * `parseTranscript` has, because the caller's fallback (report everything) depends on it.
+ */
+function parseTranscriptCached(path, sink) {
+  let stat;
+  try {
+    stat = statSync(path);
+  } catch {
+    return false;
+  }
+
+  let raw;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch {
+    return false;
+  }
+
+  // Is the cached prefix still a prefix of THIS file?
+  //
+  // Size and mtime alone are not enough, and this is not theoretical — the truncation test
+  // caught it: a rewrite that happens to produce the same byte length within the same
+  // millisecond passes both checks, and the cache then answers with the OLD session's
+  // writes. So the prefix is verified DIRECTLY: the file must be at least as long as the
+  // remembered offset, and the bytes up to that offset must still be the ones that were
+  // parsed. `prefixFingerprint` is the cheap stand-in for comparing them (a length plus the
+  // boundary bytes), so the check costs no extra read — `raw` is already in hand.
+  const cached = transcriptParseCache.get(path);
+  const reusable =
+    cached &&
+    raw.length >= cached.offset &&
+    prefixFingerprint(raw, cached.offset) === cached.fingerprint;
+
+  if (reusable && raw.length === cached.length) {
+    mergeSink(sink, cached.sink);
+    return true;
+  }
+
+  const start = reusable ? cached.offset : 0;
+  const tail = start > 0 ? raw.slice(start) : raw;
+
+  // Only the part up to the last complete newline is safely parsed and remembered; a
+  // half-flushed final line is re-read on the next call.
+  const lastNewline = tail.lastIndexOf("\n");
+  const complete = lastNewline >= 0 ? tail.slice(0, lastNewline + 1) : "";
+  const newOffset = start + complete.length;
+
+  const accumulated = reusable ? cloneSink(cached.sink) : newSink();
+  parseTranscriptText(complete, accumulated);
+  // The partial tail still contributes to THIS answer (it just is not remembered), so the
+  // caller never sees less than a full parse would have produced.
+  const withPartial = cloneSink(accumulated);
+  if (lastNewline < 0 || lastNewline + 1 < tail.length) {
+    parseTranscriptText(tail.slice(complete.length), withPartial);
+  }
+
+  transcriptParseCache.set(path, {
+    length: raw.length,
+    size: stat.size,
+    offset: newOffset,
+    fingerprint: prefixFingerprint(raw, newOffset),
+    sink: accumulated,
+  });
+  mergeSink(sink, withPartial);
+  return true;
+}
+
+/**
+ * A cheap identity check for "the first `offset` characters of this text are the ones we
+ * already parsed": the offset itself plus the characters on either side of the boundary
+ * and at the start. Not a hash — it does not need to be. It only has to catch a REWRITE,
+ * and a rewritten transcript that reproduces the head, the boundary bytes AND the exact
+ * length is not a case that occurs; a full hash would cost a pass over the very bytes this
+ * cache exists to stop touching.
+ */
+function prefixFingerprint(text, offset) {
+  if (offset <= 0) return "0";
+  const head = text.slice(0, Math.min(64, offset));
+  const boundary = text.slice(Math.max(0, offset - 64), offset);
+  return `${offset}:${head}:${boundary}`;
+}
+
 /** Parse one transcript file into `sink`. Returns false when it could not be read at all. */
 function parseTranscript(path, sink) {
   let raw;
@@ -627,6 +761,12 @@ function parseTranscript(path, sink) {
   } catch {
     return false;
   }
+  parseTranscriptText(raw, sink);
+  return true;
+}
+
+/** The line loop, shared by the whole-file and the incremental readers. */
+function parseTranscriptText(raw, sink) {
   for (const line of raw.split(/\r?\n/)) {
     if (!line.trim()) continue;
     let entry;
@@ -678,7 +818,6 @@ function parseTranscript(path, sink) {
       }
     }
   }
-  return true;
 }
 
 /**
@@ -695,10 +834,26 @@ function parseTranscript(path, sink) {
  * The same rule covers a spawned subagent whose transcript we could not find:
  * `subagentAuthorshipUnknown` makes attribution report everything.
  */
+/**
+ * #914 — memoized per (transcriptPath, nowMs). `applyInFlightAwareness` in
+ * smart-hooks-runner.js calls this once PER FAILING CHECK, and the whole point of the
+ * incremental parser above is lost if the subagent walk (up to 200 files, each stat'd and
+ * read) is repeated anyway. `nowMs` is part of the key because it decides liveness.
+ */
+const sessionActivityCache = new Map();
+
 function readSessionActivity(transcriptPath, nowMs) {
   if (!transcriptPath || !existsSync(transcriptPath)) return null;
+  const cacheKey = `${transcriptPath} ${nowMs === undefined ? "" : nowMs}`;
+  if (sessionActivityCache.has(cacheKey)) return sessionActivityCache.get(cacheKey);
+  const activity = computeSessionActivity(transcriptPath, nowMs);
+  sessionActivityCache.set(cacheKey, activity);
+  return activity;
+}
+
+function computeSessionActivity(transcriptPath, nowMs) {
   const sink = newSink();
-  if (!parseTranscript(transcriptPath, sink)) return null;
+  if (!parseTranscriptCached(transcriptPath, sink)) return null;
 
   // Each subagent gets its OWN sink so its writes can be marked IN FLIGHT while it is still
   // running (#724); the union is merged back afterwards for authorship exactly as in #720.
@@ -713,7 +868,7 @@ function readSessionActivity(transcriptPath, nowMs) {
   let subagentCount = 0;
   for (const f of subagentTranscriptFiles(transcriptPath)) {
     const sub = newSink();
-    if (!parseTranscript(f, sub)) continue;
+    if (!parseTranscriptCached(f, sub)) continue;
     parsedBasenames.add(f.split("/").pop().toLowerCase());
     subagentCount += 1;
     const live = subagentLooksLive(f, sub, nowMs);
@@ -1077,6 +1232,12 @@ if (require.main !== module) {
     disqualifyFreshForeign,
     FRESH_FOREIGN_MS,
     matchWritten,
+    // #914 — the incremental transcript reader and its caches, so a test can assert that a
+    // second call parses only the appended tail (and that a truncated file re-parses).
+    parseTranscript,
+    parseTranscriptCached,
+    transcriptParseCache,
+    sessionActivityCache,
   };
 }
 
