@@ -39,6 +39,7 @@ import {
   registerMintWorkerPairingToken,
   registerRevokeWorker,
 } from "./tools/worker-fleet.js";
+import { registerListRedDebt } from "./tools/list-red-debt.js";
 import { registerGetDiffComments } from "./tools/get-diff-comments.js";
 import { registerCreateDiffComment } from "./tools/create-diff-comment.js";
 import { registerAddComment } from "./tools/add-comment.js";
@@ -150,6 +151,7 @@ const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   mint_worker_pairing_token: registerMintWorkerPairingToken,
   revoke_worker: registerRevokeWorker,
   list_incoming_refs: registerListIncomingRefs,
+  list_red_debt: registerListRedDebt,
   get_diff_comments: registerGetDiffComments,
   create_diff_comment: registerCreateDiffComment,
   add_comment: registerAddComment,

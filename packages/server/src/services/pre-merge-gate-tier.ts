@@ -53,6 +53,13 @@ export async function resolveVerifyGateStrategy(projectId: string, database: Dat
  * verification VISIBLY cannot afford that gap between its name and its behaviour.
  *
  * `packagesEnv: null` means "set no scope env", which is what makes `test:mine` run everything.
+ *
+ * `scoped-base-watch` (#916) scopes exactly like `scoped` — the per-TRAIN gate stays narrow —
+ * but is no longer a silent alias: `resolveBaseProbeDue` (below) is what makes the "backstop"
+ * half of its name real, by deciding when a SEPARATE full base probe is owed. That decision is
+ * orthogonal to `packagesEnv`/`fileScoped`, which is why it isn't threaded through this
+ * function's return value — a caller wires the two together (scope the train gate here, then
+ * separately check whether a base probe is due).
  */
 export function resolveGateScoping(args: {
   strategy: VerifyGateStrategy;
@@ -69,6 +76,60 @@ export function resolveGateScoping(args: {
     // gate refused to narrow packages at all, and it needs a diff it could actually read.
     fileScoped: Boolean(packagesEnv) && args.fileScopePref && args.changedFileCount > 0,
   };
+}
+
+/** Default: probe at most every 4 hours, so a project idle overnight gets refreshed coverage
+ *  without a probe firing on every single train. */
+export const DEFAULT_BASE_PROBE_INTERVAL_MS = 4 * 60 * 60 * 1000;
+/** Default: also force a probe after this many trains have landed since the last one, so a
+ *  busy project (many trains, short wall-clock gaps) still gets a periodic full-suite check
+ *  rather than relying on elapsed time alone. */
+export const DEFAULT_BASE_PROBE_EVERY_N_TRAINS = 10;
+
+export interface BaseProbeDueInput {
+  strategy: VerifyGateStrategy;
+  /** ms since the last recorded base-branch-health probe for this project, or null if none ever ran. */
+  lastProbeAgeMs: number | null;
+  /** Trains landed since the last probe. */
+  trainsSinceLastProbe: number;
+  intervalMs?: number;
+  everyNTrains?: number;
+}
+
+export interface BaseProbeDueResult {
+  due: boolean;
+  /** Human-readable age of the last probe, or "never" — for the gate message's "base probe <age>". */
+  ageLabel: string;
+}
+
+/**
+ * Is a SCHEDULED full base probe owed right now (#916)? Only meaningful under
+ * `scoped-base-watch` — every other strategy either always runs the full suite (`full`) or
+ * never backstops with one (`scoped`).
+ *
+ * Never true for the FIRST train after this mechanism exists (`lastProbeAgeMs: null`) is
+ * still DUE — an unprobed base is the exact gap `scoped-base-watch` exists to close, so
+ * "never checked" must not read as "recently checked".
+ */
+export function resolveBaseProbeDue(input: BaseProbeDueInput): BaseProbeDueResult {
+  const { strategy, lastProbeAgeMs, trainsSinceLastProbe } = input;
+  const intervalMs = input.intervalMs ?? DEFAULT_BASE_PROBE_INTERVAL_MS;
+  const everyNTrains = input.everyNTrains ?? DEFAULT_BASE_PROBE_EVERY_N_TRAINS;
+
+  if (strategy !== "scoped-base-watch") return { due: false, ageLabel: formatProbeAge(lastProbeAgeMs) };
+  if (lastProbeAgeMs === null) return { due: true, ageLabel: "never" };
+
+  const due = lastProbeAgeMs >= intervalMs || trainsSinceLastProbe >= everyNTrains;
+  return { due, ageLabel: formatProbeAge(lastProbeAgeMs) };
+}
+
+function formatProbeAge(ms: number | null): string {
+  if (ms === null) return "never";
+  const minutes = Math.max(0, Math.round(ms / 60_000));
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours}h`;
+  return `${Math.round(hours / 24)}d`;
 }
 
 /** Package `__tests__` dirs to scan for the `@gate:always-run` marker (#538), mirroring
@@ -168,6 +229,13 @@ export interface GateTierInfo {
    * produced under are part of the verdict.
    */
   flakeRetryNote?: string;
+  /**
+   * Set only meaningfully under `scoped-base-watch` (#916): lets the message name
+   * `base probe <age>` — the "backstop" this tier promises, made visible the same way
+   * `buildersQuiesced`/`flakeRetryNote` make their own conditions visible on a PASSING gate.
+   */
+  baseProbeAgeLabel?: string;
+  baseProbeDue?: boolean;
 }
 
 /**
@@ -202,7 +270,10 @@ export function buildGateTierMessage(tierInfo: GateTierInfo | null): string {
       : [tierInfo.buildersQuiesced ? "builders held" : "builders NOT held"]),
   ];
   const retry = tierInfo.flakeRetryNote ? ` ${tierInfo.flakeRetryNote}` : "";
-  return `pre-merge gate passed (${parts.join(", ")})${retry}`;
+  const baseProbe = tierInfo.strategy === "scoped-base-watch" && tierInfo.baseProbeAgeLabel
+    ? ` [base probe ${tierInfo.baseProbeAgeLabel}${tierInfo.baseProbeDue ? ", due now" : ""}]`
+    : "";
+  return `pre-merge gate passed (${parts.join(", ")})${retry}${baseProbe}`;
 }
 
 /**

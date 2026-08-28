@@ -1,7 +1,7 @@
 ---
 name: agentic-kanban
 description: Operate the agentic-kanban board — a kanban board where each card is an AI coding session in its own git worktree. Use when asked to work a ticket, drive a project hands-off, review or merge agent work, inspect what agents are doing, or wire the board into another tool. Covers the MCP tools, CLI, board views, statuses, and the review/merge gate.
-commit: bc2378d909
+commit: 06b4826171
 generated: 2026-08-28
 ---
 
@@ -113,7 +113,7 @@ Depth on any of these lives in `references/` — load a file only when you actua
 
 ## MCP tool index
 
-112 tools, by category. Full descriptions: `references/mcp-tools.md`.
+113 tools, by category. Full descriptions: `references/mcp-tools.md`.
 
 | Category | Tools |
 |---|---|
@@ -122,7 +122,7 @@ Depth on any of these lives in `references/` — load a file only when you actua
 | Workspaces | `list_workspaces`, `start_workspace`, `launch_workspace`, `relaunch_workspace`, `wait_workspace`, `get_workspace_diff`, `get_workspace_scorecard`, `merge_workspace`, `close_workspace`, `mark_ready_for_merge`, `stop_workspace`, `delete_workspace`, `export_handoff_bundle` |
 | Sessions | `list_sessions`, `recent_sessions`, `read_terminal`, `get_session_transcript`, `get_session_stats`, `search_sessions`, `analyze_session`, `get_fleet_friction`, `backfill_friction`, `session_history` |
 | Tags | `list_tags`, `create_tag` |
-| Code Review | `review_workspace`, `get_diff_comments`, `create_diff_comment`, `add_comment`, `approve_tool_use`, `session_review_effectiveness`, `reviewer_fixes` |
+| Code Review | `review_workspace`, `get_diff_comments`, `create_diff_comment`, `add_comment`, `approve_tool_use`, `session_review_effectiveness`, `reviewer_fixes`, `list_red_debt` |
 | Dependencies | `add_dependency`, `remove_dependency`, `analyze_dependencies`, `update_dependencies_batch`, `contract_coupled_issues`, `propose_ticket_groups` |
 | Workflow | `propose_transition`, `clarify_or_propose`, `list_workflow_templates`, `get_workflow_template`, `create_workflow_template`, `update_workflow_template`, `delete_workflow_template` |
 | Agent Skills | `list_agent_skills`, `get_agent_skill`, `create_agent_skill`, `export_agent_skills`, `install_skill` |

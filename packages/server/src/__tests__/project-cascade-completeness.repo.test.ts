@@ -410,6 +410,12 @@ const SUBTREE_SEEDERS: Record<string, (c: SeedCtx) => Promise<void>> = {
       outcome: "green", createdAt: c.now,
     });
   },
+  red_debt: async (c) => {
+    await c.db.insert(schema.redDebt).values({
+      id: randomUUID(), projectId: c.projectId, suite: "server/foo.test.ts",
+      sinceCommit: "deadbeef", tag: "real", openedAt: c.now,
+    });
+  },
   // #775's git-token scopes. A token is a CAPABILITY, not history, so it cascades — a row
   // outliving its project would be an authorisation outliving its subject. workerId is
   // deliberately FK-less (see migration 0129), so no worker row is needed to seed one.
