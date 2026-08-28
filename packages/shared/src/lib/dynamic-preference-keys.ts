@@ -143,7 +143,7 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // Merge train review (#907): `review_mode_<id>` is `per-ticket` (default) | `per-train` —
   // a stand-in for the risk-posture resolver (#911). `per-train` reviews a ticket-group
   // workspace's assembled diff once, with every member's acceptance criteria, instead of
-  // reviewing each ticket separately. See shared/lib/review-mode-pref.ts.
+  // reviewing each ticket separately. See server/lib/review-mode-pref.ts.
   "review_mode",
 ] as const;
 

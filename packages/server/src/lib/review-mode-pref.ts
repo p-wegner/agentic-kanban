@@ -1,4 +1,4 @@
-import { projectPref } from "./dynamic-preference-keys.js";
+import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 
 /**
  * Merge train review mode (#907): a project-scoped stand-in for the risk-posture
