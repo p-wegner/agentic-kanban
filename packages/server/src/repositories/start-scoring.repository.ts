@@ -7,6 +7,8 @@
 import { issueDependencies, issues, projectStatuses } from "@agentic-kanban/shared/schema";
 import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import type { Database } from "../db/index.js";
+import { firstRow } from "../lib/first-row.js";
+import { issueIdentityColumns } from "./projections.js";
 import { BLOCKING_DEPENDENCY_TYPES } from "@agentic-kanban/shared/lib/dependency-type-traits";
 
 /**
@@ -52,16 +54,17 @@ export async function computeUnblockCounts(
 export async function selectScorableCandidates(statusIds: string[], filters: SQL[], database: Database) {
   if (statusIds.length === 0) return [];
   return database.select({
-    id: issues.id, title: issues.title, description: issues.description, issueType: issues.issueType,
-    issueNumber: issues.issueNumber, priority: issues.priority, createdAt: issues.createdAt, statusChangedAt: issues.statusChangedAt,
+    ...issueIdentityColumns,
+    description: issues.description, issueType: issues.issueType,
+    priority: issues.priority, createdAt: issues.createdAt, statusChangedAt: issues.statusChangedAt,
   }).from(issues).where(and(inArray(issues.statusId, statusIds), ...filters));
 }
 
 /** The id of a project's status with this exact name, or null when it has none. */
 export async function findProjectStatusIdByName(projectId: string, name: string, database: Database): Promise<string | null> {
-  const rows = await database.select({ id: projectStatuses.id }).from(projectStatuses)
-    .where(sql`${projectStatuses.name} = ${name} AND ${projectStatuses.projectId} = ${projectId}`).limit(1);
-  return rows[0]?.id ?? null;
+  const row = await firstRow(database.select({ id: projectStatuses.id }).from(projectStatuses)
+    .where(sql`${projectStatuses.name} = ${name} AND ${projectStatuses.projectId} = ${projectId}`).limit(1));
+  return row?.id ?? null;
 }
 
 /**
