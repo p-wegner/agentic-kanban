@@ -201,7 +201,7 @@ describe("migration 0138 backfills the extracted family (#815)", () => {
     // knows both, so apply them before the schema-shaped select below. Independent of 0139-0143
     // and 0145, which touch other tables.
     for (const stmt of readMigrationStatements("0144_merge_gate_verification_key.sql", MIGRATIONS_DIR)) await client.execute(stmt);
-    for (const stmt of readMigrationStatements("0146_merge_gate_duration.sql", MIGRATIONS_DIR)) await client.execute(stmt);
+    for (const stmt of readMigrationStatements("0148_merge_gate_duration.sql", MIGRATIONS_DIR)) await client.execute(stmt);
 
     expect(await db.select().from(workspaceMergeGate))
       .toEqual([{ workspaceId: gated, ...EVIDENCE, verificationKey: null, durationMs: null }]);
