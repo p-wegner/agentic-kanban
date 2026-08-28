@@ -61,6 +61,22 @@ export async function getProjectIssuesTouchedFiles(projectId: string, database: 
 }
 
 /**
+ * Same as {@link getProjectIssuesTouchedFiles} plus `statusId` (#918) — the touched-files
+ * ticket-group seed needs to restrict candidates to Backlog/Todo, which the identity
+ * projection alone cannot express.
+ */
+export async function getProjectIssuesTouchedFilesWithStatus(projectId: string, database: Database = db) {
+  return database
+    .select({
+      ...issueIdentityColumns,
+      statusId: issues.statusId,
+      touchedFilesJson: issues.touchedFilesJson,
+    })
+    .from(issues)
+    .where(eq(issues.projectId, projectId));
+}
+
+/**
  * id + issueNumber + touchedFilesJson for a set of issue numbers in a project
  * (CLI `issue check-overlap`). The found-set + overlap-building stays in the CLI.
  */

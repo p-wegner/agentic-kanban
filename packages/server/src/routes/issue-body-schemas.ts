@@ -56,6 +56,10 @@ export const projectIdBody = z.object({
 export const groupScanBody = z.object({
   projectId: requiredRaw("projectId is required"),
   apply: z.boolean().optional(),
+  // #918: "touched-files" is the deterministic (no LLM call) seed over `touchedFilesJson`;
+  // default "llm" keeps the existing AI-consolidation behaviour unchanged.
+  mode: z.enum(["llm", "touched-files"]).optional(),
+  minSharedFiles: z.number().int().positive().optional(),
 });
 
 export const decomposeConfirmBody = z.object({
