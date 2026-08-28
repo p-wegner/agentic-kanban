@@ -55,6 +55,17 @@ const NO_RAW_REPORT_RULE =
   "names what failed.";
 
 /**
+ * #931: this command runs concurrently with a pre-merge gate's own verify run and a
+ * base-branch health probe, on the same box, with no shared cap — a vitest default of one
+ * worker per core across three uncoordinated runs has measured 22 workers at 100% CPU on a
+ * 16-core box, starving whichever run started first.
+ */
+const MAX_WORKERS_RULE =
+  "If this command invokes vitest directly (not through a project script that already caps " +
+  "it), pass `--maxWorkers=4` (or similar) rather than letting it default to one worker per " +
+  "core — this box runs a merge gate and a base-health probe concurrently with your own tests.";
+
+/**
  * The fleet's single worst friction cluster (#195): a `--tests` filter that matches
  * nothing fails the WHOLE gradle build with exit 1, and the output — a wall of
  * `compileKotlin`/`test FAILED` task lines — reads exactly like a compile or test
@@ -255,7 +266,7 @@ export function deriveVerifyCommandPlan(profile: StackProfile | null | undefined
         // The node-ts cohort was already the healthy one — the value here is the rules.
         command: base,
         stackKey,
-        rules: [...POWERSHELL_RULES, NO_RAW_REPORT_RULE],
+        rules: [...POWERSHELL_RULES, NO_RAW_REPORT_RULE, MAX_WORKERS_RULE],
         onFailure: "Re-run only the failing test file, e.g. `pnpm exec vitest run <file>`.",
       };
     default:
