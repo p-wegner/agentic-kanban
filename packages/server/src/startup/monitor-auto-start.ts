@@ -14,7 +14,7 @@ import { projectCanDispatch, hostOverflowHasFleetCapacity as defaultHasFleetOver
 // #774 — the fleet shape behind a `no_available_worker` skip, so the reason is not a
 // single collapsed token. Same computation `GET /api/workers` serves.
 import { describeFleet } from "../services/placement-explain.service.js";
-import { shouldQuiesceBuildersForGate } from "../services/gate-quiesce.js";
+import { resolveGateQuiesce } from "../services/gate-quiesce.js";
 import { isMonitorEligibleIssue, monitorEligibleIssueSql, notDriveOrEpicMetaSql, resolveCandidateStatusIds } from "./monitor-eligibility.js";
 import { buildFileContentionGate, shouldDeferForContention, type BuildFileContentionGate } from "./monitor-file-contention.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -776,11 +776,18 @@ async function runTodoPull(ctx: AutoStartCycle, inProgressSt: { id: string; proj
     console.log(`[monitor] Auto-start pull capacity for project ${inProgressSt.projectId}: active=${capacity.active}/${wipLimit} inactiveStale=${capacity.inactiveStale}`);
   }
 
-  // #581: hold new starts while a gate holds the build semaphore. Checked per project so
-  // a project can opt out, but the resource being protected is the BOX — one project's
-  // builder saturates another project's gate just as well.
-  if (await shouldQuiesceBuildersForGate(inProgressSt.projectId, db)) {
-    ctx.noteSkip(inProgressSt.projectId, null, "verify_gate_running");
+  // #581 held new starts while a gate holds the build semaphore; #936 made that hold a
+  // PLACEMENT input (see `resolveGateQuiesce`) rather than an unconditional cycle skip.
+  const quiesce = await resolveGateQuiesce({
+    projectId: inProgressSt.projectId,
+    database: db,
+    hasFleetOverflowCapacity: () => ctx.hasFleetOverflowCapacity({
+      database: db, projectId: inProgressSt.projectId,
+      providerName: narrowProviderName(ctx.prefMap.get("provider")),
+    }),
+  });
+  if (quiesce.action === "skip") {
+    ctx.noteSkip(inProgressSt.projectId, null, quiesce.reason);
     return;
   }
 

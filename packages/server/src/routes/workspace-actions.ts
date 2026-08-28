@@ -13,7 +13,7 @@ import {
   workspaceTurnBody, rejectPlanBody, createWorkspaceCommentBody,
   updateWorkspaceCommentBody, resolveWorkspaceCommentBody,
 } from "./workspace-action-body-schemas.js";
-import { completeMergeJob, failMergeJob, getMergeJob, startMergeJob } from "../services/merge-job.service.js";
+import { completeMergeJob, describeMergeJobAttempts, failMergeJob, getMergeJob, startMergeJob } from "../services/merge-job.service.js";
 import { describePersistedGateVerdict } from "../services/workspace-merge-gate.js";
 
 import { queryFlag } from "../middleware/query-params.js";
@@ -401,7 +401,12 @@ export function createWorkspaceActionsRoute(
       }
       return c.json({ job: null, message: "no merge job recorded for this workspace in the current server process" });
     }
-    return c.json({ job });
+    // #936 — a bare `{"state":"running"}` cannot distinguish a slow convergent merge from a
+    // hung one. Measured on #926: 3h44m and TWO complete 20-minute suite runs, with this
+    // endpoint reporting the same opaque `running` throughout, so the only way to see a retry
+    // was to watch the OS process tree. The job now carries its attempt history; summarise it
+    // in one operator-readable line beside the raw list.
+    return c.json({ job, attemptSummary: describeMergeJobAttempts(job) });
   });
 
   // GET /api/workspaces/:id/already-merged-status — check if branch is already merged without modifying state
