@@ -102,6 +102,7 @@ describe("every background sweep is registered (#584)", () => {
       "session-message-pruner",
       "base-branch-health-reconciler",
       "install-staleness-reconciler",
+      "merge-train-reconciler",
       "agent-session-registry-reaper",
       "worker-health-probe",
     ]);
