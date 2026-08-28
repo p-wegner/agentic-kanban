@@ -2,7 +2,7 @@ import type { Database } from "../db/index.js";
 import type { BoardEventSink } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
 import { analyzeDependencies, enhanceIssue, aiEstimateIssue, decomposeEpic, confirmEpicDecomposition, contractCoupledComponent, confirmContractComponent, analyzeTouchedFiles } from "../services/issue-ai.service.js";
-import { scanForTicketGroups } from "../services/ticket-group-scan.service.js";
+import { scanForTicketGroups, scanTouchedFilesForTicketGroups } from "../services/ticket-group-scan.service.js";
 import type { DecomposeChildProposal, DecomposeDependencyProposal } from "../services/issue-ai.service.js";
 import { createIssueService } from "../services/issue.service.js";
 import type { CreateIssueInput, BatchDependencyInput } from "../services/issue.service.js";
@@ -169,15 +169,20 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     return c.json(result);
   });
 
-  // POST /api/issues/group-scan — AI-propose ticket GROUPS over the open backlog (#661).
+  // POST /api/issues/group-scan — propose ticket GROUPS over the open backlog (#661).
   // The non-destructive sibling of /contract: applying writes `coupled_with` edges only
   // (every ticket keeps its identity); the monitor's auto-group start then executes each
   // group as ONE workspace. Preview by default; `apply: true` creates the edges.
+  // `mode: "touched-files"` (#918) is the deterministic seed for a cold backlog — no LLM
+  // call, grouped by shared predicted files (excluding hot/registration files).
   router.post("/group-scan", async (c) => {
     const body = await parseJsonBody(c, groupScanBody);
     const projectId = body.projectId;
-    const result = await wrapAiOperation("group-scan", () => scanForTicketGroups(projectId, database, { apply: body.apply === true }));
-    if (body.apply === true) options?.boardEvents?.broadcast(projectId, "dependency_added");
+    const apply = body.apply === true;
+    const result = body.mode === "touched-files"
+      ? await scanTouchedFilesForTicketGroups(projectId, database, { apply, minSharedFiles: body.minSharedFiles })
+      : await wrapAiOperation("group-scan", () => scanForTicketGroups(projectId, database, { apply }));
+    if (apply) options?.boardEvents?.broadcast(projectId, "dependency_added");
     return c.json(result);
   });
 

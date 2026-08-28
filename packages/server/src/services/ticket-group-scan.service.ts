@@ -15,6 +15,9 @@
  */
 import { randomUUID } from "node:crypto";
 import { extractModelJson } from "@agentic-kanban/shared/lib/model-json";
+import type { TouchedFile } from "@agentic-kanban/shared";
+import { isRegistrationFile, normalizeContentionPath } from "@agentic-kanban/shared/lib/file-contention";
+import { MAX_TICKET_GROUP_SIZE } from "@agentic-kanban/shared/lib/ticket-group";
 import type { Database } from "../db/index.js";
 import { invokeClaudePrompt } from "./claude-cli.service.js";
 import {
@@ -24,6 +27,7 @@ import {
   getTerminalStatusIds,
   insertIssueDependencySafe,
 } from "../repositories/issue-ai.repository.js";
+import { getProjectIssuesTouchedFilesWithStatus } from "../repositories/issue/touched-files.repository.js";
 import { getStatusIdsByName } from "../repositories/project-status.repository.js";
 
 export interface TicketGroupProposal {
@@ -204,4 +208,138 @@ function pairsOf(ids: string[]): string[] {
     for (let j = i + 1; j < ids.length; j++) out.push(pairKey(ids[i], ids[j]));
   }
   return out;
+}
+
+/**
+ * #918: seed `coupled_with` from `issues.touchedFilesJson` — a DETERMINISTIC grouping
+ * signal (no LLM call) so a cold backlog (freshly decomposed/imported/enhanced, zero
+ * `coupled_with` edges yet) still forms ticket groups. `scanForTicketGroups` above needs
+ * an AI pass and is the tool for consolidating an established backlog; this is the seed
+ * that gives auto_group_coupled something to work with the moment tickets exist.
+ *
+ * Two tickets are proposed as coupled when they share at least `minSharedFiles` predicted
+ * files — EXCLUDING hot/registration files (`isRegistrationFile`, #119's contention
+ * vocabulary): a shared `app.ts`/`routes.ts` means CONTENTION (two tickets will conflict
+ * editing the same wiring file), not COUPLING (these tickets belong in one workspace). A
+ * shared narrow, non-hot file (a specific model/component/service) is the actual signal.
+ *
+ * Sequential (`depends_on`/`blocked_by`) pairs are excluded — same rule as
+ * `scanForTicketGroups` and the monitor's own auto-group start: grouping declares "start
+ * together", which contradicts a declared ordering.
+ *
+ * Connected components are computed over the qualifying pairs and capped at
+ * `MAX_TICKET_GROUP_SIZE` — an oversized component is split into that many
+ * lowest-numbered-first chunks rather than dropped, so a hot subsystem still yields
+ * usable (smaller) groups instead of nothing.
+ */
+export async function scanTouchedFilesForTicketGroups(
+  projectId: string,
+  database: Database,
+  opts: { apply?: boolean; minSharedFiles?: number } = {},
+): Promise<TicketGroupScanResult> {
+  const minSharedFiles = Math.max(1, opts.minSharedFiles ?? 2);
+  const candidateStatusIds = new Set(await getStatusIdsByName(projectId, ["Backlog", "Todo"], database));
+  if (candidateStatusIds.size === 0) {
+    return { proposals: [], rejected: [], scannedCount: 0 };
+  }
+  const all = await getProjectIssuesTouchedFilesWithStatus(projectId, database);
+  const candidates = all.filter((i) => i.statusId != null && candidateStatusIds.has(i.statusId) && i.issueNumber != null);
+  if (candidates.length < 2) {
+    return { proposals: [], rejected: [], scannedCount: candidates.length };
+  }
+
+  const byId = new Map(candidates.map((i) => [i.id, i]));
+  const filesByIssue = new Map<string, Set<string>>();
+  for (const issue of candidates) {
+    if (!issue.touchedFilesJson) continue;
+    let parsed: TouchedFile[];
+    try { parsed = JSON.parse(issue.touchedFilesJson) as TouchedFile[]; } catch { continue; }
+    const paths = new Set(
+      parsed
+        .map((f) => normalizeContentionPath(f.path))
+        .filter((p) => p && !isRegistrationFile(p)),
+    );
+    if (paths.size > 0) filesByIssue.set(issue.id, paths);
+  }
+  if (filesByIssue.size < 2) {
+    return { proposals: [], rejected: [], scannedCount: candidates.length };
+  }
+
+  const edges = await getProjectDependencyEdges(projectId, database);
+  const coupled = await getCoupledEdges(projectId, database);
+  const coupledPairs = new Set(coupled.map((e) => pairKey(e.issueId, e.dependsOnId)));
+  const sequentialPairs = new Set(
+    edges.filter((e) => e.type === "depends_on" || e.type === "blocked_by").map((e) => pairKey(e.from, e.to)),
+  );
+
+  const qualifyingIds = [...filesByIssue.keys()];
+  const adjacency = new Map<string, Set<string>>();
+  const link = (a: string, b: string) => {
+    let s = adjacency.get(a);
+    if (!s) { s = new Set(); adjacency.set(a, s); }
+    s.add(b);
+  };
+  for (let i = 0; i < qualifyingIds.length; i++) {
+    for (let j = i + 1; j < qualifyingIds.length; j++) {
+      const a = qualifyingIds[i];
+      const b = qualifyingIds[j];
+      if (sequentialPairs.has(pairKey(a, b))) continue;
+      const shared = [...filesByIssue.get(a)!].filter((f) => filesByIssue.get(b)!.has(f));
+      if (shared.length >= minSharedFiles) link(a, b);
+    }
+  }
+
+  // Connected components over the qualifying-pair graph.
+  const visited = new Set<string>();
+  const components: string[][] = [];
+  for (const id of qualifyingIds) {
+    if (visited.has(id) || !adjacency.has(id)) continue;
+    const component: string[] = [];
+    const stack = [id];
+    visited.add(id);
+    while (stack.length > 0) {
+      const cur = stack.pop()!;
+      component.push(cur);
+      for (const next of adjacency.get(cur) ?? []) {
+        if (visited.has(next)) continue;
+        visited.add(next);
+        stack.push(next);
+      }
+    }
+    if (component.length >= 2) components.push(component);
+  }
+
+  const proposals: TicketGroupProposal[] = [];
+  const rejected: Array<{ issueNumbers: number[]; reason: string }> = [];
+  for (const component of components) {
+    const sortedIds = component
+      .map((id) => byId.get(id)!)
+      .sort((a, b) => (a.issueNumber as number) - (b.issueNumber as number))
+      .map((i) => i.id);
+    for (let start = 0; start < sortedIds.length; start += MAX_TICKET_GROUP_SIZE) {
+      const chunkIds = sortedIds.slice(start, start + MAX_TICKET_GROUP_SIZE);
+      if (chunkIds.length < 2) continue;
+      const members = chunkIds.map((id) => byId.get(id)!);
+      const numbers = members.map((m) => m.issueNumber as number);
+      proposals.push({
+        issueNumbers: numbers,
+        issueIds: chunkIds,
+        titles: members.map((m) => m.title),
+        rationale: `Share >= ${minSharedFiles} predicted file(s) outside registration/hot files`,
+        alreadyCoupledPairs: pairsOf(chunkIds).filter((p) => coupledPairs.has(p)).length,
+      });
+    }
+    if (sortedIds.length > MAX_TICKET_GROUP_SIZE) {
+      rejected.push({
+        issueNumbers: sortedIds.map((id) => byId.get(id)!.issueNumber as number),
+        reason: `component larger than the ${MAX_TICKET_GROUP_SIZE}-ticket cap; split into smaller groups`,
+      });
+    }
+  }
+
+  const result: TicketGroupScanResult = { proposals, rejected, scannedCount: candidates.length };
+  if (opts.apply && proposals.length > 0) {
+    result.createdEdges = await applyTicketGroupProposals(proposals, coupledPairs, database);
+  }
+  return result;
 }
