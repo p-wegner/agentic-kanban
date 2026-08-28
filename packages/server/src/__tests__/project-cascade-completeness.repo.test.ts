@@ -410,6 +410,15 @@ const SUBTREE_SEEDERS: Record<string, (c: SeedCtx) => Promise<void>> = {
       outcome: "green", createdAt: c.now,
     });
   },
+  // #906 — a persisted release train is a project-child (cascading project_id). It is
+  // history, but history ABOUT one project, so it goes with the project rather than
+  // outliving it as an orphan.
+  merge_trains: async (c) => {
+    await c.db.insert(schema.mergeTrains).values({
+      id: randomUUID(), projectId: c.projectId, label: "q1", memberWorkspaceIds: "[]",
+      state: "landed", startedAt: c.now,
+    });
+  },
   red_debt: async (c) => {
     await c.db.insert(schema.redDebt).values({
       id: randomUUID(), projectId: c.projectId, suite: "server/foo.test.ts",
