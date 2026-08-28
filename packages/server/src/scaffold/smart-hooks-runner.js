@@ -225,6 +225,20 @@ const IN_PROCESS_HOOKS = {
     module: "./validate-command-safety.js",
     run: (mod, inputData) => mod.evaluateCommand(inputData || {}),
   },
+  // #914 — the other two shell guards. `.claude/settings.json` wired all three as SEPARATE
+  // `Bash|PowerShell` PreToolUse entries, so every shell tool call paid three node cold
+  // starts (0.5–1.2s each on Windows under RAM pressure) to answer three questions that
+  // share a parsed command. Routed through the runner they cost one process total, and
+  // `runCheck`'s existing catch keeps the fail-closed semantics: a guard that THROWS falls
+  // through to the spawn path rather than being read as an allow.
+  "vital-file-guard.js": {
+    module: "./vital-file-guard.js",
+    run: (mod, inputData) => mod.evaluateCommand(inputData || {}),
+  },
+  "prevent-cross-worktree-writes.js": {
+    module: "./prevent-cross-worktree-writes.js",
+    run: (mod, inputData) => mod.evaluateToolCall(inputData || {}),
+  },
 };
 
 function inProcessHookFor(command) {
@@ -690,7 +704,16 @@ function handlePreToolUse(input) {
   for (const check of checks) {
     if (!check.enabled) continue;
 
-    const result = runCheck({ ...check, cwd: check.cwd || policyDir }, { command, cwd: input.cwd }, []);
+    // The WHOLE hook input, not just `{ command, cwd }` (#914): the cross-worktree guard
+    // routes on `tool_name`/`tool_input` and would classify every call as "not a tool I
+    // guard" — a silently disabled guard, which is the exact #391 failure shape. `command`
+    // is added on top so the guards that read it flat (validate-command-safety,
+    // vital-file-guard) see the normalized value the runner already extracted.
+    const result = runCheck(
+      { ...check, cwd: check.cwd || policyDir },
+      { ...input, command, cwd: input.cwd },
+      [],
+    );
 
     if (!result.success) {
       console.error(`[smart-hooks] ${check.name}: PREVENTED`);

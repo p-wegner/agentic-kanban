@@ -237,12 +237,27 @@ describe("project-scaffold", () => {
         const commands: string[] = preToolHooks.flatMap((e: { hooks?: { command: string }[] }) =>
           (e.hooks ?? []).map((h: { command: string }) => h.command)
         );
-        const vitalCmd = commands.find((c) => c.includes("vital-file-guard.js"));
-        expect(vitalCmd).toBeTruthy();
+        // #914 — the vital-file guard no longer gets its own `Bash|PowerShell` entry; the
+        // runner's PreToolUse entry runs it in-process. The path convention this test is
+        // actually about is unchanged, so assert it on the entry that now carries the shell
+        // vector.
+        const runnerCmd = commands.find((c) => c.includes("smart-hooks-runner.js PreToolUse"));
+        expect(runnerCmd).toBeTruthy();
         // Must use $CLAUDE_PROJECT_DIR, not an absolute platform path
-        expect(vitalCmd).toContain("$CLAUDE_PROJECT_DIR");
-        expect(vitalCmd).not.toMatch(/^node [A-Z]:/i);
-        expect(vitalCmd).not.toMatch(/^node \/(?!.*\$CLAUDE_PROJECT_DIR)/);
+        expect(runnerCmd).toContain("$CLAUDE_PROJECT_DIR");
+        expect(runnerCmd).not.toMatch(/^node [A-Z]:/i);
+        expect(runnerCmd).not.toMatch(/^node \/(?!.*\$CLAUDE_PROJECT_DIR)/);
+
+        // …and the guard it collapsed must genuinely be in the runner's check list, or the
+        // collapse would just be a deletion.
+        const smartConfig = JSON.parse(
+          await readFile(join(dir, ".claude", "hooks", "smart-hooks-config.json"), "utf8"),
+        );
+        expect(
+          (smartConfig.hooks?.PreToolUse ?? []).some((c: { command?: string }) =>
+            c.command?.includes("vital-file-guard.js"),
+          ),
+        ).toBe(true);
       } finally {
         await rm(dir, { recursive: true, force: true });
       }
@@ -271,9 +286,11 @@ describe("project-scaffold", () => {
           (e: { hooks?: { command: string }[] }) => e.hooks?.some((h: { command: string }) => h.command === "node my-existing-hook.js")
         );
         expect(existingCmd).toBeDefined();
-        // New vital-file-guard hook added
+        // New hook added — the runner's PreToolUse entry, which since #914 is what carries
+        // the vital-file guard (in-process) rather than a second entry of its own.
         const newCmd = settings.hooks.PreToolUse.find(
-          (e: { hooks?: { command: string }[] }) => e.hooks?.some((h: { command: string }) => h.command.includes("vital-file-guard.js"))
+          (e: { hooks?: { command: string }[] }) =>
+            e.hooks?.some((h: { command: string }) => h.command.includes("smart-hooks-runner.js PreToolUse"))
         );
         expect(newCmd).toBeDefined();
       } finally {
@@ -323,24 +340,39 @@ describe("project-scaffold", () => {
       }
     });
 
-    it("wires the worktree guard on BOTH the write matcher and the shell matcher (#369)", async () => {
+    it("covers BOTH the write vector and the shell vector for the worktree guard (#369, collapsed by #914)", async () => {
       const dir = await tmp();
       try {
         await gitInit(dir);
         ensureHookScaffold(dir);
 
         const settings = JSON.parse(await readFile(join(dir, ".claude", "settings.json"), "utf8"));
-        const guardMatchers = ((settings.hooks?.PreToolUse ?? []) as {
+        const entries = (settings.hooks?.PreToolUse ?? []) as {
           matcher?: string;
           hooks?: { command: string }[];
-        }[])
-          .filter((e) => (e.hooks ?? []).some((h) => h.command.includes("prevent-cross-worktree-writes.js")))
-          .map((e) => e.matcher ?? "");
+        }[];
+        const matchersFor = (needle: string) =>
+          entries.filter((e) => (e.hooks ?? []).some((h) => h.command.includes(needle))).map((e) => e.matcher ?? "");
 
-        // The write matcher alone is what made #369 possible: the stray commit was produced by
-        // `cd <main checkout>; git commit -F msg`, a SHELL call the write matcher never sees.
-        expect(guardMatchers.some((m) => m.includes("Write") && m.includes("Edit"))).toBe(true);
-        expect(guardMatchers.some((m) => /Bash|PowerShell/.test(m))).toBe(true);
+        // The WRITE vector is still the guard's own entry — the runner's PreToolUse handler
+        // returns early for anything that is not a shell tool, so it cannot serve this one.
+        expect(
+          matchersFor("prevent-cross-worktree-writes.js").some((m) => m.includes("Write") && m.includes("Edit")),
+        ).toBe(true);
+
+        // The SHELL vector is what made #369 possible (`cd <main checkout>; git commit -F msg`,
+        // which the write matcher never sees). Since #914 it is carried by the runner entry
+        // plus the guard's presence in the runner's own check list — BOTH halves, because a
+        // runner entry alone proves nothing about whether the guard runs.
+        expect(matchersFor("smart-hooks-runner.js PreToolUse").some((m) => /Bash|PowerShell/.test(m))).toBe(true);
+        const smartConfig = JSON.parse(
+          await readFile(join(dir, ".claude", "hooks", "smart-hooks-config.json"), "utf8"),
+        );
+        expect(
+          (smartConfig.hooks?.PreToolUse ?? []).some((c: { command?: string }) =>
+            c.command?.includes("prevent-cross-worktree-writes.js"),
+          ),
+        ).toBe(true);
       } finally {
         await rm(dir, { recursive: true, force: true });
       }

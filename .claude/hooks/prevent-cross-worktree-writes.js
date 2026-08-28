@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @board-hook-version: 3
+// @board-hook-version: 4
 /**
  * Prevent cross-worktree writes — keep each Claude Code instance inside its own
  * git worktree.
@@ -455,32 +455,48 @@ function overrideActive(command) {
   return /(^|[;&|]\s*)(export\s+|set\s+)?ALLOW_CROSS_WORKTREE_WRITE=(1|true)\b/i.test(command);
 }
 
-async function main() {
-  const input = await readInput();
+/**
+ * Pure-ish decision core, callable IN-PROCESS by smart-hooks-runner.js (#914) — the same
+ * shape `validate-command-safety.js` and `vital-file-guard.js` expose. Returns
+ * `{ decision: "allow" | "block", reason?, stderr: string[] }`; `main()` below is the
+ * unchanged CLI wrapper, so this file still works standalone for Codex/Pi.
+ *
+ * The guard's own fail-open-but-say-so contract is unchanged: an uninspectable input is
+ * still allowed WITH the stable `[cross-worktree-guard] ALLOWED WITHOUT CHECKING` marker
+ * on stderr (#391), because wedging an agent on a parse error is worse than a logged gap.
+ * Fail-CLOSED for a guard that THREW is the caller's job: the runner falls back to
+ * spawning the script rather than treating an exception as a pass.
+ */
+function evaluateToolCall(input) {
+  const stderr = [];
+  const allowV = () => ({ decision: "allow", stderr });
+  const blockV = (reason) => ({ decision: "block", reason, stderr });
+
   if (!input) {
     // #391: this is a silent no-guard state — during #369's own verification two bypass replays
     // reported exit 0 and were nearly recorded as "not blocked", when the real cause was
     // malformed JSON hitting exactly this path. Fail open (never wedge an agent on a parse
     // error) but SAY SO, with a stable marker the board can grep for.
-    console.error(
+    stderr.push(
       "[cross-worktree-guard] ALLOWED WITHOUT CHECKING: stdin was empty or not valid JSON, " +
       "so the tool call could not be inspected. This is a no-guard state, not a pass."
     );
-    allow();
+    return allowV();
   }
 
   const toolName = input.tool_name || input.toolName;
   const isShell = SHELL_TOOLS.has(toolName);
-  if (!WRITE_TOOLS.has(toolName) && !isShell) allow();
+  if (!WRITE_TOOLS.has(toolName) && !isShell) return allowV();
 
   const toolInput = input.tool_input || input.toolInput;
   const command = isShell ? (toolInput && (toolInput.command || toolInput.script)) || "" : "";
   const targets = isShell ? [] : targetPaths(toolName, toolInput);
-  if (!isShell && targets.length === 0) allow();
-  if (isShell && !command) allow();
+  if (!isShell && targets.length === 0) return allowV();
+  if (isShell && !command) return allowV();
 
-  // Checked HERE, not before readInput(), so the inline form on the command can be seen (#408).
-  if (overrideActive(command)) allow();
+  // Checked HERE, not before reading the input, so the inline form on the command can be
+  // seen (#408).
+  if (overrideActive(command)) return allowV();
 
   // The worktree this instance is AUTHORIZED to operate in — board-declared where possible.
   const { root: currentRoot, source: rootSource, cwd } = authorizedRoot(input.cwd);
@@ -492,13 +508,13 @@ async function main() {
     // checking nothing is not acceptable for this guard (#158), so say so loudly instead of
     // letting the degrade look identical to "genuinely nothing to protect".
     if (process.env.AGENTIC_KANBAN_CONTAINER === "1") {
-      console.error(
+      stderr.push(
         "[cross-worktree-guard] containerized session: `git worktree list` sees only this " +
           "worktree — the guard cannot detect siblings and is relying on the container's own " +
           "mount isolation instead."
       );
     }
-    allow(); // single-worktree repo or not a repo → nothing to protect
+    return allowV(); // single-worktree repo or not a repo → nothing to protect
   }
 
   const others = worktrees.filter((w) => w !== currentRoot);
@@ -536,7 +552,7 @@ async function main() {
   if (rootSource === "KANBAN_WORKTREE_DIR" && input.cwd && isShell && commandMutates(command)) {
     const here = norm(gitToplevel(input.cwd) || input.cwd);
     if (!isInside(norm(input.cwd), currentRoot) && others.includes(here)) {
-      block(
+      return blockV(
         "⛔ Cross-worktree command blocked — WRONG WORKING DIRECTORY.\n\n" +
           `This session is authorized for (via KANBAN_WORKTREE_DIR):\n  ${currentRoot}\n\n` +
           `but it is running in a DIFFERENT git worktree:\n  ${here}\n\n` +
@@ -557,7 +573,7 @@ async function main() {
     // tracking; the authorized root's cwd is the fallback for harnesses that send none.
     const offending = shellViolation(command, currentRoot, others, cwd, input.cwd);
     if (offending) {
-      block(
+      return blockV(
         "⛔ Cross-worktree shell command blocked.\n\n" +
           `This session is authorized for (via ${rootSource}):\n  ${currentRoot}\n\n` +
           `but the command mutates a DIFFERENT git worktree:\n  ${offending}\n\n` +
@@ -573,7 +589,7 @@ async function main() {
           "editing this hook."
       );
     }
-    allow();
+    return allowV();
   }
 
   for (const target of targets) {
@@ -583,7 +599,7 @@ async function main() {
     // Writing inside a different worktree is the violation we guard against.
     const offending = others.find((w) => isInside(t, w));
     if (offending) {
-      block(
+      return blockV(
         "⛔ Cross-worktree write blocked.\n\n" +
           `This Claude instance is authorized for (via ${rootSource}):\n  ${currentRoot}\n\n` +
           `but the write targets a DIFFERENT git worktree:\n  ${t}\n  (worktree: ${offending})\n\n` +
@@ -601,7 +617,18 @@ async function main() {
     // Target is outside every worktree (temp, home, etc.) → not our concern.
   }
 
+  return allowV();
+}
+
+async function main() {
+  const verdict = evaluateToolCall(await readInput());
+  for (const line of verdict.stderr) console.error(line);
+  if (verdict.decision === "block") block(verdict.reason);
   allow();
 }
 
-main().catch(() => process.exit(0));
+module.exports = { evaluateToolCall };
+
+// Only run the CLI wrapper when spawned as a process. When smart-hooks-runner.js
+// require()s this file for the in-process fast path, `main()` must NOT execute.
+if (require.main === module) main().catch(() => process.exit(0));
