@@ -23,6 +23,8 @@ import { startWorkerConnectionReaper, stopWorkerConnectionReaper } from "../serv
 import { getWorkerFleet } from "../services/worker-fleet.service.js";
 import { startInstallStalenessReconciler, stopInstallStalenessReconciler } from "./install-staleness-reconciler.js";
 import { startMergeTrainReconciler, stopMergeTrainReconciler } from "./merge-train-reconciler.js";
+import { createMergeQueueService } from "../services/merge-queue.service.js";
+import { updateMergeTrainState } from "../repositories/merge-train.repository.js";
 import { startAgentSessionRegistryReaper, stopAgentSessionRegistryReaper } from "./agent-session-registry-reaper.js";
 import { startWorkerHealthProbe, stopWorkerHealthProbe } from "../services/worker-health-probe.service.js";
 import { getPreference } from "../repositories/preferences.repository.js";
@@ -248,8 +250,34 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
     // whole lifecycle is one in-process request, so anything found at boot is orphaned by
     // construction. Resumed or marked `abandoned` with a reason — never silently dropped.
     name: "merge-train-reconciler",
-    start() {
-      startMergeTrainReconciler();
+    start({ db, boardEvents, getSessionManager }) {
+      const queueService = createMergeQueueService({ database: db, boardEvents, getSessionManager });
+      startMergeTrainReconciler({
+        // Re-run the batch for the stranded row's member set. `executeQueue` re-derives the
+        // plan from the workspace ids and re-enters `runTrainStrategy` via the normal
+        // `strategy: "train"` dispatch — the same path a fresh request takes. Without this,
+        // every `assembling`/`gating` row found at boot was unconditionally abandoned and the
+        // "or resumes" half of the acceptance criteria was unreachable.
+        //
+        // `runTrainStrategy` always mints its OWN fresh `merge_trains` row (it has no notion
+        // of "resuming" one), so the stranded row this callback was handed never reaches a
+        // terminal state on its own — left alone it would sit in `assembling`/`gating` and
+        // get abandoned by a LATER sweep despite the resume having actually succeeded. Mirror
+        // the fresh train's outcome onto the stranded row explicitly so its own history entry
+        // (what `GET /api/merge-trains` shows for it) reflects what really happened.
+        async runTrain(row) {
+          const memberWorkspaceIds = JSON.parse(row.memberWorkspaceIds) as string[];
+          let landed = false;
+          for await (const event of queueService.executeQueue(memberWorkspaceIds, { strategy: "train" })) {
+            if (event.type === "done") landed = event.merged.length > 0;
+          }
+          await updateMergeTrainState(row.id, {
+            state: landed ? "landed" : "red",
+            reconciledReason: "resumed via a freshly re-assembled train after a stranded boot-time recovery",
+            finishedAt: new Date().toISOString(),
+          }, db);
+        },
+      });
       return stopMergeTrainReconciler;
     },
   },
