@@ -1,6 +1,7 @@
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import type { StartPolicy } from "@agentic-kanban/shared/types";
 import { resolveMonitorTunables } from "./strategy-objective.service.js";
+import { resolveWipLimit } from "./wip-limit.service.js";
 import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { START_MODE_VALUES } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 
@@ -61,7 +62,12 @@ export function resolveStartPolicy(prefMap: Map<string, string>, projectId: stri
     : deriveMode(prefMap, projectId);
   const source: StartPolicy["source"] = VALID_MODES.has(explicit ?? "") ? "start_mode" : "derived";
 
-  const wip = resolveMonitorTunables(prefMap, projectId).tunables;
+  // #919: `activeAgentsTarget` comes from THE WIP resolver, so `policy.wip` — which the
+  // dependency auto-chain, the plugin-loop starter and the sprint-capacity planner all act on
+  // — honours `wip_limit_<projectId>` like every other WIP surface. The other three tunables
+  // (backlog floor, starts/cycle, refill focus) are Bullseye-only and stay as they were.
+  const tunables = resolveMonitorTunables(prefMap, projectId).tunables;
+  const wip = { ...tunables, activeAgentsTarget: resolveWipLimit(prefMap, projectId).limit };
   const cascadeOptIn = getBool(prefMap, "dependency_auto_chain");
   const followupOptIn = getBool(prefMap, "auto_start_followup");
   const refillOptIn = prefMap.get("backlog_empty_strategy") === "generate_tickets";

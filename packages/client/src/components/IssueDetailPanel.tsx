@@ -15,6 +15,7 @@ import { IssueMetadataGrid } from "./IssueMetadataGrid.js";
 import type { TrailEntry } from "../hooks/useTicketTrail.js";
 import { TicketTrailStrip } from "./TicketTrailStrip.js";
 import { IssueCycleTimeBadge } from "./IssueCycleTimeBadge.js";
+import { IssueAutoStartSkipBadge } from "./IssueAutoStartSkipBadge.js";
 import { IssueWorkLogSection } from "./IssueWorkLogSection.js";
 import { useIssueDisplayData } from "../hooks/useIssueDisplayData.js";
 import { useModalDrag } from "../hooks/useModalDrag.js";
@@ -571,6 +572,15 @@ export function IssueDetailPanel({
 
           {/* Cycle time badge — only shown in view mode */}
           {!editing && <IssueCycleTimeBadge data={cycleTime} loading={extrasLoading} />}
+
+          {/* #919: why the monitor last declined to auto-start this ticket. Renders nothing
+              unless there is a record, so it costs no vertical space in the common case. */}
+          {!editing && (
+            <IssueAutoStartSkipBadge
+              reason={issue.lastAutoStartSkipReason}
+              at={issue.lastAutoStartSkipAt}
+            />
+          )}
 
           {/* Work log section — only shown in view mode */}
           {!editing && <IssueWorkLogSection issueId={issue.id} initial={timeEntries} loading={extrasLoading} />}

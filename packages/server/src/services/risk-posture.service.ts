@@ -80,6 +80,9 @@ export function resolveRiskPosture(
         redBasePolicy: "block",
         trainMaxSize: 1,
         trainMaxWaitMs: 0,
+        // #919: strict lands one at a time on purpose — every merge carries a full gate.
+        mergesPerCycle: 1,
+        relaunchesPerCycle: 1,
         builderStopChecks: "tests-and-typecheck",
         contentionMode: "serialize",
         placementBias: "host-half",
@@ -93,6 +96,8 @@ export function resolveRiskPosture(
         redBasePolicy: "allow-known-debt",
         trainMaxSize: 8,
         trainMaxWaitMs: 20 * 60 * 1000,
+        mergesPerCycle: 4,
+        relaunchesPerCycle: 4,
         builderStopChecks: "typecheck-only",
         contentionMode: "warn",
         placementBias: "remote-preferred",
@@ -106,6 +111,10 @@ export function resolveRiskPosture(
         redBasePolicy: "allow-file-debt-ticket",
         trainMaxSize: 12,
         trainMaxWaitMs: 30 * 60 * 1000,
+        // #919 acceptance: a sprint project lands a whole ready batch in ONE cycle rather
+        // than dribbling two per cycle behind a train it already gated as a unit.
+        mergesPerCycle: 8,
+        relaunchesPerCycle: 6,
         builderStopChecks: "none",
         contentionMode: "off",
         placementBias: "remote-preferred",
@@ -121,6 +130,9 @@ export function resolveRiskPosture(
         redBasePolicy: "block",
         trainMaxSize: 1,
         trainMaxWaitMs: 0,
+        // #919: today's board-wide constants, so `standard` still reproduces current behaviour.
+        mergesPerCycle: 2,
+        relaunchesPerCycle: 2,
         builderStopChecks: "tests-capacity-gated",
         contentionMode: "serialize",
         placementBias: "host-preferred",

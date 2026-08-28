@@ -39,9 +39,21 @@ import { setWorkspaceStatus } from "../repositories/workspace-status.repository.
 import { shouldSkipMergeForBackoff, type MergeBackoffDeps } from "../services/merge-backoff.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.service.js";
+import type { RiskPosture } from "@agentic-kanban/shared/types";
 
 export { DEFAULT_STUCK_BUILDER_TIMEOUT_MS } from "../services/monitor-cycle-rules.js";
 
+/**
+ * The board-wide fallback caps (#919). These are no longer THE cap: `processWorkspaceCandidates`
+ * resolves `mergesPerCycle` / `relaunchesPerCycle` PER PROJECT from that project's risk posture
+ * (`riskPostureFor`), and only falls back to these numbers when no posture resolver is wired
+ * (tests that inject nothing) — they equal `standard`'s values, so that fallback reproduces
+ * today's behaviour exactly.
+ *
+ * Why they had to go: a board-wide 2 merges/cycle put a ~30 merges/hour ceiling on every
+ * project regardless of posture, and it was GLOBAL — one busy project's two merges starved
+ * every other project on the board for that cycle. Both properties are now per-project.
+ */
 export const MAX_MONITOR_RELAUNCHES_PER_CYCLE = 2;
 export const MAX_MONITOR_MERGES_PER_CYCLE = 2;
 /**
@@ -161,8 +173,22 @@ export interface ProcessWorkspaceDeps {
   buildMonitorNudgePrompt: (projectId: string) => Promise<string>;
   getRecentAgentExcerpts: (sessionId: string, count?: number) => Promise<string[]>;
   shouldSkipNudge: (excerpts: string[]) => boolean;
+  /**
+   * Board-wide override for the per-cycle relaunch cap. Since #919 this is a CEILING that
+   * outranks the posture-derived per-project number, not the number itself — it exists so a
+   * test (or an operator pref) can pin the cap without having to seed a posture.
+   */
   maxRelaunchesPerCycle?: number;
+  /** Board-wide override for the per-cycle merge cap. See `maxRelaunchesPerCycle`. */
   maxMergesPerCycle?: number;
+  /**
+   * #919: the risk posture that decides how many merges/relaunches THIS project may attempt
+   * in one cycle. Injected (rather than read from prefs in here) for the same reason every
+   * other monitor dep is: `startup/` reaching for preferences directly would make this
+   * function untestable without a seeded DB, and monitor-setup already holds the cycle's
+   * `prefMap`. Absent ⇒ the board-wide constants above, i.e. today's behaviour.
+   */
+  riskPostureFor?: (projectId: string) => Pick<RiskPosture, "level" | "mergesPerCycle" | "relaunchesPerCycle">;
   stuckBuilderTimeoutMs?: number;
   getCommitCountAhead?: typeof getCommitCountAhead;
   countBehindCommits?: typeof countBehindCommits;
@@ -764,22 +790,54 @@ async function handleActiveRunningWorkspace(ws: WorkspaceCandidate, sess: Latest
 
 export async function processWorkspaceCandidates(candidates: WorkspaceCandidate[], deps: ProcessWorkspaceDeps): Promise<ProcessWorkspaceCandidatesResult> {
   const stats = { relaunched: 0, merged: 0, nudged: 0 };
-  const maxRelaunches = deps.maxRelaunchesPerCycle ?? MAX_MONITOR_RELAUNCHES_PER_CYCLE;
-  const maxMerges = deps.maxMergesPerCycle ?? MAX_MONITOR_MERGES_PER_CYCLE;
   const stuckBuilderTimeoutMs = deps.stuckBuilderTimeoutMs ?? parseStuckBuilderTimeoutMs();
   const logAction: LogMonitorActionFn = (action, workspaceId, issueId, extra) => deps.logMonitorAction(deps.monitorRecentActions, action, workspaceId, issueId, extra);
+
+  // #919: the caps are PER PROJECT and posture-derived. `deps.max*PerCycle` (when given)
+  // stays a board-wide ceiling on top, so an explicit override still bounds every project.
+  const postureCache = new Map<string, { level: string; merges: number; relaunches: number }>();
+  const capsFor = (projectId: string) => {
+    let caps = postureCache.get(projectId);
+    if (!caps) {
+      const posture = deps.riskPostureFor?.(projectId);
+      caps = {
+        level: posture?.level ?? "standard",
+        merges: Math.min(posture?.mergesPerCycle ?? MAX_MONITOR_MERGES_PER_CYCLE, deps.maxMergesPerCycle ?? Number.POSITIVE_INFINITY),
+        relaunches: Math.min(posture?.relaunchesPerCycle ?? MAX_MONITOR_RELAUNCHES_PER_CYCLE, deps.maxRelaunchesPerCycle ?? Number.POSITIVE_INFINITY),
+      };
+      postureCache.set(projectId, caps);
+    }
+    return caps;
+  };
+  const attemptedByProject = new Map<string, { merges: number; relaunches: number }>();
+  const attemptsFor = (projectId: string) => {
+    let a = attemptedByProject.get(projectId);
+    if (!a) { a = { merges: 0, relaunches: 0 }; attemptedByProject.set(projectId, a); }
+    return a;
+  };
+
   // Reserve the slot as part of the CHECK (not after the async action completes) so the
   // cap is enforced correctly even when different projects' candidate walks run
   // concurrently below — otherwise two concurrent walks could both pass the check before
-  // either increments, overshooting the cycle cap.
+  // either increments, overshooting the cycle cap. Both call sites are immediately followed
+  // by the action, so what is counted is ATTEMPTS, not the check itself (#919): a workspace
+  // that never reaches the cap check (backoff, disabled auto-merge, a failed pre-merge gate)
+  // no longer consumes a slot, because those checks all run BEFORE this one.
+  //
+  // `stats.relaunched`/`stats.merged` remain the board-wide ATTEMPT totals the monitor
+  // status reports; the caps below are enforced against the per-project tallies.
   const canStartRelaunch = (ws: WorkspaceCandidate) => {
-    if (stats.relaunched < maxRelaunches) { stats.relaunched++; return true; }
-    console.log(`[monitor] Relaunch cap reached (${maxRelaunches}/cycle)  leaving workspace ${ws.wsId} idle until the next monitor run`);
+    const caps = capsFor(ws.projectId);
+    const attempts = attemptsFor(ws.projectId);
+    if (attempts.relaunches < caps.relaunches) { attempts.relaunches++; stats.relaunched++; return true; }
+    console.log(`[monitor] Relaunch cap reached for project ${ws.projectId} (${caps.relaunches}/cycle, posture ${caps.level}) — leaving workspace ${ws.wsId} idle until the next monitor run`);
     return false;
   };
   const canStartMerge = (ws: WorkspaceCandidate) => {
-    if (stats.merged < maxMerges) { stats.merged++; return true; }
-    console.log(`[monitor] Merge cap reached (${maxMerges}/cycle)  leaving workspace ${ws.wsId} queued until the next monitor run`);
+    const caps = capsFor(ws.projectId);
+    const attempts = attemptsFor(ws.projectId);
+    if (attempts.merges < caps.merges) { attempts.merges++; stats.merged++; return true; }
+    console.log(`[monitor] Merge cap reached for project ${ws.projectId} (${caps.merges}/cycle, posture ${caps.level}) — leaving workspace ${ws.wsId} queued until the next monitor run`);
     return false;
   };
   const ctx: CycleContext = { deps, stats, logAction, canStartRelaunch, canStartMerge, stuckBuilderTimeoutMs };
