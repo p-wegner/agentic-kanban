@@ -77,6 +77,33 @@ Round-1 method: caller ran Step 0 (`vocab.py` histograms + `.dependency-cruiser.
   `server-root` allocation 13 → 15 (+2 reclassified files), `server-monitor` 55 → 53,
   coverage still 100 %, no new violations introduced elsewhere.
 
+### 2026-08-27 — #927: the 3 `server-monitor→server-middleware` edges (claude-sonnet-5)
+- **All 3 edges (`app-bootstrap.ts` → `error-handler.ts`/`compress.ts`/`slow-request-logger.ts`)
+  — BOUNDARY WRONG, same root cause.** `server-monitor`'s `match` is the whole
+  `packages/server/src/startup/` directory (a catch-all), while `server-root`'s `match`
+  enumerates specific composition-root files by name. `app-bootstrap.ts` builds the Hono app
+  + its middleware chain — genuine boot-time wiring, extracted from `server-start.ts` (#873,
+  its own docstring says so) — not monitor/sweep logic. It fell to `server-monitor` only
+  because the catch-all matched before `server-root`'s explicit list caught up. Fix: added
+  `app-bootstrap` to `server-root`'s enumerated list (`server-root` has no `rules` entry, i.e.
+  unconstrained, so wiring middleware from there is fine).
+- **Fallout, same fix**: reclassifying `app-bootstrap.ts` exposed a 4th, previously-hidden
+  edge — `boot-sequence.ts` (also `server-monitor` by the same catch-all) → `session-restore
+  .ts`/`startup-tasks.ts`/`service-stack-preflight.ts` (all `server-root`). Same shape exactly:
+  `boot-sequence.ts`'s docstring says "extracted from `server-start.ts` (#873)" — the
+  sequential must-precede-serving boot phase, imported only by `server-start.ts`. Also
+  BOUNDARY WRONG; added to `server-root`'s list.
+- Re-measured with `pattern_edges.py --scan --violations`: **rule violations 0** (was 3, briefly
+  4 after the first fix exposed the hidden one). Coverage still 100%, no unassigned files.
+- Not fixed as code moves: both files already sit in `packages/server/src/startup/` next to
+  their sibling `server-root` files (`route-setup.ts`, `background-services.ts`, …), so this is
+  purely a spec `match` gap, not a misplaced file.
+- **Overlap note**: #926 (merged first) already reclassified `app-bootstrap.ts`/
+  `boot-sequence.ts` as `server-root` and added them to the enumerated list for the
+  `server-monitor→server-root` edges it found. This round's fix to `pattern-language.json` is
+  the same enumerated-list addition; the middleware edges above are the ones #926 did not
+  need to touch (it only measured the `→server-root` edges, not `→server-middleware`).
+
 ## Filed (exclusion list — same idea ⇒ reference, don't refile)
 | # | verb | title |
 |---|---|---|
