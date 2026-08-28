@@ -47,13 +47,12 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { listRedDebt, openRedDebtEntry } from "../repositories/red-debt.repository.js";
 import {
-  redDebtPosturePrefKey,
   redDebtMaxPrefKey,
   redDebtMaxAgePrefKey,
-  resolveRedDebtGatePosture,
   resolveEffectiveRedDebtPosture,
-} from "@agentic-kanban/shared/lib/red-debt-cap";
-import { resolveRedDebtGateVerdict, type RedDebtGatePosture } from "@agentic-kanban/shared/lib/red-debt-gate";
+} from "../lib/red-debt-cap.js";
+import { resolveRedDebtGateVerdict, type RedDebtGatePosture } from "../lib/red-debt-gate.js";
+import { riskPosturePref, resolveRiskPosture } from "@agentic-kanban/shared/lib/risk-posture";
 
 type WorkspaceRow = typeof workspaces.$inferSelect;
 
@@ -440,8 +439,8 @@ export async function runPreLockGate(args: {
     // so it is never softened.
     if (failedSuites && failedSuites.length > 0) {
       try {
-        const postureRaw = await getPreference(redDebtPosturePrefKey(projectId), database).catch(() => null);
-        const requestedPosture = resolveRedDebtGatePosture(postureRaw);
+        const postureRaw = await getPreference(riskPosturePref.key(projectId), database).catch(() => null);
+        const requestedPosture = resolveRiskPosture(postureRaw);
         // #916 — a ledger over its cap must not let `sprint`/`fast` keep softening verdicts
         // forever; it degrades the EFFECTIVE posture one step (sprint -> fast -> standard)
         // instead. Evaluated against the SAME open-ledger snapshot the verdict itself reads

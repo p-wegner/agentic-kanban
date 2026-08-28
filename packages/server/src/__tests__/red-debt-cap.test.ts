@@ -6,7 +6,7 @@ import {
   redDebtMaxAgePrefKey,
   DEFAULT_RED_DEBT_MAX_ENTRIES,
   DEFAULT_RED_DEBT_MAX_AGE_MS,
-} from "../src/lib/red-debt-cap.js";
+} from "../lib/red-debt-cap.js";
 
 describe("redDebtMaxPrefKey / redDebtMaxAgePrefKey", () => {
   it("builds the per-project keys", () => {

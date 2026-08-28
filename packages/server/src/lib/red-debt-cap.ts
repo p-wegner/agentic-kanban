@@ -10,10 +10,17 @@
  * carries a human-readable `note` so the degrade is never silent (the ticket's "refuse to
  * keep going quietly" framing, applied to a downgrade rather than a full stop).
  *
- * PURE and client-safe: no node builtins, so the posture chip can preview the same decision
+ * Lives in `server/lib` and not `shared/lib`: the merge gate is its only consumer, and the
+ * `shared-lib-single-consumer-ratchet` (#730) is explicit that a NEW single-consumer module
+ * belongs in that consumer. The POSTURE it gates on is the shared one — `risk-posture.ts`
+ * (#911/#912), which landed while this branch was open and replaces the stand-in resolver
+ * this file used to carry.
+ *
+ * PURE: no node builtins, so the posture chip can preview the same decision
  * the server will make.
  */
-import { projectPref } from "./dynamic-preference-keys.js";
+import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
+import type { RiskPosture } from "@agentic-kanban/shared/lib/risk-posture";
 
 const redDebtMaxPrefDef = projectPref("red_debt_max");
 const redDebtMaxAgePrefDef = projectPref("red_debt_max_age");
@@ -39,17 +46,15 @@ function parsePositiveInt(raw: string | null | undefined, fallback: number): num
   return raw != null && Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
 }
 
-export type RiskPostureLevel = "strict" | "standard" | "fast" | "sprint";
-
 /** One degrade step, in order: sprint -> fast -> standard. `strict` never degrades further —
  *  there is nothing softer to fall back to, and strict never carries debt in the first place. */
-const DEGRADE_STEP: Partial<Record<RiskPostureLevel, RiskPostureLevel>> = {
+const DEGRADE_STEP: Partial<Record<RiskPosture, RiskPosture>> = {
   sprint: "fast",
   fast: "standard",
 };
 
 export interface RedDebtCapInput {
-  posture: RiskPostureLevel;
+  posture: RiskPosture;
   /** Count of currently OPEN ledger entries for the project. */
   openEntryCount: number;
   /** Age (ms) of the OLDEST open entry, or null when there are none. */
@@ -62,7 +67,7 @@ export interface RedDebtCapInput {
 
 export interface RedDebtCapResult {
   /** The posture to actually gate under. Equal to `input.posture` unless the cap forced a degrade. */
-  effectivePosture: RiskPostureLevel;
+  effectivePosture: RiskPosture;
   /** True when `effectivePosture !== input.posture`. */
   degraded: boolean;
   /** Human-readable reason, populated whenever `degraded` is true. Never silent. */
@@ -118,27 +123,4 @@ export function resolveEffectiveRedDebtPosture(input: RedDebtCapInput): RedDebtC
     current = { effectivePosture: next.effectivePosture, degraded: true, note: notes.join(" | ") };
   }
   return current;
-}
-
-const redDebtPosturePrefDef = projectPref("red_debt_posture");
-
-export function redDebtPosturePrefKey(projectId: string): string {
-  return redDebtPosturePrefDef.key(projectId);
-}
-
-const RISK_POSTURE_LEVELS: readonly RiskPostureLevel[] = ["strict", "standard", "fast", "sprint"];
-
-export const RED_DEBT_POSTURE_DEFAULT: RiskPostureLevel = "standard";
-
-/**
- * Resolve a project's posture from the `red_debt_posture_<projectId>` stand-in pref (#911 is
- * not landed yet — see `review-mode-pref.ts`'s identical stand-in for `review_mode`). Any
- * value other than an exact known level fails closed to `"standard"`, which never softens a
- * gate verdict — an unset/mistyped pref must never be read as an invitation to pass a red
- * suite through.
- */
-export function resolveRedDebtGatePosture(value: string | null | undefined): RiskPostureLevel {
-  return value && (RISK_POSTURE_LEVELS as readonly string[]).includes(value)
-    ? (value as RiskPostureLevel)
-    : RED_DEBT_POSTURE_DEFAULT;
 }
