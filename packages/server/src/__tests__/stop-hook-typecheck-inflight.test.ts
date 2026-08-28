@@ -194,7 +194,15 @@ describe("smart-hooks runner — end to end Stop with a failing compile check (#
     const abs = join(dir, rel);
     mkdirSync(dirname(abs), { recursive: true });
     mkdirSync(join(dir, ".claude", "hooks"), { recursive: true });
-    for (const f of ["smart-hooks-runner.js", "check-uncommitted.js", "git-topology-cache.js"]) {
+    // #913 added hook-posture.js + machine-capacity.js to the runner's module set. They load
+    // defensively, but a fixture missing them would silently exercise the pre-#913 chain.
+    for (const f of [
+      "smart-hooks-runner.js",
+      "check-uncommitted.js",
+      "git-topology-cache.js",
+      "hook-posture.js",
+      "machine-capacity.js",
+    ]) {
       writeFileSync(join(dir, ".claude", "hooks", f), readFileSync(join(HOOKS_DIR, f), "utf8"));
     }
     writeFileSync(

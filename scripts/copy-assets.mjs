@@ -39,6 +39,13 @@ const scaffoldHookSources = [
   resolve(root, "packages/server/src/scaffold/vital-file-guard.js"),
   resolve(root, "packages/server/src/scaffold/prevent-cross-worktree-writes.js"),
   resolve(root, "packages/server/src/scaffold/smart-hooks-runner.js"),
+  // #913 — the runner's posture/capacity policy. The runner loads them defensively, so a
+  // published package that dropped them would not CRASH; it would silently give every
+  // scaffolded project the one-size chain #913 exists to end, which is worse than a crash
+  // because nothing says so. (NOTE: git-topology-cache.js and disclose-context.mjs are
+  // still absent from this list — a pre-existing gap, not introduced here.)
+  resolve(root, "packages/server/src/scaffold/hook-posture.js"),
+  resolve(root, "packages/server/src/scaffold/machine-capacity.js"),
 ];
 const scaffoldHooksDist = resolve(serverDist, "scaffold/hooks");
 mkdirSync(scaffoldHooksDist, { recursive: true });
