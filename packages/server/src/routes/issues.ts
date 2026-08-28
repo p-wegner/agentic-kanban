@@ -54,6 +54,18 @@ import { queryFlag } from "../middleware/query-params.js";
 import { getActiveProjectIdPref } from "../repositories/board-status.repository.js";
 import { setIssueReposTouched } from "../services/repo-tags.service.js";
 import { getIssueById } from "../repositories/followup-workspace.repository.js";
+/**
+ * The two halves of `POST /api/issues/group-scan` (#661, #918): the AI proposer, and the
+ * deterministic touched-files seed a cold backlog uses instead. Module-level rather than
+ * inline because `createIssuesRoute` is on the server shrink-only nloc ring (#800).
+ */
+function runGroupScan(projectId: string, database: Database, body: { mode?: string; apply?: boolean; minSharedFiles?: number }) {
+  const apply = body.apply === true;
+  return body.mode === "touched-files"
+    ? scanTouchedFilesForTicketGroups(projectId, database, { apply, minSharedFiles: body.minSharedFiles })
+    : wrapAiOperation("group-scan", () => scanForTicketGroups(projectId, database, { apply }));
+}
+
 export function createIssuesRoute(database: Database, options?: { boardEvents?: BoardEventSink; getSessionManager?: () => SessionManager }) {
   const router = createRouter();
 
@@ -177,12 +189,8 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
   // call, grouped by shared predicted files (excluding hot/registration files).
   router.post("/group-scan", async (c) => {
     const body = await parseJsonBody(c, groupScanBody);
-    const projectId = body.projectId;
-    const apply = body.apply === true;
-    const result = body.mode === "touched-files"
-      ? await scanTouchedFilesForTicketGroups(projectId, database, { apply, minSharedFiles: body.minSharedFiles })
-      : await wrapAiOperation("group-scan", () => scanForTicketGroups(projectId, database, { apply }));
-    if (apply) options?.boardEvents?.broadcast(projectId, "dependency_added");
+    const result = await runGroupScan(body.projectId, database, body);
+    if (body.apply === true) options?.boardEvents?.broadcast(body.projectId, "dependency_added");
     return c.json(result);
   });
 

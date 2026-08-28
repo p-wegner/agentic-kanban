@@ -49,23 +49,11 @@ export async function getIssueTouchedFilesWithProject(
   );
 }
 
-/** All issues in a project with their touched-files JSON (related-issues file-overlap scan). */
-export async function getProjectIssuesTouchedFiles(projectId: string, database: Database = db) {
-  return database
-    .select({
-      ...issueIdentityColumns,
-      touchedFilesJson: issues.touchedFilesJson,
-    })
-    .from(issues)
-    .where(eq(issues.projectId, projectId));
-}
-
 /**
- * Same as {@link getProjectIssuesTouchedFiles} plus `statusId` (#918) â€” the touched-files
- * ticket-group seed needs to restrict candidates to Backlog/Todo, which the identity
- * projection alone cannot express.
+ * All issues in a project with their touched-files JSON and status id — the related-issues
+ * file-overlap scan ignores `statusId`; the #918 ticket-group seed restricts on it.
  */
-export async function getProjectIssuesTouchedFilesWithStatus(projectId: string, database: Database = db) {
+export async function getProjectIssuesTouchedFiles(projectId: string, database: Database = db) {
   return database
     .select({
       ...issueIdentityColumns,

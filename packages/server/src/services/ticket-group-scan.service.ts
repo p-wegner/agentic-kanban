@@ -27,7 +27,7 @@ import {
   getTerminalStatusIds,
   insertIssueDependencySafe,
 } from "../repositories/issue-ai.repository.js";
-import { getProjectIssuesTouchedFilesWithStatus } from "../repositories/issue/touched-files.repository.js";
+import { getProjectIssuesTouchedFiles } from "../repositories/issue/touched-files.repository.js";
 import { getStatusIdsByName } from "../repositories/project-status.repository.js";
 
 export interface TicketGroupProposal {
@@ -242,7 +242,7 @@ export async function scanTouchedFilesForTicketGroups(
   if (candidateStatusIds.size === 0) {
     return { proposals: [], rejected: [], scannedCount: 0 };
   }
-  const all = await getProjectIssuesTouchedFilesWithStatus(projectId, database);
+  const all = await getProjectIssuesTouchedFiles(projectId, database);
   const candidates = all.filter((i) => i.statusId != null && candidateStatusIds.has(i.statusId) && i.issueNumber != null);
   if (candidates.length < 2) {
     return { proposals: [], rejected: [], scannedCount: candidates.length };

@@ -1787,7 +1787,24 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                projectId:
+                  type: string
+                  minLength: 1
+                apply:
+                  type: boolean
+                mode:
+                  type: string
+                  enum:
+                    - llm
+                    - touched-files
+                minSharedFiles:
+                  type: integer
+                  exclusiveMinimum: 0
+              required:
+                - projectId
               additionalProperties: true
+              x-unknown-keys: stripped
       responses:
         "200":
           description: Success

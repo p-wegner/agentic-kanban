@@ -1145,6 +1145,14 @@ function applyZodModifier(name: string, call: CallExpression, inner: ZodRead): Z
             : undefined;
       return key ? { schema: { ...schema, [key]: value }, optional: inner.optional } : inner;
     }
+    // Numeric narrowings that ARE expressible in JSON Schema. Without these the whole
+    // schema falls back to `additionalProperties: true` (the `default` arm below), which is
+    // how `minSharedFiles: z.number().int().positive()` silently cost `POST
+    // /api/issues/group-scan` its property list.
+    case "int":
+      return { schema: { ...schema, type: "integer" }, optional: inner.optional };
+    case "positive":
+      return { schema: { ...schema, exclusiveMinimum: 0 }, optional: inner.optional };
     // Predicates and reshapes that do NOT change what the client may send: `.refine` /
     // `.superRefine` carry the guard's own message and are not expressible in JSON Schema,
     // and `.transform` changes what the HANDLER receives, not what the wire accepts.
