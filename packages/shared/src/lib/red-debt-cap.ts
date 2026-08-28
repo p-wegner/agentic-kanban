@@ -119,3 +119,26 @@ export function resolveEffectiveRedDebtPosture(input: RedDebtCapInput): RedDebtC
   }
   return current;
 }
+
+const redDebtPosturePrefDef = projectPref("red_debt_posture");
+
+export function redDebtPosturePrefKey(projectId: string): string {
+  return redDebtPosturePrefDef.key(projectId);
+}
+
+const RISK_POSTURE_LEVELS: readonly RiskPostureLevel[] = ["strict", "standard", "fast", "sprint"];
+
+export const RED_DEBT_POSTURE_DEFAULT: RiskPostureLevel = "standard";
+
+/**
+ * Resolve a project's posture from the `red_debt_posture_<projectId>` stand-in pref (#911 is
+ * not landed yet — see `review-mode-pref.ts`'s identical stand-in for `review_mode`). Any
+ * value other than an exact known level fails closed to `"standard"`, which never softens a
+ * gate verdict — an unset/mistyped pref must never be read as an invitation to pass a red
+ * suite through.
+ */
+export function resolveRedDebtGatePosture(value: string | null | undefined): RiskPostureLevel {
+  return value && (RISK_POSTURE_LEVELS as readonly string[]).includes(value)
+    ? (value as RiskPostureLevel)
+    : RED_DEBT_POSTURE_DEFAULT;
+}

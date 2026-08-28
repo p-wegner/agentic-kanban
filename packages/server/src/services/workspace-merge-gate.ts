@@ -44,6 +44,10 @@ import { runGateWithEvidence } from "./merge-gate-evidence.js";
 export { movedDuringGate } from "./merge-gate-evidence.js";
 import { getBaseBranchHealthAtMergeBase, describeRedBaseAttribution } from "./base-branch-health.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { getPreference } from "../repositories/preferences.repository.js";
+import { listRedDebt, openRedDebtEntry } from "../repositories/red-debt.repository.js";
+import { redDebtPosturePrefKey, resolveRedDebtGatePosture } from "@agentic-kanban/shared/lib/red-debt-cap";
+import { resolveRedDebtGateVerdict, type RedDebtGatePosture } from "@agentic-kanban/shared/lib/red-debt-gate";
 
 type WorkspaceRow = typeof workspaces.$inferSelect;
 
@@ -394,6 +398,7 @@ export async function runPreLockGate(args: {
     // branch's merge-base. Best-effort: a failure here must never mask the real gate failure,
     // it can only ADD attribution to it.
     let gateMessage = preGate.message;
+    let failedSuites: string[] | null = null;
     if (workspace.workingDir) {
       try {
         const baseHealth = await getBaseBranchHealthAtMergeBase(
@@ -405,6 +410,13 @@ export async function runPreLockGate(args: {
         );
         const attribution = describeRedBaseAttribution(baseHealth);
         if (attribution) gateMessage = `${attribution}\n\n${preGate.message}`;
+        if (baseHealth.health?.failedSuites) {
+          try {
+            failedSuites = JSON.parse(baseHealth.health.failedSuites) as string[];
+          } catch {
+            failedSuites = null;
+          }
+        }
       } catch (err) {
         console.warn(
           "[workspace-merge] failed to resolve base-branch health attribution (non-fatal):",
@@ -412,6 +424,46 @@ export async function runPreLockGate(args: {
         );
       }
     }
+
+    // #915 — the red-debt subset rule. A known-red suite must no longer block a `fast`/`sprint`
+    // train; a NEW red suite still does. Only meaningful when the base-health probe could name
+    // WHICH suites failed (`failedSuites`) — a gate failure with no suite list (a smoke/install
+    // failure, or a base probe that never ran) carries no evidence a ledger entry could match,
+    // so it is never softened.
+    if (failedSuites && failedSuites.length > 0) {
+      try {
+        const postureRaw = await getPreference(redDebtPosturePrefKey(projectId), database).catch(() => null);
+        const posture = resolveRedDebtGatePosture(postureRaw);
+        if (posture === "fast" || posture === "sprint") {
+          const ledger = await listRedDebt(projectId, {}, database);
+          const verdict = resolveRedDebtGateVerdict({
+            failedSuites,
+            ledger: ledger.map((e) => ({ suite: e.suite, tag: e.tag as "flaky" | "real" })),
+            posture: posture as RedDebtGatePosture,
+          });
+          if (verdict.outcome === "pass-with-debt" || verdict.outcome === "pass-with-new-debt") {
+            if (verdict.outcome === "pass-with-new-debt") {
+              const sinceCommit = (await getBaseBranchHealthAtMergeBase(projectId, workspace.workingDir!, "HEAD", baseBranch, database).catch(() => null))?.recordedSha ?? "unknown";
+              for (const suite of verdict.newRed) {
+                await openRedDebtEntry({ projectId, suite, sinceCommit, tag: "real" }, database).catch((err) => {
+                  console.warn(`[workspace-merge] failed to open red-debt entry for ${suite} (non-fatal):`, errorMessage(err));
+                });
+              }
+            }
+            console.log(
+              `[workspace-merge] pre-lock gate softened by red-debt subset rule (#915) for workspace ${workspaceId}: ${verdict.message}`,
+            );
+            return token;
+          }
+        }
+      } catch (err) {
+        console.warn(
+          "[workspace-merge] red-debt subset-rule check failed (non-fatal, gate stays withheld):",
+          errorMessage(err),
+        );
+      }
+    }
+
     await recordGateFailureNote({
       workspace,
       stage: preGate.stage,

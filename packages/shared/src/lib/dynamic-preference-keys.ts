@@ -159,6 +159,12 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // shared/lib/red-debt-cap.ts.
   "red_debt_max",
   "red_debt_max_age",
+  // `red_debt_posture_<id>` — a stand-in for the risk-posture resolver (#911), same shape as
+  // `review_mode`'s own stand-in comment above. Until #911 fans a real posture out to every
+  // consumer, this is the ONE place the merge gate reads "fast"/"sprint"/"standard"/"strict"
+  // from to decide whether the red-debt subset rule (#915) may soften a verdict. Defaults to
+  // "standard" (never softens) when unset or unparseable — see resolveRedDebtGatePosture.
+  "red_debt_posture",
 ] as const;
 
 // Deliberately NOT registered, though both are per-project keys that exist on disk (#496):
