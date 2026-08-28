@@ -97,6 +97,13 @@ export function createWorkspaceRebaseService(deps: {
       }
       await killWorktreeProcesses(worktree, isLeading ? `update-base:post` : `update-base:sibling-post:${ns}`);
       if (!repoResult.success) {
+        // #928 — rebaseOntoBase leaves a genuine conflict IN PROGRESS (detached HEAD,
+        // rebase-merge dir) for the caller to resolve. update-base has no resolution UI of
+        // its own (that's /resolve-conflicts on a fix-and-merge session), so a conflict here
+        // must abort immediately: the conflict list is already captured above, and leaving
+        // the worktree detached mid-rebase strands it for relaunch/diff/merge/the monitor
+        // until someone hand-runs `git rebase --abort` (repro: #905, same shape as #102).
+        await gitService.abortRebase(worktree).catch(() => { /* best effort — nothing to abort */ });
         result = {
           success: false,
           conflictingFiles: [
