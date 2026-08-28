@@ -107,7 +107,18 @@ describe("CLAUDE.md git/worktree invariants (#598)", () => {
     collect(settings.hooks ?? {});
 
     expect(commands.length, "no hook commands found — the walk broke, not the config").toBeGreaterThan(3);
-    const bad = commands.filter((c) => !c.includes("$CLAUDE_PROJECT_DIR/") || c.includes("\\"));
+    // Exactly one deliberate exception (#922): disclose-context.mjs uses a PLAIN RELATIVE
+    // path on purpose. $CLAUDE_PROJECT_DIR is empty in `claude -p` sessions (review/one-shot/
+    // Pi task agents) and Claude Code pre-expands it textually before spawn, so the anchored
+    // form resolves to a bogus drive-root path (e.g. C:\.claude\hooks\...) and fails
+    // non-blockingly in exactly the launch mode this hook most needs to run in. The hook
+    // self-locates its project root via a `.claude`/`.git` walk-up instead of trusting the
+    // env var — see the header of packages/server/src/scaffold/disclose-context.mjs. Every
+    // other hook stays subject to the rule; this is not a precedent for a second exception.
+    const EXEMPT_COMMANDS = new Set(["node .claude/hooks/disclose-context.mjs"]);
+    const bad = commands.filter(
+      (c) => !EXEMPT_COMMANDS.has(c) && (!c.includes("$CLAUDE_PROJECT_DIR/") || c.includes("\\")),
+    );
     expect(
       bad,
       `hook commands must be "$CLAUDE_PROJECT_DIR/..."-anchored with forward slashes:\n${bad.join("\n")}`,
