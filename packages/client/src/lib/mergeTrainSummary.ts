@@ -4,7 +4,9 @@
  * per `lib/<feature>.ts` (#589) so the derivation is testable without a component.
  */
 
-export type MergeTrainState = "assembling" | "gating" | "landing" | "landed" | "red" | "abandoned";
+import type { MergeTrainState, MergeTrainRowDto } from "@agentic-kanban/shared";
+
+export type { MergeTrainState, MergeTrainRowDto };
 
 export interface MergeTrainGateEvidence {
   gateRuns?: number;
@@ -12,19 +14,6 @@ export interface MergeTrainGateEvidence {
   landed?: string[];
   dropped?: Array<{ workspaceId: string; reason: string }>;
   mergeSha?: string | null;
-}
-
-export interface MergeTrainRowDto {
-  id: string;
-  projectId: string;
-  label: string;
-  memberWorkspaceIds: string;
-  state: MergeTrainState;
-  gateEvidence: string | null;
-  bisectResult: string | null;
-  reconciledReason: string | null;
-  startedAt: string;
-  finishedAt: string | null;
 }
 
 export interface MergeTrainSummary {
