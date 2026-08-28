@@ -19,6 +19,7 @@ import {
 import { getLatestBaseBranchHealth, type BaseBranchHealthOutcome } from "../repositories/base-branch-health.repository.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
+import { buildGateBusy } from "../services/jvm-build-semaphore.js";
 
 const DEFAULT_INTERVAL_MS = 30 * 60 * 1000;
 const INITIAL_DELAY_MS = 2 * 60 * 1000;
@@ -33,20 +34,36 @@ export interface BaseHealthDueInput {
   lastOutcome?: BaseBranchHealthOutcome | string | null;
   /** ISO start stamp of a probe believed to still be running (empty/null = none). */
   probeStartedAt?: string | null;
+  /**
+   * Is a pre-merge gate's heavyweight verify/build/smoke work running right now (#931)?
+   * Read from `buildGateBusy()` by the caller — kept as an input rather than read in here so
+   * this stays a pure decision function. The probe is the least urgent of the three
+   * uncoordinated test-spawning paths (gate, builder, base-health) and its result is not
+   * time-critical, so it is the one that yields.
+   */
+  gateBusy?: boolean;
 }
 
 export interface BaseHealthDueVerdict {
   due: boolean;
-  reason: "no_history" | "interval_elapsed" | "probe_in_flight" | "recent_result";
+  reason: "no_history" | "interval_elapsed" | "probe_in_flight" | "recent_result" | "gate_running";
 }
 
 /**
- * Whether a project's base branch is due for a probe (#712). Pure and synchronous on purpose:
- * every one of the four defects this encodes is a comparison, and a table of comparisons is a
- * far better test than a sweep that needs a database.
+ * Whether a project's base branch is due for a probe (#712, #931). Pure and synchronous on
+ * purpose: every one of the defects this encodes is a comparison, and a table of comparisons
+ * is a far better test than a sweep that needs a database.
  */
 export function isBaseHealthProbeDue(input: BaseHealthDueInput): BaseHealthDueVerdict {
   const { nowMs, intervalMs } = input;
+
+  // 0. A merge gate is spending the box's cores right now (#931: 22 vitest workers measured
+  //    from three uncoordinated runs at once). Deferred, not skipped — the interval-elapsed
+  //    check below still applies next tick, so a busy gate only delays the probe, never
+  //    starves it permanently.
+  if (input.gateBusy) {
+    return { due: false, reason: "gate_running" };
+  }
 
   // 1. A probe is already running (persisted, so a restart cannot forget it). A stamp older
   //    than the probe's own ceiling belongs to a process that was killed mid-run — trusting it
@@ -131,6 +148,7 @@ export async function runBaseBranchHealthCheckOnce(
           lastResultAt: latest?.createdAt ?? null,
           lastOutcome: latest?.outcome ?? null,
           probeStartedAt,
+          gateBusy: buildGateBusy(),
         });
         if (!verdict.due) continue;
         await verifyBaseBranchHealth(id, database);

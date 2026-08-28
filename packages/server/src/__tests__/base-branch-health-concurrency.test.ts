@@ -278,6 +278,33 @@ describe("isBaseHealthProbeDue (#712)", () => {
     });
     expect(verdict.due).toBe(true);
   });
+
+  it("defers to a running merge gate even when otherwise due (#931)", () => {
+    const verdict = isBaseHealthProbeDue({
+      nowMs,
+      intervalMs: INTERVAL_MS,
+      lastResultAt: iso(-60 * 60 * 1000),
+      lastOutcome: "green",
+      gateBusy: true,
+    });
+    expect(verdict).toEqual({ due: false, reason: "gate_running" });
+  });
+
+  it("with no history AND a busy gate, still defers rather than probing anyway (#931)", () => {
+    const verdict = isBaseHealthProbeDue({ nowMs, intervalMs: INTERVAL_MS, gateBusy: true });
+    expect(verdict).toEqual({ due: false, reason: "gate_running" });
+  });
+
+  it("runs normally once the gate is no longer busy", () => {
+    const verdict = isBaseHealthProbeDue({
+      nowMs,
+      intervalMs: INTERVAL_MS,
+      lastResultAt: iso(-60 * 60 * 1000),
+      lastOutcome: "green",
+      gateBusy: false,
+    });
+    expect(verdict).toEqual({ due: true, reason: "interval_elapsed" });
+  });
 });
 
 describe("the sweep honours an in-flight probe (#712)", () => {
@@ -308,5 +335,26 @@ describe("the sweep honours an in-flight probe (#712)", () => {
     await runBaseBranchHealthCheckOnce(db, 30 * 60 * 1000, nowMs + 40 * 60 * 1000);
 
     expect(cloneDests).toHaveLength(0);
+  });
+
+  it("does not start a probe while a merge gate holds the build semaphore (#931)", async () => {
+    const { runBaseBranchHealthCheckOnce } = await import("../startup/base-branch-health-reconciler.js");
+    const { runUnderBuildSemaphore } = await import("../services/jvm-build-semaphore.js");
+    const projectId = await seedProject(db);
+
+    // Otherwise clearly due: no history at all.
+    let releaseGate: () => void = () => {};
+    const gateHeld = new Promise<void>((resolve) => { releaseGate = resolve; });
+    const gateTask = runUnderBuildSemaphore(() => gateHeld);
+
+    await runBaseBranchHealthCheckOnce(db, 30 * 60 * 1000, Date.now());
+    expect(cloneDests).toHaveLength(0);
+
+    releaseGate();
+    await gateTask;
+
+    // Once the gate releases the semaphore, the probe runs on the next tick.
+    await runBaseBranchHealthCheckOnce(db, 30 * 60 * 1000, Date.now());
+    expect(cloneDests).toHaveLength(1);
   });
 });
