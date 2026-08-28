@@ -150,12 +150,30 @@ const checkEligibleWorker: Evaluator = async (ctx) => {
     };
   }
   ctx.workerId = workerId;
-  ctx.sharesFilesystem = ctx.workers.find((w) => w.workerId === workerId)?.sharesFilesystem === true;
+  const chosen = ctx.workers.find((w) => w.workerId === workerId);
+  ctx.sharesFilesystem = chosen?.sharesFilesystem === true;
   const eligibleCount = ctx.workers.filter((w) => w.eligible).length;
+  // #910: name the headroom that actually decided, not just the outcome — `worker
+  // explain` must show the values it read, and "least-loaded" alone stopped being the
+  // whole story once headroom became the primary sort key.
+  const headroomDetail = chosen?.capacity
+    ? `, ${chosen.capacity.freeRamGb.toFixed(1)}GB free` +
+      (chosen.capacity.thrashing !== "none" ? `, thrashing=${chosen.capacity.thrashing}` : "")
+    : ", headroom unknown";
   return {
     outcome: "pass",
-    detail: `worker ${workerId} selected (least-loaded of ${eligibleCount} eligible)`,
-    observed,
+    detail:
+      `worker ${workerId} selected (highest headroom${headroomDetail}, of ${eligibleCount} eligible)`,
+    observed: {
+      ...observed,
+      ...(chosen?.capacity
+        ? {
+            selectedFreeRamGb: chosen.capacity.freeRamGb,
+            selectedSpareCores: chosen.capacity.spareCores,
+            selectedThrashing: chosen.capacity.thrashing,
+          }
+        : { selectedFreeRamGb: null, selectedSpareCores: null, selectedThrashing: null }),
+    },
   };
 };
 

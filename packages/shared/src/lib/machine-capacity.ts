@@ -151,6 +151,50 @@ export type MachineCapacitySnapshot =
   | (Tier0Capacity & { hold: boolean });
 
 /**
+ * The worker-heartbeat shape (#910): free RAM GB, spare cores, a thrashing flag — same
+ * fields Tier 0/1 already carry, folded into one snapshot a worker daemon can drop
+ * straight onto its heartbeat. `spareCores` has no existing Tier 0/1 concept, so it is
+ * computed here from `os.cpus().length`; a caller with a real load figure (e.g. Tier 1's
+ * `fleet` tool) can override `usedCores` to get a sharper answer, cheaper than the
+ * `headroomProcesses` figure. Never throws: an unreadable `os.cpus()` degrades to 0
+ * spare cores rather than failing the whole snapshot.
+ */
+export interface WorkerCapacitySnapshot {
+  freeRamGb: number;
+  spareCores: number;
+  thrashing: "none" | "light" | "heavy" | string;
+}
+
+export function resolveSpareCores(opts: { usedCores?: number } = {}): number {
+  let total: number;
+  try {
+    total = os.cpus().length;
+  } catch {
+    return 0;
+  }
+  const used = opts.usedCores ?? 0;
+  return Math.max(0, total - used);
+}
+
+/**
+ * Fold a `MachineCapacitySnapshot` into the worker-heartbeat capacity shape. Tier 0 has
+ * no thrashing signal of its own (RAM-only), so it reports `"none"` — that is honestly
+ * "not measured", not a claim the machine is calm; a caller wanting the sharper answer
+ * should install the `fleet` CLI so Tier 1 fires instead.
+ */
+export function toWorkerCapacitySnapshot(
+  snapshot: MachineCapacitySnapshot,
+  opts: { usedCores?: number } = {},
+): WorkerCapacitySnapshot {
+  const freeRamGb = snapshot.tier === "1" ? Math.max(0, os.freemem() / GB) : (snapshot.freeGb ?? 0);
+  return {
+    freeRamGb,
+    spareCores: resolveSpareCores(opts),
+    thrashing: snapshot.tier === "1" ? snapshot.thrashing : "none",
+  };
+}
+
+/**
  * The one entry point callers should use: try Tier 1, degrade to Tier 0 when the fleet
  * tool is absent or unusable. `hold` is normalized across tiers so a caller never has to
  * branch on `tier` to answer "can I start another agent on this host right now" — but the

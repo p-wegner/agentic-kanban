@@ -149,4 +149,46 @@ describe("worker-registry (worker fleet phase 1a)", () => {
       expect(staleView.status).toBe("online");
     });
   });
+
+  // #910: capacity rides the heartbeat's `capabilities.capacity` block, in memory only
+  // (mirrors protocolVersion/workerVersion, see WorkerView's own comment on why not a column).
+  describe("capacity reporting (#910)", () => {
+    it("is absent (unknown) until a heartbeat reports it", async () => {
+      const { workerId } = await registerOne();
+      const [worker] = await registry.listWorkersView();
+      expect(worker.id).toBe(workerId);
+      expect(worker.capacity).toBeUndefined();
+    });
+
+    it("surfaces the capacity block from the latest heartbeat", async () => {
+      const { workerId, workerToken } = await registerOne();
+      await registry.heartbeat(workerId, workerToken, {
+        capabilities: { capacity: { freeRamGb: 12.5, spareCores: 6, thrashing: "none" } },
+      });
+      const [worker] = await registry.listWorkersView();
+      expect(worker.capacity).toEqual({ freeRamGb: 12.5, spareCores: 6, thrashing: "none" });
+    });
+
+    it("updates on every heartbeat rather than freezing the first report", async () => {
+      const { workerId, workerToken } = await registerOne();
+      await registry.heartbeat(workerId, workerToken, {
+        capabilities: { capacity: { freeRamGb: 12.5, spareCores: 6, thrashing: "none" } },
+      });
+      await registry.heartbeat(workerId, workerToken, {
+        capabilities: { capacity: { freeRamGb: 0.4, spareCores: 0, thrashing: "heavy" } },
+      });
+      const [worker] = await registry.listWorkersView();
+      expect(worker.capacity).toEqual({ freeRamGb: 0.4, spareCores: 0, thrashing: "heavy" });
+    });
+
+    it("goes back to unknown when a later heartbeat carries capabilities but no capacity", async () => {
+      const { workerId, workerToken } = await registerOne();
+      await registry.heartbeat(workerId, workerToken, {
+        capabilities: { capacity: { freeRamGb: 12.5, spareCores: 6, thrashing: "none" } },
+      });
+      await registry.heartbeat(workerId, workerToken, { capabilities: { maxConcurrency: 3 } });
+      const [worker] = await registry.listWorkersView();
+      expect(worker.capacity).toBeUndefined();
+    });
+  });
 });
