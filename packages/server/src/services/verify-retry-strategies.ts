@@ -55,6 +55,12 @@ export interface VerifyOutcome {
    * cleared by a second narrower run must say so.
    */
   flakeRetryNote?: string;
+  /**
+   * The suites a targeted re-run cleared, structured (not just the prose in `flakeRetryNote`).
+   * Set only alongside `flakeRetryNote` — a caller with a red-debt ledger can open a `flaky`
+   * entry per suite instead of paying for a full re-run on the next gate too (#915).
+   */
+  flakySuites?: FailedSuite[];
 }
 
 export interface ResolveVerifyOutcomeInput {
@@ -162,6 +168,7 @@ export async function resolveVerifyOutcome(input: ResolveVerifyOutcomeInput): Pr
       return {
         failure: null,
         flakeRetryNote: `— ${flake.suites.length} suite(s) failed under load and PASSED on a targeted re-run: ${names}`,
+        flakySuites: flake.suites,
       };
     }
     if (retryResult.noProgress) {

@@ -68,6 +68,9 @@ describe("resolveVerifyOutcome", () => {
     // run must never read as a plain pass.
     expect(out.flakeRetryNote).toMatch(/PASSED on a targeted re-run/);
     expect(out.flakeRetryNote).toContain("src/__tests__/a.test.ts");
+    // #915 — the cleared suite(s) are also returned structured, so a caller with a red-debt
+    // ledger can open a `flaky` entry per suite instead of just prose in the message.
+    expect(out.flakySuites).toEqual([{ packageLabel: "server", file: "src/__tests__/a.test.ts" }]);
   });
 
   it("calls the same failure REAL when the narrow re-run fails too — and does not try a third time", async () => {
