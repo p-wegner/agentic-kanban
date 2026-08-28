@@ -199,3 +199,37 @@ describe("per-repo rebase (#93)", () => {
     expect(existsSync(join(leadingWorktree, "lead.txt"))).toBe(true);
   }, REAL_GIT_TEST_TIMEOUT_MS);
 });
+
+// #928 — a leading-repo conflict during POST /update-base used to leave the worktree
+// detached mid-rebase (rebase-merge dir on disk, HEAD not on the branch): the endpoint
+// correctly reported success:false + conflictingFiles, but the worktree itself was left
+// unusable until a hand-run `git rebase --abort`. update-base must abort the failed rebase
+// itself, the same way rebaseRepo already does for a sibling conflict above.
+describe("update-base (#928): leading-repo conflict does not strand the worktree mid-rebase", () => {
+  it("aborts the failed rebase, leaving the worktree on its branch and clean, and still reports the conflicting files", async () => {
+    const { mergeService, leadRepo, workspaceId, leadingWorktree } = await setupWorkspaceWithSibling();
+
+    // Leading worktree and its base both edit README.md at the same spot → real conflict.
+    await writeFile(join(leadingWorktree, "README.md"), "FEATURE\n");
+    await exec("git", ["add", "."], leadingWorktree);
+    await exec("git", ["commit", "-m", "feature edit"], leadingWorktree);
+
+    await writeFile(join(leadRepo, "README.md"), "BASE\n");
+    await exec("git", ["add", "."], leadRepo);
+    await exec("git", ["commit", "-m", "base edit"], leadRepo);
+
+    const result = await mergeService.updateBase(workspaceId, "rebase");
+
+    expect(result.success).toBe(false);
+    expect(result.conflictingFiles).toContain("README.md");
+
+    // The worktree must be left on its branch, not detached, and clean — no rebase left
+    // in progress. This is the guard the ticket describes: relaunch/diff/merge/the monitor
+    // must never see a detached HEAD here.
+    const currentBranch = (await exec("git", ["rev-parse", "--abbrev-ref", "HEAD"], leadingWorktree)).trim();
+    expect(currentBranch).toBe("feature/rebase");
+    expect(await gitService.isRebaseInProgress(leadingWorktree)).toBe(false);
+    const status = await exec("git", ["status", "--porcelain"], leadingWorktree);
+    expect(status.trim()).toBe("");
+  }, REAL_GIT_TEST_TIMEOUT_MS);
+});
