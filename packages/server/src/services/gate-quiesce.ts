@@ -40,14 +40,76 @@ export async function quiesceBuildersEnabled(projectId: string, database: Databa
 }
 
 /**
- * True when this project's builder starts should be held THIS cycle. Both checks are
+ * True when this project's HOST builder starts should be held THIS cycle. Both checks are
  * process-local and free (no spawn), so they run before the preference read — an idle board
  * never pays for either. A gate that is running but the host is NOT saturated holds nothing:
  * the whole point of #909 is that "a gate is in flight" and "the box is tight" are different
  * facts, and only the second earns a hold on projects that have nothing to do with this gate.
+ *
+ * **#936 — "host" in that first sentence is load-bearing.** This answers a question about the
+ * BOX, so it can only ever justify holding a start that would run ON the box. The caller must
+ * treat it as a PLACEMENT input the way `isHostSaturated` already is (#908): a project whose
+ * fleet can absorb the work has somewhere else to run it, and skipping its cycle outright is
+ * what let one project's multi-hour gate freeze ten unrelated monitor-mode projects for hours.
  */
 export async function shouldQuiesceBuildersForGate(projectId: string, database: Database): Promise<boolean> {
   if (!buildGateBusy()) return false;
   if (!readTier0Capacity().hold) return false;
   return quiesceBuildersEnabled(projectId, database);
+}
+
+/** What a monitor cycle should do about a running gate (#936). */
+export type GateQuiesceAction =
+  /** Nothing is contended, or this project can route around it — keep pulling work. */
+  | { action: "proceed"; reason: "no_host_hold" | "fleet_overflow" }
+  /** The host is held and this project has nowhere else to run — skip, visibly. */
+  | { action: "skip"; reason: "verify_gate_running" };
+
+/**
+ * DECISION (pure): does a running verify gate stop THIS project's cycle (#936)?
+ *
+ * Split out of `runTodoPull` so the rule is checkable without an entire monitor-cycle
+ * fixture, and because it is exactly the "decision function" kind this package documents:
+ * a synchronous verdict co-located with the executor that acts on it.
+ *
+ * The rule that matters: a gate hold is a statement about the BOX, so it can only hold a
+ * start that would run on the box. Before this, the caller returned unconditionally — and
+ * with a merge costing multiple hours of gate time, ten monitor-mode projects were skipped
+ * with `verify_gate_running` every cycle for hours. They were not queued behind the gate;
+ * they were skipped and never run, so one project's backlog froze the whole board.
+ */
+export function decideGateQuiesce(input: {
+  /** {@link shouldQuiesceBuildersForGate} — is the host held for this project? */
+  hostHeld: boolean;
+  /** Can this project's fleet absorb a start the host cannot take? */
+  fleetOverflowAvailable: boolean;
+}): GateQuiesceAction {
+  if (!input.hostHeld) return { action: "proceed", reason: "no_host_hold" };
+  if (input.fleetOverflowAvailable) return { action: "proceed", reason: "fleet_overflow" };
+  return { action: "skip", reason: "verify_gate_running" };
+}
+
+/**
+ * The monitor's whole gate-contention question, answered in one call (#936): read the host
+ * hold, ask about fleet overflow only if the host IS held (an idle board must not pay for a
+ * fleet lookup), and say out loud when a project routes around a running gate rather than
+ * being skipped by it.
+ */
+export async function resolveGateQuiesce(args: {
+  projectId: string;
+  database: Database;
+  hasFleetOverflowCapacity: () => Promise<boolean>;
+}): Promise<GateQuiesceAction> {
+  const hostHeld = await shouldQuiesceBuildersForGate(args.projectId, args.database);
+  const decision = decideGateQuiesce({
+    hostHeld,
+    fleetOverflowAvailable: hostHeld ? await args.hasFleetOverflowCapacity() : false,
+  });
+  if (decision.reason === "fleet_overflow") {
+    console.log(
+      `[monitor] Verify gate is running and the host is tight, but project ${args.projectId} has fleet `
+        + `overflow capacity — pulling work anyway rather than skipping the cycle (#936).`,
+    );
+  }
+  return decision;
 }

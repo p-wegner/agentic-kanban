@@ -18,6 +18,7 @@ import { preferences } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
 import type { Database } from "../db/index.js";
 import {
+  decideGateQuiesce,
   shouldQuiesceBuildersForGate,
   quiesceBuildersEnabled,
   quiesceBuildersDuringGatePrefKey,
@@ -111,6 +112,34 @@ describe("builder quiescing (#581, host-saturation-scoped since #909)", () => {
       heldDuringGate = await shouldQuiesceBuildersForGate(PROJECT_ID, db);
     });
     expect(heldDuringGate).toBe(false);
+  });
+});
+
+/**
+ * #936 — a gate hold is a statement about the BOX, so it can only hold a start that would run
+ * ON the box. It used to abort the whole cycle: ten monitor-mode projects (helpdesk, pmtest,
+ * linklocker, …) were skipped with `verify_gate_running` every cycle for hours while one
+ * project's multi-hour merge gate ran. They were not queued behind it — skipped and never run.
+ */
+describe("decideGateQuiesce — a gate hold does not skip a project that can route around it (#936)", () => {
+  it("proceeds when the host is not held at all — the common case", () => {
+    expect(decideGateQuiesce({ hostHeld: false, fleetOverflowAvailable: false }))
+      .toEqual({ action: "proceed", reason: "no_host_hold" });
+  });
+
+  it("proceeds when the host is held but this project's fleet can absorb the start", () => {
+    expect(decideGateQuiesce({ hostHeld: true, fleetOverflowAvailable: true }))
+      .toEqual({ action: "proceed", reason: "fleet_overflow" });
+  });
+
+  it("skips only when the host is held AND there is nowhere else to run", () => {
+    expect(decideGateQuiesce({ hostHeld: true, fleetOverflowAvailable: false }))
+      .toEqual({ action: "skip", reason: "verify_gate_running" });
+  });
+
+  it("an unheld host is never overridden by an absent fleet", () => {
+    // The old bug's shape: the gate check fired before placement was even considered.
+    expect(decideGateQuiesce({ hostHeld: false, fleetOverflowAvailable: false }).action).toBe("proceed");
   });
 });
 
