@@ -9,7 +9,11 @@
 import type { Database } from "../db/index.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import * as gitService from "./git.service.js";
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import { getMergeQueueIssueRows, getMergeTrainMaxSizePref } from "../repositories/merge-queue.repository.js";
+import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
+import { resolveTrainOptInSize } from "./merge-train-window.js";
+import { resolveRiskPosture, formatPostureNote, type RiskPosture } from "./risk-posture.service.js";
 import { createMergeTrain, updateMergeTrainState } from "../repositories/merge-train.repository.js";
 import { runMergeTrain } from "./merge-train.service.js";
 import { runPreMergeGate } from "./pre-merge-gate.service.js";
@@ -23,11 +27,63 @@ import type { MergeQueueEvent, MergeQueuePlan } from "./merge-queue.service.js";
  * train strategy at all (#904). `> 1` is the signal — a project that has never touched this
  * knob defaults to 1 (i.e. stays on the sequential path unless the caller explicitly asks
  * for `strategy: "train"`), since #905 owns the actual batching-window default of 4.
+ *
+ * #937: the DECISION is `resolveTrainOptInSize` (a pure prefMap resolver routed through
+ * `resolveRiskPosture`); this is the thin DB-reading wrapper the existing async call sites
+ * keep, the same split `resolveVerifyGateStrategy`/`resolveGateTier` uses. An explicit
+ * `train_max_size_<projectId>` still wins, and `standard`/`strict` both resolve to 1 — so a
+ * project on either stays on the sequential path exactly as before.
  */
 export async function resolveProjectTrainMaxSize(projectId: string, database: Database): Promise<number> {
-  const raw = await getMergeTrainMaxSizePref(projectId, database);
-  const parsed = Number.parseInt(raw ?? "", 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+  const prefMap = toPrefMap(await getAllPreferencesCached(database).catch(() => []));
+  return resolveTrainOptInSize(prefMap, projectId);
+}
+
+/**
+ * As above, keeping the posture so the caller can name it when the POSTURE (not an explicit
+ * pref) is what put this batch on a train — decision 017's visibility rule.
+ */
+export async function resolveTrainOptIn(
+  projectId: string,
+  database: Database,
+): Promise<{ maxSize: number; posture: RiskPosture; fromPosture: boolean }> {
+  const prefMap = toPrefMap(await getAllPreferencesCached(database).catch(() => []));
+  const posture = resolveRiskPosture(prefMap, projectId);
+  // Sourced from the posture only when there is NO explicit override — comparing the two
+  // VALUES would misreport an operator who happens to have pinned the same number.
+  const explicit = await getMergeTrainMaxSizePref(projectId, database).catch(() => undefined);
+  const explicitParsed = Number.parseInt(explicit ?? "", 10);
+  const hasExplicit = Number.isFinite(explicitParsed) && explicitParsed > 0;
+  return { maxSize: resolveTrainOptInSize(prefMap, projectId), posture, fromPosture: !hasExplicit };
+}
+
+/**
+ * Does this project's opt-in put an eligible batch on a train?
+ *
+ * The decision lives here rather than inline in `createMergeQueueService` because it is
+ * about the TRAIN (it is the async half of `resolveTrainOptIn`, and the only caller that
+ * cares about the posture-vs-explicit distinction), and because that function is on the
+ * shrink-only nloc ring (#800) — #937's inline version pushed it past its baseline.
+ *
+ * `batchSize` is only for the log line: decision 017's visibility rule says that when the
+ * POSTURE, not an explicit `train_max_size_<projectId>`, is what batched these workspaces,
+ * the log has to say so and name the posture.
+ */
+export async function trainWantedForProject(
+  projectId: string | null,
+  database: Database,
+  batchSize: number,
+): Promise<boolean> {
+  if (!projectId) return false;
+  const optIn = await resolveTrainOptIn(projectId, database);
+  const wants = optIn.maxSize > 1;
+  if (wants && optIn.fromPosture) {
+    console.log(
+      `[merge-queue] batching ${batchSize} workspace(s) onto a train (max ${optIn.maxSize})` +
+        formatPostureNote(optIn.posture),
+    );
+  }
+  return wants;
 }
 
 /**

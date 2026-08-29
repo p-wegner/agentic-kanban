@@ -130,6 +130,53 @@ export function resolveRiskPosture(
 }
 
 /**
+ * Does this posture's `placementBias` forbid remote dispatch (#937)?
+ *
+ * Only `host-half` does. It is `strict`'s value, and `strict` is the posture for release
+ * branches and client repos — the same population `allowed_profiles_<projectId>` protects, and
+ * for the same reason: a fleet worker authenticates the agent with its OWN local login and the
+ * board deliberately sends no credentials (decision 012), so the board can PREFER a machine but
+ * cannot make a worker honour a rigor requirement. A project whose operator set `strict`
+ * because the work must not leave the box is exactly the project that must not be dispatched to
+ * one that cannot prove it qualifies.
+ *
+ * `host-preferred` (standard) and `remote-preferred` (fast/sprint) are PREFERENCES, not
+ * constraints, and this resolver deliberately reports neither as blocking — a preference that
+ * silently became a refusal would be the "weakens invisibly" failure decision 017 forbids, and
+ * the board has no worker-side attestation to bias toward or away from a machine with. So
+ * `standard` reproduces today's behaviour exactly (no new host fallback), and `fast`/`sprint`
+ * change nothing here until such an attestation exists.
+ */
+export function remoteDispatchBlockedByPlacementBias(
+  posture: RiskPosture,
+): { blocked: false } | { blocked: true; reason: string } {
+  if (posture.placementBias !== "host-half") return { blocked: false };
+  return {
+    blocked: true,
+    reason:
+      `risk posture '${posture.level}' sets placementBias 'host-half' (source: ${posture.source}), so this ` +
+      `project does not dispatch to a fleet worker — a worker authenticates with its OWN local login and the ` +
+      `board cannot make it honour the posture (decision 012/017)`,
+  };
+}
+
+/**
+ * Decision 017's VISIBILITY rule, as one formatter (#937).
+ *
+ * "Every gate/merge message that reads a `RiskPosture` field must fold `.summary` into its
+ * output" is a rule about message TEXT, so it needs one implementation — otherwise each
+ * message site invents its own wording and a reader cannot tell whether the absence of a
+ * posture note means `standard` or means the site forgot.
+ *
+ * Returns the empty string for a missing posture, so a caller that never resolved one cannot
+ * accidentally claim one decided something.
+ */
+export function formatPostureNote(posture: RiskPosture | undefined | null): string {
+  if (!posture) return "";
+  return ` [risk posture: ${posture.summary} (source: ${posture.source})]`;
+}
+
+/**
  * Find the `risk:<level>` tag on an issue, if any — the per-ticket override that wins for that
  * issue's workspace regardless of the project's `risk_posture_<projectId>` pref. A prefix scan
  * (not an exact-name lookup like `hasSkipAutoStartTag`) because the tag NAME carries the level.

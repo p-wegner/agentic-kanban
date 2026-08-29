@@ -42,6 +42,8 @@ import { classifySessionExit, resolveSessionRoleFlags } from "./session-exit-cla
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { setMergeGateEvidence } from "../repositories/merge-gate.repository.js";
 import { resolveGateVerification } from "../services/pre-merge-gate-tier.js";
+import { resolveProjectReviewMode } from "../lib/review-mode-pref.js";
+import { formatPostureNote } from "../services/risk-posture.service.js";
 import { workspaceHasCommittedWork } from "../services/workspace-commits.js";
 import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.service.js";
 import { isFoundationalBlocker } from "../services/foundational-merge.service.js";
@@ -592,6 +594,15 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
     // picked up here on its own session exit and flipped back to idle/reviewing.
     if (workspace.parentWorkspaceId || workspace.forkStatus) {
       console.log(`[workflow] workspace ${workspaceId} is a fork child (parentWorkspaceId=${workspace.parentWorkspaceId ?? "n/a"}, forkStatus=${workspace.forkStatus ?? "n/a"})  skipping legacy auto-review (#998)`);
+      return;
+    }
+    // #937 / decision 017: `sprint` posture (`reviewMode: "none"`) skips per-ticket review.
+    // It cannot override `workspace.requiresReview` — a workspace explicitly flagged as
+    // needing review is a stronger statement than a project-wide speed dial, and a posture
+    // may only weaken verification VISIBLY, never silently drop a review someone asked for.
+    const reviewDecision = resolveProjectReviewMode(prefMap, projectId);
+    if (!reviewDecision.run && !workspace.requiresReview) {
+      console.log(`[workflow] skipping per-ticket auto-review for workspace ${workspaceId}${formatPostureNote(reviewDecision.posture)}`);
       return;
     }
     const autoReview = !skipAutoReview && (workspace.requiresReview || isAutoReviewEnabled(prefMap.get(AUTO_REVIEW_PREF_KEY)));

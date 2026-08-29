@@ -1,8 +1,10 @@
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Database } from "../db/index.js";
-import { getPreference } from "../repositories/preferences.repository.js";
+import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
+import { formatPostureNote, resolveRiskPosture, type RiskPosture } from "./risk-posture.service.js";
 import { resolveEffectiveVerify } from "./stack-profile.service.js";
 import { gateVerificationKey } from "./merge-gate-tree-memo.js";
 
@@ -36,11 +38,50 @@ export function verifyGateStrategyPrefKey(projectId: string): string {
   return verifyGateStrategyPrefDef.key(projectId);
 }
 
+/**
+ * The tier decision as a pure prefMap resolver (#937), routed through `resolveRiskPosture`
+ * (#911, decision 017) — same shape as `resolveProjectContentionMode`.
+ *
+ * An explicit `verify_gate_strategy_<projectId>` still WINS when set: it is the operator's
+ * deliberate finer-grained override of one field of the posture, and #911 kept that escape
+ * hatch for `file_contention_<id>` for exactly the same reason. With no explicit value the
+ * posture's `gateTier` decides — `standard` yields `full`, which IS
+ * `DEFAULT_VERIFY_GATE_STRATEGY`, so today's behaviour is reproduced exactly.
+ *
+ * Returns the posture beside the tier so the caller can fold `.summary` into the gate message
+ * (decision 017's visibility rule: a weaker posture may only weaken verification VISIBLY).
+ */
+export function resolveGateTier(
+  prefMap: Map<string, string>,
+  projectId: string,
+): { strategy: VerifyGateStrategy; posture: RiskPosture; fromPosture: boolean } {
+  const posture = resolveRiskPosture(prefMap, projectId);
+  const raw = prefMap.get(verifyGateStrategyPrefKey(projectId))?.trim().toLowerCase();
+  if (raw !== undefined && (VERIFY_GATE_STRATEGY_VALUES as readonly string[]).includes(raw)) {
+    return { strategy: raw as VerifyGateStrategy, posture, fromPosture: false };
+  }
+  return { strategy: posture.gateTier, posture, fromPosture: true };
+}
+
+/**
+ * DB-reading wrapper over `resolveGateTier` — the same "build a prefMap, read through it"
+ * shape `resolveIssueRiskPosture` uses, so the async call sites keep their signature while
+ * the DECISION lives in one pure function.
+ *
+ * Reads the whole (short-TTL cached) pref set rather than one key: the posture needs its own
+ * project-scoped pref too, and this is the cache every monitor pass already warms.
+ */
 export async function resolveVerifyGateStrategy(projectId: string, database: Database): Promise<VerifyGateStrategy> {
-  const raw = (await getPreference(verifyGateStrategyPrefKey(projectId), database).catch(() => null))?.trim().toLowerCase();
-  return (VERIFY_GATE_STRATEGY_VALUES as readonly string[]).includes(raw ?? "")
-    ? (raw as VerifyGateStrategy)
-    : DEFAULT_VERIFY_GATE_STRATEGY;
+  return (await resolveGateTierFor(projectId, database)).strategy;
+}
+
+/** As `resolveVerifyGateStrategy`, but keeps the posture so a caller can surface `.summary`. */
+export async function resolveGateTierFor(
+  projectId: string,
+  database: Database,
+): Promise<{ strategy: VerifyGateStrategy; posture: RiskPosture; fromPosture: boolean }> {
+  const prefMap = toPrefMap(await getAllPreferencesCached(database).catch(() => []));
+  return resolveGateTier(prefMap, projectId);
 }
 
 /**
@@ -245,6 +286,17 @@ export interface GateTierInfo {
    */
   baseProbeAgeLabel?: string;
   baseProbeDue?: boolean;
+  /**
+   * The risk posture that SELECTED this tier (#937), when it did — i.e. no explicit
+   * `verify_gate_strategy_<projectId>` override was set. Decision 017's visibility rule:
+   * every gate/merge message reading a `RiskPosture` field folds its `.summary` in, so an
+   * operator can see that a weaker gate came from the posture dial rather than reading
+   * "package-scoped" and having to guess which of two knobs chose it.
+   *
+   * Undefined when the tier came from the explicit pref, or for a caller that never resolved
+   * a posture — a message must not claim a posture decided something it did not.
+   */
+  posture?: RiskPosture;
 }
 
 /**
@@ -285,7 +337,7 @@ export function buildGateTierMessage(tierInfo: GateTierInfo | null): string {
   const baseProbe = tierInfo.strategy === "scoped-base-watch" && tierInfo.baseProbeAgeLabel
     ? ` [base probe ${tierInfo.baseProbeAgeLabel}${tierInfo.baseProbeDue ? ", due now" : ""}]`
     : "";
-  return `pre-merge gate passed (${parts.join(", ")})${retry}${baseProbe}`;
+  return `pre-merge gate passed (${parts.join(", ")})${retry}${baseProbe}${formatPostureNote(tierInfo.posture)}`;
 }
 
 /**
@@ -318,12 +370,24 @@ export async function resolveGateVerification(
   database: Database,
 ): Promise<{
   strategy: VerifyGateStrategy;
+  /** The posture that selected `strategy`, or undefined when an explicit pref override did (#937). */
+  posture: RiskPosture | undefined;
   effectiveVerify: Awaited<ReturnType<typeof resolveEffectiveVerify>> | null;
   verifyScript: string | null;
   verificationKey: string;
 }> {
-  const strategy = await resolveVerifyGateStrategy(projectId, database);
+  const { strategy, posture, fromPosture } = await resolveGateTierFor(projectId, database);
   const effectiveVerify = await resolveEffectiveVerify(projectId, database, { persistDerived: true }).catch(() => null);
   const verifyScript = effectiveVerify?.command ?? null;
-  return { strategy, effectiveVerify, verifyScript, verificationKey: gateVerificationKey(strategy, verifyScript) };
+  return {
+    strategy,
+    posture: fromPosture ? posture : undefined,
+    effectiveVerify,
+    verifyScript,
+    // The KEY stays keyed on the resolved tier, not the posture that chose it: two projects on
+    // different postures that resolve to the same tier + script bought the same verification, and
+    // a pass under one is legitimately reusable under the other (#492's memo is about what the
+    // pass BOUGHT). A posture CHANGE that moves the tier already changes this key.
+    verificationKey: gateVerificationKey(strategy, verifyScript),
+  };
 }
