@@ -17,6 +17,10 @@ const HOOKS = [
   // did not — so scaffolded projects were getting the SLOW runner. Pinned here so the pair
   // cannot separate again.
   "git-topology-cache.js",
+  // #913: the runner's posture/capacity policy. Loaded defensively (a pre-#913 project
+  // survives without them), but shipped — so the same drift rule applies.
+  "hook-posture.js",
+  "machine-capacity.js",
   // #922: same dual-copy shape as the others above.
   "disclose-context.mjs",
 ];
@@ -55,6 +59,8 @@ describe("board-owned hooks refresh when the shipped version is newer (#472)", (
     "prevent-cross-worktree-writes.js",
     "smart-hooks-runner.js",
     "git-topology-cache.js",
+    "hook-posture.js",
+    "machine-capacity.js",
     "disclose-context.mjs",
   ];
 

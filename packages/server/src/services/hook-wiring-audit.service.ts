@@ -26,6 +26,19 @@ const GUARD_SCRIPT = "prevent-cross-worktree-writes.js";
 const WRITE_MATCHER_TOOLS = ["Write", "Edit", "MultiEdit", "NotebookEdit"];
 const SHELL_MATCHER_TOOLS = ["Bash", "PowerShell"];
 
+/**
+ * The COLLAPSED form (#914): the shell vector is covered by `smart-hooks-runner.js PreToolUse`
+ * running the guard IN-PROCESS, rather than by a third `Bash|PowerShell` entry of its own —
+ * three node cold starts per shell call became one.
+ *
+ * The audit must recognize it or it would report every correctly-wired project as broken and
+ * then "repair" it by appending back the entry the collapse removed, undoing #914 on every
+ * sweep. The runner's own `IN_PROCESS_HOOKS` table plus its `smart-hooks-config.json`
+ * PreToolUse list are what actually run the guard; a settings.json entry for the runner on a
+ * shell matcher is the wiring that reaches them.
+ */
+const RUNNER_SHELL_COMMAND = /smart-hooks-runner\.js\s+PreToolUse/;
+
 export interface HookWiringStatus {
   projectId: string;
   projectName: string;
@@ -71,16 +84,47 @@ function readHookEntries(settingsPath: string): { matcher: string; command: stri
   return out;
 }
 
+/**
+ * Does the runner's own config list the cross-worktree guard as a PreToolUse check (#914)?
+ *
+ * This is the half that makes the collapsed form verifiable rather than assumed. An
+ * unreadable or malformed config returns false, so an unparseable config reports the project
+ * as unwired — the same fail-closed choice `readHookEntries` already makes, and the right
+ * one: "we could not confirm the guard runs" must never read as "protected".
+ */
+function runnerRunsGuard(hooksDir: string): boolean {
+  const configPath = join(hooksDir, "smart-hooks-config.json");
+  if (!existsSync(configPath)) return false;
+  try {
+    const parsed = JSON.parse(readFileSync(configPath, "utf8")) as {
+      hooks?: { PreToolUse?: { command?: string; enabled?: boolean }[] };
+    };
+    return (parsed.hooks?.PreToolUse ?? []).some(
+      (check) => check.enabled !== false && typeof check.command === "string" && check.command.includes(GUARD_SCRIPT),
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** Audit one repo's guard wiring. Pure filesystem reads — safe to run anywhere. */
 export function auditHookWiring(
   project: { id: string; name: string; repoPath: string },
 ): HookWiringStatus {
   const hooksDir = join(project.repoPath, ".claude", "hooks");
   const scriptPresent = existsSync(join(hooksDir, GUARD_SCRIPT));
-  const entries = readHookEntries(join(project.repoPath, ".claude", "settings.json"))
-    .filter((e) => e.command.includes(GUARD_SCRIPT));
+  const allEntries = readHookEntries(join(project.repoPath, ".claude", "settings.json"));
+  const entries = allEntries.filter((e) => e.command.includes(GUARD_SCRIPT));
   const wiredForWrites = entries.some((e) => WRITE_MATCHER_TOOLS.some((t) => e.matcher.includes(t)));
-  const wiredForShell = entries.some((e) => SHELL_MATCHER_TOOLS.some((t) => e.matcher.includes(t)));
+  // Either the guard has its own shell entry (the pre-#914 form, still valid), or the runner
+  // has one AND that runner's config actually lists the guard as a PreToolUse check. Both
+  // halves are required: a runner entry alone proves nothing about whether the guard runs.
+  const wiredForShell =
+    entries.some((e) => SHELL_MATCHER_TOOLS.some((t) => e.matcher.includes(t))) ||
+    (allEntries.some(
+      (e) => RUNNER_SHELL_COMMAND.test(e.command) && SHELL_MATCHER_TOOLS.some((t) => e.matcher.includes(t)),
+    ) &&
+      runnerRunsGuard(hooksDir));
   return {
     projectId: project.id,
     projectName: project.name,

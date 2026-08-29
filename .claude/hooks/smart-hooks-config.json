@@ -9,6 +9,22 @@
         "blocking": true,
         "timeout": 30,
         "alwaysRun": true
+      },
+      {
+        "name": "Vital-file guard",
+        "command": "node .claude/hooks/vital-file-guard.js",
+        "enabled": true,
+        "blocking": true,
+        "timeout": 30,
+        "alwaysRun": true
+      },
+      {
+        "name": "Cross-worktree guard",
+        "command": "node .claude/hooks/prevent-cross-worktree-writes.js",
+        "enabled": true,
+        "blocking": true,
+        "timeout": 30,
+        "alwaysRun": true
       }
     ],
     "Stop": [

@@ -21,6 +21,22 @@ const { execSync } = require("child_process");
 const readline = require("readline");
 const { cachedTopology } = require("./git-topology-cache.js");
 
+// #913 — the posture policy and the capacity heuristic. Loaded DEFENSIVELY, unlike
+// git-topology-cache.js above: this runner is also the scaffold source shipped into
+// every driven project, and a project scaffolded before these two files existed must
+// keep working rather than dying at load time with MODULE_NOT_FOUND on every tool
+// call. Absent -> the pre-#913 behaviour (run everything, gate nothing), which is the
+// safe direction: it can only make the chain do MORE work, never less.
+function optionalHookModule(specifier) {
+  try {
+    return require(specifier);
+  } catch {
+    return null;
+  }
+}
+const capacityModule = optionalHookModule("./machine-capacity.js");
+const postureModule = optionalHookModule("./hook-posture.js");
+
 let hookInput = {};
 
 // Set by the container wrap (containerEnv in devcontainer-workspace.service.ts) on every
@@ -128,6 +144,11 @@ function loadGeneratedRules(projectDir) {
       // Generated rules are always derived from the HOST stack profile (host pnpm/tsc/etc
       // paths) — never safe to trust verbatim inside a builder container (#158).
       containerSkippable: true,
+      // #913 — marks this as a GENERATED stack rule so the posture policy and the capacity
+      // gate can see it. It was invisible to both: `runCheck` went straight to execSync, so a
+      // generated rule spawned a full build on a box the hand-authored checks had already
+      // declined to load.
+      generated: true,
     }));
 }
 
@@ -204,6 +225,20 @@ const IN_PROCESS_HOOKS = {
     module: "./validate-command-safety.js",
     run: (mod, inputData) => mod.evaluateCommand(inputData || {}),
   },
+  // #914 — the other two shell guards. `.claude/settings.json` wired all three as SEPARATE
+  // `Bash|PowerShell` PreToolUse entries, so every shell tool call paid three node cold
+  // starts (0.5–1.2s each on Windows under RAM pressure) to answer three questions that
+  // share a parsed command. Routed through the runner they cost one process total, and
+  // `runCheck`'s existing catch keeps the fail-closed semantics: a guard that THROWS falls
+  // through to the spawn path rather than being read as an allow.
+  "vital-file-guard.js": {
+    module: "./vital-file-guard.js",
+    run: (mod, inputData) => mod.evaluateCommand(inputData || {}),
+  },
+  "prevent-cross-worktree-writes.js": {
+    module: "./prevent-cross-worktree-writes.js",
+    run: (mod, inputData) => mod.evaluateToolCall(inputData || {}),
+  },
 };
 
 function inProcessHookFor(command) {
@@ -216,6 +251,86 @@ function inProcessHookFor(command) {
       `^\\s*node\\s+(["']?)[^"']*${basename.replace(/[.]/g, "\\.")}\\1\\s*$`,
     );
     if (re.test(command)) return entry;
+  }
+  return null;
+}
+
+/**
+ * The worktree's resolved posture, computed once per process (#913). A hook process
+ * handles one event, so re-reading the ticket-context file per check would be pure
+ * IO for an answer that cannot change.
+ */
+let _posture = null;
+function posture() {
+  if (_posture === null) {
+    _posture = postureModule
+      ? postureModule.resolvePosture(getProjectDir())
+      : { posture: "standard", source: "hook-posture.js absent" };
+  }
+  return _posture;
+}
+
+/**
+ * The two POLICY gates every spawning check passes through (#913), in order:
+ *
+ *   1. Posture — is this KIND of check run at all under the project's risk posture?
+ *   2. Capacity — can this box afford the spawn right now?
+ *
+ * Returns null to proceed, or an inconclusive `runCheck`-shaped result. Both refusals
+ * are `advisory` (never `blocking`) and both say plainly that nothing was verified: a
+ * skipped check must never be mistakable for a green one, and neither a posture
+ * setting nor a memory reading is evidence about the code. Same reasoning #487
+ * applied to a timed-out check.
+ *
+ * A SAFETY check (`alwaysRun`) never reaches either gate — `checkAllowedUnderPosture`
+ * classifies it as such and the capacity gate returns early for it. A guard that stands
+ * down because the box is busy is not a guard.
+ *
+ * Neither does an `other` check — one the classifier does not recognize as expensive.
+ * The capacity gate exists to stop a BUILD being spawned onto a box that cannot afford
+ * it, so it may only hold the buckets that actually spawn one (`typecheck`, `tests`,
+ * `generatedRules`). Gating everything held `check-uncommitted.js` — the cheap `git
+ * status` guard that catches stranded work at session exit — precisely when the box is
+ * loaded, i.e. when several agents are running and stranding is most likely. It also
+ * contradicted the posture module, which deliberately leaves an unclassifiable check
+ * alone rather than silently disabling something it does not understand; letting the
+ * next gate disable it anyway put that decision back.
+ */
+function policyGate(check) {
+  const { posture: level, source } = posture();
+  let kind = null;
+  if (postureModule) {
+    const verdict = postureModule.checkAllowedUnderPosture(check, level);
+    if (!verdict.run) {
+      return {
+        success: true,
+        advisory: true,
+        postureSkipped: true,
+        output: `${verdict.reason} (posture source: ${source})`,
+      };
+    }
+    kind = verdict.kind;
+  }
+  if (check.alwaysRun === true) return null;
+  if (!capacityModule) return null;
+  if (postureModule && !postureModule.policyFor(level).capacityGated) return null;
+  // Without the posture module there is no classification to key off, so fall back to
+  // the pre-#913 reach of the capacity gate rather than inventing a second classifier.
+  if (kind !== null && kind !== "typecheck" && kind !== "tests" && kind !== "generatedRules") {
+    return null;
+  }
+
+  const gate = capacityModule.capacityHold({ label: check.name || check.command });
+  if (gate.hold) {
+    return {
+      success: true,
+      advisory: true,
+      capacityHeld: true,
+      output:
+        `${gate.reason}\n` +
+        `The pre-merge train gate is what will run this check — it runs the full verify script ` +
+        `with SMART_HOOKS_FORCE semantics, so nothing is lost, only deferred.`,
+    };
   }
   return null;
 }
@@ -247,6 +362,12 @@ function runCheck(check, inputData, editedFiles) {
       );
     }
   }
+
+  // EVERY spawn passes the policy gates — generated stack rules included (#913). This
+  // sits below the in-process branch on purpose: an in-process hook costs no process
+  // and no build, so gating it would buy nothing and could only weaken a guard.
+  const gated = policyGate(check);
+  if (gated) return gated;
 
   try {
     execSync(check.command, {
@@ -600,7 +721,16 @@ function handlePreToolUse(input) {
   for (const check of checks) {
     if (!check.enabled) continue;
 
-    const result = runCheck({ ...check, cwd: check.cwd || policyDir }, { command, cwd: input.cwd }, []);
+    // The WHOLE hook input, not just `{ command, cwd }` (#914): the cross-worktree guard
+    // routes on `tool_name`/`tool_input` and would classify every call as "not a tool I
+    // guard" — a silently disabled guard, which is the exact #391 failure shape. `command`
+    // is added on top so the guards that read it flat (validate-command-safety,
+    // vital-file-guard) see the normalized value the runner already extracted.
+    const result = runCheck(
+      { ...check, cwd: check.cwd || policyDir },
+      { ...input, command, cwd: input.cwd },
+      [],
+    );
 
     if (!result.success) {
       console.error(`[smart-hooks] ${check.name}: PREVENTED`);
@@ -790,4 +920,7 @@ module.exports = {
   parseCompileErrorFiles,
   compileErrorNamesPath,
   classifyCompileFailure,
+  // #913 — the posture/capacity gate, so a test can assert what a given posture runs
+  // without spawning a build.
+  policyGate,
 };
