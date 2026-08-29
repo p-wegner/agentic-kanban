@@ -1122,13 +1122,6 @@ paths:
       tags:
         - internal-monitor
       operationId: post_api_internal_monitor-run
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -1159,13 +1152,6 @@ paths:
       tags:
         - internal-monitor
       operationId: post_api_internal_resource-sweep
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -2437,13 +2423,6 @@ paths:
           required: true
           schema:
             type: string
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
       responses:
         "201":
           description: Success
@@ -2949,13 +2928,6 @@ paths:
           required: true
           schema:
             type: string
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -3919,13 +3891,6 @@ paths:
           required: true
           schema:
             type: string
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -4258,13 +4223,6 @@ paths:
       tags:
         - preferences
       operationId: post_api_preferences_mcp_probe
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -4849,13 +4807,6 @@ paths:
           required: true
           schema:
             type: string
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -4884,13 +4835,6 @@ paths:
           required: true
           schema:
             type: string
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -4908,6 +4852,24 @@ paths:
       tags:
         - project-health
       operationId: get_api_projects_id_base-branch-health
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/base-branch-health/reprobe:
+    post:
+      summary: The response says which of those happened instead of always claiming it started one.
+      tags:
+        - project-health
+      operationId: post_api_projects_id_base-branch-health_reprobe
       parameters:
         - name: id
           in: path
@@ -5289,13 +5251,6 @@ paths:
           required: false
           schema:
             type: string
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
       responses:
         "201":
           description: Success
@@ -5324,13 +5279,6 @@ paths:
           required: false
           schema:
             type: string
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -5856,13 +5804,6 @@ paths:
           required: true
           schema:
             type: string
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -6417,13 +6358,6 @@ paths:
           required: true
           schema:
             type: string
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -6730,13 +6664,6 @@ paths:
           required: true
           schema:
             type: string
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -6999,11 +6926,6 @@ paths:
               type: object
               additionalProperties: true
       responses:
-        "200":
-          description: Success
-          content:
-            application/json:
-              schema: {}
         "201":
           description: Success
           content:
@@ -7112,11 +7034,6 @@ paths:
               type: object
               additionalProperties: true
       responses:
-        "200":
-          description: Success
-          content:
-            application/json:
-              schema: {}
         "201":
           description: Success
           content:
@@ -7163,7 +7080,7 @@ paths:
           schema:
             type: string
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -7700,11 +7617,6 @@ paths:
               type: object
               additionalProperties: true
       responses:
-        "200":
-          description: Success
-          content:
-            application/json:
-              schema: {}
         "201":
           description: Success
           content:
@@ -8088,13 +8000,6 @@ paths:
           required: true
           schema:
             type: string
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -8282,13 +8187,6 @@ paths:
           required: false
           schema:
             type: string
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -8797,13 +8695,6 @@ paths:
       tags:
         - workers
       operationId: post_api_workers_pairing-token
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
       responses:
         "201":
           description: Success
@@ -9770,13 +9661,6 @@ paths:
           required: true
           schema:
             type: string
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -9910,13 +9794,6 @@ paths:
           required: true
           schema:
             type: string
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -10219,13 +10096,6 @@ paths:
           required: true
           schema:
             type: string
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
       responses:
         "201":
           description: Success
@@ -10360,13 +10230,6 @@ paths:
           required: false
           schema:
             type: string
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -10408,13 +10271,6 @@ paths:
           required: true
           schema:
             type: string
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -10451,13 +10307,6 @@ paths:
           required: true
           schema:
             type: string
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -10476,13 +10325,6 @@ paths:
           required: true
           schema:
             type: string
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -10588,13 +10430,6 @@ paths:
           required: true
           schema:
             type: string
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -10613,13 +10448,6 @@ paths:
           required: true
           schema:
             type: string
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
       responses:
         "201":
           description: Success
@@ -10638,13 +10466,6 @@ paths:
           required: true
           schema:
             type: string
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -10738,13 +10559,6 @@ paths:
           required: true
           schema:
             type: string
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -10768,13 +10582,6 @@ paths:
           required: true
           schema:
             type: string
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -10846,13 +10653,6 @@ paths:
           required: true
           schema:
             type: string
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -10886,13 +10686,6 @@ paths:
           required: true
           schema:
             type: string
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -10944,13 +10737,6 @@ paths:
           required: true
           schema:
             type: string
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -10992,13 +10778,6 @@ paths:
           required: true
           schema:
             type: string
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
       responses:
         "200":
           description: Success
@@ -11017,13 +10796,6 @@ paths:
           required: true
           schema:
             type: string
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: true
       responses:
         "200":
           description: Success

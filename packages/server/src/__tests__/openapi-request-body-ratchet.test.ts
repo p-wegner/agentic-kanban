@@ -52,69 +52,44 @@ export function operationsWithoutPropertyList(spec: Spec): string[] {
 }
 
 /**
- * The operations whose request body is still shape-less, frozen. Every one of them parses its
- * body with no schema (`parseJsonBody(c)` / `parseOptionalJsonBody(c)`) or does not parse one
- * at all — i.e. this list IS #806's remaining surface, and it is the work list, not an
- * exemption. Delete an entry when its route gains a schema; never add one.
+ * The operations whose request body is still shape-less, frozen. Every one of them DOES parse a
+ * body — either with no schema (`parseJsonBody(c)` / `parseOptionalJsonBody(c)`) or through a
+ * raw `c.req.json()` / `formData()` / `text()` the generator can see but cannot shape. So this
+ * list IS #806's remaining surface, and it is the work list, not an exemption. Delete an entry
+ * when its route gains a schema; never add one.
+ *
+ * #935 took it 57 -> 24 by DELETION, not by exemption. The 33 that left were body-LESS POSTs
+ * (`/archive`, `/stop`, `/close`, …) which the generator used to hand a fallback
+ * `additionalProperties: true` body simply because they were not GET or DELETE. They could
+ * never have been resolved the way this list intends — there is no schema for a body that does
+ * not exist — so they sat here permanently, diluting the count. The generator now emits no
+ * `requestBody` for them at all, and what remains is 24 routes that really do take one.
  */
 const NO_PROPERTY_LIST: string[] = [
-  "POST /api/internal/monitor-run",
-  "POST /api/internal/resource-sweep",
   "PATCH /api/issues/{id}",
-  "POST /api/issues/{id}/duplicate",
-  "POST /api/merge-queue/preview/{workspaceId}",
+  "PATCH /api/projects/{id}",
+  "PATCH /api/projects/{projectId}/scripts/{scriptId}",
+  "PATCH /api/workspaces/{id}",
   "POST /api/plugins",
   "POST /api/plugins/validate",
-  "POST /api/plugins/{id}/update",
-  "POST /api/preferences/mcp/probe",
-  "PUT /api/preferences/settings",
-  "PATCH /api/projects/{id}",
-  "POST /api/projects/{id}/agent-questions/{toolUseId}/recommend",
-  "POST /api/projects/{id}/archive",
-  "POST /api/projects/{id}/butler/ensure",
-  "POST /api/projects/{id}/butler/interrupt",
   "POST /api/projects/{id}/conductor",
-  "PUT /api/projects/{id}/conductor-schedule",
-  "POST /api/projects/{id}/dependency-waves/start-next",
   "POST /api/projects/{id}/onboarding/dismiss",
   "POST /api/projects/{id}/quality-metrics",
-  "POST /api/projects/{id}/repos/{repoId}/promote",
-  "PUT /api/projects/{id}/stack-profile",
-  "POST /api/projects/{id}/unarchive",
   "POST /api/projects/{projectId}/backlog.md/import",
   "POST /api/projects/{projectId}/backlog.md/preview",
   "POST /api/projects/{projectId}/backlog/import",
   "POST /api/projects/{projectId}/config/import",
-  "PUT /api/projects/{projectId}/drives/{id}",
   "POST /api/projects/{projectId}/issues/import",
   "POST /api/projects/{projectId}/issues/import/preview",
   "POST /api/projects/{projectId}/scripts",
-  "PATCH /api/projects/{projectId}/scripts/{scriptId}",
-  "POST /api/projects/{projectId}/scripts/{scriptId}/run",
-  "PUT /api/scheduled-runs/{id}",
-  "POST /api/scheduled-runs/{id}/run",
-  "POST /api/workers/pairing-token",
   "POST /api/workflows/workspaces/{id}/transition",
-  "PATCH /api/workspaces/{id}",
-  "POST /api/workspaces/{id}/abort-rebase",
-  "POST /api/workspaces/{id}/close",
-  "POST /api/workspaces/{id}/github-handoff-draft",
   "POST /api/workspaces/{id}/launch",
-  "POST /api/workspaces/{id}/merge",
-  "POST /api/workspaces/{id}/open-editor",
-  "POST /api/workspaces/{id}/quarantine",
-  "POST /api/workspaces/{id}/ready-for-merge",
-  "POST /api/workspaces/{id}/repos/{repoName}/rebase",
-  "POST /api/workspaces/{id}/resolve-conflicts",
-  "POST /api/workspaces/{id}/retry-cleanup",
-  "POST /api/workspaces/{id}/scorecard/refresh",
-  "POST /api/workspaces/{id}/services/down",
-  "POST /api/workspaces/{id}/services/restart",
-  "POST /api/workspaces/{id}/services/up",
-  "POST /api/workspaces/{id}/setup",
-  "POST /api/workspaces/{id}/stop",
-  "POST /api/workspaces/{id}/terminal",
   "POST /api/workspaces/{id}/update-base",
+  "PUT /api/preferences/settings",
+  "PUT /api/projects/{id}/conductor-schedule",
+  "PUT /api/projects/{id}/stack-profile",
+  "PUT /api/projects/{projectId}/drives/{id}",
+  "PUT /api/scheduled-runs/{id}",
 ];
 
 function loadSpec(): Spec {
@@ -173,6 +148,46 @@ describe("openapi request-body property lists (#838)", () => {
     // `stripped` — the one decision the TS type argument could never carry.
     expect(schema["x-unknown-keys"]).toBe("passthrough");
     expect(schema.additionalProperties).toBe(true);
+  });
+
+  it("a route that reads its body RAW still documents one (#935)", () => {
+    // The guard on #935's omission rule. Omitting `requestBody` when no body is parsed is only
+    // correct while a RAW read (`c.req.json()` / `formData()` / `text()`) counts as parsing —
+    // those routes carry no `parseJsonBody` call, so a generator that keyed off that alone would
+    // report "no body" for endpoints whose body is mandatory. These six are the ones that
+    // actually bit: multi-encoding import/preview handlers, one of them (`backlog.md/*`) reading
+    // through a same-file helper. If this fails, the spec is telling a caller that an endpoint
+    // needing `{text: …}` takes nothing.
+    const spec = loadSpec();
+    const rawBodyRoutes = [
+      ["post", "/api/projects/{projectId}/backlog.md/import"],
+      ["post", "/api/projects/{projectId}/backlog.md/preview"],
+      ["post", "/api/projects/{projectId}/backlog/import"],
+      ["post", "/api/projects/{projectId}/config/import"],
+      ["post", "/api/projects/{projectId}/issues/import"],
+      ["post", "/api/projects/{projectId}/issues/import/preview"],
+    ] as const;
+    for (const [method, path] of rawBodyRoutes) {
+      expect(spec.paths[path]?.[method]?.requestBody, `${method.toUpperCase()} ${path} reads its body with a raw accessor — it must still document one`).toBeDefined();
+    }
+  });
+
+  it("a route that reads NO body documents none (#935)", () => {
+    // The other half. A body-less POST used to be handed `additionalProperties: true` with
+    // `required: false` purely because it was not GET/DELETE — "you may post any object", about
+    // a handler that never looks at one. `/reprobe` is #935's own route and takes only a path
+    // param; the rest are long-standing action POSTs.
+    const spec = loadSpec();
+    const bodylessRoutes = [
+      ["post", "/api/projects/{id}/base-branch-health/reprobe"],
+      ["post", "/api/projects/{id}/archive"],
+      ["post", "/api/workspaces/{id}/stop"],
+      ["post", "/api/workspaces/{id}/close"],
+    ] as const;
+    for (const [method, path] of bodylessRoutes) {
+      expect(spec.paths[path]?.[method], `${method.toUpperCase()} ${path} must exist in the spec`).toBeDefined();
+      expect(spec.paths[path]?.[method]?.requestBody, `${method.toUpperCase()} ${path} parses no body — it must not claim to accept one`).toBeUndefined();
+    }
   });
 
   it("bites in BOTH directions", () => {
