@@ -53,7 +53,14 @@ import { DEFAULT_BUILDER_GUARDRAILS, PREF_BUILDER_GUARDRAILS } from "../../const
 import { parseSymlinkDirs } from "@agentic-kanban/shared/lib/worktree-symlink-bootstrap";
 import { loadCodexLicenseRing } from "../codex-license-ring.js";
 import { loadClaudeSubscriptionRing } from "../claude-subscription-ring.js";
-import { classifySessionExit as classifySessionExitRoute, extractCapturedStderr, ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS as EXIT_WINDOW_MS } from "./session-exit-state-machine.js";
+import { classifySessionExit as classifySessionExitRoute, extractCapturedStderr, readSessionExitSignals, ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS as EXIT_WINDOW_MS } from "./session-exit-state-machine.js";
+import {
+  clearStaleResumeRecoveries,
+  isRecoverableStaleResume,
+  isStaleResumeRecoveryExhausted,
+  recordStaleResumeRecovery,
+  staleResumeRecoveryCount,
+} from "./stale-resume-policy.js";
 import { buildIndeterminateExitStats } from "./session-exit-stats.js";
 import { CODEX_SPARK_MODEL, CODEX_SAFE_DEFAULT_MODEL, isBuilderSession, buildStaleResumeHandoffPrompt, instructionFingerprint, mergeExistingSessionStats, lifecycleProviderName, resolveProviderRotation, withBuilderTestWorkerCap } from "./session-launch-helpers.js";
 import { finalizePlanModeExit } from "./plan-mode-exit.js";
@@ -67,9 +74,6 @@ import { createRemoteTurnRecovery } from "./remote-turn-recovery.js";
  */
 export const REMOTE_TURN_AFTER_RESTART =
   "This agent is running on a fleet worker and is still alive, but the board restarted since it was launched: its stdin belongs to the previous board process, so a follow-up turn cannot reach it. Stop the workspace to end the remote run, or wait for it to finish. (Placement: remote — the agent has NOT exited.)";
-
-/** Bounds the missing-transcript fallback (#26) to one automatic retry per workspace. */
-const MAX_STALE_RESUME_RECOVERIES = 1;
 
 /**
  * The execution surface the lifecycle depends on. The default is the dispatch
@@ -402,14 +406,9 @@ export function createSessionLifecycle(
      * launch-failure route: a fast zero-output crash or a non-zero exit with error text.
      *
      * Special-cased sub-route: a resumed launch whose error text names a missing provider
-     * transcript ("No conversation found with session ID: <uuid>" for Claude — volume
-     * deleted, ~/.claude pruned, image rebuild without the state volume). The butler SDK
-     * path already recovers from this (`isStaleResumeError` in butler-sdk.service.ts);
-     * workspace agents did not, so a stale `--resume` used to be reported as a plain
-     * launch failure and left the workspace idle awaiting a manual relaunch. Instead: clear
-     * the dead provider session id so it can't be forwarded again, and relaunch fresh with
-     * a handoff note — bounded to one automatic retry per workspace so a launch failure for
-     * an unrelated reason can't loop.
+     * transcript. It clears the dead provider session id so it can't be forwarded again and
+     * relaunches fresh with a handoff note; the rule and its bound live in
+     * `stale-resume-policy.ts` (#26, #934).
      */
     function finalizeLaunchFailureExit(
       route: Extract<ReturnType<typeof classifySessionExitRoute>, { phase: "launch-failure" }>,
@@ -419,12 +418,12 @@ export function createSessionLifecycle(
       capturedStderr: string,
     ): void {
       const { effectiveExitCode, errorText } = route;
-      const usedProviderSessionId = resumeWithNewModel ? undefined : providerSessionId;
-      const staleResumeRecoveryCount = state.workspaceStaleResumeRecoveryCount.get(workspaceId) ?? 0;
-      const isStaleResume =
-        Boolean(usedProviderSessionId) &&
-        staleResumeRecoveryCount < MAX_STALE_RESUME_RECOVERIES &&
-        getProviderExitBehavior(narrowProviderName(executor)).isStaleResumeError(errorText || capturedStderr);
+      const isStaleResume = isRecoverableStaleResume({
+        usedProviderSessionId: resumeWithNewModel ? undefined : providerSessionId,
+        recoveryCount: staleResumeRecoveryCount(state.workspaceStaleResumeRecoveryCount, workspaceId),
+        provider: narrowProviderName(executor),
+        errorText: errorText || capturedStderr,
+      });
 
       const sessionFinalized = finalizeLaunchFailureRoute(
         route,
@@ -441,25 +440,16 @@ export function createSessionLifecycle(
       void sessionFinalized.finally(() => options?.onSessionExit?.(workspaceId, sessionId, effectiveExitCode, planMode));
 
       if (isStaleResume) {
-        state.workspaceStaleResumeRecoveryCount.set(workspaceId, staleResumeRecoveryCount + 1);
+        recordStaleResumeRecovery(state.workspaceStaleResumeRecoveryCount, workspaceId);
+        // Spread the ORIGINAL options rather than re-listing them: the hand-written list this
+        // replaces silently dropped `placement`, `skipLaunchPreflight` and `allowUpdateBaseRebase`,
+        // so a recovery of a remote-placed session quietly relaunched on the board host.
         sessionFinalized.finally(() => startSession({
-          workspaceId,
+          ...opts,
           prompt: buildStaleResumeHandoffPrompt(prompt),
-          agentCommand,
           agentArgs: effectiveAgentArgs,
           resumeFromId: sessionId,
-          multiTurn,
-          permissionPromptTool,
-          planMode,
-          provider,
           triggerType: triggerType ?? "agent",
-          profile,
-          model,
-          systemInstructions,
-          contextFiles,
-          extraEnv,
-          workingDirOverride,
-          skipPermissions: skipPermissionsOpt,
         })).catch((err) => console.error(`[session] stale-resume relaunch failed: workspaceId=${workspaceId}`, err));
       }
     }
@@ -474,6 +464,9 @@ export function createSessionLifecycle(
       hadExitPlanModeDenied: boolean,
       planText: string | null,
     ): void {
+      // #934 — see stale-resume-policy.ts: a completed run releases the retry bound.
+      clearStaleResumeRecoveries(state.workspaceStaleResumeRecoveryCount, workspaceId);
+
       const sessionFinalized = (async () => {
         // #543: session-completed + the #430 failure-streak clear are the shared half; the
         // rest of this route (HANDOFF.md, the scorecard, plan mode, the auto-resume below)
@@ -506,18 +499,14 @@ export function createSessionLifecycle(
           state.workspaceAutoResumeCount.set(workspaceId, resumeCount + 1);
           console.log(`[session] auto-resuming after ExitPlanMode denial: workspaceId=${workspaceId} resumeFromId=${sessionId}`);
           sessionFinalized.finally(() => startSession({
-            workspaceId,
+            ...opts,
             prompt: "Your plan has been approved. Proceed with the implementation now.",
-            agentCommand,
             agentArgs: effectiveAgentArgs,
             resumeFromId: sessionId,
             multiTurn: undefined,
-            permissionPromptTool,
             planMode: false,
             resumeWithNewModel: undefined,
-            provider,
             triggerType: "agent",
-            profile,
           })).catch((err) => console.error(`[session] auto-resume failed: workspaceId=${workspaceId}`, err));
         } else {
           console.log(`[session] skipping auto-resume: workspaceId=${workspaceId} already auto-resumed ${resumeCount} time(s)`);
@@ -556,8 +545,7 @@ export function createSessionLifecycle(
      * explicit SessionExitContext → classify → dispatch to the matching terminal
      * handler. The provider exit behavior supplies the usage-limit detection so
      * this stays free of `executor === ...` provider branches.
-     */
-    /**
+     *
      * @param hadExitPlanModeDenied captured by the CALLER before `broadcast()` runs.
      *   #580: broadcast's exit teardown deletes `sessionExitPlanModeDenied`, and it runs
      *   first — so reading the flag here always returned false and the auto-resume below
@@ -582,13 +570,14 @@ export function createSessionLifecycle(
       // NO marker block exists, this is null and the workspace is surfaced as needs-attention
       // rather than auto-continuing on unrelated text. Non-plan runs keep the captured text.
       const planText = planMode ? extractPlanFromMessages(messages) : capturedFinalText;
-      const hadSubstantiveOutput =
-        state.sessionSubstantiveOutput.has(sessionId) ||
-        Boolean((planText ?? capturedFinalText)?.trim().length);
+      const { hadSubstantiveOutput, hadAgentWork, resultErrorText } =
+        readSessionExitSignals(state, sessionId, planText ?? capturedFinalText);
       // teardown of the per-session text/output flags (consumed above)
       state.stoppedByUser.delete(sessionId);
       state.sessionFinalText.delete(sessionId);
       state.sessionSubstantiveOutput.delete(sessionId);
+      state.sessionAgentWork.delete(sessionId);
+      state.sessionResultError.delete(sessionId);
 
       const endNow = new Date().toISOString();
       const durationMs = Math.max(0, new Date(endNow).getTime() - new Date(now).getTime());
@@ -606,6 +595,8 @@ export function createSessionLifecycle(
         usageLimit,
         planText,
         capturedStderr,
+        resultErrorText,
+        hadAgentWork,
       });
 
       switch (route.phase) {
@@ -880,8 +871,8 @@ export function createSessionLifecycle(
     // dropped these we'd lose the only observable signal and misfile every external exit (review §3.2).
     const bufferedMessages = state.messageBuffer.get(sessionId) ?? [];
     const capturedFinalText = state.sessionFinalText.get(sessionId) ?? null;
-    const hadSubstantiveOutput =
-      state.sessionSubstantiveOutput.has(sessionId) || Boolean(capturedFinalText?.trim().length);
+    const { hadSubstantiveOutput, hadAgentWork, resultErrorText } =
+      readSessionExitSignals(state, sessionId, capturedFinalText);
     const stoppedByUser = state.stoppedByUser.has(sessionId);
     const providerFromState = state.sessionProviders.get(sessionId);
 
@@ -925,6 +916,8 @@ export function createSessionLifecycle(
       usageLimit,
       planText: capturedFinalText,
       capturedStderr,
+      resultErrorText,
+      hadAgentWork,
       exitCodeKnown: exitCode !== null,
     });
 
@@ -986,6 +979,11 @@ export function createSessionLifecycle(
     }
   }
 
+  /** #934 — see `isStaleResumeRecoveryExhausted` in stale-resume-policy.ts. */
+  function staleResumeRecoveryExhausted(workspaceId: string): boolean {
+    return isStaleResumeRecoveryExhausted(state.workspaceStaleResumeRecoveryCount, workspaceId);
+  }
+
   return {
     startSession,
     stopSession,
@@ -996,5 +994,6 @@ export function createSessionLifecycle(
     reattachSession,
     notifyExternalExit,
     recoverRemoteTurnState: remoteTurnRecovery.recover,
+    staleResumeRecoveryExhausted,
   };
 }

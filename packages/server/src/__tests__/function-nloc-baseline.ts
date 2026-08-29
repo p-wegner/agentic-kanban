@@ -134,7 +134,7 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // in the board. It is still the largest entry in this ring and still wants splitting.
   "services/workspace-create.service.ts::createWorkspaceCreateService": 635,
   "services/issue.service.ts::createIssueService": 616,
-  "services/session-manager/session-lifecycle.ts::createSessionLifecycle": 631,
+  "services/session-manager/session-lifecycle.ts::createSessionLifecycle": 624,
   "services/workflow-fork.service.ts::createWorkflowForkService": 581,
   "cli/commands/workspace.ts::registerWorkspaceCommand": 573,
   "services/agent-remote.service.ts::createRemoteAgentService": 637,
