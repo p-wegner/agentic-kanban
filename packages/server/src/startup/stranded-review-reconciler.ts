@@ -1,4 +1,4 @@
-import { issues, projectStatuses, sessions, workflowNodes, workspaceReviewPreflight, workspaces } from "@agentic-kanban/shared/schema";
+import { issueComments, issues, projectStatuses, sessions, workflowNodes, workspaceReviewPreflight, workspaces } from "@agentic-kanban/shared/schema";
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import { graphOwnsPostExitReview } from "./exit/workflow-ownership.js";
@@ -92,6 +92,44 @@ export async function clearReviewPreflightBlock(database: Database, workspaceId:
   }
 }
 
+/** The fields of a candidate row {@link isOwnedByAnotherPath} judges. */
+interface ReconcilerCandidateOwnership {
+  wsId: string;
+  parentWorkspaceId: string | null;
+  forkStatus: string | null;
+  currentNodeId: string | null;
+  currentNodeType: string | null;
+  currentNodeStatusName: string | null;
+}
+
+/**
+ * Is this candidate somebody ELSE's to move? A decision function (see the server CLAUDE.md's
+ * named kinds): pure, synchronous, process-local, no query — which is exactly why it is
+ * separable, and why the four unrelated ownership rules read as a list rather than as four
+ * more branches inside the pass.
+ */
+function isOwnedByAnotherPath(c: ReconcilerCandidateOwnership): boolean {
+  // #998: a fork child (parentWorkspaceId set, or forkStatus stamped) is an ephemeral
+  // sub-branch consolidated by its JOIN — never eligible for the stranded-review
+  // reconciler, which would otherwise re-launch a review on it or mark it readyForMerge.
+  if (c.parentWorkspaceId || c.forkStatus) return true;
+  // #997: a workspace parked on a graph-owned workflow stage is owned by the graph — its own
+  // node-driven stages decide review/fix, not this legacy reconciler. Skip it so a
+  // mid-workflow branch never gets silently re-launched into review or marked readyForMerge.
+  // #757 narrowed "graph-owned" to exclude a node MAPPED to the In Review status: nothing in
+  // the graph launches a review for such a node, so skipping it here strands exactly the
+  // workspace this reconciler exists to rescue. Same predicate as the exit engine's guard.
+  if (graphOwnsPostExitReview(c.currentNodeId ? { nodeType: c.currentNodeType, statusName: c.currentNodeStatusName } : null)) return true;
+  // A merge in flight OWNS this workspace (#270): its pre-lock gate runs for 20-40 minutes
+  // with the workspace still idle, which is exactly the window in which this reconciler
+  // used to launch a second review and strand the merge. The merge path runs/ran its own
+  // gate — nothing here to recover.
+  if (getMergeJob(c.wsId)?.state === "running") return true;
+  // Another path (exit-workflow auto-review, manual review) is mid-launch — its session
+  // row may not exist yet, so the running-session check cannot see it (#270).
+  return isReviewLaunchPending(c.wsId);
+}
+
 /**
  * Recover work stranded in "In Review" because the auto-review handshake never fired —
  * e.g. the in-process review/merge timers died on a server crash mid-flight, or the
@@ -99,9 +137,20 @@ export async function clearReviewPreflightBlock(database: Database, workspaceId:
  * that finished and committed sits idle / readyForMerge=false / In Review forever and
  * `/merge` rejects it as "not_approved" (the tetris #1 incident, ticket #529).
  *
- * Finds workspaces that are idle, non-direct, in an "In Review" column, NOT yet
- * ready-for-merge, with committed changes ahead of base, NO running session, and NO
- * prior review session — then re-launches the review (via startManualReview, which
+ * Two shapes of stranding, both reached from the same candidate scan:
+ *
+ *  1. **Never reviewed** — idle, non-direct, in an "In Review" column, NOT yet
+ *     ready-for-merge, with committed changes ahead of base, NO running session, and NO
+ *     prior review session. The review is (re-)launched.
+ *  2. **Reviewed clean, never armed** (#932) — same, except a prior review session exited
+ *     0, `readyForMerge` is still false, and NO merge has ever been attempted. The
+ *     review-exit handler arms `readyForMerge` only after its own pre-merge gate returns,
+ *     and that gate queues behind the build semaphore; while a long gate holds a slot, the
+ *     arming never happens and the workspace is invisible to the monitor. Arm it rather
+ *     than re-review it. The never-merge-attempted condition is load-bearing: a merge that
+ *     hit a conflict clears the flag ON PURPOSE, and re-arming that would loop.
+ *
+ * For shape 1 this re-launches the review (via startManualReview, which
  * registers in the shared reviewSessionIds so the normal review → ready-for-merge →
  * auto-merge chain completes). If auto_review is off, marks them ready-for-merge so the
  * merge orchestrator can take them.
@@ -165,34 +214,53 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
   let recovered = 0;
   let blocked = 0;
   for (const c of candidates) {
+    // Kept inline (not folded into `isOwnedByAnotherPath`) so the compiler narrows both to
+    // non-null for the rest of the loop body. Nothing to reason about without a worktree and
+    // a base to diff it against.
     if (!c.workingDir || !c.baseBranch) continue;
-    // #998: a fork child (parentWorkspaceId set, or forkStatus stamped) is an ephemeral
-    // sub-branch consolidated by its JOIN — never eligible for the stranded-review
-    // reconciler, which would otherwise re-launch a review on it or mark it readyForMerge.
-    if (c.parentWorkspaceId || c.forkStatus) continue;
-    // #997: a workspace parked on a graph-owned workflow stage is owned by the graph — its own
-    // node-driven stages decide review/fix, not this legacy reconciler. Skip it so a
-    // mid-workflow branch never gets silently re-launched into review or marked readyForMerge.
-    // #757 narrowed "graph-owned" to exclude a node MAPPED to the In Review status: nothing in
-    // the graph launches a review for such a node, so skipping it here strands exactly the
-    // workspace this reconciler exists to rescue. Same predicate as the exit engine's guard.
-    if (graphOwnsPostExitReview(c.currentNodeId ? { nodeType: c.currentNodeType, statusName: c.currentNodeStatusName } : null)) continue;
-    // A merge in flight OWNS this workspace (#270): its pre-lock gate runs for 20-40 minutes
-    // with the workspace still idle, which is exactly the window in which this reconciler
-    // used to launch a second review and strand the merge. The merge path runs/ran its own
-    // gate — nothing here to recover.
-    if (getMergeJob(c.wsId)?.state === "running") continue;
-    // Another path (exit-workflow auto-review, manual review) is mid-launch — its session
-    // row may not exist yet, so the running-session check below cannot see it (#270).
-    if (isReviewLaunchPending(c.wsId)) continue;
+    if (isOwnedByAnotherPath(c)) continue;
     // Skip if a session is currently running for this workspace.
     const running = await database.select({ id: sessions.id }).from(sessions)
       .where(and(eq(sessions.workspaceId, c.wsId), eq(sessions.status, "running"))).limit(1);
     if (running.length > 0) continue;
-    // Skip if a review already happened — don't re-review reviewed work.
-    const priorReview = await database.select({ id: sessions.id }).from(sessions)
-      .where(and(eq(sessions.workspaceId, c.wsId), eq(sessions.triggerType, "review"))).limit(1);
-    if (priorReview.length > 0) continue;
+    // A review already happened — don't re-review reviewed work. But "reviewed" and
+    // "ready to merge" had drifted apart with nothing to reconcile them (#932): the
+    // review-exit handler arms `readyForMerge` only AFTER its own pre-merge gate returns,
+    // and that gate queues behind the build semaphore. While one long gate holds a slot
+    // (observed: 47 minutes), a review that exited CLEAN sits here un-armed — invisible to
+    // the monitor (idle + not ready) and skipped by this pass forever, because the guard
+    // below only asked WHETHER a review ran, never how it ended. It needed a manual
+    // `POST /:id/ready-for-merge` to move at all.
+    //
+    // So: a CLEAN prior review (exit 0) on a workspace still not ready is not "already
+    // handled", it is the stranding this pass exists to undo — arm it below instead of
+    // skipping. A review that exited NON-ZERO genuinely wants a human/fix, and a review
+    // still in flight is caught by the running-session check above, so neither is armed.
+    const priorReviews = await database.select({ id: sessions.id, exitCode: sessions.exitCode, status: sessions.status }).from(sessions)
+      .where(and(eq(sessions.workspaceId, c.wsId), eq(sessions.triggerType, "review")));
+    let armAfterCleanReview = false;
+    if (priorReviews.length > 0) {
+      const cleanReview = priorReviews.some((r) => r.status !== "running" && r.exitCode === "0");
+      if (!cleanReview) continue;
+      // `readyForMerge: false` after a CLEAN review has two causes, and only one of them is
+      // the #932 stranding. The other is a merge that was ATTEMPTED and deliberately
+      // un-armed the flag: `recordConflictAndClearReadyFlag` on a real conflict,
+      // `keepCleanAncestorInReview` on the 0-commit ancestor guard, and the fix-and-merge
+      // exit's #764 "did not land" path all clear it precisely so a conflicted branch is
+      // NOT silently re-queued as ready. Re-arming those would undo the guard and loop:
+      // arm → auto-merge → conflict → clear → arm again, once every 60s tick, forever.
+      //
+      // Every one of those paths runs only AFTER a merge attempt, and every merge attempt
+      // writes a `merge-attempt` comment for the workspace. So "no merge-attempt row" is
+      // the precise test for "nothing has ever cleared this flag" — which is exactly the
+      // shape #932 describes (a review that finished while a gate held the semaphore, with
+      // no merge yet tried). Conservative by construction: an un-armed workspace we cannot
+      // prove was never merge-attempted is left for the human, not auto-approved.
+      const mergeAttempt = await database.select({ id: issueComments.id }).from(issueComments)
+        .where(and(eq(issueComments.workspaceId, c.wsId), eq(issueComments.kind, "merge-attempt"))).limit(1);
+      if (mergeAttempt.length > 0) continue;
+      armAfterCleanReview = true;
+    }
 
     // #283 — a preflight that already failed its budget for THESE tips is not retried.
     // Checked before the (more expensive) ahead-count so a blocked workspace costs two
@@ -229,7 +297,22 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
     const reviewDecision = resolveProjectReviewMode(prefMap, c.projectId);
     const reviewThisOne = autoReview && reviewDecision.run;
     try {
-      if (reviewThisOne) {
+      if (armAfterCleanReview) {
+        // #932: the review already ran and passed; what never happened is the arming.
+        // Re-reviewing would burn a second session to reach the same verdict, so this
+        // completes the handshake instead.
+        //
+        // This arms readyForMerge WITHOUT writing gate evidence, deliberately — the gate
+        // never finished for this workspace, so there is nothing honest to record. The
+        // merge path is unaffected either way: with no `workspace_merge_gate` row,
+        // `gateTokenFromWorkspaceEvidence` returns `RUN_GATE`; with a stale row from an
+        // earlier run, `evidenceIsValid` rejects it on a moved tip or on age. So the merge
+        // still gates, and `readyForMerge` goes back to meaning "reviewed and approved"
+        // rather than "and the gate also happened to get a semaphore slot in time".
+        await database.update(workspaces).set({ readyForMerge: true, updatedAt: new Date().toISOString() }).where(eq(workspaces.id, c.wsId));
+        boardEvents.broadcast(c.projectId, "workspace_ready_for_merge");
+        console.log(`[reconcile] review of workspace ${c.wsId} (#${c.issueNumber ?? "?"}) exited clean but readyForMerge was never armed — arming it (#932)`);
+      } else if (reviewThisOne) {
         const { sessionId } = await startManualReview(database, getSessionManager, boardEvents, reviewSessionIds, c.wsId, false);
         if (priorFailures > 0) await clearReviewPreflightBlock(database, c.wsId);
         console.log(`[reconcile] re-launched stranded review for workspace ${c.wsId} (#${c.issueNumber ?? "?"}) session=${sessionId}`);
