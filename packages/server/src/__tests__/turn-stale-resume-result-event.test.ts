@@ -300,6 +300,33 @@ describe("#934 — the stale-resume error arrives as a result EVENT, not on stde
       expect(startSession).not.toHaveBeenCalled();
     });
 
+    it("still launches when the budget is spent but the resume target has NO provider session id", async () => {
+      // The recovery itself calls `clearProviderSessionId` on the dead session, and the counter
+      // is released only by the `completed` route — so after a recovery that then hit a usage
+      // limit, the budget reads spent forever while the resume target holds no id at all.
+      // `startSession` would forward no `--resume` and launch FRESH, which cannot hit a stale
+      // transcript; refusing here would reject a turn that works and re-drop the content.
+      const workspaceId = await seedWorkspace(db);
+      await db.insert(sessions).values({
+        id: randomUUID(), workspaceId, executor: "claude-code", status: "completed",
+        startedAt: new Date().toISOString(), providerSessionId: null,
+      });
+
+      const startSession = vi.fn(async () => "fresh-session");
+      const service = createWorkspaceSessionService({
+        database: db as never,
+        getSessionManager: () => ({
+          startSession,
+          sendTurn: vi.fn(() => ({ ok: true })),
+          staleResumeRecoveryExhausted: () => true,
+        }) as never,
+      });
+
+      const result = await service.sendTurn(workspaceId, "carry on");
+      expect(result).toEqual({ type: "resumed", sessionId: "fresh-session" });
+      expect(startSession).toHaveBeenCalledOnce();
+    });
+
     it("resumes normally when the budget is intact", async () => {
       const workspaceId = await seedWorkspace(db);
       await db.insert(sessions).values({
