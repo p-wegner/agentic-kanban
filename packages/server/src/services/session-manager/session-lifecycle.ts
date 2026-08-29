@@ -5,38 +5,12 @@ import * as lifecycleRepo from "../../repositories/session-lifecycle.repository.
 import * as agentSkillRepo from "../../repositories/agent-skill.repository.js";
 import * as realAgentService from "../agent.service.js";
 import { createAgentDispatch, type AgentExecutionService } from "../agent-dispatch.service.js";
-import { getWorkerFleet, resolveWorkerPlacement, WorkerDispatchUnavailableError } from "../worker-fleet.service.js";
-import { updateSessionPlacementReason } from "../../repositories/placement-observability.repository.js";
-import { readTier0Capacity } from "@agentic-kanban/shared/lib/machine-capacity";
+import { getWorkerFleet, WorkerDispatchUnavailableError } from "../worker-fleet.service.js";
+// #938: placement — where a launch runs and the record of why — lives in its own module.
+// `startSession` keeps the launch; that keeps the decision.
+import { resolveSessionPlacement } from "./session-placement.js";
 import { failLaunch, newLaunchTrace, type LaunchTrace } from "./launch-failure.js";
 import type { Placement } from "../agent-dispatch.service.js";
-
-/**
- * #801 — the recording seam for "why did THAT session run on the host".
- *
- * `resolveWorkerPlacement` stamps its deciding check onto the placement it returns; this is
- * where that becomes durable. A live re-derivation can never answer the historical question,
- * because the preferences, the fleet and the repo shape have all moved since.
- *
- * Written only for a RESOLVED placement: an explicit `placement` argument was never
- * resolved, so it carries no reasoning, and stamping a fabricated one would destroy the
- * distinction the nullable column exists to keep. Best-effort and un-awaited, exactly like
- * the containerId write — an observability record must never be able to fail a launch.
- *
- * A free function rather than an `if` inside `startSession`: that function's branch count is
- * ratcheted (#726), and a diagnostic write has no business spending one of its budget.
- */
-function recordPlacementReason(
-  sessionId: string,
-  placement: Placement | undefined,
-  database: Database,
-): void {
-  const reason = placement?.reason;
-  if (!reason) return;
-  updateSessionPlacementReason(sessionId, reason, database).catch((err) =>
-    console.error(`[session] Failed to store session placement reason: sessionId=${sessionId}`, err),
-  );
-}
 import { extractPlanFromMessages } from "../plan-mode.service.js";
 import { computeScorecard } from "../workspace-scorecard.service.js";
 import { computeWorkspaceCodeMetrics } from "../workspace-code-metrics.service.js";
@@ -637,16 +611,14 @@ export function createSessionLifecycle(
       wasAlreadyDowngraded: workspace.isolationDowngraded,
     });
 
-    // Worker-fleet placement (epic #1): an explicit placement wins; otherwise a
-    // project opted into worker dispatch gets an eligible remote worker, else
-    // host. Containerized launches keep the container path untouched.
-    // Strict worker dispatch (epic #184) refuses the host fallback: surface it as
-    // a CONFLICT the caller can act on, the same shape devcontainer strict mode
-    // uses for ISOLATION_REFUSED, rather than silently running on the board.
+    // Worker-fleet placement (epic #1): an explicit placement wins; otherwise
+    // `resolveSessionPlacement` (session-placement.ts) decides and records why.
+    // Containerized launches keep the container path untouched.
     let effectivePlacement = placement;
     if (!effectivePlacement && !containerProvision && projectId) {
-      effectivePlacement = await resolveWorkerPlacement({
+      effectivePlacement = await resolveSessionPlacement({
         database: db,
+        sessionId,
         projectId,
         providerName,
         branch: workspace.isDirect ? undefined : workspace.branch,
@@ -655,18 +627,7 @@ export function createSessionLifecycle(
         // it, so placement prefers that worker. `resumeWithNewModel` drops --resume, so
         // there is nothing to be near in that case — same condition as the launch below.
         resumeProviderSessionId: resumedProviderSessionId(resumeWithNewModel, providerSessionId),
-        // #908: Tier 0 is one in-process `os.freemem()` read — cheap enough to check on
-        // every launch, not just once per monitor cycle. A saturated host does not block
-        // this launch (that would turn a placement input into a gate); it only changes
-        // which reason lands on the session record when the chain picks a worker anyway.
-        hostSaturated: readTier0Capacity().hold,
-      }).catch((err) => {
-        if (err instanceof WorkerDispatchUnavailableError) {
-          throw new WorkspaceError(err.message, "CONFLICT", { code: "NO_AVAILABLE_WORKER" });
-        }
-        throw err;
       });
-      recordPlacementReason(sessionId, effectivePlacement, db);
     }
 
     try {

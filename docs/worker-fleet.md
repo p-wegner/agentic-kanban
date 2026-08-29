@@ -363,6 +363,58 @@ mode each becomes a refusal the monitor reports as `no_available_worker`.
 A worker carrying the `shares-filesystem` label skips 6, 7 and 8 entirely — it reads the
 board's own worktrees, siblings and LFS objects included.
 
+**Passing all seven is not the same as dispatching (#938).** The seven above are *guards* —
+each refuses remote dispatch for a structural reason, and each names a setting or a repo fact
+an operator can go and change. A project that clears all of them reaches a *comparison*, and
+the board host is one of the candidates in it. See §7b.
+
+### 7b. The host is a candidate, not a fallback (#938)
+
+#910 made worker selection headroom-aware: an eligible worker reports its free RAM, spare
+cores and a thrashing flag on every heartbeat, and the highest headroom wins (thrashing
+deprioritises, it does not exclude). The board host was outside that comparison. It
+participated only through a binary `hostSaturated` flag, which changed which reason got
+recorded (`machine_saturated` instead of `eligible_worker`) and never ranked anything — so a
+board with 40 GB free handed work to a worker with 1 GB free, purely because the project had
+opted into dispatch.
+
+The host is now synthesized as a pseudo-candidate and merged into the *same* ranked list,
+compared by the *same* `compareCandidates`. When it wins, the placement is `host` with
+reason **`host_has_headroom`**, whose detail names the numbers that decided:
+
+```
+board host outranks every eligible claude worker on headroom (40.0GB free)
+```
+
+That reason is deliberately distinct from `eligible_worker`. "No eligible worker" sends an
+operator after a fleet problem; here a worker *was* eligible and simply had less room.
+
+Four boundaries, each of which is a deliberate decision rather than an omission:
+
+- **The caller supplies the measurement; the resolver spawns nothing.** Tier 1
+  (`fleet snapshot`) is a process spawn, and this resolver runs on every launch — and inside
+  the monitor's per-project loop. The launch site already reads Tier 0 for `hostSaturated`
+  and folds that one read into the heartbeat shape with `toWorkerCapacitySnapshot`, so both
+  placement inputs describe the same instant.
+- **No measurement ⇒ no candidate.** An unmeasured host is not ranked at all, and behaviour
+  is byte-for-byte what it was before #938. Defaulting it to "unknown headroom" would place
+  it ahead of nothing and behind every reporting worker — a claim the board never made.
+- **Strict projects never rank the host in.** `worker_dispatch_strict_<projectId>` opted OUT
+  of the host fallback; letting a high-headroom board win the comparison would hand it the
+  work through a different door. A strict project still gets an eligible worker or
+  `NO_AVAILABLE_WORKER` (§5, #245).
+- **It is a candidate, not a gate.** A host with almost no headroom still takes the work when
+  no worker is eligible — that is check 4's ordinary fallback, unchanged, and it keeps
+  reporting `eligible_worker`. A *win* needs something to have been beaten: with an empty
+  fleet, "the host outranked every worker" is a vacuous claim about an empty set, and
+  recording it as a headroom decision would send an operator looking at RAM when the real
+  answer is that no worker was eligible. Nothing here can refuse a launch.
+
+`worker explain` does **not** rank the host in: it answers "why does nothing dispatch", a
+question about the seven guards, each of which names something to change. A headroom
+comparison names nothing to change and flips between two calls a second apart, so folding it
+in would produce spurious `agreesWithResolver: false` reports.
+
 **Ask the board instead of reading this list.** `agentic-kanban worker explain <N>` (and
 `GET /api/workers/explain?issue=<N>`) walks these same eight checks against live state and
 names the one that decided, with the values it read (#755). The chain it walks is pinned to
@@ -456,7 +508,9 @@ So `resolveWorkerPlacement` now stamps its own verdict onto the decision it retu
 session lifecycle persists it on the session row (`sessions.placement_reason` +
 `placement_detail`, migration 0133). The id is the same `PlacementCheckId` vocabulary §7 uses
 — deliberately, so a historical record and a live explanation cannot disagree about what to
-call a step — plus `resolver_error` for the catch-all host fallback, which is not a check.
+call a step — plus three ids that are not checks: `resolver_error` (the catch-all host
+fallback when resolution itself threw), `machine_saturated` (#908, the host was too tight to
+take it), and `host_has_headroom` (#938, the host won the ranked comparison — §7b).
 
 ```bash
 agentic-kanban worker placements --limit 20
