@@ -23,7 +23,8 @@ import { emitButlerSystemEvent } from "../../services/butler-event-feed.js";
 import { buildReviewContext } from "../../services/phase-context.service.js";
 import { buildMembersBlock, buildReviewPrompt, releaseReviewLaunch, tryReserveReviewLaunch } from "../../services/review.service.js";
 import { getLeadIssueForMembersBlock, listMemberIssues } from "../../repositories/workspace-issue-members.repository.js";
-import { resolveReviewMode, reviewModePref } from "../../lib/review-mode-pref.js";
+import { resolveProjectReviewMode } from "../../lib/review-mode-pref.js";
+import { formatPostureNote } from "../../services/risk-posture.service.js";
 import type { Database } from "../../db/index.js";
 import type { createBoardEvents } from "../../services/board-events.js";
 import type { createSessionManager } from "../../services/session.manager.js";
@@ -62,7 +63,10 @@ export function createReviewLauncher({ database: db, gitService, sessionManager,
         console.warn(`[workflow] rebase failed for workspace ${workspaceId}: ${prep.error}  reviewer will resolve conflicts`);
       }
     }
-    const reviewSkillName = workspace.thoroughReview ? "code-review-thorough" : "code-review";
+    // #937 / decision 017: the posture's `reviewMode` is resolved ONCE here and drives both
+    // the skill escalation (`strict` → thorough) and the members-block assembly below.
+    const reviewDecision = resolveProjectReviewMode(prefMap, projectId);
+    const reviewSkillName = workspace.thoroughReview || reviewDecision.thorough ? "code-review-thorough" : "code-review";
     const verifyAgent = prefMap.get("after_merge_verify_agent") || "none";
     // Hand the reviewer the diff instead of making a cold agent rediscover it (#128).
     // Skipped when the rebase failed — the tree is mid-conflict, so a diff taken now
@@ -78,9 +82,8 @@ export function createReviewLauncher({ database: db, gitService, sessionManager,
     // separately. The lead is fetched separately since `workspace_issue_members` holds
     // only the ADDITIONAL tickets, not the lead itself. A workspace with no additional
     // members is unaffected regardless of the pref value.
-    const reviewMode = resolveReviewMode(prefMap.get(reviewModePref.key(projectId)));
     let membersBlock = "";
-    if (reviewMode === "per-train") {
+    if (reviewDecision.mode === "per-train") {
       const additionalMembers = await listMemberIssues(workspaceId, db);
       if (additionalMembers.length > 0) {
         const leadIssue = await getLeadIssueForMembersBlock(issueId, db);
@@ -94,7 +97,7 @@ export function createReviewLauncher({ database: db, gitService, sessionManager,
       boardEvents.broadcast(projectId, "issue_updated");
       const reviewSessionId = await sessionManager.startSession({ workspaceId, prompt, agentCommand, agentArgs: reviewArgsWithModel, provider: toExecutorProvider(reviewProvider), triggerType: "review", profile: profileSelection, extraEnv: { KANBAN_SESSION_TYPE: "review", KANBAN_AFTER_MERGE_VERIFY: verifyAgent } });
       reviewSessionIds.add(reviewSessionId);
-      console.log(`[workflow] launched ${reviewSkillName} session ${reviewSessionId} for workspace ${workspaceId} (verifyAgent=${verifyAgent})`);
+      console.log(`[workflow] launched ${reviewSkillName} session ${reviewSessionId} for workspace ${workspaceId} (verifyAgent=${verifyAgent}, review mode=${reviewDecision.mode})${formatPostureNote(reviewDecision.posture)}`);
     } catch (err) {
       console.error("[workflow] Failed to launch review session:", err);
       // Do NOT swallow this and leave the workspace stuck at "reviewing" with no

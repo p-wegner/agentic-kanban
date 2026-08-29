@@ -31,6 +31,11 @@ import type {
 } from "../lib/placement-explain.types.js";
 import { remoteDispatchBlockedByRepoShape } from "./worker-transport-support.service.js";
 import {
+  remoteDispatchBlockedByPlacementBias,
+  riskPosturePrefKey,
+  type RiskPosture,
+} from "./risk-posture.service.js";
+import {
   selectWorkerForLaunch,
   workerDispatchPrefKey,
   workerLabelsPrefKey,
@@ -49,6 +54,8 @@ export interface EvalContext {
   optInPref: string | undefined;
   allowlistPref: string | undefined;
   dataHandlingPref: string | undefined;
+  /** The project's resolved risk posture (#937) — read once by the driver, judged by check 4. */
+  posture: RiskPosture;
   requiredLabels: string[];
   workers: WorkerEligibility[];
   capacity: FleetCapacity;
@@ -115,6 +122,31 @@ const checkDataHandling: Evaluator = async (ctx) => {
     detail:
       `${block.reason} — a worker authenticates the agent with its OWN local login, so the board can require a ` +
       `profile carry those tags but cannot make a worker honour it (#876)`,
+    observed,
+    refusalReason: `project ${ctx.projectId} cannot dispatch remotely: ${block.reason}`,
+  };
+};
+
+const checkPlacementBias: Evaluator = async (ctx) => {
+  const key = riskPosturePrefKey(ctx.projectId);
+  const block = remoteDispatchBlockedByPlacementBias(ctx.posture);
+  const observed = {
+    [key]: ctx.posture.source === "default" ? null : ctx.posture.level,
+    placementBias: ctx.posture.placementBias,
+    postureSource: ctx.posture.source,
+  };
+  if (!block.blocked) {
+    return {
+      outcome: "pass",
+      detail:
+        `risk posture '${ctx.posture.level}' sets placementBias '${ctx.posture.placementBias}', which is a ` +
+        `preference and not a restriction — remote placement is allowed`,
+      observed,
+    };
+  }
+  return {
+    outcome: "decided",
+    detail: block.reason,
     observed,
     refusalReason: `project ${ctx.projectId} cannot dispatch remotely: ${block.reason}`,
   };
@@ -258,6 +290,7 @@ export const EVALUATORS: Record<PlacementCheckId, Evaluator> = {
   dispatch_opt_in: checkOptIn,
   profile_allowlist: checkAllowlist,
   data_handling_requirement: checkDataHandling,
+  placement_bias: checkPlacementBias,
   eligible_worker: checkEligibleWorker,
   branch_for_transport: checkBranchForTransport,
   project_repo_path: checkRepoPath,

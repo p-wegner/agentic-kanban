@@ -15,7 +15,8 @@ import { createWorkspaceMergeService } from "./workspace-merge.service.js";
 import { isPreMergeGateFailure } from "./workspace-merge-gate.js";
 import type { BoardEventSink } from "./board-events.js";
 import type { SessionLauncher } from "./session.manager.js";
-import { createMergeTrainRunner, resolveProjectTrainMaxSize, trainEligible } from "./merge-queue-train.js";
+import { createMergeTrainRunner, resolveTrainOptIn, trainEligible } from "./merge-queue-train.js";
+import { formatPostureNote } from "./risk-posture.service.js";
 
 export interface WorkspaceConflictPreview {
   workspaceId: string;
@@ -494,8 +495,14 @@ export function createMergeQueueService(deps: {
       const first = plan.order[0];
       const issueRows = await getMergeQueueIssueRows([first.issueId], database);
       const projectId = issueRows[0]?.projectId ?? null;
-      const projectTrainMaxSize = projectId ? await resolveProjectTrainMaxSize(projectId, database) : 1;
-      wantsTrain = projectTrainMaxSize > 1;
+      // #937: the opt-in now falls back to the risk posture's `trainMaxSize` when no explicit
+      // `train_max_size_<projectId>` is set. Decision 017's visibility rule — when the POSTURE
+      // is what put this batch on a train, say so and name what that posture skips.
+      const optIn = projectId ? await resolveTrainOptIn(projectId, database) : null;
+      wantsTrain = (optIn?.maxSize ?? 1) > 1;
+      if (wantsTrain && optIn?.fromPosture) {
+        console.log(`[merge-queue] batching ${plan.order.length} workspace(s) onto a train (max ${optIn.maxSize})${formatPostureNote(optIn.posture)}`);
+      }
     }
     if (wantsTrain && opts.strategy !== "sequential" && eligible) {
       yield* trainRunner.runTrainStrategy(plan);
