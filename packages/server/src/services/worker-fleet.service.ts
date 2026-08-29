@@ -40,7 +40,16 @@ import { resolveResumeWorkerAffinity } from "./worker-resume-affinity.service.js
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { remoteDispatchBlockedByPlacementBias, resolveRiskPosture } from "./risk-posture.service.js";
+// #938: the host-as-a-candidate concept and the ranking it shares with the workers. Its own
+// module because it is its own set of rules (no slot ledger, no socket, no label filter).
+import {
+  compareCandidates,
+  hostCandidate,
+  describeHeadroom,
+  type WorkerCandidate,
+} from "./worker-host-candidate.js";
 export { SHARES_FILESYSTEM_LABEL };
+export { HOST_CANDIDATE_ID } from "./worker-host-candidate.js";
 
 // Strict-mode refusal. Defined in the dispatch layer (which must throw it when it
 // refuses a host fallback, #245) and re-exported here for existing importers.
@@ -188,49 +197,21 @@ export async function workerSharesFilesystem(fleet: WorkerFleet, workerId: strin
  * reserves. That was the actual defect — a reservation placed after this function
  * returned would have looked correct and fixed nothing.
  */
-type WorkerCandidate = {
-  id: string;
-  load: number;
-  cap: number;
-  /** #910: this worker's last reported headroom. Undefined = unknown (older build). */
-  capacity?: WorkerCapacityInfo;
-};
-
-/**
- * Rank two candidates by headroom, then load (#910).
- *
- * `--max-concurrency` is a self-declared slot count — a 4-core and a 64-core worker
- * are indistinguishable by `cap`/`load` alone, so a worker that REPORTS its actual
- * free RAM sorts ahead of one that doesn't, all else equal. A worker with no capacity
- * report (absent = unknown, an older build) is treated exactly as before this field
- * existed: neither preferred nor penalised by headroom, so it falls straight through
- * to the load tiebreak. THRASHING DEPRIORITISES, IT DOES NOT EXCLUDE — a thrashing
- * worker still sorts behind every non-thrashing candidate but ahead of nothing being
- * available at all, which is the difference between "avoid if there's a choice" and
- * "refuse".
- */
-function compareCandidates(a: WorkerCandidate, b: WorkerCandidate): number {
-  const aThrashing = a.capacity?.thrashing === "heavy" || a.capacity?.thrashing === "light";
-  const bThrashing = b.capacity?.thrashing === "heavy" || b.capacity?.thrashing === "light";
-  if (aThrashing !== bThrashing) return aThrashing ? 1 : -1;
-  const aHeadroom = a.capacity?.freeRamGb;
-  const bHeadroom = b.capacity?.freeRamGb;
-  if (aHeadroom !== undefined && bHeadroom !== undefined && aHeadroom !== bHeadroom) {
-    return bHeadroom - aHeadroom; // higher headroom first
-  }
-  if (aHeadroom !== undefined && bHeadroom === undefined) return -1;
-  if (aHeadroom === undefined && bHeadroom !== undefined) return 1;
-  return a.load - b.load;
-}
-
 function filterEligibleWorkers(
   fleet: WorkerFleet,
   workers: Awaited<ReturnType<WorkerRegistry["listWorkersView"]>>,
   providerName: ProviderName,
   requiredLabels: string[],
   nowMs?: number,
+  /**
+   * #938: the board host's own headroom, so it can be ranked against the workers instead
+   * of being a binary fallback. Omitted (the default everywhere that only wants workers)
+   * leaves the list worker-only, exactly as before.
+   */
+  hostCapacity?: WorkerCapacityInfo,
 ): WorkerCandidate[] {
-  return workers
+  const host = hostCandidate(hostCapacity);
+  const candidates: WorkerCandidate[] = workers
     .filter((w) => w.effectiveStatus === "online")
     .filter((w) => fleet.connections.isConnected(w.id))
     // #901: a live socket is not proof of a working worker. Asked AFTER `isConnected`
@@ -265,8 +246,15 @@ function filterEligibleWorkers(
         capacity: w.capacity,
       };
     })
-    .filter((w) => w.load < w.cap)
-    .sort(compareCandidates);
+    .filter((w) => w.load < w.cap);
+  // #938: the host joins the list AFTER the worker filters, never through them. Provider
+  // availability and `worker_labels_<projectId>` are statements about which WORKERS may take
+  // this project's work; the host is where the work runs when no worker does, and it has
+  // always been that fallback whatever those prefs say. Running the host through the label
+  // filter would make a `docker`-labelled project's host candidate vanish and change the
+  // meaning of a pref that has never constrained the board itself.
+  if (host) candidates.push(host);
+  return candidates.sort(compareCandidates);
 }
 
 async function eligibleWorkers(
@@ -288,6 +276,28 @@ export async function selectWorkerForLaunch(
 ): Promise<string | null> {
   const candidates = await eligibleWorkers(fleet, providerName, requiredLabels, now);
   return candidates[0]?.id ?? null;
+}
+
+/**
+ * What {@link selectAndReserveWorkerForLaunch} chose: a worker with a claimed slot, or —
+ * only when the caller supplied `hostCapacity` — the board host, which claims nothing (#938).
+ */
+export type LaunchSelection =
+  | { hostWins: true; capacity: WorkerCapacityInfo }
+  | { workerId: string; reservationId: string; honouredAffinity?: boolean; capacity?: WorkerCapacityInfo };
+
+/**
+ * Narrow a selection to the worker branch (#938).
+ *
+ * A caller that passes no `hostCapacity` can never be handed the host — but the type does
+ * not know that, so every such call site would otherwise need a cast. One named predicate
+ * is better than scattered `!`s: a cast would keep compiling if the union ever grew a third
+ * member, and this stops.
+ */
+export function isWorkerSelection(
+  selection: LaunchSelection | null,
+): selection is Extract<LaunchSelection, { workerId: string }> {
+  return selection !== null && !("hostWins" in selection);
 }
 
 /**
@@ -316,16 +326,32 @@ export async function selectAndReserveWorkerForLaunch(
    * list — so a holder with no free slot cannot be over-assigned, it is simply not there.
    */
   preferWorkerId?: string,
-): Promise<
-  | { workerId: string; reservationId: string; honouredAffinity?: boolean; capacity?: WorkerCapacityInfo }
-  | null
-> {
+  /**
+   * #938: the board host's headroom, so the host competes in this same ranking. When the
+   * host wins, this returns `{ hostWins: true }` and NOTHING is reserved — there is no slot
+   * to claim on the board itself, and a caller that treated it as a worker would reserve
+   * against a worker id that does not exist. Omitted = workers only (the pre-#938 shape).
+   */
+  hostCapacity?: WorkerCapacityInfo,
+): Promise<LaunchSelection | null> {
   const workers = await fleet.registry.listWorkersView(now);
   // --- no `await` past this line, or the reservation proves nothing ---
-  const candidates = filterEligibleWorkers(fleet, workers, providerName, requiredLabels, nowMs);
+  const candidates = filterEligibleWorkers(fleet, workers, providerName, requiredLabels, nowMs, hostCapacity);
+  // #750 affinity is a preference over the RANKING, and it outranks the host: the transcript
+  // and the checkout live on that worker, so placing the resume anywhere else — the board
+  // included — most likely fails with "no conversation found". Headroom does not fix that.
   const preferred = preferWorkerId ? candidates.find((c) => c.id === preferWorkerId) : undefined;
   const chosen = preferred ?? candidates[0];
   if (!chosen) return null;
+  if (chosen.isHost) {
+    // #938: a WIN needs something to have been beaten. With no eligible worker the host is
+    // the only candidate, so "the host outranked every worker" would be a vacuous claim
+    // about an empty set — and it would relabel the ordinary no-worker fallback as a
+    // headroom decision, sending an operator looking at RAM when the real answer is that
+    // the fleet is empty. Reporting `null` here keeps that case on its pre-#938 path.
+    if (candidates.length === 1) return null;
+    return { hostWins: true, capacity: chosen.capacity! };
+  }
   return {
     workerId: chosen.id,
     reservationId: reserveWorkerSlot(chosen.id, nowMs),
@@ -365,6 +391,23 @@ export async function resolveWorkerPlacement(params: {
    * omits this, and every existing behaviour is unchanged.
    */
   hostSaturated?: boolean;
+  /**
+   * #938: the board host's OWN headroom, in the same shape a worker reports on its
+   * heartbeat — which makes the host a true candidate in the #910 ranking rather than the
+   * binary fallback `hostSaturated` above describes.
+   *
+   * Supplied by the caller because the read is not free and the caller already does it:
+   * Tier 1 spawns `fleet snapshot`, and this resolver runs on every launch and inside the
+   * monitor's per-project loop. `toWorkerCapacitySnapshot(resolveMachineCapacity())`
+   * (`@agentic-kanban/shared/lib/machine-capacity`) is the shape — the same conversion the
+   * worker daemon uses for its own heartbeat, so the two sides of the comparison are
+   * measured the same way.
+   *
+   * Absent = the host is not ranked at all and behaviour is exactly as before. This is NOT
+   * a gate in either direction: a low-headroom host still gets the work when no worker is
+   * eligible, and `hostSaturated` keeps its separate job of labelling the reason.
+   */
+  hostCapacity?: WorkerCapacityInfo;
 }): Promise<Placement> {
   // #751: a remote decision claims a capacity slot, and EVERY exit from this
   // function that is not a remote placement has to give it back — including the
@@ -402,19 +445,36 @@ function hostBecause(id: PlacementReasonId, detail: string): Placement {
   return { kind: "host", reason: because(id, detail) };
 }
 
+/**
+ * The host WON the ranked comparison (#938) — a different thing from every `hostBecause`
+ * exit above, and it has its own helper for exactly that reason.
+ *
+ * `placement-chain-parity.test.ts` counts `return hostBecause("<id>"` occurrences in this
+ * resolver and demands one declared chain check per id, because a `hostBecause` exit IS a
+ * guard that refused remote dispatch for a reason an operator can go and change. This exit
+ * is not a guard: nothing refused anything, the host simply had more headroom, and it flips
+ * back to remote the moment the numbers move. Routing it through `hostBecause` would force
+ * a fictional entry into `docs/worker-fleet.md` §7's "nothing dispatches" checklist telling
+ * an operator to go fix a setting that does not exist.
+ */
+function hostWinsRanking(detail: string): Placement {
+  return { kind: "host", reason: because("host_has_headroom", detail) };
+}
+
 async function resolvePlacementWithReservation(
   params: Parameters<typeof resolveWorkerPlacement>[0],
   reservation: { id?: string },
 ): Promise<Placement> {
-  const { database, projectId, providerName, branch, baseBranch, resumeProviderSessionId, now, nowMs, hostSaturated } = params;
+  const {
+    database, projectId, providerName, branch, baseBranch, resumeProviderSessionId, now, nowMs,
+    hostSaturated, hostCapacity,
+  } = params;
   // #908: when the host is saturated, a remote landing is BECAUSE of that — not just
   // because a worker happened to be eligible — so the recorded reason should say so.
   // #910: name the headroom that decided, when the worker reported one — `worker
   // placements` shows this string, so "why THIS worker" must not require a separate lookup.
   const remoteReason = (detail: string, capacity?: WorkerCapacityInfo): PlacementReason => {
-    const headroom = capacity
-      ? ` (${capacity.freeRamGb.toFixed(1)}GB free${capacity.thrashing !== "none" ? `, thrashing=${capacity.thrashing}` : ""})`
-      : "";
+    const headroom = describeHeadroom(capacity);
     return hostSaturated
       ? because("machine_saturated", `host is saturated; ${detail}${headroom}`)
       : because("eligible_worker", `${detail}${headroom}`);
@@ -481,9 +541,32 @@ async function resolvePlacementWithReservation(
       resumeProviderSessionId && branch
         ? (await resolveResumeWorkerAffinity({ projectId, branch }, database)) ?? undefined
         : undefined;
+    // #938: the host competes in the SAME ranking, but only for a project that would
+    // accept it. A strict project forbids the host fallback outright, so ranking the board
+    // in would let a high-headroom host beat every worker and then have to be discarded —
+    // the comparison would decide something the project has already refused. Withholding
+    // the candidate keeps strict's contract exactly as #245 wrote it: either an eligible
+    // worker, or `NO_AVAILABLE_WORKER`. Never "the board, because it had more RAM".
+    // A SATURATED host is not a candidate either. #908 already decided the board is too
+    // tight to take this session — that is the whole meaning of `hostSaturated` — so letting
+    // it compete on the free RAM it has left would let the ranking overturn that verdict and
+    // keep the work exactly where #908 says it should not go. It remains the LAST-RESORT
+    // fallback below when no worker is eligible (that path is unchanged, and still records
+    // `machine_saturated`); it just cannot WIN a comparison against a worker that could run.
+    const rankedHostCapacity = strict || hostSaturated ? undefined : hostCapacity;
     const placed = await selectAndReserveWorkerForLaunch(
-      fleet, providerName, requiredLabels, now, nowMs, preferWorkerId,
+      fleet, providerName, requiredLabels, now, nowMs, preferWorkerId, rankedHostCapacity,
     );
+    if (placed && !isWorkerSelection(placed)) {
+      // Not a fallback and not a refusal: an eligible worker may well have been available,
+      // and the board simply had more room than all of them. Say so with the numbers, since
+      // the alternative reading — "no worker was eligible" — is the one an operator would
+      // otherwise reach for, and it would be wrong.
+      return hostWinsRanking(
+        `board host outranks every eligible ${providerName} worker on headroom` +
+          describeHeadroom(placed.capacity),
+      );
+    }
     if (!placed) {
       const detail = requiredLabels.length > 0 ? ` with labels [${requiredLabels.join(",")}]` : "";
       if (strict) refuseHost(`no eligible ${providerName} worker${detail}`);
