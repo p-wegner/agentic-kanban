@@ -144,6 +144,24 @@ export function selectPolicyByPriority(
  */
 export const STRATEGY_PREF_PREFIX = "board_strategy_";
 
+/**
+ * Ceiling on the Bullseye's `activeAgentsTarget` / `maxNewStartsPerCycle` (#919).
+ *
+ * Was 12, in two independent copies — `deriveMonitorTunables` (server-side parse) and the
+ * client's `strategy-targets.ts` (the settings form). It was a MACHINE-capacity guard
+ * wearing a policy hat: nothing else stopped an operator typing 40 into the Bullseye and
+ * burying the box. Admission control now covers exactly that case — `resolveMachineCapacity`
+ * (#908) holds a start when the host is tight, and `resolveWorkerPlacement` routes the
+ * overflow to a fleet worker rather than refusing — so the clamp is back to being what it
+ * should be: a sanity bound on a hand-typed number, not the thing keeping the machine alive.
+ *
+ * Raised to 32 rather than removed, because a mistyped `120` is still worth catching at the
+ * edge of the parser. Declared HERE (the pure policy module) rather than beside
+ * `deriveMonitorTunables`, because that module value-imports `node:fs` and so is unreachable
+ * from the client — which is how the two copies came to exist in the first place.
+ */
+export const MAX_ACTIVE_AGENTS_TARGET = 32;
+
 /** Preference key holding the Strategy Bullseye config JSON for a project. */
 export function strategyPrefKey(projectId: string): string {
   return `${STRATEGY_PREF_PREFIX}${projectId}`;

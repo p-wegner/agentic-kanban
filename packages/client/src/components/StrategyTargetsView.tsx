@@ -5,6 +5,7 @@ import { apiFetch } from "../lib/api.js";
 import { setSettings } from "../lib/settingsStore.js";
 import { showToast } from "../lib/toast.js";
 
+import { MAX_ACTIVE_AGENTS_TARGET } from "@agentic-kanban/shared/lib/strategy-policy";
 import { DEFAULT_CONFIG, POLICY_MODE_LABELS, POLICY_MODE_DESCRIPTIONS, KIND_LABELS, settingsKey, clampWeight, clampPolicy, normalizeConfig, issueSearchText, matchesSegment, deriveRefillFocus, makeAgentBrief } from "../lib/strategy-targets.js";
 import type { SegmentKind, Provider, ProviderPolicyMode, StrategySegment, ProviderProfilePolicy, StrategyConfig, MonitorPolicyPreset } from "../lib/strategy-targets.js";
 import { MonitorPolicyPresets } from "./MonitorPolicyPresets.js";
@@ -268,9 +269,9 @@ export function StrategyTargetsView({ columns, projectId, onIssueClick, searchQu
             </div>
             <div className="grid grid-cols-3 gap-2">
               {[
-                ["activeAgentsTarget", "Agents", 1, 12],
+                ["activeAgentsTarget", "Agents", 1, MAX_ACTIVE_AGENTS_TARGET],
                 ["backlogFloor", "Backlog", 0, 100],
-                ["maxNewStartsPerCycle", "Starts", 1, 12],
+                ["maxNewStartsPerCycle", "Starts", 1, MAX_ACTIVE_AGENTS_TARGET],
               ].map(([keyName, label, min, max]) => (
                 <label key={keyName} className="block">
                   <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">{label}</span>

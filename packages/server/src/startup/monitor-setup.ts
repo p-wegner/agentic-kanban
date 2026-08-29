@@ -27,6 +27,7 @@ import { scanRottedSuites } from "../services/rotted-suite-scan.js";
 import { scanDegenerateBaseHealth } from "../services/degenerate-base-health.js";
 import { scanAutodriveStallWarnings, buildAutoStartSkipWarnings } from "../services/autodrive-stall-warning.service.js";
 import { resolveMergePolicy } from "./merge-strategy.js";
+import { resolveRiskPosture } from "../services/risk-posture.service.js";
 import { getAllPreferencesCached, invalidatePreferencesCache } from "../repositories/preferences.repository.js";
 import { conditionalJsonResponse } from "../services/board-etag-cache.service.js";
 import { createMonitorPhaseRecorder, type MonitorCycleTimings } from "../lib/monitor-phase-timings.js";
@@ -493,6 +494,12 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
           return Number.isFinite(ms) && ms > 0 ? ms : undefined;
         })(),
         cycleDeadlineMs: cycleStartMs + cycleBudgetMs,
+        // #919: the per-cycle merge/relaunch caps come from the project's risk posture.
+        // Resolved from this cycle's already-loaded prefMap; the per-ticket `risk:<level>`
+        // tag override is deliberately NOT applied here — a cycle-wide cap is a property of
+        // the project, and letting one tagged ticket widen it would let a single ticket
+        // raise the ceiling for every OTHER ticket in that project's walk.
+        riskPostureFor: (projectId: string) => resolveRiskPosture(prefMap, projectId),
       });
       cycleStats.relaunched = candidateResult.relaunched;
       cycleStats.merged = candidateResult.merged;

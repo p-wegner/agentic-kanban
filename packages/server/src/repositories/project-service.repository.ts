@@ -142,6 +142,12 @@ export async function getBoardIssues(
       checklistJson: issues.checklistJson,
       pinned: issues.pinned,
       milestoneId: issues.milestoneId,
+      // #919: so the issue panel can answer "why is #57 not running" from the board payload
+      // it already loads, rather than needing a second per-issue round trip. Deliberately NOT
+      // added to the /graph projection below — that view renders titles only, and its payload
+      // size is the reason `description` is already excluded there.
+      lastAutoStartSkipReason: issues.lastAutoStartSkipReason,
+      lastAutoStartSkipAt: issues.lastAutoStartSkipAt,
     })
     .from(issues)
     .innerJoin(projectStatuses, eq(issues.statusId, projectStatuses.id))

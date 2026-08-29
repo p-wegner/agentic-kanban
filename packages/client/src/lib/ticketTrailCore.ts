@@ -102,3 +102,22 @@ export function sanitize(raw: unknown): TrailState {
         : -1;
   return { entries, cursor };
 }
+
+/**
+ * The subset of `useTicketTrail` a panel needs to render & drive its trail strip.
+ *
+ * Declared here rather than in `IssueDetailPanel` so that `hooks/` and `lib/`
+ * modules can name it without importing upward from `components/` — the edge
+ * `client-upward-type-edge-ratchet` (#694) forbids even for a type. The panel
+ * re-exports it, so existing importers are unchanged.
+ */
+export interface TicketTrailControls {
+  entries: TrailEntry[];
+  activeId: string | null;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  onBack: () => void;
+  onForward: () => void;
+  onSelect: (id: string) => void;
+  onRemove: (id: string) => void;
+}

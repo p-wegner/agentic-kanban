@@ -11,7 +11,7 @@ import type { DriveEnablementStatus } from "./drive.service.js";
 import { resolveProjectRuntimeConfig } from "./project-runtime-config.service.js";
 
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
-import { readStrategyBullseye } from "@agentic-kanban/shared/lib/strategy-objective-file";
+import { resolveWipLimit } from "./wip-limit.service.js";
 /**
  * Drive preflight (#807): assert the hands-off prerequisites BEFORE a drive starts.
  *
@@ -260,17 +260,14 @@ export async function runDrivePreflight(
     }
 
     // --- WIP target: 1 means no real parallelism (degraded, not blocking). ---
-    // #497: read+parse via the shared helper (null for absent OR malformed, same as the
-    // hand-written try/catch). The legacy `nudge_wip_limit` fallback below is deliberately
-    // NOT replaced by resolveMonitorTunables: this check needs `null` to mean "no WIP target
-    // configured" so it can stay silent, whereas resolveMonitorTunables substitutes its
-    // default of 5 and would erase that distinction.
-    const wipConfig = readStrategyBullseye(prefMap, projectId);
-    let wipTarget: number | null = wipConfig?.activeAgentsTarget ?? null;
-    if (wipTarget === null) {
-      const legacy = Number.parseInt(prefMap.get("nudge_wip_limit") ?? "", 10);
-      wipTarget = Number.isFinite(legacy) ? legacy : null;
-    }
+    // #919: reads THE WIP resolver like every other surface. This check used to bypass it
+    // (Bullseye raw, then the legacy `nudge_wip_limit`, then null) because it needs `null` to
+    // mean "no WIP target configured" so it can stay silent, and `resolveMonitorTunables`
+    // substitutes its default of 5 — erasing that distinction. `resolveWipLimit` reports BOTH:
+    // `configured` is null exactly when nothing is set, `limit` is what the board acts on. The
+    // bypass also meant this check was blind to `wip_limit_<projectId>`, so a project pinned to
+    // 1 by the onboarding wizard passed the parallelism check.
+    const wipTarget = resolveWipLimit(prefMap, projectId).configured;
     if (wipTarget !== null && wipTarget < 2) {
       checks.push(
         warn(
