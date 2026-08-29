@@ -444,9 +444,11 @@ export async function runPreLockGate(args: {
             `[workspace-merge] base health for project ${projectId} is a non-answer `
               + `('${baseHealth.health.outcome}') — requesting a fresh probe if due (#935)`,
           );
-          // Dynamic import: the due-check owns the persisted probe state and lives in
-          // `startup/`, which `services/` must not import statically (layering, #595).
-          void import("../startup/base-branch-health-reconciler.js")
+          // Kept as a dynamic import: `base-branch-health-reprobe.service.ts` is now a sibling
+          // service (#947 moved it out of `startup/`, so the layering reason is gone), but this
+          // module is on the merge gate's hot path and the reprobe door is reached only on a
+          // non-answer base row. Deferring the load keeps that cost off every gate.
+          void import("./base-branch-health-reprobe.service.js")
             .then((m) => m.requestBaseBranchReprobe(projectId, database))
             .catch(() => {});
         }
