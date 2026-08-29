@@ -192,6 +192,55 @@ describe("Stop chain honours the posture end-to-end (#913)", () => {
     expect(existsSync(join(projectDir, "vitest.marker"))).toBe(false);
   });
 
+  it("the capacity gate holds only the checks that spawn a build, never the cheap guards", async () => {
+    // The capacity gate exists to keep a BUILD off a box that cannot afford one. Gating
+    // every non-`alwaysRun` check also held `check-uncommitted.js` — a cheap `git status`
+    // that catches stranded work at session exit — exactly when the box is loaded and
+    // several agents are running, which is when stranding is most likely. It also
+    // contradicted the posture module, which deliberately leaves an unclassifiable
+    // ("other") check alone rather than disabling what it does not understand.
+    await writeFile(
+      join(projectDir, ".claude", "hooks", "smart-hooks-config.json"),
+      JSON.stringify({
+        hooks: {
+          Stop: [
+            // Classifies as "other": cheap, not a build, and carries no alwaysRun flag —
+            // the exact shape that was being held.
+            {
+              name: "Uncommitted worktree changes",
+              command: touchCommand("uncommitted.marker"),
+              enabled: true,
+              blocking: true,
+              timeout: 30,
+            },
+            {
+              name: "Typecheck (edited packages only)",
+              command: touchCommand("tsc.marker"),
+              enabled: true,
+              blocking: true,
+              timeout: 30,
+            },
+          ],
+        },
+      }),
+    );
+    const result = spawnSync(process.execPath, [runnerPath, "Stop"], {
+      input: JSON.stringify({ stop_hook_active: false }),
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        CLAUDE_PROJECT_DIR: projectDir,
+        SMART_HOOKS_POSTURE: "standard",
+        // Demand more free memory than any machine has, so the gate always holds.
+        SMART_HOOKS_MIN_FREE_GB: "99999",
+        SMART_HOOKS_FORCE: "0",
+      },
+    });
+    expect(result.status).toBe(0);
+    expect(existsSync(join(projectDir, "uncommitted.marker"))).toBe(true);
+    expect(existsSync(join(projectDir, "tsc.marker"))).toBe(false);
+  });
+
   it("a held capacity check reports inconclusive and names the train gate", () => {
     // Force a hold by demanding more free memory than any machine has.
     const result = spawnSync(process.execPath, [runnerPath, "Stop"], {

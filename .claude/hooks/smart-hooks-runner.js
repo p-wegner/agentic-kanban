@@ -283,11 +283,22 @@ function posture() {
  * applied to a timed-out check.
  *
  * A SAFETY check (`alwaysRun`) never reaches either gate — `checkAllowedUnderPosture`
- * classifies it as such and `capacityGate` returns early for it. A guard that stands
+ * classifies it as such and the capacity gate returns early for it. A guard that stands
  * down because the box is busy is not a guard.
+ *
+ * Neither does an `other` check — one the classifier does not recognize as expensive.
+ * The capacity gate exists to stop a BUILD being spawned onto a box that cannot afford
+ * it, so it may only hold the buckets that actually spawn one (`typecheck`, `tests`,
+ * `generatedRules`). Gating everything held `check-uncommitted.js` — the cheap `git
+ * status` guard that catches stranded work at session exit — precisely when the box is
+ * loaded, i.e. when several agents are running and stranding is most likely. It also
+ * contradicted the posture module, which deliberately leaves an unclassifiable check
+ * alone rather than silently disabling something it does not understand; letting the
+ * next gate disable it anyway put that decision back.
  */
 function policyGate(check) {
   const { posture: level, source } = posture();
+  let kind = null;
   if (postureModule) {
     const verdict = postureModule.checkAllowedUnderPosture(check, level);
     if (!verdict.run) {
@@ -298,10 +309,16 @@ function policyGate(check) {
         output: `${verdict.reason} (posture source: ${source})`,
       };
     }
+    kind = verdict.kind;
   }
   if (check.alwaysRun === true) return null;
   if (!capacityModule) return null;
   if (postureModule && !postureModule.policyFor(level).capacityGated) return null;
+  // Without the posture module there is no classification to key off, so fall back to
+  // the pre-#913 reach of the capacity gate rather than inventing a second classifier.
+  if (kind !== null && kind !== "typecheck" && kind !== "tests" && kind !== "generatedRules") {
+    return null;
+  }
 
   const gate = capacityModule.capacityHold({ label: check.name || check.command });
   if (gate.hold) {
