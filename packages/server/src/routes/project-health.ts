@@ -10,7 +10,8 @@ import {
 } from "../lib/board-health-events-format.js";
 import { getProjectHealth } from "../services/project-health.service.js";
 import { listBaseBranchHealth, getLatestBaseBranchHealth } from "../repositories/base-branch-health.repository.js";
-import { verifyBaseBranchHealth, inFlightBaseBranchProbeCount } from "../services/base-branch-health.service.js";
+import { inFlightBaseBranchProbeCount } from "../services/base-branch-health.service.js";
+import { requestBaseBranchReprobe } from "../startup/base-branch-health-reconciler.js";
 
 import { queryInt } from "../middleware/query-params.js";
 /**
@@ -68,21 +69,24 @@ export function createProjectHealthRoute(database: Database) {
   //
   // Deliberately fire-and-forget: a probe is a clone + install + full verify, minutes to an
   // hour. Blocking the request on it would hold an HTTP connection for the whole run and time
-  // out long before the answer. `verifyBaseBranchHealth` is per-project idempotent (the
-  // in-flight map, #712), so a double-click JOINS the running probe rather than starting a
-  // rival one — which is exactly what must not happen on an already-loaded box.
+  // out long before the answer.
+  //
+  // Routed through `requestBaseBranchReprobe` rather than the probe directly. As an explicit
+  // operator request it overrides the RECENCY back-off (that override is the route's reason to
+  // exist), but it still yields to the two machine guards — a probe already in flight, or a
+  // merge gate spending the cores right now. Bypassing those would start a second 45-minute
+  // verify on exactly the loaded box whose load produced the starved verdict being replaced.
+  // The response says which of those happened instead of always claiming it started one.
   router.post("/:id/base-branch-health/reprobe", async (c) => {
     const projectId = c.req.param("id");
     const previous = await getLatestBaseBranchHealth(projectId, database).catch(() => null);
     const alreadyRunning = inFlightBaseBranchProbeCount() > 0;
-    void verifyBaseBranchHealth(projectId, database).catch((err) => {
-      console.warn(
-        `[base-branch-health] on-demand re-probe failed for project ${projectId} (non-fatal):`,
-        err instanceof Error ? err.message : String(err),
-      );
+    const verdict = await requestBaseBranchReprobe(projectId, database, undefined, undefined, {
+      ignoreRecency: true,
     });
     return c.json({
-      started: true,
+      started: verdict.due,
+      skippedReason: verdict.due ? null : verdict.reason,
       joinedRunningProbe: alreadyRunning,
       // What the caller is replacing, so the response is self-explanatory in a log.
       previousOutcome: previous?.outcome ?? null,

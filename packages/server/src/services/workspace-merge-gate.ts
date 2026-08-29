@@ -46,7 +46,6 @@ import {
   getBaseBranchHealthAtMergeBase,
   describeRedBaseAttribution,
   isBaseHealthAnswer,
-  verifyBaseBranchHealth,
 } from "./base-branch-health.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { getPreference } from "../repositories/preferences.repository.js";
@@ -429,16 +428,27 @@ export async function runPreLockGate(args: {
         // against a verdict nobody measured. A gate failing here is the moment we most want
         // the base's real state, so ask for a fresh probe rather than waiting the sweep out.
         //
-        // Fire-and-forget, and safe to call unconditionally: `verifyBaseBranchHealth` joins an
-        // already-running probe per project (#712) instead of starting a rival one, and yields
-        // to a busy build semaphore on its own schedule. It must never delay or fail this
-        // gate — the withhold below stands either way.
+        // Routed through `requestBaseBranchReprobe`, NOT `verifyBaseBranchHealth` directly:
+        // the probe is a clone + install + full verify, and the two guards that keep it from
+        // becoming the saturation it measures — the #931 `gateBusy` yield and the #712
+        // `timeout` back-off — live in that due-check, not in the probe. Calling the probe
+        // straight from here would re-spawn a 45-minute verify on EVERY failing gate for as
+        // long as the non-answer row stands, which is precisely this ticket's failure mode.
+        // The in-flight map only dedups overlapping probes; it does not decide whether one
+        // should start.
+        //
+        // Fire-and-forget: it must never delay or fail this gate — the withhold below stands
+        // either way, and the fresh verdict (if it runs) lands for the NEXT gate.
         if (baseHealth.health && !isBaseHealthAnswer(baseHealth.health.outcome)) {
           console.log(
             `[workspace-merge] base health for project ${projectId} is a non-answer `
-              + `('${baseHealth.health.outcome}') — requesting a fresh probe (#935)`,
+              + `('${baseHealth.health.outcome}') — requesting a fresh probe if due (#935)`,
           );
-          void verifyBaseBranchHealth(projectId, database).catch(() => {});
+          // Dynamic import: the due-check owns the persisted probe state and lives in
+          // `startup/`, which `services/` must not import statically (layering, #595).
+          void import("../startup/base-branch-health-reconciler.js")
+            .then((m) => m.requestBaseBranchReprobe(projectId, database))
+            .catch(() => {});
         }
         if (baseHealth.health?.failedSuites) {
           try {
