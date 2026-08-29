@@ -7,6 +7,7 @@ import {
   clearAutoStartSkipReason,
   persistAutoStartSkipReason,
 } from "../repositories/auto-start-skip.repository.js";
+import { insertWorkspaceRecordRow } from "../repositories/workspace-crud.repository.js";
 
 /**
  * #919 — the per-ISSUE skip record that makes "why is #57 not running" answerable in the issue
@@ -59,6 +60,23 @@ describe("auto-start skip reason, per issue (#919)", () => {
     await persistAutoStartSkipReason(issueId, { reason: "wip_cap", at: "2026-08-29T10:00:00.000Z" }, db);
 
     expect(await clearAutoStartSkipReason([issueId], db)).toBeNull();
+
+    const row = await readBack(db, issueId);
+    expect(row.lastAutoStartSkipReason).toBeNull();
+    expect(row.lastAutoStartSkipAt).toBeNull();
+  });
+
+  it("a workspace created by ANY path clears the record — not just a monitor start", async () => {
+    // The monitor only clears the issues IT started. A manual start from the UI, a CLI start,
+    // or a relaunch would otherwise leave a ticket that is RUNNING (and later Done) badged
+    // "held for wip_cap" forever, which is the exact question the field claims to answer.
+    const { db, issueId } = await seedOne();
+    await persistAutoStartSkipReason(issueId, { reason: "wip_cap", at: "2026-08-29T10:00:00.000Z" }, db);
+
+    await insertWorkspaceRecordRow(
+      { id: "ws-manual", issueId, branch: "feature/ak-57-manual", status: "active" },
+      db,
+    );
 
     const row = await readBack(db, issueId);
     expect(row.lastAutoStartSkipReason).toBeNull();

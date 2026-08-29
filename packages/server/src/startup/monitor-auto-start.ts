@@ -891,6 +891,10 @@ async function runTodoPull(ctx: AutoStartCycle, inProgressSt: { id: string; proj
     for (const memberId of memberIssueIds) {
       startedAsMember.add(memberId);
       contentionGate.noteStarted(memberId);
+      // #919: a member has no workspace row of its own (the group workspace is keyed by the
+      // lead), so the create-path clear never reaches it — but it IS running, and a stale
+      // "held for wip_cap" on it would answer the panel's question wrongly.
+      ctx.noteIssueStarted(memberId);
     }
   }
 }

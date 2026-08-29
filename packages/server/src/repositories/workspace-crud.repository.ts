@@ -85,6 +85,16 @@ export async function insertWorkspaceRecordRow(
   database: Database | TransactionClient = db,
 ): Promise<void> {
   await database.insert(workspaces).values(values);
+  // #919: this issue now HAS a workspace, so any recorded "why the monitor did not start it"
+  // is stale and must not keep answering that question. The monitor clears the records of the
+  // issues IT started, but that only covers its own path — a manual start, a CLI start, or a
+  // group member joining someone else's workspace would otherwise leave a ticket that is
+  // running (and later Done) permanently badged "held for wip_cap". Cleared here, on the one
+  // choke point every workspace insert goes through, and inside the caller's transaction so
+  // the clear cannot outlive a rolled-back create.
+  await database.update(issues)
+    .set({ lastAutoStartSkipReason: null, lastAutoStartSkipAt: null })
+    .where(eq(issues.id, values.issueId));
 }
 
 /**
