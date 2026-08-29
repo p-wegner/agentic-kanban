@@ -1,26 +1,23 @@
 /**
  * #917 — scored ticket selection for the Todo-pull loop, split out of
- * `monitor-auto-start.ts` (the god-module gate's 1000-line ceiling) once this file plus
- * the read-only preview endpoint's backing function pushed it over.
+ * `monitor-auto-start.ts` (the god-module gate's 1000-line ceiling).
  *
  * `orderCandidatesByStartScore` is what `runTodoPull` calls to replace FIFO
- * `ORDER BY issue_number`; `previewNextStartCandidates` is the read-only twin behind
- * `GET /api/projects/:id/board-monitor/next` — same score, no persistence, no launch.
+ * `ORDER BY issue_number`. Its read-only twin behind
+ * `GET /api/projects/:id/board-monitor/next` used to live here too; #942 moved it to
+ * `services/start-score-preview.service.ts`, because a route reaching into `startup/` is
+ * the `server-route -> server-monitor` violation the pattern language forbids — and the
+ * preview persists nothing and launches nothing, so it was never monitor-engine code.
  */
 import { normalizeIssuePriority } from "@agentic-kanban/shared/lib/issue-priority";
 import { readStrategyBullseye } from "@agentic-kanban/shared/lib/strategy-objective-file";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import type { Database } from "../db/index.js";
-import { computeStartScore, hoursSince, matchBullseyeSegment, type StartScoreComponents, type StartScoreResult } from "../lib/start-scoring.js";
+import { computeStartScore, hoursSince, matchBullseyeSegment, type StartScoreComponents } from "../lib/start-scoring.js";
 import {
   computeUnblockCounts,
-  findProjectStatusIdByName,
-  findStatusIdsByNames,
   persistStartScore,
-  selectScorableCandidates,
 } from "../repositories/start-scoring.repository.js";
-import { resolveStartPolicy } from "../services/start-policy.service.js";
-import { monitorEligibleIssueSql, notDriveOrEpicMetaSql, resolveCandidateStatusIds } from "./monitor-eligibility.js";
 
 /** The subset of a Todo-pull candidate row the scorer needs. */
 interface ScorableCandidate {
@@ -91,59 +88,4 @@ export async function orderCandidatesByStartScore<T extends ScorableCandidate>(
 
   const scoreById = new Map(scored.map(({ issue, result }) => [issue.id, result.score]));
   candidates.sort((a, b) => (scoreById.get(b.id) ?? 0) - (scoreById.get(a.id) ?? 0));
-}
-
-/** One ranked row of {@link previewNextStartCandidates}'s result. */
-export interface StartScorePreviewRow {
-  id: string;
-  issueNumber: number | null;
-  title: string;
-  score: StartScoreResult;
-}
-
-/**
- * #917: read-only preview of the Todo-pull loop's current ranking for a project — backs
- * `GET /api/projects/:id/board-monitor/next`. Computes the same score
- * ({@link computeStartScore}) `orderCandidatesByStartScore` uses, but never writes
- * `lastStartScore*` back to the issue (a status-page read must not have side effects) and
- * never launches anything.
- */
-export async function previewNextStartCandidates(
-  projectId: string,
-  prefMap: Map<string, string>,
-  limit: number,
-  database: Database,
-): Promise<StartScorePreviewRow[]> {
-  const allowFeatureTypes = resolveStartPolicy(prefMap, projectId).mode !== "manual";
-  const todoStatusId = await findProjectStatusIdByName(projectId, "Todo", database);
-  if (!todoStatusId) return [];
-
-  const candidateStatusIds = await resolveCandidateStatusIds(projectId, todoStatusId, allowFeatureTypes, database);
-  const candidates = await selectScorableCandidates(
-    candidateStatusIds,
-    [monitorEligibleIssueSql(allowFeatureTypes), notDriveOrEpicMetaSql()],
-    database,
-  );
-  if (candidates.length === 0) return [];
-
-  const doneStatusIds = await findStatusIdsByNames(["Done", "Cancelled"], database);
-
-  const nowMs = Date.now();
-  const unblockCounts = await computeUnblockCounts(projectId, candidates.map((c) => c.id), doneStatusIds, database);
-  const bullseye = readStrategyBullseye(prefMap, projectId);
-  const segments = bullseye?.segments ?? [];
-
-  const ranked: StartScorePreviewRow[] = candidates.map((issue) => {
-    const { multiplier, segmentId } = matchBullseyeSegment(issue, segments);
-    const score = computeStartScore({
-      priority: normalizeIssuePriority(issue.priority),
-      unblockCount: unblockCounts.get(issue.id) ?? 0,
-      ageHours: hoursSince(issue.statusChangedAt ?? issue.createdAt, nowMs),
-      bullseyeMultiplier: multiplier,
-      bullseyeSegmentId: segmentId,
-    });
-    return { id: issue.id, issueNumber: issue.issueNumber, title: issue.title, score };
-  });
-  ranked.sort((a, b) => b.score.score - a.score.score);
-  return ranked.slice(0, limit);
 }

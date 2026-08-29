@@ -223,7 +223,7 @@ things live there, and only the first is actually about starting up:
 | Role | What | Examples |
 |---|---|---|
 | **composition root** | genuinely boot-time wiring, runs once | `route-setup`, `background-services`, `startup-tasks`, `readiness`, `process-handlers`, `scheduled-tasks`, `session-restore`, `fk-alignment` |
-| **monitor engine** | the Autopilot, ~5.5k LOC, runs EVERY cycle | `monitor-setup`, `monitor-cycle`, `monitor-auto-start`, `monitor-backlog`, `monitor-contract`, `monitor-eligibility`, `monitor-file-contention`, `monitor-helpers`, `monitor-project-scheduler`, `monitor-workspace-actions`, `monitor-cycle-actions`, `merge-workflow`, `exit-workflow`, `auto-merge-orchestrator` |
+| **monitor engine** | the Autopilot, ~5.5k LOC, runs EVERY cycle | `monitor-setup`, `monitor-cycle`, `monitor-auto-start`, `monitor-backlog`, `monitor-contract`, `monitor-file-contention`, `monitor-helpers`, `monitor-project-scheduler`, `monitor-workspace-actions`, `monitor-cycle-actions`, `merge-workflow`, `exit-workflow`, `auto-merge-orchestrator` (#942 moved `monitor-eligibility` out to `repositories/start-scoring.repository.ts` — candidate-selection SQL, not engine) |
 | **sweeps** | periodic passes, the **background sweep** kind above | the 13 `*-reconciler`, `*-reaper`, `*-scanner`, `worker-incoming-sweep` |
 
 **Why the split matters, concretely.** `.dependency-cruiser.cjs` enforces

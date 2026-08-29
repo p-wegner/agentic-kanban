@@ -8,7 +8,7 @@ import { getRuntimeState, setRuntimeState } from "../repositories/runtime-state.
 import { nextIssueNumber } from "../repositories/issue-number.repository.js";
 import type { MonitorActionName } from "../services/monitor-nudge.js";
 import { resolveMonitorTunables } from "../services/strategy-objective.service.js";
-import { monitorEligibleIssueSql } from "./monitor-eligibility.js";
+import { monitorEligibleIssueSql } from "../repositories/start-scoring.repository.js";
 
 /** A synthetic host issue created to carry a generation workspace. */
 interface HostIssue {
