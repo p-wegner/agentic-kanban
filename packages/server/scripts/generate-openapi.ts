@@ -50,6 +50,7 @@ import {
   SyntaxKind,
   Node,
   type CallExpression,
+  type PropertyAccessExpression,
   type TypeNode,
   type ArrowFunction,
   type FunctionExpression,
@@ -140,6 +141,14 @@ interface RouteInfo {
   requestBody?: Schema;
   /** true when body is parsed without a generic type argument (unknown shape). */
   requestBodyUnknown?: boolean;
+  /**
+   * true when the handler reads the body through a RAW Hono accessor (`c.req.json()`,
+   * `parseBody`, `text`, `formData`, …) rather than `parseJsonBody`. The shape is unknown, but
+   * the body's EXISTENCE is established — which is the distinction #935 needed: without this,
+   * "no `parseJsonBody` found" meant both "takes no body" and "takes a body I cannot read",
+   * and the six import/preview routes are the latter.
+   */
+  requestBodyRaw?: boolean;
   requestBodyOptional?: boolean;
   responseStatuses: number[];
   /** Statuses seen at a literal `c.json(body, status)` call site (plus the default fill). */
@@ -403,6 +412,38 @@ function parseRouteCall(
  */
 const MAX_BODY_FOLLOW_DEPTH = 1;
 
+/**
+ * Hono request accessors that CONSUME the request body. `json` is the one that matters most,
+ * but a multi-encoding handler branches on `content-type` and reaches for `formData`/`text` on
+ * the other arms -- `routes/backlog-markdown.ts` uses all three in one helper.
+ *
+ * Deliberately NOT included: `header`, `param`, `query`, `queries`, `valid`, `raw`, `url`,
+ * `method`, `path`, `cookie`. Those read metadata, not the body, and treating them as a body
+ * read would mark almost every route as taking one.
+ */
+const RAW_BODY_ACCESSORS = new Set(["json", "parseBody", "text", "formData", "arrayBuffer", "blob"]);
+
+/**
+ * Is this property access rooted at a Hono request (`c.req.…` / `ctx.req.…`)?
+ *
+ * The name check alone is far too broad -- `JSON.parse`, `response.json()`, `fs.text()` and any
+ * local `.json()` would all match. Requiring the `.req` qualifier keeps it to the request.
+ */
+function isHonoRequestAccess(expr: PropertyAccessExpression): boolean {
+  const target = expr.getExpression();
+  return Node.isPropertyAccessExpression(target) && target.getName() === "req";
+}
+
+/**
+ * Is this call immediately `.catch(...)`-ed? `await c.req.json().catch(() => ({}))` is the
+ * codebase's spelling for "a body is welcome but not required".
+ */
+function isCaught(call: Node): boolean {
+  const parent = call.getParent();
+  if (!parent || !Node.isPropertyAccessExpression(parent)) return false;
+  return parent.getName() === "catch" && Node.isCallExpression(parent.getParent());
+}
+
 /** A same-file function called as a bare identifier -- the only shape this walk follows. */
 function localFunctionCalled(call: Node, sf: SourceFile): Node | undefined {
   const expr = (call as CallExpression).getExpression();
@@ -467,10 +508,25 @@ function analyseHandler(
       continue;
     }
 
+    // A RAW body read: `c.req.json()` / `parseBody()` / `text()` / `formData()` / … . The shape
+    // is not readable, but the body EXISTS, and that is the whole point of recording it — a
+    // route the generator cannot shape must still be documented as taking a body (#935).
+    if (Node.isPropertyAccessExpression(expr) && RAW_BODY_ACCESSORS.has(expr.getName())
+        && isHonoRequestAccess(expr)) {
+      info.requestBodyRaw = true;
+      // `c.req.json().catch(() => ({}))` tolerates a missing/!unparseable body, so the body is
+      // OPTIONAL -- the same judgement `parseOptionalJsonBody` carries explicitly. Without this
+      // the two conductor routes would be documented `required: true` and a caller obeying the
+      // spec would send a payload the handler is written not to need.
+      if (isCaught(call)) info.requestBodyOptional = true;
+      continue;
+    }
+
     // A local wrapper around the body parse (see MAX_BODY_FOLLOW_DEPTH). Only descend when the
     // handler has not already yielded a body: a direct parse in the handler is the stronger
     // signal and must not be overwritten by one found further down.
-    if (depth < MAX_BODY_FOLLOW_DEPTH && info.requestBody === undefined && !info.requestBodyUnknown) {
+    if (depth < MAX_BODY_FOLLOW_DEPTH && info.requestBody === undefined && !info.requestBodyUnknown
+        && !info.requestBodyRaw) {
       const sf = call.getSourceFile();
       const target = localFunctionCalled(call, sf);
       if (target) {
@@ -1437,17 +1493,30 @@ function buildOpenApi(routes: RouteInfo[]): Schema {
     if (parameters.length) operation.parameters = parameters;
 
     if (route.method !== "get" && route.method !== "delete") {
-      const schema: Schema = route.requestBody ?? { type: "object", additionalProperties: true };
       // `required` follows WHETHER a body is parsed, not whether its SHAPE could be read.
       // `parseJsonBody(c, zodSchema)` (#806) carries no type argument, so the shape is unknown
       // while the body is still mandatory -- keying off `requestBody` alone documented those
       // operations as `required: false`, which is a false statement about the endpoint rather
       // than a gap in the spec. An unknown shape is an omission; "optional" is a lie.
-      const parsesBody = route.requestBody !== undefined || route.requestBodyUnknown === true;
-      operation.requestBody = {
-        required: parsesBody ? !route.requestBodyOptional : false,
-        content: { "application/json": { schema } },
-      };
+      //
+      // #935 -- and a route that reads NO body emits no `requestBody` at all. Describing it as
+      // "optional, any object" is the same class of lie in the other direction: it invited a
+      // caller to POST a payload the handler never looks at, and it was what put every
+      // body-less POST on the #838 ratchet's work list, where it could never be resolved --
+      // there is no schema to gain. The distinction is only safe because a RAW body read
+      // (`c.req.json()` & co.) is now DETECTED rather than invisible; without
+      // `requestBodyRaw`, "no parse found" also covered the eight import/preview/conductor
+      // routes that genuinely take a body, and this would have deleted theirs.
+      const parsesBody = route.requestBody !== undefined
+        || route.requestBodyUnknown === true
+        || route.requestBodyRaw === true;
+      if (parsesBody) {
+        const schema: Schema = route.requestBody ?? { type: "object", additionalProperties: true };
+        operation.requestBody = {
+          required: !route.requestBodyOptional,
+          content: { "application/json": { schema } },
+        };
+      }
     }
 
     // #826 — a status ONLY the error middleware produces says so, and names the domain code
