@@ -75,18 +75,41 @@ function normalizePosture(value) {
  * the whole markdown; a ticket-level `risk:<posture>` tag (documented in the same
  * section) is honoured too, since it overrides the project default for that ticket.
  *
+ * BOTH patterns are matched ONLY inside the `## Risk posture` section, never over the
+ * whole file. The ticket DESCRIPTION and the context primer are written into the same
+ * file ABOVE that section, so a whole-file `risk:(strict|…|sprint)` scan reads any
+ * prose that happens to quote a tag — e.g. a ticket whose description says "a ticket
+ * tagged `risk:sprint` skips the review" — as an actual tag. Since the tag branch WINS
+ * over the declared sentence, that silently downgrades a `strict` project's Stop chain
+ * to `sprint` (no typecheck, no tests) while still reporting the ticket-context file as
+ * its source. A posture may only ever be weakened deliberately and visibly.
+ *
  * Returns null when the file has no posture section at all, so the caller can tell
  * "absent" from "explicitly standard".
  */
 function parsePostureFromTicketContext(text) {
-  const body = String(text || "");
-  const tagged = /\brisk:(strict|standard|fast|sprint)\b/i.exec(body);
-  const declared = /runs under \*\*(strict|standard|fast|sprint)\*\* risk posture/i.exec(body);
+  const section = riskPostureSection(String(text || ""));
+  if (!section) return null;
+  const tagged = /\brisk:(strict|standard|fast|sprint)\b/i.exec(section);
+  const declared = /runs under \*\*(strict|standard|fast|sprint)\*\* risk posture/i.exec(section);
   // A ticket-level tag beats the project default, matching the sentence the section
   // itself prints. The generic prose line that DOCUMENTS the tag syntax uses the
   // literal `risk:<posture>`, which this regex deliberately does not match.
   const hit = tagged || declared;
   return hit ? normalizePosture(hit[1]) : null;
+}
+
+/**
+ * The body of the `## Risk posture` section, or null when the file has none. Ends at the
+ * next markdown heading of the same-or-higher level, so the following section's prose
+ * (board-feedback routing, which quotes ticket text) is outside the match window.
+ */
+function riskPostureSection(body) {
+  const start = /^##\s+Risk posture\s*$/im.exec(body);
+  if (!start) return null;
+  const rest = body.slice(start.index + start[0].length);
+  const end = /^#{1,2}\s+\S/m.exec(rest);
+  return end ? rest.slice(0, end.index) : rest;
 }
 
 function readTicketContextPosture(projectDir) {
