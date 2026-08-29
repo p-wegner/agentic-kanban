@@ -175,6 +175,7 @@ const FOREIGN: Record<string, string> = {
   VERIFY_GATE_MAX_REPAIR_ATTEMPTS: "scaffold hook contract — repair-attempt cap in the gate runner, frozen for scaffolded checkouts",
   SMART_HOOKS_FORCE: "capacity hook/server compatibility — legacy force switch shared with the existing smart-hooks heuristic",
   SMART_HOOKS_MIN_FREE_GB: "capacity hook/server compatibility — legacy memory floor shared with the existing smart-hooks heuristic",
+  SMART_HOOKS_POSTURE: "scaffold hook contract (#913) — the per-launch risk-posture override the runner's policy module reads, frozen for scaffolded checkouts alongside the other SMART_HOOKS_* switches",
   // Ports the ecosystem already names. Renaming them would break every convention that sets them.
   PORT: "hosting convention — the server port when no KANBAN_* port is set",
   VITE_PORT: "Vite convention",
@@ -242,6 +243,13 @@ const DYNAMIC_ENV_READS: Record<string, string> = {
     "GEMINI_API_KEY, GROQ_API_KEY, MISTRAL_API_KEY, OPENROUTER_API_KEY) — all foreign names " +
     "owned by their vendors, and the question is about the SET, so a literal per key would be " +
     "seven copies of one predicate.",
+  "packages/server/src/scaffold/machine-capacity.js::envName":
+    "`budgetMs(envName, defaultMs)` in the scaffolded capacity hook (#913). Resolves only to the " +
+    "literals its two call sites pass — SCOPED_VITEST_BUDGET_MS and SCOPED_TYPECHECK_BUDGET_MS, " +
+    "both named in the hook's own over-budget message. Scaffold hook contract, so the names are " +
+    "frozen for checkouts the board already wrote them into; adding the function to " +
+    "ENV_READER_HELPERS would instead demand docs/env-vars.md rows for two variables that are " +
+    "part of the hook's surface, not the board's.",
 };
 
 interface Read {
