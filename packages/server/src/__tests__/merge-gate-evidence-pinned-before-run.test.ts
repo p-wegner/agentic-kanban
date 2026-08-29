@@ -19,6 +19,7 @@ import type { Database } from "../db/index.js";
 import type { workspaces } from "@agentic-kanban/shared/schema";
 import type { MergeGateShas, PreMergeGateWorkspace } from "../services/pre-merge-gate.service.js";
 import { runGateWithEvidence, movedDuringGate } from "../services/merge-gate-evidence.js";
+import { getMergeJob, resetMergeJobs, startMergeJob } from "../services/merge-job.service.js";
 
 /** Successive tip reads, consumed in order (before-gate, then after-gate). */
 let shaReads: MergeGateShas[] = [];
@@ -26,9 +27,9 @@ let shaReadCount = 0;
 
 const gateWorkspace: PreMergeGateWorkspace = { id: "ws-1", workingDir: "/repo/.worktrees/ws-1", baseBranch: "master" };
 
-async function runProtocol(gateResult?: Partial<{ passed: boolean; ran: boolean }>) {
+async function runProtocol(gateResult?: Partial<{ passed: boolean; ran: boolean }>, workspaceId?: string) {
   return runGateWithEvidence({
-    workspace: gateWorkspace,
+    workspace: workspaceId ? { ...gateWorkspace, id: workspaceId } : gateWorkspace,
     projectId: "project-1",
     source: "pre-lock-merge",
     database: {} as Database,
@@ -127,6 +128,77 @@ describe("runGateWithEvidence pins evidence to the pre-run state (#243)", () => 
     const result = await runProtocol({ ran: false });
     expect(result.ran).toBe(false);
     expect(result.token?.kind).toBe("already-passed");
+  });
+});
+
+/**
+ * #936 — `runGateWithEvidence` is the ONE choke point every gate run passes through, so it is
+ * where a merge job learns it made another attempt. Without this, `merge-status` reported a
+ * bare `running` across multiple complete 20-minute suite runs (#926), and the only way to see
+ * a retry was to watch the OS process tree.
+ */
+describe("runGateWithEvidence records the gate attempt on the merge job (#936)", () => {
+  beforeEach(() => {
+    shaReadCount = 0;
+    resetMergeJobs();
+  });
+
+  it("records a clean pass as a `passed` attempt", async () => {
+    startMergeJob("ws-1");
+    shaReads = [{ branchSha: "a", baseSha: "b" }, { branchSha: "a", baseSha: "b" }];
+    await runProtocol();
+
+    const job = getMergeJob("ws-1")!;
+    expect(job.attemptCount).toBe(1);
+    expect(job.attempts[0]).toMatchObject({ attempt: 1, source: "pre-lock-merge", outcome: "passed", stage: "verify" });
+    expect(job.attempts[0].finishedAt).toBeTruthy();
+  });
+
+  it("records a completed-but-discarded gate WITH the reason its verdict went nowhere", async () => {
+    // The expensive silent case #936 exists for: a full suite ran to completion and its
+    // verdict is thrown away because a tip moved underneath it.
+    startMergeJob("ws-2");
+    shaReads = [{ branchSha: "verified", baseSha: "b" }, { branchSha: "moved", baseSha: "b" }];
+    const result = await runProtocol(undefined, "ws-2");
+
+    expect(result.token).toBeNull();
+    const attempt = getMergeJob("ws-2")!.attempts[0];
+    expect(attempt.outcome).toBe("discarded");
+    expect(attempt.detail).toContain("branch tip moved during the run");
+  });
+
+  it("records a red gate as a `failed` attempt carrying the gate message", async () => {
+    startMergeJob("ws-3");
+    shaReads = [{ branchSha: "a" }, { branchSha: "a" }];
+    await runProtocol({ passed: false }, "ws-3");
+
+    expect(getMergeJob("ws-3")!.attempts[0]).toMatchObject({ outcome: "failed", detail: "ok" });
+  });
+
+  it("closes the attempt even when the gate run THROWS, so the job is not left mid-attempt", async () => {
+    startMergeJob("ws-4");
+    shaReads = [{ branchSha: "a" }, { branchSha: "a" }];
+    await expect(
+      runGateWithEvidence({
+        workspace: { id: "ws-4", workingDir: "/repo/ws-4", baseBranch: "master" },
+        projectId: "project-1",
+        source: "pre-lock-merge",
+        database: {} as Database,
+        readShas: async () => ({ branchSha: "a" }),
+        runGate: async () => { throw new Error("verify_script exploded"); },
+      }),
+    ).rejects.toThrow("verify_script exploded");
+
+    const attempt = getMergeJob("ws-4")!.attempts[0];
+    expect(attempt.outcome).toBe("failed");
+    expect(attempt.detail).toContain("verify_script exploded");
+    expect(attempt.finishedAt).toBeTruthy();
+  });
+
+  it("records nothing when the gate runs outside a merge job", async () => {
+    shaReads = [{ branchSha: "a" }, { branchSha: "a" }];
+    await runProtocol();
+    expect(getMergeJob("ws-1")).toBeNull();
   });
 });
 

@@ -845,6 +845,19 @@ export async function resolveMergeGate(args: {
       };
     }
     // Stale/absent/fabricated proof → do NOT trust it; run the gate now (closes #943 TOCTOU).
+    //
+    // #936 — SAY SO. This is the second way a completed gate's verdict goes nowhere and a full
+    // suite is re-paid: a pre-lock gate passed, then its evidence was rejected here (a tip
+    // moved, or the lock wait outlived MERGE_GATE_EVIDENCE_MAX_AGE_MS). Nothing named that
+    // before, so from `merge-status` it looked like the merge had simply stopped progressing.
+    const currentBranch = currentShas.branchSha?.slice(0, 8) ?? "unknown";
+    const evidenceBranch = token.evidence.branchSha?.slice(0, 8) ?? "none recorded";
+    console.warn(
+      `[merge-gate] workspace ${workspace.id}: DISCARDING an already-passed verdict from `
+        + `${token.evidence.source} (stage ${token.evidence.stage}, ran ${token.evidence.ranAt}, `
+        + `branch ${evidenceBranch}) — it no longer describes the merge about to happen `
+        + `(current branch ${currentBranch}), so the gate is being re-run in full (#936).`,
+    );
     const result = await runGateAsResolved(workspace, projectId, database);
     return { ...result, decision: "run-gate-stale-evidence" };
   }
