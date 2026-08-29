@@ -6,7 +6,7 @@ import { type ProjectTag, type QuickUpdateCallbacks } from "./IssueCard.js";
 import { BoardColumnCard } from "./BoardColumnCard.js";
 import { evaluateWipLimit } from "../lib/wipLimits.js";
 import { computeDropSortOrder } from "../lib/reorderIssues.js";
-import { computeColumnScrollState } from "../lib/columnScrollState.js";
+import { computeColumnScrollState, showsBottomFade, showsTopFade } from "../lib/columnScrollState.js";
 import { computeColumnEstimate } from "../lib/columnHelpers.js";
 import { SwimlaneRenderer, DropGap } from "./BoardColumnSwimlanes.js";
 import {
@@ -392,7 +392,7 @@ export function BoardColumn({
       </div>
 
       <div className={`relative rounded-lg ${stacked ? "" : "flex-1 min-h-0 overflow-hidden"}`}>
-        {!stacked && (scrollState === "top" || scrollState === "middle") && (
+        {!stacked && showsTopFade(scrollState) && (
           <div className="absolute top-0 left-0 right-0 h-6 bg-gradient-to-b from-surface-sunken dark:from-surface-sunken-dark to-transparent z-10 pointer-events-none rounded-t-lg" />
         )}
         <div
@@ -464,7 +464,7 @@ export function BoardColumn({
             <p className="text-xs text-gray-400 dark:text-gray-500 text-center py-4">No issues</p>
           )}
         </div>
-        {!stacked && (scrollState === "bottom" || scrollState === "middle") && (
+        {!stacked && showsBottomFade(scrollState) && (
           <div className="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-surface-sunken dark:from-surface-sunken-dark to-transparent z-10 pointer-events-none rounded-b-lg" />
         )}
       </div>

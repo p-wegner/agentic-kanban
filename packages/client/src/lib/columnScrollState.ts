@@ -20,3 +20,16 @@ export function computeColumnScrollState({ scrollTop, scrollHeight, clientHeight
   if (atBottom && !atTop) return "bottom";
   return "middle";
 }
+
+/** A fade gradient means "there is more content in this direction", so each one is shown
+ *  only where content is actually scrolled out of view that way. These live here rather
+ *  than inline in BoardColumn because the inline predicates were inverted (#940): the top
+ *  fade was tied to `"top"` — a column's RESTING state — so a 24px gradient permanently
+ *  covered the upper part of the first ticket card. */
+export function showsTopFade(state: ColumnScrollState): boolean {
+  return state === "middle" || state === "bottom";
+}
+
+export function showsBottomFade(state: ColumnScrollState): boolean {
+  return state === "top" || state === "middle";
+}

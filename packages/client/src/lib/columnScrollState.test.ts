@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeColumnScrollState } from "./columnScrollState.js";
+import { computeColumnScrollState, showsBottomFade, showsTopFade } from "./columnScrollState.js";
 
 describe("computeColumnScrollState", () => {
   it("returns 'none' when content fits (no overflow)", () => {
@@ -28,5 +28,32 @@ describe("computeColumnScrollState", () => {
 
   it("treats a 2px gap at the bottom as still at bottom", () => {
     expect(computeColumnScrollState({ scrollTop: 298, scrollHeight: 500, clientHeight: 200 })).toBe("bottom");
+  });
+});
+
+describe("fade visibility (#940)", () => {
+  it("hides the top fade at rest, so nothing covers the first card", () => {
+    // The regression: the top fade used to be tied to "top" — every column's resting
+    // state — laying a 24px gradient over the upper part of the topmost ticket.
+    expect(showsTopFade("top")).toBe(false);
+  });
+
+  it("shows the top fade only once content is scrolled off above", () => {
+    expect(showsTopFade("middle")).toBe(true);
+    expect(showsTopFade("bottom")).toBe(true);
+  });
+
+  it("hides the bottom fade at the end, so nothing covers the last card", () => {
+    expect(showsBottomFade("bottom")).toBe(false);
+  });
+
+  it("shows the bottom fade only while content remains below", () => {
+    expect(showsBottomFade("top")).toBe(true);
+    expect(showsBottomFade("middle")).toBe(true);
+  });
+
+  it("shows no fade at all when the column does not scroll", () => {
+    expect(showsTopFade("none")).toBe(false);
+    expect(showsBottomFade("none")).toBe(false);
   });
 });
