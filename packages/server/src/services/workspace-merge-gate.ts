@@ -42,7 +42,11 @@ import { runGateWithEvidence } from "./merge-gate-evidence.js";
 // The #243 sha comparison moved next to the protocol that uses it (#540). Re-exported here
 // because this is the path callers and suites already import it from.
 export { movedDuringGate } from "./merge-gate-evidence.js";
-import { getBaseBranchHealthAtMergeBase, describeRedBaseAttribution } from "./base-branch-health.service.js";
+import {
+  getBaseBranchHealthAtMergeBase,
+  describeRedBaseAttribution,
+  isBaseHealthAnswer,
+} from "./base-branch-health.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { listRedDebt, openRedDebtEntry } from "../repositories/red-debt.repository.js";
@@ -418,6 +422,34 @@ export async function runPreLockGate(args: {
         baseHealthRecordedSha = baseHealth.recordedSha ?? null;
         const attribution = describeRedBaseAttribution(baseHealth);
         if (attribution) gateMessage = `${attribution}\n\n${preGate.message}`;
+        // #935 — a NON-ANSWER record (`timeout`/`unverified`) is a probe that could not speak,
+        // and it is sticky: the periodic sweep backs a timeout off by a full
+        // PROBE_MAX_DURATION_MS on top of its interval, so an hour-plus of gates can run
+        // against a verdict nobody measured. A gate failing here is the moment we most want
+        // the base's real state, so ask for a fresh probe rather than waiting the sweep out.
+        //
+        // Routed through `requestBaseBranchReprobe`, NOT `verifyBaseBranchHealth` directly:
+        // the probe is a clone + install + full verify, and the two guards that keep it from
+        // becoming the saturation it measures — the #931 `gateBusy` yield and the #712
+        // `timeout` back-off — live in that due-check, not in the probe. Calling the probe
+        // straight from here would re-spawn a 45-minute verify on EVERY failing gate for as
+        // long as the non-answer row stands, which is precisely this ticket's failure mode.
+        // The in-flight map only dedups overlapping probes; it does not decide whether one
+        // should start.
+        //
+        // Fire-and-forget: it must never delay or fail this gate — the withhold below stands
+        // either way, and the fresh verdict (if it runs) lands for the NEXT gate.
+        if (baseHealth.health && !isBaseHealthAnswer(baseHealth.health.outcome)) {
+          console.log(
+            `[workspace-merge] base health for project ${projectId} is a non-answer `
+              + `('${baseHealth.health.outcome}') — requesting a fresh probe if due (#935)`,
+          );
+          // Dynamic import: the due-check owns the persisted probe state and lives in
+          // `startup/`, which `services/` must not import statically (layering, #595).
+          void import("../startup/base-branch-health-reconciler.js")
+            .then((m) => m.requestBaseBranchReprobe(projectId, database))
+            .catch(() => {});
+        }
         if (baseHealth.health?.failedSuites) {
           try {
             failedSuites = JSON.parse(baseHealth.health.failedSuites) as string[];
