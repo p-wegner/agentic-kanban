@@ -9,7 +9,7 @@
 import { issues, projectStatuses } from "@agentic-kanban/shared/schema";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Database } from "../db/index.js";
-import { monitorEligibleIssueSql, notDriveOrEpicMetaSql, resolveCandidateStatusIds } from "../startup/monitor-eligibility.js";
+import { monitorEligibleIssueSql, notDriveOrEpicMetaSql, resolveCandidateStatusIds } from "./start-scoring.repository.js";
 
 /**
  * The queued Todo/Backlog tickets a project-wide auto-start hold is holding.
