@@ -366,6 +366,8 @@ async function resolveAutoStartGroupMembers(args: {
  */
 interface AutoStartCycle {
   prefMap: Map<string, string>;
+  /** The connection the skip-attribution recorders read through (#715 persistence boundary). */
+  database: Database;
   baseUrl: string;
   boardEvents: ReturnType<typeof createBoardEvents>;
   logMonitorAction: AutoStartDeps["logMonitorAction"];
@@ -644,7 +646,7 @@ async function runInProgressBackfill(ctx: AutoStartCycle, inProgressSt: { id: st
     // status carries what the console line used to be the only source of.
     await recordFleetHoldDetail(holdContext(ctx), inProgressSt.projectId, dispatch.reason);
     // #919: the project-wide hold is also the answer for every ticket queued behind it.
-    await noteHeldCandidates(ctx, inProgressSt.projectId, allowFeatureTypes, "no_available_worker");
+    await noteHeldCandidates(ctx, inProgressSt.projectId, allowFeatureTypes, "no_available_worker", ctx.database);
     return;
   }
 
@@ -654,7 +656,7 @@ async function runInProgressBackfill(ctx: AutoStartCycle, inProgressSt: { id: st
   if (isHostSaturated(ctx.machineCapacity) && !(await hasFleetOverflow(ctx, inProgressSt.projectId))) {
     recordMachineSaturationHoldDetail(holdContext(ctx), inProgressSt.projectId);
     // #919: attribute the project-wide hold to each ticket it is holding.
-    await noteHeldCandidates(ctx, inProgressSt.projectId, allowFeatureTypes, "machine_saturated");
+    await noteHeldCandidates(ctx, inProgressSt.projectId, allowFeatureTypes, "machine_saturated", ctx.database);
     return;
   }
 
@@ -749,7 +751,7 @@ async function runTodoPull(ctx: AutoStartCycle, inProgressSt: { id: string; proj
   if (quiesce.action === "skip") {
     ctx.noteSkip(inProgressSt.projectId, null, quiesce.reason);
     // #919: attribute the project-wide hold to each ticket it is holding.
-    await noteHeldCandidates(ctx, inProgressSt.projectId, allowFeatureTypes, quiesce.reason);
+    await noteHeldCandidates(ctx, inProgressSt.projectId, allowFeatureTypes, quiesce.reason, ctx.database);
     return;
   }
 
@@ -763,7 +765,7 @@ async function runTodoPull(ctx: AutoStartCycle, inProgressSt: { id: string; proj
   if (isHostSaturated(ctx.machineCapacity) && !(await hasFleetOverflow(ctx, inProgressSt.projectId))) {
     recordMachineSaturationHoldDetail(holdContext(ctx), inProgressSt.projectId);
     // #919: attribute the project-wide hold to each ticket it is holding.
-    await noteHeldCandidates(ctx, inProgressSt.projectId, allowFeatureTypes, "machine_saturated");
+    await noteHeldCandidates(ctx, inProgressSt.projectId, allowFeatureTypes, "machine_saturated", ctx.database);
     return;
   }
 
@@ -955,7 +957,7 @@ export async function runAutoStart(prefMap: Map<string, string>, {
   const machineCapacity = await readMachineCapacity();
 
   const ctx: AutoStartCycle = {
-    prefMap, baseUrl, boardEvents, logMonitorAction, isAutoDrivenProject,
+    prefMap, database: db, baseUrl, boardEvents, logMonitorAction, isAutoDrivenProject,
     buildContentionGate, canDispatch, hasFleetOverflowCapacity, orderStartCandidates, skipInfo, noteSkip, noteIssueSkip, noteIssueStarted, tunablesFor, wipLimitFor, startsRemaining, noteStart,
     machineCapacity,
   };
@@ -970,7 +972,7 @@ export async function runAutoStart(prefMap: Map<string, string>, {
     await runTodoPull(ctx, inProgressSt);
   }
 
-  await flushIssueSkipRecords(issueSkips, startedIssueIds);
+  await flushIssueSkipRecords(issueSkips, startedIssueIds, ctx.database);
   return skipInfo;
 }
 
