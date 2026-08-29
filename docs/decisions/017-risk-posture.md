@@ -109,10 +109,10 @@ interface RiskPosture {
   the gate message (via `GateTierInfo.posture`), the review launch, the train-window release,
   the merge-queue train dispatch, the stranded-review recovery. It returns `""` for a missing
   posture, so "no note" can never be mistaken for "standard".
-- `builderStopChecks` still has no consumer — the builder Stop-hook policy plumbing (#913/#914)
-  is a separate, not-yet-landed ticket; the struct emits the field now so that ticket consumes
-  it rather than inventing its own vocabulary. (`redBasePolicy` gained its consumer with the
-  red-debt ledger, #915.)
+- `redBasePolicy` and `builderStopChecks` still have no consumer — the red-debt ledger
+  (#915/#916) and the builder Stop-hook policy plumbing (#913/#914) are separate,
+  not-yet-landed tickets; the struct emits both fields now so those tickets consume them
+  rather than inventing their own vocabulary.
 
 Builds on decision 008 (Start Mode consolidation) and decision 006 (board-monitor orchestrator,
 for the `objective.md` render path #912 adds). Proposal:
