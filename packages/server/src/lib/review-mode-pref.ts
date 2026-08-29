@@ -1,10 +1,11 @@
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
+import { resolveRiskPosture, type RiskPosture } from "../services/risk-posture.service.js";
 
 /**
- * Merge train review mode (#907): a project-scoped stand-in for the risk-posture
- * resolver (`@agentic-kanban/shared/lib/risk-posture`, #912). `fast` posture is
- * intended to select train review by default; that wiring is not done yet, so this
- * remains the one pref an operator flips per project directly.
+ * Merge train review mode (#907), now fanned out from the risk-posture dial (#937,
+ * decision 017). `resolveProjectReviewMode` below is the resolver every consumer reads;
+ * `review_mode_<projectId>` stays as the operator's finer-grained per-project override,
+ * exactly as `file_contention_<projectId>` does for `contentionMode` (#911).
  *
  * `per-ticket` (default) reviews each workspace's own diff, one session per ticket —
  * today's behaviour, unchanged. `per-train` reviews the ASSEMBLED diff of a
@@ -31,4 +32,47 @@ export const REVIEW_MODE_DEFAULT: ReviewMode = "per-ticket";
  */
 export function resolveReviewMode(value: string | null | undefined): ReviewMode {
   return value === "per-train" ? "per-train" : REVIEW_MODE_DEFAULT;
+}
+
+/**
+ * The review DECISION for a project, as a pure prefMap resolver (#937) — the whole of what
+ * decision 017's `reviewMode` field means, in one place:
+ *
+ *  - `run`      — should a per-ticket auto-review be launched at all? `sprint`'s
+ *                 `reviewMode: "none"` is the one posture that says no. (A workspace's own
+ *                 `requiresReview` flag and `skipAutoReview` still decide independently; this
+ *                 is the POSTURE's contribution, applied by the exit workflow beside them.)
+ *  - `mode`     — `per-ticket` vs `per-train` assembly of the reviewed diff. `fast`'s
+ *                 `train-only` maps to `per-train`; every other posture to `per-ticket`.
+ *  - `thorough` — `strict`'s `reviewMode: "thorough"` selects the `code-review-thorough`
+ *                 skill, the same escalation `workspace.thoroughReview` already asks for.
+ *
+ * `review_mode_<projectId>` is the finer-grained override and wins for `mode` only when set —
+ * an operator who pinned per-train batching keeps it under any posture. It says nothing about
+ * `run`/`thorough`, so those always come from the posture.
+ *
+ * `standard` reproduces today's behaviour exactly: `run: true`, `mode: "per-ticket"`,
+ * `thorough: false`.
+ */
+export interface ReviewDecision {
+  run: boolean;
+  mode: ReviewMode;
+  thorough: boolean;
+  posture: RiskPosture;
+}
+
+export function resolveProjectReviewMode(prefMap: Map<string, string>, projectId: string): ReviewDecision {
+  const posture = resolveRiskPosture(prefMap, projectId);
+  const explicit = prefMap.get(reviewModePref.key(projectId));
+  const mode: ReviewMode = explicit !== undefined
+    ? resolveReviewMode(explicit)
+    : posture.reviewMode === "train-only"
+      ? "per-train"
+      : REVIEW_MODE_DEFAULT;
+  return {
+    run: posture.reviewMode !== "none",
+    mode,
+    thorough: posture.reviewMode === "thorough",
+    posture,
+  };
 }

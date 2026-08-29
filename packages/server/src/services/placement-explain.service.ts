@@ -96,6 +96,9 @@ import {
 } from "./worker-fleet.service.js";
 import type { WorkerRegistry } from "./worker-registry.service.js";
 import { loadProjectRuntimeConfig } from "./project-runtime-config.service.js";
+import { resolveRiskPosture, riskPosturePrefKey } from "./risk-posture.service.js";
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
+import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { EVALUATORS, type EvalContext } from "./placement-evaluators.js";
 
 
@@ -145,8 +148,18 @@ export const PLACEMENT_CHECK_CHAIN: readonly PlacementCheckSpec[] = [
     prefKeys: (projectId) => [requiredDataLabelsPrefKey(projectId)],
   },
   {
-    id: "eligible_worker",
+    // #937 / decision 017 — the risk posture's `placementBias`. Only `host-half` (i.e.
+    // `strict`) decides here; `host-preferred`/`remote-preferred` are preferences and pass.
+    id: "placement_bias",
     docStep: 4,
+    title: "Project's risk posture allows remote placement (placementBias is not 'host-half')",
+    resolverMarker: "remoteDispatchBlockedByPlacementBias(",
+    docMarker: /placementBias|risk posture/i,
+    prefKeys: (projectId) => [riskPosturePrefKey(projectId)],
+  },
+  {
+    id: "eligible_worker",
+    docStep: 5,
     title: "An eligible worker has a free slot",
     resolverMarker: "selectAndReserveWorkerForLaunch(",
     docMarker: /No eligible worker/i,
@@ -154,7 +167,7 @@ export const PLACEMENT_CHECK_CHAIN: readonly PlacementCheckSpec[] = [
   },
   {
     id: "branch_for_transport",
-    docStep: 5,
+    docStep: 6,
     title: "There is a branch to push back over git transport",
     resolverMarker: "if (!branch)",
     docMarker: /No branch to push back/i,
@@ -162,7 +175,7 @@ export const PLACEMENT_CHECK_CHAIN: readonly PlacementCheckSpec[] = [
   },
   {
     id: "project_repo_path",
-    docStep: 6,
+    docStep: 7,
     title: "Project has a repoPath to serve over git transport",
     resolverMarker: "project?.repoPath",
     docMarker: /no `?repoPath`?/i,
@@ -175,7 +188,7 @@ export const PLACEMENT_CHECK_CHAIN: readonly PlacementCheckSpec[] = [
     // explanation quietly over-promising. That is the whole argument for rule 2 in
     // this file's header, demonstrated on its first day.
     id: "repo_transport_shape",
-    docStep: 7,
+    docStep: 8,
     title: "Repository shape fits the single-repo git transport (no siblings, LFS or submodules)",
     resolverMarker: "remoteDispatchBlockedByRepoShape(",
     docMarker: /git transport carries ONE repository|repository shape/i,
@@ -413,6 +426,9 @@ async function buildEvalContext(params: {
     optInPref: await getPreferenceValue(workerDispatchPrefKey(projectId), database),
     allowlistPref: await getPreferenceValue(allowedProfilesPrefKey(projectId), database),
     dataHandlingPref: await getPreferenceValue(requiredDataLabelsPrefKey(projectId), database),
+    // #937: the whole posture, not one field — check 4 reports the level and source it read,
+    // and reconstructing those from a single value would be the drift this file exists to avoid.
+    posture: resolveRiskPosture(toPrefMap(await getAllPreferencesCached(database).catch(() => [])), projectId),
     requiredLabels,
     workers: await describeWorkers(fleet, providerName, requiredLabels, now),
     capacity: await resolveFleetCapacity(fleet, providerName, requiredLabels, now),

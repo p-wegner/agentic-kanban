@@ -74,19 +74,45 @@ interface RiskPosture {
   `resolveProjectContentionMode` (`startup/monitor-file-contention.ts`) now falls back to
   `resolveRiskPosture(...).contentionMode` when no explicit `file_contention_<id>` override is
   set, preserving the explicit pref as a finer-grained escape hatch.
-- **NOT yet wired** (disclosed rather than silently left, per this repo's partial-refactor
-  rule): `gateTier` into `resolveVerifyGateStrategy` (`pre-merge-gate-tier.ts`), `reviewMode`
-  into the exit-workflow review launch (`startup/exit/review-launch.ts`), `trainMaxSize`/
-  `trainMaxWaitMs` into `resolveProjectTrainMaxSize` (`merge-queue.service.ts`), and
-  `placementBias` into `resolveWorkerPlacement` (`worker-fleet.service.ts`, which is also gated
-  by `placement-chain-parity.test.ts` and needs a matching chain-entry update). Each of those
-  reads the underlying pref through an `async (projectId, database)` signature rather than an
-  already-built `prefMap`, so routing them through the resolver is a real signature change
-  across their call sites, not a drop-in swap. Filed as #937 for the remaining fan-out.
-- `redBasePolicy` and `builderStopChecks` have no consumer yet — the red-debt ledger (#915/#916)
-  and the builder Stop-hook policy plumbing (#913/#914) are separate, not-yet-landed tickets;
-  the struct emits the field now so those tickets consume it rather than inventing their own
-  vocabulary.
+- **#937 wired the remaining four**, each as the same pair: a pure `resolveX(prefMap, projectId)`
+  resolver (matching the `prefMap-resolver` kind) plus, where the call sites needed one, a thin
+  `async (projectId, database)` wrapper that builds a prefMap and reads through it — exactly the
+  shape `resolveIssueRiskPosture` already used.
+
+  | Field | Resolver | Explicit override that still wins |
+  |---|---|---|
+  | `gateTier` | `resolveGateTier` (`pre-merge-gate-tier.ts`), wrapped by `resolveVerifyGateStrategy`/`resolveGateTierFor` | `verify_gate_strategy_<id>` |
+  | `reviewMode` | `resolveProjectReviewMode` (`lib/review-mode-pref.ts`) → `{run, mode, thorough}` | `review_mode_<id>` (for `mode` only) |
+  | `trainMaxSize` / `trainMaxWaitMs` | `resolveTrainWindowConfig` + `resolveTrainOptInSize` (`merge-train-window.ts`), wrapped by `resolveProjectTrainMaxSize`/`resolveTrainOptIn` | `train_max_size_<id>` and `train_max_wait_ms_<id>`, independently of each other |
+  | `placementBias` | `remoteDispatchBlockedByPlacementBias` (`risk-posture.service.ts`), a new `placement_bias` step in `resolveWorkerPlacement` + `PLACEMENT_CHECK_CHAIN` + docs §7 step 4 | — (the posture IS the dial) |
+
+  Three consequences worth stating, because each is a place the obvious wiring would have been
+  wrong:
+  - **`reviewMode` is three decisions, not one.** `none` (sprint) skips the per-ticket review —
+    but it may not override a workspace's own `requiresReview`, and the stranded-review
+    reconciler had to learn it too, or `sprint` would strand every ticket at "waiting for a
+    review that will never come" instead of marking it mergeable.
+  - **`trainMaxSize` feeds two different consumers with two different defaults.** The merge
+    QUEUE's `> 1` opt-in defaults to 1 (sequential, today's behaviour); the #905 batching
+    WINDOW has always defaulted to 4/10 min. A posture may only make a project faster or
+    stricter than its dial says, never silently retune a window nobody touched — so only a
+    posture that ASKS for batching (`trainMaxSize > 1`, i.e. `fast`/`sprint`) overrides the
+    window, and `standard`/`strict` keep the shipped defaults.
+  - **`placementBias` blocks only for `host-half`.** `host-preferred`/`remote-preferred` are
+    preferences, and the board has no worker-side attestation to bias toward a machine with
+    (#651's open half), so reporting either as a refusal would be the "weakens invisibly"
+    failure this decision forbids. `host-half` (strict) refuses for the same reason
+    `allowed_profiles_<id>` does: a worker authenticates with its own local login and cannot be
+    made to honour the posture (decision 012).
+- **The visibility rule has one implementation**: `formatPostureNote` (`risk-posture.service.ts`)
+  renders `.summary` + `.source`, and every message site that read a posture field calls it —
+  the gate message (via `GateTierInfo.posture`), the review launch, the train-window release,
+  the merge-queue train dispatch, the stranded-review recovery. It returns `""` for a missing
+  posture, so "no note" can never be mistaken for "standard".
+- `builderStopChecks` still has no consumer — the builder Stop-hook policy plumbing (#913/#914)
+  is a separate, not-yet-landed ticket; the struct emits the field now so that ticket consumes
+  it rather than inventing its own vocabulary. (`redBasePolicy` gained its consumer with the
+  red-debt ledger, #915.)
 
 Builds on decision 008 (Start Mode consolidation) and decision 006 (board-monitor orchestrator,
 for the `objective.md` render path #912 adds). Proposal:

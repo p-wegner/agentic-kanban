@@ -13,14 +13,13 @@ import type { SessionLauncher } from "../services/session.manager.js";
 import { resolveMergePolicy } from "./merge-strategy.js";
 import { resolveMergeGateConfig } from "../services/pre-merge-gate.service.js";
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
-import { getNumber } from "@agentic-kanban/shared/lib/settings-registry";
 import type { StackProfile } from "@agentic-kanban/shared";
 import {
   decideMergeTrainRelease,
-  DEFAULT_TRAIN_MAX_SIZE,
-  DEFAULT_TRAIN_MAX_WAIT_MS,
+  resolveTrainWindowConfig,
   type MergeTrainWindowState,
 } from "../services/merge-train-window.js";
+import { formatPostureNote } from "../services/risk-posture.service.js";
 import { reconcileCompletionStates } from "./completion-state-reconciler.js";
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { reconcileDriveCompletion } from "./drive-completion-reconciler.js";
@@ -50,8 +49,6 @@ const verifyScriptPref = projectPref("verify_script");
 const stackProfilePref = projectPref("project_stack_profile");
 const devCommandPref = projectPref("dev_command");
 const healthUrlPref = projectPref("health_url");
-const trainMaxSizePref = projectPref("train_max_size");
-const trainMaxWaitMsPref = projectPref("train_max_wait_ms");
 
 export interface AutoMergeOrchestratorState {
   running: boolean;
@@ -330,10 +327,10 @@ export function createAutoMergeOrchestrator(deps: {
         continue;
       }
 
-      const config = {
-        maxSize: getNumber(prefMap, trainMaxSizePref.key(projectId), DEFAULT_TRAIN_MAX_SIZE),
-        maxWaitMs: getNumber(prefMap, trainMaxWaitMsPref.key(projectId), DEFAULT_TRAIN_MAX_WAIT_MS),
-      };
+      // #937 / decision 017: the window's size+wait now come from the risk-posture dial, with
+      // the explicit `train_max_size_<id>` / `train_max_wait_ms_<id>` prefs still winning per
+      // field. `standard` keeps the shipped defaults — see `resolveTrainWindowConfig`.
+      const config = resolveTrainWindowConfig(prefMap, projectId);
       // Preserve the ORIGINAL firstSeenAt across ticks so the wait bound is measured from when
       // the set first started accumulating, not re-armed every tick a new member joins.
       const windowState: MergeTrainWindowState = {
@@ -343,7 +340,7 @@ export function createAutoMergeOrchestrator(deps: {
 
       const verdict = decideMergeTrainRelease(windowState, config, nowMs);
       if (verdict.release) {
-        console.log(`[auto-merge] train window closed for project ${projectId} (${verdict.reason}): releasing ${ids.length} workspace(s)`);
+        console.log(`[auto-merge] train window closed for project ${projectId} (${verdict.reason}, size ${config.maxSize}/wait ${config.maxWaitMs}ms): releasing ${ids.length} workspace(s)${config.batchingFromPosture ? formatPostureNote(config.posture) : ""}`);
         released.push(...ids);
         state.trainWindows.delete(projectId);
       } else {

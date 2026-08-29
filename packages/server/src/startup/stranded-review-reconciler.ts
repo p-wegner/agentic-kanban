@@ -17,6 +17,8 @@ import { PREF_RECONCILER_STRANDED_REVIEW_ENABLED } from "../constants/preference
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 import { clearReviewPreflightBlockRow, setReviewPreflightBlock } from "../repositories/review-preflight.repository.js";
+import { resolveProjectReviewMode } from "../lib/review-mode-pref.js";
+import { formatPostureNote } from "../services/risk-posture.service.js";
 
 /**
  * How many times the reconciler may attempt a review preflight for the SAME pair of
@@ -220,15 +222,24 @@ export async function reconcileStrandedReviews(deps: StrandedReviewReconcilerDep
       .catch(() => false);
     if (!hasWork) continue;
 
+    // #937 / decision 017: `sprint` posture (`reviewMode: "none"`) skips per-ticket review, so
+    // this pass must NOT keep re-launching one — it is the safety net for exactly the state
+    // "review will never come, mark it mergeable", and a posture that turned review off is
+    // that state per PROJECT, the same way the global `auto_review=false` is board-wide.
+    const reviewDecision = resolveProjectReviewMode(prefMap, c.projectId);
+    const reviewThisOne = autoReview && reviewDecision.run;
     try {
-      if (autoReview) {
+      if (reviewThisOne) {
         const { sessionId } = await startManualReview(database, getSessionManager, boardEvents, reviewSessionIds, c.wsId, false);
         if (priorFailures > 0) await clearReviewPreflightBlock(database, c.wsId);
         console.log(`[reconcile] re-launched stranded review for workspace ${c.wsId} (#${c.issueNumber ?? "?"}) session=${sessionId}`);
       } else {
         await database.update(workspaces).set({ readyForMerge: true, updatedAt: new Date().toISOString() }).where(eq(workspaces.id, c.wsId));
         boardEvents.broadcast(c.projectId, "workspace_ready_for_merge");
-        console.log(`[reconcile] auto_review off — marked stranded workspace ${c.wsId} (#${c.issueNumber ?? "?"}) ready-for-merge`);
+        const why = autoReview
+          ? `per-ticket review is off for this project${formatPostureNote(reviewDecision.posture)}`
+          : "auto_review off";
+        console.log(`[reconcile] ${why} — marked stranded workspace ${c.wsId} (#${c.issueNumber ?? "?"}) ready-for-merge`);
       }
       recovered++;
     } catch (err) {
