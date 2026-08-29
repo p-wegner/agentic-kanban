@@ -4920,6 +4920,31 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/projects/{id}/base-branch-health/reprobe:
+    post:
+      summary: The response says which of those happened instead of always claiming it started one.
+      tags:
+        - project-health
+      operationId: post_api_projects_id_base-branch-health_reprobe
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
   /api/projects/{id}/board:
     get:
       summary: GET /api/projects/:id/board
