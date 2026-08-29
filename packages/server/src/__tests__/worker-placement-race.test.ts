@@ -29,6 +29,7 @@ import {
   getWorkerFleet,
   resolveWorkerPlacement,
   selectAndReserveWorkerForLaunch,
+  isWorkerSelection,
   workerDispatchPrefKey,
   workerStrictPrefKey,
   type WorkerFleet,
@@ -197,11 +198,17 @@ describe("#751 double assignment — placement claims the capacity slot", () => 
   it("frees the slot again once an unclaimed reservation is released", async () => {
     await optIn();
     const workerId = await connectWorker(1);
+    // #938 widened the return to include a host win. This call supplies no `hostCapacity`,
+    // so the host is never a candidate here — `isWorkerSelection` says that in the types
+    // instead of a `!` that would keep compiling if the union grew again.
     const first = await selectAndReserveWorkerForLaunch(fleet, "claude");
-    expect(first?.workerId).toBe(workerId);
+    expect(isWorkerSelection(first)).toBe(true);
+    if (!isWorkerSelection(first)) throw new Error("expected a worker selection");
+    expect(first.workerId).toBe(workerId);
     expect(await selectAndReserveWorkerForLaunch(fleet, "claude")).toBeNull();
-    releaseWorkerSlot(first!.reservationId);
-    expect((await selectAndReserveWorkerForLaunch(fleet, "claude"))?.workerId).toBe(workerId);
+    releaseWorkerSlot(first.reservationId);
+    const second = await selectAndReserveWorkerForLaunch(fleet, "claude");
+    expect(isWorkerSelection(second) && second.workerId).toBe(workerId);
   });
 
   it("stops double-counting once the reserved slot is claimed by its session", async () => {

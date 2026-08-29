@@ -48,19 +48,33 @@ export type PlacementCheckId = (typeof PLACEMENT_CHECK_IDS)[number];
 /**
  * What a recorded placement DECISION can name (#801).
  *
- * Every id is a check in the chain above, plus two that are not checks in that chain:
+ * Every id is a check in the chain above, plus three that are not checks in that chain:
  * `resolver_error`, the catch-all host fallback `resolveWorkerPlacement` takes when the
- * resolution itself threw, and `machine_saturated` (#908) — the host was too tight on
- * capacity to take the session and it placed remotely instead. Folding either into a check
- * id would file the decision under whichever step happened to be nearby, which is the kind
- * of confidently-wrong record that sends the next reader after the wrong bug.
+ * resolution itself threw; `machine_saturated` (#908) — the host was too tight on
+ * capacity to take the session and it placed remotely instead; and `host_has_headroom`
+ * (#938) — the host RANKED FIRST against the eligible workers by reported headroom, so it
+ * kept the work. Folding any of them into a check id would file the decision under
+ * whichever step happened to be nearby, which is the kind of confidently-wrong record that
+ * sends the next reader after the wrong bug.
+ *
+ * `host_has_headroom` is deliberately NOT a chain check even though it can end in a host
+ * placement: a check REFUSES remote dispatch for a structural reason an operator can go
+ * and change (a pref, a repo shape). This one is the ordinary outcome of a comparison that
+ * the host happened to win, and it flips back the moment the numbers move — describing it
+ * as a guard in `docs/worker-fleet.md` §7's "nothing dispatches" checklist would send an
+ * operator hunting for a setting that does not exist.
  */
-export type PlacementReasonId = PlacementCheckId | "resolver_error" | "machine_saturated";
+export type PlacementReasonId =
+  | PlacementCheckId
+  | "resolver_error"
+  | "machine_saturated"
+  | "host_has_headroom";
 
 export const PLACEMENT_REASON_IDS: readonly PlacementReasonId[] = [
   ...PLACEMENT_CHECK_IDS,
   "resolver_error",
   "machine_saturated",
+  "host_has_headroom",
 ];
 
 /**

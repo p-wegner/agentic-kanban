@@ -9,6 +9,7 @@ import {
   resolveWorkerPlacement,
   selectWorkerForLaunch,
   workerDispatchPrefKey,
+  workerStrictPrefKey,
   SHARES_FILESYSTEM_LABEL,
   type WorkerFleet,
 } from "../services/worker-fleet.service.js";
@@ -249,6 +250,173 @@ describe("worker-fleet placement (phase 1c)", () => {
       });
 
       expect(await selectWorkerForLaunch(fleet, "claude")).toBe(calm.workerId);
+    });
+  });
+
+  /**
+   * #938: before this, the host participated ONLY through the binary `hostSaturated` flag —
+   * it changed which reason was recorded and never actually competed. So a board with 40GB
+   * free handed work to a worker with 1GB free, because the #910 ranking was applied to
+   * every machine in the fleet except the one the board runs on.
+   */
+  describe("host as a ranked candidate (#938)", () => {
+    async function heartbeatCapacity(
+      workerId: string,
+      workerToken: string,
+      capacity: { freeRamGb: number; spareCores: number; thrashing: "none" | "light" | "heavy" },
+    ) {
+      const result = await fleet.registry.heartbeat(workerId, workerToken, { capabilities: { capacity } });
+      expect(result.ok).toBe(true);
+    }
+
+    /** An opted-in project with one connected, filesystem-sharing worker of known headroom. */
+    async function withWorkerReporting(capacity: {
+      freeRamGb: number;
+      spareCores: number;
+      thrashing: "none" | "light" | "heavy";
+    }) {
+      await optIn();
+      const worker = await registerLocalWorkerFull({ name: "w", providers: ["claude"] });
+      fleet.connections.handleOpen(worker.workerId, fakeWs());
+      await heartbeatCapacity(worker.workerId, worker.workerToken, capacity);
+      return worker.workerId;
+    }
+
+    it("keeps the work on the host when the host outranks every eligible worker on headroom", async () => {
+      await withWorkerReporting({ freeRamGb: 1, spareCores: 1, thrashing: "none" });
+
+      const placement = await resolveWorkerPlacement({
+        database: db, projectId: PROJECT_ID, providerName: "claude",
+        hostCapacity: { freeRamGb: 40, spareCores: 16, thrashing: "none" },
+      });
+
+      // Not `eligible_worker`: a worker WAS eligible. The host simply had more room, and a
+      // recorded reason saying "no eligible worker" would send an operator after a fleet
+      // problem that does not exist.
+      expect(placement).toEqual({
+        kind: "host",
+        reason: { id: "host_has_headroom", detail: expect.stringContaining("outranks") },
+      });
+    });
+
+    it("names the headroom that decided, so 'why the host' needs no second lookup", async () => {
+      await withWorkerReporting({ freeRamGb: 1, spareCores: 1, thrashing: "none" });
+      const placement = await resolveWorkerPlacement({
+        database: db, projectId: PROJECT_ID, providerName: "claude",
+        hostCapacity: { freeRamGb: 40, spareCores: 16, thrashing: "none" },
+      });
+      expect(placement.reason?.detail).toContain("40.0GB free");
+    });
+
+    it("still dispatches remotely when a worker outranks the host", async () => {
+      const workerId = await withWorkerReporting({ freeRamGb: 40, spareCores: 16, thrashing: "none" });
+
+      const placement = await resolveWorkerPlacement({
+        database: db, projectId: PROJECT_ID, providerName: "claude",
+        hostCapacity: { freeRamGb: 1, spareCores: 1, thrashing: "none" },
+      });
+
+      expect(placement).toMatchObject({ kind: "remote", workerId });
+    });
+
+    // The host is a candidate, NOT a gate: a board with almost nothing free still takes the
+    // work when there is no worker to take it instead. That is the pre-#938 fallback, and
+    // ranking must not have turned it into a refusal.
+    //
+    // It must also keep its OLD REASON. A win needs something to have been beaten, and with
+    // an empty fleet "the host outranked every worker" is a vacuous claim about an empty
+    // set — recording it as a headroom decision would send an operator looking at RAM when
+    // the real answer is that no worker was eligible.
+    it("falls back to the host as before when no worker is eligible, whatever the host reports", async () => {
+      await optIn();
+      const placement = await resolveWorkerPlacement({
+        database: db, projectId: PROJECT_ID, providerName: "claude",
+        hostCapacity: { freeRamGb: 0.2, spareCores: 0, thrashing: "heavy" },
+      });
+      expect(placement).toEqual({
+        kind: "host",
+        reason: { id: "eligible_worker", detail: expect.any(String) },
+      });
+    });
+
+    // A thrashing host is deprioritised the same way a thrashing worker is (#910) — it does
+    // not get to win on raw free RAM while it is swapping.
+    it("deprioritises a thrashing host against a calm low-headroom worker", async () => {
+      const workerId = await withWorkerReporting({ freeRamGb: 1, spareCores: 1, thrashing: "none" });
+
+      const placement = await resolveWorkerPlacement({
+        database: db, projectId: PROJECT_ID, providerName: "claude",
+        hostCapacity: { freeRamGb: 40, spareCores: 16, thrashing: "heavy" },
+      });
+
+      expect(placement).toMatchObject({ kind: "remote", workerId });
+    });
+
+    // An unmeasured host cannot be ranked. Defaulting it to "unknown headroom" would place
+    // it ahead of nothing and behind every reporting worker — a claim the board never made.
+    it("leaves behaviour exactly as before when the caller supplies no host capacity", async () => {
+      const workerId = await withWorkerReporting({ freeRamGb: 0.1, spareCores: 0, thrashing: "none" });
+
+      const placement = await resolveWorkerPlacement({
+        database: db, projectId: PROJECT_ID, providerName: "claude",
+      });
+
+      expect(placement).toMatchObject({ kind: "remote", workerId });
+    });
+
+    // #245's contract: a strict project either finds an eligible worker or gets
+    // NO_AVAILABLE_WORKER. It must never be handed the board "because it had more RAM" —
+    // that is precisely the host fallback it opted out of.
+    it("never ranks the host in for a strict project — it dispatches remotely instead", async () => {
+      const workerId = await withWorkerReporting({ freeRamGb: 1, spareCores: 1, thrashing: "none" });
+      await db.insert(preferences).values({ key: workerStrictPrefKey(PROJECT_ID), value: "true" });
+
+      const placement = await resolveWorkerPlacement({
+        database: db, projectId: PROJECT_ID, providerName: "claude",
+        hostCapacity: { freeRamGb: 40, spareCores: 16, thrashing: "none" },
+      });
+
+      expect(placement).toMatchObject({ kind: "remote", workerId });
+    });
+
+    it("still refuses a strict project with no eligible worker, however much host headroom there is", async () => {
+      await optIn();
+      await db.insert(preferences).values({ key: workerStrictPrefKey(PROJECT_ID), value: "true" });
+
+      await expect(
+        resolveWorkerPlacement({
+          database: db, projectId: PROJECT_ID, providerName: "claude",
+          hostCapacity: { freeRamGb: 40, spareCores: 16, thrashing: "none" },
+        }),
+      ).rejects.toThrow(/no eligible claude worker/);
+    });
+
+    // The whole opt-in chain is upstream of the ranking: a project with no fleet has nothing
+    // to compare the host against, so it must not acquire a new reason id for running where
+    // it was always going to run.
+    it("records dispatch_opt_in, not a ranking, for a project that never opted in", async () => {
+      const placement = await resolveWorkerPlacement({
+        database: db, projectId: PROJECT_ID, providerName: "claude",
+        hostCapacity: { freeRamGb: 40, spareCores: 16, thrashing: "none" },
+      });
+      expect(placement).toEqual({
+        kind: "host",
+        reason: { id: "dispatch_opt_in", detail: expect.any(String) },
+      });
+    });
+
+    // A host that wins reserves nothing — there is no slot ledger on the board. A leaked
+    // reservation is invisible in exactly the way #751 was, so assert the worker is still
+    // selectable afterwards rather than trusting the absence of a call.
+    it("claims no worker slot when the host wins", async () => {
+      const workerId = await withWorkerReporting({ freeRamGb: 1, spareCores: 1, thrashing: "none" });
+
+      await resolveWorkerPlacement({
+        database: db, projectId: PROJECT_ID, providerName: "claude",
+        hostCapacity: { freeRamGb: 40, spareCores: 16, thrashing: "none" },
+      });
+
+      expect(await selectWorkerForLaunch(fleet, "claude")).toBe(workerId);
     });
   });
 });
