@@ -365,6 +365,24 @@ export function getMergeJob(workspaceId: string, nowMs: number = Date.now()): Me
 }
 
 /**
+ * The tracked job for a workspace WITHOUT the zombie self-heal, for display-only readers (#944).
+ *
+ * {@link getMergeJob} transitions a zombied job to `failed` as a side effect of reading it,
+ * which is right for the merge-status endpoint (a caller polling for a verdict should get the
+ * corrected one) and wrong for the board. A board rebuild reads every workspace, runs on a WS
+ * broadcast and a 30s poll, and is triggered by any second tab — so routing it through
+ * `getMergeJob` would make an incidental card refresh the thing that declares a merge dead,
+ * at whatever moment a rebuild happened to land. Failing a merge is a decision, not a render.
+ *
+ * A display reader can afford the staleness: a zombied job still reads as `running` here, and
+ * {@link deriveGateActivity} renders exactly that state as `stalled` — which is the honest
+ * report of what this process knows, and the same conclusion, without writing it down.
+ */
+export function peekMergeJob(workspaceId: string): MergeJob | null {
+  return jobsByWorkspace.get(workspaceId) ?? null;
+}
+
+/**
  * A one-line, operator-readable account of a merge job's gate attempts (#936).
  *
  * The point is that a long-running merge reads as "gate attempt 2 in flight; attempt 1 passed

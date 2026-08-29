@@ -4,7 +4,7 @@
 // rather than reusing the sibling — see behaviorsToPreserve in the decomposition spec.
 
 import type { IssueWithStatus } from "@agentic-kanban/shared";
-import { WORKSPACE_STATUS_TONE, workspaceStatusToneClass } from "./badgeTones.js";
+import { WORKSPACE_STATUS_TONE, workspaceStatusToneClass, gateActivityToneClass } from "./badgeTones.js";
 
 /** The per-issue "main" workspace summary (non-null; rows render it only when present). */
 type WorkspaceMain = NonNullable<NonNullable<IssueWithStatus["workspaceSummary"]>["main"]>;
@@ -18,7 +18,11 @@ export const WS_STATUS_COLORS: Record<string, string> = Object.fromEntries(
 
 /** Tailwind classes for the workspace-row status pill (branch order matters). */
 export function workspaceRowStatusBadgeClass(main: WorkspaceMain): string {
-  return main.conflicts?.hasConflicts && main.status !== "fixing"
+  // #944 — first, for the same reason as on the card: during the gate `main.status` is `idle`,
+  // so every branch below would render a 40-minute verify run as an untouched workspace.
+  return main.gateActivity
+    ? gateActivityToneClass(main.gateActivity.phase)
+    : main.conflicts?.hasConflicts && main.status !== "fixing"
     ? "bg-red-100 text-red-700"
     : main.status === "closed" && main.lastSessionTriggerType === "fix-conflicts"
       ? "bg-orange-100 text-orange-700"
@@ -29,7 +33,9 @@ export function workspaceRowStatusBadgeClass(main: WorkspaceMain): string {
 
 /** Human label for the workspace-row status pill (branch order matters). */
 export function workspaceRowStatusLabel(main: WorkspaceMain): string {
-  return main.status === "reviewing"
+  return main.gateActivity
+    ? main.gateActivity.label
+    : main.status === "reviewing"
     ? "AI Reviewing"
     : main.status === "fixing"
       ? "AI Fixing Conflicts"

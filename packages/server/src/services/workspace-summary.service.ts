@@ -29,6 +29,8 @@ import { notifySummaryWriteThrough } from "./summary-write-through-notifier.js";
 import { resolveDiffRef } from "@agentic-kanban/shared/lib/git-service";
 import { unlandedRemoteBranches } from "./worker-remote-sync.service.js";
 import { resolveRemoteUnlandedPort } from "./remote-unlanded-port.js";
+import { peekMergeJob } from "./merge-job.service.js";
+import { deriveGateActivity } from "@agentic-kanban/shared/lib/gate-activity";
 
 // Bounded fan-out for background git-backed refresh tasks. The REAL git concurrency
 // control is the process-wide semaphore inside the git-exec adapter (#398) — this
@@ -150,6 +152,11 @@ export async function buildWorkspaceSummaryMap(
       planOnlyWarning: false,
       // #790 — set below, once the remote map has been consulted.
       remoteUnlanded: null,
+      // #944 — a synchronous read of this process's in-memory merge-job map. No DB, no git,
+      // no await: the whole point is that the card can show a running gate for free, on the
+      // rebuild it was already doing. `peekMergeJob` deliberately skips the zombie self-heal
+      // (see its doc) so rendering a card never fails a merge.
+      gateActivity: deriveGateActivity(peekMergeJob(mainWs.id)),
       scorecard: mainWs.scorecardScore !== null ? { score: mainWs.scorecardScore } : null,
       commitCount: commitCountByIssue.get(issueId) ?? null,
       latestCommit: latestCommitByIssue.get(issueId) ?? null,
