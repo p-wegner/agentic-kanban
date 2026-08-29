@@ -241,7 +241,16 @@ export function createWorkspaceSessionService(deps: {
     // a 201 and then silently dropped, which is exactly the failure this ticket is about.
     // Refuse instead, with a code that names the reason, so the caller knows it was not
     // delivered and can stop/rebuild the workspace.
-    if (getSessionManager().staleResumeRecoveryExhausted?.(id)) {
+    //
+    // Gated on the resume target STILL holding a provider session id, because the budget alone
+    // does not mean a resume is even going to be attempted. Two ways the counter outlives the
+    // problem: the recovery itself calls `clearProviderSessionId` on the dead session, and the
+    // counter is only released by the `completed` route — so a relaunch that ended on
+    // `usage-limit`/`stopped`/`unknown-exit` leaves it at 1 forever. In both cases
+    // `startSession` finds no id to forward, passes no `--resume`, and launches fresh; refusing
+    // there would reject a turn that was going to work, turning this fix into a new silent drop.
+    const resumeTargetProviderSessionId = resumable.session.providerSessionId ?? null;
+    if (resumeTargetProviderSessionId && getSessionManager().staleResumeRecoveryExhausted?.(id)) {
       throw new WorkspaceError(
         "The previous agent session could not be resumed — the provider no longer has its " +
           "conversation transcript, and the automatic fresh-launch fallback has already been " +
