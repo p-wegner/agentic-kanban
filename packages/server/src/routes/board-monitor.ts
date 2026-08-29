@@ -17,7 +17,7 @@ import { validateCronExpression } from "@agentic-kanban/shared/lib/cron-utils";
 
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import { requireProject } from "../services/require-project.js";
-import { previewNextStartCandidates } from "../startup/monitor-start-scoring.js";
+import { previewNextStartCandidates } from "../services/start-score-preview.service.js";
 /**
  * Read-only observability for the detached board-monitor orchestrator loop
  * (scripts/board-monitor/). Mounted under /projects.

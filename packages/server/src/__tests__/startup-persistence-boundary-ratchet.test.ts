@@ -79,7 +79,10 @@ const DRIZZLE_BASELINE = new Set<string>([
   "monitor-contract.ts",
   "monitor-cycle-actions.ts",
   "monitor-cycle.ts",
-  "monitor-eligibility.ts",
+  // `monitor-eligibility.ts` used to sit here — #942 moved its SQL fragments and candidate
+  // status lookup into `repositories/start-scoring.repository.ts`, where drizzle is legal.
+  // One real drain, so the entry is REMOVED rather than kept (see the note above about a
+  // baseline outliving its offender).
   "monitor-file-contention.ts",
   "monitor-helpers.ts",
   "monitor-setup.ts",
