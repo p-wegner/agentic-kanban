@@ -11,9 +11,13 @@ import type { MonitorActionName } from "../services/monitor-nudge.js";
 import { resolveMonitorTunables } from "../services/strategy-objective.service.js";
 import { narrowProviderName } from "../services/agent-provider.js";
 import { projectCanDispatch, hostOverflowHasFleetCapacity as defaultHasFleetOverflowCapacity } from "../services/worker-fleet.service.js";
-// #774 — the fleet shape behind a `no_available_worker` skip, so the reason is not a
-// single collapsed token. Same computation `GET /api/workers` serves.
-import { describeFleet } from "../services/placement-explain.service.js";
+import {
+  recordFleetHold as recordFleetHoldDetail,
+  recordMachineSaturationHold as recordMachineSaturationHoldDetail,
+  type FleetHoldDetail,
+  type MachineSaturationDetail,
+  type StartHoldContext,
+} from "./monitor-start-holds.js";
 import { resolveGateQuiesce } from "../services/gate-quiesce.js";
 import { isMonitorEligibleIssue, monitorEligibleIssueSql, notDriveOrEpicMetaSql, resolveCandidateStatusIds } from "../repositories/start-scoring.repository.js";
 import { buildFileContentionGate, shouldDeferForContention, type BuildFileContentionGate } from "./monitor-file-contention.js";
@@ -160,48 +164,11 @@ export type AutoStartSkipReason =
   | "create_in_flight";
 
 /**
- * What the fleet looked like when a project's start was held for `no_available_worker`
- * (#774, remaining #755 item 6).
- *
- * Before this, the whole answer was the token `no_available_worker` in `reasonCounts` plus
- * a `[monitor]` console line — so an operator reading the monitor status could not tell
- * "nobody paired a worker" from "every slot is busy" from "the one worker's socket dropped",
- * and the three have completely different remedies. The console line was the only place the
- * resolver's own `reason` appeared, and console output is not part of any status payload.
- *
- * NOTE: nothing READS this yet. The two consumers — `monitor-setup.ts` (which assembles the
- * status payload from `runAutoStart`'s return) and `autodrive-stall-warning.service.ts` —
- * were not #774's files. Tracked as **#801**.
+ * #936: the two hold RECORDERS and their detail shapes live in `monitor-start-holds.ts`
+ * — one cohesive concern (why a project's start was held, with the measured shape behind
+ * the collapsed reason token). Re-exported so existing importers keep this path.
  */
-export interface FleetHoldDetail {
-  /** The resolver's own refusal wording, verbatim. */
-  reason: string;
-  registered: number;
-  online: number;
-  /** Online AND holding a live WebSocket — the pair that actually makes a worker pickable. */
-  connected: number;
-  eligible: number;
-  freeSlots: number;
-  /** Where to get the full ordered decision chain for a specific ticket. */
-  explain: string;
-}
-
-/**
- * What the machine looked like when a project's start was held for `machine_saturated`
- * (#908). Mirrors `FleetHoldDetail`'s reasoning: the collapsed skip-reason token alone
- * cannot tell an operator "Tier 1 measured true thrashing" from "Tier 0's cheap freemem
- * floor tripped because Tier 1 was unavailable", and those have different remedies (wait
- * out the real load, vs. install/reach `fleet` for a sharper answer).
- */
-export interface MachineSaturationDetail {
-  /** Which tier answered: "1" when the `fleet` tool was reachable, "0" otherwise. */
-  tier: "0" | "1";
-  /** The capacity read's own wording. */
-  reason: string;
-  freeGb?: number | null;
-  headroomProcesses?: number;
-  thrashing?: string;
-}
+export type { FleetHoldDetail, MachineSaturationDetail };
 
 export interface AutoStartSkipInfo {
   issueNumbers: number[];
@@ -432,6 +399,37 @@ function isHostSaturated(capacity: MachineCapacitySnapshot): boolean {
   return capacity.hold;
 }
 
+/**
+ * Can this project's fleet absorb a start the host cannot take? The three callers (both `#908`
+ * saturation checks and `#936`'s gate-quiesce placement input) had this wiring inlined.
+ */
+function hasFleetOverflow(ctx: AutoStartCycle, projectId: string): Promise<boolean> {
+  return ctx.hasFleetOverflowCapacity({ database: db, projectId, providerName: narrowProviderName(ctx.prefMap.get("provider")) });
+}
+
+/**
+ * Adapt the cycle to the narrow slice `monitor-start-holds.ts` takes (#936). The detail
+ * objects are attached through callbacks rather than by handing over `skipInfo`, so the
+ * hold recorders never learn the tally map's shape — which is what keeps the dependency
+ * one-way after the extraction.
+ */
+function holdContext(ctx: AutoStartCycle): StartHoldContext {
+  return {
+    database: db,
+    prefMap: ctx.prefMap,
+    machineCapacity: ctx.machineCapacity,
+    noteSkip: ctx.noteSkip,
+    attachFleetHold: (projectId, detail) => {
+      const info = ctx.skipInfo.get(projectId);
+      if (info) info.fleetHold = detail;
+    },
+    attachMachineSaturation: (projectId, detail) => {
+      const info = ctx.skipInfo.get(projectId);
+      if (info) info.machineSaturation = detail;
+    },
+  };
+}
+
 type ContentionGate = Awaited<ReturnType<BuildFileContentionGate>>;
 
 /** The rows both loops select as start candidates — the shared subset the gates below read. */
@@ -494,71 +492,6 @@ async function evaluateStartCandidate(args: {
   if (await hasSkipAutoStartTag(issue.id)) { noteGateSkip("no_auto_start_tag"); return { start: false }; }
   if (shouldDeferForContention(contentionGate, issue.id, issue.issueNumber)) { noteGateSkip("contention_gate"); return { start: false }; }
   return { start: true, isReopenRetry, priorWorkspaceCount: issueWorkspaces.length };
-}
-
-/**
- * Record a strict-fleet hold, WITH the shape of the fleet behind it (#774). Best-effort:
- * a hold must still be recorded (and the cycle must still skip the project) if the fleet
- * snapshot itself fails.
- */
-async function recordFleetHold(ctx: AutoStartCycle, projectId: string, dispatchReason: string): Promise<void> {
-  let fleetHold: FleetHoldDetail | undefined;
-  try {
-    const snapshot = await describeFleet({
-      database: db,
-      projectId,
-      providerName: narrowProviderName(ctx.prefMap.get("provider")),
-    });
-    fleetHold = {
-      reason: dispatchReason,
-      registered: snapshot.registered,
-      online: snapshot.online,
-      connected: snapshot.connected,
-      eligible: snapshot.eligible,
-      freeSlots: snapshot.freeSlots,
-      explain: `/api/workers/explain?projectId=${projectId}&issue=<N>`,
-    };
-  } catch (err) {
-    console.warn(`[monitor] could not describe the fleet behind the hold: ${String(err)}`);
-  }
-  console.log(
-    `[monitor] auto-start held for project ${projectId}: ${dispatchReason}` +
-      (fleetHold
-        ? ` (${fleetHold.connected}/${fleetHold.registered} connected, ${fleetHold.eligible} eligible, ` +
-          `${fleetHold.freeSlots} free slots; why for one ticket: ${fleetHold.explain})`
-        : ""),
-  );
-  ctx.noteSkip(projectId, null, "no_available_worker");
-  if (fleetHold) {
-    const info = ctx.skipInfo.get(projectId);
-    if (info) info.fleetHold = fleetHold;
-  }
-}
-
-/**
- * Record a `machine_saturated` hold, WITH the capacity read behind it (#908) — same
- * reasoning as `recordFleetHold`: the collapsed token in `reasonCounts` cannot carry the
- * measured numbers an operator would need to judge "is this real load or a stale floor",
- * so the shape travels alongside it.
- */
-function recordMachineSaturationHold(ctx: AutoStartCycle, projectId: string): void {
-  const capacity = ctx.machineCapacity;
-  const detail: MachineSaturationDetail =
-    capacity.tier === "1"
-      ? {
-          tier: "1",
-          reason: `${capacity.headroomProcesses} headroom process(es), thrashing=${capacity.thrashing}`,
-          headroomProcesses: capacity.headroomProcesses,
-          thrashing: capacity.thrashing,
-        }
-      : { tier: "0", reason: capacity.reason, freeGb: capacity.freeGb };
-  console.log(
-    `[monitor] auto-start held for project ${projectId}: host is saturated (tier ${detail.tier}: ${detail.reason}) ` +
-      `and no eligible worker can take the overflow`,
-  );
-  ctx.noteSkip(projectId, null, "machine_saturated");
-  const info = ctx.skipInfo.get(projectId);
-  if (info) info.machineSaturation = detail;
 }
 
 /**
@@ -684,19 +617,15 @@ async function runInProgressBackfill(ctx: AutoStartCycle, inProgressSt: { id: st
   if (!dispatch.available) {
     // #774 — record the fleet's SHAPE alongside the collapsed reason, so the monitor
     // status carries what the console line used to be the only source of.
-    await recordFleetHold(ctx, inProgressSt.projectId, dispatch.reason);
+    await recordFleetHoldDetail(holdContext(ctx), inProgressSt.projectId, dispatch.reason);
     return;
   }
 
   // #908: the host is a PLACEMENT input, not a gate — a saturated host still starts work
   // when this project's fleet can absorb it. Only skip when the host is tight AND there is
   // nowhere else to route the overflow.
-  if (isHostSaturated(ctx.machineCapacity) && !(await ctx.hasFleetOverflowCapacity({
-    database: db,
-    projectId: inProgressSt.projectId,
-    providerName: narrowProviderName(ctx.prefMap.get("provider")),
-  }))) {
-    recordMachineSaturationHold(ctx, inProgressSt.projectId);
+  if (isHostSaturated(ctx.machineCapacity) && !(await hasFleetOverflow(ctx, inProgressSt.projectId))) {
+    recordMachineSaturationHoldDetail(holdContext(ctx), inProgressSt.projectId);
     return;
   }
 
@@ -782,12 +711,8 @@ async function runTodoPull(ctx: AutoStartCycle, inProgressSt: { id: string; proj
   // #581 held new starts while a gate holds the build semaphore; #936 made that hold a
   // PLACEMENT input (see `resolveGateQuiesce`) rather than an unconditional cycle skip.
   const quiesce = await resolveGateQuiesce({
-    projectId: inProgressSt.projectId,
-    database: db,
-    hasFleetOverflowCapacity: () => ctx.hasFleetOverflowCapacity({
-      database: db, projectId: inProgressSt.projectId,
-      providerName: narrowProviderName(ctx.prefMap.get("provider")),
-    }),
+    projectId: inProgressSt.projectId, database: db,
+    hasFleetOverflowCapacity: () => hasFleetOverflow(ctx, inProgressSt.projectId),
   });
   if (quiesce.action === "skip") {
     ctx.noteSkip(inProgressSt.projectId, null, quiesce.reason);
@@ -801,12 +726,8 @@ async function runTodoPull(ctx: AutoStartCycle, inProgressSt: { id: string; proj
 
   // #908: same placement-not-a-gate check as the backfill loop above — a saturated host
   // still pulls new work when this project's fleet can take it; only skip when neither can.
-  if (isHostSaturated(ctx.machineCapacity) && !(await ctx.hasFleetOverflowCapacity({
-    database: db,
-    projectId: inProgressSt.projectId,
-    providerName: narrowProviderName(ctx.prefMap.get("provider")),
-  }))) {
-    recordMachineSaturationHold(ctx, inProgressSt.projectId);
+  if (isHostSaturated(ctx.machineCapacity) && !(await hasFleetOverflow(ctx, inProgressSt.projectId))) {
+    recordMachineSaturationHoldDetail(holdContext(ctx), inProgressSt.projectId);
     return;
   }
 
