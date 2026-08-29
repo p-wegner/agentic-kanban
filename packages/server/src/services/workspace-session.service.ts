@@ -233,6 +233,25 @@ export function createWorkspaceSessionService(deps: {
       return { type: "sent" };
     }
 
+    // #934: this is the resume path. A resume whose provider transcript is gone now falls
+    // back to a fresh launch carrying this turn's content (the #26 recovery, reached because
+    // the exit classifier finally sees the provider's "No conversation found" result event).
+    // But that fallback is bounded to one retry per stale-resume episode — so when the budget
+    // is ALREADY spent and no session has completed since, the content would be accepted with
+    // a 201 and then silently dropped, which is exactly the failure this ticket is about.
+    // Refuse instead, with a code that names the reason, so the caller knows it was not
+    // delivered and can stop/rebuild the workspace.
+    if (getSessionManager().staleResumeRecoveryExhausted?.(id)) {
+      throw new WorkspaceError(
+        "The previous agent session could not be resumed — the provider no longer has its " +
+          "conversation transcript, and the automatic fresh-launch fallback has already been " +
+          "used for this workspace without a session completing since. The follow-up was NOT " +
+          "delivered. Stop the workspace and relaunch it (or rebuild the branch) before retrying.",
+        "CONFLICT",
+        { code: "TRANSCRIPT_GONE" },
+      );
+    }
+
     const ws0 = await getWorkspaceById(id, database);
     if (!ws0) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
 

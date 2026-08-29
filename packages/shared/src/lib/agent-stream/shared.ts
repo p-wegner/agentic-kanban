@@ -43,7 +43,8 @@ export function hasProviderFields(result: ParsedStreamEvent): boolean {
     result.toolResult !== undefined ||
     result.assistantText !== undefined ||
     result.todos !== undefined ||
-    result.rateLimitInfo !== undefined;
+    result.rateLimitInfo !== undefined ||
+    result.resultError !== undefined;
 }
 
 export function parseInput(value: unknown): Record<string, unknown> {
