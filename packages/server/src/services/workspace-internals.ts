@@ -21,6 +21,7 @@ import { getDirtyMainFiles } from "./merge-executor.service.js";
 // imports back from this module creates no runtime cycle.
 import type { MergeWarning } from "./workspace-merge-prevalidation.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { warnSiblingScanOnce } from "./sibling-scan-log.js";
 
 export class WorkspaceError extends Error {
   constructor(
@@ -435,6 +436,14 @@ export interface PendingSiblingMerge {
   unverifiable?: boolean;
   /** Human-readable reason, set only when `unverifiable` is true. */
   unverifiableReason?: string;
+  /**
+   * True when the row is unverifiable specifically because its repo DIRECTORY is gone
+   * (deleted or moved) rather than because git failed — a REGISTRATION problem, not a
+   * git one (#939). Callers that only need the fail-closed verdict can ignore it; it
+   * exists so a surface can distinguish "this sibling no longer exists on disk" from
+   * "git could not answer right now".
+   */
+  missing?: boolean;
 }
 
 /**
@@ -456,6 +465,10 @@ export interface PendingSiblingMerge {
  * any unresolvable row as part of an active merge — this function instead returns the
  * unverifiable row so the caller can choose its own failure handling (block reconcile,
  * surface a comment, etc.) without throwing out of a read-only probe.
+ *
+ * LOGGING is deduplicated once per (workspace, repo, kind) per run — see
+ * `sibling-scan-log.ts` (#939). The RETURN VALUE is unaffected, so every caller's
+ * blocking and reporting behaviour is unchanged.
  */
 export async function listPendingSiblingMerges(
   gitService: GitService,
@@ -501,15 +514,18 @@ export async function listPendingSiblingMerges(
     const label = repo.name ?? repo.path;
     if (!pathExists(repo.path)) {
       const reason = `could not verify sibling repo '${label}' at '${repo.path}' (base branch '${repo.baseBranch}'): repo directory does not exist (deleted or moved?)`;
-      console.warn(`[workspace-merge] pending-sibling scan: ${reason}`);
-      pending.push({ repo, uniqueCommits: 0, unverifiable: true, unverifiableReason: reason });
+      warnSiblingScanOnce(workspaceId, repo.path, "missing", reason);
+      pending.push({ repo, uniqueCommits: 0, unverifiable: true, unverifiableReason: reason, missing: true });
       continue;
     }
     try {
       await gitService.revParse(repo.path, repo.baseBranch);
     } catch (err) {
       const reason = `could not verify sibling repo '${label}' at '${repo.path}' (base branch '${repo.baseBranch}'): ${errorMessage(err)}`;
-      console.warn(`[workspace-merge] pending-sibling scan: ${reason}`);
+      // Keyed by the git error TEXT, not a fixed kind: a repeat of the same unresolvable
+      // base branch is a steady state, but a DIFFERENT git failure on the same repo is
+      // new information and logs again.
+      warnSiblingScanOnce(workspaceId, repo.path, `git:${errorMessage(err)}`, reason);
       pending.push({ repo, uniqueCommits: 0, unverifiable: true, unverifiableReason: reason });
       continue;
     }

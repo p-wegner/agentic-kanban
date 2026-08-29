@@ -9,7 +9,7 @@
 // and return 'proceed' otherwise, routing the workspace through the full multi-repo
 // merge pipeline. Fake git + real test DB (repos rows).
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { projects, workspaces, issues, projectStatuses } from "@agentic-kanban/shared/schema";
 import { createTestDb, type TestDb } from "./helpers/test-db.js";
@@ -22,6 +22,7 @@ import {
   checkPendingSiblingMergeGuards,
   type GitService,
 } from "../services/workspace-internals.js";
+import { resetSiblingScanWarningLog } from "../services/sibling-scan-log.js";
 import type { Database } from "../db/index.js";
 
 const SIBLING_PATH = "/sibling-repo";
@@ -239,5 +240,92 @@ describe("listPendingSiblingMerges / checkPendingSiblingMergeGuards", () => {
     // The whole point: no git process was created to learn what a stat already knew.
     expect(git.revParse).not.toHaveBeenCalled();
     expect(git.countUniqueCommits).not.toHaveBeenCalled();
+  });
+});
+
+// #939: a sibling whose directory is gone is a STEADY STATE, not an event. This scan runs
+// for every merged workspace on every merge/reconciler pass, so an unconditional warn
+// re-printed the same line forever — grepping `[workspace-merge]` during live triage of a
+// stuck merge returned almost nothing else, and the gate/phase lines for the workspace
+// under investigation were pushed out of the log tail. It must log once per run and then
+// stay silent, WITHOUT weakening the fail-closed verdict callers depend on.
+describe("pending-sibling scan logging (#939)", () => {
+  let warn: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    resetSiblingScanWarningLog();
+    warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    warn.mockRestore();
+    resetSiblingScanWarningLog();
+  });
+
+  const scanMissing = () =>
+    listPendingSiblingMerges(makeGit() as unknown as GitService, db as unknown as Database, workspaceId, {
+      pathExists: () => false,
+    });
+
+  it("warns ONCE for a missing sibling repo across repeated scans", async () => {
+    await insertSibling();
+
+    const first = await scanMissing();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toMatch(/does not exist/i);
+
+    await scanMissing();
+    await scanMissing();
+    // Still one line total — the three passes did not each re-print it.
+    expect(warn).toHaveBeenCalledTimes(1);
+
+    // The condition is SUPPRESSED IN THE LOG, not silenced: every pass still returns the
+    // fail-closed row, so the merge stays blocked and the reason still reaches the guards.
+    for (const pending of [first, await scanMissing()]) {
+      expect(pending).toHaveLength(1);
+      expect(pending[0].unverifiable).toBe(true);
+      expect(pending[0].missing).toBe(true);
+      expect(pending[0].unverifiableReason).toMatch(/does not exist/i);
+    }
+  });
+
+  it("the one line it does emit says the repeats are suppressed, so a reader is not misled", async () => {
+    await insertSibling();
+    await scanMissing();
+    expect(warn.mock.calls[0][0]).toMatch(/suppressed until restart/i);
+  });
+
+  it("a restart re-surfaces the condition (the dedup is per RUN, not permanent)", async () => {
+    await insertSibling();
+    await scanMissing();
+    expect(warn).toHaveBeenCalledTimes(1);
+
+    resetSiblingScanWarningLog(); // stands in for a fresh server process
+    await scanMissing();
+    expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it("a git failure is deduped per ERROR TEXT, so a DIFFERENT failure still logs", async () => {
+    await insertSibling();
+    let message = "fatal: bad revision 'main'";
+    const git = makeGit();
+    git.revParse = vi.fn(async () => {
+      throw new Error(message);
+    });
+    const scan = () =>
+      listPendingSiblingMerges(git as unknown as GitService, db as unknown as Database, workspaceId, {
+        pathExists: () => true,
+      });
+
+    await scan();
+    await scan();
+    expect(warn).toHaveBeenCalledTimes(1);
+
+    message = "fatal: not a git repository";
+    const pending = await scan();
+    expect(warn).toHaveBeenCalledTimes(2);
+    // A git error is unverifiable but NOT `missing` — the directory is there; git said no.
+    expect(pending[0].unverifiable).toBe(true);
+    expect(pending[0].missing).toBeUndefined();
   });
 });
