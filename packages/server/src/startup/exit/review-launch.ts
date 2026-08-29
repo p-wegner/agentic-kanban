@@ -23,7 +23,7 @@ import { emitButlerSystemEvent } from "../../services/butler-event-feed.js";
 import { buildReviewContext } from "../../services/phase-context.service.js";
 import { buildMembersBlock, buildReviewPrompt, releaseReviewLaunch, tryReserveReviewLaunch } from "../../services/review.service.js";
 import { getLeadIssueForMembersBlock, listMemberIssues } from "../../repositories/workspace-issue-members.repository.js";
-import { resolveProjectReviewMode } from "../../lib/review-mode-pref.js";
+import { resolveProjectReviewMode } from "../../services/review-mode-pref.js";
 import { formatPostureNote } from "../../services/risk-posture.service.js";
 import type { Database } from "../../db/index.js";
 import type { createBoardEvents } from "../../services/board-events.js";

@@ -28,7 +28,7 @@ import {
   resolveGateTier,
   verifyGateStrategyPrefKey,
 } from "../services/pre-merge-gate-tier.js";
-import { resolveProjectReviewMode, reviewModePref } from "../lib/review-mode-pref.js";
+import { resolveProjectReviewMode, reviewModePref } from "../services/review-mode-pref.js";
 import {
   DEFAULT_TRAIN_MAX_SIZE,
   DEFAULT_TRAIN_MAX_WAIT_MS,

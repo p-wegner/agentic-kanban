@@ -82,7 +82,7 @@ interface RiskPosture {
   | Field | Resolver | Explicit override that still wins |
   |---|---|---|
   | `gateTier` | `resolveGateTier` (`pre-merge-gate-tier.ts`), wrapped by `resolveVerifyGateStrategy`/`resolveGateTierFor` | `verify_gate_strategy_<id>` |
-  | `reviewMode` | `resolveProjectReviewMode` (`lib/review-mode-pref.ts`) → `{run, mode, thorough}` | `review_mode_<id>` (for `mode` only) |
+  | `reviewMode` | `resolveProjectReviewMode` (`services/review-mode-pref.ts`) → `{run, mode, thorough}` | `review_mode_<id>` (for `mode` only) |
   | `trainMaxSize` / `trainMaxWaitMs` | `resolveTrainWindowConfig` + `resolveTrainOptInSize` (`merge-train-window.ts`), wrapped by `resolveProjectTrainMaxSize`/`resolveTrainOptIn` | `train_max_size_<id>` and `train_max_wait_ms_<id>`, independently of each other |
   | `placementBias` | `remoteDispatchBlockedByPlacementBias` (`risk-posture.service.ts`), a new `placement_bias` step in `resolveWorkerPlacement` + `PLACEMENT_CHECK_CHAIN` + docs §7 step 4 | — (the posture IS the dial) |
 

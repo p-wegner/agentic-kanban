@@ -146,7 +146,7 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // Merge train review (#907): `review_mode_<id>` is `per-ticket` (default) | `per-train` —
   // was a stand-in for the risk-posture resolver before it landed. `per-train` reviews a
   // ticket-group workspace's assembled diff once, with every member's acceptance criteria,
-  // instead of reviewing each ticket separately. See server/lib/review-mode-pref.ts.
+  // instead of reviewing each ticket separately. See server/services/review-mode-pref.ts.
   "review_mode",
   // Risk posture (#911/#912): `risk_posture_<id>` is the ONE dial (`strict | standard | fast |
   // sprint`, default `standard`) that fans out into the gate tier, review mode, train
