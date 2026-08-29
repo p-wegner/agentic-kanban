@@ -63,6 +63,11 @@ export const WORKSPACE_REFUSAL_CODES = [
   "GROUP_MEMBER_HAS_WORKSPACE",
   "GROUP_MEMBER_IN_LIVE_GROUP",
   "GROUP_MEMBER_WRONG_PROJECT",
+  // #934: `POST /api/workspaces/:id/turn` cannot resume — the provider no longer holds the
+  // conversation transcript AND the automatic fresh-launch fallback has already been spent
+  // for this workspace. The turn content was NOT delivered, and saying so is the whole point:
+  // the observed failure was a 201 followed by a silent drop.
+  "TRANSCRIPT_GONE",
 ] as const;
 
 export type WorkspaceRefusalCode = (typeof WORKSPACE_REFUSAL_CODES)[number];

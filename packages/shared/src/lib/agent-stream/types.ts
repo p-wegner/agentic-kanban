@@ -113,6 +113,16 @@ export interface ParsedStreamEvent {
     agentSummary?: string;
   };
   turnComplete?: boolean;
+  /**
+   * The error text of a FAILED terminal result event (#934). A provider that fails
+   * without ever producing assistant text reports the reason only here — Claude's
+   * `{"type":"result","subtype":"error_during_execution","is_error":true,
+   * "errors":["No conversation found with session ID: …"]}` is the case that bit us:
+   * the exit classifier read only plan text and stderr, so a stale `--resume` arrived
+   * as an empty error string and the #26 missing-transcript recovery never fired.
+   * Absent on a successful result.
+   */
+  resultError?: string;
   liveStats?: {
     model: string;
     contextTokens: number;

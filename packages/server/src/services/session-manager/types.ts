@@ -88,6 +88,20 @@ export interface SessionState {
   sessionTextParts: Map<string, string[]>;
   sessionFinalText: Map<string, string>;
   sessionSubstantiveOutput: Set<string>;
+  /**
+   * The error text of the session's last FAILED terminal result event (#934). A provider
+   * can fail with no assistant text and nothing on stderr — Claude's stale-`--resume`
+   * "No conversation found with session ID: …" arrives only in a `result` event — so the
+   * exit classifier reads this as a third error-text source beside plan text and stderr.
+   */
+  sessionResultError: Map<string, string>;
+  /**
+   * The session emitted an event of the agent DOING work — assistant text, a tool call, a
+   * tool result, live stats (#934). Narrower than `sessionSubstantiveOutput`, which also
+   * counts the terminal result event; the exit classifier needs the narrow question ("did
+   * the agent run at all?") to tell a failed RUN from a failed LAUNCH.
+   */
+  sessionAgentWork: Set<string>;
   sessionTasks: Map<string, Map<string, { subject: string; status: string }>>;
   sessionHasTodoWrite: Set<string>;
   sessionExitPlanModeDenied: Set<string>;
@@ -139,6 +153,8 @@ export function teardownSessionState(state: SessionState, sessionId: string): vo
   state.sessionTextParts.delete(sessionId);
   state.sessionFinalText.delete(sessionId);
   state.sessionSubstantiveOutput.delete(sessionId);
+  state.sessionResultError.delete(sessionId);
+  state.sessionAgentWork.delete(sessionId);
   state.sessionTasks.delete(sessionId);
   state.sessionHasTodoWrite.delete(sessionId);
   state.sessionExitPlanModeDenied.delete(sessionId);
@@ -168,6 +184,8 @@ export function createSessionState(): SessionState {
     sessionTextParts: new Map(),
     sessionFinalText: new Map(),
     sessionSubstantiveOutput: new Set(),
+    sessionResultError: new Map(),
+    sessionAgentWork: new Set(),
     sessionTasks: new Map(),
     sessionHasTodoWrite: new Set(),
     sessionExitPlanModeDenied: new Set(),

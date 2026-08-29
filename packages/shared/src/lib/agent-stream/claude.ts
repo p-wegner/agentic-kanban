@@ -215,6 +215,27 @@ function handleRateLimitEvent(obj: Record<string, unknown>, result: ParsedStream
   });
 }
 
+/**
+ * The error text of a failed `result` event (#934). Claude reports a failed run's reason in
+ * `errors: string[]` (e.g. "No conversation found with session ID: <uuid>") and leaves
+ * `result` unset, so a classifier reading only `result`/stderr sees an empty string and
+ * cannot tell WHY the run failed. Collect every shape the CLI has been seen to use.
+ */
+function claudeResultErrorText(obj: Record<string, unknown>): string {
+  const parts: string[] = [];
+  if (Array.isArray(obj.errors)) {
+    for (const entry of obj.errors) {
+      const text = typeof entry === "string" ? entry : stringValue((entry as Record<string, unknown> | null)?.message);
+      if (text) parts.push(text);
+    }
+  }
+  const single = stringValue(obj.error);
+  if (single) parts.push(single);
+  const resultText = stringValue(obj.result);
+  if (resultText) parts.push(resultText);
+  return parts.join("\n").trim();
+}
+
 function handleResultEvent(obj: Record<string, unknown>, result: ParsedStreamEvent, isSubagentMessage: boolean): void {
   const usage = objectValue(obj.usage);
   const modelUsage = objectValue(obj.modelUsage);
@@ -258,6 +279,12 @@ function handleResultEvent(obj: Record<string, unknown>, result: ParsedStreamEve
       outputTokens,
       model,
     });
+    // #934: a FAILED result carries its reason in `errors`, which nothing read. Surface it
+    // so the exit classifier can see why the run failed (missing resume transcript, …).
+    if (!result.stats.success) {
+      const errorText = claudeResultErrorText(obj);
+      if (errorText) result.resultError = errorText;
+    }
   }
   const contextTokens = numberValue(usage.cache_read_input_tokens) + numberValue(usage.input_tokens);
   if (!isSubagentMessage && contextTokens > 0) {
