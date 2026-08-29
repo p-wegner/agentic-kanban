@@ -36,8 +36,20 @@ vi.mock("../services/base-branch-health.service.js", async (importOriginal) => {
   };
 });
 
+// #935: the gate asks for a fresh probe THROUGH the due-check, never through the probe
+// directly — the due-check is what applies the #931 gate-busy yield and the #712 timeout
+// back-off. Mocked here so the test asserts the routing without spawning anything.
+vi.mock("../startup/base-branch-health-reconciler.js", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    requestBaseBranchReprobe: vi.fn(async () => ({ due: true, reason: "interval_elapsed" as const })),
+  };
+});
+
 const { runPreLockGate } = await import("../services/workspace-merge-gate.js");
 const { getBaseBranchHealthAtMergeBase, verifyBaseBranchHealth } = await import("../services/base-branch-health.service.js");
+const { requestBaseBranchReprobe } = await import("../startup/base-branch-health-reconciler.js");
 
 const RUN_GATE_TOKEN = { kind: "run-gate" as const };
 const workspace = {
@@ -66,6 +78,8 @@ describe("runPreLockGate attributes a gate failure to an already-red base (#491)
     vi.mocked(getBaseBranchHealthAtMergeBase).mockReset();
     vi.mocked(verifyBaseBranchHealth).mockReset();
     vi.mocked(verifyBaseBranchHealth).mockResolvedValue(null);
+    vi.mocked(requestBaseBranchReprobe).mockReset();
+    vi.mocked(requestBaseBranchReprobe).mockResolvedValue({ due: true, reason: "interval_elapsed" });
   });
 
   it("prefixes the withhold message with the base's red status when the base was already broken", async () => {
@@ -175,7 +189,11 @@ describe("runPreLockGate attributes a gate failure to an already-red base (#491)
     expect(recorded[0]).toContain("TypeError: cannot read property of undefined");
     // A stale non-answer is sticky (the sweep backs a timeout off by a full probe duration on
     // top of its interval), so the gate asks for a fresh measurement instead of waiting it out.
-    expect(verifyBaseBranchHealth).toHaveBeenCalledWith("project-1", expect.anything());
+    // Through the DUE-CHECK, never the probe directly: the due-check is what still applies the
+    // #931 gate-busy yield and the #712 back-off, so a project stuck on a non-answer row cannot
+    // re-spawn a 45-minute verify on every failing gate.
+    await vi.waitFor(() => expect(requestBaseBranchReprobe).toHaveBeenCalledWith("project-1", expect.anything()));
+    expect(verifyBaseBranchHealth).not.toHaveBeenCalled();
   });
 
   it("does NOT request a re-probe when the base health is a real verdict (#935)", async () => {
@@ -197,6 +215,7 @@ describe("runPreLockGate attributes a gate failure to an already-red base (#491)
     });
 
     await expect(callRunPreLockGate(vi.fn(async () => {}))).rejects.toThrow(/Pre-merge gate failed/);
+    expect(requestBaseBranchReprobe).not.toHaveBeenCalled();
     expect(verifyBaseBranchHealth).not.toHaveBeenCalled();
   });
 
