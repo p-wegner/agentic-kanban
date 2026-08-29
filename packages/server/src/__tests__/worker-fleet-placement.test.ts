@@ -405,6 +405,58 @@ describe("worker-fleet placement (phase 1c)", () => {
       });
     });
 
+    // A worker on a pre-#910 build reports NO capacity. Between two workers, "reports
+    // headroom" outranks "unknown" — a report is evidence of a newer build. That rule must
+    // not extend to the host: the board ALWAYS reports (Tier 0 is unconditional), so it
+    // would win every launch against such a worker on a number nobody compared it to.
+    it("does not let the host beat a worker that reports no headroom at all", async () => {
+      await optIn();
+      const worker = await registerLocalWorkerFull({ name: "w", providers: ["claude"] });
+      fleet.connections.handleOpen(worker.workerId, fakeWs());
+      // Deliberately NO heartbeat: this worker's capacity is undefined.
+
+      const placement = await resolveWorkerPlacement({
+        database: db, projectId: PROJECT_ID, providerName: "claude",
+        hostCapacity: { freeRamGb: 40, spareCores: 16, thrashing: "none" },
+      });
+
+      expect(placement).toMatchObject({ kind: "remote", workerId: worker.workerId });
+    });
+
+    // The sharp end of the case above: 1GB free is BELOW #908's 2GB floor, so this host is
+    // saturated. Winning the ranking here would keep the session on a board the same call
+    // just declared too tight to take it — inverting #908 rather than extending it.
+    it("never lets a saturated host win the ranking over a worker that could run", async () => {
+      await withWorkerReporting({ freeRamGb: 1, spareCores: 1, thrashing: "none" });
+
+      const placement = await resolveWorkerPlacement({
+        database: db, projectId: PROJECT_ID, providerName: "claude",
+        hostSaturated: true,
+        hostCapacity: { freeRamGb: 4, spareCores: 8, thrashing: "none" },
+      });
+
+      // Remote, and recorded as machine_saturated — the #908 reason, not a headroom win.
+      expect(placement).toMatchObject({
+        kind: "remote",
+        reason: { id: "machine_saturated" },
+      });
+    });
+
+    // ...but a saturated host is still the last-resort fallback when nothing else can run.
+    // Withholding it from the RANKING must not have turned it into a refusal.
+    it("still falls back to a saturated host when no worker is eligible", async () => {
+      await optIn();
+      const placement = await resolveWorkerPlacement({
+        database: db, projectId: PROJECT_ID, providerName: "claude",
+        hostSaturated: true,
+        hostCapacity: { freeRamGb: 1, spareCores: 0, thrashing: "none" },
+      });
+      expect(placement).toEqual({
+        kind: "host",
+        reason: { id: "eligible_worker", detail: expect.any(String) },
+      });
+    });
+
     // A host that wins reserves nothing — there is no slot ledger on the board. A leaked
     // reservation is invisible in exactly the way #751 was, so assert the worker is still
     // selectable afterwards rather than trusting the absence of a call.
