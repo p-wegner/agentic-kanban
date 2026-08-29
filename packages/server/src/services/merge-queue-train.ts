@@ -13,7 +13,7 @@ import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import { getMergeQueueIssueRows, getMergeTrainMaxSizePref } from "../repositories/merge-queue.repository.js";
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { resolveTrainOptInSize } from "./merge-train-window.js";
-import { resolveRiskPosture, type RiskPosture } from "./risk-posture.service.js";
+import { resolveRiskPosture, formatPostureNote, type RiskPosture } from "./risk-posture.service.js";
 import { createMergeTrain, updateMergeTrainState } from "../repositories/merge-train.repository.js";
 import { runMergeTrain } from "./merge-train.service.js";
 import { runPreMergeGate } from "./pre-merge-gate.service.js";
@@ -55,6 +55,35 @@ export async function resolveTrainOptIn(
   const explicitParsed = Number.parseInt(explicit ?? "", 10);
   const hasExplicit = Number.isFinite(explicitParsed) && explicitParsed > 0;
   return { maxSize: resolveTrainOptInSize(prefMap, projectId), posture, fromPosture: !hasExplicit };
+}
+
+/**
+ * Does this project's opt-in put an eligible batch on a train?
+ *
+ * The decision lives here rather than inline in `createMergeQueueService` because it is
+ * about the TRAIN (it is the async half of `resolveTrainOptIn`, and the only caller that
+ * cares about the posture-vs-explicit distinction), and because that function is on the
+ * shrink-only nloc ring (#800) — #937's inline version pushed it past its baseline.
+ *
+ * `batchSize` is only for the log line: decision 017's visibility rule says that when the
+ * POSTURE, not an explicit `train_max_size_<projectId>`, is what batched these workspaces,
+ * the log has to say so and name the posture.
+ */
+export async function trainWantedForProject(
+  projectId: string | null,
+  database: Database,
+  batchSize: number,
+): Promise<boolean> {
+  if (!projectId) return false;
+  const optIn = await resolveTrainOptIn(projectId, database);
+  const wants = optIn.maxSize > 1;
+  if (wants && optIn.fromPosture) {
+    console.log(
+      `[merge-queue] batching ${batchSize} workspace(s) onto a train (max ${optIn.maxSize})` +
+        formatPostureNote(optIn.posture),
+    );
+  }
+  return wants;
 }
 
 /**
