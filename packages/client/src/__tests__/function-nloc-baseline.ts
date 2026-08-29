@@ -16,7 +16,7 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "routes/BoardPage.tsx::BoardPage": 627,
   "components/WorkspaceCard.tsx::WorkspaceCard": 612,
   "components/BacklogView.tsx::BacklogView": 607,
-  "components/IssueDetailPanel.tsx::IssueDetailPanel": 561,
+  "components/IssueDetailPanel.tsx::IssueDetailPanel": 551,
   "components/PluginViewsPanel.tsx::PluginViewsPanel": 552,
   "components/GraphView.tsx::GraphView": 548,
   "hooks/useWorkspaceActions.ts::useWorkspaceActions": 524,
