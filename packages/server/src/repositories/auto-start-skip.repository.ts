@@ -6,9 +6,35 @@
  * `startup-bypasses-repositories` rule `pnpm lint:arch` warns on, and keeping the write
  * behind a function is what lets the auto-start suites inject a recorder instead of a DB.
  */
-import { issues } from "@agentic-kanban/shared/schema";
-import { eq, inArray } from "drizzle-orm";
+import { issues, projectStatuses } from "@agentic-kanban/shared/schema";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Database } from "../db/index.js";
+import { monitorEligibleIssueSql, notDriveOrEpicMetaSql, resolveCandidateStatusIds } from "../startup/monitor-eligibility.js";
+
+/**
+ * The queued Todo/Backlog tickets a project-wide auto-start hold is holding.
+ *
+ * Returns `[]` for a project with no Todo status or nothing queued — a hold that is holding
+ * NOTHING is not worth recording, on the ticket or in the tally (#179's original point).
+ *
+ * Lives here rather than in `startup/monitor-skip-attribution.ts` (its only caller) because
+ * it is the one raw-persistence read that module needed, and `startup-bypasses-repositories`
+ * is a backlog that may only shrink — adding the 31st offender to attribute a skip reason
+ * would have paid for #919's answer with the boundary #715 exists to restore.
+ */
+export async function heldCandidateIds(
+  projectId: string,
+  allowFeatureTypes: boolean,
+  database: Database,
+): Promise<string[]> {
+  const waitingTodoStatus = await database.select({ id: projectStatuses.id }).from(projectStatuses)
+    .where(sql`${projectStatuses.name} = 'Todo' AND ${projectStatuses.projectId} = ${projectId}`).limit(1);
+  if (waitingTodoStatus.length === 0) return [];
+  const waitingStatusIds = await resolveCandidateStatusIds(projectId, waitingTodoStatus[0].id, allowFeatureTypes, database);
+  const rows = await database.select({ id: issues.id }).from(issues)
+    .where(and(inArray(issues.statusId, waitingStatusIds), monitorEligibleIssueSql(allowFeatureTypes), notDriveOrEpicMetaSql()));
+  return rows.map((r) => r.id);
+}
 
 /**
  * Stamp one issue's most recent auto-start skip reason. Never throws — a skip reason is a

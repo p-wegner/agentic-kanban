@@ -11,11 +11,8 @@
  * cohesive unit with one job and no dependency on the cycle's own state â€” it takes the recorder
  * as an interface, which is also what lets the auto-start suites assert attribution without a DB.
  */
-import { issues, projectStatuses } from "@agentic-kanban/shared/schema";
-import { and, inArray, sql } from "drizzle-orm";
-import { db } from "../db/index.js";
-import { clearAutoStartSkipReason, persistAutoStartSkipReason } from "../repositories/auto-start-skip.repository.js";
-import { monitorEligibleIssueSql, notDriveOrEpicMetaSql, resolveCandidateStatusIds } from "../repositories/start-scoring.repository.js";
+import type { Database } from "../db/index.js";
+import { clearAutoStartSkipReason, heldCandidateIds, persistAutoStartSkipReason } from "../repositories/auto-start-skip.repository.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /**
@@ -33,20 +30,10 @@ export interface IssueSkipRecorder<R extends string> {
 }
 
 /**
- * The queued Todo/Backlog tickets a project-wide hold is holding.
- *
- * Returns `[]` for a project with no Todo status or nothing queued â€” a hold that is holding
- * NOTHING is not worth recording, on the ticket or in the tally (#179's original point).
+ * Re-exported so this module stays the one import site for skip attribution; the query itself
+ * lives in `auto-start-skip.repository.ts` (see its header for why it is not inlined here).
  */
-export async function heldCandidateIds(projectId: string, allowFeatureTypes: boolean): Promise<string[]> {
-  const waitingTodoStatus = await db.select({ id: projectStatuses.id }).from(projectStatuses)
-    .where(sql`${projectStatuses.name} = 'Todo' AND ${projectStatuses.projectId} = ${projectId}`).limit(1);
-  if (waitingTodoStatus.length === 0) return [];
-  const waitingStatusIds = await resolveCandidateStatusIds(projectId, waitingTodoStatus[0].id, allowFeatureTypes, db);
-  const rows = await db.select({ id: issues.id }).from(issues)
-    .where(and(inArray(issues.statusId, waitingStatusIds), monitorEligibleIssueSql(allowFeatureTypes), notDriveOrEpicMetaSql()));
-  return rows.map((r) => r.id);
-}
+export { heldCandidateIds };
 
 /**
  * Attribute a project-wide hold to every ticket it holds. Best-effort: the hold has already been
@@ -58,9 +45,10 @@ export async function noteHeldCandidates<R extends string>(
   projectId: string,
   allowFeatureTypes: boolean,
   reason: R,
+  database: Database,
 ): Promise<void> {
   try {
-    for (const id of await heldCandidateIds(projectId, allowFeatureTypes)) ctx.noteIssueSkip(id, reason);
+    for (const id of await heldCandidateIds(projectId, allowFeatureTypes, database)) ctx.noteIssueSkip(id, reason);
   } catch (err) {
     console.warn(`[monitor] could not attribute the "${reason}" hold on project ${projectId} to its queued tickets: ${errorMessage(err)}`);
   }
@@ -75,9 +63,16 @@ export interface HoldRecorderCycle<R extends string, Info> extends IssueSkipReco
   prefMap: Map<string, string>;
   skipInfo: Map<string, Info>;
   noteSkip: (projectId: string, issueNumber: number | null | undefined, reason: R, count?: number) => void;
+  /**
+   * The connection to enumerate held tickets through. On the ctx rather than a separate
+   * parameter because the cycle already owns it, and because `startup/` importing the `db`
+   * singleton is the persistence-boundary backlog (#715) that may only shrink.
+   */
+  database: Database;
 }
 
 /**
+
  * #179: WIP is full â€” but only worth surfacing as a "skipped" cause if there is actually
  * queued Todo/Backlog work waiting behind it, not on every idle project.
  */
@@ -86,7 +81,7 @@ export async function noteWipCapSkip<Info>(
   projectId: string,
   allowFeatureTypes: boolean,
 ): Promise<void> {
-  const held = await heldCandidateIds(projectId, allowFeatureTypes);
+  const held = await heldCandidateIds(projectId, allowFeatureTypes, ctx.database);
   if (held.length === 0) return;
   ctx.noteSkip(projectId, null, "wip_cap", held.length);
   // #919: and on each of the held tickets, so the issue panel can answer for #57 specifically.
@@ -101,12 +96,13 @@ export async function noteWipCapSkip<Info>(
 export async function flushIssueSkipRecords(
   issueSkips: ReadonlyMap<string, string>,
   startedIssueIds: ReadonlySet<string>,
+  database: Database,
 ): Promise<void> {
   const at = new Date().toISOString();
   for (const [issueId, reason] of issueSkips) {
-    const err = await persistAutoStartSkipReason(issueId, { reason, at }, db);
+    const err = await persistAutoStartSkipReason(issueId, { reason, at }, database);
     if (err) console.warn(`[monitor] Failed to record auto-start skip reason "${reason}" for issue ${issueId}: ${errorMessage(err)}`);
   }
-  const clearErr = await clearAutoStartSkipReason([...startedIssueIds], db);
+  const clearErr = await clearAutoStartSkipReason([...startedIssueIds], database);
   if (clearErr) console.warn(`[monitor] Failed to clear auto-start skip reasons for ${startedIssueIds.size} started issue(s): ${errorMessage(clearErr)}`);
 }
