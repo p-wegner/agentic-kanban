@@ -45,6 +45,25 @@ export interface SessionExitContext {
   /** Provider stderr captured at exit (detached agents drain their .err file on exit — #779). */
   capturedStderr: string;
   /**
+   * The error text of the session's last FAILED terminal result event, when it had one (#934).
+   *
+   * A provider can fail having produced NO assistant text and NOTHING on stderr: Claude's
+   * stale-`--resume` failure is a single `{"type":"result","subtype":"error_during_execution",
+   * "is_error":true,"errors":["No conversation found with session ID: …"]}` line on stdout.
+   * That event sets `turnComplete`/`stats`, so `hadSubstantiveOutput` reads TRUE and the exit
+   * routed to `completed` with an empty error text — the workspace went back to idle with the
+   * turn content silently dropped, and the #26 missing-transcript recovery (which keys off the
+   * error text on the launch-failure route) never saw the reason.
+   */
+  resultErrorText?: string;
+  /**
+   * The agent emitted work — assistant text, a tool call/result, live stats (#934). Narrower
+   * than `hadSubstantiveOutput`, which also counts the terminal result event. Defaults to
+   * `hadSubstantiveOutput` when the caller does not distinguish the two, so an omitted value
+   * can never turn a run that DID work into a launch failure.
+   */
+  hadAgentWork?: boolean;
+  /**
    * Whether the exit code is a genuinely OBSERVED value (default: true). The live process
    * `exit` handler always observes the real code (possibly null-on-signal), so it leaves this
    * unset. The external/reattach PID-poll path can NOT observe the exit code — a surviving
@@ -128,8 +147,20 @@ export function classifySessionExit(ctx: SessionExitContext): SessionExitRoute {
   // genuinely need a time bound: zero-output-with-clean-exit (a long legitimate run can be
   // quiet) and fast-non-zero-with-output (a long run that fails late is a failed run, not a
   // launch failure — it keeps the completed path, which persists its real exit code).
-  if ((isNonZeroExit && isZeroOutput) || (withinWindow && (isZeroOutput || isNonZeroExit))) {
-    const errorText = ctx.planText?.trim() || ctx.capturedStderr || "";
+  // #934 — a non-zero exit whose ONLY output was a FAILED result event carrying an error
+  // message is a failed launch at any duration, for the same reason as the clause above: the
+  // provider said explicitly that nothing ran. It is NOT covered by that clause, because such
+  // a result event sets stats/turnComplete and so counts as substantive output. Without this,
+  // a stale `--resume` outside the 10s window (the observed case: a follow-up turn against a
+  // ~10h-old workspace) routed to `completed` and the missing-transcript recovery never ran.
+  //
+  // Gated on `hadAgentWork` and NOT on `hadSubstantiveOutput`: a long run that did real work
+  // and then failed is a failed RUN, keeps the completed route, and keeps its real exit code.
+  const resultErrorText = ctx.resultErrorText?.trim() ?? "";
+  const hadAgentWork = ctx.hadAgentWork ?? ctx.hadSubstantiveOutput;
+  const failedWithoutWorking = isNonZeroExit && !hadAgentWork && Boolean(resultErrorText);
+  if ((isNonZeroExit && isZeroOutput) || failedWithoutWorking || (withinWindow && (isZeroOutput || isNonZeroExit))) {
+    const errorText = ctx.planText?.trim() || resultErrorText || ctx.capturedStderr || "";
     const effectiveExitCode = isNonZeroExit ? (ctx.exitCode as number) : 1;
     return { phase: "launch-failure", isZeroOutput, isNonZeroExit, effectiveExitCode, errorText };
   }
@@ -145,6 +176,43 @@ export function classifySessionExit(ctx: SessionExitContext): SessionExitRoute {
   }
 
   return { phase: "completed", exitCode: ctx.exitCode };
+}
+
+/**
+ * The four per-session output signals `classifySessionExit` reads, lifted out of the
+ * in-memory state in ONE place (#934).
+ *
+ * Both exit paths — the live process `exit` handler and the external/reattach PID poll —
+ * derive these from the same `SessionState` maps, and the derivation had already drifted
+ * once (the live path folds in plan text, the external path does not). Keeping it here,
+ * beside the context type it feeds, means a new signal is added to the classifier and to
+ * both readers in one edit instead of three.
+ *
+ * `finalText` is the caller's already-resolved final/plan text — the live path substitutes
+ * a plan-marker scan for it in plan mode, which is the one thing the two paths genuinely
+ * differ on, so it stays an argument rather than another state read here.
+ */
+export interface SessionExitSignals {
+  hadSubstantiveOutput: boolean;
+  hadAgentWork: boolean;
+  resultErrorText: string;
+}
+
+export function readSessionExitSignals(
+  state: {
+    sessionSubstantiveOutput: Set<string>;
+    sessionAgentWork: Set<string>;
+    sessionResultError: Map<string, string>;
+  },
+  sessionId: string,
+  finalText: string | null,
+): SessionExitSignals {
+  const hasText = Boolean(finalText?.trim().length);
+  return {
+    hadSubstantiveOutput: state.sessionSubstantiveOutput.has(sessionId) || hasText,
+    hadAgentWork: state.sessionAgentWork.has(sessionId) || hasText,
+    resultErrorText: state.sessionResultError.get(sessionId) ?? "",
+  };
 }
 
 /**

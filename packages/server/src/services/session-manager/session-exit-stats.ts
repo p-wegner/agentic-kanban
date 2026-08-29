@@ -32,11 +32,19 @@ export function buildZeroOutputLaunchFailureStats(executor: string, durationMs: 
   };
 }
 
-/** Build launch failure stats when the agent produced an error message but is still a failed launch (e.g. model/auth error). */
+/**
+ * Build launch failure stats when the agent produced an error message but is still a failed
+ * launch (e.g. model/auth error).
+ *
+ * The duration is REPORTED rather than asserted (#934): this route is no longer reached only
+ * inside the 10s window — a non-zero exit whose only output was a failed terminal result is a
+ * launch failure at any duration — so the old "exited within 10s" wording would have been a
+ * false statement on exactly the failures that motivated widening it.
+ */
 export function buildModelErrorLaunchFailureStats(executor: string, durationMs: number, exitCode: number | null, errorText: string) {
   const truncated = errorText.length > 500 ? errorText.slice(0, 500) + "…" : errorText;
   const reason =
-    `Agent launch failed: provider process exited within ${Math.round(ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS / 1000)}s ` +
+    `Agent launch failed: provider process exited after ${Math.round(durationMs / 1000)}s ` +
     `with non-zero exit code ${exitCode ?? "unknown"} and error output:\n${truncated}`;
   return {
     durationMs,

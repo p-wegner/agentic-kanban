@@ -232,6 +232,25 @@ function isSubstantiveEvent(evt: ParsedStreamEvent): boolean {
   );
 }
 
+/**
+ * True when the event is the agent DOING something, as opposed to the terminal result
+ * event that merely reports how the run ended (#934).
+ *
+ * `isSubstantiveEvent` deliberately counts `stats`/`turnComplete`, so a session whose entire
+ * output was one failed `result` line reads as substantive — which is right for "did the
+ * process produce anything at all", and wrong for "did the agent actually run". The exit
+ * classifier needs the second question to tell a failed run from a failed launch.
+ */
+function isAgentWorkEvent(evt: ParsedStreamEvent): boolean {
+  return Boolean(
+    evt.assistantText ||
+    evt.liveStats ||
+    evt.toolActivity ||
+    evt.toolResult ||
+    evt.exitPlanModeDenied,
+  );
+}
+
 export function applyStreamEvent(
   state: SessionState,
   options: SessionManagerOptions | undefined,
@@ -242,6 +261,13 @@ export function applyStreamEvent(
   if (isSubstantiveEvent(evt)) {
     state.sessionSubstantiveOutput.add(sessionId);
   }
+  if (isAgentWorkEvent(evt)) {
+    state.sessionAgentWork.add(sessionId);
+  }
+
+  // #934: a failed terminal result reports its reason here and nowhere else (no assistant
+  // text, nothing on stderr). Keep it so the exit classifier can read WHY the run failed.
+  if (evt.resultError) state.sessionResultError.set(sessionId, evt.resultError);
 
   const ctx = state.sessionContexts.get(sessionId);
 
