@@ -67,8 +67,15 @@ export function compareCandidates(a: WorkerCandidate, b: WorkerCandidate): numbe
   if (aHeadroom !== undefined && bHeadroom !== undefined && aHeadroom !== bHeadroom) {
     return bHeadroom - aHeadroom; // higher headroom first
   }
-  if (aHeadroom !== undefined && bHeadroom === undefined) return -1;
-  if (aHeadroom === undefined && bHeadroom !== undefined) return 1;
+  // "Reports headroom" outranks "unknown headroom" only BETWEEN WORKERS, where a report is
+  // evidence of a newer build and the alternative is a blind guess. It must NOT let the HOST
+  // in: the board always reports (Tier 0 is unconditional), so against a pre-#910 worker that
+  // reports nothing this rule would hand the host every launch on a number nobody compared —
+  // including a host at 1GB free, which #908 calls saturated. The host has to WIN ON NUMBERS
+  // against a number, or not win at all; with no worker figure to beat it falls through to
+  // the load tiebreak, where its notional 0/1 slot never outranks a worker with a free slot.
+  if (aHeadroom !== undefined && bHeadroom === undefined) return a.isHost ? 1 : -1;
+  if (aHeadroom === undefined && bHeadroom !== undefined) return b.isHost ? -1 : 1;
   return a.load - b.load;
 }
 

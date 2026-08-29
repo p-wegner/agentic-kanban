@@ -547,7 +547,13 @@ async function resolvePlacementWithReservation(
     // the comparison would decide something the project has already refused. Withholding
     // the candidate keeps strict's contract exactly as #245 wrote it: either an eligible
     // worker, or `NO_AVAILABLE_WORKER`. Never "the board, because it had more RAM".
-    const rankedHostCapacity = strict ? undefined : hostCapacity;
+    // A SATURATED host is not a candidate either. #908 already decided the board is too
+    // tight to take this session — that is the whole meaning of `hostSaturated` — so letting
+    // it compete on the free RAM it has left would let the ranking overturn that verdict and
+    // keep the work exactly where #908 says it should not go. It remains the LAST-RESORT
+    // fallback below when no worker is eligible (that path is unchanged, and still records
+    // `machine_saturated`); it just cannot WIN a comparison against a worker that could run.
+    const rankedHostCapacity = strict || hostSaturated ? undefined : hostCapacity;
     const placed = await selectAndReserveWorkerForLaunch(
       fleet, providerName, requiredLabels, now, nowMs, preferWorkerId, rankedHostCapacity,
     );
