@@ -17,7 +17,7 @@ import { PREF_RECONCILER_STRANDED_REVIEW_ENABLED } from "../constants/preference
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 import { clearReviewPreflightBlockRow, setReviewPreflightBlock } from "../repositories/review-preflight.repository.js";
-import { resolveProjectReviewMode } from "../lib/review-mode-pref.js";
+import { resolveProjectReviewMode } from "../services/review-mode-pref.js";
 import { formatPostureNote } from "../services/risk-posture.service.js";
 
 /**

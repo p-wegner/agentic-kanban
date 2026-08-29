@@ -1,5 +1,5 @@
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
-import { resolveRiskPosture, type RiskPosture } from "../services/risk-posture.service.js";
+import { resolveRiskPosture, type RiskPosture } from "./risk-posture.service.js";
 
 /**
  * Merge train review mode (#907), now fanned out from the risk-posture dial (#937,
@@ -16,6 +16,14 @@ import { resolveRiskPosture, type RiskPosture } from "../services/risk-posture.s
  * A workspace with no members behaves identically under either mode: there is
  * nothing to assemble, so `per-train` degrades to the same single-ticket review
  * `per-ticket` would run.
+ *
+ * **Placement (#946)**: this is a prefMap resolver over `resolveRiskPosture`, so it lives in
+ * `services/` beside its siblings of the same shape (`merge-train-window.ts`,
+ * `pre-merge-gate-tier.ts`, `placement-evaluators.ts`) — not in `lib/`, whose contract is
+ * "imports no services". It was in `lib/` and imported `risk-posture.service.ts`, which is the
+ * `server-lib→server-service` violation the pattern-language spec forbids. Purity is unchanged:
+ * `resolveProjectReviewMode` is still sync and touches no DB, exactly as
+ * `prefmap-resolver-purity.test.ts` requires of a `resolveX(prefMap, …)`.
  */
 export const REVIEW_MODES = ["per-ticket", "per-train"] as const;
 export type ReviewMode = (typeof REVIEW_MODES)[number];
