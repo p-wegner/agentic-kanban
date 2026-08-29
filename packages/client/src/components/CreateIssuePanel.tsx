@@ -22,6 +22,7 @@ import { useProjectRepos } from "../hooks/useProjectRepos.js";
 import { ReposTouchedField } from "./ReposTouchedField.js";
 import { buildCreateIssuePayload } from "../lib/createIssuePayload.js";
 import { handleImagePaste, mergeDescriptionWithImages } from "../lib/pastedImages.js";
+import { markdownUrlTransform } from "../lib/markdownUrlTransform.js";
 import {
   COPILOT_DEFAULT_PROFILE,
   CODEX_DEFAULT_PROFILE,
@@ -226,7 +227,7 @@ export function CreateIssuePanel({
             {descriptionMode === "preview" ? (
               descriptionWithImages ? (
                 <div className="markdown-body flex-1 min-h-[200px] border border-gray-200 dark:border-gray-700 rounded px-3 py-2 dark:text-gray-200">
-                  <ReactMarkdown>{descriptionWithImages}</ReactMarkdown>
+                  <ReactMarkdown urlTransform={markdownUrlTransform}>{descriptionWithImages}</ReactMarkdown>
                 </div>
               ) : (
                 <p className="text-sm text-gray-400 dark:text-gray-500 italic flex-1 min-h-[200px] border border-gray-200 dark:border-gray-700 rounded px-3 py-2">Nothing to preview.</p>
