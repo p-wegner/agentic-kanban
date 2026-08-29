@@ -1,11 +1,15 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   completeMergeJob,
+  describeMergeJobAttempts,
   failMergeJob,
   getMergeJob,
   isZombieMergeJob,
   MERGE_JOB_ZOMBIE_AFTER_MS,
+  noteMergeGateAttemptFinished,
+  noteMergeGateAttemptStarted,
   resetMergeJobs,
+  setMergeGateLivenessProbe,
   startMergeJob,
 } from "../services/merge-job.service.js";
 
@@ -177,5 +181,183 @@ describe("merge job zombie detection (#903)", () => {
     const job = startMergeJob("ws-slow", startedAt);
     expect(getMergeJob("ws-slow")?.state).toBe("running");
     expect(getMergeJob("ws-slow")?.jobId).toBe(job.jobId);
+  });
+});
+
+/**
+ * #936 — a merge job can run the gate MORE THAN ONCE, and `merge-status` exposed none of it.
+ * Measured on #926: 3h44m and two complete 20-minute suite runs behind an opaque
+ * `{"state":"running"}`, so a slow convergent merge and a hung one were indistinguishable.
+ */
+describe("merge job gate attempts (#936)", () => {
+  beforeEach(() => resetMergeJobs());
+
+  it("records each gate attempt with its source, outcome and duration", () => {
+    startMergeJob("ws-a");
+    const first = noteMergeGateAttemptStarted("ws-a", "pre-lock-merge", new Date(Date.now() - 20_000).toISOString());
+    noteMergeGateAttemptFinished("ws-a", first, {
+      outcome: "discarded",
+      stage: "verify",
+      detail: "gate passed but the branch tip moved during the run",
+    });
+    const second = noteMergeGateAttemptStarted("ws-a", "pre-lock-merge");
+
+    const job = getMergeJob("ws-a")!;
+    expect(job.attemptCount).toBe(2);
+    expect(job.attempts[0]).toMatchObject({ attempt: 1, source: "pre-lock-merge", outcome: "discarded", stage: "verify" });
+    expect(job.attempts[0].durationMs).toBeGreaterThanOrEqual(19_000);
+    expect(job.attempts[0].detail).toContain("moved during the run");
+    // The second attempt is in flight — no outcome yet, which is the state #926 spent hours in.
+    expect(second?.attempt).toBe(2);
+    expect(job.attempts[1].finishedAt).toBeUndefined();
+  });
+
+  it("is a no-op for a gate run outside any merge job", () => {
+    // The monitor's own cycle gate and review-exit gate run with no merge job tracked.
+    expect(noteMergeGateAttemptStarted("ws-none", "monitor-cycle")).toBeNull();
+    expect(() => noteMergeGateAttemptFinished("ws-none", null, { outcome: "passed" })).not.toThrow();
+    expect(getMergeJob("ws-none")).toBeNull();
+  });
+
+  it("does not record attempts against an already-finished job", () => {
+    const job = startMergeJob("ws-fin");
+    completeMergeJob(job.jobId, "ws-fin", { merged: true });
+    expect(noteMergeGateAttemptStarted("ws-fin", "pre-lock-merge")).toBeNull();
+    expect(getMergeJob("ws-fin")?.attemptCount).toBe(0);
+  });
+
+  it("summarises attempts as an operator-readable line instead of an opaque running", () => {
+    startMergeJob("ws-sum");
+    const first = noteMergeGateAttemptStarted("ws-sum", "pre-lock-merge");
+    noteMergeGateAttemptFinished("ws-sum", first, { outcome: "discarded", stage: "verify", detail: "base tip moved" });
+    noteMergeGateAttemptStarted("ws-sum", "pre-lock-merge");
+
+    const summary = describeMergeJobAttempts(getMergeJob("ws-sum")!);
+    expect(summary).toContain("2 gate attempt(s)");
+    expect(summary).toContain("discarded");
+    expect(summary).toContain("base tip moved");
+    expect(summary).toContain("IN FLIGHT");
+  });
+
+  it("says so plainly when a running job has made no gate attempt yet", () => {
+    startMergeJob("ws-noattempt");
+    expect(describeMergeJobAttempts(getMergeJob("ws-noattempt")!)).toContain("no gate attempt recorded yet");
+  });
+
+  /**
+   * A gate run is 20-40 minutes, so the job it started under can finish and be REPLACED by a
+   * fresh job for the same workspace before it returns. Attempt numbers restart at 1 per job,
+   * so a handle carrying only a number would let the late finisher write into the successor's
+   * attempt 1 — inventing a completed attempt that job never made, and stamping the
+   * `lastActivityAt` the zombie detector trusts as its liveness signal.
+   */
+  it("drops a late finisher whose job has already been replaced, rather than writing into the successor", () => {
+    const first = startMergeJob("ws-replaced");
+    const handle = noteMergeGateAttemptStarted("ws-replaced", "pre-lock-merge");
+    completeMergeJob(first.jobId, "ws-replaced", { merged: true });
+
+    // A retried POST starts a FRESH job for the same workspace while attempt 1 is still running.
+    const second = startMergeJob("ws-replaced");
+    expect(second.jobId).not.toBe(first.jobId);
+    const beforeActivity = second.lastActivityAt;
+
+    // The stale gate finally returns and reports its verdict against the job it started under.
+    noteMergeGateAttemptFinished("ws-replaced", handle, { outcome: "passed", stage: "verify" });
+
+    const job = getMergeJob("ws-replaced")!;
+    expect(job.jobId).toBe(second.jobId);
+    expect(job.attempts).toHaveLength(0);
+    expect(job.attemptCount).toBe(0);
+    // Critically: the stale write must not count as this job's liveness heartbeat.
+    expect(job.lastActivityAt).toBe(beforeActivity);
+  });
+});
+
+/**
+ * #936 — the zombie clock must measure LIVENESS, not total elapsed time.
+ *
+ * #922 was declared dead at exactly 4h01m while its THIRD gate attempt was still running: the
+ * clock counted from the first attempt's `startedAt` and no retry ever reset it, so any merge
+ * needing more than ~12 attempts-worth of wall time was structurally guaranteed to be zombied
+ * mid-flight no matter how healthy it was.
+ */
+describe("merge job zombie detection measures liveness (#936)", () => {
+  beforeEach(() => resetMergeJobs());
+
+  it("a gate attempt boundary resets the clock, so a retrying merge is never zombied for elapsed time", () => {
+    const startedAt = new Date(Date.now() - (MERGE_JOB_ZOMBIE_AFTER_MS + 60 * 60_000)).toISOString();
+    startMergeJob("ws-retrying", startedAt);
+    // Attempt 3 started a minute ago — the job is visibly progressing, however old it is.
+    noteMergeGateAttemptStarted("ws-retrying", "pre-lock-merge", new Date(Date.now() - 60_000).toISOString());
+
+    expect(isZombieMergeJob(getMergeJob("ws-retrying")!)).toBe(false);
+    expect(getMergeJob("ws-retrying")?.state).toBe("running");
+  });
+
+  it("never zombies a job whose gate process tree is alive, whatever the timestamps say", () => {
+    setMergeGateLivenessProbe(() => true);
+    const startedAt = new Date(Date.now() - (MERGE_JOB_ZOMBIE_AFTER_MS * 3)).toISOString();
+    startMergeJob("ws-alive-gate", startedAt);
+
+    expect(isZombieMergeJob(getMergeJob("ws-alive-gate")!)).toBe(false);
+    expect(getMergeJob("ws-alive-gate")?.state).toBe("running");
+  });
+
+  it("still zombies a job that is silent AND has no gate running", () => {
+    setMergeGateLivenessProbe(() => false);
+    const startedAt = new Date(Date.now() - (MERGE_JOB_ZOMBIE_AFTER_MS + 60_000)).toISOString();
+    startMergeJob("ws-really-dead", startedAt);
+
+    const healed = getMergeJob("ws-really-dead");
+    expect(healed?.state).toBe("failed");
+    expect(healed?.reason).toBe("merge_job_zombied");
+  });
+
+  /**
+   * The liveness probe must answer about THIS JOB's gate, not about the box. The build
+   * semaphore (`buildGateBusy`) is process-global and is held by every project's gate, the
+   * cold-clone check and the e2e smoke lane — on a board with ten monitor-mode projects
+   * gating more or less continuously it is essentially always true, so consulting it would
+   * mean a genuinely wedged job could never be zombied at all. That is strictly worse than
+   * the #936 symptom, because nothing else ever clears a wedged job (#903).
+   */
+  it("zombies a silent job even while an UNRELATED workspace's gate is running", () => {
+    const startedAt = new Date(Date.now() - (MERGE_JOB_ZOMBIE_AFTER_MS + 60_000)).toISOString();
+    startMergeJob("ws-wedged", startedAt);
+    // Another workspace is mid-gate — the box is busy, but this job has no attempt of its own.
+    startMergeJob("ws-other");
+    noteMergeGateAttemptStarted("ws-other", "pre-lock-merge");
+
+    expect(getMergeJob("ws-wedged")?.state).toBe("failed");
+    expect(getMergeJob("ws-wedged")?.reason).toBe("merge_job_zombied");
+    // The unrelated healthy job is untouched.
+    expect(getMergeJob("ws-other")?.state).toBe("running");
+  });
+
+  /**
+   * An attempt whose gate process DIED never stamps `finishedAt`. Treating "unfinished" as
+   * alive unconditionally would grant that job permanent immunity — the #903 wedge, reopened
+   * through the liveness check — so an outstanding attempt ages out on the same threshold.
+   */
+  it("zombies a job whose in-flight attempt has itself been silent past the threshold", () => {
+    const longAgo = new Date(Date.now() - (MERGE_JOB_ZOMBIE_AFTER_MS + 60_000)).toISOString();
+    startMergeJob("ws-dead-mid-attempt", longAgo);
+    noteMergeGateAttemptStarted("ws-dead-mid-attempt", "pre-lock-merge", longAgo);
+
+    expect(getMergeJob("ws-dead-mid-attempt")?.state).toBe("failed");
+    expect(getMergeJob("ws-dead-mid-attempt")?.error).toContain("never finishing");
+  });
+
+  it("the zombie verdict states what it OBSERVED, not a false 'no completion'", () => {
+    setMergeGateLivenessProbe(() => false);
+    const startedAt = new Date(Date.now() - (MERGE_JOB_ZOMBIE_AFTER_MS + 60_000)).toISOString();
+    startMergeJob("ws-verdict", startedAt);
+    const a1 = noteMergeGateAttemptStarted("ws-verdict", "pre-lock-merge", startedAt);
+    noteMergeGateAttemptFinished("ws-verdict", a1, { outcome: "passed", stage: "verify" }, startedAt);
+
+    const error = getMergeJob("ws-verdict")?.error ?? "";
+    expect(error).toContain("no gate process is running");
+    expect(error).toContain("gate attempt(s) recorded");
+    expect(error).not.toContain("no completion");
   });
 });

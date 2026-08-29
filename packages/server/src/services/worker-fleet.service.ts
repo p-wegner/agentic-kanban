@@ -37,6 +37,9 @@ import { remoteDispatchBlockedByRepoShape } from "./worker-transport-support.ser
 import { recordWorkerEvent } from "./worker-events.service.js";
 import type { PlacementReason, PlacementReasonId } from "../lib/placement-explain.types.js";
 import { resolveResumeWorkerAffinity } from "./worker-resume-affinity.service.js";
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
+import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
+import { remoteDispatchBlockedByPlacementBias, resolveRiskPosture } from "./risk-posture.service.js";
 export { SHARES_FILESYSTEM_LABEL };
 
 // Strict-mode refusal. Defined in the dispatch layer (which must throw it when it
@@ -454,6 +457,19 @@ async function resolvePlacementWithReservation(
         `[worker-fleet] project ${projectId} wants worker dispatch but ${dataHandlingBlock.reason}; launching on host`,
       );
       return hostBecause("data_handling_requirement", dataHandlingBlock.reason);
+    }
+    // #937 / decision 017: `placementBias`. Same family as the two checks above and asked in
+    // the same place — a posture of `strict` (`host-half`) is the operator saying this work
+    // stays on a machine the board controls, and the board cannot make a worker honour it.
+    const placementBiasBlock = remoteDispatchBlockedByPlacementBias(
+      resolveRiskPosture(toPrefMap(await getAllPreferencesCached(database).catch(() => [])), projectId),
+    );
+    if (placementBiasBlock.blocked) {
+      if (strict) refuseHost(`project ${projectId} cannot dispatch remotely: ${placementBiasBlock.reason}`);
+      console.warn(
+        `[worker-fleet] project ${projectId} wants worker dispatch but ${placementBiasBlock.reason}; launching on host`,
+      );
+      return hostBecause("placement_bias", placementBiasBlock.reason);
     }
     const requiredLabels = parseRequiredLabels(await getPreferenceValue(workerLabelsPrefKey(projectId), database));
     // #751: select AND reserve atomically. Reading the load and then reserving after

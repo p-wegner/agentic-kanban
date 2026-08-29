@@ -15,7 +15,7 @@ import { createWorkspaceMergeService } from "./workspace-merge.service.js";
 import { isPreMergeGateFailure } from "./workspace-merge-gate.js";
 import type { BoardEventSink } from "./board-events.js";
 import type { SessionLauncher } from "./session.manager.js";
-import { createMergeTrainRunner, resolveProjectTrainMaxSize, trainEligible } from "./merge-queue-train.js";
+import { createMergeTrainRunner, trainWantedForProject, trainEligible } from "./merge-queue-train.js";
 
 export interface WorkspaceConflictPreview {
   workspaceId: string;
@@ -491,11 +491,11 @@ export function createMergeQueueService(deps: {
     const eligible = trainEligible(plan.order);
     let wantsTrain = opts.strategy === "train" || plan.recommendedStrategy === "integration-union";
     if (!wantsTrain && eligible && opts.strategy !== "sequential") {
-      const first = plan.order[0];
-      const issueRows = await getMergeQueueIssueRows([first.issueId], database);
-      const projectId = issueRows[0]?.projectId ?? null;
-      const projectTrainMaxSize = projectId ? await resolveProjectTrainMaxSize(projectId, database) : 1;
-      wantsTrain = projectTrainMaxSize > 1;
+      // #937: the opt-in falls back to the risk posture's `trainMaxSize` when no explicit
+      // `train_max_size_<projectId>` is set. The decision (and decision 017's posture-visibility
+      // log) lives in `trainWantedForProject` beside the resolver it wraps.
+      const issueRows = await getMergeQueueIssueRows([plan.order[0].issueId], database);
+      wantsTrain = await trainWantedForProject(issueRows[0]?.projectId ?? null, database, plan.order.length);
     }
     if (wantsTrain && opts.strategy !== "sequential" && eligible) {
       yield* trainRunner.runTrainStrategy(plan);
