@@ -11,7 +11,7 @@ import {
 import { getProjectHealth } from "../services/project-health.service.js";
 import { listBaseBranchHealth, getLatestBaseBranchHealth } from "../repositories/base-branch-health.repository.js";
 import { inFlightBaseBranchProbeCount } from "../services/base-branch-health.service.js";
-import { requestBaseBranchReprobe } from "../startup/base-branch-health-reconciler.js";
+import { requestBaseBranchReprobe } from "../services/base-branch-health-reprobe.service.js";
 
 import { queryInt } from "../middleware/query-params.js";
 /**

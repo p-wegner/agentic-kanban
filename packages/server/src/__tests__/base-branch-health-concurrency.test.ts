@@ -48,7 +48,7 @@ const {
   inFlightBaseBranchProbeCount,
   PROBE_MAX_DURATION_MS,
 } = await import("../services/base-branch-health.service.js");
-const { isBaseHealthProbeDue } = await import("../startup/base-branch-health-reconciler.js");
+const { isBaseHealthProbeDue } = await import("../services/base-branch-health-reprobe.service.js");
 const { setPreference, getPreference } = await import("../repositories/preferences.repository.js");
 const { verifyScriptPrefKey } = await import("../services/stack-profile.service.js");
 const { recordBaseBranchHealth } = await import("../repositories/base-branch-health.repository.js");
