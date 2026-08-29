@@ -365,7 +365,17 @@ function notReached(spec: PlacementCheckSpec, projectId: string): PlacementCheck
   };
 }
 
-/** Run the real resolver as a read-only dry run and normalise its answer. */
+/**
+ * Run the real resolver as a read-only dry run and normalise its answer.
+ *
+ * Deliberately passes NO `hostCapacity` (#938), so the host is not ranked in and this dry
+ * run compares like-for-like against the guard chain above. Two reasons. The explanation
+ * answers "why does nothing dispatch" — a question about the guards, each of which names a
+ * setting an operator can change; a headroom comparison names nothing to change and would
+ * arrive as a spurious `agreesWithResolver: false` whenever the board happened to have more
+ * free RAM than the fleet at that instant. And the honest answer moves between two calls a
+ * second apart, which is not something to pin a static chain against.
+ */
 async function dryRunResolver(params: {
   database: Database;
   projectId: string;
