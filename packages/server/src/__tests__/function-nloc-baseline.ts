@@ -152,7 +152,7 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // (`runTrainStrategy` plus its `beginMergeTrain`/`finishMergeTrain`/`trainEligible` helpers)
   // moved to `services/merge-queue-train.ts` once the train-persistence work pushed this file
   // past the 1000-line hard ceiling. The factory still holds the sequential path in full.
-  "services/merge-queue.service.ts::createMergeQueueService": 430,
+  "services/merge-queue.service.ts::createMergeQueueService": 427,
   // 506 -> 474 in #806 batch 3: ten handlers dropped their inline type literal and guard
   // ladder for a `parseJsonBody(c, schema)` call.
   "routes/issues.ts::createIssuesRoute": 473,

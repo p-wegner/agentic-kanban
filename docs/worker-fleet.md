@@ -334,12 +334,17 @@ is a **silent host fallback** with a `[worker-fleet]` warning in the server log;
 mode each becomes a refusal the monitor reports as `no_available_worker`.
 
 1. **`worker_dispatch_<projectId>` is not `true`.** Everything runs on the host, with no
-   log line at all — this is the quietest of the seven.
+   log line at all — this is the quietest of the eight.
 2. **The project has a profile allowlist.** `allowed_profiles_<projectId>` non-empty or
    unparseable → never remote (§5).
 3. **The project has a data-handling requirement.** `required_data_labels_<projectId>`
    non-empty → never remote, same reasoning as check 2 (#876, §5).
-4. **No eligible worker.** All of these must hold, and any one of them failing looks
+4. **The project's risk posture forbids remote placement.** `strict` sets `placementBias:
+   "host-half"` (decision 017) → never remote, same reasoning as checks 2 and 3: a worker
+   authenticates with its own local login, so the board can prefer a machine but cannot make
+   one honour the posture (#937). `standard`'s `host-preferred` and `fast`/`sprint`'s
+   `remote-preferred` are preferences, not restrictions — they pass this check unchanged.
+5. **No eligible worker.** All of these must hold, and any one of them failing looks
    identical from the outside:
    - the worker's `effectiveStatus` is `online` — heartbeat newer than 90 s;
    - the board still holds its WebSocket (`isConnected`) — a worker whose heartbeat is
@@ -347,19 +352,19 @@ mode each becomes a refusal the monitor reports as `no_available_worker`.
    - the launch's provider is in the worker's `--providers` (empty list = any);
    - `worker_labels_<projectId>` ⊆ the worker's `--labels`;
    - it has a free slot against `--max-concurrency` (least-loaded worker wins).
-5. **No branch to push back.** A true remote worker needs git transport, and a workspace
+6. **No branch to push back.** A true remote worker needs git transport, and a workspace
    with no feature branch has nothing safe to land — host.
-6. **The project has no `repoPath`.** Nothing to serve over git transport — host.
-7. **The repository shape does not fit the transport.** The board's git transport carries ONE
+7. **The project has no `repoPath`.** Nothing to serve over git transport — host.
+8. **The repository shape does not fit the transport.** The board's git transport carries ONE
    repository per assignment, without LFS objects and without submodules, so a project with
    sibling repos, LFS or submodules is refused rather than dispatched against an incomplete
    checkout (#748). A layout that cannot be read at all fails closed the same way.
 
-A worker carrying the `shares-filesystem` label skips 5, 6 and 7 entirely — it reads the
+A worker carrying the `shares-filesystem` label skips 6, 7 and 8 entirely — it reads the
 board's own worktrees, siblings and LFS objects included.
 
 **Ask the board instead of reading this list.** `agentic-kanban worker explain <N>` (and
-`GET /api/workers/explain?issue=<N>`) walks these same seven checks against live state and
+`GET /api/workers/explain?issue=<N>`) walks these same eight checks against live state and
 names the one that decided, with the values it read (#755). The chain it walks is pinned to
 `resolveWorkerPlacement`'s source order and to this section's numbering by
 `placement-chain-parity.test.ts`, and every answer carries `agreesWithResolver` — so if the

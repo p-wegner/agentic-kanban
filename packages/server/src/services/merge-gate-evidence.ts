@@ -8,6 +8,10 @@
  */
 import type { Database } from "../db/index.js";
 import {
+  noteMergeGateAttemptStarted,
+  noteMergeGateAttemptFinished,
+} from "./merge-job.service.js";
+import {
   resolveMergeGate,
   resolveMergeGateShas,
   gateAlreadyPassed,
@@ -105,7 +109,22 @@ export async function runGateWithEvidence(args: {
     resolveMergeGate({ token: RUN_GATE, workspace: workspace_, projectId: projectId_, database: database_ }));
   const shasBefore = await readShas(workspace);
   const startedAtMs = Date.now();
-  const result = await runGate(workspace, projectId, database);
+  // #936 — this is the ONE choke point every gate run passes through, so it is where a merge
+  // job learns that it made another attempt. Before this, `merge-status` read a bare
+  // `{"state":"running"}` for hours across multiple complete 20-minute suite runs, which is
+  // indistinguishable from a hang. A gate that runs outside a merge job (the monitor's own
+  // cycle gate, review-exit) records nothing — `noteMergeGateAttemptStarted` returns null.
+  const attempt = noteMergeGateAttemptStarted(workspace.id, source);
+  let result: Omit<ResolvedMergeGate, "decision">;
+  try {
+    result = await runGate(workspace, projectId, database);
+  } catch (err) {
+    noteMergeGateAttemptFinished(workspace.id, attempt, {
+      outcome: "failed",
+      detail: `gate run threw: ${err instanceof Error ? err.message : String(err)}`,
+    });
+    throw err;
+  }
   const durationMs = Date.now() - startedAtMs;
   const ranAt = new Date().toISOString();
   const shasAfter = await readShas(workspace);
@@ -118,6 +137,33 @@ export async function runGateWithEvidence(args: {
   const token = result.passed && !moved
     ? gateAlreadyPassed({ ranAt, stage: result.stage, source, branchSha: shasBefore.branchSha, baseSha: shasBefore.baseSha })
     : null;
+
+  // #936 acceptance: "a gate that completes without merging logs WHY, at the workspace level".
+  // The expensive-and-silent case is `passed && moved` — a full suite ran to completion and
+  // its verdict is thrown away because a tip moved underneath it, which is exactly the
+  // "gate #1 completed, no merge, job still running" step nothing accounted for on #926.
+  if (result.passed && moved) {
+    console.warn(
+      `[merge-gate] workspace ${workspace.id}: gate attempt ${attempt?.attempt ?? "?"} (${source}) PASSED after `
+        + `${Math.round(durationMs / 1000)}s but its verdict is DISCARDED — the ${moved} tip moved during the run `
+        + `(#243), so nothing proves the state about to merge was tested. The gate will run again (#936).`,
+    );
+  }
+  noteMergeGateAttemptFinished(workspace.id, attempt, {
+    outcome: !result.passed
+      ? "failed"
+      : moved
+        ? "discarded"
+        : result.ran
+          ? "passed"
+          : "skipped",
+    stage: result.stage,
+    detail: !result.passed
+      ? result.message
+      : moved
+        ? `gate passed but the ${moved} tip moved during the run — verdict discarded, the gate must run again (#243)`
+        : undefined,
+  });
 
   return { ...result, shasBefore, moved, ranAt, token, durationMs };
 }
