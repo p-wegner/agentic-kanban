@@ -2,6 +2,7 @@
 // See ../api.ts barrel.
 import type { ProfileSelection } from "./common.js";
 import type { ServiceStackState } from "../service-stack.js";
+import type { GateActivity } from "../../lib/gate-activity.js";
 
 export interface MainWorkspaceInfo {
   id: string;
@@ -45,6 +46,14 @@ export interface MainWorkspaceInfo {
    * it names the worker and demotes the pick to a tooltip, exactly as the detail chip does.
    */
   remotePlacement?: { workerId: string } | null;
+  /**
+   * #944 — set while a merge for this workspace is IN FLIGHT, so the card can show that a
+   * 30-45 minute pre-merge gate is running instead of the amber `idle` dot it would otherwise
+   * render (the same dot a workspace nobody has touched in a week gets). Null whenever no
+   * merge is running: the outcome of a finished one is already visible as merged/closed or as
+   * a merge error, and a lingering badge would only go stale.
+   */
+  gateActivity?: GateActivity | null;
 
   pendingPlanPath?: string | null;
   scorecard?: { score: number } | null;

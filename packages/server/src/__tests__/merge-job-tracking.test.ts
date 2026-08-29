@@ -8,10 +8,12 @@ import {
   MERGE_JOB_ZOMBIE_AFTER_MS,
   noteMergeGateAttemptFinished,
   noteMergeGateAttemptStarted,
+  peekMergeJob,
   resetMergeJobs,
   setMergeGateLivenessProbe,
   startMergeJob,
 } from "../services/merge-job.service.js";
+import { deriveGateActivity } from "@agentic-kanban/shared/lib/gate-activity";
 
 /**
  * The point of this registry is that a merge's verdict outlives the HTTP request that started
@@ -359,5 +361,40 @@ describe("merge job zombie detection measures liveness (#936)", () => {
     expect(error).toContain("no gate process is running");
     expect(error).toContain("gate attempt(s) recorded");
     expect(error).not.toContain("no completion");
+  });
+
+  /**
+   * #944 — the board's card render reads the job for EVERY workspace, on every rebuild (a WS
+   * broadcast, the 30s poll, a second tab). Routing that through `getMergeJob` would make an
+   * incidental refresh the thing that declares a merge dead, at whatever moment a rebuild
+   * happened to land. Failing a merge is a decision; `peekMergeJob` is the display read.
+   */
+  describe("peekMergeJob (display-only read)", () => {
+    it("returns the job without transitioning a zombie", () => {
+      setMergeGateLivenessProbe(() => false);
+      const longAgo = new Date(Date.now() - (MERGE_JOB_ZOMBIE_AFTER_MS + 60_000)).toISOString();
+      startMergeJob("ws-peek", longAgo);
+
+      // Still `running` after the peek — the peek wrote nothing.
+      expect(peekMergeJob("ws-peek")?.state).toBe("running");
+      expect(peekMergeJob("ws-peek")?.state).toBe("running");
+
+      // And the authoritative read still heals it, so the endpoint is unaffected.
+      expect(getMergeJob("ws-peek")?.state).toBe("failed");
+    });
+
+    it("is null for an unknown workspace", () => {
+      expect(peekMergeJob("ws-never-merged")).toBeNull();
+    });
+
+    it("feeds deriveGateActivity, which renders an un-healed zombie as `stalled`", () => {
+      setMergeGateLivenessProbe(() => false);
+      const longAgo = new Date(Date.now() - (MERGE_JOB_ZOMBIE_AFTER_MS + 60_000)).toISOString();
+      startMergeJob("ws-peek-render", longAgo);
+
+      // The honest report of what this process knows — same conclusion an operator needs,
+      // without writing the failure down as a side effect of drawing a card.
+      expect(deriveGateActivity(peekMergeJob("ws-peek-render"))?.phase).toBe("stalled");
+    });
   });
 });
