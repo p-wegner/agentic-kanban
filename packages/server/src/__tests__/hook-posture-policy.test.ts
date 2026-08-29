@@ -50,8 +50,27 @@ describe("hook posture resolution (#913)", () => {
 
   it("lets a ticket-level risk: tag override the project default", () => {
     const rendered =
-      "This project runs under **Strict** risk posture.\n\nTags: risk:fast, area:hooks\n";
+      "## Risk posture\n\n" +
+      "This project runs under **Strict** risk posture.\n" +
+      "Tags: risk:fast, area:hooks\n";
     expect(posture.parsePostureFromTicketContext(rendered)).toBe("fast");
+  });
+
+  it("never reads a tag out of the ticket DESCRIPTION, which sits above the posture section", () => {
+    // buildTicketContext writes the description and the context primer ABOVE the
+    // `## Risk posture` section, and renders no tag list at all. A whole-file scan
+    // therefore reads a description that merely QUOTES a tag as an actual tag — and
+    // since the tag branch wins, it silently downgraded strict to sprint.
+    const rendered =
+      "# Ticket #913\n\n" +
+      "## Description\n\n" +
+      "A ticket tagged risk:sprint runs safety guards only. See also `risk:fast`.\n\n" +
+      "## Risk posture\n\n" +
+      "This project runs under **Strict** risk posture. Everything is verified.\n" +
+      "A ticket tagged `risk:<posture>` overrides the project default for that ticket only.\n\n" +
+      "## If you hit a bug in the kanban board itself\n\n" +
+      "Report it. Some prose mentioning risk:sprint again.\n";
+    expect(posture.parsePostureFromTicketContext(rendered)).toBe("strict");
   });
 
   it("returns null when there is no posture section at all, so absent is not 'explicitly standard'", () => {
