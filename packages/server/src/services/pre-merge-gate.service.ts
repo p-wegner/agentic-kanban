@@ -226,7 +226,7 @@ export async function runPreMergeGate(
   // What verification is CURRENTLY configured — resolved BEFORE the tree memo, and in
   // `pre-merge-gate-tier.ts` because that module owns the tier. See `resolveGateVerification`
   // for why the ordering is load-bearing.
-  const { strategy: gateStrategy, effectiveVerify, verifyScript, verificationKey } =
+  const { strategy: gateStrategy, posture: gatePosture, effectiveVerify, verifyScript, verificationKey } =
     await resolveGateVerification(projectId, database);
 
   // ---- #492 tree-hash memo -----------------------------------------------------------------
@@ -450,6 +450,12 @@ export async function runPreMergeGate(
       // failed with builders competing for the box is a different claim from one that
       // failed on a quiet machine, and the failure text alone never distinguishes them.
       buildersQuiesced: await quiesceBuildersEnabled(projectId, database).catch(() => undefined),
+      // #937 / decision 017: when the TIER came from the risk-posture dial rather than an
+      // explicit `verify_gate_strategy_<projectId>` override, the message must say so and name
+      // what that posture skips — a weaker posture may only weaken verification VISIBLY.
+      // Already `undefined` in the override case (`resolveGateVerification` decides that), so
+      // this is an unconditional carry, not another branch in this already-branchy function.
+      posture: gatePosture,
     };
     const runVerify = () =>
       runUnderBuildSemaphore(() =>

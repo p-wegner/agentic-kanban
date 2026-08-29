@@ -33,6 +33,10 @@ export const PLACEMENT_CHECK_IDS = [
   "dispatch_opt_in",
   "profile_allowlist",
   "data_handling_requirement",
+  // #937 / decision 017 — the risk posture's `placementBias`. Sits with the two checks above
+  // because it is the same shape of answer: a property of the PROJECT that a worker cannot be
+  // made to honour, decided before any worker is looked at.
+  "placement_bias",
   "eligible_worker",
   "branch_for_transport",
   "project_repo_path",

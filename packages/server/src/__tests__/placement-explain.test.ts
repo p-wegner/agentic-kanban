@@ -29,6 +29,7 @@ import {
   explainPlacement,
   explainIssuePlacement,
   listSessionPlacements,
+  PLACEMENT_CHECK_CHAIN,
 } from "../services/placement-explain.service.js";
 import {
   HEALTH_PROBE_TIMEOUT_MS,
@@ -363,8 +364,11 @@ describe("placement observability over HTTP (#755)", () => {
     expect(body.explanation.decidedBy).toBe("dispatch_opt_in");
     expect(body.explanation.agreesWithResolver).toBe(true);
     // Every check is reported, including the ones that were never reached — an
-    // operator must be able to see WHERE the chain stopped, not just why.
-    expect(body.explanation.chain).toHaveLength(7);
+    // operator must be able to see WHERE the chain stopped, not just why. Pinned to the
+    // chain's own length rather than a literal (#937 added an eighth check and this
+    // assertion was the only thing that noticed): the property under test is "ALL of them",
+    // and a hardcoded count restates the chain badly instead of asserting that.
+    expect(body.explanation.chain).toHaveLength(PLACEMENT_CHECK_CHAIN.length);
 
     const missing = await app.request(`/api/workers/explain?issue=999&projectId=${PROJECT_ID}`);
     expect(missing.status).toBe(404);
