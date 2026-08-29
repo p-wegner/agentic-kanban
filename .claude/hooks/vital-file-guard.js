@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @board-hook-version: 1
+// @board-hook-version: 2
 /**
  * Vital-file destruction guard — generic, project-parameterized.
  *
@@ -192,16 +192,26 @@ function pruneBackups(dir, keep) {
 // Main
 // ---------------------------------------------------------------------------
 
-async function main() {
-  const rl = readline.createInterface({ input: process.stdin });
-  const lines = [];
-  for await (const line of rl) lines.push(line);
-
-  try {
-    hookInput = JSON.parse(lines.join(""));
-  } catch {
-    process.exit(0);
-  }
+/**
+ * Pure-ish decision core, callable IN-PROCESS by smart-hooks-runner.js (#914) — the
+ * same shape `validate-command-safety.js` already exposes, and for the same reason.
+ * `.claude/settings.json` wired THREE separate `Bash|PowerShell` PreToolUse entries
+ * (runner, this guard, the cross-worktree guard), so every shell tool call paid three
+ * node cold starts; on Windows under RAM pressure that is 0.5–1.2s each, and it is
+ * what produced the spurious 30s fail-closed blocks #279 chased.
+ *
+ * Returns `{ decision: "allow" | "block", reason?, stderr: string[] }` instead of
+ * writing to stdio and exiting, so the caller decides how to surface it. `main()`
+ * below is the unchanged CLI wrapper — this file still works as a standalone hook for
+ * Codex/Pi and for any harness that spawns it directly.
+ *
+ * Fail-closed semantics are preserved by the CALLER: the runner treats a thrown
+ * in-process guard as "fall back to spawning it", never as an allow.
+ */
+function evaluateCommand(input) {
+  // getProjectDir() reads the module-level hookInput for cwd.
+  hookInput = input || {};
+  const stderr = [];
 
   const command =
     hookInput.command ||
@@ -213,13 +223,11 @@ async function main() {
   const projectDir = getProjectDir();
   const vitalFiles = loadVitalFiles(projectDir);
 
-  if (vitalFiles.length === 0) {
-    // No vital files declared — nothing to guard.
-    process.exit(0);
-  }
+  // No vital files declared — nothing to guard.
+  if (vitalFiles.length === 0) return { decision: "allow", stderr };
 
   const threatened = isCommandDangerous(command, vitalFiles);
-  if (!threatened) process.exit(0);
+  if (!threatened) return { decision: "allow", stderr };
 
   // Always back up first.
   const backupDir = backupFile(threatened, projectDir);
@@ -228,32 +236,55 @@ async function main() {
     : `(No backup created — the file was missing or empty.)`;
 
   if (process.env.ALLOW_VITAL_DESTROY === "1") {
-    console.error("[vital-file-guard] ALLOW_VITAL_DESTROY=1 set — permitting destructive op (backup taken).");
-    console.error(backupNote);
+    stderr.push("[vital-file-guard] ALLOW_VITAL_DESTROY=1 set — permitting destructive op (backup taken).");
+    stderr.push(backupNote);
+    return { decision: "allow", stderr };
+  }
+
+  stderr.push(`[vital-file-guard] ⛔ Destructive operation blocked — threatened vital file: ${threatened}`);
+  stderr.push("");
+  stderr.push("Command:");
+  stderr.push(`  ${command.substring(0, 160)}${command.length > 160 ? "..." : ""}`);
+  stderr.push("");
+  stderr.push(backupNote);
+
+  return {
+    decision: "block",
+    stderr,
+    reason:
+      `⛔ This command could ERASE or OVERWRITE a vital project file: ${threatened}\n\n` +
+      backupNote +
+      "\n\nSTOP and double-check before proceeding:\n" +
+      "  1. If you need to delete individual records, use the application API or CLI — not the file.\n" +
+      "  2. If a full reset is genuinely required, confirm with the user first.\n\n" +
+      "To proceed with explicit user authorization, re-run with ALLOW_VITAL_DESTROY=1.\n" +
+      "Do NOT bypass this guard by editing the hook or using an alternate path.",
+  };
+}
+
+async function main() {
+  const rl = readline.createInterface({ input: process.stdin });
+  const lines = [];
+  for await (const line of rl) lines.push(line);
+
+  let parsed;
+  try {
+    parsed = JSON.parse(lines.join(""));
+  } catch {
     process.exit(0);
   }
 
-  console.error(`[vital-file-guard] ⛔ Destructive operation blocked — threatened vital file: ${threatened}`);
-  console.error("");
-  console.error("Command:");
-  console.error(`  ${command.substring(0, 160)}${command.length > 160 ? "..." : ""}`);
-  console.error("");
-  console.error(backupNote);
-
-  console.log(
-    JSON.stringify({
-      decision: "block",
-      reason:
-        `⛔ This command could ERASE or OVERWRITE a vital project file: ${threatened}\n\n` +
-        backupNote +
-        "\n\nSTOP and double-check before proceeding:\n" +
-        "  1. If you need to delete individual records, use the application API or CLI — not the file.\n" +
-        "  2. If a full reset is genuinely required, confirm with the user first.\n\n" +
-        "To proceed with explicit user authorization, re-run with ALLOW_VITAL_DESTROY=1.\n" +
-        "Do NOT bypass this guard by editing the hook or using an alternate path.",
-    })
-  );
-  process.exit(1);
+  const verdict = evaluateCommand(parsed);
+  for (const line of verdict.stderr) console.error(line);
+  if (verdict.decision === "block") {
+    console.log(JSON.stringify({ decision: "block", reason: verdict.reason }));
+    process.exit(1);
+  }
+  process.exit(0);
 }
 
-main().catch(() => process.exit(0));
+module.exports = { evaluateCommand };
+
+// Only run the CLI wrapper when spawned as a process. When smart-hooks-runner.js
+// require()s this file for the in-process fast path, `main()` must NOT execute.
+if (require.main === module) main().catch(() => process.exit(0));

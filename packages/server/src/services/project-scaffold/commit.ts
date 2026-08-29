@@ -19,6 +19,11 @@ export const DURABLE_CLAUDE_SCAFFOLD_PATHS = [
   // commit exists to prevent, reintroduced by a hook that was added without touching this
   // hand-maintained list. `scaffold-commit-covers-hooks.test.ts` now ties the two together.
   ".claude/hooks/git-topology-cache.js",
+  // #913 — the runner's posture/capacity policy modules. Same reason as the topology cache
+  // above: written by the scaffold, so untracked here means a dirty checkout from
+  // registration onward.
+  ".claude/hooks/hook-posture.js",
+  ".claude/hooks/machine-capacity.js",
   ".claude/hooks/smart-hooks-config.json",
   ".claude/hooks/verify-gate-runner.js",
   ".claude/hooks/verify-gate.config.json",
