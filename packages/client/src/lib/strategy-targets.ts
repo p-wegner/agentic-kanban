@@ -2,6 +2,7 @@ import { boardStrategyPref } from "@agentic-kanban/shared/lib/dynamic-preference
 import { ACCENT, BRAND } from "./chartColors";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import {
+  MAX_ACTIVE_AGENTS_TARGET,
   normalizeProviderPolicy,
   selectPolicyByPriority,
 } from "@agentic-kanban/shared/lib/strategy-policy";
@@ -134,9 +135,9 @@ export function normalizeConfig(raw: unknown): StrategyConfig {
     : [];
   return {
     version: 1,
-    activeAgentsTarget: clampPolicy(Number(parsed.activeAgentsTarget), DEFAULT_CONFIG.activeAgentsTarget, 1, 12),
+    activeAgentsTarget: clampPolicy(Number(parsed.activeAgentsTarget), DEFAULT_CONFIG.activeAgentsTarget, 1, MAX_ACTIVE_AGENTS_TARGET),
     backlogFloor: clampPolicy(Number(parsed.backlogFloor), DEFAULT_CONFIG.backlogFloor, 0, 100),
-    maxNewStartsPerCycle: clampPolicy(Number(parsed.maxNewStartsPerCycle), DEFAULT_CONFIG.maxNewStartsPerCycle, 1, 12),
+    maxNewStartsPerCycle: clampPolicy(Number(parsed.maxNewStartsPerCycle), DEFAULT_CONFIG.maxNewStartsPerCycle, 1, MAX_ACTIVE_AGENTS_TARGET),
     segments: segments.length > 0 ? segments : DEFAULT_CONFIG.segments,
     providerPolicies,
   };

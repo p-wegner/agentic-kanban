@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { MAX_ACTIVE_AGENTS_TARGET } from "@agentic-kanban/shared/lib/strategy-policy";
 import {
   clampWeight,
   clampPolicy,
@@ -103,7 +104,11 @@ describe("normalizeConfig", () => {
       maxNewStartsPerCycle: 0,
       segments: [{ label: "  ", weight: 3 }],
     });
-    expect(cfg.activeAgentsTarget).toBe(12);
+    // #919: asserted against the shared constant, not a literal. The clamp was two independent
+    // copies of `12` (here and in the objective-file deriver) and was raised once WIP became
+    // placement-derived — pinning the number here would have made that a two-file change with
+    // a test that only says the old value was reachable.
+    expect(cfg.activeAgentsTarget).toBe(MAX_ACTIVE_AGENTS_TARGET);
     expect(cfg.backlogFloor).toBe(0);
     expect(cfg.maxNewStartsPerCycle).toBe(1);
     // blank-label segment filtered out -> falls back to defaults

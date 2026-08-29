@@ -9,6 +9,7 @@ import { parsePluginLoopUnitKey } from "@agentic-kanban/shared/lib/plugin-manife
 import { reconcileMergedIssue } from "../services/merge-cleanup.service.js";
 import type { MonitorActionName } from "../services/monitor-nudge.js";
 import { resolveMonitorTunables } from "../services/strategy-objective.service.js";
+import { resolveWipLimit } from "../services/wip-limit.service.js";
 import { narrowProviderName } from "../services/agent-provider.js";
 import { projectCanDispatch, hostOverflowHasFleetCapacity as defaultHasFleetOverflowCapacity } from "../services/worker-fleet.service.js";
 import {
@@ -32,6 +33,13 @@ import {
   type WipCapacitySnapshot,
 } from "../repositories/wip-capacity.repository.js";
 import { orderCandidatesByStartScore } from "./monitor-start-scoring.js";
+// #919: recording a PROJECT-WIDE hold — its per-project tally, the per-ticket attribution that
+// makes "why is #57 not running" answerable, and the end-of-cycle flush of both.
+import {
+  flushIssueSkipRecords,
+  noteHeldCandidates,
+  noteWipCapSkip,
+} from "./monitor-skip-attribution.js";
 
 async function hasSkipAutoStartTag(issueId: string): Promise<boolean> {
   const rows = await db.select({ id: tags.id }).from(issueTags)
@@ -358,6 +366,8 @@ async function resolveAutoStartGroupMembers(args: {
  */
 interface AutoStartCycle {
   prefMap: Map<string, string>;
+  /** The connection the skip-attribution recorders read through (#715 persistence boundary). */
+  database: Database;
   baseUrl: string;
   boardEvents: ReturnType<typeof createBoardEvents>;
   logMonitorAction: AutoStartDeps["logMonitorAction"];
@@ -368,7 +378,26 @@ interface AutoStartCycle {
   orderStartCandidates: typeof orderCandidatesByStartScore;
   skipInfo: Map<string, AutoStartSkipInfo>;
   noteSkip: (projectId: string, issueNumber: number | null | undefined, reason: AutoStartSkipReason, count?: number) => void;
+  /**
+   * #919: record the reason PER ISSUE, so "why is #57 not running" is answerable in the issue
+   * panel. `noteSkip` above stays the per-project tally the monitor status reports — it is
+   * keyed by project and several of its reasons are project-wide holds with no single ticket
+   * to blame, so it cannot answer the per-ticket question. Buffered for the whole cycle and
+   * flushed once at the end (`persistAutoStartSkipReason`), rather than a write per skip: a
+   * `wip_cap` hold can name every waiting ticket in a backlog.
+   */
+  noteIssueSkip: (issueId: string, reason: AutoStartSkipReason) => void;
+  /** #919: an issue the monitor DID start this cycle — its stale skip record is cleared. */
+  noteIssueStarted: (issueId: string) => void;
   tunablesFor: (projectId: string) => ReturnType<typeof resolveMonitorTunables>["tunables"];
+  /**
+   * The project's WIP target, through THE resolver (#919) rather than
+   * `tunablesFor(...).activeAgentsTarget`. Both loops read this: the Bullseye alone was blind
+   * to `wip_limit_<projectId>`, the pref the onboarding wizard writes — so a project pinned to
+   * 2 by the wizard was run at the Bullseye's (or the default) 5 by the monitor while the
+   * Dependency Waves panel, which DID read it, said 2.
+   */
+  wipLimitFor: (projectId: string) => number;
   startsRemaining: (projectId: string) => number;
   noteStart: (projectId: string) => void;
   /**
@@ -465,8 +494,18 @@ async function evaluateStartCandidate(args: {
   boardEvents: ReturnType<typeof createBoardEvents>;
   noteSkip: AutoStartCycle["noteSkip"];
   noteGateSkip: (reason: AutoStartSkipReason) => void;
+  /**
+   * #919: records the reason on the ISSUE. Unlike `noteGateSkip` this is NOT a no-op for the
+   * backfill loop — the per-project tally distinction (`noteGateSkip`'s reason for existing)
+   * is about what the monitor status reports, whereas "why is #57 not running" has the same
+   * answer whichever loop declined it, and answering it for only one of the two loops would
+   * be exactly the half-fix #361 warns about above.
+   */
+  noteIssueSkip: AutoStartCycle["noteIssueSkip"];
 }): Promise<{ start: false } | { start: true; isReopenRetry: boolean; priorWorkspaceCount: number }> {
-  const { issue, contentionGate, allowFeatureTypes, noteSkip, noteGateSkip } = args;
+  const { issue, contentionGate, allowFeatureTypes, noteSkip, noteIssueSkip } = args;
+  /** Tally against the project (loop-dependent) AND record against the issue (always). */
+  const noteGateSkip = (reason: AutoStartSkipReason) => { args.noteGateSkip(reason); noteIssueSkip(issue.id, reason); };
   // Ticket group (#661): the membership subquery makes a MEMBER issue (with no workspace
   // row of its own — the group workspace is keyed by the lead) look exactly like an issue
   // with its own workspaces, so the open-workspace skip AND the already-merged reconcile
@@ -485,6 +524,7 @@ async function evaluateStartCandidate(args: {
     if (parsePluginLoopUnitKey(issue.externalKey)) {
       console.log(`[monitor] Declining reopen-retry for plugin-loop unit issue #${issue.issueNumber} — its workspace already merged and the loop cannot represent a second one (#361)`);
       noteSkip(args.skipProjectId, issue.issueNumber, "loop_unit_reopen_declined");
+      noteIssueSkip(issue.id, "loop_unit_reopen_declined");
       return { start: false };
     }
   }
@@ -492,21 +532,6 @@ async function evaluateStartCandidate(args: {
   if (await hasSkipAutoStartTag(issue.id)) { noteGateSkip("no_auto_start_tag"); return { start: false }; }
   if (shouldDeferForContention(contentionGate, issue.id, issue.issueNumber)) { noteGateSkip("contention_gate"); return { start: false }; }
   return { start: true, isReopenRetry, priorWorkspaceCount: issueWorkspaces.length };
-}
-
-/**
- * #179: WIP is full — but only worth surfacing as a "skipped" cause if there is actually
- * queued Todo/Backlog work waiting behind it, not on every idle project.
- */
-async function noteWipCapSkip(ctx: AutoStartCycle, projectId: string, allowFeatureTypes: boolean): Promise<void> {
-  const waitingTodoStatus = await db.select({ id: projectStatuses.id }).from(projectStatuses)
-    .where(sql`${projectStatuses.name} = 'Todo' AND ${projectStatuses.projectId} = ${projectId}`).limit(1);
-  if (waitingTodoStatus.length === 0) return;
-  const waitingStatusIds = await resolveCandidateStatusIds(projectId, waitingTodoStatus[0].id, allowFeatureTypes, db);
-  const waitingCount = await db.select({ count: sql<number>`count(*)` }).from(issues)
-    .where(and(inArray(issues.statusId, waitingStatusIds), monitorEligibleIssueSql(allowFeatureTypes), notDriveOrEpicMetaSql()));
-  const waiting = Number(waitingCount[0]?.count ?? 0);
-  if (waiting > 0) ctx.noteSkip(projectId, null, "wip_cap", waiting);
 }
 
 /**
@@ -573,12 +598,14 @@ async function handleTodoLaunchOutcome(
     // read as "an agent has been running for over a minute while the ticket says Backlog".
     console.log(`[monitor] Auto-start ACCEPTED for unblocked issue "${issue.title}" (${issue.id})${memberCount > 0 ? ` as a ticket group with ${memberCount} member(s)` : ""} — provisioning a workspace (minutes); the issue moves to In Progress when it completes`);
     ctx.boardEvents.broadcast(issue.projectId, "board_changed");
+    ctx.noteIssueStarted(issue.id);
     return true;
   }
   if (resp?.status === 409) {
     // #366: another automatic starter already holds the claim for this issue.
     console.log(`[monitor] Auto-start declined for unblocked issue "${issue.title}" (${issue.id}) — a workspace creation is already in flight for it (#366)`);
     ctx.noteSkip(skipProjectId, issue.issueNumber, "create_in_flight");
+    ctx.noteIssueSkip(issue.id, "create_in_flight");
     return false;
   }
   if (resp) {
@@ -599,7 +626,7 @@ async function handleTodoLaunchOutcome(
  */
 async function runInProgressBackfill(ctx: AutoStartCycle, inProgressSt: { id: string; projectId: string }): Promise<void> {
   const allowFeatureTypes = ctx.isAutoDrivenProject(inProgressSt.projectId);
-  const wipLimit = ctx.tunablesFor(inProgressSt.projectId).activeAgentsTarget;
+  const wipLimit = ctx.wipLimitFor(inProgressSt.projectId);
   const capacity = await countWipCapacity(db, inProgressSt.id);
   let currentWip = capacity.active;
   if (capacity.inactiveStale > 0) {
@@ -618,6 +645,8 @@ async function runInProgressBackfill(ctx: AutoStartCycle, inProgressSt: { id: st
     // #774 — record the fleet's SHAPE alongside the collapsed reason, so the monitor
     // status carries what the console line used to be the only source of.
     await recordFleetHoldDetail(holdContext(ctx), inProgressSt.projectId, dispatch.reason);
+    // #919: the project-wide hold is also the answer for every ticket queued behind it.
+    await noteHeldCandidates(ctx, inProgressSt.projectId, allowFeatureTypes, "no_available_worker", ctx.database);
     return;
   }
 
@@ -626,6 +655,8 @@ async function runInProgressBackfill(ctx: AutoStartCycle, inProgressSt: { id: st
   // nowhere else to route the overflow.
   if (isHostSaturated(ctx.machineCapacity) && !(await hasFleetOverflow(ctx, inProgressSt.projectId))) {
     recordMachineSaturationHoldDetail(holdContext(ctx), inProgressSt.projectId);
+    // #919: attribute the project-wide hold to each ticket it is holding.
+    await noteHeldCandidates(ctx, inProgressSt.projectId, allowFeatureTypes, "machine_saturated", ctx.database);
     return;
   }
 
@@ -647,6 +678,7 @@ async function runInProgressBackfill(ctx: AutoStartCycle, inProgressSt: { id: st
       noteSkip: ctx.noteSkip,
       // This loop never tallied the eligibility/tag/contention gates as skip reasons.
       noteGateSkip: () => {},
+      noteIssueSkip: ctx.noteIssueSkip,
     });
     if (!decision.start) continue;
     // #366: ONE branch-name producer for the whole board (`suggestBranchName`). This site had
@@ -674,6 +706,7 @@ async function runInProgressBackfill(ctx: AutoStartCycle, inProgressSt: { id: st
     if (resp?.status === 409) {
       console.log(`[monitor] Auto-start declined for In Progress issue #${issue.issueNumber} — a workspace creation is already in flight for it (#366)`);
       ctx.noteSkip(inProgressSt.projectId, issue.issueNumber, "create_in_flight");
+      ctx.noteIssueSkip(issue.id, "create_in_flight");
       continue;
     }
     // Count the slot as consumed regardless (we attempted a launch this cycle), but
@@ -689,6 +722,7 @@ async function runInProgressBackfill(ctx: AutoStartCycle, inProgressSt: { id: st
       continue;
     }
     ctx.logMonitorAction("auto_start", "", issue.id);
+    ctx.noteIssueStarted(issue.id);
     ctx.boardEvents.broadcast(inProgressSt.projectId, "board_changed");
     // Same correction as below (#358): this is the 202 for an async create job, not a workspace.
     console.log(`[monitor] Auto-start ACCEPTED for In Progress issue #${issue.issueNumber} (no open workspace) — provisioning takes minutes`);
@@ -701,7 +735,7 @@ async function runInProgressBackfill(ctx: AutoStartCycle, inProgressSt: { id: st
  */
 async function runTodoPull(ctx: AutoStartCycle, inProgressSt: { id: string; projectId: string }): Promise<void> {
   const allowFeatureTypes = ctx.isAutoDrivenProject(inProgressSt.projectId);
-  const wipLimit = ctx.tunablesFor(inProgressSt.projectId).activeAgentsTarget;
+  const wipLimit = ctx.wipLimitFor(inProgressSt.projectId);
   const capacity = await countWipCapacity(db, inProgressSt.id);
   const currentWip = capacity.active;
   if (capacity.inactiveStale > 0) {
@@ -716,6 +750,8 @@ async function runTodoPull(ctx: AutoStartCycle, inProgressSt: { id: string; proj
   });
   if (quiesce.action === "skip") {
     ctx.noteSkip(inProgressSt.projectId, null, quiesce.reason);
+    // #919: attribute the project-wide hold to each ticket it is holding.
+    await noteHeldCandidates(ctx, inProgressSt.projectId, allowFeatureTypes, quiesce.reason, ctx.database);
     return;
   }
 
@@ -728,6 +764,8 @@ async function runTodoPull(ctx: AutoStartCycle, inProgressSt: { id: string; proj
   // still pulls new work when this project's fleet can take it; only skip when neither can.
   if (isHostSaturated(ctx.machineCapacity) && !(await hasFleetOverflow(ctx, inProgressSt.projectId))) {
     recordMachineSaturationHoldDetail(holdContext(ctx), inProgressSt.projectId);
+    // #919: attribute the project-wide hold to each ticket it is holding.
+    await noteHeldCandidates(ctx, inProgressSt.projectId, allowFeatureTypes, "machine_saturated", ctx.database);
     return;
   }
 
@@ -783,6 +821,10 @@ async function runTodoPull(ctx: AutoStartCycle, inProgressSt: { id: string; proj
     if (started >= slotsAvailable) break;
     if (ctx.startsRemaining(inProgressSt.projectId) <= 0) {
       ctx.noteSkip(inProgressSt.projectId, issue.issueNumber, "cycle_start_cap");
+      // Everything after this candidate in the scored order is held for the same reason —
+      // record it on each, or the panel would answer for one ticket and stay silent on the
+      // rest of a queue that is blocked identically.
+      for (const held of todoIssues.slice(todoIssues.indexOf(issue))) ctx.noteIssueSkip(held.id, "cycle_start_cap");
       break;
     }
     if (startedAsMember.has(issue.id)) continue;
@@ -795,6 +837,7 @@ async function runTodoPull(ctx: AutoStartCycle, inProgressSt: { id: string; proj
       boardEvents: ctx.boardEvents,
       noteSkip: ctx.noteSkip,
       noteGateSkip: (reason) => ctx.noteSkip(inProgressSt.projectId, issue.issueNumber, reason),
+      noteIssueSkip: ctx.noteIssueSkip,
     });
     if (!decision.start) continue;
 
@@ -850,6 +893,10 @@ async function runTodoPull(ctx: AutoStartCycle, inProgressSt: { id: string; proj
     for (const memberId of memberIssueIds) {
       startedAsMember.add(memberId);
       contentionGate.noteStarted(memberId);
+      // #919: a member has no workspace row of its own (the group workspace is keyed by the
+      // lead), so the create-path clear never reaches it — but it IS running, and a stale
+      // "held for wip_cap" on it would answer the panel's question wrongly.
+      ctx.noteIssueStarted(memberId);
     }
   }
 }
@@ -868,6 +915,15 @@ export async function runAutoStart(prefMap: Map<string, string>, {
     info.reasonCounts[reason] = (info.reasonCounts[reason] ?? 0) + count;
   };
 
+  // #919: per-ISSUE skip reasons, buffered for the cycle and flushed once below. A `Map`, so
+  // the LAST reason recorded for an issue wins — matching the column's contract ("the reason
+  // the monitor most recently declined this ticket"), and keeping the flush one write per
+  // issue however many gates it fell through.
+  const issueSkips = new Map<string, AutoStartSkipReason>();
+  const startedIssueIds = new Set<string>();
+  const noteIssueSkip = (issueId: string, reason: AutoStartSkipReason) => { issueSkips.set(issueId, reason); };
+  const noteIssueStarted = (issueId: string) => { startedIssueIds.add(issueId); issueSkips.delete(issueId); };
+
   const baseUrl = `http://127.0.0.1:${serverPort}`;
   const inProgressStatuses = (await db.select({ id: projectStatuses.id, projectId: projectStatuses.projectId }).from(projectStatuses)
     .where(sql`${projectStatuses.name} = 'In Progress'`))
@@ -884,6 +940,14 @@ export async function runAutoStart(prefMap: Map<string, string>, {
     if (!t) { t = resolveMonitorTunables(prefMap, projectId).tunables; tunablesCache.set(projectId, t); }
     return t;
   };
+  // #919: the WIP target through THE resolver, cached per project for the same reason
+  // `tunablesFor` is — both loops ask for it, and the answer cannot change mid-cycle.
+  const wipLimitCache = new Map<string, number>();
+  const wipLimitFor = (projectId: string) => {
+    let limit = wipLimitCache.get(projectId);
+    if (limit === undefined) { limit = resolveWipLimit(prefMap, projectId).limit; wipLimitCache.set(projectId, limit); }
+    return limit;
+  };
   const startedByProject = new Map<string, number>();
   const startsRemaining = (projectId: string) => tunablesFor(projectId).maxNewStartsPerCycle - (startedByProject.get(projectId) ?? 0);
   const noteStart = (projectId: string) => startedByProject.set(projectId, (startedByProject.get(projectId) ?? 0) + 1);
@@ -893,8 +957,8 @@ export async function runAutoStart(prefMap: Map<string, string>, {
   const machineCapacity = await readMachineCapacity();
 
   const ctx: AutoStartCycle = {
-    prefMap, baseUrl, boardEvents, logMonitorAction, isAutoDrivenProject,
-    buildContentionGate, canDispatch, hasFleetOverflowCapacity, orderStartCandidates, skipInfo, noteSkip, tunablesFor, startsRemaining, noteStart,
+    prefMap, database: db, baseUrl, boardEvents, logMonitorAction, isAutoDrivenProject,
+    buildContentionGate, canDispatch, hasFleetOverflowCapacity, orderStartCandidates, skipInfo, noteSkip, noteIssueSkip, noteIssueStarted, tunablesFor, wipLimitFor, startsRemaining, noteStart,
     machineCapacity,
   };
 
@@ -908,6 +972,7 @@ export async function runAutoStart(prefMap: Map<string, string>, {
     await runTodoPull(ctx, inProgressSt);
   }
 
+  await flushIssueSkipRecords(issueSkips, startedIssueIds, ctx.database);
   return skipInfo;
 }
 

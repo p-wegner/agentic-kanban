@@ -15,8 +15,10 @@ import { IssueMetadataGrid } from "./IssueMetadataGrid.js";
 import type { TrailEntry } from "../hooks/useTicketTrail.js";
 import { TicketTrailStrip } from "./TicketTrailStrip.js";
 import { IssueCycleTimeBadge } from "./IssueCycleTimeBadge.js";
+import { IssueAutoStartSkipBadge } from "./IssueAutoStartSkipBadge.js";
 import { IssueWorkLogSection } from "./IssueWorkLogSection.js";
 import { useIssueDisplayData } from "../hooks/useIssueDisplayData.js";
+import { useIssueDetailKeyboard } from "../hooks/useIssueDetailKeyboard.js";
 import { useModalDrag } from "../hooks/useModalDrag.js";
 import { normalizeMarkdown } from "../lib/artifact-utils.js";
 import { copyIssueArtifactContent, openIssueArtifact } from "./IssueArtifactsSection.js";
@@ -57,17 +59,11 @@ interface IssueDetailPanelProps {
   trail?: TicketTrailControls;
 }
 
-/** The subset of `useTicketTrail` the panel needs to render & drive its trail strip. */
-export interface TicketTrailControls {
-  entries: TrailEntry[];
-  activeId: string | null;
-  canGoBack: boolean;
-  canGoForward: boolean;
-  onBack: () => void;
-  onForward: () => void;
-  onSelect: (id: string) => void;
-  onRemove: (id: string) => void;
-}
+// Declared in lib/ticketTrailCore.ts (beside TrailEntry) so hooks/ and lib/ can name
+// it without an upward type edge into components/ (#694); re-exported here because
+// existing importers take it from this module.
+import type { TicketTrailControls } from "../lib/ticketTrailCore.js";
+export type { TicketTrailControls };
 
 export function IssueDetailPanel({
   issue,
@@ -193,27 +189,7 @@ export function IssueDetailPanel({
     }
   }, [issue, editing]);
 
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        if (editing) {
-          handleCancelEdit();
-        } else {
-          onClose();
-        }
-        return;
-      }
-      // Browser-like back/forward across the multi-ticket trail (#383). Skip
-      // while editing so it can't yank you off a half-written description.
-      if (!editing && trail && e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
-        e.preventDefault();
-        if (e.key === "ArrowLeft") trail.onBack();
-        else trail.onForward();
-      }
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [editing, hasChanges, issue, onClose, trail]);
+  useIssueDetailKeyboard({ editing, onCancelEdit: handleCancelEdit, onClose, trail });
 
   // Reset delete confirmation on outside click
   useEffect(() => {
@@ -571,6 +547,15 @@ export function IssueDetailPanel({
 
           {/* Cycle time badge — only shown in view mode */}
           {!editing && <IssueCycleTimeBadge data={cycleTime} loading={extrasLoading} />}
+
+          {/* #919: why the monitor last declined to auto-start this ticket. Renders nothing
+              unless there is a record, so it costs no vertical space in the common case. */}
+          {!editing && (
+            <IssueAutoStartSkipBadge
+              reason={issue.lastAutoStartSkipReason}
+              at={issue.lastAutoStartSkipAt}
+            />
+          )}
 
           {/* Work log section — only shown in view mode */}
           {!editing && <IssueWorkLogSection issueId={issue.id} initial={timeEntries} loading={extrasLoading} />}

@@ -16,7 +16,7 @@
 import { gitExecSync } from "./git-exec.js";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { normalizeProviderPolicies, strategyPrefKey } from "./strategy-policy.js";
+import { MAX_ACTIVE_AGENTS_TARGET, normalizeProviderPolicies, strategyPrefKey } from "./strategy-policy.js";
 import type { ProviderPolicyMode, ProviderProfilePolicy } from "./strategy-policy.js";
 import { isBoardStrategyPreferenceKey } from "./dynamic-preference-keys.js";
 import { readRiskPosture, RISK_POSTURE_DEFAULT, RISK_POSTURE_DESCRIPTIONS, type RiskPosture } from "./risk-posture.js";
@@ -131,9 +131,9 @@ export function deriveMonitorTunables(config: StrategyBullseyeConfig): MonitorTu
   }
 
   return {
-    activeAgentsTarget: clampInt(config.activeAgentsTarget, DEFAULT_TUNABLES.activeAgentsTarget, 1, 12),
+    activeAgentsTarget: clampInt(config.activeAgentsTarget, DEFAULT_TUNABLES.activeAgentsTarget, 1, MAX_ACTIVE_AGENTS_TARGET),
     backlogFloor: clampInt(config.backlogFloor, DEFAULT_TUNABLES.backlogFloor, 0, 100),
-    maxNewStartsPerCycle: clampInt(config.maxNewStartsPerCycle, DEFAULT_TUNABLES.maxNewStartsPerCycle, 1, 12),
+    maxNewStartsPerCycle: clampInt(config.maxNewStartsPerCycle, DEFAULT_TUNABLES.maxNewStartsPerCycle, 1, MAX_ACTIVE_AGENTS_TARGET),
     refillFocus: bugfixWeight > 0 && bugfixWeight >= nonBugfixWorkWeight ? "bugfix-only" : "balanced",
   };
 }

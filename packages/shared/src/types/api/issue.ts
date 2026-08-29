@@ -78,6 +78,15 @@ export interface IssueWithStatus {
   checklist?: { id: string; text: string; completed: boolean }[];
   pinned?: boolean;
   milestoneId?: string | null;
+  /**
+   * #919: why the monitor most recently declined to auto-start this ticket — one of the
+   * `AutoStartSkipReason` tokens (`wip_cap`, `machine_saturated`, `contention_gate`, ...), or
+   * absent when it has never declined it (or has since started it). The per-project skip
+   * TALLY in the monitor status cannot answer this: it is keyed by project, and its
+   * project-wide holds name no ticket at all.
+   */
+  lastAutoStartSkipReason?: string | null;
+  lastAutoStartSkipAt?: string | null;
 }
 
 export interface MilestoneResponse {

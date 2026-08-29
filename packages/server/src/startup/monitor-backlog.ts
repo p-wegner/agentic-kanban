@@ -8,6 +8,7 @@ import { getRuntimeState, setRuntimeState } from "../repositories/runtime-state.
 import { nextIssueNumber } from "../repositories/issue-number.repository.js";
 import type { MonitorActionName } from "../services/monitor-nudge.js";
 import { resolveMonitorTunables } from "../services/strategy-objective.service.js";
+import { resolveWipLimit } from "../services/wip-limit.service.js";
 import { monitorEligibleIssueSql } from "../repositories/start-scoring.repository.js";
 
 /** A synthetic host issue created to carry a generation workspace. */
@@ -162,7 +163,9 @@ export async function runBacklogEmptyStrategy(
     // Effective tunables: Strategy Bullseye when the project has one, else the
     // legacy nudge prefs (floor 1 = refill only when truly empty; balanced focus).
     const { tunables } = resolveMonitorTunables(prefMap, projectId);
-    const wipLimit = tunables.activeAgentsTarget;
+    // #919: the WIP gate reads THE resolver (which layers `wip_limit_<projectId>` over the
+    // Bullseye); the backlog floor is a Bullseye-only tunable and stays on `tunables`.
+    const wipLimit = resolveWipLimit(prefMap, projectId).limit;
     const backlogFloor = tunables.backlogFloor;
 
     // Resolve the project's Todo backlog status.
