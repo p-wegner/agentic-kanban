@@ -30,6 +30,9 @@ This is a FRESH session every run — you have NO memory of previous runs. The k
 - **MAX_NEW_STARTS_PER_CYCLE = 3** - cap on how many NEW workspaces to launch in a single cycle.
 - **REFILL_FOCUS = balanced** - derived from work-type marker weights; `bugfix-only` emphasizes reproducible bugs, `balanced` allows feature/quality mix.
 
+## RISK POSTURE (generated - do not hand-edit)
+- **RISK POSTURE = standard** - Today's default — scoped per-ticket review and gate, red base always blocks merge. No train batching. Set via Settings -> Workflow; a ticket may override with a `risk:<posture>` tag.
+
 ## STRATEGY WEIGHTS (generated - do not hand-edit)
 - Frontend: weight 5/5, area, provider claude
 - Feature: weight 3/5, work-type
