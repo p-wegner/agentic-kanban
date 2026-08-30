@@ -10,10 +10,18 @@
 
 // Mock modules that exit-workflow.ts loads at import time.
 const checkBranchTipIsAncestorMock = vi.hoisted(() => vi.fn());
+// #950: the landed path now tears the worktree down, so the git service must offer the removal.
+const removeWorktreeMock = vi.hoisted(() => vi.fn(async () => {}));
 vi.mock("../db/index.js", () => ({ db: {} }));
 vi.mock("../services/git.service.js", () => ({
   prepareForReview: vi.fn(async () => ({ success: true, diffRef: "master", conflictingFiles: [], uncommittedChanges: [] })),
   checkBranchTipIsAncestor: checkBranchTipIsAncestorMock,
+  removeWorktree: removeWorktreeMock,
+}));
+// #950: the per-workspace Docker stack / devcontainer release must run BEFORE the directory goes.
+const releaseWorkspaceResourcesMock = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock("../services/workspace-resource-release.js", () => ({
+  releaseWorkspaceResources: releaseWorkspaceResourcesMock,
 }));
 const emitButlerSystemEventMock = vi.hoisted(() => vi.fn());
 vi.mock("../services/butler-event-feed.js", () => ({ emitButlerSystemEvent: emitButlerSystemEventMock }));
@@ -126,6 +134,8 @@ describe("exit-workflow: stranded fix-and-merge resolver (issue #764)", () => {
     ({ db } = createTestDb());
     checkBranchTipIsAncestorMock.mockReset();
     emitButlerSystemEventMock.mockReset();
+    removeWorktreeMock.mockClear();
+    releaseWorkspaceResourcesMock.mockClear();
   });
 
   it("keeps the workspace OPEN and idle (retryable) when the resolver exits but the branch did NOT land", async () => {
@@ -267,5 +277,20 @@ describe("exit-workflow: stranded fix-and-merge resolver (issue #764)", () => {
     expect(emitButlerSystemEventMock).not.toHaveBeenCalledWith(
       expect.objectContaining({ projectId, workspaceId, kind: "merge_failed" }),
     );
+
+    // #950 teardown: closing the row NULLS `workingDir`, and every other teardown path
+    // (post-merge cleanup, deleteWorkspace, pruneStaleWorktrees) gates on a NON-NULL
+    // `workingDir` read from the DB. So if this path does not tear down, nothing ever will —
+    // the Docker stack and the worktree leak for the life of the process. Pin both, and pin
+    // the ORDER: the container bind-mounts the directory, so it must be released first.
+    expect(releaseWorkspaceResourcesMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: workspaceId, workingDir: "/repo/.worktrees/ak-764-test" }),
+      expect.objectContaining({ phase: "fix-and-merge-landed" }),
+    );
+    expect(removeWorktreeMock).toHaveBeenCalledWith("/repo", "/repo/.worktrees/ak-764-test");
+    expect(releaseWorkspaceResourcesMock.mock.invocationCallOrder[0])
+      .toBeLessThan(removeWorktreeMock.mock.invocationCallOrder[0]);
+    // The column really is nulled — i.e. the teardown genuinely had to happen here.
+    expect(ws.workingDir).toBeNull();
   });
 });
