@@ -10,6 +10,7 @@ import {
   buildRiskPostureSection,
   writeTicketContextFile,
   TICKET_CONTEXT_FILENAME,
+  IMPACT_SELECT_COMMAND,
 } from "@agentic-kanban/shared/lib/ticket-context";
 import type { StackProfile } from "@agentic-kanban/shared";
 
@@ -135,6 +136,48 @@ describe("ticket-context", () => {
       for (const rule of ruleLines.slice(0, 3)) {
         expect(overridden).toContain(rule);
       }
+    });
+  });
+
+  describe("builder inner loop vs the merge gate (#953)", () => {
+    const gate = "pnpm check:arch && pnpm typecheck && pnpm test:mine";
+
+    it("names the impact selection as the inner loop, with the WORKTREE-relative path", () => {
+      // `$HOME/.claude/...` is not worktree-safe and the plugin manifest's path is
+      // plugin-checkout relative; the board copies the skill dir into each worktree, so this
+      // is the only spelling that resolves where a builder actually runs.
+      const section = buildStackProfileSection(makeProfile(), gate) ?? "";
+      expect(section).toContain(".claude/skills/test-impact/tools/impact.mjs");
+      expect(section).not.toContain("$HOME/.claude");
+    });
+
+    it("tells the builder to `select`, never `build` — a rebuild dirties the worktree", () => {
+      const section = buildStackProfileSection(makeProfile(), gate) ?? "";
+      expect(section).toContain("impact.mjs select");
+      expect(section).not.toContain("impact.mjs build");
+      expect(section).toContain("never** `build`");
+    });
+
+    it("guards the command, since the skill copy is best-effort and may be absent", () => {
+      const section = buildStackProfileSection(makeProfile(), gate) ?? "";
+      expect(section).toContain("[ -f .claude/skills/test-impact/tools/impact.mjs ]");
+    });
+
+    it("says plainly that a green impact selection is NOT a green gate", () => {
+      const section = buildStackProfileSection(makeProfile(), gate) ?? "";
+      expect(section).toContain("NOT a green gate");
+    });
+
+    it("keeps the two commands DISTINCT — the hint never becomes the gate command", () => {
+      // These answer different questions ("what do I run after each edit" vs "what must be
+      // green to merge"). Collapsing them into one string is how a builder comes to believe a
+      // narrowed run cleared the gate.
+      const section = buildStackProfileSection(makeProfile(), gate) ?? "";
+      expect(section).toContain(gate);
+      expect(section).toContain(IMPACT_SELECT_COMMAND);
+      expect(IMPACT_SELECT_COMMAND).not.toContain(gate);
+      // The gate block still stands on its own, above the inner-loop section.
+      expect(section.indexOf(gate)).toBeLessThan(section.indexOf(IMPACT_SELECT_COMMAND));
     });
   });
 

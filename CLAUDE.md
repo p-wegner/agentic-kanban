@@ -408,7 +408,12 @@ Full symptom→cause→fix in `docs/install.md` (“Clean-clone / first-start go
 
 ## Common Commands
 - `pnpm dev` — server + client (worktree ports: main 3001/5173, `feature/<N>-…` = `3001+N`/`5173+N`). `pnpm dev:desktop` adds Tauri. Safe headless launch: `dev-server` skill.
-- `pnpm test:mine` — fast loop (green unit suites; skips known-flaky). Takes `-- --changed HEAD` and patterns. Full `pnpm --filter agentic-kanban test` only before mark-ready / cross-cutting changes.
+- **Inner loop (default while editing) — the impact selection, not the package suite (#953).** `test:mine` with no scope runs WHOLE packages, so the "fast loop" on a server-side ticket is thousands of tests; the test-impact skill picks ~6 files in ~0.4s from the same change. Run from the worktree root, guarded because the copy is best-effort:
+  ```sh
+  [ -f .claude/skills/test-impact/tools/impact.mjs ] && node .claude/skills/test-impact/tools/impact.mjs select --min-score 1.0 --format vitest
+  ```
+  Then run what it prints. **`select`, never `build`** — the skill resolves its root via `git rev-parse --show-toplevel`, so a rebuild here writes a worktree-local `docs/tests/impact-map.json` that helps nobody, lands in your diff, and breaks the single-writer property; keeping the map fresh is #952's job on the main checkout. **A green impact selection is NOT a green gate** — it is a ranked guess that narrows the run, so it tells you an edit did not obviously break something, nothing more.
+- `pnpm test:mine` — fast loop (green unit suites; skips known-flaky). Takes `-- --changed HEAD` and patterns. **This is the gate**, unchanged: run it (and the full `pnpm --filter agentic-kanban test` for cross-cutting changes) before mark-ready, whatever the impact loop said. `KANBAN_TEST_SELECTOR=impact` swaps its `vitest related` scoping for the same test-impact ranking (opt-in, fail-open, #951) — not the default until #954 has produced a measured miss rate.
 - `pnpm test:e2e` — Playwright E2E. `pnpm db:migrate && pnpm db:seed` — init DB. `pnpm cli -- register <path>`/`list`/`cleanup` — project & worktree management.
 
 ## Workspace Flow
