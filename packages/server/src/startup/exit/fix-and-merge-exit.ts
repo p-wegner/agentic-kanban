@@ -23,7 +23,9 @@ import { getWorkspaceById } from "../../repositories/workspace-reads.repository.
 import { setWorkspaceStatus } from "../../repositories/workspace-status.repository.js";
 import { emitButlerSystemEvent } from "../../services/butler-event-feed.js";
 import { finalizeMergeCleanup } from "../../services/merge-cleanup.service.js";
-import { stampReconciledLeadingMerge } from "../../services/workspace-repos.service.js";
+import { cleanupSiblingWorktrees, stampReconciledLeadingMerge } from "../../services/workspace-repos.service.js";
+import { releaseWorkspaceResources } from "../../services/workspace-resource-release.js";
+import { removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
 import { RUN_GATE } from "../../services/pre-merge-gate.service.js";
 import type { Database } from "../../db/index.js";
 import type { createBoardEvents } from "../../services/board-events.js";
@@ -54,9 +56,20 @@ export function createFixAndMergeExitHandler({ database: db, gitService, boardEv
    *
    * Deliberately NOT `reconcileAlreadyMerged` itself: that entry point additionally needs a
    * `recordMergeAttempt` writer and a session killer, neither of which this exit handler has,
-   * and it re-derives an ancestry verdict the caller has just established. Worktree/branch
-   * teardown is likewise left to the paths that already own it — this closes the BOOKKEEPING
-   * hole, and inventing a teardown here would be a second owner for it.
+   * and it re-derives an ancestry verdict the caller has just established.
+   *
+   * But the TEARDOWN is not optional here, and "left to the paths that already own it" was
+   * wrong: closing the row with `workingDir: null` is precisely what makes every other path
+   * blind to this worktree. `runWorkspacePostMergeCleanup` (`teardownMergedWorktree`),
+   * `deleteWorkspace` and `pruneStaleWorktrees` all gate their teardown on a NON-NULL
+   * `workingDir` read from the DB, so after this function ran, nothing would ever release the
+   * per-workspace Docker service stack, remove the worktree, or drop the sibling
+   * worktrees/branches. Before #950 the row stayed OPEN with a live `workingDir`, so a later
+   * retry/merge/delete could still reach them — nulling it without tearing down converts a
+   * bookkeeping bug into a resource leak. (The startup orphan reconciler recovers the LEADING
+   * directory from git truth, but only at the next server boot, and it never deletes a branch
+   * or a sibling.) So this mirrors `reconcileAlreadyMerged`'s teardown too, from the
+   * PRE-NULL snapshot, in the same order: resources first, then the worktree, then siblings.
    *
    * Best-effort throughout: a stamp that fails must not turn a landed merge into a thrown exit
    * handler, so every step warns and continues. The worst case is the state we already had.
@@ -90,6 +103,32 @@ export function createFixAndMergeExitHandler({ database: db, gitService, boardEv
       await stampReconciledLeadingMerge({ gitService, database: db, workspaceId: fresh.id, now });
     } catch (err) {
       console.warn(`[workflow] #950 leading mergedHeadSha stamp failed (non-fatal) for workspace ${fresh.id}:`, errorMessage(err));
+    }
+    // Teardown, from the PRE-NULL snapshot (`fresh`) — see the note above on why this cannot be
+    // deferred to another path once `workingDir` is null. Ordered exactly as every other
+    // terminal path: the service stack/container holds the directory's bind mount, so it is
+    // released BEFORE anything removes the directory.
+    try {
+      if (fresh.workingDir && !fresh.isDirect) {
+        await releaseWorkspaceResources({ ...fresh, id: fresh.id }, { phase: "fix-and-merge-landed" });
+        if (repoPath) {
+          const workingDir = fresh.workingDir;
+          // #713 co-residency: a co-resident sharer's live checkout must survive this removal.
+          await removeWorktreeUnlessShared({
+            database: db,
+            workingDir,
+            workspaceId: fresh.id,
+            label: "merge:fix-and-merge-landed",
+            removeWorktree: () => gitService.removeWorktree(repoPath, workingDir),
+          });
+        }
+      }
+      // Multi-repo (#114/#115): siblings orphan forever otherwise, for the same reason —
+      // `preserveUnmerged` re-verifies each repo, so a sibling still carrying unmerged commits
+      // keeps its worktree and branch.
+      await cleanupSiblingWorktrees(gitService, fresh.id, db, { preserveUnmerged: true });
+    } catch (err) {
+      console.warn(`[workflow] #950 worktree teardown failed (non-fatal) for workspace ${fresh.id}:`, errorMessage(err));
     }
     // No broadcast here: `finalizeMergeCleanup` already emits `workspace_merged` when it
     // actually changed something, which is a strictly better condition than an unconditional one.
