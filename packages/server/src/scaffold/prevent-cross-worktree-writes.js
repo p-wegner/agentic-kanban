@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// @board-hook-version: 4
+// @board-hook-version: 5
 /**
  * Prevent cross-worktree writes — keep each Claude Code instance inside its own
  * git worktree.
@@ -18,8 +18,10 @@
  *
  * Scope / behaviour:
  *   - ALLOW writes inside the authorized worktree.
- *   - ALLOW writes outside every worktree (e.g. %TEMP%, ~/.claude) — not our concern.
+ *   - ALLOW writes outside every git repository (e.g. %TEMP%, ~/.claude) — not our concern.
  *   - BLOCK writes inside any OTHER worktree of the same repo.
+ *   - BLOCK writes inside any UNRELATED git checkout (#959), when the board declared the
+ *     authorized root. See "Foreign checkouts" below.
  *   - BLOCK a shell command (Bash/PowerShell/Codex shell) that both references another
  *     worktree of the same repo AND carries a mutating verb (`git commit`, a `>` redirect,
  *     `Set-Content`, `rm`, …). Read-only inspection of a sibling worktree stays allowed.
@@ -52,10 +54,42 @@
  * targets) only the RESOLVED WRITE TARGETS — plus the segment's effective cwd, tracked across
  * `cd` — are matched against foreign worktrees. A segment that mutates in a way the guard
  * cannot classify keeps the old whole-segment mention matching: fail closed, never open.
+ *
+ * FOREIGN CHECKOUTS — the HARD BLOCK (#959)
+ * ------------------------------------------
+ * Everything above guards OTHER WORKTREES OF THE SAME REPO. A completely unrelated checkout is
+ * neither the main checkout nor a linked worktree, so it was not covered at all — and a builder
+ * used exactly that hole: scoped to `.worktrees/agentic-kanban/ak-954`, it edited and COMMITTED
+ * into `C:\projects\andrena\test-impact-skill`, a repo not registered on the board. Another
+ * session then pushed that commit to its origin believing it was its own work. Nothing on the
+ * board surfaced it; it was found out of band. The diff happened to be correct, which is what
+ * makes it dangerous rather than obviously bad.
+ *
+ * The rule is therefore a HARD BLOCK, not a warning: a builder must never WRITE outside its own
+ * worktree, foreign repos included. A card needing a change in another repo must ASK for it —
+ * file a ticket against that repo's project, or hand it to the session that owns it.
+ *
+ * Three properties keep that from being over-broad:
+ *   1. It requires a board-declared root (KANBAN_WORKTREE_DIR). Without one the authorized root
+ *      is DERIVED from cwd, so every hand-run session would be judged against itself; the
+ *      foreign-checkout check simply does not run then. Same gating as the #472 cwd check.
+ *   2. It only fires for a target inside SOME git repository. A write to %TEMP%, `~/.claude`,
+ *      a package cache or any other non-repo path is untouched — those are legitimate and
+ *      constant, and blocking them would wedge every agent.
+ *   3. SIBLING WORKTREES OF THE SAME WORKSPACE STAY WRITABLE. A multi-repo project provisions
+ *      one worktree per repo at `<parent>/.worktrees/<repoDirName>/<leaf>`, so they are peers
+ *      under the same `.worktrees/` root as the authorized worktree (`worktreesDirFor` in
+ *      shared/lib/git-service/worktree.ts). `isSiblingWorkspaceWorktree` recognises exactly that
+ *      shape. A repo that merely sits NEXT TO the project on disk is not under `.worktrees/` and
+ *      is not covered by this — which is the whole point: `test-impact-skill` was such a repo.
+ *
+ * Reads are untouched, as everywhere else in this guard: a builder legitimately reads sibling
+ * repos and materialized skills.
  */
 
 const path = require("path");
 const readline = require("readline");
+const { existsSync, statSync } = require("fs");
 const { execFileSync } = require("child_process");
 
 const WRITE_TOOLS = new Set([
@@ -100,13 +134,24 @@ const MUTATING_PATTERNS = [
   /\b(Set-Content|Add-Content|Out-File|Remove-Item|New-Item|Copy-Item|Move-Item|Clear-Content|Rename-Item|Set-ItemProperty|Write-File)\b/i,
 ];
 
-/** Normalise a path for case-insensitive, separator-insensitive comparison (Windows-friendly). */
+/**
+ * Normalise a path for separator-insensitive (and, on Windows, case-insensitive) comparison.
+ *
+ * Case is folded ONLY on win32, where the filesystem is genuinely case-insensitive. That is not
+ * cosmetic: `containingRepo` (#959) hits the filesystem with a normed path, and on a
+ * case-SENSITIVE filesystem a blanket-lowercased path simply does not exist — every lookup would
+ * walk to `/` and the foreign-checkout check would silently never fire on Linux (a fleet worker,
+ * a container, any scaffolded project). Same rule, for the same reason, as
+ * `shared/lib/gradle-env.ts`.
+ */
+const FOLD_CASE = process.platform === "win32";
+
 function norm(p) {
   if (!p) return "";
   let r = path.resolve(p).replace(/\\/g, "/");
-  // Drop a trailing slash (except root) and lowercase (Windows FS is case-insensitive).
+  // Drop a trailing slash (except root).
   if (r.length > 1 && r.endsWith("/")) r = r.slice(0, -1);
-  return r.toLowerCase();
+  return FOLD_CASE ? r.toLowerCase() : r;
 }
 
 /** True if `child` is inside (or equal to) `parent`, on a path boundary. */
@@ -146,6 +191,68 @@ function listWorktrees(cwd) {
   } catch {
     return [];
   }
+}
+
+/**
+ * The git toplevel that CONTAINS `p`, or null when `p` is in no repository at all (#959).
+ *
+ * Two reasons this walks up rather than asking about `p` directly, and BOTH bit in testing:
+ *  - `p` need not exist yet — a Write creates its file, and `git rev-parse` on a missing path
+ *    fails. Creating `<foreign repo>/src/new.ts` is a write into the foreign repo whether or
+ *    not `src/` exists.
+ *  - `git rev-parse` needs a DIRECTORY as its cwd. A write target that already exists is a
+ *    FILE, so starting at `p` itself returned null for every existing file — the guard would
+ *    have allowed an edit to any file that was already there, which is most of them.
+ *
+ * So: find the nearest existing ancestor DIRECTORY and ask git about that.
+ *
+ * `p` is a `norm()`ed path, which is also a valid filesystem path — {@link norm} folds case
+ * only on Windows precisely so that this function can hit the filesystem with its output.
+ */
+function containingRepo(p) {
+  let dir = p;
+  for (let i = 0; i < 64; i++) {
+    if (existsSync(dir) && isDirectory(dir)) {
+      const top = gitToplevel(dir);
+      return top ? norm(top) : null;
+    }
+    const parent = path.dirname(dir);
+    if (!parent || parent === dir) return null;
+    dir = parent;
+  }
+  return null;
+}
+
+/** True when `p` exists AND is a directory (a file is not a usable git cwd). */
+function isDirectory(p) {
+  try {
+    return statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True when `repoRoot` is a peer worktree of the SAME workspace — a multi-repo project's
+ * sibling repo (#959 property 3).
+ *
+ * The board provisions those at `<parent>/.worktrees/<repoDirName>/<leaf>` for every repo of
+ * the project, so the authorized worktree and its siblings are peers two levels under a shared
+ * `.worktrees/` directory. Matching that shape keeps multi-repo builders working without a new
+ * env channel, and it does NOT admit an arbitrary neighbouring checkout: a plain repo sitting
+ * beside the project on disk is not under `.worktrees/` at all.
+ */
+function isSiblingWorkspaceWorktree(repoRoot, authorizedRootPath) {
+  const marker = "/.worktrees/";
+  const at = authorizedRootPath.lastIndexOf(marker);
+  if (at === -1) return false;
+  // `<...>/.worktrees/` — the root both the authorized worktree and its siblings live under.
+  const worktreesRoot = authorizedRootPath.slice(0, at + marker.length);
+  if (!repoRoot.startsWith(worktreesRoot)) return false;
+  // Depth must match: `<repoDirName>/<leaf>`, i.e. exactly two segments below `.worktrees/`,
+  // so a nested checkout deeper inside another worktree is not silently admitted.
+  const rel = repoRoot.slice(worktreesRoot.length);
+  return rel.split("/").filter(Boolean).length === 2;
 }
 
 /** Extract the target file path(s) from a write-tool input. */
@@ -348,8 +455,9 @@ function segmentWriteTargets(segment, tokens, verb) {
  *  - a mutating segment the guard cannot classify falls back to the old behaviour — any
  *    foreign-worktree mention in THAT segment blocks. Ambiguity fails closed, never open.
  */
-function shellViolation(command, currentRoot, others, cwd, execCwd) {
-  if (!command || others.length === 0) return null;
+function shellViolation(command, currentRoot, others, cwd, execCwd, foreignRepoCheck) {
+  if (!command) return null;
+  if (others.length === 0 && !foreignRepoCheck) return null;
   const stripped = stripHeredocBodies(command);
   if (!MUTATING_PATTERNS.some((re) => re.test(stripped))) return null;
 
@@ -364,9 +472,20 @@ function shellViolation(command, currentRoot, others, cwd, execCwd) {
     if (!clean) return "";
     return norm(path.isAbsolute(clean) ? clean : path.join(effCwd || base || ".", clean));
   };
+  /**
+   * Classify a resolved path: a peer worktree of the same repo (`worktree`), an unrelated
+   * checkout (`repo`, #959), or not a violation at all. Returns `{ kind, root }` or null.
+   *
+   * Worktree first, so the long-standing #369/#472 message keeps naming the worktree case; the
+   * foreign-repo verdict is the new fallback, and only when the caller enabled it.
+   */
   const foreignOf = (resolved) => {
     if (!resolved || isInside(resolved, currentRoot)) return null;
-    return others.find((w) => isInside(resolved, w)) || null;
+    const wt = others.find((w) => isInside(resolved, w));
+    if (wt) return { kind: "worktree", root: wt };
+    if (!foreignRepoCheck) return null;
+    const repo = foreignRepoCheck(resolved);
+    return repo ? { kind: "repo", root: repo } : null;
   };
 
   for (const segment of splitShellSegments(stripped)) {
@@ -396,7 +515,7 @@ function shellViolation(command, currentRoot, others, cwd, execCwd) {
       // Fail closed: it mutates, we cannot tell what — any foreign mention in this segment blocks.
       const haystack = normText(segment);
       for (const other of others) {
-        if (haystack.includes(other)) return other;
+        if (haystack.includes(other)) return { kind: "worktree", root: other };
       }
       for (const token of commandPathTokens(segment)) {
         const offending = foreignOf(resolveTok(token));
@@ -407,9 +526,14 @@ function shellViolation(command, currentRoot, others, cwd, execCwd) {
   return null;
 }
 
-/** Lowercase + forward-slash a free-text command so absolute paths compare like norm() output. */
+/**
+ * Forward-slash (and, on Windows, lowercase) a free-text command so absolute paths inside it
+ * compare like `norm()` output. Must fold case on exactly the same platforms as {@link norm},
+ * or the fail-closed mention match stops matching what it is compared against.
+ */
 function normText(text) {
-  return String(text).replace(/\\/g, "/").toLowerCase();
+  const s = String(text).replace(/\\/g, "/");
+  return FOLD_CASE ? s.toLowerCase() : s;
 }
 
 async function readInput() {
@@ -501,7 +625,33 @@ function evaluateToolCall(input) {
   // The worktree this instance is AUTHORIZED to operate in — board-declared where possible.
   const { root: currentRoot, source: rootSource, cwd } = authorizedRoot(input.cwd);
   const worktrees = listWorktrees(cwd).map(norm);
-  if (worktrees.length <= 1) {
+
+  /**
+   * The FOREIGN-CHECKOUT classifier (#959), or null when this check must not run.
+   *
+   * Only armed for a board-declared root: without KANBAN_WORKTREE_DIR the authorized root is
+   * derived from the process's own cwd, so a hand-run session would be judged against itself
+   * and every ordinary write outside its repo would block. Same gate as the #472 cwd check.
+   *
+   * Returns the offending repo root for a path that lies in SOME git repository which is
+   * neither the authorized worktree nor a sibling worktree of this workspace; null otherwise
+   * (including every path in no repository at all — %TEMP%, ~/.claude, caches).
+   *
+   * Takes a `norm()`ed path, which is also a usable filesystem path — see {@link norm}.
+   */
+  const foreignRepoCheck =
+    rootSource === "KANBAN_WORKTREE_DIR"
+      ? (target) => {
+          if (!target || isInside(target, currentRoot)) return null;
+          const repo = containingRepo(target);
+          if (!repo) return null; // not in any repository → not our concern, as before
+          if (repo === currentRoot) return null;
+          if (isSiblingWorkspaceWorktree(repo, currentRoot)) return null;
+          return repo;
+        }
+      : null;
+
+  if (worktrees.length <= 1 && !foreignRepoCheck) {
     // Inside a builder container this is usually because only ONE worktree's git dir is
     // mounted (no visibility into siblings/main), so the guard degrades to a no-op — the
     // container's own mount boundary is the actual protection in that case. Silently
@@ -518,6 +668,23 @@ function evaluateToolCall(input) {
   }
 
   const others = worktrees.filter((w) => w !== currentRoot);
+
+  /** The refusal text for a write into an unrelated checkout (#959). */
+  const foreignRepoBlock = (target, repo, what) =>
+    blockV(
+      `⛔ Write into an UNRELATED git checkout blocked (${what}).\n\n` +
+        `This session is authorized for (via ${rootSource}):\n  ${currentRoot}\n\n` +
+        `but it targets a DIFFERENT repository:\n  ${target}\n  (repo: ${repo})\n\n` +
+        "A builder must never write outside its own worktree — foreign repos included. This is\n" +
+        "the #959 vector: a builder scoped to one ticket edited and COMMITTED into an unrelated\n" +
+        "checkout, and the session that owned that repo pushed the commit to its origin believing\n" +
+        "it was its own work. Nothing on the board surfaced it.\n\n" +
+        "If this change really belongs in that repo, ASK for it instead of making it:\n" +
+        "  • file a ticket against that repo's project on the board, or\n" +
+        "  • hand it to the session that owns that checkout.\n\n" +
+        "Reading that repo is still fine — only writes are refused. Do NOT bypass by editing\n" +
+        "this hook."
+    );
 
   // #472 — the cwd ITSELF can be the violation, and nothing was checking it.
   //
@@ -551,7 +718,15 @@ function evaluateToolCall(input) {
   // heredoc's DATA must not arm this check any more than it arms the segment analysis below.
   if (rootSource === "KANBAN_WORKTREE_DIR" && input.cwd && isShell && commandMutates(command)) {
     const here = norm(gitToplevel(input.cwd) || input.cwd);
-    if (!isInside(norm(input.cwd), currentRoot) && others.includes(here)) {
+    const outside = !isInside(norm(input.cwd), currentRoot);
+    // #959: the same "the cwd IS the violation" shape, one repo further out — a bare
+    // `git commit -am ...` issued while standing in an unrelated checkout names no path
+    // either, and `others` (worktrees of THIS repo) does not contain it.
+    if (outside && !others.includes(here) && foreignRepoCheck) {
+      const repo = foreignRepoCheck(norm(input.cwd));
+      if (repo) return foreignRepoBlock(norm(input.cwd), repo, "wrong working directory");
+    }
+    if (outside && others.includes(here)) {
       return blockV(
         "⛔ Cross-worktree command blocked — WRONG WORKING DIRECTORY.\n\n" +
           `This session is authorized for (via KANBAN_WORKTREE_DIR):\n  ${currentRoot}\n\n` +
@@ -571,12 +746,16 @@ function evaluateToolCall(input) {
   if (isShell) {
     // `input.cwd` (where the command actually runs) anchors relative paths and the effective-cwd
     // tracking; the authorized root's cwd is the fallback for harnesses that send none.
-    const offending = shellViolation(command, currentRoot, others, cwd, input.cwd);
+    const offending = shellViolation(command, currentRoot, others, cwd, input.cwd, foreignRepoCheck);
+    if (offending && offending.kind === "repo") {
+      // #959 — an unrelated checkout, e.g. `git -C <foreign repo> commit`.
+      return foreignRepoBlock(offending.root, offending.root, "shell command");
+    }
     if (offending) {
       return blockV(
         "⛔ Cross-worktree shell command blocked.\n\n" +
           `This session is authorized for (via ${rootSource}):\n  ${currentRoot}\n\n` +
-          `but the command mutates a DIFFERENT git worktree:\n  ${offending}\n\n` +
+          `but the command mutates a DIFFERENT git worktree:\n  ${offending.root}\n\n` +
           `Command:\n  ${String(command).split(/\r?\n/).slice(0, 6).join("\n  ")}\n\n` +
           "This is the #369 vector: an agent cd-ing into the main checkout (or a sibling\n" +
           "worktree) and committing there bypasses the ticket's branch/merge gate entirely.\n" +
@@ -614,7 +793,14 @@ function evaluateToolCall(input) {
           "override. Do NOT bypass by editing this hook."
       );
     }
-    // Target is outside every worktree (temp, home, etc.) → not our concern.
+    // #959 — not a worktree of this repo, but possibly an UNRELATED checkout. This is the
+    // Write/Edit door of the same hole: the incident's shell commit was preceded by tool edits
+    // to the foreign repo's files, and neither was covered.
+    if (foreignRepoCheck) {
+      const repo = foreignRepoCheck(t);
+      if (repo) return foreignRepoBlock(t, repo, "file write");
+    }
+    // Target is outside every git repository (temp, home, caches) → not our concern.
   }
 
   return allowV();

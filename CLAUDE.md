@@ -231,6 +231,27 @@ only weaken verification VISIBLY: a passing gate's message always names what ran
 `pre-merge gate passed (tier: file-scoped, 3 changed file(s), +14 guard suites, workers 6)` —
 never a bare "passed" that hides whether scoping applied.
 
+### A builder writes ONLY in its own worktree — foreign repos included (#959)
+`prevent-cross-worktree-writes.js` guarded other worktrees OF THE SAME REPO. An unrelated
+checkout is neither the main checkout nor a linked worktree, so it was uncovered — and a
+builder scoped to `ak-954` edited and COMMITTED into `test-impact-skill`, a repo not
+registered on the board. The session that owned that repo then pushed the commit to its
+origin believing it was its own work; nothing on the board surfaced it, and the diff happened
+to be correct, which is what made it dangerous rather than obviously bad.
+
+The guard now HARD BLOCKS a write into any other git repository, through both doors — write
+tools and shell commands (`git -C <foreign> commit`, a `cd` into it, a redirect into it) — via
+the one script all three providers already delegate to, so Claude/Codex/Pi are covered
+together. **If a card needs a change in another repo, ASK for it**: file a ticket against that
+repo's project, or hand it to the session that owns the checkout. Do not make the change.
+
+Three things stay allowed, deliberately: READS anywhere (a builder legitimately reads sibling
+repos and materialized skills), writes to paths in no repository at all (`%TEMP%`, `~/.claude`,
+caches), and writes into a multi-repo project's SIBLING worktrees (peers under the same
+`.worktrees/` root). The foreign-repo check only arms when the board declared
+`KANBAN_WORKTREE_DIR` — without it the authorized root is derived from cwd and would be
+compared against itself, so a hand-run session keeps the old same-repo-only scope.
+
 ### Windows / hooks
 - **Hook commands in `settings.json`**: use forward slashes (`\\` → `MODULE_NOT_FOUND`) and prefix the script with `$CLAUDE_PROJECT_DIR/` — never a hardcoded absolute path (breaks on every other clone/machine) and never a bare relative path (fails on CWD shift). `$CLAUDE_PROJECT_DIR` is set by Claude Code for hook execution (not for the Bash tool) and resolves to the session's repo root, so it works across machines, clones, and worktrees. This is the convention `project-scaffold.ts` ships to every scaffolded project. The hook scripts themselves self-locate (via `git rev-parse`/`__dirname` + the `KANBAN_MAIN_CHECKOUT` override), so they hold no machine-specific paths either.
 - **Codex hook parity**: `.codex/hooks.json` routes shell checks through `.claude/hooks/smart-hooks-runner.js`, patch/write through `prevent-cross-worktree-writes.js`. New Claude safety hooks must also handle Codex input (`tool_name`, `tool_input.command`, patch/write, `cwd`).

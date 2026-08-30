@@ -30,6 +30,10 @@ const HOOK = join(__dirname, "../../../../.claude/hooks/prevent-cross-worktree-w
 let root: string;
 let mainCheckout: string;
 let worktree: string;
+/** An unrelated repo, not a worktree of the fixture repo — the #959 subject. */
+let foreignRepo: string;
+/** A multi-repo project's SIBLING worktree, peer of `worktree` under the same `.worktrees/`. */
+let siblingWorktree: string;
 
 function git(args: string[], cwd: string): void {
   execFileSync("git", args, { cwd, stdio: "ignore", windowsHide: true });
@@ -62,18 +66,40 @@ function runHook(
   return { blocked: res.status === 2, reason: res.stdout ?? "" };
 }
 
+/** `git init` + one commit, so the directory is a real repository with a toplevel. */
+function seedRepo(dir: string): void {
+  mkdirSync(dir, { recursive: true });
+  git(["init", "-b", "master"], dir);
+  git(["config", "user.email", "t@example.com"], dir);
+  git(["config", "user.name", "T"], dir);
+  writeFileSync(join(dir, "seed.md"), "seed\n", "utf8");
+  git(["add", "seed.md"], dir);
+  git(["commit", "-m", "seed"], dir);
+}
+
 beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), "ak-guard-"));
   mainCheckout = join(root, "repo");
-  worktree = join(root, "wt-ak-91");
-  mkdirSync(mainCheckout, { recursive: true });
-  git(["init", "-b", "master"], mainCheckout);
-  git(["config", "user.email", "t@example.com"], mainCheckout);
-  git(["config", "user.name", "T"], mainCheckout);
-  writeFileSync(join(mainCheckout, "seed.md"), "seed\n", "utf8");
-  git(["add", "seed.md"], mainCheckout);
-  git(["commit", "-m", "seed"], mainCheckout);
+  // The board's real on-disk layout: `<parent>/.worktrees/<repoDirName>/<leaf>` (#385,
+  // `worktreesDirFor`). The #959 sibling rule keys on exactly this shape, so the fixture has
+  // to use it rather than a flat `wt-ak-91` directory.
+  worktree = join(root, ".worktrees", "repo", "ak-91");
+  siblingWorktree = join(root, ".worktrees", "repo-frontend", "ak-91");
+  foreignRepo = join(root, "unrelated-skill");
+
+  seedRepo(mainCheckout);
+  mkdirSync(join(root, ".worktrees", "repo"), { recursive: true });
   git(["worktree", "add", "-b", "feature/ak-91", worktree], mainCheckout);
+
+  // A multi-repo project's second repo, with its own worktree beside the leading one.
+  const siblingRepo = join(root, "repo-frontend");
+  seedRepo(siblingRepo);
+  mkdirSync(join(root, ".worktrees", "repo-frontend"), { recursive: true });
+  git(["worktree", "add", "-b", "feature/ak-91", siblingWorktree], siblingRepo);
+
+  // The unrelated checkout — a different repo entirely, NOT under `.worktrees/`. This is
+  // `C:\projects\andrena\test-impact-skill` in the incident.
+  seedRepo(foreignRepo);
 });
 
 afterAll(() => {
@@ -105,7 +131,8 @@ describe("cross-worktree guard — shell vector (#369 gap i)", () => {
   it("BLOCKS a relative path that escapes into the main checkout", () => {
     const res = runHook({
       tool_name: "Bash",
-      tool_input: { command: "git -C ../repo commit -m x" },
+      // Relative to `<root>/.worktrees/repo/ak-91`, the main checkout is three levels up.
+      tool_input: { command: "git -C ../../../repo commit -m x" },
       cwd: worktree,
     });
     expect(res.blocked).toBe(true);
@@ -348,5 +375,213 @@ describe("cross-worktree guard — structured writes still guarded", () => {
       cwd: worktree,
     });
     expect(res.blocked).toBe(false);
+  });
+});
+
+/**
+ * #959 — HARD BLOCK on writes into an UNRELATED checkout.
+ *
+ * Everything above guards other worktrees OF THE SAME REPO. A foreign repo is neither the main
+ * checkout nor a linked worktree, so it was not covered at all — and a builder for #954, scoped
+ * to `.worktrees/agentic-kanban/ak-954`, edited and COMMITTED into `test-impact-skill`. Another
+ * session pushed that commit to its origin believing it was its own work; nothing on the board
+ * surfaced it.
+ *
+ * The two doors the incident used are the first two tests here. The rest pin the three
+ * properties that keep the block from being over-broad: it needs a board-declared root, it only
+ * fires inside a repository, and a multi-repo project's sibling worktrees stay writable.
+ */
+describe("foreign-checkout hard block (#959)", () => {
+  const board = () => ({ KANBAN_WORKTREE_DIR: worktree });
+
+  it("BLOCKS door 1 — a tool write into an unrelated checkout", () => {
+    const res = runHook(
+      {
+        tool_name: "Edit",
+        tool_input: { file_path: join(foreignRepo, "cli.mjs") },
+        cwd: worktree,
+      },
+      board(),
+    );
+    expect(res.blocked).toBe(true);
+    expect(res.reason).toContain("UNRELATED git checkout");
+  });
+
+  it("BLOCKS door 2 — a shell `git -C <foreign repo> commit`, the exact incident shape", () => {
+    const res = runHook(
+      {
+        tool_name: "Bash",
+        tool_input: { command: `git -C ${foreignRepo.replace(/\\/g, "/")} commit -m "feat: ..."` },
+        cwd: worktree,
+      },
+      board(),
+    );
+    expect(res.blocked).toBe(true);
+    expect(res.reason).toContain("UNRELATED git checkout");
+  });
+
+  it("names the alternative — file a ticket there, or hand it to the owning session", () => {
+    const res = runHook(
+      { tool_name: "Write", tool_input: { file_path: join(foreignRepo, "new.md") }, cwd: worktree },
+      board(),
+    );
+    expect(res.blocked).toBe(true);
+    expect(res.reason).toContain("file a ticket");
+    expect(res.reason).toContain("hand it to the session that owns");
+  });
+
+  it("BLOCKS a write to an EXISTING file in the foreign repo", () => {
+    // The incident EDITED a file that was already there, and this is where the first
+    // implementation leaked: `git rev-parse --show-toplevel` needs a DIRECTORY as its cwd, so
+    // asking about the file itself returned "no repo" and the write sailed through — i.e. the
+    // guard would have allowed every edit to an existing file, which is most of them.
+    const res = runHook(
+      { tool_name: "Edit", tool_input: { file_path: join(foreignRepo, "seed.md") }, cwd: worktree },
+      board(),
+    );
+    expect(res.blocked).toBe(true);
+  });
+
+  it("BLOCKS a write to a path that does not exist yet inside the foreign repo", () => {
+    // The write CREATES the file, so `git rev-parse` on it fails — the guard must walk up to
+    // the nearest existing ancestor instead of concluding "not in a repo".
+    const res = runHook(
+      {
+        tool_name: "Write",
+        tool_input: { file_path: join(foreignRepo, "src", "deeply", "nested.ts") },
+        cwd: worktree,
+      },
+      board(),
+    );
+    expect(res.blocked).toBe(true);
+  });
+
+  it("BLOCKS a bare commit whose CWD is the foreign repo, though it names no path", () => {
+    // The #472 shape, one repo further out: `others` holds only worktrees of THIS repo, so the
+    // existing cwd check could not see it.
+    const res = runHook(
+      { tool_name: "Bash", tool_input: { command: `git commit -am "stray"` }, cwd: foreignRepo },
+      board(),
+    );
+    expect(res.blocked).toBe(true);
+    expect(res.reason).toContain("UNRELATED git checkout");
+  });
+
+  it("BLOCKS a redirect writing a file into the foreign repo", () => {
+    const res = runHook(
+      {
+        tool_name: "Bash",
+        tool_input: { command: `echo hi > ${foreignRepo.replace(/\\/g, "/")}/notes.md` },
+        cwd: worktree,
+      },
+      board(),
+    );
+    expect(res.blocked).toBe(true);
+  });
+
+  it("ALLOWS READING the foreign repo — the promise the guard already made", () => {
+    const fwd = foreignRepo.replace(/\\/g, "/");
+    expect(
+      runHook({ tool_name: "Bash", tool_input: { command: `git -C ${fwd} log --oneline -5` }, cwd: worktree }, board())
+        .blocked,
+    ).toBe(false);
+    expect(
+      runHook({ tool_name: "Bash", tool_input: { command: `cat ${fwd}/seed.md` }, cwd: worktree }, board()).blocked,
+    ).toBe(false);
+    expect(
+      runHook({ tool_name: "Bash", tool_input: { command: `cp ${fwd}/seed.md ./copy.md` }, cwd: worktree }, board())
+        .blocked,
+    ).toBe(false);
+  });
+
+  it("ALLOWS writes into a SIBLING worktree of the same multi-repo workspace", () => {
+    // A multi-repo project provisions one worktree per repo as peers under `.worktrees/`.
+    // Blocking those would break every multi-repo builder.
+    expect(
+      runHook(
+        { tool_name: "Write", tool_input: { file_path: join(siblingWorktree, "app.ts") }, cwd: worktree },
+        board(),
+      ).blocked,
+    ).toBe(false);
+    expect(
+      runHook(
+        {
+          tool_name: "Bash",
+          tool_input: { command: `git -C ${siblingWorktree.replace(/\\/g, "/")} commit -m x` },
+          cwd: worktree,
+        },
+        board(),
+      ).blocked,
+    ).toBe(false);
+  });
+
+  it("ALLOWS writes outside every repository (temp, caches) — unchanged", () => {
+    const res = runHook(
+      {
+        tool_name: "Write",
+        tool_input: { file_path: join(tmpdir(), "ak-959-scratch.txt") },
+        cwd: worktree,
+      },
+      board(),
+    );
+    expect(res.blocked).toBe(false);
+  });
+
+  it("still ALLOWS writes inside the agent's own worktree", () => {
+    expect(
+      runHook({ tool_name: "Write", tool_input: { file_path: join(worktree, "mine.ts") }, cwd: worktree }, board())
+        .blocked,
+    ).toBe(false);
+    expect(
+      runHook({ tool_name: "Bash", tool_input: { command: `git commit -am mine` }, cwd: worktree }, board()).blocked,
+    ).toBe(false);
+  });
+
+  it("does NOT fire without a board-declared root — cwd would then be judged against itself", () => {
+    // A hand-run session derives its root from cwd, so blocking every write outside it would
+    // wedge ordinary use. Same gate as the #472 cwd check.
+    expect(
+      runHook({ tool_name: "Edit", tool_input: { file_path: join(foreignRepo, "cli.mjs") }, cwd: worktree }).blocked,
+    ).toBe(false);
+  });
+
+  it("respects the explicit override for a foreign-repo write", () => {
+    const res = runHook(
+      {
+        tool_name: "Bash",
+        tool_input: { command: `ALLOW_CROSS_WORKTREE_WRITE=1 git -C ${foreignRepo.replace(/\\/g, "/")} commit -m x` },
+        cwd: worktree,
+      },
+      board(),
+    );
+    expect(res.blocked).toBe(false);
+  });
+
+  it("holds for the Codex/Pi shell input shape too", () => {
+    // Codex routes shell through the same script (`.codex/hooks.json` → smart-hooks-runner),
+    // and the Pi adapter delegates to it as well, so provider parity is this one assertion.
+    const res = runHook(
+      {
+        tool_name: "shell",
+        tool_input: { command: `cd ${foreignRepo.replace(/\\/g, "/")} && git commit -m x` },
+        cwd: worktree,
+      },
+      board(),
+    );
+    expect(res.blocked).toBe(true);
+  });
+
+  it("holds for the Codex apply_patch tool shape", () => {
+    const res = runHook(
+      {
+        tool_name: "apply_patch",
+        tool_input: {
+          patch: `*** Begin Patch\n*** Update File: ${foreignRepo.replace(/\\/g, "/")}/seed.md\n@@\n-seed\n+edited\n*** End Patch`,
+        },
+        cwd: worktree,
+      },
+      board(),
+    );
+    expect(res.blocked).toBe(true);
   });
 });
