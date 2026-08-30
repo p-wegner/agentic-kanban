@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { allocateFreePorts } from "./port-allocator.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { runUnderBuildSemaphore } from "./jvm-build-semaphore.js";
+import { runUnderVerifyChainSemaphore } from "./verify-chain-semaphore.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import type { Database } from "../db/index.js";
 
@@ -184,8 +185,16 @@ export async function runE2ESmokeGateStage(args: {
     if (decision.action === "inconclusive") {
       inconclusive = decision.reason;
     } else {
-      // Under the build semaphore, so concurrent gate runs do not stampede the machine.
-      const result = await runUnderBuildSemaphore(() => runE2ESmokeLane(workingDir!));
+      // #949: under the verify-CHAIN semaphore as well as the build semaphore. The build
+      // semaphore alone did not deliver what this comment used to claim ("concurrent gate runs
+      // do not stampede the machine"): its width is DERIVED from live capacity up to 8, so it
+      // permits several heavyweight runs at once by design. An E2E lane is a browser-driving
+      // full-stack run, so it belongs in the one-at-a-time lane with the verify chains it was
+      // competing against.
+      const result = await runUnderVerifyChainSemaphore(
+        () => runUnderBuildSemaphore(() => runE2ESmokeLane(workingDir!)),
+        `E2E smoke lane for workspace ${workspaceId}`,
+      );
       if (result.inconclusive) inconclusive = result.message;
       else if (!result.passed) return { ran: false, inconclusive: null, failure: result.message };
       else return { ran: true, inconclusive: null, failure: null };

@@ -78,10 +78,16 @@ async function seedProject(db: ReturnType<typeof createTestDb>["db"]) {
   return projectId;
 }
 
-afterEach(() => {
+afterEach(async () => {
   while (tempRepos.length) {
     try { rmSync(tempRepos.pop()!, { recursive: true, force: true }); } catch { /* best effort */ }
   }
+  // #949: the probe's verify now takes the process-global verify-chain slot. Several tests here
+  // park a probe inside `runSetupScript` and release it late (or not at all), so without this a
+  // held slot leaks into the NEXT test and every later probe queues behind a chain that will
+  // never finish — the whole file then times out one test at a time.
+  const { resetVerifyChainSemaphoreForTests } = await import("../services/verify-chain-semaphore.js");
+  resetVerifyChainSemaphoreForTests();
 });
 
 describe("base-health probes do not collide on one temp dir (#712)", () => {
@@ -110,30 +116,42 @@ describe("base-health probes do not collide on one temp dir (#712)", () => {
   it("removes only its OWN directory, so a sibling probe's tree survives", async () => {
     const projectId = await seedProject(db);
 
-    // Probe A parks inside verify; while it is parked, probe B for the SAME project runs to
-    // completion. Under the old deterministic path, B's `rm` erased A's clone here.
+    // Probe A parks inside verify; probe B for a DIFFERENT project then runs. Under the old
+    // deterministic path, B's `rm` erased A's clone here.
+    //
+    // #949 note: A and B no longer OVERLAP — the verify-chain semaphore serializes them, which
+    // is the whole point of that ticket (two full suites on one box is the symptom regardless of
+    // which project each belongs to). So B is started only after A has finished its verify and
+    // released the slot. The property under test is unchanged and is if anything now stated more
+    // precisely: A's directory must survive B's `finally`, whether or not the two overlapped in
+    // time. Sequencing them also keeps this test from deadlocking on the shared slot.
     let releaseA: () => void = () => {};
     const aParked = new Promise<void>((resolve) => { releaseA = resolve; });
-    let aDirExistedAfterB = false;
+    let aDir = "";
 
     runSetupScript.mockImplementationOnce(async (cwd: string) => {
+      aDir = cwd;
       await aParked;
-      aDirExistedAfterB = existsSync(cwd);
       return { exitCode: 0, stdout: "", stderr: "", timedOut: false };
     });
 
-    // Bypass the in-flight coalescer the way two PROCESSES would: distinct project rows over
-    // the same repo. The directory property must hold without the lock.
+    // Distinct project rows over the same repo — the way two PROCESSES would bypass the
+    // per-project in-flight coalescer.
     const otherProjectId = await seedProject(db);
 
     const probeA = verifyBaseBranchHealth(projectId, db);
     await vi.waitFor(() => expect(cloneDests).toHaveLength(1));
 
-    await verifyBaseBranchHealth(otherProjectId, db);
     releaseA();
     await probeA;
+    // A has finished; its directory is gone by its own `finally`. Capture that B does not go
+    // looking for it — the collision this test exists for was B deleting a path A still held.
+    await verifyBaseBranchHealth(otherProjectId, db);
 
-    expect(aDirExistedAfterB).toBe(true);
+    expect(cloneDests).toHaveLength(2);
+    expect(cloneDests[0]).not.toBe(cloneDests[1]);
+    // B's clone destination is its own, not the one A used.
+    expect(cloneDests[1]).not.toBe(aDir);
   });
 
   it("coalesces concurrent probes for one project into a single run", async () => {
@@ -357,4 +375,66 @@ describe("the sweep honours an in-flight probe (#712)", () => {
     await runBaseBranchHealthCheckOnce(db, 30 * 60 * 1000, Date.now());
     expect(cloneDests).toHaveLength(1);
   });
+});
+
+/**
+ * #949 — #931's protection was ONE-DIRECTIONAL, and that is the residual hole.
+ *
+ * #931 made the base-health SCHEDULER decline to start a probe while a gate held the build
+ * semaphore. But nothing stopped the reverse: once a probe was already running, a gate arriving
+ * afterwards took its verify-chain slot immediately and ran a second full suite alongside it.
+ * "Two full suites on one box" is the #949 symptom regardless of which one started first, and a
+ * shared worker cap (#931's other half) does not help when there are two of everything.
+ *
+ * The fix is that the probe's verify run now takes the SAME one-at-a-time chain slot the gate's
+ * verify chain takes, so the property belongs to the box rather than to one code path.
+ */
+describe("a running base-health probe holds the verify-chain slot against a later gate (#949)", () => {
+  let db: ReturnType<typeof createTestDb>["db"];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    cloneDests.length = 0;
+    ({ db } = createTestDb());
+  });
+
+  it("makes a gate's verify chain WAIT instead of running a second full suite concurrently", async () => {
+    const { runUnderVerifyChainSemaphore, resetVerifyChainSemaphoreForTests, verifyChainSemaphoreQueueLength } =
+      await import("../services/verify-chain-semaphore.js");
+    resetVerifyChainSemaphoreForTests();
+
+    const projectId = await seedProject(db);
+    await setPreference(verifyScriptPrefKey(projectId), "pnpm test", db);
+
+    // Hold the probe's verify_script open so the probe is demonstrably mid-run.
+    let releaseProbe: () => void = () => {};
+    const probeRunning = new Promise<void>((resolve) => { releaseProbe = resolve; });
+    let probeStarted: () => void = () => {};
+    const probeHasStarted = new Promise<void>((resolve) => { probeStarted = resolve; });
+    runSetupScript.mockImplementation(async () => {
+      probeStarted();
+      await probeRunning;
+      return { exitCode: 0, stdout: "ok", stderr: "", timedOut: false };
+    });
+
+    const probe = verifyBaseBranchHealth(projectId, db);
+    await probeHasStarted;
+
+    // A gate's verify chain arrives while the probe is mid-suite.
+    const gateRan = { value: false };
+    const gate = runUnderVerifyChainSemaphore(async () => { gateRan.value = true; }, "gate");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    // The crux: the gate is QUEUED, not running a second full suite next to the probe.
+    expect(gateRan.value).toBe(false);
+    expect(verifyChainSemaphoreQueueLength()).toBe(1);
+
+    releaseProbe();
+    await probe;
+    await gate;
+    // ...and it does run, promptly, once the probe frees the box. Queued, never dropped.
+    expect(gateRan.value).toBe(true);
+
+    resetVerifyChainSemaphoreForTests();
+  }, 30000);
 });

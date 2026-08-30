@@ -272,6 +272,17 @@ export interface GateTierInfo {
    */
   buildersQuiesced?: boolean;
   /**
+   * How long this gate spent QUEUED behind another heavyweight verification before it could
+   * start (#949). Same rule as `buildersQuiesced`: the conditions a verdict was produced under
+   * are part of the verdict. Two gates on one box were observed at 20 min and >45 min wall with
+   * nothing anywhere distinguishing "slow" from "waited most of that time", which is what made
+   * the contention invisible in the first place.
+   *
+   * 0 (or undefined, for a caller that never took a slot) means it started immediately, and the
+   * message then says nothing rather than reporting a reassuring "queued 0s".
+   */
+  queueWaitMs?: number;
+  /**
    * Set when #894's targeted re-run cleared suites that had failed under load. A PASSING gate
    * must say this: the merge was cleared by a second, narrower run, and an operator reading
    * "passed" with no mention of it would have a different picture of the evidence than the
@@ -332,6 +343,11 @@ export function buildGateTierMessage(tierInfo: GateTierInfo | null): string {
     ...(tierInfo.buildersQuiesced === undefined
       ? []
       : [tierInfo.buildersQuiesced ? "builders held" : "builders NOT held"]),
+    // #949: only when it actually waited — a "queued 0s" on every passing gate would be noise
+    // that trains the reader to skip the field, which is how the contention stayed invisible.
+    ...(tierInfo.queueWaitMs && tierInfo.queueWaitMs > 0
+      ? [`queued ${Math.round(tierInfo.queueWaitMs / 1000)}s behind another verification`]
+      : []),
   ];
   const retry = tierInfo.flakeRetryNote ? ` ${tierInfo.flakeRetryNote}` : "";
   const baseProbe = tierInfo.strategy === "scoped-base-watch" && tierInfo.baseProbeAgeLabel
