@@ -216,4 +216,56 @@ describe("exit-workflow: stranded fix-and-merge resolver (issue #764)", () => {
     // The guard short-circuits before any ancestry check is needed for a closed workspace.
     expect(checkBranchTipIsAncestorMock).not.toHaveBeenCalled();
   });
+
+  /**
+   * #950. The case between the two above: the resolver landed the branch ITSELF (a hand
+   * `git merge` in the worktree), so `autoMerge`'s `runMergeCore` had nothing to merge and
+   * stamped nothing — the workspace is left OPEN with `mergedAt: null` while git says the
+   * branch is unambiguously on base.
+   *
+   * That is not cosmetic. `findOpenUnmergedWorkspace` (the Done guard) keys on
+   * `status != "closed"`, so a CORRECT guard then refuses the Done transition on a FALSE
+   * premise, and the ticket is stuck in In Review with no way forward but deleting the
+   * workspace. Observed live on #944 (merge commit e586e93f90, `master..branch` = 0).
+   */
+  it("#950: stamps mergedAt and closes when the resolver landed the branch itself (autoMerge stamped nothing)", async () => {
+    const { projectId, issueId, workspaceId, sessionId } = await seedFixingWorkspace(db);
+
+    // Git ground truth: the branch IS on base — the fix agent merged it by hand.
+    checkBranchTipIsAncestorMock.mockResolvedValue({ isAncestor: true, branchSha: "abc", baseSha: "def" });
+
+    const boardEvents = makeBoardEvents();
+    // The crux: autoMerge finds nothing to merge, so it stamps NOTHING and leaves the row open.
+    const autoMerge = vi.fn(async () => {});
+
+    const engine = createWorkflowEngine({
+      sessionManager: makeSessionManager() as never,
+      boardEvents: boardEvents as never,
+      autoMerge,
+      database: db as never,
+    });
+    engine.fixAndMergeSessionIds.add(sessionId);
+
+    await engine.runWorkflowOnExit(workspaceId, sessionId, 0);
+
+    const ws = await getWorkspace(db, workspaceId);
+    // The row now matches git instead of contradicting it.
+    expect(ws.mergedAt).not.toBeNull();
+    expect(ws.status).toBe("closed");
+    // ...so the Done guard's query no longer matches, which is the whole point of the fix.
+    const openUnmerged = await db.select().from(workspaces)
+      .where(eq(workspaces.issueId, issueId));
+    expect(openUnmerged.every((w) => w.status === "closed")).toBe(true);
+
+    // And the issue actually converged to Done rather than being left In Review.
+    const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
+    const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses)
+      .where(eq(projectStatuses.id, issue.statusId));
+    expect(status.name).toBe("Done");
+
+    // Not a failure: nothing should have been reported as a stranded/failed merge.
+    expect(emitButlerSystemEventMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ projectId, workspaceId, kind: "merge_failed" }),
+    );
+  });
 });
