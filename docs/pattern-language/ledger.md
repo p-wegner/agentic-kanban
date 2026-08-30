@@ -169,6 +169,42 @@ Round-1 method: caller ran Step 0 (`vocab.py` histograms + `.dependency-cruiser.
   no new pair introduced, coverage still 100% / 0 unassigned. The two remaining violations
   (`server-route→server-monitor`, `server-service→server-monitor`, both into
   `startup/base-branch-health-reconciler.ts`) are OTHER units and deliberately untouched.
+### 2026-08-29 — #947: the 1 `server-route→server-monitor` edge (ak-947, claude-opus-5)
+- **`routes/project-health.ts → startup/base-branch-health-reconciler.ts` — REAL, fixed by
+  relocation.** The imported symbol was `requestBaseBranchReprobe`, the on-demand "probe the
+  base again if it makes sense" door. That function is not a sweep: it is a decision
+  (`isBaseHealthProbeDue`) plus one orchestration call, and its two callers are a route and
+  `services/workspace-merge-gate.ts` — neither of which may import `startup/`. The file it sat
+  in genuinely IS a `server-monitor` (a timer registered in `BACKGROUND_SERVICES`), so the
+  boundary was right and the placement was wrong.
+- **The gate's dynamic `import()` was the same defect from the other side**, and is the reason
+  this was not a rule-widening candidate. `workspace-merge-gate.ts` reached the same function
+  through `void import("../startup/…")` with a comment stating outright that `services/` must
+  not import `startup/` statically (#595) — i.e. the layering rule was already being
+  acknowledged and routed around rather than satisfied. Widening `server-route`'s allow-list to
+  include `server-monitor` would have blessed both.
+- **Fix:** `isBaseHealthProbeDue`, `requestBaseBranchReprobe` and the shared
+  `resolveBaseHealthProbeDue` (which de-duplicates the six-line "read latest row + probe stamp +
+  decide" block the sweep and the door each had) moved to
+  `services/base-branch-health-reprobe.service.ts`. The reconciler shrank to the sweep alone
+  (245 → 100 lines) and now imports DOWN into that service, the direction the spec already
+  allows (`server-monitor → server-service`). The route's import became a normal
+  `server-route → server-service` edge. The gate's `import()` stayed dynamic — the layering
+  reason is gone, but it is on the merge gate's hot path and the door is reached only on a
+  non-answer base row, so the deferred load is now a cost decision rather than a rule dodge;
+  the comment says so.
+- **No spec change.** `rules` and every element's `match` are untouched — the code moved to
+  where its behaviour already belonged.
+- Both `startup-persistence-boundary-ratchet.test.ts` baselines still hold: the reconciler keeps
+  its `db` value-import and its direct `projectsTable` select, so neither entry went stale.
+- Re-measured with `pattern_edges.py --spec … --scan . --violations`: the pair reports **0**,
+  coverage still 100% / 0 unassigned, no new pair introduced. One PRE-EXISTING violation remains
+  repo-wide and is untouched by this diff — `server-lib→server-service`
+  (`lib/review-mode-pref.ts → services/risk-posture.service.ts`), a separate loop unit.
+  `pnpm check:arch` 0 errors (30 pre-existing `startup-bypasses-repositories` warnings),
+  `pnpm typecheck` clean, and the 7 affected suites (reprobe guard, base-health
+  concurrency/recency, merge-gate red-base attribution, background-sweep registry,
+  startup-persistence ratchet, sweep-timer mechanism) 43/43 green.
 
 ## Filed (exclusion list — same idea ⇒ reference, don't refile)
 | # | verb | title |

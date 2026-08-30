@@ -44,7 +44,7 @@ vi.mock("../repositories/preferences.repository.js", async (importOriginal) => {
   return { ...actual, getPreference: () => probeStartedAt() };
 });
 
-const { requestBaseBranchReprobe } = await import("../startup/base-branch-health-reconciler.js");
+const { requestBaseBranchReprobe } = await import("../services/base-branch-health-reprobe.service.js");
 const { PROBE_MAX_DURATION_MS } = await import("../services/base-branch-health.service.js");
 
 /** The sweep's own default interval, passed explicitly so this test never depends on it. */

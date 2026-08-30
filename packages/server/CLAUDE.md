@@ -254,6 +254,14 @@ into `services/start-policy.service.ts`, which already owned that decision.
   `DECLARED_BLIND_SPOTS` list (guard: `openapi-route-coverage.test.ts`).
 - A new sweep is a **background sweep** (registered in `BACKGROUND_SERVICES`) and should reach
   the DB through a repository, not drizzle.
+- **A sweep's file holds the sweep, not everything the sweep decides.** #947 moved
+  `isBaseHealthProbeDue` / `requestBaseBranchReprobe` out of
+  `startup/base-branch-health-reconciler.ts` into
+  `services/base-branch-health-reprobe.service.ts`, because a route and the merge gate both
+  needed them and neither may import `startup/`. The tell was already in the code: the gate
+  reached them through a `void import("../startup/…")` whose own comment cited the layering
+  rule it was dodging. If a non-`startup/` caller needs a decision that lives in a sweep, the
+  decision is a service — move it, rather than importing upward or deferring the import.
 
 The physical `startup/` → `monitor/` + `sweeps/` move stays open: it is a 36-file rename that
 would collide with every in-flight branch, and the rule above buys most of its value now.

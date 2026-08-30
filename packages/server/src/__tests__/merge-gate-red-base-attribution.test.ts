@@ -39,7 +39,7 @@ vi.mock("../services/base-branch-health.service.js", async (importOriginal) => {
 // #935: the gate asks for a fresh probe THROUGH the due-check, never through the probe
 // directly — the due-check is what applies the #931 gate-busy yield and the #712 timeout
 // back-off. Mocked here so the test asserts the routing without spawning anything.
-vi.mock("../startup/base-branch-health-reconciler.js", async (importOriginal) => {
+vi.mock("../services/base-branch-health-reprobe.service.js", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
@@ -49,7 +49,7 @@ vi.mock("../startup/base-branch-health-reconciler.js", async (importOriginal) =>
 
 const { runPreLockGate } = await import("../services/workspace-merge-gate.js");
 const { getBaseBranchHealthAtMergeBase, verifyBaseBranchHealth } = await import("../services/base-branch-health.service.js");
-const { requestBaseBranchReprobe } = await import("../startup/base-branch-health-reconciler.js");
+const { requestBaseBranchReprobe } = await import("../services/base-branch-health-reprobe.service.js");
 
 const RUN_GATE_TOKEN = { kind: "run-gate" as const };
 const workspace = {
