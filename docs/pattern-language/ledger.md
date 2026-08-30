@@ -140,6 +140,36 @@ Round-1 method: caller ran Step 0 (`vocab.py` histograms + `.dependency-cruiser.
   0 errors, `pnpm typecheck` clean, `pnpm test:mine -- --changed HEAD` 92 files / 840 tests
   green (incl. the always-run guard suites).
 
+### 2026-08-29 — #946: the 1 `server-lib→server-service` edge (ak-946, claude-opus-5)
+- **`packages/server/src/lib/review-mode-pref.ts → services/risk-posture.service.ts` — REAL,
+  fixed by relocating the file into the element it behaves like.** `server-lib`'s intent is
+  "pure server-side compute … imports no services"; this module's whole job is
+  `resolveProjectReviewMode`, which fans the risk-posture dial out into a review decision
+  (#937, decision 017) and therefore *must* call `resolveRiskPosture`. A lib file that cannot
+  do its job without a service is not a lib.
+- **Why relocate rather than split `risk-posture.service.ts`.** The tempting alternative —
+  move the pure half of the posture resolver down into `lib/` — is architecturally attractive
+  but touches ~12 importer files and would collide with the parallel arch tickets sharing this
+  round. The decisive argument is convention, not cost: `merge-train-window.ts`,
+  `pre-merge-gate-tier.ts`, `placement-evaluators.ts` and `merge-queue-train.ts` are the SAME
+  shape (a prefMap resolver over `resolveRiskPosture`) and all four already live in
+  `services/`. `review-mode-pref.ts` was the lone outlier, so moving it makes the population
+  uniform instead of adding a second home for one kind.
+- **Purity is unchanged.** `resolveProjectReviewMode(prefMap, projectId)` is still sync and
+  touches no DB — `prefmap-resolver-purity.test.ts` checks the FUNCTION, not the file, and
+  keeps enforcing that in its new location (services/ is where most prefMap resolvers already
+  are). The move costs no testability.
+- **Not a rule widening.** `pattern-language.json` is UNCHANGED — no `match` edit, no `rules`
+  edit. `server-lib` allocation 57 → 56, `server-service` 380 → 381. Callers updated:
+  `startup/exit-workflow.ts`, `startup/exit/review-launch.ts`,
+  `startup/stranded-review-reconciler.ts`, `__tests__/risk-posture-fanout.test.ts`, plus the
+  stale path references in `docs/decisions/017-risk-posture.md` and
+  `shared/lib/dynamic-preference-keys.ts`.
+- Re-measured with `pattern_edges.py --spec … --scan . --violations`: this pair **0** (was 1),
+  no new pair introduced, coverage still 100% / 0 unassigned. The two remaining violations
+  (`server-route→server-monitor`, `server-service→server-monitor`, both into
+  `startup/base-branch-health-reconciler.ts`) are OTHER units and deliberately untouched.
+
 ## Filed (exclusion list — same idea ⇒ reference, don't refile)
 | # | verb | title |
 |---|---|---|
