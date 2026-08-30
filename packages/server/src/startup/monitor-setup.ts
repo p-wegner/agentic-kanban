@@ -9,6 +9,7 @@ import { createSessionManager } from "../services/session.manager.js";
 import { runAutoStart } from "./monitor-auto-start.js";
 import { runAutoContract } from "./monitor-contract.js";
 import { runCompoundingSetup } from "./monitor-compounding-setup.js";
+import { runTestImpactMapRefresh } from "./monitor-test-impact-map.js";
 import { runBacklogEmptyStrategy } from "./monitor-backlog.js";
 import { getRecentAgentExcerpts, logMonitorAction, shouldSkipNudge, type MonitorAction } from "./monitor-helpers.js";
 import { processWorkspaceCandidates } from "./monitor-cycle.js";
@@ -522,6 +523,12 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
       // workspace started this cycle already forks from the branch the pass committed to.
       setPhase("compounding-setup");
       await runCompoundingSetup(prefMap, { allowProject: shouldAutoStartProject });
+      // Test-impact map refresh (#952): rebuild + commit `docs/tests/impact-map.json` on the
+      // project's main checkout when it has gone stale, under the queue repo lock and skipping
+      // on contention. Also BEFORE the fan-out, so a builder started this cycle forks from the
+      // fresh map — a stale one silently widens its gate run to the whole package suite.
+      setPhase("test-impact-map");
+      await runTestImpactMapRefresh(prefMap, { allowProject: shouldAutoStartProject });
       // Board-owned plugin loops (manifest `loops`): plan the next round of a converging
       // analysis loop once the previous round's tickets are all terminal — same WIP limit,
       // same provider selection, same auth-rotation-on-quota as any other ticket.
