@@ -61,6 +61,19 @@ export interface VerifyOutcome {
    * entry per suite instead of paying for a full re-run on the next gate too (#915).
    */
   flakySuites?: FailedSuite[];
+  /**
+   * Every suite this verify stage saw fail, whether or not a retry later cleared it (#954).
+   *
+   * Distinct from `flakySuites`, which is the narrow subset a targeted re-run PASSED and which
+   * therefore says nothing about a run that failed for real. The outcome ledger needs the other
+   * question answered — "what failed here" — for both verdicts, because a failure the selection
+   * would not have picked is exactly the miss it exists to count, and a red gate is the only kind
+   * of run that can contain one.
+   *
+   * Empty (not undefined) when the run passed first time or when no suite name could be parsed
+   * out of the output — a compile, install or runner failure names nothing to attribute.
+   */
+  failedSuites: FailedSuite[];
 }
 
 export interface ResolveVerifyOutcomeInput {
@@ -123,14 +136,16 @@ const suiteNames = (suites: FailedSuite[]) => suites.map((s) => `${s.packageLabe
 export async function resolveVerifyOutcome(input: ResolveVerifyOutcomeInput): Promise<VerifyOutcome> {
   const log = input.log ?? ((m: string) => console.warn(`[pre-merge-gate] ${m}`));
   let result = input.result;
-  if (result.exitCode === 0) return { failure: null };
-  // A timeout carries no signal about missing dependencies, so it skips both retries.
+  if (result.exitCode === 0) return { failure: null, failedSuites: [] };
+  // A timeout carries no signal about missing dependencies, so it skips both retries. It names no
+  // failed suites either: the run was cut off, so anything after the cut is UNJUDGED and reporting
+  // whatever happened to have failed before it would be a partial list presented as a whole one.
   if (result.timedOut) {
-    return { failure: timeoutFailure({ ...input, afterInstall: false }) };
+    return { failure: timeoutFailure({ ...input, afterInstall: false }), failedSuites: [] };
   }
   // Same treatment for a no-progress kill (#903) — it is not evidence about the code either.
   if (result.noProgress) {
-    return { failure: noProgressFailure({ ...input, afterInstall: false }) };
+    return { failure: noProgressFailure({ ...input, afterInstall: false }), failedSuites: [] };
   }
 
   // ---- #169 missing-deps install retry ----------------------------------------------------
@@ -147,16 +162,20 @@ export async function resolveVerifyOutcome(input: ResolveVerifyOutcomeInput): Pr
       result = await input.runVerify();
     }
   }
-  if (result.exitCode === 0) return { failure: null };
+  if (result.exitCode === 0) return { failure: null, failedSuites: [] };
   if (result.timedOut) {
-    return { failure: timeoutFailure({ ...input, afterInstall: installed }) };
+    return { failure: timeoutFailure({ ...input, afterInstall: installed }), failedSuites: [] };
   }
   if (result.noProgress) {
-    return { failure: noProgressFailure({ ...input, afterInstall: installed }) };
+    return { failure: noProgressFailure({ ...input, afterInstall: installed }), failedSuites: [] };
   }
 
   // ---- #894 targeted flake retry -----------------------------------------------------------
+  // `decideFlakeRetry` parses the failed suites in EVERY branch, including the ones where it
+  // declines to retry, so `flake.suites` is the answer to "what failed here" regardless of what
+  // it decides to do about it — which is what the #954 ledger needs on the non-retry paths too.
   const flake = decideFlakeRetry({ output: combinedOutput(result), timedOut: result.timedOut, scoped: input.scoped });
+  const failedSuites = flake.suites;
   if (flake.retry) {
     const names = suiteNames(flake.suites);
     log(
@@ -169,10 +188,14 @@ export async function resolveVerifyOutcome(input: ResolveVerifyOutcomeInput): Pr
         failure: null,
         flakeRetryNote: `— ${flake.suites.length} suite(s) failed under load and PASSED on a targeted re-run: ${names}`,
         flakySuites: flake.suites,
+        // The gate PASSED, but these suites did fail on the way there. The ledger records the
+        // pass (that is the verdict) alongside what failed, so a suite that keeps needing a retry
+        // is visible as failure history rather than being erased by the retry that cleared it.
+        failedSuites,
       };
     }
     if (retryResult.noProgress) {
-      return { failure: noProgressFailure({ ...input, afterInstall: installed }) };
+      return { failure: noProgressFailure({ ...input, afterInstall: installed }), failedSuites };
     }
     // Failed twice, the second time nearly alone on the machine. That is a much stronger
     // signal than the first failure was, and the message says so rather than repeating the
@@ -184,6 +207,7 @@ export async function resolveVerifyOutcome(input: ResolveVerifyOutcomeInput): Pr
           `again on a targeted re-run (${names}) — this is a real failure, not machine load: ` +
           input.summarize(result.stdout || "", result.stderr || ""),
       },
+      failedSuites,
     };
   }
 
@@ -194,5 +218,6 @@ export async function resolveVerifyOutcome(input: ResolveVerifyOutcomeInput): Pr
         `verify_script failed (exit ${result.exitCode})${suffix}: ` +
         input.summarize(result.stdout || "", result.stderr || ""),
     },
+    failedSuites,
   };
 }

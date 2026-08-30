@@ -42,6 +42,7 @@ import { summarizeVerifyFailure } from "./verify-failure-summary.js";
 import { VERIFY_NEUTRALIZED_LISTENER_ENV } from "../lib/verify-env.js";
 import { resolveVerifyOutcome } from "./verify-retry-strategies.js";
 import type { FailedSuite } from "./verify-flake-retry.js";
+import { recordVerifyGateOutcome } from "./test-impact-outcome.service.js";
 import { openRedDebtEntry } from "../repositories/red-debt.repository.js";
 
 // The verify TUNABLES (timeout / worker cap / file-scope prefs, and #909's capacity
@@ -312,7 +313,11 @@ export async function runPreMergeGate(
   // Hoisted out of the docs-only expression below because #894's flake retry needs the same
   // answer for a different reason: a suite scope is honoured only by THIS repo's
   // `scripts/test-mine.mjs`, so for any other project a "retry" would be a second FULL run.
-  const isSelfRepo = isSelfProjectRepo(await getProjectRepoPath(projectId, database));
+  // Read once and kept: `isSelfProjectRepo` needs it here, the smoke block needs it below, and
+  // #954's outcome ledger needs it as the MAIN checkout that owns `.test-impact/outcomes.jsonl`
+  // (a ledger written into the worktree would be deleted with the worktree and never accumulate).
+  const projectRepoPath = await getProjectRepoPath(projectId, database);
+  const isSelfRepo = isSelfProjectRepo(projectRepoPath);
   const docsOnlyGuardsRunApplies = docsOnly && isSelfRepo;
   /**
    * Set when #894's targeted re-run cleared a load-induced failure, so the PASSING gate
@@ -515,6 +520,19 @@ export async function runPreMergeGate(
     // function sits ON the god-module gate's 25-branch ceiling (grandfathered at 37), where a
     // branch that can never be false still counts against the budget.
     gateTierInfo!.queueWaitMs = queueWaitMs;
+    // #954 — the ledger row for THIS run. Recorded before the failure return so a red gate is
+    // observed too: a failing run is the only kind that can contain a miss at all, so recording
+    // only green runs would measure the heuristic exclusively on the cases where it cannot be
+    // wrong. Awaited (not fire-and-forget) so a merge never races the write, and `recordVerifyGateOutcome`
+    // is total — it resolves to `{recorded:false, reason}` rather than throwing, so this cannot
+    // turn a verdict into an error.
+    await recordVerifyGateOutcome({
+      workspaceId: workspace.id,
+      workingDir,
+      repoPath: projectRepoPath,
+      outcome,
+      tierInfo: gateTierInfo,
+    });
     if (outcome.failure) {
       return { passed: false, skipped: false, stage: "verify", ...outcome.failure };
     }
@@ -555,7 +573,7 @@ export async function runPreMergeGate(
     const plan = await resolveProjectDevServerPlan(projectId, database, {
       profile,
       workingDir: workspace.workingDir,
-      isSelfProject: isSelfProjectRepo(await getProjectRepoPath(projectId, database)),
+      isSelfProject: isSelfRepo,
     }).catch((err: unknown) => {
       // Non-fatal on purpose: a failed plan read degrades to the profile-only smoke check
       // that existed before, rather than turning the whole gate inconclusive.
