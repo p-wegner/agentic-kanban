@@ -3,6 +3,7 @@ import type { createSessionManager } from "../services/session.manager.js";
 import type { Database } from "../db/index.js";
 import { createWorkspaceService } from "../services/workspace.service.js";
 import { RUN_GATE, type MergeGateToken } from "../services/pre-merge-gate.service.js";
+import { runUnderMergeJob } from "../services/merge-job.service.js";
 
 /**
  * The subset of workspace application-service operations the in-process board
@@ -85,7 +86,14 @@ export function createMonitorWorkspaceActions(deps: {
       // passes an `already-passed` PROOF token that `resolveMergeGate` honors (avoiding a doubled
       // build/boot) — while stale/absent proof re-runs the gate. If a caller omits the token we
       // default to fully gating, so "no gate" can never be an accident.
-      await workspaceService.mergeWorkspaceDeduped(workspaceId, { gate: gate ?? RUN_GATE });
+      //
+      // #945 — this path merged with NO merge job at all, so a restart mid-gate left it exactly
+      // as invisible as the HTTP path's loss, and on a hands-off board it is the MORE common
+      // one: the monitor is precisely what "sees the workspace as ready". Tracking a job here
+      // also writes the durable in-flight marker `merge-run-reconciler.ts` reads. The
+      // join-or-own protocol (and the reasons for each of its rules) lives in the helper.
+      await runUnderMergeJob(workspaceId, "monitor-auto-merge", () =>
+        workspaceService.mergeWorkspaceDeduped(workspaceId, { gate: gate ?? RUN_GATE }));
     },
     async fixAndMerge(workspaceId, mergeError) {
       const result = await workspaceService.fixAndMerge(workspaceId, mergeError);
