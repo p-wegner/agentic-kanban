@@ -6,6 +6,7 @@ import {
   formatContextTokens,
   searchPlaceholder,
 } from "./allWorkspacesStatus.js";
+import { gateActivityToneClass } from "./badgeTones.js";
 
 type Main = Parameters<typeof workspaceRowStatusBadgeClass>[0];
 const main = (o: Record<string, unknown> & { status: string }): Main => o as unknown as Main;
@@ -27,6 +28,22 @@ describe("workspaceRowStatusBadgeClass", () => {
   it("a fixing workspace with conflicts is NOT red (the !== fixing guard)", () => {
     expect(workspaceRowStatusBadgeClass(main({ status: "fixing", conflicts: { hasConflicts: true } }))).toBe(WS_STATUS_COLORS.fixing);
   });
+
+  // #944 — during the gate the workspace's own status is `idle` (the agent has finished), so
+  // without the gate branch a 40-minute verify run renders as an untouched workspace.
+  it("an in-flight gate wins over the status map", () => {
+    const gating = main({ status: "idle", gateActivity: { phase: "verifying", label: "Verifying · 18m" } });
+    expect(workspaceRowStatusBadgeClass(gating)).toBe(gateActivityToneClass("verifying"));
+    expect(workspaceRowStatusBadgeClass(gating)).not.toBe(WS_STATUS_COLORS.idle);
+  });
+
+  it("an in-flight gate wins over conflicts too", () => {
+    expect(
+      workspaceRowStatusBadgeClass(
+        main({ status: "idle", conflicts: { hasConflicts: true }, gateActivity: { phase: "stalled", label: "Merge quiet · 1h" } }),
+      ),
+    ).toBe(gateActivityToneClass("stalled"));
+  });
 });
 
 describe("workspaceRowStatusLabel", () => {
@@ -37,6 +54,12 @@ describe("workspaceRowStatusLabel", () => {
     expect(workspaceRowStatusLabel(main({ status: "closed", lastSessionTriggerType: "fix-conflicts" }))).toBe("merged conflicts");
     expect(workspaceRowStatusLabel(main({ status: "closed", mergedAt: "t" }))).toBe("merged");
     expect(workspaceRowStatusLabel(main({ status: "idle" }))).toBe("idle");
+  });
+
+  it("shows the gate label instead of the bare status while a merge is in flight (#944)", () => {
+    expect(
+      workspaceRowStatusLabel(main({ status: "idle", gateActivity: { phase: "verifying", label: "Verifying · attempt 2 · 20m" } })),
+    ).toBe("Verifying · attempt 2 · 20m");
   });
 });
 

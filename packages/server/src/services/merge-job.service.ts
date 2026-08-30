@@ -36,6 +36,13 @@
  */
 
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { clearMergeRunMarker, resetMergeRunMarkerPort, writeMergeRunMarker } from "./merge-run-marker-port.js";
+import { notifySummaryWriteThrough } from "./summary-write-through-notifier.js";
+
+// The durable-marker port moved out to its own module when #944's cache hooks pushed this file
+// past the god-module gate (#889). Re-exported so `setMergeRunMarkerPort`'s existing import path
+// — the composition root and the #945 tests — keeps working.
+export { setMergeRunMarkerPort, type MergeRunMarkerPort } from "./merge-run-marker-port.js";
 
 export type MergeJobState = "running" | "succeeded" | "failed";
 
@@ -151,60 +158,25 @@ function evictIfNeeded(): void {
 }
 
 /**
- * The durable-marker side effects (#945), behind an injected port.
+ * Bump the board's cache generation because this workspace's {@link GateActivity} just changed
+ * (#944).
  *
- * **Default is a NO-OP; the real one is installed by the composition root**
- * (`startup/background-services.ts`, the `merge-run-reconciler` entry — both halves of the
- * feature wire up together), rather than a direct `merge-run.repository` import. Two reasons,
- * and the first is the load-
- * bearing one: this module is a pure in-memory registry with no fixture-DB setup anywhere in
- * its suites, so importing the repository would make every `startMergeJob("ws-1")` in a unit
- * test write to the process-global `db` — a test writing rows into the real board database is a
- * worse defect than the one being fixed. Second, it keeps the module honest about what it is:
- * the durable marker is a separate concern this registry merely announces.
+ * Since #944 the board card renders `gateActivity`, which is derived from THIS map and from
+ * nothing else — no DB row moves between a merge starting and finishing (there is no `merging`
+ * workspace status), and no `boardEvents.broadcast()` fires either. So without this call the
+ * merge lifecycle is entirely outside the invalidation graph, and
+ * `boardEtagCache.tryServe` answers a conditional GET with a 304 — WITHOUT rebuilding the board
+ * — for as long as the generation is unchanged, up to its 15-minute hard cap. On an otherwise
+ * quiet board that means a merge starts and every card keeps the pre-merge `idle` dot for
+ * minutes: precisely the "working hard looks identical to abandoned" confusion #944 exists to
+ * remove, reintroduced one layer down.
  *
- * Both operations are fire-and-forget: the caller is a merge, and a marker that cannot be
- * written or cleared must never change what the merge does. A failed WRITE degrades to the
- * pre-#945 behaviour (a lost gate is silent again); a failed CLEAR leaves a stale row, which
- * the reconciler resolves against LIVE state rather than trusting the row on its own.
+ * This is the same seam and the same failure mode G13 built the notifier for — a board-visible
+ * value mutated outside `boardEvents`. It debounces (500ms) and is best-effort, which is the
+ * right weight for a display field.
  */
-export interface MergeRunMarkerPort {
-  set(workspaceId: string, values: { jobId: string; startedAt: string; source?: string | null; pid?: string | null }): Promise<void>;
-  clear(workspaceId: string): Promise<void>;
-}
-
-const noopMarkerPort: MergeRunMarkerPort = {
-  set: async () => {},
-  clear: async () => {},
-};
-
-let markerPort: MergeRunMarkerPort = noopMarkerPort;
-
-/** Install the durable-marker writer. Called once at startup; also the test seam. */
-export function setMergeRunMarkerPort(port: MergeRunMarkerPort): void {
-  markerPort = port;
-}
-
-function writeMarker(workspaceId: string, values: { jobId: string; startedAt: string; source?: string | null }): void {
-  void markerPort
-    .set(workspaceId, { ...values, pid: String(process.pid) })
-    .catch((err) => {
-      console.warn(
-        `[workspace-merge] failed to persist the in-flight merge marker for workspace ${workspaceId} (non-fatal; `
-          + `a restart mid-merge will be unrecoverable, #945):`,
-        errorMessage(err),
-      );
-    });
-}
-
-function clearMarker(workspaceId: string): void {
-  void markerPort.clear(workspaceId).catch((err) => {
-    console.warn(
-      `[workspace-merge] failed to clear the in-flight merge marker for workspace ${workspaceId} (non-fatal; `
-        + `the reconciler re-checks live state before acting, #945):`,
-      errorMessage(err),
-    );
-  });
+function notifyGateActivityChanged(workspaceId: string): void {
+  notifySummaryWriteThrough(workspaceId);
 }
 
 /**
@@ -230,7 +202,9 @@ export function startMergeJob(
     lastActivityAt: nowIso,
   };
   jobsByWorkspace.set(workspaceId, job);
-  writeMarker(workspaceId, { jobId: job.jobId, startedAt: nowIso, source });
+  // null -> "merging": the card's biggest single change, and the one nothing else announces.
+  notifyGateActivityChanged(workspaceId);
+  writeMergeRunMarker(workspaceId, { jobId: job.jobId, startedAt: nowIso, source });
   return job;
 }
 
@@ -270,6 +244,8 @@ export function noteMergeGateAttemptStarted(
   job.attempts.push(attempt);
   job.attemptCount = job.attempts.length;
   job.lastActivityAt = nowIso;
+  // "merging"/"stalled" -> "verifying", and the attempt number in the label.
+  notifyGateActivityChanged(workspaceId);
   return { jobId: job.jobId, attempt: attempt.attempt };
 }
 
@@ -298,6 +274,8 @@ export function noteMergeGateAttemptFinished(
   if (patch.detail) attempt.detail = patch.detail;
   if (patch.stage) attempt.stage = patch.stage;
   job.lastActivityAt = nowIso;
+  // "verifying" -> "merging", and a discarded/failed attempt's reason enters the tooltip.
+  notifyGateActivityChanged(workspaceId);
 }
 
 function finish(jobId: string, workspaceId: string, patch: Partial<MergeJob>): void {
@@ -319,11 +297,16 @@ function finish(jobId: string, workspaceId: string, patch: Partial<MergeJob>): v
   if (previous !== -1) finishedOrder.splice(previous, 1);
   finishedOrder.push(workspaceId);
   evictIfNeeded();
+  // running -> finished, i.e. `gateActivity` goes back to null and the badge must DISAPPEAR.
+  // A successful merge broadcasts on its own afterwards, but a failed one does not reliably
+  // (the HTTP path's failure branch broadcasts nothing), which would leave a "Verifying" badge
+  // on a merge that stopped — the one lie worse than the amber dot #944 replaced.
+  notifyGateActivityChanged(workspaceId);
   // #945 — this is the ONE funnel every terminal transition goes through (complete, fail, and
   // the zombie self-heal in `getMergeJob`), so clearing here is what makes "a surviving marker
   // means the runner died" true by construction. Clearing at each call site instead would leave
   // whichever path someone forgot to update writing false orphans forever.
-  clearMarker(workspaceId);
+  clearMergeRunMarker(workspaceId);
 }
 
 /** Mark a merge job succeeded, retaining its result for later polling. */
@@ -492,6 +475,24 @@ export function getMergeJob(workspaceId: string, nowMs: number = Date.now()): Me
 }
 
 /**
+ * The tracked job for a workspace WITHOUT the zombie self-heal, for display-only readers (#944).
+ *
+ * {@link getMergeJob} transitions a zombied job to `failed` as a side effect of reading it,
+ * which is right for the merge-status endpoint (a caller polling for a verdict should get the
+ * corrected one) and wrong for the board. A board rebuild reads every workspace, runs on a WS
+ * broadcast and a 30s poll, and is triggered by any second tab — so routing it through
+ * `getMergeJob` would make an incidental card refresh the thing that declares a merge dead,
+ * at whatever moment a rebuild happened to land. Failing a merge is a decision, not a render.
+ *
+ * A display reader can afford the staleness: a zombied job still reads as `running` here, and
+ * {@link deriveGateActivity} renders exactly that state as `stalled` — which is the honest
+ * report of what this process knows, and the same conclusion, without writing it down.
+ */
+export function peekMergeJob(workspaceId: string): MergeJob | null {
+  return jobsByWorkspace.get(workspaceId) ?? null;
+}
+
+/**
  * A one-line, operator-readable account of a merge job's gate attempts (#936).
  *
  * The point is that a long-running merge reads as "gate attempt 2 in flight; attempt 1 passed
@@ -522,5 +523,5 @@ export function resetMergeJobs(): void {
   finishedOrder.length = 0;
   counter = 0;
   gateIsAlive = gateIsAliveForJob;
-  markerPort = noopMarkerPort;
+  resetMergeRunMarkerPort();
 }

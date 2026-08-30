@@ -7,6 +7,9 @@ export * from "./session-summary.js";
 export * from "./failure-keywords.js";
 export * from "./status-view.js";
 export * from "./workspace-activity-state.js";
+// In-flight pre-merge-gate card state (#944) — pure projection over a merge job, no Node
+// builtins; the client renders it and the server projects it onto the board DTO.
+export * from "./gate-activity.js";
 // Per-repo dependency-install vocabulary (#628) — pure predicates, client-rendered.
 export * from "./repo-install-state.js";
 export * from "./branch.js";

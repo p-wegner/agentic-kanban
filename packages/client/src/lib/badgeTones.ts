@@ -13,6 +13,8 @@
  * Invariant, enforced by `badgeTones.test.ts`: every tone declares a `dark:`
  * background *and* a `dark:` text colour.
  */
+import type { GateActivityPhase } from "@agentic-kanban/shared/lib/gate-activity";
+
 export type BadgeTone =
   | "neutral"
   | "brand"
@@ -76,6 +78,30 @@ export const WORKSPACE_STATUS_TONE: Record<string, BadgeTone> = {
   error: "danger",
   closed: "neutral",
 };
+
+/**
+ * In-flight pre-merge-gate phase → tone (#944).
+ *
+ * `verifying` is `info` rather than `success`: a running gate is not a good outcome yet, and
+ * green is what the board uses for a merged workspace two lines away. `stalled` is `danger`
+ * because the whole reason the phase exists is that it needs a human — an amber it shared with
+ * `idle` would put it back in the bucket #944 exists to get it out of.
+ */
+export const GATE_ACTIVITY_TONE: Record<GateActivityPhase, BadgeTone> = {
+  verifying: "info",
+  merging: "brand",
+  stalled: "danger",
+};
+
+/** Badge classes for an in-flight gate phase. */
+export function gateActivityToneClass(phase: GateActivityPhase): string {
+  return badgeToneClasses[GATE_ACTIVITY_TONE[phase]];
+}
+
+/** Dot colour for an in-flight gate phase. */
+export function gateActivityDotClass(phase: GateActivityPhase): string {
+  return badgeDotClasses[GATE_ACTIVITY_TONE[phase]];
+}
 
 /** Issue status-column name → tone. Unknown/custom columns fall back to neutral. */
 export const ISSUE_STATUS_TONE: Record<string, BadgeTone> = {
