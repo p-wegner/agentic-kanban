@@ -13,7 +13,7 @@
  * a guard read that belongs with the delete it protects.
  */
 import { projectStatuses, issues } from "@agentic-kanban/shared/schema";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, inArray, isNotNull } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
@@ -199,4 +199,21 @@ export async function listProjectStatusIdNames(
     .from(projectStatuses)
     .where(eq(projectStatuses.projectId, projectId))
     .orderBy(projectStatuses.sortOrder);
+}
+
+/**
+ * Every project that actually exists on this board — i.e. has statuses.
+ *
+ * The monitor's per-project phases each need this list. Two of them (compounding-setup,
+ * test-impact-map) hand-rolled the same `selectDistinct` in `startup/`, which is precisely the
+ * `startup-bypasses-repositories` edge the layering rule exists to drain: a phase that reaches
+ * drizzle directly cannot be tested against a fixture database without the ORM. Living here,
+ * the query exists once and a phase takes only the injected `database`.
+ */
+export async function listBoardProjectIds(database: Database = db): Promise<string[]> {
+  const rows = await database
+    .selectDistinct({ projectId: projectStatuses.projectId })
+    .from(projectStatuses)
+    .where(isNotNull(projectStatuses.projectId));
+  return rows.map((r) => r.projectId).filter((id): id is string => Boolean(id));
 }
