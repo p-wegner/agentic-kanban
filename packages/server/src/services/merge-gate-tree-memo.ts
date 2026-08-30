@@ -42,16 +42,44 @@ const passedTrees = createTtlMemo<string, true>({ ttlMs: TREE_MEMO_TTL_MS });
  * the weaker setting was replayed under the stronger one — a level silently weakening
  * verification, which is the one thing the tier rules say it may never do.
  *
- * `verificationKey` is the tier plus the effective verify command, so tightening either one
- * cannot reuse a pass earned under the looser one. The tree hash still carries the base commit
- * by content (a moved base changes the merged tree).
+ * `verificationKey` is the tier, the effective verify command and the test-impact SELECTOR
+ * identity, so tightening any of the three cannot reuse a pass earned under the looser one. The
+ * tree hash still carries the base commit by content (a moved base changes the merged tree).
  */
 const memoKey = (projectId: string, treeHash: string, verificationKey: string) =>
   `${projectId}:${verificationKey}:${treeHash}`;
 
 /**
- * Fold the tier and the verify command into one opaque key component. Hashed rather than
- * embedded so a command containing `:` cannot shift the key's field boundaries.
+ * Fold the tier, the verify command and the test-impact selector identity into one opaque key
+ * component. Hashed rather than embedded so a command containing `:` cannot shift the key's
+ * field boundaries.
+ *
+ * **The third component (#958) is the SELECTOR, and it is here because it is NOT in the tree.**
+ * The impact map is committed, so rebuilding it changes `mergedTreeHash` and invalidates the memo
+ * by itself. The selector does not: `impact.mjs` is materialized into the worktree untracked, so
+ * bumping it — or changing a score floor resolved from a preference rather than written literally
+ * into `verify_script` — changes the SELECTED SET while tree, tier and verify command are all
+ * identical. Without this component that is a stale-green replay: a pass banked under a narrower
+ * old selector, reused under a wider new one.
+ *
+ * **An empty selector id APPENDS NOTHING**, and that is load-bearing rather than cosmetic. A
+ * project that does not use the selector must hash exactly the bytes it hashed before #958 —
+ * `strategy\0command`, with no trailing field — so this change churns no existing key and
+ * invalidates no banked green. Appending a bare `\0` for the absent case would have re-keyed
+ * every project on the planet to buy nothing. See `NO_SELECTOR_ID`.
+ *
+ * A PRESENT selector id appends `\0selector=<id>`.
+ *
+ * **The honest limit of that encoding**, since a wrong claim here is worse than a stated gap: it
+ * is not injective over ARBITRARY strings. `("full", "cmd\0selector=x")` and `("full", "cmd", "x")`
+ * hash the same bytes. Making it injective means length-prefixing every field, which changes the
+ * two-field hash and re-keys every project — the exact churn this component is required not to
+ * cause. The collision is accepted because reaching it needs a verify command containing a literal
+ * NUL byte: `verify_script` is a shell command line, spawned as one, and a NUL cannot survive that
+ * round-trip. The threat model here is an operator misconfiguring a gate, not an attacker choosing
+ * a preimage — and a `verifyCommand` that hostile already has far more direct routes than forging
+ * a memo key. If `verifyCommand` ever becomes attacker-controlled, length-prefix all three fields
+ * and accept the one-time re-key.
  */
 /**
  * The separator is the ESCAPE `\0`, not a literal NUL byte in the source (#682-adjacent).
@@ -60,8 +88,16 @@ const memoKey = (projectId: string, treeHash: string, verificationKey: string) =
  * the line — so every change to the merge-gate memo was unreviewable by the usual tools. The
  * escape produces the identical byte in the string at runtime.
  */
-export function gateVerificationKey(strategy: string, verifyCommand: string | null): string {
-  return createHash("sha256").update(`${strategy}\0${verifyCommand ?? ""}`).digest("hex").slice(0, 16);
+export function gateVerificationKey(
+  strategy: string,
+  verifyCommand: string | null,
+  selectorId: string | null = "",
+): string {
+  const selector = selectorId ? `\0selector=${selectorId}` : "";
+  return createHash("sha256")
+    .update(`${strategy}\0${verifyCommand ?? ""}${selector}`)
+    .digest("hex")
+    .slice(0, 16);
 }
 
 /**

@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach, afterAll } from "vitest";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -120,5 +121,62 @@ describe("tree gate memo", () => {
     // field boundaries into another project's or another tier's slot.
     expect(gateVerificationKey("full", "a:b")).not.toBe(gateVerificationKey("full", "a"));
     expect(gateVerificationKey("full", "x")).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  // ---- #958: the SELECTOR component -------------------------------------------------------
+  //
+  // The hole this closes: `treeHash` covers the impact MAP (it is committed), but not the
+  // SELECTOR, which is materialized into the worktree untracked. Bump `impact.mjs` and the
+  // selected set changes while tree, tier and verify command are all identical — a pass banked
+  // under the narrower old selector replaying under the wider new one.
+
+  it("does not reuse a pass earned under a DIFFERENT selector — the #958 stale green", () => {
+    // The ticket's first "done when", stated as the failure it prevents: without the third
+    // component both keys are `gateVerificationKey("full", "pnpm verify")` and this reads true.
+    const OLD_SELECTOR = gateVerificationKey("full", "pnpm verify", "ti1:0679b6655ff3138c17ba");
+    const NEW_SELECTOR = gateVerificationKey("full", "pnpm verify", "ti1:aaaabbbbccccddddeeee");
+    rememberTreeGatedGreen("p1", "abc123", OLD_SELECTOR);
+    expect(wasTreeGatedGreen("p1", "abc123", NEW_SELECTOR)).toBe(false);
+    // ...and is still reusable under the SAME selector, or the component would just be noise.
+    expect(wasTreeGatedGreen("p1", "abc123", OLD_SELECTOR)).toBe(true);
+  });
+
+  it("a project NOT using the selector keeps the exact key it had before #958", () => {
+    // The ticket's second "done when". This is the whole reason absence appends nothing rather
+    // than a bare separator: every banked green on every project must survive this change
+    // landing. The literal is the pre-#958 hash of `full\0pnpm verify` — if the empty case ever
+    // starts contributing bytes, this fails rather than silently invalidating every memo.
+    const preChange = createHash("sha256").update("full\0pnpm verify").digest("hex").slice(0, 16);
+    expect(gateVerificationKey("full", "pnpm verify")).toBe(preChange);
+    expect(gateVerificationKey("full", "pnpm verify", "")).toBe(preChange);
+    expect(gateVerificationKey("full", "pnpm verify", null)).toBe(preChange);
+  });
+
+  it("a selector id is not confusable with an ordinary verify command", () => {
+    // The `selector=` marker keeps the appended field distinguishable from anything a real
+    // command can end with, so a project whose verify command merely MENTIONS a selector id
+    // does not collide with one that actually pins that selector.
+    expect(gateVerificationKey("full", "cmd", "ti1:abcdef01")).not.toBe(gateVerificationKey("full", "cmd ti1:abcdef01"));
+    expect(gateVerificationKey("full", "cmd", "ti1:abcdef01")).not.toBe(gateVerificationKey("full", "cmd"));
+    expect(gateVerificationKey("full", "cmd", "ti1:abcdef01")).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it("DOCUMENTS the one accepted collision: a verify command containing a literal NUL", () => {
+    // Pinned deliberately rather than left implicit. The encoding is not injective over
+    // arbitrary strings, and making it so means length-prefixing every field — which re-keys
+    // every project, the exact churn this component must not cause. Reaching this needs a NUL
+    // inside `verify_script`, which is a shell command line and cannot carry one.
+    //
+    // If this test ever fails, the encoding changed: that is fine, but check that the
+    // "unchanged key before #958" test above still passes, because it is the one that matters.
+    expect(gateVerificationKey("full", "cmd", "ti1:abcdef01")).toBe(
+      gateVerificationKey("full", "cmd\0selector=ti1:abcdef01"),
+    );
+  });
+
+  it("the selector is independent of the tier and the command, not a substitute for either", () => {
+    const sel = "ti1:0679b6655ff3138c17ba";
+    expect(gateVerificationKey("scoped", "pnpm verify", sel)).not.toBe(gateVerificationKey("full", "pnpm verify", sel));
+    expect(gateVerificationKey("full", "pnpm test", sel)).not.toBe(gateVerificationKey("full", "pnpm verify", sel));
   });
 });

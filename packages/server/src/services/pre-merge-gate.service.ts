@@ -227,8 +227,11 @@ export async function runPreMergeGate(
   // What verification is CURRENTLY configured — resolved BEFORE the tree memo, and in
   // `pre-merge-gate-tier.ts` because that module owns the tier. See `resolveGateVerification`
   // for why the ordering is load-bearing.
+  // #958: `workingDir` is what lets the key carry the test-impact SELECTOR's identity — the one
+  // thing that changes what this gate runs while tier, verify command and merged tree all stay
+  // identical, because the skill is materialized into the worktree untracked.
   const { strategy: gateStrategy, posture: gatePosture, effectiveVerify, verifyScript, verificationKey } =
-    await resolveGateVerification(projectId, database);
+    await resolveGateVerification(projectId, database, { workingDir: workspace.workingDir });
 
   // ---- #492 tree-hash memo -----------------------------------------------------------------
   // A queue of ready branches re-ran the same suite against the same code: five branches, five
