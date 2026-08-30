@@ -24,6 +24,7 @@ import {
   buildConflictResolutionPrompt,
   buildFixAndMergePrompt,
 } from "./merge-helpers.service.js";
+import { resolveFixAndMergeFailureContext } from "./fix-and-merge-context.js";
 import { toExecutorProvider } from "./agent-settings.service.js";
 import { buildConflictContext } from "./phase-context.service.js";
 import { computeWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
@@ -595,13 +596,30 @@ export function createWorkspaceMergeService(deps: {
     if (refreshedWorkspace.status === "fixing") throw new WorkspaceError("Fix already in progress", "CONFLICT");
     if (!getSessionManager) throw new WorkspaceError("Session manager not available", "BAD_REQUEST");
 
-    const errorMessage = mergeError || "Unknown merge error";
+    // #943 — a caller that supplies no `mergeError` (the UI/skill/manual route, which has no
+    // reason to retype a failure the board already recorded) used to get the literal
+    // "Unknown merge error" handed to the agent, blinding the escape hatch in exactly the case
+    // it exists for. Recover the real failure from the record instead.
+    const failure = await resolveFixAndMergeFailureContext(
+      { workspaceId: id, issueId: refreshedWorkspace.issueId ?? null, mergeError },
+      database,
+    );
+    const errorMessage = failure.message;
+    console.log(
+      `[workspace-merge] fix-and-merge for workspace ${id}: failure kind=${failure.kind} source=${failure.source}`
+        + (failure.verifyLogPath ? ` verifyLog=${failure.verifyLogPath}` : ""),
+    );
     const { repoPath, defaultBranch } = await resolveProjectRepo(id, database);
     const baseBranch = requireBaseBranch(refreshedWorkspace.baseBranch || defaultBranch);
 
     const rebuildNote = await prepareFixAndMergeRebuildNote(id, refreshedWorkspace, repoPath, baseBranch);
 
-    const prompt = buildFixAndMergePrompt(`${errorMessage}\n\n${rebuildNote}`, baseBranch);
+    const prompt = buildFixAndMergePrompt(
+      `${errorMessage}\n\n${rebuildNote}`,
+      baseBranch,
+      failure.kind,
+      failure.verifyLogPath,
+    );
 
     const fixProjectId = await resolveProjectId(id, database);
     const { agentCommand, agentArgs, profile, provider, model } =
@@ -619,7 +637,16 @@ export function createWorkspaceMergeService(deps: {
       workspace,
       "fix-and-merge-launched",
       `Launched a fix-and-merge session for workspace ${id}.`,
-      { sessionId, mergeError: errorMessage, targetBranch: baseBranch },
+      {
+        sessionId,
+        mergeError: errorMessage,
+        targetBranch: baseBranch,
+        // #943 — where the failure text came from, so a timeline reader can tell a caller-supplied
+        // error from one recovered off the record (and spot a genuine "nothing on file" case).
+        failureKind: failure.kind,
+        failureSource: failure.source,
+        verifyLogPath: failure.verifyLogPath,
+      },
     );
 
     if (fixProjectId) boardEvents?.broadcast(fixProjectId, "session_launched");
