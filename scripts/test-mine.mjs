@@ -516,6 +516,51 @@ export function packageLabelByDir(packages = PACKAGES) {
 }
 
 /**
+ * Does a package `exclude` glob match this package-relative test path?
+ *
+ * Only the shapes those globs actually use (`**' + '/name.test.ts`), so this is a deliberately
+ * small matcher rather than a dependency: `**` spans path segments, `*` does not.
+ */
+export function matchesExcludeGlob(glob, relPath) {
+  const pattern = glob.replace(/\\/g, "/");
+  const rx = pattern
+    .split("/")
+    .map((seg) =>
+      seg === "**"
+        ? "(?:.*)"
+        : seg.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]*"),
+    )
+    .join("/")
+    // `**' + '/x` must also match a bare `x` at the root of the package.
+    .replace(/\(\?:\.\*\)\//g, "(?:.*/)?");
+  return new RegExp(`^${rx}$`).test(relPath.replace(/\\/g, "/"));
+}
+
+/**
+ * Drop the selected suites this package will not actually run, and say which.
+ *
+ * The selector ranks every test file in the repo; it knows nothing about this runner's
+ * `exclude` list (the #173 environmental exclusions — real git, docker, a spawned CLI). Handing
+ * an excluded path to vitest is not harmless in either direction:
+ *   - if OTHER selected suites survive, vitest runs those and exits 0, silently dropping the
+ *     excluded one — a green for a suite that never ran;
+ *   - if it was the only one selected for that package, vitest resolves nothing and exits 1
+ *     with a bare `No test files found`, failing the run for a suite this runner is never
+ *     allowed to run anyway.
+ * Neither is a signal about the change, so the exclusion is applied HERE, loudly.
+ */
+export function partitionExcluded({ dir, exclude }, files) {
+  const kept = [];
+  const excluded = [];
+  for (const file of files) {
+    const hit = exclude.find(({ glob }) => matchesExcludeGlob(glob, file));
+    if (hit) excluded.push({ file: `${dir}/${file}`, reason: hit.reason });
+    else kept.push(file);
+  }
+  return { kept, excluded };
+}
+
+/**
  * Turn `--format pkgfile` stdout into the `label -> [relative test file]` map `runPackage`'s
  * file modes expect.
  *
@@ -703,10 +748,11 @@ function runPackage({ dir, label, exclude }, mode = null) {
         // mode would be the 44-minute operation the whole mechanism exists to avoid.
         : mode?.kind === "flake-retry"
           ? ["run", ...mode.files]
-          // #951 impact selection: the named suites, no `--passWithNoTests`. The selector names
-          // files that exist, so an empty resolution means one is excluded in this package or the
-          // path no longer selects — vitest exits non-zero and the gate stays red, which is the
-          // correct direction for a selector that NARROWS a merge gate.
+          // #951 impact selection: the named suites, no `--passWithNoTests`. Both ways a file
+          // could resolve to nothing are handled BEFORE we get here — nonexistent paths are
+          // dropped by `existsSync`, and this package's `exclude` globs by `partitionExcluded`
+          // (which reports each one and its reason). So an empty resolution at this point is
+          // unexpected, and failing is the correct direction for a selector that NARROWS a gate.
           : mode?.kind === "impact"
             ? ["run", ...mode.files]
             : ["run"];
@@ -1090,27 +1136,64 @@ if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
       impactScope = runImpactSelector({ cli });
     }
   }
+  /** @type {{ planned: { pkg: any, files: string[] }[], total: number, namedOverall: number, excludedCount: number } | null} */
+  let impactPlan = null;
   if (impactScope) {
+    /** @type {{ file: string, reason: string }[]} */
+    const excludedSelections = [];
     const planned = toRun
-      .map((pkg) => ({
-        pkg,
-        files: (impactScope.get(pkg.label) ?? []).filter((f) => existsSync(resolve(ROOT, pkg.dir, f))),
-      }))
+      .map((pkg) => {
+        const onDisk = (impactScope.get(pkg.label) ?? []).filter((f) =>
+          existsSync(resolve(ROOT, pkg.dir, f)),
+        );
+        // The selector does not know this runner's `exclude` list, so an excluded suite would
+        // otherwise be dropped silently by vitest (green for a suite that never ran) or fail
+        // the whole package with a bare `No test files found`. Neither says anything about the
+        // change — drop it here and name it.
+        const { kept, excluded } = partitionExcluded(pkg, onDisk);
+        excludedSelections.push(...excluded);
+        return { pkg, files: kept };
+      })
       .filter((entry) => entry.files.length > 0);
+    if (excludedSelections.length > 0) {
+      console.warn(
+        `[test:mine] the selector named ${excludedSelections.length} suite(s) this runner excludes ` +
+          `— NOT run here (they run in \`pnpm test:full\`):\n` +
+          excludedSelections.map(({ file, reason }) => `  - ${file} — ${reason}`).join("\n"),
+      );
+    }
     const total = planned.reduce((n, entry) => n + entry.files.length, 0);
     const namedOverall = [...impactScope.values()].reduce((n, files) => n + files.length, 0);
+    impactPlan = { planned, total, namedOverall, excludedCount: excludedSelections.length };
+    if (total === 0) {
+      // Everything the selector named is excluded here or outside the package scope. Running
+      // only the guards and reporting a green would assert nothing about the change, so this
+      // fails open the same way an empty selection does.
+      console.warn(
+        `[test:mine] impact selection left 0 runnable suite(s) after exclusions and package ` +
+          `scope — falling back to \`vitest related\`.`,
+      );
+      impactScope = null;
+    }
+  }
+  if (impactScope) {
+    const { planned, total, namedOverall, excludedCount } = impactPlan;
     console.log(
       `\n[test:mine] impact-scoped to ${total} suite(s) across ${planned.length} package(s) ` +
         `(KANBAN_TEST_SELECTOR=impact, --min-score ${impactMinScore}); ` +
         `the @gate:always-run guards run on top, per package.`,
     );
-    if (total < namedOverall) {
+    // Excluded suites are already reported above with their reason, so they are not also
+    // blamed on the package scope — otherwise this line tells the operator to widen
+    // KANBAN_TEST_PACKAGES for a suite that would still not run.
+    const outOfScope = namedOverall - total - excludedCount;
+    if (outOfScope > 0) {
       // Never let "the selector picked suites, but KANBAN_TEST_PACKAGES excludes their package"
       // read as a clean narrow run. It is the same class of quiet gap as an empty selection.
       console.warn(
         `[test:mine] the selector named ${namedOverall} suite(s) but only ${total} are in the ` +
-          `packages currently in scope (${toRun.map((p) => p.label).join(", ")}) — the rest are ` +
-          `NOT being run. Widen KANBAN_TEST_PACKAGES if that is not intended.`,
+          `packages currently in scope (${toRun.map((p) => p.label).join(", ")}) — ${outOfScope} ` +
+          `are NOT being run. Widen KANBAN_TEST_PACKAGES if that is not intended.`,
       );
     }
     for (const { pkg, files } of planned) {
