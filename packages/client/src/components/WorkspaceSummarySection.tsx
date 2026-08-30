@@ -7,6 +7,7 @@ import { groupConflictsByRepo, formatConflictSummary } from "../lib/groupConflic
 import { MultirepoHealthPill } from "./MultirepoHealthPill.js";
 import { useNow } from "../hooks/usePoll.js";
 import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-liveness";
+import { deriveWorkspaceCardState } from "../lib/workspaceCardState.js";
 import { Icon } from "./Icon.js";
 
 function RelativeTime({ timestamp, prefix = "" }: { timestamp: string; prefix?: string }) {
@@ -26,51 +27,36 @@ export function WorkspaceSummarySection(props: {
   // its narrowing inside the click handler and idle-badge closures below —
   // matching the original `const ws = issue.workspaceSummary` in IssueCardBody.
   const { issue, ws, compact, liveActivity, liveStats, onWorkspaceClick } = props;
+  // #944 — surface tint, dot and label used to be two separate if-chains here that had to
+  // stay in the same order to agree. They are one pure decision now; precedence (a running
+  // merge gate outranks everything) lives with it. See lib/workspaceCardState.ts.
+  const cardState = ws?.main ? deriveWorkspaceCardState(ws.main) : null;
   return (
     <>
-      {!compact && ws && ws.main && (
+      {!compact && ws && ws.main && cardState && (
         <div
-          className={`group/ws flex min-w-0 flex-wrap items-center gap-1.5 mt-1.5 text-xs cursor-pointer rounded px-1 py-1 -mx-1 border-t transition-colors overflow-hidden ${
-            ws.main.status === "reviewing" ? "border-accent-200 bg-accent-50 hover:bg-accent-100 dark:border-accent-700 dark:bg-accent-900/40" :
-            ws.main.status === "fixing" ? "border-orange-100 bg-orange-50 hover:bg-orange-100" :
-            ws.main.status === "awaiting-plan-approval" ? "border-amber-200 bg-amber-50 hover:bg-amber-100" :
-            ws.main.conflicts?.hasConflicts ? "border-red-100 bg-red-50 hover:bg-red-100" :
-            "border-brand-100 bg-brand-50 hover:bg-brand-100 hover:border-brand-200"
-          }`}
+          className={`group/ws flex min-w-0 flex-wrap items-center gap-1.5 mt-1.5 text-xs cursor-pointer rounded px-1 py-1 -mx-1 border-t transition-colors overflow-hidden ${cardState.surfaceClass}`}
           title="Open workspace"
           onClick={(e) => { e.stopPropagation(); onWorkspaceClick?.(issue, ws.main?.id); }}
         >
-          {ws.main.status === "reviewing" ? (
+          <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${cardState.dotClass} ${cardState.pulse ? "animate-pulse" : ""}`} />
+          {cardState.label !== null ? (
             <>
-              <span className="inline-block w-2 h-2 rounded-full shrink-0 bg-accent-500 animate-pulse" />
-              <span className="min-w-0 truncate font-medium text-accent-700 dark:text-accent-300">AI Reviewing</span>
-              {ws.main.workflow && <WorkflowMiniIndicator workflow={ws.main.workflow} />}
-            </>
-          ) : ws.main.status === "fixing" ? (
-            <>
-              <span className="inline-block w-2 h-2 rounded-full shrink-0 bg-orange-500 animate-pulse" />
-              <span className="min-w-0 truncate font-medium text-orange-700">AI Fixing Conflicts</span>
-              {ws.main.workflow && <WorkflowMiniIndicator workflow={ws.main.workflow} />}
-            </>
-          ) : ws.main.status === "awaiting-plan-approval" ? (
-            <>
-              <span className="inline-block w-2 h-2 rounded-full shrink-0 bg-amber-500" />
-              <span className="min-w-0 truncate font-medium text-amber-700">Plan Awaiting Approval</span>
-              {ws.main.workflow && <WorkflowMiniIndicator workflow={ws.main.workflow} />}
-            </>
-          ) : ws.main.conflicts?.hasConflicts ? (
-            <>
-              <span className="inline-block w-2 h-2 rounded-full shrink-0 bg-red-500" />
-              <span className="min-w-0 truncate font-medium text-red-700">Merge Conflicts</span>
+              <span
+                className={`min-w-0 truncate font-medium ${cardState.labelClass}`}
+                title={cardState.labelTitle ?? undefined}
+              >
+                {cardState.label}
+              </span>
+              {/* A gate label takes the slot the branch name normally occupies, but the branch
+                  is how you tell two gating workspaces apart — keep it, demoted. */}
+              {cardState.kind === "gate" && (
+                <span className="min-w-0 shrink font-mono text-[10px] text-gray-500 dark:text-gray-400 truncate">{ws.main.branch}</span>
+              )}
               {ws.main.workflow && <WorkflowMiniIndicator workflow={ws.main.workflow} />}
             </>
           ) : (
             <>
-              <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${
-                ws.main.status === "active" ? "bg-green-500" :
-                ws.main.status === "idle" ? "bg-amber-500" :
-                "bg-gray-400"
-              }`} />
               <span className="min-w-0 flex-1 basis-24 font-mono text-gray-600 dark:text-gray-400 truncate">{ws.main.branch}</span>
               {ws.main.workflow && <WorkflowMiniIndicator workflow={ws.main.workflow} />}
               {ws.main.status === "idle" && liveActivity && (() => {

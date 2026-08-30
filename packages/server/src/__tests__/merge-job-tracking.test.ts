@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   completeMergeJob,
   describeMergeJobAttempts,
@@ -8,10 +8,16 @@ import {
   MERGE_JOB_ZOMBIE_AFTER_MS,
   noteMergeGateAttemptFinished,
   noteMergeGateAttemptStarted,
+  peekMergeJob,
   resetMergeJobs,
   setMergeGateLivenessProbe,
   startMergeJob,
 } from "../services/merge-job.service.js";
+import { deriveGateActivity } from "@agentic-kanban/shared/lib/gate-activity";
+import {
+  flushSummaryWriteThroughs,
+  setSummaryWriteThroughListener,
+} from "../services/summary-write-through-notifier.js";
 
 /**
  * The point of this registry is that a merge's verdict outlives the HTTP request that started
@@ -359,5 +365,116 @@ describe("merge job zombie detection measures liveness (#936)", () => {
     expect(error).toContain("no gate process is running");
     expect(error).toContain("gate attempt(s) recorded");
     expect(error).not.toContain("no completion");
+  });
+
+  /**
+   * #944 — the board's card render reads the job for EVERY workspace, on every rebuild (a WS
+   * broadcast, the 30s poll, a second tab). Routing that through `getMergeJob` would make an
+   * incidental refresh the thing that declares a merge dead, at whatever moment a rebuild
+   * happened to land. Failing a merge is a decision; `peekMergeJob` is the display read.
+   */
+  describe("peekMergeJob (display-only read)", () => {
+    it("returns the job without transitioning a zombie", () => {
+      setMergeGateLivenessProbe(() => false);
+      const longAgo = new Date(Date.now() - (MERGE_JOB_ZOMBIE_AFTER_MS + 60_000)).toISOString();
+      startMergeJob("ws-peek", longAgo);
+
+      // Still `running` after the peek — the peek wrote nothing.
+      expect(peekMergeJob("ws-peek")?.state).toBe("running");
+      expect(peekMergeJob("ws-peek")?.state).toBe("running");
+
+      // And the authoritative read still heals it, so the endpoint is unaffected.
+      expect(getMergeJob("ws-peek")?.state).toBe("failed");
+    });
+
+    it("is null for an unknown workspace", () => {
+      expect(peekMergeJob("ws-never-merged")).toBeNull();
+    });
+
+    it("feeds deriveGateActivity, which renders an un-healed zombie as `stalled`", () => {
+      setMergeGateLivenessProbe(() => false);
+      const longAgo = new Date(Date.now() - (MERGE_JOB_ZOMBIE_AFTER_MS + 60_000)).toISOString();
+      startMergeJob("ws-peek-render", longAgo);
+
+      // The honest report of what this process knows — same conclusion an operator needs,
+      // without writing the failure down as a side effect of drawing a card.
+      expect(deriveGateActivity(peekMergeJob("ws-peek-render"))?.phase).toBe("stalled");
+    });
+  });
+
+  /**
+   * #944 — `gateActivity` is derived from THIS in-memory map and nothing else. No DB row moves
+   * between a merge starting and finishing (there is no `merging` workspace status) and no
+   * `boardEvents.broadcast()` fires, so without an explicit notification the merge lifecycle
+   * sits entirely outside the board's invalidation graph — and `boardEtagCache.tryServe`
+   * answers a conditional GET with a 304 WITHOUT rebuilding the board for as long as the
+   * generation is unchanged (15-minute hard cap). On an otherwise quiet board that means a
+   * merge starts and every card keeps its pre-merge `idle` dot for minutes: the exact
+   * "working hard looks identical to abandoned" confusion this ticket exists to remove.
+   */
+  describe("gate-activity transitions invalidate the board summary cache", () => {
+    const notified: string[] = [];
+
+    beforeEach(async () => {
+      notified.length = 0;
+      setSummaryWriteThroughListener((ids) => { notified.push(...ids); });
+    });
+
+    afterEach(async () => {
+      await flushSummaryWriteThroughs();
+      setSummaryWriteThroughListener(null);
+    });
+
+    it("notifies on every transition that changes what the card renders", async () => {
+      // null -> "merging"
+      const job = startMergeJob("ws-notify");
+      await flushSummaryWriteThroughs();
+      expect(notified).toContain("ws-notify");
+
+      // "merging" -> "verifying"
+      notified.length = 0;
+      const attempt = noteMergeGateAttemptStarted("ws-notify", "pre-lock-merge");
+      await flushSummaryWriteThroughs();
+      expect(notified).toContain("ws-notify");
+
+      // "verifying" -> "merging", carrying the attempt's verdict into the tooltip
+      notified.length = 0;
+      noteMergeGateAttemptFinished("ws-notify", attempt, { outcome: "discarded", detail: "base tip moved" });
+      await flushSummaryWriteThroughs();
+      expect(notified).toContain("ws-notify");
+
+      // running -> finished, i.e. the badge must DISAPPEAR
+      notified.length = 0;
+      completeMergeJob(job.jobId, "ws-notify", { merged: true });
+      await flushSummaryWriteThroughs();
+      expect(notified).toContain("ws-notify");
+    });
+
+    it("notifies when a FAILED merge clears the badge — that path broadcasts nothing itself", async () => {
+      const job = startMergeJob("ws-notify-fail");
+      await flushSummaryWriteThroughs();
+      notified.length = 0;
+
+      failMergeJob(job.jobId, "ws-notify-fail", new Error("pre-merge gate failed"));
+      await flushSummaryWriteThroughs();
+      // Otherwise a "Verifying" badge outlives the merge it describes — a worse lie than the
+      // amber dot it replaced, because it asserts work that has stopped.
+      expect(notified).toContain("ws-notify-fail");
+    });
+
+    it("does not notify for a no-op attempt finish (a handle whose job was replaced)", async () => {
+      const first = startMergeJob("ws-notify-stale");
+      const staleHandle = noteMergeGateAttemptStarted("ws-notify-stale", "pre-lock-merge");
+      completeMergeJob(first.jobId, "ws-notify-stale", { merged: true });
+      startMergeJob("ws-notify-stale");
+      await flushSummaryWriteThroughs();
+      notified.length = 0;
+
+      // The late finisher addresses a job that no longer exists — it writes nothing, so it
+      // must not claim the card changed either.
+      noteMergeGateAttemptFinished("ws-notify-stale", staleHandle, { outcome: "passed" });
+      await flushSummaryWriteThroughs();
+      expect(notified).not.toContain("ws-notify-stale");
+    });
   });
 });
