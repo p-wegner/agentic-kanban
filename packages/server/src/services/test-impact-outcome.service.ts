@@ -1,0 +1,393 @@
+/**
+ * Record every pre-merge gate run into the test-impact outcome ledger (#954).
+ *
+ * WHY THIS EXISTS. The test-impact scorer's weights are all reasoned defaults, and nothing has
+ * ever been recorded against them, so **the miss rate is unknown** — a miss being a failure the
+ * gate found in a suite the selection would not have picked. Until that number exists, narrowing
+ * the gate on the strength of the selection is a guess and `build --tune` has nothing to fit
+ * against. The gate is the one place in the system that already knows BOTH halves of an
+ * observation: what it ran, and what failed. This turns that into a ledger row.
+ *
+ * WHAT MAKES A ROW WORTH ANYTHING. Only a run whose scope is WIDER than the selection can witness
+ * a miss; a run narrowed to the selection cannot, even in principle, find what the selection
+ * omitted. So each row carries `ran` (what the gate actually executed) alongside `tier` (what the
+ * selection would have been), and `impact.mjs stats` computes the miss rate over the witnesses
+ * only. A full-suite gate run is therefore the ideal observation, and this records on EVERY gate
+ * run — pass and fail, full and scoped — because a scoped row still measures selection SIZE and
+ * still feeds the failure-history signal, it just does not vote on the miss rate.
+ *
+ * WHERE THE LEDGER LIVES (decided on #954). `.test-impact/outcomes.jsonl`, gitignored and local —
+ * per machine, lost on a fresh clone, not shared with CI. On a single-machine board that is where
+ * the gate runs anyway. It must be IGNORED rather than merely untracked: an untracked-but-not-
+ * ignored file in the main checkout is exactly the shape that blocks every subsequent merge via
+ * `getDirtyMainFiles`.
+ *
+ * The subtlety is WHICH repo's file. The gate runs in a WORKTREE, and the selection must be
+ * computed there (that is where the branch's diff and HEAD are). But a ledger written into a
+ * worktree dies with the worktree, so it could never accumulate the ~50 runs a miss rate needs.
+ * So: `select` runs in the worktree, and both commands write to the MAIN checkout's ledger via
+ * `impact.mjs --outcomes <abs path>`. One ledger per project, fed by every worktree's gate.
+ *
+ * BEST-EFFORT BY CONSTRUCTION. Nothing here may change a gate verdict. Every failure path — no
+ * skill materialized, no inventory built, a non-zero exit, a spawn error, a timeout — resolves to
+ * a `skipped` result with a reason and is never rethrown. A measurement apparatus that can withhold
+ * a merge is worse than no measurement.
+ */
+import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import type { GateTierInfo } from "./pre-merge-gate-tier.js";
+
+/**
+ * Path of `impact.mjs` relative to a repo root, as the board materializes the skill into a
+ * worktree (`.claude/skills/<name>/`) and as the plugin junctions it into a leading repo.
+ */
+export const IMPACT_TOOL_RELATIVE_PATH = ".claude/skills/test-impact/tools/impact.mjs";
+
+/** The ledger, relative to the repo root that owns it. Matches `impact.mjs`'s own default. */
+export const OUTCOMES_RELATIVE_PATH = ".test-impact/outcomes.jsonl";
+
+/**
+ * Wall-clock ceiling for each of the two spawns.
+ *
+ * `select` reads a committed inventory and a bounded slice of git history; on this repo it is a
+ * sub-second query. The budget is generous rather than tight because the only thing a timeout can
+ * buy is a lost measurement — but it must exist, since this runs inside the merge path and an
+ * `impact.mjs` that hangs must not hold a gate open.
+ */
+export const IMPACT_COMMAND_TIMEOUT_MS = 60_000;
+
+/**
+ * What the gate ACTUALLY ran, in the vocabulary the ledger's miss-rate computation understands.
+ *
+ * `full` is the only value that makes a row a witness — it is the claim "every suite ran, so any
+ * failure here is comparable against the selection". The narrower names are deliberately NOT
+ * collapsed into one "scoped": which narrowing applied is what a later reader needs in order to
+ * judge how much the row proves.
+ */
+export type GateRanScope = "full" | "package-scoped" | "file-scoped" | "guards-only";
+
+/**
+ * Which scope the verify run actually had.
+ *
+ * Read off the SAME `GateTierInfo` the gate's own pass message is built from, so the ledger and
+ * the operator-facing message can never disagree about what ran. Order matters: guards-only is
+ * the narrowest and wins, then file-scoping, then package-scoping. A tier that narrowed nothing
+ * is `full` — which is exactly the `buildGateTierMessage` rule that a strategy claiming to scope
+ * but performing no narrowing must report "full", never a narrower name.
+ */
+export function gateRanScope(tierInfo: GateTierInfo | null | undefined): GateRanScope {
+  if (!tierInfo) return "full";
+  if (tierInfo.guardsOnly) return "guards-only";
+  if (tierInfo.fileScoped) return "file-scoped";
+  if (tierInfo.packageScoped) return "package-scoped";
+  return "full";
+}
+
+export interface RecordGateOutcomeInput {
+  /** The worktree the gate ran in — where the diff, HEAD and the materialized skill live. */
+  workingDir: string | null;
+  /**
+   * The project's MAIN checkout. The ledger lives here so it survives worktree deletion and
+   * accumulates across every branch. When null (unknown repo path) the worktree's own ledger is
+   * used, which still records but will not accumulate — reported in the reason so it is visible.
+   */
+  repoPath: string | null;
+  /** Did the gate's verify stage pass? */
+  passed: boolean;
+  /** The suites that failed, as `failedSuitesForOutcome`/`parseFailedSuites` name them. */
+  failedSuites: string[];
+  /** The tier info the gate built — the single source of truth for what actually ran. */
+  tierInfo: GateTierInfo | null;
+  /** Tags the row's origin. The board's gate is `ci`: it is the automated gate, not a dev loop. */
+  source?: string;
+  /** Injected for tests. */
+  runCommand?: RunImpactCommand;
+  log?: (message: string) => void;
+}
+
+export interface RecordGateOutcomeResult {
+  recorded: boolean;
+  /** Why nothing was recorded, when `recorded` is false. Always set in that case. */
+  reason?: string;
+  /** The selection tier `select` reported (`impact` | `package` | `all`), when it ran. */
+  tier?: string;
+  /** How many test files the selection would have picked. */
+  selectedCount?: number;
+  /** What the gate ran, as recorded. */
+  ran?: GateRanScope;
+}
+
+/**
+ * Just the field a ledger row needs off a failed suite.
+ *
+ * Structural rather than an import of `FailedSuite`, because the ledger deliberately uses only
+ * `file` — the un-prefixed path — and naming that in the type is what stops a later reader from
+ * "helpfully" folding `packageLabel` in, which would break the string match against `select`'s
+ * repo-relative test names and turn every failure into a phantom miss.
+ */
+export interface FailedSuiteLike {
+  /** Suite path as vitest printed it: relative to the PACKAGE dir, since that is its cwd. */
+  file: string;
+  /**
+   * The package whose vitest run reported the failure (`server`, `client`, `shared`,
+   * `mcp-server`), or null when the output gave no package context.
+   *
+   * REQUIRED to build a comparable name — see `repoRelativeSuitePath`. This is the field the
+   * whole miss computation turns on, not an incidental one.
+   */
+  packageLabel?: string | null;
+}
+
+/**
+ * Turn a `FailedSuite` into the SAME vocabulary `select` names tests in: a repo-relative path.
+ *
+ * This is the join that makes the ledger mean anything, and getting it wrong is silent. vitest
+ * runs with the PACKAGE as its cwd, so it prints `src/__tests__/x.test.ts`; the inventory keys —
+ * and therefore every entry in `select --json`'s `selected` — are repo-relative
+ * (`packages/server/src/__tests__/x.test.ts`). `impact.mjs record` computes
+ * `missed = failed.filter((f) => !selected.includes(f))`, a pure STRING comparison, so handing it
+ * the package-relative form makes a failure in a suite that WAS selected read as a miss. Every
+ * failing run would then report a 100% miss rate — the exact number this ledger exists to
+ * measure, wrong in the direction that makes the selection look worthless.
+ *
+ * A suite with no `packageLabel` cannot be placed: the same relative path exists under several
+ * packages, so guessing would name a real-but-different file. Such a suite is DROPPED rather than
+ * recorded unattributed — a name that cannot match is indistinguishable from a genuine miss, and
+ * a phantom miss is worse than a missing observation.
+ */
+export function repoRelativeSuitePath(suite: FailedSuiteLike): string | null {
+  const file = suite.file.replace(/\\/g, "/").replace(/^\.\//, "");
+  if (!suite.packageLabel) return null;
+  // Already repo-relative (a root-level suite, or a runner that printed the full path).
+  if (file.startsWith("packages/") || file.startsWith(".claude/")) return file;
+  return `packages/${suite.packageLabel}/${file}`;
+}
+
+export type RunImpactCommand = (input: {
+  cwd: string;
+  args: string[];
+  timeoutMs: number;
+}) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
+
+const defaultRunCommand: RunImpactCommand = ({ cwd, args, timeoutMs }) =>
+  new Promise((resolvePromise) => {
+    execFile(
+      process.execPath,
+      args,
+      { cwd, timeout: timeoutMs, windowsHide: true, maxBuffer: 32 * 1024 * 1024 },
+      (error, stdout, stderr) => {
+        // Never reject: a spawn failure is a lost measurement, not a gate outcome. The exit code
+        // carries the distinction the caller needs, and `error.code` is a number only when the
+        // process actually ran and exited non-zero.
+        const exitCode =
+          error && typeof (error as { code?: unknown }).code === "number"
+            ? ((error as { code: number }).code)
+            : error
+              ? 1
+              : 0;
+        resolvePromise({ exitCode, stdout: String(stdout ?? ""), stderr: String(stderr ?? "") });
+      },
+    );
+  });
+
+/**
+ * The `select --json` payload, narrowed to what a ledger row needs.
+ *
+ * Deliberately tolerant: this parses the output of a TOOL that lives outside this package (the
+ * skill is materialized into worktrees and updated independently), so an unexpected shape must
+ * degrade to "no measurement" rather than throw inside the merge path.
+ */
+interface SelectPayload {
+  tier?: unknown;
+  selected?: unknown;
+}
+
+function parseSelection(stdout: string): { tier: string; selected: string[] } | null {
+  let payload: SelectPayload;
+  try {
+    payload = JSON.parse(stdout) as SelectPayload;
+  } catch {
+    return null;
+  }
+  if (!payload || typeof payload !== "object" || !Array.isArray(payload.selected)) return null;
+  const selected = payload.selected
+    .map((entry) => (entry && typeof entry === "object" ? (entry as { test?: unknown }).test : entry))
+    .filter((test): test is string => typeof test === "string" && test.length > 0);
+  return { tier: typeof payload.tier === "string" ? payload.tier : "unknown", selected };
+}
+
+/**
+ * Build the argv for `impact.mjs record`.
+ *
+ * Pure and exported so the flag wiring — the part that silently produces a useless row when it is
+ * wrong — is a table test rather than something only an end-to-end gate run would catch.
+ *
+ * `--selected` is omitted when the selection is empty, because `record` treats an empty selection
+ * as "no selection recorded" and computes no misses from it. Passing `--selected ""` would look
+ * like a selection of nothing and make every failure read as a miss.
+ */
+export function buildRecordArgs(input: {
+  toolPath: string;
+  outcomesPath: string;
+  passed: boolean;
+  selected: string[];
+  failedSuites: string[];
+  tier: string;
+  ran: GateRanScope;
+  source: string;
+}): string[] {
+  const args = [
+    input.toolPath,
+    "record",
+    "--result",
+    input.passed ? "pass" : "fail",
+    "--source",
+    input.source,
+    "--tier",
+    input.tier,
+    "--ran",
+    input.ran,
+    "--outcomes",
+    input.outcomesPath,
+  ];
+  if (input.selected.length > 0) args.push("--selected", input.selected.join(","));
+  if (input.failedSuites.length > 0) args.push("--failed", input.failedSuites.join(","));
+  return args;
+}
+
+/**
+ * Record one gate run. Resolves to a `skipped` result rather than throwing, always.
+ */
+export async function recordGateOutcome(input: RecordGateOutcomeInput): Promise<RecordGateOutcomeResult> {
+  const log = input.log ?? ((message: string) => console.warn(`[test-impact] ${message}`));
+  const run = input.runCommand ?? defaultRunCommand;
+  const source = input.source ?? "ci";
+  try {
+    const workingDir = input.workingDir;
+    if (!workingDir) return { recorded: false, reason: "no worktree — nothing to compute a selection from" };
+    const toolPath = join(workingDir, IMPACT_TOOL_RELATIVE_PATH);
+    if (!existsSync(toolPath)) {
+      // The overwhelmingly common case for any project that does not use this skill. Not a
+      // warning-worthy event, so the caller logs nothing for it.
+      return { recorded: false, reason: `no test-impact tool at ${IMPACT_TOOL_RELATIVE_PATH}` };
+    }
+    // The main checkout owns the ledger; fall back to the worktree only when the repo path is
+    // unknown, and say so — a worktree-local ledger records but never accumulates.
+    const ledgerRoot = input.repoPath ?? workingDir;
+    const outcomesPath = resolve(ledgerRoot, OUTCOMES_RELATIVE_PATH);
+
+    const selection = await run({
+      cwd: workingDir,
+      args: [toolPath, "select", "--json", "--always-run"],
+      timeoutMs: IMPACT_COMMAND_TIMEOUT_MS,
+    });
+    if (selection.exitCode !== 0) {
+      // `select` exits 2 with no inventory and 3 with an empty one — both mean "this repo has no
+      // usable map yet", which is a missing prerequisite, not a gate problem.
+      return {
+        recorded: false,
+        reason: `select exited ${selection.exitCode}: ${(selection.stderr || selection.stdout).trim().split("\n").slice(-1)[0] ?? ""}`,
+      };
+    }
+    const parsed = parseSelection(selection.stdout);
+    if (!parsed) return { recorded: false, reason: "could not parse `select --json` output" };
+
+    const ran = gateRanScope(input.tierInfo);
+    const record = await run({
+      cwd: workingDir,
+      args: buildRecordArgs({
+        toolPath,
+        outcomesPath,
+        passed: input.passed,
+        selected: parsed.selected,
+        failedSuites: input.failedSuites,
+        tier: parsed.tier,
+        ran,
+        source,
+      }),
+      timeoutMs: IMPACT_COMMAND_TIMEOUT_MS,
+    });
+    if (record.exitCode !== 0) {
+      return { recorded: false, reason: `record exited ${record.exitCode}: ${(record.stderr || record.stdout).trim()}` };
+    }
+    if (!input.repoPath) {
+      log(`recorded a gate outcome into the WORKTREE ledger at ${outcomesPath} — the project's repo path is unknown, so this row will be lost with the worktree`);
+    }
+    return { recorded: true, tier: parsed.tier, selectedCount: parsed.selected.length, ran };
+  } catch (err) {
+    // The whole point of this module is that it cannot affect a merge. Anything unanticipated
+    // lands here.
+    return { recorded: false, reason: `unexpected error: ${errorMessage(err)}` };
+  }
+}
+
+/**
+ * The pre-merge gate's adapter onto `recordGateOutcome`: turn one resolved verify outcome into a
+ * ledger row, and report what happened.
+ *
+ * Lives here rather than in `pre-merge-gate.service.ts` because that file is ON the god-module
+ * gate's 1000-line hard ceiling, and this is a self-contained side effect that the gate only
+ * needs to call — the same reason `verify-retry-strategies.ts` and `pre-merge-gate-tier.ts` were
+ * extracted out of it.
+ *
+ * ONE KIND OF RUN IS DELIBERATELY NOT RECORDED, because a row for it would be a lie: a **timeout
+ * or no-progress kill** is inconclusive by contract (#192/#903) — the run was cut off, so it is
+ * neither a pass nor evidence that the code failed, and it never observed the suites after the
+ * cut. Recording it as `fail` would attribute a machine event to the diff; as `pass`, worse.
+ *
+ * A failure that named NO suite (a compile error, a crashed runner) DOES record — as a `fail`
+ * with an empty failed set, which is the honest shape: something broke, no suite can be blamed,
+ * and it contributes no miss either way.
+ *
+ * Suite names are REPO-RELATIVE, because that is the vocabulary `select` names tests in and
+ * `record`'s miss computation is a plain string comparison against it. vitest prints them
+ * package-relative (its cwd is the package), so `repoRelativeSuitePath` performs the join; a
+ * suite that cannot be attributed to a package is dropped rather than recorded under a name that
+ * could never match. See that function for why the alternative silently reports a 100% miss rate.
+ */
+export async function recordVerifyGateOutcome(args: {
+  workspaceId: string;
+  workingDir: string;
+  repoPath: string | null;
+  /**
+   * Structurally the `VerifyOutcome` the gate resolved. Only `failure === null` (the verdict),
+   * `failure.timedOut` (inconclusive) and `failedSuites` are read; `message` is accepted so a real
+   * `VerifyFailure` satisfies this without a cast.
+   */
+  outcome: { failure: { timedOut?: boolean; message?: string } | null; failedSuites: FailedSuiteLike[] };
+  tierInfo: GateTierInfo | null;
+  runCommand?: RunImpactCommand;
+  log?: (message: string) => void;
+}): Promise<RecordGateOutcomeResult> {
+  const { workspaceId, outcome } = args;
+  const log = args.log ?? ((message: string) => console.warn(`[test-impact] ${message}`));
+  if (outcome.failure?.timedOut) {
+    return { recorded: false, reason: "the run timed out or was killed — inconclusive, so it is not an observation" };
+  }
+  const passed = outcome.failure === null;
+  const result = await recordGateOutcome({
+    workingDir: args.workingDir,
+    repoPath: args.repoPath,
+    passed,
+    failedSuites: outcome.failedSuites
+      .map(repoRelativeSuitePath)
+      .filter((file): file is string => file !== null),
+    tierInfo: args.tierInfo,
+    source: "ci",
+    runCommand: args.runCommand,
+    log,
+  });
+  if (result.recorded) {
+    console.log(
+      `[test-impact] recorded gate outcome for workspace ${workspaceId}: ${passed ? "pass" : "fail"}, ` +
+        `ran ${result.ran}, selection tier ${result.tier} would have picked ${result.selectedCount} test file(s)`,
+    );
+  } else if (result.reason && !result.reason.startsWith("no test-impact tool")) {
+    // A project without the skill is the overwhelmingly common case and says nothing. Anything
+    // else means the measurement was ATTEMPTED and lost, which is worth exactly one line.
+    log(`no outcome recorded for workspace ${workspaceId}: ${result.reason}`);
+  }
+  return result;
+}
