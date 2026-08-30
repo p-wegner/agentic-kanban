@@ -22,6 +22,7 @@
  */
 
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { notifySummaryWriteThrough } from "./summary-write-through-notifier.js";
 
 export type MergeJobState = "running" | "succeeded" | "failed";
 
@@ -136,6 +137,28 @@ function evictIfNeeded(): void {
   }
 }
 
+/**
+ * Bump the board's cache generation because this workspace's {@link GateActivity} just changed
+ * (#944).
+ *
+ * Since #944 the board card renders `gateActivity`, which is derived from THIS map and from
+ * nothing else — no DB row moves between a merge starting and finishing (there is no `merging`
+ * workspace status), and no `boardEvents.broadcast()` fires either. So without this call the
+ * merge lifecycle is entirely outside the invalidation graph, and
+ * `boardEtagCache.tryServe` answers a conditional GET with a 304 — WITHOUT rebuilding the board
+ * — for as long as the generation is unchanged, up to its 15-minute hard cap. On an otherwise
+ * quiet board that means a merge starts and every card keeps the pre-merge `idle` dot for
+ * minutes: precisely the "working hard looks identical to abandoned" confusion #944 exists to
+ * remove, reintroduced one layer down.
+ *
+ * This is the same seam and the same failure mode G13 built the notifier for — a board-visible
+ * value mutated outside `boardEvents`. It debounces (500ms) and is best-effort, which is the
+ * right weight for a display field.
+ */
+function notifyGateActivityChanged(workspaceId: string): void {
+  notifySummaryWriteThrough(workspaceId);
+}
+
 /** Record that a merge has started for this workspace, replacing any previous record. */
 export function startMergeJob(workspaceId: string, nowIso = new Date().toISOString()): MergeJob {
   const job: MergeJob = {
@@ -148,6 +171,8 @@ export function startMergeJob(workspaceId: string, nowIso = new Date().toISOStri
     lastActivityAt: nowIso,
   };
   jobsByWorkspace.set(workspaceId, job);
+  // null -> "merging": the card's biggest single change, and the one nothing else announces.
+  notifyGateActivityChanged(workspaceId);
   return job;
 }
 
@@ -187,6 +212,8 @@ export function noteMergeGateAttemptStarted(
   job.attempts.push(attempt);
   job.attemptCount = job.attempts.length;
   job.lastActivityAt = nowIso;
+  // "merging"/"stalled" -> "verifying", and the attempt number in the label.
+  notifyGateActivityChanged(workspaceId);
   return { jobId: job.jobId, attempt: attempt.attempt };
 }
 
@@ -215,6 +242,8 @@ export function noteMergeGateAttemptFinished(
   if (patch.detail) attempt.detail = patch.detail;
   if (patch.stage) attempt.stage = patch.stage;
   job.lastActivityAt = nowIso;
+  // "verifying" -> "merging", and a discarded/failed attempt's reason enters the tooltip.
+  notifyGateActivityChanged(workspaceId);
 }
 
 function finish(jobId: string, workspaceId: string, patch: Partial<MergeJob>): void {
@@ -236,6 +265,11 @@ function finish(jobId: string, workspaceId: string, patch: Partial<MergeJob>): v
   if (previous !== -1) finishedOrder.splice(previous, 1);
   finishedOrder.push(workspaceId);
   evictIfNeeded();
+  // running -> finished, i.e. `gateActivity` goes back to null and the badge must DISAPPEAR.
+  // A successful merge broadcasts on its own afterwards, but a failed one does not reliably
+  // (the HTTP path's failure branch broadcasts nothing), which would leave a "Verifying" badge
+  // on a merge that stopped — the one lie worse than the amber dot #944 replaced.
+  notifyGateActivityChanged(workspaceId);
 }
 
 /** Mark a merge job succeeded, retaining its result for later polling. */
