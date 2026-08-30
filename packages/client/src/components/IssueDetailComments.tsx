@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import { formatRelativeTime } from "../lib/formatRelativeTime.js";
 import { normalizeMarkdown } from "../lib/artifact-utils.js";
+import { markdownUrlTransform } from "../lib/markdownUrlTransform.js";
 import type { IssueComment, IssueCommentKind } from "@agentic-kanban/shared";
 import { Icon } from "./Icon.js";
 
@@ -95,7 +96,7 @@ export function IssueDetailComments({
                   <span className="text-gray-400 dark:text-gray-500 ml-auto">{formatRelativeTime(cmt.createdAt)}</span>
                 </div>
                 <div className="markdown-body text-sm">
-                  <ReactMarkdown>{normalizeMarkdown(cmt.body)}</ReactMarkdown>
+                  <ReactMarkdown urlTransform={markdownUrlTransform}>{normalizeMarkdown(cmt.body)}</ReactMarkdown>
                 </div>
                 {cmt.kind === "merge-attempt" && (() => {
                   const payload = mergeAttemptPayload(cmt.payload);
@@ -158,7 +159,7 @@ export function IssueDetailComments({
                     </button>
                   </div>
                   <div className="markdown-body text-sm">
-                    <ReactMarkdown>{normalizeMarkdown(cmt.body)}</ReactMarkdown>
+                    <ReactMarkdown urlTransform={markdownUrlTransform}>{normalizeMarkdown(cmt.body)}</ReactMarkdown>
                   </div>
                 </li>
               ))}

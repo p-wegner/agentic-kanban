@@ -21,6 +21,7 @@ import { useIssueDisplayData } from "../hooks/useIssueDisplayData.js";
 import { useIssueDetailKeyboard } from "../hooks/useIssueDetailKeyboard.js";
 import { useModalDrag } from "../hooks/useModalDrag.js";
 import { normalizeMarkdown } from "../lib/artifact-utils.js";
+import { markdownUrlTransform } from "../lib/markdownUrlTransform.js";
 import { copyIssueArtifactContent, openIssueArtifact } from "./IssueArtifactsSection.js";
 import { IssueDetailHeader } from "./IssueDetailHeader.js";
 import { IssueEditFooter } from "./IssueEditFooter.js";
@@ -419,7 +420,7 @@ export function IssueDetailPanel({
               {descriptionMode === "preview" ? (
                 description ? (
                   <div className="markdown-body min-h-[6rem] border border-gray-200 dark:border-gray-700 rounded px-2 py-1.5">
-                    <ReactMarkdown>{normalizeMarkdown(description)}</ReactMarkdown>
+                    <ReactMarkdown urlTransform={markdownUrlTransform}>{normalizeMarkdown(description)}</ReactMarkdown>
                   </div>
                 ) : (
                   <p className="text-sm text-gray-400 dark:text-gray-500 italic min-h-[6rem] border border-gray-200 dark:border-gray-700 rounded px-2 py-1.5">Nothing to preview.</p>
@@ -505,7 +506,7 @@ export function IssueDetailPanel({
               </div>
             ) : issue.description ? (
               <div className="markdown-body" data-testid="issue-description">
-                <ReactMarkdown>{normalizeMarkdown(issue.description)}</ReactMarkdown>
+                <ReactMarkdown urlTransform={markdownUrlTransform}>{normalizeMarkdown(issue.description)}</ReactMarkdown>
               </div>
             ) : descriptionFetching ? (
               <p className="text-sm text-gray-400 dark:text-gray-500 italic animate-pulse">
