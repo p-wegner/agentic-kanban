@@ -236,11 +236,24 @@ function isDirectory(p) {
  * True when `repoRoot` is a peer worktree of the SAME workspace — a multi-repo project's
  * sibling repo (#959 property 3).
  *
- * The board provisions those at `<parent>/.worktrees/<repoDirName>/<leaf>` for every repo of
- * the project, so the authorized worktree and its siblings are peers two levels under a shared
- * `.worktrees/` directory. Matching that shape keeps multi-repo builders working without a new
- * env channel, and it does NOT admit an arbitrary neighbouring checkout: a plain repo sitting
- * beside the project on disk is not under `.worktrees/` at all.
+ * The board provisions those under a shared `<parent>/.worktrees/` root, so the authorized
+ * worktree and its siblings are peers below it. Matching that shape keeps multi-repo builders
+ * working without a new env channel, and it does NOT admit an arbitrary neighbouring checkout:
+ * a plain repo sitting beside the project on disk is not under `.worktrees/` at all — which is
+ * the whole point, since `test-impact-skill` was such a repo.
+ *
+ * DEPTH IS DELIBERATELY NOT PINNED. `worktreesDirFor` emits THREE different depths that are all
+ * live at once, and requiring the default one blocks real builders:
+ *   - `<repoDirName>/<leaf>`             — today's default (two segments);
+ *   - `<repoDirName>/<namespace>/<leaf>` — when `opts.pathNamespace` is passed, e.g. the
+ *                                          merge-queue train's `train` namespace (three);
+ *   - `<leaf>`                           — OLD-LAYOUT worktrees created before #385, which
+ *                                          `createWorktree` documents as still supported and
+ *                                          explicitly NOT migrated (one segment).
+ * Pinning to exactly two hard-blocked a sibling write in the latter two layouts (verified), i.e.
+ * it wedged the multi-repo builder the sibling carve-out exists to keep working. Containment
+ * under the shared `.worktrees/` root is the property that actually distinguishes a workspace
+ * peer from a foreign checkout, so that is what is tested.
  */
 function isSiblingWorkspaceWorktree(repoRoot, authorizedRootPath) {
   const marker = "/.worktrees/";
@@ -249,10 +262,8 @@ function isSiblingWorkspaceWorktree(repoRoot, authorizedRootPath) {
   // `<...>/.worktrees/` — the root both the authorized worktree and its siblings live under.
   const worktreesRoot = authorizedRootPath.slice(0, at + marker.length);
   if (!repoRoot.startsWith(worktreesRoot)) return false;
-  // Depth must match: `<repoDirName>/<leaf>`, i.e. exactly two segments below `.worktrees/`,
-  // so a nested checkout deeper inside another worktree is not silently admitted.
-  const rel = repoRoot.slice(worktreesRoot.length);
-  return rel.split("/").filter(Boolean).length === 2;
+  // At least one segment below the root, so the `.worktrees` directory itself never qualifies.
+  return repoRoot.slice(worktreesRoot.length).split("/").filter(Boolean).length >= 1;
 }
 
 /** Extract the target file path(s) from a write-tool input. */
