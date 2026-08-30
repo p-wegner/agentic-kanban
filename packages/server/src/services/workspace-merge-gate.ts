@@ -240,7 +240,9 @@ export async function reusePersistedGateVerdict(args: {
   const readVerificationKey =
     args.readVerificationKey ??
     (async (projectId_: string, database_: Database) =>
-      (await resolveGateVerification(projectId_, database_)).verificationKey);
+      // #958: the same worktree the recorded pass was earned in, so a selector bump since then
+      // makes the keys differ and the persisted verdict is re-earned rather than replayed.
+      (await resolveGateVerification(projectId_, database_, { workingDir: workspace.workingDir })).verificationKey);
   try {
     const evidence = await readEvidence(workspaceId, database);
     if (!evidence?.ranAt || !evidence.stage || !REUSABLE_GATE_STAGES.has(evidence.stage)) return null;
@@ -279,6 +281,12 @@ export async function reusePersistedGateVerdict(args: {
 async function persistGateVerdict(args: {
   workspaceId: string;
   projectId: string;
+  /**
+   * The worktree the gate ran in, for the selector component of the key (#958). MUST match what
+   * `reusePersistedGateVerdict` passes: a key written without a selector could never equal one
+   * read WITH one, which would not be unsafe but would silently retire the reuse path entirely.
+   */
+  workingDir: string | null;
   ranAt: string;
   stage: string;
   source: string;
@@ -287,12 +295,12 @@ async function persistGateVerdict(args: {
   durationMs?: number | null;
   database: Database;
 }): Promise<void> {
-  const { workspaceId, projectId, ranAt, stage, source, branchSha, baseSha, durationMs, database } = args;
+  const { workspaceId, projectId, workingDir, ranAt, stage, source, branchSha, baseSha, durationMs, database } = args;
   try {
     // Resolved AFTER the run, so the key names the tier in force now — the one the reuse
     // check will compare against. (A mid-run tier change makes the key mismatch and the
     // verdict unreusable, which errs on re-running: the safe direction.)
-    const { verificationKey } = await resolveGateVerification(projectId, database);
+    const { verificationKey } = await resolveGateVerification(projectId, database, { workingDir });
     await setMergeGateEvidence(workspaceId, { ranAt, stage, source, branchSha, baseSha, verificationKey, durationMs: durationMs ?? null }, database);
   } catch (err) {
     console.warn(
@@ -590,6 +598,7 @@ export async function runPreLockGate(args: {
   await persistGateVerdict({
     workspaceId,
     projectId,
+    workingDir: workspace.workingDir,
     ranAt: preGate.ranAt,
     stage: preGate.stage,
     source: "pre-lock-merge",

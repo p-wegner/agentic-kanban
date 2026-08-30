@@ -7,6 +7,7 @@ import { getAllPreferencesCached } from "../repositories/preferences.repository.
 import { formatPostureNote, resolveRiskPosture, type RiskPosture } from "./risk-posture.service.js";
 import { resolveEffectiveVerify } from "./stack-profile.service.js";
 import { gateVerificationKey } from "./merge-gate-tree-memo.js";
+import { resolveSelectorId } from "./test-impact-selector-id.js";
 
 /**
  * The three verify-gate tiers (#538), replacing `verify_file_scope` plus the implicit
@@ -380,30 +381,55 @@ export function buildGateTierMessage(tierInfo: GateTierInfo | null): string {
  *
  * A read error means we cannot tell whether a gate is configured, so it degrades to "no verify
  * gate" — fail-closed applies to a CONFIGURED gate that cannot RUN, never to gate DETECTION.
+ *
+ * **`workingDir` adds the third key component (#958): the test-impact SELECTOR's identity.** The
+ * tier and the command live in preferences, but the selector is materialized into the WORKTREE and
+ * is untracked, so it is invisible to both the prefs above and to `mergedTreeHash` — the one input
+ * to "what will this gate actually run" that nothing else in the key can see. It is resolved here,
+ * with the other two, precisely so the ORDERING property this function exists to guarantee still
+ * holds: everything the memo key names is known before the memo is consulted. `selector-id` is
+ * chosen over `select --json` for exactly that reason — see `resolveSelectorId`.
+ *
+ * A caller with no worktree (or a project without the skill, which is almost all of them) passes
+ * nothing and gets today's two-component key unchanged.
  */
 export async function resolveGateVerification(
   projectId: string,
   database: Database,
+  options?: {
+    /** The worktree the gate will run in, for the selector-identity component (#958). */
+    workingDir?: string | null;
+    /** Injected for tests — see `resolveSelectorId`. */
+    resolveSelectorIdFn?: typeof resolveSelectorId;
+  },
 ): Promise<{
   strategy: VerifyGateStrategy;
   /** The posture that selected `strategy`, or undefined when an explicit pref override did (#937). */
   posture: RiskPosture | undefined;
   effectiveVerify: Awaited<ReturnType<typeof resolveEffectiveVerify>> | null;
   verifyScript: string | null;
+  /** The test-impact selector identity folded into the key, or `""` when there is none (#958). */
+  selectorId: string;
   verificationKey: string;
 }> {
   const { strategy, posture, fromPosture } = await resolveGateTierFor(projectId, database);
   const effectiveVerify = await resolveEffectiveVerify(projectId, database, { persistDerived: true }).catch(() => null);
   const verifyScript = effectiveVerify?.command ?? null;
+  // Never throws and never blocks: an unresolvable selector yields `""`, which reproduces the
+  // pre-#958 key exactly. The only cost of losing it is an extra gate run.
+  const selectorId = await (options?.resolveSelectorIdFn ?? resolveSelectorId)({
+    workingDir: options?.workingDir ?? null,
+  });
   return {
     strategy,
     posture: fromPosture ? posture : undefined,
     effectiveVerify,
     verifyScript,
+    selectorId,
     // The KEY stays keyed on the resolved tier, not the posture that chose it: two projects on
     // different postures that resolve to the same tier + script bought the same verification, and
     // a pass under one is legitimately reusable under the other (#492's memo is about what the
     // pass BOUGHT). A posture CHANGE that moves the tier already changes this key.
-    verificationKey: gateVerificationKey(strategy, verifyScript),
+    verificationKey: gateVerificationKey(strategy, verifyScript, selectorId),
   };
 }

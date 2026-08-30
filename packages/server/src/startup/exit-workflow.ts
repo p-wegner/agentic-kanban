@@ -331,6 +331,10 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
     workspaceId: string,
     projectId: string,
     evidence: { ranAt: string; stage: string; source: string; branchSha: string | null; baseSha: string | null; trustworthy: boolean },
+    /** The worktree the gate ran in, for the #958 selector component — see `resolveGateVerification`.
+     *  Must be the same worktree `reusePersistedGateVerdict` will read against, or the key it
+     *  stamps here can never match and the whole reuse path silently stops firing. */
+    workingDir: string | null,
   ): Promise<void> {
     await db.update(workspaces).set({
       readyForMerge: true,
@@ -342,7 +346,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
     // cross-restart reuse can accept this pass too. Best-effort — a null key only means
     // "not reusable by that path", never a blocked merge.
     const verificationKey = evidence.trustworthy
-      ? await resolveGateVerification(projectId, db).then((v) => v.verificationKey).catch(() => null)
+      ? await resolveGateVerification(projectId, db, { workingDir }).then((v) => v.verificationKey).catch(() => null)
       : null;
     await setMergeGateEvidence(workspaceId, {
       ranAt: evidence.trustworthy ? evidence.ranAt : null,
@@ -432,7 +436,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
       branchSha: gateShas.branchSha ?? null,
       baseSha: gateShas.baseSha ?? null,
     };
-    await armReadyForMerge(workspaceId, projectId, { ...evidence, trustworthy: !tipMovedDuringGate });
+    await armReadyForMerge(workspaceId, projectId, { ...evidence, trustworthy: !tipMovedDuringGate }, workspace.workingDir);
     const learningAfterReview = getBool(prefMap, "learning_step_after_review") && workspace.workingDir ? launchLearningStep(learningStepDeps, workspace, prefMap, "after review", true) : Promise.resolve();
     if (autoMergeEnabled) {
       await learningAfterReview;
@@ -461,7 +465,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
         console.log(`[workflow] review session ${sessionId} completed  queued for scheduled auto-merge`);
       }
     } else {
-      await armReadyForMerge(workspaceId, projectId, { ...evidence, trustworthy: true });
+      await armReadyForMerge(workspaceId, projectId, { ...evidence, trustworthy: true }, workspace.workingDir);
       console.log(`[workflow] review session ${sessionId} completed  auto-merge disabled, marked ready_for_merge and left in In Review`);
       await learningAfterReview;
     }
