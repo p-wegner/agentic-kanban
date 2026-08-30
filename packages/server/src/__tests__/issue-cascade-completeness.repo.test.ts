@@ -204,6 +204,14 @@ const SUBTREE_SEEDERS: Record<string, (c: SeedCtx) => Promise<void>> = {
       branchSha: "abc1234", baseSha: "def5678",
     });
   },
+  // #945: the durable "a merge is in flight" marker. Same `onDelete: cascade` shape, and the
+  // cascade is load-bearing for it — the reconciler's "workspace is gone" branch exists for the
+  // read-then-act window precisely BECAUSE a marker can never outlive its workspace in the DB.
+  workspace_merge_run: async (c) => {
+    await c.db.insert(schema.workspaceMergeRun).values({
+      workspaceId: c.workspaceId, jobId: "merge-abc-1", startedAt: c.now, source: "merge-endpoint", pid: "1234",
+    });
+  },
   // #815: the sixth column family extracted out of `workspaces` — the cached merge-tree
   // conflict probe. Same `onDelete: cascade` shape, so seeding it proves the cascade fires.
   workspace_conflict_cache: async (c) => {

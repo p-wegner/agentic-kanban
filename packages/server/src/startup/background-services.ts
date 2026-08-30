@@ -25,6 +25,9 @@ import { startInstallStalenessReconciler, stopInstallStalenessReconciler } from 
 import { startMergeTrainReconciler, stopMergeTrainReconciler } from "./merge-train-reconciler.js";
 import { createMergeQueueService } from "../services/merge-queue.service.js";
 import { updateMergeTrainState } from "../repositories/merge-train.repository.js";
+import { startMergeRunReconciler, stopMergeRunReconciler } from "./merge-run-reconciler.js";
+import { setMergeRunMarkerPort } from "../services/merge-job.service.js";
+import { clearMergeRun, setMergeRun } from "../repositories/merge-run.repository.js";
 import { startAgentSessionRegistryReaper, stopAgentSessionRegistryReaper } from "./agent-session-registry-reaper.js";
 import { startWorkerHealthProbe, stopWorkerHealthProbe } from "../services/worker-health-probe.service.js";
 import { getPreference } from "../repositories/preferences.repository.js";
@@ -279,6 +282,22 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
         },
       });
       return stopMergeTrainReconciler;
+    },
+  },
+  {
+    // #945 — a merge job lives only in memory, so a restart mid-gate left the workspace
+    // `readyForMerge: true` / `idle` with NO record that a merge had ever been attempted.
+    // Two halves, wired together here because they are one feature: installing the durable
+    // marker writer (the registry defaults to a no-op so its unit suites never touch the DB),
+    // and the sweep that turns a marker with no live job into a recorded terminal state.
+    name: "merge-run-reconciler",
+    start({ db }) {
+      setMergeRunMarkerPort({
+        set: (workspaceId, values) => setMergeRun(workspaceId, values, db),
+        clear: (workspaceId) => clearMergeRun(workspaceId, db),
+      });
+      startMergeRunReconciler({ database: db });
+      return stopMergeRunReconciler;
     },
   },
   {
