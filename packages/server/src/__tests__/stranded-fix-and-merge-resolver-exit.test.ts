@@ -10,10 +10,18 @@
 
 // Mock modules that exit-workflow.ts loads at import time.
 const checkBranchTipIsAncestorMock = vi.hoisted(() => vi.fn());
+// #950: the landed path now tears the worktree down, so the git service must offer the removal.
+const removeWorktreeMock = vi.hoisted(() => vi.fn(async () => {}));
 vi.mock("../db/index.js", () => ({ db: {} }));
 vi.mock("../services/git.service.js", () => ({
   prepareForReview: vi.fn(async () => ({ success: true, diffRef: "master", conflictingFiles: [], uncommittedChanges: [] })),
   checkBranchTipIsAncestor: checkBranchTipIsAncestorMock,
+  removeWorktree: removeWorktreeMock,
+}));
+// #950: the per-workspace Docker stack / devcontainer release must run BEFORE the directory goes.
+const releaseWorkspaceResourcesMock = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock("../services/workspace-resource-release.js", () => ({
+  releaseWorkspaceResources: releaseWorkspaceResourcesMock,
 }));
 const emitButlerSystemEventMock = vi.hoisted(() => vi.fn());
 vi.mock("../services/butler-event-feed.js", () => ({ emitButlerSystemEvent: emitButlerSystemEventMock }));
@@ -126,6 +134,8 @@ describe("exit-workflow: stranded fix-and-merge resolver (issue #764)", () => {
     ({ db } = createTestDb());
     checkBranchTipIsAncestorMock.mockReset();
     emitButlerSystemEventMock.mockReset();
+    removeWorktreeMock.mockClear();
+    releaseWorkspaceResourcesMock.mockClear();
   });
 
   it("keeps the workspace OPEN and idle (retryable) when the resolver exits but the branch did NOT land", async () => {
@@ -215,5 +225,72 @@ describe("exit-workflow: stranded fix-and-merge resolver (issue #764)", () => {
     expect(ws.mergedAt).not.toBeNull();
     // The guard short-circuits before any ancestry check is needed for a closed workspace.
     expect(checkBranchTipIsAncestorMock).not.toHaveBeenCalled();
+  });
+
+  /**
+   * #950. The case between the two above: the resolver landed the branch ITSELF (a hand
+   * `git merge` in the worktree), so `autoMerge`'s `runMergeCore` had nothing to merge and
+   * stamped nothing — the workspace is left OPEN with `mergedAt: null` while git says the
+   * branch is unambiguously on base.
+   *
+   * That is not cosmetic. `findOpenUnmergedWorkspace` (the Done guard) keys on
+   * `status != "closed"`, so a CORRECT guard then refuses the Done transition on a FALSE
+   * premise, and the ticket is stuck in In Review with no way forward but deleting the
+   * workspace. Observed live on #944 (merge commit e586e93f90, `master..branch` = 0).
+   */
+  it("#950: stamps mergedAt and closes when the resolver landed the branch itself (autoMerge stamped nothing)", async () => {
+    const { projectId, issueId, workspaceId, sessionId } = await seedFixingWorkspace(db);
+
+    // Git ground truth: the branch IS on base — the fix agent merged it by hand.
+    checkBranchTipIsAncestorMock.mockResolvedValue({ isAncestor: true, branchSha: "abc", baseSha: "def" });
+
+    const boardEvents = makeBoardEvents();
+    // The crux: autoMerge finds nothing to merge, so it stamps NOTHING and leaves the row open.
+    const autoMerge = vi.fn(async () => {});
+
+    const engine = createWorkflowEngine({
+      sessionManager: makeSessionManager() as never,
+      boardEvents: boardEvents as never,
+      autoMerge,
+      database: db as never,
+    });
+    engine.fixAndMergeSessionIds.add(sessionId);
+
+    await engine.runWorkflowOnExit(workspaceId, sessionId, 0);
+
+    const ws = await getWorkspace(db, workspaceId);
+    // The row now matches git instead of contradicting it.
+    expect(ws.mergedAt).not.toBeNull();
+    expect(ws.status).toBe("closed");
+    // ...so the Done guard's query no longer matches, which is the whole point of the fix.
+    const openUnmerged = await db.select().from(workspaces)
+      .where(eq(workspaces.issueId, issueId));
+    expect(openUnmerged.every((w) => w.status === "closed")).toBe(true);
+
+    // And the issue actually converged to Done rather than being left In Review.
+    const [issue] = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId));
+    const [status] = await db.select({ name: projectStatuses.name }).from(projectStatuses)
+      .where(eq(projectStatuses.id, issue.statusId));
+    expect(status.name).toBe("Done");
+
+    // Not a failure: nothing should have been reported as a stranded/failed merge.
+    expect(emitButlerSystemEventMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ projectId, workspaceId, kind: "merge_failed" }),
+    );
+
+    // #950 teardown: closing the row NULLS `workingDir`, and every other teardown path
+    // (post-merge cleanup, deleteWorkspace, pruneStaleWorktrees) gates on a NON-NULL
+    // `workingDir` read from the DB. So if this path does not tear down, nothing ever will —
+    // the Docker stack and the worktree leak for the life of the process. Pin both, and pin
+    // the ORDER: the container bind-mounts the directory, so it must be released first.
+    expect(releaseWorkspaceResourcesMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: workspaceId, workingDir: "/repo/.worktrees/ak-764-test" }),
+      expect.objectContaining({ phase: "fix-and-merge-landed" }),
+    );
+    expect(removeWorktreeMock).toHaveBeenCalledWith("/repo", "/repo/.worktrees/ak-764-test");
+    expect(releaseWorkspaceResourcesMock.mock.invocationCallOrder[0])
+      .toBeLessThan(removeWorktreeMock.mock.invocationCallOrder[0]);
+    // The column really is nulled — i.e. the teardown genuinely had to happen here.
+    expect(ws.workingDir).toBeNull();
   });
 });
