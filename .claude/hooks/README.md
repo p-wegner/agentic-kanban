@@ -28,9 +28,25 @@ it exists for a human to authorize a genuine reset. A backup is taken either way
 
 ## prevent-cross-worktree-writes.js (optional)
 
-When this repo uses git worktrees, this hook prevents an agent running in one worktree
-from writing into another worktree of the same repo. It is only wired when the repo has
-more than one worktree at scaffold time.
+Keeps an agent's WRITES inside the worktree it was launched for. Reads are never blocked —
+a builder legitimately inspects sibling repos and materialized skills.
+
+Two scopes:
+
+1. **Other worktrees of the same repo.** An agent in one worktree cannot write into the main
+   checkout or a sibling worktree, whether via a write tool or a shell command
+   (`cd <other>; git commit`, `git -C <other> commit`, a redirect into it, …).
+2. **Unrelated checkouts (#959).** When the board declares the authorized worktree via
+   `KANBAN_WORKTREE_DIR`, a write into ANY other git repository is refused too — a foreign
+   repo is neither the main checkout nor a linked worktree, so scope 1 never covered it, and
+   a builder used exactly that hole to commit into a repo it did not own.
+
+Paths in no git repository at all (`%TEMP%`, `~/.claude`, package caches) are untouched, and a
+multi-repo project's sibling worktrees (peers under the same `.worktrees/` root) stay writable.
+
+Scope 2 needs the board-supplied `KANBAN_WORKTREE_DIR`; without it the authorized root is
+derived from the process's own cwd, so it would be judged against itself. A hand-run session
+therefore gets scope 1 only.
 
 ### Bypass
 
