@@ -515,6 +515,78 @@ describe("foreign-checkout hard block (#959)", () => {
     ).toBe(false);
   });
 
+  /**
+   * The sibling carve-out must not pin the DEPTH under `.worktrees/`.
+   *
+   * `worktreesDirFor` emits three depths that are ALL live at once, and the first
+   * implementation of `isSiblingWorkspaceWorktree` required exactly the middle one:
+   *   - `<repoDirName>/<leaf>`             — today's default (two segments);
+   *   - `<repoDirName>/<namespace>/<leaf>` — `opts.pathNamespace`, e.g. the merge-queue
+   *                                          train's `train` namespace (three segments);
+   *   - `<leaf>`                           — OLD-LAYOUT worktrees created before #385, which
+   *                                          `createWorktree` documents as still supported and
+   *                                          explicitly NOT migrated (one segment).
+   * Requiring two hard-blocked a legitimate sibling write in the other two, i.e. it wedged the
+   * very multi-repo builder the carve-out exists to keep working. Containment under the shared
+   * `.worktrees/` root is the property that separates a workspace peer from a foreign checkout.
+   */
+  describe("sibling carve-out does not pin depth under .worktrees/", () => {
+    /** `<root>/.worktrees/<...segments>/<leaf>` worktrees of two repos, plus a foreign repo. */
+    function layout(name: string, segments: string[]) {
+      const base = mkdtempSync(join(tmpdir(), `ak-guard-${name}-`));
+      const lead = join(base, "app");
+      const sib = join(base, "lib");
+      seedRepo(lead);
+      seedRepo(sib);
+      // One segment = the pre-#385 flat layout (`.worktrees/<leaf>`, no repo-name segment);
+      // otherwise `.worktrees/<repoDirName>/<...extra namespace>/<leaf>`.
+      const flat = segments.length === 0;
+      const leadWt = flat
+        ? join(base, ".worktrees", "ak-1")
+        : join(base, ".worktrees", "app", ...segments, "ak-1");
+      const sibWt = flat
+        ? join(base, ".worktrees", "ak-1-lib")
+        : join(base, ".worktrees", "lib", ...segments, "ak-1");
+      mkdirSync(join(leadWt, ".."), { recursive: true });
+      mkdirSync(join(sibWt, ".."), { recursive: true });
+      git(["worktree", "add", "-b", "feature/ak-1", leadWt], lead);
+      git(["worktree", "add", "-b", "feature/ak-1", sibWt], sib);
+      const foreign = join(base, "unrelated-skill");
+      seedRepo(foreign);
+      return { base, leadWt, sibWt, foreign };
+    }
+
+    // The default two-segment layout is already covered by the fixture-wide `siblingWorktree`
+    // test above; these are the two depths the old exactly-two rule rejected.
+    const depthCases: Array<[string, string[]]> = [
+      ["old layout (one segment, pre-#385)", []],
+      ["pathNamespace layout (three segments)", ["train"]],
+    ];
+
+    for (const [label, segments] of depthCases) {
+      it(`ALLOWS a sibling write and still BLOCKS a foreign repo — ${label}`, () => {
+        const { base, leadWt, sibWt, foreign } = layout(label.replace(/\W+/g, "-"), segments);
+        try {
+          expect(
+            runHook(
+              { tool_name: "Write", tool_input: { file_path: join(sibWt, "app.ts") }, cwd: leadWt },
+              { KANBAN_WORKTREE_DIR: leadWt },
+            ).blocked,
+          ).toBe(false);
+          // The carve-out must not have widened into "anything outside my worktree is fine".
+          const foreignRes = runHook(
+            { tool_name: "Write", tool_input: { file_path: join(foreign, "cli.mjs") }, cwd: leadWt },
+            { KANBAN_WORKTREE_DIR: leadWt },
+          );
+          expect(foreignRes.blocked).toBe(true);
+          expect(foreignRes.reason).toContain("UNRELATED git checkout");
+        } finally {
+          rmSync(base, { recursive: true, force: true });
+        }
+      });
+    }
+  });
+
   it("ALLOWS writes outside every repository (temp, caches) — unchanged", () => {
     const res = runHook(
       {
