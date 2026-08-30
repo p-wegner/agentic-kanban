@@ -145,6 +145,8 @@ const FOREIGN: Record<string, string> = {
   APPDATA: "Windows — roaming app data, where a global npm install puts its bin",
   LOCALAPPDATA: "Windows — local app data, a candidate Node install location",
   ProgramFiles: "Windows — a candidate Node install location",
+  USERPROFILE: "Windows — the home directory; `test:mine` looks there for a machine-wide test-impact skill install",
+  HOME: "POSIX — the home directory, the non-Windows half of the same lookup",
   "ProgramFiles(x86)": "Windows — the 32-bit program dir, the other candidate Node install location",
   // Node runtime / toolchain conventions
   UV_THREADPOOL_SIZE: "libuv — the board raises it when unset; documented under Runtime tuning",
