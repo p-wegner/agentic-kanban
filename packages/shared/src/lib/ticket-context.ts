@@ -193,7 +193,59 @@ export function buildStackProfileSection(
       lines.push(`- **When it fails:** ${verify.onFailure}`);
     }
   }
+  lines.push("", buildImpactInnerLoopSection());
   return lines.join("\n");
+}
+
+/**
+ * The builder's INNER loop — the impact selection, not the package suite (#953).
+ *
+ * Deliberately a SEPARATE section from "Verify (the merge gate)" above, and deliberately not
+ * folded into `EffectiveVerify.command`. They answer two different questions — "what do I run
+ * after each edit" vs "what must be green for this to merge" — and collapsing them into one
+ * string is how a builder ends up believing a narrowed run cleared the gate.
+ *
+ * Why it exists: `quickTestCommand` with no scope runs WHOLE packages, so the "fast loop" on a
+ * server-side ticket is thousands of tests, and an agent that finds it slow stops running it —
+ * which is worse than a slow loop.
+ *
+ * Three things the command must get right, each learned the hard way:
+ *  - `select`, never `build`. The skill resolves its root via `git rev-parse --show-toplevel`,
+ *    which keeps a worktree a worktree, so a rebuild writes a worktree-LOCAL map: it helps
+ *    nobody, lands in the branch diff, and breaks the single-writer property the map's freshness
+ *    work depends on.
+ *  - The path is `.claude/skills/test-impact/tools/impact.mjs`, relative to the WORKTREE root —
+ *    the board copies an enabled plugin's whole skill directory in (with `dereference: true`, so
+ *    the junction becomes real files). NOT `$HOME/.claude/...`, which is not worktree-safe, and
+ *    not the plugin manifest's plugin-checkout-relative path.
+ *  - Guarded with a `-f` test: the copy happens only at provision/relaunch, only for plugins
+ *    ENABLED on the project, and is best-effort — some worktrees have no `.claude/skills` at all.
+ */
+export const IMPACT_SELECT_COMMAND =
+  "[ -f .claude/skills/test-impact/tools/impact.mjs ] && " +
+  "node .claude/skills/test-impact/tools/impact.mjs select --min-score 1.0 --format vitest";
+
+export function buildImpactInnerLoopSection(): string {
+  return [
+    "### Inner loop (while editing) — NOT the gate",
+    "",
+    "The quick-test command above runs whole packages. While iterating, run only the suites your",
+    "change actually reaches, from the worktree root:",
+    "",
+    "```sh",
+    IMPACT_SELECT_COMMAND,
+    "```",
+    "",
+    "Then run the test files it prints. It takes well under a second and typically names a",
+    "handful of suites instead of thousands of tests.",
+    "",
+    "- Use `select`, **never** `build` — a rebuild here writes a worktree-local map that helps",
+    "  nobody and lands in your diff. Keeping the map fresh is done on the main checkout.",
+    "- If the command prints nothing (the skill is not present in this worktree), just use the",
+    "  quick-test command above.",
+    "- **A green impact selection is NOT a green gate.** It is a ranked guess that narrows the",
+    "  run. Before you finish, run the verify command above in full, whatever the inner loop said.",
+  ].join("\n");
 }
 
 /**
