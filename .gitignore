@@ -82,3 +82,13 @@ dist-worker-pack/
 # block auto-merge.
 packages/server/process-alive.json
 packages/server/process-exit-log.jsonl
+
+# test-impact outcome ledger (#954): one append-only JSONL row per pre-merge gate run, written by
+# the gate so `impact.mjs stats` can report a measured MISS RATE for the selection heuristic.
+# Deliberately gitignored and per-machine (decided on #954) — the alternatives were a CI artifact
+# or a committed file that churns in every diff. Accepted cost: outcomes are lost on a fresh clone
+# and not shared with CI; on a single-machine board that is where the gate runs anyway, and
+# `record --source` already tags rows by origin so two files can be merged later if that changes.
+# IGNORED, not merely untracked: an untracked-but-unignored file in the main checkout is exactly
+# the shape that makes `getDirtyMainFiles` block every subsequent merge.
+.test-impact/
