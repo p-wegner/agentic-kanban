@@ -60,6 +60,11 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // holds the JSON record of the pass that already ran, so it runs once, not per ticket.
   "compounding_setup",
   "compounding_setup_state",
+  // Test-impact map refresh (#952): `test_impact_map_<id>` opts a project OUT
+  // ("off"/"false"/"0") of the monitor pass that rebuilds and commits
+  // `docs/tests/impact-map.json` on its main checkout. Absent = follow the board-wide
+  // `test_impact_map_refresh` setting.
+  "test_impact_map",
   "file_contention",
   // Worker fleet (epic #184): `worker_dispatch_<projectId>` opts a project's builder
   // sessions into remote execution on connected fleet workers ("true"/"false");
