@@ -24,7 +24,7 @@ import { quiesceBuildersEnabled } from "./gate-quiesce.js";
 import { isSelfProjectRepo } from "./self-project.js";
 import { getProjectRepoPath } from "../repositories/project.repository.js";
 import { runUnderBuildSemaphore } from "./jvm-build-semaphore.js";
-import { runUnderVerifyChainSemaphore } from "./verify-chain-semaphore.js";
+import { runUnderVerifyChainSemaphore, runUnderVerifyChainSemaphoreTimed } from "./verify-chain-semaphore.js";
 import { runE2ESmokeGateStage } from "./e2e-smoke-lane.js";
 import {
   resolveGateVerification,
@@ -475,7 +475,7 @@ export async function runPreMergeGate(
     // cross-workspace verify-chain semaphore, not just each individual invocation. Two
     // different workspaces' chains used to freely interleave inside `runUnderBuildSemaphore`'s
     // own cap (default 2), which is what let three full-suite runs contend on one box at once.
-    const outcome = await runUnderVerifyChainSemaphore(async () =>
+    const { result: outcome, queueWaitMs } = await runUnderVerifyChainSemaphoreTimed(async () =>
       resolveVerifyOutcome({
         result: await runVerify(),
         runVerify,
@@ -504,7 +504,17 @@ export async function runPreMergeGate(
         workspaceId: workspace.id,
         summarize: (stdout, stderr) => summarizeVerifyFailure(stdout, stderr, workspace.id),
       }),
+      `verify chain for workspace ${workspace.id}`,
     );
+    // #949: how long this gate spent QUEUED behind another heavyweight verification. Carried
+    // onto the tier info so a PASSING gate can say so — the same "the conditions a verdict was
+    // produced under are part of the verdict" rule as `buildersQuiesced`.
+    //
+    // Non-null assertion rather than an `if`: `gateTierInfo` is assigned unconditionally a few
+    // lines above and nothing clears it in between, so a guard here would be dead — and this
+    // function sits ON the god-module gate's 25-branch ceiling (grandfathered at 37), where a
+    // branch that can never be false still counts against the budget.
+    gateTierInfo!.queueWaitMs = queueWaitMs;
     if (outcome.failure) {
       return { passed: false, skipped: false, stage: "verify", ...outcome.failure };
     }
@@ -567,7 +577,14 @@ export async function runPreMergeGate(
         console.log(`[pre-merge-gate] skipping smoke check for workspace ${workspace.id} — diff touches only docs (#198)`);
       } else {
         smokeApplies = true;
-        const smoke = await runUnderBuildSemaphore(() => runSmokeCheck(workspace.workingDir!, smokeCheck));
+        // #949: the chain semaphore, not just the build semaphore. This boots a real dev server
+        // and polls a health URL; under the build semaphore alone (derived width up to 8) it ran
+        // freely alongside ANOTHER gate's verify chain, which is the contention #903 set out to
+        // remove and only removed for the verify half.
+        const smoke = await runUnderVerifyChainSemaphore(
+          () => runUnderBuildSemaphore(() => runSmokeCheck(workspace.workingDir!, smokeCheck)),
+          `smoke check for workspace ${workspace.id}`,
+        );
         if (!smoke.passed) {
           return { passed: false, skipped: false, stage: "smoke", message: `smoke check failed: ${smoke.message}` };
         }
