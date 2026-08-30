@@ -280,7 +280,7 @@ describe("recordGateOutcome", () => {
     }
   });
 
-  it("strips the package prefix off failed suite names", async () => {
+  it("records failed suites REPO-relative, so they are comparable with the selection", async () => {
     const repos = makeRepos();
     try {
       const { run, calls } = fakeRunner({ select: { stdout: selectionJson("impact", ["packages/server/src/__tests__/a.test.ts"]) } });
@@ -288,15 +288,39 @@ describe("recordGateOutcome", () => {
         workspaceId: "ws-1",
         workingDir: repos.worktree,
         repoPath: repos.main,
-        // `packageLabel` disambiguates same-named files during #894's retry; folding it into the
-        // recorded name would mean the suite could never string-match `select`'s repo-relative
-        // test paths, and every single failure would read as a miss.
+        // vitest runs with the PACKAGE as cwd, so it names this suite `src/__tests__/z.test.ts`
+        // while the inventory — and therefore `select`'s output — keys it under
+        // `packages/server/…`. `record` compares the two as plain strings, so recording the
+        // package-relative name would make a failure in a SELECTED suite read as a miss, and
+        // every failing run would report a 100% miss rate.
         outcome: { failure: { message: "boom" }, failedSuites: [{ packageLabel: "server", file: "src/__tests__/z.test.ts" }] },
         tierInfo: tierInfo(),
         runCommand: run,
       });
       const recordArgs = calls[1]!;
-      expect(recordArgs[recordArgs.indexOf("--failed") + 1]).toBe("src/__tests__/z.test.ts");
+      expect(recordArgs[recordArgs.indexOf("--failed") + 1]).toBe("packages/server/src/__tests__/z.test.ts");
+    } finally {
+      repos.cleanup();
+    }
+  });
+
+  it("drops a suite it cannot attribute to a package rather than inventing a phantom miss", async () => {
+    const repos = makeRepos();
+    try {
+      const { run, calls } = fakeRunner({ select: { stdout: selectionJson("impact", ["packages/server/src/__tests__/a.test.ts"]) } });
+      await recordVerifyGateOutcome({
+        workspaceId: "ws-1",
+        workingDir: repos.worktree,
+        repoPath: repos.main,
+        // The same relative path exists under several packages, so an unattributed suite cannot
+        // be placed. A name that can never match the selection is indistinguishable from a real
+        // miss, so it must not be recorded at all.
+        outcome: { failure: { message: "boom" }, failedSuites: [{ packageLabel: null, file: "src/__tests__/z.test.ts" }] },
+        tierInfo: tierInfo(),
+        runCommand: run,
+      });
+      const recordArgs = calls[1]!;
+      expect(recordArgs).not.toContain("--failed");
     } finally {
       repos.cleanup();
     }
@@ -333,7 +357,7 @@ describe("recordGateOutcome", () => {
         workspaceId: "ws-1",
         workingDir: repos.worktree,
         repoPath: repos.main,
-        outcome: { failure: null, failedSuites: [{ file: "src/__tests__/flaky.test.ts" }] },
+        outcome: { failure: null, failedSuites: [{ packageLabel: "server", file: "src/__tests__/flaky.test.ts" }] },
         tierInfo: tierInfo(),
         runCommand: run,
       });
@@ -343,7 +367,7 @@ describe("recordGateOutcome", () => {
       // suite did fail on the way there, and keeping that visible is what lets a repeatedly-flaky
       // suite show up as failure history instead of being erased by the retry that cleared it.
       expect(recordArgs[recordArgs.indexOf("--result") + 1]).toBe("pass");
-      expect(recordArgs[recordArgs.indexOf("--failed") + 1]).toBe("src/__tests__/flaky.test.ts");
+      expect(recordArgs[recordArgs.indexOf("--failed") + 1]).toBe("packages/server/src/__tests__/flaky.test.ts");
     } finally {
       repos.cleanup();
     }

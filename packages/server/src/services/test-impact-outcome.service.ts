@@ -128,9 +128,41 @@ export interface RecordGateOutcomeResult {
  * repo-relative test names and turn every failure into a phantom miss.
  */
 export interface FailedSuiteLike {
+  /** Suite path as vitest printed it: relative to the PACKAGE dir, since that is its cwd. */
   file: string;
-  /** Accepted (real `FailedSuite`s carry it) and deliberately UNUSED — see above. */
+  /**
+   * The package whose vitest run reported the failure (`server`, `client`, `shared`,
+   * `mcp-server`), or null when the output gave no package context.
+   *
+   * REQUIRED to build a comparable name — see `repoRelativeSuitePath`. This is the field the
+   * whole miss computation turns on, not an incidental one.
+   */
   packageLabel?: string | null;
+}
+
+/**
+ * Turn a `FailedSuite` into the SAME vocabulary `select` names tests in: a repo-relative path.
+ *
+ * This is the join that makes the ledger mean anything, and getting it wrong is silent. vitest
+ * runs with the PACKAGE as its cwd, so it prints `src/__tests__/x.test.ts`; the inventory keys —
+ * and therefore every entry in `select --json`'s `selected` — are repo-relative
+ * (`packages/server/src/__tests__/x.test.ts`). `impact.mjs record` computes
+ * `missed = failed.filter((f) => !selected.includes(f))`, a pure STRING comparison, so handing it
+ * the package-relative form makes a failure in a suite that WAS selected read as a miss. Every
+ * failing run would then report a 100% miss rate — the exact number this ledger exists to
+ * measure, wrong in the direction that makes the selection look worthless.
+ *
+ * A suite with no `packageLabel` cannot be placed: the same relative path exists under several
+ * packages, so guessing would name a real-but-different file. Such a suite is DROPPED rather than
+ * recorded unattributed — a name that cannot match is indistinguishable from a genuine miss, and
+ * a phantom miss is worse than a missing observation.
+ */
+export function repoRelativeSuitePath(suite: FailedSuiteLike): string | null {
+  const file = suite.file.replace(/\\/g, "/").replace(/^\.\//, "");
+  if (!suite.packageLabel) return null;
+  // Already repo-relative (a root-level suite, or a runner that printed the full path).
+  if (file.startsWith("packages/") || file.startsWith(".claude/")) return file;
+  return `packages/${suite.packageLabel}/${file}`;
 }
 
 export type RunImpactCommand = (input: {
@@ -309,10 +341,11 @@ export async function recordGateOutcome(input: RecordGateOutcomeInput): Promise<
  * with an empty failed set, which is the honest shape: something broke, no suite can be blamed,
  * and it contributes no miss either way.
  *
- * Suite names are passed WITHOUT their package prefix, matching the un-prefixed form
- * `failedSuitesForOutcome` produces — the same normalization rule the gate's flaky red-debt path
- * documents, and for the same reason: `select` names tests by repo-relative path, so a prefixed
- * name would never string-match the selection and EVERY failure would read as a miss.
+ * Suite names are REPO-RELATIVE, because that is the vocabulary `select` names tests in and
+ * `record`'s miss computation is a plain string comparison against it. vitest prints them
+ * package-relative (its cwd is the package), so `repoRelativeSuitePath` performs the join; a
+ * suite that cannot be attributed to a package is dropped rather than recorded under a name that
+ * could never match. See that function for why the alternative silently reports a 100% miss rate.
  */
 export async function recordVerifyGateOutcome(args: {
   workspaceId: string;
@@ -338,7 +371,9 @@ export async function recordVerifyGateOutcome(args: {
     workingDir: args.workingDir,
     repoPath: args.repoPath,
     passed,
-    failedSuites: outcome.failedSuites.map((suite) => suite.file),
+    failedSuites: outcome.failedSuites
+      .map(repoRelativeSuitePath)
+      .filter((file): file is string => file !== null),
     tierInfo: args.tierInfo,
     source: "ci",
     runCommand: args.runCommand,
