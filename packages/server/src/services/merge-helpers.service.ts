@@ -68,7 +68,23 @@ export async function getConflictingFiles(workingDir: string): Promise<string[]>
   return stdout.trim().split("\n").filter(Boolean);
 }
 
-export function buildFixAndMergePrompt(errorMessage: string, baseBranch: string): string {
+/**
+ * The fix-and-merge prompt (#943).
+ *
+ * `kind` decides which body follows the error, and getting it wrong is expensive in both
+ * directions. The original prompt was entirely about WORKING-TREE cleanliness — "stash, reset,
+ * or commit" — which is correct advice for a dirty tree and actively misleading for a red verify
+ * gate: the agent checks `git status`, finds it clean, confirms the branch fast-forwards, and
+ * exits 0 having done nothing (measured on #935, a full ~10-minute cycle). A gate failure needs
+ * the opposite instruction: the tree is fine, a test is red, go make it pass.
+ */
+export function buildFixAndMergePrompt(
+  errorMessage: string,
+  baseBranch: string,
+  kind: "pre-merge-gate" | "merge" | "unknown" = "merge",
+  verifyLogPath?: string | null,
+): string {
+  if (kind === "pre-merge-gate") return buildGateFailureFixPrompt(errorMessage, baseBranch, verifyLogPath);
   return `The merge of this workspace branch into ${baseBranch} failed with this error:
 
 ${errorMessage}
@@ -83,6 +99,49 @@ Steps:
 2. Fix the issue (stash, reset, or commit as appropriate)
 3. Do NOT attempt the merge yourself - just clean up the working tree so it is ready for merge
 4. Commit any fixes if needed
+
+Base branch: ${baseBranch}`;
+}
+
+/**
+ * The prompt for a merge withheld by the PRE-MERGE GATE (#943) — a red verify run, not a dirty
+ * tree. It names the failing output, points at the full log when one was written, and states the
+ * one thing the working-tree prompt got backwards: a clean `git status` is EXPECTED here and is
+ * not evidence that there is nothing to fix.
+ */
+function buildGateFailureFixPrompt(
+  gateMessage: string,
+  baseBranch: string,
+  verifyLogPath?: string | null,
+): string {
+  const logLine = verifyLogPath
+    ? `\nThe full verify run is at: ${verifyLogPath}\nRead it if the excerpt above is truncated — it holds the complete output.\n`
+    : "";
+  return `The merge of this workspace branch into ${baseBranch} was WITHHELD by the pre-merge verify gate.
+This is NOT a merge conflict and NOT a dirty working tree — the branch is mergeable, but its
+verification run is RED. Here is what the gate reported:
+
+${gateMessage}
+${logLine}
+Your job is to make that verification pass on this branch.
+
+Steps:
+1. Read the failure above and identify the exact suite/test/check that failed.
+2. Reproduce it locally — re-run ONLY that file first (e.g. the project's test runner against
+   the named path), not the whole suite.
+3. Fix the underlying defect in this branch's code. If the failing check is a ratchet/guard that
+   your change legitimately moved, update the ratchet's recorded baseline as that guard's own
+   documentation instructs — do not delete or weaken the guard.
+4. Re-run the project's verify command to confirm it is green.
+5. Commit the fix.
+
+Important:
+- A clean "git status" is EXPECTED and proves nothing here. Do not conclude there is nothing to
+  fix because the tree is clean and the branch fast-forwards — the failure is in the test run.
+- Do NOT attempt the merge yourself; the board re-runs the gate and merges once it is green.
+- If after investigating you are confident the failure is unrelated to this branch (it also fails
+  on ${baseBranch}), say so explicitly in your final message and name the evidence, rather than
+  exiting silently with no commits.
 
 Base branch: ${baseBranch}`;
 }

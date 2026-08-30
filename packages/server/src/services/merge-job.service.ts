@@ -17,8 +17,22 @@
  *
  * Deliberately in-memory and per-workspace: this is diagnostic state about a live operation,
  * not a durable record (the durable record is `workspaces.mergedAt` / the issue comment a gate
- * failure writes). A server restart legitimately forgets it — the merge died with the process
- * too. Bounded by `MAX_FINISHED_JOBS` so a long-lived server cannot accumulate them.
+ * failure writes). Bounded by `MAX_FINISHED_JOBS` so a long-lived server cannot accumulate them.
+ *
+ * **#945 — "a server restart legitimately forgets it" was true of the JOB and wrong about the
+ * WORKSPACE.** Observed live on #919: a ~15-minute gate, a `tsx watch` reload mid-gate, and
+ * afterwards `merge-status` returned `{"job": null}` while the workspace sat `readyForMerge:
+ * true`, `status: idle`, `mergedAt: null`. The claim above holds — the merge really did die
+ * with the process — but nothing else recorded that it had ever been attempted, so the
+ * workspace read as armed-and-healthy to every consumer including the monitor and sat
+ * indefinitely. Distinct from a gate that FAILS, which records a reason and is actionable.
+ *
+ * So a job now ALSO writes a one-row durable marker (`workspace_merge_run`) for as long as it
+ * is running, cleared on every terminal transition. The rich record stays here and stays
+ * forgettable; the marker exists solely so the next process can see that a merge was in flight
+ * and say so — `startup/merge-run-reconciler.ts` is the reader. Marker writes are
+ * fire-and-forget and non-fatal by construction: a DB hiccup must never fail a merge, and the
+ * worst case of a lost write is exactly today's behaviour.
  */
 
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -159,8 +173,76 @@ function notifyGateActivityChanged(workspaceId: string): void {
   notifySummaryWriteThrough(workspaceId);
 }
 
-/** Record that a merge has started for this workspace, replacing any previous record. */
-export function startMergeJob(workspaceId: string, nowIso = new Date().toISOString()): MergeJob {
+/**
+ * The durable-marker side effects (#945), behind an injected port.
+ *
+ * **Default is a NO-OP; the real one is installed by the composition root**
+ * (`startup/background-services.ts`, the `merge-run-reconciler` entry — both halves of the
+ * feature wire up together), rather than a direct `merge-run.repository` import. Two reasons,
+ * and the first is the load-
+ * bearing one: this module is a pure in-memory registry with no fixture-DB setup anywhere in
+ * its suites, so importing the repository would make every `startMergeJob("ws-1")` in a unit
+ * test write to the process-global `db` — a test writing rows into the real board database is a
+ * worse defect than the one being fixed. Second, it keeps the module honest about what it is:
+ * the durable marker is a separate concern this registry merely announces.
+ *
+ * Both operations are fire-and-forget: the caller is a merge, and a marker that cannot be
+ * written or cleared must never change what the merge does. A failed WRITE degrades to the
+ * pre-#945 behaviour (a lost gate is silent again); a failed CLEAR leaves a stale row, which
+ * the reconciler resolves against LIVE state rather than trusting the row on its own.
+ */
+export interface MergeRunMarkerPort {
+  set(workspaceId: string, values: { jobId: string; startedAt: string; source?: string | null; pid?: string | null }): Promise<void>;
+  clear(workspaceId: string): Promise<void>;
+}
+
+const noopMarkerPort: MergeRunMarkerPort = {
+  set: async () => {},
+  clear: async () => {},
+};
+
+let markerPort: MergeRunMarkerPort = noopMarkerPort;
+
+/** Install the durable-marker writer. Called once at startup; also the test seam. */
+export function setMergeRunMarkerPort(port: MergeRunMarkerPort): void {
+  markerPort = port;
+}
+
+function writeMarker(workspaceId: string, values: { jobId: string; startedAt: string; source?: string | null }): void {
+  void markerPort
+    .set(workspaceId, { ...values, pid: String(process.pid) })
+    .catch((err) => {
+      console.warn(
+        `[workspace-merge] failed to persist the in-flight merge marker for workspace ${workspaceId} (non-fatal; `
+          + `a restart mid-merge will be unrecoverable, #945):`,
+        errorMessage(err),
+      );
+    });
+}
+
+function clearMarker(workspaceId: string): void {
+  void markerPort.clear(workspaceId).catch((err) => {
+    console.warn(
+      `[workspace-merge] failed to clear the in-flight merge marker for workspace ${workspaceId} (non-fatal; `
+        + `the reconciler re-checks live state before acting, #945):`,
+      errorMessage(err),
+    );
+  });
+}
+
+/**
+ * Record that a merge has started for this workspace, replacing any previous record.
+ *
+ * `source` names the path that submitted it (`merge-endpoint`, `monitor-auto-merge`, …). It is
+ * only carried on the durable marker: the in-memory job already exposes per-attempt sources,
+ * but a recovered marker is all a later process has, and "who asked for this merge" is the
+ * first thing an operator reading a restart-interrupted attempt needs.
+ */
+export function startMergeJob(
+  workspaceId: string,
+  nowIso = new Date().toISOString(),
+  source = "merge-endpoint",
+): MergeJob {
   const job: MergeJob = {
     jobId: nextJobId(workspaceId),
     workspaceId,
@@ -173,6 +255,7 @@ export function startMergeJob(workspaceId: string, nowIso = new Date().toISOStri
   jobsByWorkspace.set(workspaceId, job);
   // null -> "merging": the card's biggest single change, and the one nothing else announces.
   notifyGateActivityChanged(workspaceId);
+  writeMarker(workspaceId, { jobId: job.jobId, startedAt: nowIso, source });
   return job;
 }
 
@@ -270,6 +353,11 @@ function finish(jobId: string, workspaceId: string, patch: Partial<MergeJob>): v
   // (the HTTP path's failure branch broadcasts nothing), which would leave a "Verifying" badge
   // on a merge that stopped — the one lie worse than the amber dot #944 replaced.
   notifyGateActivityChanged(workspaceId);
+  // #945 — this is the ONE funnel every terminal transition goes through (complete, fail, and
+  // the zombie self-heal in `getMergeJob`), so clearing here is what makes "a surviving marker
+  // means the runner died" true by construction. Clearing at each call site instead would leave
+  // whichever path someone forgot to update writing false orphans forever.
+  clearMarker(workspaceId);
 }
 
 /** Mark a merge job succeeded, retaining its result for later polling. */
@@ -285,6 +373,45 @@ export function failMergeJob(jobId: string, workspaceId: string, error: unknown)
       ? (error as { details?: { mergeReason?: string } }).details?.mergeReason
       : undefined;
   finish(jobId, workspaceId, { state: "failed", error: message, reason });
+}
+
+/**
+ * Run a merge under a tracked job — the join-or-own protocol, in ONE place (#945).
+ *
+ * Two callers merge: `POST /:id/merge` and the monitor's auto-merge action. The route grew the
+ * protocol first (#903) and the monitor had NONE of it — it called `mergeWorkspaceDeduped`
+ * directly, so a monitor-driven merge lost to a restart was as invisible as the HTTP one, and
+ * on a hands-off board that is the more common case since the monitor is precisely what "sees
+ * the workspace as ready".
+ *
+ * Three rules, and each exists because getting it wrong has already cost something:
+ *  - **JOIN a running job rather than replacing it (#903).** A fresh `startMergeJob` on every
+ *    retry resets `startedAt`, so the zombie clock can never elapse against one start time.
+ *  - **Only the OWNER may transition it.** A joiner that completed/failed the job would close a
+ *    merge another caller is still running, and stamp a verdict that caller never reached.
+ *  - **Rethrow unchanged.** Both callers' failure handling reads the error (fix-and-merge
+ *    routing, the #638 gate-failure exclusion); wrapping it would break both.
+ *
+ * The route does NOT use this, deliberately: it additionally needs the pre-call zombie read to
+ * thread `dropStaleActiveRequest` and it splits sync/`?async=1` around the same promise, so
+ * folding it in here would mean this helper carrying two of its caller's concerns.
+ */
+export async function runUnderMergeJob<T>(
+  workspaceId: string,
+  source: string,
+  run: () => Promise<T>,
+): Promise<T> {
+  const existing = getMergeJob(workspaceId);
+  const joining = existing !== null && existing.state === "running";
+  const job = joining ? existing : startMergeJob(workspaceId, undefined, source);
+  try {
+    const result = await run();
+    if (!joining) completeMergeJob(job.jobId, workspaceId, result);
+    return result;
+  } catch (err) {
+    if (!joining) failMergeJob(job.jobId, workspaceId, err);
+    throw err;
+  }
 }
 
 /**
@@ -441,10 +568,11 @@ export function describeMergeJobAttempts(job: MergeJob): string {
   return `${attempts.length} gate attempt(s). ${parts.join("; ")}`;
 }
 
-/** Test seam: drop all tracked jobs and the injected liveness probe. */
+/** Test seam: drop all tracked jobs, the injected liveness probe and the marker port. */
 export function resetMergeJobs(): void {
   jobsByWorkspace.clear();
   finishedOrder.length = 0;
   counter = 0;
   gateIsAlive = gateIsAliveForJob;
+  markerPort = noopMarkerPort;
 }

@@ -94,3 +94,6 @@ export { workspaceScorecard, workspaceScorecardRelations } from "./workspace-sco
 // #906: persisted release trains — survives a restart mid-gate, see the module header.
 export { mergeTrains, mergeTrainsRelations, MERGE_TRAIN_STATES } from "./merge-trains.js";
 export type { MergeTrainState } from "./merge-trains.js";
+// #945: the durable "a merge is in flight" marker — the single-workspace counterpart of
+// `merge_trains`, so a gate lost to a restart leaves a recoverable trace instead of silence.
+export { workspaceMergeRun, workspaceMergeRunRelations } from "./workspace-merge-run.js";

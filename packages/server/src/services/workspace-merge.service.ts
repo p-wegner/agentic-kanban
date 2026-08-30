@@ -22,8 +22,8 @@ import { killProcessesInDir } from "./process-cleanup.js";
 import {
   getConflictingFiles,
   buildConflictResolutionPrompt,
-  buildFixAndMergePrompt,
 } from "./merge-helpers.service.js";
+import { prepareFixAndMergeBriefing } from "./fix-and-merge-context.js";
 import { toExecutorProvider } from "./agent-settings.service.js";
 import { buildConflictContext } from "./phase-context.service.js";
 import { computeWorkspaceCodeMetrics } from "./workspace-code-metrics.service.js";
@@ -595,13 +595,14 @@ export function createWorkspaceMergeService(deps: {
     if (refreshedWorkspace.status === "fixing") throw new WorkspaceError("Fix already in progress", "CONFLICT");
     if (!getSessionManager) throw new WorkspaceError("Session manager not available", "BAD_REQUEST");
 
-    const errorMessage = mergeError || "Unknown merge error";
     const { repoPath, defaultBranch } = await resolveProjectRepo(id, database);
     const baseBranch = requireBaseBranch(refreshedWorkspace.baseBranch || defaultBranch);
 
     const rebuildNote = await prepareFixAndMergeRebuildNote(id, refreshedWorkspace, repoPath, baseBranch);
 
-    const prompt = buildFixAndMergePrompt(`${errorMessage}\n\n${rebuildNote}`, baseBranch);
+    // #943 — recover the real failure (the caller usually supplies none) and pick the matching prompt.
+    const { prompt, timelineFields } = await prepareFixAndMergeBriefing({
+      workspaceId: id, issueId: refreshedWorkspace.issueId ?? null, mergeError, baseBranch, rebuildNote }, database);
 
     const fixProjectId = await resolveProjectId(id, database);
     const { agentCommand, agentArgs, profile, provider, model } =
@@ -619,7 +620,7 @@ export function createWorkspaceMergeService(deps: {
       workspace,
       "fix-and-merge-launched",
       `Launched a fix-and-merge session for workspace ${id}.`,
-      { sessionId, mergeError: errorMessage, targetBranch: baseBranch },
+      { sessionId, targetBranch: baseBranch, ...timelineFields },
     );
 
     if (fixProjectId) boardEvents?.broadcast(fixProjectId, "session_launched");
