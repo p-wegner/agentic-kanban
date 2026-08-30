@@ -4,8 +4,10 @@ import { describe, expect, it } from "vitest";
 import { resolve } from "node:path";
 import {
   IMPACT_CLI_CANDIDATES,
+  matchesExcludeGlob,
   packageLabelByDir,
   parseImpactSelection,
+  partitionExcluded,
   resolveImpactCli,
   runImpactSelector,
   PACKAGES,
@@ -62,6 +64,54 @@ describe("parseImpactSelection", () => {
     for (const pkg of PACKAGES) {
       expect(byDir.get(pkg.dir)).toBe(pkg.label);
     }
+  });
+});
+
+describe("exclusion of selected suites this runner never runs", () => {
+  // The selector ranks EVERY test file in the repo and knows nothing about this runner's
+  // `exclude` list (the #173 environmental exclusions). Handing it an excluded path is wrong in
+  // both directions: with other suites alongside it, vitest runs those and exits 0 having
+  // silently skipped the excluded one — a green for a suite that never ran; alone, vitest
+  // resolves nothing and exits 1 with a bare `No test files found`.
+  const server = PACKAGES.find((p) => p.label === "server");
+
+  it("matches the `**/name.test.ts` shape the exclude globs actually use", () => {
+    expect(matchesExcludeGlob("**/cli.test.ts", "src/__tests__/cli.test.ts")).toBe(true);
+    expect(matchesExcludeGlob("**/cli.test.ts", "cli.test.ts")).toBe(true);
+    // Not a prefix match — `cli-butler.test.ts` has its own entry for its own reason.
+    expect(matchesExcludeGlob("**/cli.test.ts", "src/__tests__/cli-butler.test.ts")).toBe(false);
+    expect(matchesExcludeGlob("**/cli.test.ts", "src/__tests__/mycli.test.ts")).toBe(false);
+  });
+
+  it("drops an excluded suite and reports WHY, keeping the runnable ones", () => {
+    const { kept, excluded } = partitionExcluded(server, [
+      "src/__tests__/cli.test.ts",
+      "src/__tests__/gate-builder-quiesce.test.ts",
+    ]);
+    expect(kept).toEqual(["src/__tests__/gate-builder-quiesce.test.ts"]);
+    expect(excluded).toEqual([
+      { file: "packages/server/src/__tests__/cli.test.ts", reason: "spawns the CLI binary as a child process" },
+    ]);
+  });
+
+  it("drops every excluded suite in the package, not just the first", () => {
+    const { kept, excluded } = partitionExcluded(server, [
+      "src/__tests__/cli.test.ts",
+      "src/__tests__/git.service.test.ts",
+      "src/__tests__/compose-lifecycle-real-docker.test.ts",
+    ]);
+    // All three are environmentally excluded — nothing left to run, which the caller turns
+    // into a fall-back rather than a green from guards alone.
+    expect(kept).toEqual([]);
+    expect(excluded).toHaveLength(3);
+  });
+
+  it("leaves a package with no exclusions untouched", () => {
+    const client = PACKAGES.find((p) => p.label === "client");
+    expect(client.exclude).toEqual([]);
+    const { kept, excluded } = partitionExcluded(client, ["src/__tests__/a.test.ts"]);
+    expect(kept).toEqual(["src/__tests__/a.test.ts"]);
+    expect(excluded).toEqual([]);
   });
 });
 
