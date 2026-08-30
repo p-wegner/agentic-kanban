@@ -15,6 +15,7 @@ import {
 } from "./workspace-action-body-schemas.js";
 import { completeMergeJob, describeMergeJobAttempts, failMergeJob, getMergeJob, startMergeJob } from "../services/merge-job.service.js";
 import { describePersistedGateVerdict } from "../services/workspace-merge-gate.js";
+import { getMergeRun, type MergeRunRow } from "../repositories/merge-run.repository.js";
 
 import { queryFlag } from "../middleware/query-params.js";
 import { ConflictError, UnprocessableError } from "../errors/index.js";
@@ -40,6 +41,60 @@ import {
  * ref as current without saying how old it is.
  */
 export const MID_SESSION_LAND_MIN_INTERVAL_MS = 15_000;
+
+/**
+ * The `merge-status` body for a workspace this process holds NO merge job for — the shape #919
+ * hit, and the one whose emptiness was the whole defect.
+ *
+ * Two durable facts survive a restart and are what turn a bare `{"job": null}` back into an
+ * answer, so both are read here:
+ *  - the persisted pre-merge gate verdict (#893) — whether the gate had already PASSED before
+ *    the transport died, i.e. whether a retry re-pays the 30-45 minute run;
+ *  - the in-flight merge marker (#945) — whether a merge was RUNNING when the process was lost.
+ *    Without it `null` reads identically to "nobody ever tried", which is exactly the ambiguity
+ *    that left #919 armed-but-idle with no recorded reason.
+ *
+ * A marker still visible here means the interruption has not been swept yet; the reconciler's
+ * boot pass records it as a `merge-attempt` note and clears the row.
+ *
+ * Extracted from the handler rather than inlined: it is a pure projection over two reads with no
+ * dependency on the route closure, so it is assertable without standing up a router — and
+ * `createWorkspaceActionsRoute` is on the `function-nloc-ratchet` (#800) shrink-only ring.
+ */
+export async function describeAbsentMergeJob(workspaceId: string): Promise<{
+  job: null;
+  interruptedMerge: MergeRunRow | null;
+  persistedGateVerdict?: Awaited<ReturnType<typeof describePersistedGateVerdict>>;
+  message: string;
+}> {
+  const [persistedGateVerdict, interruptedMerge] = await Promise.all([
+    describePersistedGateVerdict(workspaceId),
+    getMergeRun(workspaceId).catch(() => undefined),
+  ]);
+  const interruptedNote = interruptedMerge
+    ? ` A merge (job ${interruptedMerge.jobId}) was submitted ${interruptedMerge.startedAt} and never reached a `
+      + "verdict — it is being recorded as interrupted by a restart (#945)."
+    : "";
+  if (persistedGateVerdict) {
+    return {
+      job: null,
+      persistedGateVerdict,
+      interruptedMerge: interruptedMerge ?? null,
+      message:
+        "no merge job recorded for this workspace in the current server process (it may have restarted mid-merge) — "
+        + `but a PASSING pre-merge gate verdict is persisted (stage ${persistedGateVerdict.stage}, ran ${persistedGateVerdict.ranAt}). `
+        + (persistedGateVerdict.reusable
+          ? "A merge retry will reuse it instead of re-running the gate, as long as the branch/base tips and verification tier are unchanged (#893)."
+          : "It is too old (or lacks tips/tier) to reuse, so a merge retry will re-run the gate.")
+        + interruptedNote,
+    };
+  }
+  return {
+    job: null,
+    interruptedMerge: interruptedMerge ?? null,
+    message: "no merge job recorded for this workspace in the current server process." + interruptedNote,
+  };
+}
 
 export function createWorkspaceActionsRoute(
   getSessionManager: () => SessionManager,
@@ -385,22 +440,7 @@ export function createWorkspaceActionsRoute(
   router.get("/:id/merge-status", async (c) => {
     const id = c.req.param("id");
     const job = getMergeJob(id);
-    if (!job) {
-      const persistedGateVerdict = await describePersistedGateVerdict(id);
-      if (persistedGateVerdict) {
-        return c.json({
-          job: null,
-          persistedGateVerdict,
-          message:
-            "no merge job recorded for this workspace in the current server process (it may have restarted mid-merge) — "
-            + `but a PASSING pre-merge gate verdict is persisted (stage ${persistedGateVerdict.stage}, ran ${persistedGateVerdict.ranAt}). `
-            + (persistedGateVerdict.reusable
-              ? "A merge retry will reuse it instead of re-running the gate, as long as the branch/base tips and verification tier are unchanged (#893)."
-              : "It is too old (or lacks tips/tier) to reuse, so a merge retry will re-run the gate."),
-        });
-      }
-      return c.json({ job: null, message: "no merge job recorded for this workspace in the current server process" });
-    }
+    if (!job) return c.json(await describeAbsentMergeJob(id));
     // #936 — a bare `{"state":"running"}` cannot distinguish a slow convergent merge from a
     // hung one. Measured on #926: 3h44m and TWO complete 20-minute suite runs, with this
     // endpoint reporting the same opaque `running` throughout, so the only way to see a retry
