@@ -28,6 +28,7 @@ import type { Database } from "../db/index.js";
 import { getLatestIssueCommentByKind } from "../repositories/issue-comments.repository.js";
 import { getMergeJob } from "./merge-job.service.js";
 import { PRE_MERGE_GATE_FAILURE_REASON } from "./workspace-merge-gate.js";
+import { buildFixAndMergePrompt } from "./merge-helpers.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 /** The literal the service substituted when the caller supplied nothing — the #943 symptom. */
@@ -154,4 +155,73 @@ export async function resolveFixAndMergeFailureContext(
   }
 
   return { message: UNKNOWN_MERGE_ERROR, kind: "unknown", source: "none", verifyLogPath: null };
+}
+
+/** What the fix-and-merge launcher needs in order to start the session (#943). */
+export interface FixAndMergeBriefing {
+  /** The prompt to launch the agent with — gate-shaped or working-tree-shaped. */
+  prompt: string;
+  /** The resolved failure, for anything the launcher wants to inspect. */
+  failure: FixAndMergeFailureContext;
+  /**
+   * The `merge-attempt` timeline fields describing WHERE the failure text came from, so a reader
+   * can tell a caller-supplied error from one recovered off the record — and spot a genuine
+   * "nothing on file" case. Spread into the launcher's payload.
+   */
+  timelineFields: {
+    mergeError: string;
+    failureKind: FixAndMergeFailureKind;
+    failureSource: FixAndMergeFailureContext["source"];
+    verifyLogPath: string | null;
+  };
+}
+
+/**
+ * Resolve the failure, say where it came from, and build the matching prompt (#943).
+ *
+ * One function rather than three call-site steps because the three are a single decision: WHICH
+ * failure the agent is told about determines which prompt it must get, and splitting them at the
+ * call site is what let the original code pair a recovered gate failure with working-tree advice.
+ * Keeping them together also holds `createWorkspaceMergeService` under the #800 shrink-only nloc
+ * ring — this logic belongs beside the recovery it depends on, not inlined in the factory.
+ */
+export async function prepareFixAndMergeBriefing(
+  args: {
+    workspaceId: string;
+    issueId: string | null;
+    mergeError?: string;
+    baseBranch: string;
+    /** Appended to the failure text — the rebuild/rebase note the launcher computed. */
+    rebuildNote: string;
+    /** Test seam: the prompt builder (avoids a cycle back into merge-helpers in tests). */
+    buildPrompt?: typeof buildFixAndMergePrompt;
+  },
+  database: Database = db,
+): Promise<FixAndMergeBriefing> {
+  const failure = await resolveFixAndMergeFailureContext(
+    { workspaceId: args.workspaceId, issueId: args.issueId, mergeError: args.mergeError },
+    database,
+  );
+  console.log(
+    `[workspace-merge] fix-and-merge for workspace ${args.workspaceId}: `
+      + `failure kind=${failure.kind} source=${failure.source}`
+      + (failure.verifyLogPath ? ` verifyLog=${failure.verifyLogPath}` : ""),
+  );
+  const buildPrompt = args.buildPrompt ?? buildFixAndMergePrompt;
+  const prompt = buildPrompt(
+    `${failure.message}\n\n${args.rebuildNote}`,
+    args.baseBranch,
+    failure.kind,
+    failure.verifyLogPath,
+  );
+  return {
+    prompt,
+    failure,
+    timelineFields: {
+      mergeError: failure.message,
+      failureKind: failure.kind,
+      failureSource: failure.source,
+      verifyLogPath: failure.verifyLogPath,
+    },
+  };
 }
