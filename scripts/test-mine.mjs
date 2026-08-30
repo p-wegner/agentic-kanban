@@ -80,8 +80,12 @@
 //   pnpm test:mine -- src/__tests__/tags.test.ts
 // NOTE: vitest 4 removed the --related flag. Use `pnpm exec vitest related <file>`
 // from inside the package dir to run tests that cover a specific source file.
+//
+// Selectors (#951): `KANBAN_TEST_SELECTOR=impact` replaces the `vitest related` scoping with the
+// test-impact skill's multi-signal ranking. OPT-IN and fail-open — see the block near
+// `runImpactSelector` below.
 
-import { spawn, execFileSync } from "node:child_process";
+import { spawn, spawnSync, execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -420,6 +424,184 @@ export function parseRetryScope(raw) {
 
 const retryScope = parseRetryScope(process.env.KANBAN_RETRY_TEST_FILES);
 
+/* ---------------------------------------------------------------------------
+ * Impact selector (`KANBAN_TEST_SELECTOR=impact`, #951)
+ *
+ * OPT-IN, and deliberately NOT the default until #954 has produced a measured miss rate —
+ * a selector with no miss rate is a guess, and this one NARROWS a merge gate.
+ *
+ * Why: the `KANBAN_TEST_FILES` path scopes with `vitest related`, which sees only the import
+ * graph and, on an empty selection, falls back to the package's FULL suite
+ * (`runRelatedWithFallback`) — ~4,165 tests for `packages/server`. The test-impact skill scores
+ * the same change from several independent signals (import reach, name affinity, git change-set
+ * coupling, runtime coverage, failure history), ranks them, and never returns a silent empty set.
+ *
+ * We ask it for `--format pkgfile`, which emits `<packageDir>:<path relative to that package>`
+ * per line — the same `label:file` shape `parseRetryScope` already consumes, so this runner never
+ * re-derives package ownership. (The prefix is the package DIRECTORY, so it is mapped back to a
+ * PACKAGES label here; an unknown directory is dropped loudly rather than guessed at.)
+ *
+ * Every existing guard rail is kept:
+ *   - the `@gate:always-run` top-up still runs, per package;
+ *   - vitest still runs per package with that package's dir as cwd;
+ *   - it FAILS OPEN — selector unset, skill not installed, non-zero exit, or an empty selection
+ *     all fall back to today's `vitest related` behaviour, LOUDLY.
+ * ------------------------------------------------------------------------- */
+
+const testSelector = (process.env.KANBAN_TEST_SELECTOR || "").trim().toLowerCase();
+const impactSelectorRequested = testSelector === "impact";
+if (testSelector && !impactSelectorRequested) {
+  console.warn(
+    `[test:mine] unknown KANBAN_TEST_SELECTOR="${testSelector}" — the only supported value is "impact". ` +
+      `Using the default \`vitest related\` scoping.`,
+  );
+}
+
+/**
+ * Minimum impact score a suite must reach to be selected (`KANBAN_TEST_MIN_SCORE`, default 1.0).
+ *
+ * The measured shape on this repo (2026-08-30): a one-file change scores a handful of suites at
+ * 1.00 and then has a long tail tied at ~0.14. `--min-score 1.0` is the floor that keeps the
+ * head and drops the tail — 6 files in 0.39 s, versus 20 for a 60 s budget.
+ */
+const impactMinScoreRaw = (process.env.KANBAN_TEST_MIN_SCORE || "1.0").trim();
+const impactMinScore = /^\d+(\.\d+)?$/.test(impactMinScoreRaw) ? impactMinScoreRaw : "1.0";
+if (impactSelectorRequested && impactMinScoreRaw !== impactMinScore) {
+  console.warn(
+    `[test:mine] ignoring non-numeric KANBAN_TEST_MIN_SCORE="${impactMinScoreRaw}" — using ${impactMinScore}.`,
+  );
+}
+
+/**
+ * Whether to pass `--rebuild-if-stale` (`KANBAN_IMPACT_REBUILD=1`, default OFF).
+ *
+ * The ticket's first draft had this always-on. It is wrong here, and measured so: the skill's
+ * `findRoot()` resolves via `git rev-parse --show-toplevel`, which keeps a WORKTREE a worktree,
+ * so a rebuild writes a worktree-LOCAL `docs/tests/impact-map.json`. That map helps nobody, it
+ * lands in the branch diff (and immediately trips this file's own hermeticity report, which is
+ * how it was caught), and it breaks the single-writer property #952's freshness work depends on.
+ *
+ * Keeping the map fresh is #952's job, on the MAIN checkout. A stale map here is not silent —
+ * the skill says `[inventory STALE]` and widens to the package tier, and that line is echoed.
+ */
+const impactRebuildIfStale = /^(1|true|yes)$/i.test((process.env.KANBAN_IMPACT_REBUILD || "").trim());
+
+/**
+ * Where the skill's CLI lives, in preference order.
+ *
+ * The worktree copy comes FIRST and is the one the instruction to agents names: the board copies
+ * an enabled plugin's whole skill directory into every worktree (`copySkillToWorktree`, with
+ * `dereference: true`, so the junction becomes real files). The `$HOME` copy is a fallback for
+ * the main checkout / a machine where the plugin is not enabled on this project.
+ */
+export const IMPACT_CLI_CANDIDATES = [
+  ".claude/skills/test-impact/tools/impact.mjs",
+  ".codex/skills/test-impact/tools/impact.mjs",
+];
+
+/** Absolute path to the impact CLI, or null when the skill is not installed here. */
+export function resolveImpactCli(root = ROOT, home = process.env.USERPROFILE || process.env.HOME || "") {
+  const explicit = (process.env.KANBAN_IMPACT_CLI || "").trim();
+  if (explicit) return existsSync(explicit) ? explicit : null;
+  const candidates = [
+    ...IMPACT_CLI_CANDIDATES.map((rel) => resolve(root, rel)),
+    ...(home ? IMPACT_CLI_CANDIDATES.map((rel) => resolve(home, rel)) : []),
+  ];
+  return candidates.find((p) => existsSync(p)) ?? null;
+}
+
+/** `packages/<x>` (the pkgfile prefix) -> the PACKAGES label vitest is run under. */
+export function packageLabelByDir(packages = PACKAGES) {
+  return new Map(packages.map((p) => [p.dir.replace(/\\/g, "/"), p.label]));
+}
+
+/**
+ * Turn `--format pkgfile` stdout into the `label -> [relative test file]` map `runPackage`'s
+ * file modes expect.
+ *
+ * Pure function of its arguments so the mapping is unit-testable without spawning the skill.
+ * A line whose directory prefix is not a known package is reported in `unknown` rather than
+ * silently dropped: it means the selector saw a package this runner does not run, and a caller
+ * that swallowed that would report a green for tests it never executed.
+ */
+export function parseImpactSelection(stdout, packages = PACKAGES) {
+  const byDir = packageLabelByDir(packages);
+  /** @type {Map<string, string[]>} */
+  const byLabel = new Map();
+  const unknown = [];
+  for (const rawLine of (stdout || "").split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("[test-impact]")) continue;
+    const idx = line.indexOf(":");
+    if (idx <= 0) continue;
+    const dir = line.slice(0, idx).trim().replace(/\\/g, "/");
+    const file = line.slice(idx + 1).trim().replace(/\\/g, "/");
+    if (!dir || !file) continue;
+    const label = byDir.get(dir);
+    if (!label) {
+      unknown.push(line);
+      continue;
+    }
+    if (!byLabel.has(label)) byLabel.set(label, []);
+    const files = byLabel.get(label);
+    if (!files.includes(file)) files.push(file);
+  }
+  return { byLabel, unknown };
+}
+
+/**
+ * Ask the skill which suites to run. Returns `null` on ANY failure — the caller then falls back
+ * to `vitest related`, which is the pre-#951 behaviour.
+ *
+ * The skill's stderr carries its own summary line (`… N test file(s) selected …`, `151 below
+ * --min-score 1`, the staleness/escalation notes). That line is the operator's only view of what
+ * was DROPPED, so it is echoed verbatim rather than swallowed.
+ */
+export function runImpactSelector({
+  cli,
+  minScore = impactMinScore,
+  root = ROOT,
+  rebuildIfStale = impactRebuildIfStale,
+  spawnFn = spawnSync,
+} = {}) {
+  const args = [cli, "select", "--format", "pkgfile", "--min-score", String(minScore)];
+  if (rebuildIfStale) args.push("--rebuild-if-stale");
+  console.log(`\n[test:mine] impact selector: node ${args.slice(1).join(" ")}`);
+  const res = spawnFn(process.execPath, args, {
+    cwd: root,
+    encoding: "utf8",
+    windowsHide: true,
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  // The skill's own summary/escalation lines — what it selected AND what it dropped.
+  if (res.stderr) process.stderr.write(res.stderr);
+  if (res.error) {
+    console.warn(`[test:mine] impact selector failed to start (${res.error.message}) — falling back to \`vitest related\`.`);
+    return null;
+  }
+  if (res.status !== 0) {
+    console.warn(`[test:mine] impact selector exited ${res.status} — falling back to \`vitest related\`.`);
+    return null;
+  }
+  const { byLabel, unknown } = parseImpactSelection(res.stdout ?? "");
+  if (unknown.length > 0) {
+    console.warn(
+      `[test:mine] impact selector named ${unknown.length} suite(s) in package(s) this runner does not run — ` +
+        `they will NOT be executed:\n` +
+        unknown.map((l) => `  - ${l}`).join("\n"),
+    );
+  }
+  const total = [...byLabel.values()].reduce((n, files) => n + files.length, 0);
+  if (total === 0) {
+    console.warn(
+      `[test:mine] impact selector selected 0 suites — a green from that would assert nothing. ` +
+        `Falling back to \`vitest related\`.`,
+    );
+    return null;
+  }
+  return byLabel;
+}
+
 /**
  * File-level test scoping via `KANBAN_TEST_FILES` (comma-separated, repo-relative), the
  * gate's tier 1 (#278).
@@ -521,7 +703,13 @@ function runPackage({ dir, label, exclude }, mode = null) {
         // mode would be the 44-minute operation the whole mechanism exists to avoid.
         : mode?.kind === "flake-retry"
           ? ["run", ...mode.files]
-          : ["run"];
+          // #951 impact selection: the named suites, no `--passWithNoTests`. The selector names
+          // files that exist, so an empty resolution means one is excluded in this package or the
+          // path no longer selects — vitest exits non-zero and the gate stays red, which is the
+          // correct direction for a selector that NARROWS a merge gate.
+          : mode?.kind === "impact"
+            ? ["run", ...mode.files]
+            : ["run"];
     const args = [vitestEntry, ...modeArgs, ...excludeArgs, ...workerCapArgs, ...passthrough];
     console.log(
       `\n[test:mine] ${label}: node vitest ${[...modeArgs, ...excludeArgs, ...workerCapArgs, ...passthrough].join(" ")}`
@@ -884,6 +1072,63 @@ if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
       process.exit(1);
     }
     console.log("\n[test:mine] All guard suites passed.");
+    process.exit(0);
+  }
+  // #951 — the opt-in impact selector, tried BEFORE the `vitest related` path and falling
+  // through to it on any failure. `impactScope === null` is exactly that fall-through, so the
+  // loop below is unchanged for every caller that did not opt in.
+  let impactScope = null;
+  if (impactSelectorRequested) {
+    const cli = resolveImpactCli();
+    if (!cli) {
+      console.warn(
+        `[test:mine] KANBAN_TEST_SELECTOR=impact, but the test-impact skill is not installed here ` +
+          `(looked for ${IMPACT_CLI_CANDIDATES.join(", ")} under the repo root and $HOME) — ` +
+          `falling back to \`vitest related\`.`,
+      );
+    } else {
+      impactScope = runImpactSelector({ cli });
+    }
+  }
+  if (impactScope) {
+    const planned = toRun
+      .map((pkg) => ({
+        pkg,
+        files: (impactScope.get(pkg.label) ?? []).filter((f) => existsSync(resolve(ROOT, pkg.dir, f))),
+      }))
+      .filter((entry) => entry.files.length > 0);
+    const total = planned.reduce((n, entry) => n + entry.files.length, 0);
+    const namedOverall = [...impactScope.values()].reduce((n, files) => n + files.length, 0);
+    console.log(
+      `\n[test:mine] impact-scoped to ${total} suite(s) across ${planned.length} package(s) ` +
+        `(KANBAN_TEST_SELECTOR=impact, --min-score ${impactMinScore}); ` +
+        `the @gate:always-run guards run on top, per package.`,
+    );
+    if (total < namedOverall) {
+      // Never let "the selector picked suites, but KANBAN_TEST_PACKAGES excludes their package"
+      // read as a clean narrow run. It is the same class of quiet gap as an empty selection.
+      console.warn(
+        `[test:mine] the selector named ${namedOverall} suite(s) but only ${total} are in the ` +
+          `packages currently in scope (${toRun.map((p) => p.label).join(", ")}) — the rest are ` +
+          `NOT being run. Widen KANBAN_TEST_PACKAGES if that is not intended.`,
+      );
+    }
+    for (const { pkg, files } of planned) {
+      if ((await runPackage(pkg, { kind: "impact", files })).code !== 0) failed = true;
+    }
+    // The guard top-up is NOT conditional on the package being in `planned`: a guard suite
+    // asserts a property of the tree, so it must run for every package in scope regardless of
+    // whether the selector named anything there (#538).
+    for (const pkg of toRun) {
+      const guards = (ALWAYS_RUN_TESTS[pkg.label] ?? []).filter((f) => existsSync(resolve(ROOT, pkg.dir, f)));
+      if (guards.length > 0 && (await runPackage(pkg, { kind: "guards", files: guards })).code !== 0) failed = true;
+    }
+    if (reportTreeDrift(treeBefore)) failed = true;
+    if (failed) {
+      console.error("\n[test:mine] One or more impact-selected suites failed.");
+      process.exit(1);
+    }
+    console.log("\n[test:mine] All impact-selected suites and guards passed.");
     process.exit(0);
   }
   for (const pkg of toRun) {
