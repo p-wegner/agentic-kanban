@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   resetVerifyChainSemaphoreForTests,
   runUnderVerifyChainSemaphore,
+  runUnderVerifyChainSemaphoreTimed,
   verifyChainSemaphoreActive,
   verifyChainSemaphoreConcurrency,
   verifyChainSemaphoreQueueLength,
@@ -96,5 +97,70 @@ describe("verify-chain-semaphore (#903)", () => {
     expect(verifyChainSemaphoreActive()).toBe(2);
     releaseAll();
     await Promise.all(chains);
+  });
+});
+
+/**
+ * #949 — the queue wait must be REPORTABLE, and it must be reported to the waiter itself.
+ *
+ * Two gates on one box were observed at 20 min and >45 min wall with nothing anywhere saying
+ * the second spent most of that queued rather than working, so the box read as broken instead
+ * of busy. The gate already treats "the conditions a verdict was produced under" as part of the
+ * verdict (`GateTierInfo.buildersQuiesced`); a long queue wait is one of those conditions.
+ */
+describe("verify-chain-semaphore queue-wait reporting (#949)", () => {
+  beforeEach(() => {
+    resetVerifyChainSemaphoreForTests();
+    delete process.env.KANBAN_VERIFY_CHAIN_CONCURRENCY;
+  });
+  afterEach(() => {
+    resetVerifyChainSemaphoreForTests();
+    delete process.env.KANBAN_VERIFY_CHAIN_CONCURRENCY;
+  });
+
+  it("reports a zero wait for an uncontended acquisition", async () => {
+    const { result, queueWaitMs } = await runUnderVerifyChainSemaphoreTimed(async () => "done");
+    expect(result).toBe("done");
+    expect(queueWaitMs).toBe(0);
+  });
+
+  it("reports a NON-zero wait to the chain that actually queued, and zero to the one that did not", async () => {
+    let releaseFirst: () => void = () => {};
+    const firstHeld = new Promise<void>((resolve) => { releaseFirst = resolve; });
+
+    const first = runUnderVerifyChainSemaphoreTimed(async () => { await firstHeld; }, "first");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(verifyChainSemaphoreActive()).toBe(1);
+
+    // Queued behind the holder.
+    const second = runUnderVerifyChainSemaphoreTimed(async () => "second", "second");
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(verifyChainSemaphoreQueueLength()).toBe(1);
+
+    releaseFirst();
+    const [firstRes, secondRes] = await Promise.all([first, second]);
+
+    // The holder never waited; the queued one did, and gets its OWN wait rather than a
+    // shared "most recent wait" that whoever acquired last would have overwritten.
+    expect(firstRes.queueWaitMs).toBe(0);
+    expect(secondRes.queueWaitMs).toBeGreaterThan(0);
+    expect(secondRes.result).toBe("second");
+  });
+
+  it("still releases the slot (and reports a wait) when the queued chain throws", async () => {
+    let releaseFirst: () => void = () => {};
+    const firstHeld = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const first = runUnderVerifyChainSemaphore(async () => { await firstHeld; });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const second = runUnderVerifyChainSemaphoreTimed(async () => { throw new Error("boom"); }, "second");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    releaseFirst();
+
+    await expect(second).rejects.toThrow("boom");
+    await first;
+    // A failing queued chain must not wedge the queue's accounting.
+    expect(verifyChainSemaphoreActive()).toBe(0);
+    expect(verifyChainSemaphoreQueueLength()).toBe(0);
   });
 });

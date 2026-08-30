@@ -13,6 +13,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
+import { runUnderVerifyChainSemaphore } from "./verify-chain-semaphore.js";
 // The base probe spawns the SAME verify script as the gate, so it inherits the board's
 // listener pins the same way — and a phantom EADDRINUSE here is worse, because it is
 // recorded as "the base is red" and then withholds every branch's merge.
@@ -220,16 +221,32 @@ ${tail(combined)}`,
     // no worker cap of its own — sharing the gate's resolved cap keeps the two from
     // independently defaulting to one vitest worker per core.
     const probeMaxWorkers = (await resolveVerifyMaxWorkers(projectId, database)).workers;
-    const run = await runSetupScript(dest, verifyScript, {
-      timeoutMs: VERIFY_TIMEOUT_MS,
-      env: { ...VERIFY_NEUTRALIZED_LISTENER_ENV, KANBAN_TEST_MAX_WORKERS: String(probeMaxWorkers) },
-    }).catch((e) => ({
-      exitCode: 1,
-      stdout: "",
-      stderr: String(e),
-      timedOut: false,
-    }));
+    // #949: and take the same one-at-a-time slot the gate's verify chain takes. #931 capped the
+    // probe's WORKERS and made its scheduler decline to start while a gate held the build
+    // semaphore, but that check is one-directional: once a probe was running, a gate arriving
+    // afterwards acquired its chain slot immediately and ran a full suite alongside this one.
+    // Two full suites on one box is the #949 symptom regardless of which started first, and
+    // sharing a worker cap does not help when there are two of everything.
+    let queueWaitMs = 0;
+    const run = await runUnderVerifyChainSemaphore(
+      () => runSetupScript(dest, verifyScript, {
+        timeoutMs: VERIFY_TIMEOUT_MS,
+        env: { ...VERIFY_NEUTRALIZED_LISTENER_ENV, KANBAN_TEST_MAX_WORKERS: String(probeMaxWorkers) },
+      }).catch((e) => ({
+        exitCode: 1,
+        stdout: "",
+        stderr: String(e),
+        timedOut: false,
+      })),
+      `base-branch health probe for project ${projectId}`,
+      (waited) => { queueWaitMs = waited; },
+    );
     const durationMs = Date.now() - startedAt;
+    // #949: `durationMs` spans clone + install + QUEUE WAIT + run, and the wait can now be
+    // long. #935 reports the duration as provenance for a starved probe, so the wait has to be
+    // named separately or that provenance becomes misleading in the other direction — a probe
+    // that queued 40 minutes and then ran fine would read like a slow base.
+    const queueNote = queueWaitMs > 0 ? ` (incl. ${Math.round(queueWaitMs / 1000)}s queued behind another verification)` : "";
     const combined = [run.stderr, run.stdout].filter(Boolean).join("\n").trim();
     if (run.timedOut) {
       result = {
@@ -243,7 +260,7 @@ ${tail(combined)}`,
         // existed at all; the verdict recorded nothing that would have said so. A reader (or a
         // future heuristic) needs the budget and the worker cap the probe actually ran under.
         message: `verify_script timed out after ${VERIFY_TIMEOUT_MS}ms `
-          + `(probe ran ${durationMs}ms with KANBAN_TEST_MAX_WORKERS=${probeMaxWorkers}). `
+          + `(probe ran ${durationMs}ms${queueNote} with KANBAN_TEST_MAX_WORKERS=${probeMaxWorkers}). `
           + `This is NOT a verdict about the base: the probe could not answer, so the base's health is UNKNOWN.`,
         failedSuites: failedSuitesForOutcome("timeout", combined),
       };
