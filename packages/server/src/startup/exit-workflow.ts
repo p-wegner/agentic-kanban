@@ -42,7 +42,7 @@ import { classifySessionExit, resolveSessionRoleFlags } from "./session-exit-cla
 import { setWorkspaceStatus } from "../repositories/workspace-status.repository.js";
 import { setMergeGateEvidence } from "../repositories/merge-gate.repository.js";
 import { resolveGateVerification } from "../services/pre-merge-gate-tier.js";
-import { resolveProjectReviewMode } from "../lib/review-mode-pref.js";
+import { resolveProjectReviewMode } from "../services/review-mode-pref.js";
 import { formatPostureNote } from "../services/risk-posture.service.js";
 import { workspaceHasCommittedWork } from "../services/workspace-commits.js";
 import { closeWorkspace } from "../services/workspace-lifecycle-reconcile.service.js";
