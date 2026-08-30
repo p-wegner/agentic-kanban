@@ -42,6 +42,7 @@
     "test:full": "pnpm --no-bail --workspace-concurrency=1 --filter @agentic-kanban/shared --filter agentic-kanban --filter @agentic-kanban/mcp-server --filter @agentic-kanban/client test",
     "test:mine": "node scripts/test-mine.mjs",
     "gate:always-run": "node scripts/gate-always-run.mjs",
+    "test:durations": "node scripts/capture-test-durations.mjs",
     "test:coverage": "pnpm -r --no-bail --workspace-concurrency=1 --filter @agentic-kanban/shared --filter agentic-kanban --filter @agentic-kanban/mcp-server --filter @agentic-kanban/client exec vitest run --coverage",
     "coverage:report": "node scripts/coverage-report.mjs",
     "coverage:merge": "node scripts/coverage-report.mjs --merge",
