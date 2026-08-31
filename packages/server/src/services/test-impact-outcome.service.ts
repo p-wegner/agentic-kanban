@@ -108,8 +108,8 @@ export interface RecordGateOutcomeInput {
   /** The worktree the gate ran in — where the diff, HEAD and the materialized skill live. */
   workingDir: string | null;
   /**
-   * The workspace's base branch, passed straight through to `select --base` and `record --base`
-   * (#963).
+   * The workspace's base branch, passed through to `select` (POSITIONALLY — it reads
+   * `positional[0]`, not a flag) and to `record --base` (#963).
    *
    * WITHOUT IT THE LEDGER MEASURES NOTHING. `impact.mjs`'s `changedFiles(base)` only consults
    * `base...HEAD` when a base is given; its two remaining sources are `git diff HEAD` (staged +
@@ -350,14 +350,23 @@ export async function recordGateOutcome(input: RecordGateOutcomeInput): Promise<
     const ledgerRoot = input.repoPath ?? workingDir;
     const outcomesPath = resolve(ledgerRoot, OUTCOMES_RELATIVE_PATH);
 
-    // #963 — `--base` is what makes this the branch's REAL selection rather than the constant
+    // #963 — the base is what makes this the branch's REAL selection rather than the constant
     // always-run set. See `RecordGateOutcomeInput.baseBranch` for the measurement it was silently
     // destroying. Omitted (not passed empty) when there is no base, so the tool keeps its own
     // uncommitted-work behaviour instead of being handed a ref it cannot resolve.
+    //
+    // THE TWO SUBCOMMANDS SPELL IT DIFFERENTLY, AND THAT IS NOT COSMETIC. `cmdRecord` reads
+    // `flag("base")`, so it takes `--base <ref>`. `cmdSelect` reads `positional[0]` and never
+    // consults a `--base` flag at all — passing one there is silently ignored, `changedFiles(undefined)`
+    // falls back to the uncommitted-work sources, and the change set comes back EMPTY on the clean
+    // committed tree a gate runs against. That is exactly the #963 defect this call exists to fix,
+    // so the base goes FIRST, positionally. Verified against `impact.mjs` on a branch with commits:
+    // `select --json --always-run --base master` → `changed: 0`, `select master --json --always-run`
+    // → `changed: 9`.
     const baseBranch = input.baseBranch?.trim() || null;
     const selection = await run({
       cwd: workingDir,
-      args: [toolPath, "select", "--json", "--always-run", ...(baseBranch ? ["--base", baseBranch] : [])],
+      args: [toolPath, "select", ...(baseBranch ? [baseBranch] : []), "--json", "--always-run"],
       timeoutMs: IMPACT_COMMAND_TIMEOUT_MS,
     });
     if (selection.exitCode !== 0) {
