@@ -78,6 +78,35 @@ export function graphOwnsReviewSessionExit(node: WorkflowOwnershipNode | null | 
 }
 
 /**
+ * Did the REVIEWER put this issue in "In Progress", or was it already there?
+ *
+ * The exit engine reads "In Progress after a review" as the reviewer's changes-requested
+ * signal — in non-auto-fix mode that IS the whole signal, because the review prompt tells a
+ * reviewer that finds CRITICAL/MAJOR issues to `move_issue(..., 'In Progress')` and edit
+ * nothing. On the #960 start-node shape the issue was ALREADY In Progress, so status alone
+ * cannot tell the two apart, and treating every start-node exit as "never transitioned"
+ * would arm — and auto-merge — a branch whose reviewer had just requested changes.
+ *
+ * `transitionIssueStatus` (and the PATCH path's `buildSharedIssueUpdate`) stamp
+ * `statusChangedAt` on EVERY status write, including a re-move to the status the issue is
+ * already in. So a stamp at or after the review session started is the reviewer's move;
+ * anything older is the original status the builder left behind.
+ *
+ * Fails CLOSED: a missing/unparseable `statusChangedAt` or `sessionStartedAt` counts as
+ * "the reviewer may have moved it", which keeps the pre-#960 withhold rather than arming a
+ * branch on no evidence.
+ */
+export function reviewerMovedIssueToInProgress(
+  statusChangedAt: string | null | undefined,
+  sessionStartedAt: string | null | undefined,
+): boolean {
+  const changed = statusChangedAt ? Date.parse(statusChangedAt) : NaN;
+  const started = sessionStartedAt ? Date.parse(sessionStartedAt) : NaN;
+  if (Number.isNaN(changed) || Number.isNaN(started)) return true;
+  return changed >= started;
+}
+
+/**
  * Why a review exit's `readyForMerge` arm was withheld, phrased for the server log — the
  * silent case is what made #960 invisible without a DB query (#960's "Done when").
  */
