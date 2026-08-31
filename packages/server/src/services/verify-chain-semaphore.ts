@@ -127,18 +127,28 @@ export async function runUnderVerifyChainSemaphore<T>(
   const holder = label ?? "a verify chain";
   // #957 — the MACHINE lock wraps the in-process wait, so `queueWaitMs` covers both and a gate's
   // reported wait is the whole time it spent not-working rather than only the part this process
-  // could see. `gate` is the right role for every consumer here: all of them (verify chain, smoke
-  // check, E2E lane) produce a result that a merge is waiting on. The base-health probe takes the
-  // `probe` role at ITS OWN call site instead, because it is the one consumer that should SKIP
-  // rather than proceed when it cannot get a slot (#931's yield, through a wider door).
+  // could see. `gate` is the role every consumer of THIS function takes, base-health probe
+  // included: it reaches the box through `runUnderVerifyChainSemaphore` like the rest, so it is
+  // a proceed-on-timeout waiter here, not the `probe` role's skip. Its yield to a busy verifier
+  // happens EARLIER and cheaply — `resolveGateBusy()` defers it before a probe is even started —
+  // which is the right place for it, because skipping after a three-hour wait would have burned
+  // the clone and install first. `MACHINE_VERIFY_ROLES.probe` is therefore the declared bound for
+  // a caller that wants that behaviour, and nothing in the server takes it today.
   if (!machineVerifyLockEnabled()) {
     return runUnderInProcessSemaphore(chain, holder, onWaited);
   }
+  // The two waits are reported as ONE number, which is why the in-process half is captured here
+  // rather than passed straight through: `runUnderInProcessSemaphore` calls `onWaited` with its
+  // own wait only, so handing it the caller's callback would OVERWRITE an hours-long machine-lock
+  // wait with the in-process `0` that follows it — a gate that queued two hours behind another
+  // process would then report no queue wait at all, which is the silence #957 exists to remove.
+  let inProcessWaitMs = 0;
   const outcome = await withMachineVerifyLock(
     MACHINE_VERIFY_ROLES.gate,
     holder,
-    () => runUnderInProcessSemaphore(chain, holder, onWaited),
+    () => runUnderInProcessSemaphore(chain, holder, (waited) => { inProcessWaitMs = waited; }),
   );
+  onWaited?.(outcome.waitedMs + inProcessWaitMs);
   // `gate.onTimeout` is `"proceed"`, so `ran` is always true here — but the type admits `false`
   // for the `probe` role, and silently treating a skip as a success is exactly the "a green that
   // asserted nothing" shape this codebase keeps having to fix. Fail loudly instead.

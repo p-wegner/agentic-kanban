@@ -241,4 +241,30 @@ describe("verify-chain-semaphore + the machine lock (#957)", () => {
     await chain;
     expect(entered).toBe(true);
   }, 20_000);
+
+  it("reports the CROSS-PROCESS wait in queueWaitMs, not just the in-process one", async () => {
+    process.env[MACHINE_LOCK_ENV] = "1";
+    // The reported wait is what the gate's tier message says. The in-process semaphore reports
+    // its OWN wait — 0 here, since nothing else is in this event loop — so passing the caller's
+    // callback straight down would overwrite the machine-lock wait with that 0 and a gate that
+    // queued behind ANOTHER PROCESS would report no wait at all. That silence is precisely what
+    // the ticket forbids.
+    const foreign = {
+      pid: process.pid,
+      hostname: hostname(),
+      role: "builder-test",
+      holder: "a builder's own pnpm test:mine",
+      acquiredAt: new Date().toISOString(),
+      heartbeatAt: new Date().toISOString(),
+    };
+    writeFileSync(machineVerifyLockPath(), JSON.stringify(foreign));
+
+    const chain = runUnderVerifyChainSemaphoreTimed(async () => "done", "my gate");
+    await new Promise((r) => setTimeout(r, 200));
+    rmSync(machineVerifyLockPath(), { force: true });
+
+    const { result, queueWaitMs } = await chain;
+    expect(result).toBe("done");
+    expect(queueWaitMs).toBeGreaterThan(0);
+  }, 20_000);
 });
