@@ -1,0 +1,5849 @@
+{
+ "testResults": [
+  {
+   "name": "packages/client/devProxyGuard.test.ts",
+   "startTime": 0,
+   "endTime": 5.27099609375
+  },
+  {
+   "name": "packages/client/src/__tests__/ButlerViewBody.render.test.tsx",
+   "startTime": 0,
+   "endTime": 79.902099609375
+  },
+  {
+   "name": "packages/client/src/__tests__/Icon.render.test.tsx",
+   "startTime": 0,
+   "endTime": 17.24951171875
+  },
+  {
+   "name": "packages/client/src/__tests__/SettingsPanel.render.test.tsx",
+   "startTime": 0,
+   "endTime": 5.669189453125
+  },
+  {
+   "name": "packages/client/src/__tests__/ViewTabBar.render.test.tsx",
+   "startTime": 0,
+   "endTime": 15.647216796875
+  },
+  {
+   "name": "packages/client/src/__tests__/api-response-validation-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 8.02001953125
+  },
+  {
+   "name": "packages/client/src/__tests__/boardPageStateGate.test.ts",
+   "startTime": 0,
+   "endTime": 4.030517578125
+  },
+  {
+   "name": "packages/client/src/__tests__/chart-duplication-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 5770.141357421875
+  },
+  {
+   "name": "packages/client/src/__tests__/chartGeometry.test.ts",
+   "startTime": 0,
+   "endTime": 15.155517578125
+  },
+  {
+   "name": "packages/client/src/__tests__/client-conventions-guard.test.ts",
+   "startTime": 0,
+   "endTime": 3094.4248046875
+  },
+  {
+   "name": "packages/client/src/__tests__/client-module-placement.test.ts",
+   "startTime": 0,
+   "endTime": 9.04541015625
+  },
+  {
+   "name": "packages/client/src/__tests__/client-upward-type-edge-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 81.0244140625
+  },
+  {
+   "name": "packages/client/src/__tests__/fetch-in-effect-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 4.483642578125
+  },
+  {
+   "name": "packages/client/src/__tests__/function-nloc-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 8.252685546875
+  },
+  {
+   "name": "packages/client/src/__tests__/icon-primitive-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 658.946533203125
+  },
+  {
+   "name": "packages/client/src/__tests__/issue-form-duplication-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 2126.385498046875
+  },
+  {
+   "name": "packages/client/src/__tests__/panel-registry.test.ts",
+   "startTime": 0,
+   "endTime": 6.450439453125
+  },
+  {
+   "name": "packages/client/src/__tests__/theme-tokens.test.ts",
+   "startTime": 0,
+   "endTime": 5.787109375
+  },
+  {
+   "name": "packages/client/src/components/AgentFlightRecorder.test.tsx",
+   "startTime": 0,
+   "endTime": 35.101806640625
+  },
+  {
+   "name": "packages/client/src/components/BacklogMarkdownModal.test.tsx",
+   "startTime": 0,
+   "endTime": 32.993408203125
+  },
+  {
+   "name": "packages/client/src/components/Badge.test.tsx",
+   "startTime": 0,
+   "endTime": 16.7431640625
+  },
+  {
+   "name": "packages/client/src/components/BoardStats.test.tsx",
+   "startTime": 0,
+   "endTime": 21.654541015625
+  },
+  {
+   "name": "packages/client/src/components/BoardToolbar.test.ts",
+   "startTime": 0,
+   "endTime": 3.85009765625
+  },
+  {
+   "name": "packages/client/src/components/ButlerQuestionCard.test.tsx",
+   "startTime": 0,
+   "endTime": 12.715087890625
+  },
+  {
+   "name": "packages/client/src/components/Button.test.tsx",
+   "startTime": 0,
+   "endTime": 15.52001953125
+  },
+  {
+   "name": "packages/client/src/components/CapabilityMatrix.test.tsx",
+   "startTime": 0,
+   "endTime": 19.35888671875
+  },
+  {
+   "name": "packages/client/src/components/CrimeSceneCityView.test.tsx",
+   "startTime": 0,
+   "endTime": 21.522705078125
+  },
+  {
+   "name": "packages/client/src/components/CrossRepoImpactHeatmap.test.tsx",
+   "startTime": 0,
+   "endTime": 39.005859375
+  },
+  {
+   "name": "packages/client/src/components/DiffViewer.test.tsx",
+   "startTime": 0,
+   "endTime": 44.51220703125
+  },
+  {
+   "name": "packages/client/src/components/FleetServiceStackMap.test.tsx",
+   "startTime": 0,
+   "endTime": 21.837646484375
+  },
+  {
+   "name": "packages/client/src/components/GraphEdges.test.tsx",
+   "startTime": 0,
+   "endTime": 40.98486328125
+  },
+  {
+   "name": "packages/client/src/components/IssueActivitySection.test.tsx",
+   "startTime": 0,
+   "endTime": 14.943115234375
+  },
+  {
+   "name": "packages/client/src/components/IssueCard.test.tsx",
+   "startTime": 0,
+   "endTime": 49.532470703125
+  },
+  {
+   "name": "packages/client/src/components/IssueDetailPanel.test.tsx",
+   "startTime": 0,
+   "endTime": 24.306396484375
+  },
+  {
+   "name": "packages/client/src/components/MarkdownView.test.tsx",
+   "startTime": 0,
+   "endTime": 51.186767578125
+  },
+  {
+   "name": "packages/client/src/components/MergeQueuePanel.test.ts",
+   "startTime": 0,
+   "endTime": 4.432861328125
+  },
+  {
+   "name": "packages/client/src/components/MergeReadinessBoard.test.tsx",
+   "startTime": 0,
+   "endTime": 28.774658203125
+  },
+  {
+   "name": "packages/client/src/components/MonitorPopover.test.tsx",
+   "startTime": 0,
+   "endTime": 12.88134765625
+  },
+  {
+   "name": "packages/client/src/components/OnboardingWizard.test.tsx",
+   "startTime": 0,
+   "endTime": 11.20947265625
+  },
+  {
+   "name": "packages/client/src/components/PluginScaffoldPane.test.tsx",
+   "startTime": 0,
+   "endTime": 6.449951171875
+  },
+  {
+   "name": "packages/client/src/components/PluginViewsPanel.test.tsx",
+   "startTime": 0,
+   "endTime": 16.441162109375
+  },
+  {
+   "name": "packages/client/src/components/ProjectScriptsMenu.test.tsx",
+   "startTime": 0,
+   "endTime": 14.662109375
+  },
+  {
+   "name": "packages/client/src/components/ProjectSelector.test.tsx",
+   "startTime": 0,
+   "endTime": 19.388671875
+  },
+  {
+   "name": "packages/client/src/components/ProjectTabs.test.tsx",
+   "startTime": 0,
+   "endTime": 21.802490234375
+  },
+  {
+   "name": "packages/client/src/components/RepoMergeStatusStrip.test.tsx",
+   "startTime": 0,
+   "endTime": 19.9453125
+  },
+  {
+   "name": "packages/client/src/components/RunQueueForecastPanel.test.ts",
+   "startTime": 0,
+   "endTime": 6.6982421875
+  },
+  {
+   "name": "packages/client/src/components/ServiceStackStatusPanel.test.tsx",
+   "startTime": 0,
+   "endTime": 21.025390625
+  },
+  {
+   "name": "packages/client/src/components/StrategyTargetsView.test.tsx",
+   "startTime": 0,
+   "endTime": 15.706298828125
+  },
+  {
+   "name": "packages/client/src/components/TerminalView.test.tsx",
+   "startTime": 0,
+   "endTime": 13.4091796875
+  },
+  {
+   "name": "packages/client/src/components/TimelineView.test.tsx",
+   "startTime": 0,
+   "endTime": 124.68994140625
+  },
+  {
+   "name": "packages/client/src/components/WorkspaceActionBar.test.tsx",
+   "startTime": 0,
+   "endTime": 13.63818359375
+  },
+  {
+   "name": "packages/client/src/components/WorkspaceDiffPanel.test.tsx",
+   "startTime": 0,
+   "endTime": 35.98388671875
+  },
+  {
+   "name": "packages/client/src/components/WorkspaceLifecycleTimeline.test.tsx",
+   "startTime": 0,
+   "endTime": 22.760498046875
+  },
+  {
+   "name": "packages/client/src/components/WorkspacePanel.test.tsx",
+   "startTime": 0,
+   "endTime": 17.390625
+  },
+  {
+   "name": "packages/client/src/components/WorkspacePreviewPanel.test.tsx",
+   "startTime": 0,
+   "endTime": 17.042236328125
+  },
+  {
+   "name": "packages/client/src/components/WorkspaceScorecardPanel.test.tsx",
+   "startTime": 0,
+   "endTime": 22.781494140625
+  },
+  {
+   "name": "packages/client/src/components/gateQuestionSplit.test.ts",
+   "startTime": 0,
+   "endTime": 9.323486328125
+  },
+  {
+   "name": "packages/client/src/components/pluginLoopReviewLayout.test.ts",
+   "startTime": 0,
+   "endTime": 8.28955078125
+  },
+  {
+   "name": "packages/client/src/components/pluginLoopTimeline.test.ts",
+   "startTime": 0,
+   "endTime": 10.614990234375
+  },
+  {
+   "name": "packages/client/src/components/pluginProgressStepper.test.tsx",
+   "startTime": 0,
+   "endTime": 20.114990234375
+  },
+  {
+   "name": "packages/client/src/hooks/graphSearch.test.ts",
+   "startTime": 0,
+   "endTime": 8.277099609375
+  },
+  {
+   "name": "packages/client/src/hooks/useApiResource.test.ts",
+   "startTime": 0,
+   "endTime": 4.296630859375
+  },
+  {
+   "name": "packages/client/src/hooks/useBoardDataController.test.ts",
+   "startTime": 0,
+   "endTime": 6.418701171875
+  },
+  {
+   "name": "packages/client/src/hooks/useBoardDataQueries.test.ts",
+   "startTime": 0,
+   "endTime": 18.11962890625
+  },
+  {
+   "name": "packages/client/src/hooks/useBoardWsRefresh.test.ts",
+   "startTime": 0,
+   "endTime": 43.69384765625
+  },
+  {
+   "name": "packages/client/src/hooks/useDismissable.test.ts",
+   "startTime": 0,
+   "endTime": 4.17724609375
+  },
+  {
+   "name": "packages/client/src/hooks/useInbox.test.ts",
+   "startTime": 0,
+   "endTime": 6.19140625
+  },
+  {
+   "name": "packages/client/src/hooks/useOnboardingStatus.test.ts",
+   "startTime": 0,
+   "endTime": 2.479248046875
+  },
+  {
+   "name": "packages/client/src/hooks/usePoll.test.ts",
+   "startTime": 0,
+   "endTime": 11.167724609375
+  },
+  {
+   "name": "packages/client/src/lib/__tests__/launchTemplates.test.ts",
+   "startTime": 0,
+   "endTime": 12.3291015625
+  },
+  {
+   "name": "packages/client/src/lib/agent-output-parser.test.ts",
+   "startTime": 0,
+   "endTime": 41.331787109375
+  },
+  {
+   "name": "packages/client/src/lib/agentGridView.test.ts",
+   "startTime": 0,
+   "endTime": 10.181640625
+  },
+  {
+   "name": "packages/client/src/lib/agentPresets.test.ts",
+   "startTime": 0,
+   "endTime": 13.29931640625
+  },
+  {
+   "name": "packages/client/src/lib/agentQuestionsStore.test.ts",
+   "startTime": 0,
+   "endTime": 15.810302734375
+  },
+  {
+   "name": "packages/client/src/lib/agingHeatmapThresholds.test.ts",
+   "startTime": 0,
+   "endTime": 4.3271484375
+  },
+  {
+   "name": "packages/client/src/lib/allWorkspacesFilter.test.ts",
+   "startTime": 0,
+   "endTime": 10.2890625
+  },
+  {
+   "name": "packages/client/src/lib/allWorkspacesStatus.test.ts",
+   "startTime": 0,
+   "endTime": 6.359130859375
+  },
+  {
+   "name": "packages/client/src/lib/api.test.ts",
+   "startTime": 0,
+   "endTime": 7.50146484375
+  },
+  {
+   "name": "packages/client/src/lib/apiContract.test.ts",
+   "startTime": 0,
+   "endTime": 17.6474609375
+  },
+  {
+   "name": "packages/client/src/lib/appRoutes.test.ts",
+   "startTime": 0,
+   "endTime": 28.73974609375
+  },
+  {
+   "name": "packages/client/src/lib/autoStartSkipReason.test.ts",
+   "startTime": 0,
+   "endTime": 6.559814453125
+  },
+  {
+   "name": "packages/client/src/lib/badgeTones.test.ts",
+   "startTime": 0,
+   "endTime": 9.21533203125
+  },
+  {
+   "name": "packages/client/src/lib/blockingDependencies.test.ts",
+   "startTime": 0,
+   "endTime": 6.236083984375
+  },
+  {
+   "name": "packages/client/src/lib/boardCardSnapshot.test.ts",
+   "startTime": 0,
+   "endTime": 4.514404296875
+  },
+  {
+   "name": "packages/client/src/lib/boardColumnSort.test.ts",
+   "startTime": 0,
+   "endTime": 9.265625
+  },
+  {
+   "name": "packages/client/src/lib/boardColumnsQuery.test.ts",
+   "startTime": 0,
+   "endTime": 17.47021484375
+  },
+  {
+   "name": "packages/client/src/lib/boardColumnsStore.test.ts",
+   "startTime": 0,
+   "endTime": 10.360107421875
+  },
+  {
+   "name": "packages/client/src/lib/boardDataReconcile.test.ts",
+   "startTime": 0,
+   "endTime": 8.2412109375
+  },
+  {
+   "name": "packages/client/src/lib/boardKeyboardNav.test.ts",
+   "startTime": 0,
+   "endTime": 5.262451171875
+  },
+  {
+   "name": "packages/client/src/lib/boardSavedViews.test.ts",
+   "startTime": 0,
+   "endTime": 8.393310546875
+  },
+  {
+   "name": "packages/client/src/lib/boardStats.test.ts",
+   "startTime": 0,
+   "endTime": 6.18701171875
+  },
+  {
+   "name": "packages/client/src/lib/butler-event-reducer.test.ts",
+   "startTime": 0,
+   "endTime": 16.304443359375
+  },
+  {
+   "name": "packages/client/src/lib/butler-format.test.ts",
+   "startTime": 0,
+   "endTime": 6.277099609375
+  },
+  {
+   "name": "packages/client/src/lib/butler-slash-commands.test.ts",
+   "startTime": 0,
+   "endTime": 4.1982421875
+  },
+  {
+   "name": "packages/client/src/lib/butler-speech.test.ts",
+   "startTime": 0,
+   "endTime": 4.333984375
+  },
+  {
+   "name": "packages/client/src/lib/butler-url.test.ts",
+   "startTime": 0,
+   "endTime": 3.190673828125
+  },
+  {
+   "name": "packages/client/src/lib/buttonVariants.test.ts",
+   "startTime": 0,
+   "endTime": 15.14111328125
+  },
+  {
+   "name": "packages/client/src/lib/checklist.test.ts",
+   "startTime": 0,
+   "endTime": 5.30029296875
+  },
+  {
+   "name": "packages/client/src/lib/clientInvalidation.test.ts",
+   "startTime": 0,
+   "endTime": 7.946533203125
+  },
+  {
+   "name": "packages/client/src/lib/columnHelpers.test.ts",
+   "startTime": 0,
+   "endTime": 11.98291015625
+  },
+  {
+   "name": "packages/client/src/lib/columnScrollState.test.ts",
+   "startTime": 0,
+   "endTime": 4.293212890625
+  },
+  {
+   "name": "packages/client/src/lib/context-window.test.ts",
+   "startTime": 0,
+   "endTime": 6.32568359375
+  },
+  {
+   "name": "packages/client/src/lib/createIssuePayload.test.ts",
+   "startTime": 0,
+   "endTime": 7.992919921875
+  },
+  {
+   "name": "packages/client/src/lib/createIssueService.test.ts",
+   "startTime": 0,
+   "endTime": 19.72021484375
+  },
+  {
+   "name": "packages/client/src/lib/createWorkspaceBody.test.ts",
+   "startTime": 0,
+   "endTime": 8.190185546875
+  },
+  {
+   "name": "packages/client/src/lib/criticalPath.test.ts",
+   "startTime": 0,
+   "endTime": 10.40283203125
+  },
+  {
+   "name": "packages/client/src/lib/crossRepoActivity.test.ts",
+   "startTime": 0,
+   "endTime": 14.175048828125
+  },
+  {
+   "name": "packages/client/src/lib/crossRepoImpact.test.ts",
+   "startTime": 0,
+   "endTime": 10.553466796875
+  },
+  {
+   "name": "packages/client/src/lib/detectAgentStall.test.ts",
+   "startTime": 0,
+   "endTime": 8.376708984375
+  },
+  {
+   "name": "packages/client/src/lib/diff-highlight.test.ts",
+   "startTime": 0,
+   "endTime": 7.269775390625
+  },
+  {
+   "name": "packages/client/src/lib/diff-parse.test.ts",
+   "startTime": 0,
+   "endTime": 9.759521484375
+  },
+  {
+   "name": "packages/client/src/lib/diffMultiRepoMatrix.test.ts",
+   "startTime": 0,
+   "endTime": 5.4208984375
+  },
+  {
+   "name": "packages/client/src/lib/fleetLiveStats.test.ts",
+   "startTime": 0,
+   "endTime": 7.689208984375
+  },
+  {
+   "name": "packages/client/src/lib/fleetServiceStacks.test.ts",
+   "startTime": 0,
+   "endTime": 7.470458984375
+  },
+  {
+   "name": "packages/client/src/lib/flightRecorderEvents.test.ts",
+   "startTime": 0,
+   "endTime": 20.561279296875
+  },
+  {
+   "name": "packages/client/src/lib/formatRelativeTime.test.ts",
+   "startTime": 0,
+   "endTime": 6.6923828125
+  },
+  {
+   "name": "packages/client/src/lib/gateCardPolicy.test.tsx",
+   "startTime": 0,
+   "endTime": 26.6064453125
+  },
+  {
+   "name": "packages/client/src/lib/groupConflictsByRepo.test.ts",
+   "startTime": 0,
+   "endTime": 6.39013671875
+  },
+  {
+   "name": "packages/client/src/lib/inboxNavigation.test.ts",
+   "startTime": 0,
+   "endTime": 5.604736328125
+  },
+  {
+   "name": "packages/client/src/lib/insights-format.test.ts",
+   "startTime": 0,
+   "endTime": 9.686767578125
+  },
+  {
+   "name": "packages/client/src/lib/issueCardDisplay.test.ts",
+   "startTime": 0,
+   "endTime": 6.221435546875
+  },
+  {
+   "name": "packages/client/src/lib/issueEditForm.test.ts",
+   "startTime": 0,
+   "endTime": 11.094970703125
+  },
+  {
+   "name": "packages/client/src/lib/issueMoveHelpers.test.ts",
+   "startTime": 0,
+   "endTime": 5.341552734375
+  },
+  {
+   "name": "packages/client/src/lib/markdownUrlTransform.render.test.tsx",
+   "startTime": 0,
+   "endTime": 42.94873046875
+  },
+  {
+   "name": "packages/client/src/lib/markdownUrlTransform.test.ts",
+   "startTime": 0,
+   "endTime": 6.104248046875
+  },
+  {
+   "name": "packages/client/src/lib/mcp-tool-toggle.test.ts",
+   "startTime": 0,
+   "endTime": 6.228271484375
+  },
+  {
+   "name": "packages/client/src/lib/mergeReadiness.test.ts",
+   "startTime": 0,
+   "endTime": 9.273193359375
+  },
+  {
+   "name": "packages/client/src/lib/mergeTrainSummary.test.ts",
+   "startTime": 0,
+   "endTime": 5.5234375
+  },
+  {
+   "name": "packages/client/src/lib/monitor-popover.test.ts",
+   "startTime": 0,
+   "endTime": 4.484619140625
+  },
+  {
+   "name": "packages/client/src/lib/monitorToolbarStatus.test.ts",
+   "startTime": 0,
+   "endTime": 4.4892578125
+  },
+  {
+   "name": "packages/client/src/lib/monitorWarningSummary.test.ts",
+   "startTime": 0,
+   "endTime": 12.206787109375
+  },
+  {
+   "name": "packages/client/src/lib/multiRepoMatrix.test.ts",
+   "startTime": 0,
+   "endTime": 12.730712890625
+  },
+  {
+   "name": "packages/client/src/lib/parseSessionTranscript.test.ts",
+   "startTime": 0,
+   "endTime": 9.242431640625
+  },
+  {
+   "name": "packages/client/src/lib/pastedImages.test.ts",
+   "startTime": 0,
+   "endTime": 8.104248046875
+  },
+  {
+   "name": "packages/client/src/lib/pluginArtifactNavigation.test.ts",
+   "startTime": 0,
+   "endTime": 17.19091796875
+  },
+  {
+   "name": "packages/client/src/lib/priorityTraits.test.ts",
+   "startTime": 0,
+   "endTime": 8.230712890625
+  },
+  {
+   "name": "packages/client/src/lib/profileOptionLabels.test.ts",
+   "startTime": 0,
+   "endTime": 7.6240234375
+  },
+  {
+   "name": "packages/client/src/lib/projectSlug.test.ts",
+   "startTime": 0,
+   "endTime": 10.14404296875
+  },
+  {
+   "name": "packages/client/src/lib/propsEqualIgnoring.test.ts",
+   "startTime": 0,
+   "endTime": 5.3427734375
+  },
+  {
+   "name": "packages/client/src/lib/reorderIssues.test.ts",
+   "startTime": 0,
+   "endTime": 5.77587890625
+  },
+  {
+   "name": "packages/client/src/lib/repoEditPayload.test.ts",
+   "startTime": 0,
+   "endTime": 7.375244140625
+  },
+  {
+   "name": "packages/client/src/lib/scheduled-run-form.test.ts",
+   "startTime": 0,
+   "endTime": 9.15625
+  },
+  {
+   "name": "packages/client/src/lib/selectedIssueSync.test.ts",
+   "startTime": 0,
+   "endTime": 6.25927734375
+  },
+  {
+   "name": "packages/client/src/lib/services-config.test.ts",
+   "startTime": 0,
+   "endTime": 6.308349609375
+  },
+  {
+   "name": "packages/client/src/lib/session-replay-turns.test.ts",
+   "startTime": 0,
+   "endTime": 16.245361328125
+  },
+  {
+   "name": "packages/client/src/lib/sessionTranscriptTrailing.test.ts",
+   "startTime": 0,
+   "endTime": 4.30419921875
+  },
+  {
+   "name": "packages/client/src/lib/settings-shared.test.ts",
+   "startTime": 0,
+   "endTime": 7.435546875
+  },
+  {
+   "name": "packages/client/src/lib/settingsPanelState.test.ts",
+   "startTime": 0,
+   "endTime": 10.133544921875
+  },
+  {
+   "name": "packages/client/src/lib/settingsStore.test.ts",
+   "startTime": 0,
+   "endTime": 18.9501953125
+  },
+  {
+   "name": "packages/client/src/lib/strategy-targets.test.ts",
+   "startTime": 0,
+   "endTime": 11.3916015625
+  },
+  {
+   "name": "packages/client/src/lib/summarizeMultirepoHealth.test.ts",
+   "startTime": 0,
+   "endTime": 6.48779296875
+  },
+  {
+   "name": "packages/client/src/lib/tableView-bulk-ops.test.ts",
+   "startTime": 0,
+   "endTime": 5.726318359375
+  },
+  {
+   "name": "packages/client/src/lib/tableView-cells.test.ts",
+   "startTime": 0,
+   "endTime": 8.419189453125
+  },
+  {
+   "name": "packages/client/src/lib/tableView-filters.test.ts",
+   "startTime": 0,
+   "endTime": 9.4677734375
+  },
+  {
+   "name": "packages/client/src/lib/tableView-sorting.test.ts",
+   "startTime": 0,
+   "endTime": 7.231201171875
+  },
+  {
+   "name": "packages/client/src/lib/terminal-transcript.test.ts",
+   "startTime": 0,
+   "endTime": 14.8212890625
+  },
+  {
+   "name": "packages/client/src/lib/ticketTrailCore.test.ts",
+   "startTime": 0,
+   "endTime": 10.348876953125
+  },
+  {
+   "name": "packages/client/src/lib/timelineView.test.ts",
+   "startTime": 0,
+   "endTime": 11.313720703125
+  },
+  {
+   "name": "packages/client/src/lib/toolbarTabOverflow.test.ts",
+   "startTime": 0,
+   "endTime": 7.23828125
+  },
+  {
+   "name": "packages/client/src/lib/url.test.ts",
+   "startTime": 0,
+   "endTime": 4.546875
+  },
+  {
+   "name": "packages/client/src/lib/viewRegistry.test.tsx",
+   "startTime": 0,
+   "endTime": 13.179931640625
+  },
+  {
+   "name": "packages/client/src/lib/viewTabGroups.test.ts",
+   "startTime": 0,
+   "endTime": 5.26318359375
+  },
+  {
+   "name": "packages/client/src/lib/viewVisibility.test.ts",
+   "startTime": 0,
+   "endTime": 11.100341796875
+  },
+  {
+   "name": "packages/client/src/lib/voice-language.test.ts",
+   "startTime": 0,
+   "endTime": 5.52978515625
+  },
+  {
+   "name": "packages/client/src/lib/wipLimits.test.ts",
+   "startTime": 0,
+   "endTime": 5.201904296875
+  },
+  {
+   "name": "packages/client/src/lib/workflowHistory.test.ts",
+   "startTime": 0,
+   "endTime": 8.596923828125
+  },
+  {
+   "name": "packages/client/src/lib/workflowNodeConfig.test.ts",
+   "startTime": 0,
+   "endTime": 5.323486328125
+  },
+  {
+   "name": "packages/client/src/lib/workspace-launch.test.ts",
+   "startTime": 0,
+   "endTime": 6.322021484375
+  },
+  {
+   "name": "packages/client/src/lib/workspace-preview.test.ts",
+   "startTime": 0,
+   "endTime": 10.369140625
+  },
+  {
+   "name": "packages/client/src/lib/workspace-secondary-data.test.ts",
+   "startTime": 0,
+   "endTime": 11.439453125
+  },
+  {
+   "name": "packages/client/src/lib/workspaceCardState.test.ts",
+   "startTime": 0,
+   "endTime": 6.33837890625
+  },
+  {
+   "name": "packages/client/src/lib/workspaceLaunchState.test.ts",
+   "startTime": 0,
+   "endTime": 6.4599609375
+  },
+  {
+   "name": "packages/client/src/lib/workspaceLifecyclePhases.test.ts",
+   "startTime": 0,
+   "endTime": 8.38525390625
+  },
+  {
+   "name": "packages/client/src/lib/workspacePanelDrag.test.ts",
+   "startTime": 0,
+   "endTime": 5.164306640625
+  },
+  {
+   "name": "packages/client/src/lib/workspaceRepoStatusQuery.test.ts",
+   "startTime": 0,
+   "endTime": 9.336181640625
+  },
+  {
+   "name": "packages/client/src/routes/boardRouteSync.test.ts",
+   "startTime": 0,
+   "endTime": 19.138427734375
+  },
+  {
+   "name": "packages/client/src/stores/boardBulkSelectionStore.test.ts",
+   "startTime": 0,
+   "endTime": 7.307373046875
+  },
+  {
+   "name": "packages/client/src/stores/boardCursorStore.test.ts",
+   "startTime": 0,
+   "endTime": 4.53662109375
+  },
+  {
+   "name": "packages/client/src/stores/boardFilterStore.test.ts",
+   "startTime": 0,
+   "endTime": 10.827392578125
+  },
+  {
+   "name": "packages/client/src/stores/pluginViewStore.test.ts",
+   "startTime": 0,
+   "endTime": 6.425537109375
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/board-call.test.ts",
+   "startTime": 0,
+   "endTime": 22.154541015625
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/butler-api.test.ts",
+   "startTime": 0,
+   "endTime": 23.36376953125
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/db.test.ts",
+   "startTime": 0,
+   "endTime": 940.031494140625
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/disabled-tools.test.ts",
+   "startTime": 0,
+   "endTime": 11088.9482421875
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/http-transport.test.ts",
+   "startTime": 0,
+   "endTime": 318.018310546875
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/mcp-catalog-parity.test.ts",
+   "startTime": 0,
+   "endTime": 15.0263671875
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/mcp-error-spelling.test.ts",
+   "startTime": 0,
+   "endTime": 27.1953125
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/mcp-tools.test.ts",
+   "startTime": 0,
+   "endTime": 22200.561279296875
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/server-resilience-stay-up.test.ts",
+   "startTime": 0,
+   "endTime": 15.52392578125
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/session-messages-reader.test.ts",
+   "startTime": 0,
+   "endTime": 19305.46875
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/tool-board-reach.test.ts",
+   "startTime": 0,
+   "endTime": 69.428955078125
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/tools/analyze-touched-files.test.ts",
+   "startTime": 0,
+   "endTime": 4.716064453125
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/tools/attach-artifact.test.ts",
+   "startTime": 0,
+   "endTime": 7542.599609375
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/tools/butler-tools.test.ts",
+   "startTime": 0,
+   "endTime": 21.548095703125
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/tools/clarify-or-propose.test.ts",
+   "startTime": 0,
+   "endTime": 2389.211669921875
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/tools/contract-coupled-issues.test.ts",
+   "startTime": 0,
+   "endTime": 16049.347412109375
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/tools/create-agent-skill.test.ts",
+   "startTime": 0,
+   "endTime": 147.859130859375
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/tools/create-issue.test.ts",
+   "startTime": 0,
+   "endTime": 13339.506103515625
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/tools/create-issues-batch.test.ts",
+   "startTime": 0,
+   "endTime": 36427.507080078125
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/tools/create-sub-issue.test.ts",
+   "startTime": 0,
+   "endTime": 2421.1240234375
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/tools/db-utils.test.ts",
+   "startTime": 0,
+   "endTime": 24004.74658203125
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/tools/delete-cascade.test.ts",
+   "startTime": 0,
+   "endTime": 5320.017578125
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/tools/drives.test.ts",
+   "startTime": 0,
+   "endTime": 24366.844482421875
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/tools/get-board-status.test.ts",
+   "startTime": 0,
+   "endTime": 9560.849853515625
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/tools/get-context-boundary.test.ts",
+   "startTime": 0,
+   "endTime": 11031.09033203125
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/tools/get-issue.test.ts",
+   "startTime": 0,
+   "endTime": 15591.68017578125
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/tools/get-workspace-diff.test.ts",
+   "startTime": 0,
+   "endTime": 3069.1416015625
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/tools/issue-number-project-scoping.test.ts",
+   "startTime": 0,
+   "endTime": 16225.9873046875
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/tools/launch-workspace-api.test.ts",
+   "startTime": 0,
+   "endTime": 5097.304931640625
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/tools/list-issues.test.ts",
+   "startTime": 0,
+   "endTime": 15018.279541015625
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/tools/mark-ready-for-merge-fork-child.test.ts",
+   "startTime": 0,
+   "endTime": 115.0009765625
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/tools/merge-workspace-delegate.test.ts",
+   "startTime": 0,
+   "endTime": 4963.043212890625
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/tools/move-issue-webhook.test.ts",
+   "startTime": 0,
+   "endTime": 10004.839599609375
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/tools/move-issue-workflow-edge.test.ts",
+   "startTime": 0,
+   "endTime": 4994.969970703125
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/tools/openspec.test.ts",
+   "startTime": 0,
+   "endTime": 7321.56201171875
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/tools/propose-transition.test.ts",
+   "startTime": 0,
+   "endTime": 15437.155029296875
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/tools/session-tools.test.ts",
+   "startTime": 0,
+   "endTime": 4801.193115234375
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/tools/set-preference.test.ts",
+   "startTime": 0,
+   "endTime": 33996.166748046875
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/tools/start-workspace-provider.test.ts",
+   "startTime": 0,
+   "endTime": 353.415283203125
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/tools/terminal-done-guard.test.ts",
+   "startTime": 0,
+   "endTime": 25191.78564453125
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/tools/update-dependencies-batch.test.ts",
+   "startTime": 0,
+   "endTime": 27234.839599609375
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/tools/update-issue-node-sync.test.ts",
+   "startTime": 0,
+   "endTime": 8041.731689453125
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/tools/update-issue.test.ts",
+   "startTime": 0,
+   "endTime": 4965.630859375
+  },
+  {
+   "name": "packages/mcp-server/src/__tests__/tools/workspace-edge-errors.test.ts",
+   "startTime": 0,
+   "endTime": 25554.452392578125
+  },
+  {
+   "name": "packages/server/src/__tests__/active-stopped-workspace-enters-review.test.ts",
+   "startTime": 0,
+   "endTime": 576.083251953125
+  },
+  {
+   "name": "packages/server/src/__tests__/agent-cli-version.service.test.ts",
+   "startTime": 0,
+   "endTime": 121.492919921875
+  },
+  {
+   "name": "packages/server/src/__tests__/agent-dispatch.test.ts",
+   "startTime": 0,
+   "endTime": 18.786376953125
+  },
+  {
+   "name": "packages/server/src/__tests__/agent-exit-output-drain.test.ts",
+   "startTime": 0,
+   "endTime": 150.0380859375
+  },
+  {
+   "name": "packages/server/src/__tests__/agent-launch-env.test.ts",
+   "startTime": 0,
+   "endTime": 11.6748046875
+  },
+  {
+   "name": "packages/server/src/__tests__/agent-profile-health.service.test.ts",
+   "startTime": 0,
+   "endTime": 3159.52490234375
+  },
+  {
+   "name": "packages/server/src/__tests__/agent-provider-denied-args.test.ts",
+   "startTime": 0,
+   "endTime": 14.19140625
+  },
+  {
+   "name": "packages/server/src/__tests__/agent-provider-observed-parse.test.ts",
+   "startTime": 0,
+   "endTime": 6.780029296875
+  },
+  {
+   "name": "packages/server/src/__tests__/agent-provider-registry.test.ts",
+   "startTime": 0,
+   "endTime": 6.499267578125
+  },
+  {
+   "name": "packages/server/src/__tests__/agent-provider.test.ts",
+   "startTime": 0,
+   "endTime": 152.189697265625
+  },
+  {
+   "name": "packages/server/src/__tests__/agent-questions-answer-route.test.ts",
+   "startTime": 0,
+   "endTime": 205.7705078125
+  },
+  {
+   "name": "packages/server/src/__tests__/agent-questions-perf.test.ts",
+   "startTime": 0,
+   "endTime": 643.194580078125
+  },
+  {
+   "name": "packages/server/src/__tests__/agent-questions.test.ts",
+   "startTime": 0,
+   "endTime": 618.05859375
+  },
+  {
+   "name": "packages/server/src/__tests__/agent-remote-liveness.test.ts",
+   "startTime": 0,
+   "endTime": 28.341064453125
+  },
+  {
+   "name": "packages/server/src/__tests__/agent-remote.test.ts",
+   "startTime": 0,
+   "endTime": 440.782470703125
+  },
+  {
+   "name": "packages/server/src/__tests__/agent-session-registry-reaper.test.ts",
+   "startTime": 0,
+   "endTime": 15.432861328125
+  },
+  {
+   "name": "packages/server/src/__tests__/agent-session-resume-provider-id.test.ts",
+   "startTime": 0,
+   "endTime": 450.70166015625
+  },
+  {
+   "name": "packages/server/src/__tests__/agent-session-turn-followup.test.ts",
+   "startTime": 0,
+   "endTime": 214.638916015625
+  },
+  {
+   "name": "packages/server/src/__tests__/agent-sessions-reattach-recover.test.ts",
+   "startTime": 0,
+   "endTime": 424.253662109375
+  },
+  {
+   "name": "packages/server/src/__tests__/agent-settings.test.ts",
+   "startTime": 0,
+   "endTime": 11.38037109375
+  },
+  {
+   "name": "packages/server/src/__tests__/agent-stop-kills-shell-group.test.ts",
+   "startTime": 0,
+   "endTime": 75.43115234375
+  },
+  {
+   "name": "packages/server/src/__tests__/agent.service.test.ts",
+   "startTime": 0,
+   "endTime": 156.736572265625
+  },
+  {
+   "name": "packages/server/src/__tests__/already-merged-guard-fast.test.ts",
+   "startTime": 0,
+   "endTime": 459.656005859375
+  },
+  {
+   "name": "packages/server/src/__tests__/always-run-dirs-lockstep.test.ts",
+   "startTime": 0,
+   "endTime": 1101.208251953125
+  },
+  {
+   "name": "packages/server/src/__tests__/always-run-marker-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 754.72412109375
+  },
+  {
+   "name": "packages/server/src/__tests__/always-run-raw-read-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 1171.59521484375
+  },
+  {
+   "name": "packages/server/src/__tests__/ancestor-branch-reconciler.test.ts",
+   "startTime": 0,
+   "endTime": 6737.319580078125
+  },
+  {
+   "name": "packages/server/src/__tests__/api-agent-skills.test.ts",
+   "startTime": 0,
+   "endTime": 554.0380859375
+  },
+  {
+   "name": "packages/server/src/__tests__/api-board.test.ts",
+   "startTime": 0,
+   "endTime": 2866.1123046875
+  },
+  {
+   "name": "packages/server/src/__tests__/api-diff.test.ts",
+   "startTime": 0,
+   "endTime": 122.08349609375
+  },
+  {
+   "name": "packages/server/src/__tests__/api-issue.test.ts",
+   "startTime": 0,
+   "endTime": 525.649169921875
+  },
+  {
+   "name": "packages/server/src/__tests__/api-preferences.test.ts",
+   "startTime": 0,
+   "endTime": 70.148681640625
+  },
+  {
+   "name": "packages/server/src/__tests__/api-project-add-repo-absolute.test.ts",
+   "startTime": 0,
+   "endTime": 171.708740234375
+  },
+  {
+   "name": "packages/server/src/__tests__/api-project.test.ts",
+   "startTime": 0,
+   "endTime": 2374.843505859375
+  },
+  {
+   "name": "packages/server/src/__tests__/api-transcript.test.ts",
+   "startTime": 0,
+   "endTime": 240.991943359375
+  },
+  {
+   "name": "packages/server/src/__tests__/api-workspace.test.ts",
+   "startTime": 0,
+   "endTime": 56667.822998046875
+  },
+  {
+   "name": "packages/server/src/__tests__/apply-stream-event.test.ts",
+   "startTime": 0,
+   "endTime": 206.46875
+  },
+  {
+   "name": "packages/server/src/__tests__/auth-rotation-bullseye-coherence.test.ts",
+   "startTime": 0,
+   "endTime": 167.55859375
+  },
+  {
+   "name": "packages/server/src/__tests__/auth-rotation-ring-core.test.ts",
+   "startTime": 0,
+   "endTime": 14.26123046875
+  },
+  {
+   "name": "packages/server/src/__tests__/auth-rotation-transactionality.test.ts",
+   "startTime": 0,
+   "endTime": 142.053466796875
+  },
+  {
+   "name": "packages/server/src/__tests__/auto-merge-orchestrator-reconcile-gate.test.ts",
+   "startTime": 0,
+   "endTime": 134.259521484375
+  },
+  {
+   "name": "packages/server/src/__tests__/auto-merge-orchestrator-train-window.test.ts",
+   "startTime": 0,
+   "endTime": 436.482666015625
+  },
+  {
+   "name": "packages/server/src/__tests__/auto-merge-orchestrator.test.ts",
+   "startTime": 0,
+   "endTime": 552.999267578125
+  },
+  {
+   "name": "packages/server/src/__tests__/auto-merge-pref.test.ts",
+   "startTime": 0,
+   "endTime": 1966.320068359375
+  },
+  {
+   "name": "packages/server/src/__tests__/auto-review-pref.test.ts",
+   "startTime": 0,
+   "endTime": 4303.734130859375
+  },
+  {
+   "name": "packages/server/src/__tests__/auto-start-claim-no-duplicate-workspace.test.ts",
+   "startTime": 0,
+   "endTime": 14.423828125
+  },
+  {
+   "name": "packages/server/src/__tests__/auto-start-skip-reason.test.ts",
+   "startTime": 0,
+   "endTime": 609.015380859375
+  },
+  {
+   "name": "packages/server/src/__tests__/autodrive-stall-warning.test.ts",
+   "startTime": 0,
+   "endTime": 572.232666015625
+  },
+  {
+   "name": "packages/server/src/__tests__/automerge-mergedat-bookkeeping.test.ts",
+   "startTime": 0,
+   "endTime": 117.633544921875
+  },
+  {
+   "name": "packages/server/src/__tests__/background-sibling-installs.test.ts",
+   "startTime": 0,
+   "endTime": 71.3408203125
+  },
+  {
+   "name": "packages/server/src/__tests__/background-sweep-registry.test.ts",
+   "startTime": 0,
+   "endTime": 6.51806640625
+  },
+  {
+   "name": "packages/server/src/__tests__/backlog-markdown.service.test.ts",
+   "startTime": 0,
+   "endTime": 281.729248046875
+  },
+  {
+   "name": "packages/server/src/__tests__/backlog-snapshot.test.ts",
+   "startTime": 0,
+   "endTime": 417.47314453125
+  },
+  {
+   "name": "packages/server/src/__tests__/backup.test.ts",
+   "startTime": 0,
+   "endTime": 973.020263671875
+  },
+  {
+   "name": "packages/server/src/__tests__/base-branch-health-concurrency.test.ts",
+   "startTime": 0,
+   "endTime": 770.299560546875
+  },
+  {
+   "name": "packages/server/src/__tests__/base-branch-health-recency.test.ts",
+   "startTime": 0,
+   "endTime": 119.474609375
+  },
+  {
+   "name": "packages/server/src/__tests__/base-branch-health.test.ts",
+   "startTime": 0,
+   "endTime": 4949.358642578125
+  },
+  {
+   "name": "packages/server/src/__tests__/base-health-reprobe-guard.test.ts",
+   "startTime": 0,
+   "endTime": 7.62939453125
+  },
+  {
+   "name": "packages/server/src/__tests__/base-health-timeout-is-unknown.test.ts",
+   "startTime": 0,
+   "endTime": 102.537109375
+  },
+  {
+   "name": "packages/server/src/__tests__/bearer-token.test.ts",
+   "startTime": 0,
+   "endTime": 13.7744140625
+  },
+  {
+   "name": "packages/server/src/__tests__/bisect.service.test.ts",
+   "startTime": 0,
+   "endTime": 24394.5966796875
+  },
+  {
+   "name": "packages/server/src/__tests__/board-cache-merge-invalidation.test.ts",
+   "startTime": 0,
+   "endTime": 304.984619140625
+  },
+  {
+   "name": "packages/server/src/__tests__/board-cache-patch-invalidation.test.ts",
+   "startTime": 0,
+   "endTime": 367.970947265625
+  },
+  {
+   "name": "packages/server/src/__tests__/board-cache-workspace-lifecycle-invalidation.test.ts",
+   "startTime": 0,
+   "endTime": 577.205810546875
+  },
+  {
+   "name": "packages/server/src/__tests__/board-client-port-ladder-single-source.test.ts",
+   "startTime": 0,
+   "endTime": 4.9267578125
+  },
+  {
+   "name": "packages/server/src/__tests__/board-column-count-invariant.test.ts",
+   "startTime": 0,
+   "endTime": 1256.71533203125
+  },
+  {
+   "name": "packages/server/src/__tests__/board-etag-fast-path.test.ts",
+   "startTime": 0,
+   "endTime": 537.8740234375
+  },
+  {
+   "name": "packages/server/src/__tests__/board-events.test.ts",
+   "startTime": 0,
+   "endTime": 23.847412109375
+  },
+  {
+   "name": "packages/server/src/__tests__/board-feedback-routing.test.ts",
+   "startTime": 0,
+   "endTime": 8.37255859375
+  },
+  {
+   "name": "packages/server/src/__tests__/board-health-events-route.test.ts",
+   "startTime": 0,
+   "endTime": 253.29443359375
+  },
+  {
+   "name": "packages/server/src/__tests__/board-monitor-next-route.test.ts",
+   "startTime": 0,
+   "endTime": 544.641357421875
+  },
+  {
+   "name": "packages/server/src/__tests__/board-monitor-skill.test.ts",
+   "startTime": 0,
+   "endTime": 3.233642578125
+  },
+  {
+   "name": "packages/server/src/__tests__/board-notify-route.test.ts",
+   "startTime": 0,
+   "endTime": 255.06787109375
+  },
+  {
+   "name": "packages/server/src/__tests__/board-port-ladder-single-source.test.ts",
+   "startTime": 0,
+   "endTime": 461.59814453125
+  },
+  {
+   "name": "packages/server/src/__tests__/board-rebuild-coalescing.test.ts",
+   "startTime": 0,
+   "endTime": 784.1591796875
+  },
+  {
+   "name": "packages/server/src/__tests__/board-risk-digest.service.test.ts",
+   "startTime": 0,
+   "endTime": 383.273193359375
+  },
+  {
+   "name": "packages/server/src/__tests__/board-status-enrichment-conflicts.test.ts",
+   "startTime": 0,
+   "endTime": 218.78466796875
+  },
+  {
+   "name": "packages/server/src/__tests__/board-status-entry.test.ts",
+   "startTime": 0,
+   "endTime": 7.37646484375
+  },
+  {
+   "name": "packages/server/src/__tests__/board-status.test.ts",
+   "startTime": 0,
+   "endTime": 346.098388671875
+  },
+  {
+   "name": "packages/server/src/__tests__/born-blocked-reconciler.test.ts",
+   "startTime": 0,
+   "endTime": 8.408203125
+  },
+  {
+   "name": "packages/server/src/__tests__/born-blocked-sweep.test.ts",
+   "startTime": 0,
+   "endTime": 307.63720703125
+  },
+  {
+   "name": "packages/server/src/__tests__/bounded-session-message-reads.test.ts",
+   "startTime": 0,
+   "endTime": 2327.635986328125
+  },
+  {
+   "name": "packages/server/src/__tests__/branch-commits-behind-base.test.ts",
+   "startTime": 0,
+   "endTime": 1190.678955078125
+  },
+  {
+   "name": "packages/server/src/__tests__/branch-name-single-producer.test.ts",
+   "startTime": 0,
+   "endTime": 9.05859375
+  },
+  {
+   "name": "packages/server/src/__tests__/branch.test.ts",
+   "startTime": 0,
+   "endTime": 7.447265625
+  },
+  {
+   "name": "packages/server/src/__tests__/broadcast-batch.test.ts",
+   "startTime": 0,
+   "endTime": 20.10986328125
+  },
+  {
+   "name": "packages/server/src/__tests__/broadcast-flush-on-exit.test.ts",
+   "startTime": 0,
+   "endTime": 12.792724609375
+  },
+  {
+   "name": "packages/server/src/__tests__/broadcast-insert-cap-acceptance.test.ts",
+   "startTime": 0,
+   "endTime": 990.57958984375
+  },
+  {
+   "name": "packages/server/src/__tests__/broadcast-insert-cap.test.ts",
+   "startTime": 0,
+   "endTime": 19.775146484375
+  },
+  {
+   "name": "packages/server/src/__tests__/budget-estimator.test.ts",
+   "startTime": 0,
+   "endTime": 186.3564453125
+  },
+  {
+   "name": "packages/server/src/__tests__/build-spawn-env-strip.test.ts",
+   "startTime": 0,
+   "endTime": 24.290283203125
+  },
+  {
+   "name": "packages/server/src/__tests__/builtin-skills-refresh.test.ts",
+   "startTime": 0,
+   "endTime": 1994.657470703125
+  },
+  {
+   "name": "packages/server/src/__tests__/builtin-workflow-analysis-task.test.ts",
+   "startTime": 0,
+   "endTime": 6.202392578125
+  },
+  {
+   "name": "packages/server/src/__tests__/bundled-skill-freshness.test.ts",
+   "startTime": 0,
+   "endTime": 319.30810546875
+  },
+  {
+   "name": "packages/server/src/__tests__/burndown.test.ts",
+   "startTime": 0,
+   "endTime": 52.402099609375
+  },
+  {
+   "name": "packages/server/src/__tests__/butler-ask-user-question.test.ts",
+   "startTime": 0,
+   "endTime": 155.23779296875
+  },
+  {
+   "name": "packages/server/src/__tests__/butler-codex-home.test.ts",
+   "startTime": 0,
+   "endTime": 149.576904296875
+  },
+  {
+   "name": "packages/server/src/__tests__/butler-codex-observed-parse.test.ts",
+   "startTime": 0,
+   "endTime": 28.942138671875
+  },
+  {
+   "name": "packages/server/src/__tests__/butler-codex-resume-recovery.test.ts",
+   "startTime": 0,
+   "endTime": 81.366943359375
+  },
+  {
+   "name": "packages/server/src/__tests__/butler-definitions-limits.test.ts",
+   "startTime": 0,
+   "endTime": 557.39404296875
+  },
+  {
+   "name": "packages/server/src/__tests__/butler-event-feed-injection.test.ts",
+   "startTime": 0,
+   "endTime": 20.774658203125
+  },
+  {
+   "name": "packages/server/src/__tests__/butler-history-access-allowlist.test.ts",
+   "startTime": 0,
+   "endTime": 164.95703125
+  },
+  {
+   "name": "packages/server/src/__tests__/butler-interrupt-inflight.test.ts",
+   "startTime": 0,
+   "endTime": 227.8837890625
+  },
+  {
+   "name": "packages/server/src/__tests__/butler-loop-classify.test.ts",
+   "startTime": 0,
+   "endTime": 5.30810546875
+  },
+  {
+   "name": "packages/server/src/__tests__/butler-message-busy-409.test.ts",
+   "startTime": 0,
+   "endTime": 387.8369140625
+  },
+  {
+   "name": "packages/server/src/__tests__/butler-plugin-onboarding.test.ts",
+   "startTime": 0,
+   "endTime": 6.77099609375
+  },
+  {
+   "name": "packages/server/src/__tests__/butler-provider.test.ts",
+   "startTime": 0,
+   "endTime": 434.45751953125
+  },
+  {
+   "name": "packages/server/src/__tests__/butler-sdk-resume-regression.test.ts",
+   "startTime": 0,
+   "endTime": 149.376708984375
+  },
+  {
+   "name": "packages/server/src/__tests__/butler-skill-repository.test.ts",
+   "startTime": 0,
+   "endTime": 411.939697265625
+  },
+  {
+   "name": "packages/server/src/__tests__/check-branch-tip-is-ancestor.test.ts",
+   "startTime": 0,
+   "endTime": 928.55224609375
+  },
+  {
+   "name": "packages/server/src/__tests__/check-uncommitted-hook.test.ts",
+   "startTime": 0,
+   "endTime": 3045.40966796875
+  },
+  {
+   "name": "packages/server/src/__tests__/claude-md-git-invariants.test.ts",
+   "startTime": 0,
+   "endTime": 1159.36767578125
+  },
+  {
+   "name": "packages/server/src/__tests__/claude-md-skill-and-feedback-invariants.test.ts",
+   "startTime": 0,
+   "endTime": 132.41552734375
+  },
+  {
+   "name": "packages/server/src/__tests__/claude-rate-limit.test.ts",
+   "startTime": 0,
+   "endTime": 12.191650390625
+  },
+  {
+   "name": "packages/server/src/__tests__/claude-subscription-ring.test.ts",
+   "startTime": 0,
+   "endTime": 18.3876953125
+  },
+  {
+   "name": "packages/server/src/__tests__/cleanup-warnings.test.ts",
+   "startTime": 0,
+   "endTime": 77.427734375
+  },
+  {
+   "name": "packages/server/src/__tests__/cli-butler.test.ts",
+   "startTime": 0,
+   "endTime": 16170.066650390625
+  },
+  {
+   "name": "packages/server/src/__tests__/cli-db-resolution-flip-warning.test.ts",
+   "startTime": 0,
+   "endTime": 3.551513671875
+  },
+  {
+   "name": "packages/server/src/__tests__/cli-db-warning.test.ts",
+   "startTime": 0,
+   "endTime": 10.40673828125
+  },
+  {
+   "name": "packages/server/src/__tests__/cli-failure-detail.test.ts",
+   "startTime": 0,
+   "endTime": 3.296630859375
+  },
+  {
+   "name": "packages/server/src/__tests__/cli-issue-number-cross-project.test.ts",
+   "startTime": 0,
+   "endTime": 366.75634765625
+  },
+  {
+   "name": "packages/server/src/__tests__/cli-preferences-guard.test.ts",
+   "startTime": 0,
+   "endTime": 306.9189453125
+  },
+  {
+   "name": "packages/server/src/__tests__/cli-project-flag.test.ts",
+   "startTime": 0,
+   "endTime": 209.93798828125
+  },
+  {
+   "name": "packages/server/src/__tests__/cli-register-populate.test.ts",
+   "startTime": 0,
+   "endTime": 217.910888671875
+  },
+  {
+   "name": "packages/server/src/__tests__/cli.test.ts",
+   "startTime": 0,
+   "endTime": 643285.7861328125
+  },
+  {
+   "name": "packages/server/src/__tests__/close-workspace-on-terminal-issue.test.ts",
+   "startTime": 0,
+   "endTime": 285.2802734375
+  },
+  {
+   "name": "packages/server/src/__tests__/code-metrics-extraction.repo.test.ts",
+   "startTime": 0,
+   "endTime": 438.06005859375
+  },
+  {
+   "name": "packages/server/src/__tests__/codemod-limit-guard.test.ts",
+   "startTime": 0,
+   "endTime": 783.160400390625
+  },
+  {
+   "name": "packages/server/src/__tests__/codemod-preview-generate.test.ts",
+   "startTime": 0,
+   "endTime": 145.3115234375
+  },
+  {
+   "name": "packages/server/src/__tests__/codex-license-ring.test.ts",
+   "startTime": 0,
+   "endTime": 11.43701171875
+  },
+  {
+   "name": "packages/server/src/__tests__/codex-skills-parity.test.ts",
+   "startTime": 0,
+   "endTime": 5.650634765625
+  },
+  {
+   "name": "packages/server/src/__tests__/cold-clone-build-check.service.test.ts",
+   "startTime": 0,
+   "endTime": 12.829345703125
+  },
+  {
+   "name": "packages/server/src/__tests__/column-staleness.test.ts",
+   "startTime": 0,
+   "endTime": 96.701171875
+  },
+  {
+   "name": "packages/server/src/__tests__/command-safety-backup-prune.test.ts",
+   "startTime": 0,
+   "endTime": 272.236328125
+  },
+  {
+   "name": "packages/server/src/__tests__/command-safety-guard.test.ts",
+   "startTime": 0,
+   "endTime": 44043.5341796875
+  },
+  {
+   "name": "packages/server/src/__tests__/commit-checkpoint.test.ts",
+   "startTime": 0,
+   "endTime": 1961.7666015625
+  },
+  {
+   "name": "packages/server/src/__tests__/completion-state-reconciler.test.ts",
+   "startTime": 0,
+   "endTime": 2211.1689453125
+  },
+  {
+   "name": "packages/server/src/__tests__/compose-lifecycle-real-docker.test.ts",
+   "startTime": 0,
+   "endTime": 21101.289794921875
+  },
+  {
+   "name": "packages/server/src/__tests__/compose-runner-down-rmi.test.ts",
+   "startTime": 0,
+   "endTime": 4.950927734375
+  },
+  {
+   "name": "packages/server/src/__tests__/compounding-setup.test.ts",
+   "startTime": 0,
+   "endTime": 7505.35107421875
+  },
+  {
+   "name": "packages/server/src/__tests__/compress-async-threshold.test.ts",
+   "startTime": 0,
+   "endTime": 102.2978515625
+  },
+  {
+   "name": "packages/server/src/__tests__/compress-middleware.test.ts",
+   "startTime": 0,
+   "endTime": 81.248779296875
+  },
+  {
+   "name": "packages/server/src/__tests__/conductor-lifecycle.test.ts",
+   "startTime": 0,
+   "endTime": 85.27490234375
+  },
+  {
+   "name": "packages/server/src/__tests__/config-export-import.test.ts",
+   "startTime": 0,
+   "endTime": 311.19384765625
+  },
+  {
+   "name": "packages/server/src/__tests__/conflict-cache-extraction.repo.test.ts",
+   "startTime": 0,
+   "endTime": 1377.991455078125
+  },
+  {
+   "name": "packages/server/src/__tests__/conflict-marker-scanner.test.ts",
+   "startTime": 0,
+   "endTime": 77.1796875
+  },
+  {
+   "name": "packages/server/src/__tests__/console-tag-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 5.385986328125
+  },
+  {
+   "name": "packages/server/src/__tests__/container-mcp-reattach-refresh.test.ts",
+   "startTime": 0,
+   "endTime": 159.97314453125
+  },
+  {
+   "name": "packages/server/src/__tests__/container-profile.test.ts",
+   "startTime": 0,
+   "endTime": 443.136474609375
+  },
+  {
+   "name": "packages/server/src/__tests__/container-reap-terminal-paths.test.ts",
+   "startTime": 0,
+   "endTime": 628.16943359375
+  },
+  {
+   "name": "packages/server/src/__tests__/container-wrap.test.ts",
+   "startTime": 0,
+   "endTime": 17.25341796875
+  },
+  {
+   "name": "packages/server/src/__tests__/context-files-prompt-parity.test.ts",
+   "startTime": 0,
+   "endTime": 27.08837890625
+  },
+  {
+   "name": "packages/server/src/__tests__/copilot-parse-stream-event.test.ts",
+   "startTime": 0,
+   "endTime": 19.3359375
+  },
+  {
+   "name": "packages/server/src/__tests__/cors-origin.test.ts",
+   "startTime": 0,
+   "endTime": 5.845947265625
+  },
+  {
+   "name": "packages/server/src/__tests__/coupling-batch-and-contract-mode.test.ts",
+   "startTime": 0,
+   "endTime": 9.365234375
+  },
+  {
+   "name": "packages/server/src/__tests__/coupling-contract.test.ts",
+   "startTime": 0,
+   "endTime": 303.415771484375
+  },
+  {
+   "name": "packages/server/src/__tests__/coupling-guard.test.ts",
+   "startTime": 0,
+   "endTime": 4.128662109375
+  },
+  {
+   "name": "packages/server/src/__tests__/coverage-floor-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 120.443115234375
+  },
+  {
+   "name": "packages/server/src/__tests__/coverage-wiring.test.ts",
+   "startTime": 0,
+   "endTime": 75.418212890625
+  },
+  {
+   "name": "packages/server/src/__tests__/create-job-tracking.test.ts",
+   "startTime": 0,
+   "endTime": 10.297607421875
+  },
+  {
+   "name": "packages/server/src/__tests__/create-project-initial-commit.test.ts",
+   "startTime": 0,
+   "endTime": 11588.47998046875
+  },
+  {
+   "name": "packages/server/src/__tests__/cron-utils.test.ts",
+   "startTime": 0,
+   "endTime": 20.08349609375
+  },
+  {
+   "name": "packages/server/src/__tests__/cross-project-sibling-guard.repository.test.ts",
+   "startTime": 0,
+   "endTime": 300.938720703125
+  },
+  {
+   "name": "packages/server/src/__tests__/cross-worktree-guard.test.ts",
+   "startTime": 0,
+   "endTime": 54812.37109375
+  },
+  {
+   "name": "packages/server/src/__tests__/cycle-time.service.test.ts",
+   "startTime": 0,
+   "endTime": 54.41943359375
+  },
+  {
+   "name": "packages/server/src/__tests__/data-dir.test.ts",
+   "startTime": 0,
+   "endTime": 37.83447265625
+  },
+  {
+   "name": "packages/server/src/__tests__/db-retry.test.ts",
+   "startTime": 0,
+   "endTime": 25.787109375
+  },
+  {
+   "name": "packages/server/src/__tests__/decision-function-purity.test.ts",
+   "startTime": 0,
+   "endTime": 4.542236328125
+  },
+  {
+   "name": "packages/server/src/__tests__/decompose-repo-tags.test.ts",
+   "startTime": 0,
+   "endTime": 213.4150390625
+  },
+  {
+   "name": "packages/server/src/__tests__/decompose-ticket-sizing-floor.test.ts",
+   "startTime": 0,
+   "endTime": 8.385986328125
+  },
+  {
+   "name": "packages/server/src/__tests__/degenerate-base-health.test.ts",
+   "startTime": 0,
+   "endTime": 722.30517578125
+  },
+  {
+   "name": "packages/server/src/__tests__/dependency-auto-chain.test.ts",
+   "startTime": 0,
+   "endTime": 538.36474609375
+  },
+  {
+   "name": "packages/server/src/__tests__/dependency-graph-edge.test.ts",
+   "startTime": 0,
+   "endTime": 644.764892578125
+  },
+  {
+   "name": "packages/server/src/__tests__/dependency-wave-wip-limit.test.ts",
+   "startTime": 0,
+   "endTime": 9.29931640625
+  },
+  {
+   "name": "packages/server/src/__tests__/dependency-wave.service.test.ts",
+   "startTime": 0,
+   "endTime": 764.943115234375
+  },
+  {
+   "name": "packages/server/src/__tests__/dev-port-guard.test.ts",
+   "startTime": 0,
+   "endTime": 8.415771484375
+  },
+  {
+   "name": "packages/server/src/__tests__/dev-script.test.mjs",
+   "startTime": 0,
+   "endTime": 3082.8056640625
+  },
+  {
+   "name": "packages/server/src/__tests__/dev-server.service.test.ts",
+   "startTime": 0,
+   "endTime": 19.17626953125
+  },
+  {
+   "name": "packages/server/src/__tests__/devcontainer-provision-options.test.ts",
+   "startTime": 0,
+   "endTime": 6.387451171875
+  },
+  {
+   "name": "packages/server/src/__tests__/devcontainer-workspace-isolation.test.ts",
+   "startTime": 0,
+   "endTime": 824.635498046875
+  },
+  {
+   "name": "packages/server/src/__tests__/devcontainer-workspace-profile-mount.test.ts",
+   "startTime": 0,
+   "endTime": 19.782470703125
+  },
+  {
+   "name": "packages/server/src/__tests__/diff-stat-cache-extraction.repo.test.ts",
+   "startTime": 0,
+   "endTime": 720.935302734375
+  },
+  {
+   "name": "packages/server/src/__tests__/digest.test.ts",
+   "startTime": 0,
+   "endTime": 80.30517578125
+  },
+  {
+   "name": "packages/server/src/__tests__/dirty-main-checkout-missing-repo.test.ts",
+   "startTime": 0,
+   "endTime": 190.606201171875
+  },
+  {
+   "name": "packages/server/src/__tests__/dirty-main-checkout.test.ts",
+   "startTime": 0,
+   "endTime": 2498.9609375
+  },
+  {
+   "name": "packages/server/src/__tests__/domain-error-vocabulary.test.ts",
+   "startTime": 0,
+   "endTime": 778.614990234375
+  },
+  {
+   "name": "packages/server/src/__tests__/done-issue-board-column.test.ts",
+   "startTime": 0,
+   "endTime": 190.931396484375
+  },
+  {
+   "name": "packages/server/src/__tests__/done-unmerged-invariant-sweep.test.ts",
+   "startTime": 0,
+   "endTime": 10400.177490234375
+  },
+  {
+   "name": "packages/server/src/__tests__/done-write-path-guard.test.ts",
+   "startTime": 0,
+   "endTime": 839.660888671875
+  },
+  {
+   "name": "packages/server/src/__tests__/drive-completion-reconciler.test.ts",
+   "startTime": 0,
+   "endTime": 470.260986328125
+  },
+  {
+   "name": "packages/server/src/__tests__/drive-dashboard.service.test.ts",
+   "startTime": 0,
+   "endTime": 297.93359375
+  },
+  {
+   "name": "packages/server/src/__tests__/drive-obstacles-route.test.ts",
+   "startTime": 0,
+   "endTime": 335.607177734375
+  },
+  {
+   "name": "packages/server/src/__tests__/drive-obstacles.test.ts",
+   "startTime": 0,
+   "endTime": 240.4521484375
+  },
+  {
+   "name": "packages/server/src/__tests__/drive-preflight.test.ts",
+   "startTime": 0,
+   "endTime": 1043.096435546875
+  },
+  {
+   "name": "packages/server/src/__tests__/drive-retro.test.ts",
+   "startTime": 0,
+   "endTime": 411.200927734375
+  },
+  {
+   "name": "packages/server/src/__tests__/drive.test.ts",
+   "startTime": 0,
+   "endTime": 219.0859375
+  },
+  {
+   "name": "packages/server/src/__tests__/drives-api.test.ts",
+   "startTime": 0,
+   "endTime": 363.37158203125
+  },
+  {
+   "name": "packages/server/src/__tests__/drizzle-config-db-path.test.ts",
+   "startTime": 0,
+   "endTime": 1.97314453125
+  },
+  {
+   "name": "packages/server/src/__tests__/dynamic-preference-keys.test.ts",
+   "startTime": 0,
+   "endTime": 9.32568359375
+  },
+  {
+   "name": "packages/server/src/__tests__/e2e-smoke-lane.test.ts",
+   "startTime": 0,
+   "endTime": 129.22607421875
+  },
+  {
+   "name": "packages/server/src/__tests__/env-read-ownership.test.ts",
+   "startTime": 0,
+   "endTime": 11.559326171875
+  },
+  {
+   "name": "packages/server/src/__tests__/env-registry-doc-parity.test.ts",
+   "startTime": 0,
+   "endTime": 10.141845703125
+  },
+  {
+   "name": "packages/server/src/__tests__/epic-decompose-drive.test.ts",
+   "startTime": 0,
+   "endTime": 234.35986328125
+  },
+  {
+   "name": "packages/server/src/__tests__/error-handler-code-echo.test.ts",
+   "startTime": 0,
+   "endTime": 40.27880859375
+  },
+  {
+   "name": "packages/server/src/__tests__/executor-id-mapping-guard.test.ts",
+   "startTime": 0,
+   "endTime": 1013.498779296875
+  },
+  {
+   "name": "packages/server/src/__tests__/exit-classification-restart.test.ts",
+   "startTime": 0,
+   "endTime": 543.993896484375
+  },
+  {
+   "name": "packages/server/src/__tests__/exit-plan-mode-denied-ordering.test.ts",
+   "startTime": 0,
+   "endTime": 6.46923828125
+  },
+  {
+   "name": "packages/server/src/__tests__/exit-workflow-idle-terminal-race.test.ts",
+   "startTime": 0,
+   "endTime": 628.815673828125
+  },
+  {
+   "name": "packages/server/src/__tests__/export-skills-on-registration.test.ts",
+   "startTime": 0,
+   "endTime": 67.0302734375
+  },
+  {
+   "name": "packages/server/src/__tests__/failure-keywords.test.ts",
+   "startTime": 0,
+   "endTime": 8.781982421875
+  },
+  {
+   "name": "packages/server/src/__tests__/fake-timers-restored.test.ts",
+   "startTime": 0,
+   "endTime": 2275.156005859375
+  },
+  {
+   "name": "packages/server/src/__tests__/file-contention.service.test.ts",
+   "startTime": 0,
+   "endTime": 393.78955078125
+  },
+  {
+   "name": "packages/server/src/__tests__/file-db-close-before-unlink.test.ts",
+   "startTime": 0,
+   "endTime": 383.013916015625
+  },
+  {
+   "name": "packages/server/src/__tests__/first-row-single-spelling.test.ts",
+   "startTime": 0,
+   "endTime": 202.909912109375
+  },
+  {
+   "name": "packages/server/src/__tests__/fix-and-merge-endpoint.test.ts",
+   "startTime": 0,
+   "endTime": 616.93505859375
+  },
+  {
+   "name": "packages/server/src/__tests__/fix-and-merge-failure-context.test.ts",
+   "startTime": 0,
+   "endTime": 13.453857421875
+  },
+  {
+   "name": "packages/server/src/__tests__/fix-and-merge-session-recovery.test.ts",
+   "startTime": 0,
+   "endTime": 577.79150390625
+  },
+  {
+   "name": "packages/server/src/__tests__/fixture-temp-dir-sweep.test.ts",
+   "startTime": 0,
+   "endTime": 7.30908203125
+  },
+  {
+   "name": "packages/server/src/__tests__/fk-actions-repair.test.ts",
+   "startTime": 0,
+   "endTime": 42.728515625
+  },
+  {
+   "name": "packages/server/src/__tests__/fk-alignment-startup.test.ts",
+   "startTime": 0,
+   "endTime": 47.7900390625
+  },
+  {
+   "name": "packages/server/src/__tests__/fk-leading-index-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 165.2490234375
+  },
+  {
+   "name": "packages/server/src/__tests__/fk-violations.test.ts",
+   "startTime": 0,
+   "endTime": 89.845703125
+  },
+  {
+   "name": "packages/server/src/__tests__/flake-classifier.service.test.ts",
+   "startTime": 0,
+   "endTime": 617.697998046875
+  },
+  {
+   "name": "packages/server/src/__tests__/fleet-listener.test.ts",
+   "startTime": 0,
+   "endTime": 216.9716796875
+  },
+  {
+   "name": "packages/server/src/__tests__/fleet-mcp-bridge.test.ts",
+   "startTime": 0,
+   "endTime": 259.33544921875
+  },
+  {
+   "name": "packages/server/src/__tests__/focus.test.ts",
+   "startTime": 0,
+   "endTime": 35.156005859375
+  },
+  {
+   "name": "packages/server/src/__tests__/followup-workspace-status-gate.test.ts",
+   "startTime": 0,
+   "endTime": 523.32275390625
+  },
+  {
+   "name": "packages/server/src/__tests__/fork-artifacts.test.ts",
+   "startTime": 0,
+   "endTime": 8.209716796875
+  },
+  {
+   "name": "packages/server/src/__tests__/fork-child-join-lost-on-exit-race.test.ts",
+   "startTime": 0,
+   "endTime": 4471.9921875
+  },
+  {
+   "name": "packages/server/src/__tests__/foundational-merge.service.test.ts",
+   "startTime": 0,
+   "endTime": 295.432861328125
+  },
+  {
+   "name": "packages/server/src/__tests__/foundational-sync-merge-consequence.test.ts",
+   "startTime": 0,
+   "endTime": 6861.787109375
+  },
+  {
+   "name": "packages/server/src/__tests__/frontend-smoke-predicate.test.ts",
+   "startTime": 0,
+   "endTime": 13.097900390625
+  },
+  {
+   "name": "packages/server/src/__tests__/function-nloc-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 6.175048828125
+  },
+  {
+   "name": "packages/server/src/__tests__/gate-builder-quiesce.test.ts",
+   "startTime": 0,
+   "endTime": 140.12841796875
+  },
+  {
+   "name": "packages/server/src/__tests__/gate-does-not-block-review.test.ts",
+   "startTime": 0,
+   "endTime": 368.658447265625
+  },
+  {
+   "name": "packages/server/src/__tests__/gate-failure-not-fix-and-merge.test.ts",
+   "startTime": 0,
+   "endTime": 16.31640625
+  },
+  {
+   "name": "packages/server/src/__tests__/gate-recommendation-retry.test.ts",
+   "startTime": 0,
+   "endTime": 221.435791015625
+  },
+  {
+   "name": "packages/server/src/__tests__/gate-recommendation-skip-trace.test.ts",
+   "startTime": 0,
+   "endTime": 142.39404296875
+  },
+  {
+   "name": "packages/server/src/__tests__/gate-tier-scoping.test.ts",
+   "startTime": 0,
+   "endTime": 10.165771484375
+  },
+  {
+   "name": "packages/server/src/__tests__/git-heavy-budget-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 14.289306640625
+  },
+  {
+   "name": "packages/server/src/__tests__/git-http.test.ts",
+   "startTime": 0,
+   "endTime": 7762.980712890625
+  },
+  {
+   "name": "packages/server/src/__tests__/git-info-async.service.test.ts",
+   "startTime": 0,
+   "endTime": 13625.681884765625
+  },
+  {
+   "name": "packages/server/src/__tests__/git-info.service.test.ts",
+   "startTime": 0,
+   "endTime": 7507.45166015625
+  },
+  {
+   "name": "packages/server/src/__tests__/git-prepare-for-review.test.ts",
+   "startTime": 0,
+   "endTime": 7356.380615234375
+  },
+  {
+   "name": "packages/server/src/__tests__/git-rebase-skips-integrated-base.test.ts",
+   "startTime": 0,
+   "endTime": 26514.74560546875
+  },
+  {
+   "name": "packages/server/src/__tests__/git-service-branch-refresh.test.ts",
+   "startTime": 0,
+   "endTime": 6607.4345703125
+  },
+  {
+   "name": "packages/server/src/__tests__/git-service-contract.test.ts",
+   "startTime": 0,
+   "endTime": 3.91552734375
+  },
+  {
+   "name": "packages/server/src/__tests__/git-service-remove-worktree.test.ts",
+   "startTime": 0,
+   "endTime": 166.154296875
+  },
+  {
+   "name": "packages/server/src/__tests__/git-token-persistence.test.ts",
+   "startTime": 0,
+   "endTime": 9750.32470703125
+  },
+  {
+   "name": "packages/server/src/__tests__/git.service.test.ts",
+   "startTime": 0,
+   "endTime": 84733.3486328125
+  },
+  {
+   "name": "packages/server/src/__tests__/github-handoff-draft.service.test.ts",
+   "startTime": 0,
+   "endTime": 3.664794921875
+  },
+  {
+   "name": "packages/server/src/__tests__/graph-search.test.ts",
+   "startTime": 0,
+   "endTime": 96.56005859375
+  },
+  {
+   "name": "packages/server/src/__tests__/graph-summary-cache.test.ts",
+   "startTime": 0,
+   "endTime": 900.27099609375
+  },
+  {
+   "name": "packages/server/src/__tests__/guard-suite-count.test.ts",
+   "startTime": 0,
+   "endTime": 95.0908203125
+  },
+  {
+   "name": "packages/server/src/__tests__/hand-merged-branch-reconciler.test.ts",
+   "startTime": 0,
+   "endTime": 649.53515625
+  },
+  {
+   "name": "packages/server/src/__tests__/handoff-meta.test.ts",
+   "startTime": 0,
+   "endTime": 58.847412109375
+  },
+  {
+   "name": "packages/server/src/__tests__/handoff-multirepo.test.ts",
+   "startTime": 0,
+   "endTime": 331.576416015625
+  },
+  {
+   "name": "packages/server/src/__tests__/harness-settings.test.ts",
+   "startTime": 0,
+   "endTime": 6.712890625
+  },
+  {
+   "name": "packages/server/src/__tests__/health-deps-route.test.ts",
+   "startTime": 0,
+   "endTime": 111.2265625
+  },
+  {
+   "name": "packages/server/src/__tests__/health-refresh-gate.test.ts",
+   "startTime": 0,
+   "endTime": 6.263427734375
+  },
+  {
+   "name": "packages/server/src/__tests__/health-route-deps-aware.test.ts",
+   "startTime": 0,
+   "endTime": 221.803955078125
+  },
+  {
+   "name": "packages/server/src/__tests__/hook-cost-collapse.test.ts",
+   "startTime": 0,
+   "endTime": 936.492431640625
+  },
+  {
+   "name": "packages/server/src/__tests__/hook-posture-policy.test.ts",
+   "startTime": 0,
+   "endTime": 5445.29833984375
+  },
+  {
+   "name": "packages/server/src/__tests__/hook-wiring-audit.test.ts",
+   "startTime": 0,
+   "endTime": 710.2451171875
+  },
+  {
+   "name": "packages/server/src/__tests__/http-request-timeout.test.ts",
+   "startTime": 0,
+   "endTime": 3.783203125
+  },
+  {
+   "name": "packages/server/src/__tests__/inbox-fanout.test.ts",
+   "startTime": 0,
+   "endTime": 423.039794921875
+  },
+  {
+   "name": "packages/server/src/__tests__/index-hygiene-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 403.901123046875
+  },
+  {
+   "name": "packages/server/src/__tests__/insights-accumulator.test.ts",
+   "startTime": 0,
+   "endTime": 16.65966796875
+  },
+  {
+   "name": "packages/server/src/__tests__/insights-by-skill.test.ts",
+   "startTime": 0,
+   "endTime": 416.50830078125
+  },
+  {
+   "name": "packages/server/src/__tests__/insights-context-consumers.test.ts",
+   "startTime": 0,
+   "endTime": 599.1171875
+  },
+  {
+   "name": "packages/server/src/__tests__/insights-provider-profile.test.ts",
+   "startTime": 0,
+   "endTime": 379.89794921875
+  },
+  {
+   "name": "packages/server/src/__tests__/install-staleness-heartbeat.test.ts",
+   "startTime": 0,
+   "endTime": 784.788818359375
+  },
+  {
+   "name": "packages/server/src/__tests__/install-staleness-reconciler.test.ts",
+   "startTime": 0,
+   "endTime": 8.47021484375
+  },
+  {
+   "name": "packages/server/src/__tests__/ipv6-companion-listener.test.ts",
+   "startTime": 0,
+   "endTime": 3.408935546875
+  },
+  {
+   "name": "packages/server/src/__tests__/is-rebase-in-progress-worktree.test.ts",
+   "startTime": 0,
+   "endTime": 1721.155517578125
+  },
+  {
+   "name": "packages/server/src/__tests__/issue-activity.test.ts",
+   "startTime": 0,
+   "endTime": 48.68798828125
+  },
+  {
+   "name": "packages/server/src/__tests__/issue-ai-touched-files.test.ts",
+   "startTime": 0,
+   "endTime": 9.277099609375
+  },
+  {
+   "name": "packages/server/src/__tests__/issue-artifacts-route.test.ts",
+   "startTime": 0,
+   "endTime": 345.38232421875
+  },
+  {
+   "name": "packages/server/src/__tests__/issue-body-schemas.test.ts",
+   "startTime": 0,
+   "endTime": 15.2099609375
+  },
+  {
+   "name": "packages/server/src/__tests__/issue-body-validation.test.ts",
+   "startTime": 0,
+   "endTime": 31.736083984375
+  },
+  {
+   "name": "packages/server/src/__tests__/issue-cascade-and-dep.repo.test.ts",
+   "startTime": 0,
+   "endTime": 280.50927734375
+  },
+  {
+   "name": "packages/server/src/__tests__/issue-cascade-completeness.repo.test.ts",
+   "startTime": 0,
+   "endTime": 16006.568359375
+  },
+  {
+   "name": "packages/server/src/__tests__/issue-comment-retention.test.ts",
+   "startTime": 0,
+   "endTime": 447.96728515625
+  },
+  {
+   "name": "packages/server/src/__tests__/issue-comments-dedup.test.ts",
+   "startTime": 0,
+   "endTime": 330.61328125
+  },
+  {
+   "name": "packages/server/src/__tests__/issue-comments-read-cap.test.ts",
+   "startTime": 0,
+   "endTime": 3189.5830078125
+  },
+  {
+   "name": "packages/server/src/__tests__/issue-comments-single-write-path.test.ts",
+   "startTime": 0,
+   "endTime": 551.6201171875
+  },
+  {
+   "name": "packages/server/src/__tests__/issue-comments.test.ts",
+   "startTime": 0,
+   "endTime": 319.592529296875
+  },
+  {
+   "name": "packages/server/src/__tests__/issue-create-workflow-status.test.ts",
+   "startTime": 0,
+   "endTime": 208.1201171875
+  },
+  {
+   "name": "packages/server/src/__tests__/issue-detail-bundle.test.ts",
+   "startTime": 0,
+   "endTime": 293.115478515625
+  },
+  {
+   "name": "packages/server/src/__tests__/issue-merged-commits.service.test.ts",
+   "startTime": 0,
+   "endTime": 76.982421875
+  },
+  {
+   "name": "packages/server/src/__tests__/issue-number-unique.test.ts",
+   "startTime": 0,
+   "endTime": 118.524658203125
+  },
+  {
+   "name": "packages/server/src/__tests__/issue-number.test.ts",
+   "startTime": 0,
+   "endTime": 159.602783203125
+  },
+  {
+   "name": "packages/server/src/__tests__/issue-scoped-workspace-list.test.ts",
+   "startTime": 0,
+   "endTime": 234.567138671875
+  },
+  {
+   "name": "packages/server/src/__tests__/issue-summary-projection.test.ts",
+   "startTime": 0,
+   "endTime": 7.307373046875
+  },
+  {
+   "name": "packages/server/src/__tests__/issue-transition-on-interrupted-merge.test.ts",
+   "startTime": 0,
+   "endTime": 638.021728515625
+  },
+  {
+   "name": "packages/server/src/__tests__/issue-update-fields.test.ts",
+   "startTime": 0,
+   "endTime": 7.363037109375
+  },
+  {
+   "name": "packages/server/src/__tests__/issues-batch.test.ts",
+   "startTime": 0,
+   "endTime": 38779.38818359375
+  },
+  {
+   "name": "packages/server/src/__tests__/issues-routes-edge-cases.test.ts",
+   "startTime": 0,
+   "endTime": 2351.286376953125
+  },
+  {
+   "name": "packages/server/src/__tests__/issues-slim.test.ts",
+   "startTime": 0,
+   "endTime": 830.5
+  },
+  {
+   "name": "packages/server/src/__tests__/jvm-build-semaphore.test.ts",
+   "startTime": 0,
+   "endTime": 42.091796875
+  },
+  {
+   "name": "packages/server/src/__tests__/kill-seam-portability.test.ts",
+   "startTime": 0,
+   "endTime": 101.392822265625
+  },
+  {
+   "name": "packages/server/src/__tests__/launch-preview.test.ts",
+   "startTime": 0,
+   "endTime": 581.914306640625
+  },
+  {
+   "name": "packages/server/src/__tests__/leading-ref-reads-the-row.test.ts",
+   "startTime": 0,
+   "endTime": 308.14111328125
+  },
+  {
+   "name": "packages/server/src/__tests__/leading-repo-row.test.ts",
+   "startTime": 0,
+   "endTime": 242.060546875
+  },
+  {
+   "name": "packages/server/src/__tests__/leaked-temp-project-cleanup.test.ts",
+   "startTime": 0,
+   "endTime": 6668.784423828125
+  },
+  {
+   "name": "packages/server/src/__tests__/learning-step-prompt.test.ts",
+   "startTime": 0,
+   "endTime": 3.397705078125
+  },
+  {
+   "name": "packages/server/src/__tests__/list-endpoints-etag.test.ts",
+   "startTime": 0,
+   "endTime": 485.311279296875
+  },
+  {
+   "name": "packages/server/src/__tests__/listener-bind-host.test.ts",
+   "startTime": 0,
+   "endTime": 287.55078125
+  },
+  {
+   "name": "packages/server/src/__tests__/loop-lag-instrumentation.test.ts",
+   "startTime": 0,
+   "endTime": 2050.6767578125
+  },
+  {
+   "name": "packages/server/src/__tests__/loop-unit-reopen-guard.test.ts",
+   "startTime": 0,
+   "endTime": 27.371826171875
+  },
+  {
+   "name": "packages/server/src/__tests__/manual-migrate.test.ts",
+   "startTime": 0,
+   "endTime": 584.09228515625
+  },
+  {
+   "name": "packages/server/src/__tests__/mcp-health.service.test.ts",
+   "startTime": 0,
+   "endTime": 586.7431640625
+  },
+  {
+   "name": "packages/server/src/__tests__/mcp-server-invocation.test.ts",
+   "startTime": 0,
+   "endTime": 7.465576171875
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-atomic-done-transition.test.ts",
+   "startTime": 0,
+   "endTime": 1009.4345703125
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-backoff-ceiling.test.ts",
+   "startTime": 0,
+   "endTime": 669.46728515625
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-backoff-extraction.repo.test.ts",
+   "startTime": 0,
+   "endTime": 559.592529296875
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-backoff.test.ts",
+   "startTime": 0,
+   "endTime": 735.411865234375
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-checkout-and-bookkeeping-invariants.test.ts",
+   "startTime": 0,
+   "endTime": 13.221435546875
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-cleanup.service.test.ts",
+   "startTime": 0,
+   "endTime": 10351.752197265625
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-conflict-server-health.test.ts",
+   "startTime": 0,
+   "endTime": 8213.66650390625
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-endpoint-reconcile-noop.test.ts",
+   "startTime": 0,
+   "endTime": 1080.83642578125
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-error-reporting.test.ts",
+   "startTime": 0,
+   "endTime": 101.216796875
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-followup-start-policy.test.ts",
+   "startTime": 0,
+   "endTime": 20.947021484375
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-gate-base-branch.test.ts",
+   "startTime": 0,
+   "endTime": 544.731201171875
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-gate-config.test.ts",
+   "startTime": 0,
+   "endTime": 5.216796875
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-gate-direct-workspace-skip.test.ts",
+   "startTime": 0,
+   "endTime": 14.5234375
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-gate-evidence-content-key.test.ts",
+   "startTime": 0,
+   "endTime": 9.796875
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-gate-evidence-pinned-before-run.test.ts",
+   "startTime": 0,
+   "endTime": 123.11328125
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-gate-extraction.repo.test.ts",
+   "startTime": 0,
+   "endTime": 1858.49853515625
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-gate-outside-lock.test.ts",
+   "startTime": 0,
+   "endTime": 1557.130859375
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-gate-red-base-attribution.test.ts",
+   "startTime": 0,
+   "endTime": 91.683837890625
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-gate-red-debt-subset-rule.test.ts",
+   "startTime": 0,
+   "endTime": 20.617919921875
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-gate-tree-memo.test.ts",
+   "startTime": 0,
+   "endTime": 4521.44775390625
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-job-tracking.test.ts",
+   "startTime": 0,
+   "endTime": 25.39990234375
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-lock-serialization.test.ts",
+   "startTime": 0,
+   "endTime": 4456.31494140625
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-overlap-cluster-landing.test.ts",
+   "startTime": 0,
+   "endTime": 17390.46484375
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-precheck-cross-process-lock.test.ts",
+   "startTime": 0,
+   "endTime": 21.387451171875
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-queue-lock-leak.test.ts",
+   "startTime": 0,
+   "endTime": 296.2529296875
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-queue-route.test.ts",
+   "startTime": 0,
+   "endTime": 28.72412109375
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-queue-strategy.test.ts",
+   "startTime": 0,
+   "endTime": 9.47607421875
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-queue-train-dispatch.test.ts",
+   "startTime": 0,
+   "endTime": 35510.93505859375
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-queue.service.test.ts",
+   "startTime": 0,
+   "endTime": 466.116943359375
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-response-before-cleanup.test.ts",
+   "startTime": 0,
+   "endTime": 3371.065673828125
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-run-reconciler.test.ts",
+   "startTime": 0,
+   "endTime": 2014.873291015625
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-service-edge-cases.test.ts",
+   "startTime": 0,
+   "endTime": 2220.529296875
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-shared-core-routing.test.ts",
+   "startTime": 0,
+   "endTime": 254.158203125
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-strategy.test.ts",
+   "startTime": 0,
+   "endTime": 7.3056640625
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-train-orchestration.test.ts",
+   "startTime": 0,
+   "endTime": 96092.662109375
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-train-window.test.ts",
+   "startTime": 0,
+   "endTime": 6.260009765625
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-train.test.ts",
+   "startTime": 0,
+   "endTime": 50283.25244140625
+  },
+  {
+   "name": "packages/server/src/__tests__/merge-verify-gate-path-coverage.test.ts",
+   "startTime": 0,
+   "endTime": 6506.609375
+  },
+  {
+   "name": "packages/server/src/__tests__/metrics-cache-policy.test.ts",
+   "startTime": 0,
+   "endTime": 6.389892578125
+  },
+  {
+   "name": "packages/server/src/__tests__/migrate-global-default-model.test.ts",
+   "startTime": 0,
+   "endTime": 444.715576171875
+  },
+  {
+   "name": "packages/server/src/__tests__/migration-rename-diagnostic.test.ts",
+   "startTime": 0,
+   "endTime": 20.478515625
+  },
+  {
+   "name": "packages/server/src/__tests__/migration-schema-drift.test.ts",
+   "startTime": 0,
+   "endTime": 946.856689453125
+  },
+  {
+   "name": "packages/server/src/__tests__/milestones-summary.test.ts",
+   "startTime": 0,
+   "endTime": 23.630615234375
+  },
+  {
+   "name": "packages/server/src/__tests__/mock-agent-error.test.ts",
+   "startTime": 0,
+   "endTime": 14389.177001953125
+  },
+  {
+   "name": "packages/server/src/__tests__/mock-agent-multiturn.test.ts",
+   "startTime": 0,
+   "endTime": 18946.7001953125
+  },
+  {
+   "name": "packages/server/src/__tests__/mock-agent-standard.test.ts",
+   "startTime": 0,
+   "endTime": 32044.4892578125
+  },
+  {
+   "name": "packages/server/src/__tests__/monitor-action-display.test.ts",
+   "startTime": 0,
+   "endTime": 12.212890625
+  },
+  {
+   "name": "packages/server/src/__tests__/monitor-auto-start-already-merged.test.ts",
+   "startTime": 0,
+   "endTime": 32.348388671875
+  },
+  {
+   "name": "packages/server/src/__tests__/monitor-auto-start-wip-capacity.test.ts",
+   "startTime": 0,
+   "endTime": 423.78759765625
+  },
+  {
+   "name": "packages/server/src/__tests__/monitor-auto-start.test.ts",
+   "startTime": 0,
+   "endTime": 69.76513671875
+  },
+  {
+   "name": "packages/server/src/__tests__/monitor-backlog.test.ts",
+   "startTime": 0,
+   "endTime": 103.27490234375
+  },
+  {
+   "name": "packages/server/src/__tests__/monitor-butler-llm-cycle.test.ts",
+   "startTime": 0,
+   "endTime": 23.47900390625
+  },
+  {
+   "name": "packages/server/src/__tests__/monitor-control-spawn.test.ts",
+   "startTime": 0,
+   "endTime": 730.0263671875
+  },
+  {
+   "name": "packages/server/src/__tests__/monitor-cycle-health.test.ts",
+   "startTime": 0,
+   "endTime": 495.1591796875
+  },
+  {
+   "name": "packages/server/src/__tests__/monitor-cycle-progress-marker.test.ts",
+   "startTime": 0,
+   "endTime": 300.707763671875
+  },
+  {
+   "name": "packages/server/src/__tests__/monitor-cycle-spawn-time-split.test.ts",
+   "startTime": 0,
+   "endTime": 238.379150390625
+  },
+  {
+   "name": "packages/server/src/__tests__/monitor-cycle.test.ts",
+   "startTime": 0,
+   "endTime": 327.35498046875
+  },
+  {
+   "name": "packages/server/src/__tests__/monitor-file-contention.test.ts",
+   "startTime": 0,
+   "endTime": 74.06005859375
+  },
+  {
+   "name": "packages/server/src/__tests__/monitor-merge-gate.test.ts",
+   "startTime": 0,
+   "endTime": 144.998779296875
+  },
+  {
+   "name": "packages/server/src/__tests__/monitor-meta-autostart.test.ts",
+   "startTime": 0,
+   "endTime": 395.911865234375
+  },
+  {
+   "name": "packages/server/src/__tests__/monitor-nudge.test.ts",
+   "startTime": 0,
+   "endTime": 7.02685546875
+  },
+  {
+   "name": "packages/server/src/__tests__/monitor-project-scheduler.test.ts",
+   "startTime": 0,
+   "endTime": 8.52587890625
+  },
+  {
+   "name": "packages/server/src/__tests__/monitor-reentrancy-guard.test.ts",
+   "startTime": 0,
+   "endTime": 932.20751953125
+  },
+  {
+   "name": "packages/server/src/__tests__/monitor-status-payload.test.ts",
+   "startTime": 0,
+   "endTime": 119.482666015625
+  },
+  {
+   "name": "packages/server/src/__tests__/monitor-sync-blocking-vs-loop-delay.test.ts",
+   "startTime": 0,
+   "endTime": 276.8759765625
+  },
+  {
+   "name": "packages/server/src/__tests__/monitor-warning-refresh-off-hot-path.test.ts",
+   "startTime": 0,
+   "endTime": 445.3583984375
+  },
+  {
+   "name": "packages/server/src/__tests__/no-global-default-model.test.ts",
+   "startTime": 0,
+   "endTime": 5.350830078125
+  },
+  {
+   "name": "packages/server/src/__tests__/no-self-http-in-services.test.ts",
+   "startTime": 0,
+   "endTime": 1147.25146484375
+  },
+  {
+   "name": "packages/server/src/__tests__/null-workingdir-launch.test.ts",
+   "startTime": 0,
+   "endTime": 330.3330078125
+  },
+  {
+   "name": "packages/server/src/__tests__/oauth-login-bootstrap.test.ts",
+   "startTime": 0,
+   "endTime": 18.9453125
+  },
+  {
+   "name": "packages/server/src/__tests__/onboarding-service.test.ts",
+   "startTime": 0,
+   "endTime": 16771.966552734375
+  },
+  {
+   "name": "packages/server/src/__tests__/openapi-drift.test.ts",
+   "startTime": 0,
+   "endTime": 52588.7705078125
+  },
+  {
+   "name": "packages/server/src/__tests__/openapi-request-body-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 1359.524658203125
+  },
+  {
+   "name": "packages/server/src/__tests__/openapi-route-coverage.test.ts",
+   "startTime": 0,
+   "endTime": 25952.135009765625
+  },
+  {
+   "name": "packages/server/src/__tests__/openapi-thrown-status.test.ts",
+   "startTime": 0,
+   "endTime": 24191.122314453125
+  },
+  {
+   "name": "packages/server/src/__tests__/orchestrator-monitor.service.test.ts",
+   "startTime": 0,
+   "endTime": 121.160888671875
+  },
+  {
+   "name": "packages/server/src/__tests__/orphaned-worktree-reconciler.test.ts",
+   "startTime": 0,
+   "endTime": 25.22705078125
+  },
+  {
+   "name": "packages/server/src/__tests__/outbound-webhook.test.ts",
+   "startTime": 0,
+   "endTime": 5.369140625
+  },
+  {
+   "name": "packages/server/src/__tests__/pack-worker-script.test.ts",
+   "startTime": 0,
+   "endTime": 1012.427490234375
+  },
+  {
+   "name": "packages/server/src/__tests__/parentless-child-server-reap.test.ts",
+   "startTime": 0,
+   "endTime": 13.352294921875
+  },
+  {
+   "name": "packages/server/src/__tests__/pass-report-emission.test.ts",
+   "startTime": 0,
+   "endTime": 17.390869140625
+  },
+  {
+   "name": "packages/server/src/__tests__/periodic-sweep.test.ts",
+   "startTime": 0,
+   "endTime": 73.00439453125
+  },
+  {
+   "name": "packages/server/src/__tests__/persisted-gate-verdict.test.ts",
+   "startTime": 0,
+   "endTime": 269.52197265625
+  },
+  {
+   "name": "packages/server/src/__tests__/phase-context-precomputed.test.ts",
+   "startTime": 0,
+   "endTime": 2317.646728515625
+  },
+  {
+   "name": "packages/server/src/__tests__/pi-parse-stream-event.test.ts",
+   "startTime": 0,
+   "endTime": 17.65771484375
+  },
+  {
+   "name": "packages/server/src/__tests__/pid-liveness.test.ts",
+   "startTime": 0,
+   "endTime": 9.436279296875
+  },
+  {
+   "name": "packages/server/src/__tests__/placement-chain-parity.test.ts",
+   "startTime": 0,
+   "endTime": 34.431396484375
+  },
+  {
+   "name": "packages/server/src/__tests__/placement-explain.test.ts",
+   "startTime": 0,
+   "endTime": 908.271484375
+  },
+  {
+   "name": "packages/server/src/__tests__/plan-approval-endpoint.test.ts",
+   "startTime": 0,
+   "endTime": 370.598388671875
+  },
+  {
+   "name": "packages/server/src/__tests__/plan-mode-exit-harness.test.ts",
+   "startTime": 0,
+   "endTime": 356.29931640625
+  },
+  {
+   "name": "packages/server/src/__tests__/plan-mode-reconciler.test.ts",
+   "startTime": 0,
+   "endTime": 910.898681640625
+  },
+  {
+   "name": "packages/server/src/__tests__/plan-mode.service.test.ts",
+   "startTime": 0,
+   "endTime": 9.203125
+  },
+  {
+   "name": "packages/server/src/__tests__/plugin-body-schema-contract.test.ts",
+   "startTime": 0,
+   "endTime": 270.261474609375
+  },
+  {
+   "name": "packages/server/src/__tests__/plugin-docs.service.test.ts",
+   "startTime": 0,
+   "endTime": 8.013427734375
+  },
+  {
+   "name": "packages/server/src/__tests__/plugin-enabled.test.ts",
+   "startTime": 0,
+   "endTime": 1065.681884765625
+  },
+  {
+   "name": "packages/server/src/__tests__/plugin-encoding-repro.test.ts",
+   "startTime": 0,
+   "endTime": 1429.049560546875
+  },
+  {
+   "name": "packages/server/src/__tests__/plugin-exec-structured-stdout.test.ts",
+   "startTime": 0,
+   "endTime": 724.19970703125
+  },
+  {
+   "name": "packages/server/src/__tests__/plugin-install-hardening.test.ts",
+   "startTime": 0,
+   "endTime": 5684.216796875
+  },
+  {
+   "name": "packages/server/src/__tests__/plugin-loop-artifact-lazy-diff.test.ts",
+   "startTime": 0,
+   "endTime": 8971.078369140625
+  },
+  {
+   "name": "packages/server/src/__tests__/plugin-loop-autoland-recovery.test.ts",
+   "startTime": 0,
+   "endTime": 117.485107421875
+  },
+  {
+   "name": "packages/server/src/__tests__/plugin-loop-awaiting-merge-staleness.test.ts",
+   "startTime": 0,
+   "endTime": 3.6669921875
+  },
+  {
+   "name": "packages/server/src/__tests__/plugin-loop-closed-unmerged-query.test.ts",
+   "startTime": 0,
+   "endTime": 251.19287109375
+  },
+  {
+   "name": "packages/server/src/__tests__/plugin-loop-concurrency.test.ts",
+   "startTime": 0,
+   "endTime": 1756.724609375
+  },
+  {
+   "name": "packages/server/src/__tests__/plugin-loop-convergence.test.ts",
+   "startTime": 0,
+   "endTime": 5132.124755859375
+  },
+  {
+   "name": "packages/server/src/__tests__/plugin-loop-cost-skip.test.ts",
+   "startTime": 0,
+   "endTime": 240.7255859375
+  },
+  {
+   "name": "packages/server/src/__tests__/plugin-loop-direct-start.test.ts",
+   "startTime": 0,
+   "endTime": 641.030517578125
+  },
+  {
+   "name": "packages/server/src/__tests__/plugin-loop-gate-recommendation-retry.test.ts",
+   "startTime": 0,
+   "endTime": 3519.819580078125
+  },
+  {
+   "name": "packages/server/src/__tests__/plugin-loop-invariants.test.ts",
+   "startTime": 0,
+   "endTime": 7804.626708984375
+  },
+  {
+   "name": "packages/server/src/__tests__/plugin-loop-like-prefix.test.ts",
+   "startTime": 0,
+   "endTime": 203.36083984375
+  },
+  {
+   "name": "packages/server/src/__tests__/plugin-loop-monitor.test.ts",
+   "startTime": 0,
+   "endTime": 795.9228515625
+  },
+  {
+   "name": "packages/server/src/__tests__/plugin-loop-noop-advance-collapse.test.ts",
+   "startTime": 0,
+   "endTime": 2878.173095703125
+  },
+  {
+   "name": "packages/server/src/__tests__/plugin-loop-stall-classification.test.ts",
+   "startTime": 0,
+   "endTime": 13.230224609375
+  },
+  {
+   "name": "packages/server/src/__tests__/plugin-loop-step-state.test.ts",
+   "startTime": 0,
+   "endTime": 4.986328125
+  },
+  {
+   "name": "packages/server/src/__tests__/plugin-loop-stranded-ticket.test.ts",
+   "startTime": 0,
+   "endTime": 1572.005126953125
+  },
+  {
+   "name": "packages/server/src/__tests__/plugin-loop-unit-state.test.ts",
+   "startTime": 0,
+   "endTime": 552.66796875
+  },
+  {
+   "name": "packages/server/src/__tests__/plugin-marketplace.test.ts",
+   "startTime": 0,
+   "endTime": 4856.33056640625
+  },
+  {
+   "name": "packages/server/src/__tests__/plugin-scaffold-wrapped-hints.test.ts",
+   "startTime": 0,
+   "endTime": 10.53076171875
+  },
+  {
+   "name": "packages/server/src/__tests__/plugin-service.test.ts",
+   "startTime": 0,
+   "endTime": 47825.873046875
+  },
+  {
+   "name": "packages/server/src/__tests__/plugin-surface-audience.test.ts",
+   "startTime": 0,
+   "endTime": 451.85205078125
+  },
+  {
+   "name": "packages/server/src/__tests__/plugin-surface-drift.test.ts",
+   "startTime": 0,
+   "endTime": 1869.050537109375
+  },
+  {
+   "name": "packages/server/src/__tests__/plugin-view-readiness.test.ts",
+   "startTime": 0,
+   "endTime": 2826.32373046875
+  },
+  {
+   "name": "packages/server/src/__tests__/plugin-view-start-race.test.ts",
+   "startTime": 0,
+   "endTime": 1766.421875
+  },
+  {
+   "name": "packages/server/src/__tests__/port-allocator.test.ts",
+   "startTime": 0,
+   "endTime": 105.93359375
+  },
+  {
+   "name": "packages/server/src/__tests__/pre-merge-gate-install-block.test.ts",
+   "startTime": 0,
+   "endTime": 262.06787109375
+  },
+  {
+   "name": "packages/server/src/__tests__/pre-merge-gate.service.test.ts",
+   "startTime": 0,
+   "endTime": 1429.567626953125
+  },
+  {
+   "name": "packages/server/src/__tests__/pref-polarity-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 7.77880859375
+  },
+  {
+   "name": "packages/server/src/__tests__/preference-access-single-source.test.ts",
+   "startTime": 0,
+   "endTime": 1812.302490234375
+  },
+  {
+   "name": "packages/server/src/__tests__/preference-guard-project-scope.test.ts",
+   "startTime": 0,
+   "endTime": 237.904296875
+  },
+  {
+   "name": "packages/server/src/__tests__/preferences-cache.test.ts",
+   "startTime": 0,
+   "endTime": 418.79248046875
+  },
+  {
+   "name": "packages/server/src/__tests__/preferences-settings-enforcement.test.ts",
+   "startTime": 0,
+   "endTime": 739.652099609375
+  },
+  {
+   "name": "packages/server/src/__tests__/preferences.test.ts",
+   "startTime": 0,
+   "endTime": 5741.1904296875
+  },
+  {
+   "name": "packages/server/src/__tests__/preflight-check.test.ts",
+   "startTime": 0,
+   "endTime": 1173.77587890625
+  },
+  {
+   "name": "packages/server/src/__tests__/prefmap-resolver-purity.test.ts",
+   "startTime": 0,
+   "endTime": 4.85546875
+  },
+  {
+   "name": "packages/server/src/__tests__/process-exec.test.ts",
+   "startTime": 0,
+   "endTime": 42.7275390625
+  },
+  {
+   "name": "packages/server/src/__tests__/process-exit-record.test.ts",
+   "startTime": 0,
+   "endTime": 401.742919921875
+  },
+  {
+   "name": "packages/server/src/__tests__/process-guard.test.ts",
+   "startTime": 0,
+   "endTime": 14.52783203125
+  },
+  {
+   "name": "packages/server/src/__tests__/profile-health-version-probe-cache.test.ts",
+   "startTime": 0,
+   "endTime": 6484.47509765625
+  },
+  {
+   "name": "packages/server/src/__tests__/project-activity.test.ts",
+   "startTime": 0,
+   "endTime": 108.910400390625
+  },
+  {
+   "name": "packages/server/src/__tests__/project-cascade-completeness.repo.test.ts",
+   "startTime": 0,
+   "endTime": 12784.30078125
+  },
+  {
+   "name": "packages/server/src/__tests__/project-completion-reconciler.test.ts",
+   "startTime": 0,
+   "endTime": 511.27978515625
+  },
+  {
+   "name": "packages/server/src/__tests__/project-conductor.service.test.ts",
+   "startTime": 0,
+   "endTime": 4.4970703125
+  },
+  {
+   "name": "packages/server/src/__tests__/project-data-handling-requirement.test.ts",
+   "startTime": 0,
+   "endTime": 10.841552734375
+  },
+  {
+   "name": "packages/server/src/__tests__/project-dedup-same-git-root.test.ts",
+   "startTime": 0,
+   "endTime": 9402.31591796875
+  },
+  {
+   "name": "packages/server/src/__tests__/project-health-multirepo.test.ts",
+   "startTime": 0,
+   "endTime": 9.141845703125
+  },
+  {
+   "name": "packages/server/src/__tests__/project-health-red-base-warning.test.ts",
+   "startTime": 0,
+   "endTime": 2678.482666015625
+  },
+  {
+   "name": "packages/server/src/__tests__/project-profile-allowlist.test.ts",
+   "startTime": 0,
+   "endTime": 14.598876953125
+  },
+  {
+   "name": "packages/server/src/__tests__/project-runtime-config.test.ts",
+   "startTime": 0,
+   "endTime": 9.689697265625
+  },
+  {
+   "name": "packages/server/src/__tests__/project-scaffold.test.ts",
+   "startTime": 0,
+   "endTime": 17265.626708984375
+  },
+  {
+   "name": "packages/server/src/__tests__/project-scoped-workspace-list.test.ts",
+   "startTime": 0,
+   "endTime": 671.840576171875
+  },
+  {
+   "name": "packages/server/src/__tests__/project-scripts.test.ts",
+   "startTime": 0,
+   "endTime": 1400.42919921875
+  },
+  {
+   "name": "packages/server/src/__tests__/project-service-profile-first.test.ts",
+   "startTime": 0,
+   "endTime": 5.25146484375
+  },
+  {
+   "name": "packages/server/src/__tests__/project-setup.service.test.ts",
+   "startTime": 0,
+   "endTime": 387.105712890625
+  },
+  {
+   "name": "packages/server/src/__tests__/project-status-list-ordering.test.ts",
+   "startTime": 0,
+   "endTime": 29.959716796875
+  },
+  {
+   "name": "packages/server/src/__tests__/project-statuses-unique-name.test.ts",
+   "startTime": 0,
+   "endTime": 326.828125
+  },
+  {
+   "name": "packages/server/src/__tests__/promote-repo-to-leading.test.ts",
+   "startTime": 0,
+   "endTime": 778.867919921875
+  },
+  {
+   "name": "packages/server/src/__tests__/provider-auth-breaker.test.ts",
+   "startTime": 0,
+   "endTime": 8.221435546875
+  },
+  {
+   "name": "packages/server/src/__tests__/provider-auth-failure.test.ts",
+   "startTime": 0,
+   "endTime": 8.36181640625
+  },
+  {
+   "name": "packages/server/src/__tests__/provider-auth-recovery.test.ts",
+   "startTime": 0,
+   "endTime": 218.327880859375
+  },
+  {
+   "name": "packages/server/src/__tests__/provider-config-resolution.test.ts",
+   "startTime": 0,
+   "endTime": 11.17041015625
+  },
+  {
+   "name": "packages/server/src/__tests__/provider-divergence.test.ts",
+   "startTime": 0,
+   "endTime": 138.289306640625
+  },
+  {
+   "name": "packages/server/src/__tests__/provider-exit-behavior.test.ts",
+   "startTime": 0,
+   "endTime": 11.385498046875
+  },
+  {
+   "name": "packages/server/src/__tests__/provider-pair-parity.test.ts",
+   "startTime": 0,
+   "endTime": 8.770263671875
+  },
+  {
+   "name": "packages/server/src/__tests__/provider-resolution-single-source.test.ts",
+   "startTime": 0,
+   "endTime": 2638.354736328125
+  },
+  {
+   "name": "packages/server/src/__tests__/provider-switch-stale-default-model.test.ts",
+   "startTime": 0,
+   "endTime": 713.266357421875
+  },
+  {
+   "name": "packages/server/src/__tests__/quality-metrics-collector-skill.test.ts",
+   "startTime": 0,
+   "endTime": 5.82568359375
+  },
+  {
+   "name": "packages/server/src/__tests__/quality-metrics-route.test.ts",
+   "startTime": 0,
+   "endTime": 271.480224609375
+  },
+  {
+   "name": "packages/server/src/__tests__/quality-metrics.service.test.ts",
+   "startTime": 0,
+   "endTime": 420.09423828125
+  },
+  {
+   "name": "packages/server/src/__tests__/query-params.test.ts",
+   "startTime": 0,
+   "endTime": 6.368896484375
+  },
+  {
+   "name": "packages/server/src/__tests__/quota-usage-endpoint.test.ts",
+   "startTime": 0,
+   "endTime": 23.184814453125
+  },
+  {
+   "name": "packages/server/src/__tests__/rate-limit-exit-decision.test.ts",
+   "startTime": 0,
+   "endTime": 7.331787109375
+  },
+  {
+   "name": "packages/server/src/__tests__/ready-for-merge-zero-commit-guard.test.ts",
+   "startTime": 0,
+   "endTime": 361.11767578125
+  },
+  {
+   "name": "packages/server/src/__tests__/reconcile-leading-stamp.test.ts",
+   "startTime": 0,
+   "endTime": 9890.88671875
+  },
+  {
+   "name": "packages/server/src/__tests__/reconcile-live-session-guard.test.ts",
+   "startTime": 0,
+   "endTime": 1466.860595703125
+  },
+  {
+   "name": "packages/server/src/__tests__/reconcile-merged-issue.test.ts",
+   "startTime": 0,
+   "endTime": 19189.111083984375
+  },
+  {
+   "name": "packages/server/src/__tests__/reconcile-sibling-stamp.test.ts",
+   "startTime": 0,
+   "endTime": 15300.986572265625
+  },
+  {
+   "name": "packages/server/src/__tests__/reconcile-silently-merged.test.ts",
+   "startTime": 0,
+   "endTime": 27.985595703125
+  },
+  {
+   "name": "packages/server/src/__tests__/reconciler.service.test.ts",
+   "startTime": 0,
+   "endTime": 7.9169921875
+  },
+  {
+   "name": "packages/server/src/__tests__/red-debt-cap.test.ts",
+   "startTime": 0,
+   "endTime": 8.353271484375
+  },
+  {
+   "name": "packages/server/src/__tests__/red-debt-gate.test.ts",
+   "startTime": 0,
+   "endTime": 8.388916015625
+  },
+  {
+   "name": "packages/server/src/__tests__/red-debt.repository.test.ts",
+   "startTime": 0,
+   "endTime": 407.994384765625
+  },
+  {
+   "name": "packages/server/src/__tests__/registration-create-project-unified.test.ts",
+   "startTime": 0,
+   "endTime": 13174.450927734375
+  },
+  {
+   "name": "packages/server/src/__tests__/registration-create-workflow.test.ts",
+   "startTime": 0,
+   "endTime": 3525.033935546875
+  },
+  {
+   "name": "packages/server/src/__tests__/registration-default-statuses.test.ts",
+   "startTime": 0,
+   "endTime": 478.847412109375
+  },
+  {
+   "name": "packages/server/src/__tests__/registration-idempotent.test.ts",
+   "startTime": 0,
+   "endTime": 10967.43505859375
+  },
+  {
+   "name": "packages/server/src/__tests__/registration-progress.test.ts",
+   "startTime": 0,
+   "endTime": 13.343505859375
+  },
+  {
+   "name": "packages/server/src/__tests__/registration-repair-backfill.test.ts",
+   "startTime": 0,
+   "endTime": 1861.099853515625
+  },
+  {
+   "name": "packages/server/src/__tests__/registration-resolve-default-branch.test.ts",
+   "startTime": 0,
+   "endTime": 17607.9404296875
+  },
+  {
+   "name": "packages/server/src/__tests__/registration-seed-statuses-workflow.test.ts",
+   "startTime": 0,
+   "endTime": 10232.541748046875
+  },
+  {
+   "name": "packages/server/src/__tests__/registration-unified-path.test.ts",
+   "startTime": 0,
+   "endTime": 24597.61328125
+  },
+  {
+   "name": "packages/server/src/__tests__/relaunch-model-resolution.test.ts",
+   "startTime": 0,
+   "endTime": 427.422119140625
+  },
+  {
+   "name": "packages/server/src/__tests__/remote-board-tools-claude.test.ts",
+   "startTime": 0,
+   "endTime": 5069.45703125
+  },
+  {
+   "name": "packages/server/src/__tests__/remote-launch-spec.test.ts",
+   "startTime": 0,
+   "endTime": 19.148193359375
+  },
+  {
+   "name": "packages/server/src/__tests__/remote-mid-session-repo-ops.test.ts",
+   "startTime": 0,
+   "endTime": 26345.5869140625
+  },
+  {
+   "name": "packages/server/src/__tests__/remote-session-liveness-hold.test.ts",
+   "startTime": 0,
+   "endTime": 546.485107421875
+  },
+  {
+   "name": "packages/server/src/__tests__/remote-session-socket-gap.test.ts",
+   "startTime": 0,
+   "endTime": 658.85205078125
+  },
+  {
+   "name": "packages/server/src/__tests__/remote-session-survives-board-restart.test.ts",
+   "startTime": 0,
+   "endTime": 240.74951171875
+  },
+  {
+   "name": "packages/server/src/__tests__/remote-spec-env.test.ts",
+   "startTime": 0,
+   "endTime": 364.55419921875
+  },
+  {
+   "name": "packages/server/src/__tests__/remote-stdin-recovery-e2e.test.ts",
+   "startTime": 0,
+   "endTime": 4915.631591796875
+  },
+  {
+   "name": "packages/server/src/__tests__/remote-turn-after-restart.test.ts",
+   "startTime": 0,
+   "endTime": 271.01611328125
+  },
+  {
+   "name": "packages/server/src/__tests__/remote-turn-checkout-sync.test.ts",
+   "startTime": 0,
+   "endTime": 1223.648193359375
+  },
+  {
+   "name": "packages/server/src/__tests__/remote-unlanded-card-hint.test.ts",
+   "startTime": 0,
+   "endTime": 7.588623046875
+  },
+  {
+   "name": "packages/server/src/__tests__/remote-worker-ticket-context.test.ts",
+   "startTime": 0,
+   "endTime": 13.59033203125
+  },
+  {
+   "name": "packages/server/src/__tests__/remove-worktree-teardown.test.ts",
+   "startTime": 0,
+   "endTime": 187.94189453125
+  },
+  {
+   "name": "packages/server/src/__tests__/repo-clone-service.test.ts",
+   "startTime": 0,
+   "endTime": 25.891845703125
+  },
+  {
+   "name": "packages/server/src/__tests__/repo-lock-unavailable-fails-fast.test.ts",
+   "startTime": 0,
+   "endTime": 2042.29541015625
+  },
+  {
+   "name": "packages/server/src/__tests__/repo-merge-status-projection.test.ts",
+   "startTime": 0,
+   "endTime": 702.191650390625
+  },
+  {
+   "name": "packages/server/src/__tests__/repo-path-literal-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 1399.7978515625
+  },
+  {
+   "name": "packages/server/src/__tests__/repo-repository.test.ts",
+   "startTime": 0,
+   "endTime": 1730.045654296875
+  },
+  {
+   "name": "packages/server/src/__tests__/repo-scope-from-ticket.test.ts",
+   "startTime": 0,
+   "endTime": 6.635498046875
+  },
+  {
+   "name": "packages/server/src/__tests__/repos-touched-editable.test.ts",
+   "startTime": 0,
+   "endTime": 1102.465576171875
+  },
+  {
+   "name": "packages/server/src/__tests__/repository-projections-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 508.477783203125
+  },
+  {
+   "name": "packages/server/src/__tests__/repository-table-ownership.test.ts",
+   "startTime": 0,
+   "endTime": 4.472900390625
+  },
+  {
+   "name": "packages/server/src/__tests__/resolver-provider-relaunch.test.ts",
+   "startTime": 0,
+   "endTime": 433.213623046875
+  },
+  {
+   "name": "packages/server/src/__tests__/result-spelling-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 1026.715087890625
+  },
+  {
+   "name": "packages/server/src/__tests__/review-concurrent.test.ts",
+   "startTime": 0,
+   "endTime": 922.7001953125
+  },
+  {
+   "name": "packages/server/src/__tests__/review-effectiveness-aggregation.test.ts",
+   "startTime": 0,
+   "endTime": 15.16357421875
+  },
+  {
+   "name": "packages/server/src/__tests__/review-effectiveness-report.test.ts",
+   "startTime": 0,
+   "endTime": 16.597900390625
+  },
+  {
+   "name": "packages/server/src/__tests__/review-effectiveness.service.test.ts",
+   "startTime": 0,
+   "endTime": 336.04150390625
+  },
+  {
+   "name": "packages/server/src/__tests__/review-preflight-extraction.repo.test.ts",
+   "startTime": 0,
+   "endTime": 1199.0966796875
+  },
+  {
+   "name": "packages/server/src/__tests__/review-prompt-approval-instruction.test.ts",
+   "startTime": 0,
+   "endTime": 470.1240234375
+  },
+  {
+   "name": "packages/server/src/__tests__/review-route-code-echo.test.ts",
+   "startTime": 0,
+   "endTime": 58.043212890625
+  },
+  {
+   "name": "packages/server/src/__tests__/review-route-error-mapping.test.ts",
+   "startTime": 0,
+   "endTime": 20.318603515625
+  },
+  {
+   "name": "packages/server/src/__tests__/review-train-members.test.ts",
+   "startTime": 0,
+   "endTime": 268.5
+  },
+  {
+   "name": "packages/server/src/__tests__/review-workspace-profile.test.ts",
+   "startTime": 0,
+   "endTime": 8.45556640625
+  },
+  {
+   "name": "packages/server/src/__tests__/risk-posture-fanout.test.ts",
+   "startTime": 0,
+   "endTime": 8.119384765625
+  },
+  {
+   "name": "packages/server/src/__tests__/risk-posture-raw-read-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 990.707763671875
+  },
+  {
+   "name": "packages/server/src/__tests__/roast-skill.test.ts",
+   "startTime": 0,
+   "endTime": 4.5625
+  },
+  {
+   "name": "packages/server/src/__tests__/rotted-suite-scan.test.ts",
+   "startTime": 0,
+   "endTime": 990.456787109375
+  },
+  {
+   "name": "packages/server/src/__tests__/route-body-schemas-batch3-contract.test.ts",
+   "startTime": 0,
+   "endTime": 17.251220703125
+  },
+  {
+   "name": "packages/server/src/__tests__/route-body-schemas-batch4-contract.test.ts",
+   "startTime": 0,
+   "endTime": 19.26416015625
+  },
+  {
+   "name": "packages/server/src/__tests__/route-body-schemas-batch5-contract.test.ts",
+   "startTime": 0,
+   "endTime": 21.273193359375
+  },
+  {
+   "name": "packages/server/src/__tests__/route-body-validation-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 285.4423828125
+  },
+  {
+   "name": "packages/server/src/__tests__/runbooks.test.ts",
+   "startTime": 0,
+   "endTime": 117.58056640625
+  },
+  {
+   "name": "packages/server/src/__tests__/runtime-port.test.ts",
+   "startTime": 0,
+   "endTime": 4.161376953125
+  },
+  {
+   "name": "packages/server/src/__tests__/runtime-state-separation.test.ts",
+   "startTime": 0,
+   "endTime": 223.80224609375
+  },
+  {
+   "name": "packages/server/src/__tests__/scaffold-commit-covers-hooks.test.ts",
+   "startTime": 0,
+   "endTime": 6.388427734375
+  },
+  {
+   "name": "packages/server/src/__tests__/scaffold-hook-sources.test.ts",
+   "startTime": 0,
+   "endTime": 2576.74609375
+  },
+  {
+   "name": "packages/server/src/__tests__/scheduled-run.service.test.ts",
+   "startTime": 0,
+   "endTime": 324.396484375
+  },
+  {
+   "name": "packages/server/src/__tests__/scheduled-tasks.test.ts",
+   "startTime": 0,
+   "endTime": 17.41162109375
+  },
+  {
+   "name": "packages/server/src/__tests__/scorecard-extraction.repo.test.ts",
+   "startTime": 0,
+   "endTime": 1359.013671875
+  },
+  {
+   "name": "packages/server/src/__tests__/self-project.test.ts",
+   "startTime": 0,
+   "endTime": 6.330810546875
+  },
+  {
+   "name": "packages/server/src/__tests__/server-test-typecheck-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 33512.302001953125
+  },
+  {
+   "name": "packages/server/src/__tests__/service-layer-direction.test.ts",
+   "startTime": 0,
+   "endTime": 453.372802734375
+  },
+  {
+   "name": "packages/server/src/__tests__/service-stack-preflight.test.ts",
+   "startTime": 0,
+   "endTime": 10.382080078125
+  },
+  {
+   "name": "packages/server/src/__tests__/service-stack-reaper.test.ts",
+   "startTime": 0,
+   "endTime": 521.603759765625
+  },
+  {
+   "name": "packages/server/src/__tests__/service-wiring-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 955.9228515625
+  },
+  {
+   "name": "packages/server/src/__tests__/session-activity-throttle.test.ts",
+   "startTime": 0,
+   "endTime": 22.885009765625
+  },
+  {
+   "name": "packages/server/src/__tests__/session-artifacts.test.ts",
+   "startTime": 0,
+   "endTime": 941.668701171875
+  },
+  {
+   "name": "packages/server/src/__tests__/session-completion-callback-idempotency.test.ts",
+   "startTime": 0,
+   "endTime": 414.614013671875
+  },
+  {
+   "name": "packages/server/src/__tests__/session-exit-classification.test.ts",
+   "startTime": 0,
+   "endTime": 13.16357421875
+  },
+  {
+   "name": "packages/server/src/__tests__/session-exit-finalize-single-source.test.ts",
+   "startTime": 0,
+   "endTime": 7.255615234375
+  },
+  {
+   "name": "packages/server/src/__tests__/session-exit-state-machine.test.ts",
+   "startTime": 0,
+   "endTime": 9.149658203125
+  },
+  {
+   "name": "packages/server/src/__tests__/session-filter.test.ts",
+   "startTime": 0,
+   "endTime": 6.142822265625
+  },
+  {
+   "name": "packages/server/src/__tests__/session-handoff-role-gate.test.ts",
+   "startTime": 0,
+   "endTime": 323.31494140625
+  },
+  {
+   "name": "packages/server/src/__tests__/session-launch-orphan-guard.test.ts",
+   "startTime": 0,
+   "endTime": 418.099853515625
+  },
+  {
+   "name": "packages/server/src/__tests__/session-lifecycle-isolation-downgrade.test.ts",
+   "startTime": 0,
+   "endTime": 765.021728515625
+  },
+  {
+   "name": "packages/server/src/__tests__/session-lifecycle.test.ts",
+   "startTime": 0,
+   "endTime": 12159.8671875
+  },
+  {
+   "name": "packages/server/src/__tests__/session-message-pruner.test.ts",
+   "startTime": 0,
+   "endTime": 972.131103515625
+  },
+  {
+   "name": "packages/server/src/__tests__/session-messages-index.test.ts",
+   "startTime": 0,
+   "endTime": 308.27587890625
+  },
+  {
+   "name": "packages/server/src/__tests__/session-messages-perf.test.ts",
+   "startTime": 0,
+   "endTime": 3674.234375
+  },
+  {
+   "name": "packages/server/src/__tests__/session-output-etag.test.ts",
+   "startTime": 0,
+   "endTime": 38.807861328125
+  },
+  {
+   "name": "packages/server/src/__tests__/session-output-tail-read.test.ts",
+   "startTime": 0,
+   "endTime": 590.37109375
+  },
+  {
+   "name": "packages/server/src/__tests__/session-output.test.ts",
+   "startTime": 0,
+   "endTime": 18.213623046875
+  },
+  {
+   "name": "packages/server/src/__tests__/session-state-teardown.test.ts",
+   "startTime": 0,
+   "endTime": 7.48388671875
+  },
+  {
+   "name": "packages/server/src/__tests__/session-stream-buffer-free.test.ts",
+   "startTime": 0,
+   "endTime": 10.373779296875
+  },
+  {
+   "name": "packages/server/src/__tests__/session-summary-memo.test.ts",
+   "startTime": 0,
+   "endTime": 746.3544921875
+  },
+  {
+   "name": "packages/server/src/__tests__/session-summary.test.ts",
+   "startTime": 0,
+   "endTime": 743.121826171875
+  },
+  {
+   "name": "packages/server/src/__tests__/session.manager.test.ts",
+   "startTime": 0,
+   "endTime": 15.240478515625
+  },
+  {
+   "name": "packages/server/src/__tests__/set-provider-default-skill-settings-keys.test.ts",
+   "startTime": 0,
+   "endTime": 115.4033203125
+  },
+  {
+   "name": "packages/server/src/__tests__/settings-divergence-guard.test.ts",
+   "startTime": 0,
+   "endTime": 292.3095703125
+  },
+  {
+   "name": "packages/server/src/__tests__/settings-registry-keys.test.ts",
+   "startTime": 0,
+   "endTime": 15.435791015625
+  },
+  {
+   "name": "packages/server/src/__tests__/setup-run-extraction.repo.test.ts",
+   "startTime": 0,
+   "endTime": 829.78759765625
+  },
+  {
+   "name": "packages/server/src/__tests__/setup-script-populate.test.ts",
+   "startTime": 0,
+   "endTime": 643.333740234375
+  },
+  {
+   "name": "packages/server/src/__tests__/shared-dist-rebuild-on-merge.test.ts",
+   "startTime": 0,
+   "endTime": 853.802734375
+  },
+  {
+   "name": "packages/server/src/__tests__/shared-package-exports.test.ts",
+   "startTime": 0,
+   "endTime": 7084.814697265625
+  },
+  {
+   "name": "packages/server/src/__tests__/sibling-orphan-worktree-sweep.test.ts",
+   "startTime": 0,
+   "endTime": 47.88916015625
+  },
+  {
+   "name": "packages/server/src/__tests__/sibling-provisioning-concurrency.test.ts",
+   "startTime": 0,
+   "endTime": 528.416748046875
+  },
+  {
+   "name": "packages/server/src/__tests__/silently-merged-periodic-reconcile.test.ts",
+   "startTime": 0,
+   "endTime": 424.203857421875
+  },
+  {
+   "name": "packages/server/src/__tests__/slow-request-logger.test.ts",
+   "startTime": 0,
+   "endTime": 961.13916015625
+  },
+  {
+   "name": "packages/server/src/__tests__/smart-hooks-runner.test.ts",
+   "startTime": 0,
+   "endTime": 862.742919921875
+  },
+  {
+   "name": "packages/server/src/__tests__/smoke-check-build.test.ts",
+   "startTime": 0,
+   "endTime": 12.212158203125
+  },
+  {
+   "name": "packages/server/src/__tests__/smoke-check-plan-override.test.ts",
+   "startTime": 0,
+   "endTime": 8.441162109375
+  },
+  {
+   "name": "packages/server/src/__tests__/spec-constitution-gate.test.ts",
+   "startTime": 0,
+   "endTime": 3.443359375
+  },
+  {
+   "name": "packages/server/src/__tests__/spec-tasks-materialization.test.ts",
+   "startTime": 0,
+   "endTime": 8721.62451171875
+  },
+  {
+   "name": "packages/server/src/__tests__/split-responsibility-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 175.263427734375
+  },
+  {
+   "name": "packages/server/src/__tests__/sprint-capacity.service.test.ts",
+   "startTime": 0,
+   "endTime": 1140.524658203125
+  },
+  {
+   "name": "packages/server/src/__tests__/stack-admission-cap-concurrency.test.ts",
+   "startTime": 0,
+   "endTime": 45.725830078125
+  },
+  {
+   "name": "packages/server/src/__tests__/stack-detector.service.test.ts",
+   "startTime": 0,
+   "endTime": 622.3251953125
+  },
+  {
+   "name": "packages/server/src/__tests__/stack-marker-ladder-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 2071.723388671875
+  },
+  {
+   "name": "packages/server/src/__tests__/stack-profile-llm-gapfill.test.ts",
+   "startTime": 0,
+   "endTime": 322.207275390625
+  },
+  {
+   "name": "packages/server/src/__tests__/stack-profile-read-is-pure.test.ts",
+   "startTime": 0,
+   "endTime": 338.838623046875
+  },
+  {
+   "name": "packages/server/src/__tests__/stack-profile.service.test.ts",
+   "startTime": 0,
+   "endTime": 1268.458740234375
+  },
+  {
+   "name": "packages/server/src/__tests__/stale-backlog.test.ts",
+   "startTime": 0,
+   "endTime": 106.546630859375
+  },
+  {
+   "name": "packages/server/src/__tests__/stale-dev-processes.test.ts",
+   "startTime": 0,
+   "endTime": 26.324951171875
+  },
+  {
+   "name": "packages/server/src/__tests__/stale-supervisor.test.ts",
+   "startTime": 0,
+   "endTime": 67.32421875
+  },
+  {
+   "name": "packages/server/src/__tests__/stale-worktree-cleanup.test.ts",
+   "startTime": 0,
+   "endTime": 92.502197265625
+  },
+  {
+   "name": "packages/server/src/__tests__/stale-worktree-shared-workingdir.test.ts",
+   "startTime": 0,
+   "endTime": 537.15087890625
+  },
+  {
+   "name": "packages/server/src/__tests__/start-policy-single-source.test.ts",
+   "startTime": 0,
+   "endTime": 3.37158203125
+  },
+  {
+   "name": "packages/server/src/__tests__/start-scoring-integration.test.ts",
+   "startTime": 0,
+   "endTime": 393.867431640625
+  },
+  {
+   "name": "packages/server/src/__tests__/start-scoring.test.ts",
+   "startTime": 0,
+   "endTime": 8.5810546875
+  },
+  {
+   "name": "packages/server/src/__tests__/startup-git-service-injection.test.ts",
+   "startTime": 0,
+   "endTime": 14.74462890625
+  },
+  {
+   "name": "packages/server/src/__tests__/startup-persistence-boundary-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 260.294677734375
+  },
+  {
+   "name": "packages/server/src/__tests__/startup-readiness-gate.test.ts",
+   "startTime": 0,
+   "endTime": 104.52783203125
+  },
+  {
+   "name": "packages/server/src/__tests__/startup-tasks-wiring.test.ts",
+   "startTime": 0,
+   "endTime": 223.206298828125
+  },
+  {
+   "name": "packages/server/src/__tests__/startup-tasks.test.ts",
+   "startTime": 0,
+   "endTime": 25.1591796875
+  },
+  {
+   "name": "packages/server/src/__tests__/startup-timer-registry.test.ts",
+   "startTime": 0,
+   "endTime": 6.900634765625
+  },
+  {
+   "name": "packages/server/src/__tests__/startup-timers-hmr.test.ts",
+   "startTime": 0,
+   "endTime": 82.911865234375
+  },
+  {
+   "name": "packages/server/src/__tests__/static-serving-traversal-security.test.ts",
+   "startTime": 0,
+   "endTime": 153.730224609375
+  },
+  {
+   "name": "packages/server/src/__tests__/status-delete-linked-guard.test.ts",
+   "startTime": 0,
+   "endTime": 286.588134765625
+  },
+  {
+   "name": "packages/server/src/__tests__/status-read-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 2.255859375
+  },
+  {
+   "name": "packages/server/src/__tests__/status-transition-authority.test.ts",
+   "startTime": 0,
+   "endTime": 8403.41455078125
+  },
+  {
+   "name": "packages/server/src/__tests__/status-view.test.ts",
+   "startTime": 0,
+   "endTime": 4.20361328125
+  },
+  {
+   "name": "packages/server/src/__tests__/status-write-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 4.517578125
+  },
+  {
+   "name": "packages/server/src/__tests__/stop-hook-chain-ordering.test.ts",
+   "startTime": 0,
+   "endTime": 2846.79345703125
+  },
+  {
+   "name": "packages/server/src/__tests__/stop-hook-content-dirty.test.ts",
+   "startTime": 0,
+   "endTime": 7045.751953125
+  },
+  {
+   "name": "packages/server/src/__tests__/stop-hook-inflight-attribution.test.ts",
+   "startTime": 0,
+   "endTime": 3848.561279296875
+  },
+  {
+   "name": "packages/server/src/__tests__/stop-hook-typecheck-inflight.test.ts",
+   "startTime": 0,
+   "endTime": 4051.972412109375
+  },
+  {
+   "name": "packages/server/src/__tests__/stranded-fix-and-merge-resolver-exit.test.ts",
+   "startTime": 0,
+   "endTime": 479.291259765625
+  },
+  {
+   "name": "packages/server/src/__tests__/stranded-review-preflight-backoff.test.ts",
+   "startTime": 0,
+   "endTime": 2508.751708984375
+  },
+  {
+   "name": "packages/server/src/__tests__/stranded-review-reconciler-relaunch.test.ts",
+   "startTime": 0,
+   "endTime": 344.56640625
+  },
+  {
+   "name": "packages/server/src/__tests__/stranded-review-reconciler.test.ts",
+   "startTime": 0,
+   "endTime": 659.394775390625
+  },
+  {
+   "name": "packages/server/src/__tests__/stranded-sibling-reconciler.test.ts",
+   "startTime": 0,
+   "endTime": 27563.501708984375
+  },
+  {
+   "name": "packages/server/src/__tests__/strategy-objective.service.test.ts",
+   "startTime": 0,
+   "endTime": 4770.285888671875
+  },
+  {
+   "name": "packages/server/src/__tests__/strategy-objective.test.ts",
+   "startTime": 0,
+   "endTime": 19.221923828125
+  },
+  {
+   "name": "packages/server/src/__tests__/summary-projection-extraction.repo.test.ts",
+   "startTime": 0,
+   "endTime": 1249.714111328125
+  },
+  {
+   "name": "packages/server/src/__tests__/sweep-timer-mechanism.test.ts",
+   "startTime": 0,
+   "endTime": 15.864990234375
+  },
+  {
+   "name": "packages/server/src/__tests__/symlink-run-extraction.repo.test.ts",
+   "startTime": 0,
+   "endTime": 1054.7001953125
+  },
+  {
+   "name": "packages/server/src/__tests__/tags.test.ts",
+   "startTime": 0,
+   "endTime": 670.095947265625
+  },
+  {
+   "name": "packages/server/src/__tests__/temp-dir-namespace-guard.test.ts",
+   "startTime": 0,
+   "endTime": 5204.6240234375
+  },
+  {
+   "name": "packages/server/src/__tests__/terminal-move-guard.test.ts",
+   "startTime": 0,
+   "endTime": 772.779541015625
+  },
+  {
+   "name": "packages/server/src/__tests__/terminal-workspace-reaper.test.ts",
+   "startTime": 0,
+   "endTime": 578.826904296875
+  },
+  {
+   "name": "packages/server/src/__tests__/test-db-template-cache.test.ts",
+   "startTime": 0,
+   "endTime": 1088.434814453125
+  },
+  {
+   "name": "packages/server/src/__tests__/test-impact-map.test.ts",
+   "startTime": 0,
+   "endTime": 45517.39794921875
+  },
+  {
+   "name": "packages/server/src/__tests__/test-impact-outcome.service.test.ts",
+   "startTime": 0,
+   "endTime": 70.972900390625
+  },
+  {
+   "name": "packages/server/src/__tests__/test-impact-selector-id.test.ts",
+   "startTime": 0,
+   "endTime": 473.023681640625
+  },
+  {
+   "name": "packages/server/src/__tests__/test-mine-exclusions-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 142.783203125
+  },
+  {
+   "name": "packages/server/src/__tests__/test-mine-impact-selector.test.mjs",
+   "startTime": 0,
+   "endTime": 19.68408203125
+  },
+  {
+   "name": "packages/server/src/__tests__/test-mine-scope-derivation.test.mjs",
+   "startTime": 0,
+   "endTime": 16.19970703125
+  },
+  {
+   "name": "packages/server/src/__tests__/test-run.service.test.ts",
+   "startTime": 0,
+   "endTime": 1287.1796875
+  },
+  {
+   "name": "packages/server/src/__tests__/test-scaffold.test.ts",
+   "startTime": 0,
+   "endTime": 438.86376953125
+  },
+  {
+   "name": "packages/server/src/__tests__/ticket-context.test.ts",
+   "startTime": 0,
+   "endTime": 95.216796875
+  },
+  {
+   "name": "packages/server/src/__tests__/ticket-group-scan-touched-files.test.ts",
+   "startTime": 0,
+   "endTime": 483.254638671875
+  },
+  {
+   "name": "packages/server/src/__tests__/ticket-groups.test.ts",
+   "startTime": 0,
+   "endTime": 15926.25390625
+  },
+  {
+   "name": "packages/server/src/__tests__/ticket-preflight-skip-pref.test.ts",
+   "startTime": 0,
+   "endTime": 129.87841796875
+  },
+  {
+   "name": "packages/server/src/__tests__/time-injection-spelling-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 3.33935546875
+  },
+  {
+   "name": "packages/server/src/__tests__/time-report.service.test.ts",
+   "startTime": 0,
+   "endTime": 13.324951171875
+  },
+  {
+   "name": "packages/server/src/__tests__/transient-errors.test.ts",
+   "startTime": 0,
+   "endTime": 18.321044921875
+  },
+  {
+   "name": "packages/server/src/__tests__/turn-stale-resume-result-event.test.ts",
+   "startTime": 0,
+   "endTime": 482.584716796875
+  },
+  {
+   "name": "packages/server/src/__tests__/unique-issue-number-constraint.test.ts",
+   "startTime": 0,
+   "endTime": 43.995849609375
+  },
+  {
+   "name": "packages/server/src/__tests__/unverified-merge-note.test.ts",
+   "startTime": 0,
+   "endTime": 10.097412109375
+  },
+  {
+   "name": "packages/server/src/__tests__/usage-limit-rotation-exit.test.ts",
+   "startTime": 0,
+   "endTime": 1223.509033203125
+  },
+  {
+   "name": "packages/server/src/__tests__/utf8-repair.test.ts",
+   "startTime": 0,
+   "endTime": 964.68359375
+  },
+  {
+   "name": "packages/server/src/__tests__/verify-budget-parity.test.ts",
+   "startTime": 0,
+   "endTime": 2.366455078125
+  },
+  {
+   "name": "packages/server/src/__tests__/verify-chain-semaphore.test.ts",
+   "startTime": 0,
+   "endTime": 195.614013671875
+  },
+  {
+   "name": "packages/server/src/__tests__/verify-command.test.ts",
+   "startTime": 0,
+   "endTime": 15.255615234375
+  },
+  {
+   "name": "packages/server/src/__tests__/verify-env-listener-neutralization.test.ts",
+   "startTime": 0,
+   "endTime": 7.225341796875
+  },
+  {
+   "name": "packages/server/src/__tests__/verify-failure-summary.test.ts",
+   "startTime": 0,
+   "endTime": 5.207275390625
+  },
+  {
+   "name": "packages/server/src/__tests__/verify-flake-retry.test.ts",
+   "startTime": 0,
+   "endTime": 6.50341796875
+  },
+  {
+   "name": "packages/server/src/__tests__/verify-gate-runner.test.ts",
+   "startTime": 0,
+   "endTime": 34988.266845703125
+  },
+  {
+   "name": "packages/server/src/__tests__/verify-retry-strategies.test.ts",
+   "startTime": 0,
+   "endTime": 15.336181640625
+  },
+  {
+   "name": "packages/server/src/__tests__/verify-script-populate.test.ts",
+   "startTime": 0,
+   "endTime": 410.19580078125
+  },
+  {
+   "name": "packages/server/src/__tests__/visual-verification-relevance.test.ts",
+   "startTime": 0,
+   "endTime": 4.36474609375
+  },
+  {
+   "name": "packages/server/src/__tests__/vital-file-guard-backup.test.ts",
+   "startTime": 0,
+   "endTime": 768.94921875
+  },
+  {
+   "name": "packages/server/src/__tests__/voice-capture.service.test.ts",
+   "startTime": 0,
+   "endTime": 1483.5390625
+  },
+  {
+   "name": "packages/server/src/__tests__/windows-hide-spawn-guard.test.ts",
+   "startTime": 0,
+   "endTime": 2549.71240234375
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-agent-runner-posix-detach.test.ts",
+   "startTime": 0,
+   "endTime": 219.922607421875
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-agent-runner.test.ts",
+   "startTime": 0,
+   "endTime": 24175.103271484375
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-allowlist-enforcement.test.ts",
+   "startTime": 0,
+   "endTime": 945.87451171875
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-assignment-token-bound.test.ts",
+   "startTime": 0,
+   "endTime": 11537.228759765625
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-build-freshness-board.test.ts",
+   "startTime": 0,
+   "endTime": 259.560791015625
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-cli-isolation.test.ts",
+   "startTime": 0,
+   "endTime": 7.857421875
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-connect-instructions.test.ts",
+   "startTime": 0,
+   "endTime": 9.539794921875
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-connection-reaper.test.ts",
+   "startTime": 0,
+   "endTime": 10.50439453125
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-daemon-close-code.test.ts",
+   "startTime": 0,
+   "endTime": 1119.49658203125
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-daemon-reconnect.test.ts",
+   "startTime": 0,
+   "endTime": 4385.434814453125
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-daemon-robustness.test.ts",
+   "startTime": 0,
+   "endTime": 5814.932861328125
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-data-handling-enforcement.test.ts",
+   "startTime": 0,
+   "endTime": 272.417724609375
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-dispatch-e2e.test.ts",
+   "startTime": 0,
+   "endTime": 1483.232666015625
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-doctor-lazy-transport-and-trust.test.ts",
+   "startTime": 0,
+   "endTime": 721.752685546875
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-doctor-provider-auth.test.ts",
+   "startTime": 0,
+   "endTime": 933.912109375
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-doctor.test.ts",
+   "startTime": 0,
+   "endTime": 705.225830078125
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-drop-diagnosis.test.ts",
+   "startTime": 0,
+   "endTime": 14.610595703125
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-events-emitter-coverage.test.ts",
+   "startTime": 0,
+   "endTime": 14.78271484375
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-events-retention.test.ts",
+   "startTime": 0,
+   "endTime": 3922.1953125
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-fleet-integration.test.ts",
+   "startTime": 0,
+   "endTime": 480.626953125
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-fleet-observability-followup.test.ts",
+   "startTime": 0,
+   "endTime": 269.545166015625
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-fleet-observability-routes.test.ts",
+   "startTime": 0,
+   "endTime": 270.0751953125
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-fleet-placement.test.ts",
+   "startTime": 0,
+   "endTime": 1424.400390625
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-fleet-scheduling.test.ts",
+   "startTime": 0,
+   "endTime": 16016.86328125
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-git-transport-e2e.test.ts",
+   "startTime": 0,
+   "endTime": 14525.6220703125
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-health-probe.test.ts",
+   "startTime": 0,
+   "endTime": 19.723388671875
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-incoming-refs.test.ts",
+   "startTime": 0,
+   "endTime": 36506.45947265625
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-list-cli-message.test.ts",
+   "startTime": 0,
+   "endTime": 3.582763671875
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-placement-race.test.ts",
+   "startTime": 0,
+   "endTime": 1060.4921875
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-protocol-handshake.test.ts",
+   "startTime": 0,
+   "endTime": 364.655029296875
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-push-retry.test.ts",
+   "startTime": 0,
+   "endTime": 2559.2685546875
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-registry.test.ts",
+   "startTime": 0,
+   "endTime": 725.399658203125
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-remote-sync.test.ts",
+   "startTime": 0,
+   "endTime": 31626.60302734375
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-repo-credentials.test.ts",
+   "startTime": 0,
+   "endTime": 5.47314453125
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-repo-reap-checkouts.test.ts",
+   "startTime": 0,
+   "endTime": 1862.556396484375
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-resume-affinity.test.ts",
+   "startTime": 0,
+   "endTime": 501.556396484375
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-running-session-silence-ttl.test.ts",
+   "startTime": 0,
+   "endTime": 11.502197265625
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-session-probe-e2e.test.ts",
+   "startTime": 0,
+   "endTime": 1088.85595703125
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-session-registry.test.ts",
+   "startTime": 0,
+   "endTime": 14.68505859375
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-stop-kill-seam.test.ts",
+   "startTime": 0,
+   "endTime": 3696.88134765625
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-transport-refusal.test.ts",
+   "startTime": 0,
+   "endTime": 21342.46826171875
+  },
+  {
+   "name": "packages/server/src/__tests__/worker-update-check.test.ts",
+   "startTime": 0,
+   "endTime": 302.92041015625
+  },
+  {
+   "name": "packages/server/src/__tests__/workflow-autoroute-multifire.test.ts",
+   "startTime": 0,
+   "endTime": 1044.51220703125
+  },
+  {
+   "name": "packages/server/src/__tests__/workflow-engine-matcher-boundary.test.ts",
+   "startTime": 0,
+   "endTime": 3.11328125
+  },
+  {
+   "name": "packages/server/src/__tests__/workflow-engine.test.ts",
+   "startTime": 0,
+   "endTime": 39666.851318359375
+  },
+  {
+   "name": "packages/server/src/__tests__/workflow-fork.test.ts",
+   "startTime": 0,
+   "endTime": 27369.932861328125
+  },
+  {
+   "name": "packages/server/src/__tests__/workflow-managed-skip-legacy-review.test.ts",
+   "startTime": 0,
+   "endTime": 892.9775390625
+  },
+  {
+   "name": "packages/server/src/__tests__/workflow-node-divergence-sweep.test.ts",
+   "startTime": 0,
+   "endTime": 492.5244140625
+  },
+  {
+   "name": "packages/server/src/__tests__/workflow-node-divergence.test.ts",
+   "startTime": 0,
+   "endTime": 4.189697265625
+  },
+  {
+   "name": "packages/server/src/__tests__/workflow-template-crud-boundary.test.ts",
+   "startTime": 0,
+   "endTime": 239.103515625
+  },
+  {
+   "name": "packages/server/src/__tests__/workflow-validate-graph-rules.test.ts",
+   "startTime": 0,
+   "endTime": 6.102783203125
+  },
+  {
+   "name": "packages/server/src/__tests__/workflow.service.test.ts",
+   "startTime": 0,
+   "endTime": 8046.407470703125
+  },
+  {
+   "name": "packages/server/src/__tests__/workflows-route.test.ts",
+   "startTime": 0,
+   "endTime": 1061.2373046875
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-actions-route.test.ts",
+   "startTime": 0,
+   "endTime": 45.89794921875
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-activity-state.test.ts",
+   "startTime": 0,
+   "endTime": 13.085693359375
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-agent-selection-default-profile.test.ts",
+   "startTime": 0,
+   "endTime": 5.244384765625
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-all-repos.test.ts",
+   "startTime": 0,
+   "endTime": 372.2626953125
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-already-merged.test.ts",
+   "startTime": 0,
+   "endTime": 5181.794921875
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-branch-already-held.test.ts",
+   "startTime": 0,
+   "endTime": 693.02587890625
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-branch-create-claim-concurrent.test.ts",
+   "startTime": 0,
+   "endTime": 625.660400390625
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-branch-create-claim-key-ttl.test.ts",
+   "startTime": 0,
+   "endTime": 11.031005859375
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-build-refresh.test.ts",
+   "startTime": 0,
+   "endTime": 12.49560546875
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-close-multirepo.test.ts",
+   "startTime": 0,
+   "endTime": 8186.697509765625
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-code-metrics.service.test.ts",
+   "startTime": 0,
+   "endTime": 238.88134765625
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-committed-work.test.ts",
+   "startTime": 0,
+   "endTime": 12.59423828125
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-create-async.test.ts",
+   "startTime": 0,
+   "endTime": 3306.651123046875
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-create-harden.test.ts",
+   "startTime": 0,
+   "endTime": 735.105224609375
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-create-issue-ref.test.ts",
+   "startTime": 0,
+   "endTime": 2178.05517578125
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-create-policy.test.ts",
+   "startTime": 0,
+   "endTime": 10.2041015625
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-create-stack-admission.test.ts",
+   "startTime": 0,
+   "endTime": 8.7490234375
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-create-worktree-rollback.test.ts",
+   "startTime": 0,
+   "endTime": 411.322021484375
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-details-projection-activity.test.ts",
+   "startTime": 0,
+   "endTime": 7.525146484375
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-details-projection.test.ts",
+   "startTime": 0,
+   "endTime": 10.32080078125
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-diff-cache.test.ts",
+   "startTime": 0,
+   "endTime": 10.335205078125
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-diff-etag.test.ts",
+   "startTime": 0,
+   "endTime": 38.865966796875
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-diff-multirepo.test.ts",
+   "startTime": 0,
+   "endTime": 243.540283203125
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-diff-stats-variant.test.ts",
+   "startTime": 0,
+   "endTime": 342.282470703125
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-diff-stats.test.ts",
+   "startTime": 0,
+   "endTime": 4.4248046875
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-dto-leading-repo-source.test.ts",
+   "startTime": 0,
+   "endTime": 348.109375
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-fleet-reattach-survives-reload.test.ts",
+   "startTime": 0,
+   "endTime": 235.9697265625
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-git-state-mirror.test.ts",
+   "startTime": 0,
+   "endTime": 823.998291015625
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-hang-watchdog.test.ts",
+   "startTime": 0,
+   "endTime": 8.94140625
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-launch-failures.test.ts",
+   "startTime": 0,
+   "endTime": 4030.028076171875
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-launch-skill-refresh.test.ts",
+   "startTime": 0,
+   "endTime": 383.87060546875
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-lifecycle-reconcile.service.test.ts",
+   "startTime": 0,
+   "endTime": 850.46337890625
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-lifecycle-status-transitions.test.ts",
+   "startTime": 0,
+   "endTime": 2333.134521484375
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-lifecycle-transitions.test.ts",
+   "startTime": 0,
+   "endTime": 6548.98291015625
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-merge-flap.test.ts",
+   "startTime": 0,
+   "endTime": 10126.19140625
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-merge-multirepo-preflight.test.ts",
+   "startTime": 0,
+   "endTime": 1219.5927734375
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-merge-multirepo-retry.test.ts",
+   "startTime": 0,
+   "endTime": 15195.23828125
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-merge-reconcile-teardown.test.ts",
+   "startTime": 0,
+   "endTime": 6869.1201171875
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-merge-service.test.ts",
+   "startTime": 0,
+   "endTime": 11099.991455078125
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-merge-subservices.test.ts",
+   "startTime": 0,
+   "endTime": 36.463134765625
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-one-direct-per-issue-error.test.ts",
+   "startTime": 0,
+   "endTime": 421.219970703125
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-provider-resolution.test.ts",
+   "startTime": 0,
+   "endTime": 595.918701171875
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-provision-plugin-skills.test.ts",
+   "startTime": 0,
+   "endTime": 2468.37744140625
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-provisioning-marker.test.ts",
+   "startTime": 0,
+   "endTime": 643.808837890625
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-repo-rebase.test.ts",
+   "startTime": 0,
+   "endTime": 26392.2646484375
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-repo-status-batch.test.ts",
+   "startTime": 0,
+   "endTime": 906.25244140625
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-repos-merge.test.ts",
+   "startTime": 0,
+   "endTime": 11585.04931640625
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-repos-service.test.ts",
+   "startTime": 0,
+   "endTime": 10732.667724609375
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-resource-release.test.ts",
+   "startTime": 0,
+   "endTime": 7.54248046875
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-risk.service.integration.test.ts",
+   "startTime": 0,
+   "endTime": 1923.14404296875
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-risk.service.test.ts",
+   "startTime": 0,
+   "endTime": 11.29541015625
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-service-state-sharing.repository.test.ts",
+   "startTime": 0,
+   "endTime": 634.657958984375
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-service-state.repository.test.ts",
+   "startTime": 0,
+   "endTime": 957.2138671875
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-services-control.service.test.ts",
+   "startTime": 0,
+   "endTime": 287.3251953125
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-services.service.test.ts",
+   "startTime": 0,
+   "endTime": 6586.28271484375
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-stop-strand-recovery.test.ts",
+   "startTime": 0,
+   "endTime": 676.6328125
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-summary-bggit.test.ts",
+   "startTime": 0,
+   "endTime": 9.8623046875
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-summary-cache.test.ts",
+   "startTime": 0,
+   "endTime": 88.077392578125
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-summary-projection.test.ts",
+   "startTime": 0,
+   "endTime": 1418.85009765625
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-summary-session.test.ts",
+   "startTime": 0,
+   "endTime": 6.26611328125
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-summary.service.test.ts",
+   "startTime": 0,
+   "endTime": 2175.714599609375
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-teardown.service.test.ts",
+   "startTime": 0,
+   "endTime": 1828.127197265625
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-turn-missing-content.test.ts",
+   "startTime": 0,
+   "endTime": 413.5234375
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace-worktree-not-registered-reconcile.test.ts",
+   "startTime": 0,
+   "endTime": 434.311279296875
+  },
+  {
+   "name": "packages/server/src/__tests__/workspace.service.test.ts",
+   "startTime": 0,
+   "endTime": 26256.68896484375
+  },
+  {
+   "name": "packages/server/src/__tests__/workspaces-cost-over-time.test.ts",
+   "startTime": 0,
+   "endTime": 845.12158203125
+  },
+  {
+   "name": "packages/server/src/__tests__/workspaces-table-width-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 241.130615234375
+  },
+  {
+   "name": "packages/server/src/__tests__/worktree-claim-guard.test.ts",
+   "startTime": 0,
+   "endTime": 873.700439453125
+  },
+  {
+   "name": "packages/server/src/__tests__/worktree-symlink-bootstrap.test.ts",
+   "startTime": 0,
+   "endTime": 94.923828125
+  },
+  {
+   "name": "packages/server/src/__tests__/worktrees-diff-stats.test.ts",
+   "startTime": 0,
+   "endTime": 694.010986328125
+  },
+  {
+   "name": "packages/server/src/__tests__/worktrees-panel-multirepo.test.ts",
+   "startTime": 0,
+   "endTime": 2879.163330078125
+  },
+  {
+   "name": "packages/server/src/__tests__/zero-diff-inreview-exit.test.ts",
+   "startTime": 0,
+   "endTime": 224.618896484375
+  },
+  {
+   "name": "packages/server/src/__tests__/zombie-fix-session-reconciler.test.ts",
+   "startTime": 0,
+   "endTime": 693.44921875
+  },
+  {
+   "name": "packages/server/src/cli/__tests__/shared.test.ts",
+   "startTime": 0,
+   "endTime": 28.589111328125
+  },
+  {
+   "name": "packages/server/src/cli/commands/workspace-api-url.test.ts",
+   "startTime": 0,
+   "endTime": 17.948486328125
+  },
+  {
+   "name": "packages/server/src/cli/commands/workspace-wait.test.ts",
+   "startTime": 0,
+   "endTime": 2.389404296875
+  },
+  {
+   "name": "packages/server/src/lib/analytics-window.test.ts",
+   "startTime": 0,
+   "endTime": 10.42626953125
+  },
+  {
+   "name": "packages/server/src/lib/batch-create-issues.test.ts",
+   "startTime": 0,
+   "endTime": 5.177001953125
+  },
+  {
+   "name": "packages/server/src/lib/board-health-events-format.test.ts",
+   "startTime": 0,
+   "endTime": 9.214111328125
+  },
+  {
+   "name": "packages/server/src/lib/board-view.test.ts",
+   "startTime": 0,
+   "endTime": 15.451416015625
+  },
+  {
+   "name": "packages/server/src/lib/dependency-batch.test.ts",
+   "startTime": 0,
+   "endTime": 7.40625
+  },
+  {
+   "name": "packages/server/src/lib/dependency-graph.test.ts",
+   "startTime": 0,
+   "endTime": 6.07421875
+  },
+  {
+   "name": "packages/server/src/lib/issue-analytics.test.ts",
+   "startTime": 0,
+   "endTime": 12.452880859375
+  },
+  {
+   "name": "packages/server/src/lib/issue-cli-format.test.ts",
+   "startTime": 0,
+   "endTime": 17.20849609375
+  },
+  {
+   "name": "packages/server/src/lib/pass-report.test.ts",
+   "startTime": 0,
+   "endTime": 5.3662109375
+  },
+  {
+   "name": "packages/server/src/lib/session-message-extraction.test.ts",
+   "startTime": 0,
+   "endTime": 10.62109375
+  },
+  {
+   "name": "packages/server/src/lib/workflow-template-import.test.ts",
+   "startTime": 0,
+   "endTime": 8.41162109375
+  },
+  {
+   "name": "packages/server/src/lib/workspace-risk-signals.test.ts",
+   "startTime": 0,
+   "endTime": 10.1171875
+  },
+  {
+   "name": "packages/server/src/lib/workspace-stats.test.ts",
+   "startTime": 0,
+   "endTime": 8.329345703125
+  },
+  {
+   "name": "packages/server/src/services/conductor-schedule.service.test.ts",
+   "startTime": 0,
+   "endTime": 16.287109375
+  },
+  {
+   "name": "packages/server/src/services/dashboard-analytics.service.test.ts",
+   "startTime": 0,
+   "endTime": 8.272216796875
+  },
+  {
+   "name": "packages/server/src/services/gradle-detect.service.test.ts",
+   "startTime": 0,
+   "endTime": 331.9248046875
+  },
+  {
+   "name": "packages/server/src/services/risk-posture.service.test.ts",
+   "startTime": 0,
+   "endTime": 7.4697265625
+  },
+  {
+   "name": "packages/server/src/services/start-policy.service.test.ts",
+   "startTime": 0,
+   "endTime": 13.386962890625
+  },
+  {
+   "name": "packages/server/src/services/wip-limit.service.test.ts",
+   "startTime": 0,
+   "endTime": 9.4150390625
+  },
+  {
+   "name": "packages/server/src/services/workspace-run-records.test.ts",
+   "startTime": 0,
+   "endTime": 5.188232421875
+  },
+  {
+   "name": "packages/server/src/services/worktree-ports.test.ts",
+   "startTime": 0,
+   "endTime": 9.325439453125
+  },
+  {
+   "name": "packages/server/src/startup/monitor-setup.test.ts",
+   "startTime": 0,
+   "endTime": 7.42431640625
+  },
+  {
+   "name": "packages/shared/__tests__/agent-skill-files-crlf.test.ts",
+   "startTime": 0,
+   "endTime": 308.0439453125
+  },
+  {
+   "name": "packages/shared/__tests__/agent-skill-files-single-source.test.ts",
+   "startTime": 0,
+   "endTime": 49.597900390625
+  },
+  {
+   "name": "packages/shared/__tests__/agent-stream-field-drift.test.ts",
+   "startTime": 0,
+   "endTime": 7.343994140625
+  },
+  {
+   "name": "packages/shared/__tests__/agent-stream-parser-characterization.test.ts",
+   "startTime": 0,
+   "endTime": 38.529541015625
+  },
+  {
+   "name": "packages/shared/__tests__/agent-stream-unknown-events.test.ts",
+   "startTime": 0,
+   "endTime": 24.335693359375
+  },
+  {
+   "name": "packages/shared/__tests__/always-run-enforcement-point.test.ts",
+   "startTime": 0,
+   "endTime": 21.3984375
+  },
+  {
+   "name": "packages/shared/__tests__/append-only-hotfile-merge.integration.test.ts",
+   "startTime": 0,
+   "endTime": 34776.868896484375
+  },
+  {
+   "name": "packages/shared/__tests__/backlog-markdown.test.ts",
+   "startTime": 0,
+   "endTime": 14.348388671875
+  },
+  {
+   "name": "packages/shared/__tests__/barrel-client-safety.test.ts",
+   "startTime": 0,
+   "endTime": 3587.983642578125
+  },
+  {
+   "name": "packages/shared/__tests__/board-events-contract.test.ts",
+   "startTime": 0,
+   "endTime": 6.25146484375
+  },
+  {
+   "name": "packages/shared/__tests__/board-server-url.test.ts",
+   "startTime": 0,
+   "endTime": 4.35302734375
+  },
+  {
+   "name": "packages/shared/__tests__/board-status-classifiers.test.ts",
+   "startTime": 0,
+   "endTime": 3.235595703125
+  },
+  {
+   "name": "packages/shared/__tests__/branch.test.ts",
+   "startTime": 0,
+   "endTime": 5.169677734375
+  },
+  {
+   "name": "packages/shared/__tests__/builder-skill-policy.test.ts",
+   "startTime": 0,
+   "endTime": 27.149658203125
+  },
+  {
+   "name": "packages/shared/__tests__/bundled-skills.test.ts",
+   "startTime": 0,
+   "endTime": 3452.501708984375
+  },
+  {
+   "name": "packages/shared/__tests__/butler-ticket-prompt.test.ts",
+   "startTime": 0,
+   "endTime": 4.36474609375
+  },
+  {
+   "name": "packages/shared/__tests__/changed-packages.test.ts",
+   "startTime": 0,
+   "endTime": 6.150390625
+  },
+  {
+   "name": "packages/shared/__tests__/check-god-modules-script.test.ts",
+   "startTime": 0,
+   "endTime": 6203.163330078125
+  },
+  {
+   "name": "packages/shared/__tests__/client-test-typecheck-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 32247.188232421875
+  },
+  {
+   "name": "packages/shared/__tests__/container-dep-volumes.test.ts",
+   "startTime": 0,
+   "endTime": 160.7919921875
+  },
+  {
+   "name": "packages/shared/__tests__/copilot-assistant-text-extraction.test.ts",
+   "startTime": 0,
+   "endTime": 5.399658203125
+  },
+  {
+   "name": "packages/shared/__tests__/copilot-event-types-lockstep.test.ts",
+   "startTime": 0,
+   "endTime": 5.751220703125
+  },
+  {
+   "name": "packages/shared/__tests__/copilot-tool-result-error-status.test.ts",
+   "startTime": 0,
+   "endTime": 3.298828125
+  },
+  {
+   "name": "packages/shared/__tests__/coupling-contraction.test.ts",
+   "startTime": 0,
+   "endTime": 5.26708984375
+  },
+  {
+   "name": "packages/shared/__tests__/coupling-overlap.test.ts",
+   "startTime": 0,
+   "endTime": 9.144775390625
+  },
+  {
+   "name": "packages/shared/__tests__/db-client-pragmas.test.ts",
+   "startTime": 0,
+   "endTime": 46.30126953125
+  },
+  {
+   "name": "packages/shared/__tests__/db-path.test.ts",
+   "startTime": 0,
+   "endTime": 102.322509765625
+  },
+  {
+   "name": "packages/shared/__tests__/dependency-pinning.test.ts",
+   "startTime": 0,
+   "endTime": 21.248291015625
+  },
+  {
+   "name": "packages/shared/__tests__/dependency-type-traits.test.ts",
+   "startTime": 0,
+   "endTime": 4.236083984375
+  },
+  {
+   "name": "packages/shared/__tests__/detect-provider.test.ts",
+   "startTime": 0,
+   "endTime": 4.661376953125
+  },
+  {
+   "name": "packages/shared/__tests__/devcontainer-exec.test.ts",
+   "startTime": 0,
+   "endTime": 5.289306640625
+  },
+  {
+   "name": "packages/shared/__tests__/diff-range-args.test.ts",
+   "startTime": 0,
+   "endTime": 3.223388671875
+  },
+  {
+   "name": "packages/shared/__tests__/docs-only-diff.test.ts",
+   "startTime": 0,
+   "endTime": 5.17333984375
+  },
+  {
+   "name": "packages/shared/__tests__/drizzle-snapshot-baseline.test.ts",
+   "startTime": 0,
+   "endTime": 56.53076171875
+  },
+  {
+   "name": "packages/shared/__tests__/ensure-shared-fresh-wiring.test.ts",
+   "startTime": 0,
+   "endTime": 4.686767578125
+  },
+  {
+   "name": "packages/shared/__tests__/error-message.test.ts",
+   "startTime": 0,
+   "endTime": 6.228759765625
+  },
+  {
+   "name": "packages/shared/__tests__/exec-adapter-shape.test.ts",
+   "startTime": 0,
+   "endTime": 77.717041015625
+  },
+  {
+   "name": "packages/shared/__tests__/exec-result-helper-adoption.test.ts",
+   "startTime": 0,
+   "endTime": 2339.664794921875
+  },
+  {
+   "name": "packages/shared/__tests__/file-contention.test.ts",
+   "startTime": 0,
+   "endTime": 9.108154296875
+  },
+  {
+   "name": "packages/shared/__tests__/find-cycle-nodes.test.ts",
+   "startTime": 0,
+   "endTime": 204.105712890625
+  },
+  {
+   "name": "packages/shared/__tests__/gate-activity.test.ts",
+   "startTime": 0,
+   "endTime": 6.15234375
+  },
+  {
+   "name": "packages/shared/__tests__/git-exec-child-vs-queue-time.test.ts",
+   "startTime": 0,
+   "endTime": 248.711181640625
+  },
+  {
+   "name": "packages/shared/__tests__/git-exec-defaults.test.ts",
+   "startTime": 0,
+   "endTime": 9.653564453125
+  },
+  {
+   "name": "packages/shared/__tests__/git-exec-enoent-disambiguation.test.ts",
+   "startTime": 0,
+   "endTime": 12.25439453125
+  },
+  {
+   "name": "packages/shared/__tests__/git-exec-scheduler.test.ts",
+   "startTime": 0,
+   "endTime": 37.814697265625
+  },
+  {
+   "name": "packages/shared/__tests__/git-exec-single-spawn.test.ts",
+   "startTime": 0,
+   "endTime": 5457.82373046875
+  },
+  {
+   "name": "packages/shared/__tests__/git-service-worktree-collision.test.ts",
+   "startTime": 0,
+   "endTime": 35521.50634765625
+  },
+  {
+   "name": "packages/shared/__tests__/git-service-worktree-escape.test.ts",
+   "startTime": 0,
+   "endTime": 4099.529296875
+  },
+  {
+   "name": "packages/shared/__tests__/git-service-worktree-live-claim.test.ts",
+   "startTime": 0,
+   "endTime": 17560.900390625
+  },
+  {
+   "name": "packages/shared/__tests__/git-service.integration.test.ts",
+   "startTime": 0,
+   "endTime": 47503.512451171875
+  },
+  {
+   "name": "packages/shared/__tests__/git-untracked-diff-boundary.test.ts",
+   "startTime": 0,
+   "endTime": 2806.59765625
+  },
+  {
+   "name": "packages/shared/__tests__/git-working-tree-changes.test.ts",
+   "startTime": 0,
+   "endTime": 4332.92236328125
+  },
+  {
+   "name": "packages/shared/__tests__/gradle-env.test.ts",
+   "startTime": 0,
+   "endTime": 17.578857421875
+  },
+  {
+   "name": "packages/shared/__tests__/hook-teardown-await.test.ts",
+   "startTime": 0,
+   "endTime": 1253.08056640625
+  },
+  {
+   "name": "packages/shared/__tests__/issue-number-single-source.test.ts",
+   "startTime": 0,
+   "endTime": 2109.4306640625
+  },
+  {
+   "name": "packages/shared/__tests__/issue-priority.test.ts",
+   "startTime": 0,
+   "endTime": 2.8525390625
+  },
+  {
+   "name": "packages/shared/__tests__/issue-ref.test.ts",
+   "startTime": 0,
+   "endTime": 3.599853515625
+  },
+  {
+   "name": "packages/shared/__tests__/issue-vocab.test.ts",
+   "startTime": 0,
+   "endTime": 5.17041015625
+  },
+  {
+   "name": "packages/shared/__tests__/kanban-db-literal-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 4737.43994140625
+  },
+  {
+   "name": "packages/shared/__tests__/line-based-guard-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 10.1240234375
+  },
+  {
+   "name": "packages/shared/__tests__/lint-arch-gate.test.ts",
+   "startTime": 0,
+   "endTime": 21470.258544921875
+  },
+  {
+   "name": "packages/shared/__tests__/machine-capacity.test.ts",
+   "startTime": 0,
+   "endTime": 9.185302734375
+  },
+  {
+   "name": "packages/shared/__tests__/max-file-size.test.ts",
+   "startTime": 0,
+   "endTime": 8172.245849609375
+  },
+  {
+   "name": "packages/shared/__tests__/merge-ref-cas.integration.test.ts",
+   "startTime": 0,
+   "endTime": 30672.766357421875
+  },
+  {
+   "name": "packages/shared/__tests__/migration-renumber-conflict-guard.test.ts",
+   "startTime": 0,
+   "endTime": 8153.00048828125
+  },
+  {
+   "name": "packages/shared/__tests__/model-json.test.ts",
+   "startTime": 0,
+   "endTime": 8.369873046875
+  },
+  {
+   "name": "packages/shared/__tests__/model-provider.test.ts",
+   "startTime": 0,
+   "endTime": 2.19091796875
+  },
+  {
+   "name": "packages/shared/__tests__/module-path-derivation.test.ts",
+   "startTime": 0,
+   "endTime": 1358.8056640625
+  },
+  {
+   "name": "packages/shared/__tests__/offline-transcript.test.ts",
+   "startTime": 0,
+   "endTime": 9.81103515625
+  },
+  {
+   "name": "packages/shared/__tests__/onboarding-plan.test.ts",
+   "startTime": 0,
+   "endTime": 9.1533203125
+  },
+  {
+   "name": "packages/shared/__tests__/operation-metrics.test.ts",
+   "startTime": 0,
+   "endTime": 6.438720703125
+  },
+  {
+   "name": "packages/shared/__tests__/operation-windows.test.ts",
+   "startTime": 0,
+   "endTime": 9.916015625
+  },
+  {
+   "name": "packages/shared/__tests__/parse-issue-number-from-branch.test.ts",
+   "startTime": 0,
+   "endTime": 5.240478515625
+  },
+  {
+   "name": "packages/shared/__tests__/path-key.test.ts",
+   "startTime": 0,
+   "endTime": 7.332275390625
+  },
+  {
+   "name": "packages/shared/__tests__/plugin-manifest.test.ts",
+   "startTime": 0,
+   "endTime": 36.3076171875
+  },
+  {
+   "name": "packages/shared/__tests__/plugin-placeholders.test.ts",
+   "startTime": 0,
+   "endTime": 6.29345703125
+  },
+  {
+   "name": "packages/shared/__tests__/preference-map.test.ts",
+   "startTime": 0,
+   "endTime": 1.45263671875
+  },
+  {
+   "name": "packages/shared/__tests__/profile-allowlist.test.ts",
+   "startTime": 0,
+   "endTime": 11.315185546875
+  },
+  {
+   "name": "packages/shared/__tests__/profile-capabilities.test.ts",
+   "startTime": 0,
+   "endTime": 5.337646484375
+  },
+  {
+   "name": "packages/shared/__tests__/profile-selection.test.ts",
+   "startTime": 0,
+   "endTime": 4.407470703125
+  },
+  {
+   "name": "packages/shared/__tests__/project-pref.test.ts",
+   "startTime": 0,
+   "endTime": 6.5859375
+  },
+  {
+   "name": "packages/shared/__tests__/provider-traits.test.ts",
+   "startTime": 0,
+   "endTime": 5.196044921875
+  },
+  {
+   "name": "packages/shared/__tests__/rebase-onto-base-conflict-attribution.test.ts",
+   "startTime": 0,
+   "endTime": 7.3984375
+  },
+  {
+   "name": "packages/shared/__tests__/repo-lock.test.ts",
+   "startTime": 0,
+   "endTime": 891.870849609375
+  },
+  {
+   "name": "packages/shared/__tests__/repo-tags.test.ts",
+   "startTime": 0,
+   "endTime": 5.2666015625
+  },
+  {
+   "name": "packages/shared/__tests__/risk-posture.test.ts",
+   "startTime": 0,
+   "endTime": 5.44140625
+  },
+  {
+   "name": "packages/shared/__tests__/security-policy-licence-acceptance.test.ts",
+   "startTime": 0,
+   "endTime": 3.2333984375
+  },
+  {
+   "name": "packages/shared/__tests__/service-compose-lint.test.ts",
+   "startTime": 0,
+   "endTime": 10.38720703125
+  },
+  {
+   "name": "packages/shared/__tests__/service-ports.test.ts",
+   "startTime": 0,
+   "endTime": 7.313720703125
+  },
+  {
+   "name": "packages/shared/__tests__/session-files-async.test.ts",
+   "startTime": 0,
+   "endTime": 31.98583984375
+  },
+  {
+   "name": "packages/shared/__tests__/session-trigger.test.ts",
+   "startTime": 0,
+   "endTime": 6.029296875
+  },
+  {
+   "name": "packages/shared/__tests__/settings-registry.test.ts",
+   "startTime": 0,
+   "endTime": 8.483642578125
+  },
+  {
+   "name": "packages/shared/__tests__/setup-script-container.test.ts",
+   "startTime": 0,
+   "endTime": 4.1298828125
+  },
+  {
+   "name": "packages/shared/__tests__/setup-script-no-progress.test.ts",
+   "startTime": 0,
+   "endTime": 5541.53955078125
+  },
+  {
+   "name": "packages/shared/__tests__/setup-script-posix-wrapper-windows.test.ts",
+   "startTime": 0,
+   "endTime": 96.059814453125
+  },
+  {
+   "name": "packages/shared/__tests__/setup-script-quoting.test.ts",
+   "startTime": 0,
+   "endTime": 230.4755859375
+  },
+  {
+   "name": "packages/shared/__tests__/setup-script-timeout.test.ts",
+   "startTime": 0,
+   "endTime": 415.913818359375
+  },
+  {
+   "name": "packages/shared/__tests__/shared-lib-single-consumer-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 5.6015625
+  },
+  {
+   "name": "packages/shared/__tests__/shared-lib-sub-kinds.test.ts",
+   "startTime": 0,
+   "endTime": 279.912353515625
+  },
+  {
+   "name": "packages/shared/__tests__/shebang-eol-guard.test.ts",
+   "startTime": 0,
+   "endTime": 19915.740478515625
+  },
+  {
+   "name": "packages/shared/__tests__/slug-path-compat.test.ts",
+   "startTime": 0,
+   "endTime": 5.235595703125
+  },
+  {
+   "name": "packages/shared/__tests__/slugify.test.ts",
+   "startTime": 0,
+   "endTime": 5.274169921875
+  },
+  {
+   "name": "packages/shared/__tests__/smoke-check.test.ts",
+   "startTime": 0,
+   "endTime": 35503.409423828125
+  },
+  {
+   "name": "packages/shared/__tests__/status-transitions.test.ts",
+   "startTime": 0,
+   "endTime": 9.315673828125
+  },
+  {
+   "name": "packages/shared/__tests__/strategy-policy-parser-parity.test.ts",
+   "startTime": 0,
+   "endTime": 10.340576171875
+  },
+  {
+   "name": "packages/shared/__tests__/temp-dir.test.ts",
+   "startTime": 0,
+   "endTime": 28.940185546875
+  },
+  {
+   "name": "packages/shared/__tests__/test-tree-write-hermeticity.test.ts",
+   "startTime": 0,
+   "endTime": 4847.81591796875
+  },
+  {
+   "name": "packages/shared/__tests__/transcript-cwd-encoding.test.ts",
+   "startTime": 0,
+   "endTime": 3.11328125
+  },
+  {
+   "name": "packages/shared/__tests__/ttl-memo.test.ts",
+   "startTime": 0,
+   "endTime": 5.213134765625
+  },
+  {
+   "name": "packages/shared/__tests__/usage-limit-stats.test.ts",
+   "startTime": 0,
+   "endTime": 3.322021484375
+  },
+  {
+   "name": "packages/shared/__tests__/wire-dto-single-declaration.test.ts",
+   "startTime": 0,
+   "endTime": 5.81689453125
+  },
+  {
+   "name": "packages/shared/__tests__/worker-build-freshness.test.ts",
+   "startTime": 0,
+   "endTime": 3.647705078125
+  },
+  {
+   "name": "packages/shared/__tests__/worker-protocol-session-probe.test.ts",
+   "startTime": 0,
+   "endTime": 4.155517578125
+  },
+  {
+   "name": "packages/shared/__tests__/workflow-node-agent-override.test.ts",
+   "startTime": 0,
+   "endTime": 4.304931640625
+  },
+  {
+   "name": "packages/shared/__tests__/workspace-liveness.test.ts",
+   "startTime": 0,
+   "endTime": 4.242431640625
+  },
+  {
+   "name": "packages/shared/__tests__/worktree-delete-guard-ratchet.test.ts",
+   "startTime": 0,
+   "endTime": 4024.91748046875
+  }
+ ]
+}
