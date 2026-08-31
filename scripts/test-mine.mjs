@@ -487,6 +487,46 @@ if (impactSelectorRequested && impactMinScoreRaw !== impactMinScore) {
 const impactRebuildIfStale = /^(1|true|yes)$/i.test((process.env.KANBAN_IMPACT_REBUILD || "").trim());
 
 /**
+ * The base ref the selection computes its change set against (`KANBAN_IMPACT_BASE`, #956).
+ *
+ * WITHOUT IT THE SELECTION SEES NOTHING AT GATE TIME, and that failure is silent. `impact.mjs`'s
+ * `changedFiles(base)` only consults `base...HEAD` when a base is given; its other two sources are
+ * `git diff HEAD` and untracked files, both empty on the clean, fully-committed tree the pre-merge
+ * gate runs against. The selection then degrades to the constant always-run set — identical for
+ * every branch — while still reporting itself as a selection. That is exactly #963, which had to be
+ * fixed on the ledger side for the same reason.
+ *
+ * The interactive `pnpm test:mine` case is the opposite and is why this is not simply always `HEAD`
+ * or the default branch: a developer's uncommitted work IS the change set, and passing a base there
+ * would replace it with "everything committed since the base". So: unset (the inner loop) keeps
+ * today's uncommitted-work behaviour; the gate sets it to the workspace's base branch.
+ *
+ * **Positional, never `--base`.** `cmdSelect` reads `positional[0]` and ignores a `--base` flag
+ * entirely — getting that backwards is what made #963's first fix inert.
+ */
+const impactBase = (process.env.KANBAN_IMPACT_BASE || "").trim();
+
+/**
+ * Test files the run must include REGARDLESS of what the selection ranked (`KANBAN_TEST_NEW_FILES`,
+ * comma-separated, repo-relative, #956).
+ *
+ * A test file the diff ADDS is the one suite a ranked selection is structurally worst at: it is
+ * absent from the committed impact map (which is built from the base tree), so it has no coverage
+ * history, no failure history and no runtime signal — the very signals the score is made of. A
+ * brand-new suite could therefore be ranked out below the floor by its own newness, and the branch
+ * that introduced it would merge without ever running it. Nothing else in the pipeline catches
+ * that: the guards cover marked tree-scanners, not new tests.
+ *
+ * So the gate names them explicitly and they are merged into the selection. This is a WIDENING of
+ * an opt-in narrowing, so it never needs to fail open — an unset or unparseable value simply adds
+ * nothing.
+ */
+const impactNewTestFiles = (process.env.KANBAN_TEST_NEW_FILES || "")
+  .split(",")
+  .map((s) => s.trim().replace(/\\/g, "/"))
+  .filter(Boolean);
+
+/**
  * Where the skill's CLI lives, in preference order.
  *
  * The worktree copy comes FIRST and is the one the instruction to agents names: the board copies
@@ -595,6 +635,42 @@ export function parseImpactSelection(stdout, packages = PACKAGES) {
 }
 
 /**
+ * Merge the gate's NEW test files into a selection map, in place of nothing (#956).
+ *
+ * Pure and exported so the rule — "a suite the diff adds always runs, whatever it scored" — is a
+ * table test rather than something only a live gate run would exercise. Returns the count actually
+ * added, so the caller can say so; a file already selected, or one under no known package, adds
+ * nothing (the latter is reported by the caller, not silently guessed at).
+ *
+ * Only `*.test.*` paths are honoured. The gate derives the list from its diff, and a diff names
+ * source files too — handing vitest a non-test path makes it resolve no suite and fail the package
+ * with a bare `No test files found`, i.e. turn a widening into a red gate.
+ */
+export function mergeNewTestFiles(byLabel, newFiles, packages = PACKAGES) {
+  const byDir = packageLabelByDir(packages);
+  let added = 0;
+  const unknown = [];
+  for (const raw of newFiles) {
+    const file = raw.replace(/\\/g, "/");
+    if (!/\.test\.[cm]?[jt]sx?$/.test(file)) continue;
+    const entry = [...byDir.entries()].find(([dir]) => file.startsWith(`${dir}/`));
+    if (!entry) {
+      unknown.push(file);
+      continue;
+    }
+    const [dir, label] = entry;
+    const rel = file.slice(dir.length + 1);
+    if (!byLabel.has(label)) byLabel.set(label, []);
+    const files = byLabel.get(label);
+    if (!files.includes(rel)) {
+      files.push(rel);
+      added += 1;
+    }
+  }
+  return { added, unknown };
+}
+
+/**
  * Ask the skill which suites to run. Returns `null` on ANY failure — the caller then falls back
  * to `vitest related`, which is the pre-#951 behaviour.
  *
@@ -607,9 +683,14 @@ export function runImpactSelector({
   minScore = impactMinScore,
   root = ROOT,
   rebuildIfStale = impactRebuildIfStale,
+  base = impactBase,
+  newTestFiles = impactNewTestFiles,
   spawnFn = spawnSync,
 } = {}) {
-  const args = [cli, "select", "--format", "pkgfile", "--min-score", String(minScore)];
+  // The base is POSITIONAL and must come before the flags — `cmdSelect` reads `positional[0]` and
+  // never looks at a `--base` flag. See `impactBase` for what an absent base silently costs at
+  // gate time.
+  const args = [cli, "select", ...(base ? [base] : []), "--format", "pkgfile", "--min-score", String(minScore)];
   if (rebuildIfStale) args.push("--rebuild-if-stale");
   console.log(`\n[test:mine] impact selector: node ${args.slice(1).join(" ")}`);
   const res = spawnFn(process.execPath, args, {
@@ -643,6 +724,25 @@ export function runImpactSelector({
         `Falling back to \`vitest related\`.`,
     );
     return null;
+  }
+  // #956 — the gate's new test files are merged AFTER the fail-open check, deliberately. An empty
+  // selection must still fall back to `vitest related` even when the diff adds a suite: running
+  // only the new file there would be NARROWER than the fallback, and the empty selection is
+  // evidence the selector had nothing to say about this change at all.
+  if (newTestFiles.length > 0) {
+    const { added, unknown: unknownNew } = mergeNewTestFiles(byLabel, newTestFiles);
+    if (added > 0) {
+      console.log(
+        `[test:mine] added ${added} NEW test file(s) from the diff on top of the selection — a suite ` +
+          `the diff adds is absent from the impact map, so it can be ranked out by its own newness.`,
+      );
+    }
+    if (unknownNew.length > 0) {
+      console.warn(
+        `[test:mine] ${unknownNew.length} new test file(s) are in package(s) this runner does not run — ` +
+          `they will NOT be executed:\n` + unknownNew.map((l) => `  - ${l}`).join("\n"),
+      );
+    }
   }
   return byLabel;
 }

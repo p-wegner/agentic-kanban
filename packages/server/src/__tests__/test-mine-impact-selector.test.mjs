@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import {
   IMPACT_CLI_CANDIDATES,
   matchesExcludeGlob,
+  mergeNewTestFiles,
   packageLabelByDir,
   parseImpactSelection,
   partitionExcluded,
@@ -189,7 +190,7 @@ describe("runImpactSelector fail-open", () => {
       seen = args;
       return { status: 0, stdout: "packages/server:src/__tests__/a.test.ts\n", stderr: "" };
     };
-    runImpactSelector({ cli, minScore: "1.0", rebuildIfStale: false, spawnFn });
+    runImpactSelector({ cli, minScore: "1.0", rebuildIfStale: false, base: "", spawnFn });
     expect(seen.slice(1)).toEqual(["select", "--format", "pkgfile", "--min-score", "1.0"]);
     expect(seen).not.toContain("--rebuild-if-stale");
   });
@@ -201,7 +202,123 @@ describe("runImpactSelector fail-open", () => {
       seen = args;
       return { status: 0, stdout: "packages/server:src/__tests__/a.test.ts\n", stderr: "" };
     };
-    runImpactSelector({ cli, minScore: "1.0", rebuildIfStale: true, spawnFn });
+    runImpactSelector({ cli, minScore: "1.0", rebuildIfStale: true, base: "", spawnFn });
     expect(seen).toContain("--rebuild-if-stale");
+  });
+});
+
+/**
+ * #956 — the base ref, and the new-test-file widening.
+ *
+ * These two are what make the `impact` GATE TIER an honest narrowing rather than a decorative one.
+ * Without the base the selection at gate time is computed from an empty change set; without the
+ * new-file merge a suite the branch adds can be ranked out by its own newness and never run.
+ */
+describe("the selection's base ref", () => {
+  const cli = resolve("/repo", ".claude/skills/test-impact/tools/impact.mjs");
+  const spawnCapturing = (sink) => (_exe, args) => {
+    sink.args = args;
+    return { status: 0, stdout: "packages/server:src/__tests__/a.test.ts\n", stderr: "" };
+  };
+
+  it("passes the base POSITIONALLY, before the flags", () => {
+    // `cmdSelect` reads `positional[0]` and never consults a `--base` flag. Passing it as a flag
+    // is silently ignored, `changedFiles(undefined)` falls back to uncommitted work, and on the
+    // clean committed tree a gate runs against the change set comes back EMPTY — the selection
+    // then degrades to the constant always-run set while still calling itself a selection. That
+    // is #963, and getting the spelling backwards is exactly what made its first fix inert.
+    const sink = {};
+    runImpactSelector({ cli, minScore: "1.0", rebuildIfStale: false, base: "master", spawnFn: spawnCapturing(sink) });
+    expect(sink.args.slice(1)).toEqual(["select", "master", "--format", "pkgfile", "--min-score", "1.0"]);
+    expect(sink.args).not.toContain("--base");
+  });
+
+  it("omits it entirely when unset, keeping the inner loop's uncommitted-work behaviour", () => {
+    // A developer mid-edit HAS uncommitted work, and that is the right change set for them. A base
+    // there would replace it with everything committed since the base.
+    const sink = {};
+    runImpactSelector({ cli, minScore: "1.0", rebuildIfStale: false, base: "", spawnFn: spawnCapturing(sink) });
+    expect(sink.args.slice(1)).toEqual(["select", "--format", "pkgfile", "--min-score", "1.0"]);
+  });
+});
+
+describe("mergeNewTestFiles", () => {
+  it("adds a new suite the selection did not name", () => {
+    // The motivating case: a test file the diff ADDS is absent from the committed impact map, so
+    // it has no coverage, failure or runtime history — the very signals the score is built from —
+    // and can be ranked out below the floor by its own newness.
+    const byLabel = new Map([["server", ["src/__tests__/a.test.ts"]]]);
+    const { added, unknown } = mergeNewTestFiles(byLabel, ["packages/server/src/__tests__/new.test.ts"]);
+    expect(added).toBe(1);
+    expect(unknown).toEqual([]);
+    expect(byLabel.get("server")).toEqual(["src/__tests__/a.test.ts", "src/__tests__/new.test.ts"]);
+  });
+
+  it("creates the package entry when the selection named nothing there", () => {
+    const byLabel = new Map([["server", ["src/__tests__/a.test.ts"]]]);
+    mergeNewTestFiles(byLabel, ["packages/client/src/__tests__/new.test.tsx"]);
+    expect(byLabel.get("client")).toEqual(["src/__tests__/new.test.tsx"]);
+  });
+
+  it("does not double-add a suite the selection already named", () => {
+    const byLabel = new Map([["server", ["src/__tests__/a.test.ts"]]]);
+    const { added } = mergeNewTestFiles(byLabel, ["packages/server/src/__tests__/a.test.ts"]);
+    expect(added).toBe(0);
+    expect(byLabel.get("server")).toEqual(["src/__tests__/a.test.ts"]);
+  });
+
+  it("ignores non-test paths, which would fail the package rather than widen it", () => {
+    // The gate derives this list from its diff, and a diff names source files too. Handing vitest
+    // a non-test path makes it resolve no suite and exit 1 with a bare `No test files found` —
+    // turning a widening into a red gate.
+    const byLabel = new Map();
+    const { added } = mergeNewTestFiles(byLabel, [
+      "packages/server/src/services/a.ts",
+      "packages/server/README.md",
+    ]);
+    expect(added).toBe(0);
+    expect(byLabel.size).toBe(0);
+  });
+
+  it("reports a file in a package this runner does not run instead of guessing", () => {
+    const byLabel = new Map();
+    const { added, unknown } = mergeNewTestFiles(byLabel, ["packages/desktop/src/__tests__/x.test.ts"]);
+    expect(added).toBe(0);
+    expect(unknown).toEqual(["packages/desktop/src/__tests__/x.test.ts"]);
+  });
+
+  it("accepts every test extension the runner runs", () => {
+    const byLabel = new Map();
+    mergeNewTestFiles(byLabel, [
+      "packages/server/src/__tests__/a.test.ts",
+      "packages/client/src/__tests__/b.test.tsx",
+      "packages/server/src/__tests__/c.test.mjs",
+    ]);
+    expect(byLabel.get("server")).toEqual(["src/__tests__/a.test.ts", "src/__tests__/c.test.mjs"]);
+    expect(byLabel.get("client")).toEqual(["src/__tests__/b.test.tsx"]);
+  });
+});
+
+describe("new test files versus the empty-selection fail-open", () => {
+  const cli = resolve("/repo", ".claude/skills/test-impact/tools/impact.mjs");
+
+  it("still falls back to `vitest related` when the selection is empty", () => {
+    // Deliberate ordering: running ONLY the new file there would be NARROWER than the fallback,
+    // and an empty selection is evidence the selector had nothing to say about this change at all.
+    const spawnFn = () => ({ status: 0, stdout: "", stderr: "" });
+    expect(
+      runImpactSelector({ cli, base: "", newTestFiles: ["packages/server/src/__tests__/new.test.ts"], spawnFn }),
+    ).toBeNull();
+  });
+
+  it("merges them into a non-empty selection", () => {
+    const spawnFn = () => ({ status: 0, stdout: "packages/server:src/__tests__/a.test.ts\n", stderr: "" });
+    const scope = runImpactSelector({
+      cli,
+      base: "",
+      newTestFiles: ["packages/server/src/__tests__/new.test.ts"],
+      spawnFn,
+    });
+    expect(scope?.get("server")).toEqual(["src/__tests__/a.test.ts", "src/__tests__/new.test.ts"]);
   });
 });
