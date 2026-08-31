@@ -648,6 +648,35 @@ export function runImpactSelector({
 }
 
 /**
+ * `KANBAN_TEST_SELECTOR=impact` + `KANBAN_TEST_FILES` is a CONFLICT, not a combination (#962).
+ *
+ * They are two different answers to "which suites". The selector derives its own change set from
+ * git and never looks at the supplied list, so before this the file list was silently discarded:
+ * the run then reads as an ordinary narrow run, and every suite the caller meant to cover but the
+ * heuristic ranked out is unobserved with nothing anywhere saying so. Same failure direction as
+ * recording an impact-narrowed run as `full` — a green that asserts more than it checked.
+ *
+ * Refusing rather than picking a winner: honoring the file list would silently disable an
+ * explicitly-requested selector, and honoring the selector is the bug itself. The caller knows
+ * which it meant, and unsetting one variable resolves it. (The board's own gate never emits the
+ * pair — `pre-merge-gate.service.ts` drops its file scope under the selector and logs that it
+ * did — so this fires for a hand-run or scripted caller, which is exactly who needs telling.)
+ *
+ * Returns the message to print, or `null` when there is no conflict. Pure so the rule is a unit
+ * test rather than something only a real double-scoped run would reveal.
+ */
+export function selectorFileScopeConflict({ impactSelectorRequested, scopedFiles }) {
+  if (!impactSelectorRequested || scopedFiles.length === 0) return null;
+  return (
+    `[test:mine] refusing to run: KANBAN_TEST_SELECTOR=impact and KANBAN_TEST_FILES are both set, and they ` +
+    `name different suites. The impact selector derives its OWN change set from git, so the ` +
+    `${scopedFiles.length} file(s) in KANBAN_TEST_FILES would be discarded without a trace.\n` +
+    `  Unset KANBAN_TEST_FILES to use the impact selection, or unset KANBAN_TEST_SELECTOR to ` +
+    `scope with \`vitest related\` over the files you named.`
+  );
+}
+
+/**
  * File-level test scoping via `KANBAN_TEST_FILES` (comma-separated, repo-relative), the
  * gate's tier 1 (#278).
  *
@@ -1119,6 +1148,11 @@ if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
     }
     console.log("\n[test:mine] All guard suites passed.");
     process.exit(0);
+  }
+  const conflict = selectorFileScopeConflict({ impactSelectorRequested, scopedFiles });
+  if (conflict) {
+    console.error(conflict);
+    process.exit(2);
   }
   // #951 — the opt-in impact selector, tried BEFORE the `vitest related` path and falling
   // through to it on any failure. `impactScope === null` is exactly that fall-through, so the

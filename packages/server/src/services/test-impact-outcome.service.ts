@@ -66,7 +66,7 @@ export const IMPACT_COMMAND_TIMEOUT_MS = 60_000;
  * collapsed into one "scoped": which narrowing applied is what a later reader needs in order to
  * judge how much the row proves.
  */
-export type GateRanScope = "full" | "package-scoped" | "file-scoped" | "guards-only";
+export type GateRanScope = "full" | "package-scoped" | "file-scoped" | "guards-only" | "impact-scoped";
 
 /**
  * Which scope the verify run actually had.
@@ -76,10 +76,29 @@ export type GateRanScope = "full" | "package-scoped" | "file-scoped" | "guards-o
  * the narrowest and wins, then file-scoping, then package-scoping. A tier that narrowed nothing
  * is `full` — which is exactly the `buildGateTierMessage` rule that a strategy claiming to scope
  * but performing no narrowing must report "full", never a narrower name.
+ *
+ * **#962 — the IMPACT selector outranks every one of those, including `full`.** A run under
+ * `KANBAN_TEST_SELECTOR=impact` executes the suites the impact heuristic ranked, plus the
+ * always-run guards; the package/file scoping the rest of this function reads is layered on top
+ * of that set, not instead of it. So a gate with `strategy: full` (no package scope, no file
+ * scope) and the impact selector would fall straight through to `full` — a claim that every suite
+ * was observed, on the one kind of run where a whole ranked-out tail was NOT. `impact.mjs`'s
+ * `isWitness` counts only `full`/`all`, so such a row would enter the miss-rate DENOMINATOR while
+ * being structurally unable to witness a miss, driving the rate toward a confident zero exactly
+ * when the selector is in charge. `impact-scoped` is not in `WITNESS_SCOPES`, so those rows are
+ * reported separately as non-witnesses — which is the honest reading.
+ *
+ * `guards-only` still wins over it, and that is not an inconsistency: `test-mine.mjs`'s
+ * `KANBAN_TEST_GUARDS_ONLY` branch runs the guards and EXITS before the selector is ever
+ * consulted, so a docs-only diff genuinely ran no impact selection at all.
+ *
+ * Absent selector reads as `related`, so every project that has not opted in records exactly as
+ * it did before.
  */
 export function gateRanScope(tierInfo: GateTierInfo | null | undefined): GateRanScope {
   if (!tierInfo) return "full";
   if (tierInfo.guardsOnly) return "guards-only";
+  if (tierInfo.selector === "impact") return "impact-scoped";
   if (tierInfo.fileScoped) return "file-scoped";
   if (tierInfo.packageScoped) return "package-scoped";
   return "full";

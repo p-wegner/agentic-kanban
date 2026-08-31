@@ -239,8 +239,45 @@ export function countAlwaysRunGuardSuites(repoRoot: string): number {
   return count;
 }
 
+/**
+ * Which selector chose the suites the verify run executed (#962).
+ *
+ * `related` is today's `vitest related` scoping — the import-graph walk `KANBAN_TEST_FILES`
+ * drives. `impact` is the test-impact heuristic (`KANBAN_TEST_SELECTOR=impact`, #951), which
+ * NARROWS to a ranked guess rather than to a dependency closure.
+ *
+ * The distinction has to exist because it is the only thing that separates "every suite in scope
+ * ran" from "a heuristic picked some". Without it an impact-narrowed run is recorded as `full`,
+ * which asserts that every suite was observed — so any suite the selector skipped is counted as
+ * having passed, and the ledger UNDER-reports misses precisely on the runs where the selector was
+ * in charge. A confidently wrong LOW miss rate is what would promote the selector to default.
+ */
+export type GateTestSelector = "related" | "impact";
+
+/**
+ * The selector the verify run will actually use, as a pure function of the env it will see.
+ *
+ * The gate layers `verifyEnv` over `process.env` (`runSetupScript` applies the caller's map last),
+ * so the effective value is the gate's own when it sets one and the ambient board-server env
+ * otherwise. Nothing in the board sets `KANBAN_TEST_SELECTOR` today, which is exactly why this
+ * must read the ambient value rather than assume: an operator who exports it for the server
+ * process gets an impact-narrowed gate with no code change, and that run must not record as full.
+ *
+ * Mirrors `scripts/test-mine.mjs`'s own parse (trim + lowercase, `impact` the only recognized
+ * value); an unrecognized value falls back there to `vitest related`, so it does here too.
+ */
+export function resolveGateTestSelector(env: Record<string, string | undefined>): GateTestSelector {
+  return (env.KANBAN_TEST_SELECTOR ?? "").trim().toLowerCase() === "impact" ? "impact" : "related";
+}
+
 export interface GateTierInfo {
   strategy: VerifyGateStrategy;
+  /**
+   * Which selector chose the suites (#962). Optional for back-compat with a caller that never
+   * resolved one; `gateRanScope` treats an absent value as `related`, which reproduces the
+   * pre-#962 recording exactly for every project that does not opt in.
+   */
+  selector?: GateTestSelector;
   /** Whether `KANBAN_TEST_PACKAGES` was set at all — false for an unreadable diff, a
    *  global-config change, or a path owned by no package, in which case EVERY package's full
    *  suite ran regardless of `strategy`. Distinct from `fileScoped`: package-scoping without
@@ -338,6 +375,12 @@ export function buildGateTierMessage(tierInfo: GateTierInfo | null): string {
     : `workers ${tierInfo.maxWorkers}`;
   const parts = [
     `tier: ${tier}`,
+    // #962: only when it is NOT the default. A run whose suites were chosen by a ranked heuristic
+    // rather than by an import-graph walk is a materially weaker claim, and the tier name alone
+    // does not carry it — `full` + impact selector reads as "everything ran". A level may only
+    // weaken verification VISIBLY, so the message says which selector was in charge. Saying
+    // "selector: related" on every gate would be noise that trains the reader to skip the field.
+    ...(tierInfo.selector === "impact" && !tierInfo.guardsOnly ? ["selector: impact (heuristic)"] : []),
     `${tierInfo.changedFileCount} changed file(s)`,
     ...(tierInfo.fileScoped || tierInfo.guardsOnly ? [`${tierInfo.guardsOnly ? "" : "+"}${tierInfo.guardSuiteCount} guard suites`] : []),
     workersLabel,

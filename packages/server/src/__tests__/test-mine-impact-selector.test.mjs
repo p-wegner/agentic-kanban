@@ -10,6 +10,7 @@ import {
   partitionExcluded,
   resolveImpactCli,
   runImpactSelector,
+  selectorFileScopeConflict,
   PACKAGES,
 } from "../../../../scripts/test-mine.mjs";
 
@@ -18,6 +19,31 @@ import {
  * `--format pkgfile` output (`<packageDir>:<path relative to that package>` per line). These
  * tests exercise the pure parsing/resolution directly, never spawning the real skill.
  */
+describe("selectorFileScopeConflict", () => {
+  it("refuses when both the impact selector and an explicit file scope are set", () => {
+    // #962 — before this the file list was silently discarded: the selector derives its own
+    // change set from git and never reads it, so a caller that asked for specific suites got a
+    // different set back with nothing anywhere saying so. Silent is the whole problem.
+    const message = selectorFileScopeConflict({
+      impactSelectorRequested: true,
+      scopedFiles: ["packages/server/src/a.ts", "packages/server/src/b.ts"],
+    });
+    expect(message).toContain("refusing to run");
+    // Both variables named, and the count, so the operator can see what would have been dropped.
+    expect(message).toContain("KANBAN_TEST_SELECTOR=impact");
+    expect(message).toContain("2 file(s)");
+    // And the remedy — either direction, because only the caller knows which they meant.
+    expect(message).toContain("Unset KANBAN_TEST_FILES");
+    expect(message).toContain("unset KANBAN_TEST_SELECTOR");
+  });
+
+  it("allows each of them alone", () => {
+    expect(selectorFileScopeConflict({ impactSelectorRequested: true, scopedFiles: [] })).toBeNull();
+    expect(selectorFileScopeConflict({ impactSelectorRequested: false, scopedFiles: ["a.ts"] })).toBeNull();
+    expect(selectorFileScopeConflict({ impactSelectorRequested: false, scopedFiles: [] })).toBeNull();
+  });
+});
+
 describe("parseImpactSelection", () => {
   it("maps package DIRECTORIES back to the labels vitest is run under", () => {
     const stdout = [
