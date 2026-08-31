@@ -22,6 +22,7 @@
 import { existsSync, mkdirSync, renameSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
+import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 import { isPathInside, rewritePathPrefix, samePath } from "@agentic-kanban/shared/lib/path-key";
 import { isAgentRunningStatus } from "@agentic-kanban/shared/lib/workspace-liveness";
 import { db, withTransaction } from "../db/index.js";
@@ -252,7 +253,7 @@ async function repairWorktrees(plan: RelocationPlan): Promise<RelocationResult["
   if (!existsSync(plan.toPath)) return [];
   const worktreePaths = plan.directoryMoves.filter((m) => m.kind === "worktree").map((m) => m.to);
   const result = await gitExec(["worktree", "repair", ...worktreePaths], { cwd: plan.toPath });
-  const ok = result.code === 0 && !result.error;
+  const ok = execSucceeded(result);
   return [{ path: plan.toPath, ok, detail: ok ? undefined : result.stderr || result.error?.message }];
 }
 
