@@ -2,7 +2,7 @@
 
 # MCP tools
 
-All 113 tools exposed by the `agentic-kanban` MCP server. Call them as `mcp__agentic-kanban__<name>`.
+All 114 tools exposed by the `agentic-kanban` MCP server. Call them as `mcp__agentic-kanban__<name>`.
 
 ## Board Overview
 
@@ -149,6 +149,7 @@ All 113 tools exposed by the `agentic-kanban` MCP server. Call them as `mcp__age
 | `init_project` | Initialize and register a git repository as a project on the kanban board. Mirrors CLI `init [path]`. The server must already be running (the MCP server itself being active satisfies this). If no path is provided, only confirms the server is reachable and migrations are up to date. |
 | `list_project_repos` | List the ADDITIONAL (sibling) repos attached to a multi-repo project. Returns an array of repo rows ({ id, path, name, defaultBranch, setupScript, composeFile }). Does NOT include the leading repo (that is the project's own repoPath, from list_projects). An empty array means the project is single-repo. |
 | `add_project_repo` | Attach an ADDITIONAL git repository to an existing multi-repo project (the 'full-peers' model). The project's registered repo is the LEADING repo (the agent starts there); every repo added here becomes a sibling that each new workspace also gets a worktree for on the same branch, with merge landing every repo that has commits. To build a multi-repo project: first `register_project` the leading repo, then call this once per sibling with that project's id. Provide exactly one of `path` (absolute path to an existing local repo), `cloneUrl` (clone a remote), or `createName` (scaffold a brand-new git repo in a new folder created inside the project folder, beside the leading repo). |
+| `relocate_project` | Move a registered project to a new checkout path WITHOUT unregistering it — its issues, workspaces, sessions and history are all kept. Rewrites every persisted path that pointed at the old location: projects.repo_path, the project's repos rows (path + worktree_path), its workspaces' working_dir, and the projects_base_path preference when it named the old parent. Issue text, comments and session records are deliberately left alone — they record what was true then. Pass `fromPrefix`/`toPrefix` instead of `projectId`/`newRepoPath` to relocate EVERY project under one directory into another (a directory consolidation). Set `moveFiles` to have the board rename the directories on disk and run `git worktree repair` so the worktrees relink; without it the destination must already be a git checkout. ALWAYS run with `dryRun: true` first — it returns the exact rows and directories that would change and touches nothing. |
 | `remove_project_repo` | Detach an ADDITIONAL (sibling) repo from a multi-repo project. Removes only the project↔repo association — the checkout on disk is left untouched and existing workspaces keep their worktrees. Use `list_project_repos` to find the repoId. Cannot remove the leading repo (that is unregister_project territory). |
 
 ## Settings

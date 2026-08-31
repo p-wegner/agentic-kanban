@@ -62,3 +62,24 @@ export function isPathInside(child: string, parent: string): boolean {
   if (c === p) return true;
   return c.startsWith(p.endsWith("/") ? p : p + "/");
 }
+
+/**
+ * Re-root `p` from under `fromPrefix` to under `toPrefix`, preserving the SEPARATOR
+ * STYLE of the original string (#964).
+ *
+ * Returns `null` when `p` is not inside `fromPrefix` — callers use that to decide
+ * whether a row participates in a relocation at all, so "not affected" and "rewritten
+ * to itself" stay distinguishable.
+ *
+ * The separator care matters: `workspaces.workingDir` and `repos.path` hold
+ * Windows-style backslash paths written by `join()`, and a rewrite that quietly
+ * forward-slashes them would still compare equal under `pathKey` but would no longer
+ * match the raw string comparisons and log lines an operator reads.
+ */
+export function rewritePathPrefix(p: string, fromPrefix: string, toPrefix: string): string | null {
+  if (!isPathInside(p, fromPrefix)) return null;
+  const usesBackslash = p.includes("\\");
+  const suffix = normalizeSlashes(resolve(p)).slice(stripTrailingSeparators(normalizeSlashes(resolve(fromPrefix))).length);
+  const rebased = stripTrailingSeparators(normalizeSlashes(resolve(toPrefix))) + suffix;
+  return usesBackslash ? rebased.replace(/\//g, "\\") : rebased;
+}

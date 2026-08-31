@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { resolve } from "node:path";
-import { pathKey, samePath, isPathInside, normalizeSlashes } from "../src/lib/path-key.js";
+import { pathKey, samePath, isPathInside, normalizeSlashes, rewritePathPrefix } from "../src/lib/path-key.js";
 
 const WIN = process.platform === "win32";
 
@@ -68,5 +68,38 @@ describe("normalizeSlashes", () => {
   it("is platform-free: no resolve, no case-folding", () => {
     expect(normalizeSlashes("a\\b\\c")).toBe("a/b/c");
     expect(normalizeSlashes("A/B")).toBe("A/B");
+  });
+});
+
+describe("rewritePathPrefix (#964)", () => {
+  it("re-roots a path from one prefix to another", () => {
+    expect(rewritePathPrefix(resolve("old/app/src"), resolve("old"), resolve("new")))
+      .toBe(resolve("new/app/src"));
+  });
+
+  it("re-roots the prefix itself, not only its descendants", () => {
+    expect(rewritePathPrefix(resolve("old/app"), resolve("old/app"), resolve("new/app")))
+      .toBe(resolve("new/app"));
+  });
+
+  it("returns null for a path outside the prefix, so callers can tell 'unaffected' from 'unchanged'", () => {
+    expect(rewritePathPrefix(resolve("elsewhere/app"), resolve("old"), resolve("new"))).toBeNull();
+  });
+
+  it("does not re-root a sibling whose name merely starts the same", () => {
+    // The bug a LIKE 'C:\old%' rewrite would have: old-baseline is not under old.
+    expect(rewritePathPrefix(resolve("srv/repo-2/x"), resolve("srv/repo"), resolve("srv/moved"))).toBeNull();
+  });
+
+  it("preserves the separator style of the input", () => {
+    // repoPath / workingDir rows hold backslash paths; forward-slashing them on rewrite
+    // would still compare equal under pathKey but no longer match a raw string read.
+    const out = rewritePathPrefix(String.raw`C:\old\app\src`, String.raw`C:\old`, String.raw`C:\new`);
+    expect(out).toBe(WIN ? String.raw`C:\new\app\src` : null);
+  });
+
+  it("is unfazed by a trailing separator on either prefix", () => {
+    expect(rewritePathPrefix(resolve("old/app"), resolve("old") + "/", resolve("new") + "/"))
+      .toBe(resolve("new/app"));
   });
 });

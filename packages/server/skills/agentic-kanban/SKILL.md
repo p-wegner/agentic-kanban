@@ -1,8 +1,8 @@
 ---
 name: agentic-kanban
 description: Operate the agentic-kanban board — a kanban board where each card is an AI coding session in its own git worktree. Use when asked to work a ticket, drive a project hands-off, review or merge agent work, inspect what agents are doing, or wire the board into another tool. Covers the MCP tools, CLI, board views, statuses, and the review/merge gate.
-commit: 06b4826171
-generated: 2026-08-28
+commit: 470ecacbc6
+generated: 2026-08-31
 ---
 
 # agentic-kanban
@@ -113,7 +113,7 @@ Depth on any of these lives in `references/` — load a file only when you actua
 
 ## MCP tool index
 
-113 tools, by category. Full descriptions: `references/mcp-tools.md`.
+114 tools, by category. Full descriptions: `references/mcp-tools.md`.
 
 | Category | Tools |
 |---|---|
@@ -128,7 +128,7 @@ Depth on any of these lives in `references/` — load a file only when you actua
 | Agent Skills | `list_agent_skills`, `get_agent_skill`, `create_agent_skill`, `export_agent_skills`, `install_skill` |
 | Living Specs | `openspec_list_specs`, `show_spec`, `validate_change` |
 | Drives | `start_drive`, `list_drives`, `get_drive`, `finish_drive`, `drive_review_effectiveness` |
-| Projects | `register_project`, `create_project`, `list_projects`, `unregister_project`, `cleanup_project`, `init_project`, `list_project_repos`, `add_project_repo`, `remove_project_repo` |
+| Projects | `register_project`, `create_project`, `list_projects`, `unregister_project`, `cleanup_project`, `init_project`, `list_project_repos`, `add_project_repo`, `relocate_project`, `remove_project_repo` |
 | Settings | `get_preference`, `set_preference` |
 | Butler | `ask_butler`, `butler_ensure`, `butler_stop`, `butler_list`, `butler_interrupt`, `butler_state`, `butler_set_model`, `butler_set_profile`, `get_butler_skill`, `set_butler_skill` |
 | Plugin Loops & Gates | `list_plugin_gates`, `get_plugin_gate`, `resolve_plugin_gate`, `advance_plugin_loop`, `list_inbox`, `enable_plugin`, `set_plugin_output_location`, `get_plugin_scaffold`, `fill_plugin_scaffold` |
@@ -142,7 +142,7 @@ Depth on any of these lives in `references/` — load a file only when you actua
 
 `agentic-kanban <command>` (inside this repo: `pnpm cli -- <command>`). Full list with descriptions: `references/cli.md`.
 
-Top-level: `cleanup`, `create`, `delete-status`, `dev`, `export-backlog`, `import-backlog`, `init`, `install-skill`, `list`, `register`, `status`, `unregister`
+Top-level: `cleanup`, `create`, `delete-status`, `dev`, `export-backlog`, `import-backlog`, `init`, `install-skill`, `list`, `register`, `relocate`, `status`, `unregister`
 
 | Group | Subcommands |
 |---|---|

@@ -19,6 +19,7 @@ Run any command with `--help` for its options — this list is names and purpose
 | `install-skill` | Install agent skills into a project's .claude/skills/ directory, or into your user agent-skill directories with --user |
 | `list` | List all registered projects |
 | `register` | Register a git repo as a project |
+| `relocate` | Move a registered project to a new checkout path, keeping its issues, workspaces and history |
 | `status` | Show board status overview with all active agents, workspaces, and progress |
 | `unregister` | Remove a registered project by name or ID |
 
