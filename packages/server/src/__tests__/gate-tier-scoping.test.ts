@@ -17,6 +17,7 @@ import { describe, it, expect } from "vitest";
 import {
   resolveGateScoping,
   resolveGateTestSelector,
+  resolveGateFileScopeEmission,
   buildGateTierMessage,
   resolveBaseProbeDue,
   DEFAULT_VERIFY_GATE_STRATEGY,
@@ -127,6 +128,36 @@ describe("resolveGateTestSelector (#962)", () => {
     expect(resolveGateTestSelector({})).toBe("related");
     expect(resolveGateTestSelector({ KANBAN_TEST_SELECTOR: "" })).toBe("related");
     expect(resolveGateTestSelector({ KANBAN_TEST_SELECTOR: "vitest-related" })).toBe("related");
+  });
+});
+
+describe("resolveGateFileScopeEmission (#962)", () => {
+  it("drops the file scope under the impact selector, rather than emitting a pair test:mine rejects", () => {
+    // `test-mine.mjs` refuses to run with both set. A knob an operator exported for the server
+    // process must not thereby turn every file-scoped gate into a hard merge blocker, so the
+    // gate resolves the conflict itself — in the selector's favour, and out loud.
+    const dropped = resolveGateFileScopeEmission({
+      env: { KANBAN_TEST_SELECTOR: "impact" }, fileScoped: true, changedFileCount: 5,
+    });
+    expect(dropped.selector).toBe("impact");
+    expect(dropped.emitFileScope).toBe(false);
+    // Dropping a narrowing the operator configured must be VISIBLE, not inferred from its absence.
+    expect(dropped.note).toContain("replaces the 5-file scope");
+    expect(dropped.note).toContain("impact-scoped, not full");
+  });
+
+  it("emits the file scope as before when no selector is set", () => {
+    const kept = resolveGateFileScopeEmission({ env: {}, fileScoped: true, changedFileCount: 5 });
+    expect(kept).toMatchObject({ selector: "related", emitFileScope: true });
+    expect(kept.note).toContain("file-scoping verify tests to 5 changed file(s)");
+  });
+
+  it("never invents a file scope the scoping decision did not ask for, and says nothing", () => {
+    for (const env of [{}, { KANBAN_TEST_SELECTOR: "impact" }]) {
+      const result = resolveGateFileScopeEmission({ env, fileScoped: false, changedFileCount: 5 });
+      expect(result.emitFileScope).toBe(false);
+      expect(result.note).toBeNull();
+    }
   });
 });
 
