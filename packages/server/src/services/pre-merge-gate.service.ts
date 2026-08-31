@@ -32,6 +32,7 @@ import {
   countAlwaysRunGuardSuites,
   buildGateTierMessage,
   resolveGateScoping,
+  resolveGateFileScopeEmission,
   type GateTierInfo,
 } from "./pre-merge-gate-tier.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -426,25 +427,42 @@ export async function runPreMergeGate(
     // exists to catch exactly that drift. The premise "a `.md` change cannot break the build"
     // is false BY CONSTRUCTION in this repo, so the cheap-check motive is honoured by narrowing
     // to the guards rather than by checking nothing.
+    //
+    // #962 — the selector, and whether the file scope may still be emitted alongside it. See
+    // `resolveGateFileScopeEmission` for why the gate resolves that conflict itself.
+    const { selector: gateSelector, emitFileScope, note: fileScopeNote } = resolveGateFileScopeEmission({
+      env: process.env,
+      fileScoped: fileScope,
+      changedFileCount: changedFiles.length,
+    });
     const verifyEnv = docsOnlyGuardsRunApplies
       ? { ...isolationEnv, KANBAN_TEST_GUARDS_ONLY: "1" }
       : effectiveTestScope
         ? {
             ...isolationEnv,
             KANBAN_TEST_PACKAGES: effectiveTestScope,
-            ...(fileScope ? { KANBAN_TEST_FILES: changedFiles.join(",") } : {}),
+            ...(emitFileScope ? { KANBAN_TEST_FILES: changedFiles.join(",") } : {}),
           }
         : isolationEnv;
     if (docsOnlyGuardsRunApplies) {
       console.log(`[pre-merge-gate] docs-only diff for workspace ${workspace.id} (${changedFiles.length} file(s)) — running @gate:always-run guard suites only`);
     }
-    if (fileScope) {
-      console.log(`[pre-merge-gate] file-scoping verify tests to ${changedFiles.length} changed file(s) for workspace ${workspace.id}`);
+    // One branch, and the message itself was chosen by `resolveGateFileScopeEmission` — the
+    // dropped-scope case is a different MESSAGE about the same decision, not a second decision.
+    if (fileScopeNote) {
+      console.log(`[pre-merge-gate] ${fileScopeNote} for workspace ${workspace.id}`);
     }
     gateTierInfo = {
       strategy: gateStrategy,
+      // #962: which selector chose the suites, so an impact-narrowed run is recorded as
+      // `impact-scoped` rather than as `full` — the latter asserts that every suite was observed,
+      // which is the one claim such a run cannot make.
+      selector: gateSelector,
       packageScoped: Boolean(effectiveTestScope) && !docsOnlyGuardsRunApplies,
-      fileScoped: fileScope && !docsOnlyGuardsRunApplies,
+      // What was actually EMITTED, not what the scoping decision wanted: under the impact
+      // selector the file list is dropped, and reporting `fileScoped: true` would name a
+      // narrowing that never reached the runner.
+      fileScoped: emitFileScope && !docsOnlyGuardsRunApplies,
       ...(docsOnlyGuardsRunApplies ? { guardsOnly: true } : {}),
       changedFileCount: changedFiles.length,
       guardSuiteCount: countAlwaysRunGuardSuites(workingDir),
@@ -529,10 +547,16 @@ export async function runPreMergeGate(
     // wrong. Awaited (not fire-and-forget) so a merge never races the write, and `recordVerifyGateOutcome`
     // is total — it resolves to `{recorded:false, reason}` rather than throwing, so this cannot
     // turn a verdict into an error.
+    //
+    // #963 — `baseBranch` is not optional decoration: without it the selection is computed from
+    // an EMPTY change set (a gate runs on a clean, fully-committed tree, so `git diff HEAD` and
+    // the untracked list are both empty) and every row records the constant always-run set with a
+    // free `missed: 0`.
     await recordVerifyGateOutcome({
       workspaceId: workspace.id,
       workingDir,
       repoPath: projectRepoPath,
+      baseBranch: workspace.baseBranch,
       outcome,
       tierInfo: gateTierInfo,
     });
