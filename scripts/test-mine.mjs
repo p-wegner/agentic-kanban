@@ -90,6 +90,10 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, resolve } from "node:path";
+import {
+  acquireForBuilderTest,
+  MACHINE_LOCK_HEARTBEAT_INTERVAL_MS,
+} from "./machine-verify-lock.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
@@ -1188,6 +1192,43 @@ function reportTreeDrift(before) {
 // `process.argv[1]` is its own path in that case.
 if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
   let failed = false;
+
+  /* -------------------------------------------------------------------------
+   * Machine-wide verify lock (#957)
+   *
+   * #949 brought every heavyweight verification the SERVER PROCESS runs under one in-process
+   * semaphore. This run is not in that process: a builder agent's own `pnpm test:mine` is a
+   * separate process tree, and with WIP 2-3 it is the single largest load the board cannot see.
+   * So the box could sit at 100% CPU with one gate correctly serialized and three unserialized
+   * test runners beside it — the exact symptom #949 was filed against.
+   *
+   * Taking the lock HERE is what makes a builder participate at all; nothing the board does can
+   * make it, which is why this is a change to the repo's own test entrypoint rather than to a
+   * board service. It only helps repos that adopt it, and that is inherent.
+   *
+   * OPT-IN (`KANBAN_MACHINE_VERIFY_LOCK=1`): with the switch off `acquireForBuilderTest` returns
+   * immediately with no handle and no note, and this run is byte-for-byte what it was before.
+   * Bounded by the short `builder-test` role — a builder that waits an hour for a gate has
+   * stopped being a builder — and on timeout it RUNS ANYWAY, having printed why.
+   * ---------------------------------------------------------------------- */
+  const lockHolder = `test:mine ${process.cwd()}`;
+  const { handle: machineLock, note: machineLockNote } = await acquireForBuilderTest(lockHolder);
+  const heartbeat = machineLock
+    ? setInterval(() => machineLock.heartbeat(), MACHINE_LOCK_HEARTBEAT_INTERVAL_MS)
+    : null;
+  // Never let the heartbeat timer be the reason this process cannot exit.
+  heartbeat?.unref?.();
+  // Released on EVERY exit path — this block calls `process.exit()` in half a dozen places, and
+  // a lock leaked by one of them would block every other verifier on the box for the full
+  // staleness window. `once` so a normal fallthrough plus an explicit exit cannot double-release.
+  process.once("exit", () => {
+    if (heartbeat) clearInterval(heartbeat);
+    machineLock?.release();
+    // The note is repeated at the END as well as when it was issued: a run's caveat is worth
+    // nothing if it scrolled past thousands of lines of vitest output an hour ago.
+    if (machineLockNote) console.warn(`\n${machineLockNote}`);
+  });
+
   const treeBefore = treeSnapshot();
   if (retryScope.size > 0) {
     // #894 — the narrow re-run of suites that just failed a full gate. Runs ONLY what it was
