@@ -89,6 +89,25 @@ export interface RecordGateOutcomeInput {
   /** The worktree the gate ran in — where the diff, HEAD and the materialized skill live. */
   workingDir: string | null;
   /**
+   * The workspace's base branch, passed straight through to `select --base` and `record --base`
+   * (#963).
+   *
+   * WITHOUT IT THE LEDGER MEASURES NOTHING. `impact.mjs`'s `changedFiles(base)` only consults
+   * `base...HEAD` when a base is given; its two remaining sources are `git diff HEAD` (staged +
+   * unstaged) and untracked files. At GATE time the branch is fully committed and the tree is
+   * clean, so both are empty and the change set is `[]` — the selection then degrades to the
+   * constant `--always-run` guard set, identical for every branch. Measured: three gate rows for
+   * three unrelated diffs all recorded `changed 0, selected 158, missed 0`. A `missed: 0` computed
+   * against a selection that never saw the diff is trivially true, so the corpus would report a
+   * confident 0% miss rate for a selector that was never consulted — the same failure direction as
+   * a mislabeled `ran` scope.
+   *
+   * Null when the workspace has none (a direct workspace, or an unresolvable base): the selection
+   * is then still recorded, but the row is FLAGGED rather than silently diluting the corpus — see
+   * `emptyChangeSetReason`.
+   */
+  baseBranch?: string | null;
+  /**
    * The project's MAIN checkout. The ledger lives here so it survives worktree deletion and
    * accumulates across every branch. When null (unknown repo path) the worktree's own ledger is
    * used, which still records but will not accumulate — reported in the reason so it is visible.
@@ -115,6 +134,10 @@ export interface RecordGateOutcomeResult {
   tier?: string;
   /** How many test files the selection would have picked. */
   selectedCount?: number;
+  /** How many files `select` saw as changed — 0 means the row is the always-run baseline (#963). */
+  changedCount?: number;
+  /** Set when the row was recorded but flagged as not a valid observation of the selection (#963). */
+  suspectReason?: string;
   /** What the gate ran, as recorded. */
   ran?: GateRanScope;
 }
@@ -202,9 +225,10 @@ const defaultRunCommand: RunImpactCommand = ({ cwd, args, timeoutMs }) =>
 interface SelectPayload {
   tier?: unknown;
   selected?: unknown;
+  changed?: unknown;
 }
 
-function parseSelection(stdout: string): { tier: string; selected: string[] } | null {
+export function parseSelection(stdout: string): { tier: string; selected: string[]; changed: string[] } | null {
   let payload: SelectPayload;
   try {
     payload = JSON.parse(stdout) as SelectPayload;
@@ -215,7 +239,33 @@ function parseSelection(stdout: string): { tier: string; selected: string[] } | 
   const selected = payload.selected
     .map((entry) => (entry && typeof entry === "object" ? (entry as { test?: unknown }).test : entry))
     .filter((test): test is string => typeof test === "string" && test.length > 0);
-  return { tier: typeof payload.tier === "string" ? payload.tier : "unknown", selected };
+  // `changed` is what makes the row auditable (#963): a selection computed from an EMPTY change
+  // set is the always-run baseline wearing the selection's name, and nothing else in the row says
+  // so. Absent (an older tool) reads as an empty array, which the guard below treats the same way
+  // as an observed-empty one — conservative, since neither can be shown to have seen the diff.
+  const changed = Array.isArray(payload.changed)
+    ? payload.changed.filter((file): file is string => typeof file === "string" && file.length > 0)
+    : [];
+  return { tier: typeof payload.tier === "string" ? payload.tier : "unknown", selected, changed };
+}
+
+/**
+ * Is this row a valid observation of the SELECTION, or of the always-run baseline (#963)?
+ *
+ * Returns a reason string when the row is suspect, `null` when it is fine. A gate always runs on a
+ * branch that has commits against its base, so an empty change set there is not "a diff that
+ * happened to touch nothing" — it means the change set was never computed, and every such row
+ * reports `missed: 0` for free. Those rows are what would accumulate into a confidently wrong 0%
+ * miss rate.
+ *
+ * The row is still RECORDED, tagged with a source suffix rather than dropped: a dropped row is
+ * indistinguishable from "the gate never ran", while a tagged one is filterable and visible. What
+ * it must not do is sit in the corpus looking like a normal observation.
+ */
+export function emptyChangeSetReason(input: { changed: string[]; baseBranch: string | null | undefined }): string | null {
+  if (input.changed.length > 0) return null;
+  if (!input.baseBranch) return "no base branch was available, so the change set could not be computed";
+  return `the change set against ${input.baseBranch} came back empty`;
 }
 
 /**
@@ -237,6 +287,8 @@ export function buildRecordArgs(input: {
   tier: string;
   ran: GateRanScope;
   source: string;
+  /** #963 — `record` recomputes the change set itself, so it needs the same base `select` got. */
+  baseBranch?: string | null;
 }): string[] {
   const args = [
     input.toolPath,
@@ -252,6 +304,7 @@ export function buildRecordArgs(input: {
     "--outcomes",
     input.outcomesPath,
   ];
+  if (input.baseBranch) args.push("--base", input.baseBranch);
   if (input.selected.length > 0) args.push("--selected", input.selected.join(","));
   if (input.failedSuites.length > 0) args.push("--failed", input.failedSuites.join(","));
   return args;
@@ -278,9 +331,14 @@ export async function recordGateOutcome(input: RecordGateOutcomeInput): Promise<
     const ledgerRoot = input.repoPath ?? workingDir;
     const outcomesPath = resolve(ledgerRoot, OUTCOMES_RELATIVE_PATH);
 
+    // #963 — `--base` is what makes this the branch's REAL selection rather than the constant
+    // always-run set. See `RecordGateOutcomeInput.baseBranch` for the measurement it was silently
+    // destroying. Omitted (not passed empty) when there is no base, so the tool keeps its own
+    // uncommitted-work behaviour instead of being handed a ref it cannot resolve.
+    const baseBranch = input.baseBranch?.trim() || null;
     const selection = await run({
       cwd: workingDir,
-      args: [toolPath, "select", "--json", "--always-run"],
+      args: [toolPath, "select", "--json", "--always-run", ...(baseBranch ? ["--base", baseBranch] : [])],
       timeoutMs: IMPACT_COMMAND_TIMEOUT_MS,
     });
     if (selection.exitCode !== 0) {
@@ -295,6 +353,12 @@ export async function recordGateOutcome(input: RecordGateOutcomeInput): Promise<
     if (!parsed) return { recorded: false, reason: "could not parse `select --json` output" };
 
     const ran = gateRanScope(input.tierInfo);
+    // #963 — a row whose change set is empty is not an observation of the selection; it is the
+    // always-run baseline, and its `missed: 0` is true for free. Tag the SOURCE so `stats`'
+    // `bySource` breakdown separates it from real rows, instead of letting it read as an ordinary
+    // gate observation. The source vocabulary belongs to the producer (see `cmdRecord`), so this
+    // needs no change on the tool side.
+    const suspectReason = emptyChangeSetReason({ changed: parsed.changed, baseBranch });
     const record = await run({
       cwd: workingDir,
       args: buildRecordArgs({
@@ -305,7 +369,8 @@ export async function recordGateOutcome(input: RecordGateOutcomeInput): Promise<
         failedSuites: input.failedSuites,
         tier: parsed.tier,
         ran,
-        source,
+        source: suspectReason ? `${source}-nochange` : source,
+        baseBranch,
       }),
       timeoutMs: IMPACT_COMMAND_TIMEOUT_MS,
     });
@@ -315,7 +380,21 @@ export async function recordGateOutcome(input: RecordGateOutcomeInput): Promise<
     if (!input.repoPath) {
       log(`recorded a gate outcome into the WORKTREE ledger at ${outcomesPath} — the project's repo path is unknown, so this row will be lost with the worktree`);
     }
-    return { recorded: true, tier: parsed.tier, selectedCount: parsed.selected.length, ran };
+    if (suspectReason) {
+      log(
+        `recorded a gate outcome with an EMPTY change set (${suspectReason}) — the selection it names is the ` +
+          `always-run baseline, not this branch's, so the row is tagged source=${source}-nochange and must not be ` +
+          `counted toward the miss rate`,
+      );
+    }
+    return {
+      recorded: true,
+      tier: parsed.tier,
+      selectedCount: parsed.selected.length,
+      changedCount: parsed.changed.length,
+      ran,
+      ...(suspectReason ? { suspectReason } : {}),
+    };
   } catch (err) {
     // The whole point of this module is that it cannot affect a merge. Anything unanticipated
     // lands here.
@@ -351,6 +430,8 @@ export async function recordVerifyGateOutcome(args: {
   workspaceId: string;
   workingDir: string;
   repoPath: string | null;
+  /** The workspace's base branch — see `RecordGateOutcomeInput.baseBranch` (#963). */
+  baseBranch?: string | null;
   /**
    * Structurally the `VerifyOutcome` the gate resolved. Only `failure === null` (the verdict),
    * `failure.timedOut` (inconclusive) and `failedSuites` are read; `message` is accepted so a real
@@ -370,6 +451,7 @@ export async function recordVerifyGateOutcome(args: {
   const result = await recordGateOutcome({
     workingDir: args.workingDir,
     repoPath: args.repoPath,
+    baseBranch: args.baseBranch,
     passed,
     failedSuites: outcome.failedSuites
       .map(repoRelativeSuitePath)
@@ -382,7 +464,8 @@ export async function recordVerifyGateOutcome(args: {
   if (result.recorded) {
     console.log(
       `[test-impact] recorded gate outcome for workspace ${workspaceId}: ${passed ? "pass" : "fail"}, ` +
-        `ran ${result.ran}, selection tier ${result.tier} would have picked ${result.selectedCount} test file(s)`,
+        `ran ${result.ran}, ${result.changedCount} changed file(s), selection tier ${result.tier} would have ` +
+        `picked ${result.selectedCount} test file(s)`,
     );
   } else if (result.reason && !result.reason.startsWith("no test-impact tool")) {
     // A project without the skill is the overwhelmingly common case and says nothing. Anything
