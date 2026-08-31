@@ -98,6 +98,7 @@ import { registerCreateProject } from "./tools/create-project.js";
 import { registerListProjects } from "./tools/list-projects.js";
 import { registerUnregisterProject } from "./tools/unregister-project.js";
 import { registerAddProjectRepo } from "./tools/add-project-repo.js";
+import { registerRelocateProject } from "./tools/relocate-project.js";
 import { registerListProjectRepos } from "./tools/list-project-repos.js";
 import { registerRemoveProjectRepo } from "./tools/remove-project-repo.js";
 import { registerCleanupProject } from "./tools/cleanup-project.js";
@@ -214,6 +215,7 @@ const TOOL_REGISTRARS: Record<string, (server: McpServer) => void> = {
   list_projects: registerListProjects,
   unregister_project: registerUnregisterProject,
   add_project_repo: registerAddProjectRepo,
+  relocate_project: registerRelocateProject,
   list_project_repos: registerListProjectRepos,
   remove_project_repo: registerRemoveProjectRepo,
   cleanup_project: registerCleanupProject,

@@ -11,6 +11,7 @@ import {
   generateScriptBody, updateStatusSortOrderBody, updateProjectRepoBody,
   removeWorktreeBody, openWorktreeBody, onboardingApplyBody, onboardingSkipBody,
   addStatusBody, addProjectRepoBody, createProjectBody,
+  relocateProjectBody, relocatePrefixBody,
 } from "./project-body-schemas.js";
 import { createRouter } from "../middleware/create-router.js";
 import { wrapAiOperation } from "../lib/ai-operation.js";
@@ -23,6 +24,7 @@ import { setSummaryWriteThroughListener } from "../services/summary-write-throug
 import { getProjectIdsForWorkspaces } from "../repositories/workspace-summary.repository.js";
 import { listProjectRepos, insertProjectRepo, updateProjectRepo, deleteProjectRepo, type RepoRow } from "../repositories/repo.repository.js";
 import { updateProjectServicesConfig } from "../repositories/project.repository.js";
+import { relocateProject, relocateProjectsUnderPrefix } from "../services/project-relocate.service.js";
 import { detectRepoInfo } from "../services/git-info.service.js";
 import { parseIncludeParam, serveWorkspaceRepoStatusBatch } from "../services/workspace-repo-status-batch.service.js";
 import { cloneRepo } from "../services/repo-clone.service.js";
@@ -306,6 +308,28 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
     const result = await projectService.createProject(body);
     options?.boardEvents?.broadcastProjectsChanged(result.id, "project_created");
     return c.json(result, 201);
+  });
+
+  // POST /api/projects/relocate-prefix — re-point every project under one directory at
+  // another (#964). Registered BEFORE the /:id routes so "relocate-prefix" is never
+  // matched as a project id.
+  router.post("/relocate-prefix", async (c) => {
+    const body = await parseProjectBody(c, relocatePrefixBody);
+    const result = await relocateProjectsUnderPrefix(body.fromPrefix, body.toPrefix, body, database);
+    for (const relocated of result.results) {
+      if (relocated.applied) options?.boardEvents?.broadcastProjectsChanged(relocated.projectId, "project_updated");
+    }
+    return c.json(result);
+  });
+
+  // POST /api/projects/:id/relocate — move one project to a new checkout path, rewriting
+  // every persisted path that pointed at the old one. `dryRun` reports the plan only.
+  router.post("/:id/relocate", async (c) => {
+    const id = c.req.param("id");
+    const body = await parseProjectBody(c, relocateProjectBody);
+    const result = await relocateProject(id, body.newRepoPath, body, database);
+    if (result.applied) options?.boardEvents?.broadcastProjectsChanged(id, "project_updated");
+    return c.json(result);
   });
 
   // PATCH /api/projects/:id — update project fields

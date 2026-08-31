@@ -198,3 +198,31 @@ export const createProjectBody = z.object({
   gitignoreTemplate: unchecked<string>(),
   generateReadme: unchecked<boolean>(),
 }).passthrough();
+
+/**
+ * `POST /api/projects/:id/relocate` and `POST /api/projects/relocate-prefix` (#964).
+ *
+ * Both paths are required and must be ABSOLUTE, for the same reason
+ * {@link addProjectRepoBody} insists on it: a relative path would be resolved against the
+ * SERVER's cwd, and a relocation that silently re-roots a project into the board's own
+ * checkout is exactly the mistake the operation exists to prevent.
+ */
+export const relocateProjectBody = z.object({
+  newRepoPath: z.string().trim().min(1, "newRepoPath is required")
+    .refine((p) => isAbsolute(p), "newRepoPath must be an absolute path"),
+  moveFiles: z.boolean().optional(),
+  dryRun: z.boolean().optional(),
+  updateBasePath: z.boolean().optional(),
+  force: z.boolean().optional(),
+});
+
+export const relocatePrefixBody = z.object({
+  fromPrefix: z.string().trim().min(1, "fromPrefix is required")
+    .refine((p) => isAbsolute(p), "fromPrefix must be an absolute path"),
+  toPrefix: z.string().trim().min(1, "toPrefix is required")
+    .refine((p) => isAbsolute(p), "toPrefix must be an absolute path"),
+  moveFiles: z.boolean().optional(),
+  dryRun: z.boolean().optional(),
+  updateBasePath: z.boolean().optional(),
+  force: z.boolean().optional(),
+});

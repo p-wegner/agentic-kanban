@@ -2,9 +2,10 @@ import { projects, projectStatuses, issues, workspaces } from "@agentic-kanban/s
 import { deleteProjectCascade as deleteProjectCascadeShared } from "@agentic-kanban/shared/lib/cascade-delete";
 import { eq, sql, and, isNull, isNotNull, gte, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
-import type { Database } from "../db/index.js";
+import type { Database, TransactionClient } from "../db/index.js";
 import { initializeProjectStatuses } from "./issue.repository.js";
 import { firstRow } from "../lib/first-row.js";
+import { isPathInside } from "@agentic-kanban/shared/lib/path-key";
 
 /**
  * Facade barrel (#889 god-module gate). The `project_statuses` lifecycle — list, create,
@@ -257,4 +258,37 @@ export async function getProjectDefaultBranch(
 ): Promise<{ defaultBranch: string | null } | null> {
   const project = await getProjectById(projectId, database);
   return project ? { defaultBranch: project.defaultBranch } : null;
+}
+
+/**
+ * Every project whose repoPath is `prefix` or lives underneath it (#964).
+ *
+ * Prefix containment is decided in JS via `isPathInside`, not by a SQL `LIKE`: repoPath
+ * rows are raw Windows paths whose separators and casing vary by how they were
+ * registered, and a `LIKE` over them would both miss rows and match a sibling directory
+ * whose name merely starts the same (`…/repo-2` under `…/repo`).
+ */
+export async function getProjectsUnderPathPrefix(
+  prefix: string,
+  database: Database = db,
+) {
+  const all = await database.select().from(projects);
+  return all.filter((p) => p.repoPath && isPathInside(p.repoPath, prefix));
+}
+
+/**
+ * Re-point a project at a new checkout location (#964). The ONLY writer of
+ * `projects.repo_path` after registration — deliberately not reachable through
+ * `updateProject`, whose body maps user-editable fields and must not be able to move a
+ * project's repo out from under its live worktrees by accident.
+ */
+export async function updateProjectRepoPath(
+  projectId: string,
+  repoPath: string,
+  database: Database | TransactionClient = db,
+): Promise<void> {
+  await database
+    .update(projects)
+    .set({ repoPath, updatedAt: new Date().toISOString() })
+    .where(eq(projects.id, projectId));
 }
