@@ -32,6 +32,7 @@ import {
   countAlwaysRunGuardSuites,
   buildGateTierMessage,
   resolveGateScoping,
+  resolveGateTestSelector,
   type GateTierInfo,
 } from "./pre-merge-gate-tier.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -426,25 +427,45 @@ export async function runPreMergeGate(
     // exists to catch exactly that drift. The premise "a `.md` change cannot break the build"
     // is false BY CONSTRUCTION in this repo, so the cheap-check motive is honoured by narrowing
     // to the guards rather than by checking nothing.
+    //
+    // #962: `KANBAN_TEST_FILES` and `KANBAN_TEST_SELECTOR=impact` are two different answers to
+    // "which suites", and `test-mine.mjs` now REFUSES to run with both rather than silently
+    // discarding the file list. Nothing in the board sets the selector, but an operator can
+    // export it for the server process — and a measurement knob must not turn a file-scoped gate
+    // into a hard merge blocker. So the gate resolves the conflict itself, in the selector's
+    // favour (it is the more explicit request) and OUT LOUD, instead of emitting a pair the
+    // runner will reject.
+    const gateSelector = resolveGateTestSelector(process.env);
+    const emitFileScope = fileScope && gateSelector !== "impact";
     const verifyEnv = docsOnlyGuardsRunApplies
       ? { ...isolationEnv, KANBAN_TEST_GUARDS_ONLY: "1" }
       : effectiveTestScope
         ? {
             ...isolationEnv,
             KANBAN_TEST_PACKAGES: effectiveTestScope,
-            ...(fileScope ? { KANBAN_TEST_FILES: changedFiles.join(",") } : {}),
+            ...(emitFileScope ? { KANBAN_TEST_FILES: changedFiles.join(",") } : {}),
           }
         : isolationEnv;
     if (docsOnlyGuardsRunApplies) {
       console.log(`[pre-merge-gate] docs-only diff for workspace ${workspace.id} (${changedFiles.length} file(s)) — running @gate:always-run guard suites only`);
     }
-    if (fileScope) {
+    if (fileScope && !emitFileScope) {
+      console.log(`[pre-merge-gate] KANBAN_TEST_SELECTOR=impact is set, so the impact selection replaces the ${changedFiles.length}-file scope for workspace ${workspace.id} — this run is recorded as impact-scoped, not full`);
+    }
+    if (emitFileScope) {
       console.log(`[pre-merge-gate] file-scoping verify tests to ${changedFiles.length} changed file(s) for workspace ${workspace.id}`);
     }
     gateTierInfo = {
       strategy: gateStrategy,
+      // #962: which selector chose the suites, so an impact-narrowed run is recorded as
+      // `impact-scoped` rather than as `full` — the latter asserts that every suite was observed,
+      // which is the one claim such a run cannot make.
+      selector: gateSelector,
       packageScoped: Boolean(effectiveTestScope) && !docsOnlyGuardsRunApplies,
-      fileScoped: fileScope && !docsOnlyGuardsRunApplies,
+      // What was actually EMITTED, not what the scoping decision wanted: under the impact
+      // selector the file list is dropped, and reporting `fileScoped: true` would name a
+      // narrowing that never reached the runner.
+      fileScoped: emitFileScope && !docsOnlyGuardsRunApplies,
       ...(docsOnlyGuardsRunApplies ? { guardsOnly: true } : {}),
       changedFileCount: changedFiles.length,
       guardSuiteCount: countAlwaysRunGuardSuites(workingDir),

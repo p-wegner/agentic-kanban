@@ -84,6 +84,29 @@ describe("gateRanScope", () => {
   it("treats a missing tier info as full rather than inventing a narrower claim", () => {
     expect(gateRanScope(null)).toBe("full");
   });
+
+  it("reports an impact-narrowed run as its OWN scope, never as full (#962)", () => {
+    // The worst possible direction of error for the miss rate. `full` asserts that every suite
+    // was observed, so any suite the heuristic ranked out would be silently treated as having
+    // passed — and `impact.mjs`'s `isWitness` counts `full` rows into the DENOMINATOR, so these
+    // rows would drive the rate toward a confident zero precisely on the runs where the selector
+    // was actually in charge. That is the number that would promote it to default.
+    expect(gateRanScope(tierInfo({ selector: "impact" }))).toBe("impact-scoped");
+    // It outranks package/file scoping too: those narrowings are layered ON the impact set, so
+    // naming either of them alone would still overstate what ran.
+    expect(gateRanScope(tierInfo({ selector: "impact", packageScoped: true, fileScoped: true }))).toBe("impact-scoped");
+  });
+
+  it("keeps guards-only ahead of the selector, because that branch never consults it", () => {
+    // `test-mine.mjs`'s KANBAN_TEST_GUARDS_ONLY branch runs the guards and exits before the
+    // selector is reached, so a docs-only diff genuinely ran no impact selection.
+    expect(gateRanScope(tierInfo({ selector: "impact", guardsOnly: true }))).toBe("guards-only");
+  });
+
+  it("reads an absent selector as the default, so nothing that has not opted in changes", () => {
+    expect(gateRanScope(tierInfo({ selector: undefined }))).toBe("full");
+    expect(gateRanScope(tierInfo({ selector: "related", packageScoped: true }))).toBe("package-scoped");
+  });
 });
 
 describe("buildRecordArgs", () => {

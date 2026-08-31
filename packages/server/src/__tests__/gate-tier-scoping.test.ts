@@ -16,6 +16,7 @@
 import { describe, it, expect } from "vitest";
 import {
   resolveGateScoping,
+  resolveGateTestSelector,
   buildGateTierMessage,
   resolveBaseProbeDue,
   DEFAULT_VERIFY_GATE_STRATEGY,
@@ -114,7 +115,51 @@ describe("resolveBaseProbeDue (#916 — scoped-base-watch's actual backstop)", (
   });
 });
 
+describe("resolveGateTestSelector (#962)", () => {
+  it("recognizes only `impact`, case- and whitespace-insensitively", () => {
+    expect(resolveGateTestSelector({ KANBAN_TEST_SELECTOR: "impact" })).toBe("impact");
+    expect(resolveGateTestSelector({ KANBAN_TEST_SELECTOR: "  Impact " })).toBe("impact");
+  });
+
+  it("falls back to `related` for absent, empty or unrecognized values", () => {
+    // Mirrors `scripts/test-mine.mjs`, which warns and uses `vitest related` for an unknown
+    // value. The two must agree, or the ledger would name a selector that never ran.
+    expect(resolveGateTestSelector({})).toBe("related");
+    expect(resolveGateTestSelector({ KANBAN_TEST_SELECTOR: "" })).toBe("related");
+    expect(resolveGateTestSelector({ KANBAN_TEST_SELECTOR: "vitest-related" })).toBe("related");
+  });
+});
+
 describe("the tier MESSAGE agrees with the tier that ran", () => {
+  it("names the impact selector, because the tier name alone does not carry it (#962)", () => {
+    // `tier: full` + the impact selector reads as "everything ran". A level may only weaken
+    // verification VISIBLY, and a ranked heuristic choosing the suites is a materially weaker
+    // claim than an import-graph closure — so the message has to say which was in charge.
+    const msg = buildGateTierMessage({
+      strategy: "full", selector: "impact", packageScoped: false, fileScoped: false,
+      changedFileCount: 4, guardSuiteCount: 7, maxWorkers: 6,
+    });
+    expect(msg).toContain("selector: impact (heuristic)");
+  });
+
+  it("stays silent about the DEFAULT selector, so the field means something when present", () => {
+    for (const selector of ["related", undefined] as const) {
+      const msg = buildGateTierMessage({
+        strategy: "full", selector, packageScoped: false, fileScoped: false,
+        changedFileCount: 4, guardSuiteCount: 7, maxWorkers: 6,
+      });
+      expect(msg).not.toContain("selector:");
+    }
+  });
+
+  it("does not claim a selector on a guards-only run, which never consults one", () => {
+    const msg = buildGateTierMessage({
+      strategy: "full", selector: "impact", packageScoped: false, fileScoped: false, guardsOnly: true,
+      changedFileCount: 2, guardSuiteCount: 16, maxWorkers: 6,
+    });
+    expect(msg).not.toContain("selector:");
+  });
+
   it("says `full` for a full-strategy run, not `package-scoped`", () => {
     const { packagesEnv, fileScoped } = resolveGateScoping({
       strategy: "full", testScope: SCOPE, fileScopePref: true, changedFileCount: 4,
