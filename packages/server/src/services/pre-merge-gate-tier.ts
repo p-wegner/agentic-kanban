@@ -270,6 +270,38 @@ export function resolveGateTestSelector(env: Record<string, string | undefined>)
   return (env.KANBAN_TEST_SELECTOR ?? "").trim().toLowerCase() === "impact" ? "impact" : "related";
 }
 
+/**
+ * Resolve the selector AND whether the gate may still emit its `KANBAN_TEST_FILES` scope (#962).
+ *
+ * `KANBAN_TEST_FILES` and `KANBAN_TEST_SELECTOR=impact` are two different answers to "which
+ * suites", and `scripts/test-mine.mjs` now REFUSES to run with both rather than silently
+ * discarding the file list. Nothing in the board sets the selector, but an operator can export it
+ * for the server process — and a measurement knob must not turn a file-scoped gate into a hard
+ * merge blocker. So the gate resolves the conflict itself, in the selector's favour (it is the
+ * more explicit request) and out loud, instead of emitting a pair the runner will reject.
+ *
+ * Returns the operator-facing `note` alongside the decision — the DROPPED case must be visible,
+ * and the caller then has one `if` and no ternary. That is not cosmetic: `runPreMergeGate` sits ON
+ * the god-module gate's 25-branch ceiling (grandfathered at 37), where every branch a decision
+ * costs at the call site is one the function cannot spend on the merge logic it exists for.
+ * `note` is null exactly when there is nothing to say (no file scoping was decided at all).
+ */
+export function resolveGateFileScopeEmission(args: {
+  env: Record<string, string | undefined>;
+  /** What `resolveGateScoping` decided, before the selector is taken into account. */
+  fileScoped: boolean;
+  changedFileCount: number;
+}): { selector: GateTestSelector; emitFileScope: boolean; note: string | null } {
+  const selector = resolveGateTestSelector(args.env);
+  const emitFileScope = args.fileScoped && selector !== "impact";
+  const note = !args.fileScoped
+    ? null
+    : emitFileScope
+      ? `file-scoping verify tests to ${args.changedFileCount} changed file(s)`
+      : `KANBAN_TEST_SELECTOR=impact is set, so the impact selection replaces the ${args.changedFileCount}-file scope — this run is recorded as impact-scoped, not full`;
+  return { selector, emitFileScope, note };
+}
+
 export interface GateTierInfo {
   strategy: VerifyGateStrategy;
   /**

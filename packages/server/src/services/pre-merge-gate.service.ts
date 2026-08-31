@@ -32,7 +32,7 @@ import {
   countAlwaysRunGuardSuites,
   buildGateTierMessage,
   resolveGateScoping,
-  resolveGateTestSelector,
+  resolveGateFileScopeEmission,
   type GateTierInfo,
 } from "./pre-merge-gate-tier.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -428,15 +428,13 @@ export async function runPreMergeGate(
     // is false BY CONSTRUCTION in this repo, so the cheap-check motive is honoured by narrowing
     // to the guards rather than by checking nothing.
     //
-    // #962: `KANBAN_TEST_FILES` and `KANBAN_TEST_SELECTOR=impact` are two different answers to
-    // "which suites", and `test-mine.mjs` now REFUSES to run with both rather than silently
-    // discarding the file list. Nothing in the board sets the selector, but an operator can
-    // export it for the server process — and a measurement knob must not turn a file-scoped gate
-    // into a hard merge blocker. So the gate resolves the conflict itself, in the selector's
-    // favour (it is the more explicit request) and OUT LOUD, instead of emitting a pair the
-    // runner will reject.
-    const gateSelector = resolveGateTestSelector(process.env);
-    const emitFileScope = fileScope && gateSelector !== "impact";
+    // #962 — the selector, and whether the file scope may still be emitted alongside it. See
+    // `resolveGateFileScopeEmission` for why the gate resolves that conflict itself.
+    const { selector: gateSelector, emitFileScope, note: fileScopeNote } = resolveGateFileScopeEmission({
+      env: process.env,
+      fileScoped: fileScope,
+      changedFileCount: changedFiles.length,
+    });
     const verifyEnv = docsOnlyGuardsRunApplies
       ? { ...isolationEnv, KANBAN_TEST_GUARDS_ONLY: "1" }
       : effectiveTestScope
@@ -449,11 +447,10 @@ export async function runPreMergeGate(
     if (docsOnlyGuardsRunApplies) {
       console.log(`[pre-merge-gate] docs-only diff for workspace ${workspace.id} (${changedFiles.length} file(s)) — running @gate:always-run guard suites only`);
     }
-    if (fileScope && !emitFileScope) {
-      console.log(`[pre-merge-gate] KANBAN_TEST_SELECTOR=impact is set, so the impact selection replaces the ${changedFiles.length}-file scope for workspace ${workspace.id} — this run is recorded as impact-scoped, not full`);
-    }
-    if (emitFileScope) {
-      console.log(`[pre-merge-gate] file-scoping verify tests to ${changedFiles.length} changed file(s) for workspace ${workspace.id}`);
+    // One branch, and the message itself was chosen by `resolveGateFileScopeEmission` — the
+    // dropped-scope case is a different MESSAGE about the same decision, not a second decision.
+    if (fileScopeNote) {
+      console.log(`[pre-merge-gate] ${fileScopeNote} for workspace ${workspace.id}`);
     }
     gateTierInfo = {
       strategy: gateStrategy,
