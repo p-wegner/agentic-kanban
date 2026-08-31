@@ -11,7 +11,7 @@ import { eq } from "drizzle-orm";
 import { issues, preferences, repos, workspaces } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database, TransactionClient } from "../db/index.js";
-import { firstRow } from "../lib/first-row.js";
+import { getPreference } from "./preferences.repository.js";
 
 /** The preference holding the parent directory new projects are scaffolded into. */
 export const PROJECTS_BASE_PATH_KEY = "projects_base_path";
@@ -70,14 +70,15 @@ export async function updatePreferenceValue(
   await database.update(preferences).set({ value }).where(eq(preferences.key, key));
 }
 
-/** The raw `projects_base_path` value, or null when unset. */
+/**
+ * The raw `projects_base_path` value, or null when unset.
+ *
+ * Delegates to `preferences.repository` rather than querying the table here: WHO may read
+ * `preferences` is ratcheted (`preference-access-single-source.test.ts`, #613) precisely
+ * because a hand-rolled reader silently opts out of whatever that module does — caching,
+ * metrics, the null-vs-undefined contract. The contract is identical (`string | null`), so
+ * this is a delegation, not a behaviour change.
+ */
 export async function getProjectsBasePathPreference(database: Database = db): Promise<string | null> {
-  const row = await firstRow(
-    database
-      .select({ value: preferences.value })
-      .from(preferences)
-      .where(eq(preferences.key, PROJECTS_BASE_PATH_KEY))
-      .limit(1),
-  );
-  return row?.value ?? null;
+  return getPreference(PROJECTS_BASE_PATH_KEY, database);
 }
