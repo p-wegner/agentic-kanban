@@ -37,7 +37,7 @@ import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
-import type { GateTierInfo } from "./pre-merge-gate-tier.js";
+import type { GateImpactSelection, GateTierInfo } from "./pre-merge-gate-tier.js";
 
 /**
  * Path of `impact.mjs` relative to a repo root, as the board materializes the skill into a
@@ -245,9 +245,35 @@ interface SelectPayload {
   tier?: unknown;
   selected?: unknown;
   changed?: unknown;
+  belowFloor?: unknown;
+  stale?: unknown;
 }
 
-export function parseSelection(stdout: string): { tier: string; selected: string[]; changed: string[] } | null {
+export interface ParsedSelection {
+  tier: string;
+  selected: string[];
+  changed: string[];
+  /**
+   * How many candidate suites the selection ranked out BELOW the score floor (#956).
+   *
+   * This is the number the `impact` gate tier's honesty depends on — it is the size of the tail
+   * the tier is betting against — so it is parsed here rather than left to a second reader.
+   * Absent (an older tool) reads as 0; the payload has carried it since the skill's 2026-08-30
+   * build, and a wrong-low 0 is visible beside `selectedCount` rather than silently distorting a
+   * rate the way a missing `changed` would.
+   */
+  belowFloorCount: number;
+  /**
+   * Was the impact map stale when the selection was computed? The skill widens to the package
+   * tier and prints `[inventory STALE]` in that case, so a stale selection is a DIFFERENT
+   * artifact from a fresh one and the gate message must not report them identically. Absent reads
+   * as `false` — the honest default is "the tool did not say", and the `selectionTier` printed
+   * beside it is what would show the widening.
+   */
+  stale: boolean;
+}
+
+export function parseSelection(stdout: string): ParsedSelection | null {
   let payload: SelectPayload;
   try {
     payload = JSON.parse(stdout) as SelectPayload;
@@ -265,7 +291,80 @@ export function parseSelection(stdout: string): { tier: string; selected: string
   const changed = Array.isArray(payload.changed)
     ? payload.changed.filter((file): file is string => typeof file === "string" && file.length > 0)
     : [];
-  return { tier: typeof payload.tier === "string" ? payload.tier : "unknown", selected, changed };
+  return {
+    tier: typeof payload.tier === "string" ? payload.tier : "unknown",
+    selected,
+    changed,
+    belowFloorCount: Array.isArray(payload.belowFloor) ? payload.belowFloor.length : 0,
+    stale: payload.stale === true,
+  };
+}
+
+/**
+ * Run `select --json` in a worktree and parse it, or return null (#956).
+ *
+ * Extracted from `recordGateOutcome` so the `impact` gate TIER can name what the selection kept
+ * and dropped in its pass message using the same call the ledger already makes — one selection,
+ * two consumers, so the operator-facing message and the recorded row can never disagree about
+ * what the selection was.
+ *
+ * The base goes FIRST and POSITIONALLY. `cmdSelect` reads `positional[0]` and never consults a
+ * `--base` flag; passing one there is silently ignored and `changedFiles(undefined)` falls back to
+ * uncommitted work, which on the clean committed tree a gate runs against is EMPTY. That is #963's
+ * defect, and reintroducing it here would make every selection this tier reports the constant
+ * always-run baseline wearing the selection's name.
+ *
+ * Total by construction, like everything else in this module: any failure resolves to null.
+ */
+export async function resolveGateSelection(input: {
+  workingDir: string | null;
+  baseBranch?: string | null;
+  runCommand?: RunImpactCommand;
+}): Promise<ParsedSelection | null> {
+  try {
+    const { workingDir } = input;
+    if (!workingDir) return null;
+    const toolPath = join(workingDir, IMPACT_TOOL_RELATIVE_PATH);
+    if (!existsSync(toolPath)) return null;
+    const base = input.baseBranch?.trim() || null;
+    const run = input.runCommand ?? defaultRunCommand;
+    const result = await run({
+      cwd: workingDir,
+      args: [toolPath, "select", ...(base ? [base] : []), "--json", "--always-run"],
+      timeoutMs: IMPACT_COMMAND_TIMEOUT_MS,
+    });
+    if (result.exitCode !== 0) return null;
+    return parseSelection(result.stdout);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The `GateImpactSelection` the gate message needs, or null (#956).
+ *
+ * A thin adapter over `resolveGateSelection` so the CALLER — `runPreMergeGate`, which sits on the
+ * god-module gate's branch ceiling — spends no branch on the "did it resolve" question. Returns
+ * `undefined` when the run is not impact-selected at all (nothing to describe), and `null` when it
+ * is but the selection could not be resolved (which `buildImpactSelectionNote` renders as an
+ * explicit UNKNOWN). Those two are deliberately different values, not both falsy-and-equivalent.
+ */
+export async function resolveGateImpactSelection(input: {
+  applies: boolean;
+  workingDir: string | null;
+  baseBranch?: string | null;
+  runCommand?: RunImpactCommand;
+}): Promise<GateImpactSelection | null | undefined> {
+  if (!input.applies) return undefined;
+  const selection = await resolveGateSelection(input);
+  if (!selection) return null;
+  return {
+    selectedCount: selection.selected.length,
+    belowFloorCount: selection.belowFloorCount,
+    stale: selection.stale,
+    selectionTier: selection.tier,
+    changedCount: selection.changed.length,
+  };
 }
 
 /**

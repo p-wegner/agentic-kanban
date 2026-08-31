@@ -160,7 +160,9 @@ const COMPLEXITY_BASELINE: Record<string, number> = {
   "packages/server/src/cli/commands/system.ts": 32,
   "packages/server/src/routes/projects.ts": 30,
   "packages/server/src/services/backlog-markdown.service.ts": 41,
-  "packages/server/src/services/pre-merge-gate.service.ts": 37,
+  // 37 -> 34 (#956): the verify-env assembly moved into `buildVerifyEnv` in
+  // `pre-merge-gate-tier.ts`, where the scoping resolvers it combines already live.
+  "packages/server/src/services/pre-merge-gate.service.ts": 34,
   "packages/server/src/services/preflight-check.ts": 23,
   "packages/server/src/services/session-manager/session-lifecycle.ts": 38,
   "packages/server/src/services/workspace-scorecard.service.ts": 27,

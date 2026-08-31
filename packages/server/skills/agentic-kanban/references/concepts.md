@@ -29,9 +29,16 @@ The test half can be **scoped** to the packages a diff actually touches, but a s
 forces the *guard* suites — those that assert a property of the whole repo tree and would be invisible
 to import-graph scoping.
 
-`verify_gate_strategy_<projectId>` picks the tier (`full` | `scoped` | `scoped-base-watch`). A tier may
-only weaken verification **visibly**: a passing gate names what ran, e.g.
+`verify_gate_strategy_<projectId>` picks the tier (`full` | `scoped` | `scoped-base-watch` | `impact`).
+A tier may only weaken verification **visibly**: a passing gate names what ran, e.g.
 `pre-merge gate passed (tier: file-scoped, 3 changed file(s), +14 guard suites)`.
+
+`impact` is the narrowest tier and is **strictly opt-in** — it is nobody's default and no risk posture
+yields it. It picks the suites with the test-impact selection (a ranked heuristic) instead of
+`vitest related`'s import-graph walk, plus the guard suites and every test file the diff touches.
+Because what it drops is a guess rather than a provable non-dependency, its pass message additionally
+names how many suites the selection kept, how many it dropped below the score floor, and whether the
+impact map was fresh — a selection from a stale map is a weaker claim and must not read the same.
 
 If the gate is red, the branch is wrong. Fix it, or run fix-and-merge (which rebases and re-runs) —
 merging around it is never the answer.
