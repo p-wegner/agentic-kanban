@@ -49,6 +49,15 @@ export declare function scanAlwaysRunTests(
   readText?: (path: string) => string,
 ): string[];
 
+/**
+ * The refusal message for `KANBAN_TEST_SELECTOR=impact` + `KANBAN_TEST_FILES` together, or
+ * `null` when there is no conflict (#962).
+ */
+export declare function selectorFileScopeConflict(input: {
+  impactSelectorRequested: boolean;
+  scopedFiles: readonly string[];
+}): string | null;
+
 /** Changed files under a package, relative to that package's directory. */
 export declare function ownedChangedFiles(
   pkgDir: string,
