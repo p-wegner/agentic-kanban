@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   buildRecordArgs,
+  emptyChangeSetReason,
   gateRanScope,
+  parseSelection,
   recordGateOutcome,
   recordVerifyGateOutcome,
   IMPACT_TOOL_RELATIVE_PATH,
@@ -43,8 +45,8 @@ function makeRepos(): { worktree: string; main: string; cleanup: () => void } {
   return { worktree, main, cleanup: () => rmSync(root, { recursive: true, force: true }) };
 }
 
-const selectionJson = (tier: string, tests: string[]) =>
-  JSON.stringify({ tier, selected: tests.map((test) => ({ test, score: 1 })) });
+const selectionJson = (tier: string, tests: string[], changed: string[] = ["packages/server/src/services/x.ts"]) =>
+  JSON.stringify({ tier, changed, selected: tests.map((test) => ({ test, score: 1 })) });
 
 /** Records the argv of each spawn, and replies with a scripted stdout per subcommand. */
 function fakeRunner(replies: {
@@ -124,6 +126,43 @@ describe("buildRecordArgs", () => {
     });
     expect(args).not.toContain("--selected");
     expect(args).not.toContain("--failed");
+    // No base given — the flag is absent rather than empty, so the tool keeps its own default.
+    expect(args).not.toContain("--base");
+  });
+
+  it("carries --base when one was resolved", () => {
+    const args = buildRecordArgs({
+      toolPath: "/w/impact.mjs",
+      outcomesPath: "/o.jsonl",
+      passed: true,
+      selected: ["a.test.ts"],
+      failedSuites: [],
+      tier: "impact",
+      ran: "full",
+      source: "ci",
+      baseBranch: "master",
+    });
+    expect(args[args.indexOf("--base") + 1]).toBe("master");
+  });
+});
+
+describe("parseSelection / emptyChangeSetReason", () => {
+  it("reads the change set alongside the selection", () => {
+    const parsed = parseSelection(selectionJson("impact", ["a.test.ts"], ["src/a.ts", "src/b.ts"]));
+    expect(parsed).toMatchObject({ tier: "impact", selected: ["a.test.ts"], changed: ["src/a.ts", "src/b.ts"] });
+  });
+
+  it("reads a missing `changed` field as empty rather than assuming a diff was seen", () => {
+    // An older `impact.mjs` printed no `changed`. Assuming it saw a diff is the one reading that
+    // silently readmits the rows this guard exists to keep out.
+    const parsed = parseSelection(JSON.stringify({ tier: "impact", selected: ["a.test.ts"] }));
+    expect(parsed!.changed).toEqual([]);
+  });
+
+  it("flags an empty change set, and names whether a base was even available", () => {
+    expect(emptyChangeSetReason({ changed: ["src/a.ts"], baseBranch: "master" })).toBeNull();
+    expect(emptyChangeSetReason({ changed: [], baseBranch: "master" })).toContain("against master");
+    expect(emptyChangeSetReason({ changed: [], baseBranch: null })).toContain("no base branch");
   });
 });
 
@@ -368,6 +407,108 @@ describe("recordGateOutcome", () => {
       // suite show up as failure history instead of being erased by the retry that cleared it.
       expect(recordArgs[recordArgs.indexOf("--result") + 1]).toBe("pass");
       expect(recordArgs[recordArgs.indexOf("--failed") + 1]).toBe("packages/server/src/__tests__/flaky.test.ts");
+    } finally {
+      repos.cleanup();
+    }
+  });
+
+  it("passes the base branch to BOTH select and record, so the change set is the branch's own", async () => {
+    // #963 — the whole defect. `impact.mjs`'s `changedFiles(base)` only reads `base...HEAD` when
+    // a base is given; its other two sources (staged/unstaged, untracked) are both empty on the
+    // clean, fully-committed tree a gate runs against. Without `--base` every gate row recorded
+    // `changed: 0` and a selection equal to the constant always-run set.
+    const repos = makeRepos();
+    try {
+      const { run, calls } = fakeRunner({ select: { stdout: selectionJson("impact", ["a.test.ts"]) } });
+      await recordGateOutcome({
+        workingDir: repos.worktree,
+        repoPath: repos.main,
+        baseBranch: "master",
+        passed: true,
+        failedSuites: [],
+        tierInfo: tierInfo(),
+        runCommand: run,
+      });
+      const selectArgs = calls[0]!;
+      expect(selectArgs[selectArgs.indexOf("--base") + 1]).toBe("master");
+      // `record` recomputes the change set itself, so it needs the same base — otherwise the
+      // ledger's own `changed` field stays empty even though `select` saw the real diff.
+      const recordArgs = calls[1]!;
+      expect(recordArgs[recordArgs.indexOf("--base") + 1]).toBe("master");
+    } finally {
+      repos.cleanup();
+    }
+  });
+
+  it("omits --base entirely when the workspace has none, rather than passing an empty ref", async () => {
+    const repos = makeRepos();
+    try {
+      const { run, calls } = fakeRunner({ select: { stdout: selectionJson("impact", ["a.test.ts"]) } });
+      await recordGateOutcome({
+        workingDir: repos.worktree,
+        repoPath: repos.main,
+        baseBranch: "   ",
+        passed: true,
+        failedSuites: [],
+        tierInfo: tierInfo(),
+        runCommand: run,
+      });
+      expect(calls[0]!).not.toContain("--base");
+      expect(calls[1]!).not.toContain("--base");
+    } finally {
+      repos.cleanup();
+    }
+  });
+
+  it("tags a row whose change set came back empty, so it cannot dilute the miss rate", async () => {
+    // A gate always runs on a branch with commits against its base, so `changed: []` there does
+    // not mean "a diff that touched nothing" — it means the change set was never computed. Such a
+    // row records `missed: 0` for free, and 50 of them read as a confident 0% miss rate for a
+    // selector that was never consulted. It still RECORDS (a dropped row is indistinguishable
+    // from "the gate never ran") but under a distinct source, so `stats --json`'s `bySource`
+    // separates it.
+    const repos = makeRepos();
+    try {
+      const { run, calls } = fakeRunner({ select: { stdout: selectionJson("impact", ["a.test.ts"], []) } });
+      const warnings: string[] = [];
+      const result = await recordGateOutcome({
+        workingDir: repos.worktree,
+        repoPath: repos.main,
+        baseBranch: "master",
+        passed: true,
+        failedSuites: [],
+        tierInfo: tierInfo(),
+        runCommand: run,
+        log: (m) => warnings.push(m),
+      });
+      expect(result.recorded).toBe(true);
+      expect(result.changedCount).toBe(0);
+      expect(result.suspectReason).toContain("empty");
+      const recordArgs = calls[1]!;
+      expect(recordArgs[recordArgs.indexOf("--source") + 1]).toBe("ci-nochange");
+      expect(warnings.join(" ")).toContain("always-run baseline");
+    } finally {
+      repos.cleanup();
+    }
+  });
+
+  it("records a real change set under the plain source", async () => {
+    const repos = makeRepos();
+    try {
+      const { run, calls } = fakeRunner({ select: { stdout: selectionJson("impact", ["a.test.ts"]) } });
+      const result = await recordGateOutcome({
+        workingDir: repos.worktree,
+        repoPath: repos.main,
+        baseBranch: "master",
+        passed: true,
+        failedSuites: [],
+        tierInfo: tierInfo(),
+        runCommand: run,
+      });
+      expect(result.suspectReason).toBeUndefined();
+      expect(result.changedCount).toBe(1);
+      const recordArgs = calls[1]!;
+      expect(recordArgs[recordArgs.indexOf("--source") + 1]).toBe("ci");
     } finally {
       repos.cleanup();
     }

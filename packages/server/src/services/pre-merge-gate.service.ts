@@ -529,10 +529,16 @@ export async function runPreMergeGate(
     // wrong. Awaited (not fire-and-forget) so a merge never races the write, and `recordVerifyGateOutcome`
     // is total — it resolves to `{recorded:false, reason}` rather than throwing, so this cannot
     // turn a verdict into an error.
+    //
+    // #963 — `baseBranch` is not optional decoration: without it the selection is computed from
+    // an EMPTY change set (a gate runs on a clean, fully-committed tree, so `git diff HEAD` and
+    // the untracked list are both empty) and every row records the constant always-run set with a
+    // free `missed: 0`.
     await recordVerifyGateOutcome({
       workspaceId: workspace.id,
       workingDir,
       repoPath: projectRepoPath,
+      baseBranch: workspace.baseBranch,
       outcome,
       tierInfo: gateTierInfo,
     });
