@@ -435,11 +435,16 @@ describe("recordGateOutcome", () => {
     }
   });
 
-  it("passes the base branch to BOTH select and record, so the change set is the branch's own", async () => {
+  it("passes the base branch to BOTH select and record, in the spelling EACH subcommand parses", async () => {
     // #963 — the whole defect. `impact.mjs`'s `changedFiles(base)` only reads `base...HEAD` when
     // a base is given; its other two sources (staged/unstaged, untracked) are both empty on the
-    // clean, fully-committed tree a gate runs against. Without `--base` every gate row recorded
+    // clean, fully-committed tree a gate runs against. Without a base every gate row recorded
     // `changed: 0` and a selection equal to the constant always-run set.
+    //
+    // The two subcommands take it DIFFERENTLY, and asserting merely that "--base master" appears
+    // somewhere is what let the first fix land inert: `cmdSelect` reads `positional[0]` and never
+    // looks at a `--base` flag, so the flag form is accepted, ignored, and yields the empty change
+    // set the ticket exists to eliminate. `cmdRecord` reads `flag("base")`. Hence the asymmetry.
     const repos = makeRepos();
     try {
       const { run, calls } = fakeRunner({ select: { stdout: selectionJson("impact", ["a.test.ts"]) } });
@@ -452,10 +457,14 @@ describe("recordGateOutcome", () => {
         tierInfo: tierInfo(),
         runCommand: run,
       });
+      // POSITIONAL, and first — `select <base> --json --always-run`. `positional` is derived from
+      // `args.slice(1)`, so the base must be the argument directly after the subcommand.
       const selectArgs = calls[0]!;
-      expect(selectArgs[selectArgs.indexOf("--base") + 1]).toBe("master");
+      expect(selectArgs.slice(1, 3)).toEqual(["select", "master"]);
+      expect(selectArgs).not.toContain("--base");
       // `record` recomputes the change set itself, so it needs the same base — otherwise the
-      // ledger's own `changed` field stays empty even though `select` saw the real diff.
+      // ledger's own `changed` field stays empty even though `select` saw the real diff. It reads
+      // `flag("base")`, so here the FLAG form is the correct one.
       const recordArgs = calls[1]!;
       expect(recordArgs[recordArgs.indexOf("--base") + 1]).toBe("master");
     } finally {
@@ -463,7 +472,7 @@ describe("recordGateOutcome", () => {
     }
   });
 
-  it("omits --base entirely when the workspace has none, rather than passing an empty ref", async () => {
+  it("omits the base entirely when the workspace has none, rather than passing an empty ref", async () => {
     const repos = makeRepos();
     try {
       const { run, calls } = fakeRunner({ select: { stdout: selectionJson("impact", ["a.test.ts"]) } });
@@ -476,6 +485,9 @@ describe("recordGateOutcome", () => {
         tierInfo: tierInfo(),
         runCommand: run,
       });
+      // No positional base for `select` — the flag list must follow the subcommand directly, or
+      // `positional[0]` would pick up a blank ref the tool cannot resolve.
+      expect(calls[0]!.slice(1, 3)).toEqual(["select", "--json"]);
       expect(calls[0]!).not.toContain("--base");
       expect(calls[1]!).not.toContain("--base");
     } finally {
