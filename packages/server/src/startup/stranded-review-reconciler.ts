@@ -1,7 +1,7 @@
 import { issueComments, issues, projectStatuses, sessions, workflowNodes, workspaceReviewPreflight, workspaces } from "@agentic-kanban/shared/schema";
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
-import { graphOwnsPostExitReview } from "./exit/workflow-ownership.js";
+import { graphOwnsReviewSessionExit } from "./exit/workflow-ownership.js";
 import { and, eq } from "drizzle-orm";
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
@@ -119,7 +119,11 @@ function isOwnedByAnotherPath(c: ReconcilerCandidateOwnership): boolean {
   // #757 narrowed "graph-owned" to exclude a node MAPPED to the In Review status: nothing in
   // the graph launches a review for such a node, so skipping it here strands exactly the
   // workspace this reconciler exists to rescue. Same predicate as the exit engine's guard.
-  if (graphOwnsPostExitReview(c.currentNodeId ? { nodeType: c.currentNodeType, statusName: c.currentNodeStatusName } : null)) return true;
+  // #960: on a START node the exception is the other way round — a start node is where the
+  // BUILDER works, so a review that already exited there means the In-Review transition was
+  // missed, not that the graph is mid-flow. `graphOwnsReviewSessionExit` is the same predicate
+  // the exit engine's review path now uses, so the two halves cannot drift.
+  if (graphOwnsReviewSessionExit(c.currentNodeId ? { nodeType: c.currentNodeType, statusName: c.currentNodeStatusName } : null)) return true;
   // A merge in flight OWNS this workspace (#270): its pre-lock gate runs for 20-40 minutes
   // with the workspace still idle, which is exactly the window in which this reconciler
   // used to launch a second review and strand the merge. The merge path runs/ran its own

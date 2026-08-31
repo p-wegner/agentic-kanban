@@ -56,7 +56,7 @@ import { createReviewLauncher } from "./exit/review-launch.js";
 import { createUsageLimitExitHandler, findUsageLimitProvider } from "./exit/usage-limit-exit.js";
 import { launchLearningStep } from "./exit/learning-step.js";
 import type { AutoMergeFn, ExitContext, WorkspaceRow } from "./exit/exit-context.js";
-import { graphOwnsPostExitReview } from "./exit/workflow-ownership.js";
+import { describeWithheldReviewArm, graphOwnsPostExitReview, graphOwnsReviewSessionExit, START_NODE_TYPE } from "./exit/workflow-ownership.js";
 import { isWorkspaceTerminalOnExit, terminalGuardCasStatus } from "./exit/workspace-terminal-guard.js";
 import { getWorkflowNodeById, getWorkspaceCurrentWorkflowNode } from "../repositories/workflow.repository.js";
 
@@ -121,6 +121,17 @@ async function isSpecPlanningNode(database: Database, currentNodeId: string | nu
  */
 async function graphOwnsWorkspaceReview(database: Database, workspaceId: string): Promise<boolean> {
   return graphOwnsPostExitReview(await getWorkspaceCurrentWorkflowNode(workspaceId, database));
+}
+
+/**
+ * The REVIEW-exit flavour of the guard above (#960). Same read, narrower predicate: a start
+ * node is where the BUILDER works, so a review session exiting there means the issue
+ * transition to In Review was missed — not that the graph is mid-flow. Returns the node too,
+ * so a withheld arm can NAME the stage it was withheld on instead of being silent.
+ */
+async function graphOwnsReviewExit(database: Database, workspaceId: string) {
+  const node = await getWorkspaceCurrentWorkflowNode(workspaceId, database);
+  return { owned: graphOwnsReviewSessionExit(node), node };
 }
 
 export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, reconcileForkChildOnExit, database, gitService: injectedGitService }: WorkflowDeps) {
@@ -369,18 +380,31 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
     // saying "review this", and nothing in the graph launches or lands that review, so the
     // legacy path is its executor and readyForMerge is armed on a branch the workflow did mean
     // to review.
-    if (await graphOwnsWorkspaceReview(db, workspaceId)) {
-      console.log(`[workflow] review session ${sessionId} exited but workspace ${workspaceId} sits on a graph-owned workflow stage  withholding readyForMerge (#997/#757)`);
+    // #960 narrows it once more for THIS path: a start node is the builder's stage, so a review
+    // exiting there means the In-Review transition was missed — the graph has no next stage to
+    // drive and withholding stranded #954/#959. And when the arm IS withheld, the log NAMES the
+    // node: the silent withhold is what made #960 need a DB query to see at all.
+    const reviewOwnership = await graphOwnsReviewExit(db, workspaceId);
+    if (reviewOwnership.owned) {
+      console.log(`[workflow] review session ${sessionId} exited but workspace ${workspaceId} sits on graph-owned ${describeWithheldReviewArm(reviewOwnership.node!)} — withholding readyForMerge (#997/#757/#960)`);
       boardEvents.broadcast(projectId, "issue_updated");
       return;
     }
     const currentIssueRows = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId)).limit(1);
     const currentStatus = currentIssueRows.length > 0 ? statuses.find((s) => s.id === currentIssueRows[0].statusId) : null;
     const autoFix = getBool(prefMap, "review_auto_fix");
-    if (currentStatus?.name === "In Progress" && !autoFix) {
+    // #960: "In Progress after a review" normally means the REVIEWER moved it back because it
+    // flagged issues. It does NOT mean that when the workspace never left the graph's start
+    // node — then the issue simply never transitioned to In Review, so In Progress is the
+    // ORIGINAL status and reading it as a downgrade strands a clean review (#954, #959).
+    const neverLeftStartNode = reviewOwnership.node?.nodeType === START_NODE_TYPE;
+    if (currentStatus?.name === "In Progress" && !autoFix && !neverLeftStartNode) {
       console.log("[workflow] reviewer flagged issues (non-auto-fix mode)  skipping auto-merge, leaving in In Progress");
       boardEvents.broadcast(projectId, "issue_updated");
       return;
+    }
+    if (neverLeftStartNode) {
+      console.log(`[workflow] review session ${sessionId} exited clean while workspace ${workspaceId} still sits on start ${describeWithheldReviewArm(reviewOwnership.node!)} — the In-Review transition was missed; proceeding to the pre-merge gate rather than stranding it (#960)`);
     }
     // Pre-merge gate (arch-review §1.2): the verify (#531) + smoke (#791) checks now run through
     // the SINGLE shared owner `runPreMergeGate` — the SAME gate the manual/monitor merge paths run
