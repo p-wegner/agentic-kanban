@@ -252,6 +252,27 @@ const DYNAMIC_ENV_READS: Record<string, string> = {
     "frozen for checkouts the board already wrote them into; adding the function to " +
     "ENV_READER_HELPERS would instead demand docs/env-vars.md rows for two variables that are " +
     "part of the hook's surface, not the board's.",
+  // #957 — the machine-scoped verify lock. Its two variables are read through the module's own
+  // exported constants so that the server half and the `scripts/` mirror cannot disagree about
+  // which env var they mean: a lock whose two halves read different switches serializes nothing
+  // while appearing to work, which is the exact failure `machine-verify-lock-mirror.test.ts`
+  // exists to prevent (it asserts equality of these constants across both halves). A string
+  // literal at each of the four sites would be four places for that to drift. Both names have
+  // docs/env-vars.md rows.
+  "packages/server/src/lib/machine-verify-lock.ts::MACHINE_LOCK_ENV":
+    "resolves only to the exported constant KANBAN_MACHINE_VERIFY_LOCK — the opt-in switch for " +
+    "the cross-process verify lock. Read through the constant so the scripts/ mirror provably " +
+    "reads the same name (pinned by machine-verify-lock-mirror.test.ts).",
+  "packages/server/src/lib/machine-verify-lock.ts::MACHINE_LOCK_DIR_ENV":
+    "resolves only to the exported constant KANBAN_MACHINE_VERIFY_LOCK_DIR — the lockfile " +
+    "directory override, which is the seam the suites acquire a real lock through. Same " +
+    "constant-not-literal reasoning as the switch above.",
+  "scripts/machine-verify-lock.mjs::MACHINE_LOCK_ENV":
+    "the mirror half of the same read. It cannot import the server constant (bare `node`, no " +
+    "build step, and worktrees have no built dist/), so it re-declares it and the mirror suite " +
+    "asserts the two are equal.",
+  "scripts/machine-verify-lock.mjs::MACHINE_LOCK_DIR_ENV":
+    "the mirror half of the directory override, held to the shared value by the same suite.",
 };
 
 interface Read {

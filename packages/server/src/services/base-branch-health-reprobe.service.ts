@@ -23,9 +23,37 @@ import {
 import { getLatestBaseBranchHealth, type BaseBranchHealthOutcome } from "../repositories/base-branch-health.repository.js";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { buildGateBusy } from "./jvm-build-semaphore.js";
+import {
+  inspectMachineVerifyLock,
+  machineVerifyLockEnabled,
+} from "../lib/machine-verify-lock.js";
 
 /** Default cadence of the periodic sweep; also the recency window an on-demand ask is judged against. */
 export const BASE_HEALTH_DEFAULT_INTERVAL_MS = 30 * 60 * 1000;
+
+/**
+ * "Is heavyweight verification running right now?" — the ONE signal (#957).
+ *
+ * `buildGateBusy()` answers that for THIS process only, which is what let a worktree dev server's
+ * gate, a second board server, or a builder's own `pnpm test:mine` run beside a probe with
+ * nothing noticing. The machine lock sees those; this ORs the two so callers keep asking one
+ * question and get an answer that covers the box rather than the event loop.
+ *
+ * A lock held by OUR OWN pid is deliberately not counted: this process's own holder is already
+ * what `buildGateBusy()` reports, and double-counting it would make a probe that legitimately
+ * holds the lock consider itself busy. Cheap enough to call per decision — one `existsSync` plus
+ * at most one small read, and only when the lock is switched on at all.
+ */
+export function resolveGateBusy(): boolean {
+  if (buildGateBusy()) return true;
+  if (!machineVerifyLockEnabled()) return false;
+  const held = inspectMachineVerifyLock();
+  if (!held) return false;
+  // Stale or confirmed-dead holders are reclaimable, so they are not "running" by any useful
+  // reading — treating them as busy would let one crashed process starve the probe indefinitely.
+  if (held.isStale && !held.ownerProcessAlive) return false;
+  return held.contents.pid !== process.pid;
+}
 
 export interface BaseHealthDueInput {
   /** Epoch ms — pure arithmetic, hence `nowMs` (#614's vocabulary). */
@@ -39,10 +67,19 @@ export interface BaseHealthDueInput {
   probeStartedAt?: string | null;
   /**
    * Is a pre-merge gate's heavyweight verify/build/smoke work running right now (#931)?
-   * Read from `buildGateBusy()` by the caller — kept as an input rather than read in here so
-   * this stays a pure decision function. The probe is the least urgent of the three
-   * uncoordinated test-spawning paths (gate, builder, base-health) and its result is not
-   * time-critical, so it is the one that yields.
+   * Read by the caller — kept as an input rather than read in here so this stays a pure decision
+   * function. The probe is the least urgent of the three uncoordinated test-spawning paths
+   * (gate, builder, base-health) and its result is not time-critical, so it is the one that
+   * yields.
+   *
+   * **#957 reconciled this with the machine lock instead of stacking a second signal.** The
+   * ticket's third design question was exactly that: a machine-wide lock overlaps `buildGateBusy()`
+   * and the two should be one thing. They are — `resolveGateBusy()` below ORs the in-process
+   * semaphore with "some OTHER process holds the machine verify lock", and this field keeps
+   * meaning precisely what it meant before: "heavyweight verification is running right now, so
+   * yield". What changed is only that it can now see past this process's own boundary, which is
+   * the blindness #957 exists to remove. A second `machineLockBusy` input would have forced every
+   * caller to re-derive the same disjunction and let the two drift.
    */
   gateBusy?: boolean;
 }
@@ -117,7 +154,8 @@ export async function resolveBaseHealthProbeDue(
     lastResultAt: latest?.createdAt ?? null,
     lastOutcome: latest?.outcome ?? null,
     probeStartedAt,
-    gateBusy: buildGateBusy(),
+    // #957 — the machine-wide reading, not just this process's. See `resolveGateBusy`.
+    gateBusy: resolveGateBusy(),
   });
 }
 
