@@ -83,10 +83,13 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // timeouts that fail gates and trigger whole-pipeline retries.
   "verify_max_workers",
   "verify_file_scope",
-  // Named verify-gate tier (#538): `full | scoped | scoped-base-watch`, replacing three
+  // Named verify-gate tier (#538): `full | scoped | scoped-base-watch | impact`, replacing three
   // independent booleans (`verify_file_scope` + the implicit package/file scoping an
   // operator could otherwise misalign) with ONE dial. See `resolveVerifyGateStrategy`
   // in `pre-merge-gate.service.ts` for the mapping onto the existing knobs.
+  // `impact` (#956) is the narrowest and is STRICTLY OPT-IN — no risk posture yields it, and it
+  // is nobody's default, because the selection is a ranked heuristic whose miss rate is not yet
+  // measured (#954 owns that corpus, and gates PROMOTING this tier — not its existence).
   "verify_gate_strategy",
   // #660 — opt-in: run the E2E smoke lane as part of this project's pre-merge gate. Default
   // OFF, because enabling it taxes every merge with ~52s plus a cold two-server boot, and

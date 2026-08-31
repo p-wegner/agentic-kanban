@@ -1,7 +1,7 @@
 import { gateVerificationKey, combinedMergedTreeHash, rememberTreeGatedGreen, wasTreeGatedGreen } from "./merge-gate-tree-memo.js";
 import { getAllWorkspaceRepos } from "./workspace-all-repos.js";
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createManagedTempDir, type ManagedTempDir } from "@agentic-kanban/shared/lib/temp-dir";
@@ -33,6 +33,8 @@ import {
   buildGateTierMessage,
   resolveGateScoping,
   resolveGateFileScopeEmission,
+  resolveImpactSelectorEnv,
+  buildVerifyEnv,
   type GateTierInfo,
 } from "./pre-merge-gate-tier.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -43,7 +45,7 @@ import { summarizeVerifyFailure } from "./verify-failure-summary.js";
 import { VERIFY_NEUTRALIZED_LISTENER_ENV } from "../lib/verify-env.js";
 import { resolveVerifyOutcome } from "./verify-retry-strategies.js";
 import type { FailedSuite } from "./verify-flake-retry.js";
-import { recordVerifyGateOutcome } from "./test-impact-outcome.service.js";
+import { recordVerifyGateOutcome, resolveGateImpactSelection } from "./test-impact-outcome.service.js";
 import { openRedDebtEntry } from "../repositories/red-debt.repository.js";
 
 // The verify TUNABLES (timeout / worker cap / file-scope prefs, and #909's capacity
@@ -434,16 +436,23 @@ export async function runPreMergeGate(
       env: process.env,
       fileScoped: fileScope,
       changedFileCount: changedFiles.length,
+      strategy: gateStrategy,
     });
-    const verifyEnv = docsOnlyGuardsRunApplies
-      ? { ...isolationEnv, KANBAN_TEST_GUARDS_ONLY: "1" }
-      : effectiveTestScope
-        ? {
-            ...isolationEnv,
-            KANBAN_TEST_PACKAGES: effectiveTestScope,
-            ...(emitFileScope ? { KANBAN_TEST_FILES: changedFiles.join(",") } : {}),
-          }
-        : isolationEnv;
+    // #956 — the three scoping vocabularies do not compose freely, so their precedence lives in
+    // one pure function beside the resolvers that feed it. See `buildVerifyEnv`.
+    const verifyEnv = buildVerifyEnv({
+      isolationEnv,
+      guardsOnly: docsOnlyGuardsRunApplies,
+      impactEnv: resolveImpactSelectorEnv({
+        strategy: gateStrategy,
+        baseBranch: workspace.baseBranch,
+        changedFiles,
+        fileExists: (file) => existsSync(join(workingDir, file)),
+      }),
+      packagesEnv: effectiveTestScope,
+      emitFileScope,
+      changedFiles,
+    });
     if (docsOnlyGuardsRunApplies) {
       console.log(`[pre-merge-gate] docs-only diff for workspace ${workspace.id} (${changedFiles.length} file(s)) — running @gate:always-run guard suites only`);
     }
@@ -458,6 +467,13 @@ export async function runPreMergeGate(
       // `impact-scoped` rather than as `full` — the latter asserts that every suite was observed,
       // which is the one claim such a run cannot make.
       selector: gateSelector,
+      // #956: what the selection kept and dropped, for the PASS message — the same `select --json`
+      // the #954 ledger makes, so message and ledger cannot disagree about what it was.
+      impactSelection: await resolveGateImpactSelection({
+        applies: gateSelector === "impact" && !docsOnlyGuardsRunApplies,
+        workingDir,
+        baseBranch: workspace.baseBranch,
+      }),
       packageScoped: Boolean(effectiveTestScope) && !docsOnlyGuardsRunApplies,
       // What was actually EMITTED, not what the scoping decision wanted: under the impact
       // selector the file list is dropped, and reporting `fileScoped: true` would name a

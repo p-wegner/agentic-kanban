@@ -21,11 +21,24 @@ import { resolveSelectorId } from "./test-impact-selector-id.js";
  *                            classifier cannot see (a guard whose ambient read hides in a
  *                            helper). Falls back to `scoped` behavior until that base-health
  *                            mechanism lands — no knob may claim a proof it cannot yet make.
+ *  - `impact`              — NARROWER THAN `scoped` (#956). Package scoping still applies, but
+ *                            the file half is chosen by the test-impact SELECTION (a ranked
+ *                            heuristic over several signals) instead of `vitest related`'s
+ *                            import-graph walk, plus the `@gate:always-run` guards and every
+ *                            NEW test file in the diff.
  *
  * A level may only WEAKEN verification VISIBLY: `buildGateTierMessage` always names the level
  * actually used, so a merge comment never hides which of these ran.
+ *
+ * **`impact` IS STRICTLY OPT-IN AND IS NOT ANY PROJECT'S DEFAULT** — deliberately, and this is
+ * the whole reason it can exist before #954's miss-rate corpus does. The selection is a ranked
+ * GUESS: unlike `vitest related`, whose omissions are provably outside the import graph, a suite
+ * this tier drops below the score floor may genuinely have been broken by the diff. A tier that
+ * no project selects cannot weaken any gate, so #954's ~50-run corpus gates the PROMOTION of
+ * this tier to anybody's default — a separate, later decision — rather than its existence.
+ * `DEFAULT_VERIFY_GATE_STRATEGY` stays `full`, and no risk posture yields `impact`.
  */
-export const VERIFY_GATE_STRATEGY_VALUES = ["full", "scoped", "scoped-base-watch"] as const;
+export const VERIFY_GATE_STRATEGY_VALUES = ["full", "scoped", "scoped-base-watch", "impact"] as const;
 export type VerifyGateStrategy = (typeof VERIFY_GATE_STRATEGY_VALUES)[number];
 
 /** Default until a base-health signal exists (see `scoped-base-watch` above) — #538. */
@@ -102,6 +115,15 @@ export async function resolveGateTierFor(
  * orthogonal to `packagesEnv`/`fileScoped`, which is why it isn't threaded through this
  * function's return value — a caller wires the two together (scope the train gate here, then
  * separately check whether a base probe is due).
+ *
+ * **`impact` (#956) keeps the PACKAGE scope and returns `fileScoped: false`**, which is not a
+ * widening — it is the one honest encoding available. `fileScoped` in this codebase means
+ * exactly "a `KANBAN_TEST_FILES` list was emitted, so the runner will use `vitest related`", and
+ * under `impact` no such list is emitted (`scripts/test-mine.mjs` REFUSES to run with both, see
+ * `resolveGateFileScopeEmission`). The narrowing that DOES apply is the selection, and it is
+ * reported through `selector`/`impactSelection` rather than by borrowing this flag — a flag
+ * whose name would then mean two different narrowings is precisely how a tier weakens
+ * invisibly.
  */
 export function resolveGateScoping(args: {
   strategy: VerifyGateStrategy;
@@ -265,8 +287,18 @@ export type GateTestSelector = "related" | "impact";
  *
  * Mirrors `scripts/test-mine.mjs`'s own parse (trim + lowercase, `impact` the only recognized
  * value); an unrecognized value falls back there to `vitest related`, so it does here too.
+ *
+ * **The TIER also selects it (#956).** `verify_gate_strategy = impact` is the supported,
+ * per-project way in; the ambient env var stays honoured because #962's reason for reading it has
+ * not gone away (an operator who exports it for the server process gets an impact-narrowed gate
+ * with no code change, and that run must not record as full). Either route yields the same
+ * selector, so a gate never claims one and runs the other.
  */
-export function resolveGateTestSelector(env: Record<string, string | undefined>): GateTestSelector {
+export function resolveGateTestSelector(
+  env: Record<string, string | undefined>,
+  strategy?: VerifyGateStrategy,
+): GateTestSelector {
+  if (strategy === "impact") return "impact";
   return (env.KANBAN_TEST_SELECTOR ?? "").trim().toLowerCase() === "impact" ? "impact" : "related";
 }
 
@@ -291,19 +323,149 @@ export function resolveGateFileScopeEmission(args: {
   /** What `resolveGateScoping` decided, before the selector is taken into account. */
   fileScoped: boolean;
   changedFileCount: number;
+  /** The resolved tier — `impact` selects the selector on its own (#956). */
+  strategy?: VerifyGateStrategy;
 }): { selector: GateTestSelector; emitFileScope: boolean; note: string | null } {
-  const selector = resolveGateTestSelector(args.env);
+  const selector = resolveGateTestSelector(args.env, args.strategy);
   const emitFileScope = args.fileScoped && selector !== "impact";
+  // Which of the two routes chose the selector, so the log line names the knob an operator would
+  // actually have to change. Under the `impact` TIER the file scope was never going to be emitted
+  // in the first place, so calling that a "dropped" scope would misdescribe it.
+  const viaTier = args.strategy === "impact";
   const note = !args.fileScoped
     ? null
     : emitFileScope
       ? `file-scoping verify tests to ${args.changedFileCount} changed file(s)`
-      : `KANBAN_TEST_SELECTOR=impact is set, so the impact selection replaces the ${args.changedFileCount}-file scope — this run is recorded as impact-scoped, not full`;
+      : viaTier
+        ? `verify_gate_strategy=impact, so the impact selection chooses the suites instead of the ${args.changedFileCount}-file scope — this run is recorded as impact-scoped, not full`
+        : `KANBAN_TEST_SELECTOR=impact is set, so the impact selection replaces the ${args.changedFileCount}-file scope — this run is recorded as impact-scoped, not full`;
   return { selector, emitFileScope, note };
+}
+
+/**
+ * What the test-impact selection actually kept and dropped, for the gate message (#956).
+ *
+ * The `impact` tier's whole risk is in the tail it drops, so the message may not stop at naming
+ * the tier: the repo's rule is that a level may only weaken verification VISIBLY, and "impact
+ * tier, 12 suites" hides both HOW MANY suites were ranked out below the floor and whether the map
+ * that ranked them was even current. A selection made from a STALE map is a materially different,
+ * weaker claim than one made from a fresh map — the skill itself widens to the package tier and
+ * prints `[inventory STALE]` in that case — and the two must not read the same.
+ *
+ * Every field is optional-by-absence at the type level only in the sense that the whole object is;
+ * when the gate could not resolve a selection at all it carries `null` and the message SAYS the
+ * selection facts are unknown rather than omitting the subject.
+ */
+export interface GateImpactSelection {
+  /** How many test files the selection kept — the suites that actually ran (plus guards). */
+  selectedCount: number;
+  /** How many were ranked out BELOW the score floor. This is the tail the tier is betting on. */
+  belowFloorCount: number;
+  /** Was the impact map stale when the selection was computed? */
+  stale: boolean;
+  /** The selection tier the skill itself reported (`impact` | `package` | `all`). */
+  selectionTier?: string;
+  /** How many changed files the selection saw — 0 means it never saw the diff (#963). */
+  changedCount?: number;
+}
+
+/** Matches the test-file extensions `scripts/test-mine.mjs` actually runs. */
+const TEST_FILE_RE = /\.test\.[cm]?[jt]sx?$/;
+
+/**
+ * The env the `impact` tier hands the verify runner — and it is three variables, not one (#956).
+ *
+ * - `KANBAN_TEST_SELECTOR=impact` turns the selection on.
+ * - `KANBAN_IMPACT_BASE` is what makes it a selection AT ALL. A gate runs on a clean,
+ *   fully-committed tree, so with no base `impact.mjs` computes an EMPTY change set and silently
+ *   degrades to the constant always-run set — identical for every branch — while still calling
+ *   itself a selection. That is the #963 defect in a new place.
+ * - `KANBAN_TEST_NEW_FILES` names the test files the diff TOUCHES. The motivating case is an ADDED
+ *   suite: it is absent from the committed impact map, so it has no coverage, failure or runtime
+ *   history — the very signals the score is built from — and can be ranked out below the floor by
+ *   its own newness, letting the branch that introduced it merge without ever running it. Added vs
+ *   MODIFIED is deliberately not distinguished: the answer is the same for both (run it), and the
+ *   diff-status plumbing to tell them apart would buy nothing.
+ *
+ * Empty for every other tier, INCLUDING one whose selector came from the ambient
+ * `KANBAN_TEST_SELECTOR` rather than from the tier: there the operator owns the configuration and
+ * the gate does not second-guess it by injecting a base they did not ask for.
+ *
+ * Pure, and here rather than inline at the call site, because `runPreMergeGate` sits ON the
+ * god-module gate's 25-branch ceiling (grandfathered at 37) — three conditionals spent on env
+ * assembly are three the function cannot spend on the merge logic it exists for. Being pure also
+ * makes the wiring a table test instead of something only a live gate run would catch, which is
+ * the same reason `resolveGateFileScopeEmission` and `resolveGateScoping` live here.
+ *
+ * `fileExists` is injected so that test is possible without a worktree on disk.
+ */
+export function resolveImpactSelectorEnv(args: {
+  strategy: VerifyGateStrategy;
+  baseBranch: string | null | undefined;
+  changedFiles: readonly string[];
+  /** Whether a changed path still exists — a DELETED test must not be named. Handing vitest a
+   *  missing path fails the package with a bare `No test files found`, turning a WIDENING into a
+   *  red gate. */
+  fileExists: (relativePath: string) => boolean;
+}): Record<string, string> {
+  if (args.strategy !== "impact") return {};
+  const newTestFiles = args.changedFiles.filter((file) => TEST_FILE_RE.test(file) && args.fileExists(file));
+  return {
+    KANBAN_TEST_SELECTOR: "impact",
+    ...(args.baseBranch ? { KANBAN_IMPACT_BASE: args.baseBranch } : {}),
+    ...(newTestFiles.length > 0 ? { KANBAN_TEST_NEW_FILES: newTestFiles.join(",") } : {}),
+  };
+}
+
+/**
+ * Assemble the env the verify script runs under — the ONE place the three mutually-exclusive
+ * scoping vocabularies are combined (#956).
+ *
+ * There are exactly three ways this gate narrows the test half, and they do not compose freely:
+ * `KANBAN_TEST_GUARDS_ONLY` (docs-only, exits before anything else is consulted),
+ * `KANBAN_TEST_SELECTOR=impact` + its base/new-file companions, and
+ * `KANBAN_TEST_PACKAGES` (+ `KANBAN_TEST_FILES`). Getting the precedence wrong is silent in the
+ * worst direction — `test-mine.mjs` REFUSES the selector+files pair outright, so an assembly bug
+ * here turns a merge gate into a hard exit-2 rather than a wrong-but-visible run.
+ *
+ * Pure, and here beside `resolveGateScoping` / `resolveGateFileScopeEmission` / the impact env,
+ * so the whole decision is testable as a table and `runPreMergeGate` — which sits ON the
+ * god-module gate's branch and line ceilings — spends nothing on it.
+ *
+ * The impact env is folded into the non-guards arms only: a docs-only diff never reaches the
+ * selector, so naming it there would describe a selection that cannot happen.
+ */
+export function buildVerifyEnv(args: {
+  /** Isolation/capacity env every run gets regardless of tier. */
+  isolationEnv: Record<string, string>;
+  guardsOnly: boolean;
+  /** `resolveImpactSelectorEnv`'s output — `{}` for every non-impact tier. */
+  impactEnv: Record<string, string>;
+  /** `resolveGateScoping`'s `packagesEnv`; null means "set no package scope". */
+  packagesEnv: string | null;
+  /** `resolveGateFileScopeEmission`'s `emitFileScope`. */
+  emitFileScope: boolean;
+  changedFiles: readonly string[];
+}): Record<string, string> {
+  if (args.guardsOnly) return { ...args.isolationEnv, KANBAN_TEST_GUARDS_ONLY: "1" };
+  const base = { ...args.isolationEnv, ...args.impactEnv };
+  if (!args.packagesEnv) return base;
+  return {
+    ...base,
+    KANBAN_TEST_PACKAGES: args.packagesEnv,
+    ...(args.emitFileScope ? { KANBAN_TEST_FILES: args.changedFiles.join(",") } : {}),
+  };
 }
 
 export interface GateTierInfo {
   strategy: VerifyGateStrategy;
+  /**
+   * The selection facts behind an `impact`-selector run (#956), or null when the gate ran under
+   * that selector but could not resolve them (no skill, no inventory, an unparseable payload).
+   *
+   * Undefined for every non-impact run, where there is no selection to describe.
+   */
+  impactSelection?: GateImpactSelection | null;
   /**
    * Which selector chose the suites (#962). Optional for back-compat with a caller that never
    * resolved one; `gateRanScope` treats an absent value as `related`, which reproduces the
@@ -381,6 +543,32 @@ export interface GateTierInfo {
 }
 
 /**
+ * The impact selection's facts as a message fragment (#956), or null when there is nothing to say.
+ *
+ * Extracted from `buildGateTierMessage` rather than inlined because it is the part with a real
+ * decision in it — an unresolved selection must produce a LOUDER string than a resolved one, which
+ * is the opposite of the usual "omit when absent" shape used for the optional fields around it.
+ */
+export function buildImpactSelectionNote(tierInfo: GateTierInfo): string | null {
+  if (tierInfo.selector !== "impact" || tierInfo.guardsOnly) return null;
+  const selection = tierInfo.impactSelection;
+  if (!selection) {
+    // Silence here would read as "nothing was dropped". The tier narrowed the run by an amount
+    // nobody can state, which is strictly worse than a stated number and must say so.
+    return "selection UNKNOWN (could not be resolved — what it dropped is unmeasured)";
+  }
+  // `map stale` is not a footnote: the skill widens to the package tier and prints
+  // `[inventory STALE]` when the map is behind, so the selection is a different, weaker artifact.
+  // "map fresh" is stated too — an absent word would leave a reader unable to tell a fresh
+  // selection from an older gate message that predates this field.
+  return (
+    `selection kept ${selection.selectedCount} suite(s), dropped ${selection.belowFloorCount} below the score floor` +
+    (selection.selectionTier ? `, selection tier ${selection.selectionTier}` : "") +
+    `, map ${selection.stale ? "STALE" : "fresh"}`
+  );
+}
+
+/**
  * #538 — even a PASSED gate must say what actually ran, so a level may only weaken
  * verification VISIBLY: anyone reading a merge comment can see the tier, not just "passed".
  *
@@ -395,13 +583,21 @@ export interface GateTierInfo {
  */
 export function buildGateTierMessage(tierInfo: GateTierInfo | null): string {
   if (!tierInfo) return "pre-merge gate passed (smoke check only — no verify_script tier)";
+  // #956 — the impact SELECTION outranks the package/file scoping for the tier NAME, because it
+  // is the narrower and the less provable of the two: `package-scoped` asserts that every suite in
+  // those packages ran, which is exactly what an impact-selected run does not do. Guards-only still
+  // wins, for the same reason it wins in `gateRanScope`: `KANBAN_TEST_GUARDS_ONLY` exits before the
+  // selector is ever consulted, so no selection happened at all.
   const tier = tierInfo.guardsOnly
     ? "guards-only (docs-only diff)"
-    : tierInfo.fileScoped
-      ? "file-scoped"
-      : tierInfo.packageScoped
-        ? "package-scoped"
-        : "full";
+    : tierInfo.selector === "impact"
+      ? "impact-selected"
+      : tierInfo.fileScoped
+        ? "file-scoped"
+        : tierInfo.packageScoped
+          ? "package-scoped"
+          : "full";
+  const impactNote = buildImpactSelectionNote(tierInfo);
   const workersLabel = tierInfo.maxWorkersDerived
     ? `workers ${tierInfo.maxWorkers} (derived, host free ${(tierInfo.hostFreeGb ?? 0).toFixed(1)} GB)`
     : `workers ${tierInfo.maxWorkers}`;
@@ -413,8 +609,15 @@ export function buildGateTierMessage(tierInfo: GateTierInfo | null): string {
     // weaken verification VISIBLY, so the message says which selector was in charge. Saying
     // "selector: related" on every gate would be noise that trains the reader to skip the field.
     ...(tierInfo.selector === "impact" && !tierInfo.guardsOnly ? ["selector: impact (heuristic)"] : []),
+    // #956 — how many suites the selection kept, what it dropped below the floor, and whether the
+    // map was fresh. Sits next to the selector name so the claim and its size read together.
+    ...(impactNote ? [impactNote] : []),
     `${tierInfo.changedFileCount} changed file(s)`,
-    ...(tierInfo.fileScoped || tierInfo.guardsOnly ? [`${tierInfo.guardsOnly ? "" : "+"}${tierInfo.guardSuiteCount} guard suites`] : []),
+    // #956 adds the impact case: the guards run ON TOP of the selection there too, and a tier that
+    // narrows this hard must name the set it did NOT narrow.
+    ...(tierInfo.fileScoped || tierInfo.guardsOnly || (tierInfo.selector === "impact" && !tierInfo.guardsOnly)
+      ? [`${tierInfo.guardsOnly ? "" : "+"}${tierInfo.guardSuiteCount} guard suites`]
+      : []),
     workersLabel,
     ...(tierInfo.buildersQuiesced === undefined
       ? []
