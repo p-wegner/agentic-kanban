@@ -63,14 +63,16 @@ vi.mock("node:child_process", async (importOriginal) => {
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { issues, projectStatuses, projects, sessions, workflowNodes, workflowTemplates, workspaces } from "@agentic-kanban/shared/schema";
+import { issues, preferences, projectStatuses, projects, sessions, workflowNodes, workflowTemplates, workspaces } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
+import { invalidatePreferencesCache } from "../repositories/preferences.repository.js";
 import { createWorkflowEngine } from "../startup/exit-workflow.js";
 import {
   describeWithheldReviewArm,
   graphOwnsPostExitReview,
   graphOwnsReviewSessionExit,
   REVIEW_STAGE_STATUS_NAME,
+  reviewerMovedIssueToInProgress,
   START_NODE_TYPE,
 } from "../startup/exit/workflow-ownership.js";
 
@@ -116,6 +118,29 @@ describe("graphOwnsReviewSessionExit (#960)", () => {
   });
 });
 
+describe("reviewerMovedIssueToInProgress (#960)", () => {
+  const started = "2026-08-31T10:00:00.000Z";
+
+  it("reads a status write made DURING the review as the reviewer requesting changes", () => {
+    expect(reviewerMovedIssueToInProgress("2026-08-31T10:05:00.000Z", started)).toBe(true);
+    // Same instant counts as the reviewer's: the stamp cannot predate its own session.
+    expect(reviewerMovedIssueToInProgress(started, started)).toBe(true);
+  });
+
+  it("reads a status write from BEFORE the review as the builder's original transition", () => {
+    expect(reviewerMovedIssueToInProgress("2026-08-31T09:00:00.000Z", started)).toBe(false);
+  });
+
+  it("fails CLOSED on a missing or unparseable timestamp", () => {
+    // Withholding is the pre-#960 behaviour; arming on no evidence would auto-merge an
+    // unreviewed branch, so the unknown case must keep the withhold rather than the fix.
+    expect(reviewerMovedIssueToInProgress(null, started)).toBe(true);
+    expect(reviewerMovedIssueToInProgress(undefined, started)).toBe(true);
+    expect(reviewerMovedIssueToInProgress("2026-08-31T09:00:00.000Z", null)).toBe(true);
+    expect(reviewerMovedIssueToInProgress("not a date", started)).toBe(true);
+  });
+});
+
 describe("describeWithheldReviewArm (#960)", () => {
   it("names the node, its type and its status so a withheld arm is visible in the log", () => {
     const text = describeWithheldReviewArm({ name: "Prepare", nodeType: "normal", statusName: "In Progress" });
@@ -143,6 +168,9 @@ describe("exit-workflow: clean review on a start node arms readyForMerge (#960)"
 
   beforeEach(() => {
     ({ db } = createTestDb());
+    // Each case gets a fresh db; drop any prefs cached against the previous one so the
+    // review_auto_fix cases below cannot leak into the default-pref cases.
+    invalidatePreferencesCache();
   });
 
   /**
@@ -151,9 +179,26 @@ describe("exit-workflow: clean review on a start node arms readyForMerge (#960)"
    */
   async function seedReviewExitOnNode(
     nodeType: "start" | "normal",
-    opts: { nodeName: string; nodeStatusName: string | null; issueStatus: "In Progress" | "In Review" },
+    opts: {
+      nodeName: string;
+      nodeStatusName: string | null;
+      issueStatus: "In Progress" | "In Review";
+      /**
+       * When did the ISSUE last get a status write, relative to the review session's start?
+       * `"before"` (default) is the #954/#959 shape — the builder's own transition, untouched
+       * by the review. `"during"` is the reviewer calling `move_issue(..., 'In Progress')` to
+       * request changes, which stamps `statusChangedAt` even when the status does not change.
+       */
+      statusWrite?: "before" | "during";
+    },
   ) {
     const now = new Date().toISOString();
+    // The session starts a minute ago; the builder's status write predates it by an hour,
+    // a reviewer's lands after it. Relative, never hardcoded ISO strings that age out.
+    const sessionStartedAt = new Date(Date.now() - 60_000).toISOString();
+    const statusChangedAt = opts.statusWrite === "during"
+      ? new Date(Date.now() - 30_000).toISOString()
+      : new Date(Date.now() - 3_600_000).toISOString();
     const projectId = randomUUID();
     const inProgressId = randomUUID();
     const inReviewId = randomUUID();
@@ -187,7 +232,7 @@ describe("exit-workflow: clean review on a start node arms readyForMerge (#960)"
       statusId: opts.issueStatus === "In Progress" ? inProgressId : inReviewId,
       workflowTemplateId: templateId,
       currentNodeId: nodeId,
-      projectId, createdAt: now, updatedAt: now,
+      projectId, createdAt: now, updatedAt: now, statusChangedAt,
     });
     await db.insert(workspaces).values({
       id: workspaceId, issueId,
@@ -205,7 +250,7 @@ describe("exit-workflow: clean review on a start node arms readyForMerge (#960)"
       id: reviewSessionId, workspaceId,
       status: "running",
       triggerType: "review",
-      startedAt: now,
+      startedAt: sessionStartedAt,
     });
 
     return { projectId, issueId, workspaceId, reviewSessionId };
@@ -266,6 +311,46 @@ describe("exit-workflow: clean review on a start node arms readyForMerge (#960)"
     expect(withheld).toHaveLength(1);
     expect(withheld[0]).toContain("Prepare");
     log.mockRestore();
+  });
+
+  it("does NOT arm when the reviewer itself moved the issue to In Progress on the start node", async () => {
+    // The non-auto-fix reviewer's ONLY changes-requested channel is `move_issue(…, 'In
+    // Progress')` — and on the start node the issue is already In Progress, so the resulting
+    // state is byte-identical to the #954/#959 stranded shape apart from WHEN the status was
+    // written. Arming here would auto-merge a branch whose reviewer just found a CRITICAL.
+    const { workspaceId, reviewSessionId, projectId } = await seedReviewExitOnNode("start", {
+      nodeName: "Reproduce & Fix", nodeStatusName: "In Progress", issueStatus: "In Progress",
+      statusWrite: "during",
+    });
+
+    // The hazard only exists in NON-auto-fix mode: with `review_auto_fix` on (the default) a
+    // reviewer that finds issues fixes and commits them, so a clean exit SHOULD arm. Off, it
+    // is told to report and edit nothing — the status move is then the whole verdict.
+    await db.insert(preferences).values({ key: "review_auto_fix", value: "false", updatedAt: new Date().toISOString() });
+    invalidatePreferencesCache();
+
+    const boardEvents = await runExit(workspaceId, reviewSessionId);
+
+    const [ws] = await db.select({ readyForMerge: workspaces.readyForMerge })
+      .from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.readyForMerge).toBe(false);
+    expect(boardEvents.broadcast).not.toHaveBeenCalledWith(projectId, "workspace_ready_for_merge");
+  });
+
+  it("still arms the #954/#959 shape in non-auto-fix mode when the reviewer did NOT touch the status", async () => {
+    // The other half of the same pref: with review_auto_fix off, a review that changed nothing
+    // must still arm — otherwise the fix would only work in the default configuration.
+    const { workspaceId, reviewSessionId } = await seedReviewExitOnNode("start", {
+      nodeName: "Implement", nodeStatusName: "In Progress", issueStatus: "In Progress",
+    });
+    await db.insert(preferences).values({ key: "review_auto_fix", value: "false", updatedAt: new Date().toISOString() });
+    invalidatePreferencesCache();
+
+    await runExit(workspaceId, reviewSessionId);
+
+    const [ws] = await db.select({ readyForMerge: workspaces.readyForMerge })
+      .from(workspaces).where(eq(workspaces.id, workspaceId));
+    expect(ws.readyForMerge).toBe(true);
   });
 
   it("keeps the #757 In-Review-node behaviour: still arms", async () => {

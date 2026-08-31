@@ -56,7 +56,7 @@ import { createReviewLauncher } from "./exit/review-launch.js";
 import { createUsageLimitExitHandler, findUsageLimitProvider } from "./exit/usage-limit-exit.js";
 import { launchLearningStep } from "./exit/learning-step.js";
 import type { AutoMergeFn, ExitContext, WorkspaceRow } from "./exit/exit-context.js";
-import { describeWithheldReviewArm, graphOwnsPostExitReview, graphOwnsReviewSessionExit, START_NODE_TYPE } from "./exit/workflow-ownership.js";
+import { describeWithheldReviewArm, graphOwnsPostExitReview, graphOwnsReviewSessionExit, reviewerMovedIssueToInProgress, START_NODE_TYPE } from "./exit/workflow-ownership.js";
 import { isWorkspaceTerminalOnExit, terminalGuardCasStatus } from "./exit/workspace-terminal-guard.js";
 import { getWorkflowNodeById, getWorkspaceCurrentWorkflowNode } from "../repositories/workflow.repository.js";
 
@@ -390,14 +390,27 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
       boardEvents.broadcast(projectId, "issue_updated");
       return;
     }
-    const currentIssueRows = await db.select({ statusId: issues.statusId }).from(issues).where(eq(issues.id, issueId)).limit(1);
+    const currentIssueRows = await db.select({ statusId: issues.statusId, statusChangedAt: issues.statusChangedAt }).from(issues).where(eq(issues.id, issueId)).limit(1);
     const currentStatus = currentIssueRows.length > 0 ? statuses.find((s) => s.id === currentIssueRows[0].statusId) : null;
     const autoFix = getBool(prefMap, "review_auto_fix");
     // #960: "In Progress after a review" normally means the REVIEWER moved it back because it
     // flagged issues. It does NOT mean that when the workspace never left the graph's start
     // node — then the issue simply never transitioned to In Review, so In Progress is the
     // ORIGINAL status and reading it as a downgrade strands a clean review (#954, #959).
-    const neverLeftStartNode = reviewOwnership.node?.nodeType === START_NODE_TYPE;
+    //
+    // But on that shape the issue was ALREADY In Progress, so the status alone cannot tell a
+    // stranded clean review from a reviewer that just requested changes — in non-auto-fix mode
+    // `move_issue(..., 'In Progress')` is the reviewer's ONLY changes-requested channel, and it
+    // lands on the status the issue is already in. The discriminator is WHEN the status was last
+    // written: every status write stamps `statusChangedAt`, so a stamp at/after this review
+    // session started is the reviewer's move and the withhold must stand. Unknown timestamps
+    // fail closed (treated as the reviewer's move).
+    const reviewSessionRows = await db.select({ startedAt: sessions.startedAt }).from(sessions).where(eq(sessions.id, sessionId)).limit(1);
+    const reviewerRequestedChanges = reviewerMovedIssueToInProgress(
+      currentIssueRows[0]?.statusChangedAt,
+      reviewSessionRows[0]?.startedAt,
+    );
+    const neverLeftStartNode = reviewOwnership.node?.nodeType === START_NODE_TYPE && !reviewerRequestedChanges;
     if (currentStatus?.name === "In Progress" && !autoFix && !neverLeftStartNode) {
       console.log("[workflow] reviewer flagged issues (non-auto-fix mode)  skipping auto-merge, leaving in In Progress");
       boardEvents.broadcast(projectId, "issue_updated");
