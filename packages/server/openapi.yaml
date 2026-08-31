@@ -4594,6 +4594,49 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/projects/relocate-prefix:
+    post:
+      summary: matched as a project id.
+      tags:
+        - projects
+      operationId: post_api_projects_relocate-prefix
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                fromPrefix:
+                  type: string
+                  minLength: 1
+                toPrefix:
+                  type: string
+                  minLength: 1
+                moveFiles:
+                  type: boolean
+                dryRun:
+                  type: boolean
+                updateBasePath:
+                  type: boolean
+                force:
+                  type: boolean
+              required:
+                - fromPrefix
+                - toPrefix
+              additionalProperties: true
+              x-unknown-keys: stripped
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, HTTPException, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
   /api/projects/{id}:
     delete:
       summary: DELETE /api/projects/:id — unregister a project (cascade deletes all associated data)
@@ -6176,6 +6219,56 @@ paths:
       responses:
         "200":
           description: Success
+          content:
+            application/json:
+              schema: {}
+        "404":
+          description: Error (thrown NOT_FOUND, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+  /api/projects/{id}/relocate:
+    post:
+      summary: every persisted path that pointed at the old one. `dryRun` reports the plan only.
+      tags:
+        - projects
+      operationId: post_api_projects_id_relocate
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                newRepoPath:
+                  type: string
+                  minLength: 1
+                moveFiles:
+                  type: boolean
+                dryRun:
+                  type: boolean
+                updateBasePath:
+                  type: boolean
+                force:
+                  type: boolean
+              required:
+                - newRepoPath
+              additionalProperties: true
+              x-unknown-keys: stripped
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
+        "400":
+          description: Error (thrown BAD_REQUEST, HTTPException, status from domainErrorHandler)
           content:
             application/json:
               schema: {}
