@@ -18,6 +18,11 @@
  * and `readyForMerge` armed there is armed on a branch the workflow DID mean to review. Every
  * other non-terminal node (a Prepare/plan stage, a fork arm, any stage the graph has not yet
  * advanced out of) keeps #997's behaviour: hands off.
+ *
+ * #960 adds a second exception, and it belongs to a DIFFERENT caller — see
+ * `graphOwnsReviewSessionExit` below. "Does the graph own what happens next?" has two answers on
+ * a `start` node depending on WHO exited: a builder there is genuinely mid-flow (it proposes the
+ * transition itself), a reviewer there is proof the transition never happened.
  */
 import { isTerminalNodeType } from "@agentic-kanban/shared/lib/workflow-engine";
 
@@ -43,4 +48,39 @@ export function graphOwnsPostExitReview(node: WorkflowOwnershipNode | null | und
   // of the execution — nothing in the graph launches a review session for such a node.
   if (node.statusName === REVIEW_STAGE_STATUS_NAME) return false;
   return true;
+}
+
+/** The structural node type of a template's entry node — where the BUILDER works. */
+export const START_NODE_TYPE = "start";
+
+/**
+ * The same question, asked when a REVIEW session exits (#960).
+ *
+ * `graphOwnsPostExitReview` is correct for a BUILDER exit: a builder finishing on the graph's
+ * start node is exactly mid-flow, and the graph advances it (the agent calls
+ * `propose_transition`). It is wrong for a review exit, and that asymmetry is what stranded
+ * #954 and #959.
+ *
+ * `workspaces.currentNodeId` tracks the ISSUE's status. When the issue never transitioned to
+ * "In Review", the node is still the START node — non-terminal, `statusName` "In Progress" —
+ * so the shared predicate says "the graph owns it" and `readyForMerge` is withheld on the
+ * theory that the graph will drive the next stage. Nothing does: a start node is where the
+ * BUILDER works, so a REVIEW session exiting there means the issue transition was missed, not
+ * that the graph is mid-flow. Both observed cases (#954 `Implement`, #959 `Reproduce & Fix`)
+ * were clean review exits on a start node that needed a hand `POST /ready-for-merge` to move.
+ *
+ * So: on a start node the legacy pipeline owns the review exit, exactly as it does for the
+ * #757 In-Review node. Every other non-terminal node keeps #997's hands-off behaviour.
+ */
+export function graphOwnsReviewSessionExit(node: WorkflowOwnershipNode | null | undefined): boolean {
+  if (node?.nodeType === START_NODE_TYPE) return false;
+  return graphOwnsPostExitReview(node);
+}
+
+/**
+ * Why a review exit's `readyForMerge` arm was withheld, phrased for the server log — the
+ * silent case is what made #960 invisible without a DB query (#960's "Done when").
+ */
+export function describeWithheldReviewArm(node: WorkflowOwnershipNode & { name?: string | null }): string {
+  return `node "${node.name ?? "?"}" (type=${node.nodeType ?? "?"}, status=${node.statusName ?? "none"})`;
 }
