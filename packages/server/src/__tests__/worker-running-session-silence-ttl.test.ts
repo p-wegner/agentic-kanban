@@ -63,10 +63,14 @@ describe("running-session silence TTL (#883)", () => {
   it("restarts the clock on every event, so a chatty long-running session never ages out", () => {
     const manager = connectedWorker();
     manager.handleMessage("w-1", { type: "event", event: { type: "stdout", sessionId: "s-live", data: "a" } });
-    // A second event arrives; the stamp is refreshed to now.
+    // A second event arrives; the stamp is refreshed to now. Read the clock BEFORE it, not
+    // after: the stamp is taken inside handleMessage, so a reference instant read afterwards
+    // is >= the stamp and the probe below would measure an age of TTL-1 PLUS however long
+    // the call took — >= TTL, i.e. expired, after a single millisecond of scheduling delay.
+    const beforeRefresh = Date.now();
     manager.handleMessage("w-1", { type: "event", event: { type: "stdout", sessionId: "s-live", data: "b" } });
 
-    const later = Date.now() + RUNNING_SESSION_SILENCE_TTL_MS - 1;
+    const later = beforeRefresh + RUNNING_SESSION_SILENCE_TTL_MS - 1;
     expect(manager.assignedSessionIds("w-1", later)).toEqual(["s-live"]);
   });
 
@@ -77,8 +81,11 @@ describe("running-session silence TTL (#883)", () => {
     // Long after s-old would have aged out, the worker reconnects and vouches for it.
     // Without a fresh stamp the reconnect would inherit an expired one and evict a
     // session the worker just said it is holding.
+    // Reference instant BEFORE the stamping call — see the note above; read afterwards this
+    // is a zero-margin race that fails under any load.
+    const beforeHello = Date.now();
     manager.handleMessage("w-1", { type: "hello", workerId: "w-1", runningSessionIds: ["s-old"] });
-    const afterOldTtl = Date.now() + RUNNING_SESSION_SILENCE_TTL_MS - 1;
+    const afterOldTtl = beforeHello + RUNNING_SESSION_SILENCE_TTL_MS - 1;
     expect(manager.assignedSessionIds("w-1", afterOldTtl)).toEqual(["s-old"]);
   });
 
