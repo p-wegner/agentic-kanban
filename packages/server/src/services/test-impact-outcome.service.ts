@@ -301,6 +301,20 @@ export function parseSelection(stdout: string): ParsedSelection | null {
 }
 
 /**
+ * The score floor the gate's verify run will actually apply (#956).
+ *
+ * Mirrors `scripts/test-mine.mjs`'s own parse of `KANBAN_TEST_MIN_SCORE` exactly — same default
+ * (`1.0`), same numeric guard, same fall back to the default on an unparseable value — because the
+ * message's selection call and the run's selection call must ask `impact.mjs` the same question.
+ * A floor here that is looser than the runner's over-reports what ran and under-reports the tail;
+ * a tighter one invents drops that never happened.
+ */
+export function resolveGateMinScore(env: Record<string, string | undefined>): string {
+  const raw = (env.KANBAN_TEST_MIN_SCORE || "1.0").trim();
+  return /^\d+(\.\d+)?$/.test(raw) ? raw : "1.0";
+}
+
+/**
  * Run `select --json` in a worktree and parse it, or return null (#956).
  *
  * Extracted from `recordGateOutcome` so the `impact` gate TIER can name what the selection kept
@@ -314,11 +328,20 @@ export function parseSelection(stdout: string): ParsedSelection | null {
  * defect, and reintroducing it here would make every selection this tier reports the constant
  * always-run baseline wearing the selection's name.
  *
+ * **The SCORE FLOOR must match the one the run will actually use.** `impact.mjs` computes
+ * `belowFloor` only when `--min-score > 0` (it defaults to `0`), and it applies the floor to
+ * `selected` too. So an unfloored call reports `dropped 0 below the score floor` for EVERY run —
+ * the one number this tier's honesty rests on, structurally pinned at zero — while the real run
+ * (`scripts/test-mine.mjs`, floor `1.0` by default) dropped a long tail, and reports a `selected`
+ * set wider than what ran. Same failure direction as recording an impact-narrowed run as `full`.
+ * `resolveGateMinScore` mirrors `test-mine.mjs`'s own parse so the two cannot drift.
+ *
  * Total by construction, like everything else in this module: any failure resolves to null.
  */
 export async function resolveGateSelection(input: {
   workingDir: string | null;
   baseBranch?: string | null;
+  minScore?: string;
   runCommand?: RunImpactCommand;
 }): Promise<ParsedSelection | null> {
   try {
@@ -327,10 +350,11 @@ export async function resolveGateSelection(input: {
     const toolPath = join(workingDir, IMPACT_TOOL_RELATIVE_PATH);
     if (!existsSync(toolPath)) return null;
     const base = input.baseBranch?.trim() || null;
+    const minScore = input.minScore ?? resolveGateMinScore(process.env);
     const run = input.runCommand ?? defaultRunCommand;
     const result = await run({
       cwd: workingDir,
-      args: [toolPath, "select", ...(base ? [base] : []), "--json", "--always-run"],
+      args: [toolPath, "select", ...(base ? [base] : []), "--json", "--always-run", "--min-score", minScore],
       timeoutMs: IMPACT_COMMAND_TIMEOUT_MS,
     });
     if (result.exitCode !== 0) return null;
@@ -353,6 +377,8 @@ export async function resolveGateImpactSelection(input: {
   applies: boolean;
   workingDir: string | null;
   baseBranch?: string | null;
+  /** The floor the verify run will use; defaults to `resolveGateMinScore(process.env)`. */
+  minScore?: string;
   runCommand?: RunImpactCommand;
 }): Promise<GateImpactSelection | null | undefined> {
   if (!input.applies) return undefined;

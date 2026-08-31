@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { parseSelection, resolveGateImpactSelection } from "../services/test-impact-outcome.service.js";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import {
+  parseSelection,
+  resolveGateImpactSelection,
+  resolveGateMinScore,
+  resolveGateSelection,
+} from "../services/test-impact-outcome.service.js";
 
 /**
  * #956 — the selection facts the `impact` tier's pass message is built from.
@@ -46,6 +54,65 @@ describe("parseSelection", () => {
   it("returns null for output that is not a selection at all", () => {
     expect(parseSelection("not json")).toBeNull();
     expect(parseSelection(JSON.stringify({ tier: "impact" }))).toBeNull();
+  });
+});
+
+describe("resolveGateMinScore", () => {
+  it("mirrors test-mine.mjs: default 1.0, honour a numeric override, reject anything else", () => {
+    expect(resolveGateMinScore({})).toBe("1.0");
+    expect(resolveGateMinScore({ KANBAN_TEST_MIN_SCORE: " 2.5 " })).toBe("2.5");
+    expect(resolveGateMinScore({ KANBAN_TEST_MIN_SCORE: "high" })).toBe("1.0");
+  });
+});
+
+describe("resolveGateSelection — the args it asks impact.mjs for", () => {
+  /**
+   * The args ARE the finding. `impact.mjs` computes `belowFloor` only when `--min-score > 0` and
+   * defaults it to `0`, so an unfloored call reports "dropped 0 below the score floor" on every
+   * run while the real verify run (floor 1.0) dropped a whole tail — the tier weakening the gate
+   * by an amount the message pins at zero. The base must stay positional for the same class of
+   * reason (#963).
+   */
+  const withTool = () => {
+    const dir = mkdtempSync(join(tmpdir(), "ak-gate-impact-args-"));
+    const tool = join(dir, ".claude/skills/test-impact/tools/impact.mjs");
+    mkdirSync(dirname(tool), { recursive: true });
+    writeFileSync(tool, "// stub\n");
+    return dir;
+  };
+
+  it("passes the base positionally and the SAME score floor the verify run will use", async () => {
+    const seen: string[][] = [];
+    await resolveGateSelection({
+      workingDir: withTool(),
+      baseBranch: "master",
+      minScore: "1.0",
+      runCommand: async ({ args }) => {
+        seen.push(args);
+        return { exitCode: 0, stdout: JSON.stringify({ tier: "impact", selected: [], changed: [] }), stderr: "" };
+      },
+    });
+    const args = seen[0];
+    // Positional, immediately after the subcommand — never `--base`.
+    expect(args[1]).toBe("select");
+    expect(args[2]).toBe("master");
+    expect(args).not.toContain("--base");
+    expect(args[args.indexOf("--min-score") + 1]).toBe("1.0");
+  });
+
+  it("still passes a floor when the workspace has no base branch", async () => {
+    const seen: string[][] = [];
+    await resolveGateSelection({
+      workingDir: withTool(),
+      baseBranch: null,
+      minScore: "1.0",
+      runCommand: async ({ args }) => {
+        seen.push(args);
+        return { exitCode: 0, stdout: JSON.stringify({ tier: "impact", selected: [], changed: [] }), stderr: "" };
+      },
+    });
+    expect(seen[0][2]).toBe("--json");
+    expect(seen[0]).toContain("--min-score");
   });
 });
 
