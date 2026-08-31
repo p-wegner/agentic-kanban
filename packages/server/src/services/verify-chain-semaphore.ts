@@ -29,14 +29,32 @@
  * All three now acquire this slot, so "one heavyweight verification per box" is a property of
  * the box rather than of one code path.
  *
- * SCOPE, stated plainly: this is in-process module state. It serializes consumers inside ONE
- * server process. A second server, a worktree dev server, or a builder agent running its own
- * `pnpm test:mine` is not bound by it — that is the ticket's "a builder agent is not one
- * worker" observation, and closing it needs a cross-process lock (the shape `repo-lock.ts`
- * already implements, but machine-scoped rather than per-repoPath), not a wider semaphore.
+ * SCOPE — and #957 is what widened it. This module's own state is still in-process: `active`
+ * and `waiters[]` serialize consumers inside ONE server process, and a second server, a worktree
+ * dev server, or a builder agent running its own `pnpm test:mine` cannot see either. That is the
+ * ticket's "a builder agent is not one worker" observation, and it left the live symptom intact —
+ * one gate correctly serialized with three unserialized test runners beside it on the same box.
+ *
+ * So every acquisition now takes TWO slots, innermost last:
+ *   1. the MACHINE lock (`@agentic-kanban/shared/lib/machine-verify-lock`) — cross-process, in
+ *      `repo-lock.ts`'s shape but keyed on the machine, since three processes verifying three
+ *      DIFFERENT repos starve each other exactly as much as three verifying one;
+ *   2. this in-process semaphore — still worth having under it, because it is free, it keeps FIFO
+ *      order among this process's own waiters, and it is what bounds us when the machine lock is
+ *      switched off.
+ *
+ * The machine lock is OPT-IN (`KANBAN_MACHINE_VERIFY_LOCK=1`); unset, this module behaves exactly
+ * as it did at #949. A caller that cannot acquire it within its role's bound PROCEEDS and says so
+ * — see `lockNote`, which the gate puts in its tier message, per "a level may only weaken
+ * verification VISIBLY".
  *
  * Named a semaphore, not a gate (#611) — it refuses nothing, it only delays.
  */
+import {
+  MACHINE_VERIFY_ROLES,
+  machineVerifyLockEnabled,
+  withMachineVerifyLock,
+} from "../lib/machine-verify-lock.js";
 
 let active = 0;
 const waiters: Array<() => void> = [];
@@ -73,10 +91,16 @@ export function verifyChainSemaphoreQueueLength(): number {
 export async function runUnderVerifyChainSemaphoreTimed<T>(
   chain: () => Promise<T>,
   label?: string,
-): Promise<{ result: T; queueWaitMs: number }> {
+): Promise<{ result: T; queueWaitMs: number; lockNote: string | null }> {
   let queueWaitMs = 0;
-  const result = await runUnderVerifyChainSemaphore(chain, label, (waited) => { queueWaitMs = waited; });
-  return { result, queueWaitMs };
+  let lockNote: string | null = null;
+  const result = await runUnderVerifyChainSemaphore(
+    chain,
+    label,
+    (waited) => { queueWaitMs = waited; },
+    (note) => { lockNote = note; },
+  );
+  return { result, queueWaitMs, lockNote };
 }
 
 /**
@@ -89,24 +113,60 @@ export async function runUnderVerifyChainSemaphoreTimed<T>(
  * existing callers and tests are unaffected; a caller that omits it still queues correctly, it
  * is just anonymous in the log. `onWaited` reports the queue wait to the caller — prefer
  * {@link runUnderVerifyChainSemaphoreTimed}, which wraps it.
+ *
+ * `onUnserialized` (#957) fires only when the work ran WITHOUT the cross-process machine lock,
+ * carrying the note that says so. The gate surfaces it; a caller that ignores it is no worse off
+ * than before the lock existed, which is why it is optional.
  */
 export async function runUnderVerifyChainSemaphore<T>(
   chain: () => Promise<T>,
   label?: string,
+  onWaited?: (queueWaitMs: number) => void,
+  onUnserialized?: (note: string) => void,
+): Promise<T> {
+  const holder = label ?? "a verify chain";
+  // #957 — the MACHINE lock wraps the in-process wait, so `queueWaitMs` covers both and a gate's
+  // reported wait is the whole time it spent not-working rather than only the part this process
+  // could see. `gate` is the right role for every consumer here: all of them (verify chain, smoke
+  // check, E2E lane) produce a result that a merge is waiting on. The base-health probe takes the
+  // `probe` role at ITS OWN call site instead, because it is the one consumer that should SKIP
+  // rather than proceed when it cannot get a slot (#931's yield, through a wider door).
+  if (!machineVerifyLockEnabled()) {
+    return runUnderInProcessSemaphore(chain, holder, onWaited);
+  }
+  const outcome = await withMachineVerifyLock(
+    MACHINE_VERIFY_ROLES.gate,
+    holder,
+    () => runUnderInProcessSemaphore(chain, holder, onWaited),
+  );
+  // `gate.onTimeout` is `"proceed"`, so `ran` is always true here — but the type admits `false`
+  // for the `probe` role, and silently treating a skip as a success is exactly the "a green that
+  // asserted nothing" shape this codebase keeps having to fix. Fail loudly instead.
+  if (!outcome.ran) {
+    throw new Error(`[verify-chain] ${holder} was skipped by the machine verify lock: ${outcome.lockNote}`);
+  }
+  if (outcome.lockNote) onUnserialized?.(outcome.lockNote);
+  return outcome.result;
+}
+
+/** The pre-#957 body: this process's own FIFO slot, unchanged. */
+async function runUnderInProcessSemaphore<T>(
+  chain: () => Promise<T>,
+  label: string,
   onWaited?: (queueWaitMs: number) => void,
 ): Promise<T> {
   if (active >= verifyChainSemaphoreConcurrency()) {
     const queuedAt = Date.now();
     const ahead = waiters.length + active;
     console.log(
-      `[verify-chain] ${label ?? "a verify chain"} is QUEUED behind ${ahead} in-flight/waiting chain(s) — `
+      `[verify-chain] ${label} is QUEUED behind ${ahead} in-flight/waiting chain(s) — `
         + `serializing rather than running concurrently, because N full suites at 1/N speed finish no sooner `
         + `and starve each other (#949)`,
     );
     await new Promise<void>((resolve) => waiters.push(resolve));
     const waited = Date.now() - queuedAt;
     onWaited?.(waited);
-    console.log(`[verify-chain] ${label ?? "a verify chain"} acquired its slot after ${Math.round(waited / 1000)}s queued`);
+    console.log(`[verify-chain] ${label} acquired its slot after ${Math.round(waited / 1000)}s queued`);
   } else {
     onWaited?.(0);
   }

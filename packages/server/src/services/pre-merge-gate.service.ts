@@ -517,7 +517,7 @@ export async function runPreMergeGate(
     // cross-workspace verify-chain semaphore, not just each individual invocation. Two
     // different workspaces' chains used to freely interleave inside `runUnderBuildSemaphore`'s
     // own cap (default 2), which is what let three full-suite runs contend on one box at once.
-    const { result: outcome, queueWaitMs } = await runUnderVerifyChainSemaphoreTimed(async () =>
+    const { result: outcome, queueWaitMs, lockNote } = await runUnderVerifyChainSemaphoreTimed(async () =>
       resolveVerifyOutcome({
         result: await runVerify(),
         runVerify,
@@ -557,6 +557,14 @@ export async function runPreMergeGate(
     // function sits ON the god-module gate's 25-branch ceiling (grandfathered at 37), where a
     // branch that can never be false still counts against the budget.
     gateTierInfo!.queueWaitMs = queueWaitMs;
+    // #957: non-null only when the chain ran WITHOUT the cross-process machine lock — it waited
+    // out its role's bound behind a holder it could not outlast, or the lock could not be hosted
+    // here. Assigned unconditionally (`?? undefined` rather than an `if`) for the same reason the
+    // line above uses a non-null assertion instead of a guard: this function is ON the
+    // god-module gate's 25-branch ceiling, grandfathered at 37 and shrink-only, so a branch here
+    // would have to be paid for by restructuring something else. The tier formatter already
+    // treats undefined as "say nothing".
+    gateTierInfo!.unserializedNote = lockNote ?? undefined;
     // #954 — the ledger row for THIS run. Recorded before the failure return so a red gate is
     // observed too: a failing run is the only kind that can contain a miss at all, so recording
     // only green runs would measure the heuristic exclusively on the cases where it cannot be

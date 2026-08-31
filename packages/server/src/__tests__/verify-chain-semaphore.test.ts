@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { hostname, tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   resetVerifyChainSemaphoreForTests,
   runUnderVerifyChainSemaphore,
@@ -7,6 +10,11 @@ import {
   verifyChainSemaphoreConcurrency,
   verifyChainSemaphoreQueueLength,
 } from "../services/verify-chain-semaphore.js";
+import {
+  MACHINE_LOCK_DIR_ENV,
+  MACHINE_LOCK_ENV,
+  machineVerifyLockPath,
+} from "../lib/machine-verify-lock.js";
 
 /**
  * #903 — verify chains from DIFFERENT workspaces must not interleave. `runUnderBuildSemaphore`
@@ -163,4 +171,74 @@ describe("verify-chain-semaphore queue-wait reporting (#949)", () => {
     expect(verifyChainSemaphoreActive()).toBe(0);
     expect(verifyChainSemaphoreQueueLength()).toBe(0);
   });
+});
+
+/**
+ * #957 — the semaphore above is in-process module state, so a builder agent's own `pnpm
+ * test:mine`, a worktree dev server and a second board process were all invisible to it. Every
+ * acquisition now also takes the cross-process MACHINE lock, and a chain that could not get it
+ * reports a note the gate puts in its tier message.
+ */
+describe("verify-chain-semaphore + the machine lock (#957)", () => {
+  let lockDir: string;
+
+  beforeEach(() => {
+    resetVerifyChainSemaphoreForTests();
+    lockDir = mkdtempSync(join(tmpdir(), "ak-chain-lock-"));
+    process.env[MACHINE_LOCK_DIR_ENV] = lockDir;
+  });
+  afterEach(() => {
+    resetVerifyChainSemaphoreForTests();
+    delete process.env[MACHINE_LOCK_ENV];
+    delete process.env[MACHINE_LOCK_DIR_ENV];
+    rmSync(lockDir, { recursive: true, force: true });
+  });
+
+  it("with the lock OFF (the default) nothing changes and no lockfile is written", async () => {
+    const { result, lockNote } = await runUnderVerifyChainSemaphoreTimed(async () => "done", "chain");
+    expect(result).toBe("done");
+    expect(lockNote).toBeNull();
+    expect(existsSync(machineVerifyLockPath())).toBe(false);
+  });
+
+  it("with the lock ON, a chain HOLDS it while running — a foreign process would be blocked", async () => {
+    process.env[MACHINE_LOCK_ENV] = "1";
+    let heldDuring = false;
+    await runUnderVerifyChainSemaphore(async () => {
+      heldDuring = existsSync(machineVerifyLockPath());
+    }, "chain");
+    expect(heldDuring).toBe(true);
+    // ...and it is released afterwards, so the next verifier on the box gets in.
+    expect(existsSync(machineVerifyLockPath())).toBe(false);
+  });
+
+  it("WAITS for a live foreign holder rather than running beside it — released, it proceeds", async () => {
+    process.env[MACHINE_LOCK_ENV] = "1";
+    // A live foreign holder: our own pid, so the liveness probe says "alive" and the lock is
+    // never reclaimed out from under it. This stands in for the builder / worktree dev server /
+    // second board process that #949's in-process semaphore could not see.
+    const foreign = {
+      pid: process.pid,
+      hostname: hostname(),
+      role: "builder-test",
+      holder: "a builder's own pnpm test:mine",
+      acquiredAt: new Date().toISOString(),
+      heartbeatAt: new Date().toISOString(),
+    };
+    writeFileSync(machineVerifyLockPath(), JSON.stringify(foreign));
+
+    let entered = false;
+    const chain = runUnderVerifyChainSemaphore(async () => { entered = true; }, "my gate");
+
+    // While the foreign holder is there, the chain must NOT be running. This is the whole
+    // ticket: before #957 it would have started immediately, because the foreign process is not
+    // in this event loop and the in-process semaphore is blind to it.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(entered).toBe(false);
+
+    // The foreign process finishes and releases.
+    rmSync(machineVerifyLockPath(), { force: true });
+    await chain;
+    expect(entered).toBe(true);
+  }, 20_000);
 });
