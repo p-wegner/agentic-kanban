@@ -515,6 +515,21 @@ export interface GateTierInfo {
    */
   queueWaitMs?: number;
   /**
+   * Set when this gate ran WITHOUT the cross-process machine verify lock (#957) — either it
+   * waited out its role's bound behind a holder it could not outlast, or the lock could not be
+   * hosted on this box at all.
+   *
+   * The ticket's acceptance requires that a process which cannot acquire within its timeout SAYS
+   * SO rather than proceeding silently, per "a level may only weaken verification VISIBLY". A
+   * verdict produced alongside an unknown other full suite is a weaker verdict than the same
+   * verdict produced on a quiet box — the same argument `buildersQuiesced` and `queueWaitMs`
+   * already make, extended past this process's own boundary.
+   *
+   * `undefined` (the overwhelmingly common case: the lock is opt-in, and when on it is usually
+   * acquired) means the message says nothing.
+   */
+  unserializedNote?: string;
+  /**
    * Set when #894's targeted re-run cleared suites that had failed under load. A PASSING gate
    * must say this: the merge was cleared by a second, narrower run, and an operator reading
    * "passed" with no mention of it would have a different picture of the evidence than the
@@ -627,12 +642,19 @@ export function buildGateTierMessage(tierInfo: GateTierInfo | null): string {
     ...(tierInfo.queueWaitMs && tierInfo.queueWaitMs > 0
       ? [`queued ${Math.round(tierInfo.queueWaitMs / 1000)}s behind another verification`]
       : []),
+    // #957: this gate could not get the MACHINE-wide lock and ran anyway, so another process's
+    // heavyweight verification was on the box at the same time. Named unconditionally when it
+    // happens — the whole point of the note is that it is never the silent case.
+    ...(tierInfo.unserializedNote ? ["UNSERIALIZED across processes"] : []),
   ];
   const retry = tierInfo.flakeRetryNote ? ` ${tierInfo.flakeRetryNote}` : "";
   const baseProbe = tierInfo.strategy === "scoped-base-watch" && tierInfo.baseProbeAgeLabel
     ? ` [base probe ${tierInfo.baseProbeAgeLabel}${tierInfo.baseProbeDue ? ", due now" : ""}]`
     : "";
-  return `pre-merge gate passed (${parts.join(", ")})${retry}${baseProbe}${formatPostureNote(tierInfo.posture)}`;
+  // #957: the parenthesised list carries the FLAG; the note itself carries who was holding and
+  // for how long, which is what an operator needs to act on. Same split as `flakeRetryNote`.
+  const unserialized = tierInfo.unserializedNote ? ` ${tierInfo.unserializedNote}` : "";
+  return `pre-merge gate passed (${parts.join(", ")})${retry}${unserialized}${baseProbe}${formatPostureNote(tierInfo.posture)}`;
 }
 
 /**
