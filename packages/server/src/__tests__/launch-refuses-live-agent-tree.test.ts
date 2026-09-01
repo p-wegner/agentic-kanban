@@ -69,12 +69,16 @@ async function seedWorkspace(db: TestDb, worktreePath: string): Promise<string> 
  * with exit 0 is deliberately the status seeded here — a guard that filtered by status would
  * skip precisely this row and reintroduce the bug.
  */
-async function seedCompletedSession(db: TestDb, workspaceId: string, pid: number): Promise<string> {
+async function seedCompletedSession(
+  db: TestDb,
+  workspaceId: string,
+  pid: number,
+  endedAt: string = new Date().toISOString(),
+): Promise<string> {
   const sessionId = randomUUID();
-  const now = new Date().toISOString();
   await db.insert(schema.sessions).values({
     id: sessionId, workspaceId, status: "completed", pid,
-    startedAt: now, endedAt: now, exitCode: "0", executor: "claude-code",
+    startedAt: endedAt, endedAt, exitCode: "0", executor: "claude-code",
   });
   return sessionId;
 }
@@ -197,6 +201,24 @@ describe("launchSession refuses a relaunch over a live agent tree (#968)", () =>
     } finally {
       consoleWarnSpy.mockRestore();
     }
+  });
+
+  it("launches over an OLD session whose pid has since been recycled onto something else", async () => {
+    // `sessions.pid` is never cleared and a pid is not durable, so a week-old row can hold a
+    // pid the OS has handed to an unrelated live process. `process.pid` stands in for exactly
+    // that. Without the recency window this workspace could never be relaunched again —
+    // including by the monitor, which passes no `force`.
+    const { db } = createTestDb();
+    const workspaceId = await seedWorkspace(db, makeTempDir());
+    const weekOld = new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
+    await seedCompletedSession(db, workspaceId, process.pid, weekOld);
+
+    const sessionManager = createMockSessionManager();
+    const service = createWorkspaceSessionService({ database: db, getSessionManager: () => sessionManager });
+
+    await expect(service.launchSession(workspaceId)).resolves.toEqual(
+      expect.objectContaining({ sessionId: expect.any(String) }),
+    );
   });
 
   it("ignores a fleet session, whose liveness is the worker's question and not this machine's", async () => {
