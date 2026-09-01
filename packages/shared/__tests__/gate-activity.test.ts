@@ -160,3 +160,89 @@ describe("formatGateDuration", () => {
     expect(formatGateDuration(-1)).toBe("0s");
   });
 });
+
+describe("#977: the fine-grained gate phase", () => {
+  it("a QUEUED attempt does not read as `Verifying` — the case #977 exists for", () => {
+    // Same shape as a long-running suite: one attempt, in flight for 40 minutes. The only
+    // difference is that nothing is executing, and before #977 the two were the same badge.
+    const activity = deriveGateActivity(
+      job({
+        startedAt: at(41 * MIN),
+        lastActivityAt: at(40 * MIN),
+        attemptCount: 1,
+        attempts: [
+          {
+            attempt: 1,
+            source: "pre-lock-merge",
+            startedAt: at(40 * MIN),
+            phase: "queued",
+            phaseSince: at(40 * MIN),
+            phaseDetail: "waiting for the cross-workspace verify chain",
+          },
+        ],
+      }),
+      NOW,
+    );
+
+    expect(activity?.gatePhase).toBe("queued");
+    expect(activity?.label).toBe("Queued · 40m");
+    expect(activity?.detail).toContain("waiting for the cross-workspace verify chain");
+    // The coarse phase is unchanged, so the badge colour needs no new case.
+    expect(activity?.phase).toBe("verifying");
+  });
+
+  it("the phase clock counts from `phaseSince`, not from the attempt start", () => {
+    // A gate that queued 40 minutes and has been verifying for 2 must read `Verifying · 2m`.
+    // Showing the attempt's own age here is what made a queue and a long suite look alike.
+    const activity = deriveGateActivity(
+      job({
+        startedAt: at(43 * MIN),
+        lastActivityAt: at(2 * MIN),
+        attemptCount: 1,
+        attempts: [
+          { attempt: 1, source: "pre-lock-merge", startedAt: at(42 * MIN), phase: "verify", phaseSince: at(2 * MIN) },
+        ],
+      }),
+      NOW,
+    );
+
+    expect(activity?.label).toBe("Verifying · 2m");
+    // The attempt's full age is still in the tooltip — the phase clock narrows the badge, it
+    // does not hide how long the attempt has been alive.
+    expect(activity?.detail).toContain("running for 42m");
+  });
+
+  it("names each remaining phase with its own verb", () => {
+    const labelFor = (phase: NonNullable<GateActivitySource["attempts"]>[number]["phase"]) =>
+      deriveGateActivity(
+        job({
+          attemptCount: 1,
+          attempts: [{ attempt: 1, source: "pre-lock-merge", startedAt: at(5 * MIN), phase, phaseSince: at(3 * MIN) }],
+        }),
+        NOW,
+      )?.label;
+
+    expect(labelFor("install")).toBe("Installing · 3m");
+    expect(labelFor("flake-retry")).toBe("Re-testing · 3m");
+    expect(labelFor("smoke")).toBe("Smoke test · 3m");
+  });
+
+  it("an attempt that reports NO phase reads exactly as it did before #977", () => {
+    // Every gate path outside a merge job records no phases at all, and a job started by an
+    // older process has none either. Neither may change what the badge says.
+    const activity = deriveGateActivity(
+      job({
+        startedAt: at(25 * MIN),
+        attemptCount: 2,
+        attempts: [
+          { attempt: 1, source: "pre-lock-merge", startedAt: at(24 * MIN), finishedAt: at(19 * MIN), outcome: "passed" },
+          { attempt: 2, source: "merge-executor", startedAt: at(18 * MIN) },
+        ],
+      }),
+      NOW,
+    );
+
+    expect(activity?.gatePhase).toBeNull();
+    expect(activity?.label).toBe("Verifying · attempt 2 · 18m");
+  });
+});

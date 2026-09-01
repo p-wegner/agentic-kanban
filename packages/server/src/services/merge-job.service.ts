@@ -35,6 +35,7 @@
  * worst case of a lost write is exactly today's behaviour.
  */
 
+import type { MergeGatePhase } from "@agentic-kanban/shared/lib/gate-activity";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { clearMergeRunMarker, resetMergeRunMarkerPort, writeMergeRunMarker } from "./merge-run-marker-port.js";
 import { notifySummaryWriteThrough } from "./summary-write-through-notifier.js";
@@ -79,6 +80,20 @@ export interface MergeJobAttempt {
   detail?: string;
   /** The gate stage this attempt reached (`verify` / `smoke` / `none`). */
   stage?: string;
+  /**
+   * The step this attempt is on RIGHT NOW (#977) — `queued` -> `install` -> `verify` ->
+   * `flake-retry` -> `smoke`. Absent until the first {@link noteMergeGatePhase} call, so an
+   * attempt recorded by a path that reports no phases still reads exactly as it did before.
+   *
+   * `stage` is not this. That one is the gate's terminal verdict stage, written once when the
+   * attempt FINISHES; this changes several times while it runs and is what makes a queued gate
+   * distinguishable from a hung one.
+   */
+  phase?: MergeGatePhase;
+  /** When the attempt entered {@link phase} — the badge's elapsed clock counts from here. */
+  phaseSince?: string;
+  /** One line of context for the phase, e.g. what the queue is waiting behind. */
+  phaseDetail?: string;
 }
 
 export interface MergeJob {
@@ -247,6 +262,41 @@ export function noteMergeGateAttemptStarted(
   // "merging"/"stalled" -> "verifying", and the attempt number in the label.
   notifyGateActivityChanged(workspaceId);
   return { jobId: job.jobId, attempt: attempt.attempt };
+}
+
+/**
+ * Record which STEP the in-flight gate attempt has reached (#977).
+ *
+ * Keyed by workspace and applied to that job's last UNFINISHED attempt rather than taking a
+ * {@link MergeGateAttemptHandle}: the phases are reported from deep inside
+ * `pre-merge-gate.service.ts` (around the verify-chain semaphore, inside the install and
+ * flake-retry callbacks), and threading a handle down through those layers would be new
+ * plumbing through a function that is already ON the god-module gate's branch ceiling. The
+ * workspace is in scope at every one of those points; the handle is not.
+ *
+ * A no-op when nothing is running — a gate outside a merge job (the monitor's own cycle gate,
+ * review-exit) reports phases into the void, exactly as it already records no attempts.
+ *
+ * Advances `lastActivityAt`, which until now moved only at attempt BOUNDARIES: a 40-minute
+ * attempt therefore looked, to the stall display, like 40 minutes of silence.
+ */
+export function noteMergeGatePhase(
+  workspaceId: string,
+  phase: MergeGatePhase,
+  detail?: string,
+  nowIso = new Date().toISOString(),
+): void {
+  const job = jobsByWorkspace.get(workspaceId);
+  if (!job || job.state !== "running") return;
+  // Last, not first: retries push a new attempt and the newest unfinished one is the live gate.
+  const attempt = [...job.attempts].reverse().find((a) => !a.finishedAt);
+  if (!attempt) return;
+  if (attempt.phase === phase && attempt.phaseDetail === detail) return;
+  attempt.phase = phase;
+  attempt.phaseSince = nowIso;
+  attempt.phaseDetail = detail;
+  job.lastActivityAt = nowIso;
+  notifyGateActivityChanged(workspaceId);
 }
 
 /**
