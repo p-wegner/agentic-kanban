@@ -40,12 +40,22 @@ export function contextWindowForModel(model: string | null | undefined): number 
  * future point releases (e.g. opus-4-9, sonnet-4-7, opus-5-0) are covered
  * without an exhaustive list, while older 200k models (opus-4-5, sonnet-4-5)
  * are not. Haiku is never 1M, so it's excluded from the family match.
+ *
+ * The minor version is OPTIONAL (#970): a whole-number family id like
+ * `claude-opus-5` carries no minor at all, and requiring one made every Opus 5
+ * session report the 200k default — the exact symptom the ticket screenshot
+ * shows (a 1M-context Opus rendered against a 200k denominator). A bare major
+ * is treated as its `.0` release, so `claude-opus-5` is 1M while
+ * `claude-opus-4` (pre-4.6) correctly stays at 200k.
  */
 function isMillionContextClaude(m: string): boolean {
-  const match = m.match(/claude-(?:opus|sonnet)-(\d+)-(\d+)/);
+  // The minor is capped at two digits so a trailing release DATE cannot be read
+  // as one: `claude-opus-4-20260101` must stay 200k, not become "minor 20260101".
+  const match = m.match(/claude-(?:opus|sonnet)-(\d+)(?:[-.](\d{1,2})(?!\d))?/);
   if (!match) return false;
   const major = Number(match[1]);
-  const minor = Number(match[2]);
+  // No minor segment means the family's first release, i.e. `.0`.
+  const minor = match[2] === undefined ? 0 : Number(match[2]);
   return major > 4 || (major === 4 && minor >= 6);
 }
 
