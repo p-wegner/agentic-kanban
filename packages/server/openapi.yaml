@@ -1505,6 +1505,11 @@ paths:
           content:
             application/json:
               schema: {}
+        "422":
+          description: Error
+          content:
+            application/json:
+              schema: {}
   /api/issues/burndown:
     get:
       summary: order-sensitive router (fallback for this router's nested params) shadows them.
@@ -1939,6 +1944,11 @@ paths:
               schema: {}
         "409":
           description: Error (thrown CONFLICT, status from domainErrorHandler)
+          content:
+            application/json:
+              schema: {}
+        "422":
+          description: Error
           content:
             application/json:
               schema: {}

@@ -1,15 +1,16 @@
+import type { Context, Hono } from "hono";
 import type { Database } from "../db/index.js";
 import type { BoardEventSink } from "../services/board-events.js";
 import type { SessionManager } from "../services/session.manager.js";
 import { analyzeDependencies, enhanceIssue, aiEstimateIssue, decomposeEpic, confirmEpicDecomposition, contractCoupledComponent, confirmContractComponent, analyzeTouchedFiles } from "../services/issue-ai.service.js";
 import { scanForTicketGroups, scanTouchedFilesForTicketGroups } from "../services/ticket-group-scan.service.js";
 import type { DecomposeChildProposal, DecomposeDependencyProposal } from "../services/issue-ai.service.js";
+import { createIssueService } from "../services/issue.service.js";
 import {
-  createIssueService,
   unrecognizedIssueUpdateKeys,
   RECOGNIZED_ISSUE_UPDATE_KEYS,
   RECOGNIZED_BULK_ISSUE_UPDATE_KEYS,
-} from "../services/issue.service.js";
+} from "../services/issue-update-fields.js";
 import type { CreateIssueInput, BatchDependencyInput } from "../services/issue.service.js";
 import {
   getIssueDescription,
@@ -69,6 +70,87 @@ function runGroupScan(projectId: string, database: Database, body: { mode?: stri
   return body.mode === "touched-files"
     ? scanTouchedFilesForTicketGroups(projectId, database, { apply, minSharedFiles: body.minSharedFiles })
     : wrapAiOperation("group-scan", () => scanForTicketGroups(projectId, database, { apply }));
+}
+
+/**
+ * The 422 body for a PATCH whose fields nobody reads (#987).
+ *
+ * A free function rather than two inline blocks: the single-issue and bulk routes differ only
+ * in WHICH key set they check against, and duplicating the response shape is how the two would
+ * drift into reporting the same defect differently. It also keeps `createIssuesRoute` off the
+ * `function-nloc-ratchet` (#800) shrink-only ring, which the inline version broke.
+ *
+ * `recognizedKeys` is in the body deliberately: the fix is almost always a rename, so the
+ * answer belongs in the error rather than in the docs the caller would otherwise go read.
+ */
+function unrecognizedFieldsBody(ignoredKeys: string[], recognized: ReadonlySet<string>, what: string) {
+  return {
+    ok: false as const,
+    error: `Unrecognized field(s) for ${what}: ${ignoredKeys.join(", ")}. Nothing was applied.`,
+    ignoredKeys,
+    recognizedKeys: [...recognized].sort(),
+  };
+}
+
+/**
+ * The two PATCH handlers, lifted OUT of `createIssuesRoute` (#987 follow-up).
+ *
+ * Not cosmetic: `createIssuesRoute` sits on the `function-nloc-ratchet` (#800) shrink-only ring
+ * at 473, and the unrecognized-field guard added 8 lines to it. That ring's rule is "only ever
+ * LOWER a number", and re-baselining growth is what its header explicitly forbids doing quietly
+ * — so the guard is paid for by moving these two handlers out rather than by moving the number
+ * up. They are the right thing to move: a PATCH body's field vocabulary is one concern, and it
+ * now lives next to `unrecognizedFieldsBody` instead of inside a 470-line route factory.
+ *
+ * `422 with NOTHING applied` follows #874 (the settings write that silently dropped unknown
+ * keys): a write that reports success for work it did not do is the defect, and a partial apply
+ * would make the caller's next read the only way to find out which half landed.
+ */
+/**
+ * The two PATCH routes, registered from a helper instead of inline in `createIssuesRoute`.
+ *
+ * This is "shape C" (#805) — a `registerXRoutes(router, …)` helper, which the OpenAPI generator
+ * follows for route discovery and whose handlers it scans INLINE. That matters here: the
+ * generator collects response statuses only from the handler body it is scanning, and only
+ * descends into a local function to hunt a request body. Lifting the handler bodies into plain
+ * helpers therefore made the bulk route's `c.json(…, 422)` invisible and silently dropped it
+ * from the spec — measured, not assumed. Moving the whole REGISTRATION keeps every status
+ * visible while still taking the lines off `createIssuesRoute`, which sits on the
+ * `function-nloc-ratchet` (#800) shrink-only ring and had no room for the #987 guard.
+ */
+function registerIssueUpdateRoutes(router: Hono, issueService: ReturnType<typeof createIssueService>): void {
+// PATCH /api/issues/bulk - update N issues in one request
+router.patch("/bulk", async (c) => {
+  const body = await parseJsonBody(c, bulkUpdateBody);
+  // #987 — same rule as the single-issue PATCH above. The bulk path applies only the SHARED
+  // field table (no checklist/pinned/milestone), so it is checked against the narrower set:
+  // accepting `checklist` here would report success for a field `updateIssuesBulk` never reads.
+  const ignoredKeys = unrecognizedIssueUpdateKeys(body.updates, RECOGNIZED_BULK_ISSUE_UPDATE_KEYS);
+  if (ignoredKeys.length > 0) return c.json(unrecognizedFieldsBody(ignoredKeys, RECOGNIZED_BULK_ISSUE_UPDATE_KEYS, "a bulk issue update"), 422);
+  const result = await issueService.updateIssuesBulk(body.issueIds, body.updates);
+  return c.json({ updated: result.updated });
+});
+
+// PATCH /api/issues/:id
+router.patch("/:id", async (c) => {
+  // #806 batch 3 REJECTED a body SCHEMA here, deliberately, and that still holds: the body is
+  // forwarded whole to `updateIssue(id, body: Record<string, unknown>)`, which decides field
+  // by field what it recognises, so a schema would have to invent a field list and 400 the
+  // fields it forgot. Same argument as `PATCH /api/projects/:id` in batch 2.
+  //
+  // #987 is the other question — not "are the accepted fields valid" but "did anyone read the
+  // ones sent". This route returned 200 with the full issue object whether or not a single
+  // field applied. Measured live: three tickets closed with `{"status":"Done"}` (the field is
+  // `statusId`) were still Todo hours later, and the card context menu's own "Move to status"
+  // PATCHed `{statusName}` and did nothing, with no error toast because the request succeeded.
+  // That needs no schema — only the key set the service already reads, which is exported as
+  // `RECOGNIZED_ISSUE_UPDATE_KEYS` and derived from the same table that applies them.
+  const body = await parseJsonBody(c);
+  const ignoredKeys = unrecognizedIssueUpdateKeys(body as Record<string, unknown>);
+  if (ignoredKeys.length > 0) return c.json(unrecognizedFieldsBody(ignoredKeys, RECOGNIZED_ISSUE_UPDATE_KEYS, "an issue update"), 422);
+  const result = await issueService.updateIssue(c.req.param("id"), body as Record<string, unknown>);
+  return c.json(result);
+});
 }
 
 export function createIssuesRoute(database: Database, options?: { boardEvents?: BoardEventSink; getSessionManager?: () => SessionManager }) {
@@ -244,27 +326,7 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     return c.json({ archived: result.archived });
   });
 
-  // PATCH /api/issues/bulk - update N issues in one request
-  router.patch("/bulk", async (c) => {
-    const body = await parseJsonBody(c, bulkUpdateBody);
-    // #987 — same rule as the single-issue PATCH above. The bulk path applies only the SHARED
-    // field table (no checklist/pinned/milestone), so it is checked against the narrower set:
-    // accepting `checklist` here would report success for a field `updateIssuesBulk` never reads.
-    const ignoredKeys = unrecognizedIssueUpdateKeys(body.updates, RECOGNIZED_BULK_ISSUE_UPDATE_KEYS);
-    if (ignoredKeys.length > 0) {
-      return c.json(
-        {
-          ok: false,
-          error: `Unrecognized field(s) for a bulk issue update: ${ignoredKeys.join(", ")}. Nothing was applied.`,
-          ignoredKeys,
-          recognizedKeys: [...RECOGNIZED_BULK_ISSUE_UPDATE_KEYS].sort(),
-        },
-        422,
-      );
-    }
-    const result = await issueService.updateIssuesBulk(body.issueIds, body.updates);
-    return c.json({ updated: result.updated });
-  });
+  registerIssueUpdateRoutes(router, issueService);
 
   // POST /api/issues
   router.post("/", async (c) => {
@@ -557,41 +619,7 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
     return c.json(result);
   });
 
-  // PATCH /api/issues/:id
-  router.patch("/:id", async (c) => {
-    // #806 batch 3 REJECTED a body SCHEMA here, deliberately, and that still holds: the body is
-    // forwarded whole to `updateIssue(id, body: Record<string, unknown>)`, which decides field
-    // by field what it recognises, so a schema would have to invent a field list and 400 the
-    // fields it forgot. Same argument as `PATCH /api/projects/:id` in batch 2.
-    //
-    // #987 is the other question — not "are the accepted fields valid" but "did anyone read the
-    // ones sent". This route returned 200 with the full issue object whether or not a single
-    // field applied. Measured live: three tickets closed with `{"status":"Done"}` (the field is
-    // `statusId`) were still Todo hours later, and the card context menu's own "Move to status"
-    // PATCHed `{statusName}` and did nothing, with no error toast because the request succeeded.
-    // That needs no schema — only the key set the service already reads, which is exported as
-    // `RECOGNIZED_ISSUE_UPDATE_KEYS` and derived from the same table that applies them.
-    const id = c.req.param("id");
-    const body = await parseJsonBody(c);
-    const ignoredKeys = unrecognizedIssueUpdateKeys(body as Record<string, unknown>);
-    if (ignoredKeys.length > 0) {
-      // 422 with NOTHING applied, following #874 (the settings write that silently dropped
-      // unknown keys): a write that reports success for work it did not do is the defect, and a
-      // partial apply would make the caller's next read the only way to find out which half
-      // landed. `recognizedKeys` is in the body because the fix is almost always a rename.
-      return c.json(
-        {
-          ok: false,
-          error: `Unrecognized field(s) for an issue update: ${ignoredKeys.join(", ")}. Nothing was applied.`,
-          ignoredKeys,
-          recognizedKeys: [...RECOGNIZED_ISSUE_UPDATE_KEYS].sort(),
-        },
-        422,
-      );
-    }
-    const result = await issueService.updateIssue(id, body);
-    return c.json(result);
-  });
+
 
   // PUT /api/issues/:id/repos-touched — set the repos this issue declares it touches (#633).
   //

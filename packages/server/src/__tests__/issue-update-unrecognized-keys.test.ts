@@ -23,7 +23,7 @@ import {
   RECOGNIZED_BULK_ISSUE_UPDATE_KEYS,
   unrecognizedIssueUpdateKeys,
   buildSharedIssueUpdate,
-} from "../services/issue.service.js";
+} from "../services/issue-update-fields.js";
 
 const UPDATE_ISSUE_REQUEST_SRC = fileURLToPath(
   new URL("../../../shared/src/types/api/issue.ts", import.meta.url),
@@ -31,7 +31,10 @@ const UPDATE_ISSUE_REQUEST_SRC = fileURLToPath(
 
 /** The declared field names of the `UpdateIssueRequest` interface, read from source. */
 function declaredUpdateIssueRequestFields(): string[] {
-  const src = readFileSync(UPDATE_ISSUE_REQUEST_SRC, "utf8");
+  // CRLF-normalised at the read (#888): this compares against newline-bearing patterns
+  // (a newline-anchored slice and a multiline `^` regex), which are green on master and red
+  // in every worktree gate under core.autocrlf=true.
+  const src = readFileSync(UPDATE_ISSUE_REQUEST_SRC, "utf8").replace(/\r\n?/g, "\n");
   const start = src.indexOf("export interface UpdateIssueRequest {");
   expect(start, "UpdateIssueRequest interface not found — this guard is reading the wrong file").toBeGreaterThan(-1);
   const body = src.slice(start, src.indexOf("\n}", start));

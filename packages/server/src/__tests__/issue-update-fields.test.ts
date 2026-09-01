@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildSharedIssueUpdate } from "../services/issue.service.js";
+import { buildSharedIssueUpdate } from "../services/issue-update-fields.js";
 
 const NOW = "2026-06-18T12:00:00.000Z";
 
