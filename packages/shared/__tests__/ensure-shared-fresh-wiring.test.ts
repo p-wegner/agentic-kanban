@@ -38,9 +38,35 @@ describe("pnpm cli guards against a stale packages/shared/dist (#865)", () => {
   });
 
   it("the `typecheck` script also runs ensure-shared-fresh.mjs first (#582)", () => {
+    // #991: this matched `node scripts/ensure-shared-fresh.mjs &&`, which pinned the SHAPE of
+    // the script (an `&&` chain led by the check) rather than the property (#582 protection is
+    // reachable). #980 replaced the chain with `node scripts/typecheck.mjs` and moved the call
+    // INSIDE the runner — verified at typecheck.mjs:98, and confirmed by touching
+    // packages/shared/src and watching the rebuild fire — so the guard went red while what it
+    // guards was intact.
+    //
+    // Assert the property instead: the check runs, in the script or in the runner the script
+    // invokes. Still non-vacuous — no runner match leaves `runnerSource` empty, and a script
+    // that dropped the check entirely fails on both halves.
     const scripts = readPackageJsonScripts();
     const typecheckScript = scripts.typecheck;
     expect(typecheckScript, "package.json has no `typecheck` script").toBeDefined();
-    expect(typecheckScript).toMatch(/node scripts\/ensure-shared-fresh\.mjs\s*&&/);
+    const runner = typecheckScript.match(/scripts\/([\w.-]+\.mjs)/);
+    const runnerSource = runner ? readFileSync(join(REPO_ROOT, "scripts", runner[1]), "utf8") : "";
+    expect(
+      typecheckScript.includes("ensure-shared-fresh.mjs") || runnerSource.includes("ensure-shared-fresh.mjs"),
+      `\`pnpm typecheck\` (${typecheckScript}) must run the shared-dist freshness check (#582), `
+        + "directly or via the runner it invokes — otherwise tsc reads last build's .d.ts and "
+        + "reports a plausible, specific error in innocent consuming code",
+    ).toBe(true);
+  });
+
+  it("the `typecheck:serial` bisect path keeps the check inline (#980)", () => {
+    // The serial chain has no runner to hide the check in, and its whole purpose is to be the
+    // trustworthy comparison when you suspect a concurrency artifact — comparing a fresh run
+    // against a stale one would defeat it.
+    const scripts = readPackageJsonScripts();
+    expect(scripts["typecheck:serial"], "package.json has no `typecheck:serial` script").toBeDefined();
+    expect(scripts["typecheck:serial"]).toMatch(/node scripts\/ensure-shared-fresh\.mjs\s*&&/);
   });
 });
