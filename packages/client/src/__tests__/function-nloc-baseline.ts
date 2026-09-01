@@ -19,8 +19,10 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "components/ButlerView.tsx::ButlerView": 693,
   "components/CreateWorkspaceForm.tsx::CreateWorkspaceForm": 694,
   "routes/BoardPage.tsx::BoardPage": 627,
+  // master shrank this one; #972 never touched it.
   "components/WorkspaceCard.tsx::WorkspaceCard": 570,
-  "components/BacklogView.tsx::BacklogView": 607,
+  // #972 moved the dependency-wave concern out to `hooks/useDependencyWave.ts`.
+  "components/BacklogView.tsx::BacklogView": 568,
   "components/IssueDetailPanel.tsx::IssueDetailPanel": 551,
   "components/PluginViewsPanel.tsx::PluginViewsPanel": 552,
   "components/GraphView.tsx::GraphView": 548,
