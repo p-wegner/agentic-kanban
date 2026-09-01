@@ -47,6 +47,11 @@ export interface UpdateIssueRequest {
   checklist?: { id: string; text: string; completed: boolean }[] | null;
   pinned?: boolean;
   milestoneId?: string | null;
+  /**
+   * Workflow template this issue runs under. Read by `updateIssue` since long before #987 but
+   * missing from this contract, so a typed client could not send a field the server applies.
+   */
+  workflowTemplateId?: string | null;
 }
 
 export interface IssueWithStatus {

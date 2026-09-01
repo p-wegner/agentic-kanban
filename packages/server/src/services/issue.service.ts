@@ -190,23 +190,80 @@ export type WebhookSender = (projectId: string, payload: WebhookIssueStatusPaylo
  * on checklist/pinned/milestoneId after calling this; those are intentionally NOT part
  * of bulk update.
  */
+/**
+ * Body key -> how it lands on the row. A TABLE rather than the `if` chain this used to be
+ * (#987), because the key set is now needed in a second place: the route has to know which
+ * fields it recognises in order to say when it recognised none of them.
+ *
+ * The table IS that list. A hand-written `RECOGNIZED_KEYS` beside an `if` chain is two
+ * descriptions of one thing, and the one that drifts is the one that 422s a field that works.
+ */
+const SHARED_ISSUE_UPDATE_FIELDS: Record<
+  string,
+  (value: unknown, updates: Record<string, unknown>, now: string) => void
+> = {
+  title: (v, u) => { u.title = v; },
+  description: (v, u) => { u.description = v; },
+  priority: (v, u) => { u.priority = v; },
+  issueType: (v, u) => { u.issueType = v; },
+  statusId: (v, u, now) => { u.statusId = v; u.statusChangedAt = now; },
+  sortOrder: (v, u) => { u.sortOrder = v; },
+  estimate: (v, u) => { u.estimate = v; },
+  skipAutoReview: (v, u) => { u.skipAutoReview = v; },
+  dueDate: (v, u) => { u.dueDate = v; },
+  externalKey: (v, u) => { u.externalKey = normalizeExternalKey(v); },
+  externalUrl: (v, u) => { u.externalUrl = validateExternalUrl(v); },
+  workflowTemplateId: (v, u) => { u.workflowTemplateId = v; },
+};
+
+/**
+ * The keys `updateIssue` and `updateIssuesBulk` actually read (#987).
+ *
+ * `PATCH /api/issues/:id` forwards its whole body to a service that picks fields out of it and
+ * ignores the rest, and it returned **200 with the full issue object** either way. Measured
+ * live 2026-09-01: three tickets closed with `{"status":"Done"}` (the field is `statusId`)
+ * were still `Todo` hours later, and the UI's own card context menu had been PATCHing
+ * `{statusName}` — a "Move to status" action that did nothing, silently, with no error toast
+ * because the request succeeded.
+ *
+ * The three the table above does not cover are handled directly in `updateIssue`; they are
+ * listed here rather than added to the table because each writes a column the shared/bulk path
+ * deliberately does not (`checklist` serialises, `milestoneId` normalises undefined to null).
+ */
+export const RECOGNIZED_ISSUE_UPDATE_KEYS: ReadonlySet<string> = new Set([
+  ...Object.keys(SHARED_ISSUE_UPDATE_FIELDS),
+  "checklist",
+  "pinned",
+  "milestoneId",
+]);
+
+/** The subset of {@link RECOGNIZED_ISSUE_UPDATE_KEYS} a BULK update can apply. */
+export const RECOGNIZED_BULK_ISSUE_UPDATE_KEYS: ReadonlySet<string> = new Set(
+  Object.keys(SHARED_ISSUE_UPDATE_FIELDS),
+);
+
+/**
+ * Which of `body`'s keys nobody will read (#987). Empty means every field will be applied.
+ *
+ * Returned rather than thrown so the caller decides the status code — the route 422s (the
+ * #874 precedent: a write that reports success for work it did not do is the defect), while
+ * an internal caller assembling its own body can simply assert it is empty.
+ */
+export function unrecognizedIssueUpdateKeys(
+  body: Record<string, unknown>,
+  recognized: ReadonlySet<string> = RECOGNIZED_ISSUE_UPDATE_KEYS,
+): string[] {
+  return Object.keys(body).filter((key) => !recognized.has(key));
+}
+
 export function buildSharedIssueUpdate(
   body: Record<string, unknown>,
   now: string,
 ): Record<string, unknown> {
   const updates: Record<string, unknown> = { updatedAt: now };
-  if (body.title !== undefined) updates.title = body.title;
-  if (body.description !== undefined) updates.description = body.description;
-  if (body.priority !== undefined) updates.priority = body.priority;
-  if (body.issueType !== undefined) updates.issueType = body.issueType;
-  if (body.statusId !== undefined) { updates.statusId = body.statusId; updates.statusChangedAt = now; }
-  if (body.sortOrder !== undefined) updates.sortOrder = body.sortOrder;
-  if (body.estimate !== undefined) updates.estimate = body.estimate;
-  if (body.skipAutoReview !== undefined) updates.skipAutoReview = body.skipAutoReview;
-  if (body.dueDate !== undefined) updates.dueDate = body.dueDate;
-  if (body.externalKey !== undefined) updates.externalKey = normalizeExternalKey(body.externalKey);
-  if (body.externalUrl !== undefined) updates.externalUrl = validateExternalUrl(body.externalUrl);
-  if (body.workflowTemplateId !== undefined) updates.workflowTemplateId = body.workflowTemplateId;
+  for (const [key, apply] of Object.entries(SHARED_ISSUE_UPDATE_FIELDS)) {
+    if (body[key] !== undefined) apply(body[key], updates, now);
+  }
   return updates;
 }
 

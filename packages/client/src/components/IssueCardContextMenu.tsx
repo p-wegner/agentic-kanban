@@ -111,10 +111,14 @@ export function IssueCardContextMenu({
     }
   }
 
-  async function handleMoveToStatus(statusName: string) {
+  // #987 — this PATCHed `{ statusName }`, which `updateIssue` does not read: the request
+  // succeeded, nothing moved, and the catch below never fired, so "Move to status" was a
+  // silent no-op. The route now 422s an unrecognized field; this sends the id the submenu
+  // already has.
+  async function handleMoveToStatus(statusId: string) {
     onClose();
     try {
-      await apiPatch(`/api/issues/${issue.id}`, { statusName });
+      await apiPatch(`/api/issues/${issue.id}`, { statusId });
     } catch {
       showToast("Failed to move issue", "error");
     }
@@ -294,7 +298,7 @@ export function IssueCardContextMenu({
                   key={s.id}
                   type="button"
                   role="menuitem"
-                  onClick={() => handleMoveToStatus(s.name)}
+                  onClick={() => handleMoveToStatus(s.id)}
                   className={`flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-xs hover:bg-gray-50 focus:bg-gray-50 focus:outline-none dark:hover:bg-gray-800 dark:focus:bg-gray-800 ${issue.statusName === s.name ? "font-semibold text-brand-700 dark:text-brand-300" : "text-gray-700 dark:text-gray-200"}`}
                 >
                   <span className="truncate">{s.name}</span>
