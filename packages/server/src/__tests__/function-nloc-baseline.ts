@@ -178,7 +178,7 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "services/merge-queue.service.ts::createMergeQueueService": 427,
   // 506 -> 474 in #806 batch 3: ten handlers dropped their inline type literal and guard
   // ladder for a `parseJsonBody(c, schema)` call.
-  "routes/issues.ts::createIssuesRoute": 473,
+  "routes/issues.ts::createIssuesRoute": 463,
   "services/workflow.service.ts::createWorkflowService": 456,
   // 418 -> 409, banked (#892): the skill-materialization body (resolveSkillFile +
   // materializeEnabledPluginSkills + the new materializeWorkspaceSkills) moved to
