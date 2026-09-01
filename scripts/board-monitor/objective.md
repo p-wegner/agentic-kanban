@@ -31,7 +31,7 @@ This is a FRESH session every run — you have NO memory of previous runs. The k
 - **REFILL_FOCUS = balanced** - derived from work-type marker weights; `bugfix-only` emphasizes reproducible bugs, `balanced` allows feature/quality mix.
 
 ## RISK POSTURE (generated - do not hand-edit)
-- **RISK POSTURE = standard** - Today's default — scoped per-ticket review and gate, red base always blocks merge. No train batching. Set via Settings -> Workflow; a ticket may override with a `risk:<posture>` tag.
+- **RISK POSTURE = iterate** - Fast iteration on a local-first repo: the per-merge gate runs the test-impact SELECTION (a ranked guess, narrower than scoped), and the full suite runs nightly on the base branch instead. A defect the selection misses lands on the base and is caught within a day — cheap when a rebase is the whole cost, wrong when there is a real deployment (use Strict there). Set via Settings -> Workflow; a ticket may override with a `risk:<posture>` tag.
 
 ## STRATEGY WEIGHTS (generated - do not hand-edit)
 - Frontend: weight 5/5, area, provider claude
