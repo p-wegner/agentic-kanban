@@ -39,7 +39,8 @@ export function TestImpactBudgetSection({ projectSettings, setProjectSettings }:
       />
       {!valid && (
         <p className="text-xs text-red-600">
-          Expected e.g. <code>60s</code>, <code>90000ms</code> or <code>2m</code> — a bare number is milliseconds.
+          Expected e.g. <code>60s</code> or <code>90000ms</code> — a bare number is milliseconds.
+          Minutes have no unit; spell them in seconds (<code>120s</code>).
         </p>
       )}
     </CollapsibleSection>

@@ -493,10 +493,11 @@ if (impactSelectorRequested && impactMinScoreRaw !== impactMinScore) {
  * guard only fires for a value edited around the API or exported by hand.)
  */
 const impactBudgetRaw = (process.env.KANBAN_TEST_BUDGET || "").trim();
-const impactBudget = /^\d+(\.\d+)?(ms|s|m)?$/i.test(impactBudgetRaw) ? impactBudgetRaw : "";
+const impactBudget = /^\d+(\.\d+)?(ms|s)?$/i.test(impactBudgetRaw) ? impactBudgetRaw : "";
 if (impactBudgetRaw && !impactBudget) {
   console.warn(
-    `[test:mine] ignoring unparseable KANBAN_TEST_BUDGET="${impactBudgetRaw}" — expected e.g. "60s", "90000ms" or "2m". ` +
+    `[test:mine] ignoring unparseable KANBAN_TEST_BUDGET="${impactBudgetRaw}" — expected e.g. "60s" or "90000ms" ` +
+      `(a bare number is ms; "m" is NOT a unit the selector understands — spell minutes in seconds). ` +
       `Running the selection with NO time budget.`,
   );
 }
