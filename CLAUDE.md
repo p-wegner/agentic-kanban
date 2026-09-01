@@ -453,6 +453,16 @@ Full symptom→cause→fix in `docs/install.md` (“Clean-clone / first-start go
   ```
   Then run what it prints. **`select`, never `build`** — the skill resolves its root via `git rev-parse --show-toplevel`, so a rebuild here writes a worktree-local `docs/tests/impact-map.json` that helps nobody, lands in your diff, and breaks the single-writer property; keeping the map fresh is #952's job on the main checkout. **A green impact selection is NOT a green gate** — it is a ranked guess that narrows the run, so it tells you an edit did not obviously break something, nothing more.
 - `pnpm test:mine` — fast loop (green unit suites; skips known-flaky). Takes `-- --changed HEAD` and patterns. **This is the gate**, unchanged: run it (and the full `pnpm --filter agentic-kanban test` for cross-cutting changes) before mark-ready, whatever the impact loop said. `KANBAN_TEST_SELECTOR=impact` swaps its `vitest related` scoping for the same test-impact ranking (opt-in, fail-open, #951) — not the default until #954 has produced a measured miss rate.
+- **`pnpm typecheck` is `scripts/typecheck.mjs`, not an `&&` chain (#980).** It runs the five typed
+  packages with bounded concurrency (`KANBAN_TYPECHECK_WORKERS`, default **2** — each `tsc` peaks
+  around 0.5-1 GB and this box runs several agents, so a worker-per-core default is how one run
+  takes the machine down) and an incremental cache under each package's `node_modules/.cache/`.
+  Measured on an idle box: **54s serial → 37s cold → ~10s warm**. It prints
+  `[typecheck] 37s total across 5 package(s), 2 worker(s): server 33s, client 21s, …` so the
+  pre-merge gate's FLOOR stays measured rather than guessed — with the test half budgeted at 120s
+  (#966/#967), arch+typecheck was most of a small change's gate. `pnpm typecheck:serial` is the old
+  chain, kept for bisecting a suspected concurrency artifact. A new package with a `tsconfig.json`
+  must be added to `PACKAGES` there; `typecheck-package-coverage.test.ts` fails if it is not.
 - `pnpm test:e2e` — Playwright E2E. `pnpm db:migrate && pnpm db:seed` — init DB. `pnpm cli -- register <path>`/`list`/`cleanup` — project & worktree management.
 
 ## Workspace Flow
