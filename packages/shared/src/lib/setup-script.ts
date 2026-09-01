@@ -19,6 +19,15 @@ export interface SetupScriptResult {
    * progress, not that it ran and failed.
    */
   noProgress?: boolean;
+  /**
+   * True when the process was killed because the caller's `signal` aborted (#989).
+   *
+   * A THIRD non-verdict, alongside `timedOut` and `noProgress`, and it must be read the same
+   * way: the caller changed its mind, so the run says nothing about the thing under test. The
+   * base-health probe uses it to abandon a verify mid-flight when a merge gate is waiting for
+   * the box's verify slot.
+   */
+  aborted?: boolean;
 }
 
 /** Fallback timeout when a caller doesn't pass `timeoutMs` (#192 — was a non-configurable constant). */
@@ -108,6 +117,16 @@ export interface RunSetupScriptOptions {
    * `GRADLE_USER_HOME`, #194) — applied AFTER the process env copy so a caller's value wins.
    */
   env?: Record<string, string>;
+  /**
+   * Abort the run from outside (#989): when this fires, the child is killed and the promise
+   * RESOLVES with `aborted: true` — never rejects, matching the never-reject contract the
+   * timeout and no-progress paths already keep, so a caller cannot mistake "we stopped it" for
+   * "it ran and failed".
+   *
+   * An already-aborted signal kills before the child does any work; the process is still spawned
+   * first so there is exactly one teardown path rather than two.
+   */
+  signal?: AbortSignal;
 }
 
 /**
@@ -178,11 +197,23 @@ export function runSetupScript(
     const timeoutMs = options.timeoutMs ?? DEFAULT_SETUP_SCRIPT_TIMEOUT_MS;
     const noProgressTimeoutMs = options.noProgressTimeoutMs ?? DEFAULT_NO_PROGRESS_TIMEOUT_MS;
 
+    // #989 — one place that undoes every listener/timer, so the three kill paths below and the
+    // normal exit cannot each forget a different one. `onAbort` in particular must come off the
+    // signal: a long-lived signal outliving this call would otherwise retain the closure (and
+    // its buffered stdout) for as long as the caller holds it.
+    let onAbort: (() => void) | undefined;
+    const cleanup = () => {
+      clearTimeout(timeout);
+      if (noProgressInterval) clearInterval(noProgressInterval);
+      if (onAbort) options.signal?.removeEventListener("abort", onAbort);
+    };
+
     const timeout = setTimeout(() => {
       proc.kill();
       // Resolve (never reject) on timeout — a kill is NOT the same verdict as a
       // script that ran to completion and failed (#192). `timedOut: true` lets
       // callers report "didn't finish in time" instead of "failed (exit 1)".
+      cleanup();
       resolve({ exitCode: 124, stdout, stderr, timedOut: true });
     }, timeoutMs);
 
@@ -196,26 +227,37 @@ export function runSetupScript(
       const pollMs = Math.max(1000, Math.min(60_000, Math.floor(noProgressTimeoutMs / 10)));
       noProgressInterval = setInterval(() => {
         if (Date.now() - lastOutputAt >= noProgressTimeoutMs) {
-          clearTimeout(timeout);
-          clearInterval(noProgressInterval);
           proc.kill();
           // Same never-reject contract as the wall-clock timeout: a no-progress kill is
           // "stopped producing evidence", not "ran and failed".
+          cleanup();
           resolve({ exitCode: 124, stdout, stderr, noProgress: true });
         }
       }, pollMs);
       noProgressInterval.unref?.();
     }
 
+    // #989 — wired AFTER both timers, because an already-aborted signal fires `onAbort`
+    // synchronously and `cleanup` reads them.
+    if (options.signal) {
+      onAbort = () => {
+        proc.kill();
+        cleanup();
+        // Same never-reject contract as the two kill paths above: an abort is "the caller
+        // stopped us", not "ran and failed". 130 is the conventional SIGINT-ish exit.
+        resolve({ exitCode: 130, stdout, stderr, aborted: true });
+      };
+      if (options.signal.aborted) onAbort();
+      else options.signal.addEventListener("abort", onAbort, { once: true });
+    }
+
     proc.on("exit", (code: number | null) => {
-      clearTimeout(timeout);
-      if (noProgressInterval) clearInterval(noProgressInterval);
+      cleanup();
       resolve({ exitCode: code ?? 1, stdout, stderr, timedOut: false });
     });
 
     proc.on("error", (err: Error) => {
-      clearTimeout(timeout);
-      if (noProgressInterval) clearInterval(noProgressInterval);
+      cleanup();
       reject(err);
     });
   });

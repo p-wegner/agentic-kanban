@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   clearProbeYieldStreak,
   probeConsecutiveYields,
+  probeGatePollIntervalMs,
+  probeYieldStreakFloorMs,
   probeMaxConsecutiveYields,
   recordProbeYield,
   resetProbeYieldStreaksForTests,
@@ -56,11 +58,38 @@ describe("shouldProbeYield (#989)", () => {
       .toBe("yield_budget_exhausted");
   });
 
-  it("a bound of 0 disables preemption entirely — the pre-#989 behaviour, on demand", () => {
+  it("a bound of 0 disables preemption entirely — and says DISABLED, not budget-exhausted", () => {
+    // The two both mean yield:false, but they are different facts and the log line differs.
+    // Collapsed, a disabled bound logged "already yielded 0 time(s) in a row" on every tick —
+    // untrue (no streak was spent) and alarming (it reads as a gate being made to wait).
     expect(shouldProbeYield({ gateWaiting: true, consecutiveYields: 0, maxConsecutiveYields: 0 })).toEqual({
       yield: false,
-      reason: "yield_budget_exhausted",
+      reason: "disabled",
     });
+    // ...and it wins over every other case, including "nobody is waiting".
+    expect(shouldProbeYield({ gateWaiting: false, consecutiveYields: 9, maxConsecutiveYields: 0 }).reason)
+      .toBe("disabled");
+  });
+});
+
+describe("probeGatePollIntervalMs (#989)", () => {
+  const POLL_ENV = "KANBAN_BASE_HEALTH_GATE_POLL_MS";
+  afterEach(() => { delete process.env[POLL_ENV]; });
+
+  it("defaults to 15s — small against a 45-minute verify, free to evaluate", () => {
+    expect(probeGatePollIntervalMs()).toBe(15_000);
+  });
+
+  it("honors the env override and rejects a non-positive or garbage value", () => {
+    process.env[POLL_ENV] = "50";
+    expect(probeGatePollIntervalMs()).toBe(50);
+    // A zero/negative interval would spin the event loop; fall back rather than obey it.
+    process.env[POLL_ENV] = "0";
+    expect(probeGatePollIntervalMs()).toBe(15_000);
+    process.env[POLL_ENV] = "-5";
+    expect(probeGatePollIntervalMs()).toBe(15_000);
+    process.env[POLL_ENV] = "nope";
+    expect(probeGatePollIntervalMs()).toBe(15_000);
   });
 });
 
@@ -83,6 +112,40 @@ describe("probeMaxConsecutiveYields (#989)", () => {
     expect(probeMaxConsecutiveYields()).toBe(3);
     process.env[ENV] = "-2";
     expect(probeMaxConsecutiveYields()).toBe(3);
+  });
+});
+
+describe("the streak floor (#989)", () => {
+  const FLOOR_ENV = "KANBAN_BASE_HEALTH_YIELD_STREAK_FLOOR_MS";
+  beforeEach(() => { resetProbeYieldStreaksForTests(); delete process.env[FLOOR_ENV]; });
+  afterEach(() => { resetProbeYieldStreaksForTests(); delete process.env[FLOOR_ENV]; });
+
+  it("defaults to 60s and honors an override, including 0", () => {
+    expect(probeYieldStreakFloorMs()).toBe(60_000);
+    process.env[FLOOR_ENV] = "5000";
+    expect(probeYieldStreakFloorMs()).toBe(5000);
+    process.env[FLOOR_ENV] = "0";
+    expect(probeYieldStreakFloorMs()).toBe(0);
+    process.env[FLOOR_ENV] = "junk";
+    expect(probeYieldStreakFloorMs()).toBe(60_000);
+  });
+
+  it("a yield below the floor does not consume budget", () => {
+    // Three seconds of discarded verify is not the thing the escape exists to bound: the probe
+    // barely started and re-runs cheaply. Counting it would let a merge train burn the budget
+    // with free yields and then force a full run through the train.
+    expect(recordProbeYield("p1", 3_000)).toBe(0);
+    expect(recordProbeYield("p1", 3_000)).toBe(0);
+    expect(probeConsecutiveYields("p1")).toBe(0);
+  });
+
+  it("a yield at or above the floor counts", () => {
+    expect(recordProbeYield("p1", 60_000)).toBe(1);
+    expect(recordProbeYield("p1", 10 * 60_000)).toBe(2);
+  });
+
+  it("an untimed yield always counts — a caller with no timing gets the pre-floor behaviour", () => {
+    expect(recordProbeYield("p1")).toBe(1);
   });
 });
 

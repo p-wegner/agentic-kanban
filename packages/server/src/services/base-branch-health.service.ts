@@ -20,7 +20,8 @@ import {
   probeMaxConsecutiveYields,
   recordProbeYield,
   shouldProbeYield,
-  type ProbeYieldStage,
+  probeGatePollIntervalMs,
+  probeYieldStreakFloorMs,
 } from "./base-health-probe-preemption.js";
 // The base probe spawns the SAME verify script as the gate, so it inherits the board's
 // listener pins the same way — and a phantom EADDRINUSE here is worse, because it is
@@ -126,8 +127,14 @@ export function inFlightBaseBranchProbeCount(): number {
 
 /**
  * Run `verify_script` against the project's base branch at its CURRENT tip and persist the
- * result. Returns `null` when the project has no repo/base branch/verify_script configured —
- * a pure no-op, mirroring the pre-merge gate's own "nothing configured" behaviour.
+ * result.
+ *
+ * Returns `null` in two cases, and neither records a row:
+ *  - the project has no repo/base branch/verify_script configured — a pure no-op, mirroring the
+ *    pre-merge gate's own "nothing configured" behaviour;
+ *  - the running verify YIELDED the box's verify slot to a waiting gate-class chain (#989). The
+ *    probe was killed mid-run, so it observed nothing; it is logged and counted, and re-runs
+ *    when the base is next due. See `base-health-probe-preemption.ts`.
  *
  * Concurrency-safe per project (#712): a call made while a probe for the same project is
  * already running JOINS it and returns its result rather than starting a second one.
@@ -199,42 +206,11 @@ async function runBaseBranchProbe(
   const installCommand = (deriveSetupScriptFromProfile(await getStackProfile(projectId, database), project.repoPath) || "").trim();
 
   let result: BaseBranchVerifyResult;
-  // #989 — set by a checkpoint that abandoned the run, so the `finally` below can tell a yield
-  // (streak continues) from a completed run (streak clears).
+  // #989 — set when the running verify was abandoned for a waiting gate, so the `finally` below
+  // can tell a yield (streak continues) from a completed run (streak clears).
   let didYield = false;
-  const yieldToWaitingGate = (stage: ProbeYieldStage): boolean => {
-    const already = probeConsecutiveYields(projectId);
-    const decision = shouldProbeYield({ gateWaiting: verifyChainGateWaiting(), consecutiveYields: already });
-    if (decision.reason === "yield_budget_exhausted") {
-      console.log(
-        `[base-branch-health] probe for project ${projectId} is NOT yielding before the ${stage} stage `
-          + `despite a waiting merge gate — it has already yielded ${already} time(s) in a row `
-          + `(KANBAN_BASE_HEALTH_MAX_CONSECUTIVE_YIELDS=${probeMaxConsecutiveYields()}), and a base whose `
-          + `health is never measured is the failure this probe exists to prevent`,
-      );
-      return false;
-    }
-    if (!decision.yield) return false;
-    didYield = true;
-    const streak = recordProbeYield(projectId);
-    // A silent abort is how a repeatedly-preempted probe becomes invisible, so this is the
-    // minimum the ticket requires: it says WHICH stage yielded, how much work is being thrown
-    // away, and how close the streak is to the run-to-completion escape.
-    console.log(
-      `[base-branch-health] probe for project ${projectId} YIELDED the verify slot before the ${stage} stage `
-        + `after ${Math.round((Date.now() - startedAt) / 1000)}s — a merge gate is queued behind it and has `
-        + `someone waiting, while this is a background measurement. Nothing recorded; it re-runs when the `
-        + `base is next due. Consecutive yields: ${streak}/${probeMaxConsecutiveYields()}`,
-    );
-    return true;
-  };
   try {
-    // #989 — the FIRST checkpoint, before anything expensive. Clone, install and verify are the
-    // three natural boundaries; this one is the cheapest place to discover that a gate queued
-    // while we were resolving the project and the stack profile.
-    if (yieldToWaitingGate("clone")) return null;
     await cloneBranchTo(project.repoPath, branch, dest, CLONE_TIMEOUT_MS);
-    if (yieldToWaitingGate("install")) return null;
     if (installCommand) {
       const install = await runSetupScript(dest, installCommand, { timeoutMs: INSTALL_TIMEOUT_MS, env: { ...VERIFY_NEUTRALIZED_LISTENER_ENV } }).catch((e) => ({
         exitCode: 1,
@@ -265,11 +241,6 @@ ${tail(combined)}`,
     // no worker cap of its own — sharing the gate's resolved cap keeps the two from
     // independently defaulting to one vitest worker per core.
     const probeMaxWorkers = (await resolveVerifyMaxWorkers(projectId, database)).workers;
-    // #989 — the LAST and most valuable checkpoint: verify is the 45-minute stage, and the
-    // install that just finished is where #971's gate was observed waiting. Checked BEFORE
-    // acquiring the slot rather than inside it, so the gate takes the slot straight from the
-    // released install rather than queueing behind a probe that is about to abandon anyway.
-    if (yieldToWaitingGate("verify")) return null;
     // #949: and take the same one-at-a-time slot the gate's verify chain takes. #931 capped the
     // probe's WORKERS and made its scheduler decline to start while a gate held the build
     // semaphore, but that check is one-directional: once a probe was running, a gate arriving
@@ -278,15 +249,71 @@ ${tail(combined)}`,
     // sharing a worker cap does not help when there are two of everything.
     let queueWaitMs = 0;
     const run = await runUnderVerifyChainSemaphore(
-      () => runSetupScript(dest, verifyScript, {
-        timeoutMs: VERIFY_TIMEOUT_MS,
-        env: { ...VERIFY_NEUTRALIZED_LISTENER_ENV, KANBAN_TEST_MAX_WORKERS: String(probeMaxWorkers) },
-      }).catch((e) => ({
-        exitCode: 1,
-        stdout: "",
-        stderr: String(e),
-        timedOut: false,
-      })),
+      () => {
+        // #989 — THE yield. Everything before this point holds no slot, so a gate arriving during
+        // clone/install already waits zero and there is nothing to give up. Here the probe holds
+        // the one thing the gate wants, for up to 45 minutes, which is where #971's ~35-minute
+        // wait actually came from. So while the child runs, poll for a gate-class waiter and kill
+        // it when one appears.
+        const abort = new AbortController();
+        let exhaustedLogged = false;
+        // The VERIFY's own start, not the probe's: the streak floor asks how much verify a yield
+        // discards, and clone+install are not that.
+        const verifyStartedAt = Date.now();
+        const poll = setInterval(() => {
+          const already = probeConsecutiveYields(projectId);
+          const decision = shouldProbeYield({
+            gateWaiting: verifyChainGateWaiting(),
+            consecutiveYields: already,
+          });
+          if (decision.reason === "yield_budget_exhausted") {
+            // Once per RUN, not once per tick — at 15s over a 45-minute verify this would
+            // otherwise be 180 identical lines.
+            if (!exhaustedLogged) {
+              exhaustedLogged = true;
+              console.log(
+                `[base-branch-health] probe for project ${projectId} is NOT yielding its verify slot `
+                  + `despite a gate-class waiter queued for it — it has already yielded ${already} time(s) `
+                  + `in a row (KANBAN_BASE_HEALTH_MAX_CONSECUTIVE_YIELDS=${probeMaxConsecutiveYields()}), `
+                  + `and a base whose health is never measured is the failure this probe exists to prevent`,
+              );
+            }
+            return;
+          }
+          if (!decision.yield) return;
+          clearInterval(poll);
+          didYield = true;
+          const discardedMs = Date.now() - verifyStartedAt;
+          const streak = recordProbeYield(projectId, discardedMs);
+          const freeNote = discardedMs < probeYieldStreakFloorMs()
+            ? " (below the streak floor, so it cost no budget)"
+            : "";
+          // A silent abort is how a repeatedly-preempted probe becomes invisible, so this is the
+          // minimum the ticket requires: how much work is being thrown away, and how close the
+          // streak is to the run-to-completion escape. "A gate-class WAITER is queued" rather
+          // than "a merge gate is waiting on us" — `gate` is the semaphore's default class and
+          // includes the e2e smoke lane, so naming a merge specifically would be a false claim.
+          console.log(
+            `[base-branch-health] probe for project ${projectId} YIELDED the verify slot mid-run, `
+              + `discarding ${Math.round(discardedMs / 1000)}s of verify (${Math.round((Date.now() - startedAt) / 1000)}s `
+              + `into the probe) — a gate-class waiter is queued for it and has someone blocked behind it, while `
+              + `this is a background measurement. Nothing recorded; it re-runs when the base is next due. `
+              + `Consecutive yields: ${streak}/${probeMaxConsecutiveYields()}${freeNote}`,
+          );
+          abort.abort();
+        }, probeGatePollIntervalMs());
+        poll.unref?.();
+        return runSetupScript(dest, verifyScript, {
+          timeoutMs: VERIFY_TIMEOUT_MS,
+          env: { ...VERIFY_NEUTRALIZED_LISTENER_ENV, KANBAN_TEST_MAX_WORKERS: String(probeMaxWorkers) },
+          signal: abort.signal,
+        }).catch((e) => ({
+          exitCode: 1,
+          stdout: "",
+          stderr: String(e),
+          timedOut: false,
+        })).finally(() => clearInterval(poll));
+      },
       `base-branch health probe for project ${projectId}`,
       (waited) => { queueWaitMs = waited; },
       undefined,
@@ -296,6 +323,11 @@ ${tail(combined)}`,
       // ceiling is promoted back to arrival order, so this is a delay and never starvation.
       { priority: "background" },
     );
+    // #989 — the child was killed for a waiting gate. Return BEFORE building any result, so
+    // nothing is recorded; the `finally` still clears the temp dir and the in-flight stamp, and
+    // `didYield` keeps the streak. Deliberately inside the slot-releasing await: the kill has
+    // already happened, so #949's "never two heavyweight verifies" holds across the handover.
+    if ((run as { aborted?: boolean }).aborted) return null;
     const durationMs = Date.now() - startedAt;
     // #949: `durationMs` spans clone + install + QUEUE WAIT + run, and the wait can now be
     // long. #935 reports the duration as provenance for a starved probe, so the wait has to be
