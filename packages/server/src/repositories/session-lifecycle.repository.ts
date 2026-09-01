@@ -222,14 +222,20 @@ export async function getSessionStatus(
   const status = await getSessionStatusCanonical(sessionId, database);
   if (status === null) return null;
   // startedAt/executor are needed by the external-exit classifier (durationMs for the
-  // launch-failure window + provider for usage-limit detection); one query keeps the
+  // launch-failure window + provider for usage-limit detection); `pid` by #968's survivor
+  // probe, which has no in-memory pid on a reattached session. One query keeps the
   // repository surface flat (no extra function — the god-module gate is at its ceiling).
   const rows = await database
-    .select({ startedAt: sessions.startedAt, executor: sessions.executor })
+    .select({ startedAt: sessions.startedAt, executor: sessions.executor, pid: sessions.pid })
     .from(sessions)
     .where(eq(sessions.id, sessionId))
     .limit(1);
-  return { status, startedAt: rows[0]?.startedAt ?? null, executor: rows[0]?.executor ?? null };
+  return {
+    status,
+    startedAt: rows[0]?.startedAt ?? null,
+    executor: rows[0]?.executor ?? null,
+    pid: rows[0]?.pid ?? null,
+  };
 }
 
 export async function getSessionWorkspaceId(

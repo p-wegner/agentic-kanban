@@ -60,7 +60,9 @@ const { cleanupStaleSessions } = await import("../startup/startup-tasks.js");
 const { createSessionState } = await import("../services/session-manager/types.js");
 const { createSessionLifecycle } = await import("../services/session-manager/session-lifecycle.js");
 const { createMockProc } = await import("./helpers/mocks.js");
-import { projects, projectStatuses, issues, workspaces, sessions } from "@agentic-kanban/shared/schema";
+// #968 — the survivor probe. Imported after the db mock like every other real unit here.
+const { recordSurvivingProcessTree } = await import("../services/session-manager/exit-finalize.js");
+import { projects, projectStatuses, issues, workspaces, sessions, sessionMessages } from "@agentic-kanban/shared/schema";
 import type { SessionManager } from "../services/session.manager.js";
 import type { AgentService } from "../services/session-manager/session-lifecycle.js";
 import type * as agentServiceType from "../services/agent.service.js";
@@ -325,5 +327,87 @@ describe("notifyExternalExit — routes external exits through the exit state ma
     // after a restart parked the workspace idle and the monitor relaunched it on the same
     // dead login — the retry loop #430 exists to stop.
     expect(await getRuntimeState(key, h.db)).not.toBeNull();
+  });
+
+  // ── #968: 'completed' is a claim about the STREAM, never about the process ────────────
+  // A session was recorded `completed` exit 0 while its claude.exe kept editing files and
+  // running the verify chain for 20 more minutes. The workspace then looked free, the driving
+  // session relaunched it, and two agents co-edited one worktree. The exit path must record
+  // the survivor rather than let a clean-looking `completed` stand alone.
+  //
+  // PID liveness here is REAL, exactly like the rest of this file: `process.pid` is this test
+  // process, so the probe genuinely finds a live tree. No mock decides the branch.
+
+  // The survivor probe is fired but not awaited by `finalizeCompletedRoute` — it reads the
+  // whole OS process table and produces a diagnostic note, never a state transition, so it
+  // must not sit on the critical path that fires `onSessionExit` and can launch the next
+  // session. These two therefore drive `recordSurvivingProcessTree` directly, which is the
+  // unit that decides; the exit route's job is only to fire it, and case (e) asserts the row
+  // it leaves alone.
+
+  it("(e) a completed exit whose PROCESS is still alive records the survivor, not a bare success", async () => {
+    const seeded = await seedWorkspace(h.db, 15);
+    const oldStartedAt = new Date(Date.now() - 600_000).toISOString();
+    const sessionId = await insertRunningSession(h.db, seeded.workspaceId, process.pid, oldStartedAt);
+    const { lifecycle } = makeLifecycle(seeded, sessionId);
+
+    await lifecycle.notifyExternalExit(sessionId, 0);
+
+    // The row still says `completed` — the stream DID close, and rewriting the exit code would
+    // break every reader of it. What changes is that the other fact is no longer missing.
+    const [row] = await h.db.select().from(sessions).where(eq(sessions.id, sessionId));
+    expect(row.status).toBe("completed");
+
+    // PID liveness is REAL here: `process.pid` is this test process.
+    await recordSurvivingProcessTree({
+      db: h.db, sessionId, workspaceId: seeded.workspaceId, projectId: seeded.projectId,
+      executor: "claude-code", healthProviderName: "claude", authProviderName: "claude",
+      profileName: undefined, durationMs: 0, exitCode: 0, capturedStderr: "",
+      now: new Date().toISOString(), pid: process.pid,
+    });
+
+    const msgs = await h.db.select().from(sessionMessages).where(eq(sessionMessages.sessionId, sessionId));
+    const survivorNote = msgs.find((m) => (m.data ?? "").includes("process tree SURVIVED"));
+    expect(survivorNote, "a completed session with a live process tree must say so where the session is READ")
+      .toBeDefined();
+    // Actionable, not merely alarming: it names the pid an operator would look at.
+    expect(survivorNote!.data).toContain(String(process.pid));
+  });
+
+  it("(f) a completed exit with a dead PID records NO survivor note — the ordinary case stays quiet", async () => {
+    const seeded = await seedWorkspace(h.db, 16);
+    const oldStartedAt = new Date(Date.now() - 600_000).toISOString();
+    // A pid that cannot exist, so the probe genuinely answers `dead`. A note here would train
+    // operators to ignore the real one.
+    const sessionId = await insertRunningSession(h.db, seeded.workspaceId, 2_147_483_600, oldStartedAt);
+    const { lifecycle } = makeLifecycle(seeded, sessionId);
+
+    await lifecycle.notifyExternalExit(sessionId, 0);
+    await recordSurvivingProcessTree({
+      db: h.db, sessionId, workspaceId: seeded.workspaceId, projectId: seeded.projectId,
+      executor: "claude-code", healthProviderName: "claude", authProviderName: "claude",
+      profileName: undefined, durationMs: 0, exitCode: 0, capturedStderr: "",
+      now: new Date().toISOString(), pid: 2_147_483_600,
+    });
+
+    const [row] = await h.db.select().from(sessions).where(eq(sessions.id, sessionId));
+    expect(row.status).toBe("completed");
+    const msgs = await h.db.select().from(sessionMessages).where(eq(sessionMessages.sessionId, sessionId));
+    expect(msgs.some((m) => (m.data ?? "").includes("process tree SURVIVED"))).toBe(false);
+  });
+
+  it("(g) a remote session with no host pid is never probed — that is the worker's question", async () => {
+    const seeded = await seedWorkspace(h.db, 17);
+    const sessionId = await insertRunningSession(h.db, seeded.workspaceId, null, new Date().toISOString());
+    const probeTree = vi.fn();
+
+    await recordSurvivingProcessTree({
+      db: h.db, sessionId, workspaceId: seeded.workspaceId, projectId: seeded.projectId,
+      executor: "claude-code", healthProviderName: "claude", authProviderName: "claude",
+      profileName: undefined, durationMs: 0, exitCode: 0, capturedStderr: "",
+      now: new Date().toISOString(), pid: null, probeTree,
+    });
+
+    expect(probeTree).not.toHaveBeenCalled();
   });
 });
