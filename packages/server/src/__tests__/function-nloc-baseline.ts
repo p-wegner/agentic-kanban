@@ -123,6 +123,28 @@
  *                                          two new fields (`stdinOpen`, `idle`) the board needs,
  *                                          read off the same runner state the rest of the probe
  *                                          answer already reads.
+ *
+ * ── Sixth disclosed movement (2026-09-01, #968 survivor probe) ─────────────────────────
+ *
+ *   createSessionLifecycle      618 -> 620  Growth, named, and two lines of it. A session was
+ *                                          recorded `completed` exit 0 while its process kept
+ *                                          working, so the workspace looked free and a relaunch
+ *                                          put two agents in one worktree. The completed route
+ *                                          now probes whether the process TREE outlived the exit
+ *                                          event, and that needs the pid the session was SPAWNED
+ *                                          as — `sessions.pid` may already have been overwritten
+ *                                          by the relaunch, which would report a survivor on
+ *                                          every clean handover. The two lines are the two ends
+ *                                          of that: `state.launchedPids.set(...)` at the spawn
+ *                                          site, and the read in `notifyExternalExit` that must
+ *                                          happen BEFORE `teardownSessionState` clears the map.
+ *                                          Neither can be extracted — each has to sit at the
+ *                                          exact point in this function's flow where the value
+ *                                          is available. The decision itself (which pid to ask
+ *                                          about, in-memory vs persisted) DID move out, to the
+ *                                          module-level `survivorProbePid`, and the probe and
+ *                                          its verdict live entirely outside this file
+ *                                          (`lib/process-tree.ts`, `exit-finalize.ts`).
  */
 export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "cli/commands/issue.ts::registerIssueCommand": 718,
@@ -134,7 +156,8 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // in the board. It is still the largest entry in this ring and still wants splitting.
   "services/workspace-create.service.ts::createWorkspaceCreateService": 635,
   "services/issue.service.ts::createIssueService": 616,
-  "services/session-manager/session-lifecycle.ts::createSessionLifecycle": 618,
+  // 618 -> 620 (#968), disclosed in the sixth movement above.
+  "services/session-manager/session-lifecycle.ts::createSessionLifecycle": 620,
   "services/workflow-fork.service.ts::createWorkflowForkService": 581,
   "cli/commands/workspace.ts::registerWorkspaceCommand": 573,
   "services/agent-remote.service.ts::createRemoteAgentService": 637,

@@ -40,6 +40,7 @@ import {
   type GitService,
 } from "./workspace-internals.js";
 import { stopBisectSession } from "./bisect.service.js";
+import { findLiveAgentTrees, liveAgentRefusalMessage } from "./workspace-agent-liveness.service.js";
 import * as realGitService from "./git.service.js";
 import { resolveEffectiveModel } from "./effective-config.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -96,10 +97,55 @@ export function createWorkspaceSessionService(deps: {
     }
   }
 
+  /**
+   * Refuse a relaunch while a previous session's agent process tree is still alive (#968).
+   *
+   * The board's own record said the workspace was free — session `completed`, exit 0 — while
+   * the agent kept working, so the caller that relaunched had no way to know better. That is
+   * why this check belongs to the API rather than to its callers: it is the only layer that
+   * can ask the operating system instead of the session table.
+   *
+   * Placed FIRST, before the worktree rebuild, the auto-rebase and the skill
+   * re-materialization: every one of those writes into a worktree a live agent may be reading,
+   * and an auto-rebase under a working agent is worse than the double launch it precedes.
+   *
+   * `force` keeps the old behavior reachable — the operator who has just killed the zombie by
+   * hand should not have to wait for a process table to agree with them.
+   *
+   * An `unknown` verdict does NOT block. The probe reads a whole process table and can fail
+   * for reasons that have nothing to do with this workspace (no PowerShell, a blown budget);
+   * a guard that turns every such failure into a refused launch would take the board down on
+   * a bad enumeration, and the failure it prevents is rare, recoverable and — as #968 itself
+   * showed — noticed by the agents involved. It is logged rather than silent.
+   */
+  async function assertNoLiveAgentTree(id: string, force: boolean): Promise<void> {
+    if (force) {
+      console.warn(`[workspace-session] launch with force=true: skipping the live-agent-tree check for workspaceId=${id}`);
+      return;
+    }
+    const priorSessions = await getWorkspaceSessions(id, database).catch(() => []);
+    const liveness = await findLiveAgentTrees(priorSessions);
+    if (liveness.verdict === "live") {
+      console.warn(`[workspace-session] launch refused, live agent tree: workspaceId=${id} ${liveness.reason}`);
+      throw new WorkspaceError(liveAgentRefusalMessage(liveness), "CONFLICT", {
+        reason: "LIVE_AGENT_TREE",
+        trees: liveness.trees,
+      });
+    }
+    if (liveness.verdict === "unknown") {
+      console.warn(
+        `[workspace-session] live-agent-tree check inconclusive for workspaceId=${id}: ${liveness.reason}. ` +
+          `Launching anyway — an unreadable process table is not evidence of a second agent.`,
+      );
+    }
+  }
+
   async function launchSession(id: string, body: Record<string, unknown> = {}) {
     const ws0 = await getWorkspaceById(id, database);
     if (!ws0) throw new WorkspaceError("Workspace not found", "NOT_FOUND");
     if (!getSessionManager) throw new WorkspaceError("Session manager not available", "BAD_REQUEST");
+
+    await assertNoLiveAgentTree(id, body.force === true);
 
     // If workingDir is missing on a non-direct workspace, attempt to rebuild the worktree.
     if (!ws0.isDirect && !ws0.workingDir) {
