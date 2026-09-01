@@ -16,6 +16,7 @@ import {
 import { completeMergeJob, describeMergeJobAttempts, failMergeJob, getMergeJob, startMergeJob } from "../services/merge-job.service.js";
 import { describePersistedGateVerdict } from "../services/workspace-merge-gate.js";
 import { getMergeRun, type MergeRunRow } from "../repositories/merge-run.repository.js";
+import { getWorkspaceMergeState } from "../repositories/merge-queue.repository.js";
 
 import { queryFlag } from "../middleware/query-params.js";
 import { ConflictError, UnprocessableError } from "../errors/index.js";
@@ -46,8 +47,10 @@ export const MID_SESSION_LAND_MIN_INTERVAL_MS = 15_000;
  * The `merge-status` body for a workspace this process holds NO merge job for — the shape #919
  * hit, and the one whose emptiness was the whole defect.
  *
- * Two durable facts survive a restart and are what turn a bare `{"job": null}` back into an
- * answer, so both are read here:
+ * Three durable facts survive a restart and are what turn a bare `{"job": null}` back into an
+ * answer, so all three are read here:
+ *  - `workspaces.merged_at` / `merged_head_sha` (#990) — whether the merge SUCCEEDED. This is
+ *    the terminal one and it is checked first;
  *  - the persisted pre-merge gate verdict (#893) — whether the gate had already PASSED before
  *    the transport died, i.e. whether a retry re-pays the 30-45 minute run;
  *  - the in-flight merge marker (#945) — whether a merge was RUNNING when the process was lost.
@@ -57,20 +60,62 @@ export const MID_SESSION_LAND_MIN_INTERVAL_MS = 15_000;
  * A marker still visible here means the interruption has not been swept yet; the reconciler's
  * boot pass records it as a `merge-attempt` note and clears the row.
  *
+ * **Why the success case needed its own read (#990).** The restart this function exists to
+ * survive is very often caused BY the merge: a successful merge moves the main checkout's
+ * `master`, `tsx watch` restarts the server, and the in-memory job map goes with it. On that
+ * path the in-flight marker has been resolved rather than left dangling, and a gate verdict —
+ * if stored at all — only says the gate passed, not that the merge landed. So the two reads
+ * above both come back empty and the caller was told
+ * "no merge job recorded for this workspace in the current server process": the exact same
+ * sentence as a workspace nobody ever tried to merge. Measured 2026-09-01, twice in one
+ * merge-queue run (after #969's and #973's merges), each time forcing the driver to fall back
+ * to the git tip to learn an outcome the board already had in a column.
+ *
+ * The fix is a projection, not persistence: the outcome already survives in `merged_at`, so
+ * ranking the facts — merged (terminal) beats interrupted beats a gate verdict beats
+ * "nobody ever tried" — is all that was missing.
+ *
  * Extracted from the handler rather than inlined: it is a pure projection over two reads with no
  * dependency on the route closure, so it is assertable without standing up a router — and
  * `createWorkspaceActionsRoute` is on the `function-nloc-ratchet` (#800) shrink-only ring.
  */
 export async function describeAbsentMergeJob(workspaceId: string): Promise<{
   job: null;
+  /**
+   * #990 — set only when `workspaces.merged_at` is stamped. `"completed"` is the terminal,
+   * unambiguous answer a poller that lost the job map is looking for; its absence is what the
+   * other branches below then have to disambiguate.
+   */
+  outcome?: "completed";
+  mergedAt?: string;
+  mergedHeadSha?: string | null;
   interruptedMerge: MergeRunRow | null;
   persistedGateVerdict?: Awaited<ReturnType<typeof describePersistedGateVerdict>>;
   message: string;
 }> {
-  const [persistedGateVerdict, interruptedMerge] = await Promise.all([
+  const [persistedGateVerdict, interruptedMerge, mergeState] = await Promise.all([
     describePersistedGateVerdict(workspaceId),
     getMergeRun(workspaceId).catch(() => undefined),
+    getWorkspaceMergeState(workspaceId).catch(() => undefined),
   ]);
+  // #990 — checked FIRST, and returning here rather than decorating the messages below, because
+  // a stamped `merged_at` is terminal: once the merge landed, whether a gate verdict is still
+  // reusable or an interruption marker is still unswept is no longer the caller's question.
+  if (mergeState?.mergedAt) {
+    return {
+      job: null,
+      outcome: "completed",
+      mergedAt: mergeState.mergedAt,
+      mergedHeadSha: mergeState.mergedHeadSha,
+      interruptedMerge: interruptedMerge ?? null,
+      message:
+        `no merge job is held in the current server process, but this workspace is stamped MERGED at ${mergeState.mergedAt}`
+        + (mergeState.mergedHeadSha ? ` (merged head ${mergeState.mergedHeadSha})` : "")
+        + ". The merge succeeded; the job record was lost with a server restart — very often the "
+        + "one the merge itself caused, since moving the base branch restarts a tsx-watch server (#990). "
+        + "No retry is needed.",
+    };
+  }
   const interruptedNote = interruptedMerge
     ? ` A merge (job ${interruptedMerge.jobId}) was submitted ${interruptedMerge.startedAt} and never reached a `
       + "verdict — it is being recorded as interrupted by a restart (#945)."
