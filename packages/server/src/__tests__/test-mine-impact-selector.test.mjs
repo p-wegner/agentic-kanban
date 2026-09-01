@@ -236,27 +236,49 @@ describe("resolveImpactCli", () => {
   });
 });
 
+/**
+ * #971 — every one of `runImpactSelector`'s option defaults is read from `process.env` AT MODULE
+ * LOAD (`impactMinScore`, `impactBase`, `impactBudget`, `impactRebuildIfStale`,
+ * `impactNewTestFiles`). So a test that omits an option is not asserting the function's behaviour,
+ * it is asserting the MACHINE's configuration — and the argv assertions below went red on any
+ * worktree where an operator had actually turned the per-project `test_impact_budget_<id>` setting
+ * on (`KANBAN_TEST_BUDGET=120s` exported into the run), for a reason unrelated to the diff.
+ *
+ * `vi.stubEnv` cannot fix that: the defaults are already frozen by the time the import resolves.
+ * The hermetic form is therefore to pass every env-derived option EXPLICITLY. `selectorOpts` is
+ * that neutral baseline — pass an override for whatever the test is actually about.
+ */
+const HERMETIC_SELECTOR_DEFAULTS = {
+  minScore: "1.0",
+  rebuildIfStale: false,
+  base: "",
+  budget: "",
+  union: [],
+  newTestFiles: [],
+};
+const selectorOpts = (overrides = {}) => ({ ...HERMETIC_SELECTOR_DEFAULTS, ...overrides });
+
 describe("runImpactSelector fail-open", () => {
   const cli = resolve("/repo", ".claude/skills/test-impact/tools/impact.mjs");
 
   it("returns null when the selector cannot start", () => {
     const spawnFn = () => ({ error: new Error("ENOENT"), status: null, stdout: "", stderr: "" });
-    expect(runImpactSelector({ cli, spawnFn })).toBeNull();
+    expect(runImpactSelector(selectorOpts({ cli, spawnFn }))).toBeNull();
   });
 
   it("returns null on a non-zero exit", () => {
     const spawnFn = () => ({ status: 2, stdout: "packages/server:src/__tests__/a.test.ts", stderr: "" });
-    expect(runImpactSelector({ cli, spawnFn })).toBeNull();
+    expect(runImpactSelector(selectorOpts({ cli, spawnFn }))).toBeNull();
   });
 
   it("returns null on an EMPTY selection — a green from that would assert nothing", () => {
     const spawnFn = () => ({ status: 0, stdout: "[test-impact] 0 test file(s) selected\n", stderr: "" });
-    expect(runImpactSelector({ cli, spawnFn })).toBeNull();
+    expect(runImpactSelector(selectorOpts({ cli, spawnFn }))).toBeNull();
   });
 
   it("returns the label map on a successful selection", () => {
     const spawnFn = () => ({ status: 0, stdout: "packages/server:src/__tests__/a.test.ts\n", stderr: "" });
-    const scope = runImpactSelector({ cli, spawnFn });
+    const scope = runImpactSelector(selectorOpts({ cli, spawnFn }));
     expect(scope?.get("server")).toEqual(["src/__tests__/a.test.ts"]);
   });
 
@@ -270,7 +292,7 @@ describe("runImpactSelector fail-open", () => {
       seen = args;
       return { status: 0, stdout: "packages/server:src/__tests__/a.test.ts\n", stderr: "" };
     };
-    runImpactSelector({ cli, minScore: "1.0", rebuildIfStale: false, base: "", spawnFn });
+    runImpactSelector(selectorOpts({ cli, spawnFn }));
     expect(seen.slice(1)).toEqual(["select", "--format", "pkgfile", "--min-score", "1.0"]);
     expect(seen).not.toContain("--rebuild-if-stale");
   });
@@ -282,7 +304,7 @@ describe("runImpactSelector fail-open", () => {
       seen = args;
       return { status: 0, stdout: "packages/server:src/__tests__/a.test.ts\n", stderr: "" };
     };
-    runImpactSelector({ cli, minScore: "1.0", rebuildIfStale: true, base: "", spawnFn });
+    runImpactSelector(selectorOpts({ cli, rebuildIfStale: true, spawnFn }));
     expect(seen).toContain("--rebuild-if-stale");
   });
 });
@@ -308,7 +330,7 @@ describe("the selection's base ref", () => {
     // then degrades to the constant always-run set while still calling itself a selection. That
     // is #963, and getting the spelling backwards is exactly what made its first fix inert.
     const sink = {};
-    runImpactSelector({ cli, minScore: "1.0", rebuildIfStale: false, base: "master", spawnFn: spawnCapturing(sink) });
+    runImpactSelector(selectorOpts({ cli, base: "master", spawnFn: spawnCapturing(sink) }));
     expect(sink.args.slice(1)).toEqual(["select", "master", "--format", "pkgfile", "--min-score", "1.0"]);
     expect(sink.args).not.toContain("--base");
   });
@@ -317,7 +339,7 @@ describe("the selection's base ref", () => {
     // A developer mid-edit HAS uncommitted work, and that is the right change set for them. A base
     // there would replace it with everything committed since the base.
     const sink = {};
-    runImpactSelector({ cli, minScore: "1.0", rebuildIfStale: false, base: "", spawnFn: spawnCapturing(sink) });
+    runImpactSelector(selectorOpts({ cli, spawnFn: spawnCapturing(sink) }));
     expect(sink.args.slice(1)).toEqual(["select", "--format", "pkgfile", "--min-score", "1.0"]);
   });
 });
@@ -339,9 +361,20 @@ describe("the selection's time budget", () => {
 
   it("passes --budget alongside the floor, after the positional base", () => {
     const sink = {};
-    runImpactSelector({ cli, minScore: "1.0", rebuildIfStale: false, base: "master", budget: "60s", spawnFn: spawnCapturing(sink) });
+    runImpactSelector(selectorOpts({ cli, base: "master", budget: "60s", spawnFn: spawnCapturing(sink) }));
     expect(sink.args.slice(1)).toEqual([
       "select", "master", "--format", "pkgfile", "--min-score", "1.0", "--budget", "60s",
+    ]);
+  });
+
+  it("appends --budget with NO base either — the inner loop's shape with the setting on", () => {
+    // #971 — the combination an operator who turns `test_impact_budget_<id>` on actually gets in
+    // the builder's own loop (a budget, no `KANBAN_IMPACT_BASE`). It was only ever observable by
+    // ACCIDENT, as the ambient env leaking into the tests above; now it is asserted on purpose.
+    const sink = {};
+    runImpactSelector(selectorOpts({ cli, budget: "120s", spawnFn: spawnCapturing(sink) }));
+    expect(sink.args.slice(1)).toEqual([
+      "select", "--format", "pkgfile", "--min-score", "1.0", "--budget", "120s",
     ]);
   });
 
@@ -349,7 +382,7 @@ describe("the selection's time budget", () => {
     // "Clearing the setting restores today's behaviour exactly" is the whole contract of the
     // Settings field, and this is where it either holds or does not.
     const sink = {};
-    runImpactSelector({ cli, minScore: "1.0", rebuildIfStale: false, base: "", budget: "", spawnFn: spawnCapturing(sink) });
+    runImpactSelector(selectorOpts({ cli, spawnFn: spawnCapturing(sink) }));
     expect(sink.args.slice(1)).toEqual(["select", "--format", "pkgfile", "--min-score", "1.0"]);
   });
 });
@@ -372,15 +405,13 @@ describe("the union hand-off to select --union", () => {
 
   it("passes the related picks over STDIN as `--union -`, before --rebuild-if-stale", () => {
     const sink = {};
-    runImpactSelector({
+    runImpactSelector(selectorOpts({
       cli,
-      minScore: "1.0",
-      rebuildIfStale: false,
       base: "master",
       budget: "60s",
       union: ["packages/server/src/__tests__/b.test.ts", "packages/shared/__tests__/c.test.ts"],
       spawnFn: spawnCapturing(sink),
-    });
+    }));
     expect(sink.args.slice(1)).toEqual([
       "select", "master", "--format", "pkgfile", "--min-score", "1.0", "--budget", "60s",
       "--union", "-",
@@ -400,14 +431,14 @@ describe("the union hand-off to select --union", () => {
     const sink = {};
     const union = Array.from({ length: 700 }, (_, i) => `packages/server/src/__tests__/generated-suite-${i}.test.ts`);
     expect(union.join(",").length).toBeGreaterThan(32767);
-    runImpactSelector({ cli, minScore: "1.0", rebuildIfStale: false, base: "master", union, spawnFn: spawnCapturing(sink) });
+    runImpactSelector(selectorOpts({ cli, base: "master", union, spawnFn: spawnCapturing(sink) }));
     for (const arg of sink.args) expect(arg.length).toBeLessThan(8191);
     expect(sink.input.split("\n").filter(Boolean)).toHaveLength(700);
   });
 
   it("omits --union entirely when no other selector ran — byte-identical argv to the pre-#967 runner", () => {
     const sink = {};
-    runImpactSelector({ cli, minScore: "1.0", rebuildIfStale: false, base: "", union: [], spawnFn: spawnCapturing(sink) });
+    runImpactSelector(selectorOpts({ cli, spawnFn: spawnCapturing(sink) }));
     expect(sink.args.slice(1)).toEqual(["select", "--format", "pkgfile", "--min-score", "1.0"]);
     // No stdin either — an unrelated caller's spawn options are unchanged.
     expect(sink.input).toBeUndefined();
@@ -479,18 +510,17 @@ describe("new test files versus the empty-selection fail-open", () => {
     // and an empty selection is evidence the selector had nothing to say about this change at all.
     const spawnFn = () => ({ status: 0, stdout: "", stderr: "" });
     expect(
-      runImpactSelector({ cli, base: "", newTestFiles: ["packages/server/src/__tests__/new.test.ts"], spawnFn }),
+      runImpactSelector(selectorOpts({ cli, newTestFiles: ["packages/server/src/__tests__/new.test.ts"], spawnFn })),
     ).toBeNull();
   });
 
   it("merges them into a non-empty selection", () => {
     const spawnFn = () => ({ status: 0, stdout: "packages/server:src/__tests__/a.test.ts\n", stderr: "" });
-    const scope = runImpactSelector({
+    const scope = runImpactSelector(selectorOpts({
       cli,
-      base: "",
       newTestFiles: ["packages/server/src/__tests__/new.test.ts"],
       spawnFn,
-    });
+    }));
     expect(scope?.get("server")).toEqual(["src/__tests__/a.test.ts", "src/__tests__/new.test.ts"]);
   });
 });
