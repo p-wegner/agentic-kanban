@@ -65,6 +65,11 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // `docs/tests/impact-map.json` on its main checkout. Absent = follow the board-wide
   // `test_impact_map_refresh` setting.
   "test_impact_map",
+  // Test-impact BUDGET (#966): `test_impact_budget_<id>` is a wall-clock ceiling (e.g. "60s")
+  // on the tests a gate/builder run may spend, AND the switch that turns the impact selector
+  // on for that project — a ceiling on a selection nobody makes would be inert. Absent/empty =
+  // off, which is today's behaviour exactly. See shared/lib/test-impact-budget.ts.
+  "test_impact_budget",
   "file_contention",
   // Worker fleet (epic #184): `worker_dispatch_<projectId>` opts a project's builder
   // sessions into remote execution on connected fleet workers ("true"/"false");

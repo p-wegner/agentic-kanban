@@ -3,7 +3,9 @@ import {
   buildProjectPatchBody,
   buildProjectSettingsState,
   buildSettingsToSave,
+  hydrateProjectSettings,
   isDefaultBranchInvalid,
+  projectSettingsSaveError,
   verifyScriptKey,
 } from "./settingsPanelState.js";
 import { projectRowFixture, projectSettingsFixture } from "../__tests__/fixtures/settingsPanel.js";
@@ -173,9 +175,59 @@ describe("verifyScriptKey", () => {
   });
 });
 
+describe("hydrateProjectSettings", () => {
+  it("reads BOTH per-project preference keys off the settings blob (#966)", () => {
+    // The component no longer names either key, so this is where the two reads are pinned.
+    // Mutation: read the budget under `verifyScriptKey` — the field would mirror the verify
+    // script and a save would then write the script into the budget.
+    const state = hydrateProjectSettings(
+      projectRowFixture(),
+      { "verify_script_proj-1": "pnpm test:mine", "test_impact_budget_proj-1": "60s" },
+      "proj-1",
+    );
+    expect(state.verifyScript).toBe("pnpm test:mine");
+    expect(state.testImpactBudget).toBe("60s");
+  });
+
+  it("defaults both to empty when the blob carries neither", () => {
+    const state = hydrateProjectSettings(projectRowFixture(), {}, "proj-1");
+    expect(state.verifyScript).toBe("");
+    expect(state.testImpactBudget).toBe("");
+  });
+});
+
+describe("projectSettingsSaveError", () => {
+  const branches = { local: ["main"], remote: [] };
+
+  it("is null when both the branch and the budget are acceptable", () => {
+    expect(projectSettingsSaveError({ defaultBranch: "main", testImpactBudget: "60s" }, branches)).toBeNull();
+    expect(projectSettingsSaveError({ defaultBranch: "", testImpactBudget: "" }, branches)).toBeNull();
+  });
+
+  it("refuses an unparseable budget rather than coercing it (#966)", () => {
+    // Mutation: return null here — the save would apply NO budget while the operator believes
+    // the gate is capped, which is the exact failure the refusal exists to prevent.
+    expect(projectSettingsSaveError({ defaultBranch: "main", testImpactBudget: "soon" }, branches))
+      .toMatch(/Test-impact budget/);
+  });
+
+  it("still reports an unknown default branch, and reports it FIRST", () => {
+    expect(projectSettingsSaveError({ defaultBranch: "typo", testImpactBudget: "60s" }, branches))
+      .toMatch(/Default branch/);
+    expect(projectSettingsSaveError({ defaultBranch: "typo", testImpactBudget: "soon" }, branches))
+      .toMatch(/Default branch/);
+  });
+});
+
 describe("buildSettingsToSave", () => {
+  const projectPrefs = (overrides: Partial<{ verifyScript: string; testImpactBudget: string }> = {}) => ({
+    verifyScript: "pnpm test",
+    testImpactBudget: "",
+    ...overrides,
+  });
+
   it("adds the active project's verify script under its per-project key", () => {
-    const out = buildSettingsToSave<Record<string, unknown>>({ theme: "dark" }, { verifyScript: "pnpm test:mine" }, "proj-1");
+    const out = buildSettingsToSave<Record<string, unknown>>({ theme: "dark" }, projectPrefs({ verifyScript: "pnpm test:mine" }), "proj-1");
     expect(out["verify_script_proj-1"]).toBe("pnpm test:mine");
     expect(out.theme).toBe("dark");
   });
@@ -183,21 +235,33 @@ describe("buildSettingsToSave", () => {
   it("stores an emptied verify script rather than skipping it", () => {
     // Mutation: `if (activeProjectId && projectSettings.verifyScript)` — clearing the verify
     // script in the UI would silently leave the old one in place.
-    expect(buildSettingsToSave<Record<string, unknown>>({}, { verifyScript: "" }, "proj-1")["verify_script_proj-1"]).toBe("");
+    expect(buildSettingsToSave<Record<string, unknown>>({}, projectPrefs({ verifyScript: "" }), "proj-1")["verify_script_proj-1"]).toBe("");
   });
 
-  it("writes no verify-script key when there is no active project", () => {
-    expect(buildSettingsToSave({ theme: "dark" }, { verifyScript: "pnpm test" }, null))
-      .toEqual({ theme: "dark" });
-    expect(buildSettingsToSave({ theme: "dark" }, { verifyScript: "pnpm test" }, undefined))
-      .toEqual({ theme: "dark" });
+  it("adds the test-impact budget under the SHARED key family (#966)", () => {
+    // The key comes from `testImpactBudgetPrefKey`, not a second hand-written string — which is
+    // exactly the drift `verify_script_<id>` above documents.
+    const out = buildSettingsToSave<Record<string, unknown>>({}, projectPrefs({ testImpactBudget: " 60s " }), "proj-1");
+    expect(out["test_impact_budget_proj-1"]).toBe("60s");
+  });
+
+  it("writes an EMPTY budget rather than omitting it — that is how the setting is cleared", () => {
+    // Omitting the key would leave a previously-set budget in place while the field the operator
+    // just emptied says otherwise, i.e. a gate still narrowed by a budget nobody can see.
+    const out = buildSettingsToSave<Record<string, unknown>>({}, projectPrefs({ testImpactBudget: "" }), "proj-1");
+    expect(out["test_impact_budget_proj-1"]).toBe("");
+  });
+
+  it("writes no per-project key when there is no active project", () => {
+    expect(buildSettingsToSave({ theme: "dark" }, projectPrefs(), null)).toEqual({ theme: "dark" });
+    expect(buildSettingsToSave({ theme: "dark" }, projectPrefs(), undefined)).toEqual({ theme: "dark" });
   });
 
   it("does not mutate the settings object it was given", () => {
     // Mutation: assign into `settings` instead of a copy — React state would be mutated in
     // place, so the re-render after a failed save would show the unsaved value as saved.
     const settings: Record<string, string> = { theme: "dark" };
-    buildSettingsToSave(settings, { verifyScript: "pnpm test" }, "proj-1");
+    buildSettingsToSave(settings, projectPrefs(), "proj-1");
     expect(settings).toEqual({ theme: "dark" });
   });
 });

@@ -9,6 +9,9 @@ import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { mergeSessionStats } from "@agentic-kanban/shared/lib/session-stats-blob";
 import { isBuilderLaunchTrigger } from "@agentic-kanban/shared/lib/session-trigger";
 import { readTier0Capacity, deriveVerifyWorkers } from "@agentic-kanban/shared/lib/machine-capacity";
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
+import { resolveTestImpactBudget, resolveTestImpactBudgetEnv } from "@agentic-kanban/shared/lib/test-impact-budget";
+import { getAllPreferencesCached } from "../../repositories/preferences.repository.js";
 
 /** Pure helpers for session launch that don't need the createSessionLifecycle closure. */
 
@@ -54,6 +57,44 @@ export function withBuilderTestWorkerCap(
     const tier0 = readTier0Capacity();
     const workers = deriveVerifyWorkers({ cpuCount: os.cpus().length, freeGb: tier0.freeGb, ceiling: BUILDER_TEST_WORKERS_CEILING });
     return { ...extraEnv, KANBAN_TEST_MAX_WORKERS: String(workers) };
+  } catch {
+    return extraEnv;
+  }
+}
+
+/**
+ * #966: export the project's test-impact BUDGET into a BUILDER's env, so the agent's own inner
+ * loop (`pnpm test:mine`) runs the same budgeted impact selection its merge gate will.
+ *
+ * The budget is one setting with two consumers by design. If it applied only to the gate, an
+ * agent would iterate against `vitest related` and then be gated by a differently-chosen set —
+ * two selections to reason about instead of one, and the cheaper loop would be the wider one,
+ * which is backwards.
+ *
+ * BUILDER SESSIONS ONLY, the same rule (and the same reason) as `withBuilderTestWorkerCap`: a
+ * review/verify/reconcile session is not iterating on the code, and narrowing what a REVIEWER
+ * could run is a weakening nobody asked for.
+ *
+ * Best-effort by construction. A pref read that fails, or a project with no budget, leaves the
+ * env untouched — which is byte-for-byte the pre-#966 launch. The whole feature is opt-in, so
+ * failing toward "off" is both the safe and the honest direction.
+ */
+export async function withBuilderTestImpactBudget(
+  extraEnv: Record<string, string> | undefined,
+  isBuilder: boolean,
+  projectId: string,
+  database: Database,
+  deps?: {
+    loadPrefs?: (db: Database) => Promise<Array<{ key: string; value: string }>>;
+  },
+): Promise<Record<string, string> | undefined> {
+  if (!isBuilder || !projectId) return extraEnv;
+  try {
+    const load = deps?.loadPrefs ?? ((db: Database) => getAllPreferencesCached(db));
+    const budget = resolveTestImpactBudget(toPrefMap(await load(database)), projectId);
+    const env = resolveTestImpactBudgetEnv(budget);
+    if (Object.keys(env).length === 0) return extraEnv;
+    return { ...extraEnv, ...env };
   } catch {
     return extraEnv;
   }

@@ -8,6 +8,11 @@ import { formatPostureNote, resolveRiskPosture, type RiskPosture } from "./risk-
 import { resolveEffectiveVerify } from "./stack-profile.service.js";
 import { gateVerificationKey } from "./merge-gate-tree-memo.js";
 import { resolveSelectorId } from "./test-impact-selector-id.js";
+import {
+  resolveTestImpactBudget,
+  resolveTestImpactBudgetEnv,
+  type ParsedTestImpactBudget,
+} from "@agentic-kanban/shared/lib/test-impact-budget";
 
 /**
  * The three verify-gate tiers (#538), replacing `verify_file_scope` plus the implicit
@@ -89,13 +94,25 @@ export async function resolveVerifyGateStrategy(projectId: string, database: Dat
   return (await resolveGateTierFor(projectId, database)).strategy;
 }
 
-/** As `resolveVerifyGateStrategy`, but keeps the posture so a caller can surface `.summary`. */
+/**
+ * As `resolveVerifyGateStrategy`, but keeps the posture so a caller can surface `.summary` — and
+ * the project's test-impact BUDGET (#966), read from the same prefMap this already loads.
+ *
+ * The budget rides along here rather than getting its own DB read because it is resolved at the
+ * same instant, for the same decision, and a second read is a second chance for the two to
+ * disagree about which pref generation the gate ran under.
+ */
 export async function resolveGateTierFor(
   projectId: string,
   database: Database,
-): Promise<{ strategy: VerifyGateStrategy; posture: RiskPosture; fromPosture: boolean }> {
+): Promise<{
+  strategy: VerifyGateStrategy;
+  posture: RiskPosture;
+  fromPosture: boolean;
+  budget: ParsedTestImpactBudget | null;
+}> {
   const prefMap = toPrefMap(await getAllPreferencesCached(database).catch(() => []));
-  return resolveGateTier(prefMap, projectId);
+  return { ...resolveGateTier(prefMap, projectId), budget: resolveTestImpactBudget(prefMap, projectId) };
 }
 
 /**
@@ -297,8 +314,15 @@ export type GateTestSelector = "related" | "impact";
 export function resolveGateTestSelector(
   env: Record<string, string | undefined>,
   strategy?: VerifyGateStrategy,
+  /**
+   * The project's `test_impact_budget_<id>` (#966). A budget is a ceiling on a SELECTION, so
+   * setting one with no selector would be inert — the budget is therefore the third route to
+   * this selector, alongside the tier and the ambient env var. All three yield the same value,
+   * so a gate never claims one selector and runs another.
+   */
+  budget?: ParsedTestImpactBudget | null,
 ): GateTestSelector {
-  if (strategy === "impact") return "impact";
+  if (strategy === "impact" || budget) return "impact";
   return (env.KANBAN_TEST_SELECTOR ?? "").trim().toLowerCase() === "impact" ? "impact" : "related";
 }
 
@@ -325,20 +349,26 @@ export function resolveGateFileScopeEmission(args: {
   changedFileCount: number;
   /** The resolved tier — `impact` selects the selector on its own (#956). */
   strategy?: VerifyGateStrategy;
+  /** The project's test-impact budget — a THIRD route to the selector (#966). */
+  budget?: ParsedTestImpactBudget | null;
 }): { selector: GateTestSelector; emitFileScope: boolean; note: string | null } {
-  const selector = resolveGateTestSelector(args.env, args.strategy);
+  const selector = resolveGateTestSelector(args.env, args.strategy, args.budget);
   const emitFileScope = args.fileScoped && selector !== "impact";
-  // Which of the two routes chose the selector, so the log line names the knob an operator would
-  // actually have to change. Under the `impact` TIER the file scope was never going to be emitted
-  // in the first place, so calling that a "dropped" scope would misdescribe it.
+  // Which of the three routes chose the selector, so the log line names the knob an operator
+  // would actually have to change. Under the `impact` TIER (or a budget) the file scope was
+  // never going to be emitted in the first place, so calling that a "dropped" scope would
+  // misdescribe it. The BUDGET is named first when both apply: it is the setting an operator
+  // most likely just changed, and it is the one visible in Settings.
   const viaTier = args.strategy === "impact";
   const note = !args.fileScoped
     ? null
     : emitFileScope
       ? `file-scoping verify tests to ${args.changedFileCount} changed file(s)`
-      : viaTier
-        ? `verify_gate_strategy=impact, so the impact selection chooses the suites instead of the ${args.changedFileCount}-file scope — this run is recorded as impact-scoped, not full`
-        : `KANBAN_TEST_SELECTOR=impact is set, so the impact selection replaces the ${args.changedFileCount}-file scope — this run is recorded as impact-scoped, not full`;
+      : args.budget
+        ? `test_impact_budget=${args.budget.value}, so the impact selection chooses the suites instead of the ${args.changedFileCount}-file scope — this run is recorded as impact-scoped, not full`
+        : viaTier
+          ? `verify_gate_strategy=impact, so the impact selection chooses the suites instead of the ${args.changedFileCount}-file scope — this run is recorded as impact-scoped, not full`
+          : `KANBAN_TEST_SELECTOR=impact is set, so the impact selection replaces the ${args.changedFileCount}-file scope — this run is recorded as impact-scoped, not full`;
   return { selector, emitFileScope, note };
 }
 
@@ -367,6 +397,25 @@ export interface GateImpactSelection {
   selectionTier?: string;
   /** How many changed files the selection saw — 0 means it never saw the diff (#963). */
   changedCount?: number;
+  /**
+   * The budget the selection was made under, as the operator spelled it (#966), or undefined
+   * when no budget applied. Named in the message because a budget is a SECOND, independent
+   * narrowing on top of the score floor: `dropped 37 below the score floor` says nothing about
+   * how many more the clock dropped, and an operator reading a passing gate has to be able to
+   * tell "the tail scored too low" from "we ran out of the 60 seconds you allotted".
+   */
+  budget?: string;
+  /**
+   * How many suites the BUDGET dropped (i.e. cleared the score floor but did not fit in the
+   * time). Distinct from `belowFloorCount` on purpose — collapsing them would hide which knob
+   * to turn.
+   */
+  budgetDroppedCount?: number;
+  /**
+   * The selection's own measured estimate of what it kept, in ms — the number the budget is
+   * compared against. Undefined when the tool did not report one.
+   */
+  estMs?: number;
 }
 
 /** Matches the test-file extensions `scripts/test-mine.mjs` actually runs. */
@@ -407,11 +456,24 @@ export function resolveImpactSelectorEnv(args: {
    *  missing path fails the package with a bare `No test files found`, turning a WIDENING into a
    *  red gate. */
   fileExists: (relativePath: string) => boolean;
+  /**
+   * The project's `test_impact_budget_<id>` (#966). A budget IMPLIES the selector, so this
+   * function now has two entry conditions rather than one — and the budget adds a FOURTH
+   * variable, `KANBAN_TEST_BUDGET`, which `scripts/test-mine.mjs` passes to `select --budget`.
+   *
+   * A budget with a non-`impact` tier is the ordinary case, not an edge one: the Settings field
+   * is the intended way in, and no project's tier defaults to `impact`. So the base/new-file
+   * companions have to be emitted for a budgeted run too — they are what make the selection see
+   * the diff at all (#963), and they are just as load-bearing when the budget chose the selector
+   * as when the tier did.
+   */
+  budget?: ParsedTestImpactBudget | null;
 }): Record<string, string> {
-  if (args.strategy !== "impact") return {};
+  if (args.strategy !== "impact" && !args.budget) return {};
   const newTestFiles = args.changedFiles.filter((file) => TEST_FILE_RE.test(file) && args.fileExists(file));
   return {
     KANBAN_TEST_SELECTOR: "impact",
+    ...resolveTestImpactBudgetEnv(args.budget ?? null),
     ...(args.baseBranch ? { KANBAN_IMPACT_BASE: args.baseBranch } : {}),
     ...(newTestFiles.length > 0 ? { KANBAN_TEST_NEW_FILES: newTestFiles.join(",") } : {}),
   };
@@ -576,8 +638,20 @@ export function buildImpactSelectionNote(tierInfo: GateTierInfo): string | null 
   // `[inventory STALE]` when the map is behind, so the selection is a different, weaker artifact.
   // "map fresh" is stated too — an absent word would leave a reader unable to tell a fresh
   // selection from an older gate message that predates this field.
+  //
+  // #966 — the BUDGET and what it cost come FIRST when one applies. A tier that weakens
+  // verification must say what it ran, and under a budget the headline fact is no longer the
+  // score floor but the clock: `budget 60s, est 58s` is the claim, and `dropped N over budget`
+  // is the tail that claim bought. Both drop counts are printed, never summed — they name
+  // different knobs (`test_impact_budget` vs `KANBAN_TEST_MIN_SCORE`).
+  const budgetNote = selection.budget
+    ? `budget ${selection.budget}` +
+      (selection.estMs !== undefined ? `, est ${Math.round(selection.estMs / 1000)}s` : "") +
+      (selection.budgetDroppedCount ? `, dropped ${selection.budgetDroppedCount} over budget` : "") +
+      ", "
+    : "";
   return (
-    `selection kept ${selection.selectedCount} suite(s), dropped ${selection.belowFloorCount} below the score floor` +
+    `${budgetNote}selection kept ${selection.selectedCount} suite(s), dropped ${selection.belowFloorCount} below the score floor` +
     (selection.selectionTier ? `, selection tier ${selection.selectionTier}` : "") +
     `, map ${selection.stale ? "STALE" : "fresh"}`
   );
@@ -710,15 +784,24 @@ export async function resolveGateVerification(
   verifyScript: string | null;
   /** The test-impact selector identity folded into the key, or `""` when there is none (#958). */
   selectorId: string;
+  /** The project's test-impact budget, resolved with the tier (#966); null when off. */
+  budget: ParsedTestImpactBudget | null;
   verificationKey: string;
 }> {
-  const { strategy, posture, fromPosture } = await resolveGateTierFor(projectId, database);
+  const { strategy, posture, fromPosture, budget } = await resolveGateTierFor(projectId, database);
   const effectiveVerify = await resolveEffectiveVerify(projectId, database, { persistDerived: true }).catch(() => null);
   const verifyScript = effectiveVerify?.command ?? null;
   // Never throws and never blocks: an unresolvable selector yields `""`, which reproduces the
   // pre-#958 key exactly. The only cost of losing it is an extra gate run.
+  //
+  // **The BUDGET is passed as a selector ARG, which is what makes flipping the setting invalidate
+  // banked passes (#966).** `selectorIdentity()` in `impact.mjs` already folds `budgetMs` into the
+  // id (#958), so the memo safety is free — but only if the budget actually reaches it. Omitting
+  // it here would leave a pass banked under a 30s budget replayable under a 120s one, i.e. a
+  // level weakening verification invisibly, which is the one thing the tier contract forbids.
   const selectorId = await (options?.resolveSelectorIdFn ?? resolveSelectorId)({
     workingDir: options?.workingDir ?? null,
+    selectorArgs: budget ? ["--budget", budget.value] : [],
   });
   return {
     strategy,
@@ -726,6 +809,7 @@ export async function resolveGateVerification(
     effectiveVerify,
     verifyScript,
     selectorId,
+    budget,
     // The KEY stays keyed on the resolved tier, not the posture that chose it: two projects on
     // different postures that resolve to the same tier + script bought the same verification, and
     // a pass under one is legitimately reusable under the other (#492's memo is about what the
