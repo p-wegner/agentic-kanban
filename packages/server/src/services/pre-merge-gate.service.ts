@@ -47,6 +47,7 @@ import { summarizeVerifyFailure } from "./verify-failure-summary.js";
 import { VERIFY_NEUTRALIZED_LISTENER_ENV } from "../lib/verify-env.js";
 import { resolveVerifyOutcome } from "./verify-retry-strategies.js";
 import type { FailedSuite } from "./verify-flake-retry.js";
+import { parseVerifyStepTimings, type VerifyStepTiming } from "./verify-step-timings.js";
 import { recordVerifyGateOutcome, resolveGateImpactSelection } from "./test-impact-outcome.service.js";
 import { openRedDebtEntry } from "../repositories/red-debt.repository.js";
 
@@ -460,16 +461,42 @@ export async function runPreMergeGate(
     // as `Verifying · 40m`, indistinguishable from a suite that had been executing that long.
     // Noted inside `runVerify` rather than beside the semaphore acquisition so the post-install
     // re-run walks back from `install` to `verify` for free.
-    const runVerify = () => {
+    //
+    // #988 — the LAST full verify run's step self-reports and wall clock. `resolveVerifyOutcome`
+    // collapses the runs into a verdict and keeps no stdout on the passing path, so the timings
+    // are captured here, at the one seam that sees every run. Last-run-wins on purpose: when an
+    // install retry re-ran the whole script, the run that produced the verdict is the one whose
+    // cost the message should name, and reporting the first (failed, partial) run's steps beside
+    // a PASSED verdict would describe a run that is not the one that passed.
+    //
+    // Only the full `runVerify` writes here — the flake retry deliberately does not, since it
+    // runs a narrowed subset and its step line would understate what the gate actually cost.
+    let lastVerifySteps: VerifyStepTiming[] = [];
+    let lastVerifyRunMs: number | undefined;
+    const runVerify = async () => {
       noteMergeGatePhase(workspace.id, "verify");
-      return runUnderBuildSemaphore(() =>
-        runSetupScript(workingDir, verifyScript!, { timeoutMs: verifyTimeoutMs, env: verifyEnv }).catch((e) => ({
+      // Started INSIDE the semaphore callback, not before it. `runUnderBuildSemaphore` can hold
+      // this task for minutes behind another workspace's build, and timing from out here would
+      // book that queue wait into `verifyRunMs` — which the message then prints as
+      // `+ Ns unaccounted`, i.e. as time the SCRIPT spent between its steps. That is precisely
+      // the conflation the clause exists to prevent, and it is already reported separately and
+      // honestly as `queued Ns behind another verification` (#949).
+      let startedAt = Date.now();
+      const result = await runUnderBuildSemaphore(() => {
+        startedAt = Date.now();
+        return runSetupScript(workingDir, verifyScript!, { timeoutMs: verifyTimeoutMs, env: verifyEnv }).catch((e) => ({
           exitCode: 1,
           stdout: "",
           stderr: String(e),
           timedOut: false,
-        })),
-      );
+        }));
+      });
+      lastVerifyRunMs = Date.now() - startedAt;
+      // Total by construction (see `verify-step-timings.ts`): an unparseable or step-less run
+      // yields `[]` and the message simply omits the clause. It must never be able to turn a
+      // green gate into an error, which is why nothing here can throw.
+      lastVerifySteps = parseVerifyStepTimings(result.stdout);
+      return result;
     };
     // #169's install retry and #894's targeted flake retry both answer ONE question - "is this
     // failure the code's fault?" - and inlined here they took runPreMergeGate past the
@@ -532,6 +559,13 @@ export async function runPreMergeGate(
     // would have to be paid for by restructuring something else. The tier formatter already
     // treats undefined as "say nothing".
     gateTierInfo!.unserializedNote = lockNote ?? undefined;
+    // #988: where the run's time went, per the steps' own reports. Assigned unconditionally
+    // (an empty array means "the script said nothing", which the formatter renders as silence)
+    // for the same reason the two lines above avoid a guard: this function sits ON the
+    // god-module gate's branch ceiling, so a branch that only ever guards an empty array
+    // would have to be paid for by restructuring something else.
+    gateTierInfo!.stepTimings = lastVerifySteps;
+    gateTierInfo!.verifyRunMs = lastVerifyRunMs;
     // #954 — the ledger row for THIS run. Recorded before the failure return so a red gate is
     // observed too: a failing run is the only kind that can contain a miss at all, so recording
     // only green runs would measure the heuristic exclusively on the cases where it cannot be
