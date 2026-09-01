@@ -26,8 +26,10 @@ import { VERIFY_SCRIPT_TIMEOUT_MS } from "./verify-budget.js";
 import { resolveVerifyMaxWorkers } from "./pre-merge-gate.service.js";
 import { failedSuitesForOutcome } from "./failed-suite-parse.js";
 import { resolveEffectiveVerify, deriveSetupScriptFromProfile, getStackProfile } from "./stack-profile.service.js";
+import { recordBaseSweepOutcome } from "./test-impact-outcome.service.js";
 import {
   recordBaseBranchHealth,
+  getLastGreenBaseBranchHealth,
   getLatestBaseBranchHealth,
   getBaseBranchHealthForSha,
   isBaseHealthAnswer,
@@ -296,6 +298,11 @@ ${tail(combined)}`,
     await setPreference(baseHealthProbeStartPrefKey(projectId), "", database).catch(() => {});
   }
 
+  // Read the last green BEFORE recording this run, or a green run would find itself.
+  const lastGreen = isBaseHealthAnswer(result.outcome)
+    ? await getLastGreenBaseBranchHealth(projectId, database).catch(() => null)
+    : null;
+
   await recordBaseBranchHealth(
     {
       projectId,
@@ -308,6 +315,26 @@ ${tail(combined)}`,
     },
     database,
   );
+
+  // #982 — feed the full-suite verdict back into the test-impact outcome ledger, so the fast
+  // per-merge tiers have a measured miss rate instead of an assumed one. Deliberately narrow:
+  //  - only a VERDICT (`green`/`red`); a `timeout`/`unverified` observed nothing and recording
+  //    it would attribute a machine event to the diff (the same contract the gate applies),
+  //  - only when a prior GREEN sha exists to measure the diff against — see
+  //    `recordBaseSweepOutcome` for why the tip is the wrong base,
+  //  - never against this run's own sha, which would produce an empty change set.
+  // Best-effort: the ledger is an observation, never a reason to fail a health probe.
+  if (lastGreen && lastGreen.sha !== result.sha) {
+    await recordBaseSweepOutcome({
+      projectId,
+      repoPath: project.repoPath,
+      baseSha: lastGreen.sha,
+      passed: result.outcome === "green",
+      failedSuites: result.failedSuites ?? [],
+    }).catch((e) => {
+      console.warn(`[base-branch-health] outcome ledger write failed for ${projectId} (non-fatal):`, e instanceof Error ? e.message : String(e));
+    });
+  }
   return result;
 }
 

@@ -5,6 +5,7 @@ import { getSettings } from "../lib/settingsStore.js";
 const POSTURE_DOT: Record<RiskPosture, string> = {
   strict: "bg-blue-500",
   standard: "bg-gray-400 dark:bg-gray-500",
+  iterate: "bg-emerald-500",
   fast: "bg-amber-500",
   sprint: "bg-red-500",
 };

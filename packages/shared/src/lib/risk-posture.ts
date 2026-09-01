@@ -15,7 +15,7 @@ import { projectPref } from "./dynamic-preference-keys.js";
  * consumer that renders a posture should quote this text rather than inventing
  * its own summary, so the disclosure stays consistent everywhere it appears.
  */
-export const RISK_POSTURES = ["strict", "standard", "fast", "sprint"] as const;
+export const RISK_POSTURES = ["strict", "standard", "iterate", "fast", "sprint"] as const;
 export type RiskPosture = (typeof RISK_POSTURES)[number];
 
 export const riskPosturePref = projectPref("risk_posture");
@@ -25,6 +25,7 @@ export const RISK_POSTURE_DEFAULT: RiskPosture = "standard";
 export const RISK_POSTURE_LABELS: Record<RiskPosture, string> = {
   strict: "Strict",
   standard: "Standard",
+  iterate: "Iterate",
   fast: "Fast",
   sprint: "Sprint",
 };
@@ -37,6 +38,7 @@ export const RISK_POSTURE_LABELS: Record<RiskPosture, string> = {
 export const RISK_POSTURE_DESCRIPTIONS: Record<RiskPosture, string> = {
   strict: "Skips nothing — thorough per-ticket review, full pre-merge gate, no red base ever, no train batching. For release branches and client repos with allowlists.",
   standard: "Today's default — scoped per-ticket review and gate, red base always blocks merge. No train batching.",
+  iterate: "Fast iteration on a local-first repo: the per-merge gate runs the test-impact SELECTION (a ranked guess, narrower than scoped), and the full suite runs nightly on the base branch instead. A defect the selection misses lands on the base and is caught within a day — cheap when a rebase is the whole cost, wrong when there is a real deployment (use Strict there).",
   fast: "Skips per-ticket review in favor of one review per train; gate runs once per train instead of per ticket. Red base allowed only if it is already-known debt.",
   sprint: "Skips pre-merge review entirely (a review ticket is filed after the fact); gate runs guards-only per train, full suite on schedule. Red base allowed and tracked as debt.",
 };

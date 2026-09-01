@@ -7,6 +7,13 @@
  * project's verify run can itself take many minutes. Projects with no `verify_script`
  * configured are skipped cheaply (checked inside `verifyBaseBranchHealth`, itself a no-op).
  *
+ * **The cadence is PER PROJECT and OPT-IN (#983).** `intervalMs` here is only the tick rate of
+ * the sweep loop; whether a given project is probed at all, and how often, comes from its risk
+ * posture via `resolveBaseSweepIntervalMs`. A project whose posture was never explicitly chosen
+ * returns `null` and is skipped entirely — which is most of the ~25 registered projects, since
+ * they are imported fixtures nobody is developing. That is the fix for the load this file's
+ * `runBaseBranchHealthCheckOnce` doc describes below.
+ *
  * This file is the SWEEP only. Whether a probe is due (`isBaseHealthProbeDue`,
  * `resolveBaseHealthProbeDue`) and the on-demand door that asks for one
  * (`requestBaseBranchReprobe`) moved to `services/base-branch-health-reprobe.service.ts` in
@@ -17,7 +24,10 @@
 import { projects as projectsTable } from "@agentic-kanban/shared/schema";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
+import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { verifyBaseBranchHealth } from "../services/base-branch-health.service.js";
+import { resolveRiskPosture, resolveBaseSweepIntervalMs } from "../services/risk-posture.service.js";
 import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
 import {
   resolveBaseHealthProbeDue,
@@ -71,9 +81,15 @@ export async function runBaseBranchHealthCheckOnce(
     const rows = await database
       .select({ id: projectsTable.id })
       .from(projectsTable);
+    const prefMap = toPrefMap(await getAllPreferencesCached(database).catch(() => []));
     for (const { id } of rows) {
       try {
-        const verdict = await resolveBaseHealthProbeDue(id, database, intervalMs, nowMs);
+        // Per-project cadence, and `null` (no posture explicitly chosen) means "never" — the
+        // opt-in rule (#983). `intervalMs` is now only the FALLBACK for a caller that passes one
+        // deliberately (the tests do); it is no longer the cadence every project inherits.
+        const projectIntervalMs = resolveBaseSweepIntervalMs(resolveRiskPosture(prefMap, id));
+        if (projectIntervalMs === null) continue;
+        const verdict = await resolveBaseHealthProbeDue(id, database, projectIntervalMs, nowMs);
         if (!verdict.due) continue;
         await verifyBaseBranchHealth(id, database);
       } catch (err) {

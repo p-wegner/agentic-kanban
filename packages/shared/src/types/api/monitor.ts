@@ -58,8 +58,19 @@ export interface RiskPosture {
   /** Whether the level came from an explicit per-project pref, a per-ticket `risk:` tag
    *  override, or fell back to the default. */
   source: "risk_posture" | "issue_tag" | "default";
-  gateTier: "full" | "scoped" | "scoped-base-watch";
+  gateTier: "full" | "scoped" | "scoped-base-watch" | "impact";
   reviewMode: "thorough" | "standard" | "train-only" | "none";
+  /**
+   * How often the periodic base-branch health sweep should run the FULL verify for this
+   * project, in ms — the other half of the verification cadence (#983). `null` means no
+   * scheduled sweep at all; the per-merge gate is then the only check.
+   *
+   * **This is the NOMINAL cadence for the level, not the answer to "does a sweep run".**
+   * The sweep is OPT-IN: read it through `resolveBaseSweepIntervalMs`, which returns `null`
+   * for any project that never explicitly chose a posture, so importing a repo never starts
+   * background compute on an idle project.
+   */
+  sweepIntervalMs: number | null;
   /** Whether a merge is allowed to land on top of a red base branch. */
   redBasePolicy: "block" | "allow-known-debt" | "allow-file-debt-ticket";
   trainMaxSize: number;

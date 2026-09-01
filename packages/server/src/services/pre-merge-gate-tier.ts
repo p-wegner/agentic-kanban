@@ -35,13 +35,24 @@ import {
  * A level may only WEAKEN verification VISIBLY: `buildGateTierMessage` always names the level
  * actually used, so a merge comment never hides which of these ran.
  *
- * **`impact` IS STRICTLY OPT-IN AND IS NOT ANY PROJECT'S DEFAULT** — deliberately, and this is
- * the whole reason it can exist before #954's miss-rate corpus does. The selection is a ranked
- * GUESS: unlike `vitest related`, whose omissions are provably outside the import graph, a suite
- * this tier drops below the score floor may genuinely have been broken by the diff. A tier that
- * no project selects cannot weaken any gate, so #954's ~50-run corpus gates the PROMOTION of
- * this tier to anybody's default — a separate, later decision — rather than its existence.
- * `DEFAULT_VERIFY_GATE_STRATEGY` stays `full`, and no risk posture yields `impact`.
+ * **`impact` IS OPT-IN — and since #983 the `iterate` risk posture is how you opt in.** The
+ * constraint this replaces read: "no risk posture yields `impact`", on the argument that #954's
+ * ~50-run miss-rate corpus had to exist before the tier could be anybody's default. That was
+ * the right call at #956 and it is deliberately REVERSED here, for a reason stated rather than
+ * slipped in: the corpus was unreachable. `recordVerifyGateOutcome` had exactly one caller (the
+ * pre-merge gate), so the only rows the ledger could ever hold came from a gate that, by
+ * construction, cannot observe a suite it chose not to run. #982 added the second caller — the
+ * periodic base-branch sweep, which runs the FULL suite — so a miss is now observable at all,
+ * and `iterate` pairs the narrow gate with that sweep as its backstop rather than removing
+ * verification.
+ *
+ * What has NOT changed: the selection is still a ranked GUESS. Unlike `vitest related`, whose
+ * omissions are provably outside the import graph, a suite this tier drops below the score floor
+ * may genuinely have been broken by the diff — which is why `iterate` is documented as trading
+ * "caught before it lands" for "caught within a day, costing a rebase", and why it is wrong for
+ * a repo with a real deployment. `DEFAULT_VERIFY_GATE_STRATEGY` stays `full`, and every posture
+ * except `iterate` still yields a non-`impact` tier: a project reaches this tier only by an
+ * operator explicitly choosing `iterate` (or setting `verify_gate_strategy_<id>` by hand).
  */
 export const VERIFY_GATE_STRATEGY_VALUES = ["full", "scoped", "scoped-base-watch", "impact"] as const;
 export type VerifyGateStrategy = (typeof VERIFY_GATE_STRATEGY_VALUES)[number];

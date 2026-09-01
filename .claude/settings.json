@@ -68,7 +68,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node .claude/hooks/disclose-context.mjs",
+            "command": "node $CLAUDE_PROJECT_DIR/.claude/hooks/disclose-context.mjs",
             "timeout": 15
           }
         ]

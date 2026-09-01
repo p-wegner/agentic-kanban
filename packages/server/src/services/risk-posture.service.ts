@@ -19,6 +19,12 @@ import { getIssueTagRows } from "../repositories/tag.repository.js";
  *                 every field below is today's actual default, not the proposal's target state
  *                 (e.g. `trainMaxSize: 1`, not the proposal's "≤4", since #905 owns raising that
  *                 default; `gateTier: "full"`, matching `DEFAULT_VERIFY_GATE_STRATEGY`).
+ *  - `iterate`  — active local-first development (#983). Per-merge gate is the test-impact
+ *                 SELECTION rather than the full suite; the full suite runs on a daily sweep of
+ *                 the base branch instead, and every miss it finds is recorded to the outcome
+ *                 ledger. Trades "a defect is caught before it lands" for "a defect is caught
+ *                 within a day and costs a rebase" — right for a repo with no deployment,
+ *                 wrong for one with a real release (use `strict`).
  *  - `fast`     — large backlog, trusted agents. Scoped gate once per train, review the train
  *                 not each ticket, red base allowed if the red set is known debt, contention
  *                 downgraded to a warning, placement prefers remote.
@@ -40,7 +46,7 @@ export function riskPosturePrefKey(projectId: string): string {
 
 const VALID_LEVELS: ReadonlySet<string> = new Set<RiskPostureLevel>(RISK_POSTURES);
 
-/** Per-ticket override prefix — an issue tag `risk:strict|standard|fast|sprint` wins for its
+/** Per-ticket override prefix — an issue tag `risk:<level>` wins for its
  *  workspace over the project's `risk_posture_<projectId>` pref. */
 export const RISK_TAG_PREFIX = "risk:";
 
@@ -76,6 +82,9 @@ export function resolveRiskPosture(
       return {
         level, source,
         gateTier: "full",
+        // A strict project gates every merge in full, so a sweep only adds value for changes
+        // that arrive OUTSIDE a merge (a direct push to the base). Half-daily is enough for that.
+        sweepIntervalMs: 12 * 60 * 60 * 1000,
         reviewMode: "thorough",
         redBasePolicy: "block",
         trainMaxSize: 1,
@@ -92,6 +101,7 @@ export function resolveRiskPosture(
       return {
         level, source,
         gateTier: "scoped",
+        sweepIntervalMs: 6 * 60 * 60 * 1000,
         reviewMode: "train-only",
         redBasePolicy: "allow-known-debt",
         trainMaxSize: 8,
@@ -107,6 +117,8 @@ export function resolveRiskPosture(
       return {
         level, source,
         gateTier: "scoped-base-watch",
+        // Makes this level's long-standing description ("full suite on schedule") actually true.
+        sweepIntervalMs: 24 * 60 * 60 * 1000,
         reviewMode: "none",
         redBasePolicy: "allow-file-debt-ticket",
         trainMaxSize: 12,
@@ -120,12 +132,36 @@ export function resolveRiskPosture(
         placementBias: "remote-preferred",
         summary: "sprint: no per-ticket review, guards-only gate, red base allowed (files a debt ticket), builder self-tests off, contention off",
       };
+    case "iterate":
+      return {
+        level, source,
+        // The per-merge gate is the test-impact SELECTION — narrower than `scoped`, and a ranked
+        // GUESS rather than a provable non-dependency. That is only honest because the nightly
+        // sweep below runs the full suite on the base and feeds every miss back into the ledger
+        // (#982), which is what turns the guess into a measured one.
+        gateTier: "impact",
+        sweepIntervalMs: 24 * 60 * 60 * 1000,
+        reviewMode: "standard",
+        redBasePolicy: "block",
+        trainMaxSize: 1,
+        trainMaxWaitMs: 0,
+        mergesPerCycle: 2,
+        relaunchesPerCycle: 2,
+        builderStopChecks: "tests-capacity-gated",
+        contentionMode: "serialize",
+        placementBias: "host-preferred",
+        summary: "iterate: per-merge gate is the test-impact selection (a ranked guess, narrower than scoped); the FULL suite runs nightly on the base instead, and its misses are recorded",
+      };
     case "standard":
     default:
       // Today's behaviour, exactly — see the header doc.
       return {
         level: "standard", source,
         gateTier: "full",
+        // Today's `BASE_HEALTH_DEFAULT_INTERVAL_MS`, so an explicitly-standard project keeps
+        // exactly the cadence it has now. (An UNSET project gets none — see the opt-in rule in
+        // `resolveBaseSweepIntervalMs`, which is what stops idle imported repos burning compute.)
+        sweepIntervalMs: 30 * 60 * 1000,
         reviewMode: "standard",
         redBasePolicy: "block",
         trainMaxSize: 1,
@@ -139,6 +175,27 @@ export function resolveRiskPosture(
         summary: "standard: today's default behaviour, nothing skipped",
       };
   }
+}
+
+/**
+ * How often the periodic base-branch health sweep should run for this project — the OPT-IN
+ * resolver (#983). This is what callers read; `posture.sweepIntervalMs` alone is only the
+ * NOMINAL cadence of the level.
+ *
+ * **`null` means no scheduled sweep at all**, and that is what an un-chosen posture returns.
+ * Before this, `base-branch-health-reconciler` ran a full `check:arch && typecheck && test:mine`
+ * for EVERY registered project every 30 minutes — ~25 projects, serially, most of them imported
+ * fixtures nobody is developing. That load competes with the developer's own suite and is the
+ * documented suspect behind `Worker exited unexpectedly` crashes and 5s guard-suite timeouts.
+ *
+ * Choosing a posture IS the opt-in — no second knob. `source` already distinguishes an explicit
+ * `risk_posture_<projectId>` pref from the fallback, so a project nobody has configured spends
+ * no background compute, and a `risk:` ISSUE TAG does not opt a project in either: a tag is
+ * scoped to one ticket's workspace and cannot speak for a project-wide periodic sweep.
+ */
+export function resolveBaseSweepIntervalMs(posture: RiskPosture): number | null {
+  if (posture.source !== "risk_posture") return null;
+  return posture.sweepIntervalMs;
 }
 
 /**
