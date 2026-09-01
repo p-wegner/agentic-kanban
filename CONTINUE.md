@@ -47,17 +47,20 @@ Verified in production, not just in tests: registering it hot-reloaded the dev s
 `f2c47e9c54 chore: rebuild test-impact map @ 3173abcf8b` unattended. Selector reads
 `behind=1 stale=false tier=impact`.
 
-**#993 is NOT closed** — its other half is visibility. A stale map still escalates
-`impact` → `package` while the gate verdict says `tier: impact`, which is a gate naming a tier it
-did not run. The skill now emits `[test-impact:inventory] behind=… stale=… tier=… selected=…`
-(test-impact-skill `bab1226`, junctioned so the board already sees it); the board should lift it
-into the verdict beside the tier, as a second marker KIND on #988's `[gate:step]` parser rather
-than a rival parser. Contract and the three requirements are on the ticket.
+**#993 is CLOSED.** Its other half — making the rot visible — turned out to already exist, and
+saying so is the point of this paragraph rather than quietly dropping it.
 
-**#988 is NOT on master** (checked: no merge commit, and `services/verify-step-timings.ts` does
-not exist here). An earlier version of this section said it was — that was wrong, from conflating
-it with #989's merge, which did land. So the consumer is still BLOCKED, not unblocked: the parser
-it must extend does not exist yet. Do not start it until `verify-step-timings.ts` is on master.
+`GateImpactSelection.stale` has been in the gate message since **#956**: populated by
+`resolveGateImpactSelection` from the skill's own selection description, rendered by
+`buildImpactSelectionNote` as `, map STALE` / `, map fresh`, and covered by
+`gate-tier-impact.test.ts`. A gate whose selection ran on a stale map already names it beside the
+tier. Two of us (this session and test-impact-skill) believed it was missing; a
+`[test-impact:inventory]` consumer was written and typechecked before anyone checked, and would
+have printed the staleness twice. Reverted unshipped.
+
+Residual, recorded so nobody re-derives it as a hole: the clause says `map STALE` but not HOW
+stale. `behind=<n|unknown>` from the skill's record could join the EXISTING clause if that ever
+matters — a nicety, and a small window now that the map self-heals within 15 minutes.
 
 ### Unverified / outstanding
 
