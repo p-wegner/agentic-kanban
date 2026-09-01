@@ -246,6 +246,8 @@ interface SelectPayload {
   selected?: unknown;
   changed?: unknown;
   belowFloor?: unknown;
+  dropped?: unknown;
+  estMs?: unknown;
   stale?: unknown;
 }
 
@@ -263,6 +265,19 @@ export interface ParsedSelection {
    * rate the way a missing `changed` would.
    */
   belowFloorCount: number;
+  /**
+   * How many suites the BUDGET dropped (#966) — they cleared the score floor but did not fit in
+   * the allotted time. `impact.mjs` reports these in its own `dropped` array, separately from
+   * `belowFloor`, and the two must stay separate here: they name different knobs, and a reader
+   * who cannot tell them apart cannot tell whether to raise the budget or lower the floor.
+   * Absent (no budget, or an older tool) reads as 0.
+   */
+  budgetDroppedCount: number;
+  /**
+   * The tool's own measured estimate of what the selection kept, in ms — the figure the budget
+   * is compared against. Undefined when the payload carried none.
+   */
+  estMs?: number;
   /**
    * Was the impact map stale when the selection was computed? The skill widens to the package
    * tier and prints `[inventory STALE]` in that case, so a stale selection is a DIFFERENT
@@ -296,6 +311,8 @@ export function parseSelection(stdout: string): ParsedSelection | null {
     selected,
     changed,
     belowFloorCount: Array.isArray(payload.belowFloor) ? payload.belowFloor.length : 0,
+    budgetDroppedCount: Array.isArray(payload.dropped) ? payload.dropped.length : 0,
+    ...(typeof payload.estMs === "number" && Number.isFinite(payload.estMs) ? { estMs: payload.estMs } : {}),
     stale: payload.stale === true,
   };
 }
@@ -342,6 +359,15 @@ export async function resolveGateSelection(input: {
   workingDir: string | null;
   baseBranch?: string | null;
   minScore?: string;
+  /**
+   * The project's test-impact budget, as the operator spelled it (#966).
+   *
+   * **The SAME rule as the score floor, for the same reason.** This call exists to describe the
+   * selection the run will actually make; a budget applied by the run but not by this call would
+   * report a `selected` set WIDER than what ran and `dropped 0 over budget` for every gate — the
+   * number whose whole purpose is to size what the clock cut, structurally pinned at zero.
+   */
+  budget?: string | null;
   runCommand?: RunImpactCommand;
 }): Promise<ParsedSelection | null> {
   try {
@@ -351,10 +377,20 @@ export async function resolveGateSelection(input: {
     if (!existsSync(toolPath)) return null;
     const base = input.baseBranch?.trim() || null;
     const minScore = input.minScore ?? resolveGateMinScore(process.env);
+    const budget = input.budget?.trim() || null;
     const run = input.runCommand ?? defaultRunCommand;
     const result = await run({
       cwd: workingDir,
-      args: [toolPath, "select", ...(base ? [base] : []), "--json", "--always-run", "--min-score", minScore],
+      args: [
+        toolPath,
+        "select",
+        ...(base ? [base] : []),
+        "--json",
+        "--always-run",
+        "--min-score",
+        minScore,
+        ...(budget ? ["--budget", budget] : []),
+      ],
       timeoutMs: IMPACT_COMMAND_TIMEOUT_MS,
     });
     if (result.exitCode !== 0) return null;
@@ -379,17 +415,25 @@ export async function resolveGateImpactSelection(input: {
   baseBranch?: string | null;
   /** The floor the verify run will use; defaults to `resolveGateMinScore(process.env)`. */
   minScore?: string;
+  /** The budget the verify run will use (#966), as the operator spelled it; null when off. */
+  budget?: string | null;
   runCommand?: RunImpactCommand;
 }): Promise<GateImpactSelection | null | undefined> {
   if (!input.applies) return undefined;
   const selection = await resolveGateSelection(input);
   if (!selection) return null;
+  const budget = input.budget?.trim() || null;
   return {
     selectedCount: selection.selected.length,
     belowFloorCount: selection.belowFloorCount,
     stale: selection.stale,
     selectionTier: selection.tier,
     changedCount: selection.changed.length,
+    // Only when a budget actually applied: the message omits the whole budget clause otherwise,
+    // rather than printing a reassuring "dropped 0 over budget" for a run that had no clock at all.
+    ...(budget
+      ? { budget, budgetDroppedCount: selection.budgetDroppedCount, ...(selection.estMs !== undefined ? { estMs: selection.estMs } : {}) }
+      : {}),
   };
 }
 

@@ -8,6 +8,11 @@
  *
  * Only ever LOWER a number or delete a line. The ratchet fails on growth, on a listed
  * function that has vanished, and on a number that has become stale.
+ *
+ * `SettingsPanel` (444 → 429) and `ProjectSettings` (468 → 465) re-banked by #966: adding the
+ * test-impact budget field to both would have GROWN them, so the additions went to the pure core
+ * (`emptyProjectSettingsState`, `hydrateProjectSettings`, `projectSettingsSaveError`) and to a
+ * `TestImpactBudgetSection` component instead, which is what the ring exists to force.
  */
 export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "components/Layout.tsx::Layout": 691,
@@ -23,9 +28,9 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "components/WorkflowBuilder.tsx::WorkflowBuilder": 516,
   "components/WorkspacePanel.tsx::WorkspacePanel": 512,
   "components/StrategyTargetsView.tsx::StrategyTargetsView": 509,
-  "components/SettingsPanel.tsx::SettingsPanel": 444,
+  "components/SettingsPanel.tsx::SettingsPanel": 429,
   "components/BoardToolbar.tsx::BoardToolbar": 491,
-  "components/settings/ProjectSettings.tsx::ProjectSettings": 468,
+  "components/settings/ProjectSettings.tsx::ProjectSettings": 465,
   "components/AllWorkspacesPanel.tsx::AllWorkspacesPanel": 438,
   "components/CreateIssuePanel.tsx::CreateIssuePanel": 353,
   "components/ButlerViewBody.tsx::ButlerViewBody": 415,

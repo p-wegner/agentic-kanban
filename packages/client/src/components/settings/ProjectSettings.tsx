@@ -7,6 +7,7 @@ import { DriveSettingsSection } from "../DriveSettingsSection.js";
 import { showToast } from "../../lib/toast.js";
 import { ArchiveDoneSection, CollapsibleSection, Field, Toggle, type ProjectSettingsState, type Settings, type SkillSetting } from "../SettingsPanel.shared.js";
 import { Icon, Spinner } from "../Icon.js";
+import { TestImpactBudgetSection } from "../TestImpactBudgetSection.js";
 
 type ConfigImportPreview = {
   statusChanges: { toAdd: unknown[]; toUpdate: unknown[] };
@@ -334,11 +335,8 @@ export function ProjectSettings({ activeProjectId, settings, setSettings, projec
                           )}
                         </button>
                       </CollapsibleSection>
-                      <CollapsibleSection
-                        title="Service stack (Docker Compose)"
-                        configured={projectSettings.servicesEnabled}
-                        defaultOpen={projectSettings.servicesEnabled}
-                      >
+                      <TestImpactBudgetSection projectSettings={projectSettings} setProjectSettings={setProjectSettings} />
+                      <CollapsibleSection title="Service stack (Docker Compose)" configured={projectSettings.servicesEnabled} defaultOpen={projectSettings.servicesEnabled}>
                         <p className="text-xs text-gray-500">
                           Bring a declared Docker Compose stack (e.g. a postgres sidecar) UP per workspace on
                           create and DOWN on merge/delete. Each workspace gets its own isolated compose project
