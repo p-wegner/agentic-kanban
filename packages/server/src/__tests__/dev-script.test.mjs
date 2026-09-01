@@ -1179,8 +1179,34 @@ describe("shared/dist freshness guard for typecheck (#582)", () => {
   });
 
   it("is wired into the root `typecheck` script, which is what the PostToolUse hook runs", () => {
+    // #991: this used to assert the package-script STRING contained `ensure-shared-fresh.mjs`,
+    // which was true only while `typecheck` was an `&&` chain. #980 replaced that chain with
+    // `node scripts/typecheck.mjs` and moved the freshness call INSIDE the runner (verified:
+    // `typecheck.mjs` spawns it before any package, and a stale dist really does rebuild). So
+    // the guard went red while the behaviour it guards was intact — a stale assertion, not the
+    // regression it looked like.
+    //
+    // Asserting REACHABILITY instead of a literal keeps the guard honest across that shape
+    // change: the check must be either in the script or in the runner the script invokes.
     const rootPkg = JSON.parse(readFileSync(join(repoRootDir, "package.json"), "utf8"));
-    expect(rootPkg.scripts.typecheck).toContain("ensure-shared-fresh.mjs");
+    const script = rootPkg.scripts.typecheck;
+    const runnerMatch = script.match(/scripts\/([\w.-]+\.mjs)/);
+    const runnerSource = runnerMatch
+      ? readFileSync(join(repoRootDir, "scripts", runnerMatch[1]), "utf8")
+      : "";
+    expect(
+      script.includes("ensure-shared-fresh.mjs") || runnerSource.includes("ensure-shared-fresh.mjs"),
+      `the root \`typecheck\` script (${script}) must run the shared-dist freshness check (#582), `
+      + "directly or via the runner it invokes",
+    ).toBe(true);
+  });
+
+  it("keeps the freshness check on `typecheck:serial`, the kept bisect path (#980)", () => {
+    // The serial chain is what you fall back to when you suspect a concurrency artifact. If it
+    // silently skipped the rebuild, bisecting a type error would compare a fresh run against a
+    // stale one — the one job it has is to be the trustworthy comparison.
+    const rootPkg = JSON.parse(readFileSync(join(repoRootDir, "package.json"), "utf8"));
+    expect(rootPkg.scripts["typecheck:serial"]).toContain("ensure-shared-fresh.mjs");
   });
 
   it("is wired into the root `cli` script (#846) — a stale dist otherwise dies with an unhelpful ERR_MODULE_NOT_FOUND on every CLI verb", () => {
