@@ -8,6 +8,7 @@ import { formatPostureNote, resolveRiskPosture, type RiskPosture } from "./risk-
 import { resolveEffectiveVerify } from "./stack-profile.service.js";
 import { gateVerificationKey } from "./merge-gate-tree-memo.js";
 import { resolveSelectorId } from "./test-impact-selector-id.js";
+import { buildStepTimingNote, type VerifyStepTiming } from "./verify-step-timings.js";
 import {
   resolveTestImpactBudget,
   resolveTestImpactBudgetEnv,
@@ -664,6 +665,20 @@ export interface GateTierInfo {
   baseProbeAgeLabel?: string;
   baseProbeDue?: boolean;
   /**
+   * What each STEP of the verify script cost (#988), as the steps themselves reported it.
+   *
+   * Empty for every project whose `verify_script` emits no `[gate:step]` lines — which is every
+   * project but this one — and the message then omits the clause rather than inventing a
+   * breakdown. See `verify-step-timings.ts` for the contract and why the board cannot time the
+   * steps itself.
+   */
+  stepTimings?: VerifyStepTiming[];
+  /**
+   * The verify run's wall clock, for the `+ Ns unaccounted` tail on the step clause (#988).
+   * Undefined for a caller that never timed the run; the clause then reports only the parts.
+   */
+  verifyRunMs?: number;
+  /**
    * The risk posture that SELECTED this tier (#937), when it did — i.e. no explicit
    * `verify_gate_strategy_<projectId>` override was set. Decision 017's visibility rule:
    * every gate/merge message reading a `RiskPosture` field folds its `.summary` in, so an
@@ -764,6 +779,7 @@ export function buildGateTierMessage(tierInfo: GateTierInfo | null): string {
           ? "package-scoped"
           : "full";
   const impactNote = buildImpactSelectionNote(tierInfo);
+  const stepNote = buildStepTimingNote(tierInfo.stepTimings ?? [], tierInfo.verifyRunMs);
   const workersLabel = tierInfo.maxWorkersDerived
     ? `workers ${tierInfo.maxWorkers} (derived, host free ${(tierInfo.hostFreeGb ?? 0).toFixed(1)} GB)`
     : `workers ${tierInfo.maxWorkers}`;
@@ -802,6 +818,15 @@ export function buildGateTierMessage(tierInfo: GateTierInfo | null): string {
     // heavyweight verification was on the box at the same time. Named unconditionally when it
     // happens — the whole point of the note is that it is never the silent case.
     ...(tierInfo.unserializedNote ? ["UNSERIALIZED across processes"] : []),
+    // #988: where the gate's time actually went, as each step reported it. Last in the list
+    // because it is the only clause about COST rather than about what was checked — a reader
+    // scanning for "was this a weakened run" wants the tier and the selector first, and a
+    // reader arguing about the floor wants the numbers and knows to read to the end.
+    //
+    // Silent for every project whose verify script emits nothing (i.e. all but this one), for
+    // the same reason `queued 0s` is silent: a permanently-absent field trains the reader to
+    // skip the position it would occupy.
+    ...(stepNote ? [stepNote] : []),
   ];
   const retry = tierInfo.flakeRetryNote ? ` ${tierInfo.flakeRetryNote}` : "";
   const baseProbe = tierInfo.strategy === "scoped-base-watch" && tierInfo.baseProbeAgeLabel
