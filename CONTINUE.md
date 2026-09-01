@@ -34,10 +34,25 @@ was silently escalating `tier: impact` → `tier: package`. Both consumers degra
 merge gate AND every builder's inner loop. Rebuilt at `0ad14fe6b7` with `--durations` (the 1169
 measured durations are erased by a rebuild without it, #955).
 
-**That commit is a remediation, not a fix.** The refresh is a PHASE INSIDE `runMonitorCycle`, and
-this board's `start_mode` is `manual` — a true kill-switch — so the cycle never runs here and the
-map cannot refresh itself. `test_impact_map_refresh=true` is set and makes no difference. Filed as
-**#993**; until it lands, the map rots again and nothing says so.
+**FIXED the same day at `771ab84644`** (#993, expensive half). The refresh was a PHASE INSIDE
+`runMonitorCycle`, and this board's `start_mode` is `manual` — a true kill-switch — so the cycle
+never ran here and the map could not refresh itself; `test_impact_map_refresh=true` made no
+difference. It is now `test-impact-map-reconciler`, a background sweep in `BACKGROUND_SERVICES`,
+which runs at boot regardless of start mode (15-min interval; a full pass with nothing to do
+measures 1111 ms, because the freshness check short-circuits before the repo lock). The monitor
+phase is deliberately kept for its fork-freshness coupling — the pass is idempotent.
+
+Verified in production, not just in tests: registering it hot-reloaded the dev server, and at
+20:21:37 the sweep detected the staleness #989's merge had just created and committed
+`f2c47e9c54 chore: rebuild test-impact map @ 3173abcf8b` unattended. Selector reads
+`behind=1 stale=false tier=impact`.
+
+**#993 is NOT closed** — its other half is visibility. A stale map still escalates
+`impact` → `package` while the gate verdict says `tier: impact`, which is a gate naming a tier it
+did not run. The skill now emits `[test-impact:inventory] behind=… stale=… tier=… selected=…`
+(test-impact-skill `bab1226`, junctioned so the board already sees it); the board should lift it
+into the verdict beside the tier, as a second marker KIND on #988's `[gate:step]` parser (now on
+master) rather than a rival parser. Contract and the three requirements are on the ticket.
 
 ### Unverified / outstanding
 
