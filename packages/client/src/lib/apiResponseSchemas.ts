@@ -439,6 +439,28 @@ const nextStartCandidate = looseObject({
 
 const nextStartCandidates = looseObject({ projectId: str, candidates: arrayOf(nested(nextStartCandidate)) });
 
+/**
+ * The dependency-wave plan (#972).
+ *
+ * Registered rather than baselined because the plan's fetch moved behind
+ * `useApiResource`, where the scanner can no longer see the literal path — so
+ * without a schema this endpoint would silently leave the measured surface
+ * instead of being checked. `wip` is asserted field-by-field: the panel does
+ * arithmetic on all three numbers (the "Start Next Wave (N)" cap is
+ * `min(startable, available)`), so a missing one yields `NaN` in a button label
+ * rather than a visible failure. The issue arrays are checked as arrays with an
+ * `id`/`startEligible` element shape, which is exactly what the start-candidate
+ * selection reads.
+ */
+const dependencyWaveIssue = looseObject({ id: str, startEligible: bool });
+const dependencyWavePlan = looseObject({
+  projectId: str,
+  readyNow: arrayOf(nested(dependencyWaveIssue)),
+  blocked: anyArray(),
+  cyclicInvalid: anyArray(),
+  wip: nested(looseObject({ current: num, limit: num, available: num })),
+});
+
 const projectRepo = dtoObject<ProjectRepoResponse>({
   id: str,
   projectId: str,
@@ -681,6 +703,7 @@ export const API_RESPONSE_SCHEMAS: readonly ApiResponseRoute[] = [
   { method: "GET", template: "/api/projects/:id/statuses", schema: arrayRoot(projectStatus) },
   { method: "GET", template: "/api/projects/:id/repos", schema: arrayRoot(projectRepo) },
   { method: "GET", template: "/api/projects/:id/board-monitor/next", schema: nextStartCandidates },
+  { method: "GET", template: "/api/projects/:id/dependency-waves", schema: dependencyWavePlan },
   // `all` is a LITERAL segment, not a project id. It has the same segment count as
   // `/:id/statuses`, and `findApiResponseSchema` prefers the more literal template — but the
   // last segments differ anyway, so neither can shadow the other.
