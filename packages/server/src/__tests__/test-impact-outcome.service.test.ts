@@ -9,6 +9,7 @@ import {
   gateRanScope,
   parseSelection,
   recordGateOutcome,
+  recordBaseSweepOutcome,
   recordVerifyGateOutcome,
   IMPACT_TOOL_RELATIVE_PATH,
   OUTCOMES_RELATIVE_PATH,
@@ -679,6 +680,95 @@ describe("recordGateOutcome", () => {
       expect(result.reason).toContain("could not parse");
     } finally {
       repos.cleanup();
+    }
+  });
+});
+
+/**
+ * #982 — the base-branch sweep is the ledger's SECOND caller, and the only one that can witness
+ * a miss: the gate can never observe a suite it chose not to run.
+ */
+describe("recordBaseSweepOutcome", () => {
+  /** A main checkout with the skill materialized — the sweep records from the repo, not a worktree. */
+  function makeMainRepo(): { main: string; cleanup: () => void } {
+    const root = mkdtempSync(join(tmpdir(), "ak-ti-sweep-"));
+    const main = join(root, "main");
+    mkdirSync(join(main, ".claude", "skills", "test-impact", "tools"), { recursive: true });
+    writeFileSync(join(main, IMPACT_TOOL_RELATIVE_PATH), "// stub" + String.fromCharCode(10));
+    return { main, cleanup: () => rmSync(root, { recursive: true, force: true }) };
+  }
+
+  it("measures against the LAST GREEN sha, and records the run as full scope", async () => {
+    const { main, cleanup } = makeMainRepo();
+    try {
+      const { run, calls } = fakeRunner({
+        select: { stdout: selectionJson("impact", ["packages/server/src/__tests__/a.test.ts"]) },
+      });
+      const result = await recordBaseSweepOutcome({
+        projectId: "p1",
+        repoPath: main,
+        baseSha: "deadbee",
+        passed: false,
+        failedSuites: ["packages/server/src/__tests__/b.test.ts"],
+        runCommand: run,
+      });
+
+      expect(result.recorded).toBe(true);
+      // The sweep runs the project's effective verify unscoped, so the row must say `full` —
+      // that is what makes it a WITNESS in the miss-rate computation.
+      expect(result.ran).toBe("full");
+      // `select` takes the base POSITIONALLY (#963); passing it as a flag measures nothing.
+      const select = calls.find((args) => args[1] === "select");
+      expect(select).toBeDefined();
+      expect(select).toContain("deadbee");
+      const record = calls.find((args) => args[1] === "record");
+      expect(record?.join(" ")).toContain("base-sweep");
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("refuses a red run whose failed suites cannot be placed in a package", async () => {
+    // Dropping them would UNDERSTATE the failed set, and an understated failed set understates
+    // the miss count — the one direction of error that makes the selection look better than it
+    // is, which is exactly what this corpus exists to rule out.
+    const { main, cleanup } = makeMainRepo();
+    try {
+      const { run, calls } = fakeRunner({ select: { stdout: selectionJson("impact", []) } });
+      const result = await recordBaseSweepOutcome({
+        projectId: "p1",
+        repoPath: main,
+        baseSha: "deadbee",
+        passed: false,
+        failedSuites: ["src/__tests__/b.test.ts"],
+        runCommand: run,
+        log: () => {},
+      });
+
+      expect(result.recorded).toBe(false);
+      expect(result.reason).toContain("cannot be attributed");
+      // And it refuses BEFORE spending a selection run.
+      expect(calls).toHaveLength(0);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("records a green run, where an empty failed set is the truth rather than a truncation", async () => {
+    const { main, cleanup } = makeMainRepo();
+    try {
+      const { run } = fakeRunner({ select: { stdout: selectionJson("impact", []) } });
+      const result = await recordBaseSweepOutcome({
+        projectId: "p1",
+        repoPath: main,
+        baseSha: "deadbee",
+        passed: true,
+        failedSuites: [],
+        runCommand: run,
+      });
+      expect(result.recorded).toBe(true);
+    } finally {
+      cleanup();
     }
   });
 });

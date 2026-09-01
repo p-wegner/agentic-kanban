@@ -75,6 +75,10 @@ async function seedProject(db: ReturnType<typeof createTestDb>["db"]) {
   });
   // No stack profile ⇒ no install command, so the probe goes straight to verify.
   await setPreference(verifyScriptPrefKey(projectId), "pnpm test", db);
+  // #983 — the sweep is opt-in, so a project with no explicit posture is never probed. Every
+  // case here is about the CONCURRENCY guards, which only matter for a project that opted in.
+  // `standard`'s `sweepIntervalMs` is the same 30 minutes these tests already pass.
+  await setPreference(`risk_posture_${projectId}`, "standard", db);
   return projectId;
 }
 

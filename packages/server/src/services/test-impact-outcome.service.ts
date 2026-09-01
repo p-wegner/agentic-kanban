@@ -818,3 +818,89 @@ export async function recordVerifyGateOutcome(args: {
   }
   return result;
 }
+
+/** Forward-slash, no leading `./` — the form `select` names test files in. */
+function normalizedSuitePath(file: string): string {
+  return file.replace(/\\/g, "/").replace(/^\.\//, "");
+}
+
+/**
+ * The OTHER caller of the ledger (#982) — the periodic base-branch sweep.
+ *
+ * Until this existed, `recordVerifyGateOutcome` had exactly ONE caller (the pre-merge gate), so
+ * the corpus only ever contained rows the gate itself produced. That is circular: the gate can
+ * only observe suites it chose to run, and a miss is by definition a suite it did NOT run. The
+ * sweep is the one thing here that runs the FULL suite over the base, so it is the only place a
+ * genuine miss can be seen at all — and it was recording nothing.
+ *
+ * `baseSha` MUST be the sha of the LAST GREEN sweep, not the tip being verified. `select` derives
+ * its change set from `base...HEAD`, so a base equal to HEAD yields an EMPTY change set, and
+ * `emptyChangeSetReason` then tags the row `-nochange` and excludes it from the miss rate — the
+ * row would be filed into the corpus it exists to populate and thrown straight back out. Against
+ * the last green sha the change set is "everything that merged since we last knew the base was
+ * healthy", which makes the row answer the question that matters: of the suites that failed
+ * tonight, how many would the selection have picked for that diff?
+ *
+ * With no prior green row there is no meaningful base, and the caller should record NOTHING
+ * rather than dilute the corpus.
+ *
+ * `tierInfo` is deliberately `null`: the sweep runs the project's effective verify unscoped, so
+ * `gateRanScope(null)` is `full`, which is the truth.
+ */
+export async function recordBaseSweepOutcome(args: {
+  projectId: string;
+  /** The project's MAIN checkout — the sweep's temp clone is deleted before this is called. */
+  repoPath: string;
+  /** Sha of the last GREEN sweep for this project. See above: never the tip just verified. */
+  baseSha: string;
+  passed: boolean;
+  /**
+   * Suite paths exactly as `failedSuitesForOutcome` produced them. Unlike the gate's
+   * `FailedSuiteLike`, the sweep has no per-package attribution to hand over — see the
+   * refusal below for what that costs and why it is a refusal rather than a partial row.
+   */
+  failedSuites: string[];
+  runCommand?: RunImpactCommand;
+  log?: (message: string) => void;
+}): Promise<RecordGateOutcomeResult> {
+  const log = args.log ?? ((message: string) => console.warn(`[test-impact] ${message}`));
+  // The ledger compares suite names to `select`'s repo-relative ones as PLAIN STRINGS, and the
+  // sweep parses a combined multi-package log with no package attribution — so a suite vitest
+  // printed package-relative (`src/__tests__/x.test.ts`) cannot be placed here the way
+  // `repoRelativeSuitePath` places a gate's.
+  //
+  // Dropping the unplaceable ones would understate the failed set, and an UNDERSTATED failed set
+  // understates the MISS COUNT — biasing the corpus in the one direction that makes the selection
+  // look better than it is, which is the failure this ledger exists to prevent. So a red sweep
+  // that cannot name every failure repo-relatively records NOTHING. A green one is unaffected:
+  // an empty failed set is then the truth, not a truncation.
+  const unplaceable = args.failedSuites.filter((file) => !normalizedSuitePath(file).startsWith("packages/"));
+  if (!args.passed && unplaceable.length > 0) {
+    const reason =
+      `${unplaceable.length} of ${args.failedSuites.length} failed suite(s) are package-relative and cannot be ` +
+      `attributed to a package (e.g. ${unplaceable[0]}); an incomplete failed set would understate the miss rate`;
+    log(`no base-sweep outcome recorded for project ${args.projectId}: ${reason}`);
+    return { recorded: false, reason };
+  }
+  const result = await recordGateOutcome({
+    workingDir: args.repoPath,
+    repoPath: args.repoPath,
+    baseBranch: args.baseSha,
+    passed: args.passed,
+    failedSuites: args.failedSuites.map(normalizedSuitePath),
+    tierInfo: null,
+    source: "base-sweep",
+    runCommand: args.runCommand,
+    log,
+  });
+  if (result.recorded) {
+    console.log(
+      `[test-impact] recorded base-sweep outcome for project ${args.projectId}: ${args.passed ? "pass" : "fail"}, ` +
+        `${result.changedCount} changed file(s) since the last green base, selection tier ${result.tier} would ` +
+        `have picked ${result.selectedCount} test file(s)`,
+    );
+  } else if (result.reason && !result.reason.startsWith("no test-impact tool")) {
+    log(`no base-sweep outcome recorded for project ${args.projectId}: ${result.reason}`);
+  }
+  return result;
+}

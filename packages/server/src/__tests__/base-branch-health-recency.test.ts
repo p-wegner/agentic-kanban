@@ -12,9 +12,11 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { randomUUID } from "node:crypto";
-import { projects } from "@agentic-kanban/shared/schema";
+import { preferences, projects } from "@agentic-kanban/shared/schema";
 import { createTestDb } from "./helpers/test-db.js";
+import { eq } from "drizzle-orm";
 import { recordBaseBranchHealth } from "../repositories/base-branch-health.repository.js";
+import { invalidatePreferencesCache } from "../repositories/preferences.repository.js";
 
 const verifyBaseBranchHealth = vi.fn(async () => {});
 // Only the probe itself is stubbed; the sweep also reads this module's start-stamp key and
@@ -48,6 +50,25 @@ describe("base-branch health sweep respects persisted recency across restarts", 
       repoName: "repo",
       createdAt: new Date().toISOString(),
     });
+    // #983 — the sweep is OPT-IN: a project with no explicit risk posture is never probed at
+    // all, so these recency assertions need a project that opted in. `standard` is deliberate:
+    // its `sweepIntervalMs` IS `INTERVAL_MS`, so every case below keeps the timing it had.
+    await db.insert(preferences).values({
+      key: `risk_posture_${projectId}`,
+      value: "standard",
+      updatedAt: new Date().toISOString(),
+    });
+  });
+
+  it("never probes a project whose posture was never chosen — the opt-in rule (#983)", async () => {
+    // The bulk of registered projects are imported fixtures nobody is developing. Before this,
+    // every one of them got a full `check:arch && typecheck && test:mine` every 30 minutes.
+    await db.delete(preferences).where(eq(preferences.key, `risk_posture_${projectId}`));
+    invalidatePreferencesCache();
+
+    await runBaseBranchHealthCheckOnce(db, INTERVAL_MS, Date.now());
+
+    expect(verifyBaseBranchHealth).not.toHaveBeenCalled();
   });
 
   it("verifies a project that has never been checked", async () => {

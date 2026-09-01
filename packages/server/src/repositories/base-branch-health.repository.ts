@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { baseBranchHealth } from "@agentic-kanban/shared/schema";
-import { count, desc, eq, sql } from "drizzle-orm";
+import { and, count, desc, eq, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { firstRow } from "../lib/first-row.js";
@@ -79,6 +79,30 @@ export async function getLatestBaseBranchHealth(
       .select()
       .from(baseBranchHealth)
       .where(eq(baseBranchHealth.projectId, projectId))
+      .orderBy(desc(baseBranchHealth.createdAt))
+      .limit(1)
+  );
+}
+
+/**
+ * The newest GREEN result for a project, or null when it has never had one (#982).
+ *
+ * This is the base the sweep's ledger row is measured against: the diff since the last time we
+ * KNEW the tree was healthy. `getLatestBaseBranchHealth` cannot serve that — the latest row is
+ * usually the sweep's own, whose sha is the tip, and a change set computed against the tip is
+ * EMPTY, which the outcome ledger tags `-nochange` and excludes from the miss rate. So a naive
+ * "use the last probe" here would file rows into the very corpus they are meant to populate and
+ * have them thrown out.
+ */
+export async function getLastGreenBaseBranchHealth(
+  projectId: string,
+  database: Database = db,
+) {
+  return firstRow(
+    database
+      .select()
+      .from(baseBranchHealth)
+      .where(and(eq(baseBranchHealth.projectId, projectId), eq(baseBranchHealth.outcome, "green")))
       .orderBy(desc(baseBranchHealth.createdAt))
       .limit(1)
   );

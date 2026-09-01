@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveRiskPosture, riskPosturePrefKey } from "./risk-posture.service.js";
+import { resolveBaseSweepIntervalMs, resolveRiskPosture, riskPosturePrefKey } from "./risk-posture.service.js";
 
 const PID = "11111111-2222-3333-4444-555555555555";
 
@@ -106,9 +106,62 @@ describe("resolveRiskPosture", () => {
   });
 
   it("every posture's summary names what it does relative to standard", () => {
-    for (const level of ["strict", "fast", "sprint"] as const) {
+    for (const level of ["strict", "iterate", "fast", "sprint"] as const) {
       const p = resolveRiskPosture(prefs({ [riskPosturePrefKey(PID)]: level }), PID);
       expect(p.summary.startsWith(`${level}:`)).toBe(true);
     }
+  });
+});
+
+// @covers preferences-config.resolve.risk-posture [config,risk]
+describe("iterate posture (#983)", () => {
+  it("is the ONLY posture that yields the impact gate tier", () => {
+    const iterate = resolveRiskPosture(prefs({ [riskPosturePrefKey(PID)]: "iterate" }), PID);
+    expect(iterate.gateTier).toBe("impact");
+
+    for (const level of ["strict", "standard", "fast", "sprint"] as const) {
+      expect(resolveRiskPosture(prefs({ [riskPosturePrefKey(PID)]: level }), PID).gateTier).not.toBe("impact");
+    }
+  });
+
+  it("pairs the narrow gate with a daily FULL sweep — the backstop is the whole argument", () => {
+    const p = resolveRiskPosture(prefs({ [riskPosturePrefKey(PID)]: "iterate" }), PID);
+    expect(p.sweepIntervalMs).toBe(24 * 60 * 60 * 1000);
+    // Without a scheduled full run, `impact` would weaken verification with nothing behind it.
+    expect(resolveBaseSweepIntervalMs(p)).not.toBeNull();
+  });
+});
+
+// @covers preferences-config.resolve.risk-posture [config,risk]
+describe("resolveBaseSweepIntervalMs — the sweep is OPT-IN (#983)", () => {
+  it("returns null for a project that never chose a posture", () => {
+    const p = resolveRiskPosture(prefs({}), PID);
+    expect(p.source).toBe("default");
+    // The nominal cadence of the LEVEL is still 30 min; the resolver is what makes it "never".
+    expect(p.sweepIntervalMs).toBe(30 * 60 * 1000);
+    expect(resolveBaseSweepIntervalMs(p)).toBeNull();
+  });
+
+  it("returns the level's cadence once a posture is explicitly set", () => {
+    for (const [level, expected] of [
+      ["strict", 12 * 60 * 60 * 1000],
+      ["standard", 30 * 60 * 1000],
+      ["iterate", 24 * 60 * 60 * 1000],
+      ["fast", 6 * 60 * 60 * 1000],
+      ["sprint", 24 * 60 * 60 * 1000],
+    ] as const) {
+      const p = resolveRiskPosture(prefs({ [riskPosturePrefKey(PID)]: level }), PID);
+      expect(p.source).toBe("risk_posture");
+      expect(resolveBaseSweepIntervalMs(p)).toBe(expected);
+    }
+  });
+
+  it("a per-ticket risk: TAG does not opt the project in", () => {
+    // A tag is scoped to one ticket's workspace; it cannot speak for a project-wide periodic
+    // sweep, and reading it as consent would start background compute nobody asked for.
+    const p = resolveRiskPosture(prefs({}), PID, { tagOverride: "risk:iterate" });
+    expect(p.source).toBe("issue_tag");
+    expect(p.gateTier).toBe("impact");
+    expect(resolveBaseSweepIntervalMs(p)).toBeNull();
   });
 });
