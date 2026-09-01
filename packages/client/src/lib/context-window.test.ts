@@ -30,6 +30,34 @@ describe("contextWindowForModel", () => {
     expect(contextWindowForModel("claude-fable-5")).toBe(1_000_000);
   });
 
+  it("recognizes whole-number family ids with no minor segment (#970)", () => {
+    // The live Opus 5 model id carries no minor version. Requiring one made
+    // every Opus 5 session fall through to the 200k default.
+    expect(contextWindowForModel("claude-opus-5")).toBe(1_000_000);
+    expect(contextWindowForModel("claude-opus-5[1m]")).toBe(1_000_000);
+    expect(contextWindowForModel("claude-sonnet-5")).toBe(1_000_000);
+    // A bare pre-4.6 major is still 200k — the missing minor reads as ".0".
+    expect(contextWindowForModel("claude-opus-4")).toBe(200_000);
+    // Haiku never gets the 1M family match, whatever its version shape.
+    expect(contextWindowForModel("claude-haiku-5")).toBe(200_000);
+    expect(contextWindowForModel("claude-haiku-4-5-20251001")).toBe(200_000);
+  });
+
+  it("tolerates dotted version separators", () => {
+    expect(contextWindowForModel("claude-opus-4.8")).toBe(1_000_000);
+    expect(contextWindowForModel("claude-opus-4.5")).toBe(200_000);
+  });
+
+  it("never reads a trailing release date as the minor version (#970)", () => {
+    // Making the minor optional opens a trap: without a digit cap, the date in
+    // `claude-opus-4-20260101` binds as "minor 20260101" and a 200k model would
+    // be promoted to 1M. The dated ids that carry a real minor still work.
+    expect(contextWindowForModel("claude-opus-4-20260101")).toBe(200_000);
+    expect(contextWindowForModel("claude-opus-4-5-20251001")).toBe(200_000);
+    expect(contextWindowForModel("claude-opus-4-6-20260101")).toBe(1_000_000);
+    expect(contextWindowForModel("claude-opus-5-20260501")).toBe(1_000_000);
+  });
+
   it("maps gpt-5 / codex / o-series to 400k", () => {
     expect(contextWindowForModel("gpt-5.5")).toBe(400_000);
     expect(contextWindowForModel("gpt-5.3-codex")).toBe(400_000);
