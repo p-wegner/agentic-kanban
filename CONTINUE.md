@@ -51,8 +51,13 @@ Verified in production, not just in tests: registering it hot-reloaded the dev s
 `impact` → `package` while the gate verdict says `tier: impact`, which is a gate naming a tier it
 did not run. The skill now emits `[test-impact:inventory] behind=… stale=… tier=… selected=…`
 (test-impact-skill `bab1226`, junctioned so the board already sees it); the board should lift it
-into the verdict beside the tier, as a second marker KIND on #988's `[gate:step]` parser (now on
-master) rather than a rival parser. Contract and the three requirements are on the ticket.
+into the verdict beside the tier, as a second marker KIND on #988's `[gate:step]` parser rather
+than a rival parser. Contract and the three requirements are on the ticket.
+
+**#988 is NOT on master** (checked: no merge commit, and `services/verify-step-timings.ts` does
+not exist here). An earlier version of this section said it was — that was wrong, from conflating
+it with #989's merge, which did land. So the consumer is still BLOCKED, not unblocked: the parser
+it must extend does not exist yet. Do not start it until `verify-step-timings.ts` is on master.
 
 ### Unverified / outstanding
 
