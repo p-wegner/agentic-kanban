@@ -149,9 +149,11 @@ describe("the budget implies the impact selector for the gate", () => {
     expect(resolveGateTestSelector({}, "full", null)).toBe("related");
   });
 
-  it("drops the file scope, so the runner is never handed the pair it refuses", () => {
-    // `test-mine.mjs` REFUSES KANBAN_TEST_FILES + KANBAN_TEST_SELECTOR=impact (exit 2, a hard
-    // merge blocker), so the gate has to resolve this itself.
+  it("keeps the file scope, so a budgeted run is the UNION of both selectors (#967)", () => {
+    // A budget is a ceiling on a selection, and #967 made the selection the union — so the budget
+    // holds over BOTH selectors' picks. That is the property the setting sells ("only these
+    // seconds"), and it only survives because `select --union` admits externals before its budget
+    // cut rather than the consumer merging them after it.
     const result = resolveGateFileScopeEmission({
       env: {},
       fileScoped: true,
@@ -160,8 +162,10 @@ describe("the budget implies the impact selector for the gate", () => {
       budget,
     });
     expect(result.selector).toBe("impact");
-    expect(result.emitFileScope).toBe(false);
+    expect(result.emitFileScope).toBe(true);
+    expect(result.unioned).toBe(true);
     expect(result.note).toContain("test_impact_budget=60s");
+    expect(result.note).toContain("counted against the budget");
   });
 
   it("names the budget rather than the tier when the budget is what chose the selector", () => {
