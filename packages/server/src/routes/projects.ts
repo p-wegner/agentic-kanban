@@ -347,12 +347,18 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
     const result = await projectService.updateProject(id, body);
     if (servicesConfigJson !== undefined) {
       await updateProjectServicesConfig(id, servicesConfigJson, database);
-      // F12: the ProjectResponse DTO promises a PARSED ServiceStackConfig | null, not the
-      // raw JSON string. Reflect the value we just persisted, parsed the same way GET does.
-      (result as { servicesConfig?: unknown }).servicesConfig = parseServicesConfig(servicesConfigJson);
     }
+    // F12: the ProjectResponse DTO promises a PARSED ServiceStackConfig | null, not the raw
+    // JSON string the column holds — so parse UNCONDITIONALLY, the same way GET does. Doing it
+    // only when this PATCH happened to carry servicesConfig left every other save answering
+    // with the raw string. When this call did persist one, reflect that value rather than
+    // re-reading it.
+    const stored = servicesConfigJson !== undefined
+      ? servicesConfigJson
+      : (result as { servicesConfig?: unknown }).servicesConfig;
+    const response = { ...result, servicesConfig: parseServicesConfig(stored) };
     options?.boardEvents?.broadcastProjectsChanged(id, "project_updated");
-    return c.json(result);
+    return c.json(response);
   });
 
   // POST /api/projects/:id/archive — hide a project without deleting its data

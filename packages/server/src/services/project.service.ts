@@ -424,7 +424,13 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     }
 
     await updateProjectFields(id, updates, database);
-    return { id };
+    // Answer with the UPDATED row, not a bare `{ id }`. The wire contract for
+    // `PATCH /api/projects/:id` is a full `ProjectResponse` (the client asserts
+    // `id`/`name`/`repoPath`/`createdAt`), and the route's own servicesConfig reflection
+    // already assumed a fuller DTO — a bare handle made the client reject every settings
+    // save as an API contract violation.
+    const updated = await getProjectById(id, database);
+    return updated ?? { id };
   }
 
   async function deleteProject(id: string) {

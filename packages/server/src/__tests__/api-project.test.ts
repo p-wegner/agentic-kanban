@@ -129,6 +129,30 @@ describe("Projects API", () => {
     expect(res.status).toBe(404);
   });
 
+  it("PATCH /api/projects/:id answers with the full ProjectResponse, not a bare { id }", async () => {
+    // The client validates every response against a declared wire contract, and the one for
+    // this endpoint is a full ProjectResponse. `updateProject` used to answer `{ id }`, so
+    // the settings panel rejected EVERY save with "API contract violation: name: missing;
+    // repoPath: missing; createdAt: missing" — while the write itself had already succeeded,
+    // which is what made it read as a save failure rather than a response-shape bug. These are
+    // exactly the four fields `apiResponseSchemas.ts` asserts.
+    const dtoProjectId = await createProjectDirectly(database, { name: "Dto Shape", repoPath: "/tmp/dto-shape" });
+    const res = await app.request(`/api/projects/${dtoProjectId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ description: "touched" }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as Record<string, unknown>;
+    expect(body.id).toBe(dtoProjectId);
+    expect(body.name).toBe("Dto Shape");
+    expect(typeof body.repoPath).toBe("string");
+    expect(typeof body.createdAt).toBe("string");
+    // Parsed, never the raw JSON string — even though this PATCH carried no servicesConfig.
+    // Reflecting it only when the body supplied one was the other half of the same bug.
+    expect(typeof body.servicesConfig).not.toBe("string");
+  });
+
   it("PATCH /api/projects/:id validates defaultBranch exists locally", async () => {
     const repoPath = mkdtempSync(join(tmpdir(), "kanban-project-branch-"));
     execFileSync("git", ["init", "-b", "main"], { cwd: repoPath });
