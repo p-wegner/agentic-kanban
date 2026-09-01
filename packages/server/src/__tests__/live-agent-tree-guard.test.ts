@@ -13,6 +13,8 @@ import { descendantsOf, probeProcessTree, type ProcessTableRow } from "../lib/pr
 import {
   findLiveAgentTrees,
   liveAgentRefusalMessage,
+  pidStillIdentifiesSession,
+  SURVIVOR_PROBE_WINDOW_MS,
   type SessionPidRow,
 } from "../services/workspace-agent-liveness.service.js";
 
@@ -194,6 +196,67 @@ describe("findLiveAgentTrees — the relaunch guard's verdict (#968)", () => {
       probeTree: () => Promise.reject(new Error("boom")),
     });
     expect(liveness.verdict).toBe("unknown");
+  });
+});
+
+describe("the recency window — a stale pid must not block a relaunch forever (#968)", () => {
+  // `sessions.pid` is never cleared, and a pid is not a durable identifier. Without a window,
+  // a workspace whose session ended weeks ago holds a pid the OS has since recycled onto an
+  // unrelated process: `isPidAlive` says yes, the guard says `live`, and `launchSession`
+  // refuses FOREVER — including the monitor's auto-relaunch, which passes no `force`.
+  const now = Date.parse("2026-09-01T12:00:00.000Z");
+  const ago = (ms: number) => new Date(now - ms).toISOString();
+
+  it("probes a session that ended just now", () => {
+    expect(pidStillIdentifiesSession({ id: "s", pid: 100, endedAt: ago(60_000) }, now)).toBe(true);
+  });
+
+  it("probes a session with no recorded end — the board still believes it is running", () => {
+    expect(pidStillIdentifiesSession({ id: "s", pid: 100, endedAt: null }, now)).toBe(true);
+    expect(pidStillIdentifiesSession({ id: "s", pid: 100 }, now)).toBe(true);
+  });
+
+  it("still probes at the exact edge of the window", () => {
+    expect(pidStillIdentifiesSession({ id: "s", pid: 100, endedAt: ago(SURVIVOR_PROBE_WINDOW_MS) }, now)).toBe(true);
+  });
+
+  it("stops probing a session whose pid is old enough to have been recycled", () => {
+    expect(pidStillIdentifiesSession({ id: "s", pid: 100, endedAt: ago(SURVIVOR_PROBE_WINDOW_MS + 1) }, now)).toBe(false);
+    expect(pidStillIdentifiesSession({ id: "s", pid: 100, endedAt: ago(30 * 24 * 3600_000) }, now)).toBe(false);
+  });
+
+  it("probes rather than skips on an unparseable timestamp — a bad value is not evidence of staleness", () => {
+    expect(pidStillIdentifiesSession({ id: "s", pid: 100, endedAt: "not a date" }, now)).toBe(true);
+  });
+
+  it("does not refuse a relaunch over a week-old session whose pid was recycled", async () => {
+    // The concrete regression: without the window this is `live` and the workspace can never
+    // be relaunched again by the monitor.
+    const probeTree = vi.fn(() => ({ liveness: "alive" as const, pids: [100], reason: "pid 100 is alive" }));
+    const liveness = await findLiveAgentTrees(
+      [{ id: "ancient", pid: 100, endedAt: ago(7 * 24 * 3600_000) }],
+      { probeTree, nowMs: now },
+    );
+    expect(probeTree).not.toHaveBeenCalled();
+    expect(liveness.verdict).toBe("clear");
+  });
+
+  it("still catches the #968 survivor, which is recent by construction", async () => {
+    const liveness = await findLiveAgentTrees(
+      [
+        { id: "ancient", pid: 55, endedAt: ago(7 * 24 * 3600_000) },
+        { id: "62c6722d", pid: 100, endedAt: ago(16 * 60_000) },
+      ],
+      {
+        probeTree: (pid) =>
+          pid === 100
+            ? { liveness: "alive", pids: [31344], reason: "survivor" }
+            : { liveness: "alive", pids: [55], reason: "recycled pid, must never be reached" },
+        nowMs: now,
+      },
+    );
+    expect(liveness.verdict).toBe("live");
+    expect(liveness.trees.map((t) => t.sessionId)).toEqual(["62c6722d"]);
   });
 });
 
