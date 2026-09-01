@@ -11,6 +11,11 @@
  * ProviderCostOverTime, ScorecardDistribution, Throughput) now share
  * `hooks/useWindowedChartData.ts`, which is itself a thin layer over `useApiResource` and
  * so adds no new entry of its own.
+ *
+ * #972 removed `components/BacklogView.tsx`: its dependency-wave plan fetch moved into
+ * `hooks/useDependencyWave.ts`, which rides `useApiResource` rather than re-rolling the
+ * ladder — so the entry is deleted, not relocated. The old inline version had no
+ * cancelled guard, the exact defect #513 cites as the reason the hook exists.
  */
 export const FETCH_IN_EFFECT_BASELINE: Record<string, number> = {
   // #513: THE sanctioned ladder. Every entry below is a hand-rolled copy waiting to be
@@ -18,7 +23,6 @@ export const FETCH_IN_EFFECT_BASELINE: Record<string, number> = {
   "hooks/useApiResource.ts": 1,
   "components/AllWorkspacesPanel.tsx": 1,
   "components/ArtifactViewer.tsx": 1,
-  "components/BacklogView.tsx": 1,
   "components/BoardHealthNotificationCenter.tsx": 1,
   "components/ButlerManageModal.tsx": 1,
   "components/ButlerView.tsx": 3,

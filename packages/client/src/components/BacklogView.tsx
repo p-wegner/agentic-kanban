@@ -1,16 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
-import type { CreateIssueRequest, DependencyWaveIssue, DependencyWavePlan, DependencyWaveStartResult, IssueWithStatus, ProfileSelection, StatusWithIssues } from "@agentic-kanban/shared";
+import type { CreateIssueRequest, DependencyWaveIssue, DependencyWavePlan, IssueWithStatus, ProfileSelection, StatusWithIssues } from "@agentic-kanban/shared";
 import type { CreateIssueFormState } from "./CreateIssueForm.js";
 import { CreateIssueForm } from "./CreateIssueForm.js";
 import { IssueCard } from "./IssueCard.js";
 import type { LiveSessionStats, TodoItem } from "../lib/useBoardEvents.js";
-import { apiFetch, apiPost } from "../lib/api.js";
 import { getSettings, setSettings } from "../lib/settingsStore.js";
 import { showToast } from "../lib/toast.js";
 import { useBoardFilterStore } from "../stores/boardFilterStore.js";
 import { useBoardBulkSelectionStore } from "../stores/boardBulkSelectionStore.js";
+import { useDependencyWave } from "../hooks/useDependencyWave.js";
+import type { WaveStartProgress } from "../lib/waveStartFeedback.js";
+import { selectWaveStartCandidates } from "../lib/waveStartFeedback.js";
 import { normalizeIssuePriority, priorityLabel, priorityOrder } from "../lib/priorityTraits.js";
-import { Icon } from "./Icon.js";
+import { Icon, Spinner } from "./Icon.js";
 
 type SortMode = "rank" | "newest" | "oldest" | "priority" | "type" | "due";
 type GroupMode = "none" | "priority" | "type";
@@ -158,9 +160,11 @@ export function BacklogView({
   const [presets, setPresets] = useState<BacklogPreset[]>([]);
   const [presetsSaving, setPresetsSaving] = useState(false);
   const [promotingIssueIds, setPromotingIssueIds] = useState<Set<string>>(new Set());
-  const [wavePlan, setWavePlan] = useState<DependencyWavePlan | null>(null);
-  const [waveLoading, setWaveLoading] = useState(false);
-  const [startingWave, setStartingWave] = useState(false);
+  // The dependency-wave concern (plan fetch + "start next wave" with its
+  // per-issue feedback, #972) lives in its own hook. The plan is derived from
+  // the board, so it must re-fetch when the board moves — the second argument is
+  // the pre-#972 effect's key (backlog size + column count), kept verbatim.
+  const wave = useDependencyWave(projectId, `${backlogColumn?.issues.length ?? 0}:${activeColumns.length}`);
   // Secondary controls (presets, dependency waves) are tucked behind toggles so
   // the always-visible compact toolbar stays a single wrapping row and the issue
   // list keeps the vertical space — critical on small screens where stacked
@@ -199,23 +203,6 @@ export function BacklogView({
       cancelled = true;
     };
   }, [presetSettingsKey]);
-
-  async function loadWavePlan() {
-    setWaveLoading(true);
-    try {
-      const plan = await apiFetch<DependencyWavePlan>(`/api/projects/${projectId}/dependency-waves`);
-      setWavePlan(plan);
-    } catch {
-      setWavePlan(null);
-    } finally {
-      setWaveLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    void loadWavePlan();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, backlogColumn?.issues.length, activeColumns.length]);
 
   const filteredIssues = useMemo(() => {
     return backlogIssues.filter((issue) => {
@@ -285,7 +272,7 @@ export function BacklogView({
     ready: readyCount,
     workspace: workspaceCount,
   };
-  const waveSlots = wavePlan?.wip.available ?? 0;
+  const waveSlots = wave.plan?.wip.available ?? 0;
 
   function toggleSelected(issueId: string) {
     setSelectedIds((prev) => {
@@ -400,31 +387,6 @@ export function BacklogView({
     const deleted = await persistPresets(nextPresets, `Deleted preset "${preset.name}"`);
     if (!deleted) return;
     setSelectedPresetId("");
-  }
-
-  async function startNextWave() {
-    setStartingWave(true);
-    try {
-      const result = await apiPost<DependencyWaveStartResult>(`/api/projects/${projectId}/dependency-waves/start-next`);
-      const failures = result.failed.length;
-      if (result.started.length > 0) {
-        showToast(
-          failures > 0
-            ? `Started ${result.started.length}; ${failures} failed`
-            : `Started ${result.started.length} issue${result.started.length === 1 ? "" : "s"}`,
-          failures > 0 ? "error" : "success",
-        );
-      } else if (result.skipped.availableSlots <= 0) {
-        showToast("WIP limit reached", "error");
-      } else {
-        showToast("No ready issues to start");
-      }
-      await loadWavePlan();
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Failed to start wave", "error");
-    } finally {
-      setStartingWave(false);
-    }
   }
 
   function handleDrop(e: React.DragEvent) {
@@ -635,11 +597,12 @@ export function BacklogView({
         {showWaves && (
           <div className="mt-2.5 rounded-md border border-gray-200 bg-white p-2.5 dark:border-gray-700 dark:bg-gray-900">
             <DependencyWavePanel
-              plan={wavePlan}
-              loading={waveLoading}
-              starting={startingWave}
-              onRefresh={loadWavePlan}
-              onStartNextWave={startNextWave}
+              plan={wave.plan}
+              loading={wave.loading}
+              starting={wave.starting}
+              progress={wave.progress}
+              onRefresh={wave.refresh}
+              onStartNextWave={wave.startNextWave}
             />
           </div>
         )}
@@ -776,17 +739,21 @@ function DependencyWavePanel({
   plan,
   loading,
   starting,
+  progress,
   onRefresh,
   onStartNextWave,
 }: {
   plan: DependencyWavePlan | null;
   loading: boolean;
   starting: boolean;
+  progress: WaveStartProgress;
   onRefresh: () => void;
   onStartNextWave: () => void;
 }) {
-  const startableCount = plan?.readyNow.filter((issue) => issue.startEligible).length ?? 0;
-  const startLimit = plan ? Math.min(startableCount, plan.wip.available) : 0;
+  const startLimit = selectWaveStartCandidates(plan).length;
+  const startingIssueIds = progress.phase === "starting"
+    ? new Set(progress.attemptedIssueIds)
+    : EMPTY_ISSUE_IDS;
   const summary = plan
     ? `${plan.wip.current}/${plan.wip.limit} WIP, ${plan.wip.available} slot${plan.wip.available === 1 ? "" : "s"} open`
     : loading ? "Loading wave plan" : "Wave plan unavailable";
@@ -811,17 +778,34 @@ function DependencyWavePanel({
             type="button"
             onClick={onStartNextWave}
             disabled={!plan || startLimit === 0 || loading || starting}
-            className="rounded border border-brand-200 bg-brand-50 px-2 py-1 text-xs font-medium text-brand-700 hover:bg-brand-100 disabled:opacity-50 dark:border-brand-800 dark:bg-brand-900/40 dark:text-brand-300"
+            className="inline-flex items-center gap-1.5 rounded border border-brand-200 bg-brand-50 px-2 py-1 text-xs font-medium text-brand-700 hover:bg-brand-100 disabled:opacity-50 dark:border-brand-800 dark:bg-brand-900/40 dark:text-brand-300"
           >
-            {starting ? "Starting..." : `Start Next Wave${startLimit > 0 ? ` (${startLimit})` : ""}`}
+            {starting && <Spinner className="h-3 w-3 shrink-0 animate-spin" />}
+            {starting ? "Starting…" : `Start Next Wave${startLimit > 0 ? ` (${startLimit})` : ""}`}
           </button>
         </div>
       </div>
+      {progress.phase !== "idle" && (
+        <div
+          role="status"
+          aria-live="polite"
+          className={`mb-2 flex items-start gap-1.5 rounded border px-2 py-1 text-xs ${
+            progress.failed
+              ? "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300"
+              : progress.phase === "starting"
+                ? "border-brand-200 bg-brand-50 text-brand-700 dark:border-brand-800 dark:bg-brand-900/30 dark:text-brand-300"
+                : "border-green-200 bg-green-50 text-green-700 dark:border-green-900 dark:bg-green-950/30 dark:text-green-300"
+          }`}
+        >
+          {progress.phase === "starting" && <Spinner className="mt-0.5 h-3 w-3 shrink-0 animate-spin" />}
+          <span className="min-w-0">{progress.message}</span>
+        </div>
+      )}
       {plan ? (
         <div className="grid max-h-72 grid-cols-1 gap-2 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3">
-          <WaveColumn title="Ready Now" issues={plan.readyNow} emptyText="No ready open issues" tone="ready" />
-          <WaveColumn title="Blocked" issues={plan.blocked} emptyText="No blocked issues" tone="blocked" />
-          <WaveColumn title="Cyclic/Invalid" issues={plan.cyclicInvalid} emptyText="No invalid dependency chains" tone="invalid" />
+          <WaveColumn title="Ready Now" issues={plan.readyNow} emptyText="No ready open issues" tone="ready" startingIssueIds={startingIssueIds} />
+          <WaveColumn title="Blocked" issues={plan.blocked} emptyText="No blocked issues" tone="blocked" startingIssueIds={startingIssueIds} />
+          <WaveColumn title="Cyclic/Invalid" issues={plan.cyclicInvalid} emptyText="No invalid dependency chains" tone="invalid" startingIssueIds={startingIssueIds} />
         </div>
       ) : (
         <div className="text-xs text-gray-400 dark:text-gray-500">{loading ? "Loading wave plan…" : "Wave plan unavailable"}</div>
@@ -830,16 +814,21 @@ function DependencyWavePanel({
   );
 }
 
+/** Stable identity so a non-starting render never re-renders the columns (#972). */
+const EMPTY_ISSUE_IDS: ReadonlySet<string> = new Set<string>();
+
 function WaveColumn({
   title,
   issues,
   emptyText,
   tone,
+  startingIssueIds,
 }: {
   title: string;
   issues: DependencyWaveIssue[];
   emptyText: string;
   tone: "ready" | "blocked" | "invalid";
+  startingIssueIds: ReadonlySet<string>;
 }) {
   const toneClass = tone === "ready"
     ? "border-green-200 bg-green-50 text-green-700 dark:border-green-900 dark:bg-green-950/30 dark:text-green-300"
@@ -861,7 +850,14 @@ function WaveColumn({
               <div className="flex min-w-0 items-center gap-1.5">
                 <span className="shrink-0 font-mono text-gray-400">{issue.issueNumber != null ? `#${issue.issueNumber}` : "-"}</span>
                 <span className="truncate font-medium text-gray-700 dark:text-gray-200">{issue.title}</span>
-                {issue.startEligible && <span className="shrink-0 rounded bg-green-100 px-1 text-[10px] text-green-700 dark:bg-green-950 dark:text-green-300">startable</span>}
+                {startingIssueIds.has(issue.id)
+                  ? (
+                    <span className="inline-flex shrink-0 items-center gap-1 rounded bg-brand-100 px-1 text-[10px] text-brand-700 dark:bg-brand-950 dark:text-brand-300">
+                      <Spinner className="h-2.5 w-2.5 animate-spin" />
+                      starting
+                    </span>
+                  )
+                  : issue.startEligible && <span className="shrink-0 rounded bg-green-100 px-1 text-[10px] text-green-700 dark:bg-green-950 dark:text-green-300">startable</span>}
               </div>
               {(issue.blockers.length > 0 || issue.reasons.length > 0) && (
                 <div className="mt-0.5 truncate text-[11px] text-gray-500 dark:text-gray-400">
