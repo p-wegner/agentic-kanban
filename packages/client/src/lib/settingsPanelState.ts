@@ -176,7 +176,7 @@ export function projectSettingsSaveError(
   branches: { local: string[]; remote: string[] } | null,
 ): string | null {
   if (isDefaultBranchInvalid(p.defaultBranch, branches)) return "Default branch does not exist in this repo";
-  if (!isValidTestImpactBudget(p.testImpactBudget)) return 'Test-impact budget must look like "60s", "90000ms" or "2m" (or be empty)';
+  if (!isValidTestImpactBudget(p.testImpactBudget)) return 'Test-impact budget must look like "60s" or "90000ms" — a bare number is ms, and minutes are spelled in seconds (or leave it empty)';
   return null;
 }
 

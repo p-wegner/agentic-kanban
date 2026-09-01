@@ -70,10 +70,33 @@ describe("the budget preference key", () => {
 describe("parsing a budget value", () => {
   it("accepts the units impact.mjs accepts and converts to ms", () => {
     expect(parseTestImpactBudget("60s")).toEqual({ value: "60s", ms: 60_000 });
-    expect(parseTestImpactBudget("2m")).toEqual({ value: "2m", ms: 120_000 });
     expect(parseTestImpactBudget("90000ms")).toEqual({ value: "90000ms", ms: 90_000 });
     // A bare number is milliseconds there, so it must be here too.
     expect(parseTestImpactBudget("500")).toEqual({ value: "500", ms: 500 });
+  });
+
+  it("REJECTS a minutes suffix, because the tool would read it as milliseconds", () => {
+    // `impact.mjs`'s parseMs is `/s$/ && !/ms$/ ? *1000 : parseFloat(v)` — it knows exactly two
+    // units, so `2m` reaches it as parseFloat("2m") === 2, i.e. TWO MILLISECONDS. Accepting `m`
+    // would let the board validate the value, print `budget 2m` in the gate message, and hand the
+    // selector a budget that drops every non-always-run suite: a near-empty verification reported
+    // as a two-minute one. Rejecting at the settings boundary is the only failure direction that
+    // cannot silently weaken a gate.
+    expect(parseTestImpactBudget("2m")).toBeNull();
+    expect(isValidTestImpactBudget("2m")).toBe(false);
+  });
+
+  it("mirrors impact.mjs's parseMs exactly on every value it accepts", () => {
+    // The invariant the module claims: "a value this accepts is a value the tool accepts". Pinned
+    // against a local copy of the tool's own expression rather than against hand-written numbers,
+    // so a future unit added on one side without the other fails here.
+    const toolParseMs = (v: string) =>
+      /s$/.test(v) && !/ms$/.test(v) ? parseFloat(v) * 1000 : parseFloat(v);
+    for (const raw of ["60s", "90000ms", "500", "0.5s", "120s"]) {
+      const parsed = parseTestImpactBudget(raw);
+      expect(parsed).not.toBeNull();
+      expect(parsed!.ms).toBe(toolParseMs(parsed!.value));
+    }
   });
 
   it("preserves the operator's own spelling rather than normalising it", () => {

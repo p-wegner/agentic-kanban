@@ -60,11 +60,18 @@ export function testImpactBudgetPrefKey(projectId: string): string {
 }
 
 /**
- * A budget as `impact.mjs --budget` accepts it: a positive number, optionally suffixed `ms`,
- * `s` or `m`. A bare number is milliseconds there, so `60s` (not `60`) is what an operator
- * almost always means — the Settings field's placeholder says so.
+ * A budget as `impact.mjs --budget` accepts it: a positive number, optionally suffixed `ms` or
+ * `s`. A bare number is milliseconds there, so `60s` (not `60`) is what an operator almost
+ * always means — the Settings field's placeholder says so.
+ *
+ * **`m` is deliberately NOT accepted, and that is not a nicety.** The tool's `parseMs` is
+ * `/s$/.test(v) && !/ms$/.test(v) ? parseFloat(v) * 1000 : parseFloat(v)` — it knows exactly two
+ * units, so `2m` falls through to `parseFloat("2m") === 2`, i.e. TWO MILLISECONDS. Accepting `m`
+ * here would let the board validate a value, print `budget 2m` in the gate message, and hand the
+ * tool a budget that drops every non-always-run suite — a near-empty verification reported as a
+ * two-minute one. Minutes are spelled in seconds (`120s`) until `impact.mjs` grows the unit.
  */
-const BUDGET_RE = /^(\d+(?:\.\d+)?)(ms|s|m)?$/i;
+const BUDGET_RE = /^(\d+(?:\.\d+)?)(ms|s)?$/i;
 
 /** The parsed budget: the operator's own spelling plus its value in ms, for display/tests. */
 export interface ParsedTestImpactBudget {
@@ -93,7 +100,7 @@ export function parseTestImpactBudget(raw: string | null | undefined): ParsedTes
   const amount = Number(match[1]);
   if (!Number.isFinite(amount) || amount <= 0) return null;
   const unit = (match[2] ?? "ms").toLowerCase();
-  const ms = unit === "m" ? amount * 60_000 : unit === "s" ? amount * 1_000 : amount;
+  const ms = unit === "s" ? amount * 1_000 : amount;
   return { value, ms };
 }
 
