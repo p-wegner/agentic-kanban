@@ -146,7 +146,6 @@ export const UNVALIDATED_API_RESPONSES: readonly string[] = [
   "GET /api/projects/:param/butler/skill",
   "GET /api/projects/:param/butlers",
   "GET /api/projects/:param/conductor-schedule",
-  "GET /api/projects/:param/dependency-waves",
   "GET /api/projects/:param/drive",
   "GET /api/projects/:param/drives",
   "GET /api/projects/:param/drives/:param/dashboard",
