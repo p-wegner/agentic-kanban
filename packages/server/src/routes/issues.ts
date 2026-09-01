@@ -4,7 +4,12 @@ import type { SessionManager } from "../services/session.manager.js";
 import { analyzeDependencies, enhanceIssue, aiEstimateIssue, decomposeEpic, confirmEpicDecomposition, contractCoupledComponent, confirmContractComponent, analyzeTouchedFiles } from "../services/issue-ai.service.js";
 import { scanForTicketGroups, scanTouchedFilesForTicketGroups } from "../services/ticket-group-scan.service.js";
 import type { DecomposeChildProposal, DecomposeDependencyProposal } from "../services/issue-ai.service.js";
-import { createIssueService } from "../services/issue.service.js";
+import {
+  createIssueService,
+  unrecognizedIssueUpdateKeys,
+  RECOGNIZED_ISSUE_UPDATE_KEYS,
+  RECOGNIZED_BULK_ISSUE_UPDATE_KEYS,
+} from "../services/issue.service.js";
 import type { CreateIssueInput, BatchDependencyInput } from "../services/issue.service.js";
 import {
   getIssueDescription,
@@ -242,6 +247,21 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
   // PATCH /api/issues/bulk - update N issues in one request
   router.patch("/bulk", async (c) => {
     const body = await parseJsonBody(c, bulkUpdateBody);
+    // #987 — same rule as the single-issue PATCH above. The bulk path applies only the SHARED
+    // field table (no checklist/pinned/milestone), so it is checked against the narrower set:
+    // accepting `checklist` here would report success for a field `updateIssuesBulk` never reads.
+    const ignoredKeys = unrecognizedIssueUpdateKeys(body.updates, RECOGNIZED_BULK_ISSUE_UPDATE_KEYS);
+    if (ignoredKeys.length > 0) {
+      return c.json(
+        {
+          ok: false,
+          error: `Unrecognized field(s) for a bulk issue update: ${ignoredKeys.join(", ")}. Nothing was applied.`,
+          ignoredKeys,
+          recognizedKeys: [...RECOGNIZED_BULK_ISSUE_UPDATE_KEYS].sort(),
+        },
+        422,
+      );
+    }
     const result = await issueService.updateIssuesBulk(body.issueIds, body.updates);
     return c.json({ updated: result.updated });
   });
@@ -539,13 +559,36 @@ export function createIssuesRoute(database: Database, options?: { boardEvents?: 
 
   // PATCH /api/issues/:id
   router.patch("/:id", async (c) => {
-    // #806 batch 3 REJECTED this read, deliberately: the body has no declared type and is
-    // forwarded WHOLE to `updateIssue(id, body: Record<string, unknown>)`, which decides field
-    // by field what it recognises. There is nothing to tighten TO — a schema here would have to
-    // invent a field list (and 400 the fields it forgot) or check nothing and merely look
-    // validated. Same argument as `PATCH /api/projects/:id` in batch 2.
+    // #806 batch 3 REJECTED a body SCHEMA here, deliberately, and that still holds: the body is
+    // forwarded whole to `updateIssue(id, body: Record<string, unknown>)`, which decides field
+    // by field what it recognises, so a schema would have to invent a field list and 400 the
+    // fields it forgot. Same argument as `PATCH /api/projects/:id` in batch 2.
+    //
+    // #987 is the other question — not "are the accepted fields valid" but "did anyone read the
+    // ones sent". This route returned 200 with the full issue object whether or not a single
+    // field applied. Measured live: three tickets closed with `{"status":"Done"}` (the field is
+    // `statusId`) were still Todo hours later, and the card context menu's own "Move to status"
+    // PATCHed `{statusName}` and did nothing, with no error toast because the request succeeded.
+    // That needs no schema — only the key set the service already reads, which is exported as
+    // `RECOGNIZED_ISSUE_UPDATE_KEYS` and derived from the same table that applies them.
     const id = c.req.param("id");
     const body = await parseJsonBody(c);
+    const ignoredKeys = unrecognizedIssueUpdateKeys(body as Record<string, unknown>);
+    if (ignoredKeys.length > 0) {
+      // 422 with NOTHING applied, following #874 (the settings write that silently dropped
+      // unknown keys): a write that reports success for work it did not do is the defect, and a
+      // partial apply would make the caller's next read the only way to find out which half
+      // landed. `recognizedKeys` is in the body because the fix is almost always a rename.
+      return c.json(
+        {
+          ok: false,
+          error: `Unrecognized field(s) for an issue update: ${ignoredKeys.join(", ")}. Nothing was applied.`,
+          ignoredKeys,
+          recognizedKeys: [...RECOGNIZED_ISSUE_UPDATE_KEYS].sort(),
+        },
+        422,
+      );
+    }
     const result = await issueService.updateIssue(id, body);
     return c.json(result);
   });
