@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { DependencyWaveIssue, DependencyWavePlan, DependencyWaveStartResult } from "@agentic-kanban/shared";
 import {
+  IDLE_WAVE_PROGRESS,
   clearWaveIssuesPending,
   describeWaveStartError,
   describeWaveStarting,
@@ -173,5 +174,35 @@ describe("describeWaveStartError", () => {
 
   it("falls back to a generic message for a non-Error throw", () => {
     expect(describeWaveStartError("boom", []).message).toBe("Failed to start wave");
+  });
+});
+
+describe("IDLE_WAVE_PROGRESS", () => {
+  // `useDependencyWave` resets to this value when `projectId` changes, because
+  // `BacklogView` is not keyed by project: a switch mutates the prop on a mounted
+  // component. These are the properties that reset relies on — an idle value that
+  // still carried a message or ids would render the previous project's banner and
+  // badge the new project's cards.
+  it("renders nothing: no phase, no message, no attempted ids, not failed", () => {
+    expect(IDLE_WAVE_PROGRESS).toEqual({
+      phase: "idle",
+      attemptedIssueIds: [],
+      message: "",
+      failed: false,
+    });
+  });
+
+  it("is distinguishable from every non-idle outcome by phase alone", () => {
+    // The panel renders the banner on `phase !== "idle"`, so no real outcome may
+    // share the idle phase.
+    const outcomes = [
+      describeWaveStarting(["a"]),
+      summarizeWaveStart(startResult({ started: [{ issueId: "a", issueNumber: 7, workspaceId: "w1" }] }), ["a"]),
+      summarizeWaveStart(startResult(), []),
+      describeWaveStartError(new Error("boom"), ["a"]),
+    ];
+    for (const outcome of outcomes) {
+      expect(outcome.phase).not.toBe("idle");
+    }
   });
 });
