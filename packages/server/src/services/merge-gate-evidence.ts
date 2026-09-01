@@ -34,6 +34,31 @@ export function movedDuringGate(before: MergeGateShas, after: MergeGateShas): "b
   return null;
 }
 
+/**
+ * Name every tip that moved, old → new — the falsifiable half of the discard message (#979).
+ *
+ * "the branch tip moved during the run" is unfalsifiable from outside the process: it was
+ * emitted for #971's merge whose branch had not received a commit in over an hour, and there
+ * was no way to tell a real move from a self-inflicted one (the board's own pending-wt-sync
+ * touching the worktree near the end of the gate) without the shas. A discard throws away a
+ * full-suite pass — 20-40 minutes when the in-lock recovery path does not apply — so the one
+ * line that explains it has to carry its evidence.
+ *
+ * Reports BOTH tips, unlike {@link movedDuringGate}, which returns the first and so hides a
+ * simultaneous base move behind a branch move. Returns null when nothing known-to-known changed.
+ */
+export function describeTipMovement(before: MergeGateShas, after: MergeGateShas): string | null {
+  const short = (sha: string) => sha.slice(0, 8);
+  const parts: string[] = [];
+  if (before.branchSha && after.branchSha && before.branchSha !== after.branchSha) {
+    parts.push(`branch ${short(before.branchSha)} -> ${short(after.branchSha)}`);
+  }
+  if (before.baseSha && after.baseSha && before.baseSha !== after.baseSha) {
+    parts.push(`base ${short(before.baseSha)} -> ${short(after.baseSha)}`);
+  }
+  return parts.length > 0 ? parts.join(", ") : null;
+}
+
 /** Outcome of {@link runGateWithEvidence}. */
 export interface GateWithEvidence {
   /** Whether the merge may proceed. */
@@ -48,6 +73,12 @@ export interface GateWithEvidence {
   shasBefore: MergeGateShas;
   /** Which tip moved WHILE the gate ran, if any. */
   moved: "branch" | "base" | null;
+  /**
+   * The movement spelled out — `branch 1a2b3c4d -> 5e6f7a8b`, both tips when both moved (#979).
+   * Null when nothing moved. Always present in the discard log and the attempt detail, so a
+   * discard can be checked against `git log` instead of taken on faith.
+   */
+  movedDetail: string | null;
   /**
    * Stamped when the gate FINISHED. Callers must use this rather than a timestamp captured
    * before the run: on a repo whose gate is a full suite + build that is 30-45 minutes of
@@ -129,6 +160,9 @@ export async function runGateWithEvidence(args: {
   const ranAt = new Date().toISOString();
   const shasAfter = await readShas(workspace);
   const moved = movedDuringGate(shasBefore, shasAfter);
+  // #979 — the shas, always, whenever movement is claimed. Without them the discard is
+  // unfalsifiable from outside the process.
+  const movedDetail = describeTipMovement(shasBefore, shasAfter);
 
   // Minted for any PASS whose tips held still — including a pass with nothing to gate on
   // (stage "none"). Callers that only want proof of a REAL run check `ran` first, as the
@@ -145,8 +179,9 @@ export async function runGateWithEvidence(args: {
   if (result.passed && moved) {
     console.warn(
       `[merge-gate] workspace ${workspace.id}: gate attempt ${attempt?.attempt ?? "?"} (${source}) PASSED after `
-        + `${Math.round(durationMs / 1000)}s but its verdict is DISCARDED — the ${moved} tip moved during the run `
-        + `(#243), so nothing proves the state about to merge was tested. The gate will run again (#936).`,
+        + `${Math.round(durationMs / 1000)}s but its verdict is DISCARDED — ${movedDetail ?? `the ${moved} tip`} `
+        + `moved during the run (#243), so nothing proves the state about to merge was tested. `
+        + `The gate will run again (#936).`,
     );
   }
   noteMergeGateAttemptFinished(workspace.id, attempt, {
@@ -161,9 +196,9 @@ export async function runGateWithEvidence(args: {
     detail: !result.passed
       ? result.message
       : moved
-        ? `gate passed but the ${moved} tip moved during the run — verdict discarded, the gate must run again (#243)`
+        ? `gate passed but a tip moved during the run (${movedDetail ?? moved}) — verdict discarded, the gate must run again (#243)`
         : undefined,
   });
 
-  return { ...result, shasBefore, moved, ranAt, token, durationMs };
+  return { ...result, shasBefore, moved, movedDetail, ranAt, token, durationMs };
 }
