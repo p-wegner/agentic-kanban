@@ -140,23 +140,28 @@ describe("resolveGateSelection — the args it asks impact.mjs for", () => {
     // after the `--min-score` cut and BEFORE the `--budget` cut. Unioning here would append them to
     // an already-budgeted selection, so a 60s budget would describe a run that took longer.
     const seen: string[][] = [];
+    const stdins: (string | undefined)[] = [];
     await resolveGateSelection({
       workingDir: withTool(),
       baseBranch: "master",
       minScore: "1.0",
       budget: "60s",
       union: ["packages/server/src/__tests__/a.test.ts", "packages/shared/__tests__/b.test.ts", "   "],
-      runCommand: async ({ args }) => {
+      runCommand: async ({ args, stdin }) => {
         seen.push(args);
+        stdins.push(stdin);
         return { exitCode: 0, stdout: JSON.stringify({ tier: "impact", selected: [], changed: [] }), stderr: "" };
       },
     });
     const args = seen[0];
     expect(args).toContain("--budget");
-    // Blank entries are dropped -- a stray comma must not become a phantom test path.
-    expect(args[args.indexOf("--union") + 1]).toBe(
-      "packages/server/src/__tests__/a.test.ts,packages/shared/__tests__/b.test.ts",
-    );
+    // Over STDIN, not inline. A real union is tens of thousands of characters (536 related suites
+    // for a `packages/server/src/db/index.ts` diff comma-join to 33,735), past Windows'
+    // 32,767-char CreateProcess limit -- the spawn would fail ENAMETOOLONG and this describing
+    // call would report no selection at all.
+    expect(args[args.indexOf("--union") + 1]).toBe("-");
+    // Blank entries are dropped -- a stray entry must not become a phantom test path.
+    expect(stdins[0]).toBe("packages/server/src/__tests__/a.test.ts\npackages/shared/__tests__/b.test.ts\n");
   });
 
   it("omits --union when there is none, keeping the pre-#967 argv byte-identical", async () => {
