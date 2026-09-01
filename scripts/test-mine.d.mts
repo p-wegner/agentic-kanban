@@ -50,13 +50,38 @@ export declare function scanAlwaysRunTests(
 ): string[];
 
 /**
- * The refusal message for `KANBAN_TEST_SELECTOR=impact` + `KANBAN_TEST_FILES` together, or
- * `null` when there is no conflict (#962).
+ * The provenance note for `KANBAN_TEST_SELECTOR=impact` + `KANBAN_TEST_FILES` together, or `null`
+ * when only one of them is set (#967).
+ *
+ * Informational, not a refusal: the pair is now a UNION (the related picks are handed to
+ * `select --union`), where #962 made it an exit-2 conflict.
  */
-export declare function selectorFileScopeConflict(input: {
+export declare function selectorFileScopeUnionNote(input: {
   impactSelectorRequested: boolean;
   scopedFiles: readonly string[];
 }): string | null;
+
+/**
+ * The suites `vitest related <files>` would select for `pkgDir`, as repo-relative paths, or
+ * `null` when the derivation failed (#967). Fails open — the union widens an opt-in narrowing.
+ */
+export declare function relatedTestSpecs(
+  pkgDir: string,
+  files: readonly string[],
+  loadVitest?: (pkgDir: string) => Promise<{ createVitest: (...a: never[]) => unknown }>,
+  root?: string,
+): Promise<string[] | null>;
+
+/**
+ * The union input for `select --union` across every package the file scope touches, plus the
+ * packages whose derivation FAILED (named, never silently read as "related agreed") — #967.
+ */
+export declare function relatedUnionSpecs(
+  packages: readonly { dir: string; label: string }[],
+  ownedFor: (pkg: { dir: string; label: string }) => string[],
+  upstreamFor: (pkg: { dir: string; label: string }) => string[],
+  derive?: (pkgDir: string, files: readonly string[]) => Promise<string[] | null>,
+): Promise<{ specs: string[]; failedPackages: string[] }>;
 
 /** Changed files under a package, relative to that package's directory. */
 export declare function ownedChangedFiles(

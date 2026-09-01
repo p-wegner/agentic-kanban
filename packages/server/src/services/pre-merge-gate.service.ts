@@ -377,9 +377,9 @@ export async function runPreMergeGate(
     // is false BY CONSTRUCTION in this repo, so the cheap-check motive is honoured by narrowing
     // to the guards rather than by checking nothing.
     //
-    // #962 — the selector, and whether the file scope may still be emitted alongside it. See
-    // `resolveGateFileScopeEmission` for why the gate resolves that conflict itself.
-    const { selector: gateSelector, emitFileScope, note: fileScopeNote } = resolveGateFileScopeEmission({
+    // #962/#967 — the selector, and whether the file scope is emitted ALONGSIDE it. See
+    // `resolveGateFileScopeEmission` for why what #962 had to resolve as a conflict is now a union.
+    const { selector: gateSelector, emitFileScope, unioned: gateUnioned, note: fileScopeNote } = resolveGateFileScopeEmission({
       env: process.env,
       fileScoped: fileScope,
       changedFileCount: changedFiles.length,
@@ -423,11 +423,16 @@ export async function runPreMergeGate(
         workingDir,
         baseBranch: workspace.baseBranch,
         budget: gateBudget?.value ?? null, // #966 — describe the selection the run MAKES
+        // #967 — the run will union `vitest related`'s picks in, but this description cannot
+        // reproduce that half (only the runner walks vitest's module graph). Saying so beats
+        // reporting the impact half as if it were the whole selection.
+        unioned: gateUnioned && !docsOnlyGuardsRunApplies,
       }),
       packageScoped: Boolean(effectiveTestScope) && !docsOnlyGuardsRunApplies,
-      // What was actually EMITTED, not what the scoping decision wanted: under the impact
-      // selector the file list is dropped, and reporting `fileScoped: true` would name a
-      // narrowing that never reached the runner.
+      // What was actually EMITTED, not what the scoping decision wanted. Since #967 the file list
+      // IS emitted under the impact selector — the runner unions it in rather than refusing the
+      // pair — so this is `true` for a union run, and that is what `gateRanScope` reads to record
+      // it as `impact+related`.
       fileScoped: emitFileScope && !docsOnlyGuardsRunApplies,
       ...(docsOnlyGuardsRunApplies ? { guardsOnly: true } : {}),
       changedFileCount: changedFiles.length,

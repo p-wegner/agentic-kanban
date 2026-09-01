@@ -92,9 +92,21 @@ describe("gateRanScope", () => {
     // rows would drive the rate toward a confident zero precisely on the runs where the selector
     // was actually in charge. That is the number that would promote it to default.
     expect(gateRanScope(tierInfo({ selector: "impact" }))).toBe("impact-scoped");
-    // It outranks package/file scoping too: those narrowings are layered ON the impact set, so
-    // naming either of them alone would still overstate what ran.
-    expect(gateRanScope(tierInfo({ selector: "impact", packageScoped: true, fileScoped: true }))).toBe("impact-scoped");
+    // It outranks PACKAGE scoping: that narrowing is layered ON the impact set, so naming it
+    // alone would still overstate what ran. (FILE scoping is the one case that does NOT fold in
+    // this direction since #967 — it is the union's other half, see the next test.)
+    expect(gateRanScope(tierInfo({ selector: "impact", packageScoped: true }))).toBe("impact-scoped");
+  });
+
+  it("records a UNION run under its own name, not as impact alone (#967)", () => {
+    // A file scope emitted ALONGSIDE the impact selector is not a rival narrowing — since #967 the
+    // runner derives `vitest related`'s suites from it and merges them in. So the row has to name
+    // the COMBINED selector: "impact alone" and "impact ∪ related" have different miss profiles,
+    // and folding them together would credit the ranking with the union's catches. Still a
+    // non-witness (not in the tool's WITNESS_SCOPES), which is correct — a union is wider than the
+    // ranking but narrower than the full suite, so it cannot see what BOTH selectors omitted.
+    expect(gateRanScope(tierInfo({ selector: "impact", fileScoped: true }))).toBe("impact+related");
+    expect(gateRanScope(tierInfo({ selector: "impact", packageScoped: true, fileScoped: true }))).toBe("impact+related");
   });
 
   it("keeps guards-only ahead of the selector, because that branch never consults it", () => {
@@ -180,6 +192,20 @@ describe("parseSelection / emptyChangeSetReason", () => {
     // silently readmits the rows this guard exists to keep out.
     const parsed = parseSelection(JSON.stringify({ tier: "impact", selected: ["a.test.ts"] }));
     expect(parsed!.changed).toEqual([]);
+  });
+
+  // The `signalCounts.external` reads live in `gate-impact-selection.test.ts` beside the rest of
+  // the selection-parsing suite; what belongs here is only the shape that could produce a
+  // wrong-LOW count rather than an absent one.
+  it("degrades to unknown rather than to a wrong number on an unexpected signalCounts shape (#967)", () => {
+    // A payload change on the tool side must not silently produce a low count that the message
+    // then reports as a measured split.
+    for (const signalCounts of [null, "12", { external: "12" }, { external: Number.NaN }]) {
+      const parsed = parseSelection(
+        JSON.stringify({ tier: "impact", selected: [{ test: "a.test.ts", score: 1 }], signalCounts }),
+      );
+      expect(parsed!.externalCount).toBeUndefined();
+    }
   });
 
   it("flags an empty change set, and names whether a base was even available", () => {

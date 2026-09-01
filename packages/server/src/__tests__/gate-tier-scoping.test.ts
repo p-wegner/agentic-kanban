@@ -131,19 +131,21 @@ describe("resolveGateTestSelector (#962)", () => {
   });
 });
 
-describe("resolveGateFileScopeEmission (#962)", () => {
-  it("drops the file scope under the impact selector, rather than emitting a pair test:mine rejects", () => {
-    // `test-mine.mjs` refuses to run with both set. A knob an operator exported for the server
-    // process must not thereby turn every file-scoped gate into a hard merge blocker, so the
-    // gate resolves the conflict itself — in the selector's favour, and out loud.
-    const dropped = resolveGateFileScopeEmission({
+describe("resolveGateFileScopeEmission (#962, unioned by #967)", () => {
+  it("KEEPS the file scope under the impact selector, so the runner unions the two", () => {
+    // #962 dropped it because `test-mine.mjs` refused the pair. That refusal is retired: the
+    // runner now derives `vitest related`'s suites from the file list and passes them to
+    // `select --union`, so emitting both is the intended pairing. What survives from #962 is the
+    // rule that the combination is never silent — hence the note assertions below.
+    const unioned = resolveGateFileScopeEmission({
       env: { KANBAN_TEST_SELECTOR: "impact" }, fileScoped: true, changedFileCount: 5,
     });
-    expect(dropped.selector).toBe("impact");
-    expect(dropped.emitFileScope).toBe(false);
-    // Dropping a narrowing the operator configured must be VISIBLE, not inferred from its absence.
-    expect(dropped.note).toContain("replaces the 5-file scope");
-    expect(dropped.note).toContain("impact-scoped, not full");
+    expect(unioned.selector).toBe("impact");
+    expect(unioned.emitFileScope).toBe(true);
+    expect(unioned.unioned).toBe(true);
+    // Combining two selectors must be VISIBLE, not inferred from a pair of env vars.
+    expect(unioned.note).toContain("5-file scope is UNIONED");
+    expect(unioned.note).toContain("impact+related, not full");
   });
 
   it("emits the file scope as before when no selector is set", () => {

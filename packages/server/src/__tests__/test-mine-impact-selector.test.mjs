@@ -10,8 +10,9 @@ import {
   parseImpactSelection,
   partitionExcluded,
   resolveImpactCli,
+  relatedUnionSpecs,
   runImpactSelector,
-  selectorFileScopeConflict,
+  selectorFileScopeUnionNote,
   PACKAGES,
 } from "../../../../scripts/test-mine.mjs";
 
@@ -20,28 +21,107 @@ import {
  * `--format pkgfile` output (`<packageDir>:<path relative to that package>` per line). These
  * tests exercise the pure parsing/resolution directly, never spawning the real skill.
  */
-describe("selectorFileScopeConflict", () => {
-  it("refuses when both the impact selector and an explicit file scope are set", () => {
-    // #962 — before this the file list was silently discarded: the selector derives its own
-    // change set from git and never reads it, so a caller that asked for specific suites got a
-    // different set back with nothing anywhere saying so. Silent is the whole problem.
-    const message = selectorFileScopeConflict({
+describe("selectorFileScopeUnionNote", () => {
+  it("announces the UNION when both the impact selector and an explicit file scope are set", () => {
+    // #967 reverses #962's refusal. The refusal existed because the file list was silently
+    // DISCARDED — but the fix for silence is not exclusivity: the two selectors' misses are
+    // different in kind (`related` is blind to runtime reach; impact is a ranked bet), so
+    // replace-mode gave up the half `related` is actually good at. What must survive from #962 is
+    // that the combination is never silent, which is what this note is.
+    const message = selectorFileScopeUnionNote({
       impactSelectorRequested: true,
       scopedFiles: ["packages/server/src/a.ts", "packages/server/src/b.ts"],
     });
-    expect(message).toContain("refusing to run");
-    // Both variables named, and the count, so the operator can see what would have been dropped.
+    expect(message).not.toContain("refusing to run");
+    expect(message).toContain("UNION");
+    // Both variables named, and the count, so the operator can see what is being combined.
     expect(message).toContain("KANBAN_TEST_SELECTOR=impact");
-    expect(message).toContain("2 file(s)");
-    // And the remedy — either direction, because only the caller knows which they meant.
-    expect(message).toContain("Unset KANBAN_TEST_FILES");
-    expect(message).toContain("unset KANBAN_TEST_SELECTOR");
+    expect(message).toContain("KANBAN_TEST_FILES");
+    expect(message).toContain("2 named file(s)");
+    // The ORDERING decision, stated where an operator reads it: our score floor has no authority
+    // over another selector's evidence, but the budget must still hold over the union.
+    expect(message).toContain("--min-score");
+    expect(message).toContain("budget");
   });
 
-  it("allows each of them alone", () => {
-    expect(selectorFileScopeConflict({ impactSelectorRequested: true, scopedFiles: [] })).toBeNull();
-    expect(selectorFileScopeConflict({ impactSelectorRequested: false, scopedFiles: ["a.ts"] })).toBeNull();
-    expect(selectorFileScopeConflict({ impactSelectorRequested: false, scopedFiles: [] })).toBeNull();
+  it("says nothing when only one of them is set", () => {
+    expect(selectorFileScopeUnionNote({ impactSelectorRequested: true, scopedFiles: [] })).toBeNull();
+    expect(selectorFileScopeUnionNote({ impactSelectorRequested: false, scopedFiles: ["a.ts"] })).toBeNull();
+    expect(selectorFileScopeUnionNote({ impactSelectorRequested: false, scopedFiles: [] })).toBeNull();
+  });
+});
+
+/**
+ * #967 — the union INPUT: what `vitest related` would have selected, gathered per package and
+ * handed to `select --union`.
+ *
+ * The derivation itself boots a real vitest instance, so it is injected here; what these pin is
+ * the part that decides whether the union means anything — which packages are asked, that an
+ * upstream-only package still contributes, and that a FAILED derivation is named rather than
+ * read as "related agreed with the impact selection".
+ */
+describe("relatedUnionSpecs", () => {
+  const packages = [
+    { dir: "packages/server", label: "server" },
+    { dir: "packages/shared", label: "shared" },
+  ];
+
+  it("collects and dedupes the related suites across every package with changed files", async () => {
+    const { specs, failedPackages } = await relatedUnionSpecs(
+      packages,
+      (pkg) => (pkg.label === "server" ? ["src/a.ts"] : ["src/b.ts"]),
+      () => [],
+      async (_pkgDir, _files) => ["packages/server/src/__tests__/a.test.ts"],
+    );
+    // Both packages derived the same suite; the union is a SET, not a concatenation.
+    expect(specs).toEqual(["packages/server/src/__tests__/a.test.ts"]);
+    expect(failedPackages).toEqual([]);
+  });
+
+  it("falls back to the UPSTREAM changed files for a package that owns none", async () => {
+    // The `related` path's own rule: a `packages/shared`-only diff reaches the server's suites
+    // through its vitest alias. Skipping such a package would silently shrink the union to the
+    // one package that happened to own the diff.
+    const seen = [];
+    await relatedUnionSpecs(
+      packages,
+      (pkg) => (pkg.label === "shared" ? ["src/b.ts"] : []),
+      (pkg) => (pkg.label === "server" ? ["/repo/packages/shared/src/b.ts"] : []),
+      async (pkgDir, files) => {
+        seen.push([pkgDir, files]);
+        return [];
+      },
+    );
+    expect(seen).toHaveLength(2);
+    expect(seen.some(([, files]) => files[0] === "/repo/packages/shared/src/b.ts")).toBe(true);
+  });
+
+  it("skips a package with no changed files of its own and none upstream", async () => {
+    const seen = [];
+    const { specs } = await relatedUnionSpecs(
+      packages,
+      () => [],
+      () => [],
+      async (pkgDir) => {
+        seen.push(pkgDir);
+        return [];
+      },
+    );
+    expect(seen).toEqual([]);
+    expect(specs).toEqual([]);
+  });
+
+  it("NAMES a package whose derivation failed instead of contributing silence", async () => {
+    // Silence would read as "`vitest related` selected nothing there", i.e. "the other selector
+    // agreed with ours" — the one claim a failed probe may not make.
+    const { specs, failedPackages } = await relatedUnionSpecs(
+      packages,
+      () => ["src/a.ts"],
+      () => [],
+      async (pkgDir) => (pkgDir.includes("shared") ? null : ["packages/server/src/__tests__/a.test.ts"]),
+    );
+    expect(specs).toEqual(["packages/server/src/__tests__/a.test.ts"]);
+    expect(failedPackages).toEqual(["shared"]);
   });
 });
 
@@ -270,6 +350,45 @@ describe("the selection's time budget", () => {
     // Settings field, and this is where it either holds or does not.
     const sink = {};
     runImpactSelector({ cli, minScore: "1.0", rebuildIfStale: false, base: "", budget: "", spawnFn: spawnCapturing(sink) });
+    expect(sink.args.slice(1)).toEqual(["select", "--format", "pkgfile", "--min-score", "1.0"]);
+  });
+});
+
+/**
+ * #967 — the union reaches the tool as `select --union`, and the PLACEMENT is the contract.
+ *
+ * `impact.mjs` admits external entries after the `--min-score` cut and before the `--budget` cut.
+ * Doing the union here instead — appending the related picks to a finished selection — would land
+ * them after the budget was already spent, so a project with a 60s budget would silently run
+ * longer than the setting promises. That is why this is an ARGV assertion and not a merge test.
+ */
+describe("the union hand-off to select --union", () => {
+  const cli = resolve("/repo", ".claude/skills/test-impact/tools/impact.mjs");
+  const spawnCapturing = (sink) => (_exe, args) => {
+    sink.args = args;
+    return { status: 0, stdout: "packages/server:src/__tests__/a.test.ts\n", stderr: "" };
+  };
+
+  it("passes the related picks as a comma-separated --union, before --rebuild-if-stale", () => {
+    const sink = {};
+    runImpactSelector({
+      cli,
+      minScore: "1.0",
+      rebuildIfStale: false,
+      base: "master",
+      budget: "60s",
+      union: ["packages/server/src/__tests__/b.test.ts", "packages/shared/__tests__/c.test.ts"],
+      spawnFn: spawnCapturing(sink),
+    });
+    expect(sink.args.slice(1)).toEqual([
+      "select", "master", "--format", "pkgfile", "--min-score", "1.0", "--budget", "60s",
+      "--union", "packages/server/src/__tests__/b.test.ts,packages/shared/__tests__/c.test.ts",
+    ]);
+  });
+
+  it("omits --union entirely when no other selector ran — byte-identical argv to the pre-#967 runner", () => {
+    const sink = {};
+    runImpactSelector({ cli, minScore: "1.0", rebuildIfStale: false, base: "", union: [], spawnFn: spawnCapturing(sink) });
     expect(sink.args.slice(1)).toEqual(["select", "--format", "pkgfile", "--min-score", "1.0"]);
   });
 });

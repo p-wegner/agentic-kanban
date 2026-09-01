@@ -81,15 +81,17 @@
 // NOTE: vitest 4 removed the --related flag. Use `pnpm exec vitest related <file>`
 // from inside the package dir to run tests that cover a specific source file.
 //
-// Selectors (#951): `KANBAN_TEST_SELECTOR=impact` replaces the `vitest related` scoping with the
-// test-impact skill's multi-signal ranking. OPT-IN and fail-open — see the block near
-// `runImpactSelector` below.
+// Selectors (#951): `KANBAN_TEST_SELECTOR=impact` picks the suites with the test-impact skill's
+// multi-signal ranking instead of `vitest related`. OPT-IN and fail-open — see the block near
+// `runImpactSelector` below. When `KANBAN_TEST_FILES` is ALSO set the two are UNIONED rather than
+// one replacing the other (#967): the related suites are derived and handed to `select --union`,
+// where they are exempt from the score floor but still counted against the budget.
 
 import { spawn, spawnSync, execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { dirname, resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import {
   acquireForBuilderTest,
   MACHINE_LOCK_HEARTBEAT_INTERVAL_MS,
@@ -716,6 +718,16 @@ export function runImpactSelector({
   base = impactBase,
   newTestFiles = impactNewTestFiles,
   budget = impactBudget,
+  /**
+   * The OTHER selector's picks, repo-relative (#967) — `vitest related`'s suite set for the
+   * `KANBAN_TEST_FILES` scope, already derived by `relatedUnionSpecs`.
+   *
+   * Handed to the tool as `--union` rather than merged into the result here, and that placement is
+   * the whole contract: `select` applies the score floor, then admits externals, then cuts to the
+   * budget. Unioning consumer-side would happen AFTER the budget cut, so the run would exceed the
+   * budget the setting promises. Empty means "no other selector ran", which is the pre-#967 argv.
+   */
+  union = [],
   spawnFn = spawnSync,
 } = {}) {
   // The base is POSITIONAL and must come before the flags — `cmdSelect` reads `positional[0]` and
@@ -725,6 +737,10 @@ export function runImpactSelector({
   // #966 — the floor is applied first and the budget second, by the tool. Omitted entirely when
   // unset, so a project with no budget gets byte-identical argv to the pre-#966 runner.
   if (budget) args.push("--budget", String(budget));
+  // #967 — comma-separated is one of the four shapes `readUnionList` accepts, and the only one
+  // that needs no temp file. A single entry containing no comma is still unambiguous there: it is
+  // recognised as a test path before the file-on-disk branch is tried.
+  if (union.length > 0) args.push("--union", union.join(","));
   if (rebuildIfStale) args.push("--rebuild-if-stale");
   console.log(`\n[test:mine] impact selector: node ${args.slice(1).join(" ")}`);
   const res = spawnFn(process.execPath, args, {
@@ -782,31 +798,34 @@ export function runImpactSelector({
 }
 
 /**
- * `KANBAN_TEST_SELECTOR=impact` + `KANBAN_TEST_FILES` is a CONFLICT, not a combination (#962).
+ * `KANBAN_TEST_SELECTOR=impact` + `KANBAN_TEST_FILES` is a UNION, not a conflict (#967).
  *
- * They are two different answers to "which suites". The selector derives its own change set from
- * git and never looks at the supplied list, so before this the file list was silently discarded:
- * the run then reads as an ordinary narrow run, and every suite the caller meant to cover but the
- * heuristic ranked out is unobserved with nothing anywhere saying so. Same failure direction as
- * recording an impact-narrowed run as `full` — a green that asserts more than it checked.
+ * **This reverses #962's refusal, deliberately, and the reason it was a refusal is worth keeping in
+ * view.** The pair used to be two rival answers to "which suites", and the file list was silently
+ * DISCARDED — a green that asserts more than it checked, which is why refusing beat picking a
+ * winner. What changed is that there is now a third answer: `impact.mjs select --union` takes the
+ * other selector's picks as input, entering them AFTER the score floor (they are another selector's
+ * evidence — our floor has no authority over it) and BEFORE the budget cut (or "only these seconds"
+ * would be a lie). So the file list is no longer discarded; it is derived into suites via vitest's
+ * own machinery (`relatedTestSpecs`) and merged.
  *
- * Refusing rather than picking a winner: honoring the file list would silently disable an
- * explicitly-requested selector, and honoring the selector is the bug itself. The caller knows
- * which it meant, and unsetting one variable resolves it. (The board's own gate never emits the
- * pair — `pre-merge-gate.service.ts` drops its file scope under the selector and logs that it
- * did — so this fires for a hand-run or scripted caller, which is exactly who needs telling.)
+ * Why the union rather than either alone: the two selectors' MISSES are different in kind.
+ * `vitest related` is blind to runtime reach (a spawned script, a fixture, a migration read) but
+ * its omissions are provably outside the import graph; the impact heuristic sees runtime reach via
+ * co-change/coverage/failure history but is a ranked bet under a floor and a budget. Replace-mode
+ * silently gave up the first half.
  *
- * Returns the message to print, or `null` when there is no conflict. Pure so the rule is a unit
- * test rather than something only a real double-scoped run would reveal.
+ * Returns a message to print, or `null`. It is now INFORMATIONAL — the caller logs it and
+ * continues, rather than exiting 2. Kept as a pure function (rather than an inline `console.log`)
+ * so the rule stays a unit test instead of something only a real double-scoped run would reveal.
  */
-export function selectorFileScopeConflict({ impactSelectorRequested, scopedFiles }) {
+export function selectorFileScopeUnionNote({ impactSelectorRequested, scopedFiles }) {
   if (!impactSelectorRequested || scopedFiles.length === 0) return null;
   return (
-    `[test:mine] refusing to run: KANBAN_TEST_SELECTOR=impact and KANBAN_TEST_FILES are both set, and they ` +
-    `name different suites. The impact selector derives its OWN change set from git, so the ` +
-    `${scopedFiles.length} file(s) in KANBAN_TEST_FILES would be discarded without a trace.\n` +
-    `  Unset KANBAN_TEST_FILES to use the impact selection, or unset KANBAN_TEST_SELECTOR to ` +
-    `scope with \`vitest related\` over the files you named.`
+    `[test:mine] KANBAN_TEST_SELECTOR=impact and KANBAN_TEST_FILES are both set — running the UNION ` +
+    `(#967): the suites \`vitest related\` would select for the ${scopedFiles.length} named file(s) are ` +
+    `derived and passed to \`select --union\`, so they are exempt from --min-score but still counted ` +
+    `against the budget.`
   );
 }
 
@@ -1058,6 +1077,102 @@ export async function relatedCoverageByFile(pkgDir, files, loadVitest = defaultV
       /* a probe that cannot shut down cleanly must not fail the run */
     }
   }
+}
+
+/**
+ * The suites `vitest related <files>` WOULD select for this package, as repo-relative paths (#967).
+ *
+ * This is the other selector's answer, made available to the impact selection as `--union` input
+ * rather than being thrown away. `KANBAN_TEST_SELECTOR=impact` used to REPLACE the edit-based
+ * scope, which silently gave up the half of the safety `related` is actually good at: its misses
+ * are provably outside the import graph, while the heuristic's are a ranked bet. The two see
+ * different things, so the union is strictly stronger than either.
+ *
+ * Built from vitest's OWN machinery — `globTestSpecifications` + `getTestDependencies`, the two
+ * calls `related` itself is built from, the same pair `relatedCoverageByFile` uses — so this cannot
+ * name a different set than a `vitest related` spawn would have run. It is deliberately NOT a
+ * second, cheaper approximation: an approximation here would silently either widen the gate (an
+ * unrelated suite in the union) or, worse, claim `related`'s safety while omitting one of its picks.
+ *
+ * Fails OPEN, returning `null`: the union is a WIDENING of an opt-in narrowing, so a probe that
+ * cannot run must leave the impact selection exactly as it was rather than fail the gate.
+ *
+ * @returns repo-relative suite paths, or `null` when the derivation failed.
+ */
+export async function relatedTestSpecs(pkgDir, files, loadVitest = defaultVitestLoader, root = ROOT) {
+  const targets = files.map((f) => slash(resolve(pkgDir, f)));
+  if (targets.length === 0) return [];
+  const cwd = process.cwd();
+  let vitest;
+  try {
+    const { createVitest } = await loadVitest(pkgDir);
+    process.chdir(pkgDir);
+    vitest = await createVitest("test", { watch: false, run: true, passWithNoTests: true, reporters: [] });
+    const specs = await vitest.specifications.globTestSpecifications();
+    const selected = [];
+    const targetSet = new Set(targets);
+    for (const spec of specs) {
+      const id = slash(spec.moduleId);
+      if (targetSet.has(id)) {
+        selected.push(id);
+        continue;
+      }
+      const deps = await vitest.specifications.getTestDependencies(spec);
+      for (const dep of deps) {
+        if (targetSet.has(slash(dep))) {
+          selected.push(id);
+          break;
+        }
+      }
+    }
+    // Repo-relative, because that is the vocabulary the impact inventory keys tests in — the
+    // skill matches `--union` entries against `inv.entries`, so a package-relative path would be
+    // "not in the inventory" for every single pick and lose its measured duration.
+    return [...new Set(selected.map((p) => slash(relative(root, p))))];
+  } catch (err) {
+    console.warn(
+      `[test:mine] could not derive the \`vitest related\` suite set for ${pkgDir} (${err?.message ?? err}) — ` +
+        `the impact selection runs WITHOUT that selector's picks unioned in.`,
+    );
+    return null;
+  } finally {
+    process.chdir(cwd);
+    try {
+      await vitest?.close?.();
+    } catch {
+      /* a probe that cannot shut down cleanly must not fail the run */
+    }
+  }
+}
+
+/**
+ * The union input for `select --union`: every suite `vitest related` would have selected, across
+ * every package the file scope names files in (#967).
+ *
+ * Per package, because `vitest related` is per package — a suite is selected by the vitest instance
+ * whose config resolves the changed file, and `UPSTREAM_DEPENDENCIES` is what lets a
+ * `packages/shared` change reach the server's suites through its alias, exactly as the
+ * `related`-path loop below does it. Deriving the union from a single root instance would miss that.
+ *
+ * Returns `{ specs, failedPackages }` — a package whose probe failed is NAMED, never silently
+ * treated as "related selected nothing there". Silence would read as "the other selector agreed
+ * with ours", which is the one thing this must not claim.
+ */
+export async function relatedUnionSpecs(packages, ownedFor, upstreamFor, derive = relatedTestSpecs) {
+  const specs = new Set();
+  const failedPackages = [];
+  for (const pkg of packages) {
+    const owned = ownedFor(pkg);
+    const files = owned.length > 0 ? owned : upstreamFor(pkg);
+    if (files.length === 0) continue;
+    const found = await derive(resolve(ROOT, pkg.dir), files);
+    if (found === null) {
+      failedPackages.push(pkg.label);
+      continue;
+    }
+    for (const spec of found) specs.add(spec);
+  }
+  return { specs: [...specs], failedPackages };
 }
 
 /**
@@ -1320,11 +1435,8 @@ if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
     console.log("\n[test:mine] All guard suites passed.");
     process.exit(0);
   }
-  const conflict = selectorFileScopeConflict({ impactSelectorRequested, scopedFiles });
-  if (conflict) {
-    console.error(conflict);
-    process.exit(2);
-  }
+  const unionNote = selectorFileScopeUnionNote({ impactSelectorRequested, scopedFiles });
+  if (unionNote) console.log(unionNote);
   // #951 — the opt-in impact selector, tried BEFORE the `vitest related` path and falling
   // through to it on any failure. `impactScope === null` is exactly that fall-through, so the
   // loop below is unchanged for every caller that did not opt in.
@@ -1338,7 +1450,30 @@ if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
           `falling back to \`vitest related\`.`,
       );
     } else {
-      impactScope = runImpactSelector({ cli });
+      // #967 — derive the OTHER selector's picks first, so they enter `select` as `--union` input
+      // (before its budget cut) rather than being appended to a finished selection afterwards.
+      // Empty when no file scope was given, which reproduces the pre-#967 call exactly.
+      let union = [];
+      if (scopedFiles.length > 0) {
+        const { specs, failedPackages } = await relatedUnionSpecs(
+          toRun,
+          (pkg) => ownedChangedFiles(pkg.dir),
+          (pkg) => upstreamChangedFiles(pkg.label),
+        );
+        union = specs;
+        if (failedPackages.length > 0) {
+          // Never let a failed derivation read as "related agreed with the impact selection".
+          console.warn(
+            `[test:mine] could not derive the \`vitest related\` suite set for ${failedPackages.join(", ")} — ` +
+              `those packages contribute NOTHING to the union, so the run is as narrow as impact alone there.`,
+          );
+        }
+        console.log(
+          `[test:mine] union input: ${union.length} suite(s) from \`vitest related\` over ` +
+            `${scopedFiles.length} changed file(s) — passed to \`select --union\`.`,
+        );
+      }
+      impactScope = runImpactSelector({ cli, union });
     }
   }
   /** @type {{ planned: { pkg: any, files: string[] }[], total: number, namedOverall: number, excludedCount: number } | null} */
@@ -1384,8 +1519,9 @@ if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
   if (impactScope) {
     const { planned, total, namedOverall, excludedCount } = impactPlan;
     console.log(
-      `\n[test:mine] impact-scoped to ${total} suite(s) across ${planned.length} package(s) ` +
-        `(KANBAN_TEST_SELECTOR=impact, --min-score ${impactMinScore}); ` +
+      `\n[test:mine] ${scopedFiles.length > 0 ? "impact+related-scoped" : "impact-scoped"} to ${total} suite(s) ` +
+        `across ${planned.length} package(s) (KANBAN_TEST_SELECTOR=impact, --min-score ${impactMinScore}` +
+        `${scopedFiles.length > 0 ? `, unioned with \`vitest related\` over ${scopedFiles.length} changed file(s)` : ""}); ` +
         `the @gate:always-run guards run on top, per package.`,
     );
     // Excluded suites are already reported above with their reason, so they are not also
