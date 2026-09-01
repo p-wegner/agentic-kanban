@@ -3,6 +3,79 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-01 — verification cadence: the fast gate is real, and its map had rotted
+
+**Standing state for the test-impact / fast-gate work.** Read this before the dated passes below.
+
+### What is true and verified now
+
+The three-part goal (narrow per-merge gate, narrow builder inner loop, full suite nightly) is
+CONFIGURED AND WORKING on this board. Verified end to end today, each by direct observation
+rather than by reading the design doc:
+
+- **Merging uses the impact selection.** `risk_posture_<board>` = `iterate` → `gateTier: impact`,
+  `sweepIntervalMs` 24h. Confirmed the empty `verify_gate_strategy_<board>` pref does NOT win
+  (`""` is not in `VERIFY_GATE_STRATEGY_VALUES`, so the resolver falls through to the posture) —
+  worth knowing, because an explicit tier DOES outrank the posture and would have made the flip a
+  silent no-op.
+- **Ticket implementation uses it too.** `test_impact_budget_<board>` = `120s`, and
+  `resolveTestImpactBudgetEnv` emits `KANBAN_TEST_SELECTOR=impact` alongside `KANBAN_TEST_BUDGET`,
+  which `withBuilderTestImpactBudget` puts into every BUILDER's launch env.
+- **Measured selectivity**, on a real 12-file diff: `tier: impact, 226 test file(s) selected` of
+  1290 known, inside the 120s budget, 76 dropped below the score floor.
+- **The nightly sweep runs.** `base_branch_health` shows this board's sweeps, most recently a
+  green at 2026-09-01T10:47Z (33 min). The ledger wire (`recordBaseSweepOutcome`) is reachable
+  and correct.
+
+### The thing that was actually broken, and will break again
+
+`docs/tests/impact-map.json` was stamped `2e04e24667` — **46 commits stale** — so every selection
+was silently escalating `tier: impact` → `tier: package`. Both consumers degraded together: the
+merge gate AND every builder's inner loop. Rebuilt at `0ad14fe6b7` with `--durations` (the 1169
+measured durations are erased by a rebuild without it, #955).
+
+**That commit is a remediation, not a fix.** The refresh is a PHASE INSIDE `runMonitorCycle`, and
+this board's `start_mode` is `manual` — a true kill-switch — so the cycle never runs here and the
+map cannot refresh itself. `test_impact_map_refresh=true` is set and makes no difference. Filed as
+**#993**; until it lands, the map rots again and nothing says so.
+
+### Unverified / outstanding
+
+- **The miss rate is still not measured, which is the whole safety argument.** The ledger holds 25
+  rows, ALL from gate runs (`ci` / `ci-partialselection`) and **zero from base sweeps**. Current
+  reading: `miss rate 0% — 0 of 3 failing full-scope runs`, i.e. three witnessing runs against
+  #954's ~50-run target. Not broken: the sweep→ledger wire landed at 13:14 today (`2ebe615fb3`)
+  and the board's last sweep was 10:47, so no row was possible yet.
+- **Corpus accrual is now ~1 base-sweep row/day**, because the posture moved the sweep from
+  roughly hourly to 24h. That is the right cadence for a backstop and a slow one for building the
+  corpus that justifies the weaker gate — worth revisiting deliberately rather than discovering in
+  two months.
+- Step 5 of `docs/proposals/2026-09-01-verification-cadence.md` ("report the measured miss rate
+  and revisit") is the open item. If the rate is bad, `iterate` is the wrong setting for this board
+  and the flip gets reverted with data.
+
+### Also landed today, and why it matters here
+
+Master was red on **six** guard suites, which blocks every merge on the board and therefore this
+work: four from #987 (`b10406295e`), the stale `typecheck` wiring assertions from #980 (`7fbef4371d`,
+`79546d131a` — the third was in `packages/shared` and no ticket had named it), and #976 appending a
+section AFTER the board-feedback heading, which `retargetBoardFeedback` truncates (`51a294fd90`).
+
+Two traps worth not re-learning:
+- **#991's diagnosis was wrong** on its load-bearing claim: #980 never dropped the shared-dist
+  freshness call (it is at `typecheck.mjs:98`, verified by `git show` and by watching a rebuild
+  fire). Only the ASSERTION was stale. Following the ticket literally would have added a second
+  call and rebuilt shared twice per typecheck.
+- **Decomposing a route silently shrinks the OpenAPI spec.** The generator collects statuses only
+  from the handler body it scans. Lifting handler bodies out lost a 422; moving the registration
+  out (shape C) lost both 200s. Only registration-in-helper with every `c.json` INLINE keeps them,
+  and the helper's first param must be typed literally `Hono`. Regenerate and DIFF the statuses —
+  the drift gate is happy with a smaller spec.
+
+Known flake, filed as **#994**: `max-file-size` and `shebang-eol-guard` TIME OUT at 120s under
+4-worker load (they pass in isolation) and a timeout renders as a normal test failure — so a red
+`max-file-size` reads as "a real god-module breach", which is indistinguishable from the real thing.
+
 ## Where this stands (2026-08-27)
 
 **Read this section before anything below it.** Everything under it is a dated pass and
