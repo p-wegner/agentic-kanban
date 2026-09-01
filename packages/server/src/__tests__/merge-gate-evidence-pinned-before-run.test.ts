@@ -18,7 +18,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Database } from "../db/index.js";
 import type { workspaces } from "@agentic-kanban/shared/schema";
 import type { MergeGateShas, PreMergeGateWorkspace } from "../services/pre-merge-gate.service.js";
-import { runGateWithEvidence, movedDuringGate } from "../services/merge-gate-evidence.js";
+import { runGateWithEvidence, movedDuringGate, describeTipMovement } from "../services/merge-gate-evidence.js";
 import { getMergeJob, resetMergeJobs, startMergeJob } from "../services/merge-job.service.js";
 
 /** Successive tip reads, consumed in order (before-gate, then after-gate). */
@@ -164,7 +164,9 @@ describe("runGateWithEvidence records the gate attempt on the merge job (#936)",
     expect(result.token).toBeNull();
     const attempt = getMergeJob("ws-2")!.attempts[0];
     expect(attempt.outcome).toBe("discarded");
-    expect(attempt.detail).toContain("branch tip moved during the run");
+    expect(attempt.detail).toContain("a tip moved during the run");
+    // #979 - and it names WHICH sha moved, so the discard is checkable against `git log`.
+    expect(attempt.detail).toContain("branch verified -> moved");
   });
 
   it("records a red gate as a `failed` attempt carrying the gate message", async () => {
@@ -236,3 +238,27 @@ describe("runPreLockGate uses the shared protocol's token", () => {
     vi.doUnmock("../services/merge-gate-evidence.js");
   });
 });
+
+describe("#979: a discard names the shas that moved", () => {
+  it("spells out branch old -> new instead of an unfalsifiable sentence", () => {
+    // The #971 discard said only "the branch tip moved during the run" for a branch whose last
+    // commit was an hour older than the gate. With no shas there was no way to tell a real
+    // move from a self-inflicted one, and a discard throws away a full-suite pass.
+    expect(describeTipMovement({ branchSha: "aaaaaaaa1111" }, { branchSha: "bbbbbbbb2222" }))
+      .toBe("branch aaaaaaaa -> bbbbbbbb");
+  });
+
+  it("reports BOTH tips when both moved — movedDuringGate returns only the first", () => {
+    const before = { branchSha: "aaaaaaaa1111", baseSha: "cccccccc3333" };
+    const after = { branchSha: "bbbbbbbb2222", baseSha: "dddddddd4444" };
+    expect(movedDuringGate(before, after)).toBe("branch");
+    expect(describeTipMovement(before, after)).toBe("branch aaaaaaaa -> bbbbbbbb, base cccccccc -> dddddddd");
+  });
+
+  it("an UNRESOLVABLE tip on either side is not movement — a failed diagnostic read must not discard", () => {
+    expect(describeTipMovement({ branchSha: "aaaaaaaa1111" }, {})).toBeNull();
+    expect(describeTipMovement({}, { branchSha: "bbbbbbbb2222" })).toBeNull();
+    expect(describeTipMovement({ branchSha: "aaaaaaaa1111" }, { branchSha: "aaaaaaaa1111" })).toBeNull();
+  });
+});
+
