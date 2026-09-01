@@ -74,3 +74,60 @@ Ranked by effort vs. impact:
 ## Positioning Statement
 
 > Agentic Kanban is the **developer-first** kanban for AI coding tasks — testable, scriptable, and transparent. Where Vibe Kanban over-engineered for multi-tenant cloud, Cline optimizes for autonomous workflows, and Lanes for polished UX, we optimize for **observability and control**: every agent action is parsed, persisted, and reviewable. The 101+ E2E test suite, mock Claude profile, and full CLI make it the only option where you can confidently iterate on agent behavior with automated feedback loops.
+
+---
+
+# Addendum — 2026-09-01: three adjacent tools
+
+Added [nodeterm](nodeterm.md), [LoopX](loopx.md) and [Apache Maka](maka.md). Only
+LoopX was read at code level; the other two are public-material profiles.
+
+## What changes in the analysis
+
+**A third axis appeared.** The original comparison ranked everyone on board features
+and agent breadth. These three compete on *control*:
+
+- **LoopX gates at turn-start.** A fail-closed `PreToolUse` hook denies non-read-only
+  tools when the control plane says the card may not spend a turn — and denies them
+  when the control plane is *unreachable*. We gate at merge. Worktrees confine where
+  an agent writes; nothing today confines when it acts.
+- **Maka makes the execution record authoritative**, with the UI a view of it, and
+  compacts context without deleting the evidence.
+- **nodeterm makes a blocked agent visible** — hook-driven NEEDS YOU state, a
+  per-node context meter, OS and phone notifications.
+
+All three attack the same blind spot: a board shows a card as "in progress" while the
+agent behind it is stalled, waiting, or burning turns. Status is not control.
+
+## Revised gap list
+
+| Gap | Source | Impact | Effort | Priority |
+|---|---|---|---|---|
+| Turn-start gate: fail-closed `PreToolUse` hook driven by card state | LoopX | **High** | Low | **P1** (new) |
+| "Needs you" / blocked-on-human as a distinct card state + notification | nodeterm | High | Low | **P1** (new) |
+| Per-card context meter on the card | nodeterm | Medium | Low | **P2** (new) |
+| Per-card spend budget + scheduler hint (run / back off / stop) | LoopX | Medium | Medium | **P4** (new) |
+| Permission decisions written into the session record | Maka | Medium | Low | **P4** (new) |
+| Context compaction that preserves the evidence | Maka | Medium | Medium | **P5** (new) |
+| GitHub Issues ↔ column two-way sync with label mapping | nodeterm | Medium | Medium | reopens the "Won't do" line on GitHub integration |
+
+The earlier P1 (dependency auto-chain) and the rest of the 2026-05-23 table still
+stand; these are additions, not replacements.
+
+## Positioning, restated
+
+The 2026-05-23 statement — *observability and control* — was half-delivered. We have
+the observability: parsed stream, session summaries, inline diff comments, 101+ E2E
+tests. **The control half is currently a merge gate and nothing else.** The turn-start
+gate and a distinct blocked state are what would make the second word true, and both
+are small.
+
+## Not adopted, with reasons
+
+- **nodeterm's canvas** — a genuinely different interaction model, and out of scope. A
+  board is the point.
+- **LoopX's harness-neutral state kernel** — 134k lines to be independent of a harness
+  we deliberately picked. Claude-Code-only remains a design decision, not a gap.
+- **Maka's eval harness** — the right idea, but the mock Claude profile plus the E2E
+  suite covers the need until cards are scored rather than merged.
+- **Anything from nodeterm's implementation** — BUSL-1.1. Design ideas only.
