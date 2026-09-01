@@ -41,6 +41,13 @@ describe("scopedTestPackages", () => {
     [".dependency-cruiser.cjs"],
     ["scripts/test-mine.mjs"],
     ["scripts/check-god-modules.mjs"],
+    // #988 — `pnpm check:arch` and `pnpm typecheck` ARE these two scripts, so each decides part
+    // of what the gate runs, exactly like test-mine.mjs above.
+    ["scripts/check-arch.mjs"],
+    ["scripts/typecheck.mjs"],
+    // #988 — all three of the above spawn pnpm through this one, so it decides how the gate's
+    // sub-steps are invoked at all.
+    ["scripts/pnpm-exec.mjs"],
     ["scripts/build-server.mjs"],
     ["scripts/copy-assets.mjs"],
   ])("refuses to scope when the diff touches the global config %s", (file) => {
