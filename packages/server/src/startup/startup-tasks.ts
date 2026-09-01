@@ -21,7 +21,7 @@ import { reconcileAncestorBranchWorkspaces } from "./ancestor-branch-reconciler.
 import { reconcileHandMergedBranches } from "./hand-merged-branch-reconciler.js";
 import { scanDoneUnmergedWorkspaces } from "./done-unmerged-invariant-sweep.js";
 import { reapTerminalWorkspaces } from "./terminal-workspace-reaper.js";
-import { reconcileOrphanedWorktrees } from "./orphaned-worktree-reconciler.js";
+import { reconcileOrphanedWorktrees, realUnshippedWorkProbe } from "./orphaned-worktree-reconciler.js";
 import { assertForeignKeysEnabled, alignForeignKeyActionsOnStartup } from "./fk-alignment.js";
 import { checkForeignKeyViolations, logForeignKeyViolations } from "../db/fk-violations.js";
 import { modelBelongsToProvider } from "@agentic-kanban/shared";
@@ -642,7 +642,7 @@ export async function pruneOrphanedWorktrees(): Promise<void> {
         repoPath: project.repoPath,
         baseBranch: project.defaultBranch || "master",
         claims,
-        git: realGitService,
+        git: { ...realGitService, ...realUnshippedWorkProbe },
         database: db,
       });
       if (report.removed.length > 0 || report.keptWithUnshippedWork.length > 0 || report.keptClaimed.length > 0) {
@@ -682,7 +682,7 @@ export async function pruneOrphanedSiblingWorktrees(
   } = {},
 ): Promise<void> {
   const database = deps.database ?? db;
-  const git = deps.git ?? realGitService;
+  const git = deps.git ?? { ...realGitService, ...realUnshippedWorkProbe };
   const listRepos = deps.listRepos ?? listProjectRepos;
   const projectRepos = await listRepos(project.id, database).catch(() => [] as Awaited<ReturnType<typeof listProjectRepos>>);
   for (const repo of projectRepos) {

@@ -21,6 +21,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   classifyWorktree,
   reconcileOrphanedWorktrees,
+  describeUnshippedWork,
   type OrphanedWorktreeGitPort,
   type WorktreeClaimRow,
 } from "../startup/orphaned-worktree-reconciler.js";
@@ -279,6 +280,100 @@ describe("#735: the shared guard has the last word on the removal", () => {
     expect(report.removed).toEqual([]);
     expect(report.keptClaimed.sort()).toEqual([WT12, WT6].sort());
     expect(vi.mocked(git.removeWorktree)).not.toHaveBeenCalled();
+  });
+});
+
+describe("#981: the kept-worktree message says WHICH kind of work, and base-ignored dirt is not work", () => {
+  /** One unclaimed worktree, fully merged, with whatever dirt the test supplies. */
+  function oneWorktree(overrides: Partial<OrphanedWorktreeGitPort>): OrphanedWorktreeGitPort {
+    return makeGit({
+      listWorktrees: vi.fn(async () => [
+        { path: REPO, branch: "master" },
+        { path: WT12, branch: BR12 },
+      ]),
+      ...overrides,
+    });
+  }
+
+  it("an untracked file the BASE branch ignores does not pin the worktree — the measured ak-952 shape", async () => {
+    // `.test-impact/` was gitignored by #954; a branch predating that entry carries the file
+    // unignored, and the conflated probe kept the worktree as `unshipped_work` forever.
+    const git = oneWorktree({
+      getTrackedWorkingTreeDiff: vi.fn(async () => ""),
+      listUntrackedFiles: vi.fn(async () => [".test-impact/outcomes.jsonl"]),
+      filterIgnoredAtBase: vi.fn(async () => [".test-impact/outcomes.jsonl"]),
+    });
+
+    const report = await reconcileOrphanedWorktrees({
+      repoPath: REPO, baseBranch: "master", claims: [], git, database: guardDb(),
+    });
+
+    expect(report.removed).toEqual([WT12]);
+    expect(report.keptWithUnshippedWork).toEqual([]);
+  });
+
+  it("an untracked file the base does NOT ignore still keeps the worktree", async () => {
+    const git = oneWorktree({
+      getTrackedWorkingTreeDiff: vi.fn(async () => ""),
+      listUntrackedFiles: vi.fn(async () => ["src/rescue-me.ts", ".test-impact/outcomes.jsonl"]),
+      filterIgnoredAtBase: vi.fn(async () => [".test-impact/outcomes.jsonl"]),
+    });
+
+    const report = await reconcileOrphanedWorktrees({
+      repoPath: REPO, baseBranch: "master", claims: [], git, database: guardDb(),
+    });
+
+    expect(report.removed).toEqual([]);
+    expect(report.keptWithUnshippedWork).toEqual([WT12]);
+  });
+
+  it("a FAILING ignore filter keeps every untracked path — the error direction must not lose work", async () => {
+    const git = oneWorktree({
+      getTrackedWorkingTreeDiff: vi.fn(async () => ""),
+      listUntrackedFiles: vi.fn(async () => [".test-impact/outcomes.jsonl"]),
+      filterIgnoredAtBase: vi.fn(async () => { throw new Error("check-ignore exploded"); }),
+    });
+
+    const report = await reconcileOrphanedWorktrees({
+      repoPath: REPO, baseBranch: "master", claims: [], git, database: guardDb(),
+    });
+
+    expect(report.removed).toEqual([]);
+    expect(report.keptWithUnshippedWork).toEqual([WT12]);
+  });
+
+  it("tracked modifications still keep it, unchanged", async () => {
+    const git = oneWorktree({
+      getTrackedWorkingTreeDiff: vi.fn(async () => "diff --git a/src/x.ts b/src/x.ts\n"),
+      listUntrackedFiles: vi.fn(async () => []),
+    });
+
+    const report = await reconcileOrphanedWorktrees({
+      repoPath: REPO, baseBranch: "master", claims: [], git, database: guardDb(),
+    });
+
+    expect(report.keptWithUnshippedWork).toEqual([WT12]);
+  });
+
+  it("a port WITHOUT the #981 methods degrades to the conflated verdict, not to removal", async () => {
+    const git = oneWorktree({ getWorkingTreeDiff: vi.fn(async () => "?? something\n") });
+
+    const report = await reconcileOrphanedWorktrees({
+      repoPath: REPO, baseBranch: "master", claims: [], git, database: guardDb(),
+    });
+
+    expect(report.keptWithUnshippedWork).toEqual([WT12]);
+  });
+
+  it("the message distinguishes unmerged commits from untracked-only dirt", () => {
+    // The whole point of #981: the old sentence asserted the first for both, which is what
+    // trained readers to ignore the notice.
+    expect(describeUnshippedWork({ kind: "unmerged_commits", count: 3 })).toContain("3 commit(s)");
+    const untracked = describeUnshippedWork({ kind: "untracked_only", files: [".test-impact/outcomes.jsonl"] });
+    expect(untracked).toContain("NO unmerged commits");
+    expect(untracked).toContain(".test-impact/outcomes.jsonl");
+    expect(describeUnshippedWork({ kind: "dirty_tracked" })).toContain("tracked");
+    expect(describeUnshippedWork({ kind: "detached_head" })).toContain("detached");
   });
 });
 

@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { samePath as sharedSamePath } from "@agentic-kanban/shared/lib/path-key";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { removeWorktreeUnlessShared } from "@agentic-kanban/shared/lib/worktree-claim";
+import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
 import type { Database } from "../db/index.js";
 
 /**
@@ -136,6 +137,74 @@ export interface OrphanedWorktreeGitPort {
    * worktree was classified removable, i.e. the exact behaviour the test exists to forbid.
    */
   pathExists?(worktreePath: string): boolean;
+  /**
+   * TRACKED modifications only (`git diff HEAD`), unlike `getWorkingTreeDiff`, which also lists
+   * untracked files. #981 needs the two apart: "three hours of uncommitted work" and "one
+   * untracked cache file" warrant opposite reactions, and the conflated probe reported both as
+   * "work that never landed".
+   *
+   * Optional. Absent, the reason degrades to the conflated `dirty` — the pre-#981 behaviour, so a
+   * caller that has not been updated keeps working and only loses the detail.
+   */
+  getTrackedWorkingTreeDiff?(worktreePath: string): Promise<string>;
+  /** `git ls-files --others --exclude-standard` — untracked, not ignored BY THIS WORKTREE. */
+  listUntrackedFiles?(worktreePath: string): Promise<string[]>;
+  /**
+   * Which of `relPaths` the BASE checkout ignores (#981, defect 2).
+   *
+   * A worktree whose branch predates a new `.gitignore` entry inherits files that are ignored on
+   * the base branch and unignored in the worktree — measured: `.test-impact/outcomes.jsonl` in a
+   * branch older than #954's ignore rule, which pinned that worktree as `unshipped_work`
+   * permanently. Such a file is a stale-ignore-rule artifact, not work, so it is excluded from
+   * the dirt. Untracked files the base does NOT ignore still count, unchanged.
+   */
+  filterIgnoredAtBase?(repoPath: string, relPaths: string[]): Promise<string[]>;
+}
+
+/**
+ * WHY a worktree is being kept — the honest half of #981.
+ *
+ * The reconciler used to hold a boolean and print one sentence for every case: "it holds work that
+ * never landed", asserted even when `base..branch` was empty and the only dirt was an untracked
+ * cache file. A reader (and one did) reasonably concludes there are unmerged commits to rescue,
+ * which trains them to ignore the notice — so the day it is real, nobody looks.
+ */
+export type UnshippedWorkReason =
+  | { kind: "none" }
+  /** Commits on the branch that the base branch does not have. The case the old message claimed. */
+  | { kind: "unmerged_commits"; count: number }
+  /** Modifications to TRACKED files, committed nowhere. */
+  | { kind: "dirty_tracked" }
+  /** Only untracked files, none of them ignored by the base branch. */
+  | { kind: "untracked_only"; files: string[] }
+  /** Tracked-vs-untracked could not be told apart (port without the #981 methods). */
+  | { kind: "dirty" }
+  /** Detached HEAD: nothing can be said about what it holds, so it is kept. */
+  | { kind: "detached_head" }
+  /** A git call failed. Fail-closed — an unreadable worktree is treated as holding work. */
+  | { kind: "unreadable"; detail: string };
+
+/** One line naming what is actually there, for the kept-worktree log. */
+export function describeUnshippedWork(reason: UnshippedWorkReason): string {
+  switch (reason.kind) {
+    case "unmerged_commits":
+      return `it holds ${reason.count} commit(s) the base branch does not have`;
+    case "dirty_tracked":
+      return "it holds uncommitted changes to tracked files";
+    case "untracked_only": {
+      const shown = reason.files.slice(0, 3).join(", ");
+      const rest = reason.files.length > 3 ? `, +${reason.files.length - 3} more` : "";
+      return `it holds ${reason.files.length} untracked file(s) and NO unmerged commits — ${shown}${rest}`;
+    }
+    case "dirty":
+      return "it holds uncommitted or untracked changes";
+    case "detached_head":
+      return "its HEAD is detached, so what it holds cannot be determined";
+    case "unreadable":
+      return `git could not read it (${reason.detail}), so it is kept fail-closed`;
+    case "none":
+      return "nothing";
+  }
 }
 
 export interface OrphanedWorktreeReport {
@@ -158,33 +227,70 @@ export interface OrphanedWorktreeReport {
  * internal error (which would read as "fully merged"), so the refs are resolved with `revParse`
  * — which throws — first. This mirrors `cleanupSiblingWorktrees`' proven preserve probe.
  */
-async function hasUnshippedWork(
+async function probeUnshippedWork(
   git: OrphanedWorktreeGitPort,
   repoPath: string,
   baseBranch: string,
   worktree: { path: string; branch: string },
-): Promise<boolean> {
+): Promise<UnshippedWorkReason> {
   if ((git.pathExists ?? existsSync)(worktree.path)) {
     try {
-      if ((await git.getWorkingTreeDiff(worktree.path)).trim() !== "") return true;
-    } catch {
-      return true;
+      const dirt = await probeWorkingTreeDirt(git, repoPath, worktree.path);
+      if (dirt) return dirt;
+    } catch (err) {
+      return { kind: "unreadable", detail: errorMessage(err) };
     }
   }
-  if (!worktree.branch) return true; // detached HEAD: cannot reason about what it holds.
+  if (!worktree.branch) return { kind: "detached_head" };
   try {
     await git.revParse(repoPath, worktree.branch);
   } catch {
     // The branch is GONE while the worktree survives — precisely #361's `…-skele` shape.
     // There is no branch left to hold anything, so nothing is unshipped.
-    return false;
+    return { kind: "none" };
   }
   try {
     await git.revParse(repoPath, baseBranch);
-    return (await git.countUniqueCommits(repoPath, baseBranch, worktree.branch)) > 0;
-  } catch {
-    return true;
+    const count = await git.countUniqueCommits(repoPath, baseBranch, worktree.branch);
+    return count > 0 ? { kind: "unmerged_commits", count } : { kind: "none" };
+  } catch (err) {
+    return { kind: "unreadable", detail: errorMessage(err) };
   }
+}
+
+/**
+ * Working-tree dirt, split into tracked vs untracked when the port can (#981).
+ *
+ * Returns `null` for a clean tree. Throws on a git failure so the caller can fail closed — the
+ * one property this probe must never lose.
+ */
+async function probeWorkingTreeDirt(
+  git: OrphanedWorktreeGitPort,
+  repoPath: string,
+  worktreePath: string,
+): Promise<UnshippedWorkReason | null> {
+  if (!git.getTrackedWorkingTreeDiff || !git.listUntrackedFiles) {
+    // Pre-#981 port: the two are conflated and cannot be told apart. Same verdict as before.
+    return (await git.getWorkingTreeDiff(worktreePath)).trim() !== "" ? { kind: "dirty" } : null;
+  }
+  if ((await git.getTrackedWorkingTreeDiff(worktreePath)).trim() !== "") return { kind: "dirty_tracked" };
+
+  const untracked = (await git.listUntrackedFiles(worktreePath)).map((f) => f.trim()).filter(Boolean);
+  if (untracked.length === 0) return null;
+  // Defect 2: a file the BASE branch ignores is a stale-ignore-rule artifact, not work. If the
+  // filter itself fails, keep every path — dropping one on an error is the direction that loses
+  // work, and this whole probe is fail-closed by design.
+  let ignoredAtBase: string[] = [];
+  if (git.filterIgnoredAtBase) {
+    try {
+      ignoredAtBase = await git.filterIgnoredAtBase(repoPath, untracked);
+    } catch {
+      ignoredAtBase = [];
+    }
+  }
+  const ignored = new Set(ignoredAtBase.map((f) => f.trim()));
+  const real = untracked.filter((f) => !ignored.has(f));
+  return real.length > 0 ? { kind: "untracked_only", files: real } : null;
 }
 
 /**
@@ -222,15 +328,19 @@ export async function reconcileOrphanedWorktrees(args: {
     const cheap = classifyWorktree({ ...args, worktreePath: worktree.path, mainCheckoutPath: args.repoPath, worktreeBranch: worktree.branch, hasUnshippedWork: false });
     if (cheap === "main_checkout" || cheap === "claimed") continue;
 
+    const reason = await probeUnshippedWork(args.git, args.repoPath, args.baseBranch, worktree);
     const verdict = classifyWorktree({
       ...args,
       worktreePath: worktree.path,
       mainCheckoutPath: args.repoPath,
       worktreeBranch: worktree.branch,
-      hasUnshippedWork: await hasUnshippedWork(args.git, args.repoPath, args.baseBranch, worktree),
+      hasUnshippedWork: reason.kind !== "none",
     });
     if (verdict === "unshipped_work") {
-      console.warn(`[worktree-reconcile] keeping orphaned worktree ${worktree.path} (${worktree.branch || "detached"}) — it holds work that never landed`);
+      console.warn(
+        `[worktree-reconcile] keeping orphaned worktree ${worktree.path} (${worktree.branch || "detached"}) — ` +
+          describeUnshippedWork(reason),
+      );
       report.keptWithUnshippedWork.push(worktree.path);
       continue;
     }
@@ -270,3 +380,40 @@ export async function reconcileOrphanedWorktrees(args: {
 
   return report;
 }
+
+/**
+ * The real git half of the #981 probe, kept OUT of the port's defaults on purpose.
+ *
+ * `pathExists` defaults to `existsSync` because a missing directory has no diff to read either
+ * way. These three do not get the same treatment: defaulting them to real git calls would make
+ * every existing fixture port silently reach the actual filesystem, which is the failure the
+ * `pathExists` doc comment above already records once. A port that omits them degrades to the
+ * conflated pre-#981 verdict instead, and production opts in by spreading this in.
+ */
+export const realUnshippedWorkProbe = {
+  async getTrackedWorkingTreeDiff(worktreePath: string): Promise<string> {
+    const res = await gitExec(["diff", "HEAD"], { cwd: worktreePath });
+    if (res.error) throw res.error;
+    return res.stdout;
+  },
+  async listUntrackedFiles(worktreePath: string): Promise<string[]> {
+    const res = await gitExec(["ls-files", "--others", "--exclude-standard"], { cwd: worktreePath });
+    if (res.error) throw res.error;
+    return res.stdout.split("\n").map((l) => l.trim()).filter(Boolean);
+  },
+  /**
+   * Asked of the MAIN checkout, which is the closest readable stand-in for "what the base branch
+   * ignores" — `check-ignore` evaluates the rules of the tree it runs in, and the base branch's
+   * rules are the ones the main checkout carries.
+   *
+   * `check-ignore` exits 1 when nothing matched, which is a normal answer and not an error; only
+   * a spawn failure throws. Paths go over stdin (`--stdin`), since an untracked list can be long
+   * enough to pass Windows' argv limit — the same trap #967 measured for the impact union.
+   */
+  async filterIgnoredAtBase(repoPath: string, relPaths: string[]): Promise<string[]> {
+    if (relPaths.length === 0) return [];
+    const res = await gitExec(["check-ignore", "--stdin"], { cwd: repoPath, input: `${relPaths.join("\n")}\n` });
+    if (res.error) throw res.error;
+    return res.stdout.split("\n").map((l) => l.trim()).filter(Boolean);
+  },
+};
