@@ -22,6 +22,7 @@ import { startBaseBranchHealthReconciler, stopBaseBranchHealthReconciler } from 
 import { startWorkerConnectionReaper, stopWorkerConnectionReaper } from "../services/worker-connection-reaper.service.js";
 import { getWorkerFleet } from "../services/worker-fleet.service.js";
 import { startInstallStalenessReconciler, stopInstallStalenessReconciler } from "./install-staleness-reconciler.js";
+import { startTestImpactMapReconciler, stopTestImpactMapReconciler } from "./test-impact-map-reconciler.js";
 import { startMergeTrainReconciler, stopMergeTrainReconciler } from "./merge-train-reconciler.js";
 import { createMergeQueueService } from "../services/merge-queue.service.js";
 import { updateMergeTrainState } from "../repositories/merge-train.repository.js";
@@ -235,6 +236,20 @@ export const BACKGROUND_SERVICES: BackgroundService[] = [
     start({ db }) {
       startBaseBranchHealthReconciler(db);
       return stopBaseBranchHealthReconciler;
+    },
+  },
+  {
+    // #993 — the map refresh was a PHASE INSIDE the monitor cycle, so a project whose
+    // `start_mode` is `manual` (a true kill-switch, decision 008) never refreshed it. Measured:
+    // this board's map sat 46 commits stale and every selection silently escalated
+    // `tier: impact` -> `tier: package`, in the merge gate AND in every builder's inner loop,
+    // while `test_impact_map_refresh` was on. The monitor phase stays (it lands before
+    // `runAutoStart`, so a builder forks from the branch it just committed); the pass is
+    // idempotent and short-circuits on a freshness check, so running both costs nothing.
+    name: "test-impact-map-reconciler",
+    start({ db }) {
+      startTestImpactMapReconciler({ database: db });
+      return stopTestImpactMapReconciler;
     },
   },
   {
