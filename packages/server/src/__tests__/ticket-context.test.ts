@@ -482,4 +482,15 @@ describe("ticket-context", () => {
       expect(md.indexOf("## Risk posture")).toBeLessThan(md.indexOf("## If you hit a bug in the kanban board itself"));
     });
   });
+
+  describe("#976: the commit-message encoding rule", () => {
+    it("is in EVERY generated ticket file, not only a group or feedback one", () => {
+      // The audience is a builder in ANOTHER repo, which reads that repo's CLAUDE.md and never
+      // this board's — so the rule has to travel in the file the board writes into the worktree.
+      const md = buildTicketContextMarkdown({ issueNumber: 976, title: "t", description: "d" });
+      expect(md).toContain("## Commit messages");
+      expect(md).toContain("utf8NoBOM");
+      expect(md).toContain("git commit -F");
+    });
+  });
 });

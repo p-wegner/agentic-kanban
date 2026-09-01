@@ -274,6 +274,23 @@ caches), and writes into a multi-repo project's SIBLING worktrees (peers under t
 `KANBAN_WORKTREE_DIR` — without it the authorized root is derived from cwd and would be
 compared against itself, so a hand-run session keeps the old same-repo-only scope.
 
+### Commit messages carry no UTF-8 BOM (#976)
+Write the message file for `git commit -F` with the **Bash** tool (a heredoc), never a bare
+PowerShell redirect: PS 5.1's `Set-Content`/`Add-Content`/`Out-File` default to UTF-8 **with a
+BOM**, `git commit -F` keeps it, and the subject then starts with an invisible `EF BB BF`. It
+renders as a stray glyph in `git log --oneline` and breaks anything that pattern-matches a
+subject — including this board's own `ak-<N>` matching in the hand-merged-branch reconciler and
+`checkAlreadyMerged`. Measured: 77 commits, 1 in 2026-05 rising to 53 in 2026-08 as more work
+went through builders. `-Encoding utf8NoBOM` is the PowerShell escape hatch.
+
+Two backstops, because the rule alone was never going to hold: every worktree gets a
+`commit-msg` hook that STRIPS the BOM (`installCommitMsgHook`,
+`services/workspace-provision.service.ts` — it also carries the optional TDD gate, since git
+allows one such hook per repo), and `commit-subject-bom-ratchet.test.ts` fails on any commit
+newer than its pinned baseline whose subject begins with one. The existing 77 are NOT rewritten:
+a landed commit is not rewritable here once built upon, and the defect is cosmetic-plus-fragile,
+not corrupting.
+
 ### Windows / hooks
 - **Hook commands in `settings.json`**: use forward slashes (`\\` → `MODULE_NOT_FOUND`) and prefix the script with `$CLAUDE_PROJECT_DIR/` — never a hardcoded absolute path (breaks on every other clone/machine) and never a bare relative path (fails on CWD shift). `$CLAUDE_PROJECT_DIR` is set by Claude Code for hook execution (not for the Bash tool) and resolves to the session's repo root, so it works across machines, clones, and worktrees. This is the convention `project-scaffold.ts` ships to every scaffolded project. The hook scripts themselves self-locate (via `git rev-parse`/`__dirname` + the `KANBAN_MAIN_CHECKOUT` override), so they hold no machine-specific paths either.
 - **Codex hook parity**: `.codex/hooks.json` routes shell checks through `.claude/hooks/smart-hooks-runner.js`, patch/write through `prevent-cross-worktree-writes.js`. New Claude safety hooks must also handle Codex input (`tool_name`, `tool_input.command`, patch/write, `cwd`).

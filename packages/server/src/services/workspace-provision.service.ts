@@ -205,6 +205,60 @@ async function readRiskPosture(projectId: string, database: Database): Promise<R
   }
 }
 
+/**
+ * Install the worktree's `commit-msg` hook.
+ *
+ * TWO jobs in ONE hook, because git allows exactly one `commit-msg` per repository and the TDD
+ * gate already owned the file:
+ *
+ * 1. **Strip a leading UTF-8 BOM from the subject (#976).** 77 of this repo's commits carry
+ *    `EF BB BF` as the first bytes of the SUBJECT, and the rate is accelerating (1 in May, 53 in
+ *    August) as more work goes through builders. The cause is an agent writing the message with
+ *    a bare PowerShell redirect — PS 5.1's `Set-Content`/`Out-File` default to UTF-8 WITH BOM —
+ *    and `git commit -F` does not strip it. It is invisible in every normal view, so nobody
+ *    catches it in review, while anything that PATTERN-MATCHES a subject sees `﻿feat(#951)`
+ *    instead of `feat(#951)` — including this board's own `ak-<N>` history matching in the
+ *    hand-merged-branch reconciler and `checkAlreadyMerged`.
+ *
+ *    It STRIPS rather than rejects: the message is already correct in intent, and failing the
+ *    commit would cost a builder a turn over a byte it cannot see. Documentation (the ticket
+ *    context and the root CLAUDE.md) is the prevention half; this is the backstop.
+ *
+ * 2. **The TDD gate**, only when the workspace asked for it — unchanged behaviour.
+ */
+export function buildCommitMsgHookScript(opts: { tddMode: boolean }): string {
+  // `sed -i` is avoided: Git for Windows' sed rewrites the file in place with a temp rename
+  // that trips on the .git directory's permissions often enough to be a real flake source.
+  const bomStrip = `#!/bin/sh
+# #976 - strip a leading UTF-8 BOM from the commit message. A bare PowerShell redirect writes
+# one, \`git commit -F\` keeps it, and it is invisible in every normal view.
+if [ -f "$1" ]; then
+  first=$(head -c 3 "$1" | od -An -tx1 | tr -d '[:space:]')
+  if [ "$first" = "efbbbf" ]; then
+    tail -c +4 "$1" > "$1.nobom" && mv "$1.nobom" "$1"
+    echo "[commit-msg] stripped a UTF-8 BOM from the commit message (#976)" >&2
+  fi
+fi
+`;
+  const tddGate = `
+# TDD mode: ensure AC test commit comes before implementation commits.
+MSG=$(cat "$1")
+# If this commit is the AC test commit, allow it.
+if echo "$MSG" | grep -qE '^test: AC for #[0-9]+'; then
+  exit 0
+fi
+# Check if an AC test commit already exists on this branch.
+if git log --oneline | grep -qE ' test: AC for #[0-9]+'; then
+  exit 0
+fi
+echo "TDD mode: write failing AC tests first." >&2
+echo "  Commit your tests with: git commit -m 'test: AC for #<issue-number>'" >&2
+exit 1
+`;
+  return opts.tddMode ? bomStrip + tddGate : `${bomStrip}exit 0
+`;
+}
+
 export function createWorkspaceProvisionService(deps: {
   database: Database;
   gitService: GitService;
@@ -558,35 +612,21 @@ export function createWorkspaceProvisionService(deps: {
     };
   }
 
-  function installTddHook(worktreePath: string): void {
+  /** Write {@link buildCommitMsgHookScript} into the worktree. Best-effort — never throws. */
+  function installCommitMsgHook(worktreePath: string, opts: { tddMode: boolean }): void {
     try {
       const hooksDir = join(worktreePath, ".git", "hooks");
       mkdirSync(hooksDir, { recursive: true });
       const hookPath = join(hooksDir, "commit-msg");
-      const hookScript = `#!/bin/sh
-# TDD mode: ensure AC test commit comes before implementation commits.
-MSG=$(cat "$1")
-# If this commit is the AC test commit, allow it.
-if echo "$MSG" | grep -qE '^test: AC for #[0-9]+'; then
-  exit 0
-fi
-# Check if an AC test commit already exists on this branch.
-if git log --oneline | grep -qE ' test: AC for #[0-9]+'; then
-  exit 0
-fi
-echo "TDD mode: write failing AC tests first." >&2
-echo "  Commit your tests with: git commit -m 'test: AC for #<issue-number>'" >&2
-exit 1
-`;
-      writeFileSync(hookPath, hookScript, { encoding: "utf-8" });
+      writeFileSync(hookPath, buildCommitMsgHookScript(opts), { encoding: "utf-8" });
       try {
         chmodSync(hookPath, 0o755);
       } catch {
         // chmod may fail on Windows; hook still runs via Git for Windows bash
       }
-      console.log(`[workspaces] TDD commit-msg hook installed: ${hookPath}`);
+      console.log(`[workspaces] commit-msg hook installed${opts.tddMode ? " (TDD gate + BOM strip)" : " (BOM strip)"}: ${hookPath}`);
     } catch (err) {
-      console.warn(`[workspaces] failed to install TDD hook: ${errorMessage(err)}`);
+      console.warn(`[workspaces] failed to install commit-msg hook: ${errorMessage(err)}`);
     }
   }
 
@@ -764,7 +804,7 @@ exit 1
   return {
     setupWorktree,
     buildAgentConfig,
-    installTddHook,
+    installCommitMsgHook,
     packContextPrimer,
     materializeEnabledPluginSkills,
     materializeWorkspaceSkills,

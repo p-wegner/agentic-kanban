@@ -92,7 +92,7 @@ export function createWorkspaceCreateService(deps: {
   const {
     setupWorktree,
     buildAgentConfig,
-    installTddHook,
+    installCommitMsgHook,
     packContextPrimer,
     writeWorktreeTicketContext,
     resolveAgentPromptAndSkill,
@@ -840,8 +840,11 @@ export function createWorkspaceCreateService(deps: {
           .catch((err) => console.warn(`[workspaces] failed to persist setup status: ${errorMessage(err)}`));
       }
 
-      if (tddMode && worktreePath) {
-        installTddHook(worktreePath);
+      // #976 - installed for EVERY worktree, not only TDD ones: the BOM half of the hook is
+      // what stops builders writing an invisible `EF BB BF` into commit subjects, and that is
+      // not a TDD concern. The TDD gate is still conditional, inside the one hook git allows.
+      if (worktreePath) {
+        installCommitMsgHook(worktreePath, { tddMode });
       }
 
       timing("total", phaseStart);
