@@ -9,7 +9,7 @@ import { WorkspaceDiagnosticsPanel } from "./WorkspaceDiagnosticsPanel.js";
 import { WorkspaceTimelinePanel } from "./WorkspaceTimelinePanel.js";
 import { WorkspaceLifecycleTimeline } from "./WorkspaceLifecycleTimeline.js";
 import { FailurePatternHint } from "./FailurePatternHint.js";
-import TicketMentionInput from "./TicketMentionInput.js";
+import { WorkspaceComposer } from "./WorkspaceComposer.js";
 import { SetupStatusPanel } from "./SetupStatusPanel.js";
 import { ServiceStackStatusPanel } from "./ServiceStackStatusPanel.js";
 import { RepoMergeStatusStrip } from "./RepoMergeStatusStrip.js";
@@ -753,46 +753,18 @@ export function WorkspaceCard({
               multiTurn={isSessionAlive}
               sessionId={selectedHistoryId ?? activeSession ?? undefined}
               footer={isRunning && ws.status !== "closed" ? (
-                  <div className="flex gap-2">
-                    <TicketMentionInput
-                      inputRef={textareaRef}
-                      value={prompt}
-                      onChange={setPrompt}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && e.ctrlKey) {
-                          e.preventDefault();
-                          if (isSessionAlive && !isWaitingForInput) {
-                            handleStop(ws.id);
-                          } else if (isWaitingForInput && prompt.trim()) {
-                            handleSendTurn(ws.id);
-                          } else if (!isRunning && prompt.trim()) {
-                            handleLaunch(ws.id);
-                          }
-                        }
-                      }}
-                      placeholder={isSessionAlive && !isWaitingForInput ? "Agent is working..." : "Message agent..."}
-                      rows={2}
-                      disabled={isSessionAlive && !isWaitingForInput}
-                      className="flex-1 text-sm bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 resize-none disabled:bg-gray-50 dark:disabled:bg-gray-950 disabled:text-gray-400 dark:disabled:text-gray-500"
-                    />
-                    {isSessionAlive && !isWaitingForInput ? (
-                      <button
-                        onClick={() => handleStop(ws.id)}
-                        disabled={actionLoading}
-                        className="text-sm bg-red-600 text-white px-3 py-1.5 rounded hover:bg-red-700 disabled:opacity-50 self-end"
-                      >
-                        Stop
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => isWaitingForInput ? handleSendTurn(ws.id) : handleLaunch(ws.id)}
-                        disabled={actionLoading || !prompt.trim()}
-                        className="text-sm bg-brand-600 text-white px-3 py-1.5 rounded hover:bg-brand-700 disabled:opacity-50 self-end"
-                      >
-                        Send
-                      </button>
-                    )}
-                  </div>
+                  <WorkspaceComposer
+                    wsId={ws.id}
+                    prompt={prompt}
+                    setPrompt={setPrompt}
+                    inputRef={textareaRef}
+                    isSessionAlive={isSessionAlive}
+                    isWaitingForInput={isWaitingForInput}
+                    actionLoading={actionLoading}
+                    onSendTurn={handleSendTurn}
+                    onLaunch={handleLaunch}
+                    onStop={handleStop}
+                  />
                 ) : undefined}
               />
           ) : null}
@@ -840,35 +812,21 @@ export function WorkspaceCard({
 
           {/* Idle message input — available on ANY sub-view (output/diff/summary/...) so that
               following up on an idle or In-Review workspace is always possible, not only on the
-              output tab. When there is no live session, the only meaningful action is to send
-              (which resumes the prior conversation via /launch with resumeFromId), so the
-              unreachable "Agent is working / Stop" branch is intentionally gone here. */}
+              output tab. There is no live session here, so the composer is handed the idle state
+              explicitly and offers no Stop: the only meaningful action is to send, which resumes
+              the prior conversation via /launch with resumeFromId. */}
           {!selectedHistoryId && !activeSession && ws.workingDir && ws.status !== "closed" && (
-            <div className="flex gap-2">
-              <TicketMentionInput
-                inputRef={textareaRef}
-                value={prompt}
-                onChange={(val) => setPrompt(val)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && e.ctrlKey) {
-                    e.preventDefault();
-                    if (prompt.trim()) {
-                      handleLaunch(ws.id);
-                    }
-                  }
-                }}
-                placeholder="Message agent..."
-                rows={2}
-                className="flex-1 text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-brand-500 resize-none disabled:bg-gray-50 dark:disabled:bg-gray-950 disabled:text-gray-400 dark:disabled:text-gray-500"
-              />
-              <button
-                onClick={() => handleLaunch(ws.id)}
-                disabled={actionLoading || !prompt.trim()}
-                className="text-sm bg-brand-600 text-white px-3 py-1.5 rounded hover:bg-brand-700 disabled:opacity-50 self-end"
-              >
-                Send
-              </button>
-            </div>
+            <WorkspaceComposer
+              wsId={ws.id}
+              prompt={prompt}
+              setPrompt={setPrompt}
+              inputRef={textareaRef}
+              isSessionAlive={false}
+              isWaitingForInput={false}
+              actionLoading={actionLoading}
+              onSendTurn={handleSendTurn}
+              onLaunch={handleLaunch}
+            />
           )}
 
           {ws.status !== "closed" && (
