@@ -654,12 +654,17 @@ export function buildTicketContextMarkdown(ctx: TicketContext): string {
     lines.push(riskPostureSection);
     lines.push("");
   }
+  // #976's commit-encoding section goes BEFORE the board-feedback one, not after. The
+  // board-feedback section must be the LAST heading in the document: `retargetBoardFeedback`
+  // replaces the span from its heading to end-of-string, so anything appended after it is
+  // silently destroyed the first time a worker's context is retargeted. #976 appended here
+  // and broke that invariant (and its guard) — the ordering is load-bearing, not cosmetic.
+  lines.push(buildCommitMessageEncodingSection(), "");
   const boardFeedback = buildBoardFeedbackSection(ctx.boardFeedback);
   if (boardFeedback) {
     lines.push(boardFeedback);
     lines.push("");
   }
-  lines.push(buildCommitMessageEncodingSection(), "");
   return lines.join("\n");
 }
 
