@@ -36,7 +36,7 @@ import {
   staleResumeRecoveryCount,
 } from "./stale-resume-policy.js";
 import { buildIndeterminateExitStats } from "./session-exit-stats.js";
-import { CODEX_SPARK_MODEL, CODEX_SAFE_DEFAULT_MODEL, isBuilderSession, buildStaleResumeHandoffPrompt, instructionFingerprint, mergeExistingSessionStats, lifecycleProviderName, resolveProviderRotation, withBuilderTestWorkerCap } from "./session-launch-helpers.js";
+import { CODEX_SPARK_MODEL, CODEX_SAFE_DEFAULT_MODEL, isBuilderSession, buildStaleResumeHandoffPrompt, instructionFingerprint, mergeExistingSessionStats, lifecycleProviderName, resolveProviderRotation, withBuilderTestWorkerCap, withBuilderTestImpactBudget } from "./session-launch-helpers.js";
 import { finalizePlanModeExit } from "./plan-mode-exit.js";
 import { finalizeUsageLimitRoute, finalizeLaunchFailureRoute, finalizeCompletedRoute, type ExitFinalizeContext } from "./exit-finalize.js";
 import { createRemoteTurnRecovery } from "./remote-turn-recovery.js";
@@ -330,7 +330,9 @@ export function createSessionLifecycle(
     // profile resolves to a separate CODEX_HOME / CLAUDE_CONFIG_DIR, point the env
     // var at it and drop the profile name from the launch. Best-effort — see
     // resolveProviderRotation for why a failure must never block a launch.
-    const rotation = await resolveProviderRotation(db, profile, withBuilderTestWorkerCap(extraEnv, builderSession) /* #909 */, {
+    // #966 rides in on the same seam as #909's worker cap: a builder's inner loop then runs the
+    // same budgeted selection its merge gate will. Both are best-effort — see the helpers.
+    const rotation = await resolveProviderRotation(db, profile, await withBuilderTestImpactBudget(withBuilderTestWorkerCap(extraEnv, builderSession), builderSession, projectId, db), {
       loadCodexLicenseRing,
       loadClaudeSubscriptionRing,
       getProviderExitBehavior,

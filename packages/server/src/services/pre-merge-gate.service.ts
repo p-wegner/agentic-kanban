@@ -177,10 +177,10 @@ export async function runPreMergeGate(
   // What verification is CURRENTLY configured — resolved BEFORE the tree memo, and in
   // `pre-merge-gate-tier.ts` because that module owns the tier. See `resolveGateVerification`
   // for why the ordering is load-bearing.
-  // #958: `workingDir` is what lets the key carry the test-impact SELECTOR's identity — the one
-  // thing that changes what this gate runs while tier, verify command and merged tree all stay
-  // identical, because the skill is materialized into the worktree untracked.
-  const { strategy: gateStrategy, posture: gatePosture, effectiveVerify, verifyScript, verificationKey } =
+  // #958: `workingDir` lets the key carry the test-impact SELECTOR's identity — the one thing
+  // that changes what this gate runs while tier, verify command and merged tree stay identical,
+  // because the skill is materialized into the worktree untracked. #966 folds the budget in there.
+  const { strategy: gateStrategy, posture: gatePosture, effectiveVerify, verifyScript, verificationKey, budget: gateBudget } =
     await resolveGateVerification(projectId, database, { workingDir: workspace.workingDir });
 
   // ---- #492 tree-hash memo -----------------------------------------------------------------
@@ -384,6 +384,7 @@ export async function runPreMergeGate(
       fileScoped: fileScope,
       changedFileCount: changedFiles.length,
       strategy: gateStrategy,
+      budget: gateBudget, // #966 — a THIRD route to the impact selector; see the resolver's doc
     });
     // #956 — the three scoping vocabularies do not compose freely, so their precedence lives in
     // one pure function beside the resolvers that feed it. See `buildVerifyEnv`.
@@ -395,6 +396,7 @@ export async function runPreMergeGate(
         baseBranch: workspace.baseBranch,
         changedFiles,
         fileExists: (file) => existsSync(join(workingDir, file)),
+        budget: gateBudget,
       }),
       packagesEnv: effectiveTestScope,
       emitFileScope,
@@ -420,6 +422,7 @@ export async function runPreMergeGate(
         applies: gateSelector === "impact" && !docsOnlyGuardsRunApplies,
         workingDir,
         baseBranch: workspace.baseBranch,
+        budget: gateBudget?.value ?? null, // #966 — describe the selection the run MAKES
       }),
       packageScoped: Boolean(effectiveTestScope) && !docsOnlyGuardsRunApplies,
       // What was actually EMITTED, not what the scoping decision wanted: under the impact

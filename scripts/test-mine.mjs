@@ -477,6 +477,32 @@ if (impactSelectorRequested && impactMinScoreRaw !== impactMinScore) {
 }
 
 /**
+ * Wall-clock ceiling for the selected suites (`KANBAN_TEST_BUDGET`, e.g. `60s`, #966).
+ *
+ * This is the per-project `test_impact_budget_<id>` setting, exported by the board into both the
+ * merge gate's verify run and the builder's own loop. It composes with the score floor and the
+ * ORDER is the contract: `impact.mjs` applies `--min-score` first (an evidence floor) and
+ * `--budget` second (fill the remaining time with the highest-scoring survivors). Reversing them
+ * would spend the clock on weakly-implicated suites before strongly-implicated ones.
+ *
+ * Since the map carries MEASURED durations (#955) this denominates in real seconds; before that
+ * it was a files x 3s estimate, which is why the same `60s` used to mean ~20 files and now means
+ * ~360. A value the tool cannot parse is DROPPED rather than defaulted: a default budget would
+ * silently narrow the run on a typo, which is the one failure direction that can hide a break.
+ * (The board validates the setting on write — see `shared/lib/test-impact-budget.ts` — so this
+ * guard only fires for a value edited around the API or exported by hand.)
+ */
+const impactBudgetRaw = (process.env.KANBAN_TEST_BUDGET || "").trim();
+const impactBudget = /^\d+(\.\d+)?(ms|s)?$/i.test(impactBudgetRaw) ? impactBudgetRaw : "";
+if (impactBudgetRaw && !impactBudget) {
+  console.warn(
+    `[test:mine] ignoring unparseable KANBAN_TEST_BUDGET="${impactBudgetRaw}" — expected e.g. "60s" or "90000ms" ` +
+      `(a bare number is ms; "m" is NOT a unit the selector understands — spell minutes in seconds). ` +
+      `Running the selection with NO time budget.`,
+  );
+}
+
+/**
  * Whether to pass `--rebuild-if-stale` (`KANBAN_IMPACT_REBUILD=1`, default OFF).
  *
  * The ticket's first draft had this always-on. It is wrong here, and measured so: the skill's
@@ -689,12 +715,16 @@ export function runImpactSelector({
   rebuildIfStale = impactRebuildIfStale,
   base = impactBase,
   newTestFiles = impactNewTestFiles,
+  budget = impactBudget,
   spawnFn = spawnSync,
 } = {}) {
   // The base is POSITIONAL and must come before the flags — `cmdSelect` reads `positional[0]` and
   // never looks at a `--base` flag. See `impactBase` for what an absent base silently costs at
   // gate time.
   const args = [cli, "select", ...(base ? [base] : []), "--format", "pkgfile", "--min-score", String(minScore)];
+  // #966 — the floor is applied first and the budget second, by the tool. Omitted entirely when
+  // unset, so a project with no budget gets byte-identical argv to the pre-#966 runner.
+  if (budget) args.push("--budget", String(budget));
   if (rebuildIfStale) args.push("--rebuild-if-stale");
   console.log(`\n[test:mine] impact selector: node ${args.slice(1).join(" ")}`);
   const res = spawnFn(process.execPath, args, {

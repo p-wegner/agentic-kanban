@@ -242,6 +242,38 @@ describe("the selection's base ref", () => {
   });
 });
 
+/**
+ * #966 — the per-project TIME BUDGET (`KANBAN_TEST_BUDGET`), the board's `test_impact_budget_<id>`
+ * setting as the runner sees it.
+ *
+ * The floor and the budget are two different cuts and they COMPOSE, floor first: `--min-score` is
+ * an evidence threshold, `--budget` then fills the remaining seconds with the highest-scoring
+ * survivors. Both stay independently configurable, so both must reach the tool.
+ */
+describe("the selection's time budget", () => {
+  const cli = resolve("/repo", ".claude/skills/test-impact/tools/impact.mjs");
+  const spawnCapturing = (sink) => (_exe, args) => {
+    sink.args = args;
+    return { status: 0, stdout: "packages/server:src/__tests__/a.test.ts\n", stderr: "" };
+  };
+
+  it("passes --budget alongside the floor, after the positional base", () => {
+    const sink = {};
+    runImpactSelector({ cli, minScore: "1.0", rebuildIfStale: false, base: "master", budget: "60s", spawnFn: spawnCapturing(sink) });
+    expect(sink.args.slice(1)).toEqual([
+      "select", "master", "--format", "pkgfile", "--min-score", "1.0", "--budget", "60s",
+    ]);
+  });
+
+  it("omits it entirely when unset — byte-identical argv to the pre-#966 runner", () => {
+    // "Clearing the setting restores today's behaviour exactly" is the whole contract of the
+    // Settings field, and this is where it either holds or does not.
+    const sink = {};
+    runImpactSelector({ cli, minScore: "1.0", rebuildIfStale: false, base: "", budget: "", spawnFn: spawnCapturing(sink) });
+    expect(sink.args.slice(1)).toEqual(["select", "--format", "pkgfile", "--min-score", "1.0"]);
+  });
+});
+
 describe("mergeNewTestFiles", () => {
   it("adds a new suite the selection did not name", () => {
     // The motivating case: a test file the diff ADDS is absent from the committed impact map, so
