@@ -54,21 +54,41 @@ export function useDependencyWave(projectId: string, boardKey: string): Dependen
   const [progress, setProgress] = useState<WaveStartProgress>(IDLE_WAVE_PROGRESS);
   const { data: plan, loading, reload: refresh } = resource;
 
+  // `BacklogView` is rendered without a `key`, so switching project changes
+  // `projectId` on a MOUNTED component: the resource re-fetches (its path moved)
+  // but this hook's own state does not reset by itself. `progress` is keyed to
+  // the project that produced it — its message names that project's issue
+  // numbers, and `attemptedIssueIds` badges cards by id — so carrying it across a
+  // switch attributes one project's wave start to another's board. Clear it.
+  const seenProjectId = useRef(projectId);
+  if (seenProjectId.current !== projectId) {
+    seenProjectId.current = projectId;
+    // Render-phase reset (the sanctioned "adjust state on prop change" form):
+    // the stale banner never reaches the DOM, where an effect would flash it.
+    setProgress(IDLE_WAVE_PROGRESS);
+  }
+
   // The plan is derived from the board's issues, so a board move invalidates it.
   // `useApiResource` re-fetches on path change only, and the path does not carry
   // the board's shape — hence the explicit reload. The initial mount is already
   // covered by the resource's own effect; skipping the first run of this one is
   // what keeps that from being a double fetch.
+  //
+  // The same applies to a project switch: the resource re-fetches on the path
+  // change, so the new project's first `boardKey` must be absorbed rather than
+  // reloaded, or every switch costs a duplicate request.
   const seenBoardKey = useRef<string | null>(null);
+  const boardKeyProjectId = useRef(projectId);
   useEffect(() => {
-    if (seenBoardKey.current === null) {
+    if (seenBoardKey.current === null || boardKeyProjectId.current !== projectId) {
       seenBoardKey.current = boardKey;
+      boardKeyProjectId.current = projectId;
       return;
     }
     if (seenBoardKey.current === boardKey) return;
     seenBoardKey.current = boardKey;
     refresh();
-  }, [boardKey, refresh]);
+  }, [boardKey, projectId, refresh]);
 
   const startNextWave = useCallback(async () => {
     // Mark the issues this click will attempt BEFORE the request goes out, so
