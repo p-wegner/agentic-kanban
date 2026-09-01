@@ -135,6 +135,29 @@ export function verifyChainSemaphoreQueueLength(): number {
 }
 
 /**
+ * Is a `gate`-class waiter queued right now (#989)?
+ *
+ * #978's priority classes act only at ADMISSION — they decide who gets the slot next. Once a
+ * background probe is running, a gate that arrives a minute later waits out the whole clone +
+ * install + verify (up to 65 minutes by the ceilings in `base-branch-health.service.ts`), which
+ * is the other half of the ~35-minute wait measured on #971's merge. The running probe needs to
+ * be able to ASK, between its stages, whether someone is blocked behind it — and the semaphore
+ * is the only thing that knows, because it already classifies its waiters.
+ *
+ * Deliberately a plain synchronous read of module state rather than a subscription: the caller
+ * checks it at natural checkpoints it chooses, so there is no callback to unregister and no way
+ * for a stale listener to outlive the chain that installed it.
+ *
+ * `false` when the semaphore's own state cannot see the waiter — a gate blocked on the
+ * CROSS-PROCESS machine lock is invisible here, exactly as it is to `chooseNextVerifyChainWaiter`.
+ * That is the same fail-open the rest of this module takes: not yielding costs a delay, yielding
+ * on a phantom costs a discarded measurement.
+ */
+export function verifyChainGateWaiting(): boolean {
+  return waiters.some((w) => w.priority === "gate");
+}
+
+/**
  * Run `chain` and also report how long it spent QUEUED (#949).
  *
  * A queued gate was previously indistinguishable from a slow one. Two gates on one box were

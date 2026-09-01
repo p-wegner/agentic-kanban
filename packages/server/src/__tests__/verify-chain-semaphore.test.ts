@@ -8,6 +8,7 @@ import {
   runUnderVerifyChainSemaphore,
   runUnderVerifyChainSemaphoreTimed,
   verifyChainSemaphoreActive,
+  verifyChainGateWaiting,
   verifyChainSemaphoreConcurrency,
   verifyChainSemaphoreQueueLength,
 } from "../services/verify-chain-semaphore.js";
@@ -306,6 +307,10 @@ describe("#978: a merge gate is admitted ahead of a background measurement", () 
     expect(chooseNextVerifyChainWaiter([], 0, 30 * MIN)).toBe(-1);
   });
 
+  it("takes a background waiter when it is the only one, even alongside a running chain", () => {
+    expect(chooseNextVerifyChainWaiter([q("background", 1)], 0, 30 * MIN)).toBe(0);
+  });
+
   it("`gate` is the default, so an existing caller's behaviour is unchanged", async () => {
     // Every pre-#978 call site omits the option. If the default were `background`, the first
     // opt-in would silently demote all of them.
@@ -324,5 +329,95 @@ describe("#978: a merge gate is admitted ahead of a background measurement", () 
     await Promise.all([first, second, third]);
 
     expect(order).toEqual(["first", "second", "third"]);
+  });
+});
+
+/**
+ * #989 — the running holder must be able to ASK whether someone is blocked behind it.
+ *
+ * #978's classes act only at admission. A background probe already running holds the slot for up
+ * to clone 5m + install 15m + verify 45m, so a gate arriving a minute in waits it out — the other
+ * half of the ~35 minutes measured on #971's merge. This predicate is what the probe checks at
+ * its stage boundaries.
+ */
+describe("#989: verifyChainGateWaiting exposes a queued gate to the running holder", () => {
+  beforeEach(() => {
+    resetVerifyChainSemaphoreForTests();
+    delete process.env.KANBAN_VERIFY_CHAIN_CONCURRENCY;
+  });
+  afterEach(() => {
+    resetVerifyChainSemaphoreForTests();
+    delete process.env.KANBAN_VERIFY_CHAIN_CONCURRENCY;
+  });
+
+  it("is false with an empty queue", () => {
+    expect(verifyChainGateWaiting()).toBe(false);
+  });
+
+  it("is true, FROM INSIDE the running chain, once a gate queues behind it", async () => {
+    const seen: boolean[] = [];
+    let releaseHolder: () => void = () => {};
+    const held = new Promise<void>((resolve) => { releaseHolder = resolve; });
+
+    const holder = runUnderVerifyChainSemaphore(async () => {
+      // The probe's own checkpoint shape: read at a stage boundary, before and after a waiter
+      // could have arrived.
+      seen.push(verifyChainGateWaiting());
+      await held;
+      seen.push(verifyChainGateWaiting());
+    }, "probe", undefined, undefined, { priority: "background" });
+
+    await new Promise((r) => setTimeout(r, 10));
+    const gate = runUnderVerifyChainSemaphore(async () => "landed", "gate");
+    await new Promise((r) => setTimeout(r, 10));
+
+    releaseHolder();
+    await Promise.all([holder, gate]);
+
+    // Nothing queued at the first checkpoint; a gate queued by the second.
+    expect(seen).toEqual([false, true]);
+  });
+
+  it("is FALSE when only another background chain is queued — a probe does not yield to a probe", async () => {
+    let releaseHolder: () => void = () => {};
+    const held = new Promise<void>((resolve) => { releaseHolder = resolve; });
+    let seenDuring: boolean | null = null;
+
+    const holder = runUnderVerifyChainSemaphore(async () => {
+      await held;
+      seenDuring = verifyChainGateWaiting();
+    }, "probe-a", undefined, undefined, { priority: "background" });
+
+    await new Promise((r) => setTimeout(r, 10));
+    const other = runUnderVerifyChainSemaphore(async () => "b", "probe-b", undefined, undefined, {
+      priority: "background",
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(verifyChainSemaphoreQueueLength()).toBe(1);
+
+    releaseHolder();
+    await Promise.all([holder, other]);
+    expect(seenDuring).toBe(false);
+  });
+
+  it("goes back to false once the gate has been admitted", async () => {
+    let releaseHolder: () => void = () => {};
+    const held = new Promise<void>((resolve) => { releaseHolder = resolve; });
+    const holder = runUnderVerifyChainSemaphore(async () => { await held; }, "probe", undefined, undefined, {
+      priority: "background",
+    });
+    await new Promise((r) => setTimeout(r, 10));
+
+    let waitingInsideGate: boolean | null = null;
+    const gate = runUnderVerifyChainSemaphore(async () => {
+      waitingInsideGate = verifyChainGateWaiting();
+    }, "gate");
+    await new Promise((r) => setTimeout(r, 10));
+    expect(verifyChainGateWaiting()).toBe(true);
+
+    releaseHolder();
+    await Promise.all([holder, gate]);
+    expect(waitingInsideGate).toBe(false);
+    expect(verifyChainGateWaiting()).toBe(false);
   });
 });

@@ -442,3 +442,163 @@ describe("a running base-health probe holds the verify-chain slot against a late
     resetVerifyChainSemaphoreForTests();
   }, 30000);
 });
+
+/**
+ * #989 — the other half of #978, and the direct continuation of the test above.
+ *
+ * That one pins the property #949 bought: a gate arriving during a probe QUEUES rather than
+ * running a second full suite. Correct, and still the point — but it is also the whole cost: the
+ * probe can hold the slot for clone 5m + install 15m + verify 45m, so the gate's correct queueing
+ * was measured at ~35 minutes on #971's merge. #978's priority classes do not help, because they
+ * only decide who is admitted NEXT.
+ *
+ * So the probe now checks at its stage boundaries whether a gate is queued behind it, and if so
+ * abandons the run — recording nothing, because a yielded probe is not a measurement that failed,
+ * it is one that never happened. The three properties pinned here are the three design questions
+ * the ticket asked to settle: no row is written, the yield is not silent, and it is bounded.
+ */
+describe("a running base-health probe YIELDS the verify slot to a waiting gate (#989)", () => {
+  let db: ReturnType<typeof createTestDb>["db"];
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    cloneDests.length = 0;
+    ({ db } = createTestDb());
+    const { resetProbeYieldStreaksForTests } = await import("../services/base-health-probe-preemption.js");
+    resetProbeYieldStreaksForTests();
+    const { resetVerifyChainSemaphoreForTests } = await import("../services/verify-chain-semaphore.js");
+    resetVerifyChainSemaphoreForTests();
+  });
+  afterEach(async () => {
+    const { resetProbeYieldStreaksForTests } = await import("../services/base-health-probe-preemption.js");
+    resetProbeYieldStreaksForTests();
+    delete process.env.KANBAN_BASE_HEALTH_MAX_CONSECUTIVE_YIELDS;
+  });
+
+  /**
+   * Park a `gate`-class chain in the semaphore's WAITER queue and keep it there, by holding the
+   * single slot with a chain we control. That is the state a mid-flight probe has to notice:
+   * `verifyChainGateWaiting()` is true, and the probe's next checkpoint must abandon.
+   */
+  async function withGateQueued<T>(body: () => Promise<T>): Promise<T> {
+    const { runUnderVerifyChainSemaphore, verifyChainGateWaiting } =
+      await import("../services/verify-chain-semaphore.js");
+    let releaseHolder: () => void = () => {};
+    const held = new Promise<void>((resolve) => { releaseHolder = resolve; });
+    const holder = runUnderVerifyChainSemaphore(async () => { await held; }, "holder");
+    await vi.waitFor(() => expect(inFlightBaseBranchProbeCount()).toBe(0));
+    const gate = runUnderVerifyChainSemaphore(async () => "gate ran", "a merge gate");
+    await vi.waitFor(() => expect(verifyChainGateWaiting()).toBe(true));
+    try {
+      return await body();
+    } finally {
+      releaseHolder();
+      await Promise.all([holder, gate]);
+    }
+  }
+
+  it("abandons the run and records NOTHING — `timeout`/`unverified` stay the only two non-answers", async () => {
+    const { getLatestBaseBranchHealth } = await import("../repositories/base-branch-health.repository.js");
+    const projectId = await seedProject(db);
+    runSetupScript.mockResolvedValue({ exitCode: 0, stdout: "ok", stderr: "", timedOut: false });
+
+    const result = await withGateQueued(() => verifyBaseBranchHealth(projectId, db));
+
+    expect(result).toBeNull();
+    // Nothing cloned: the FIRST checkpoint sits in front of the clone, so a gate that is already
+    // waiting costs the probe nothing at all.
+    expect(cloneDests).toHaveLength(0);
+    // And no row — inventing an `aborted` outcome would have to be learned by the rot detector,
+    // the attribution path and the sha cache alike, for a run that observed nothing.
+    expect(await getLatestBaseBranchHealth(projectId, db)).toBeFalsy();
+  }, 30000);
+
+  it("clears the in-flight start stamp on the way out, so the next sweep is not blocked by a run that ended", async () => {
+    const projectId = await seedProject(db);
+    runSetupScript.mockResolvedValue({ exitCode: 0, stdout: "ok", stderr: "", timedOut: false });
+
+    await withGateQueued(() => verifyBaseBranchHealth(projectId, db));
+
+    // The `finally` runs on the yield path too — otherwise a yielded probe would look in-flight
+    // for its full 65-minute ceiling and `isBaseHealthProbeDue` would report `probe_in_flight`.
+    expect(await getPreference(baseHealthProbeStartPrefKey(projectId), db)).toBe("");
+    expect(inFlightBaseBranchProbeCount()).toBe(0);
+  }, 30000);
+
+  it("COUNTS the yield, so a repeatedly-preempted probe is visible rather than silently absent", async () => {
+    const { probeConsecutiveYields } = await import("../services/base-health-probe-preemption.js");
+    const projectId = await seedProject(db);
+    runSetupScript.mockResolvedValue({ exitCode: 0, stdout: "ok", stderr: "", timedOut: false });
+
+    expect(probeConsecutiveYields(projectId)).toBe(0);
+    await withGateQueued(() => verifyBaseBranchHealth(projectId, db));
+    expect(probeConsecutiveYields(projectId)).toBe(1);
+  }, 30000);
+
+  it("runs to completion once the consecutive-yield bound is spent — the anti-thrash escape", async () => {
+    const { runUnderVerifyChainSemaphore, verifyChainGateWaiting } =
+      await import("../services/verify-chain-semaphore.js");
+    const { probeConsecutiveYields } = await import("../services/base-health-probe-preemption.js");
+    const projectId = await seedProject(db);
+    runSetupScript.mockResolvedValue({ exitCode: 0, stdout: "ok", stderr: "", timedOut: false });
+    // A bound of 1 keeps the test to two probes; the mechanism is the same at the default 3.
+    process.env.KANBAN_BASE_HEALTH_MAX_CONSECUTIVE_YIELDS = "1";
+
+    await withGateQueued(() => verifyBaseBranchHealth(projectId, db));
+    expect(probeConsecutiveYields(projectId)).toBe(1);
+    expect(cloneDests).toHaveLength(0);
+
+    // A gate is STILL waiting, but a board merging steadily must not preempt every probe forever
+    // — that is the same starvation #978's priority classes needed a bound for.
+    //
+    // Not `withGateQueued` here: that helper holds the slot until its body resolves, and a probe
+    // that runs to completion needs the slot for its own verify. So the holder is released as
+    // soon as the probe has passed its checkpoints, which is also the realistic shape — the gate
+    // ahead of it lands and the probe then queues normally.
+    let releaseHolder: () => void = () => {};
+    const held = new Promise<void>((resolve) => { releaseHolder = resolve; });
+    const holder = runUnderVerifyChainSemaphore(async () => { await held; }, "holder");
+    const gate = runUnderVerifyChainSemaphore(async () => "gate ran", "a merge gate");
+    await vi.waitFor(() => expect(verifyChainGateWaiting()).toBe(true));
+
+    const probe = verifyBaseBranchHealth(projectId, db);
+    // It got past the clone despite the waiting gate — the escape fired.
+    await vi.waitFor(() => expect(cloneDests).toHaveLength(1));
+    releaseHolder();
+
+    const second = await probe;
+    await Promise.all([holder, gate]);
+
+    expect(second?.outcome).toBe("green");
+    expect(cloneDests).toHaveLength(1);
+    // ...and a completed run ends the streak, so the next gate can preempt again.
+    expect(probeConsecutiveYields(projectId)).toBe(0);
+  }, 30000);
+
+  it("does not yield when only a BACKGROUND chain is queued — a probe does not preempt a probe", async () => {
+    const { runUnderVerifyChainSemaphore } = await import("../services/verify-chain-semaphore.js");
+    const { probeConsecutiveYields } = await import("../services/base-health-probe-preemption.js");
+    const projectId = await seedProject(db);
+    runSetupScript.mockResolvedValue({ exitCode: 0, stdout: "ok", stderr: "", timedOut: false });
+
+    let releaseHolder: () => void = () => {};
+    const held = new Promise<void>((resolve) => { releaseHolder = resolve; });
+    const holder = runUnderVerifyChainSemaphore(async () => { await held; }, "holder");
+    const other = runUnderVerifyChainSemaphore(async () => "b", "another probe", undefined, undefined, {
+      priority: "background",
+    });
+    await new Promise((r) => setTimeout(r, 20));
+
+    const probe = verifyBaseBranchHealth(projectId, db);
+    // The probe passes its clone/install checkpoints (nothing GATE-class is waiting) and then
+    // queues for the verify slot like any other background chain — #978's behaviour, unchanged.
+    await vi.waitFor(() => expect(cloneDests).toHaveLength(1));
+
+    releaseHolder();
+    const result = await probe;
+    await Promise.all([holder, other]);
+
+    expect(result?.outcome).toBe("green");
+    expect(probeConsecutiveYields(projectId)).toBe(0);
+  }, 30000);
+});

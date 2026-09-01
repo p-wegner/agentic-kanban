@@ -13,7 +13,15 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
-import { runUnderVerifyChainSemaphore } from "./verify-chain-semaphore.js";
+import { runUnderVerifyChainSemaphore, verifyChainGateWaiting } from "./verify-chain-semaphore.js";
+import {
+  clearProbeYieldStreak,
+  probeConsecutiveYields,
+  probeMaxConsecutiveYields,
+  recordProbeYield,
+  shouldProbeYield,
+  type ProbeYieldStage,
+} from "./base-health-probe-preemption.js";
 // The base probe spawns the SAME verify script as the gate, so it inherits the board's
 // listener pins the same way — and a phantom EADDRINUSE here is worse, because it is
 // recorded as "the base is red" and then withholds every branch's merge.
@@ -191,8 +199,42 @@ async function runBaseBranchProbe(
   const installCommand = (deriveSetupScriptFromProfile(await getStackProfile(projectId, database), project.repoPath) || "").trim();
 
   let result: BaseBranchVerifyResult;
+  // #989 — set by a checkpoint that abandoned the run, so the `finally` below can tell a yield
+  // (streak continues) from a completed run (streak clears).
+  let didYield = false;
+  const yieldToWaitingGate = (stage: ProbeYieldStage): boolean => {
+    const already = probeConsecutiveYields(projectId);
+    const decision = shouldProbeYield({ gateWaiting: verifyChainGateWaiting(), consecutiveYields: already });
+    if (decision.reason === "yield_budget_exhausted") {
+      console.log(
+        `[base-branch-health] probe for project ${projectId} is NOT yielding before the ${stage} stage `
+          + `despite a waiting merge gate — it has already yielded ${already} time(s) in a row `
+          + `(KANBAN_BASE_HEALTH_MAX_CONSECUTIVE_YIELDS=${probeMaxConsecutiveYields()}), and a base whose `
+          + `health is never measured is the failure this probe exists to prevent`,
+      );
+      return false;
+    }
+    if (!decision.yield) return false;
+    didYield = true;
+    const streak = recordProbeYield(projectId);
+    // A silent abort is how a repeatedly-preempted probe becomes invisible, so this is the
+    // minimum the ticket requires: it says WHICH stage yielded, how much work is being thrown
+    // away, and how close the streak is to the run-to-completion escape.
+    console.log(
+      `[base-branch-health] probe for project ${projectId} YIELDED the verify slot before the ${stage} stage `
+        + `after ${Math.round((Date.now() - startedAt) / 1000)}s — a merge gate is queued behind it and has `
+        + `someone waiting, while this is a background measurement. Nothing recorded; it re-runs when the `
+        + `base is next due. Consecutive yields: ${streak}/${probeMaxConsecutiveYields()}`,
+    );
+    return true;
+  };
   try {
+    // #989 — the FIRST checkpoint, before anything expensive. Clone, install and verify are the
+    // three natural boundaries; this one is the cheapest place to discover that a gate queued
+    // while we were resolving the project and the stack profile.
+    if (yieldToWaitingGate("clone")) return null;
     await cloneBranchTo(project.repoPath, branch, dest, CLONE_TIMEOUT_MS);
+    if (yieldToWaitingGate("install")) return null;
     if (installCommand) {
       const install = await runSetupScript(dest, installCommand, { timeoutMs: INSTALL_TIMEOUT_MS, env: { ...VERIFY_NEUTRALIZED_LISTENER_ENV } }).catch((e) => ({
         exitCode: 1,
@@ -223,6 +265,11 @@ ${tail(combined)}`,
     // no worker cap of its own — sharing the gate's resolved cap keeps the two from
     // independently defaulting to one vitest worker per core.
     const probeMaxWorkers = (await resolveVerifyMaxWorkers(projectId, database)).workers;
+    // #989 — the LAST and most valuable checkpoint: verify is the 45-minute stage, and the
+    // install that just finished is where #971's gate was observed waiting. Checked BEFORE
+    // acquiring the slot rather than inside it, so the gate takes the slot straight from the
+    // released install rather than queueing behind a probe that is about to abandon anyway.
+    if (yieldToWaitingGate("verify")) return null;
     // #949: and take the same one-at-a-time slot the gate's verify chain takes. #931 capped the
     // probe's WORKERS and made its scheduler decline to start while a gate held the build
     // semaphore, but that check is one-directional: once a probe was running, a gate arriving
@@ -296,6 +343,10 @@ ${tail(combined)}`,
       message: `base-branch health check errored: ${e instanceof Error ? e.message : String(e)}`,
     };
   } finally {
+    // #989 — this run produced a result (or errored into one), so the yield streak is over. A
+    // `return null` from a checkpoint above never reaches here, because each of those returns
+    // from inside the `try`... which DOES run this block. `didYield` is what tells the two apart.
+    if (!didYield) clearProbeYieldStreak(projectId);
     // Only ever this probe's OWN directory — the whole point of `mkdtemp` above.
     await rm(probeRoot, { recursive: true, force: true }).catch(() => {});
     // Clear the in-flight stamp. An empty value reads as absent (see `isBaseHealthProbeDue`),
