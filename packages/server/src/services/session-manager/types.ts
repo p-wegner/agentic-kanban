@@ -110,6 +110,13 @@ export interface SessionState {
   /** Bounds the missing-transcript fallback (#26) to one automatic retry per workspace. */
   workspaceStaleResumeRecoveryCount: Map<string, number>;
   sessionProviders: Map<string, string>;
+  /**
+   * The host pid this session was SPAWNED as (#968). Distinct from `sessions.pid` in the DB,
+   * which a concurrent relaunch may already have overwritten by the time an exit finalizes —
+   * probing that pid's tree would then report a survivor on every clean handover. Absent for
+   * a remote/fleet session, which has no host process at all.
+   */
+  launchedPids: Map<string, number>;
   dbWriteBuffer: Map<string, DbWriteBufferEntry[]>;
   dbWriteTimers: Map<string, ReturnType<typeof setTimeout>>;
 }
@@ -159,6 +166,7 @@ export function teardownSessionState(state: SessionState, sessionId: string): vo
   state.sessionHasTodoWrite.delete(sessionId);
   state.sessionExitPlanModeDenied.delete(sessionId);
   state.sessionProviders.delete(sessionId);
+  state.launchedPids.delete(sessionId);
 
   const pendingTimer = state.dbWriteTimers.get(sessionId);
   if (pendingTimer !== undefined) {
@@ -193,6 +201,7 @@ export function createSessionState(): SessionState {
     workspaceAutoResumeCount: new Map(),
     workspaceStaleResumeRecoveryCount: new Map(),
     sessionProviders: new Map(),
+    launchedPids: new Map(),
     dbWriteBuffer: new Map(),
     dbWriteTimers: new Map(),
   };
