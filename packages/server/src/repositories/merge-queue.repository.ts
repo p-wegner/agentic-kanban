@@ -39,14 +39,23 @@ export async function getWorkspaceStatus(
   return current?.status;
 }
 
+/**
+ * The durable merge outcome of one workspace.
+ *
+ * `mergedHeadSha` is here for #990: it is the branch tip captured at merge time and it
+ * SURVIVES the post-merge branch deletion, so it is the one field that lets a caller
+ * confirm a merge landed without consulting git. `mergedAt` alone says "it landed";
+ * the sha says *what* landed.
+ */
 export async function getWorkspaceMergeState(
   workspaceId: string,
   database: Database = db,
-): Promise<{ status: string; mergedAt: string | null } | undefined> {
+): Promise<{ status: string; mergedAt: string | null; mergedHeadSha: string | null } | undefined> {
   const [row] = await database
     .select({
       status: workspaces.status,
       mergedAt: workspaces.mergedAt,
+      mergedHeadSha: workspaces.mergedHeadSha,
     })
     .from(workspaces)
     .where(eq(workspaces.id, workspaceId))
