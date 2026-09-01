@@ -364,12 +364,13 @@ describe("the selection's time budget", () => {
  */
 describe("the union hand-off to select --union", () => {
   const cli = resolve("/repo", ".claude/skills/test-impact/tools/impact.mjs");
-  const spawnCapturing = (sink) => (_exe, args) => {
+  const spawnCapturing = (sink) => (_exe, args, opts) => {
     sink.args = args;
+    sink.input = opts?.input;
     return { status: 0, stdout: "packages/server:src/__tests__/a.test.ts\n", stderr: "" };
   };
 
-  it("passes the related picks as a comma-separated --union, before --rebuild-if-stale", () => {
+  it("passes the related picks over STDIN as `--union -`, before --rebuild-if-stale", () => {
     const sink = {};
     runImpactSelector({
       cli,
@@ -382,14 +383,34 @@ describe("the union hand-off to select --union", () => {
     });
     expect(sink.args.slice(1)).toEqual([
       "select", "master", "--format", "pkgfile", "--min-score", "1.0", "--budget", "60s",
-      "--union", "packages/server/src/__tests__/b.test.ts,packages/shared/__tests__/c.test.ts",
+      "--union", "-",
     ]);
+    // Newline-separated: the shape `readUnionList` splits on for the `-` form.
+    expect(sink.input).toBe("packages/server/src/__tests__/b.test.ts\npackages/shared/__tests__/c.test.ts\n");
+  });
+
+  it("keeps a REAL-SIZED union off the command line entirely", () => {
+    // The concrete failure, measured on this repo: a diff touching
+    // `packages/server/src/db/index.ts` derives 536 related suites, which comma-join to 33,735
+    // chars — past Windows' 32,767-char CreateProcess limit. Inline, `spawnSync` fails
+    // ENAMETOOLONG, `runImpactSelector`'s fail-open path returns null, and the run silently loses
+    // BOTH the impact selection and the project's `--budget` cap on exactly the widest, highest
+    // fan-out diffs. So the assertion is not "the flag is spelled `-`" but "no single argument
+    // grows with the union", which is what actually holds the guarantee.
+    const sink = {};
+    const union = Array.from({ length: 700 }, (_, i) => `packages/server/src/__tests__/generated-suite-${i}.test.ts`);
+    expect(union.join(",").length).toBeGreaterThan(32767);
+    runImpactSelector({ cli, minScore: "1.0", rebuildIfStale: false, base: "master", union, spawnFn: spawnCapturing(sink) });
+    for (const arg of sink.args) expect(arg.length).toBeLessThan(8191);
+    expect(sink.input.split("\n").filter(Boolean)).toHaveLength(700);
   });
 
   it("omits --union entirely when no other selector ran — byte-identical argv to the pre-#967 runner", () => {
     const sink = {};
     runImpactSelector({ cli, minScore: "1.0", rebuildIfStale: false, base: "", union: [], spawnFn: spawnCapturing(sink) });
     expect(sink.args.slice(1)).toEqual(["select", "--format", "pkgfile", "--min-score", "1.0"]);
+    // No stdin either — an unrelated caller's spawn options are unchanged.
+    expect(sink.input).toBeUndefined();
   });
 });
 

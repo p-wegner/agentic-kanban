@@ -737,17 +737,29 @@ export function runImpactSelector({
   // #966 — the floor is applied first and the budget second, by the tool. Omitted entirely when
   // unset, so a project with no budget gets byte-identical argv to the pre-#966 runner.
   if (budget) args.push("--budget", String(budget));
-  // #967 — comma-separated is one of the four shapes `readUnionList` accepts, and the only one
-  // that needs no temp file. A single entry containing no comma is still unambiguous there: it is
-  // recognised as a test path before the file-on-disk branch is tried.
-  if (union.length > 0) args.push("--union", union.join(","));
+  // #967 — the union goes over STDIN (`--union -`), never inline as a comma list.
+  //
+  // MEASURED: `relatedTestSpecs` for a diff touching `packages/server/src/db/index.ts` returns 536
+  // suites, whose comma-joined form is 33,735 chars — past Windows' 32,767-char CreateProcess
+  // limit before the rest of the argv is counted. `spawnSync` then fails ENAMETOOLONG, this
+  // function's `res.error` branch fails open to `vitest related`, and the run silently loses BOTH
+  // the impact selection and the budget cap the project asked for — on exactly the widest, highest
+  // fan-out diffs, which are the ones a budget exists to bound. Stdin has no such limit, and `-` is
+  // one of the four shapes `readUnionList` already accepts.
+  if (union.length > 0) args.push("--union", "-");
   if (rebuildIfStale) args.push("--rebuild-if-stale");
-  console.log(`\n[test:mine] impact selector: node ${args.slice(1).join(" ")}`);
+  console.log(
+    `\n[test:mine] impact selector: node ${args.slice(1).join(" ")}` +
+      (union.length > 0 ? ` (${union.length} union entr(ies) on stdin)` : ""),
+  );
   const res = spawnFn(process.execPath, args, {
     cwd: root,
     encoding: "utf8",
     windowsHide: true,
     maxBuffer: 64 * 1024 * 1024,
+    // Newline-separated, which is what `readUnionList` splits on for the `-` shape. Empty when
+    // there is no union, so the pre-#967 argv AND stdio are byte-identical for that caller.
+    ...(union.length > 0 ? { input: `${union.join("\n")}\n` } : {}),
   });
   // The skill's own summary/escalation lines — what it selected AND what it dropped.
   if (res.stderr) process.stderr.write(res.stderr);
