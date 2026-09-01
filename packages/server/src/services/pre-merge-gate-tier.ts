@@ -133,14 +133,13 @@ export async function resolveGateTierFor(
  * function's return value — a caller wires the two together (scope the train gate here, then
  * separately check whether a base probe is due).
  *
- * **`impact` (#956) keeps the PACKAGE scope and returns `fileScoped: false`**, which is not a
- * widening — it is the one honest encoding available. `fileScoped` in this codebase means
- * exactly "a `KANBAN_TEST_FILES` list was emitted, so the runner will use `vitest related`", and
- * under `impact` no such list is emitted (`scripts/test-mine.mjs` REFUSES to run with both, see
- * `resolveGateFileScopeEmission`). The narrowing that DOES apply is the selection, and it is
- * reported through `selector`/`impactSelection` rather than by borrowing this flag — a flag
- * whose name would then mean two different narrowings is precisely how a tier weakens
- * invisibly.
+ * **`impact` keeps the PACKAGE scope, and since #967 the FILE scope too.** `fileScoped` means
+ * exactly "a `KANBAN_TEST_FILES` list was emitted", and under `impact` that list is now emitted as
+ * well — `scripts/test-mine.mjs` derives the `vitest related` suites from it and hands them to
+ * `select --union` instead of refusing the pair (#962's refusal is retired; see
+ * `resolveGateFileScopeEmission` for why the rivalry became a union). The selection narrowing is
+ * still reported through `selector`/`impactSelection` rather than by borrowing this flag — a flag
+ * whose name meant two different narrowings is precisely how a tier weakens invisibly.
  */
 export function resolveGateScoping(args: {
   strategy: VerifyGateStrategy;
@@ -327,20 +326,33 @@ export function resolveGateTestSelector(
 }
 
 /**
- * Resolve the selector AND whether the gate may still emit its `KANBAN_TEST_FILES` scope (#962).
+ * Resolve the selector AND whether the gate may still emit its `KANBAN_TEST_FILES` scope (#962),
+ * which since #967 is **also the union decision**.
  *
- * `KANBAN_TEST_FILES` and `KANBAN_TEST_SELECTOR=impact` are two different answers to "which
- * suites", and `scripts/test-mine.mjs` now REFUSES to run with both rather than silently
- * discarding the file list. Nothing in the board sets the selector, but an operator can export it
- * for the server process — and a measurement knob must not turn a file-scoped gate into a hard
- * merge blocker. So the gate resolves the conflict itself, in the selector's favour (it is the
- * more explicit request) and out loud, instead of emitting a pair the runner will reject.
+ * **#962 dropped the file scope under the impact selector; #967 keeps it.** The two were rival
+ * answers to "which suites", and `test-mine.mjs` refused the pair rather than silently discarding
+ * the file list — so the gate resolved the conflict itself, in the selector's favour. That was the
+ * right call for a rivalry, and the wrong one now: the selectors' MISSES are different in kind.
+ * `vitest related` is blind to runtime reach (spawned processes, fixtures, migrations) but its
+ * omissions are provably outside the import graph; the impact heuristic sees that reach through
+ * co-change/coverage/failure history but is a ranked bet under a floor and a budget. Dropping the
+ * file scope gave up `related`'s cheap safety on every impact run for nothing.
  *
- * Returns the operator-facing `note` alongside the decision — the DROPPED case must be visible,
- * and the caller then has one `if` and no ternary. That is not cosmetic: `runPreMergeGate` sits ON
- * the god-module gate's 25-branch ceiling (grandfathered at 37), where every branch a decision
- * costs at the call site is one the function cannot spend on the merge logic it exists for.
- * `note` is null exactly when there is nothing to say (no file scoping was decided at all).
+ * So the file scope is now emitted ALONGSIDE the selector, and `test-mine.mjs` derives the related
+ * suites and hands them to `impact.mjs select --union` — where they enter after the score floor
+ * (another selector's evidence is not subject to OUR floor) and before the budget cut (or "only
+ * these seconds" would be a lie). The budget therefore still holds over the union, which is the
+ * property the setting sells.
+ *
+ * `emitFileScope` is consequently just `fileScoped` today. It stays a named field rather than being
+ * collapsed away: it is what `GateTierInfo.fileScoped` records, and the whole point of #962 was
+ * that "what the scoping decision wanted" and "what reached the runner" are different questions.
+ *
+ * Returns the operator-facing `note` alongside the decision — the union case must be as visible as
+ * the dropped case was — and the caller then has one `if` and no ternary. That is not cosmetic:
+ * `runPreMergeGate` sits ON the god-module gate's 25-branch ceiling (grandfathered at 37), where
+ * every branch a decision costs at the call site is one the function cannot spend on the merge
+ * logic it exists for. `note` is null exactly when there is nothing to say (no file scoping at all).
  */
 export function resolveGateFileScopeEmission(args: {
   env: Record<string, string | undefined>;
@@ -351,25 +363,27 @@ export function resolveGateFileScopeEmission(args: {
   strategy?: VerifyGateStrategy;
   /** The project's test-impact budget — a THIRD route to the selector (#966). */
   budget?: ParsedTestImpactBudget | null;
-}): { selector: GateTestSelector; emitFileScope: boolean; note: string | null } {
+}): { selector: GateTestSelector; emitFileScope: boolean; unioned: boolean; note: string | null } {
   const selector = resolveGateTestSelector(args.env, args.strategy, args.budget);
-  const emitFileScope = args.fileScoped && selector !== "impact";
-  // Which of the three routes chose the selector, so the log line names the knob an operator
-  // would actually have to change. Under the `impact` TIER (or a budget) the file scope was
-  // never going to be emitted in the first place, so calling that a "dropped" scope would
-  // misdescribe it. The BUDGET is named first when both apply: it is the setting an operator
-  // most likely just changed, and it is the one visible in Settings.
-  const viaTier = args.strategy === "impact";
+  const emitFileScope = args.fileScoped;
+  // #967 — a run is UNIONED when both selectors contributed. That is the fact the message, the
+  // tier name and the ledger row all key off, so it is resolved once here rather than re-derived
+  // as `selector === "impact" && fileScoped` at each of the three sites.
+  const unioned = emitFileScope && selector === "impact";
+  // Which of the three routes chose the selector, so the log line names the knob an operator would
+  // actually have to change. The BUDGET is named first when both apply: it is the setting an
+  // operator most likely just changed, and it is the one visible in Settings.
+  const via = args.budget
+    ? `test_impact_budget=${args.budget.value}`
+    : args.strategy === "impact"
+      ? "verify_gate_strategy=impact"
+      : "KANBAN_TEST_SELECTOR=impact";
   const note = !args.fileScoped
     ? null
-    : emitFileScope
-      ? `file-scoping verify tests to ${args.changedFileCount} changed file(s)`
-      : args.budget
-        ? `test_impact_budget=${args.budget.value}, so the impact selection chooses the suites instead of the ${args.changedFileCount}-file scope — this run is recorded as impact-scoped, not full`
-        : viaTier
-          ? `verify_gate_strategy=impact, so the impact selection chooses the suites instead of the ${args.changedFileCount}-file scope — this run is recorded as impact-scoped, not full`
-          : `KANBAN_TEST_SELECTOR=impact is set, so the impact selection replaces the ${args.changedFileCount}-file scope — this run is recorded as impact-scoped, not full`;
-  return { selector, emitFileScope, note };
+    : unioned
+      ? `${via}, and the ${args.changedFileCount}-file scope is UNIONED into the impact selection rather than replaced (#967) — related-derived suites are exempt from the score floor but counted against the budget; this run is recorded as impact+related, not full`
+      : `file-scoping verify tests to ${args.changedFileCount} changed file(s)`;
+  return { selector, emitFileScope, unioned, note };
 }
 
 /**
@@ -416,6 +430,36 @@ export interface GateImpactSelection {
    * compared against. Undefined when the tool did not report one.
    */
   estMs?: number;
+  /**
+   * How many of the kept suites came from the OTHER selector rather than from the impact score
+   * (#967) — `signalCounts.external` in `select --json`, i.e. entries `--union` contributed that
+   * the impact ranking had not already picked.
+   *
+   * This is the provenance the ticket requires the message to state: `impact 143 + related added
+   * 12` is a materially different claim from `impact 155`, because the 12 carry no impact evidence
+   * at all — they are there because a second, differently-blind selector asked for them. Undefined
+   * when no union was passed (there is nothing to attribute); 0 when one was and the impact
+   * ranking had already picked every one of its suites, which is a real and worth-saying result.
+   */
+  externalCount?: number;
+  /**
+   * The run UNIONED a second selector in, but this DESCRIPTION could not reproduce that half
+   * (#967).
+   *
+   * Why the case exists at all. The gate's message is built from a second `select --json` call
+   * (`resolveGateSelection`), which is what keeps message and ledger from disagreeing about what the
+   * selection was. That call can pass everything the run passes — base, floor, budget — except one:
+   * the `--union` list, which is `vitest related`'s suite set for the changed files, derived by the
+   * RUNNER by booting a vitest instance per package. Reproducing it here would mean doing that
+   * inside the merge path, for a message.
+   *
+   * So the description covers the impact half exactly and the related half not at all. The numbers
+   * it reports are therefore a LOWER BOUND on what ran, and this flag is what makes the message say
+   * so. The alternative — printing `kept 143` for a run that executed 155 — is a level weakening
+   * verification invisibly in the one direction that flatters it, which is the failure this whole
+   * tier's messaging exists to prevent.
+   */
+  unionUnmeasured?: boolean;
 }
 
 /** Matches the test-file extensions `scripts/test-mine.mjs` actually runs. */
@@ -480,15 +524,17 @@ export function resolveImpactSelectorEnv(args: {
 }
 
 /**
- * Assemble the env the verify script runs under — the ONE place the three mutually-exclusive
- * scoping vocabularies are combined (#956).
+ * Assemble the env the verify script runs under — the ONE place the scoping vocabularies are
+ * combined (#956).
  *
- * There are exactly three ways this gate narrows the test half, and they do not compose freely:
+ * There are three ways this gate narrows the test half, and they still do not compose freely:
  * `KANBAN_TEST_GUARDS_ONLY` (docs-only, exits before anything else is consulted),
  * `KANBAN_TEST_SELECTOR=impact` + its base/new-file companions, and
- * `KANBAN_TEST_PACKAGES` (+ `KANBAN_TEST_FILES`). Getting the precedence wrong is silent in the
- * worst direction — `test-mine.mjs` REFUSES the selector+files pair outright, so an assembly bug
- * here turns a merge gate into a hard exit-2 rather than a wrong-but-visible run.
+ * `KANBAN_TEST_PACKAGES` (+ `KANBAN_TEST_FILES`). **The last two now COMPOSE (#967)**: the runner
+ * derives `vitest related`'s suites from the file list and unions them into the selection, so
+ * emitting both is the intended pairing rather than the exit-2 refusal #962 had to route around.
+ * Guards-only still excludes everything else — it exits before the selector is ever consulted, so
+ * naming a selection there would describe one that cannot happen.
  *
  * Pure, and here beside `resolveGateScoping` / `resolveGateFileScopeEmission` / the impact env,
  * so the whole decision is testable as a table and `runPreMergeGate` — which sits ON the
@@ -650,8 +696,23 @@ export function buildImpactSelectionNote(tierInfo: GateTierInfo): string | null 
       (selection.budgetDroppedCount ? `, dropped ${selection.budgetDroppedCount} over budget` : "") +
       ", "
     : "";
+  // #967 — the PROVENANCE of the kept set, when two selectors contributed. `selection kept 155`
+  // hides that 12 of them carry no impact evidence and are present only because `vitest related`
+  // asked for them; an operator judging whether to trust the selector needs the split, and #954's
+  // corpus is judging the COMBINED selector, so the message has to name what "combined" meant here.
+  //
+  // `unionUnmeasured` is the third case and the one that must never be silent: the run unioned a
+  // second selector in, but this description could not reproduce that half (see the field's doc),
+  // so every number here is a LOWER BOUND. Printing them bare would understate what ran — which is
+  // the flattering direction, and therefore the one that has to be labelled.
+  const kept =
+    selection.externalCount !== undefined
+      ? `selection kept ${selection.selectedCount} suite(s) (impact ${selection.selectedCount - selection.externalCount} + related added ${selection.externalCount})`
+      : selection.unionUnmeasured
+        ? `selection kept ${selection.selectedCount} impact suite(s) PLUS the \`vitest related\` scope (unioned at run time, not counted here — these figures are a lower bound)`
+        : `selection kept ${selection.selectedCount} suite(s)`;
   return (
-    `${budgetNote}selection kept ${selection.selectedCount} suite(s), dropped ${selection.belowFloorCount} below the score floor` +
+    `${budgetNote}${kept}, dropped ${selection.belowFloorCount} below the score floor` +
     (selection.selectionTier ? `, selection tier ${selection.selectionTier}` : "") +
     `, map ${selection.stale ? "STALE" : "fresh"}`
   );
@@ -680,7 +741,12 @@ export function buildGateTierMessage(tierInfo: GateTierInfo | null): string {
   const tier = tierInfo.guardsOnly
     ? "guards-only (docs-only diff)"
     : tierInfo.selector === "impact"
-      ? "impact-selected"
+      // #967 — a run whose suites came from BOTH selectors is not the same claim as one that came
+      // from the ranking alone, and the ledger records it under its own `ran` name for exactly that
+      // reason. The tier label has to match, or the message and the row describe different runs.
+      ? tierInfo.fileScoped
+        ? "impact+related"
+        : "impact-selected"
       : tierInfo.fileScoped
         ? "file-scoped"
         : tierInfo.packageScoped
@@ -697,7 +763,12 @@ export function buildGateTierMessage(tierInfo: GateTierInfo | null): string {
     // does not carry it — `full` + impact selector reads as "everything ran". A level may only
     // weaken verification VISIBLY, so the message says which selector was in charge. Saying
     // "selector: related" on every gate would be noise that trains the reader to skip the field.
-    ...(tierInfo.selector === "impact" && !tierInfo.guardsOnly ? ["selector: impact (heuristic)"] : []),
+    ...(tierInfo.selector === "impact" && !tierInfo.guardsOnly
+      // ASCII deliberately: this string travels through merge comments, PowerShell hosts and log
+      // files on a Windows box, and a `∪` came back mojibake from the first tool in that chain
+      // that guessed an encoding. A gate message that renders as `âˆª` is worse than a plain word.
+      ? [tierInfo.fileScoped ? "selector: impact (heuristic) UNION related" : "selector: impact (heuristic)"]
+      : []),
     // #956 — how many suites the selection kept, what it dropped below the floor, and whether the
     // map was fresh. Sits next to the selector name so the claim and its size read together.
     ...(impactNote ? [impactNote] : []),
