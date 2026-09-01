@@ -21,6 +21,10 @@
 // do NOT fold them in here.
 import { create } from "zustand";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
+import {
+  shouldAutoOpenWorkspacePanel,
+  type WorkspaceAutoOpenSelection,
+} from "../lib/workspaceAutoOpen.js";
 
 /** Workspace panel deep-link target (open a specific workspace/session). */
 export type WorkspaceInitial = { workspaceId: string; sessionId?: string } | null;
@@ -76,3 +80,37 @@ export const boardSelectionActions = {
   setWorkspaceOpenCreate: (open: boolean) =>
     useBoardSelectionStore.getState().setWorkspaceOpenCreate(open),
 };
+
+/** Current selection reduced to what the #973 auto-open decision needs. */
+export function captureWorkspaceAutoOpenSelection(): WorkspaceAutoOpenSelection {
+  const state = useBoardSelectionStore.getState();
+  return {
+    selectedIssueId: state.selectedIssue?.id ?? null,
+    workspaceIssueId: state.workspaceIssue?.id ?? null,
+  };
+}
+
+/**
+ * #973 — open the workspace drawer for a just-launched issue ONLY if the user
+ * has not moved on while the launch was in flight. `before` is the snapshot
+ * `captureWorkspaceAutoOpenSelection()` returned before the request was issued.
+ * Returns whether the panel was opened, so a caller can adapt its feedback.
+ */
+export function openWorkspacePanelIfUndisturbed(
+  before: WorkspaceAutoOpenSelection,
+  issue: IssueWithStatus,
+  initial: WorkspaceInitial,
+): boolean {
+  const allowed = shouldAutoOpenWorkspacePanel({
+    before,
+    after: captureWorkspaceAutoOpenSelection(),
+    launchedIssueId: issue.id,
+  });
+  if (!allowed) return false;
+  const state = useBoardSelectionStore.getState();
+  state.setSelectedIssue(null);
+  state.setWorkspaceIssue(issue);
+  state.setWorkspaceInitial(initial);
+  state.setWorkspaceOpenCreate(false);
+  return true;
+}
