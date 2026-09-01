@@ -104,7 +104,12 @@ export function parseTestImpactBudget(raw: string | null | undefined): ParsedTes
   return { value, ms };
 }
 
-/** True for a value the settings write path may accept (empty = clearing the setting = OK). */
+/**
+ * True for a value the settings write path may accept.
+ *
+ * An empty value is accepted deliberately: clearing the field IS how an operator turns the budget
+ * off, so rejecting it would leave no way back to the pre-#966 behaviour from the Settings UI.
+ */
 export function isValidTestImpactBudget(raw: string | null | undefined): boolean {
   const value = (raw ?? "").trim();
   return value.length === 0 || parseTestImpactBudget(value) !== null;
