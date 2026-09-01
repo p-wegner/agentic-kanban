@@ -429,8 +429,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     // `id`/`name`/`repoPath`/`createdAt`), and the route's own servicesConfig reflection
     // already assumed a fuller DTO — a bare handle made the client reject every settings
     // save as an API contract violation.
-    const updated = await getProjectById(id, database);
-    return updated ?? { id };
+    return (await getProjectById(id, database)) ?? { id };
   }
 
   async function deleteProject(id: string) {
