@@ -20,7 +20,13 @@ import {
   baseHealthProbeStartPrefKey,
   PROBE_MAX_DURATION_MS,
 } from "./base-branch-health.service.js";
-import { getLatestBaseBranchHealth, type BaseBranchHealthOutcome } from "../repositories/base-branch-health.repository.js";
+import {
+  getLatestBaseBranchHealth,
+  isBaseHealthAnswer,
+  type BaseBranchHealthOutcome,
+} from "../repositories/base-branch-health.repository.js";
+import { getProjectById } from "../repositories/project.repository.js";
+import { revParse } from "@agentic-kanban/shared/lib/git-service";
 import { getPreference } from "../repositories/preferences.repository.js";
 import { buildGateBusy } from "./jvm-build-semaphore.js";
 import {
@@ -82,11 +88,28 @@ export interface BaseHealthDueInput {
    * caller to re-derive the same disjunction and let the two drift.
    */
   gateBusy?: boolean;
+  /**
+   * The base branch's CURRENT sha, when resolvable (#978).
+   *
+   * Absent/null means "could not be read" and restores the pre-#978 behaviour exactly — the
+   * decision falls through to the interval. That fail-open is deliberate: an unreadable sha
+   * must cost an extra probe, never a skipped one, because the failure mode of the other
+   * direction is a base whose health is never re-measured.
+   */
+  currentSha?: string | null;
+  /** The sha the newest recorded result was measured at, or null when there is no history. */
+  lastResultSha?: string | null;
 }
 
 export interface BaseHealthDueVerdict {
   due: boolean;
-  reason: "no_history" | "interval_elapsed" | "probe_in_flight" | "recent_result" | "gate_running";
+  reason:
+    | "no_history"
+    | "interval_elapsed"
+    | "probe_in_flight"
+    | "recent_result"
+    | "gate_running"
+    | "sha_unchanged";
 }
 
 /**
@@ -116,6 +139,24 @@ export function isBaseHealthProbeDue(input: BaseHealthDueInput): BaseHealthDueVe
   const lastMs = input.lastResultAt ? Date.parse(input.lastResultAt) : NaN;
   if (!Number.isFinite(lastMs)) return { due: true, reason: "no_history" };
 
+  // 1a. #978 — the base has not MOVED since a probe last answered about it, so the answer is
+  //     still the answer and the 30-minute interval is measuring nothing. Master only moves on
+  //     a merge, so on a quiet board this removes essentially every probe run — and each one it
+  //     removes is a clone + install + full verify that was occupying the box's single verify
+  //     slot. #971's merge gate waited ~35 minutes behind exactly that.
+  //
+  //     Only an ANSWER (green/red) counts. A `timeout`/`unverified` at this sha means the probe
+  //     learned nothing about it, so re-probing the same sha is the point rather than a waste;
+  //     that case still falls through to the interval and to the timeout back-off below.
+  if (
+    input.currentSha
+    && input.lastResultSha
+    && input.currentSha === input.lastResultSha
+    && isBaseHealthAnswer(input.lastOutcome)
+  ) {
+    return { due: false, reason: "sha_unchanged" };
+  }
+
   // 2. A FUTURE `createdAt` (clock skew, a restored DB, a hand-written row) made
   //    `nowMs - lastMs` negative, which is always "< intervalMs" — so the sweep went silently
   //    dead for that project until wall-clock caught up. An unusable stamp is distrusted, not
@@ -132,6 +173,21 @@ export function isBaseHealthProbeDue(input: BaseHealthDueInput): BaseHealthDueVe
 
   if (ageMs < effectiveIntervalMs) return { due: false, reason: "recent_result" };
   return { due: true, reason: "interval_elapsed" };
+}
+
+/**
+ * The base branch's current sha, or null when it cannot be read (#978).
+ *
+ * Total by construction: an unregistered project, a moved checkout, a repo with no such branch
+ * and a git failure all yield null, which the decision treats as "no sha information" and
+ * falls back to the interval. It reads the same `revParse(repoPath, defaultBranch)` the probe
+ * itself uses to stamp the row, so the two shas are comparable by construction rather than by
+ * convention.
+ */
+async function resolveBaseBranchSha(projectId: string, database: Database): Promise<string | null> {
+  const project = await getProjectById(projectId, database).catch(() => null);
+  if (!project?.repoPath || !project.defaultBranch) return null;
+  return revParse(project.repoPath, project.defaultBranch).catch(() => null);
 }
 
 /**
@@ -153,6 +209,10 @@ export async function resolveBaseHealthProbeDue(
     intervalMs,
     lastResultAt: latest?.createdAt ?? null,
     lastOutcome: latest?.outcome ?? null,
+    lastResultSha: latest?.sha ?? null,
+    // #978 — read here rather than inside the decision, which stays pure. Every failure path
+    // yields null and so restores the interval-only behaviour; see `currentSha`'s comment.
+    currentSha: await resolveBaseBranchSha(projectId, database),
     probeStartedAt,
     // #957 — the machine-wide reading, not just this process's. See `resolveGateBusy`.
     gateBusy: resolveGateBusy(),
@@ -194,7 +254,10 @@ export async function requestBaseBranchReprobe(
     // and the ticket asks for exactly that. It is NOT allowed to override the two guards that
     // protect the machine: a probe already running (`probe_in_flight`) or a gate spending the
     // cores right now (`gate_running`). Those are why the starved verdict exists.
-    if (opts.ignoreRecency && !verdict.due && verdict.reason === "recent_result") {
+    // `sha_unchanged` joins `recent_result` here (#978): both are "we already know the
+    // answer", and an operator pressing re-probe is saying they do not believe it. The two
+    // machine-protecting reasons below still stand.
+    if (opts.ignoreRecency && !verdict.due && (verdict.reason === "recent_result" || verdict.reason === "sha_unchanged")) {
       verdict = { due: true, reason: "interval_elapsed" };
     }
     if (!verdict.due) {

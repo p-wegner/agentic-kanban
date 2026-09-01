@@ -242,6 +242,12 @@ ${tail(combined)}`,
       })),
       `base-branch health probe for project ${projectId}`,
       (waited) => { queueWaitMs = waited; },
+      undefined,
+      // #978 — the ONE background user of the box's verify slot. A merge gate has a person or
+      // the monitor blocked behind it; this is a measurement whose answer keeps until the slot
+      // is free. It is still bounded: a probe overtaken past the semaphore's background wait
+      // ceiling is promoted back to arrival order, so this is a delay and never starvation.
+      { priority: "background" },
     );
     const durationMs = Date.now() - startedAt;
     // #949: `durationMs` spans clone + install + QUEUE WAIT + run, and the wait can now be

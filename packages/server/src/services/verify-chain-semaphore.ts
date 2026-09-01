@@ -56,8 +56,67 @@ import {
   withMachineVerifyLock,
 } from "../lib/machine-verify-lock.js";
 
+/**
+ * Which CLASS of work a waiter is (#978).
+ *
+ * `gate` is a merge waiting to land — something a person or the monitor is blocked on.
+ * `background` is a measurement whose result is not time-critical: the base-branch health
+ * probe is the one that exists today. Measured 2026-09-01: #971's merge gate waited ~35
+ * minutes for this slot behind a base-health probe that was still writing `node_modules`,
+ * while the gate itself needed a fraction of that under the 120s impact budget. Both are
+ * legitimate users of the box's one verify slot; only one of them has someone waiting.
+ *
+ * `gate` is the DEFAULT so that every existing caller keeps the exact FIFO behaviour it had —
+ * a class nobody opts out of is a class that changes nothing.
+ */
+export type VerifyChainPriority = "gate" | "background";
+
+/**
+ * How long a `background` waiter may be overtaken before it is promoted to strict FIFO (#978).
+ *
+ * Priority without a starvation bound is how a background job waits forever: merges arrive in
+ * bursts on this board and each new gate would jump the probe indefinitely, so the base's
+ * health would silently stop being measured — the exact failure the probe exists to prevent,
+ * reached by "optimising" it. Past this bound the queue reverts to plain arrival order, so the
+ * worst case is a delay, never starvation.
+ */
+export function verifyChainBackgroundMaxWaitMs(): number {
+  const raw = Number.parseInt(process.env.KANBAN_VERIFY_CHAIN_BACKGROUND_MAX_WAIT_MS ?? "", 10);
+  return Number.isFinite(raw) && raw >= 0 ? raw : 30 * 60 * 1000;
+}
+
+interface VerifyChainWaiter {
+  resolve: () => void;
+  priority: VerifyChainPriority;
+  queuedAtMs: number;
+  label: string;
+}
+
 let active = 0;
-const waiters: Array<() => void> = [];
+const waiters: VerifyChainWaiter[] = [];
+
+/**
+ * Choose the next waiter to admit: a `gate` ahead of a `background` one, arrival order within
+ * a class, and strict arrival order once any `background` waiter has been overtaken for longer
+ * than {@link verifyChainBackgroundMaxWaitMs}.
+ *
+ * Pure and separable from the queue it serves, so the whole ordering policy — including the
+ * starvation escape — is a table of cases rather than something only reproducible by racing
+ * real 20-minute suites.
+ */
+export function chooseNextVerifyChainWaiter(
+  queue: Array<{ priority: VerifyChainPriority; queuedAtMs: number }>,
+  nowMs: number,
+  maxBackgroundWaitMs: number = verifyChainBackgroundMaxWaitMs(),
+): number {
+  if (queue.length === 0) return -1;
+  const starving = queue.some(
+    (w) => w.priority === "background" && nowMs - w.queuedAtMs >= maxBackgroundWaitMs,
+  );
+  if (starving) return 0; // the array is already in arrival order
+  const firstGate = queue.findIndex((w) => w.priority === "gate");
+  return firstGate === -1 ? 0 : firstGate;
+}
 
 /** Max concurrent verify CHAINS across the whole process. Env-overridable; clamped to >= 1. */
 export function verifyChainSemaphoreConcurrency(): number {
@@ -91,6 +150,7 @@ export function verifyChainSemaphoreQueueLength(): number {
 export async function runUnderVerifyChainSemaphoreTimed<T>(
   chain: () => Promise<T>,
   label?: string,
+  opts?: { priority?: VerifyChainPriority },
 ): Promise<{ result: T; queueWaitMs: number; lockNote: string | null }> {
   let queueWaitMs = 0;
   let lockNote: string | null = null;
@@ -99,6 +159,7 @@ export async function runUnderVerifyChainSemaphoreTimed<T>(
     label,
     (waited) => { queueWaitMs = waited; },
     (note) => { lockNote = note; },
+    opts,
   );
   return { result, queueWaitMs, lockNote };
 }
@@ -123,8 +184,13 @@ export async function runUnderVerifyChainSemaphore<T>(
   label?: string,
   onWaited?: (queueWaitMs: number) => void,
   onUnserialized?: (note: string) => void,
+  // An options OBJECT rather than a fifth positional flag (#978): this signature is already at
+  // the point where a reader cannot tell the two callbacks apart at a call site, and a bare
+  // `"background"` in fifth place would be unreadable. Only the base-health probe passes it.
+  opts?: { priority?: VerifyChainPriority },
 ): Promise<T> {
   const holder = label ?? "a verify chain";
+  const priority = opts?.priority ?? "gate";
   // #957 — the MACHINE lock wraps the in-process wait, so `queueWaitMs` covers both and a gate's
   // reported wait is the whole time it spent not-working rather than only the part this process
   // could see. `gate` is the role every consumer of THIS function takes, base-health probe
@@ -135,7 +201,7 @@ export async function runUnderVerifyChainSemaphore<T>(
   // the clone and install first. `MACHINE_VERIFY_ROLES.probe` is therefore the declared bound for
   // a caller that wants that behaviour, and nothing in the server takes it today.
   if (!machineVerifyLockEnabled()) {
-    return runUnderInProcessSemaphore(chain, holder, onWaited);
+    return runUnderInProcessSemaphore(chain, holder, priority, onWaited);
   }
   // The two waits are reported as ONE number, which is why the in-process half is captured here
   // rather than passed straight through: `runUnderInProcessSemaphore` calls `onWaited` with its
@@ -146,7 +212,7 @@ export async function runUnderVerifyChainSemaphore<T>(
   const outcome = await withMachineVerifyLock(
     MACHINE_VERIFY_ROLES.gate,
     holder,
-    () => runUnderInProcessSemaphore(chain, holder, (waited) => { inProcessWaitMs = waited; }),
+    () => runUnderInProcessSemaphore(chain, holder, priority, (waited) => { inProcessWaitMs = waited; }),
   );
   onWaited?.(outcome.waitedMs + inProcessWaitMs);
   // `gate.onTimeout` is `"proceed"`, so `ran` is always true here — but the type admits `false`
@@ -163,17 +229,18 @@ export async function runUnderVerifyChainSemaphore<T>(
 async function runUnderInProcessSemaphore<T>(
   chain: () => Promise<T>,
   label: string,
+  priority: VerifyChainPriority,
   onWaited?: (queueWaitMs: number) => void,
 ): Promise<T> {
   if (active >= verifyChainSemaphoreConcurrency()) {
     const queuedAt = Date.now();
     const ahead = waiters.length + active;
     console.log(
-      `[verify-chain] ${label} is QUEUED behind ${ahead} in-flight/waiting chain(s) — `
+      `[verify-chain] ${label} is QUEUED (${priority}) behind ${ahead} in-flight/waiting chain(s) — `
         + `serializing rather than running concurrently, because N full suites at 1/N speed finish no sooner `
         + `and starve each other (#949)`,
     );
-    await new Promise<void>((resolve) => waiters.push(resolve));
+    await new Promise<void>((resolve) => waiters.push({ resolve, priority, queuedAtMs: queuedAt, label }));
     const waited = Date.now() - queuedAt;
     onWaited?.(waited);
     console.log(`[verify-chain] ${label} acquired its slot after ${Math.round(waited / 1000)}s queued`);
@@ -185,8 +252,13 @@ async function runUnderInProcessSemaphore<T>(
     return await chain();
   } finally {
     active--;
-    const next = waiters.shift();
-    if (next) next();
+    // #978 — a merge someone is waiting on goes ahead of a background measurement, with a
+    // starvation escape back to arrival order. `chooseNextVerifyChainWaiter` owns the policy.
+    const index = chooseNextVerifyChainWaiter(waiters, Date.now());
+    if (index >= 0) {
+      const [next] = waiters.splice(index, 1);
+      next?.resolve();
+    }
   }
 }
 

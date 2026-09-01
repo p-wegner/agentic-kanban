@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  chooseNextVerifyChainWaiter,
   resetVerifyChainSemaphoreForTests,
   runUnderVerifyChainSemaphore,
   runUnderVerifyChainSemaphoreTimed,
@@ -267,4 +268,61 @@ describe("verify-chain-semaphore + the machine lock (#957)", () => {
     expect(result).toBe("done");
     expect(queueWaitMs).toBeGreaterThan(0);
   }, 20_000);
+});
+
+describe("#978: a merge gate is admitted ahead of a background measurement", () => {
+  const MIN = 60_000;
+  const q = (priority: "gate" | "background", agoMin: number) => ({ priority, queuedAtMs: -agoMin * MIN });
+
+  it("picks the first GATE waiter even when a background one arrived first", () => {
+    // The observed case: #971's gate queued ~35 min behind a base-health probe. Both are
+    // legitimate users of the one slot; only one has someone blocked behind it.
+    const queue = [q("background", 5), q("gate", 3), q("gate", 1)];
+    expect(chooseNextVerifyChainWaiter(queue, 0, 30 * MIN)).toBe(1);
+  });
+
+  it("keeps arrival order WITHIN the gate class", () => {
+    expect(chooseNextVerifyChainWaiter([q("gate", 3), q("gate", 9)], 0, 30 * MIN)).toBe(0);
+  });
+
+  it("reverts to strict arrival order once a background waiter has been overtaken too long", () => {
+    // Merges arrive in bursts here, so priority without a starvation bound is how the base's
+    // health silently stops being measured — the failure the probe exists to prevent, reached
+    // by optimising it.
+    const queue = [q("background", 31), q("gate", 2)];
+    expect(chooseNextVerifyChainWaiter(queue, 0, 30 * MIN)).toBe(0);
+  });
+
+  it("promotes on the OLDEST background waiter, not on the head of the queue", () => {
+    const queue = [q("gate", 4), q("background", 45), q("gate", 1)];
+    expect(chooseNextVerifyChainWaiter(queue, 0, 30 * MIN)).toBe(0);
+  });
+
+  it("takes the head when nothing is a gate", () => {
+    expect(chooseNextVerifyChainWaiter([q("background", 5), q("background", 2)], 0, 30 * MIN)).toBe(0);
+  });
+
+  it("reports -1 for an empty queue", () => {
+    expect(chooseNextVerifyChainWaiter([], 0, 30 * MIN)).toBe(-1);
+  });
+
+  it("`gate` is the default, so an existing caller's behaviour is unchanged", async () => {
+    // Every pre-#978 call site omits the option. If the default were `background`, the first
+    // opt-in would silently demote all of them.
+    resetVerifyChainSemaphoreForTests();
+    const order: string[] = [];
+    let releaseFirst: (() => void) | null = null;
+    const first = runUnderVerifyChainSemaphore(
+      () => new Promise<void>((resolve) => { releaseFirst = () => { order.push("first"); resolve(); }; }),
+      "first",
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    const second = runUnderVerifyChainSemaphore(async () => { order.push("second"); }, "second");
+    const third = runUnderVerifyChainSemaphore(async () => { order.push("third"); }, "third");
+    await new Promise((r) => setTimeout(r, 0));
+    releaseFirst!();
+    await Promise.all([first, second, third]);
+
+    expect(order).toEqual(["first", "second", "third"]);
+  });
 });
