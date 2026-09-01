@@ -33,6 +33,7 @@ export function projectSettingsFixture(overrides: Partial<ProjectSettingsState> 
     setupEnabled: true,
     teardownScript: "",
     verifyScript: "",
+    testImpactBudget: "",
     color: null,
     symlinkEnabled: false,
     symlinkDirs: "",

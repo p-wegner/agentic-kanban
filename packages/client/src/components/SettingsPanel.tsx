@@ -9,7 +9,7 @@ import { applyPreflightResult, CODEX_DEFAULT_PROFILE, COPILOT_DEFAULT_PROFILE, D
 // Pure core of this panel — the project-row projection, the PATCH body, the settings blob and
 // the default-branch rule (#782). This is the client's most-reworked file; those four were the
 // parts of it that never needed React, and they now have tests.
-import { buildProjectPatchBody, buildProjectSettingsState, buildSettingsToSave, isDefaultBranchInvalid, verifyScriptKey, type SettingsProjectRow } from "../lib/settingsPanelState.js";
+import { buildProjectPatchBody, buildSettingsToSave, emptyProjectSettingsState, hydrateProjectSettings, isDefaultBranchInvalid, projectSettingsSaveError, type SettingsProjectRow } from "../lib/settingsPanelState.js";
 import { allowedProfilesPrefKey, parseProfileAllowlist } from "@agentic-kanban/shared/lib/profile-allowlist";
 import { parseDisabledTools, withToolDisabled } from "../lib/mcp-tool-toggle.js";
 import { useTagsEditor } from "../hooks/useTagsEditor.js";
@@ -46,23 +46,7 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
   const [tab, setTab] = useState<Tab>("agent");
 
   // Project-specific settings
-  const [projectSettings, setProjectSettings] = useState<ProjectSettingsState>({
-    defaultBranch: "",
-    setupScript: "",
-    setupBlocking: true,
-    setupEnabled: true,
-    teardownScript: "",
-    verifyScript: "",
-    color: null,
-    symlinkEnabled: false,
-    symlinkDirs: "",
-    defaultSkillId: null,
-    servicesEnabled: false,
-    servicesComposeFile: "",
-    servicesComposeRepo: "",
-    servicesPorts: "",
-    servicesConfigBase: null,
-  });
+  const [projectSettings, setProjectSettings] = useState<ProjectSettingsState>(emptyProjectSettingsState);
   const [projectBranches, setProjectBranches] = useState<{ local: string[]; remote: string[] } | null>(null);
   const [generatingScript, setGeneratingScript] = useState(false);
   const [generatingTeardown, setGeneratingTeardown] = useState(false);
@@ -187,7 +171,7 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
               if (cancelled) return;
               const project = projects.find((p) => p.id === activeProjectId);
               if (project) {
-                setProjectSettings(buildProjectSettingsState(project, data[verifyScriptKey(activeProjectId)] || ""));
+                setProjectSettings(hydrateProjectSettings(project, data, activeProjectId));
               }
             })
             .catch(() => { /* use defaults for project settings */ });
@@ -271,8 +255,9 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
   }
 
   async function handleSave() {
-    if (defaultBranchInvalid) {
-      showToast("Default branch does not exist in this repo", "error");
+    const saveError = projectSettingsSaveError(projectSettings, projectBranches);
+    if (saveError) {
+      showToast(saveError, "error");
       return;
     }
     setSaving(true);

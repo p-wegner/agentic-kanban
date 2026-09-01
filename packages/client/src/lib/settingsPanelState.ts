@@ -1,5 +1,8 @@
 import type { ServiceStackConfig } from "@agentic-kanban/shared";
+import { isValidTestImpactBudget, testImpactBudgetPrefKey } from "@agentic-kanban/shared/lib/test-impact-budget";
 import { buildServicesConfig, type ServicesConfigFormFields } from "./services-config.js";
+
+export { isValidTestImpactBudget, testImpactBudgetPrefKey } from "@agentic-kanban/shared/lib/test-impact-budget";
 
 /**
  * The pure core of `components/SettingsPanel.tsx` (#782).
@@ -31,6 +34,8 @@ export type ProjectSettingsState = {
   setupEnabled: boolean;
   teardownScript: string;
   verifyScript: string;
+  /** #966 — `test_impact_budget_<projectId>`. Empty = off (today's behaviour exactly). */
+  testImpactBudget: string;
   color: string | null;
   symlinkEnabled: boolean;
   symlinkDirs: string;
@@ -60,7 +65,12 @@ export type SettingsProjectRow = {
  * so a row from an older server does not silently flip a project's behaviour. Nullable
  * text columns become `""` because they are bound to controlled inputs.
  */
-export function buildProjectSettingsState(project: SettingsProjectRow, verifyScript: string): ProjectSettingsState {
+export function buildProjectSettingsState(
+  project: SettingsProjectRow,
+  verifyScript: string,
+  /** #966 — the `test_impact_budget_<id>` pref. Optional so existing callers/tests are unchanged. */
+  testImpactBudget = "",
+): ProjectSettingsState {
   const svc = project.servicesConfig ?? null;
   return {
     defaultBranch: project.defaultBranch || "",
@@ -69,6 +79,7 @@ export function buildProjectSettingsState(project: SettingsProjectRow, verifyScr
     setupEnabled: project.setupEnabled !== false,
     teardownScript: project.teardownScript || "",
     verifyScript,
+    testImpactBudget,
     color: project.color || null,
     symlinkEnabled: project.symlinkEnabled === true,
     symlinkDirs: project.symlinkDirs || "",
@@ -88,8 +99,8 @@ export function buildProjectSettingsState(project: SettingsProjectRow, verifyScr
  * `""` to null so clearing an input clears the column rather than storing an empty string
  * the server would then treat as "configured".
  *
- * `verifyScript` is deliberately absent: it is a PREFERENCE, saved with the settings blob
- * (see `buildSettingsToSave`), not a project column.
+ * `verifyScript` and `testImpactBudget` are deliberately absent: both are PREFERENCES, saved
+ * with the settings blob (see `buildSettingsToSave`), not project columns.
  */
 export function buildProjectPatchBody(p: ProjectSettingsState) {
   return {
@@ -120,24 +131,73 @@ export function isDefaultBranchInvalid(defaultBranch: string, branches: { local:
   return !branches.local.includes(value);
 }
 
-/** The preference key holding a project's verify script. */
+/**
+ * The preference key holding a project's verify script.
+ *
+ * Hand-built, and the reason it is worth NOT copying: this string exists a second time on the
+ * server (`verify_script_<id>`) with nothing tying the two together — the drift the ticket for
+ * #966 names explicitly. The budget key below is therefore imported from the shared key family
+ * rather than spelled again here.
+ */
 export function verifyScriptKey(projectId: string): string {
   return `verify_script_${projectId}`;
 }
 
 /**
- * The settings blob to PUT: the panel's settings plus the active project's verify script,
- * which is edited on the Project tab but stored as a per-project preference. Returns a copy —
- * the caller's state object is never mutated.
+ * The form state before any project has loaded — every field at the value an absent row implies.
+ *
+ * Derived from `buildProjectSettingsState` rather than written out again: the panel's own initial
+ * `useState` literal was a THIRD hand-maintained copy of the field list (after this type and the
+ * projection), and a field added to one and not the others is invisible to tsc when the literal
+ * is complete but wrong. `setupBlocking`/`setupEnabled` default ON and `symlinkEnabled` OFF here
+ * for the same reason they do in the projection — that asymmetry is the contract.
+ */
+export function emptyProjectSettingsState(): ProjectSettingsState {
+  return buildProjectSettingsState({ id: "", defaultBranch: null, setupScript: null, setupBlocking: true, color: null }, "");
+}
+
+/**
+ * Hydrate the form state from a project row plus the fetched settings blob — i.e. `buildProjectSettingsState`
+ * with the per-project PREFERENCE reads folded in, so the component names neither key.
+ */
+export function hydrateProjectSettings(project: SettingsProjectRow, prefs: Record<string, string>, projectId: string): ProjectSettingsState {
+  return buildProjectSettingsState(project, prefs[verifyScriptKey(projectId)] || "", prefs[testImpactBudgetPrefKey(projectId)] || "");
+}
+
+/**
+ * The reason a settings save must be REFUSED, or null when it may proceed.
+ *
+ * #966 refuses rather than coerces an unparseable budget: applying no budget would leave the
+ * operator believing the gate is capped when it is not, and silently defaulting one would narrow
+ * the gate on a typo — worse still.
+ */
+export function projectSettingsSaveError(
+  p: Pick<ProjectSettingsState, "defaultBranch" | "testImpactBudget">,
+  branches: { local: string[]; remote: string[] } | null,
+): string | null {
+  if (isDefaultBranchInvalid(p.defaultBranch, branches)) return "Default branch does not exist in this repo";
+  if (!isValidTestImpactBudget(p.testImpactBudget)) return 'Test-impact budget must look like "60s", "90000ms" or "2m" (or be empty)';
+  return null;
+}
+
+/**
+ * The settings blob to PUT: the panel's settings plus the active project's per-project
+ * PREFERENCES that are edited on the Project tab (the verify script, and the test-impact budget
+ * since #966). Returns a copy — the caller's state object is never mutated.
+ *
+ * The budget is written even when empty, deliberately: an empty value is how the setting is
+ * CLEARED, and omitting the key would leave a previously-set budget in place while the field the
+ * operator just emptied says otherwise.
  */
 export function buildSettingsToSave<S extends Record<string, unknown>>(
   settings: S,
-  projectSettings: Pick<ProjectSettingsState, "verifyScript">,
+  projectSettings: Pick<ProjectSettingsState, "verifyScript" | "testImpactBudget">,
   activeProjectId: string | null | undefined,
 ): S {
   const out = { ...settings };
   if (activeProjectId) {
     (out as Record<string, unknown>)[verifyScriptKey(activeProjectId)] = projectSettings.verifyScript;
+    (out as Record<string, unknown>)[testImpactBudgetPrefKey(activeProjectId)] = projectSettings.testImpactBudget.trim();
   }
   return out;
 }
