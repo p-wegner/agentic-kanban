@@ -66,6 +66,17 @@ describe("the gate message names each verify STEP's duration (#988)", () => {
     expect(msg).toContain("steps: tests 100s + 40s unaccounted");
   });
 
+  it("names which run the steps describe when a flake retry produced the verdict", () => {
+    // The steps come from the full run that FAILED — the targeted retry reports none of its own.
+    // Beside a PASSED verdict they would otherwise read as the cost of the run that passed.
+    const msg = buildGateTierMessage({
+      ...base,
+      flakeRetryNote: "— 1 suite(s) failed under load and PASSED on a targeted re-run: foo.test.ts",
+      stepTimings: [{ name: "tests", seconds: 118 }],
+    });
+    expect(msg).toContain("steps: tests 118s, from the run before the retry");
+  });
+
   it("still carries every pre-existing clause — the step note is additive", () => {
     // The message is the one place several tickets' visibility rules meet, so a new clause
     // that displaced an old one would silently undo another ticket's fix.

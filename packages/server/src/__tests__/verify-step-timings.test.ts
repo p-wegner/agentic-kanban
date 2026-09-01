@@ -1,3 +1,5 @@
+// @gate:always-run — the round-trip block below reads the repo's own gate scripts off disk, so
+// it asserts a property of the tree that its own imports cannot reach (#988).
 /**
  * The `[gate:step]` contract between a verify script and the merge gate (#988).
  *
@@ -6,6 +8,9 @@
  * unable to render as if it had not.
  */
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseVerifyStepTimings, buildStepTimingNote } from "../services/verify-step-timings.js";
 
 describe("parseVerifyStepTimings", () => {
@@ -75,6 +80,55 @@ describe("parseVerifyStepTimings", () => {
     expect(parseVerifyStepTimings(stdout)).toHaveLength(4);
     expect(parseVerifyStepTimings(stdout).every((s) => s.scope === "full")).toBe(true);
   });
+
+  it("collapses a repeated name LAST-WINS, keeping its first position", () => {
+    // #169's install retry re-runs the whole script into ONE stdout buffer, so a duplicated
+    // `tests` is the normal case, not a corruption — and the second run is the one whose cost
+    // the verdict describes. Position stays at first appearance because the clause claims to
+    // show EXECUTION order: a re-run must not reorder the pipeline it is reporting.
+    const steps = parseVerifyStepTimings(
+      [
+        "[gate:step] name=arch seconds=25",
+        "[gate:step] name=tests seconds=118 scope=full",
+        "[gate:step] name=tests seconds=131 scope=full",
+      ].join("\n"),
+    );
+    expect(steps.map((s) => s.name)).toEqual(["arch", "tests"]);
+    expect(steps.find((s) => s.name === "tests")?.seconds).toBe(131);
+  });
+
+  it("a step's own console.log at column 0 cannot append a phantom step", () => {
+    // The marker is anchored, so a mid-line mention is already inert — but a suite that ECHOES
+    // the contract prints it at column 0, and this repo has exactly such suites. Because the
+    // message is PERSISTED as the merge verdict, an injected line must not be able to add a
+    // step; the dedup makes the echo collapse onto the real one instead.
+    const steps = parseVerifyStepTimings(
+      [
+        "[gate:step] name=typecheck seconds=35",
+        " Test Files  412 passed (412)",
+        "[gate:step] name=tests seconds=118 scope=full",
+        // a suite printing the contract verbatim as part of its own output
+        "[gate:step] name=tests seconds=1",
+      ].join("\n"),
+    );
+    expect(steps.map((s) => s.name)).toEqual(["typecheck", "tests"]);
+    expect(steps).toHaveLength(2);
+  });
+
+  it("caps the step count, so injected junk cannot grow the persisted message without bound", () => {
+    const stdout = Array.from({ length: 40 }, (_, i) => `[gate:step] name=junk${i} seconds=1`).join("\n");
+    expect(parseVerifyStepTimings(stdout).length).toBeLessThanOrEqual(8);
+  });
+
+  it("still updates an ALREADY-SEEN step past the cap — a real retry is not junk", () => {
+    // The cap drops new NAMES, not new values: an install retry's second run arrives after
+    // arbitrarily much output, and it must still be able to overwrite its own steps.
+    const stdout = [
+      ...Array.from({ length: 20 }, (_, i) => `[gate:step] name=junk${i} seconds=1`),
+      "[gate:step] name=junk0 seconds=99",
+    ].join("\n");
+    expect(parseVerifyStepTimings(stdout).find((s) => s.name === "junk0")?.seconds).toBe(99);
+  });
 });
 
 describe("buildStepTimingNote", () => {
@@ -119,5 +173,73 @@ describe("buildStepTimingNote", () => {
 
   it("omits the tail entirely when the run was never timed", () => {
     expect(buildStepTimingNote([{ name: "tests", seconds: 100 }])).toBe("steps: tests 100s");
+  });
+
+  it("says which run it describes when a flake retry produced the verdict", () => {
+    // The retry reports no steps of its own (a subset's clock would understate the floor), so
+    // these belong to the FULL run that FAILED. Unqualified beside a PASSED verdict they read as
+    // the cost of the run that passed — the same conflation `+ Ns unaccounted` exists to prevent.
+    expect(buildStepTimingNote([{ name: "tests", seconds: 118 }], undefined, true)).toBe(
+      "steps: tests 118s, from the run before the retry",
+    );
+  });
+
+  it("stays unqualified on the ordinary path — the note is for the exceptional case", () => {
+    expect(buildStepTimingNote([{ name: "tests", seconds: 118 }], undefined, false)).toBe("steps: tests 118s");
+  });
+});
+
+/**
+ * The two halves of the contract, checked against EACH OTHER (#988).
+ *
+ * `gate-step-emitters.test.ts` guards that each script still emits a line, but it does so with a
+ * substring match on the source — so a drift INSIDE the template passes it while the parser drops
+ * the step. `seconds=${n}s` is the concrete case: the guard sees `[gate:step] name=tests seconds=`
+ * and is happy, `Number("12s")` is NaN, the step is discarded, and the gate message silently loses
+ * a clause. Only realizing the emitter's own template and parsing it catches that.
+ */
+describe("emitter templates round-trip through the parser (#988)", () => {
+  const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
+
+  /**
+   * Pull each `[gate:step] …` template literal out of a script and realize it: every `${…}`
+   * substitution becomes a plausible runtime value. `seconds` gets a bare integer (what
+   * `Math.round(ms / 1000)` yields) and anything else a word, so the assertion is about the
+   * template's SHAPE — the literal text around the holes — which is what can drift.
+   */
+  function realizedStepLines(rel: string): string[] {
+    const source = readFileSync(join(REPO_ROOT, rel), "utf8");
+    // `name=` is required in the match, not just `[gate:step]`: each of these files also MENTIONS
+    // the marker in backtick-quoted prose ("the `[gate:step]` line the gate parses"), and a doc
+    // sentence is not an emitter — matching it would fail this test for a file that is correct.
+    return [...source.matchAll(/`(\[gate:step\][^`]*name=[^`]*)`/g)].map(([, template]) =>
+      template.replace(/\$\{[^}]*\}/g, (_hole, offset: number) =>
+        /seconds=$/.test(template.slice(0, offset)) ? "37" : "somescope",
+      ),
+    );
+  }
+
+  it.each([
+    ["scripts/check-arch.mjs", "arch"],
+    ["scripts/typecheck.mjs", "typecheck"],
+    ["scripts/test-mine.mjs", "tests"],
+  ])("%s's emitted line parses back to a step named %s", (rel, stepName) => {
+    const lines = realizedStepLines(rel);
+    expect(lines, `${rel} has no [gate:step] template literal`).not.toHaveLength(0);
+    for (const line of lines) {
+      const parsed = parseVerifyStepTimings(line);
+      expect(parsed, `${rel} emits \`${line}\`, which the gate's own parser discards`).toHaveLength(1);
+      expect(parsed[0].name).toBe(stepName);
+      // The number has to survive as a number — this is the `seconds=12.4s` drift the static
+      // emitter guard cannot see.
+      expect(Number.isFinite(parsed[0].seconds)).toBe(true);
+      expect(parsed[0].seconds).toBe(37);
+    }
+  });
+
+  it("the realizer would CATCH a unit suffix — the failure this test exists for", () => {
+    // A negative control: without it, a green above could mean the realizer never substitutes
+    // anything and every template trivially "parses".
+    expect(parseVerifyStepTimings("[gate:step] name=tests seconds=37s")).toEqual([]);
   });
 });

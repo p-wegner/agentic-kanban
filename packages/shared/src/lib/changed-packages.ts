@@ -49,6 +49,11 @@ const GLOBAL_SCOPE_BREAKERS: ReadonlyArray<RegExp> = [
   // packages get typechecked and with what cache, so a diff touching it cannot be scoped by a
   // map that only models source ownership.
   /^scripts\/typecheck\.mjs$/,
+  // #988 — and both of those spawn pnpm through this one, as does `test-mine.mjs`. It resolves
+  // HOW pnpm is invoked at all (`npm_execpath` vs a `pnpm.cmd` shell fallback), so breaking it
+  // breaks every sub-step of the gate at once — the same "decides what the gate runs" rationale
+  // as the three scripts above, one level down.
+  /^scripts\/pnpm-exec\.mjs$/,
   /^scripts\/build-.*\.mjs$/,
   /^scripts\/copy-assets\.mjs$/,
   // #643: the breakers above are ROOT-anchored, so a PER-PACKAGE `package.json` or

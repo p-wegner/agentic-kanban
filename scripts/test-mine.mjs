@@ -88,7 +88,7 @@
 // where they are exempt from the score floor but still counted against the budget.
 
 import { spawn, spawnSync, execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeSync } from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, relative, resolve } from "node:path";
@@ -1402,6 +1402,14 @@ if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
    * `scope` is the honesty half. A run narrowed to guards or to an impact selection cost less
    * BECAUSE it checked less, and a bare `tests 40s` beside a `tier: guards-only` gate would
    * invite exactly the wrong conclusion about the floor.
+   *
+   * Written with `writeSync(1, …)`, NOT `console.log`. Every branch below ends in an explicit
+   * `process.exit()`, and on Linux stdout to a pipe is ASYNC — which is what the gate uses, since
+   * `runSetupScript` spawns with `stdio: "pipe"` and the board also supports containerized verify.
+   * A `console.log` queued from an exit handler is discarded when the process exits before the
+   * write drains, so the step line would vanish for exactly the callers that parse it, and its
+   * absence reads as "this project reports no steps" rather than "the write was lost". `writeSync`
+   * hits the fd before `exit` returns.
    * ---------------------------------------------------------------------- */
   const stepStartedAt = Date.now();
   // Package scoping is the BASE, not a mode: every branch below runs inside whatever
@@ -1410,7 +1418,11 @@ if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
   // scope it selected within, and naming both would be two labels for one run.
   let stepScope = toRun !== PACKAGES ? "package-scoped" : "full";
   process.once("exit", () => {
-    console.log(`[gate:step] name=tests seconds=${Math.round((Date.now() - stepStartedAt) / 1000)} scope=${stepScope}`);
+    // Never let the report itself be the reason a run fails: a closed/broken fd (EPIPE from a
+    // `| head`, a detached parent) must lose the line, not throw out of an exit handler.
+    try {
+      writeSync(1, `[gate:step] name=tests seconds=${Math.round((Date.now() - stepStartedAt) / 1000)} scope=${stepScope}\n`);
+    } catch {}
   });
 
   const treeBefore = treeSnapshot();
@@ -1559,6 +1571,11 @@ if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
   }
   if (impactScope) {
     const { planned, total, namedOverall, excludedCount } = impactPlan;
+    // `impact-selected` matches the TIER name the gate message prints a few clauses earlier
+    // (`pre-merge-gate-tier.ts`), which is what a reader compares this against. The test-impact
+    // LEDGER spells the same run `impact-scoped` (`test-impact-outcome.service.ts`) — deliberately
+    // not aligned here: that is a persisted corpus vocabulary whose historical rows must keep
+    // meaning what they meant, so it is renamed only with a migration, never to match a log line.
     stepScope = scopedFiles.length > 0 ? "impact+related" : "impact-selected";
     console.log(
       `\n[test:mine] ${scopedFiles.length > 0 ? "impact+related-scoped" : "impact-scoped"} to ${total} suite(s) ` +

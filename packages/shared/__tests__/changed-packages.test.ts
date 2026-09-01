@@ -45,6 +45,9 @@ describe("scopedTestPackages", () => {
     // of what the gate runs, exactly like test-mine.mjs above.
     ["scripts/check-arch.mjs"],
     ["scripts/typecheck.mjs"],
+    // #988 — all three of the above spawn pnpm through this one, so it decides how the gate's
+    // sub-steps are invoked at all.
+    ["scripts/pnpm-exec.mjs"],
     ["scripts/build-server.mjs"],
     ["scripts/copy-assets.mjs"],
   ])("refuses to scope when the diff touches the global config %s", (file) => {

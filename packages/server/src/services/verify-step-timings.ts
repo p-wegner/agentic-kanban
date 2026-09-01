@@ -51,6 +51,19 @@ const STEP_LINE = /^\s*\[gate:step\]\s+(.+?)\s*$/;
 const FIELD = /(\w+)=(?:"([^"]*)"|(\S+))/g;
 
 /**
+ * Most steps a gate message will name. A verify chain is a handful of commands; this repo's is
+ * three. The cap is not about memory — it is about what a FABRICATED line can do to the message.
+ *
+ * The marker is anchored, but "anchored" only rules out a mid-line match: a test whose own
+ * output prints a literal `[gate:step] …` at column 0 (this repo has suites that echo the
+ * contract, and any project's verify script may print anything) would otherwise append a step to
+ * a message that is PERSISTED as the merge verdict. Capping bounds that to a few junk entries
+ * instead of an unbounded wall of them, and the dedup below means a repeated injection collapses
+ * rather than accumulating.
+ */
+const MAX_STEPS = 8;
+
+/**
  * Parse every `[gate:step]` line out of a verify run's output.
  *
  * Order is the order the lines appeared, i.e. execution order — NOT sorted by duration the way
@@ -60,10 +73,17 @@ const FIELD = /(\w+)=(?:"([^"]*)"|(\S+))/g;
  *
  * A malformed line (no `name`, no numeric `seconds`) is DROPPED rather than reported as a
  * zero-second step — a step that claims 0s reads as "free", which is the flattering direction.
+ *
+ * A repeated `name` is LAST-WINS, keeping the position of its first appearance. Two sources
+ * produce duplicates and they want the same answer: an install retry re-runs the whole script
+ * into one stdout buffer (the second run is the one whose cost the verdict describes), and a
+ * suite that echoes the contract in its own output would otherwise append a phantom second
+ * `tests`. Order is held at first appearance because that is the EXECUTION order the clause
+ * claims to show — a re-run must not reorder the pipeline.
  */
 export function parseVerifyStepTimings(output: string | undefined | null): VerifyStepTiming[] {
   if (!output) return [];
-  const steps: VerifyStepTiming[] = [];
+  const byName = new Map<string, VerifyStepTiming>();
   for (const rawLine of output.split(/\r?\n/)) {
     const marker = STEP_LINE.exec(rawLine);
     if (!marker) continue;
@@ -76,10 +96,16 @@ export function parseVerifyStepTimings(output: string | undefined | null): Verif
     const name = fields.get("name");
     const seconds = Number(fields.get("seconds"));
     if (!name || !Number.isFinite(seconds) || seconds < 0) continue;
+    // Past the cap, only an already-seen step may be UPDATED — a new name is dropped. So a
+    // legitimate chain's install-retry re-run still overwrites its own steps however long the
+    // output is, while injected junk cannot keep growing the message.
+    if (!byName.has(name) && byName.size >= MAX_STEPS) continue;
     const scope = fields.get("scope");
-    steps.push({ name, seconds: Math.round(seconds), ...(scope ? { scope } : {}) });
+    byName.set(name, { name, seconds: Math.round(seconds), ...(scope ? { scope } : {}) });
   }
-  return steps;
+  // Map preserves insertion order, and re-`set`ting an existing key does not move it — so this
+  // is first-appearance order with last-seen values, which is exactly the rule above.
+  return [...byName.values()];
 }
 
 /**
@@ -96,7 +122,16 @@ export function parseVerifyStepTimings(output: string | undefined | null): Verif
  * the `PassReport` convention already does with the same problem, and it is the honest shape:
  * a reader can see that the named steps do not add up to the run.
  */
-export function buildStepTimingNote(steps: VerifyStepTiming[], totalRunMs?: number): string | null {
+export function buildStepTimingNote(
+  steps: VerifyStepTiming[],
+  totalRunMs?: number,
+  /**
+   * True when a targeted flake retry produced the verdict (#894). The steps then belong to the
+   * FULL run that failed — the retry reports none of its own — so the clause says which run it is
+   * describing rather than letting the numbers read as the cost of the run that passed.
+   */
+  fromPreRetryRun = false,
+): string | null {
   if (steps.length === 0) return null;
   const parts = steps.map((s) => `${s.name} ${s.seconds}s${s.scope ? ` (${s.scope})` : ""}`);
   const reported = steps.reduce((sum, s) => sum + s.seconds, 0);
@@ -106,5 +141,6 @@ export function buildStepTimingNote(steps: VerifyStepTiming[], totalRunMs?: numb
     totalRunMs !== undefined && Math.round(totalRunMs / 1000) - reported >= 1
       ? ` + ${Math.round(totalRunMs / 1000) - reported}s unaccounted`
       : "";
-  return `steps: ${parts.join(", ")}${unaccounted}`;
+  const provenance = fromPreRetryRun ? ", from the run before the retry" : "";
+  return `steps: ${parts.join(", ")}${unaccounted}${provenance}`;
 }

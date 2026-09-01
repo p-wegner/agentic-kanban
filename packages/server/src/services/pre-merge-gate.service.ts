@@ -475,15 +475,22 @@ export async function runPreMergeGate(
     let lastVerifyRunMs: number | undefined;
     const runVerify = async () => {
       noteMergeGatePhase(workspace.id, "verify");
-      const startedAt = Date.now();
-      const result = await runUnderBuildSemaphore(() =>
-        runSetupScript(workingDir, verifyScript!, { timeoutMs: verifyTimeoutMs, env: verifyEnv }).catch((e) => ({
+      // Started INSIDE the semaphore callback, not before it. `runUnderBuildSemaphore` can hold
+      // this task for minutes behind another workspace's build, and timing from out here would
+      // book that queue wait into `verifyRunMs` — which the message then prints as
+      // `+ Ns unaccounted`, i.e. as time the SCRIPT spent between its steps. That is precisely
+      // the conflation the clause exists to prevent, and it is already reported separately and
+      // honestly as `queued Ns behind another verification` (#949).
+      let startedAt = Date.now();
+      const result = await runUnderBuildSemaphore(() => {
+        startedAt = Date.now();
+        return runSetupScript(workingDir, verifyScript!, { timeoutMs: verifyTimeoutMs, env: verifyEnv }).catch((e) => ({
           exitCode: 1,
           stdout: "",
           stderr: String(e),
           timedOut: false,
-        })),
-      );
+        }));
+      });
       lastVerifyRunMs = Date.now() - startedAt;
       // Total by construction (see `verify-step-timings.ts`): an unparseable or step-less run
       // yields `[]` and the message simply omits the clause. It must never be able to turn a

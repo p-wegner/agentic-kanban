@@ -779,7 +779,16 @@ export function buildGateTierMessage(tierInfo: GateTierInfo | null): string {
           ? "package-scoped"
           : "full";
   const impactNote = buildImpactSelectionNote(tierInfo);
-  const stepNote = buildStepTimingNote(tierInfo.stepTimings ?? [], tierInfo.verifyRunMs);
+  // #988 — when a flake retry produced the verdict, the steps describe the FULL run that failed,
+  // not the narrow re-run that cleared it (the retry deliberately reports no steps of its own,
+  // since a subset's clock would understate the floor). Saying so is the same honesty rule the
+  // clause exists for: unqualified, `tests 118s` beside a PASSED verdict reads as the cost of the
+  // run that passed, and it is not.
+  const stepNote = buildStepTimingNote(
+    tierInfo.stepTimings ?? [],
+    tierInfo.verifyRunMs,
+    Boolean(tierInfo.flakeRetryNote),
+  );
   const workersLabel = tierInfo.maxWorkersDerived
     ? `workers ${tierInfo.maxWorkers} (derived, host free ${(tierInfo.hostFreeGb ?? 0).toFixed(1)} GB)`
     : `workers ${tierInfo.maxWorkers}`;
