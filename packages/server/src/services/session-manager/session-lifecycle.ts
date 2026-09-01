@@ -74,6 +74,22 @@ export const ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS = EXIT_WINDOW_MS;
  * control-flow-branch ceiling: a ternary at the call site pushes it over the god-module
  * gate's limit, and the answer is not `startSession`'s to compute anyway.
  */
+/**
+ * Which pid the completed-exit survivor probe (#968) should ask about.
+ *
+ * Prefer the pid recorded IN MEMORY at spawn over `sessions.pid`: by the time an exit
+ * finalizes, a concurrent relaunch may already have overwritten the row, and probing the NEW
+ * session's tree would report a survivor on every clean handover. The persisted value is the
+ * fallback for a reattached session, whose process outlived the server (so the map is empty)
+ * but whose row still holds the right pid.
+ *
+ * Module-level rather than inline so `createSessionLifecycle` — already at its nloc ratchet
+ * ceiling — does not grow to hold a two-line decision.
+ */
+function survivorProbePid(state: SessionState, sessionId: string, persistedPid?: number | null): number | null {
+  return state.launchedPids.get(sessionId) ?? persistedPid ?? null;
+}
+
 function resumedProviderSessionId(resumeWithNewModel: boolean | undefined, providerSessionId: string | undefined): string | undefined {
   return resumeWithNewModel ? undefined : providerSessionId;
 }
@@ -360,7 +376,9 @@ export function createSessionLifecycle(
         healthProviderName: lifecycleProviderName(provider, profile),
         authProviderName: narrowProviderName(executor),
         profileName: profile?.name,
-        durationMs, exitCode, capturedStderr, now: endNow,
+        // #968: `pid` is what the completed route's survivor probe asks about — see
+        // `survivorProbePid` for why the in-memory spawn pid beats `sessions.pid` here.
+        durationMs, exitCode, capturedStderr, now: endNow, pid: survivorProbePid(state, sessionId),
       };
     }
 
@@ -673,7 +691,11 @@ export function createSessionLifecycle(
       // which is written `if (pid && ...)`. Every millisecond this write is outstanding is
       // a window in which a healthy, just-spawned agent can be reaped. The write is a
       // single indexed UPDATE on the local DB; awaiting it costs nothing worth the race.
+      // #968: `launchedPids` is set FIRST and synchronously — the exit handler is already
+      // wired above, so a fast crash can finalize before the DB write below resolves, and the
+      // survivor probe needs the pid this session was spawned as, not what the row holds then.
       if (proc.pid) {
+        state.launchedPids.set(sessionId, proc.pid);
         await lifecycleRepo.updateSessionPid(sessionId, proc.pid, db)
           .catch((err) => console.error("Failed to store session pid:", err));
       }
@@ -838,6 +860,10 @@ export function createSessionLifecycle(
       readSessionExitSignals(state, sessionId, capturedFinalText);
     const stoppedByUser = state.stoppedByUser.has(sessionId);
     const providerFromState = state.sessionProviders.get(sessionId);
+    // #968: read BEFORE teardown clears it, like every other signal here. A reattached session
+    // has no in-memory pid (its process outlived the server, not the map), so the ctx below
+    // falls back to the persisted one.
+    const launchedPid = survivorProbePid(state, sessionId);
 
     const ctx = state.sessionContexts.get(sessionId);
     // #543: read `ctx` FIRST — teardown clears sessionContexts, and the activity/todo
@@ -896,7 +922,7 @@ export function createSessionLifecycle(
       healthProviderName: providerName,
       authProviderName: providerName,
       profileName: externalWorkspace?.claudeProfile ?? undefined,
-      durationMs, exitCode, capturedStderr, now,
+      durationMs, exitCode, capturedStderr, now, pid: launchedPid ?? existing.pid ?? null,
     };
 
     const fireExit = (code: number | null) => {
