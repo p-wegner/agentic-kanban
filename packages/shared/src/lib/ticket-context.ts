@@ -659,7 +659,34 @@ export function buildTicketContextMarkdown(ctx: TicketContext): string {
     lines.push(boardFeedback);
     lines.push("");
   }
+  lines.push(buildCommitMessageEncodingSection(), "");
   return lines.join("\n");
+}
+
+/**
+ * #976 — how to write a commit message file without an invisible UTF-8 BOM.
+ *
+ * Unconditional, and in the ticket context rather than only in the board's own CLAUDE.md,
+ * because the agent this rule is for is a builder in ANOTHER repo: it reads that repo's
+ * CLAUDE.md, never this board's. Measured: 77 commits with `EF BB BF` in the SUBJECT, rising
+ * from 1 in 2026-05 to 53 in 2026-08 as more work went through builders.
+ *
+ * The worktree's `commit-msg` hook strips it as a backstop, but a builder that knows the rule
+ * never produces one — and the hook cannot reach a commit made outside a board worktree.
+ */
+export function buildCommitMessageEncodingSection(): string {
+  return [
+    "## Commit messages — no UTF-8 BOM (#976)",
+    "",
+    "When you write a commit message to a file for `git commit -F`, write it with the **Bash**",
+    "tool (a heredoc), not a bare PowerShell redirect. PowerShell 5.1's `Set-Content` /",
+    "`Add-Content` / `Out-File` emit UTF-8 **with a BOM**, `git commit -F` keeps it, and the",
+    "subject then begins with an invisible `EF BB BF`. It renders as a stray glyph in",
+    "`git log --oneline` and breaks anything that pattern-matches a subject — including the",
+    "board's own `ak-<N>` matching in its merge reconcilers.",
+    "",
+    "If you must use PowerShell, pass `-Encoding utf8NoBOM` explicitly.",
+  ].join("\n");
 }
 
 /**
