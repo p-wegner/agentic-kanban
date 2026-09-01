@@ -35,6 +35,14 @@ export interface CreateIssueFlowDeps {
   setWorkspaceIssue: (issue: IssueWithStatus) => void;
   setWorkspaceInitial: (value: { workspaceId: string; sessionId: string }) => void;
   refetchBoard: () => Promise<StatusWithIssues[] | undefined>;
+  /**
+   * #973: the workspace launch is an async round trip, so by the time it lands
+   * the user may have clicked elsewhere. This is consulted before the panel is
+   * opened; when it returns false the workspace still exists, we simply do not
+   * steal focus for it. Absent = always open (the pre-#973 behaviour), which
+   * keeps every existing caller and test valid.
+   */
+  shouldOpenWorkspacePanel?: () => boolean;
 }
 
 /**
@@ -59,6 +67,7 @@ export async function runCreateIssueFlow(data: CreateIssuePayload, deps: CreateI
     setWorkspaceIssue,
     setWorkspaceInitial,
     refetchBoard,
+    shouldOpenWorkspacePanel,
   } = deps;
   setMutating(true);
   setError(null);
@@ -139,14 +148,18 @@ export async function runCreateIssueFlow(data: CreateIssuePayload, deps: CreateI
         } catch {
           // workspace created; later realtime/poll refresh reconciles the card
         }
-        for (const col of launchedBoard ?? board ?? columns) {
-          const found = col.issues.find((i) => i.id === created.id);
-          if (found) {
-            setWorkspaceIssue(found);
-            if (ws.sessionId) {
-              setWorkspaceInitial({ workspaceId: ws.id, sessionId: ws.sessionId });
+        // #973: only take over the screen if the user is still where they were
+        // when the launch started. The workspace is created either way.
+        if (shouldOpenWorkspacePanel?.() ?? true) {
+          for (const col of launchedBoard ?? board ?? columns) {
+            const found = col.issues.find((i) => i.id === created.id);
+            if (found) {
+              setWorkspaceIssue(found);
+              if (ws.sessionId) {
+                setWorkspaceInitial({ workspaceId: ws.id, sessionId: ws.sessionId });
+              }
+              break;
             }
-            break;
           }
         }
         showToast("Issue and workspace created", "success");

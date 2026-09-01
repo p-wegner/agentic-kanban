@@ -288,6 +288,32 @@ describe("runCreateIssueFlow — create and start working", () => {
     expect(h.workspaceOpened()).toEqual({ issueId: "issue-1" });
   });
 
+  it("#973: does not open the workspace panel when the user moved on during the launch", async () => {
+    stubFetch({ "/api/issues": created, "/api/workspaces": { id: "ws-1", sessionId: "sess-1" } });
+    const h = harness({
+      refetchBoard: async () => boardWithCreatedIssue(),
+      shouldOpenWorkspacePanel: () => false,
+    });
+
+    await runCreateIssueFlow({ ...payload, startWorkspace: true }, h.deps);
+
+    // The workspace was still created and reported — only the focus steal is gone.
+    expect(h.workspaceOpened()).toBeNull();
+    expect(toastMessages()).toEqual(["success: Issue and workspace created"]);
+  });
+
+  it("#973: still opens the panel when the guard says the user has not moved", async () => {
+    stubFetch({ "/api/issues": created, "/api/workspaces": { id: "ws-1", sessionId: "sess-1" } });
+    const h = harness({
+      refetchBoard: async () => boardWithCreatedIssue(),
+      shouldOpenWorkspacePanel: () => true,
+    });
+
+    await runCreateIssueFlow({ ...payload, startWorkspace: true }, h.deps);
+
+    expect(h.workspaceOpened()).toEqual({ issueId: "issue-1", workspaceId: "ws-1", sessionId: "sess-1" });
+  });
+
   it("asks for a direct-on-master workspace without a branch or base branch", async () => {
     const { calls } = stubFetch({ "/api/issues": created, "/api/workspaces": { id: "ws-1" } });
     const h = harness({ refetchBoard: async () => boardWithCreatedIssue() });
