@@ -24,9 +24,15 @@ import { spawnPnpm } from "./pnpm-exec.mjs";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-function awaitExit(child) {
+function awaitExit(child, label) {
   return new Promise((resolve) => {
-    child.on("error", () => resolve(1));
+    // A spawn that never started fails the step exactly like a non-zero exit — but silently it is
+    // indistinguishable from the sub-step running and failing, and the two have completely
+    // different fixes (a missing pnpm on PATH vs a real layering violation). Name the cause.
+    child.on("error", (err) => {
+      console.error(`[check:arch] could not start ${label}: ${err.message}`);
+      resolve(1);
+    });
     child.on("close", (code) => resolve(code ?? 1));
   });
 }
@@ -38,11 +44,11 @@ function awaitExit(child) {
 const STEPS = [
   {
     label: "god-modules",
-    run: () => awaitExit(spawn(process.execPath, [join(REPO_ROOT, "scripts", "check-god-modules.mjs")], { cwd: REPO_ROOT, stdio: "inherit", windowsHide: true })),
+    run: () => awaitExit(spawn(process.execPath, [join(REPO_ROOT, "scripts", "check-god-modules.mjs")], { cwd: REPO_ROOT, stdio: "inherit", windowsHide: true }), "god-modules"),
   },
   {
     label: "lint:arch",
-    run: () => awaitExit(spawnPnpm(["lint:arch"], { cwd: REPO_ROOT, stdio: "inherit" })),
+    run: () => awaitExit(spawnPnpm(["lint:arch"], { cwd: REPO_ROOT, stdio: "inherit" }), "lint:arch"),
   },
   {
     label: "mcp-catalog-parity",
@@ -52,6 +58,7 @@ const STEPS = [
           ["--filter", "@agentic-kanban/mcp-server", "exec", "vitest", "run", "src/__tests__/mcp-catalog-parity.test.ts"],
           { cwd: REPO_ROOT, stdio: "inherit" },
         ),
+        "mcp-catalog-parity",
       ),
   },
 ];
