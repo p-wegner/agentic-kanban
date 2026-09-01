@@ -83,8 +83,8 @@ describe("resolveGateTestSelector", () => {
 
 describe("resolveGateScoping under impact", () => {
   it("keeps the package scope", () => {
-    // The selection replaces the FILE half only. Dropping the package scope too would widen the
-    // run, which is not what an operator asking for the narrowest tier requested.
+    // Dropping the package scope would widen the run, which is not what an operator asking for the
+    // narrowest tier requested.
     const { packagesEnv } = resolveGateScoping({
       strategy: "impact",
       testScope: "server,shared",
@@ -94,18 +94,42 @@ describe("resolveGateScoping under impact", () => {
     expect(packagesEnv).toBe("server,shared");
   });
 
-  it("emits no KANBAN_TEST_FILES, because that pair is a refusal in the runner", () => {
-    const { emitFileScope, note } = resolveGateFileScopeEmission({
+  it("KEEPS the file scope, so the runner can union the two selectors (#967)", () => {
+    // #962 made this pair a refusal; #967 retires that. The two selectors MISS different things --
+    // `vitest related` is safe but blind to runtime reach (spawned scripts, fixtures, migrations),
+    // the impact heuristic sees that reach but is a ranked bet under a floor and a budget. Emitting
+    // only one of them silently gives up the other's coverage, so the file list now travels with the
+    // selector and `test-mine.mjs` hands the derived suites to `select --union`.
+    const { emitFileScope, unioned, note } = resolveGateFileScopeEmission({
       env: {},
       fileScoped: true,
       changedFileCount: 9,
       strategy: "impact",
     });
-    expect(emitFileScope).toBe(false);
-    // And it says WHICH knob chose it — under the tier, "KANBAN_TEST_SELECTOR is set" would name
+    expect(emitFileScope).toBe(true);
+    expect(unioned).toBe(true);
+    // And it says WHICH knob chose it -- under the tier, "KANBAN_TEST_SELECTOR is set" would name
     // an env var the operator never set and would send them looking in the wrong place.
     expect(note).toContain("verify_gate_strategy=impact");
-    expect(note).toContain("impact-scoped, not full");
+    expect(note).toContain("UNIONED");
+    // The ordering decision, stated where an operator reads it: OUR floor may not drop another
+    // selector's evidence, but the budget must still hold over the union or the budget setting's
+    // promise ("only these seconds") is broken.
+    expect(note).toContain("exempt from the score floor");
+    expect(note).toContain("counted against the budget");
+    expect(note).toContain("impact+related, not full");
+  });
+
+  it("is not 'unioned' when there was no file scope to union with", () => {
+    const { emitFileScope, unioned, note } = resolveGateFileScopeEmission({
+      env: {},
+      fileScoped: false,
+      changedFileCount: 0,
+      strategy: "impact",
+    });
+    expect(emitFileScope).toBe(false);
+    expect(unioned).toBe(false);
+    expect(note).toBeNull();
   });
 
   it("still blames the env var when the env var is what set it", () => {
@@ -177,10 +201,9 @@ describe("buildVerifyEnv", () => {
   const isolationEnv = { AGENTIC_KANBAN_DIR: "/tmp/gate" };
   const impactEnv = { KANBAN_TEST_SELECTOR: "impact", KANBAN_IMPACT_BASE: "master" };
 
-  it("never emits the selector and a file scope together", () => {
-    // `test-mine.mjs` REFUSES that pair (exit 2, #962), so an assembly bug here would turn a merge
-    // gate into a hard failure rather than a wrong-but-visible run. `emitFileScope` is already
-    // false under the selector; this pins that the assembly does not reintroduce it.
+  it("omits the file scope when the resolver said not to emit one", () => {
+    // The assembly obeys `emitFileScope` and nothing else -- it does not re-derive the decision
+    // from the selector, which is what let the two halves disagree before #967.
     const env = buildVerifyEnv({
       isolationEnv,
       guardsOnly: false,
@@ -192,6 +215,25 @@ describe("buildVerifyEnv", () => {
     expect(env.KANBAN_TEST_SELECTOR).toBe("impact");
     expect(env).not.toHaveProperty("KANBAN_TEST_FILES");
     expect(env.KANBAN_TEST_PACKAGES).toBe("server");
+  });
+
+  it("emits the selector AND the file scope together for a union run (#967)", () => {
+    // The pair used to be a refusal (exit 2, #962). It is now the instruction that MAKES the union:
+    // `test-mine.mjs` reads the file list, derives the suites `vitest related` would pick for it,
+    // and passes them to `select --union`. Dropping either half here silently drops one selector.
+    const env = buildVerifyEnv({
+      isolationEnv,
+      guardsOnly: false,
+      impactEnv,
+      packagesEnv: "server",
+      emitFileScope: true,
+      changedFiles: ["packages/server/src/a.ts", "packages/shared/src/b.ts"],
+    });
+    expect(env.KANBAN_TEST_SELECTOR).toBe("impact");
+    expect(env.KANBAN_TEST_FILES).toBe("packages/server/src/a.ts,packages/shared/src/b.ts");
+    expect(env.KANBAN_TEST_PACKAGES).toBe("server");
+    // The base is what makes it a selection rather than the constant always-run set (#963).
+    expect(env.KANBAN_IMPACT_BASE).toBe("master");
   });
 
   it("keeps the guards-only run free of any selector, which it never reaches anyway", () => {
@@ -282,6 +324,67 @@ describe("buildImpactSelectionNote", () => {
     expect(buildImpactSelectionNote({ ...baseTier, strategy: "scoped", selector: "related" })).toBeNull();
   });
 
+  it("splits the provenance when the union's size is known (#967)", () => {
+    // The ticket's own example message. A combined selector that reports one number cannot be
+    // audited: `kept 155` hides whether `related` contributed anything, and therefore whether the
+    // union is doing the job it was added for.
+    const note = buildImpactSelectionNote({
+      ...baseTier,
+      fileScoped: true,
+      impactSelection: {
+        selectedCount: 155,
+        externalCount: 12,
+        belowFloorCount: 90,
+        stale: false,
+        budget: "60s",
+        estMs: 58_000,
+        budgetDroppedCount: 4,
+      },
+    });
+    expect(note).toContain("kept 155 suite(s) (impact 143 + related added 12)");
+    expect(note).toContain("budget 60s");
+    expect(note).toContain("est 58s");
+    expect(note).toContain("dropped 4 over budget");
+    // The floor still applies -- to the impact-scored candidates only, which is the whole point of
+    // externals entering AFTER the floor and BEFORE the budget cut inside `impact.mjs`.
+    expect(note).toContain("dropped 90 below the score floor");
+  });
+
+  it("reports 'related added 0' rather than hiding it (#967)", () => {
+    // A real answer: the impact ranking had already picked everything `related` named. That is
+    // evidence the heuristic is doing well, and it must not read the same as "no union ran".
+    const note = buildImpactSelectionNote({
+      ...baseTier,
+      fileScoped: true,
+      impactSelection: { selectedCount: 12, externalCount: 0, belowFloorCount: 151, stale: false },
+    });
+    expect(note).toContain("impact 12 + related added 0");
+  });
+
+  it("labels a union whose size it could not measure as a LOWER BOUND (#967)", () => {
+    // The board's descriptive `select --json` call cannot pass the union list: `vitest related`'s
+    // picks come out of vitest's own per-package module graph, walked in the worktree at run time.
+    // Printing the impact half as the whole selection would understate what ran -- the flattering
+    // direction, and therefore the one this tier may never take silently.
+    const note = buildImpactSelectionNote({
+      ...baseTier,
+      fileScoped: true,
+      impactSelection: { selectedCount: 12, belowFloorCount: 151, stale: false, unionUnmeasured: true },
+    });
+    expect(note).toContain("12 impact suite(s)");
+    expect(note).toContain("lower bound");
+  });
+
+  it("leaves an impact-only run's note exactly as #956 wrote it", () => {
+    const note = buildImpactSelectionNote({
+      ...baseTier,
+      impactSelection: { selectedCount: 12, belowFloorCount: 151, stale: false },
+    });
+    expect(note).toContain("kept 12 suite(s)");
+    expect(note).not.toContain("related added");
+    expect(note).not.toContain("lower bound");
+  });
+
   it("says nothing for a guards-only run, which never consults the selector", () => {
     // `KANBAN_TEST_GUARDS_ONLY` exits before the selector is reached in `test-mine.mjs`, so a
     // selection note there would describe a selection that never happened.
@@ -320,6 +423,25 @@ describe("buildGateTierMessage under the impact tier", () => {
     expect(message).not.toContain("tier: full");
   });
 
+  it("names a union run 'impact+related', because that is the selector it ran (#967)", () => {
+    // Two selectors ran, so `impact-selected` would name only half of what chose the suites --
+    // and #954's corpus judges the COMBINED selector, which is the thing the setting ships.
+    const message = buildGateTierMessage({
+      ...baseTier,
+      fileScoped: true,
+      changedFileCount: 3,
+      impactSelection: { selectedCount: 155, externalCount: 12, belowFloorCount: 90, stale: false },
+    });
+    expect(message).toContain("tier: impact+related");
+    // ASCII on purpose: this string travels through merge comments, PowerShell hosts and log files
+    // on a Windows box, where a `∪` comes back mojibake from the first tool that guesses an encoding.
+    expect(message).toContain("selector: impact (heuristic) UNION related");
+    expect(message).toContain("impact 143 + related added 12");
+    // Still never `file-scoped`: that name asserts every suite reachable from those files ran, and
+    // a union under a floor and a budget does not promise that.
+    expect(message).not.toContain("tier: file-scoped");
+  });
+
   it("leaves a non-impact message exactly as it was", () => {
     // The regression that matters most: every project stays on `full`/`scoped`, so their messages
     // must be byte-identical to before this tier existed.
@@ -343,6 +465,14 @@ describe("gateRanScope under the impact tier", () => {
     // confident zero exactly on the runs the selector was in charge of.
     expect(gateRanScope({ ...baseTier, packageScoped: false, fileScoped: false })).toBe("impact-scoped");
     expect(gateRanScope({ ...baseTier, packageScoped: true })).toBe("impact-scoped");
+  });
+
+  it("records a union run under its OWN name, not as impact alone (#967)", () => {
+    // The ledger has to judge what actually selected the suites. `impact-scoped` would credit (or
+    // blame) the heuristic for a set that `vitest related` also contributed to, so a union run is
+    // its own `ran` value -- still a non-witness for the miss-rate corpus, but a distinct one.
+    expect(gateRanScope({ ...baseTier, packageScoped: true, fileScoped: true })).toBe("impact+related");
+    expect(gateRanScope({ ...baseTier, packageScoped: false, fileScoped: true })).toBe("impact+related");
   });
 
   it("still lets guards-only win", () => {

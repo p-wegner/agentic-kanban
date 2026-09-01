@@ -55,6 +55,21 @@ describe("parseSelection", () => {
     expect(parseSelection("not json")).toBeNull();
     expect(parseSelection(JSON.stringify({ tier: "impact" }))).toBeNull();
   });
+
+  it("reads signalCounts.external as what the OTHER selector contributed (#967)", () => {
+    // The provenance split the message prints (`impact 143 + related added 12`) is computed from
+    // this one number. It is read off `signalCounts` -- which the tool computes once -- rather than
+    // re-derived from `selected[].signals` here, so the two cannot disagree.
+    expect(parseSelection(payload({ signalCounts: { self: 1, importer: 8, external: 12 } }))?.externalCount).toBe(12);
+  });
+
+  it("distinguishes 'the union added nothing' from 'no union ran' (#967)", () => {
+    // 0 is a real result -- the impact ranking had already picked every suite `related` named,
+    // which is worth saying. It must not read the same as "no second selector was consulted".
+    expect(parseSelection(payload({ signalCounts: { external: 0 } }))?.externalCount).toBe(0);
+    expect(parseSelection(payload({ signalCounts: { importer: 3 } }))?.externalCount).toBeUndefined();
+    expect(parseSelection(payload())?.externalCount).toBeUndefined();
+  });
 });
 
 describe("resolveGateMinScore", () => {
@@ -114,6 +129,57 @@ describe("resolveGateSelection — the args it asks impact.mjs for", () => {
     expect(seen[0][2]).toBe("--json");
     expect(seen[0]).toContain("--min-score");
   });
+
+  it("passes a supplied union as --union, so the DESCRIPTION matches the run (#967)", async () => {
+    // Same class of reason as the floor and the budget above: this call exists to describe the
+    // selection the verify run will make. A union applied by the run but not here would report a
+    // `selected` set narrower than what executes, and `signalCounts.external` absent -- a message
+    // saying "impact chose these N" for a run where a second selector also chose some.
+    //
+    // It stays a TOOL flag rather than a merge on the result because `impact.mjs` admits externals
+    // after the `--min-score` cut and BEFORE the `--budget` cut. Unioning here would append them to
+    // an already-budgeted selection, so a 60s budget would describe a run that took longer.
+    const seen: string[][] = [];
+    const stdins: (string | undefined)[] = [];
+    await resolveGateSelection({
+      workingDir: withTool(),
+      baseBranch: "master",
+      minScore: "1.0",
+      budget: "60s",
+      union: ["packages/server/src/__tests__/a.test.ts", "packages/shared/__tests__/b.test.ts", "   "],
+      runCommand: async ({ args, stdin }) => {
+        seen.push(args);
+        stdins.push(stdin);
+        return { exitCode: 0, stdout: JSON.stringify({ tier: "impact", selected: [], changed: [] }), stderr: "" };
+      },
+    });
+    const args = seen[0];
+    expect(args).toContain("--budget");
+    // Over STDIN, not inline. A real union is tens of thousands of characters (536 related suites
+    // for a `packages/server/src/db/index.ts` diff comma-join to 33,735), past Windows'
+    // 32,767-char CreateProcess limit -- the spawn would fail ENAMETOOLONG and this describing
+    // call would report no selection at all.
+    expect(args[args.indexOf("--union") + 1]).toBe("-");
+    // Blank entries are dropped -- a stray entry must not become a phantom test path.
+    expect(stdins[0]).toBe("packages/server/src/__tests__/a.test.ts\npackages/shared/__tests__/b.test.ts\n");
+  });
+
+  it("omits --union when there is none, keeping the pre-#967 argv byte-identical", async () => {
+    const seen: string[][] = [];
+    for (const union of [undefined, [], ["", "  "]]) {
+      await resolveGateSelection({
+        workingDir: withTool(),
+        baseBranch: "master",
+        minScore: "1.0",
+        union,
+        runCommand: async ({ args }) => {
+          seen.push(args);
+          return { exitCode: 0, stdout: JSON.stringify({ tier: "impact", selected: [], changed: [] }), stderr: "" };
+        },
+      });
+    }
+    for (const args of seen) expect(args).not.toContain("--union");
+  });
 });
 
 describe("resolveGateImpactSelection", () => {
@@ -134,5 +200,68 @@ describe("resolveGateImpactSelection", () => {
 
   it("returns null for a null worktree rather than rejecting into the merge path", async () => {
     expect(await resolveGateImpactSelection({ applies: true, workingDir: null })).toBeNull();
+  });
+});
+
+/**
+ * #967 -- the union has THREE states, and conflating any two of them is a silent misreport:
+ *   - no union            -> `externalCount` and `unionUnmeasured` both absent
+ *   - union, size known   -> `externalCount` set (0 is a real answer: related added nothing new)
+ *   - union, size unknown -> `unionUnmeasured`, because this describing call cannot boot vitest
+ */
+describe("resolveGateImpactSelection and the union it cannot measure (#967)", () => {
+  const withTool = () => {
+    const dir = mkdtempSync(join(tmpdir(), "ak-gate-impact-union-"));
+    const tool = join(dir, ".claude/skills/test-impact/tools/impact.mjs");
+    mkdirSync(dirname(tool), { recursive: true });
+    writeFileSync(tool, "// stub\n");
+    return dir;
+  };
+  const replying = (body: unknown) => async () => ({ exitCode: 0, stdout: JSON.stringify(body), stderr: "" });
+
+  it("marks the selection unionUnmeasured when a union WILL happen but no list was supplied", async () => {
+    // The board knows the runner will union -- it emitted `KANBAN_TEST_FILES` alongside the
+    // selector -- but it cannot compute the contents: `vitest related`'s picks come out of vitest's
+    // own per-package module graph, walked in the worktree at run time. Saying so is the point;
+    // reporting the impact half as the whole selection understates what ran, which is the
+    // flattering direction and therefore the one that must be labelled.
+    const selection = await resolveGateImpactSelection({
+      applies: true,
+      workingDir: withTool(),
+      baseBranch: "master",
+      unioned: true,
+      runCommand: replying({ tier: "impact", selected: [{ test: "a.test.ts" }], changed: ["x.ts"] }),
+    });
+    expect(selection?.unionUnmeasured).toBe(true);
+    expect(selection?.externalCount).toBeUndefined();
+  });
+
+  it("does NOT mark it unmeasured when the union was supplied and the tool counted it", async () => {
+    const selection = await resolveGateImpactSelection({
+      applies: true,
+      workingDir: withTool(),
+      baseBranch: "master",
+      unioned: true,
+      union: ["packages/server/src/__tests__/u.test.ts"],
+      runCommand: replying({
+        tier: "impact",
+        selected: [{ test: "a.test.ts" }, { test: "packages/server/src/__tests__/u.test.ts" }],
+        changed: ["x.ts"],
+        signalCounts: { external: 1 },
+      }),
+    });
+    expect(selection?.unionUnmeasured).toBeUndefined();
+    expect(selection?.externalCount).toBe(1);
+  });
+
+  it("leaves an ordinary impact-only run untouched -- neither field appears", async () => {
+    const selection = await resolveGateImpactSelection({
+      applies: true,
+      workingDir: withTool(),
+      baseBranch: "master",
+      runCommand: replying({ tier: "impact", selected: [{ test: "a.test.ts" }], changed: ["x.ts"] }),
+    });
+    expect(selection?.unionUnmeasured).toBeUndefined();
+    expect(selection?.externalCount).toBeUndefined();
   });
 });

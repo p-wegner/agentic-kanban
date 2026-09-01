@@ -66,7 +66,23 @@ export const IMPACT_COMMAND_TIMEOUT_MS = 60_000;
  * collapsed into one "scoped": which narrowing applied is what a later reader needs in order to
  * judge how much the row proves.
  */
-export type GateRanScope = "full" | "package-scoped" | "file-scoped" | "guards-only" | "impact-scoped";
+export type GateRanScope =
+  | "full"
+  | "package-scoped"
+  | "file-scoped"
+  | "guards-only"
+  | "impact-scoped"
+  /**
+   * #967 — the impact selection UNIONED with `vitest related`'s picks for the same diff. Its own
+   * name, not folded into `impact-scoped`: the corpus is judging the selector the setting actually
+   * ships, and "impact alone" and "impact ∪ related" are different selectors with different miss
+   * profiles. Collapsing them would attribute a union run's catches to the ranking.
+   *
+   * Still a NON-witness (it is not in the tool's `WITNESS_SCOPES`), which is correct — a union is
+   * wider than the ranking but still narrower than the full suite, so it cannot see what BOTH
+   * selectors omitted.
+   */
+  | "impact+related";
 
 /**
  * Which scope the verify run actually had.
@@ -98,7 +114,12 @@ export type GateRanScope = "full" | "package-scoped" | "file-scoped" | "guards-o
 export function gateRanScope(tierInfo: GateTierInfo | null | undefined): GateRanScope {
   if (!tierInfo) return "full";
   if (tierInfo.guardsOnly) return "guards-only";
-  if (tierInfo.selector === "impact") return "impact-scoped";
+  // #967 — a file scope emitted ALONGSIDE the impact selector is the union, not a rival scope: the
+  // runner derives `vitest related`'s suites from it and merges them into the selection. So the row
+  // names the combined selector, which is what the setting ships and therefore what the corpus must
+  // judge. (Before #967 the gate dropped the file scope under this selector, so this pair could not
+  // occur — an old row reading `impact-scoped` still means what it always did.)
+  if (tierInfo.selector === "impact") return tierInfo.fileScoped ? "impact+related" : "impact-scoped";
   if (tierInfo.fileScoped) return "file-scoped";
   if (tierInfo.packageScoped) return "package-scoped";
   return "full";
@@ -211,11 +232,21 @@ export type RunImpactCommand = (input: {
   cwd: string;
   args: string[];
   timeoutMs: number;
+  /**
+   * Written to the child's stdin, for the argv a command line cannot hold (#967).
+   *
+   * The union list is the only user: 536 related suites — a real fan-out, measured on a diff
+   * touching `packages/server/src/db/index.ts` — comma-join to 33,735 chars, past Windows'
+   * 32,767-char CreateProcess limit. Inline, the spawn fails ENAMETOOLONG and the caller's
+   * fail-open path silently drops the selection AND the budget on the widest diffs. `select`
+   * accepts `--union -` and reads the list from stdin, which has no such limit.
+   */
+  stdin?: string;
 }) => Promise<{ exitCode: number; stdout: string; stderr: string }>;
 
-const defaultRunCommand: RunImpactCommand = ({ cwd, args, timeoutMs }) =>
+const defaultRunCommand: RunImpactCommand = ({ cwd, args, timeoutMs, stdin }) =>
   new Promise((resolvePromise) => {
-    execFile(
+    const child = execFile(
       process.execPath,
       args,
       { cwd, timeout: timeoutMs, windowsHide: true, maxBuffer: 32 * 1024 * 1024 },
@@ -232,6 +263,12 @@ const defaultRunCommand: RunImpactCommand = ({ cwd, args, timeoutMs }) =>
         resolvePromise({ exitCode, stdout: String(stdout ?? ""), stderr: String(stderr ?? "") });
       },
     );
+    // Always closed, even with nothing to write: `select` only READS stdin for `--union -`, but a
+    // child whose stdin is left open is a child that may never exit, and this runs inside the
+    // merge path. An EPIPE here means the child already exited — a lost measurement the callback
+    // above already reports, never a throw out of this promise.
+    child.stdin?.on("error", () => {});
+    child.stdin?.end(stdin ?? "");
   });
 
 /**
@@ -249,6 +286,7 @@ interface SelectPayload {
   dropped?: unknown;
   estMs?: unknown;
   stale?: unknown;
+  signalCounts?: unknown;
 }
 
 export interface ParsedSelection {
@@ -286,6 +324,16 @@ export interface ParsedSelection {
    * beside it is what would show the widening.
    */
   stale: boolean;
+  /**
+   * How many kept entries came from `--union` rather than from the impact ranking (#967) —
+   * `signalCounts.external`, the code `impact.mjs` tags every external entry with.
+   *
+   * Undefined when no union was passed. Read off `signalCounts` rather than counted from
+   * `selected[].signals` so a payload shape change on the tool side degrades to "unknown" instead
+   * of to a wrong-low number: the tool computes this count once, and re-deriving it here is a
+   * second place for the two to disagree.
+   */
+  externalCount?: number;
 }
 
 export function parseSelection(stdout: string): ParsedSelection | null {
@@ -306,6 +354,14 @@ export function parseSelection(stdout: string): ParsedSelection | null {
   const changed = Array.isArray(payload.changed)
     ? payload.changed.filter((file): file is string => typeof file === "string" && file.length > 0)
     : [];
+  // #967 — `signalCounts.external` exists only when `--union` contributed something. Absent means
+  // "no union entered this selection", which is a real answer and must stay distinguishable from
+  // "a union entered and added zero": the latter is reported as 0 by the tool.
+  const signalCounts =
+    payload.signalCounts && typeof payload.signalCounts === "object"
+      ? (payload.signalCounts as Record<string, unknown>)
+      : null;
+  const external = signalCounts?.external;
   return {
     tier: typeof payload.tier === "string" ? payload.tier : "unknown",
     selected,
@@ -314,6 +370,7 @@ export function parseSelection(stdout: string): ParsedSelection | null {
     budgetDroppedCount: Array.isArray(payload.dropped) ? payload.dropped.length : 0,
     ...(typeof payload.estMs === "number" && Number.isFinite(payload.estMs) ? { estMs: payload.estMs } : {}),
     stale: payload.stale === true,
+    ...(typeof external === "number" && Number.isFinite(external) ? { externalCount: external } : {}),
   };
 }
 
@@ -368,6 +425,20 @@ export async function resolveGateSelection(input: {
    * number whose whole purpose is to size what the clock cut, structurally pinned at zero.
    */
   budget?: string | null;
+  /**
+   * The OTHER selector's picks, repo-relative, when the run is unioned (#967).
+   *
+   * Same rule as the score floor and the budget: this call exists to DESCRIBE the selection the run
+   * will make, so a union applied by the run but not by this call reports a `selected` set narrower
+   * than what runs and `signalCounts.external` absent — i.e. a message that says "impact chose these
+   * N" for a run where a second selector also chose some.
+   *
+   * The board cannot derive this list itself: `vitest related`'s picks come from vitest's own module
+   * graph, which only the runner (in the worktree, per package) can walk. So the CALLER supplies it
+   * when it has it, and when it does not the caller sets `unionUnmeasured` on the resulting
+   * `GateImpactSelection` so the message says the union's size is unknown rather than implying none.
+   */
+  union?: readonly string[];
   runCommand?: RunImpactCommand;
 }): Promise<ParsedSelection | null> {
   try {
@@ -378,6 +449,7 @@ export async function resolveGateSelection(input: {
     const base = input.baseBranch?.trim() || null;
     const minScore = input.minScore ?? resolveGateMinScore(process.env);
     const budget = input.budget?.trim() || null;
+    const union = (input.union ?? []).filter((entry) => entry.trim().length > 0);
     const run = input.runCommand ?? defaultRunCommand;
     const result = await run({
       cwd: workingDir,
@@ -390,8 +462,16 @@ export async function resolveGateSelection(input: {
         "--min-score",
         minScore,
         ...(budget ? ["--budget", budget] : []),
+        // #967 — externals enter AFTER the floor and BEFORE the budget cut, which is why this is a
+        // tool flag and not a merge performed on the result here: unioning after the cut would run
+        // more seconds than the budget promised.
+        //
+        // Over STDIN, not inline: a real union runs to tens of thousands of characters (see
+        // `RunImpactCommand.stdin`), which no command line on Windows can carry.
+        ...(union.length > 0 ? ["--union", "-"] : []),
       ],
       timeoutMs: IMPACT_COMMAND_TIMEOUT_MS,
+      ...(union.length > 0 ? { stdin: `${union.join("\n")}\n` } : {}),
     });
     if (result.exitCode !== 0) return null;
     return parseSelection(result.stdout);
@@ -417,12 +497,27 @@ export async function resolveGateImpactSelection(input: {
   minScore?: string;
   /** The budget the verify run will use (#966), as the operator spelled it; null when off. */
   budget?: string | null;
+  /**
+   * Will the verify run UNION the edit-based scope into the selection (#967)? I.e. did the gate
+   * emit `KANBAN_TEST_FILES` alongside `KANBAN_TEST_SELECTOR=impact`?
+   *
+   * The board cannot compute the union's CONTENTS — `vitest related`'s picks come out of vitest's
+   * own per-package module graph, which only `scripts/test-mine.mjs` walks, in the worktree, at run
+   * time. It can and does know that a union WILL happen, and that is the difference between a
+   * message that under-reports and one that says what it does not know. So when this is true and no
+   * `union` list was supplied, the selection is marked `unionUnmeasured` and the message says the
+   * related half's size is unknown — never silently reporting the impact half as the whole.
+   */
+  unioned?: boolean;
+  /** The union's contents, when a caller can supply them — see `resolveGateSelection`. */
+  union?: readonly string[];
   runCommand?: RunImpactCommand;
 }): Promise<GateImpactSelection | null | undefined> {
   if (!input.applies) return undefined;
   const selection = await resolveGateSelection(input);
   if (!selection) return null;
   const budget = input.budget?.trim() || null;
+  const unionSupplied = (input.union ?? []).some((entry) => entry.trim().length > 0);
   return {
     selectedCount: selection.selected.length,
     belowFloorCount: selection.belowFloorCount,
@@ -434,6 +529,12 @@ export async function resolveGateImpactSelection(input: {
     ...(budget
       ? { budget, budgetDroppedCount: selection.budgetDroppedCount, ...(selection.estMs !== undefined ? { estMs: selection.estMs } : {}) }
       : {}),
+    // #967 — three states, deliberately distinct: no union at all (both undefined), a union whose
+    // size the tool reported (`externalCount`), and a union that will happen but whose size this
+    // call could not measure (`unionUnmeasured`). Collapsing the third into the first is the
+    // failure this flag exists to prevent.
+    ...(selection.externalCount !== undefined ? { externalCount: selection.externalCount } : {}),
+    ...(input.unioned && !unionSupplied ? { unionUnmeasured: true } : {}),
   };
 }
 
@@ -454,6 +555,37 @@ export function emptyChangeSetReason(input: { changed: string[]; baseBranch: str
   if (input.changed.length > 0) return null;
   if (!input.baseBranch) return "no base branch was available, so the change set could not be computed";
   return `the change set against ${input.baseBranch} came back empty`;
+}
+
+/**
+ * Is this row's `selected` set actually the selector named in `ran`? (#967)
+ *
+ * Returns a reason string when it is not, `null` when it is. Same discipline as
+ * `emptyChangeSetReason`: the row is still recorded, tagged rather than dropped.
+ *
+ * **The concrete failure this prevents.** A `impact+related` run executes the UNION, but the
+ * `selected` list on the row comes from this module's own `select --json` call, which cannot pass
+ * `--union` — `vitest related`'s picks come out of vitest's per-package module graph, walked by the
+ * runner in the worktree (the same limit `GateImpactSelection.unionUnmeasured` exists for). So
+ * `selected` is the impact half only, while `ran` claims the combined selector.
+ *
+ * `impact.mjs record` then computes `missed = failed.filter((f) => !selected.includes(f))` as a
+ * plain string comparison. A suite the ranking did NOT pick but `related` DID — exactly the suites
+ * the union was added to recover — runs, and if it fails it lands in `failed` and not in
+ * `selected`, so it is scored as a MISS by the very selector that caught it. The corpus that is
+ * meant to judge whether the union is worth shipping would be fed evidence against it, generated by
+ * the union working.
+ *
+ * Tagging keeps the row visible and filterable (`stats`' `bySource` breakdown) instead of letting
+ * it read as an ordinary observation of the combined selector.
+ */
+export function unmeasuredUnionReason(input: { ran: GateRanScope }): string | null {
+  if (input.ran !== "impact+related") return null;
+  return (
+    "the run unioned `vitest related`'s picks into the selection, but this row's `selected` list is " +
+    "the impact half only — the board cannot walk vitest's module graph — so a failure the related " +
+    "half caught would be scored as a miss by the selector that caught it"
+  );
 }
 
 /**
@@ -555,7 +687,15 @@ export async function recordGateOutcome(input: RecordGateOutcomeInput): Promise<
     // `bySource` breakdown separates it from real rows, instead of letting it read as an ordinary
     // gate observation. The source vocabulary belongs to the producer (see `cmdRecord`), so this
     // needs no change on the tool side.
-    const suspectReason = emptyChangeSetReason({ changed: parsed.changed, baseBranch });
+    const noChangeReason = emptyChangeSetReason({ changed: parsed.changed, baseBranch });
+    // #967 — the OTHER way a row can fail to be an observation of the selector it names: a union
+    // run whose `selected` list covers only the impact half. See `unmeasuredUnionReason` for the
+    // miss it would otherwise manufacture. Tagged the same way, with its own suffix so `bySource`
+    // can tell the two apart; the empty change set is named first because it invalidates the row
+    // more completely (there is no selection to judge at all).
+    const unionReason = unmeasuredUnionReason({ ran });
+    const suspectReason = noChangeReason ?? unionReason;
+    const sourceSuffix = `${noChangeReason ? "-nochange" : ""}${unionReason ? "-partialselection" : ""}`;
     const record = await run({
       cwd: workingDir,
       args: buildRecordArgs({
@@ -566,7 +706,7 @@ export async function recordGateOutcome(input: RecordGateOutcomeInput): Promise<
         failedSuites: input.failedSuites,
         tier: parsed.tier,
         ran,
-        source: suspectReason ? `${source}-nochange` : source,
+        source: `${source}${sourceSuffix}`,
         baseBranch,
       }),
       timeoutMs: IMPACT_COMMAND_TIMEOUT_MS,
@@ -577,11 +717,18 @@ export async function recordGateOutcome(input: RecordGateOutcomeInput): Promise<
     if (!input.repoPath) {
       log(`recorded a gate outcome into the WORKTREE ledger at ${outcomesPath} — the project's repo path is unknown, so this row will be lost with the worktree`);
     }
-    if (suspectReason) {
+    if (noChangeReason) {
       log(
-        `recorded a gate outcome with an EMPTY change set (${suspectReason}) — the selection it names is the ` +
-          `always-run baseline, not this branch's, so the row is tagged source=${source}-nochange and must not be ` +
+        `recorded a gate outcome with an EMPTY change set (${noChangeReason}) — the selection it names is the ` +
+          `always-run baseline, not this branch's, so the row is tagged source=${source}${sourceSuffix} and must not be ` +
           `counted toward the miss rate`,
+      );
+    }
+    if (unionReason) {
+      log(
+        `recorded a UNION gate outcome whose selection covers only the impact half (${unionReason}) — the row is ` +
+          `tagged source=${source}${sourceSuffix} and its \`missed\` set must not be counted toward the miss rate of ` +
+          `the combined selector`,
       );
     }
     return {
