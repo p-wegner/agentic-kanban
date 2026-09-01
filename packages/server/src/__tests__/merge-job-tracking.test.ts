@@ -8,6 +8,7 @@ import {
   MERGE_JOB_ZOMBIE_AFTER_MS,
   noteMergeGateAttemptFinished,
   noteMergeGateAttemptStarted,
+  noteMergeGatePhase,
   peekMergeJob,
   resetMergeJobs,
   setMergeGateLivenessProbe,
@@ -475,6 +476,73 @@ describe("merge job zombie detection measures liveness (#936)", () => {
       noteMergeGateAttemptFinished("ws-notify-stale", staleHandle, { outcome: "passed" });
       await flushSummaryWriteThroughs();
       expect(notified).not.toContain("ws-notify-stale");
+    });
+  });
+
+  describe("#977: the in-flight gate phase", () => {
+    it("writes the phase onto the running attempt and moves `lastActivityAt`", () => {
+      // `lastActivityAt` previously advanced only at attempt BOUNDARIES, so a 40-minute attempt
+      // looked to the stall display like 40 minutes of silence.
+      startMergeJob("ws-phase", new Date(Date.now() - 60_000).toISOString());
+      noteMergeGateAttemptStarted("ws-phase", "pre-lock-merge", new Date(Date.now() - 50_000).toISOString());
+
+      noteMergeGatePhase("ws-phase", "queued", "waiting for the cross-workspace verify chain");
+
+      const job = getMergeJob("ws-phase")!;
+      expect(job.attempts[0]?.phase).toBe("queued");
+      expect(job.attempts[0]?.phaseDetail).toBe("waiting for the cross-workspace verify chain");
+      expect(Date.parse(job.lastActivityAt)).toBeGreaterThan(Date.parse(job.attempts[0]!.startedAt));
+    });
+
+    it("re-stamps `phaseSince` on a transition, so the badge clock restarts per phase", () => {
+      startMergeJob("ws-phase-since");
+      noteMergeGateAttemptStarted("ws-phase-since", "pre-lock-merge");
+      noteMergeGatePhase("ws-phase-since", "queued", undefined, "2026-08-30T10:00:00.000Z");
+      noteMergeGatePhase("ws-phase-since", "verify", undefined, "2026-08-30T10:40:00.000Z");
+
+      const attempt = getMergeJob("ws-phase-since")!.attempts[0]!;
+      expect(attempt.phase).toBe("verify");
+      expect(attempt.phaseSince).toBe("2026-08-30T10:40:00.000Z");
+    });
+
+    it("targets the NEWEST unfinished attempt, not the first", () => {
+      startMergeJob("ws-phase-retry");
+      const first = noteMergeGateAttemptStarted("ws-phase-retry", "pre-lock-merge");
+      noteMergeGateAttemptFinished("ws-phase-retry", first, { outcome: "discarded" });
+      noteMergeGateAttemptStarted("ws-phase-retry", "merge-executor");
+
+      noteMergeGatePhase("ws-phase-retry", "verify");
+
+      const job = getMergeJob("ws-phase-retry")!;
+      expect(job.attempts[0]?.phase).toBeUndefined();
+      expect(job.attempts[1]?.phase).toBe("verify");
+    });
+
+    it("is a NO-OP outside a merge job — a gate can legitimately run without one", () => {
+      // The monitor's own cycle gate and review-exit both run the gate with no merge job; that
+      // must be silent, exactly as `noteMergeGateAttemptStarted` already returns null there.
+      expect(() => noteMergeGatePhase("ws-no-job", "verify")).not.toThrow();
+      expect(getMergeJob("ws-no-job")).toBeNull();
+    });
+
+    it("is a no-op once every attempt has finished — it never resurrects a closed one", () => {
+      startMergeJob("ws-phase-closed");
+      const handle = noteMergeGateAttemptStarted("ws-phase-closed", "pre-lock-merge");
+      noteMergeGateAttemptFinished("ws-phase-closed", handle, { outcome: "failed" });
+
+      noteMergeGatePhase("ws-phase-closed", "verify");
+
+      expect(getMergeJob("ws-phase-closed")!.attempts[0]?.phase).toBeUndefined();
+    });
+
+    it("reaches the card: the derived badge says QUEUED rather than Verifying", () => {
+      startMergeJob("ws-phase-card");
+      noteMergeGateAttemptStarted("ws-phase-card", "pre-lock-merge");
+      noteMergeGatePhase("ws-phase-card", "queued", "waiting for the cross-workspace verify chain");
+
+      const activity = deriveGateActivity(peekMergeJob("ws-phase-card"));
+      expect(activity?.gatePhase).toBe("queued");
+      expect(activity?.label).toMatch(/^Queued/);
     });
   });
 });

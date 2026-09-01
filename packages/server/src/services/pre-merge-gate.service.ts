@@ -27,6 +27,7 @@ import { getProjectRepoPath } from "../repositories/project.repository.js";
 import { runUnderBuildSemaphore } from "./jvm-build-semaphore.js";
 import { runUnderVerifyChainSemaphore, runUnderVerifyChainSemaphoreTimed } from "./verify-chain-semaphore.js";
 import { runE2ESmokeGateStage } from "./e2e-smoke-lane.js";
+import { noteMergeGatePhase } from "./merge-job.service.js";
 import {
   resolveGateVerification,
   resolveVerifyGateStrategy,
@@ -454,8 +455,14 @@ export async function runPreMergeGate(
       // this is an unconditional carry, not another branch in this already-branchy function.
       posture: gatePosture,
     };
-    const runVerify = () =>
-      runUnderBuildSemaphore(() =>
+    // #977 — the phase transitions, reported from the seams that already exist. `queued` is
+    // the one that mattered: a gate waiting behind another workspace's verify chain rendered
+    // as `Verifying · 40m`, indistinguishable from a suite that had been executing that long.
+    // Noted inside `runVerify` rather than beside the semaphore acquisition so the post-install
+    // re-run walks back from `install` to `verify` for free.
+    const runVerify = () => {
+      noteMergeGatePhase(workspace.id, "verify");
+      return runUnderBuildSemaphore(() =>
         runSetupScript(workingDir, verifyScript!, { timeoutMs: verifyTimeoutMs, env: verifyEnv }).catch((e) => ({
           exitCode: 1,
           stdout: "",
@@ -463,6 +470,7 @@ export async function runPreMergeGate(
           timedOut: false,
         })),
       );
+    };
     // #169's install retry and #894's targeted flake retry both answer ONE question - "is this
     // failure the code's fault?" - and inlined here they took runPreMergeGate past the
     // god-module gate's branch ceiling. They live in verify-retry-strategies.ts now; everything
@@ -472,19 +480,23 @@ export async function runPreMergeGate(
     // cross-workspace verify-chain semaphore, not just each individual invocation. Two
     // different workspaces' chains used to freely interleave inside `runUnderBuildSemaphore`'s
     // own cap (default 2), which is what let three full-suite runs contend on one box at once.
+    noteMergeGatePhase(workspace.id, "queued", "waiting for the cross-workspace verify chain");
     const { result: outcome, queueWaitMs, lockNote } = await runUnderVerifyChainSemaphoreTimed(async () =>
       resolveVerifyOutcome({
         result: await runVerify(),
         runVerify,
-        runVerifyWithRetryScope: (retryScope) =>
-          runUnderBuildSemaphore(() =>
+        runVerifyWithRetryScope: (retryScope) => {
+          noteMergeGatePhase(workspace.id, "flake-retry", "re-running only the failing tests");
+          return runUnderBuildSemaphore(() =>
             runSetupScript(workingDir, verifyScript!, {
               timeoutMs: verifyTimeoutMs,
               env: { ...verifyEnv, KANBAN_RETRY_TEST_FILES: retryScope },
             }).catch((e) => ({ exitCode: 1, stdout: "", stderr: String(e), timedOut: false })),
-          ),
+          );
+        },
         getInstallCommand: () => getProjectSetupScript(projectId, database).catch(() => null),
         runInstall: async (command) => {
+          noteMergeGatePhase(workspace.id, "install", command);
           await runUnderBuildSemaphore(() =>
             runSetupScript(workingDir, command, {
               timeoutMs: DEFAULT_SETUP_SCRIPT_TIMEOUT_MS,
@@ -601,6 +613,7 @@ export async function runPreMergeGate(
         console.log(`[pre-merge-gate] skipping smoke check for workspace ${workspace.id} — diff touches only docs (#198)`);
       } else {
         smokeApplies = true;
+        noteMergeGatePhase(workspace.id, "smoke", "boot + render check");
         // #949: the chain semaphore, not just the build semaphore. This boots a real dev server
         // and polls a health URL; under the build semaphore alone (derived width up to 8) it ran
         // freely alongside ANOTHER gate's verify chain, which is the contention #903 set out to

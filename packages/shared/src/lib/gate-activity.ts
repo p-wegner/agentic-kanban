@@ -32,6 +32,29 @@ export type GateActivityPhase =
   | "stalled";
 
 /**
+ * The FINE-GRAINED step a gate attempt is currently on (#977).
+ *
+ * Distinct from {@link GateActivityPhase}, and deliberately so: that one is the coarse badge
+ * colour (is a gate attempt in flight at all?), this one is what the attempt is DOING. The
+ * two answer different questions and a card that conflates them loses the one #977 exists
+ * for — `queued` and `verify` are both "an attempt is in flight", but a gate that has not
+ * started running anything because another workspace's chain holds the verify semaphore is
+ * not the same thing as a suite that has been executing for eighteen minutes, and rendering
+ * both as `Verifying · 18m` is what makes a queue indistinguishable from a hang.
+ */
+export type MergeGatePhase =
+  /** Waiting for the cross-workspace verify-chain semaphore — nothing is executing yet. */
+  | "queued"
+  /** Re-running the project's install command after a missing-deps failure (#169). */
+  | "install"
+  /** The verify script itself is running. */
+  | "verify"
+  /** A targeted re-run of the failing tests, to tell a flake from a real failure (#894). */
+  | "flake-retry"
+  /** The boot/render smoke check that follows a green verify. */
+  | "smoke";
+
+/**
  * How long a running merge may go with no observed activity before the CARD calls it stalled.
  *
  * Deliberately far below `MERGE_JOB_ZOMBIE_AFTER_MS` (4h), and it means something different.
@@ -60,6 +83,12 @@ export interface GateActivitySource {
     outcome?: "passed" | "failed" | "skipped" | "discarded";
     detail?: string;
     stage?: string;
+    /** The step this attempt is on right now (#977). */
+    phase?: MergeGatePhase;
+    /** When it entered {@link phase} — what the badge's elapsed time counts from. */
+    phaseSince?: string;
+    /** One line of context for the phase, e.g. what the queue is waiting behind. */
+    phaseDetail?: string;
   }>;
 }
 
@@ -80,9 +109,27 @@ export interface GateActivity {
   elapsedMs: number;
   /** 1-based number of the attempt in flight; null when no attempt is running. */
   attempt: number | null;
+  /**
+   * The fine-grained step the in-flight attempt is on (#977), or null when no attempt is in
+   * flight or the running attempt predates phase reporting. Never replaces {@link phase} —
+   * tone/colour is still chosen from the coarse one, so a new step never needs a new colour.
+   */
+  gatePhase: MergeGatePhase | null;
   /** How many gate attempts this merge has made so far. */
   attemptCount: number;
 }
+
+/**
+ * Badge verb per phase. A table rather than a `switch` so a new phase is a compile error here
+ * (`Record<MergeGatePhase, string>`) instead of silently falling through to "Verifying".
+ */
+const GATE_PHASE_VERB: Record<MergeGatePhase, string> = {
+  queued: "Queued",
+  install: "Installing",
+  verify: "Verifying",
+  "flake-retry": "Re-testing",
+  smoke: "Smoke test",
+};
 
 function parseMs(iso: string | undefined, fallback: number): number {
   if (!iso) return fallback;
@@ -148,16 +195,28 @@ export function deriveGateActivity(
   if (inFlight) {
     const runningMs = Math.max(0, nowMs - parseMs(inFlight.startedAt, nowMs));
     const attemptLabel = attemptCount > 1 ? ` · attempt ${inFlight.attempt}` : "";
+    // #977 — the phase clock counts from `phaseSince`, not from the attempt start. A gate that
+    // queued for 40 minutes and has been verifying for 2 must read `Verifying · 2m`; showing
+    // the attempt's own age there is what made a queue and a long suite look identical.
+    const gatePhase = inFlight.phase ?? null;
+    const phaseMs = Math.max(0, nowMs - parseMs(inFlight.phaseSince, parseMs(inFlight.startedAt, nowMs)));
+    const verb = gatePhase ? GATE_PHASE_VERB[gatePhase] : "Verifying";
     return {
       phase: "verifying",
-      label: `Verifying${attemptLabel} · ${formatGateDuration(runningMs)}`,
+      label: `${verb}${attemptLabel} · ${formatGateDuration(gatePhase ? phaseMs : runningMs)}`,
       detail:
         `Pre-merge gate attempt ${inFlight.attempt} (${inFlight.source}) has been running for `
         + `${formatGateDuration(runningMs)}; the merge started ${formatGateDuration(elapsedMs)} ago.`
+        + (gatePhase
+          ? ` Currently ${gatePhase} for ${formatGateDuration(phaseMs)}`
+            + (inFlight.phaseDetail ? ` (${inFlight.phaseDetail})` : "")
+            + "."
+          : "")
         + (previous ? ` Previously: ${previous}.` : ""),
       quietMs,
       elapsedMs,
       attempt: inFlight.attempt,
+      gatePhase,
       attemptCount,
     };
   }
@@ -176,6 +235,7 @@ export function deriveGateActivity(
       quietMs,
       elapsedMs,
       attempt: null,
+      gatePhase: null,
       attemptCount,
     };
   }
@@ -193,6 +253,7 @@ export function deriveGateActivity(
     quietMs,
     elapsedMs,
     attempt: null,
+    gatePhase: null,
     attemptCount,
   };
 }
