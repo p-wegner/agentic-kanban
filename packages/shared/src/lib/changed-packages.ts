@@ -42,6 +42,13 @@ const GLOBAL_SCOPE_BREAKERS: ReadonlyArray<RegExp> = [
   /^\.dependency-cruiser\.cjs$/,
   /^scripts\/test-mine\.mjs$/,
   /^scripts\/check-god-modules\.mjs$/,
+  // #988 — `pnpm check:arch` is this script now, so an edit here changes what the arch half of
+  // the gate runs, exactly as an edit to the god-module script does.
+  /^scripts\/check-arch\.mjs$/,
+  // #988 — and `pnpm typecheck` is this one (#980), which was never listed: it decides which
+  // packages get typechecked and with what cache, so a diff touching it cannot be scoped by a
+  // map that only models source ownership.
+  /^scripts\/typecheck\.mjs$/,
   /^scripts\/build-.*\.mjs$/,
   /^scripts\/copy-assets\.mjs$/,
   // #643: the breakers above are ROOT-anchored, so a PER-PACKAGE `package.json` or

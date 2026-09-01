@@ -117,6 +117,12 @@ async function main() {
   const ordered = [...results].sort((a, b) => b.durationMs - a.durationMs);
   const parts = ordered.map((r) => `${r.label} ${Math.round(r.durationMs / 1000)}s${r.code === 0 ? "" : " FAILED"}`);
   console.log(`[typecheck] ${Math.round(totalMs / 1000)}s total across ${results.length} package(s), ${workers} worker(s): ${parts.join(", ")}`);
+  // #988 — the machine-readable half of the same number, for the merge gate. The line above is
+  // for a human reading a log; this one is parsed by `verify-step-timings.ts` so the gate's own
+  // one-line verdict can say `typecheck 35s` instead of leaving the floor to be re-measured by
+  // hand the way #980 had to. This step never narrows itself — all five packages always run —
+  // so it carries no `scope` field rather than a decorative `scope=full`.
+  console.log(`[gate:step] name=typecheck seconds=${Math.round(totalMs / 1000)}`);
 
   const failed = results.filter((r) => r.code !== 0);
   if (failed.length > 0) {

@@ -1386,6 +1386,33 @@ if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
     if (machineLockNote) console.warn(`\n${machineLockNote}`);
   });
 
+  /* -------------------------------------------------------------------------
+   * The gate's step-timing self-report (#988)
+   *
+   * `packages/server/src/services/verify-step-timings.ts` is the other half of this contract.
+   * A merge gate sees the whole `verify_script` as ONE opaque `runSetupScript` call, so nothing
+   * on the board's side can say whether three minutes were tests, typecheck or depcruise — and
+   * #980 measured that floor by hand precisely because the gate would not say.
+   *
+   * Emitted from a `process.once("exit")` handler rather than from each of the half-dozen
+   * `process.exit()` sites below, for the same reason the lock release above is: a report that
+   * only some exit paths produce is worse than none, because its absence then reads as "this
+   * step was free" instead of "this path forgot to print".
+   *
+   * `scope` is the honesty half. A run narrowed to guards or to an impact selection cost less
+   * BECAUSE it checked less, and a bare `tests 40s` beside a `tier: guards-only` gate would
+   * invite exactly the wrong conclusion about the floor.
+   * ---------------------------------------------------------------------- */
+  const stepStartedAt = Date.now();
+  // Package scoping is the BASE, not a mode: every branch below runs inside whatever
+  // `KANBAN_TEST_PACKAGES` left in `toRun`, so it is the honest label whenever nothing narrower
+  // was chosen. A narrower mode overwrites it — `impact-selected` already implies the package
+  // scope it selected within, and naming both would be two labels for one run.
+  let stepScope = toRun !== PACKAGES ? "package-scoped" : "full";
+  process.once("exit", () => {
+    console.log(`[gate:step] name=tests seconds=${Math.round((Date.now() - stepStartedAt) / 1000)} scope=${stepScope}`);
+  });
+
   const treeBefore = treeSnapshot();
   if (retryScope.size > 0) {
     // #894 — the narrow re-run of suites that just failed a full gate. Runs ONLY what it was
@@ -1398,6 +1425,7 @@ if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
     })).filter((entry) => entry.files.length > 0);
     const total = planned.reduce((n, entry) => n + entry.files.length, 0);
     const asked = [...retryScope.values()].reduce((n, files) => n + files.length, 0);
+    stepScope = "flake-retry";
     console.log(`\n[test:mine] flake-retry mode (KANBAN_RETRY_TEST_FILES): ${total} suite(s) across ${planned.length} package(s)`);
     if (total !== asked) {
       // Never quietly run a subset: a suite that vanished between the failing run and the
@@ -1429,6 +1457,7 @@ if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
       guards: (ALWAYS_RUN_TESTS[pkg.label] ?? []).filter((f) => existsSync(resolve(ROOT, pkg.dir, f))),
     })).filter((entry) => entry.guards.length > 0);
     const total = planned.reduce((n, entry) => n + entry.guards.length, 0);
+    stepScope = "guards-only";
     console.log(`\n[test:mine] guards-only mode (KANBAN_TEST_GUARDS_ONLY): ${total} @gate:always-run suite(s) across ${planned.length} package(s)`);
     if (total === 0) {
       // Fail loudly rather than reporting a green that checked nothing — the whole point of
@@ -1530,6 +1559,7 @@ if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
   }
   if (impactScope) {
     const { planned, total, namedOverall, excludedCount } = impactPlan;
+    stepScope = scopedFiles.length > 0 ? "impact+related" : "impact-selected";
     console.log(
       `\n[test:mine] ${scopedFiles.length > 0 ? "impact+related-scoped" : "impact-scoped"} to ${total} suite(s) ` +
         `across ${planned.length} package(s) (KANBAN_TEST_SELECTOR=impact, --min-score ${impactMinScore}` +
@@ -1567,6 +1597,12 @@ if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
     console.log("\n[test:mine] All impact-selected suites and guards passed.");
     process.exit(0);
   }
+  // The `vitest related` path. Per-package it may be file-scoped or a full suite (a package with
+  // no own changes and no upstream ones falls through to its whole suite), so the ONE label this
+  // step can honestly claim is whether a file scope was in play at all — the gate message names
+  // the tier separately, and a `file-scoped` here that meant "for three of five packages" would
+  // be a narrower claim than the run earned.
+  if (scopedFiles.length > 0) stepScope = "file-scoped";
   for (const pkg of toRun) {
     const owned = scopedFiles.length > 0 ? ownedChangedFiles(pkg.dir) : [];
     let relatedFiles = owned;
