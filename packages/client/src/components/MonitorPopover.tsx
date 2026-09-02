@@ -174,6 +174,14 @@ export function MonitorPopover({
     iss.workspaceSummary.main.lastAssistantMessage
   );
   const warnings = status?.warnings ?? [];
+  // #1004: the server flags these off resolveStartPolicy; the popover only relays them.
+  const parkedIssues = columns.flatMap(c => c.issues).filter(iss => iss.awaitingManualStart);
+  const openParkedIssue = (issueId: string) => {
+    const main = parkedIssues.find(iss => iss.id === issueId)?.workspaceSummary?.main;
+    if (!main) return;
+    onOpenWorkspace(main.id, issueId);
+    onClose();
+  };
 
   return createPortal(
     <>
@@ -225,6 +233,8 @@ export function MonitorPopover({
               onPutSettings={putSettings}
               formatAge={formatAge}
               formatCountdown={formatCountdown}
+              parkedIssues={parkedIssues}
+              onOpenIssue={openParkedIssue}
             />
           )}
 

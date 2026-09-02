@@ -12,6 +12,9 @@
  * preserves whatever extra fields the caller's rows carry into the output.
  */
 
+import { occupiesWipSlot } from "@agentic-kanban/shared/lib/workspace-liveness";
+import type { StartPolicy } from "@agentic-kanban/shared/types";
+
 /** A project status (column) — only the fields the projection reads/emits. */
 export interface BoardStatusRow {
   id: string;
@@ -44,12 +47,28 @@ export interface BoardIssueTag {
   color: string | null;
 }
 
-/** The workspace-summary fields the terminal-status override reads. */
+/** The workspace-summary fields the terminal-status override and the no-driver check read. */
 export interface BoardWorkspaceSummaryShape {
   main?: {
     status?: string | null;
+    readyForMerge?: boolean | null;
+    sessionStatus?: string | null;
     workflow?: { currentNodeStatusName?: string | null } | null;
   } | null;
+}
+
+/**
+ * #1004: does something currently OWN this In-Progress ticket, so that "In Progress" is
+ * telling the truth? An agent session running (or reviewing/fixing), a plan parked for a
+ * human's approval, or a branch waiting on the merge are all owners — each has its own
+ * badge. Only a workspace that is idle/errored/absent with nothing pending has none.
+ */
+function hasDriver(main: BoardWorkspaceSummaryShape["main"]): boolean {
+  if (!main) return false;
+  if (occupiesWipSlot(main.status)) return true;
+  if (main.sessionStatus === "running") return true;
+  if (main.status === "awaiting-plan-approval") return true;
+  return main.readyForMerge === true;
 }
 
 export interface BuildBoardColumnsParams<
@@ -71,6 +90,14 @@ export interface BuildBoardColumnsParams<
   staleDays: number;
   /** In-progress column staleness threshold in days. */
   inProgressStaleDays: number;
+  /**
+   * #1004: the project's RESOLVED Start Mode (`resolveStartPolicy(...).mode`) — the one
+   * decision every auto-start path consults (decision 008). Pass the resolved value, never a
+   * raw `start_mode_<id>` pref read, so this projection cannot disagree with the monitor
+   * about whether anything will pick a parked ticket up. Optional so callers that do not
+   * know the policy (tests, secondary projections) simply never flag.
+   */
+  startMode?: StartPolicy["mode"];
 }
 
 /**
@@ -92,7 +119,11 @@ export function buildBoardColumns<
     now,
     staleDays,
     inProgressStaleDays,
+    startMode,
   } = params;
+  // Only `manual` parks a ticket: `monitor` relaunches on its next cycle and `conductor`'s
+  // external loop owns starts, so on both the column is telling the truth.
+  const nothingAutoStarts = startMode === "manual";
 
   const staleMs = staleDays * 24 * 60 * 60 * 1000;
   const inProgressStaleMs = inProgressStaleDays * 24 * 60 * 60 * 1000;
@@ -132,6 +163,9 @@ export function buildBoardColumns<
     const columnElapsed = now - columnEnteredAt;
     const columnAgeDays = Math.floor(columnElapsed / (24 * 60 * 60 * 1000));
     const isColumnStale = isInProgress && columnElapsed >= inProgressStaleMs;
+    // #1004: "In Progress" means "a driver owns this". On a manual-start project with no
+    // agent on the ticket that is false and nothing will make it true — say so.
+    const awaitingManualStart = nothingAutoStarts && isInProgress && !hasDriver(wsSummary?.main);
     return {
       ...issue,
       ...(workflowStatus ? { statusId: workflowStatus.id, statusName: workflowStatus.name } : {}),
@@ -140,6 +174,7 @@ export function buildBoardColumns<
       ...(isStale ? { isStale: true, staleDays: staleDaysActual } : {}),
       columnAgeDays,
       ...(isColumnStale ? { isColumnStale: true } : {}),
+      ...(awaitingManualStart ? { awaitingManualStart: true } : {}),
     };
   });
 

@@ -30,6 +30,7 @@ export function stringifyForIssueCard(issue: IssueWithStatus): string {
     staleDays: issue.staleDays,
     columnAgeDays: issue.columnAgeDays,
     isColumnStale: issue.isColumnStale,
+    awaitingManualStart: issue.awaitingManualStart,
     skipAutoReview: issue.skipAutoReview,
     estimate: issue.estimate,
     dueDate: issue.dueDate,
