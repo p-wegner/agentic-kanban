@@ -22,12 +22,13 @@
  * ordinary path.
  */
 import { execFile, spawn } from "node:child_process";
-import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
+import { mkdtemp, writeFile, mkdir } from "node:fs/promises";
 import { readFileSync, writeFileSync, mkdirSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createRequire } from "node:module";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { rmFixtureDir } from "./helpers/rm-or-report-holder.js";
 
 const requireCjs = createRequire(import.meta.url);
 const hookPath = resolve(
@@ -157,7 +158,7 @@ describe("check-uncommitted hook — dirty detection is content-based (#770)", (
       );
       expect(stagedFailed.all).toEqual([A]);
     } finally {
-      await rm(repo, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+      rmFixtureDir(repo);
     }
   });
 
@@ -176,7 +177,7 @@ describe("check-uncommitted hook — dirty detection is content-based (#770)", (
       expect(trackedSourceChanges(repo, () => null).all).toEqual([A]);
       expect(porcelainSourceChanges(repo).all).toEqual([A]);
     } finally {
-      await rm(repo, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+      rmFixtureDir(repo);
     }
   });
 });
@@ -196,7 +197,7 @@ describe("check-uncommitted hook — real repo, content vs metadata (#770)", () 
     // #1006 — retry the removal. Every child here is a synchronous `execFile`/`spawn` that has
     // already exited, so an EPERM is Windows closing the last `.git` handle asynchronously, not a
     // holder to diagnose. Left unretried it fails a test whose assertions passed.
-    await rm(repo, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    rmFixtureDir(repo);
   });
 
   it("a tracked file rewritten with IDENTICAL bytes is neither stranded nor in-flight", async () => {
