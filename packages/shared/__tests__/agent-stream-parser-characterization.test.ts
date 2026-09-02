@@ -321,6 +321,10 @@ describe("claude parser characterization", () => {
     `);
   });
 
+  // #1001: this snapshot used to carry a `liveStats` block with `contextTokens: 12` — the
+  // result event's CUMULATIVE usage published as if it were context-window occupancy. There
+  // is no `liveStats` on a result event any more; the totals live in `stats`, where the field
+  // names say what they are.
   it("result success", () => {
     expect(parse("claude", {
       type: "result",
@@ -345,10 +349,6 @@ describe("claude parser characterization", () => {
             "totalCostUsd": 0.05,
           },
         ],
-        "liveStats": {
-          "contextTokens": 12,
-          "model": "",
-        },
         "stats": {
           "agentSummary": "done",
           "durationMs": 1234,

@@ -286,10 +286,14 @@ function handleResultEvent(obj: Record<string, unknown>, result: ParsedStreamEve
       if (errorText) result.resultError = errorText;
     }
   }
-  const contextTokens = numberValue(usage.cache_read_input_tokens) + numberValue(usage.input_tokens);
-  if (!isSubagentMessage && contextTokens > 0) {
-    result.liveStats = { ...(result.liveStats ?? { model: "", contextTokens }), contextTokens };
-  }
+  // #1001: the `result` event's `usage` is the CUMULATIVE total for the whole session, not
+  // the context window's occupancy at any moment. Reading it as `liveStats.contextTokens`
+  // overwrote the last assistant message's real occupancy with a running sum, so the Context
+  // Window view rendered nonsense like "2.0M / 200.0K" for a session whose largest single
+  // request was 124,687 tokens. Occupancy is an assistant-event signal only (see
+  // `handleAssistantEvent`); the cumulative figure already has a home that says what it is,
+  // `result.stats.inputTokens` / `outputTokens`. Emitting no `liveStats` here also stops the
+  // result event racing its own stats write (see broadcast.ts `queueStatsWrite`).
   const denials = Array.isArray(obj.permission_denials) ? obj.permission_denials as Array<Record<string, unknown>> : [];
   if (denials.some((d) => d.tool_name === "ExitPlanMode")) result.exitPlanModeDenied = true;
 }

@@ -40,10 +40,13 @@ function frictionFromBuffer(messages: AgentOutputMessage[]): SessionFrictionStat
  * event (which already include friction). Fire-and-forget.
  */
 async function persistFrictionFallback(sessionId: string, messages: AgentOutputMessage[]) {
-  try {
-    const friction = frictionFromBuffer(messages);
-    const usageLimit = detectCodexUsageLimitMessages(messages);
-    if (!friction && !usageLimit) return;
+  const friction = frictionFromBuffer(messages);
+  const usageLimit = detectCodexUsageLimitMessages(messages);
+  if (!friction && !usageLimit) return;
+  // Read AND write inside the chain (#1002): this decides what to write from what the blob
+  // already holds ("friction already persisted on the result-event write"), so reading it
+  // outside the serialised section would judge a stats blob that is about to change.
+  await queueStatsWrite(sessionId, async () => {
     const rows = await selectSessionStats(sessionId);
     if (rows.length === 0) return;
     let stats: Record<string, unknown> = {};
@@ -64,9 +67,9 @@ async function persistFrictionFallback(sessionId: string, messages: AgentOutputM
       stats.friction = friction;
     }
     await updateSessionStats(sessionId, JSON.stringify(stats));
-  } catch (err) {
+  }).catch((err) => {
     console.error("Failed to persist session friction (fallback):", err);
-  }
+  });
 }
 
 async function mergeExistingStats(sessionId: string, statsToSave: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -74,6 +77,58 @@ async function mergeExistingStats(sessionId: string, statsToSave: Record<string,
   // the twin in session-launch-helpers, which reads through a passed `database`.
   const rows = await selectSessionStats(sessionId);
   return mergeSessionStats(rows[0]?.stats, statsToSave);
+}
+
+/**
+ * One write chain per session for the `sessions.stats` blob (#1002).
+ *
+ * Three writers in this file read-modify-write that one row — `applyStatsEvent` (the result
+ * event's aggregates), `persistLiveActivity` (#930's contextTokens/lastTool heartbeat) and
+ * `persistFrictionFallback` (the terminal friction/usage-limit write). Each did its own
+ * `select` → `mergeSessionStats` → `update` with nothing between them, and `mergeSessionStats`
+ * is a spread — so whichever write RESOLVED last won with whatever it had READ, and every
+ * field the other writer had just added was silently dropped.
+ *
+ * It was not a rare interleaving: one result event drove two of them, so the loss was
+ * deterministic. Measured before this fix — 102 of the 103 sessions that carried a
+ * live-activity `contextTokens` had lost `inputTokens`, `outputTokens`, `model`, `durationMs`,
+ * `totalCostUsd` and `success` from the same blob. The missing `model` is why the Context
+ * Window view fell back to a 200k denominator, and the missing token fields are what made the
+ * workspace timeline call every completed session a launch failure.
+ *
+ * Serialising the read alongside the write is the actual guarantee — removing the result
+ * event's redundant `liveStats` (#1001) only removes the collision that happened to be
+ * deterministic; the throttled heartbeat can still land beside a result event on its own.
+ */
+const statsWriteChains = new Map<string, Promise<unknown>>();
+
+function queueStatsWrite<T>(sessionId: string, run: () => Promise<T>): Promise<T> {
+  const previous = statsWriteChains.get(sessionId) ?? Promise.resolve();
+  // Run after the previous write SETTLES, whether it resolved or rejected: a failed write
+  // must not strand the chain and block every later one.
+  const next = previous.then(run, run);
+  statsWriteChains.set(sessionId, next.catch(() => undefined));
+  return next;
+}
+
+/** Merge a patch into the session's stats blob, serialised against the other writers. */
+function mergeAndSaveStats(sessionId: string, patch: Record<string, unknown>): Promise<void> {
+  return queueStatsWrite(sessionId, async () => {
+    const merged = await mergeExistingStats(sessionId, patch);
+    await updateSessionStats(sessionId, JSON.stringify(merged));
+  });
+}
+
+/**
+ * Drop a finished session's chain once it has drained. Only clears the entry it waited on,
+ * so a write that arrives after the exit re-arms the chain rather than losing its ordering.
+ */
+function releaseStatsWriteChain(sessionId: string): void {
+  const tail = statsWriteChains.get(sessionId);
+  if (!tail) return;
+  void tail.finally(() => {
+    if (statsWriteChains.get(sessionId) === tail) statsWriteChains.delete(sessionId);
+  });
 }
 
 /**
@@ -88,8 +143,7 @@ async function mergeExistingStats(sessionId: string, statsToSave: Record<string,
  */
 function persistLiveActivity(sessionId: string, patch: { contextTokens?: number; lastTool?: string }): void {
   const statsToSave = { ...patch, lastActivityAt: new Date().toISOString() };
-  mergeExistingStats(sessionId, statsToSave)
-    .then((mergedStats) => updateSessionStats(sessionId, JSON.stringify(mergedStats)))
+  mergeAndSaveStats(sessionId, statsToSave)
     .catch((err) => console.error("[session] Failed to persist live session activity:", err));
 }
 
@@ -330,8 +384,7 @@ function applyStatsEvent(state: SessionState, sessionId: string, stats: NonNulla
     ...(lastTool ? { lastTool } : {}),
     ...(friction ? { friction } : {}),
   };
-  mergeExistingStats(sessionId, statsToSave)
-    .then((mergedStats) => updateSessionStats(sessionId, JSON.stringify(mergedStats)))
+  mergeAndSaveStats(sessionId, statsToSave)
     .catch((err) => console.error("Failed to update session stats:", err));
 }
 
@@ -532,7 +585,9 @@ export function createBroadcaster(
       // Fallback for sessions that never emitted a result/stats event (e.g.
       // codex/copilot). Safe: only sets `friction` when absent, so it can't
       // overwrite cost/token stats from the result-event path above.
-      void persistFrictionFallback(sessionId, state.messageBuffer.get(sessionId) ?? []);
+      void persistFrictionFallback(sessionId, state.messageBuffer.get(sessionId) ?? []).finally(
+        () => releaseStatsWriteChain(sessionId),
+      );
     }
 
     // Deliver to WebSocket subscribers
