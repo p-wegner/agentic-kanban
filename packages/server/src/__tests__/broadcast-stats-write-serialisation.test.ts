@@ -105,8 +105,8 @@ describe("#1002: concurrent writers to sessions.stats never lose each other's fi
   });
 
   it("keeps the result event's aggregates alongside the live-activity fields", async () => {
-    broadcast(SESSION, { type: "stdout", data: ASSISTANT_EVENT });
-    broadcast(SESSION, { type: "stdout", data: RESULT_EVENT });
+    broadcast(SESSION, { sessionId: SESSION, type: "stdout", data: ASSISTANT_EVENT });
+    broadcast(SESSION, { sessionId: SESSION, type: "stdout", data: RESULT_EVENT });
     await settle();
 
     const stats = parseStored();
@@ -122,8 +122,8 @@ describe("#1002: concurrent writers to sessions.stats never lose each other's fi
   });
 
   it("#1001: contextTokens is the last request's occupancy, not the session total", async () => {
-    broadcast(SESSION, { type: "stdout", data: ASSISTANT_EVENT });
-    broadcast(SESSION, { type: "stdout", data: RESULT_EVENT });
+    broadcast(SESSION, { sessionId: SESSION, type: "stdout", data: ASSISTANT_EVENT });
+    broadcast(SESSION, { sessionId: SESSION, type: "stdout", data: RESULT_EVENT });
     await settle();
 
     const stats = parseStored();
@@ -134,8 +134,8 @@ describe("#1002: concurrent writers to sessions.stats never lose each other's fi
   });
 
   it("no write ever drops a key an earlier write had added", async () => {
-    broadcast(SESSION, { type: "stdout", data: ASSISTANT_EVENT });
-    broadcast(SESSION, { type: "stdout", data: RESULT_EVENT });
+    broadcast(SESSION, { sessionId: SESSION, type: "stdout", data: ASSISTANT_EVENT });
+    broadcast(SESSION, { sessionId: SESSION, type: "stdout", data: RESULT_EVENT });
     await settle();
 
     // The invariant, stated over the whole write history rather than only the final value:
