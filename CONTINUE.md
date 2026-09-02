@@ -3,6 +3,52 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-02 — #986 unblocked with real evidence, and it exposed #998: the board was discarding its own gates
+
+**#986's blocked step is done.** It was waiting on classified discard evidence ("instrumentation
+is armed; the next discard decides it"). `%TEMP%/kanban-dev.log` holds 8 `[merge-gate] …
+DISCARDED` lines; six predate #979 and name no shas, but **two carry the sha pair and both are
+decidable**. Attached to the ticket as an artifact; the close is test-impact's call, not ours.
+
+| Discard | movement | verdict |
+|---|---|---|
+| `d0399eaa`, PASSED 374s | `base 0ad14fe6 -> 83539117` | **genuine** — a `docs:` commit landed during the gate |
+| `42eb8b43`, PASSED 590s | `base f805f608 -> a0881bf8` | **genuine, and self-inflicted** — `a0881bf8` is `chore: rebuild test-impact map`, the board's own commit |
+
+**What that decides for #986: #979's conditional half was a misreading and the exclusion must NOT
+be implemented.** Its hypothesis was that the new sha would be a *sync artifact* — a
+pending-wt-sync, a plumbing merge, a `syncBranchToHead` reattach. Neither is. Both new tips are
+ordinary commits with real trees, so a gate that ran against the old tip genuinely did not test
+what would land, and suppressing either discard would merge code no gate ever saw. n = 2 is small,
+but both point the same way and that way is "leave the check alone" — the safe direction to be
+wrong in.
+
+### #998 — the finding that is not "nothing to do", and it is Done
+
+Discard B is a ten-minute PASSED gate thrown away by the board's own housekeeping. #993 registered
+the map reconciler in `BACKGROUND_SERVICES` a day ago so it runs regardless of start mode — the
+right fix for the map rotting forever, and it created a committer that writes to master every 15
+minutes with no knowledge of the merge path.
+
+The pass already skipped on `lock_busy`, and **that is the wrong window**: the repo lock is held
+by the merge, while the gate runs before it (the discarded attempt is literally named
+`pre-lock-merge`), so the expensive 6–40 minute verification window was exactly the one the
+existing skip missed.
+
+Fixed by deferring a project's refresh while a merge is in flight FOR THAT PROJECT, keyed on the
+#945 marker — durable, cross-process, written by `startMergeJob` and cleared on every terminal
+transition, so it spans the whole gate including verification. Per project, not board-wide, or a
+busy project would starve an idle one's map and re-create #993 through a different door. Fails
+open (an unreadable marker refreshes anyway: a missed skip costs one gate, a refusal costs the
+freshness #993 guarantees). Logs the deferral, because a silently-never-refreshing map IS #993.
+
+Deferring is nearly free — the sweep repeats in 15 minutes and a stale map only WIDENS the
+selection — while a discarded gate costs 20–40 minutes of re-verify.
+
+**Verified**: two cases (the merging project is skipped and the idle one is not; the deferral
+lifts by itself when the marker is deleted), plus a negative control — stubbing the condition to
+`false` fails both. Impact selection green, guards-only green, typecheck green.
+
 ## 2026-09-02 — #997: the outcome ledger stops losing failures silently; one reported defect was already fixed
 
 **#997 is Done.** Reported over ACP by the test-impact session, which consumes
