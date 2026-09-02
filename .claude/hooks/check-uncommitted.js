@@ -62,12 +62,18 @@ function gitPorcelain(cwd) {
 }
 
 /** One `git` invocation whose stdout we want, or `null` when git could not answer at all. */
+// #1006: 15s was blown by a `git diff` on a temp repo while the pre-merge gate had the box
+// under memory pressure — a spawn that normally takes milliseconds. A read-only `git diff`
+// cannot hang on anything but the machine, so a larger budget hides no defect, while a
+// too-tight one turns machine load into a wrong ANSWER (see `trackedSourceChanges`).
+const GIT_READ_TIMEOUT_MS = 45000;
+
 function gitOut(cwd, args) {
   try {
     return execFileSync("git", args, {
       cwd,
       encoding: "utf8",
-      timeout: 15000,
+      timeout: GIT_READ_TIMEOUT_MS,
       windowsHide: true,
       stdio: GIT_READ_STDIO,
     });
@@ -152,7 +158,21 @@ function porcelainSourceChanges(cwd) {
 function trackedSourceChanges(cwd, run = (args) => gitOut(cwd, args)) {
   const worktree = run(["diff", "--name-status", "-z", "HEAD"]);
   const staged = run(["diff", "--cached", "--name-status", "-z", "HEAD"]);
-  if (worktree === null && staged === null) {
+  // #1006: EITHER half failing is enough to fall back, not both.
+  //
+  // `gitOut` swallows a 15s timeout into `null`, and on a loaded box (the pre-merge gate runs
+  // this suite at 4 workers alongside everything else, with under a gigabyte genuinely free)
+  // one `git diff` can blow that budget while the other — served from a now-warm index —
+  // answers in milliseconds. The old `&&` then took the successful half's answer as the WHOLE
+  // answer: one timed-out call silently became "no tracked changes", which is the exact
+  // silence the fallback exists to prevent, and it is worse than the both-failed case because
+  // nothing looks wrong. Observed as `trackedSourceChanges returned [] instead of the changed
+  // file` in a gate run whose fixture was unambiguously dirty.
+  //
+  // The porcelain answer is a superset built from ONE spawn, so falling back on a partial
+  // failure costs a cheap re-ask and over-reports at worst. Over-reporting is recoverable;
+  // a false "clean" strands the work this hook exists to catch.
+  if (worktree === null || staged === null) {
     // No HEAD (fresh repo — nothing is tracked, so this is empty anyway) or git is unusable.
     // Degrade to the old stat-cache answer rather than going silent: over-reporting is the
     // recoverable direction, silence is not.

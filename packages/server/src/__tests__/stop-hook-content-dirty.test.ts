@@ -22,12 +22,13 @@
  * ordinary path.
  */
 import { execFile, spawn } from "node:child_process";
-import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
+import { mkdtemp, writeFile, mkdir } from "node:fs/promises";
 import { readFileSync, writeFileSync, mkdirSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createRequire } from "node:module";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { rmFixtureDir } from "./helpers/rm-or-report-holder.js";
 
 const requireCjs = createRequire(import.meta.url);
 const hookPath = resolve(
@@ -129,6 +130,38 @@ describe("check-uncommitted hook — dirty detection is content-based (#770)", (
     expect(changes.all).toEqual([]);
   });
 
+  it("falls back when EITHER content diff fails, not only when both do (#1006)", async () => {
+    // The gate failure this pins: `trackedSourceChanges returned [] instead of the changed file`
+    // on a box under memory pressure. `gitOut` swallows its spawn timeout into `null`, so one
+    // `git diff` blowing the budget while the other answers fast used to yield the successful
+    // half's answer as the WHOLE answer — a silent, confident "clean" for a dirty tree, which is
+    // strictly worse than the both-failed case because nothing looks wrong.
+    const repo = await mkdtemp(join(tmpdir(), "ak-1006-partial-"));
+    try {
+      await git(repo, ["init", "-q", "-b", "main"]);
+      await git(repo, ["config", "user.email", "t@e.com"]);
+      await git(repo, ["config", "user.name", "T"]);
+      await writeFileIn(repo, A, "export const a = 1;\n");
+      await git(repo, ["add", "-A"]);
+      await git(repo, ["commit", "-q", "-m", "seed"]);
+      await writeFileIn(repo, A, "export const a = 2;\n");
+
+      // Worktree half times out (null), staged half succeeds and is legitimately empty.
+      const worktreeFailed = trackedSourceChanges(repo, (args) =>
+        args.includes("--cached") ? "" : null,
+      );
+      expect(worktreeFailed.all).toEqual([A]);
+
+      // And the mirror image: staged half times out, worktree half answers.
+      const stagedFailed = trackedSourceChanges(repo, (args) =>
+        args.includes("--cached") ? null : "",
+      );
+      expect(stagedFailed.all).toEqual([A]);
+    } finally {
+      rmFixtureDir(repo);
+    }
+  });
+
   it("falls back to the porcelain answer when git cannot diff at all (never goes silent)", async () => {
     // `run` returning null for both = no HEAD, or git unusable. Over-reporting is recoverable;
     // silence is not, so the legacy stat-cache classifier is the fallback rather than `[]`.
@@ -144,7 +177,7 @@ describe("check-uncommitted hook — dirty detection is content-based (#770)", (
       expect(trackedSourceChanges(repo, () => null).all).toEqual([A]);
       expect(porcelainSourceChanges(repo).all).toEqual([A]);
     } finally {
-      await rm(repo, { recursive: true, force: true });
+      rmFixtureDir(repo);
     }
   });
 });
@@ -161,7 +194,10 @@ describe("check-uncommitted hook — real repo, content vs metadata (#770)", () 
     await git(repo, ["commit", "-q", "-m", "seed"]);
   });
   afterEach(async () => {
-    await rm(repo, { recursive: true, force: true });
+    // #1006 — retry the removal. Every child here is a synchronous `execFile`/`spawn` that has
+    // already exited, so an EPERM is Windows closing the last `.git` handle asynchronously, not a
+    // holder to diagnose. Left unretried it fails a test whose assertions passed.
+    rmFixtureDir(repo);
   });
 
   it("a tracked file rewritten with IDENTICAL bytes is neither stranded nor in-flight", async () => {
