@@ -3,6 +3,34 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-02 — #996: the raw-read ratchet follows readGuardSource, and its baseline went back UP
+
+**#996 is Done.** `always-run-raw-read-ratchet` (#888) matched `readFileSync(<repo path>, "utf8")`
+at the CALL SITE only, so a read behind a helper was invisible — the blind spot its own header
+names. #994 made that concrete: routing `max-file-size`'s line-counting read through the new
+memoised `readGuardSource` dropped its baseline 2 → 1. The read did not stop existing; the scan
+stopped seeing it. Since `readGuardSource` is the helper every future guard is told to use, the
+blind spot grew with adoption.
+
+`TREE_READERS` now names both readers with a `hasEncodingArg` flag — load-bearing, because
+`readFileSync` without an encoding returns a Buffer (nothing a newline literal could match)
+while `readGuardSource` takes no encoding at all and always returns utf8 text. Everything else in
+the heuristic is unchanged, including all three sanctioned outs.
+
+**The evidence came for free and is the good kind**: turning it on immediately re-flagged
+`shared/max-file-size.test.ts: 2 > baseline 1` — the guard found the read it had been blind to,
+before any synthetic fixture was written. The baseline is back at 2 with the whole story in its
+reason, because *a ratchet entry that DROPS after a refactor is as worth reading as one that
+grows* — that is the lesson to keep from this pair of tickets.
+
+Two synthetic fixture cases added beside the existing five, so the helper's shape is proved
+red-then-green rather than argued: a `readGuardSource` read compared against a newline-bearing
+literal is flagged, and a `// RAW-BYTES OK:` marker still exempts it (following a helper must not
+create a shape whose only escape is to stop using the helper).
+
+Filed on the test-impact session's advice — "a flagged-in-chat blind spot has exactly the lifetime
+of this group's memory" — which was right.
+
 ## 2026-09-02 — #992: PATCH /api/projects/:id stops reporting success for work it did not do
 
 **#992 is Done.** The route 422s a body whose fields nobody reads, with nothing applied — the
