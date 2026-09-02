@@ -51,11 +51,15 @@
  * This is a NET, not a proof (explicitly, per the ticket): a raw read hidden behind a helper
  * function, or a comparison built through an intermediate variable several statements away
  * from both the read and the newline-bearing literal, will not match. Narrowing the gap is the
- * goal; the marker/`.gitattributes`/normalize outs above are what a reviewed exception looks
+ * goal, and #996 narrowed it once: `readGuardSource` — the memoised tree reader in
+ * `shared/__tests__/helpers/guard-scan.ts` that guard suites are told to use — is now FOLLOWED
+ * (see `TREE_READERS`), because a blind spot that grows every time the shared helper is adopted
+ * is the opposite of a ratchet. Any OTHER helper is still invisible; the marker/`.gitattributes`/normalize outs above are what a reviewed exception looks
  * like when the heuristic is wrong in the OTHER direction (a false positive).
  *
  * Detection, per always-run-marked test file:
- *  1. Find `readFileSync(<expr>, "utf8" | "utf-8")` where `<expr>`'s source text is ANCHORED at
+ *  1. Find a TREE_READERS call — `readFileSync(<expr>, "utf8" | "utf-8")`, or `readGuardSource(<expr>)`
+ *     which takes no encoding argument because it always returns utf8 — where `<expr>`'s source text is ANCHORED at
  *     the repo tree — it mentions `__dirname`, `import.meta.dirname`/`import.meta.url`, or an
  *     identifier this repo's guards conventionally use for a resolved repo/package root
  *     (`repoRoot`, `REPO_ROOT`, `SERVER_ROOT`, `packagesRoot`, `SPEC`, or a bare `join(`/
@@ -106,6 +110,8 @@ interface ReadCall {
   end: number;
   pathExpr: string;
   encodingExpr: string | null;
+  /** True for a reader that returns utf8 TEXT and takes no encoding argument (#996). */
+  readsUtf8WithoutEncodingArg: boolean;
 }
 
 function splitTopLevelArgs(argsText: string): string[] {
@@ -126,9 +132,33 @@ function splitTopLevelArgs(argsText: string): string[] {
   return parts.map((p) => p.trim());
 }
 
+/**
+ * The repo-tree readers this scan follows (#996).
+ *
+ * `readFileSync` is the direct form. `readGuardSource` is the MEMOISED form in
+ * `packages/shared/__tests__/helpers/guard-scan.ts` — the shared helper a guard suite is meant
+ * to use, added by #994 when re-reading the whole source tree once per `it` turned out to cost
+ * 158 s on a cold cache and time the god-module gate out at vitest's 120 s limit.
+ *
+ * Following it is not optional politeness. This file's own header names "a raw read hidden
+ * behind a helper function" as the heuristic's blind spot, and #994 demonstrated it: routing one
+ * read through `readGuardSource` dropped `shared/max-file-size.test.ts` from 2 to 1 in the
+ * baseline below — the read did not stop existing, the scan stopped seeing it. Since
+ * `readGuardSource` is the helper every future guard is told to use, that blind spot would grow
+ * with adoption, which is the opposite of what a ratchet is for.
+ *
+ * `hasEncodingArg` keeps the utf8 check honest per reader: `readFileSync` returns a Buffer
+ * without one (nothing a newline-bearing literal could be compared against), while
+ * `readGuardSource` takes no encoding argument at all and always returns utf8 text.
+ */
+const TREE_READERS: ReadonlyArray<{ name: string; hasEncodingArg: boolean }> = [
+  { name: "readFileSync", hasEncodingArg: true },
+  { name: "readGuardSource", hasEncodingArg: false },
+];
+
 function findReadFileSyncCalls(source: string): ReadCall[] {
   const calls: ReadCall[] = [];
-  const CALL_RE = /\breadFileSync\(/g;
+  const CALL_RE = new RegExp(`\\b(${TREE_READERS.map((r) => r.name).join("|")})\\(`, "g");
   let m: RegExpExecArray | null;
   while ((m = CALL_RE.exec(source))) {
     const openParen = m.index + m[0].length - 1;
@@ -148,11 +178,13 @@ function findReadFileSyncCalls(source: string): ReadCall[] {
     const argsText = source.slice(openParen + 1, closeParen);
     const args = splitTopLevelArgs(argsText);
     if (args.length === 0) continue;
+    const reader = TREE_READERS.find((r) => r.name === m![1]);
     calls.push({
       start: m.index,
       end: closeParen + 1,
       pathExpr: args[0]!,
       encodingExpr: args[1] ?? null,
+      readsUtf8WithoutEncodingArg: reader?.hasEncodingArg === false,
     });
   }
   return calls;
@@ -228,16 +260,18 @@ const RAW_READ_BASELINE: Record<string, { count: number; reason: string }> = {
     reason: "\\r?\\n-tolerant split — `text.split(/\\r?\\n/)`.",
   },
   "shared/max-file-size.test.ts": {
-    count: 1,
+    count: 2,
     reason:
-      "\\n-as-position-anchor — `scriptText.indexOf(\"\\n};\", …)` finds a line-initial " +
-      "close-brace, and the subsequent `.split(\"\\n\")` per-entry regex has no end anchor, so " +
-      "a trailing `\\r` on each line does not affect the match. " +
-      "Was 2 until #994: the line-counting read now goes through `readGuardSource` (the memoised " +
-      "reader that took this suite's cold cost off a x3 multiplier), so this scan no longer sees " +
-      "it — the helper-hidden-read blind spot this file's own header names. That read is still " +
-      "CRLF-safe (`text.split(\"\\n\").length` counts \\n occurrences either way); what " +
-      "changed is that the net stopped watching it.",
+      "Two reads, both currently safe. The line count is `text.split(\"\\n\").length`, which "
+      + "counts \\n occurrences and is the same number under CRLF or LF. The other is "
+      + "\\n-as-position-anchor — `scriptText.indexOf(\"\\n};\", …)` finds a line-initial "
+      + "close-brace, and the subsequent `.split(\"\\n\")` per-entry regex has no end anchor, so "
+      + "a trailing \\r on each line does not affect the match. "
+      + "Was briefly 1: #994 routed the line-counting read through `readGuardSource` and this scan "
+      + "stopped seeing it — the helper-hidden-read blind spot this file\"s header names. #996 "
+      + "taught TREE_READERS to follow that helper, so the entry is back at its true count. The "
+      + "lesson is in the number: a ratchet entry that DROPS after a refactor is as worth reading "
+      + "as one that grows.",
   },
   "shared/worktree-delete-guard-ratchet.test.ts": {
     count: 1,
@@ -324,7 +358,10 @@ function scanFile(full: string): number {
 
   let offenses = 0;
   for (const call of findReadFileSyncCalls(source)) {
-    if (!call.encodingExpr || !/^["']utf-?8["']$/.test(call.encodingExpr)) continue;
+    // A reader that always returns utf8 text has nothing to check here; for `readFileSync` the
+    // encoding argument is load-bearing — without one it returns a Buffer, which no
+    // newline-bearing string literal could be compared against in the first place.
+    if (!call.readsUtf8WithoutEncodingArg && (!call.encodingExpr || !/^["']utf-?8["']$/.test(call.encodingExpr))) continue;
     if (!ANCHORED_AT_REPO_TREE.test(call.pathExpr) && !ANCHORED_AT_REPO_TREE.test(source)) continue;
 
     const nearby = source.slice(call.end, call.end + NORMALIZE_WINDOW);
@@ -471,6 +508,27 @@ describe("the meta-guard reports the #885 shape, and respects each sanctioned ou
 
   it("does not flag a comparison with no newline in the literal", () => {
     const count = synthetic(READ_LINE + 'if (text.indexOf("foo") === -1) throw new Error("nope");\n');
+    expect(count).toBe(0);
+  });
+
+  it("follows a read through readGuardSource, the memoised helper (#996)", () => {
+    // The blind spot this file's header names, closed. `readGuardSource` takes no encoding
+    // argument — it always returns utf8 text — so the utf8 check must not reject it for the
+    // absence, which is how a helper-hidden read used to escape.
+    const count = synthetic(
+      'const text = readGuardSource(join(__dirname, "fixture.txt"));\n'
+        + 'if (text.indexOf("foo\\nbar") === -1) throw new Error("nope");\n',
+    );
+    expect(count).toBe(1);
+  });
+
+  it("still respects the sanctioned outs for a readGuardSource read (#996)", () => {
+    // Following the helper must not create a shape with no escape hatch: the marker has to work
+    // on it too, or a genuine false positive would be unfixable except by un-adopting the helper.
+    const count = synthetic(
+      'const text = readGuardSource(join(__dirname, "fixture.txt")); // RAW-BYTES OK: synthetic proof case\n'
+        + 'if (text.indexOf("foo\\nbar") === -1) throw new Error("nope");\n',
+    );
     expect(count).toBe(0);
   });
 
