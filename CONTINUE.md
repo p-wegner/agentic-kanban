@@ -3,6 +3,52 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-02 — #999's workspace panel had three defects in it, and they were one chain
+
+Started as "check #999 in the UI"; the three things visible there turned out to share a
+root. Filed as #1001–#1003, all three fixed on master (`a70367b1bc`, `b5be315502`).
+
+**What was on screen.** `Context Window — 100% of context window · 2.0M / 200.0K`, and a
+Timeline calling both of the workspace's sessions `Session exited with zero output (launch
+failure)` — a 100-minute run with 132 tool calls and exit 0, and a 5-minute review that
+committed a fix and filed a ticket.
+
+**The chain, in causal order:**
+
+1. **#1001** — `handleResultEvent` published the claude `result` event's `usage` as
+   `liveStats.contextTokens`. That usage is the session TOTAL; occupancy is per-request.
+   Verified against the session's own transcript rather than by reading the code twice:
+   largest single request 124,687 tokens, stored value 2,016,340.
+2. **#1002** — because of #1001 the result event drove TWO read-modify-write paths onto one
+   `sessions.stats` row, and `mergeSessionStats` is a spread, so the second write won with
+   what it had read. Not theoretical: **102 of the 103** sessions carrying a live-activity
+   `contextTokens` had lost `inputTokens`, `outputTokens`, `model`, `durationMs`,
+   `totalCostUsd` and `success`. The missing `model` is the `200.0K` denominator.
+3. **#1003** — the timeline carried a SECOND `isZeroOutputSession` that inferred failure from
+   absent token counts; `workspace-launch-failures.service.ts` had already abandoned that
+   heuristic. #1002 stripped exactly those fields, so it fired on 100% of healthy runs.
+
+**Verified by what.** #1003 end-to-end against the live board — `GET /timeline` returns
+`session_completed / success` for both of #999's sessions, confirmed in the UI with
+playwright-cli. #1001/#1002 by a new test whose negative control was actually run: reverting
+the serialisation makes `broadcast-stats-write-serialisation.test.ts` fail on a dropped key.
+220 tests over the impact selection plus the shared agent-stream suites are green.
+
+**Not fixed, on purpose.** The 102 damaged stats blobs are not reconstructible (the result
+event is not retained) and are display-only telemetry, so they keep their bogus values and age
+out. `occupancyFromStatsJson`'s secondary fallback (`inputTokens + cacheReadTokens`) is also
+cumulative for claude result stats, so the ~1968 older sessions still render a session total as
+occupancy — that one has no ticket yet.
+
+**A process note worth keeping.** `pnpm typecheck` ran green and the suite passed, and the
+gate still caught a real error: the new test's `broadcast()` messages were missing
+`AgentOutputMessage.sessionId`, which vitest never touches. I had typechecked *before* writing
+the test. Typecheck last, not first.
+
+**#1004 is open and is not a code defect on the branch.** The review of #999 moved the ticket
+back to In Progress on a `manual`-start project, where nothing picks it up — so "stuck" was the
+board doing exactly what its Start Mode says, with nothing on screen saying so.
+
 ## 2026-09-02 — the recorder now records an EMPTY selection, after being wrong about it twice
 
 Not a ticket — a correction to #997's neighbourhood, taken on pushback from the test-impact
