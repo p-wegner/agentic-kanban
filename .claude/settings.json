@@ -72,6 +72,15 @@
             "timeout": 15
           }
         ]
+      },
+      {
+        "matcher": "Bash|PowerShell|Grep|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/disclose-context.mjs"
+          }
+        ]
       }
     ],
     "Stop": [
