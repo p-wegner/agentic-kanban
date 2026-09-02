@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   buildRecordArgs,
   emptyChangeSetReason,
+  unattributedFailureReason,
   unmeasuredUnionReason,
   gateRanScope,
   parseSelection,
@@ -216,6 +217,15 @@ describe("parseSelection / emptyChangeSetReason", () => {
     expect(emptyChangeSetReason({ changed: [], baseBranch: null })).toContain("no base branch");
   });
 
+  it("flags a failing row whose suite names were dropped by attribution (#997)", () => {
+    expect(unattributedFailureReason({ parsed: 2, attributed: 2 })).toBeNull();
+    expect(unattributedFailureReason({ parsed: 0, attributed: 0 })).toBeNull();
+    // Defensive: `attributed` can never legitimately exceed `parsed`, and if it somehow did,
+    // reporting a NEGATIVE drop as a suspect row would be worse than saying nothing.
+    expect(unattributedFailureReason({ parsed: 1, attributed: 2 })).toBeNull();
+    expect(unattributedFailureReason({ parsed: 3, attributed: 1 })).toContain("2 of 3");
+  });
+
   it("flags ONLY the union scope as having a partially-measured selection (#967)", () => {
     expect(unmeasuredUnionReason({ ran: "impact+related" })).toContain("impact half only");
     for (const ran of ["full", "package-scoped", "file-scoped", "guards-only", "impact-scoped"] as const) {
@@ -418,6 +428,68 @@ describe("recordGateOutcome", () => {
       });
       const recordArgs = calls[1]!;
       expect(recordArgs).not.toContain("--failed");
+    } finally {
+      repos.cleanup();
+    }
+  });
+
+  it("TAGS the row when attribution lost the failing suite names (#997)", async () => {
+    // The other half of the test above. Dropping the unattributable name is right; doing it
+    // silently is what made nine consecutive failing rows carry `failed: []` with nothing saying
+    // whether the tests failed and were lost, or the failure was never in the tests at all. With
+    // the lost case tagged, an UNtagged failing row with an empty `failed` set positively means
+    // "the runner named no file" instead of being one of three indistinguishable things.
+    const repos = makeRepos();
+    try {
+      const { run, calls } = fakeRunner({ select: { stdout: selectionJson("impact", ["packages/server/src/__tests__/a.test.ts"]) } });
+      const warnings: string[] = [];
+      const result = await recordVerifyGateOutcome({
+        workspaceId: "ws-1",
+        workingDir: repos.worktree,
+        repoPath: repos.main,
+        outcome: {
+          failure: { message: "boom" },
+          failedSuites: [
+            { packageLabel: null, file: "src/__tests__/z.test.ts" },
+            { packageLabel: "server", file: "src/__tests__/a.test.ts" },
+          ],
+        },
+        tierInfo: tierInfo(),
+        runCommand: run,
+        log: (m) => warnings.push(m),
+      });
+      expect(result.recorded).toBe(true);
+      const recordArgs = calls[1]!;
+      // The attributable one is still recorded — a partial set is more useful than none.
+      expect(recordArgs[recordArgs.indexOf("--failed") + 1]).toBe("packages/server/src/__tests__/a.test.ts");
+      // ...but the row says its set is incomplete, so nobody computes a miss rate from it.
+      expect(recordArgs[recordArgs.indexOf("--source") + 1]).toBe("ci-unattributed");
+      expect(result.suspectReason).toContain("could not be attributed");
+      expect(warnings.join(" ")).toContain("LOST");
+    } finally {
+      repos.cleanup();
+    }
+  });
+
+  it("does NOT tag a failing run whose runner simply named no file (#997)", async () => {
+    // Case 1/2 of the three: a typecheck, arch or install failure, or a crashed runner. Nothing
+    // was lost, so tagging it would be a false alarm — and would put every non-test gate failure
+    // in the suspect bucket, which is most of them.
+    const repos = makeRepos();
+    try {
+      const { run, calls } = fakeRunner({ select: { stdout: selectionJson("impact", ["packages/server/src/__tests__/a.test.ts"]) } });
+      const result = await recordVerifyGateOutcome({
+        workspaceId: "ws-1",
+        workingDir: repos.worktree,
+        repoPath: repos.main,
+        outcome: { failure: { message: "tsc exited 2" }, failedSuites: [] },
+        tierInfo: tierInfo(),
+        runCommand: run,
+      });
+      expect(result.recorded).toBe(true);
+      expect(result.suspectReason).toBeUndefined();
+      const recordArgs = calls[1]!;
+      expect(recordArgs[recordArgs.indexOf("--source") + 1]).toBe("ci");
     } finally {
       repos.cleanup();
     }
