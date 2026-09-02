@@ -74,6 +74,13 @@ export interface IssueWithStatus {
   staleDays?: number;
   columnAgeDays?: number;
   isColumnStale?: boolean;
+  /**
+   * #1004: the ticket sits in a driver-owned column (In Progress) on a project whose
+   * resolved Start Mode is `manual`, with no agent on it — so nothing will pick it up
+   * until someone starts it by hand. On a `monitor`/`conductor` project the same column
+   * state is correct (the next cycle relaunches) and this is never set.
+   */
+  awaitingManualStart?: boolean;
   skipAutoReview?: boolean;
   estimate?: string | null;
   dueDate?: string | null;

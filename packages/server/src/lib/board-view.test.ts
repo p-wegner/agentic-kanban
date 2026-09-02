@@ -180,6 +180,68 @@ describe("buildBoardColumns", () => {
     expect(u.checklist).toBeUndefined();
   });
 
+  // #1004: "In Progress" means "a driver owns this". On a manual-start project with no agent
+  // on the ticket that is false and nothing will make it true — the projection says so.
+  describe("awaitingManualStart (#1004)", () => {
+    type Main = { status: string; readyForMerge?: boolean; sessionStatus?: string | null };
+    function buildWith(startMode: "manual" | "monitor" | "conductor" | undefined, statusId: string, main?: Main) {
+      const cols = buildBoardColumns({
+        statuses: STATUSES,
+        visibleStatuses: STATUSES,
+        projectIssues: [issue({ id: "i", statusId })],
+        workspaceSummaryMap: main ? new Map([["i", { main }]]) : new Map(),
+        blockedMap: new Map(),
+        issueTagMap: new Map(),
+        now: NOW,
+        staleDays: 14,
+        inProgressStaleDays: 3,
+        startMode,
+      });
+      return cols.flatMap((c) => c.issues).find((i) => i.id === "i")! as Record<string, unknown>;
+    }
+
+    it("flags an idle In-Progress ticket on a manual-start project", () => {
+      expect(buildWith("manual", "inprog", { status: "idle", readyForMerge: false }).awaitingManualStart).toBe(true);
+    });
+
+    it("flags an In-Progress ticket with NO workspace at all on a manual-start project", () => {
+      expect(buildWith("manual", "inprog").awaitingManualStart).toBe(true);
+    });
+
+    it("flags an errored workspace too — a crashed builder is not a driver", () => {
+      expect(buildWith("manual", "inprog", { status: "error" }).awaitingManualStart).toBe(true);
+    });
+
+    it("does NOT flag the same column on a monitor project (the next cycle relaunches)", () => {
+      expect(buildWith("monitor", "inprog", { status: "idle", readyForMerge: false }).awaitingManualStart).toBeUndefined();
+    });
+
+    it("does NOT flag the same column on a conductor project (the external loop owns starts)", () => {
+      expect(buildWith("conductor", "inprog", { status: "idle" }).awaitingManualStart).toBeUndefined();
+    });
+
+    it("does NOT flag when the caller passes no start mode (unknown policy never accuses)", () => {
+      expect(buildWith(undefined, "inprog", { status: "idle" }).awaitingManualStart).toBeUndefined();
+    });
+
+    it("does NOT flag a ticket outside the driver-owned column", () => {
+      expect(buildWith("manual", "backlog").awaitingManualStart).toBeUndefined();
+      expect(buildWith("manual", "review", { status: "idle" }).awaitingManualStart).toBeUndefined();
+    });
+
+    it("does NOT flag while an agent owns the ticket (active / fixing / reviewing / running session)", () => {
+      expect(buildWith("manual", "inprog", { status: "active" }).awaitingManualStart).toBeUndefined();
+      expect(buildWith("manual", "inprog", { status: "fixing" }).awaitingManualStart).toBeUndefined();
+      expect(buildWith("manual", "inprog", { status: "reviewing" }).awaitingManualStart).toBeUndefined();
+      expect(buildWith("manual", "inprog", { status: "idle", sessionStatus: "running" }).awaitingManualStart).toBeUndefined();
+    });
+
+    it("does NOT flag a ticket parked on purpose — plan approval or waiting on the merge", () => {
+      expect(buildWith("manual", "inprog", { status: "awaiting-plan-approval" }).awaitingManualStart).toBeUndefined();
+      expect(buildWith("manual", "inprog", { status: "idle", readyForMerge: true }).awaitingManualStart).toBeUndefined();
+    });
+  });
+
   it("attaches blocked rollup when present", () => {
     const cols = buildBoardColumns({
       statuses: STATUSES,
