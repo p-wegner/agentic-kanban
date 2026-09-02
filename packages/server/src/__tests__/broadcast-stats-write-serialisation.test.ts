@@ -13,7 +13,7 @@
  * interleaving the old code lost, and a mock that resolved both immediately would pass either
  * way.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import { createSessionState } from "../services/session-manager/types.js";
 
 /** One in-memory `stats` cell, standing in for the row. */
@@ -52,6 +52,9 @@ vi.spyOn(console, "warn").mockImplementation(() => {});
 const { createBroadcaster, ACTIVITY_BROADCAST_THROTTLE_MS } = await import("../services/session-manager/broadcast.js");
 
 vi.useFakeTimers();
+// #921: a module-scope useFakeTimers() with no matching useRealTimers() leaves fake timers
+// installed for the rest of the vitest worker, so the NEXT file's real timers never fire.
+afterAll(() => { vi.useRealTimers(); });
 
 const SESSION = "session-1001";
 
