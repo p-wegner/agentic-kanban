@@ -9,19 +9,19 @@ import {
   getAssistantMessagesForSessions,
 } from "../repositories/workspace-timeline.repository.js";
 import { getWorkspaceSetupRun } from "../repositories/workspace-setup-run.repository.js";
+import { isLaunchFailedSession, endedWithinLaunchWindow } from "./session-launch-failure.js";
 
+/**
+ * #1003: this used to carry a SECOND definition of "launch failure" — a session with no
+ * `inputTokens` and no `outputTokens` in its stats blob. `workspace-launch-failures.service.ts`
+ * had already abandoned that heuristic ("duration/tokens no longer get a vote"), so the two
+ * views disagreed about the same session; and once #1002's lost-update started stripping the
+ * token fields from every completed session, the heuristic fired on 100% of healthy runs.
+ * Both services now read the one predicate.
+ */
 function isZeroOutputSession(session: { startedAt: string; endedAt: string | null; stats: string | null }): boolean {
   if (!session.endedAt) return false;
-  const durationMs = new Date(session.endedAt).getTime() - new Date(session.startedAt).getTime();
-  if (durationMs <= 1000) return true;
-  if (session.stats) {
-    try {
-      const s = readSessionStats(session.stats);
-      if ((s.inputTokens === 0 || s.inputTokens == null) && (s.outputTokens === 0 || s.outputTokens == null)) return true;
-      if (s.launchFailure === true) return true;
-    } catch { /* ignore */ }
-  }
-  return false;
+  return endedWithinLaunchWindow(session) || isLaunchFailedSession(session);
 }
 
 function parseStats(stats: string | null): { inputTokens?: number; outputTokens?: number } | null {

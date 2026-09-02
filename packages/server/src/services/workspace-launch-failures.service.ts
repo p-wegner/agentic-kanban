@@ -6,6 +6,7 @@ import { readUsageLimitStats } from "@agentic-kanban/shared/lib/session-stats-bl
 import { getDirtyTrackedSourceFiles } from "./dirty-main-checkout.js";
 import { getProjectById } from "../repositories/project.repository.js";
 import { revParse, countUniqueCommits } from "@agentic-kanban/shared/lib/git-service";
+import { isLaunchFailedSession } from "./session-launch-failure.js";
 import {
   getNonClosedWorkspacesForIssues,
   getProjectIssueRows,
@@ -60,34 +61,12 @@ export interface WorkspaceLaunchFailuresResponse {
 }
 
 /**
- * A session is a launch failure when an EXPLICIT signal says so — never inferred
- * from wall-clock duration or token counts.
- *
- * The old heuristic ("lasted <=1000ms OR had zero tokens") misclassified both
- * directions: a fast-legit run that committed in under a second was flagged as a
- * failure, and a slow-healthy run whose token stats the parser failed to extract
- * was too. The session lifecycle (session-lifecycle.ts) now owns failure
- * classification at the source — using the provider's own per-provider success
- * signal (the parsed `result`/`turn.completed` event's `success` flag plus
- * substantive-output tracking) — and stamps an explicit `launchFailure: true` /
- * `success: false` into the stored stats. This service simply TRUSTS that signal.
- *
- * Order of trust:
- *  1. `launchFailure === true`  → definitive launch failure (lifecycle stamped it).
- *  2. `success === false` with `launchFailure` unset → a recorded provider result
- *     that did not succeed (e.g. error result event).
- * A session with no stats yet (still running, or stats not persisted) is NOT a
- * failure here — duration/tokens no longer get a vote.
+ * Re-exported under this file's historical name; the definition itself now lives in
+ * `session-launch-failure.ts` so the workspace TIMELINE cannot drift back into a second,
+ * disagreeing one (#1003). The reasoning for trusting an explicit lifecycle signal over any
+ * duration/token heuristic is documented there.
  */
-function isZeroOutputSession(session: { stats: string | null }): boolean {
-  if (!session.stats) return false;
-  try {
-    const s = readSessionStats(session.stats);
-    if (s.launchFailure === true) return true;
-    if (s.success === false) return true;
-  } catch { /* ignore bad JSON */ }
-  return false;
-}
+const isZeroOutputSession = isLaunchFailedSession;
 
 /** Provider-neutral since #542 — this used to see a Codex quota death but not a Claude one. */
 function isRateLimitedSession(session: { stats: string | null }): boolean {
