@@ -64,6 +64,28 @@ async function relatedProcesses(path: string): Promise<string[]> {
 }
 
 /**
+ * Remove a SHORT-LIVED fixture whose only children were synchronous and have already exited
+ * (#1006) — a temp git repo driven with `execFileSync`/`spawnSync` and nothing else.
+ *
+ * This is a different case from `rmOrReportHolder` below, and the difference is the whole reason
+ * it gets different treatment. That helper's no-retry policy exists because the fixtures it
+ * guards own a LONG-LIVED holder — a child server, a git transport helper, a watcher — where an
+ * EPERM is real evidence of a leak and retrying would destroy it. Here every child has already
+ * been reaped by the synchronous spawn returning, so there is no holder to name: the EPERM is
+ * Windows closing the last handle on `.git` asynchronously after `git` exits, which clears in
+ * milliseconds. Observed on the pre-merge gate (run merge-6dbc0e62-4) as an EPERM from the
+ * `finally` of a test whose assertions had all PASSED — a green test reported red by its own
+ * cleanup, on a box that was merely busy.
+ *
+ * `force` still swallows ENOENT, and a failure that OUTLASTS the retries still throws, so a
+ * genuine leak is not papered over — it just is not diagnosed with a process list, because for
+ * this shape there is nothing to enumerate.
+ */
+export function rmFixtureDir(path: string): void {
+  rmSync(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+}
+
+/**
  * Remove `path` recursively. On success, silent. On failure, throw an error that names the
  * surviving tree and the processes that plausibly hold it — never a retry.
  */
