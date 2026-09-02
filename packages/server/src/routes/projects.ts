@@ -8,6 +8,10 @@ import { getRegistrationProgress } from "../services/registration-progress.servi
 import { searchGraphIssueIds } from "../repositories/graph-search.repository.js";
 import { parseJsonBody, parseOptionalJsonBody } from "../middleware/parse-body.js";
 import {
+  RECOGNIZED_PROJECT_PATCH_KEYS,
+  unrecognizedProjectUpdateKeys,
+} from "../services/project-update-fields.js";
+import {
   generateScriptBody, updateStatusSortOrderBody, updateProjectRepoBody,
   removeWorktreeBody, openWorktreeBody, onboardingApplyBody, onboardingSkipBody,
   addStatusBody, addProjectRepoBody, createProjectBody,
@@ -336,6 +340,28 @@ export function createProjectsRoute(database: Database, options?: { boardEvents?
   router.patch("/:id", async (c) => {
     const id = c.req.param("id");
     const body = await parseJsonBody(c);
+    // #992 — a body whose fields nobody reads is a 422 with NOTHING applied, not a 200 with the
+    // full project object. This is the #987 defect one route over, and the #874 precedent for
+    // what to do about it: a write that reports success for work it did not do is the bug, and
+    // "200 plus a droppedKeys list" was rejected there because nobody reads the list.
+    //
+    // Checked FIRST — before the servicesConfig validation below and before any write — so the
+    // ordering property that block already had ("malformed config 422s before any other field
+    // is written") holds for this refusal too: an unread key means the row is untouched.
+    //
+    // Safe to tighten a previously-permissive endpoint only because the recognized set is
+    // DERIVED from the table that applies the fields, and a guard proves both the wire contract
+    // (`UpdateProjectRequest`) and the client's own PATCH body are subsets of it. See
+    // `project-update-unrecognized-keys.test.ts`.
+    const ignoredKeys = unrecognizedProjectUpdateKeys(body as Record<string, unknown>);
+    if (ignoredKeys.length > 0) {
+      return c.json({
+        error:
+          `Unrecognized field(s) in a project update: ${ignoredKeys.join(", ")}. Nothing was applied. `
+          + `Recognized fields: ${[...RECOGNIZED_PROJECT_PATCH_KEYS].sort().join(", ")}.`,
+        ignoredKeys,
+      }, 422);
+    }
     // servicesConfig is validated + persisted here (not via the generic updateProject
     // mapper) so malformed config 422s before any other field is written.
     let servicesConfigJson: string | null | undefined;

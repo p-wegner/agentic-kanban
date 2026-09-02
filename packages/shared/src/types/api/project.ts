@@ -23,6 +23,16 @@ export interface UpdateProjectRequest {
   maxRetries?: number;
   symlinkEnabled?: boolean;
   symlinkDirs?: string | string[] | null;
+  /**
+   * Default agent skill for this project's workspaces. `null`/`""` clears it.
+   *
+   * Added by #992: the server has always read this key and the settings panel has always sent
+   * it, but it was absent from the contract — so the guard that proves "the contract is a
+   * subset of what the server reads" could pass while a real client field went undeclared.
+   * With the route now 422ing unread keys, an undeclared-but-sent field is the exact shape of
+   * the mistake that would break a legitimate save.
+   */
+  defaultSkillId?: string | null;
   /** Declared per-workspace Docker Compose service stack. null/"" clears it. */
   servicesConfig?: ServiceStackConfig | string | null;
 }

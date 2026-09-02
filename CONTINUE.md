@@ -3,6 +3,66 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-02 — #992: PATCH /api/projects/:id stops reporting success for work it did not do
+
+**#992 is Done.** The route 422s a body whose fields nobody reads, with nothing applied — the
+#987 defect one route over, and the #874 remedy (a `droppedKeys` list on a 200 was rejected
+there because nobody reads it).
+
+### Why this was not a copy of #987's patch
+
+The expensive half of #987 was never the guard, it was the caller sweep — "a wrong key list here
+422s a legitimate client". Redone from scratch, and it found things the issue-side sweep could
+not have:
+
+- **The client's PATCH body is NOT typed.** `buildProjectPatchBody` returns a plain object
+  literal, so the "contract is a subset of what the server reads" guard proves nothing about
+  what the one real caller actually sends. The guard therefore has a SECOND half that reads that
+  function's own source. This is the difference from the issue side, where every client body is
+  typed `UpdateIssueRequest`.
+- **`defaultSkillId` was undeclared.** The server has always read it and the settings panel has
+  always sent it, but it was absent from `UpdateProjectRequest`. Harmless under a permissive
+  route; under a 422 it is exactly the shape of mistake that breaks every settings save. Added
+  to the contract in the same commit.
+- **No other caller reaches the route.** `onboarding.service.ts` calls the SERVICE (and sends a
+  recognized key anyway); none of the ten MCP project tools updates fields this way; the CLI has
+  no `project update`.
+- **Step 4 (a narrower second endpoint, which on the issue side was the bulk route) has no
+  project-side analogue for THIS body.** `PATCH /api/projects/:id/{repos,scripts,statuses}/:id`
+  are different resources with their own handlers. They have the same class of hole and are
+  deliberately out of scope.
+
+### Structure
+
+`services/project-update-fields.ts` holds the field table, and both key sets are derived from
+it: `RECOGNIZED_PROJECT_UPDATE_KEYS` (what the service applies) and `RECOGNIZED_PROJECT_PATCH_KEYS`
+(that plus `servicesConfig`, which the ROUTE applies). That split is the project-side form of
+#987's single/bulk split — collapsing it would either make the service accept a field it cannot
+apply or the route reject one it can.
+
+`defaultBranch` stays out of the table because applying it needs an async `branchExists` call;
+it is named explicitly in the recognized set, the same treatment `checklist`/`pinned`/
+`milestoneId` get on the issue side.
+
+### Verified by
+
+- `project-update-unrecognized-keys.test.ts` (`@gate:always-run`, 7 cases) — the two contract
+  halves, the service/route set split, and the field application.
+- Three route-level cases in `api-project.test.ts`: the 422 asserted against the ROW (a 422 that
+  had already written a field would be worse than the 200 it replaced), the ORDERING property
+  (the refusal sits ahead of the `servicesConfig` validation, so a body bad in both ways reports
+  the unread key and still writes nothing), and the real settings-panel body still saving.
+- Impact selection: 49 suites, all green (44 server files / 327 tests, plus shared, client,
+  mcp-server). Guards-only set green. Typecheck green.
+- One shrink banked, not left as budget: `createProjectService` 564 → 536 NLOC in
+  `function-nloc-baseline.ts` — the ratchet caught it and refused the commit until it was
+  lowered.
+
+### Not run
+
+`packages/e2e/tests/api/projects.test.ts` was in the impact selection and needs a live server;
+not run here. Nothing in the change is e2e-shaped, but that is a claim, not a result.
+
 ## 2026-09-02 — #995: merge-status can report an INTERRUPTED merge, so waiting no longer loses information
 
 **#995 is Done.** `GET /api/workspaces/:id/merge-status` now answers `outcome: "interrupted"`

@@ -162,7 +162,9 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "cli/commands/workspace.ts::registerWorkspaceCommand": 573,
   "services/agent-remote.service.ts::createRemoteAgentService": 637,
   "cli/commands/session.ts::registerSessionCommand": 569,
-  "services/project.service.ts::createProjectService": 564,
+  // 564 -> 536 (#992): the PATCH field `if` chain became the table in
+  // `services/project-update-fields.ts`, which is also what derives the recognized-key set.
+  "services/project.service.ts::createProjectService": 536,
   // 529 -> 534, a DELIBERATE raise (#835). `mergeWorkspace` used to return the lock's
   // `Promise<unknown>`; it now declares `MergeWorkspaceResult` and publishes through
   // `publishMergeResponse`, and the lock-reuse path answers CONFLICT instead of handing back
