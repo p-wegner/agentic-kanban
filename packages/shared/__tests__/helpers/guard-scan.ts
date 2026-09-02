@@ -167,12 +167,31 @@ export function importedBindingsFrom(source: string, modulePattern: RegExp): str
  * ------------------------------------------------------------------------- */
 
 const parseCache = new Map<string, ts.SourceFile>();
+const textCache = new Map<string, string>();
+
+/**
+ * The source text of one file, memoised per absolute path (#994).
+ *
+ * A guard suite typically walks the same tree once per `it`, and each walk re-reads every
+ * file. That is invisible on a warm page cache (~1 s here) and dominant on a cold one: the
+ * god-module suite measured 4 s warm against 158 s cold, past the 120 s vitest timeout — and
+ * a timed-out guard reports as a FAILURE, i.e. as "a source file breached the god-module
+ * ceiling" when nothing breached. Reading each file once per worker is what takes the cold
+ * cost off the multiplier.
+ */
+export function readGuardSource(absFile: string): string {
+  const cached = textCache.get(absFile);
+  if (cached !== undefined) return cached;
+  const text = fs.readFileSync(absFile, "utf8");
+  textCache.set(absFile, text);
+  return text;
+}
 
 /** The parsed AST of one source file, memoised. Comments are not nodes, so a guard walking this tree never needs to strip them. */
 export function parseGuardSource(absFile: string, text?: string): ts.SourceFile {
   const cached = parseCache.get(absFile);
   if (cached) return cached;
-  const source = text ?? fs.readFileSync(absFile, "utf8");
+  const source = text ?? readGuardSource(absFile);
   const sf = ts.createSourceFile(
     absFile,
     source,

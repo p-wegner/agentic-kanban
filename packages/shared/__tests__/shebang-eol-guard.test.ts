@@ -1,4 +1,4 @@
-// @gate:always-run — walks the whole tracked tree and shells out to `git check-attr`;
+// @gate:always-run — scans the whole tracked tree and shells out to `git check-attr`;
 // it imports nothing it checks, so `vitest related` is blind to it (#583).
 //
 // Guard for #703. A tracked file that starts with `#!` and is ALSO imported by test code
@@ -51,11 +51,44 @@ function git(args: string[]): string {
 
 type ShebangFile = { path: string; hasCrlf: boolean };
 
-/** Every tracked path whose on-disk content begins with `#!`, with its CRLF verdict. */
+/**
+ * Tracked paths that MIGHT begin with `#!` — a superset, narrowed by the caller (#994).
+ *
+ * The obvious implementation is `git ls-files` plus a `readFileSync` per entry, and that is
+ * what this was. It reads all 3704 tracked files, twice (once per assertion below). Warm that
+ * costs ~1 s; cold it measured 61 s single-threaded and 202 s under load — past vitest's 120 s
+ * timeout, which is reported as a FAILURE, i.e. as "a tracked shebang file is not pinned to
+ * LF" when nothing is unpinned. `git grep` does the same scan in one process in ~0.5 s.
+ *
+ * `^#!` matches a line-initial `#!` ANYWHERE in a file, so this over-selects (83 candidates
+ * against the 80 real ones here) — deliberately: over-selecting is safe because
+ * {@link trackedShebangFiles} still checks the first two bytes itself, whereas under-selecting
+ * would silently shrink the guard's subject. `-a` rather than `-I` for the same reason: a file
+ * git considers binary is not a file this guard may skip on git's say-so.
+ */
+function shebangCandidates(): string[] {
+  try {
+    return git(["grep", "-l", "-a", "-z", "-e", "^#!", "--", "."]).split("\0").filter(Boolean);
+  } catch (err) {
+    // `git grep` exits 1 with no output when nothing matches. Any OTHER failure must not be
+    // mistaken for "this repo has no shebang files" — hence the non-empty assertions below.
+    const stdout = (err as { stdout?: string }).stdout;
+    if (typeof stdout === "string") return stdout.split("\0").filter(Boolean);
+    throw err;
+  }
+}
+
+/**
+ * Every tracked path whose on-disk content begins with `#!`, with its CRLF verdict. Memoised:
+ * both assertions below need the same list, and computing it twice doubled the cost for
+ * nothing.
+ */
+let shebangFileCache: ShebangFile[] | null = null;
+
 function trackedShebangFiles(): ShebangFile[] {
-  const tracked = git(["ls-files", "-z"]).split("\0").filter(Boolean);
+  if (shebangFileCache) return shebangFileCache;
   const hits: ShebangFile[] = [];
-  for (const rel of tracked) {
+  for (const rel of shebangCandidates()) {
     let content: Buffer;
     try {
       content = readFileSync(join(REPO_ROOT, rel));
@@ -66,6 +99,7 @@ function trackedShebangFiles(): ShebangFile[] {
       hits.push({ path: rel, hasCrlf: content.includes("\r\n") });
     }
   }
+  shebangFileCache = hits;
   return hits;
 }
 
@@ -78,6 +112,16 @@ function eolAttrs(paths: string[]): Map<string, string> {
   for (let i = 0; i + 2 < raw.length; i += 3) out.set(raw[i]!, raw[i + 2]!);
   return out;
 }
+
+/**
+ * A tree-scanning guard is genuinely long-running, and vitest reports a TIMEOUT as a test
+ * FAILURE — for this suite, as "a tracked shebang file is not pinned to LF" (#994). That is
+ * indistinguishable from the real thing, which is a merge-blocking condition, so an operator
+ * seeing it red has to re-run to learn anything. The scan itself is now ~0.5 s warm; this
+ * ceiling exists for the loaded, cold-cache case, where the honest outcome is a slow PASS
+ * rather than a fast lie.
+ */
+const SCAN_TIMEOUT_MS = 300_000;
 
 describe("shebang files are pinned to LF on checkout (#703)", () => {
   it("every tracked shebang file has eol=lf, so a CRLF checkout cannot break its transform", () => {
@@ -106,7 +150,7 @@ describe("shebang files are pinned to LF on checkout (#703)", () => {
             ...unpinned.map((p) => `  ${p} (eol=${attrs.get(p) ?? "unspecified"})`),
           ].join("\n"),
     ).toEqual([]);
-  });
+  }, SCAN_TIMEOUT_MS);
 
   // The byte-level half (#716). The attribute above is a promise about the NEXT checkout;
   // this is the only assertion that says anything about the one we are standing in.
@@ -140,5 +184,5 @@ describe("shebang files are pinned to LF on checkout (#703)", () => {
             ...crlf.map((p) => `  ${p}`),
           ].join("\n"),
     ).toEqual([]);
-  });
+  }, SCAN_TIMEOUT_MS);
 });
