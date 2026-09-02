@@ -153,6 +153,95 @@ describe("Projects API", () => {
     expect(typeof body.servicesConfig).not.toBe("string");
   });
 
+  it("PATCH /api/projects/:id 422s an unrecognized field with NOTHING applied (#992)", async () => {
+    // The defect: this returned 200 with the full project object for a body nobody read, so a
+    // caller sending a renamed or misremembered field got a success response and an unchanged
+    // row. Same class as #987 one route over, and #874 chose the same remedy — 422 with nothing
+    // applied, rather than 200 plus a droppedKeys list nobody reads.
+    const projectId = await createProjectDirectly(database, { name: "Unread Keys", repoPath: "/tmp/unread-keys" });
+
+    const res = await app.request(`/api/projects/${projectId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      // `repoPath` is the plausible one: it is a real project column, it is in ProjectResponse,
+      // and `updateProject` has never read it — relocating a project is a different endpoint.
+      body: JSON.stringify({ description: "should not land", repoPath: "C:/somewhere/else" }),
+    });
+
+    expect(res.status).toBe(422);
+    const body = await res.json() as { error: string; ignoredKeys: string[] };
+    expect(body.ignoredKeys).toEqual(["repoPath"]);
+    // The message names both halves: what was not read, and what would have been.
+    expect(body.error).toContain("repoPath");
+    expect(body.error).toContain("Nothing was applied");
+    expect(body.error).toContain("description");
+
+    // "Nothing applied" is the load-bearing half of the contract, so it is asserted against the
+    // ROW rather than trusted from the message — a 422 that had already written `description`
+    // would be a worse failure than the 200 it replaced.
+    const rows = await database
+      .select({ description: schema.projects.description, repoPath: schema.projects.repoPath })
+      .from(schema.projects).where(eq(schema.projects.id, projectId));
+    expect(rows[0].description).not.toBe("should not land");
+    expect(rows[0].repoPath).toBe("/tmp/unread-keys");
+  });
+
+  it("PATCH /api/projects/:id refuses an unread key BEFORE validating servicesConfig (#992)", async () => {
+    // Ordering property the ticket calls out explicitly: the servicesConfig block 422s malformed
+    // config before any other field is written, and the new refusal must sit AHEAD of it rather
+    // than beside it. A body that is bad in both ways must report the unread key — the cheaper,
+    // more actionable answer — and must still write nothing.
+    const projectId = await createProjectDirectly(database, { name: "Order Check", repoPath: "/tmp/order-check" });
+
+    const res = await app.request(`/api/projects/${projectId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nope: 1, servicesConfig: { enabled: "yes-please" }, color: "#123456" }),
+    });
+
+    expect(res.status).toBe(422);
+    const body = await res.json() as { ignoredKeys?: string[] };
+    expect(body.ignoredKeys).toEqual(["nope"]);
+
+    const rows = await database
+      .select({ color: schema.projects.color, servicesConfig: schema.projects.servicesConfig })
+      .from(schema.projects).where(eq(schema.projects.id, projectId));
+    expect(rows[0].color).not.toBe("#123456");
+    expect(rows[0].servicesConfig).toBeNull();
+  });
+
+  it("PATCH /api/projects/:id still accepts every field the settings panel sends (#992)", async () => {
+    // The counterweight to the two above: tightening a permissive endpoint is only safe if the
+    // real client's body still passes. This is the body `buildProjectPatchBody` produces, keys
+    // and all; `project-update-unrecognized-keys.test.ts` keeps the two in step statically, and
+    // this proves the route actually accepts it end to end.
+    const projectId = await createProjectDirectly(database, { name: "Panel Save", repoPath: "/tmp/panel-save" });
+
+    const res = await app.request(`/api/projects/${projectId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        setupScript: "pnpm install -r",
+        setupBlocking: true,
+        setupEnabled: true,
+        teardownScript: null,
+        color: "#abcdef",
+        defaultBranch: null,
+        symlinkEnabled: false,
+        symlinkDirs: null,
+        defaultSkillId: null,
+        servicesConfig: null,
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const rows = await database
+      .select({ color: schema.projects.color, setupScript: schema.projects.setupScript })
+      .from(schema.projects).where(eq(schema.projects.id, projectId));
+    expect(rows[0].color).toBe("#abcdef");
+    expect(rows[0].setupScript).toBe("pnpm install -r");
+  });
+
   it("PATCH /api/projects/:id validates defaultBranch exists locally", async () => {
     const repoPath = mkdtempSync(join(tmpdir(), "kanban-project-branch-"));
     execFileSync("git", ["init", "-b", "main"], { cwd: repoPath });

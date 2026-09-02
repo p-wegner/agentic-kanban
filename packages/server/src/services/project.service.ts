@@ -28,6 +28,7 @@ import type { WorkspaceSummary } from "./workspace-summary.service.js";
 import { buildBoardColumns } from "../lib/board-view.js";
 
 import { ProjectError } from "./project-error.js";
+import { applyProjectUpdateFields } from "./project-update-fields.js";
 import { createInitialCommit, createSiblingRepoDir, promoteRepoToLeading } from "./project-repos.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { createProjectWorktreesService } from "./project-worktrees.service.js";
@@ -377,37 +378,13 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     if (!project) throw new ProjectError("Project not found", "NOT_FOUND");
 
     const updates: Record<string, unknown> = { updatedAt: now };
-    if (body.name !== undefined) updates.name = body.name;
-    if (body.description !== undefined) updates.description = body.description;
-    if (body.color !== undefined) updates.color = body.color;
-    if (body.setupScript !== undefined) updates.setupScript = body.setupScript || null;
-    if (body.setupBlocking !== undefined) updates.setupBlocking = !!body.setupBlocking;
-    if (body.setupEnabled !== undefined) updates.setupEnabled = !!body.setupEnabled;
-    if (body.teardownScript !== undefined) updates.teardownScript = body.teardownScript || null;
-    if (body.autoRetryFlakes !== undefined) updates.autoRetryFlakes = !!body.autoRetryFlakes;
-    if (body.maxRetries !== undefined) updates.maxRetries = Number(body.maxRetries);
-    if (body.symlinkEnabled !== undefined) updates.symlinkEnabled = !!body.symlinkEnabled;
-    if (body.symlinkDirs !== undefined) {
-      // Validate: must be a JSON array of strings with safe directory names
-      if (body.symlinkDirs === null || body.symlinkDirs === "") {
-        updates.symlinkDirs = null;
-      } else if (typeof body.symlinkDirs === "string") {
-        // Parse and re-serialize to normalize
-        try {
-          const parsed: unknown = JSON.parse(body.symlinkDirs);
-          if (Array.isArray(parsed)) {
-            updates.symlinkDirs = JSON.stringify(parsed.filter((d: unknown) => typeof d === "string"));
-          }
-        } catch {
-          throw new ProjectError("symlinkDirs must be a JSON array of strings", "BAD_REQUEST");
-        }
-      } else if (Array.isArray(body.symlinkDirs)) {
-        updates.symlinkDirs = JSON.stringify(body.symlinkDirs.filter((d: unknown) => typeof d === "string"));
-      }
-    }
-    if (body.defaultSkillId !== undefined) {
-      updates.defaultSkillId = typeof body.defaultSkillId === "string" && body.defaultSkillId ? body.defaultSkillId : null;
-    }
+    // Every PURE field, from the table that also DERIVES the recognized-key set the route
+    // rejects on (#992). Keeping the list and the application in one place is the whole point:
+    // a hand-written key list beside an `if` chain is what 422s a field that actually works.
+    applyProjectUpdateFields(body, updates);
+    // `defaultBranch` stays here because applying it is not pure — it must exist in this
+    // project's checkout, which is a git call the table cannot make. It is named explicitly in
+    // RECOGNIZED_PROJECT_UPDATE_KEYS for the same reason.
     if (body.defaultBranch !== undefined) {
       const nextDefaultBranch = typeof body.defaultBranch === "string"
         ? body.defaultBranch.trim()
