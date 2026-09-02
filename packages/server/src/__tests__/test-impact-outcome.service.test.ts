@@ -148,10 +148,17 @@ describe("buildRecordArgs", () => {
     expect(at("--outcomes")).toBe("/main/.test-impact/outcomes.jsonl");
   });
 
-  it("omits --selected entirely when the selection is empty", () => {
-    // `record` reads an empty selection as "no selection recorded" and computes no misses from
-    // it. Passing `--selected ""` would instead read as a selection of NOTHING, which makes every
-    // failure look like a miss and would poison the exact number this ledger exists to produce.
+  it("passes --selected VERBATIM when the selection is empty, so the row is scored not skipped", () => {
+    // This assertion was the exact opposite until 2026-09-02, on the reasoning that `record`
+    // treated an empty selection as "no selection recorded" so the flag had to be omitted. The
+    // tool no longer works that way: flag PRESENT with zero entries sets `selectionEmpty` and
+    // computes `missed`, while flag ABSENT stays unknown and witnesses nothing. So the empty
+    // case is the one that must be said out loud — a failing run whose selector picked nothing
+    // is the selector at its worst, and omitting the flag excused exactly that case.
+    //
+    // Unreachable on THIS project (the recorder passes --always-run over ~170 guard suites) and
+    // that is why the old rule survived; the recorder runs for every registered project, and a
+    // small repo with no always-run markers legitimately selects nothing for a docs change.
     const args = buildRecordArgs({
       toolPath: "/w/impact.mjs",
       outcomesPath: "/o.jsonl",
@@ -162,7 +169,10 @@ describe("buildRecordArgs", () => {
       ran: "full",
       source: "ci",
     });
-    expect(args).not.toContain("--selected");
+    expect(args).toContain("--selected");
+    expect(args[args.indexOf("--selected") + 1]).toBe("");
+    // `--failed` keeps the opposite rule: an absent failed set is genuinely "nothing failed",
+    // which needs no flag, and there is no third state for the tool to distinguish.
     expect(args).not.toContain("--failed");
     // No base given — the flag is absent rather than empty, so the tool keeps its own default.
     expect(args).not.toContain("--base");

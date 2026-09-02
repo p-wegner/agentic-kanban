@@ -3,6 +3,44 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-02 — the recorder now records an EMPTY selection, after being wrong about it twice
+
+Not a ticket — a correction to #997's neighbourhood, taken on pushback from the test-impact
+session and worth writing down because **I argued against it first and was wrong**.
+
+`buildRecordArgs` omitted `--selected` when the selection was empty, on the documented reasoning
+that `record` read an empty selection as "no selection recorded", so passing `--selected ""` would
+make every failure read as a miss. Their new `record` inverts that, and the distinction is now
+load-bearing (verified in `impact.mjs:1662`/`:1680` rather than taken on report):
+
+- flag PRESENT, zero entries → `selectionEmpty: true`, `missed` IS computed — a failing run whose
+  selector picked nothing is scored as the full miss it is;
+- flag ABSENT → unknown, witnesses nothing. Unchanged.
+
+**My first answer was that this buys the board nothing**, because the recorder passes
+`--always-run` and this repo has ~170 guard suites, so its selection is never empty (measured: 171
+selected against 4 changed). That is true and it is not the question. The recorder runs for EVERY
+registered project with the plugin, and a small repo with no `@gate:always-run` markers
+legitimately selects nothing for a docs-shaped change. The first external adopter is where the old
+behaviour would have silently stopped counting — in exactly the case where the selector did worst.
+Scoping an "unreachable" claim to this project, and not to the code path, is the error to remember.
+
+The fix is one line (`args.push("--selected", …)` unconditionally); the test that pinned the old
+rule was flipped, with the old reasoning kept in the comment so nobody restores it.
+
+### The god-module gate caught the cost of the prose, and the fix is the gate's own prescription
+
+#997's comments pushed `test-impact-outcome.service.ts` to **1014 lines**, past the 1000-line
+ceiling. Trimming the reasoning would have been the wrong response — it was added deliberately.
+The three row-quality classifiers (`emptyChangeSetReason`, `unmeasuredUnionReason`,
+`unattributedFailureReason`) moved to `services/test-impact-outcome/row-quality.ts`: the only
+functions in that module with no I/O, no tool spawn and no knowledge of where the ledger lives.
+925 lines now. Re-exported from the facade, so no caller changed.
+
+One trap worth knowing: a bare `export … from` re-exports without binding the names in the
+re-exporting module's scope, and `recordGateOutcome` calls all three. It needs `import` AND
+`export`, which the typecheck caught immediately.
+
 ## 2026-09-02 — #986 unblocked with real evidence, and it exposed #998: the board was discarding its own gates
 
 **#986's blocked step is done.** It was waiting on classified discard evidence ("instrumentation
