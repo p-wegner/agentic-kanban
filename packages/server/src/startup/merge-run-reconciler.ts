@@ -44,7 +44,7 @@
 import type { Database } from "../db/index.js";
 import { clearMergeRun, listMergeRuns, type MergeRunRow } from "../repositories/merge-run.repository.js";
 import { getWorkspaceById } from "../repositories/workspace-reads.repository.js";
-import { insertIssueComment } from "../repositories/issue-comments.repository.js";
+import { insertIssueComment, MERGE_INTERRUPTED_BY_RESTART } from "../repositories/issue-comments.repository.js";
 import { getMergeJob } from "../services/merge-job.service.js";
 import { emptyPassReport, formatPassReportBody, recordActed, recordSkipped, type PassReport } from "../lib/pass-report.js";
 import { startPeriodicSweep, type PeriodicSweepHandle } from "../lib/periodic-sweep.js";
@@ -187,7 +187,9 @@ export async function reconcileInterruptedMergeRuns(
         body,
         payload: {
           eventType: "warning",
-          mergeReason: "merge_interrupted_by_restart",
+          // The reader half of this stamp is `getLatestInterruptedMergeRecord` (#995): once this
+          // note is written the marker below is DELETED, so the note is the only durable record.
+          mergeReason: MERGE_INTERRUPTED_BY_RESTART,
           jobId: row.jobId,
           startedAt: row.startedAt,
           source: row.source,
