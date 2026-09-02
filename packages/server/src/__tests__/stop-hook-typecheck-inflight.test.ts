@@ -23,11 +23,14 @@
  */
 import { spawnSync } from "node:child_process";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
+// #1006 — see the helper: an EPERM from THIS fixture shape is Windows' async handle close after
+// the synchronous git/runner children exited, not a leaked holder worth failing the gate over.
+import { rmFixtureDir } from "./helpers/rm-or-report-holder.js";
 
 const requireCjs = createRequire(import.meta.url);
 const HOOKS_DIR = resolve(import.meta.dirname, "..", "..", "..", "..", ".claude", "hooks");
@@ -269,7 +272,26 @@ describe("smart-hooks runner — end to end Stop with a failing compile check (#
       cwd: dir,
       input: JSON.stringify({ stop_hook_active: false, session_id: "no-such-session", transcript_path: transcript }),
       encoding: "utf8",
-      env: { ...process.env, CLAUDE_PROJECT_DIR: dir },
+      env: {
+        ...process.env,
+        CLAUDE_PROJECT_DIR: dir,
+        // #1006 — pin BOTH policy gates, or this suite asserts a machine reading.
+        //
+        // The fixture's single check is named "TypeScript typecheck", so `classifyCheck` puts it
+        // in the `typecheck` bucket, and under the default `standard` posture that bucket is
+        // capacity-gated. `capacityHold` then reads `os.freemem()`: below its 2GB floor the check
+        // is SKIPPED (advisory, success) and the runner exits 0 — so the "still blocks" case below
+        // fails with `status 0 instead of 2` on a loaded box and passes on a quiet one, with no
+        // code change in between. That is exactly what happened to gate run merge-6dbc0e62-5.
+        //
+        // `SMART_HOOKS_FORCE=1` is the documented escape hatch for "a deliberate run must not be
+        // second-guessed by a heuristic", and `SMART_HOOKS_POSTURE=standard` pins the other gate so
+        // the worktree's own ticket-context posture can never reach in either. Neither weakens what
+        // is under test: this suite is about ATTRIBUTION of a compile error, and both gates sit
+        // upstream of the classifier it exercises.
+        SMART_HOOKS_FORCE: "1",
+        SMART_HOOKS_POSTURE: "standard",
+      },
     });
   }
 
@@ -281,7 +303,7 @@ describe("smart-hooks runner — end to end Stop with a failing compile check (#
       expect(result.stdout).not.toContain("CHECKS FAILED");
       expect(result.status).toBe(0);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmFixtureDir(dir);
     }
   });
 
@@ -293,7 +315,7 @@ describe("smart-hooks runner — end to end Stop with a failing compile check (#
       expect(result.stdout).toContain("CHECKS FAILED");
       expect(result.stderr).toContain("case: YOURS");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmFixtureDir(dir);
     }
   });
 });

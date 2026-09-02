@@ -22,10 +22,14 @@
  *      budget still lets the critical gate report before it is exhausted.
  */
 import { describe, expect, it } from "vitest";
-import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from "node:fs";
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, utimesSync } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+// #1006 — retrying removal for this fixture shape (short-lived temp git repo, every child
+// already reaped by the synchronous spawn). An EPERM here is Windows' async handle close, not
+// a leak: the gate went red on one while the test's own assertions had passed.
+import { rmFixtureDir } from "./helpers/rm-or-report-holder.js";
 
 const REPO_ROOT = resolve(import.meta.dirname, "..", "..", "..", "..");
 const SETTINGS_PATH = join(REPO_ROOT, ".claude", "settings.json");
@@ -147,7 +151,17 @@ describe("Stop hook chain — check-uncommitted actually blocks agent exit on a 
     return spawnSync(process.execPath, [RUNNER_PATH, "Stop"], {
       input: JSON.stringify({ stop_hook_active: false, session_id: "no-such-session" }),
       encoding: "utf8",
-      env: { ...process.env, CLAUDE_PROJECT_DIR: dir },
+      env: {
+        ...process.env,
+        CLAUDE_PROJECT_DIR: dir,
+        // #1006 — pin both policy gates so this suite asserts the CHAIN, never a machine reading.
+        // The uncommitted check classifies as `other` today (so neither gate reaches it), but that
+        // is a property of its name: rename it to anything matching /\btests?\b/ and the capacity
+        // gate would start skipping it below 2GB free, turning this into the same load-dependent
+        // red the typecheck suite hit. Pinning costs nothing and removes the standing trap.
+        SMART_HOOKS_FORCE: "1",
+        SMART_HOOKS_POSTURE: "standard",
+      },
     });
   }
 
@@ -168,7 +182,7 @@ describe("Stop hook chain — check-uncommitted actually blocks agent exit on a 
       expect(result.stdout).toContain("CHECKS FAILED");
       expect(result.stdout).toContain("Uncommitted");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmFixtureDir(dir);
     }
   });
 
@@ -178,7 +192,7 @@ describe("Stop hook chain — check-uncommitted actually blocks agent exit on a 
       const result = runStop(dir);
       expect(result.status).toBe(0);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmFixtureDir(dir);
     }
   });
 });
