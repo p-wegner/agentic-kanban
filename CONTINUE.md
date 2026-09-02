@@ -3,6 +3,60 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-02 — #997: the outcome ledger stops losing failures silently; one reported defect was already fixed
+
+**#997 is Done.** Reported over ACP by the test-impact session, which consumes
+`.test-impact/outcomes.jsonl`. Both halves were checked against the data before anything was
+written, and the second one turned out not to be what it looked like.
+
+### The real defect
+
+**All 9 failing rows carry `failed: []`.** A miss is by definition a failing suite the selection
+did not pick, so with no failing suite ever named, `missed` is structurally always empty and the
+miss rate reads 0% no matter how bad the selector is. That number is the whole safety argument for
+the `impact` gate tier (#954) and it has never had a witness.
+
+The provable cause is not that attribution drops unattributable names — that is correct, since the
+same relative path exists under every package and a name that can never match `select`'s
+vocabulary would report a 100% miss rate. **The cause is that the drop was SILENT**, so a
+`failed: []` row meant one of three unrelated things with no way to tell them apart: the chain
+failed outside the tests; the runner named a failure but no file; or suites WERE named and all of
+them were lost.
+
+Fixed by tagging, the same mechanism `-nochange` (#963) and `-partialselection` (#967) already
+use: `unattributedFailureReason` compares the pre- and post-attribution counts, the row is tagged
+`-unattributed`, the attributable subset is still recorded, and it logs once. With the lost case
+tagged, an UNtagged failing row with an empty `failed` set now positively means "the runner named
+no file" — which is what makes the honest cases readable.
+
+### The half that was already fixed, and why saying so matters
+
+The same report said 7 rows have a selection but an empty change set — "a recorder path calls
+select without a base, the #963 shape". **The count is right; the diagnosis is not.** All 7 are
+dated 2026-08-30T21:01Z .. 2026-08-31T19:42Z; `a62efaca4b` (#963's fix) landed 2026-08-31 18:20
++0200; **every one of the 20 rows after that last timestamp carries a real change set.** Current
+code passes the base and tags an empty-change-set row — the tagging has simply never had to fire.
+
+Those 7 rows are deliberately NOT retro-tagged: the ledger is an append-only record of what was
+observed, and rewriting it so the history looks better is the opposite of what it is for. The date
+boundary is recorded in a comment on `emptyChangeSetReason` — the function a reader lands on when
+they ask why an old row is untagged — rather than only in the ticket.
+
+### Verified by
+
+- Four new cases in `test-impact-outcome.service.test.ts` (40 total, green): the tag fires and
+  still records the attributable subset; it does NOT fire for a runner that simply named no file
+  (otherwise every typecheck/arch failure lands in the suspect bucket, which is most of them); and
+  the pure reason helper, including that a negative drop reports nothing.
+- Impact selection: 10 suites / 224 tests green. Guards-only green. Typecheck green.
+
+### Still open, and it is the point of #954
+
+Tagging makes the corpus HONEST; it does not make it big. The miss rate stays unmeasurable until
+failing runs start naming suites, and the only producer that can witness a genuine miss is the
+base sweep (#982), now at roughly one row a day. Nothing here changes that — it changes whether we
+would be able to believe the number when it arrives.
+
 ## 2026-09-02 — #996: the raw-read ratchet follows readGuardSource, and its baseline went back UP
 
 **#996 is Done.** `always-run-raw-read-ratchet` (#888) matched `readFileSync(<repo path>, "utf8")`

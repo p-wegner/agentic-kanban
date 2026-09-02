@@ -157,6 +157,13 @@ export interface RecordGateOutcomeInput {
   passed: boolean;
   /** The suites that failed, as `failedSuitesForOutcome`/`parseFailedSuites` name them. */
   failedSuites: string[];
+  /**
+   * How many suite names the runner produced BEFORE package attribution dropped any (#997).
+   *
+   * Defaults to `failedSuites.length`, i.e. "nothing was dropped" — the right default for a
+   * caller that never had unattributable names to lose. See {@link unattributedFailureReason}.
+   */
+  parsedFailedSuiteCount?: number;
   /** The tier info the gate built — the single source of truth for what actually ran. */
   tierInfo: GateTierInfo | null;
   /** Tags the row's origin. The board's gate is `ci`: it is the automated gate, not a dev loop. */
@@ -539,6 +546,41 @@ export async function resolveGateImpactSelection(input: {
 }
 
 /**
+ * Did this row LOSE the names of the suites that failed (#997)?
+ *
+ * `repoRelativeSuitePath` returns null for a failed suite with no package label, and the caller
+ * drops it — correctly, because the same relative path (`src/__tests__/x.test.ts`) exists under
+ * every package, so an unattributed name would be wrong rather than merely missing, and a name
+ * that can never match `select`'s vocabulary reports a 100% miss rate.
+ *
+ * What was wrong until #997 is that the drop left NO TRACE. A failing row with `failed: []` meant
+ * one of three unrelated things and the ledger could not tell them apart:
+ *
+ *  1. the verify chain failed OUTSIDE the tests (typecheck, arch, install, smoke) — honest;
+ *  2. the runner named a failure but no file (a compile error, a crashed worker) — honest;
+ *  3. suites WERE named and every one was dropped for want of a package label — a lost
+ *     measurement, recorded as a clean observation.
+ *
+ * Measured on this board's own corpus 2026-09-02: all 9 failing rows carried `failed: []`, so
+ * `missed` was structurally always empty and the miss rate — the entire safety argument for the
+ * `impact` gate tier (#954) — was unfalsifiable. Case 3 being indistinguishable from 1 and 2 is
+ * why nine consecutive runs produced nothing and nobody noticed.
+ *
+ * Tagging (rather than dropping the row, or recording the unattributable name) is the same choice
+ * {@link emptyChangeSetReason} makes and for the same reason: a dropped row is indistinguishable
+ * from "the gate never ran", while a tagged one is filterable and visible. With case 3 tagged, an
+ * UNtagged failing row with an empty `failed` set now positively means cases 1-2.
+ */
+export function unattributedFailureReason(input: { parsed: number; attributed: number }): string | null {
+  const dropped = input.parsed - input.attributed;
+  if (dropped <= 0) return null;
+  return (
+    `${dropped} of ${input.parsed} failing suite(s) could not be attributed to a package, so their names were `
+    + "dropped — this row's `failed` set is incomplete and its `missed` set cannot be trusted"
+  );
+}
+
+/**
  * Is this row a valid observation of the SELECTION, or of the always-run baseline (#963)?
  *
  * Returns a reason string when the row is suspect, `null` when it is fine. A gate always runs on a
@@ -550,6 +592,22 @@ export async function resolveGateImpactSelection(input: {
  * The row is still RECORDED, tagged with a source suffix rather than dropped: a dropped row is
  * indistinguishable from "the gate never ran", while a tagged one is filterable and visible. What
  * it must not do is sit in the corpus looking like a normal observation.
+ */
+/*
+ * A measured note about the rows this tag did NOT catch, so nobody re-diagnoses it (#997).
+ *
+ * This board's corpus holds 7 rows with an empty change set and a PLAIN `ci` source. They are not
+ * evidence of a recorder path that still omits the base: they are all dated
+ * 2026-08-30T21:01Z .. 2026-08-31T19:42Z, `a62efaca4b` ("pass the base branch to select/record",
+ * #963) landed 2026-08-31 18:20 +0200, and every one of the 20 rows after that last timestamp
+ * carries a real change set. The tagging below has simply never had to fire in production because
+ * the condition stopped occurring.
+ *
+ * Those 7 rows are deliberately NOT retro-tagged. The ledger is an append-only record of what was
+ * observed, and rewriting it so the history looks better is the opposite of what it is for; a
+ * consumer that wants to exclude them can key on the date boundary above. Recorded here rather
+ * than only in the ticket because this is the function a reader lands on when they ask why an old
+ * row is untagged.
  */
 export function emptyChangeSetReason(input: { changed: string[]; baseBranch: string | null | undefined }): string | null {
   if (input.changed.length > 0) return null;
@@ -694,8 +752,17 @@ export async function recordGateOutcome(input: RecordGateOutcomeInput): Promise<
     // can tell the two apart; the empty change set is named first because it invalidates the row
     // more completely (there is no selection to judge at all).
     const unionReason = unmeasuredUnionReason({ ran });
-    const suspectReason = noChangeReason ?? unionReason;
-    const sourceSuffix = `${noChangeReason ? "-nochange" : ""}${unionReason ? "-partialselection" : ""}`;
+    // #997 — the THIRD way a row can fail to be an observation: the run named failing suites and
+    // package attribution lost them, so `failed` is incomplete and `missed` is computed against a
+    // set that is missing exactly the entries a miss would be made of.
+    const unattributedReason = unattributedFailureReason({
+      parsed: input.parsedFailedSuiteCount ?? input.failedSuites.length,
+      attributed: input.failedSuites.length,
+    });
+    const suspectReason = noChangeReason ?? unionReason ?? unattributedReason;
+    const sourceSuffix =
+      `${noChangeReason ? "-nochange" : ""}${unionReason ? "-partialselection" : ""}`
+      + `${unattributedReason ? "-unattributed" : ""}`;
     const record = await run({
       cwd: workingDir,
       args: buildRecordArgs({
@@ -722,6 +789,13 @@ export async function recordGateOutcome(input: RecordGateOutcomeInput): Promise<
         `recorded a gate outcome with an EMPTY change set (${noChangeReason}) — the selection it names is the ` +
           `always-run baseline, not this branch's, so the row is tagged source=${source}${sourceSuffix} and must not be ` +
           `counted toward the miss rate`,
+      );
+    }
+    if (unattributedReason) {
+      log(
+        `recorded a gate outcome whose failing-suite names were LOST (${unattributedReason}) — the row is tagged ` +
+          `source=${source}${sourceSuffix}. This is the only path that used to lose a measurement silently, which is ` +
+          "why the corpus held nine failing rows naming nothing (#997)",
       );
     }
     if (unionReason) {
@@ -792,14 +866,20 @@ export async function recordVerifyGateOutcome(args: {
     return { recorded: false, reason: "the run timed out or was killed — inconclusive, so it is not an observation" };
   }
   const passed = outcome.failure === null;
+  // #997 — keep the PRE-attribution count. `repoRelativeSuitePath` returns null for a suite with
+  // no package label and this filter drops it; that is correct (an unattributed name would match
+  // nothing in `select`'s vocabulary and report a 100% miss rate) but it used to be SILENT, which
+  // is how nine consecutive failing rows came to name no suite at all with nothing recording why.
+  const attributedSuites = outcome.failedSuites
+    .map(repoRelativeSuitePath)
+    .filter((file): file is string => file !== null);
   const result = await recordGateOutcome({
     workingDir: args.workingDir,
     repoPath: args.repoPath,
     baseBranch: args.baseBranch,
     passed,
-    failedSuites: outcome.failedSuites
-      .map(repoRelativeSuitePath)
-      .filter((file): file is string => file !== null),
+    failedSuites: attributedSuites,
+    parsedFailedSuiteCount: outcome.failedSuites.length,
     tierInfo: args.tierInfo,
     source: "ci",
     runCommand: args.runCommand,
