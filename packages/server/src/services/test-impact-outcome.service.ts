@@ -729,8 +729,17 @@ export async function recordGateOutcome(input: RecordGateOutcomeInput): Promise<
       timeoutMs: IMPACT_COMMAND_TIMEOUT_MS,
     });
     if (selection.exitCode !== 0) {
-      // `select` exits 2 with no inventory and 3 with an empty one — both mean "this repo has no
-      // usable map yet", which is a missing prerequisite, not a gate problem.
+      // `select` exits 3 with an empty inventory, which means "this repo has no usable map yet" —
+      // a missing prerequisite, not a gate problem.
+      //
+      // Exit 2 is NO LONGER one thing (verified 2026-09-02 against the skill at 3e362b6): it is
+      // still "no inventory", and it is ALSO "the base ref does not resolve", which the tool now
+      // REFUSES rather than silently scoring an empty diff — the #963 shape, caught at the source.
+      // Those two want opposite reactions from a maintainer: the first is a repo that has not
+      // opted in, the second is a BOARD bug passing a ref that does not exist. Do not read a bare
+      // `exited 2` as the benign one. The reason below carries the tool's own last stderr line,
+      // which says which it was ("base \"x\" does not resolve to a commit"), so the distinction
+      // reaches an operator even though this branch does not act on it.
       return {
         recorded: false,
         reason: `select exited ${selection.exitCode}: ${(selection.stderr || selection.stdout).trim().split("\n").slice(-1)[0] ?? ""}`,
