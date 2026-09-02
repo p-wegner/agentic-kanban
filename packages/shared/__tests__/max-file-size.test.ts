@@ -4,7 +4,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
-import { parseGuardSource } from "./helpers/guard-scan";
+import { parseGuardSource, readGuardSource } from "./helpers/guard-scan";
 
 /**
  * Architecture gate: a cohesion-aware god-module guard (arch-review #875).
@@ -333,22 +333,44 @@ function maxFunctionBranches(file: string, text: string): WorstFunction {
   return worst;
 }
 
+/**
+ * Every scanned source file, walked ONCE per worker (#994).
+ *
+ * Each of the three assertions below used to re-walk the tree and re-read every file. Warm
+ * that is 4 s; cold it measured 158 s and TIMED OUT at vitest's 120 s limit — reported as a
+ * failure of `no source file exceeds the 1000-line hard ceiling`, which is indistinguishable
+ * from a real god-module breach. Walking once (and reading through `readGuardSource`) takes
+ * the cold cost off the x3 multiplier.
+ */
+let sourceFileCache: string[] | null = null;
+
 function gatherSourceFiles(): string[] {
+  if (sourceFileCache) return sourceFileCache;
   const packagesDir = join(REPO_ROOT, "packages");
   const files: string[] = [];
   for (const pkg of readdirSync(packagesDir)) {
     if (pkg === ".worktrees") continue;
     collectSourceFiles(join(packagesDir, pkg, "src"), files);
   }
+  sourceFileCache = files;
   return files;
 }
+
+/**
+ * A tree-scanning guard is genuinely long-running, and vitest reports a TIMEOUT as a test
+ * FAILURE — here as "a source file exceeds the 1000-line hard ceiling" (#994), which is a real
+ * and merge-blocking condition, so an operator cannot tell the two apart without re-running.
+ * The walk is memoised now; this ceiling covers the loaded, cold-cache case, where the honest
+ * outcome is a slow PASS rather than a fast lie.
+ */
+const SCAN_TIMEOUT_MS = 300_000;
 
 describe("god-module gate (cohesion-aware)", () => {
   it(`no source file exceeds the ${MAX_LINES}-line hard ceiling`, () => {
     const offenders: string[] = [];
     for (const file of gatherSourceFiles()) {
       const rel = relative(REPO_ROOT, file).split(sep).join("/");
-      const lines = lineCount(readFileSync(file, "utf8"));
+      const lines = lineCount(readGuardSource(file));
       if (lines > MAX_LINES) offenders.push(`${rel}  (${lines} lines)`);
     }
 
@@ -359,13 +381,13 @@ describe("god-module gate (cohesion-aware)", () => {
         `git-service.ts / workflow-engine.ts):\n` +
         offenders.join("\n"),
     ).toEqual([]);
-  });
+  }, SCAN_TIMEOUT_MS);
 
   it(`no module declares more than ${COHESION_MAX_FN_DECLS} top-level functions/classes`, () => {
     const offenders: string[] = [];
     for (const file of gatherSourceFiles()) {
       const rel = relative(REPO_ROOT, file).split(sep).join("/");
-      const text = readFileSync(file, "utf8");
+      const text = readGuardSource(file);
       const lines = lineCount(text);
       const fnDecls = countInternalFunctions(file, text);
       const allowed = Math.max(COHESION_MAX_FN_DECLS, COHESION_BASELINE[rel] ?? 0);
@@ -385,7 +407,7 @@ describe("god-module gate (cohesion-aware)", () => {
         `barrel (see workflow-engine.ts / git-service.ts / agent-stream-parser.ts):\n` +
         offenders.join("\n"),
     ).toEqual([]);
-  });
+  }, SCAN_TIMEOUT_MS);
 
   it(`no single function exceeds ${MAX_FUNCTION_BRANCHES} control-flow branches`, () => {
     const offenders: string[] = [];
@@ -395,7 +417,7 @@ describe("god-module gate (cohesion-aware)", () => {
 
     for (const file of gatherSourceFiles()) {
       const rel = relative(REPO_ROOT, file).split(sep).join("/");
-      const worst = maxFunctionBranches(file, readFileSync(file, "utf8"));
+      const worst = maxFunctionBranches(file, readGuardSource(file));
       if (worst.branches > peak.branches) peak = { ...worst, rel };
       if (worst.branches > MAX_FUNCTION_BRANCHES) overThreshold++;
       const baselined = COMPLEXITY_BASELINE[rel];
@@ -426,7 +448,7 @@ describe("god-module gate (cohesion-aware)", () => {
         `${MAX_FUNCTION_BRANCHES}-branch threshold, all baselined` +
         (stale.length > 0 ? `; ${stale.length} stale baseline entr${stale.length === 1 ? "y" : "ies"} to lower: ${stale.join(", ")}` : ""),
     );
-  });
+  }, SCAN_TIMEOUT_MS);
 
   // The thresholds and the ratchet baseline live in TWO files by design: this suite is the
   // in-IDE signal, and `scripts/check-god-modules.mjs` is the merge-blocking gate of record

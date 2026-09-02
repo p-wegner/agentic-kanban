@@ -3,6 +3,72 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-02 — #994: two always-run guards no longer time out, and the reason was I/O, not git
+
+**#994 is Done.** `max-file-size.test.ts` ("no source file exceeds the 1000-line hard ceiling")
+and `shebang-eol-guard.test.ts` ("every tracked shebang file has eol=lf") were timing out at
+vitest's 120 s limit under load, and a timeout is reported as a test FAILURE — i.e. as
+"a god-module breached" and "a shebang file is unpinned", both real, both merge-blocking, so an
+operator could not tell a contention artifact from master actually being broken.
+
+### What the cause turned out to be, and where the ticket's guess was wrong
+
+The ticket blamed `git check-attr`. Measured, `check-attr` over all 80 shebang paths costs
+**57 ms** — it was never the problem. The cost is **plain file I/O on a cold page cache**:
+
+- `shebang-eol-guard` ran `git ls-files` and then `readFileSync` on **all 3704 tracked files**,
+  **twice** (once per assertion, no memoisation). Measured: **61.5 s on the first run of the
+  session, 1.44 s on the immediately following one.** Essentially the whole cost was per-file
+  opens; on a loaded box the ticket measured 202 s.
+- `max-file-size` re-walked and re-read the ~1448-file source tree once per `it`, three times.
+  4.3 s warm, 158 s in the ticket's loaded run.
+
+### The fix
+
+- **`shebang-eol-guard` gets its candidate list from `git grep -l -a -z -e '^#!'`** — one process,
+  ~0.5 s — and still checks the first two bytes itself, so `^#!` matching mid-file only
+  over-selects (83 candidates against the 80 real files) and never under-selects. Verified the two
+  approaches return the **identical 80-file set** before switching. The list is memoised, so the
+  second assertion re-uses it. File opens: **7408 → 83.**
+- **`max-file-size` walks once** and reads through a new memoised `readGuardSource` in
+  `helpers/guard-scan.ts` (beside the existing memoised `parseGuardSource`).
+- Both suites carry an explicit `SCAN_TIMEOUT_MS = 300_000` on their scanning `it`s. A
+  tree-scanning guard really is long-running; the honest outcome under contention is a slow PASS,
+  not a fast lie.
+
+### Verified by
+
+- **Negative controls, both suites** — the point being that a faster guard that no longer guards
+  is worse than a slow one. Converting `scripts/check-god-modules.mjs` to CRLF fails the byte-half
+  of the shebang guard by name; appending 1200 lines to `issue-priority.ts` fails the 1000-line
+  ceiling at 1239 lines. Both reverted, tree clean.
+- **The whole always-run set**: `KANBAN_TEST_GUARDS_ONLY=1 KANBAN_TEST_MAX_WORKERS=2` — all guard
+  suites passed, 277 s, no timeouts.
+- `node scripts/typecheck.mjs` green (36 s, 1 worker).
+
+### One thing this made WORSE, recorded rather than dropped
+
+`always-run-raw-read-ratchet.test.ts` (#888) caught the change and its baseline for
+`shared/max-file-size.test.ts` dropped 2 → 1 — because that ratchet detects
+`readFileSync(<repo path>, "utf8")` at the call site, and the line-counting read now sits behind
+`readGuardSource`. That is the **helper-hidden-read blind spot the ratchet's own header names**,
+and it is now one file wider. The read itself is still CRLF-safe (`text.split("
+").length` counts
+`
+` either way), so nothing is broken today; what changed is that the net stopped watching it.
+The baseline entry says so in full. Teaching the ratchet to follow `readGuardSource` is the real
+fix and is deliberately NOT done here — it means changing a second always-run guard's detection on
+a ticket about two slow ones.
+
+### Cold-cache caveat — what is measured and what is inferred
+
+Measured: the read counts, the warm timings, `check-attr` at 57 ms, and the 61.5 s → 1.44 s
+cold→warm collapse that identifies per-file I/O as the whole cost. **Inferred, not measured:** the
+cold/loaded run is now fast enough, since dropping a Windows page cache on demand is not something
+this session can do. The inference is direct (45× fewer file opens against a cost shown to be
+almost entirely per-file opens), but it is an inference. If a loaded gate ever times out in one of
+these two again, the timeout ceiling above is what keeps it honest in the meantime.
+
 ## 2026-09-01 — verification cadence: the fast gate is real, and its map had rotted
 
 **Standing state for the test-impact / fast-gate work.** Read this before the dated passes below.

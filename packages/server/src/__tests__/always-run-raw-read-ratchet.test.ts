@@ -228,13 +228,16 @@ const RAW_READ_BASELINE: Record<string, { count: number; reason: string }> = {
     reason: "\\r?\\n-tolerant split — `text.split(/\\r?\\n/)`.",
   },
   "shared/max-file-size.test.ts": {
-    count: 2,
+    count: 1,
     reason:
-      "First read counts lines via `text.split(\"\\n\").length`, which counts `\\n` occurrences " +
-      "and is the same number under CRLF or LF. Second read is \\n-as-position-anchor — " +
-      "`scriptText.indexOf(\"\\n};\", …)` finds a line-initial close-brace, and the subsequent " +
-      "`.split(\"\\n\")` per-entry regex has no end anchor, so a trailing `\\r` on each line " +
-      "does not affect the match.",
+      "\\n-as-position-anchor — `scriptText.indexOf(\"\\n};\", …)` finds a line-initial " +
+      "close-brace, and the subsequent `.split(\"\\n\")` per-entry regex has no end anchor, so " +
+      "a trailing `\\r` on each line does not affect the match. " +
+      "Was 2 until #994: the line-counting read now goes through `readGuardSource` (the memoised " +
+      "reader that took this suite's cold cost off a x3 multiplier), so this scan no longer sees " +
+      "it — the helper-hidden-read blind spot this file's own header names. That read is still " +
+      "CRLF-safe (`text.split(\"\\n\").length` counts \\n occurrences either way); what " +
+      "changed is that the net stopped watching it.",
   },
   "shared/worktree-delete-guard-ratchet.test.ts": {
     count: 1,
