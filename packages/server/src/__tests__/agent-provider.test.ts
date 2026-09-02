@@ -503,12 +503,33 @@ describe("ClaudeProvider", () => {
       expect(evt).toBeUndefined();
     });
 
-    it("returns contextTokens from result event usage", () => {
+    // #1001: this asserted the OPPOSITE (`contextTokens === 500`), and that is what put a
+    // session's cumulative usage on a "% of context window" bar. The result event's `usage`
+    // is the total for the whole run; occupancy is a per-request quantity and comes from the
+    // assistant events. The cumulative numbers are still reported — as `stats`, where the
+    // name says what they are.
+    it("does NOT report result-event usage as context-window occupancy", () => {
       const evt = provider.parseStreamEvent(
         JSON.stringify({
           type: "result",
           subtype: "success",
-          usage: { input_tokens: 200, cache_read_input_tokens: 300 },
+          usage: { input_tokens: 200, cache_read_input_tokens: 300, output_tokens: 40 },
+        })
+      );
+      expect(evt?.liveStats).toBeUndefined();
+      expect(evt?.stats?.inputTokens).toBe(200);
+      expect(evt?.stats?.outputTokens).toBe(40);
+    });
+
+    it("reports occupancy from the assistant event, which is per-request", () => {
+      const evt = provider.parseStreamEvent(
+        JSON.stringify({
+          type: "assistant",
+          message: {
+            model: "claude-opus-4-8",
+            usage: { input_tokens: 200, cache_read_input_tokens: 300 },
+            content: [{ type: "text", text: "hi" }],
+          },
         })
       );
       expect(evt?.liveStats?.contextTokens).toBe(500);
