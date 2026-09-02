@@ -243,6 +243,79 @@ export async function deleteIssueComment(
 }
 
 /**
+ * The `payload.mergeReason` the merge-run reconciler stamps on the note it writes for a merge
+ * whose runner died mid-flight (#945). Declared here, beside the reader, so the writer in
+ * `startup/merge-run-reconciler.ts` and the `merge-status` projection that reads it back agree
+ * by construction rather than by two matching string literals.
+ */
+export const MERGE_INTERRUPTED_BY_RESTART = "merge_interrupted_by_restart";
+
+/** What a recorded (already-swept) interrupted merge can still tell a caller. */
+export interface InterruptedMergeRecord {
+  jobId: string | null;
+  /** When the lost merge job was SUBMITTED, from the marker the sweep consumed. */
+  startedAt: string | null;
+  /** Who submitted it (`merge-endpoint`, the orchestrator, …), or null if the note predates it. */
+  source: string | null;
+  /** When the interruption was RECORDED — the sweep's own timestamp. */
+  recordedAt: string;
+  /** The note's prose, so a caller can surface the reconciler's wording rather than re-deriving it. */
+  body: string;
+}
+
+/**
+ * The recorded interruption for a workspace, if an interruption is the LAST thing that happened
+ * to its merge (#995).
+ *
+ * Why this exists at all: the in-flight marker (`workspace_merge_run`) is the queryable form of
+ * "a merge is running", and `merge-run-reconciler` DELETES it as it writes this note. So the
+ * record moves from a row into the timeline, and `merge-status` — the one endpoint a merge
+ * poller watches — went from answering correctly to answering the never-tried sentence. The
+ * longer a client waited, the less the endpoint knew, which is backwards for a poller.
+ *
+ * **Only the NEWEST `merge-attempt` note counts.** Not "an interruption is somewhere in this
+ * workspace's history": a workspace that was interrupted, re-submitted, and then failed its gate
+ * has a newer note saying so, and reporting the older interruption would be a stale answer
+ * dressed as a terminal one. Reading one row is also all the work this needs — the
+ * `idx_issue_comments_workspace_id` index is exactly this lookup.
+ *
+ * Fails CLOSED, unlike the write path above: an unparseable payload returns null (the caller
+ * then falls back to the weaker but true answer) rather than being guessed at.
+ */
+export async function getLatestInterruptedMergeRecord(
+  workspaceId: string,
+  database: Database = db,
+): Promise<InterruptedMergeRecord | null> {
+  const row = firstRow(
+    database
+      .select()
+      .from(issueComments)
+      .where(and(eq(issueComments.workspaceId, workspaceId), eq(issueComments.kind, "merge-attempt")))
+      .orderBy(desc(issueComments.createdAt), desc(issueComments.id))
+      .limit(1),
+  );
+  const latest = await row;
+  if (!latest?.payload) return null;
+  let payload: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(latest.payload);
+    if (!parsed || typeof parsed !== "object") return null;
+    payload = parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  if (payload.mergeReason !== MERGE_INTERRUPTED_BY_RESTART) return null;
+  const str = (value: unknown): string | null => (typeof value === "string" && value.length > 0 ? value : null);
+  return {
+    jobId: str(payload.jobId),
+    startedAt: str(payload.startedAt),
+    source: str(payload.source),
+    recordedAt: latest.lastRepeatedAt ?? latest.createdAt,
+    body: latest.body,
+  };
+}
+
+/**
  * The most recent comments for one issue (optionally narrowed to a workspace and kind),
  * newest first. Used by callers that must decide whether a system note they are about to
  * write is a REPEAT of one already on the timeline (#737) — the timeline itself is the

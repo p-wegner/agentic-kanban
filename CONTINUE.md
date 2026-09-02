@@ -3,6 +3,52 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-02 — #995: merge-status can report an INTERRUPTED merge, so waiting no longer loses information
+
+**#995 is Done.** `GET /api/workspaces/:id/merge-status` now answers `outcome: "interrupted"`
+for a merge that died before reaching a verdict, instead of the never-tried sentence.
+
+### The mechanism, which is the part worth keeping
+
+The interruption was always recorded — `merge-run-reconciler` writes a `merge-attempt` note that
+correctly distinguishes "interrupted" from "gate failed". What broke the endpoint is that the
+same step is **destructive**: it writes the note and then calls `clearMergeRun`, deleting the
+#945 in-flight marker that `describeAbsentMergeJob` reads. So immediately after a crash the
+endpoint answered correctly, and after the sweep it degraded to *"no merge job recorded for this
+workspace in the current server process"* — verbatim what a workspace nobody ever tried to merge
+gets. **The longer a client waited, the less the endpoint knew**, which is backwards for a
+poller, whose entire behaviour is to wait. Measured on `merge-42eb8b43-1` (#988), reported by the
+test-impact session whose poller sat across the sweep.
+
+### What landed
+
+- `getLatestInterruptedMergeRecord` (`repositories/issue-comments.repository.ts`) reads the
+  durable note back. **Only the NEWEST `merge-attempt` note for the workspace counts** — not "an
+  interruption somewhere in this workspace's history", which would report a stale interruption
+  for a workspace that was since re-submitted and failed its gate.
+- `describeAbsentMergeJob` gains an `interrupted` branch ranked directly below `merged` and
+  ABOVE the gate verdict, sourced from the live marker OR the record. The gate verdict is not
+  dropped on that path — a retry still wants to know it can reuse a passing gate — it is demoted
+  from the answer to a detail of it. Full ranking now: **merged > interrupted > reusable gate
+  verdict > nobody ever tried.**
+- The `mergeReason` stamp is one exported constant (`MERGE_INTERRUPTED_BY_RESTART`) that the
+  writer and the reader now share, instead of two matching string literals.
+- Option 2 from the ticket (make the marker non-destructive) was NOT taken, as the ticket
+  preferred: it grows a row that then needs pruning.
+- The un-ready behaviour is untouched, as the ticket's "Do not" section required. Not
+  auto-resubmitting after an interruption is correct; the gap was purely reporting.
+
+### Verified by
+
+- `merge-status-absent-job-interrupted.test.ts`, 5 cases including three that are about NOT
+  over-claiming: a newer gate-failure note supersedes an older interruption, a landed merge
+  outranks a recorded one, and an unknown workspace id never reports interrupted (the read is
+  `.catch(() => null)`, and a truthiness slip there would invent an attempt that never happened).
+- **Negative control**: stubbing the new read to `Promise.resolve(null)` — i.e. the pre-fix
+  behaviour — fails exactly the one case that is about the post-sweep world, and no other.
+- Impact selection for the change: 20 suites, 133 tests, all green. Guards-only set green (298s).
+  Typecheck green.
+
 ## 2026-09-02 — #994: two always-run guards no longer time out, and the reason was I/O, not git
 
 **#994 is Done.** `max-file-size.test.ts` ("no source file exceeds the 1000-line hard ceiling")

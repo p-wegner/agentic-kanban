@@ -17,6 +17,7 @@ import { completeMergeJob, describeMergeJobAttempts, failMergeJob, getMergeJob, 
 import { describePersistedGateVerdict } from "../services/workspace-merge-gate.js";
 import { getMergeRun, type MergeRunRow } from "../repositories/merge-run.repository.js";
 import { getWorkspaceMergeState } from "../repositories/merge-queue.repository.js";
+import { getLatestInterruptedMergeRecord, type InterruptedMergeRecord } from "../repositories/issue-comments.repository.js";
 
 import { queryFlag } from "../middleware/query-params.js";
 import { ConflictError, UnprocessableError } from "../errors/index.js";
@@ -47,18 +48,30 @@ export const MID_SESSION_LAND_MIN_INTERVAL_MS = 15_000;
  * The `merge-status` body for a workspace this process holds NO merge job for — the shape #919
  * hit, and the one whose emptiness was the whole defect.
  *
- * Three durable facts survive a restart and are what turn a bare `{"job": null}` back into an
- * answer, so all three are read here:
+ * **The ranking is the design**: merged (terminal) beats interrupted beats a reusable gate
+ * verdict beats "nobody ever tried". Each step down is a weaker but still true answer, and the
+ * point of every one of them is that the caller must never be handed the never-tried sentence
+ * for a merge that was actually attempted. #990 split off the success case; #995 split off the
+ * interrupted case, which until then was decoration on the two weakest branches AND was sourced
+ * only from a marker the reconciler deletes.
+ *
+ * Four durable facts survive a restart and are what turn a bare `{"job": null}` back into an
+ * answer, so all four are read here:
  *  - `workspaces.merged_at` / `merged_head_sha` (#990) — whether the merge SUCCEEDED. This is
  *    the terminal one and it is checked first;
  *  - the persisted pre-merge gate verdict (#893) — whether the gate had already PASSED before
  *    the transport died, i.e. whether a retry re-pays the 30-45 minute run;
  *  - the in-flight merge marker (#945) — whether a merge was RUNNING when the process was lost.
  *    Without it `null` reads identically to "nobody ever tried", which is exactly the ambiguity
- *    that left #919 armed-but-idle with no recorded reason.
+ *    that left #919 armed-but-idle with no recorded reason;
+ *  - the RECORDED interruption (#995) — the `merge-attempt` note the reconciler writes as it
+ *    deletes that marker, read back by `getLatestInterruptedMergeRecord`.
  *
  * A marker still visible here means the interruption has not been swept yet; the reconciler's
- * boot pass records it as a `merge-attempt` note and clears the row.
+ * boot pass records it as a `merge-attempt` note and clears the row. **That clear is why the
+ * fourth read exists** — with only the first three, this endpoint answered correctly right after
+ * the crash and then degraded to the never-tried sentence once the sweep ran, so a poller (the
+ * one consumer whose entire behaviour is to wait) learned LESS the longer it waited.
  *
  * **Why the success case needed its own read (#990).** The restart this function exists to
  * survive is very often caused BY the merge: a successful merge moves the main checkout's
@@ -82,21 +95,37 @@ export const MID_SESSION_LAND_MIN_INTERVAL_MS = 15_000;
 export async function describeAbsentMergeJob(workspaceId: string): Promise<{
   job: null;
   /**
-   * #990 — set only when `workspaces.merged_at` is stamped. `"completed"` is the terminal,
-   * unambiguous answer a poller that lost the job map is looking for; its absence is what the
-   * other branches below then have to disambiguate.
+   * The terminal, unambiguous answer a poller that lost the job map is looking for.
+   *
+   * `"completed"` (#990) — `workspaces.merged_at` is stamped.
+   * `"interrupted"` (#995) — a merge was submitted and died before reaching a verdict, so
+   * NOTHING was learned about the branch. Distinct from a gate failure, and distinct from
+   * never-tried, which is the ambiguity it exists to remove.
+   *
+   * Its ABSENCE is what the remaining branches below then have to disambiguate.
    */
-  outcome?: "completed";
+  outcome?: "completed" | "interrupted";
   mergedAt?: string;
   mergedHeadSha?: string | null;
+  /** The LIVE in-flight marker — present only until the reconciler sweeps it. */
   interruptedMerge: MergeRunRow | null;
+  /**
+   * The RECORDED interruption, which outlives the marker (#995). Set whenever the newest
+   * merge-attempt note for this workspace is the reconciler's; that is the half a poller
+   * arriving after the sweep can still see.
+   */
+  interruptedMergeRecord?: InterruptedMergeRecord;
   persistedGateVerdict?: Awaited<ReturnType<typeof describePersistedGateVerdict>>;
   message: string;
 }> {
-  const [persistedGateVerdict, interruptedMerge, mergeState] = await Promise.all([
+  const [persistedGateVerdict, interruptedMerge, mergeState, interruptedRecord] = await Promise.all([
     describePersistedGateVerdict(workspaceId),
     getMergeRun(workspaceId).catch(() => undefined),
     getWorkspaceMergeState(workspaceId).catch(() => undefined),
+    // #995 — the marker above is deleted by the sweep that RECORDS the interruption, so the
+    // marker alone answers correctly for a few minutes and then stops. Read the durable record
+    // beside it; failing to read it must never be worse than not having looked.
+    getLatestInterruptedMergeRecord(workspaceId).catch(() => null),
   ]);
   // #990 — checked FIRST, and returning here rather than decorating the messages below, because
   // a stamped `merged_at` is terminal: once the merge landed, whether a gate verdict is still
@@ -116,28 +145,72 @@ export async function describeAbsentMergeJob(workspaceId: string): Promise<{
         + "No retry is needed.",
     };
   }
-  const interruptedNote = interruptedMerge
-    ? ` A merge (job ${interruptedMerge.jobId}) was submitted ${interruptedMerge.startedAt} and never reached a `
-      + "verdict — it is being recorded as interrupted by a restart (#945)."
-    : "";
+  // #995 — the interrupted branch, ranked directly below "merged" and ABOVE the gate verdict.
+  //
+  // Before this, an interruption was decoration appended to whichever weaker branch ran, and it
+  // came only from the live marker. That marker is deleted by the very sweep that records the
+  // interruption (`merge-run-reconciler`), so the endpoint answered correctly for a few minutes
+  // and then degraded to "no merge job recorded for this workspace in the current server
+  // process" — verbatim what a workspace nobody ever tried to merge gets. The longer a client
+  // waited, the less this endpoint knew, which is backwards for a poller: waiting is its whole
+  // behaviour. Measured on merge-42eb8b43-1 (#988), where a poller watched across the sweep and
+  // saw the answer decay from terminal to indistinguishable-from-never-tried.
+  //
+  // The gate verdict is NOT dropped on this path — a retry still wants to know it can reuse a
+  // passing gate — it is demoted from "the answer" to a detail of it.
+  const interruption = interruptedMerge
+    ? {
+        jobId: interruptedMerge.jobId,
+        startedAt: interruptedMerge.startedAt,
+        swept: false,
+      }
+    : interruptedRecord
+      ? { jobId: interruptedRecord.jobId, startedAt: interruptedRecord.startedAt, swept: true }
+      : null;
+  if (interruption) {
+    const job = interruption.jobId ? ` (job ${interruption.jobId})` : "";
+    const when = interruption.startedAt ? ` was submitted ${interruption.startedAt} and` : " ";
+    return {
+      job: null,
+      outcome: "interrupted",
+      interruptedMerge: interruptedMerge ?? null,
+      ...(interruptedRecord ? { interruptedMergeRecord: interruptedRecord } : {}),
+      ...(persistedGateVerdict ? { persistedGateVerdict } : {}),
+      message:
+        `no merge job is held in the current server process, and the last thing that happened to this `
+        + `workspace's merge was an INTERRUPTION: a merge${job}${when} never reached a verdict — the process `
+        + "running it died first (#945). This is NOT a gate failure: nothing was learned about the branch, so a "
+        + "retry starts from where it stood, and it is NOT 'nobody ever tried'. "
+        + (interruption.swept
+          ? `Recorded on the issue timeline at ${interruptedRecord?.recordedAt} by the merge-run reconciler, `
+            + "which clears the in-flight marker as it writes the note (#995)."
+          : "The in-flight marker is still present; the reconciler has not swept it yet.")
+        + (persistedGateVerdict
+          ? ` A pre-merge gate verdict is persisted (stage ${persistedGateVerdict.stage}, ran ${persistedGateVerdict.ranAt}); `
+            + (persistedGateVerdict.reusable
+              ? "a retry reuses it rather than re-running the gate (#893)."
+              : "it is too old (or lacks tips/tier) to reuse, so a retry re-runs the gate.")
+          : ""),
+    };
+  }
   if (persistedGateVerdict) {
     return {
       job: null,
       persistedGateVerdict,
-      interruptedMerge: interruptedMerge ?? null,
+      // Provably null here: any interruption, live or recorded, returned above.
+      interruptedMerge: null,
       message:
         "no merge job recorded for this workspace in the current server process (it may have restarted mid-merge) — "
         + `but a PASSING pre-merge gate verdict is persisted (stage ${persistedGateVerdict.stage}, ran ${persistedGateVerdict.ranAt}). `
         + (persistedGateVerdict.reusable
           ? "A merge retry will reuse it instead of re-running the gate, as long as the branch/base tips and verification tier are unchanged (#893)."
-          : "It is too old (or lacks tips/tier) to reuse, so a merge retry will re-run the gate.")
-        + interruptedNote,
+          : "It is too old (or lacks tips/tier) to reuse, so a merge retry will re-run the gate."),
     };
   }
   return {
     job: null,
-    interruptedMerge: interruptedMerge ?? null,
-    message: "no merge job recorded for this workspace in the current server process." + interruptedNote,
+    interruptedMerge: null,
+    message: "no merge job recorded for this workspace in the current server process.",
   };
 }
 
