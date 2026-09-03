@@ -12,6 +12,8 @@
 // (startup-tasks.ts, data-dir resolution), so we anchor to it here too, injectable
 // for tests.
 
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { pathKey } from "@agentic-kanban/shared/lib/path-key";
 
 /** Canonical comparison key for a repo path (#532 — one definition, win32-only case-fold). */
@@ -24,7 +26,30 @@ function normalizeRepoPath(p: string): string {
  * that follows this app's worktree-port convention. `selfRoot` defaults to the server
  * process's working directory (the checkout it was launched from).
  */
-export function isSelfProjectRepo(repoPath: string | null | undefined, selfRoot: string = process.cwd()): boolean {
+/**
+ * The checkout root the server process runs from — NOT `process.cwd()` verbatim (#1010).
+ *
+ * The dev backend is spawned with `cwd: packages/server` (`scripts/server-dev-proxy.mjs`), so a
+ * raw `process.cwd()` compared against a project's `repoPath` (the checkout ROOT) never matched:
+ * the board's own project was never "self" on a running dev server, and every consumer that
+ * asks — the docs+config guards-only gate run (#1008), the worktree-port convention — silently
+ * took the foreign-project path (#999's diff ran the full suite despite #1008). Walk up from the
+ * start dir to the nearest ancestor that looks like this monorepo's root (`pnpm-workspace.yaml`
+ * beside `packages/server`); fall back to the start dir itself when nothing above qualifies, so
+ * a packaged install (no self repo at all) behaves exactly as before.
+ */
+export function resolveSelfRoot(startDir: string = process.cwd()): string {
+  let dir = startDir;
+  for (let depth = 0; depth < 6; depth++) {
+    if (existsSync(join(dir, "pnpm-workspace.yaml")) && existsSync(join(dir, "packages", "server"))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return startDir;
+}
+
+export function isSelfProjectRepo(repoPath: string | null | undefined, selfRoot: string = resolveSelfRoot()): boolean {
   if (!repoPath) return false;
   return normalizeRepoPath(repoPath) === normalizeRepoPath(selfRoot);
 }

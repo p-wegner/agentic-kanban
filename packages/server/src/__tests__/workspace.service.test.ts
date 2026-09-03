@@ -1918,9 +1918,14 @@ describe("createWorkspace — service stack deferred chain", () => {
     // the state exists, so this asserts "never called by the finished chain", not "not called
     // yet" (which a fixed flush could pass by arriving early).
     expect(provisionSpy).not.toHaveBeenCalled();
-    await flushDeferred();
 
-    // The workspace itself still lives and the agent still launches (non-fatal error).
+    // The workspace itself still lives and the agent still launches (non-fatal error). Between
+    // the persisted error state and the launch sit a real ticket-context rewrite (fs) and a
+    // lifecycle read (DB), so wait for the launch itself rather than a tick count (#470).
+    await waitFor(
+      async () => (sessionManager.startSession as ReturnType<typeof vi.fn>).mock.calls.length > 0 ? true : null,
+      "the deferred agent launch after a failed service stack",
+    );
     expect(sessionManager.startSession).toHaveBeenCalledOnce();
   });
 

@@ -101,7 +101,7 @@ describe("runSetupScript kills the child's process TREE, not just the shell (#10
     const { mkdtempSync, existsSync, readFileSync, rmSync, writeFileSync } = await import("node:fs");
     const { tmpdir } = await import("node:os");
     const { join } = await import("node:path");
-    const dir = mkdtempSync(join(tmpdir(), "setup-script-tree-"));
+    const dir = mkdtempSync(join(tmpdir(), "ak-setup-script-tree-"));
     const pidFile = join(dir, "grandchild.pid");
     // The script's direct child is node (the "pnpm" layer); IT spawns a long-lived grandchild
     // (the "vitest worker") that writes its pid and then sleeps. Both live as files on disk so
