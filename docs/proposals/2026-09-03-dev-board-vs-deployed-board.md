@@ -235,12 +235,36 @@ injiziert ihn in die Prozessumgebung jeder Session, also kann ein Hook im laufen
 Kehrseite ist dieselbe Tatsache: die Werte sind für jeden Kindprozess sichtbar. Für ein Rollen-Tag
 ist das harmlos; deshalb bleiben es Tags, nie etwas Credential-Förmiges.
 
-Zwei Einschränkungen: Codex-Profile sind eine TOML, keine Settings-JSON, also braucht der Leser
-dort einen zweiten Träger (eine kleine `[kanban]`-Tabelle) hinter derselben Funktion. Und ein
-Verzeichnis-Profil auf einem Worker ist ein Login, das ein Mensch von Hand gemacht hat, also wird
-auch der `env`-Block dort von Hand gesetzt. Das Board kann ihn nicht verteilen und soll es nicht.
-Was es kann: warnen, wenn ein Worker einen bekannten Profilnamen mit einer unerwarteten Rolle
-attestiert.
+Eine Einschränkung: Codex-Profile sind eine TOML, keine Settings-JSON, also braucht der Leser
+dort einen zweiten Träger (eine kleine `[kanban]`-Tabelle) hinter derselben Funktion.
+
+### claude-pick besitzt den Lebenszyklus der Attribute
+
+Profile entstehen heute in claude-pick (Settings-Datei anlegen, oder einen neuen Account über
+den Picker bootstrappen), und claude-pick ist auch das Werkzeug, das sie zwischen Maschinen
+bewegt. Damit ist es der richtige Besitzer für Anlegen, Ändern und Löschen der Attribute; das
+Board liest nur.
+
+- **Anlegen**: der Bootstrap eines neuen Profils fragt die Rolle ab (Vorgabe `pool`) und optional
+  die Widmung, und schreibt beide in den `env`-Block der Datei, die es ohnehin erzeugt.
+- **Ändern und Löschen**: ein Unterkommando `claude-pick profile attr <name> [--role …]
+  [--dedicated <slug>] [--clear]`, das denselben Leser aus `packages/shared` benutzt wie das
+  Board und der Worker, und den `env`-Block bearbeitet, ohne den Rest der Datei anzufassen
+  (BOM-frei, siehe `Write-Utf8NoBom` in `profile-bundle.ps1`). `claude-pick profile list` zeigt
+  Rolle und Widmung neben `loggedIn`.
+- **Verteilen**: `profile-bundle.ps1` bündelt heute `.credentials.json`, `settings.json` und
+  `CLAUDE.md` und schiebt sie per `export` / `import` / `push <ssh-ziel>` auf die eigenen anderen
+  Maschinen. **Die Attribute reisen also mit dem Login**, ohne zusätzlichen Mechanismus: ein Worker,
+  dem ein Profil per `push` eingerichtet wurde, attestiert dieselbe Rolle wie der Board-Host. Die
+  frühere Sorge, ein Worker-Login sei "von Hand gemacht" und die Rolle dort deshalb unverteilbar,
+  gilt nur für Profile, die ohne das Bundle eingeloggt wurden. Für die bleibt die Warnung im
+  Monitor-View ("bekannter Name, unerwartete Rolle") der Backstop.
+
+Was das Board damit **nicht** tut: Attribute schreiben. Ein Board, das die Rolle eines Profils
+ändern könnte, wäre wieder eine zweite Quelle der Wahrheit, genau das, was Decision 017 und die
+`set-provider-default`-Regel an anderer Stelle mühsam abgeschafft haben. Die Kader-Tabelle in
+Settings → Agent zeigt die beobachteten Attribute und verlinkt auf das claude-pick-Kommando, das
+sie ändert.
 
 ### Die Quota-Quelle: vorausschauend, aus dem eigenen Token, gedrosselt
 
