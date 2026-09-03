@@ -89,3 +89,49 @@ describe("runSetupScript abort signal (#989)", () => {
     expect(result.aborted).toBeFalsy();
   }, 15000);
 });
+
+/**
+ * #1009 — an abort (and, by the same helper, a timeout) must take the whole process TREE with
+ * it. `proc.kill()` on Windows stops only the `cmd.exe` shell; the vitest workers it launched
+ * kept running as orphans, so a probe that "yielded" its verify slot to a merge gate left a
+ * full suite on the box and the gate ran a second one beside it (the #999 collision).
+ */
+describe("runSetupScript kills the child's process TREE, not just the shell (#1009)", () => {
+  it("a grandchild spawned by the script is dead after an abort", async () => {
+    const { mkdtempSync, existsSync, readFileSync, rmSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const dir = mkdtempSync(join(tmpdir(), "setup-script-tree-"));
+    const pidFile = join(dir, "grandchild.pid");
+    // The script's direct child is node (the "pnpm" layer); IT spawns a long-lived grandchild
+    // (the "vitest worker") that writes its pid and then sleeps. Both live as files on disk so
+    // nothing here depends on cmd.exe quoting.
+    writeFileSync(join(dir, "grandchild.js"), "setInterval(()=>{},1000);require('fs').writeFileSync(process.argv[2],String(process.pid));");
+    writeFileSync(join(dir, "child.js"), "const cp=require('child_process');cp.spawn(process.execPath,[process.argv[2],process.argv[3]],{stdio:'ignore'});setInterval(()=>{},1000);");
+    const script = `node "${join(dir, "child.js")}" "${join(dir, "grandchild.js")}" "${pidFile}"`;
+    try {
+      const abort = new AbortController();
+      const run = runSetupScript(process.cwd(), script, { timeoutMs: 60_000, noProgressTimeoutMs: 0, signal: abort.signal });
+      // Wait for the grandchild to announce itself.
+      const deadline = Date.now() + 10_000;
+      while (!existsSync(pidFile) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+      expect(existsSync(pidFile)).toBe(true);
+      const pid = Number(readFileSync(pidFile, "utf8"));
+      expect(Number.isInteger(pid) && pid > 0).toBe(true);
+      const alive = () => { try { process.kill(pid, 0); return true; } catch { return false; } };
+      expect(alive()).toBe(true);
+
+      abort.abort();
+      const result = await run;
+      expect(result.aborted).toBe(true);
+      // Give the tree kill a moment to land, then the grandchild must be gone too.
+      const gone = Date.now() + 5000;
+      while (alive() && Date.now() < gone) await new Promise((r) => setTimeout(r, 100));
+      const stillAlive = alive();
+      if (stillAlive) { try { process.kill(pid); } catch { /* best-effort cleanup */ } }
+      expect(stillAlive).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
+});

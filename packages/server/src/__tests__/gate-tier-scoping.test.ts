@@ -272,4 +272,15 @@ describe("the tier MESSAGE agrees with the tier that ran", () => {
     expect(msg).toContain("16 guard suites");
     expect(msg).not.toContain("tier: full");
   });
+
+  // #1009: when the gate sequenced against a base-health run, the PASS message has to say
+  // so — an operator sees one job in `verify` and cannot otherwise tell two suites ran.
+  it("names the base-health run the gate sequenced against, and is silent when there was none (#1009)", () => {
+    const base = { strategy: "scoped" as const, packageScoped: true, fileScoped: true, changedFileCount: 3, guardSuiteCount: 14, maxWorkers: 4 };
+    expect(buildGateTierMessage({ ...base, baseHealthNote: "base-health: ran FIRST (interval_elapsed, 1400s, base green) before the branch verify" }))
+      .toContain("[base-health: ran FIRST (interval_elapsed, 1400s, base green) before the branch verify]");
+    expect(buildGateTierMessage({ ...base, baseHealthNote: "base-health: DEFERRED, host below the free-RAM floor" }))
+      .toContain("[base-health: DEFERRED");
+    expect(buildGateTierMessage(base)).not.toContain("base-health");
+  });
 });

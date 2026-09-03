@@ -126,6 +126,15 @@ export function inFlightBaseBranchProbeCount(): number {
 }
 
 /**
+ * The probe currently running for a project in this process, or null (#1009). Lets the merge
+ * gate JOIN a base-health run that is already under way instead of starting its own verify
+ * beside it — see `gate-base-health-sequencing.ts`. Read-only: it never starts one.
+ */
+export function inFlightBaseBranchProbe(projectId: string): Promise<BaseBranchVerifyResult | null> | null {
+  return inFlightProbes.get(projectId) ?? null;
+}
+
+/**
  * Run `verify_script` against the project's base branch at its CURRENT tip and persist the
  * result.
  *

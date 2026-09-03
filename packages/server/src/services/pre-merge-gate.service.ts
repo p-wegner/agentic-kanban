@@ -50,6 +50,7 @@ import { resolveVerifyOutcome } from "./verify-retry-strategies.js";
 import type { FailedSuite } from "./verify-flake-retry.js";
 import { parseVerifyStepTimings, type VerifyStepTiming } from "./verify-step-timings.js";
 import { recordVerifyGateOutcome, resolveGateImpactSelection } from "./test-impact-outcome.service.js";
+import { sequenceBaseHealthBeforeVerify } from "./gate-base-health-sequencing.js";
 import { openRedDebtEntry } from "../repositories/red-debt.repository.js";
 
 // The verify TUNABLES (timeout / worker cap / file-scope prefs, and #909's capacity
@@ -522,6 +523,12 @@ export async function runPreMergeGate(
     // cross-workspace verify-chain semaphore, not just each individual invocation. Two
     // different workspaces' chains used to freely interleave inside `runUnderBuildSemaphore`'s
     // own cap (default 2), which is what let three full-suite runs contend on one box at once.
+    // #1009 — BEFORE taking the chain slot: join a base-health run already in flight, or run a
+    // due one to completion first, or say the host is too tight to measure the base at all.
+    // Never two suites at once on this box, and the message names whichever happened. Total
+    // by construction (`note` is null when nothing was due), so no branch here — this function
+    // sits on the god-module gate's branch ceiling.
+    gateTierInfo.baseHealthNote = (await sequenceBaseHealthBeforeVerify({ projectId, database, workspaceId: workspace.id })).note ?? undefined;
     noteMergeGatePhase(workspace.id, "queued", "waiting for the cross-workspace verify chain");
     const { result: outcome, queueWaitMs, lockNote } = await runUnderVerifyChainSemaphoreTimed(async () =>
       resolveVerifyOutcome({
