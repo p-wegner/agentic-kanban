@@ -339,8 +339,23 @@ function mergeSmartHooksGuardChecks(
 }
 
 /**
+ * Normalise a hook command for the dedupe comparison in `mergeSettingsHooks` (#1000).
+ *
+ * `node $CLAUDE_PROJECT_DIR/.claude/hooks/x.mjs` and `node .claude/hooks/x.mjs` name the SAME
+ * script — the anchor only changes how the path resolves at spawn time. Comparing them as
+ * distinct strings is what let a stale anchored `disclose-context.mjs` entry (re-introduced on
+ * master after #922 had deliberately made it relative) gain a second, relative twin in every
+ * new worktree's scaffold commit. Strip the anchor (with or without braces, with or without a
+ * trailing slash) and compare the rest — matcher-scoping (#369) is unaffected.
+ */
+export function normalizeHookCommand(command: string): string {
+  return command.replace(/\$\{?CLAUDE_PROJECT_DIR\}?\/?/g, "").trim();
+}
+
+/**
  * Merge a hooks array from the scaffold into an existing .claude/settings.json without
- * overwriting anything. Existing hooks with the same command string are skipped (idempotent).
+ * overwriting anything. Existing hooks with the same command (modulo the
+ * `$CLAUDE_PROJECT_DIR` anchor, see `normalizeHookCommand`) are skipped (idempotent).
  */
 function mergeSettingsHooks(
   settingsPath: string,
@@ -375,7 +390,9 @@ function mergeSettingsHooks(
     const alreadyPresent = arr.some((e) => {
       if ((e.matcher ?? undefined) !== matcher) return false;
       const innerHooks = (e.hooks as Record<string, unknown>[] | undefined) ?? [];
-      return innerHooks.some((h) => h.command === command);
+      return innerHooks.some(
+        (h) => typeof h.command === "string" && normalizeHookCommand(h.command) === normalizeHookCommand(command),
+      );
     });
     if (alreadyPresent) continue;
 
