@@ -577,6 +577,18 @@ export function buildVerifyEnv(args: {
   };
 }
 
+/** See `GateTierInfo.guardsOnlyReason` (#1008). */
+export type GuardsOnlyReason = "docs-only" | "docs-and-config";
+
+/**
+ * Name the narrow diff that earned a guards-only run (#1008). A helper rather than a ternary at
+ * the call site because `runPreMergeGate` sits ON the god-module branch ceiling, where a
+ * conditional expression counts.
+ */
+export function guardsOnlyReasonFor(docsOnly: boolean): GuardsOnlyReason {
+  return docsOnly ? "docs-only" : "docs-and-config";
+}
+
 export interface GateTierInfo {
   strategy: VerifyGateStrategy;
   /**
@@ -603,6 +615,13 @@ export interface GateTierInfo {
    *  own name because the previous behavior — skipping verification entirely — read as a bare
    *  "skipped" and hid that the markdown-reading guards never ran. */
   guardsOnly?: boolean;
+  /**
+   * WHICH narrow diff earned the guards-only run (#1008). `docs-only` is the #198/#675 case;
+   * `docs-and-config` adds the modelled config/data paths (`.gitignore`, `.code-metrics/**`,
+   * `.claude/settings*.json`, `.codex/**`, non-code `docs/**`) that no package suite can
+   * import. Absent means `docs-only`, so a pre-#1008 caller's message is unchanged.
+   */
+  guardsOnlyReason?: GuardsOnlyReason;
   changedFileCount: number;
   guardSuiteCount: number;
   maxWorkers: number;
@@ -764,8 +783,12 @@ export function buildGateTierMessage(tierInfo: GateTierInfo | null): string {
   // those packages ran, which is exactly what an impact-selected run does not do. Guards-only still
   // wins, for the same reason it wins in `gateRanScope`: `KANBAN_TEST_GUARDS_ONLY` exits before the
   // selector is ever consulted, so no selection happened at all.
+  // #1008: a `.gitignore`/settings/`.code-metrics` diff is guards-only too, and calling it
+  // "docs-only" would misdescribe what was merged.
   const tier = tierInfo.guardsOnly
-    ? "guards-only (docs-only diff)"
+    ? tierInfo.guardsOnlyReason === "docs-and-config"
+      ? "guards-only (docs+config-only diff, #1008)"
+      : "guards-only (docs-only diff)"
     : tierInfo.selector === "impact"
       // #967 — a run whose suites came from BOTH selectors is not the same claim as one that came
       // from the ranking alone, and the ledger records it under its own `ran` name for exactly that
