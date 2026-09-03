@@ -155,3 +155,117 @@ rotes Gate kein Ausfall mehr ist, den man mit dem nächsten Guard verhindern mus
   Tags, Historie und Hooks an einem Ort.
 - **Gate ganz abschaffen.** Typecheck und Guards kosten unter 30 s warm und haben in dieser Woche
   echte Fehler gefangen (fehlende `sessionId` in #1002, die zwei roten Guards in #991).
+
+## 6. Profile und Quota: ein Kader pro Projekt, mit Rollen
+
+### Was heute da ist, und warum es das Szenario nicht abdeckt
+
+Drei Mechanismen tragen je ein Stück, keiner alles:
+
+| Mechanismus | Kann | Kann nicht |
+|---|---|---|
+| **Strategy Bullseye, Provider Policy** (`fill` / `throttle` / `fallback-only`, `headroomPct`, `quotaProviderId`) | Prioritätsliste pro Projekt; Quota-Gating gegen eine Tampermonkey-`/api/usage`-Quelle | Die Quelle ist an ein lokales Browser-Tool gebunden und faktisch nicht befüllt. Ohne Telemetrie degradiert die Auswahl zur statischen Reihenfolge. Ein "verboten" gibt es nicht; eine explizite Workspace-Wahl steht über der Policy. |
+| **Auth-Rotation-Ring** (`claude-subscription-ring`, `codex-license-ring`) | Reaktiv: erkennt den Usage-Limit-Text im Output, stempelt einen Cooldown, rotiert weiter, schreibt die Bullseye-Policy um (#973) | Wählt erst, wenn die Quota schon weg ist. Kennt keine Rollen. Rotiert global, nicht pro Projekt. |
+| **Profil-Allowlist** (`allowed_profiles_<projectId>`, `profile-allowlist.ts`) | Harte Schranke, als Letztes angewandt, cooldown-bewusst, hält statt zu borgen, fail-closed bei Unlesbarkeit; verweigert Remote-Platzierung für eingeschränkte Projekte (#651) | Eine flache Liste. Kein "Reserve nur im Notfall", kein globales Verbot, keine Quota-Sicht, keine Worker-Attestierung. |
+
+Das Fünf-Profile-Szenario braucht genau die drei fehlenden Dinge: **Rollen**, **eine vorausschauende
+Quota-Quelle**, und **eine Worker-Seite, die dasselbe Vokabular spricht**.
+
+### Zielmodell: der Profilkader
+
+Ein **globaler Kader** aller bekannten Profile mit je einer Rolle, und pro Projekt eine optionale
+Einschränkung darauf. Beides in Settings → Agent, beides als eine Preference.
+
+```
+roster (global)                          roster_<projectId> (Überschreibung, optional)
+  claude:anth        pool                   kunde-x:  claude:kunde-x  pool   (nur dieses)
+  claude:team5x      pool
+  claude:team5x_2    pool
+  claude:privat      reserve
+  claude:training    forbidden   <- global forbidden bleibt forbidden, auch pro Projekt
+```
+
+Die drei Rollen:
+
+| Rolle | Bedeutung | Auswahl |
+|---|---|---|
+| `pool` | Standardvorrat. Wird bis zur Quota-Schwelle genutzt. | Nach **verbleibendem Headroom im 5-h-Fenster** sortiert, nicht nach Listenreihenfolge. Über der Schwelle (Vorschlag 90 %, konfigurierbar) gilt das Profil als erschöpft. |
+| `reserve` | Notfall. | Nur, wenn **jedes** `pool`-Profil erschöpft oder im Cooldown ist, **und** der Griff zur Reserve erlaubt ist: Projekt-Flag `reserve_allowed_<projectId>`, Ticket-Tag `reserve:ok`, oder ein expliziter Operator-Start. Jeder Reserve-Start wird protokolliert und im Monitor-View als Warnung gezeigt. |
+| `forbidden` | Darf diese Arbeit nie sehen. | Nie. Auch eine explizite Workspace-Wahl, ein Ring-Rewrite und ein `--profile` per CLI werden abgewiesen, nicht geklemmt. Ein globales `forbidden` kann pro Projekt nicht aufgehoben werden. |
+
+Fehlt alles, gilt "unrestricted, alle `pool`", also das heutige Verhalten. Ein Projekt mit
+Kader-Überschreibung sieht **nur** die dort genannten Profile: das Kundenprojekt bekommt
+`claude:kunde-x pool` und sonst nichts, und wenn das erschöpft ist, **hält** es (das ist die
+Allowlist-Semantik von heute, unverändert).
+
+Das ersetzt keine Bullseye. Die Bullseye bleibt die *Präferenz* (welcher Provider, welches Modell,
+welche Gewichtung), der Kader ist *Erlaubnis plus Budget*. Technisch ist der Kader die heutige
+Allowlist mit Rollen statt bloßer Reihenfolge; `profile-allowlist.ts` bleibt der Ort, die
+`fallback-only`-Policies der Bullseye werden auf `reserve` abgebildet, und `quotaProviderId`
+entfällt zugunsten der Quelle unten.
+
+### Die Quota-Quelle: vorausschauend, aus dem eigenen Token, gedrosselt
+
+Die verlässliche Quelle ist der OAuth-Usage-Endpoint, pro Profil mit dessen eigenem Token gelesen.
+`claude-pick/fleet/lib/usage.mjs` tut das bereits und hat die Fallen hinter sich: der Endpoint
+gibt leicht 429, also **ein Profil pro Tick, Round-Robin, nie ein Burst**, TTL nach Nähe zur
+Kappe, jede Anfrage geloggt. Der Vorschlag ist, diese Logik als `QuotaUsageProvider`-Implementierung
+ins Board zu holen (das Interface existiert in `quota-usage.service.ts`) und den Tampermonkey-Pfad
+zu ersetzen. Ergebnis pro Profil: Prozent im 5-h- und im 7-Tage-Fenster, Reset-Zeitpunkt, Alter
+der Messung.
+
+Alt ist besser als falsch: ist die Messung älter als ein Reset-Fenster, zählt das Profil als
+"unbekannt" und wird hinter den `pool`-Profilen mit frischer Messung einsortiert, nicht als
+erschöpft und nicht als leer.
+
+### Lokal und remote sind verschieden, und das ist richtig so
+
+Der Board-Host kennt seine Profile und ihre Tokens. Ein Worker kennt **seine**, und das Board
+sendet bewusst keine Credentials (Decision 012, `REMOTE_SPEC_ENV_ALLOWLIST`). Heute folgt daraus
+#651: ein eingeschränktes Projekt geht nie remote. Der Kader macht daraus eine Verhandlung:
+
+1. **Attestierung im `hello`.** Der Worker deklariert neben `--providers` und `--labels` auch
+   `--profiles anth,team5x`: die Profilnamen, unter denen er sich lokal authentifizieren kann.
+   Namen, keine Secrets. Das Board speichert sie am Worker-Datensatz wie heute `providers`.
+2. **Quota im Heartbeat.** Der Worker liest den Usage-Endpoint für seine eigenen Profile (dieselbe
+   gedrosselte Logik) und schickt die Prozentwerte mit. Damit hat das Board eine Quota-Sicht auf
+   Profile, deren Token es nie besitzt.
+3. **Platzierung = Schnittmenge.** `resolveWorkerPlacement` schneidet den Projektkader mit den
+   attestierten Profilen des Workers und wählt nach Rolle und Headroom wie lokal. Leer und
+   `worker_dispatch_strict`: halten, mit dem Kader als Grund. Leer und nicht strict: Host, wie heute.
+4. **Der Spec trägt den Profilnamen, der Worker löst ihn auf.** Kennt der Worker den Namen nicht
+   (Attestierung veraltet), lehnt er den Assign ab, und das Board platziert neu. Kein stiller
+   Fallback auf "irgendein Login" auf dem Worker.
+
+Ein Profil kann auf zwei Maschinen liegen (dieselbe Subscription zweimal eingeloggt). Dann ist der
+Name der Schlüssel, und die Quota des Namens ist dieselbe, die beide Leser sehen, weil der Endpoint
+pro Account antwortet, nicht pro Maschine. Das ist der Grund, Profile beim Namen zu führen und
+nicht nach Config-Verzeichnis.
+
+`forbidden` gilt remote genauso: ein Worker, der nur `training` attestiert, bekommt von einem
+Projekt, dem `training` verboten ist, nichts, egal was `--providers` sagt.
+
+### Was das für das Szenario heißt
+
+| Projekt | Kader | Verhalten |
+|---|---|---|
+| agentic-kanban (Dev) | global: 3 × `pool`, 1 × `reserve`, 1 × `forbidden` | Startet auf dem Pool-Profil mit dem meisten Headroom; rotiert vorausschauend statt nach dem Limit-Text; greift zur Reserve nur mit Flag; sieht `training` nie. |
+| Kundenprojekt | `roster_<id>` = `claude:kunde-x pool` | Läuft ausschließlich dort. Erschöpft heißt halten, Remote nur zu einem Worker, der `kunde-x` attestiert. |
+
+### Schritte, in Reihenfolge, jeder für sich landbar
+
+1. **Quota-Quelle**: die Logik aus `usage.mjs` als `OAuthQuotaProvider` ins Board, gedrosselt, mit
+   Alter der Messung im DTO. Ersetzt den Tampermonkey-Pfad. Sichtbar im Monitor-View pro Profil.
+   (Für sich nützlich: Sentinel und Objective sehen endlich Quota.)
+2. **Rollen im Kader**: `allowed_profiles` bekommt pro Eintrag eine Rolle, plus die globale
+   Variante mit `forbidden`. Resolver bleibt `profile-allowlist.ts`, erweitert um
+   Headroom-Sortierung und Reserve-Regel. Ratchet-Test analog zu `risk-posture-raw-read-ratchet`:
+   kein Lesen des Kader-Prefs außerhalb des Resolvers.
+3. **Vorausschauende Rotation**: der Ring stempelt weiter Cooldowns reaktiv, aber die Auswahl vor
+   dem Start fragt zuerst den Kader mit Quota. Der Limit-Text wird zum Backstop.
+4. **Worker-Attestierung**: `--profiles` im hello, Quota im Heartbeat, Platzierung als Schnittmenge.
+   Hebt #651 von "nie" auf "nur zu einem Worker, der es beweisen kann".
+5. **UI**: eine Kader-Tabelle in Settings → Agent (global) und im Projekt, mit Rolle, Headroom,
+   Reset-Zeit, letzter Messung.
+
+Schritt 1 und 2 sind das Szenario; 3 und 4 sind Durchsatz und Fleet-Verträglichkeit.
