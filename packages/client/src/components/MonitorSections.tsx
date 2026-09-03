@@ -436,6 +436,8 @@ export function StartModeSection({
   onPutSettings,
   formatAge,
   formatCountdown,
+  parkedIssues = [],
+  onOpenIssue,
 }: {
   projectId: string;
   resolvedTunables: ResolvedTunables | null;
@@ -447,6 +449,13 @@ export function StartModeSection({
   onPutSettings: (patch: Record<string, string>) => void;
   formatAge: (isoStr: string) => string;
   formatCountdown: (isoStr: string) => string;
+  /**
+   * #1004: tickets the board flagged `awaitingManualStart` — sitting in a driver-owned
+   * column on this manual-start project with no agent on them. Rendered here because
+   * this is the section that explains WHY nothing picks them up.
+   */
+  parkedIssues?: { id: string; issueNumber: number | null; title: string }[];
+  onOpenIssue?: (issueId: string) => void;
 }) {
   return (
     <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800 space-y-2">
@@ -485,6 +494,29 @@ export function StartModeSection({
       </div>
       {resolvedTunables?.startPolicy && (
         <p className="text-[10px] text-gray-400 dark:text-gray-500 leading-snug">{START_MODE_HINT[resolvedTunables.startPolicy.mode]}</p>
+      )}
+      {parkedIssues.length > 0 && (
+        <div
+          data-testid="manual-start-parked"
+          className="rounded-md bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 px-2 py-1.5 space-y-1"
+        >
+          <div className="text-[10px] font-medium text-amber-800 dark:text-amber-300 leading-snug">
+            {parkedIssues.length === 1 ? "1 ticket sits" : `${parkedIssues.length} tickets sit`} in In Progress with no driver — nothing will pick {parkedIssues.length === 1 ? "it" : "them"} up in manual mode. Start or resume by hand, or switch Start Mode.
+          </div>
+          <ul className="space-y-0.5">
+            {parkedIssues.map((iss) => (
+              <li key={iss.id}>
+                <button
+                  onClick={() => onOpenIssue?.(iss.id)}
+                  className="text-[10px] text-amber-900 dark:text-amber-200 hover:underline text-left truncate max-w-full"
+                  title={iss.title}
+                >
+                  {iss.issueNumber != null ? `#${iss.issueNumber} ` : ""}{iss.title}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
       {resolvedTunables?.startPolicy?.mode === "conductor" && orchestrator?.available && (
         <div className="flex items-center justify-between rounded-md bg-gray-50 dark:bg-gray-950 px-2 py-1.5">
