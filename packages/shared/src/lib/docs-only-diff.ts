@@ -79,3 +79,50 @@ export function isDocsOnlyDiff(files: string[]): boolean {
   if (files.length === 0) return false;
   return files.every(isDocsOnlyFile);
 }
+
+/**
+ * Paths that are NOT documentation but that no test can import either (#1008): board/agent
+ * configuration and generated data. A diff made only of these (plus documentation) cannot
+ * change what the package suites observe, but it is exactly what the `@gate:always-run`
+ * GUARD suites exist to check — the hook-wiring parity guards read `.claude/settings*.json`
+ * and `.codex/**`, the ratchets read `.gitignore`. So such a diff routes to the guard suites
+ * (+ typecheck), never to the FULL suite the null package scope used to imply.
+ *
+ * Deliberately CLOSED, like every other set in this module (#240, #642): a path the gate
+ * cannot reason about must keep running everything. Observed on #999: `.claude/settings.json`,
+ * `.code-metrics/agent-vocabulary.json`, `.gitignore` and a `docs/analysis/*.md` ran the whole
+ * server package twice and timed out the 90-minute budget both times.
+ */
+const GUARDS_ONLY_PATHS: RegExp[] = [
+  /(^|\/)\.gitignore$/i,
+  /(^|\/)\.code-metrics\//i,
+  /(^|\/)\.claude\/settings[^/]*\.json$/i,
+  /(^|\/)\.codex\//i,
+];
+
+/**
+ * Under `docs/`, #642's closed extension set decides what is DOCUMENTATION; this decides what
+ * is merely NOT CODE. A `docs/verification/*.json` artifact is read by tests, so it is not
+ * docs-only — but no package suite imports it, so the guard suites are still the right run.
+ * Executable extensions stay OUT: a `docs/tools/*.js` is code wherever it lives.
+ */
+const CODE_EXTENSIONS = /\.(ts|tsx|js|jsx|mjs|cjs|mts|cts|py|rb|sh|ps1|bat|cmd|kt|kts|java|go|rs|sql|yml|yaml)$/i;
+
+function isGuardsOnlyFile(path: string): boolean {
+  const normalized = path.replace(/\\/g, "/");
+  if (isDocsOnlyFile(normalized)) return true;
+  if (GUARDS_ONLY_PATHS.some((re) => re.test(normalized))) return true;
+  if (/^docs\//i.test(normalized)) return !CODE_EXTENSIONS.test(normalized);
+  return false;
+}
+
+/**
+ * True when every changed file is documentation OR one of the modelled config/data paths above
+ * (#1008) — a superset of {@link isDocsOnlyDiff}. Such a diff can be verified by the
+ * `@gate:always-run` guard suites plus typecheck instead of the full suite. An empty list is
+ * NOT guards-only, for the same reason it is not docs-only.
+ */
+export function isGuardsOnlyDiff(files: string[]): boolean {
+  if (files.length === 0) return false;
+  return files.every(isGuardsOnlyFile);
+}

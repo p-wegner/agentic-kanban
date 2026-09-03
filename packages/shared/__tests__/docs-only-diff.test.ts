@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isDocsOnlyDiff } from "../src/lib/docs-only-diff.js";
+import { isDocsOnlyDiff, isGuardsOnlyDiff } from "../src/lib/docs-only-diff.js";
 
 describe("isDocsOnlyDiff", () => {
   it("is false for an empty diff (nothing changed is not 'only docs changed')", () => {
@@ -95,5 +95,68 @@ describe("isDocsOnlyDiff", () => {
       "docs/diagram.svg",
       "docs/NOTES",
     ])).toBe(true);
+  });
+});
+
+/**
+ * #1008 — a diff of board/agent configuration and generated data (plus docs) is not UNKNOWN to
+ * the gate: no package suite can import these paths, and the `@gate:always-run` guards are
+ * exactly what checks them. Observed on #999: four such files ran the whole server package
+ * twice and timed out both times, because the package scoper returned null and null meant
+ * "run everything".
+ */
+describe("isGuardsOnlyDiff (#1008)", () => {
+  it("is FALSE for an empty list — an unreadable diff is not a narrow diff", () => {
+    expect(isGuardsOnlyDiff([])).toBe(false);
+  });
+
+  it("is TRUE for the exact #999 diff", () => {
+    expect(isGuardsOnlyDiff([
+      ".claude/settings.json",
+      ".code-metrics/agent-vocabulary.json",
+      ".gitignore",
+      "docs/analysis/test-strategy-2026-09-02.md",
+    ])).toBe(true);
+  });
+
+  it.each([
+    [".gitignore"],
+    ["packages/server/.gitignore"],
+    [".code-metrics/import-graph.json"],
+    [".claude/settings.json"],
+    [".claude/settings.local.json"],
+    [".codex/hooks.json"],
+    [".codex/skills/board-navigator/SKILL.md"],
+    ["docs/verification/report.json"],
+    ["docs/domain/_plan.json"],
+    ["README.md"],
+  ])("is TRUE for %s", (file) => {
+    expect(isGuardsOnlyDiff([file])).toBe(true);
+  });
+
+  it("is a superset of docs-only: every docs-only diff is guards-only", () => {
+    const docs = ["docs/guide.md", "CHANGELOG", "LICENSE.txt", "docs/images/a.png"];
+    expect(isDocsOnlyDiff(docs)).toBe(true);
+    expect(isGuardsOnlyDiff(docs)).toBe(true);
+  });
+
+  it.each([
+    ["packages/server/src/index.ts"],
+    [".claude/hooks/validate-command-safety.js"],
+    [".claude/skills/foo/tools/run.mjs"],
+    ["docs/tools/generate.js"],
+    ["docs/ci/pipeline.yaml"],
+    ["package.json"],
+    ["pnpm-lock.yaml"],
+    ["scripts/test-mine.mjs"],
+  ])("is FALSE for %s — genuinely un-modelled or code, keeps the full run", (file) => {
+    expect(isGuardsOnlyDiff([file])).toBe(false);
+    // …and one such file beside modelled ones must not be laundered.
+    expect(isGuardsOnlyDiff([".gitignore", file])).toBe(false);
+  });
+
+  it("is not docs-only for a config-only diff (the smoke skip stays docs-only)", () => {
+    expect(isDocsOnlyDiff([".gitignore", ".claude/settings.json"])).toBe(false);
+    expect(isGuardsOnlyDiff([".gitignore", ".claude/settings.json"])).toBe(true);
   });
 });

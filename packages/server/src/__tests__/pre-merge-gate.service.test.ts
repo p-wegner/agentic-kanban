@@ -371,6 +371,62 @@ describe("docs-only guards-only run is restricted to this repo's checkout", () =
     expect(res.message).toContain("guard");
   });
 
+  // #1008 — the #999 diff: settings.json + .code-metrics + .gitignore + a docs markdown. The
+  // package scoper returns null for it and null meant "run everything", so a four-file config
+  // change ran the whole server package (twice, both to the 90-minute timeout). These paths are
+  // not unknown: nothing under packages/ can import them, and the always-run guards are what
+  // checks them.
+  it("#1008: routes a docs+config-only diff on THIS repo to the guard suites, and says so", async () => {
+    const selfProjectId = await createProjectDirectly(db, { repoPath: process.cwd() });
+    await setPreference(verifyScriptPrefKey(selfProjectId), "pnpm test:mine", db);
+    await setPreference(`verify_gate_strategy_${selfProjectId}`, "scoped", db);
+    getChangedFileNames.mockResolvedValue([
+      ".claude/settings.json",
+      ".code-metrics/agent-vocabulary.json",
+      ".gitignore",
+      "docs/analysis/test-strategy-2026-09-02.md",
+    ]);
+    runSetupScript.mockResolvedValue({ exitCode: 0, stdout: "ok", stderr: "" });
+
+    const res = await runPreMergeGate({ id: "ws", workingDir: "/tmp/wt", baseBranch: "master" }, selfProjectId, db);
+
+    expect(res.passed).toBe(true);
+    expect(res.stage).toBe("verify");
+    const env = (runSetupScript.mock.calls[0]?.[2] as { env: Record<string, string> }).env;
+    expect(env.KANBAN_TEST_GUARDS_ONLY).toBe("1");
+    expect(env.KANBAN_TEST_PACKAGES).toBeUndefined();
+    expect(res.message).toContain("guards-only (docs+config-only diff");
+    expect(res.message).not.toContain("docs-only diff)");
+  });
+
+  it("#1008: a genuinely un-modelled path beside config keeps the FULL run on THIS repo", async () => {
+    const selfProjectId = await createProjectDirectly(db, { repoPath: process.cwd() });
+    await setPreference(verifyScriptPrefKey(selfProjectId), "pnpm test:mine", db);
+    getChangedFileNames.mockResolvedValue([".gitignore", "package.json"]);
+    runSetupScript.mockResolvedValue({ exitCode: 0, stdout: "ok", stderr: "" });
+
+    const res = await runPreMergeGate({ id: "ws", workingDir: "/tmp/wt", baseBranch: "master" }, selfProjectId, db);
+
+    expect(res.passed).toBe(true);
+    const env = (runSetupScript.mock.calls[0]?.[2] as { env: Record<string, string> }).env;
+    expect(env.KANBAN_TEST_GUARDS_ONLY).toBeUndefined();
+    expect(res.message).toContain("tier: full");
+  });
+
+  it("#1008: a config-only diff on ANOTHER project runs its full verify (no guards mode, no #198 skip)", async () => {
+    const otherProjectId = await createProjectDirectly(db, { repoPath: join(tmpdir(), "some-other-repo-cfg") });
+    await setPreference(verifyScriptPrefKey(otherProjectId), "gradlew.bat test", db);
+    getChangedFileNames.mockResolvedValue([".gitignore", ".claude/settings.json"]);
+    runSetupScript.mockResolvedValue({ exitCode: 0, stdout: "ok", stderr: "" });
+
+    const res = await runPreMergeGate({ id: "ws", workingDir: "/tmp/wt", baseBranch: "master" }, otherProjectId, db);
+
+    expect(res.skipped).toBe(false);
+    expect(runSetupScript).toHaveBeenCalledTimes(1);
+    const env = (runSetupScript.mock.calls[0]?.[2] as { env: Record<string, string> }).env;
+    expect(env.KANBAN_TEST_GUARDS_ONLY).toBeUndefined();
+  });
+
   it("skips verify_script wholesale for a docs-only diff on ANOTHER project", async () => {
     const otherProjectId = await createProjectDirectly(db, { repoPath: join(tmpdir(), "some-other-repo") });
     await setPreference(verifyScriptPrefKey(otherProjectId), "gradlew.bat test", db);

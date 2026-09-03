@@ -8,7 +8,7 @@ import { createManagedTempDir, type ManagedTempDir } from "@agentic-kanban/share
 import { DEFAULT_SETUP_SCRIPT_TIMEOUT_MS, runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import { runSmokeCheck } from "@agentic-kanban/shared/lib/smoke-check";
 import { gradleUserHomeForWorktree } from "@agentic-kanban/shared/lib/gradle-env";
-import { isDocsOnlyDiff } from "@agentic-kanban/shared";
+import { isDocsOnlyDiff, isGuardsOnlyDiff } from "@agentic-kanban/shared";
 import { testPackagesEnvValue } from "@agentic-kanban/shared/lib/changed-packages";
 import { revParse } from "@agentic-kanban/shared/lib/git-service";
 import { getChangedFileNames } from "./git.service.js";
@@ -37,6 +37,7 @@ import {
   resolveGateFileScopeEmission,
   resolveImpactSelectorEnv,
   buildVerifyEnv,
+  guardsOnlyReasonFor,
   type GateTierInfo,
 } from "./pre-merge-gate-tier.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -252,6 +253,15 @@ export async function runPreMergeGate(
   ).flat();
   const changedFiles = [...leadingChangedFiles, ...siblingChangedFiles];
   const docsOnly = changedFiles.length > 0 && isDocsOnlyDiff(changedFiles);
+  // #1008: a SUPERSET of `docsOnly` — documentation plus the modelled config/data paths
+  // (`.gitignore`, `.code-metrics/**`, `.claude/settings*.json`, `.codex/**`, non-code
+  // `docs/**`). Nothing under `packages/` can import those, so the package scoper returns null
+  // for them, and null used to mean "run everything" — the #999 diff (four such files) ran the
+  // whole server package twice and timed out both times. They are not UNKNOWN paths: the
+  // `@gate:always-run` guards are exactly what checks them. Genuinely un-modelled paths still
+  // return false here and keep the full run. `docsOnly` stays the narrower signal for the
+  // smoke skip and the foreign-project wholesale skip (#198), which are about documentation.
+  const guardsOnlyDiff = isGuardsOnlyDiff(changedFiles);
 
   // Populated once verify_script actually runs, so the final message can NAME what ran even on
   // a passing gate (#538) — a level may only weaken verification VISIBLY, so the tier that was
@@ -273,7 +283,10 @@ export async function runPreMergeGate(
   // (a ledger written into the worktree would be deleted with the worktree and never accumulate).
   const projectRepoPath = await getProjectRepoPath(projectId, database);
   const isSelfRepo = isSelfProjectRepo(projectRepoPath);
-  const docsOnlyGuardsRunApplies = docsOnly && isSelfRepo;
+  // #1008: `guardsOnlyDiff`, not `docsOnly` — the config/data paths above get the same
+  // guards-only run on THIS repo. For any other project they fall through to the full run
+  // (a foreign verify_script ignores the env var, and only documentation earns #198's skip).
+  const docsOnlyGuardsRunApplies = guardsOnlyDiff && isSelfRepo;
   /**
    * Set when #894's targeted re-run cleared a load-induced failure, so the PASSING gate
    * message can say the suites were re-run. A gate that quietly downgrades its own evidence
@@ -405,7 +418,7 @@ export async function runPreMergeGate(
       changedFiles,
     });
     if (docsOnlyGuardsRunApplies) {
-      console.log(`[pre-merge-gate] docs-only diff for workspace ${workspace.id} (${changedFiles.length} file(s)) — running @gate:always-run guard suites only`);
+      console.log(`[pre-merge-gate] ${guardsOnlyReasonFor(docsOnly)} diff for workspace ${workspace.id} (${changedFiles.length} file(s)) — running @gate:always-run guard suites only (#1008)`);
     }
     // One branch, and the message itself was chosen by `resolveGateFileScopeEmission` — the
     // dropped-scope case is a different MESSAGE about the same decision, not a second decision.
@@ -436,7 +449,9 @@ export async function runPreMergeGate(
       // pair — so this is `true` for a union run, and that is what `gateRanScope` reads to record
       // it as `impact+related`.
       fileScoped: emitFileScope && !docsOnlyGuardsRunApplies,
-      ...(docsOnlyGuardsRunApplies ? { guardsOnly: true } : {}),
+      // #1008: WHICH narrow diff earned the guards-only run — the message must say
+      // "docs+config-only", since "docs-only" would misdescribe a `.gitignore`/settings change.
+      ...(docsOnlyGuardsRunApplies ? { guardsOnly: true, guardsOnlyReason: guardsOnlyReasonFor(docsOnly) } : {}),
       changedFileCount: changedFiles.length,
       guardSuiteCount: countAlwaysRunGuardSuites(workingDir),
       maxWorkers: gateMaxWorkers,

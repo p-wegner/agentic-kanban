@@ -258,4 +258,18 @@ describe("the tier MESSAGE agrees with the tier that ran", () => {
     // Must not read as a full run — that is the dishonesty this tier exists to avoid.
     expect(msg).not.toContain("tier: full");
   });
+
+  // #1008: a `.gitignore` / `.claude/settings.json` / `.code-metrics` diff earns the same
+  // guards-only run, but calling it "docs-only" would misdescribe what merged.
+  it("names the docs+config-only reason for a guards-only run over config/data paths (#1008)", () => {
+    const msg = buildGateTierMessage({
+      strategy: "scoped", packageScoped: false, fileScoped: false,
+      guardsOnly: true, guardsOnlyReason: "docs-and-config",
+      changedFileCount: 4, guardSuiteCount: 16, maxWorkers: 4,
+    });
+    expect(msg).toContain("tier: guards-only (docs+config-only diff, #1008)");
+    expect(msg).not.toContain("docs-only diff)");
+    expect(msg).toContain("16 guard suites");
+    expect(msg).not.toContain("tier: full");
+  });
 });
