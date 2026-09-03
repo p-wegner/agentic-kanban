@@ -8,6 +8,7 @@ import {
   ensureStarterClaudeMd,
   ensureStarterAgentsMd,
   ensureHookScaffold,
+  normalizeHookCommand,
   ensureVerifyGateRunner,
   commitProjectScaffoldArtifacts,
   ensurePnpmBuildApproval,
@@ -312,6 +313,43 @@ describe("project-scaffold", () => {
         const s1 = JSON.parse(settingsAfterFirst);
         const s2 = JSON.parse(settingsAfterSecond);
         expect(s2.hooks.PreToolUse.length).toBe(s1.hooks.PreToolUse.length);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("treats a stale $CLAUDE_PROJECT_DIR-anchored entry as the same command and adds no duplicate (#1000)", async () => {
+      const dir = await tmp();
+      try {
+        await gitInit(dir);
+        await mkdir(join(dir, ".claude"), { recursive: true });
+        // The regressed master state: the anchored spelling that #922 had replaced.
+        const stale = {
+          hooks: {
+            PostToolUse: [
+              {
+                matcher: "Bash|PowerShell|Grep|Glob",
+                hooks: [{ type: "command", command: "node $CLAUDE_PROJECT_DIR/.claude/hooks/disclose-context.mjs", timeout: 15 }],
+              },
+            ],
+          },
+        };
+        await writeFile(join(dir, ".claude", "settings.json"), JSON.stringify(stale, null, 2), "utf8");
+
+        ensureHookScaffold(dir, { includeWorktreeGuard: false });
+
+        const settings = JSON.parse(await readFile(join(dir, ".claude", "settings.json"), "utf8"));
+        const disclose = (settings.hooks.PostToolUse as { matcher?: string; hooks?: { command: string }[] }[])
+          .flatMap((e) => (e.hooks ?? []).map((h) => ({ matcher: e.matcher, command: h.command })))
+          .filter((h) => h.command.includes("disclose-context.mjs"));
+        // Exactly one entry survives — the existing one is preserved (clobber-safe), not twinned.
+        expect(disclose).toHaveLength(1);
+        expect(disclose[0].matcher).toBe("Bash|PowerShell|Grep|Glob");
+
+        // The normaliser itself: anchor with/without braces collapses to the bare path.
+        expect(normalizeHookCommand("node $CLAUDE_PROJECT_DIR/.claude/hooks/x.mjs")).toBe("node .claude/hooks/x.mjs");
+        expect(normalizeHookCommand("node ${CLAUDE_PROJECT_DIR}/.claude/hooks/x.mjs")).toBe("node .claude/hooks/x.mjs");
+        expect(normalizeHookCommand("node .claude/hooks/x.mjs")).toBe("node .claude/hooks/x.mjs");
       } finally {
         await rm(dir, { recursive: true, force: true });
       }

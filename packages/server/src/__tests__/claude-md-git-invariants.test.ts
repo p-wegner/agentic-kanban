@@ -115,7 +115,8 @@ describe("CLAUDE.md git/worktree invariants (#598)", () => {
     // self-locates its project root via a `.claude`/`.git` walk-up instead of trusting the
     // env var — see the header of packages/server/src/scaffold/disclose-context.mjs. Every
     // other hook stays subject to the rule; this is not a precedent for a second exception.
-    const EXEMPT_COMMANDS = new Set(["node .claude/hooks/disclose-context.mjs"]);
+    const DISCLOSE_RELATIVE = "node .claude/hooks/disclose-context.mjs";
+    const EXEMPT_COMMANDS = new Set([DISCLOSE_RELATIVE]);
     const bad = commands.filter(
       (c) => !EXEMPT_COMMANDS.has(c) && (!c.includes("$CLAUDE_PROJECT_DIR/") || c.includes("\\")),
     );
@@ -123,6 +124,26 @@ describe("CLAUDE.md git/worktree invariants (#598)", () => {
       bad,
       `hook commands must be "$CLAUDE_PROJECT_DIR/..."-anchored with forward slashes:\n${bad.join("\n")}`,
     ).toEqual([]);
+
+    // The exception is REQUIRED, not merely tolerated (#1000). Exempting the relative spelling
+    // alone let `2ebe615fb3` rewrite the entry to the anchored form under the general rule and
+    // pass: the scaffold's `ensureHookScaffold` then found no entry matching its relative
+    // command and appended one, so every new worktree committed BOTH spellings under the same
+    // matcher — the hook spawned twice per shell/grep/glob call, and the anchored twin failed in
+    // exactly the `claude -p` mode #922 exists for. So: the relative spelling must be present,
+    // exactly once per matcher, and no anchored spelling of the same script may exist at all.
+    const discloseCommands = commands.filter((c) => c.includes("disclose-context.mjs"));
+    expect(
+      discloseCommands,
+      "disclose-context.mjs must be wired with the plain relative path, exactly once",
+    ).toEqual([DISCLOSE_RELATIVE]);
+    const postToolUse = (settings.hooks?.PostToolUse ?? []) as { matcher?: string; hooks?: { command?: string }[] }[];
+    const perMatcher = new Map<string, number>();
+    for (const entry of postToolUse) {
+      const n = (entry.hooks ?? []).filter((h) => (h.command ?? "").includes("disclose-context.mjs")).length;
+      if (n > 0) perMatcher.set(entry.matcher ?? "", (perMatcher.get(entry.matcher ?? "") ?? 0) + n);
+    }
+    expect([...perMatcher.values()], "disclose-context.mjs wired more than once under one matcher").toEqual([1]);
   });
 });
 
