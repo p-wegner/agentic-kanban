@@ -1,0 +1,37 @@
+{
+  "contract": "agent-vocabulary/1",
+  "generated_at": "2026-09-02T10:40:00Z",
+  "generated_by": "test-strategy skill (ticket #999)",
+  "repo_sha": "9bde4f639abaf9a671d6236d21decb9316a26b05",
+  "entries": [
+    {
+      "id": "ak-createtestdb-fresh-file-per-call",
+      "family": "state_isolation",
+      "classification": "fresh_database_per_test",
+      "extensions": [".ts"],
+      "tokens": ["test-db-template-"],
+      "word_boundary": false,
+      "scope": "any",
+      "search": "repo",
+      "occurrences": [
+        { "path": "packages/server/src/__tests__/helpers/test-db.ts", "line": 169 }
+      ],
+      "why": "createTestDb() mints a per-call temp file named test-db-<uuid>.db (line 250) and copies this fully-migrated template database onto it (line 252), then opens a libsql client on that file (line 253); no reset, truncation or rollback is used because each caller receives its own database file"
+    },
+    {
+      "id": "ak-createtestdb-callsite-db-boundary",
+      "family": "dependency_treatment",
+      "classification": "real",
+      "boundary": "db",
+      "extensions": [".ts"],
+      "tokens": ["helpers/test-db"],
+      "word_boundary": false,
+      "scope": "import",
+      "search": "tests",
+      "occurrences": [
+        { "path": "packages/server/src/__tests__/workspace-merge-service.test.ts", "line": 17 }
+      ],
+      "why": "importing this helper binds the test to a real file-backed SQLite (libsql) database with every drizzle migration applied, not an in-memory or stubbed store; the helper's own header records that a temp FILE is used deliberately because libsql loses an in-memory database across a transaction commit"
+    }
+  ]
+}
