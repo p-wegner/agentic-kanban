@@ -14,6 +14,7 @@
 
 import { occupiesWipSlot } from "@agentic-kanban/shared/lib/workspace-liveness";
 import type { StartPolicy } from "@agentic-kanban/shared/types";
+import { workflowNodeMayOverrideStatus } from "./workflow-status-override.js";
 
 /** A project status (column) — only the fields the projection reads/emits. */
 export interface BoardStatusRow {
@@ -131,6 +132,11 @@ export function buildBoardColumns<
   const inProgressStatusNames = new Set(statuses.filter((s) => s.name.toLowerCase() === "in progress").map((s) => s.id));
 
   const statusByName = new Map(statuses.map((status) => [status.name.toLowerCase(), status]));
+  const statusById = new Map(statuses.map((status) => [status.id, status]));
+  const orderedStatusNames = statuses
+    .slice()
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .map((s) => s.name);
   const TERMINAL_STATUS_NAMES = new Set(["done", "cancelled"]);
   const issuesWithBlocked = projectIssues.map((issue) => {
     const wsSummary = workspaceSummaryMap.get(issue.id);
@@ -143,7 +149,11 @@ export function buildBoardColumns<
     const workflowStatusName = !issueIsTerminal && wsSummary?.main?.status !== "closed"
       ? wsSummary?.main?.workflow?.currentNodeStatusName
       : null;
+    // A node may only pull the card FORWARD (workflow advanced ahead of the issue row),
+    // never back past the status the issue holds — see workflow-status-override.ts.
+    const issueStatusName = statusById.get(issue.statusId)?.name ?? issue.statusName;
     const workflowStatus = workflowStatusName
+      && workflowNodeMayOverrideStatus(issueStatusName, workflowStatusName, orderedStatusNames)
       ? statusByName.get(workflowStatusName.toLowerCase())
       : null;
     const effectiveStatusId = workflowStatus ? workflowStatus.id : issue.statusId;

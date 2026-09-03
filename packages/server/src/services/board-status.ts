@@ -14,6 +14,7 @@ import {
 import { collectBoardStatusEntryWork, type ConflictCacheEntry } from "./board-status-enrichment.js";
 import { unlandedRemoteBranches } from "./worker-remote-sync.service.js";
 import { resolveRemoteUnlandedPort } from "./remote-unlanded-port.js";
+import { workflowNodeMayOverrideStatus } from "../lib/workflow-status-override.js";
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import {
   getActiveProjectIdPref,
@@ -52,6 +53,8 @@ function selectMainWorkspace(
   fallbackStatusName: string,
   currentNodeStatusById: Map<string, string | null>,
   statusByName: Map<string, { id: string; name: string }>,
+  /** Project status names in column order (ascending sortOrder). */
+  orderedStatusNames: readonly string[],
 ): { mainWs: WorkspaceRow | null; effectiveStatusName: string } {
   const mainWs = wsForIssue.sort((a, b) =>
     workspaceStatusPriority(a.status) - workspaceStatusPriority(b.status) ||
@@ -60,7 +63,11 @@ function selectMainWorkspace(
   const workflowStatusName = mainWs?.status !== "closed" && mainWs?.currentNodeId
     ? currentNodeStatusById.get(mainWs.currentNodeId)
     : null;
+  // A node may only pull the issue FORWARD, never back past the status it holds
+  // (a manual move to a status the template has no node for) — see
+  // lib/workflow-status-override.ts.
   const effectiveStatusName = workflowStatusName
+    && workflowNodeMayOverrideStatus(fallbackStatusName, workflowStatusName, orderedStatusNames)
     ? statusByName.get(workflowStatusName.toLowerCase())?.name ?? fallbackStatusName
     : fallbackStatusName;
   return { mainWs, effectiveStatusName };
@@ -127,6 +134,8 @@ export async function getBoardStatus(
   const currentNodeStatuses = await getWorkflowNodeStatuses(currentNodeIds, database);
   const currentNodeStatusById = new Map(currentNodeStatuses.map((node) => [node.id, node.statusName]));
   const statusByName = new Map(statuses.map((status) => [status.name.toLowerCase(), status]));
+  // listProjectStatusIdNames orders by sortOrder, so array order IS column order.
+  const orderedStatusNames = statuses.map((s) => s.name);
 
   // 5. Get sessions for these workspaces
   const wsIds = wsRows.map(w => w.id);
@@ -165,6 +174,7 @@ export async function getBoardStatus(
       issue.statusName,
       currentNodeStatusById,
       statusByName,
+      orderedStatusNames,
     );
 
     const mainSessions = mainWs ? (sessionsByWs.get(mainWs.id) ?? []) : [];
