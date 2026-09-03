@@ -26,6 +26,7 @@ import { cloneRepo } from "./repo-clone.service.js";
 import type { WorkspaceSummaryCache } from "./workspace-summary-cache.service.js";
 import type { WorkspaceSummary } from "./workspace-summary.service.js";
 import { buildBoardColumns } from "../lib/board-view.js";
+import { resolveStartPolicy } from "./start-policy.service.js";
 
 import { ProjectError } from "./project-error.js";
 import { applyProjectUpdateFields } from "./project-update-fields.js";
@@ -621,7 +622,6 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     const prefMap = new Map(prefRows.map((r) => [r.key, r.value] as const));
     const staleDays = getNumber(prefMap, "backlog_stale_days");
     const inProgressStaleDays = getNumber(prefMap, "inprogress_stale_days");
-    const now = new Date(nowOverride ?? new Date().toISOString()).getTime();
 
     return buildBoardColumns({
       statuses,
@@ -630,9 +630,12 @@ export function createProjectService(deps: { database: Database; workspaceSummar
       workspaceSummaryMap,
       blockedMap,
       issueTagMap,
-      now,
+      now: new Date(nowOverride ?? new Date().toISOString()).getTime(),
       staleDays,
       inProgressStaleDays,
+      // #1004: read the ONE Start Mode decision (decision 008), not the raw pref — so a project
+      // whose `monitor` mode is derived from a legacy `board_autodrive` flag is not misreported.
+      startMode: resolveStartPolicy(prefMap, projectId).mode,
     });
   }
 
