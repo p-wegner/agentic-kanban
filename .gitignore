@@ -49,6 +49,10 @@ verify-*.png
 
 # code-metrics analysis output (regenerable; config in .codemetricsrc is tracked)
 code-metrics-out/
+# ...and the newer default output location. `.code-metrics/agent-vocabulary.json` is an
+# INPUT to `analyze` (contract agent-vocabulary/1), not output, so it stays tracked.
+.code-metrics/*
+!.code-metrics/agent-vocabulary.json
 
 # AI agent artifacts (written during a workspace session; not project source)
 /*.log
