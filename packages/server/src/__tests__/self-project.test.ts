@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { isSelfProjectRepo } from "../services/self-project.js";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { isSelfProjectRepo, resolveSelfRoot } from "../services/self-project.js";
 
 describe("isSelfProjectRepo", () => {
   const selfRoot = "C:/projects/andrena/agentic-kanban";
@@ -34,5 +37,32 @@ describe("isSelfProjectRepo", () => {
     expect(isSelfProjectRepo(null, selfRoot)).toBe(false);
     expect(isSelfProjectRepo(undefined, selfRoot)).toBe(false);
     expect(isSelfProjectRepo("", selfRoot)).toBe(false);
+  });
+});
+
+describe("resolveSelfRoot (#1010) — the checkout root, not the backend's packages/server cwd", () => {
+  it("walks up from packages/server to the monorepo root", () => {
+    const root = mkdtempSync(join(tmpdir(), "ak-self-root-"));
+    try {
+      writeFileSync(join(root, "pnpm-workspace.yaml"), "packages:\n  - packages/*\n");
+      mkdirSync(join(root, "packages", "server"), { recursive: true });
+      const serverDir = join(root, "packages", "server");
+      expect(resolveSelfRoot(serverDir)).toBe(root);
+      expect(resolveSelfRoot(root)).toBe(root);
+      // The comparison the gate actually makes: the project's repoPath IS the root, the
+      // backend's cwd is packages/server — that pair must resolve as self.
+      expect(isSelfProjectRepo(root, resolveSelfRoot(serverDir))).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to the start dir when nothing above looks like the monorepo (packaged install)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ak-self-root-none-"));
+    try {
+      expect(resolveSelfRoot(dir)).toBe(dir);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

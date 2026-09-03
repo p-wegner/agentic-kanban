@@ -9,6 +9,7 @@ import { createTestDb, type TestDb } from "./helpers/test-db.js";
 import { createProjectDirectly } from "./helpers/api-test-helpers.js";
 import { getPreference, setPreference } from "../repositories/preferences.repository.js";
 import { saveStackProfile, verifyScriptPrefKey } from "../services/stack-profile.service.js";
+import { resolveSelfRoot } from "../services/self-project.js";
 import type { StackProfile } from "@agentic-kanban/shared";
 
 // The pre-merge gate runs two heavyweight shared helpers (verify_script via runSetupScript, the
@@ -29,6 +30,21 @@ vi.mock("../services/git.service.js", () => ({
 }));
 
 const { runPreMergeGate } = await import("../services/pre-merge-gate.service.js");
+
+// The gate under test reads the AMBIENT selector env (`resolveGateTestSelector`, #962) — and
+// when this file runs INSIDE a merge gate, that env is the outer gate's own verify env
+// (`KANBAN_TEST_SELECTOR=impact` + companions, #966 budget route), so every "tier: full"
+// assertion below became "tier: impact-selected" on the board while passing on a bare shell
+// (#1010). Pin the ambient env to "nothing set" for the whole file; the selector's own env
+// handling has its unit tests in gate-tier-scoping.test.ts.
+beforeEach(() => {
+  for (const key of ["KANBAN_TEST_SELECTOR", "KANBAN_IMPACT_BASE", "KANBAN_TEST_NEW_FILES", "KANBAN_TEST_BUDGET", "KANBAN_TEST_GUARDS_ONLY", "KANBAN_TEST_PACKAGES", "KANBAN_TEST_FILES"]) {
+    vi.stubEnv(key, undefined);
+  }
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 function webProfile(overrides: Partial<StackProfile> = {}): StackProfile {
   return {
@@ -354,8 +370,8 @@ describe("docs-only guards-only run is restricted to this repo's checkout", () =
   });
 
   it("runs verify with KANBAN_TEST_GUARDS_ONLY for a docs-only diff on THIS repo", async () => {
-    // repoPath = process.cwd() is what makes the fixture resolve as the self project.
-    const selfProjectId = await createProjectDirectly(db, { repoPath: process.cwd() });
+    // repoPath = the checkout ROOT (not this package's cwd, #1010) is what makes the fixture resolve as the self project.
+    const selfProjectId = await createProjectDirectly(db, { repoPath: resolveSelfRoot() });
     await setPreference(verifyScriptPrefKey(selfProjectId), "pnpm test:mine", db);
     getChangedFileNames.mockResolvedValue(["CLAUDE.md"]);
     runSetupScript.mockResolvedValue({ exitCode: 0, stdout: "ok", stderr: "" });
@@ -377,7 +393,7 @@ describe("docs-only guards-only run is restricted to this repo's checkout", () =
   // not unknown: nothing under packages/ can import them, and the always-run guards are what
   // checks them.
   it("#1008: routes a docs+config-only diff on THIS repo to the guard suites, and says so", async () => {
-    const selfProjectId = await createProjectDirectly(db, { repoPath: process.cwd() });
+    const selfProjectId = await createProjectDirectly(db, { repoPath: resolveSelfRoot() });
     await setPreference(verifyScriptPrefKey(selfProjectId), "pnpm test:mine", db);
     await setPreference(`verify_gate_strategy_${selfProjectId}`, "scoped", db);
     getChangedFileNames.mockResolvedValue([
@@ -400,7 +416,7 @@ describe("docs-only guards-only run is restricted to this repo's checkout", () =
   });
 
   it("#1008: a genuinely un-modelled path beside config keeps the FULL run on THIS repo", async () => {
-    const selfProjectId = await createProjectDirectly(db, { repoPath: process.cwd() });
+    const selfProjectId = await createProjectDirectly(db, { repoPath: resolveSelfRoot() });
     await setPreference(verifyScriptPrefKey(selfProjectId), "pnpm test:mine", db);
     getChangedFileNames.mockResolvedValue([".gitignore", "package.json"]);
     runSetupScript.mockResolvedValue({ exitCode: 0, stdout: "ok", stderr: "" });
