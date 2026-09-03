@@ -204,6 +204,44 @@ Allowlist mit Rollen statt bloßer Reihenfolge; `profile-allowlist.ts` bleibt de
 `fallback-only`-Policies der Bullseye werden auf `reserve` abgebildet, und `quotaProviderId`
 entfällt zugunsten der Quelle unten.
 
+### Wo die Rolle wohnt: am Profil, nicht im Board
+
+Hinter "Rolle" stecken zwei Dinge. Das eine ist eine **Eigenschaft des Accounts**: diese
+Subscription gehört Kunde X, diese trainiert auf Daten, diese ist der private Notfall. Das gilt auf
+jeder Maschine, auf der das Login existiert, unabhängig von jedem Board. Das andere ist eine
+**Zuteilung**: für Projekt Y erst diese drei, die vierte in Reserve. Das ist eine Beziehung zwischen
+Projekt und Profil, und nur das Board kennt das Projekt.
+
+Daraus folgt die Aufteilung:
+
+- **Eigenschaften stehen am Profil, im `env`-Block** der Settings-Datei, für beide Profiltypen
+  (`settings_<name>.json` für API-Key-Profile, `~/.claude-<name>/settings.json` für
+  Verzeichnis-Profile). Wenige, namensraum-geprägte Schlüssel: `KANBAN_PROFILE_ROLE=pool|reserve|forbidden`
+  als Vorgabe des Profils, optional `KANBAN_PROFILE_DEDICATED=<project-slug>` für "überall
+  verboten außer dort". Ein Worker hat damit alles, was er attestieren muss, in einer Datei, die er
+  ohnehin besitzt. Der Leser ist **eine** Funktion in `packages/shared` (`profile-attributes.ts`),
+  benutzt von der Board-Discovery, vom Worker-`hello` und von claude-pick.
+- **Der Projektkader im Board darf nur verengen.** Ein `pool`-Profil kann für ein Projekt zu
+  `reserve` oder `forbidden` werden, nie umgekehrt. Ein globales `forbidden` ist damit durch die
+  Konstruktion unaufhebbar, nicht durch eine Regel, an die sich jemand erinnern muss.
+- **Das Board cached, was es beobachtet hat, und besitzt es nicht.** Discovery liest die Dateien
+  und legt Rolle plus Beobachtungszeit am Profil-Datensatz ab, so wie der Ring heute `loggedIn`
+  führt. Widersprechen sich zwei Maschinen über denselben Account, gewinnt `forbidden`, und der
+  Monitor-View zeigt den Widerspruch.
+
+Der `env`-Block ist dabei nicht nur bequem, sondern ein zweiter Durchsetzungspunkt: Claude Code
+injiziert ihn in die Prozessumgebung jeder Session, also kann ein Hook im laufenden Agenten
+`KANBAN_PROFILE_ROLE` lesen und abbrechen, falls ein verbotenes Profil je durchgerutscht ist. Die
+Kehrseite ist dieselbe Tatsache: die Werte sind für jeden Kindprozess sichtbar. Für ein Rollen-Tag
+ist das harmlos; deshalb bleiben es Tags, nie etwas Credential-Förmiges.
+
+Zwei Einschränkungen: Codex-Profile sind eine TOML, keine Settings-JSON, also braucht der Leser
+dort einen zweiten Träger (eine kleine `[kanban]`-Tabelle) hinter derselben Funktion. Und ein
+Verzeichnis-Profil auf einem Worker ist ein Login, das ein Mensch von Hand gemacht hat, also wird
+auch der `env`-Block dort von Hand gesetzt. Das Board kann ihn nicht verteilen und soll es nicht.
+Was es kann: warnen, wenn ein Worker einen bekannten Profilnamen mit einer unerwarteten Rolle
+attestiert.
+
 ### Die Quota-Quelle: vorausschauend, aus dem eigenen Token, gedrosselt
 
 Die verlässliche Quelle ist der OAuth-Usage-Endpoint, pro Profil mit dessen eigenem Token gelesen.
