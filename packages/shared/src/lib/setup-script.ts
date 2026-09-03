@@ -1,4 +1,37 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
+
+/**
+ * Kill a setup/verify child AND everything it spawned (#1009).
+ *
+ * Every kill path here used `proc.kill()`, which on Windows terminates the `cmd.exe` shell and
+ * NOTHING below it: the `pnpm` -> `node` -> vitest worker tree it started keeps running to
+ * completion as orphans. So a base-health probe that "yielded" its verify slot to a waiting
+ * merge gate (#989) handed the slot over while its full suite was still on the box, and the
+ * gate then ran a second full suite beside it — which is exactly the two-suites-at-once
+ * collision observed on #999, on a host that then timed both out. A 90-minute timeout kill
+ * orphaned the branch's own workers the same way.
+ *
+ * `taskkill /T /F` is the same tree kill `smoke-check.ts` already uses for a dev server. On
+ * POSIX the child is a `/bin/sh -c` whose children die with it for the scripts this runs
+ * (`pnpm`/`gradle` wrappers forward the signal), so the plain kill is kept there. Best-effort by
+ * construction: a kill that cannot be issued must not turn the timeout/abort verdict into a
+ * throw, and the caller's `resolve` runs regardless.
+ */
+function killSetupProcessTree(proc: ChildProcess): void {
+  if (process.platform === "win32" && proc.pid) {
+    try {
+      spawn("taskkill", ["/pid", String(proc.pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+      return;
+    } catch {
+      // fall through to the plain kill
+    }
+  }
+  try {
+    proc.kill();
+  } catch {
+    // already gone
+  }
+}
 
 export interface SetupScriptResult {
   exitCode: number;
@@ -209,7 +242,7 @@ export function runSetupScript(
     };
 
     const timeout = setTimeout(() => {
-      proc.kill();
+      killSetupProcessTree(proc);
       // Resolve (never reject) on timeout — a kill is NOT the same verdict as a
       // script that ran to completion and failed (#192). `timedOut: true` lets
       // callers report "didn't finish in time" instead of "failed (exit 1)".
@@ -227,7 +260,7 @@ export function runSetupScript(
       const pollMs = Math.max(1000, Math.min(60_000, Math.floor(noProgressTimeoutMs / 10)));
       noProgressInterval = setInterval(() => {
         if (Date.now() - lastOutputAt >= noProgressTimeoutMs) {
-          proc.kill();
+          killSetupProcessTree(proc);
           // Same never-reject contract as the wall-clock timeout: a no-progress kill is
           // "stopped producing evidence", not "ran and failed".
           cleanup();
@@ -241,7 +274,7 @@ export function runSetupScript(
     // synchronously and `cleanup` reads them.
     if (options.signal) {
       onAbort = () => {
-        proc.kill();
+        killSetupProcessTree(proc);
         cleanup();
         // Same never-reject contract as the two kill paths above: an abort is "the caller
         // stopped us", not "ran and failed". 130 is the conventional SIGINT-ish exit.

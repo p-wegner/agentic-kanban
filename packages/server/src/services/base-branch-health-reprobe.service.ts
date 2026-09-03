@@ -33,6 +33,7 @@ import {
   inspectMachineVerifyLock,
   machineVerifyLockEnabled,
 } from "../lib/machine-verify-lock.js";
+import { readTier0Capacity, type Tier0Capacity } from "@agentic-kanban/shared/lib/machine-capacity";
 
 /** Default cadence of the periodic sweep; also the recency window an on-demand ask is judged against. */
 export const BASE_HEALTH_DEFAULT_INTERVAL_MS = 30 * 60 * 1000;
@@ -99,6 +100,17 @@ export interface BaseHealthDueInput {
   currentSha?: string | null;
   /** The sha the newest recorded result was measured at, or null when there is no history. */
   lastResultSha?: string | null;
+  /**
+   * The Tier-0 host-saturation reason when the box is below the free-RAM floor the monitor
+   * applies to auto-starts (`readTier0Capacity`), else null/undefined (#1009).
+   *
+   * A probe is a clone + install + full verify; launching one onto a host the monitor would
+   * not even start a builder on is how #999's base run and branch gate both timed out. Read by
+   * the caller (`resolveBaseHealthProbeDue`) so this stays a pure decision. DEFERS, never
+   * skips: the interval check runs again next tick, and a persistently tight box only delays
+   * the measurement.
+   */
+  hostSaturated?: string | null;
 }
 
 export interface BaseHealthDueVerdict {
@@ -109,7 +121,8 @@ export interface BaseHealthDueVerdict {
     | "probe_in_flight"
     | "recent_result"
     | "gate_running"
-    | "sha_unchanged";
+    | "sha_unchanged"
+    | "host_saturated";
 }
 
 /**
@@ -134,6 +147,15 @@ export function isBaseHealthProbeDue(input: BaseHealthDueInput): BaseHealthDueVe
   const startMs = input.probeStartedAt ? Date.parse(input.probeStartedAt) : NaN;
   if (Number.isFinite(startMs) && startMs <= nowMs && nowMs - startMs < PROBE_MAX_DURATION_MS) {
     return { due: false, reason: "probe_in_flight" };
+  }
+
+  // 1b. #1009 — the host is below the same free-RAM floor the monitor holds auto-starts at.
+  //     After the two machine-state checks above (a running probe is running, whatever the
+  //     box looks like) and BEFORE every "is it time" check below: a due probe on a saturated
+  //     host is deferred, and the answer to "why did the probe not run" is the saturation,
+  //     not the interval.
+  if (input.hostSaturated) {
+    return { due: false, reason: "host_saturated" };
   }
 
   const lastMs = input.lastResultAt ? Date.parse(input.lastResultAt) : NaN;
@@ -201,10 +223,19 @@ export async function resolveBaseHealthProbeDue(
   database: Database,
   intervalMs: number,
   nowMs: number,
+  opts: {
+    /** Injected for tests; defaults to the live Tier-0 read (#1009). */
+    readCapacity?: () => Tier0Capacity;
+  } = {},
 ): Promise<BaseHealthDueVerdict> {
   const latest = await getLatestBaseBranchHealth(projectId, database).catch(() => null);
   const probeStartedAt = await getPreference(baseHealthProbeStartPrefKey(projectId), database).catch(() => null);
+  // #1009 — the SAME signal `monitor-auto-start.ts` holds builder starts on (`tier 0: only X GB
+  // free (floor 2GB)`), so a base-health probe now counts against the floor the way a builder
+  // does. Fail-open by construction: an unreadable capacity is `hold: false`.
+  const capacity = (opts.readCapacity ?? readTier0Capacity)();
   return isBaseHealthProbeDue({
+    hostSaturated: capacity.hold ? capacity.reason : null,
     nowMs,
     intervalMs,
     lastResultAt: latest?.createdAt ?? null,
@@ -244,11 +275,11 @@ export async function requestBaseBranchReprobe(
   database: Database = db,
   intervalMs = BASE_HEALTH_DEFAULT_INTERVAL_MS,
   nowMs: number = Date.now(),
-  opts: { ignoreRecency?: boolean } = {},
+  opts: { ignoreRecency?: boolean; readCapacity?: () => Tier0Capacity } = {},
 ): Promise<BaseHealthDueVerdict> {
   let verdict: BaseHealthDueVerdict = { due: false, reason: "recent_result" };
   try {
-    verdict = await resolveBaseHealthProbeDue(projectId, database, intervalMs, nowMs);
+    verdict = await resolveBaseHealthProbeDue(projectId, database, intervalMs, nowMs, { readCapacity: opts.readCapacity });
     // An EXPLICIT operator request ("that verdict was starved, measure again") is allowed to
     // override the recency/timeout back-off — overriding it is the whole point of the route,
     // and the ticket asks for exactly that. It is NOT allowed to override the two guards that

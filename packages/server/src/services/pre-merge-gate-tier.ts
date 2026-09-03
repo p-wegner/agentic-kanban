@@ -684,6 +684,14 @@ export interface GateTierInfo {
   baseProbeAgeLabel?: string;
   baseProbeDue?: boolean;
   /**
+   * What happened to the base-health run this gate had to sequence against (#1009): joined an
+   * in-flight one, ran a due one FIRST, or deferred it because the host was below the Tier-0
+   * floor. An operator otherwise sees one job in `verify` and cannot tell the box is running
+   * two suites — or that the base was deliberately NOT re-measured. Undefined when nothing was
+   * due, which is the common case and says nothing.
+   */
+  baseHealthNote?: string;
+  /**
    * What each STEP of the verify script cost (#988), as the steps themselves reported it.
    *
    * Empty for every project whose `verify_script` emits no `[gate:step]` lines — which is every
@@ -867,7 +875,11 @@ export function buildGateTierMessage(tierInfo: GateTierInfo | null): string {
   // #957: the parenthesised list carries the FLAG; the note itself carries who was holding and
   // for how long, which is what an operator needs to act on. Same split as `flakeRetryNote`.
   const unserialized = tierInfo.unserializedNote ? ` ${tierInfo.unserializedNote}` : "";
-  return `pre-merge gate passed (${parts.join(", ")})${retry}${unserialized}${baseProbe}${formatPostureNote(tierInfo.posture)}`;
+  // #1009: the base-health run this gate sequenced against, when there was one. Bracketed like
+  // the `scoped-base-watch` probe age because it is the same kind of claim — about the base,
+  // not about the branch.
+  const baseHealth = tierInfo.baseHealthNote ? ` [${tierInfo.baseHealthNote}]` : "";
+  return `pre-merge gate passed (${parts.join(", ")})${retry}${unserialized}${baseProbe}${baseHealth}${formatPostureNote(tierInfo.posture)}`;
 }
 
 /**
