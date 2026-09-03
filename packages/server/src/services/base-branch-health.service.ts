@@ -32,7 +32,7 @@ import type { Database } from "../db/index.js";
 import { getPreference, setPreference } from "../repositories/preferences.repository.js";
 import { getProjectById } from "../repositories/project.repository.js";
 import { VERIFY_SCRIPT_TIMEOUT_MS } from "./verify-budget.js";
-import { resolveVerifyMaxWorkers } from "./pre-merge-gate.service.js";
+import { resolveVerifyMaxWorkers } from "./verify-tunables.js";
 import { failedSuitesForOutcome } from "./failed-suite-parse.js";
 import { resolveEffectiveVerify, deriveSetupScriptFromProfile, getStackProfile } from "./stack-profile.service.js";
 import { recordBaseSweepOutcome } from "./test-impact-outcome.service.js";
