@@ -114,6 +114,27 @@ describe("buildBoardColumns", () => {
     expect(moved.statusName).toBe("In Progress");
   });
 
+  it("does not snap a manually moved issue back to a stale, EARLIER workflow node", () => {
+    // Drag In Progress -> In Review on a template with no In Review node: the PATCH lands
+    // (issue says In Review) but the workspace node still says In Progress. The card must
+    // stay where the user dropped it.
+    const cols = buildBoardColumns({
+      statuses: STATUSES,
+      visibleStatuses: STATUSES,
+      projectIssues: [issue({ id: "r", statusId: "review", statusName: "In Review" })],
+      workspaceSummaryMap: new Map([
+        ["r", { main: { status: "idle", workflow: { currentNodeStatusName: "In Progress" } } }],
+      ]),
+      blockedMap: new Map(),
+      issueTagMap: new Map(),
+      now: NOW,
+      staleDays: 14,
+      inProgressStaleDays: 3,
+    });
+    expect(cols.find((c) => c.id === "review")!.count).toBe(1);
+    expect(cols.find((c) => c.id === "inprog")!.count).toBe(0);
+  });
+
   it("honours a terminal issue status over a stale workflow node", () => {
     const cols = buildBoardColumns({
       statuses: STATUSES,
