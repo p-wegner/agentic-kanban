@@ -18,7 +18,7 @@
 // depend only on this file. Keep this module free of anything that reaches the db.
 import type { ProviderName } from "../services/agent-provider/types.js";
 import type { WorkerBuildFreshness } from "@agentic-kanban/shared/lib/worker-build-freshness";
-import type { WorkerCapacityInfo } from "@agentic-kanban/shared/lib/worker-protocol";
+import type { WorkerCapacityInfo, WorkerProfileAttestation } from "@agentic-kanban/shared/lib/worker-protocol";
 
 /**
  * The chain's check ids, as DATA so the union and the runtime list cannot drift (#801).
@@ -163,6 +163,12 @@ export interface WorkerEligibility {
    * refusal is `protocolVersion`'s job.
    */
   buildFreshness?: WorkerBuildFreshness;
+  /**
+   * Agent profiles this worker ATTESTS it can authenticate as (#1027). In-memory from its
+   * last `hello`/heartbeat, so absent means "this worker has said nothing" — which a
+   * profile-restricted project reads as #651's refusal, never as "any profile".
+   */
+  attestedProfiles?: WorkerProfileAttestation[];
   /** Sessions the board currently has assigned to this worker. `load` is its length. */
   assignedSessionIds: string[];
   /** Free slots on THIS worker: `maxConcurrency - load`, floored at 0. */

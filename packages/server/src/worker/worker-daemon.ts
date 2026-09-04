@@ -42,12 +42,15 @@ import {
   WORKER_UPDATE_REMEDIATION,
   type WorkerCapabilities,
   type WorkerCapacityInfo,
+  type WorkerProfileAttestation,
   type WorkerToBoardMessage,
 } from "@agentic-kanban/shared/lib/worker-protocol";
 import { readTier0Capacity, toWorkerCapacitySnapshot } from "@agentic-kanban/shared/lib/machine-capacity";
 import { createWorkerAgentRunner } from "./worker-agent-runner.js";
 import { defaultWorkerWorkRoot, reapOrphanedCheckouts } from "./worker-repo.js";
 import { attestProviderAuth } from "../cli/commands/worker-doctor.js";
+import { createWorkerProfileAttestor, type WorkerProfileAttestor } from "./worker-profiles.js";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
 const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 const RECONNECT_MIN_MS = 1000;
@@ -88,6 +91,20 @@ export interface WorkerDaemonOptions {
    * operator asserting that a false negative, not a real gap.
    */
   attestProviders?: boolean;
+  /**
+   * `--profiles anth,team5x` (#1027): the agent profiles this machine ATTESTS it can
+   * authenticate as. Names only — never a token, never a config dir.
+   *
+   * Absent = attest whatever local profile discovery finds, which is what makes a
+   * freshly-upgraded worker useful to a profile-restricted project without extra
+   * configuration. `["none"]` opts out: the worker then attests nothing and behaves
+   * exactly like a protocol-1 build, i.e. restricted projects keep #651's refusal for it.
+   * A declared name this machine does not hold is dropped with a log line, the same way
+   * `--providers` is narrowed by attestation (#895).
+   */
+  profiles?: string[];
+  /** Override the home dir profile discovery reads. Test seam; a service install may set it. */
+  profileHome?: string;
   maxConcurrency?: number;
   /** Defaults to ~/.agentic-kanban/worker-state.json. */
   stateFile?: string;
@@ -153,13 +170,24 @@ function capacityOf(): WorkerCapacityInfo {
   return snapshot;
 }
 
-/** What this machine declares about itself, on every registration AND every beat (#754). */
-function capabilitiesOf(opts: WorkerDaemonOptions): WorkerCapabilities {
+/**
+ * What this machine declares about itself, on every registration AND every beat (#754).
+ *
+ * `profiles` (#1027) rides the same channel for the same reason the others do: it is a
+ * fact about the machine as it is NOW — a login can be added, removed or run out of quota
+ * — and a value frozen at pairing time would be a claim the board keeps acting on after
+ * it stopped being true.
+ */
+function capabilitiesOf(
+  opts: WorkerDaemonOptions,
+  profiles?: WorkerProfileAttestation[],
+): WorkerCapabilities {
   return {
     ...(opts.labels ? { labels: opts.labels } : {}),
     ...(opts.providers ? { providers: opts.providers } : {}),
     ...(opts.maxConcurrency !== undefined ? { maxConcurrency: opts.maxConcurrency } : {}),
     capacity: capacityOf(),
+    ...(profiles && profiles.length > 0 ? { profiles } : {}),
   };
 }
 
@@ -221,7 +249,12 @@ export class WorkerRegistrationRefused extends Error {
   }
 }
 
-async function registerWithBoard(opts: WorkerDaemonOptions, boardUrl: string, name: string): Promise<WorkerIdentity> {
+async function registerWithBoard(
+  opts: WorkerDaemonOptions,
+  boardUrl: string,
+  name: string,
+  attestedProfiles?: WorkerProfileAttestation[],
+): Promise<WorkerIdentity> {
   if (!opts.pairingToken) {
     throw new Error(
       `Worker is not paired with ${boardUrl} and no --token was given. ` +
@@ -239,6 +272,9 @@ async function registerWithBoard(opts: WorkerDaemonOptions, boardUrl: string, na
       labels: opts.labels,
       providers: opts.providers,
       maxConcurrency: opts.maxConcurrency,
+      // #1027: attested profile NAMES, so a restricted project can consider this machine
+      // from its very first heartbeat rather than only after the next one lands.
+      ...(attestedProfiles && attestedProfiles.length > 0 ? { profiles: attestedProfiles } : {}),
       // #754: the handshake. A board that speaks a different protocol says so here, once,
       // instead of the mismatch surfacing later as dropped "malformed" messages.
       protocolVersion: WORKER_PROTOCOL_VERSION,
@@ -336,6 +372,17 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
   // ADVERTISED (opts.providers, mutated below) so a re-check can always re-attest the full
   // requested set — a provider excluded now may attest again later (login restored) without
   // needing a restart.
+  // #1027: what this machine can authenticate as. Built once here (discovery is a
+  // filesystem walk) and re-read for quota on every beat; `current()` re-reads the ROLE
+  // carriers each time, so a role a human just changed with claude-pick takes effect
+  // without restarting the daemon — the same freshness rule the board's own roster has.
+  const profileAttestor: WorkerProfileAttestor = createWorkerProfileAttestor({
+    ...(opts.profiles ? { declared: opts.profiles } : {}),
+    ...(opts.profileHome ? { home: opts.profileHome } : {}),
+    log,
+  });
+  const attestedProfiles = (): WorkerProfileAttestation[] => profileAttestor.current();
+
   const declaredProviders = opts.providers;
   let advertisedProviders = declaredProviders;
   if (opts.attestProviders !== false && declaredProviders && declaredProviders.length > 0) {
@@ -358,7 +405,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
 
   let identity = loadState(stateFile).boards[boardUrl];
   if (!identity) {
-    identity = await registerWithBoard(opts, boardUrl, name);
+    identity = await registerWithBoard(opts, boardUrl, name, attestedProfiles());
     saveIdentity(stateFile, boardUrl, identity);
     log(`[worker] registered with ${boardUrl} as '${identity.name}' (id=${identity.workerId})`);
   } else {
@@ -521,7 +568,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
           // gained docker (or changed its ceiling) says so without being re-paired.
           protocolVersion: WORKER_PROTOCOL_VERSION,
           ...(workerVersion ? { workerVersion } : {}),
-          capabilities: capabilitiesOf(opts),
+          capabilities: capabilitiesOf(opts, attestedProfiles()),
         } satisfies WorkerToBoardMessage));
         while (pendingCritical.length > 0) {
           socket.send(JSON.stringify(pendingCritical.shift()));
@@ -706,6 +753,14 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
         opts.providers = advertisedProviders;
       }
     }
+    // #1027: ONE quota tick per beat — at most one request to the usage endpoint, over the
+    // profiles that are due. Never throws: a quota read is diagnostics, and a rate limit
+    // must not cost this machine its heartbeat (which is what would take it offline).
+    try {
+      await profileAttestor.refreshQuota();
+    } catch (err) {
+      log(`[worker] profile quota refresh failed (continuing): ${errorMessage(err)}`);
+    }
     let res: Response;
     try {
       res = await fetch(`${boardUrl}/api/workers/${identity.workerId}/heartbeat`, {
@@ -716,7 +771,7 @@ export async function startWorkerDaemon(opts: WorkerDaemonOptions): Promise<Work
         },
         body: JSON.stringify({
           ...(draining ? { status: "draining" } : {}),
-          capabilities: capabilitiesOf(opts),
+          capabilities: capabilitiesOf(opts, attestedProfiles()),
           protocolVersion: WORKER_PROTOCOL_VERSION,
           ...(workerVersion ? { workerVersion } : {}),
         }),

@@ -251,27 +251,42 @@ const WORKER_CANNOT_ENFORCE =
  * its restriction as `roster_<projectId>` must not LOSE the #651 protection by migrating
  * onto the newer spelling. Either key blocks; both are read.
  *
- * This is deliberately not the last word. Worker-side ATTESTATION — the worker declaring
- * which profiles/config dirs it can authenticate as, the way it already declares
- * `--providers` and `--labels` — would let a restricted project dispatch to a worker
- * that can prove it satisfies the list (#1027). That check goes right here, narrowing the
- * block instead of replacing it.
+ * Worker ATTESTATION (#1027) is what narrows this, and `attestation` is where it enters:
+ * a worker that DECLARES the profile names it can authenticate as gives the board a fact
+ * to act on without ever holding the credential, so "never" becomes "only to a worker that
+ * attests". The block above is unchanged for everything else — no attestation, a worker
+ * that attests only profiles this project forbids, an unreadable roster — because in every
+ * one of those cases the board still cannot know which account the work would run under.
  */
+export interface RemoteAttestationSummary {
+  /** How many eligible workers attest a profile this project's roster PERMITS. */
+  permittedWorkers: number;
+  /** What was found, in the words the refusal appends. */
+  detail?: string;
+}
+
 export function remoteDispatchBlockedByAllowlist(
   allowlistRaw: string | null | undefined,
   rosterRaw?: string | null | undefined,
+  attestation?: RemoteAttestationSummary,
 ): { blocked: false } | { blocked: true; reason: string } {
+  // The permissive direction, and the ONLY one an attestation can move: a restriction is
+  // still a restriction, it is now satisfiable remotely. Deliberately asked BEFORE the
+  // roster/allowlist are even parsed, so the answer cannot depend on which spelling the
+  // project used.
+  if (attestation && attestation.permittedWorkers > 0) return { blocked: false };
+  const attestationTail = attestation?.detail ? ` — ${attestation.detail} (#1027)` : "";
   const roster = (rosterRaw ?? "").trim() ? parseRoster(rosterRaw, "roster") : null;
   if (roster?.restricted) {
     const detail = roster.malformed
       ? "its profile roster is present but unreadable"
       : `its roster is [${roster.entries.map((e) => `${profileRefId(e)} ${e.role}`).join(", ")}]`;
-    return { blocked: true, reason: `${detail}, ${WORKER_CANNOT_ENFORCE}` };
+    return { blocked: true, reason: `${detail}, ${WORKER_CANNOT_ENFORCE}${attestationTail}` };
   }
   const allowlist = parseProfileAllowlist(allowlistRaw);
   if (!allowlist.restricted) return { blocked: false };
   const detail = allowlist.malformed
     ? "its profile allowlist is present but unreadable"
     : `it is restricted to [${allowlist.entries.map(allowedProfileId).join(", ")}]`;
-  return { blocked: true, reason: `${detail}, ${WORKER_CANNOT_ENFORCE}` };
+  return { blocked: true, reason: `${detail}, ${WORKER_CANNOT_ENFORCE}${attestationTail}` };
 }

@@ -126,6 +126,16 @@ export interface RemoteLaunchSpecParams {
   /** Provider name the session selected ("claude" | "codex" | "copilot" | "pi"). */
   provider?: string;
   /**
+   * The profile NAME the placement pinned (#1027), for a project whose roster restricts
+   * profiles and whose chosen worker attested that profile.
+   *
+   * It travels because it is not a credential: `--settings` (a board-host path naming a
+   * board-side account) is still stripped by {@link HOST_PATH_VALUE_FLAGS}, and this is
+   * the opposite thing — a name the WORKER resolves against its own logins. Absent for
+   * every unrestricted project, which is what keeps the spec unchanged for them.
+   */
+  profileName?: string;
+  /**
    * True when the worker does NOT share this filesystem (git transport). Only then is the
    * config's board-shaped command/args wrong; a same-machine worker runs in the board's
    * own worktree and keeps host paths exactly as it keeps them in env.
@@ -148,7 +158,8 @@ export function buildLaunchIntent(params: RemoteLaunchSpecParams): WorkerLaunchI
   // which is NOT the program to resolve remotely — the provider name is.
   const derived = logicalProgramName(params.config.command);
   const program = derived === "node" ? provider : derived;
-  return { provider, program };
+  const profile = params.profileName?.trim();
+  return { provider, program, ...(profile ? { profile } : {}) };
 }
 
 /**
