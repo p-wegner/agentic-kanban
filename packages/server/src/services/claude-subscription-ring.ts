@@ -22,6 +22,8 @@ import {
 
 export type { RotationResult };
 
+import type { ProfileRole } from "@agentic-kanban/shared/lib/profile-attributes";
+
 /**
  * One Claude "subscription" in the rotation ring.
  *
@@ -197,6 +199,22 @@ export interface ClaudeSubscriptionInfo {
   inRing: boolean;
   /** Found on disk as a `~/.claude-<name>` dir (vs. only declared in the ring). */
   autoDiscovered: boolean;
+  /**
+   * #1024 — the role the ACCOUNT declares for itself (`KANBAN_PROFILE_ROLE` in its own
+   * settings carrier). Observed and cached by discovery, never written by the board.
+   * Nothing declared anywhere → `pool`, i.e. today's behaviour.
+   */
+  role: ProfileRole;
+  /** `KANBAN_PROFILE_DEDICATED` — "forbidden everywhere except this project slug". */
+  dedicatedProject: string | null;
+  /** ISO stamp of the newest contributing observation; null when nothing declared anything. */
+  roleObservedAt: string | null;
+  /** Two carriers/machines disagreed about this profile name — `forbidden` (else the more restrictive role) won. */
+  roleConflict: boolean;
+  /** The distinct roles seen when `roleConflict`; empty otherwise. */
+  conflictingRoles: ProfileRole[];
+  /** Unknown role values and conflict detail, for the Monitor/roster view (#1028). */
+  roleWarnings: string[];
 }
 
 /**
@@ -204,8 +222,8 @@ export interface ClaudeSubscriptionInfo {
  * `~/.claude-<name>` dir merged with the rotation-ring entries. The editor renders
  * this so a logged-in subscription shows up even when it isn't (yet) in the ring.
  */
-export function listClaudeSubscriptions(ring: ClaudeSubscriptionEntry[]): ClaudeSubscriptionInfo[] {
-  return listAuthRing(CONFIG, ring).map((info) => ({
+export function listClaudeSubscriptions(ring: ClaudeSubscriptionEntry[], now?: string): ClaudeSubscriptionInfo[] {
+  return listAuthRing(CONFIG, ring, now).map((info) => ({
     profile: info.profile,
     mode: info.mode,
     configDir: info.dir,
@@ -213,5 +231,11 @@ export function listClaudeSubscriptions(ring: ClaudeSubscriptionEntry[]): Claude
     loggedIn: info.loggedIn,
     inRing: info.inRing,
     autoDiscovered: info.autoDiscovered,
+    role: info.attributes.role,
+    dedicatedProject: info.attributes.dedicatedProject,
+    roleObservedAt: info.attributes.observedAt,
+    roleConflict: info.attributes.roleConflict,
+    conflictingRoles: info.attributes.conflictingRoles,
+    roleWarnings: info.attributes.warnings,
   }));
 }

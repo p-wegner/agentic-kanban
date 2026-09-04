@@ -1,6 +1,12 @@
 // #496: BOARD_STRATEGY_PREFIX comes from the same module as `strategyPrefKey`, so the
 // key SCAN below and the key BUILDER cannot disagree about the format.
 import { STRATEGY_PREF_PREFIX as BOARD_STRATEGY_PREFIX } from "@agentic-kanban/shared/lib/strategy-policy";
+import {
+  defaultProfileAttributes,
+  profileAttributeCarrierPaths,
+  readProfileAttributes,
+  type ProfileAttributes,
+} from "@agentic-kanban/shared/lib/profile-attributes";
 import { existsSync, readdirSync, type Dirent } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -45,6 +51,11 @@ export interface AuthRingInfo {
   loggedIn: boolean;
   inRing: boolean;
   autoDiscovered: boolean;
+  /**
+   * Observed profile attributes (#1024). Cached exactly like `loggedIn`: read off the
+   * profile's own settings carrier at discovery time, never written by the board.
+   */
+  attributes: ProfileAttributes;
 }
 
 export interface AuthRingConfig<E extends BaseRingEntry> {
@@ -307,18 +318,48 @@ export function dirHasAuth<E extends BaseRingEntry>(cfg: AuthRingConfig<E>, dir:
 }
 
 /**
+ * Observe a profile's declared attributes (#1024) at discovery time — the board CACHES
+ * what the account declares, it never owns it. Every carrier the shared reader knows about
+ * is consulted for the profile NAME; a ring entry that points somewhere non-standard (a
+ * custom config dir, or an api-key profile named differently from the ring profile) adds
+ * ITS file as an extra carrier, so both readings are merged under the conflict rule
+ * (`forbidden` wins, disagreement exposed) instead of one silently shadowing the other.
+ *
+ * Only `claude` and `codex` have a carrier today; other providers observe nothing and
+ * therefore default to `pool`, which is exactly today's behaviour.
+ */
+function observeProfileAttributes<E extends BaseRingEntry>(
+  cfg: AuthRingConfig<E>,
+  profile: string,
+  dir: string | null,
+  apiKeyRef: string | null,
+  now?: string,
+): ProfileAttributes {
+  if (cfg.provider !== "claude" && cfg.provider !== "codex") return defaultProfileAttributes();
+  const extraPaths: string[] = [];
+  if (dir && dir !== defaultDir(cfg, profile)) {
+    extraPaths.push(join(dir, cfg.provider === "claude" ? "settings.json" : "config.toml"));
+  }
+  if (apiKeyRef && apiKeyRef !== profile) {
+    extraPaths.push(...profileAttributeCarrierPaths(cfg.provider, apiKeyRef));
+  }
+  return readProfileAttributes(cfg.provider, profile, { extraPaths, now });
+}
+
+/**
  * The unified, provider-neutral view of selectable logins: every auto-discovered
  * `~/<prefix><name>` dir merged with the rotation-ring entries, so a logged-in
  * login shows up even when it isn't (yet) in the ring. Each adapter maps the
  * result to its provider DTO.
  */
-export function listAuthRing<E extends BaseRingEntry>(cfg: AuthRingConfig<E>, ring: E[]): AuthRingInfo[] {
+export function listAuthRing<E extends BaseRingEntry>(cfg: AuthRingConfig<E>, ring: E[], now?: string): AuthRingInfo[] {
   const byProfile = new Map<string, AuthRingInfo>();
   for (const name of discoverProfiles(cfg)) {
     const dir = defaultDir(cfg, name);
     byProfile.set(name, {
       profile: name, mode: "oauth", dir, apiKeyRef: null,
       loggedIn: dirHasAuth(cfg, dir), inRing: false, autoDiscovered: true,
+      attributes: observeProfileAttributes(cfg, name, dir, null, now),
     });
   }
   for (const entry of ring) {
@@ -328,12 +369,14 @@ export function listAuthRing<E extends BaseRingEntry>(cfg: AuthRingConfig<E>, ri
       byProfile.set(entry.profile, {
         profile: entry.profile, mode: "apikey", dir: null, apiKeyRef,
         loggedIn: true, inRing: true, autoDiscovered,
+        attributes: observeProfileAttributes(cfg, entry.profile, null, apiKeyRef, now),
       });
     } else {
       const dir = resolveDir(cfg, entry) ?? null;
       byProfile.set(entry.profile, {
         profile: entry.profile, mode: "oauth", dir, apiKeyRef: null,
         loggedIn: dir ? dirHasAuth(cfg, dir) : false, inRing: true, autoDiscovered,
+        attributes: observeProfileAttributes(cfg, entry.profile, dir, null, now),
       });
     }
   }
