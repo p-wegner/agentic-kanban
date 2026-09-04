@@ -95,10 +95,11 @@ export const SETTINGS_REGISTRY = {
   // skills and a domain map ONCE, between tickets, so later builders inherit an already
   // set-up environment instead of re-discovering it. 0 disables it board-wide.
   compounding_setup_min_merges: { type: "number", default: "5" },
-  // Whether the monitor rebuilds and commits each project's `docs/tests/impact-map.json`
-  // when it goes stale (#952). ON by default, and a no-op on any project that does not
-  // already track a map or does not have the test-impact skill — a stale map does not
-  // fail, it WIDENS the gate's test selection back to the whole package suite.
+  // Whether the board rebuilds each project's `docs/tests/impact-map.json` in place when it
+  // goes stale (#952). Nothing is committed — the map is a gitignored artifact since #1018.
+  // ON by default, and a no-op on any project without the test-impact skill or that has not
+  // gitignored the path — a stale map does not fail, it WIDENS the gate's test selection back
+  // to the whole package suite.
   test_impact_map_refresh: { type: "bool", default: "true" },
   // Max per-workspace Docker service stacks that may be "up" at once (#56). Empty/0 =
   // unlimited (default — unchanged behaviour). When >0, provisioning DEFERS rather than

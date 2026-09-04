@@ -8,6 +8,7 @@ import {
   resolveSelectorId,
 } from "../services/test-impact-selector-id.js";
 import { IMPACT_TOOL_RELATIVE_PATH } from "../services/test-impact-outcome.service.js";
+import { IMPACT_MAP_PATH } from "../services/test-impact-map.service.js";
 
 /**
  * The selector-identity component of the merge-gate verification key (#958).
@@ -67,10 +68,13 @@ describe("parseSelectorId", () => {
 });
 
 describe("resolveSelectorId", () => {
-  it("returns the id the tool printed", async () => {
+  it("returns the id the tool printed, stamped with the map it will select against", async () => {
+    // #1018 appended `map=<stamp>`: the map left the tree hash, so a rebuild between two runs on
+    // the same merged tree would otherwise reuse a banked pass earned against a different map.
     const dir = makeWorktree(true);
     const { run, calls } = stubRun({ stdout: "ti1:0679b6655ff3138c17ba\n" });
-    expect(await resolveSelectorId({ workingDir: dir, runCommand: run, log: silent })).toBe("ti1:0679b6655ff3138c17ba");
+    expect(await resolveSelectorId({ workingDir: dir, runCommand: run, log: silent }))
+      .toBe("ti1:0679b6655ff3138c17ba map=absent");
     // The ORDERING guarantee in one assertion: `selector-id`, never `select`. `select` needs an
     // inventory, and the memo key is read before the gate resolves — sourcing the component from
     // `select --json`'s `selectorId` is exactly the dependency #958 exists to avoid.
@@ -143,7 +147,69 @@ describe("resolveSelectorId", () => {
         "console.log('ti1:0679b6655ff3138c17ba');",
       ].join("\n"),
     );
-    expect(await resolveSelectorId({ workingDir: dir, log: silent })).toBe("ti1:0679b6655ff3138c17ba");
+    expect(await resolveSelectorId({ workingDir: dir, log: silent })).toBe("ti1:0679b6655ff3138c17ba map=absent");
+    cleanup();
+  });
+});
+
+describe("the map stamp in the selector component (#1018)", () => {
+  /** Put a map with the given header stamp into a worktree. */
+  function writeMap(dir: string, header: string): void {
+    const mapPath = join(dir, ...IMPACT_MAP_PATH.split("/"));
+    mkdirSync(dirname(mapPath), { recursive: true });
+    writeFileSync(mapPath, header);
+  }
+
+  it("reads the stamp out of the map's header", async () => {
+    const dir = makeWorktree(true);
+    writeMap(dir, '{"format":"test-impact 1","commit":"8a0f35d793","generated":"2026-09-04T09:15:32.094Z"}\n');
+    const { run } = stubRun({ stdout: "ti1:0679b6655ff3138c17ba\n" });
+    expect(await resolveSelectorId({ workingDir: dir, runCommand: run, log: silent }))
+      .toBe("ti1:0679b6655ff3138c17ba map=8a0f35d793");
+    cleanup();
+  });
+
+  it("keys two different maps differently on the same selector — the whole point", async () => {
+    const before = makeWorktree(true);
+    const after = makeWorktree(true);
+    writeMap(before, '{"commit":"aaaaaaaaaa"}\n');
+    writeMap(after, '{"commit":"bbbbbbbbbb"}\n');
+    const stdout = "ti1:0679b6655ff3138c17ba\n";
+    const a = await resolveSelectorId({ workingDir: before, runCommand: stubRun({ stdout }).run, log: silent });
+    const b = await resolveSelectorId({ workingDir: after, runCommand: stubRun({ stdout }).run, log: silent });
+    expect(a).not.toBe(b);
+    cleanup();
+  });
+
+  it("does not parse the whole map — only its header is read", async () => {
+    // The map is ~1.4 MB of one-entry-per-line JSON and this runs on the merge path, so the
+    // stamp is read from the first few KB. A body too large to sit in that window (and, here,
+    // deliberately not even valid JSON) must not change the answer.
+    const dir = makeWorktree(true);
+    writeMap(dir, `{"commit":"cccccccccc","entries":{\n${"x".repeat(200_000)}`);
+    const { run } = stubRun({ stdout: "ti1:0679b6655ff3138c17ba\n" });
+    expect(await resolveSelectorId({ workingDir: dir, runCommand: run, log: silent }))
+      .toBe("ti1:0679b6655ff3138c17ba map=cccccccccc");
+    cleanup();
+  });
+
+  it("says `absent` for a map whose header carries no stamp, rather than failing", async () => {
+    // Two runs that both selected without a usable inventory SHOULD share a key: each widened to
+    // the package tier, which is the same, stronger claim.
+    const dir = makeWorktree(true);
+    writeMap(dir, "not json at all\n");
+    const { run } = stubRun({ stdout: "ti1:0679b6655ff3138c17ba\n" });
+    expect(await resolveSelectorId({ workingDir: dir, runCommand: run, log: silent }))
+      .toBe("ti1:0679b6655ff3138c17ba map=absent");
+    cleanup();
+  });
+
+  it("adds no stamp when there is no selector — an absent component stays exactly empty", async () => {
+    // The #958 no-churn rule: a project that does not use the selector must hash the same bytes
+    // it hashed before, so `map=` must never appear on its own.
+    const dir = makeWorktree(false);
+    writeMap(dir, '{"commit":"8a0f35d793"}\n');
+    expect(await resolveSelectorId({ workingDir: dir, log: silent })).toBe(NO_SELECTOR_ID);
     cleanup();
   });
 });

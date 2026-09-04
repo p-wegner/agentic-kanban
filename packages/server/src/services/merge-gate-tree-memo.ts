@@ -55,12 +55,17 @@ const memoKey = (projectId: string, treeHash: string, verificationKey: string) =
  * field boundaries.
  *
  * **The third component (#958) is the SELECTOR, and it is here because it is NOT in the tree.**
- * The impact map is committed, so rebuilding it changes `mergedTreeHash` and invalidates the memo
- * by itself. The selector does not: `impact.mjs` is materialized into the worktree untracked, so
- * bumping it — or changing a score floor resolved from a preference rather than written literally
- * into `verify_script` — changes the SELECTED SET while tree, tier and verify command are all
- * identical. Without this component that is a stale-green replay: a pass banked under a narrower
- * old selector, reused under a wider new one.
+ * `impact.mjs` is materialized into the worktree untracked, so bumping it — or changing a score
+ * floor resolved from a preference rather than written literally into `verify_script` — changes
+ * the SELECTED SET while tree, tier and verify command are all identical. Without this component
+ * that is a stale-green replay: a pass banked under a narrower old selector, reused under a wider
+ * new one.
+ *
+ * **#1018 widened that component to cover the MAP as well as the selector.** The impact map used
+ * to be committed, so rebuilding it changed `mergedTreeHash` and invalidated the memo by itself;
+ * it is now an untracked artifact copied into the worktree, which took that invalidation away.
+ * `resolveSelectorId` therefore appends the worktree map's own `commit:` stamp, so a pass banked
+ * against one map is not replayed against a different one on the same tree.
  *
  * **An empty selector id APPENDS NOTHING**, and that is load-bearing rather than cosmetic. A
  * project that does not use the selector must hash exactly the bytes it hashed before #958 —
