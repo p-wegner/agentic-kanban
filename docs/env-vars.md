@@ -183,6 +183,7 @@ file header for what the hook does.
 | Variable | Purpose |
 |---|---|
 | `KANBAN_STATUS_TRANSITION_STRICT` | Set to 1 to make an illegal workspace status transition throw (`IllegalStatusTransitionError`) instead of warning and falling through to the terminal guard. |
+| `KANBAN_QUOTA_SOURCE` | Which `QuotaUsageProvider` the board constructs (#1023). Unset/anything else = the **OAuth** provider, which reads `api/oauth/usage` per Claude profile with that profile's own token (one profile per tick, round-robin, backoff on 429). Set to exactly `tampermonkey` for the old local tampermonkey-direct `:8742` path — kept because the class is fine, but it is no longer the default: that service is effectively never running, so quota gating silently degraded to the static priority order. |
 | `UV_THREADPOOL_SIZE` | Node's libuv pool, default 4 and shared by every async fs op *and* the libsql file driver. The board raises it to 12 **if unset** (`packages/server/src/uv-threadpool.ts`, imported first from every entry point since libuv reads it lazily at the first submission): at 4, a single-SELECT endpoint queued behind a workspace-summary rebuild and measured 6–24s. An explicit value always wins. |
 
 ## Not renamed, and why
