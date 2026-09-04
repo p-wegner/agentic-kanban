@@ -6,7 +6,7 @@ import {
   profileAttributeCarrierPaths,
   readProfileAttributes,
   type ProfileAttributes,
-} from "@agentic-kanban/shared/lib/profile-attributes";
+} from "../lib/profile-attributes.js";
 import { existsSync, readdirSync, type Dirent } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";

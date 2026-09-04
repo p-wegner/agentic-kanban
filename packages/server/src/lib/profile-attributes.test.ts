@@ -13,7 +13,7 @@ import {
   readProfileAttributes,
   readProfileAttributesFromEnv,
   readProfileAttributesFromToml,
-} from "../src/lib/profile-attributes.js";
+} from "./profile-attributes.js";
 
 /**
  * #1024 — the one reader for `KANBAN_PROFILE_ROLE` / `KANBAN_PROFILE_DEDICATED`,
