@@ -168,7 +168,7 @@ Trigger: `GET /:projectId/config/export`, `POST /:projectId/config/import` (JSON
 - **monitor-orchestration** (Customer-Supplier; this module is supplier). The monitor *consumes* `resolveMonitorTunables` and `resolveStartPolicy` to decide what/whether to start. The Bullseye→`objective.md` render is a **Published Language** the out-of-process Conductor reads as a file. Hidden co-change: editing the Bullseye schema ripples into the monitor's behavior without an import edge.
 - **agent-providers** (Shared Kernel via `narrowProviderName`/`getProfilePrefKey` in `agent-provider/registry.ts`). This module decides *which* provider+profile+model; the providers module owns *how* to launch. The profile-pref-key mapping is shared kernel, deliberately centralized.
 - **issues-board** (Conformist). Config export/import reaches into project statuses via `projectService`; the active-project pref scopes the divergence guard. Per-project keys are namespaced by the board's project UUIDs.
-- **External: tampermonkey-direct `:8742`** (`quota-usage.service.ts`) — live quota telemetry; an injectable `QuotaUsageProvider` so the source can be swapped, and failures degrade gracefully to static priority.
+- **External: the Anthropic OAuth usage endpoint** (`oauth-quota-provider.ts`, the default since #1023) — live quota telemetry per Claude profile, read with that profile's own `.credentials.json` token; one profile per tick, round-robin, backoff on 429, and a measurement older than one reset window reads `unknown`. Still an injectable `QuotaUsageProvider`, and failures degrade gracefully to static priority. The former default, tampermonkey-direct `:8742` (`quota-usage.service.ts`), remains selectable via `KANBAN_QUOTA_SOURCE=tampermonkey`.
 
 ## File topology
 
