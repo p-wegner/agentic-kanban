@@ -53,4 +53,5 @@ export type * from "./api/focus.js";
 export type * from "./api/risk.js";
 export type * from "./api/sprint.js";
 export type * from "./api/quota.js";
+export type * from "./api/profile-roster.js";
 export type * from "./api/runbook.js";
