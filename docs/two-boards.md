@@ -11,13 +11,19 @@ The fix is two boards:
 |---|---|---|
 | Checkout | a SECOND checkout of this repo, on tag `stable` | this checkout |
 | Process | the built artifact — `pnpm build` + `pnpm --filter agentic-kanban start` | `pnpm dev:devboard` |
-| Ports | **3001 / 5173** (unchanged) | **3101 / 5273** |
+| Ports | **3001** — API *and* UI, one process (unchanged) | **3101 / 5273** (API proxy / Vite) |
 | Database | today's `~/.agentic-kanban/kanban.db`, PINNED via `KANBAN_DB_URL` | its own, `~/.agentic-kanban-dev/kanban.db` |
 | Registered projects | all, **including `agentic-kanban`** | fixtures only (`exp/`), never its own checkout |
 | May be red? | never | as long as necessary |
 
-This page is the runbook. **Nothing here has been executed**: #1013 landed the code and the
-document; the cutover is an operator step, and the checklist at the end is what to run.
+**5173 is not a stable-board port.** A dev run has two processes (a proxy on 3001 and Vite on
+5173); the BUILT artifact is one process that serves the compiled client from the same port as the
+API. So after the cutover nothing listens on 5173 at all, and a browser bookmark for the board is
+`http://127.0.0.1:3001`. The dev board keeps both ports because it is still a `pnpm dev`.
+
+This page is the runbook. §7 was **executed on 2026-09-05** (#1013's acceptance: a second session
+following it cold); the corrections that run produced are folded in below. §8 (`pnpm promote`) has
+still never been run.
 
 ---
 
@@ -56,9 +62,25 @@ Everything else about `pnpm dev` is unchanged: the port guard, the supervisor, t
 
 ### Seeding the dev board
 
-The dev DB starts empty. `pnpm db:migrate && pnpm db:seed` against it creates schema and default
-tags/skills; register fixtures from `C:\projects\andrena\exp\` with `pnpm cli -- register <path>`.
-**Do not register this checkout on the dev board** — see §3.
+**Usually nothing to do: the first `pnpm dev:devboard` migrates and seeds the dev DB itself.** The
+`dev` command runs first-time setup when no database exists (`dbExists()` → migrate → seed), so the
+board comes up on an empty-but-seeded database — measured on the 2026-09-05 cutover: 0 projects,
+3 tags, 22 agent skills, without a single explicit db command.
+
+If you ever do need to run them by hand, **pass the dev DB explicitly**:
+
+```bash
+KANBAN_DB_URL=file:$HOME/.agentic-kanban-dev/kanban.db pnpm db:migrate
+KANBAN_DB_URL=file:$HOME/.agentic-kanban-dev/kanban.db pnpm db:seed
+```
+
+A bare `pnpm db:migrate` / `pnpm db:seed` in this checkout does **not** reach the dev board.
+`KANBAN_BOARD_ROLE` is read by `scripts/dev.mjs`, not by the CLI, so those commands fall through
+`resolveDbLocation` to the home fallback and open the OPERATED database
+(`[db] opening C:\Users\<you>\.agentic-kanban\kanban.db (source: home-fallback)` — verified).
+
+Register fixtures from `C:\projects\andrena\exp\` with `pnpm cli -- register <path>`, likewise with
+`KANBAN_DB_URL` pointed at the dev DB. **Do not register this checkout on the dev board** — see §3.
 
 ## 2. The stable board — built artifact, pinned DB
 
@@ -69,8 +91,20 @@ cd <stable checkout>
 pnpm install -r
 pnpm build
 KANBAN_DB_URL=file:C:/Users/<you>/.agentic-kanban/kanban.db \
-  pnpm --filter agentic-kanban start
+  node <stable checkout>/packages/server/dist/cli/index.js dev --port 3001 --no-open
 ```
+
+**Spawn the built CLI by its absolute path, not `pnpm --filter agentic-kanban start`** — the same
+form `scripts/promote.mjs` uses, and for the same two reasons (both hit on the 2026-09-05 cutover):
+
+- `start` carries no `--no-open`, so the `dev` command's `options.open` defaults to true and it
+  runs `cmd /c start http://…` — a browser and a flashed window on a board you are launching
+  headless.
+- Through `pnpm --filter`, the node process's command line is the relative `dist/cli/index.js dev`
+  and contains the stable checkout's path nowhere. §8's `planPortOwnerKill` refuses any pid whose
+  command line does not contain that path, so a board started that way is one `pnpm promote`
+  cannot stop: the promotion aborts, or — worse, on a machine where the listener lookup comes back
+  empty — starts a second board over the first.
 
 `start` is `node packages/server/dist/cli/index.js dev` — it migrates and seeds on first run. The
 mechanics of the built path (where migrations and bundled skills resolve from, and what to check
@@ -161,25 +195,45 @@ never write into it.
 
 ## 7. Operator cutover checklist
 
-Nothing below has been run. Do it in this order.
+Run on 2026-09-05 (tag `stable-20260905` = `stable` = `e01438a4c5`). Do it in this order.
 
 1. **Tag the stable point.** On the main checkout, with a green full sweep behind it:
    `git tag stable-YYYYMMDD && git tag -f stable stable-YYYYMMDD`.
 2. **Create the second checkout.** `git worktree add C:\projects\andrena\agentic-kanban-stable stable`
-   (or a clone at that path). Do not register it on any board.
+   (or a clone at that path). Do not register it on any board. As a worktree it lands on a
+   **detached HEAD** at the tag — that is fine, `git merge --ff-only <tag>` in §8 works detached.
 3. **Build it.** `pnpm install -r && pnpm build` in that checkout, then `pnpm smoke:boot-dist` once
-   to confirm the artifact boots (#1012).
+   to confirm the artifact boots (#1012). ~2 min for the install, ~1 min each for the build and
+   the smoke (8/8 checks) on a 16-core box.
+
+   **From an agent session, every command that MUTATES the stable checkout needs the override
+   prefix `ALLOW_CROSS_WORKTREE_WRITE=1`.** `.claude/hooks/prevent-cross-worktree-writes.js` sees a
+   `cd` into another checkout as the #369 vector and blocks it — correctly, it cannot tell an
+   operator cutover from a builder wandering off — so the install, the build and the smoke are all
+   refused without it. §6 is the same guard seen from the builder's side: what makes the stable
+   tree safe from builders is what makes the operator prefix the command here. An operator at a
+   plain shell needs none of this.
 4. **Stop the current `pnpm dev` on 3001/5173.** Per the `dev-server` skill — kill the port owner by
-   signature, never all node.
-5. **Start the stable board** with the pinned `KANBAN_DB_URL` (§2). Verify: `GET /health` on 3001,
-   `GET /api/projects` lists the real projects including `agentic-kanban`, one `get_board_status`.
+   signature, never all node. **Stop 13001 too**: 3001 is only the proxy, and the `tsx` backend that
+   holds the DB open lives on `port + 10000`. Walk the parent chain to the `dev.mjs` supervisor or
+   it respawns what you killed.
+5. **Start the stable board** with the pinned `KANBAN_DB_URL` (§2) — absolute CLI path, `--no-open`,
+   `nohup`/detached. Verify: `GET /health` on 3001, `GET /api/projects` lists the real projects
+   including `agentic-kanban`, one `get_board_status`, and the startup log says
+   `[db] opening …\.agentic-kanban\kanban.db (source: DB_URL)`. Nothing binds 5173 any more — the
+   built artifact serves the UI on 3001; check `GET http://127.0.0.1:3001/` returns the app HTML.
 6. **Start the dev board**: `pnpm dev:devboard` in this checkout. Verify 3101 answers `/health`,
    5273 serves the UI, and `GET http://127.0.0.1:3101/api/projects` is EMPTY (or holds only
    fixtures) — a dev board that lists the real projects means the DB pin is wrong; stop and fix
-   before doing anything else.
-7. **Seed the dev board** (§1) and register the `exp/` fixtures you want.
+   before doing anything else. Its log must say
+   `[db] opening …\.agentic-kanban-dev\kanban.db (source: DB_URL)`.
+7. **Seed the dev board** — normally already done by step 6's first run (§1); register the `exp/`
+   fixtures you want, with `KANBAN_DB_URL` pointed at the dev DB.
 8. **Leave MCP configs alone** (§4). Re-check one MCP call from an unrelated repo — it must answer
-   from the stable board.
+   from the stable board. Cheapest check without a client:
+   `cd <unrelated repo> && node <stable>/packages/server/dist/mcp.js < /dev/null`, which prints
+   `[mcp-db] opening …\.agentic-kanban\kanban.db (source: home-fallback)` — the operated DB, i.e.
+   the stable board's.
 9. **Move board development to the dev board**: file/start `agentic-kanban` tickets on the STABLE
    board (that is where the project lives), but let a red master on this checkout stop nothing.
 10. **Promotion** — tag, fast-forward the stable checkout, rebuild, restart, smoke — is §8.
@@ -234,6 +288,13 @@ LISTENER on `KANBAN_STABLE_PORT` (netstat/lsof) and passes it through `planPortO
 same guard `scripts/dev.mjs` uses: a pid whose command line does not contain the stable
 checkout's path is REFUSED, not killed, and the promotion aborts. So it cannot take down another
 agent's worktree server, the dev board, or anything else that happens to hold the port.
+
+**Known defect, found by the 2026-09-05 cutover (#1035): on a non-English Windows the listener
+lookup finds nothing.** `parseNetstatListeners` matches the literal state token `LISTENING`, and a
+German `netstat -ano` prints `ABHÖREN` — so `stopStableBoard()` logs "nothing listening on 3001 —
+nothing to stop" and `startStableBoard()` then spawns a SECOND board over the running one. The
+signature guard above never gets to run. Fix #1035 before relying on `pnpm promote` on such a
+machine.
 
 Starting spawns the BUILT artifact directly — `node <stable>/packages/server/dist/cli/index.js
 dev --port <port> --no-open` — which is what `pnpm --filter agentic-kanban start` runs (§2),
