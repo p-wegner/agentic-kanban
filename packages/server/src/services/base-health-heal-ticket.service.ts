@@ -35,7 +35,7 @@
  * a health probe; a ticket that could not be written must not turn a green sweep into an error.
  */
 
-import { HEAL_TICKET_TAG, healTicketExternalKey } from "@agentic-kanban/shared/lib/heal-ticket-key";
+import { HEAL_TICKET_TAG, healTicketExternalKey } from "../lib/heal-ticket-key.js";
 import { LEGACY_TERMINAL_STATUS_NAMES } from "@agentic-kanban/shared/lib/status-view";
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import type { BaseBranchHealthOutcome } from "../repositories/base-branch-health.repository.js";

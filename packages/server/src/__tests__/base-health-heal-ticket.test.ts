@@ -17,7 +17,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { issueComments, issues, issueTags, preferences, projects, tags } from "@agentic-kanban/shared/schema";
-import { healTicketExternalKey, HEAL_TICKET_TAG } from "@agentic-kanban/shared/lib/heal-ticket-key";
+import { healTicketExternalKey, HEAL_TICKET_TAG } from "../lib/heal-ticket-key.js";
 import { createTestDb } from "./helpers/test-db.js";
 import { initializeProjectStatuses } from "../repositories/issue.repository.js";
 import { invalidatePreferencesCache } from "../repositories/preferences.repository.js";

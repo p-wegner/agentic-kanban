@@ -21,7 +21,11 @@
  * new ticket with the same key, so a project accumulates a legible history of heal episodes
  * while only ever one of them is open. Lookups therefore filter by status, never by key alone.
  *
- * Pure strings, no Node builtins — client-safe.
+ * Pure strings, no Node builtins. It lives in `packages/server/src/lib` and NOT in
+ * `packages/shared/src/lib` because `server` is its only consuming package (the sweep service
+ * and its test) — `shared/lib` is for code MORE THAN ONE package needs (#590/#730), enforced by
+ * `shared-lib-single-consumer-ratchet.test.ts`. Move it to `shared` only when a second package
+ * actually imports it.
  */
 
 /** Namespace prefix, so a heal key can never collide with a real tracker id or a loop key. */
