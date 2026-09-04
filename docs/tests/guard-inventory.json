@@ -1998,9 +1998,9 @@
       "introducedSha": "7dd8572fbf",
       "introducedDate": "2026-07-02",
       "lastRedProxy": {
-        "sha": "270dd81f2a",
-        "date": "2026-08-23",
-        "subject": "fix(#957): delegate the placement-reason write to the sessions aggregate",
+        "sha": "5c38873b79",
+        "date": "2026-09-04",
+        "subject": "feat(#1016): the base-health sweep files ONE heal ticket on a red base",
         "method": "git-log-fix-commit-naming-the-file"
       },
       "lastRedSource": "proxy: git log of fix commits naming the file (no gate-outcome ledger exists)",
