@@ -3,6 +3,79 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-04 — direct-master batch: #1029 #1030/#1011 #1031 #1032 landed, #1033 code parts, two master reds fixed
+
+Afternoon batch after the roster wave below: parallel agents on the MAIN checkout, every commit by
+pathspec (`git commit -F msg -- <paths>`), no worktrees, no merges. Baseline `b45039a038`; the
+range `b45039a038..d2ea5ca51b` holds exactly these ten commits and nothing else.
+
+**Landed, with what verified each (from the commit messages and ticket notes):**
+- **#1032** `80f5137ea6` — `monitor/HarnessShareSection.tsx` renders the weekly harness share
+  next to the Bullseye budget; MCP `update_issue` takes `tags: {add, remove}` by name; bundled
+  skill regenerated; ticket-enhancer points at it. Verified: mcp-server update-issue +
+  mcp-catalog-parity, client HarnessShareSection + MonitorPopover, `pnpm skill:check`,
+  guard-inventory green; Monitor popover line visually verified (playwright-cli); live stdio MCP
+  call set and removed `harness` on a throwaway issue.
+- **#1029** `364f135bbf` — `deriveCapacityHold` (shared `machine-capacity.ts`), a generated
+  `## CAPACITY HOLD` section in the objective block, live `capacity` on
+  `GET /api/projects/:id/monitor-tunables`; the hand-written MEMORY HOLD in `objective.md` is
+  retired; new `@gate:always-run` `objective-capacity-hold-ratchet`. Verified: 17 suites green
+  (machine-capacity, strategy-objective, board-monitor-next-route, the ratchets); live
+  monitor-tunables answers `capacity` (tier 0, hold=false, maxNewStarts=3).
+- **#1031** `c15ff65ab0` — `standard` posture sweeps every 12 h instead of 30 min (decision 017
+  amendment); `PINNED_SWEEP_INTERVALS` + "no posture under 6 h" pinned in
+  `risk-posture.service.test.ts`; `BaseSweepInfo` on `base-branch-health` (`sweep`) and
+  `projects/health` (`baseSweep`), rendered in the Project Health Overview. Verified live on 3001:
+  28 projects, one scheduled (agentic-kanban, iterate, 24 h), none on a 30-minute cadence.
+- **#1030 + #1011** `6cad99720a` — migration 0152: `merge_gate_discards` (sha pair, base-move
+  files, `impact_selection`, source/stage/duration/attempt) written non-fatally from the discard
+  branch of `runGateWithEvidence`, read back as `gateDiscards` on `merge-status`; the PASSING
+  gate's tier message persists on the attempt `detail` and `workspace_merge_gate.message`.
+  Instrumentation only — `movedDuringGate` untouched. Verified: 155 tests incl. new
+  `merge-gate-discard-persistence` (6) and the schema/index/cascade ratchets; the live server
+  applied 0152. Still log-only: the stale-evidence re-run in `resolveMergeGate`; `merge_workspace`'s
+  body carries no message.
+- **#1033, code parts only** — `200e763406` (CLAUDE.md Worktrees rule), `a07c009c03`
+  (`validate-command-safety.js` blocks dependency installs and `pnpm dev` from a nested
+  `.claude/worktrees/*` cwd, override `KANBAN_ALLOW_NESTED_WORKTREE_INSTALL=1`; `scripts/safe-rmdir.mjs`
+  refuses a tree with an outbound junction; 5 hook cases + `safe-rmdir.test.ts` `@gate:always-run`),
+  `dd57255ddd` (boot-dist smoke names its junctions in a sidecar, removes them on any exit, refuses
+  to purge while one remains; `--install` alternative added, not run). Verified:
+  `node scripts/boot-dist-smoke.mjs --json` ok 8/8. **The ticket stays in Backlog** — the operator's
+  forced reinstall (below) is what closes it. Root cause NOT proven; the guard refuses rather than risks.
+
+**Master reds found and fixed on the way (no baseline bumps):**
+- `11022584a2` **client-conventions-guard 17 > 16** — #1028's `ProfileQuotaSection.tsx` spelled
+  `/api/preferences/quota-usage` itself; now `settingsStore.getQuotaUsage()`.
+- `7250908c87` **console-tag-ratchet 22 > 21** — #1027's `console.warn(line)` fallback in
+  `worker-profile-placement.service.ts`; the `[worker-fleet]` tag now sits at the call.
+- Fixed inline by the #1031 builder: `packages/server/openapi.yaml` was one field (`profiles` on the
+  worker register body, #1028 `9be1604ca7`) behind the routes, failing `openapi-drift` for any change.
+- Found in THIS close-out: **god-module gate** — `runPreMergeGate` 35 > baseline 34, the
+  conditional spread `6cad99720a` added. `d2ea5ca51b` lifts it into `impactSelectionField()`;
+  behaviour unchanged.
+
+**Verified by this close-out, on `d2ea5ca51b`:** `KANBAN_TYPECHECK_WORKERS=2 pnpm typecheck` green
+(10s warm / 19s); `node scripts/check-god-modules.mjs` OK (1679 files, 19 baselined over
+threshold, none grown); `pnpm test:mine -- --maxWorkers=4` (fleet gate: go) is **NOT green**: mcp-server 43/43 files
+green; client 4 pre-existing reds (files last touched by `733fd529f3` #1021 and `9be1604ca7` #1028, both
+before this batch); server **7 failed / 8552 passed** in 5 files, and these ARE consequences of this
+batch: `merge-gate-extraction.repo.test.ts` (3 — migration 0152 added `workspace_merge_gate.message`,
+the "drops nothing else" pin needs the new column), `guard-inventory.test.ts` (parses test-mine
+output as JSON and now meets a `[test:mine] scoped to:` banner), `codex-skills-parity` (#1029 edited
+`.claude/skills/board-monitor/SKILL.md`, the `.codex` mirror did not follow),
+`repository-projections-ratchet` (a removed column set re-spelled beyond baseline),
+`worker-running-session-silence-ttl` (#1027: `hello` now carries profiles). The close-out agent
+that ran this hit its usage limit before fixing any of them; a session started 19:00 on this box is
+editing exactly these files plus `scripts/test-mine.mjs` and the `.codex` mirrors in the working
+tree right now — pick up from its commits, do not redo. `pnpm lint:arch` still crashes
+(`chalk.Instance is not a constructor`) — environmental (#1033), not run.
+
+**Remains.** Operator: the #1033 forced reinstall (`pnpm install -r --offline --force` in MAIN with
+the dev server stopped — see the pass below). **#1020 deliberately held** — it feeds the dev board,
+which needs #1013's stable/dev split, still In Review. `BACKLOG.md` re-exported (4 open issues; the
+committed file was the 2026-08-24 export, so the diff is a refresh, not a format change).
+
 ## 2026-09-04 — the profile-roster wave landed; the cut-off merge batch finished by hand
 
 The 2026-09-04 session (0cf4fadb) drove #1025 → #1026 → #1028 → #1027 and hit its usage limit
@@ -78,23 +151,24 @@ state at the time it was written. Standing state lives here and nowhere else.
 
 ### Verified now (2026-09-04)
 
-- **Branch `master`, working tree clean, 74 commits ahead of `origin/master`.** `origin` =
+- **Branch `master`, working tree clean, 86 commits ahead of `origin/master`.** `origin` =
   GitHub `p-wegner/agentic-kanban`; there is a second remote `gitlab` — do not confuse them.
 - **The profile-roster wave is complete:** #1024 (attributes), #1025 (roster roles), #1026
   (predictive rotation), #1027 (worker attestation, protocol v2), #1028 (roster UI) all Done.
-- **Board (agentic-kanban project):** In Review #1013, #1014 (blocked); Todo #1030; Backlog
-  incl. #1033.
+- **Board (agentic-kanban project):** In Review #1013, #1014 (blocked); Todo empty; Backlog
+  #1020 (held on #1013), #1033 (code landed, operator step open). #1029, #1030, #1011, #1031,
+  #1032 Done today by direct-master commits (shas in the top pass).
 
 ### Next steps, in order
 
-1. **Operator: the #1033 forced reinstall** (see above) — one deliberate step with the dev server
-   stopped; it un-breaks `pnpm lint:arch`.
+1. **Operator: the #1033 forced reinstall** (see the roster pass) — one deliberate step with the
+   dev server stopped; it un-breaks `pnpm lint:arch` and closes #1033.
 2. **#1013 / #1014** (In Review) — stable/dev board split and the promote script; #1014 is
-   marked blocked.
-3. **Operator: decide the push.** 74 commits, clean fast-forward; the Linux CI run is what #923
+   marked blocked. #1020 (producer side) starts only after #1013 lands.
+3. **Operator: decide the push.** 86 commits, clean fast-forward; the Linux CI run is what #923
    needs.
-4. **`pnpm --filter agentic-kanban test` on an idle box** — the whole-repo gate remains the
-   outstanding verification; only targeted suites ran today.
+4. **`pnpm --filter agentic-kanban test` on an idle box** — the whole-repo gate (incl. the
+   known-flaky set `test:mine` skips) remains the outstanding verification.
 
 ### Operator flag — RESOLVED, not open (corrected 2026-08-27)
 
