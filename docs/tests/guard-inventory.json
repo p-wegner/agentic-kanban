@@ -643,9 +643,9 @@
       "introducedSha": "5bdbefcd09",
       "introducedDate": "2026-08-17",
       "lastRedProxy": {
-        "sha": "12eb62af13",
-        "date": "2026-08-27",
-        "subject": "fix(#922): anchor exemption + rename disclose-context env vars to KANBAN_*",
+        "sha": "d98ca49eab",
+        "date": "2026-09-03",
+        "subject": "fix(scaffold): #1000 disclose-context hook wired relative once — invariant requires it, merge normalises the anchor",
         "method": "git-log-fix-commit-naming-the-file"
       },
       "lastRedSource": "proxy: git log of fix commits naming the file (no gate-outcome ledger exists)",
@@ -990,9 +990,9 @@
       "introducedSha": "c6e07440b6",
       "introducedDate": "2026-05-24",
       "lastRedProxy": {
-        "sha": "6af086d6f8",
-        "date": "2026-09-01",
-        "subject": "feat(#988): the gate names where its time went, and check:arch keeps its edges",
+        "sha": "5f50240382",
+        "date": "2026-09-04",
+        "subject": "feat(#1013): one-command dev board (3101/5273, own DB) + the two-boards runbook",
         "method": "git-log-fix-commit-naming-the-file"
       },
       "lastRedSource": "proxy: git log of fix commits naming the file (no gate-outcome ledger exists)",
@@ -1271,9 +1271,14 @@
       "property": "The guard inventory (#1022) must SEE the whole standing guard set, exactly once per file.",
       "propertyKey": "the guard inventory must see the whole standing guard set exactly once per file",
       "propertySource": "doc-block",
-      "introducedSha": null,
-      "introducedDate": null,
-      "lastRedProxy": null,
+      "introducedSha": "83f6e23713",
+      "introducedDate": "2026-09-04",
+      "lastRedProxy": {
+        "sha": "1bd286826e",
+        "date": "2026-09-04",
+        "subject": "Merge #1022: guard-suite inventory (pnpm guard:inventory) — report only, no removals",
+        "method": "git-log-fix-commit-naming-the-file"
+      },
       "lastRedSource": "proxy: git log of fix commits naming the file (no gate-outcome ledger exists)",
       "durationMs": null,
       "durationSource": "absent from docs/tests/durations.json"
@@ -4847,11 +4852,6 @@
       }
     ],
     "neverRedSinceIntroduction": [
-      {
-        "file": "packages/server/src/__tests__/guard-inventory.test.ts",
-        "introducedDate": null,
-        "property": "The guard inventory (#1022) must SEE the whole standing guard set, exactly once per file."
-      },
       {
         "file": "packages/server/src/__tests__/commit-checkpoint.test.ts",
         "introducedDate": "2026-05-28",
