@@ -56,7 +56,7 @@ export async function noteHeldCandidates<R extends string>(
 
 /**
  * The cycle state the three project-wide hold recorders below read. Structural rather than the
- * concrete `AutoStartCycle` (which is declared in `monitor-auto-start.ts`, our importer) â€” and
+ * concrete `AutoStartCycle` (which is declared in `monitor-auto-start-cycle.ts`, a module our importers share) â€” and
  * usefully so: it states exactly what recording a hold is allowed to touch.
  */
 export interface HoldRecorderCycle<R extends string, Info> extends IssueSkipRecorder<R> {
