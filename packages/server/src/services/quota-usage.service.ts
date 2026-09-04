@@ -2,6 +2,7 @@ import type { QuotaMetric, QuotaProviderEntry, QuotaUsageResult } from "@agentic
 // #704: moved to shared/src/types/api/. Re-exported so importers of this module are unchanged.
 export type { QuotaMetric, QuotaProviderEntry, QuotaUsageResult };
 import { request } from "node:http";
+import { OAuthQuotaProvider } from "./oauth-quota-provider.js";
 
 
 
@@ -64,11 +65,33 @@ export class TampermonkeyQuotaProvider implements QuotaUsageProvider {
   }
 }
 
-// Default singleton — points at the local tampermonkey-direct service.
-// Replace this instance (or inject a different QuotaUsageProvider) to swap the source.
-let _provider: QuotaUsageProvider = new TampermonkeyQuotaProvider();
+/**
+ * The default source (#1023): the OAuth usage endpoint, read per Claude profile with
+ * that profile's own token.
+ *
+ * `TampermonkeyQuotaProvider` was the default and is not the default any more. It is
+ * bound to a local browser-extension service on :8742 which is effectively never
+ * running, so `fetchLiveQuotaUsage()` threw on every call and the Bullseye's quota
+ * gating degraded to the static priority order. The class stays exported and
+ * selectable — nothing about it was wrong, it just cannot be the thing the board
+ * assumes is there.
+ *
+ * Selection is by env, not by preference, deliberately: this is a source-of-truth
+ * choice for the whole process, not per project, and a preference read here would make
+ * a module that must construct at import time DB-bound.
+ *   KANBAN_QUOTA_SOURCE=tampermonkey  → the old :8742 path
+ *   anything else / unset             → the OAuth provider
+ * `setQuotaUsageProvider()` still overrides both, which is what tests use.
+ */
+export function createDefaultQuotaUsageProvider(): QuotaUsageProvider {
+  if (process.env.KANBAN_QUOTA_SOURCE === "tampermonkey") return new TampermonkeyQuotaProvider();
+  return new OAuthQuotaProvider();
+}
+
+let _provider: QuotaUsageProvider | null = null;
 
 export function getQuotaUsageProvider(): QuotaUsageProvider {
+  if (!_provider) _provider = createDefaultQuotaUsageProvider();
   return _provider;
 }
 
@@ -77,5 +100,5 @@ export function setQuotaUsageProvider(provider: QuotaUsageProvider): void {
 }
 
 export async function fetchLiveQuotaUsage(): Promise<QuotaUsageResult> {
-  return _provider.fetchUsage();
+  return getQuotaUsageProvider().fetchUsage();
 }
