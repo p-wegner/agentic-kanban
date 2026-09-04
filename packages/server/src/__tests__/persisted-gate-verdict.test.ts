@@ -197,6 +197,26 @@ describe("describePersistedGateVerdict (#893 part 3 — merge-status after a res
     expect((await describePersistedGateVerdict(workspaceId, db))?.reusable).toBe(false);
   });
 
+  it("carries the PASSING gate's tier message, and null for evidence written without one (#1011)", async () => {
+    const { db } = createTestDb();
+    const workspaceId = await seedWorkspace(db);
+    const ranAt = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const message = "pre-merge gate passed (tier: guards-only (docs-and-config), 2 changed file(s), +66 guard suites, workers 4)";
+    await setMergeGateEvidence(workspaceId, {
+      ranAt, stage: "verify", source: "pre-lock-merge",
+      branchSha: "aaa", baseSha: "bbb", verificationKey: "key-1", message,
+    }, db);
+    expect((await describePersistedGateVerdict(workspaceId, db))?.message).toBe(message);
+
+    // Every write overwrites the whole row: a re-gate that resolved no message must not keep
+    // the previous run's tier text beside its own tips.
+    await setMergeGateEvidence(workspaceId, {
+      ranAt, stage: "verify", source: "pre-lock-merge",
+      branchSha: "aaa", baseSha: "bbb", verificationKey: "key-1",
+    }, db);
+    expect((await describePersistedGateVerdict(workspaceId, db))?.message).toBeNull();
+  });
+
   it("does not report a record of NO verification as a verdict", async () => {
     const { db } = createTestDb();
     const workspaceId = await seedWorkspace(db);

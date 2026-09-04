@@ -735,6 +735,10 @@ export async function runPreMergeGate(
           ? `pre-merge gate skipped — docs-only diff (${changedFiles.length} file(s))`
           : "NOT VERIFIED: this project has no verify_script and no smoke check, so nothing checked this merge (#377)",
     ...(unverified ? { unverified: true } : {}),
+    // #1030 — only for a run that actually verified something: a skipped gate made no selection.
+    ...(ranSomething && gateTierInfo && gateTierInfo.impactSelection !== undefined
+      ? { impactSelection: gateTierInfo.impactSelection }
+      : {}),
   };
 }
 
@@ -774,6 +778,7 @@ async function runGateAsResolved(
     stage: gate.stage,
     message: gate.message,
     ...(gate.unverified ? { unverified: true } : {}),
+    ...(gate.impactSelection !== undefined ? { impactSelection: gate.impactSelection } : {}),
   };
 }
 

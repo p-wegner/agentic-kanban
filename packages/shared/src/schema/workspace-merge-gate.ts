@@ -57,6 +57,14 @@ export const workspaceMergeGate = sqliteTable("workspace_merge_gate", {
    * simply carries no cost figure.
    */
   durationMs: integer("duration_ms"),
+  /**
+   * The PASSING gate's own message — `pre-merge gate passed (tier: file-scoped, 3 changed
+   * file(s), +14 guard suites, workers 6)` (#1011). CLAUDE.md promises a level may only weaken
+   * verification VISIBLY, but the message was only ever logged, so for a pass the promise held
+   * solely for whoever was watching the server log at that moment. Nullable: evidence written
+   * before #1011, or by a writer that had no message (a reused verdict pays no new run).
+   */
+  message: text("message"),
 });
 
 export const workspaceMergeGateRelations = relations(workspaceMergeGate, ({ one }) => ({

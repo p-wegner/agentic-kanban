@@ -97,3 +97,5 @@ export type { MergeTrainState } from "./merge-trains.js";
 // #945: the durable "a merge is in flight" marker — the single-workspace counterpart of
 // `merge_trains`, so a gate lost to a restart leaves a recoverable trace instead of silence.
 export { workspaceMergeRun, workspaceMergeRunRelations } from "./workspace-merge-run.js";
+// #1030: one row per DISCARDED gate verdict (#243) — sha pair, base-move files, impact selection.
+export { mergeGateDiscards, mergeGateDiscardsRelations } from "./merge-gate-discards.js";

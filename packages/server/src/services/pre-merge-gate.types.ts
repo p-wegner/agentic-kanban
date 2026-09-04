@@ -2,6 +2,7 @@
 // (pre-merge-gate.service.ts) and the gate DECISION token (merge-gate-token.ts) so that
 // neither has to import the other — see the no-circular arch rule.
 import type { Database } from "../db/index.js";
+import type { GateImpactSelection } from "./pre-merge-gate-tier.js";
 
 /** The workspace fields the pre-merge gate needs. A thin shape so any caller (exit-workflow's
  *  full WorkspaceRow, the monitor's WorkspaceCandidate) can satisfy it. */
@@ -57,4 +58,11 @@ export interface PreMergeGateResult {
    * with no visible difference. This flag is what makes that state sayable; callers surface it.
    */
   unverified?: boolean;
+  /**
+   * The impact selection the run was made under (#956), carried out of the gate so a DISCARDED
+   * verdict can be recorded with it (#1030): `null` when the gate ran under the impact selector
+   * but could not resolve one, absent for every other selector. Instrumentation only — nothing
+   * decides on it.
+   */
+  impactSelection?: GateImpactSelection | null;
 }

@@ -73,9 +73,12 @@ export interface MergeJobAttempt {
   /** Terminal verdict of this attempt, absent while it is still running. */
   outcome?: "passed" | "failed" | "skipped" | "discarded";
   /**
-   * Why this attempt did not land the merge, in operator words. Set for `failed` (the gate
-   * message) and for `discarded` — the case #936 exists for: the gate ran to completion and
-   * its verdict went nowhere (a tip moved during the run, evidence expired before the lock).
+   * What this attempt concluded, in operator words. Set for `failed` (the gate message), for
+   * `discarded` — the case #936 exists for: the gate ran to completion and its verdict went
+   * nowhere (a tip moved during the run, evidence expired before the lock) — and, since #1011,
+   * for `passed` too: the gate's own tier message (`pre-merge gate passed (tier: guards-only,
+   * +14 guard suites, …)`), so a WEAKENED tier is auditable after the fact and not only while
+   * someone is watching the server log.
    */
   detail?: string;
   /** The gate stage this attempt reached (`verify` / `smoke` / `none`). */

@@ -41,6 +41,11 @@ export interface MergeGateEvidenceValues {
    * previous row's value.
    */
   durationMs?: number | null;
+  /**
+   * The PASSING gate's tier message (#1011). Optional for the same reason as the two above and
+   * normalized the same way: omitted is written as null, never left as the previous row's value.
+   */
+  message?: string | null;
 }
 
 /**
@@ -57,7 +62,12 @@ export async function setMergeGateEvidence(
   // Normalize the optional field: an upsert whose SET omits `verification_key` would keep the
   // PREVIOUS run's key beside this run's tips — a proof asserting a tier it never ran under.
   // Every write therefore overwrites the whole row.
-  const row = { ...values, verificationKey: values.verificationKey ?? null, durationMs: values.durationMs ?? null };
+  const row = {
+    ...values,
+    verificationKey: values.verificationKey ?? null,
+    durationMs: values.durationMs ?? null,
+    message: values.message ?? null,
+  };
   await database.insert(workspaceMergeGate).values({ workspaceId, ...row })
     .onConflictDoUpdate({ target: workspaceMergeGate.workspaceId, set: { ...row } });
 }

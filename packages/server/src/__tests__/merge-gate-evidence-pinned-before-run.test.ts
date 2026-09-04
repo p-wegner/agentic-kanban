@@ -154,6 +154,34 @@ describe("runGateWithEvidence records the gate attempt on the merge job (#936)",
     expect(job.attempts[0].finishedAt).toBeTruthy();
   });
 
+  it("a PASSING attempt carries the gate's tier message, so a weakened tier is auditable after the fact (#1011)", async () => {
+    startMergeJob("ws-1b");
+    shaReads = [{ branchSha: "a", baseSha: "b" }, { branchSha: "a", baseSha: "b" }];
+    await runGateWithEvidence({
+      workspace: { ...gateWorkspace, id: "ws-1b" },
+      projectId: "project-1",
+      source: "pre-lock-merge",
+      database: {} as Database,
+      readShas: async () => shaReads[Math.min(shaReadCount++, 1)],
+      runGate: async () => ({
+        passed: true, ran: true, stage: "verify" as const,
+        message: "pre-merge gate passed (tier: guards-only (docs-and-config), 2 changed file(s), +66 guard suites, workers 4)",
+      }),
+    });
+    const attempt = getMergeJob("ws-1b")!.attempts[0];
+    expect(attempt.outcome).toBe("passed");
+    expect(attempt.detail).toContain("tier: guards-only");
+    expect(attempt.detail).toContain("+66 guard suites");
+  });
+
+  it("a SKIPPED attempt (nothing to gate on) carries no message — there is no tier to audit", async () => {
+    startMergeJob("ws-1c");
+    shaReads = [{ branchSha: "a", baseSha: "b" }, { branchSha: "a", baseSha: "b" }];
+    await runProtocol({ ran: false }, "ws-1c");
+    expect(getMergeJob("ws-1c")!.attempts[0]).toMatchObject({ outcome: "skipped" });
+    expect(getMergeJob("ws-1c")!.attempts[0].detail).toBeUndefined();
+  });
+
   it("records a completed-but-discarded gate WITH the reason its verdict went nowhere", async () => {
     // The expensive silent case #936 exists for: a full suite ran to completion and its
     // verdict is thrown away because a tip moved underneath it.

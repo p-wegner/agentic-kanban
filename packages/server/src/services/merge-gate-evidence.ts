@@ -6,10 +6,14 @@
  * merge path mocks `resolveMergeGate` on that module; folding this protocol in beside it would
  * make the call intra-module and silently bypass those mocks (measured — five suites went red).
  */
+import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
+import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import type { Database } from "../db/index.js";
+import { recordMergeGateDiscard } from "../repositories/merge-gate-discard.repository.js";
 import {
   noteMergeGateAttemptStarted,
   noteMergeGateAttemptFinished,
+  type MergeGateAttemptHandle,
 } from "./merge-job.service.js";
 import {
   resolveMergeGate,
@@ -133,6 +137,11 @@ export async function runGateWithEvidence(args: {
     projectId: string | null,
     database: Database,
   ) => Promise<Omit<ResolvedMergeGate, "decision">>;
+  /**
+   * Injectable reader for the base move's file list (#1030), so a test can pin it without a
+   * repo. Defaults to `git diff --name-only <before> <after>` in the worktree.
+   */
+  readBaseMoveFiles?: (workingDir: string, baseShaBefore: string, baseShaAfter: string) => Promise<string[] | null>;
 }): Promise<GateWithEvidence> {
   const { workspace, projectId, source, database } = args;
   const readShas = args.readShas ?? resolveMergeGateShas;
@@ -183,6 +192,12 @@ export async function runGateWithEvidence(args: {
         + `moved during the run (#243), so nothing proves the state about to merge was tested. `
         + `The gate will run again (#936).`,
     );
+    // #1030 — and write it down where it outlives this process. The warn above is the only trace
+    // a discard used to leave, and the dev log it lands in is truncated on every `pnpm dev`.
+    await persistDiscard({
+      workspace, source, database, result, attempt, moved, durationMs, ranAt, shasBefore, shasAfter,
+      readBaseMoveFiles: args.readBaseMoveFiles ?? readBaseMoveFilesFromGit,
+    });
   }
   noteMergeGateAttemptFinished(workspace.id, attempt, {
     outcome: !result.passed
@@ -193,12 +208,77 @@ export async function runGateWithEvidence(args: {
           ? "passed"
           : "skipped",
     stage: result.stage,
+    // #1011 — a PASS carries its tier message too ("pre-merge gate passed (tier: guards-only,
+    // …)"). "A level may only weaken verification visibly" was true only in the server log;
+    // the attempt record is what `merge-status` shows an operator reading the board later.
     detail: !result.passed
       ? result.message
       : moved
         ? `gate passed but a tip moved during the run (${movedDetail ?? moved}) — verdict discarded, the gate must run again (#243)`
-        : undefined,
+        : result.ran
+          ? result.message
+          : undefined,
   });
 
   return { ...result, shasBefore, moved, movedDetail, ranAt, token, durationMs };
+}
+
+/** `git diff --name-only <before> <after>` in the worktree; null when git cannot answer. */
+async function readBaseMoveFilesFromGit(workingDir: string, before: string, after: string): Promise<string[] | null> {
+  const res = await gitExec(["diff", "--name-only", before, after], { cwd: workingDir });
+  if (res.error || res.code !== 0) return null;
+  return res.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+}
+
+/**
+ * Record a discarded verdict in `merge_gate_discards` (#1030): the sha pair per tip, the files
+ * the base move touched, and the impact selection the run was made under.
+ *
+ * Instrumentation ONLY. It runs after the discard has already been decided and changes nothing
+ * about it — #986 and #1017 both closed with "#243's discard stays exactly as strict as it is",
+ * and this exists so that a future argument about relaxing it can be made from data rather than
+ * from `git log` committer dates. Non-fatal throughout: an unrecordable discard must never fail
+ * the gate protocol that just made it.
+ */
+async function persistDiscard(args: {
+  workspace: PreMergeGateWorkspace;
+  source: string;
+  database: Database;
+  result: Omit<ResolvedMergeGate, "decision">;
+  attempt: MergeGateAttemptHandle | null;
+  moved: "branch" | "base";
+  durationMs: number;
+  ranAt: string;
+  shasBefore: MergeGateShas;
+  shasAfter: MergeGateShas;
+  readBaseMoveFiles: (workingDir: string, before: string, after: string) => Promise<string[] | null>;
+}): Promise<void> {
+  const { workspace, source, database, result, attempt, moved, durationMs, ranAt, shasBefore, shasAfter } = args;
+  try {
+    const baseMoved = Boolean(shasBefore.baseSha && shasAfter.baseSha && shasBefore.baseSha !== shasAfter.baseSha);
+    const baseMoveFiles = baseMoved && workspace.workingDir
+      ? await args.readBaseMoveFiles(workspace.workingDir, shasBefore.baseSha!, shasAfter.baseSha!).catch(() => null)
+      : null;
+    await recordMergeGateDiscard({
+      workspaceId: workspace.id,
+      discardedAt: ranAt,
+      source,
+      stage: result.stage,
+      durationMs,
+      jobId: attempt?.jobId ?? null,
+      attempt: attempt?.attempt ?? null,
+      moved,
+      branchShaBefore: shasBefore.branchSha ?? null,
+      branchShaAfter: shasAfter.branchSha ?? null,
+      baseShaBefore: shasBefore.baseSha ?? null,
+      baseShaAfter: shasAfter.baseSha ?? null,
+      baseMoveFiles: baseMoveFiles ? JSON.stringify(baseMoveFiles) : null,
+      impactSelection: result.impactSelection ? JSON.stringify(result.impactSelection) : null,
+    }, database);
+  } catch (err) {
+    console.warn(
+      `[merge-gate] failed to persist discarded verdict for workspace ${workspace.id} (non-fatal, #1030):`,
+      errorMessage(err),
+    );
+  }
 }
