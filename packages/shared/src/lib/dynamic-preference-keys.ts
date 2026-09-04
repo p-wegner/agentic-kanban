@@ -175,6 +175,15 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // server/lib/red-debt-cap.ts.
   "red_debt_max",
   "red_debt_max_age",
+  // Red-base policy override (#1015): `red_base_policy_<id>` overrides the `redBasePolicy`
+  // the project's risk-posture LEVEL derives, **softer only** — `block` -> `allow-known-debt`
+  // -> `allow-file-debt-ticket`. A stricter value is ignored with a logged warning, because
+  // the level is the dial that is supposed to say how strict a project is; this key exists so
+  // a project can let merges land on a red base (dev-board "land, then heal") WITHOUT having
+  // to abandon its level's gate tier, review mode and train sizing. Applied in
+  // `resolveRiskPosture` after level derivation; nothing else may read the key
+  // (`red-base-policy-raw-read-ratchet.test.ts`). See decision 017, Amendment 2026-09-04.
+  "red_base_policy",
 ] as const;
 
 // Deliberately NOT registered, though both are per-project keys that exist on disk (#496):

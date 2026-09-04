@@ -13,6 +13,8 @@
  * previewed in the UI — same shape as `profile-allowlist.ts`'s pure-policy kind.
  */
 
+import type { RedBasePolicy } from "@agentic-kanban/shared/types";
+
 /** The two postures this rule is defined for. `strict`/`standard` never soften a verdict. */
 export type RedDebtGatePosture = "fast" | "sprint";
 
@@ -89,6 +91,21 @@ export function resolveRedDebtGateVerdict(input: RedDebtGateInput): RedDebtGateV
     message: `PASS-WITH-DEBT (sprint) — ledgered new red suite(s): ${newRed.join(", ")}`
       + (carriedDebt.length > 0 ? `; also carrying known debt: ${carriedDebt.join(", ")}` : ""),
   };
+}
+
+/**
+ * Which subset-rule behaviour a {@link RedBasePolicy} asks for (#1015) — `null` for `block`,
+ * i.e. "this rule does not apply, the gate stays withheld".
+ *
+ * The two behaviours were named after the postures that first needed them (`fast` rejects new
+ * red, `sprint` ledgers it and lands anyway). The merge gate now keys on the POLICY, so this
+ * is the one place the policy -> behaviour mapping lives; the names stay, because the pure
+ * decision function and its tests are about the two behaviours, not about levels.
+ */
+export function redDebtGatePostureForPolicy(policy: RedBasePolicy): RedDebtGatePosture | null {
+  if (policy === "allow-known-debt") return "fast";
+  if (policy === "allow-file-debt-ticket") return "sprint";
+  return null;
 }
 
 /** True when every entry of `failedSuites` is present in `ledgeredSuites`. */

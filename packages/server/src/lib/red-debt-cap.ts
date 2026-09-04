@@ -21,6 +21,7 @@
  */
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import type { RiskPosture } from "@agentic-kanban/shared/lib/risk-posture";
+import type { RedBasePolicy } from "@agentic-kanban/shared/types";
 
 const redDebtMaxPrefDef = projectPref("red_debt_max");
 const redDebtMaxAgePrefDef = projectPref("red_debt_max_age");
@@ -81,28 +82,43 @@ export interface RedDebtCapResult {
  * postures already run the full gate and carry no debt-driven softening to take away.
  */
 export function resolveRedDebtCapDegrade(input: RedDebtCapInput): RedDebtCapResult {
-  const { posture, openEntryCount, oldestOpenEntryAgeMs } = input;
+  const { posture } = input;
   const noDegrade: RedDebtCapResult = { effectivePosture: posture, degraded: false, note: null };
 
   const nextStep = DEGRADE_STEP[posture];
   if (!nextStep) return noDegrade;
 
-  const maxEntries = parsePositiveInt(input.maxEntriesRaw, DEFAULT_RED_DEBT_MAX_ENTRIES);
-  const maxAgeMs = parsePositiveInt(input.maxAgeMsRaw, DEFAULT_RED_DEBT_MAX_AGE_MS);
-
-  const overCount = openEntryCount > maxEntries;
-  const overAge = oldestOpenEntryAgeMs !== null && oldestOpenEntryAgeMs > maxAgeMs;
-  if (!overCount && !overAge) return noDegrade;
-
-  const reasons: string[] = [];
-  if (overCount) reasons.push(`${openEntryCount} open debt entries exceed the cap of ${maxEntries}`);
-  if (overAge) reasons.push(`oldest open entry is ${Math.round((oldestOpenEntryAgeMs as number) / 60_000)}m old, exceeding the ${Math.round(maxAgeMs / 60_000)}m cap`);
+  const reasons = capExceededReasons(input);
+  if (!reasons) return noDegrade;
 
   return {
     effectivePosture: nextStep,
     degraded: true,
     note: `red-debt cap exceeded (${reasons.join("; ")}) — posture degraded ${posture} -> ${nextStep}`,
   };
+}
+
+/** Is the ledger over either cap, and why? `null` = within both caps. Shared by the posture
+ *  form above and the red-base-policy form below, so the two can never disagree about when
+ *  the cap bites. */
+function capExceededReasons(input: {
+  openEntryCount: number;
+  oldestOpenEntryAgeMs: number | null;
+  maxEntriesRaw?: string | null;
+  maxAgeMsRaw?: string | null;
+}): string[] | null {
+  const { openEntryCount, oldestOpenEntryAgeMs } = input;
+  const maxEntries = parsePositiveInt(input.maxEntriesRaw, DEFAULT_RED_DEBT_MAX_ENTRIES);
+  const maxAgeMs = parsePositiveInt(input.maxAgeMsRaw, DEFAULT_RED_DEBT_MAX_AGE_MS);
+
+  const overCount = openEntryCount > maxEntries;
+  const overAge = oldestOpenEntryAgeMs !== null && oldestOpenEntryAgeMs > maxAgeMs;
+  if (!overCount && !overAge) return null;
+
+  const reasons: string[] = [];
+  if (overCount) reasons.push(`${openEntryCount} open debt entries exceed the cap of ${maxEntries}`);
+  if (overAge) reasons.push(`oldest open entry is ${Math.round((oldestOpenEntryAgeMs as number) / 60_000)}m old, exceeding the ${Math.round(maxAgeMs / 60_000)}m cap`);
+  return reasons;
 }
 
 /**
@@ -123,4 +139,58 @@ export function resolveEffectiveRedDebtPosture(input: RedDebtCapInput): RedDebtC
     current = { effectivePosture: next.effectivePosture, degraded: true, note: notes.join(" | ") };
   }
   return current;
+}
+
+/** One degrade step for the RED-BASE POLICY, in the same direction the softer-only override
+ *  is allowed to move (#1015): allow-file-debt-ticket -> allow-known-debt -> block. */
+const POLICY_DEGRADE_STEP: Partial<Record<RedBasePolicy, RedBasePolicy>> = {
+  "allow-file-debt-ticket": "allow-known-debt",
+  "allow-known-debt": "block",
+};
+
+export interface RedBasePolicyCapInput {
+  /** The policy the posture resolved (level table + any softer project override). */
+  policy: RedBasePolicy;
+  /** Count of currently OPEN ledger entries for the project. */
+  openEntryCount: number;
+  /** Age (ms) of the OLDEST open entry, or null when there are none. */
+  oldestOpenEntryAgeMs: number | null;
+  maxEntriesRaw?: string | null;
+  maxAgeMsRaw?: string | null;
+}
+
+export interface RedBasePolicyCapResult {
+  effectivePolicy: RedBasePolicy;
+  degraded: boolean;
+  /** Human-readable reason, populated whenever `degraded` is true. Never silent. */
+  note: string | null;
+}
+
+/**
+ * The #916 cap expressed on the RED-BASE POLICY rather than the posture LEVEL (#1015).
+ *
+ * The merge gate's subset rule now keys on `redBasePolicy`, and a project may reach a soft
+ * policy WITHOUT a soft level (an `iterate` project carrying the softer-only project override). Capping
+ * the level alone would therefore have left that project softening verdicts forever — the
+ * exact hole #916 was written to close. So the cap runs on the policy: over cap, the policy
+ * steps all the way down to `block`, because the cap condition does not change as it steps
+ * (unlike a level, no intermediate policy is "small enough debt" again).
+ *
+ * Within cap, or already `block`, this is a no-op — so a project nobody configured is
+ * byte-identical to before.
+ */
+export function resolveEffectiveRedBasePolicy(input: RedBasePolicyCapInput): RedBasePolicyCapResult {
+  const noDegrade: RedBasePolicyCapResult = { effectivePolicy: input.policy, degraded: false, note: null };
+  if (!POLICY_DEGRADE_STEP[input.policy]) return noDegrade;
+
+  const reasons = capExceededReasons(input);
+  if (!reasons) return noDegrade;
+
+  const notes: string[] = [];
+  let current = input.policy;
+  for (let next = POLICY_DEGRADE_STEP[current]; next; next = POLICY_DEGRADE_STEP[current]) {
+    notes.push(`red-debt cap exceeded (${reasons.join("; ")}) — red-base policy degraded ${current} -> ${next}`);
+    current = next;
+  }
+  return { effectivePolicy: current, degraded: true, note: notes.join(" | ") };
 }
