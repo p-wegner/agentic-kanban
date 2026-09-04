@@ -22,7 +22,7 @@ import {
 
 export type { RotationResult };
 
-import type { ProfileRole } from "@agentic-kanban/shared/lib/profile-attributes";
+import type { ProfileRole } from "../lib/profile-attributes.js";
 
 /**
  * One Claude "subscription" in the rotation ring.
