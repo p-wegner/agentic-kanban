@@ -2,13 +2,13 @@
   "schema": "guard-inventory 1",
   "generatedBy": "pnpm guard:inventory (scripts/guard-inventory.mjs)",
   "counts": {
-    "files": 172,
-    "alwaysRun": 172,
-    "ratchet": 38,
-    "both": 38,
-    "distinctProperties": 172,
+    "files": 173,
+    "alwaysRun": 173,
+    "ratchet": 39,
+    "both": 39,
+    "distinctProperties": 173,
     "missingProperty": 0,
-    "unmeasured": 10
+    "unmeasured": 11
   },
   "slowThresholdMs": 20000,
   "withGit": true,
@@ -1912,6 +1912,29 @@
       "durationSource": "docs/tests/durations.json"
     },
     {
+      "file": "packages/server/src/__tests__/red-base-policy-raw-read-ratchet.test.ts",
+      "basename": "red-base-policy-raw-read-ratchet.test.ts",
+      "package": "server",
+      "kinds": [
+        "always-run",
+        "ratchet"
+      ],
+      "property": "#1015 — `red_base_policy_<projectId>` is the per-project, **softer-only** override of the",
+      "propertyKey": "1015 red base policy projectid is the per project softer only override of the",
+      "propertySource": "doc-block",
+      "introducedSha": "ac4685ca23",
+      "introducedDate": "2026-09-04",
+      "lastRedProxy": {
+        "sha": "8a0f35d793",
+        "date": "2026-09-04",
+        "subject": "Merge #1015: red-debt rule keys on redBasePolicy; softer-only per-project red_base_policy override (decision 017 amendment)",
+        "method": "git-log-fix-commit-naming-the-file"
+      },
+      "lastRedSource": "proxy: git log of fix commits naming the file (no gate-outcome ledger exists)",
+      "durationMs": null,
+      "durationSource": "absent from docs/tests/durations.json"
+    },
+    {
       "file": "packages/server/src/__tests__/repo-path-literal-ratchet.test.ts",
       "basename": "repo-path-literal-ratchet.test.ts",
       "package": "server",
@@ -3645,6 +3668,13 @@
       ]
     },
     {
+      "propertyKey": "1015 red base policy projectid is the per project softer only override of the",
+      "property": "#1015 — `red_base_policy_<projectId>` is the per-project, **softer-only** override of the",
+      "files": [
+        "packages/server/src/__tests__/red-base-policy-raw-read-ratchet.test.ts"
+      ]
+    },
+    {
       "propertyKey": "220 branch name producer agreement",
       "property": "#220 — branch-name PRODUCER agreement.",
       "files": [
@@ -5128,6 +5158,7 @@
       "packages/server/src/__tests__/machine-verify-lock-mirror.test.ts",
       "packages/server/src/__tests__/project-update-unrecognized-keys.test.ts",
       "packages/server/src/__tests__/promote-plan.test.ts",
+      "packages/server/src/__tests__/red-base-policy-raw-read-ratchet.test.ts",
       "packages/server/src/__tests__/test-impact-budget-setting.test.ts",
       "packages/server/src/__tests__/typecheck-package-coverage.test.ts",
       "packages/server/src/__tests__/verify-step-timings.test.ts",
