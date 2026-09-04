@@ -135,6 +135,11 @@ async function main() {
     throw new Error(`${join(REPO_ROOT, "node_modules")} is missing — run: pnpm install`);
   }
 
+  // `ak-` is the reaper's swept namespace (`SWEPT_TEMP_NAMESPACES` in
+  // `packages/server/src/__tests__/helpers/reap-fixture-child-servers.ts`, enforced by
+  // `temp-dir-namespace-guard.test.ts`). This is plain node with no package resolution, so the
+  // prefix is MIRRORED rather than imported — keep it in that namespace, or an aborted run
+  // (the `finally` below cannot reach a killed process) leaks this directory permanently.
   const work = mkdtempSync(join(tmpdir(), "ak-boot-dist-"));
   const checkout = join(work, "checkout");
   const dbPath = join(work, "smoke.db");

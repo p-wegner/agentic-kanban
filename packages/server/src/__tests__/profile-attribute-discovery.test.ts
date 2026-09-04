@@ -31,7 +31,7 @@ function write(path: string, text: string): void {
 
 beforeAll(() => {
   // `tmpdir` here is the mocked module's re-export of the real one (only homedir is faked).
-  fixture.home = mkdtempSync(join(tmpdir(), "profile-discovery-"));
+  fixture.home = mkdtempSync(join(tmpdir(), "ak-profile-discovery-"));
 
   // A forbidden OAuth subscription: `~/.claude-training/` with a settings.json env block.
   write(
