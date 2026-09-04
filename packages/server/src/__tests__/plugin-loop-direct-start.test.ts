@@ -21,6 +21,7 @@ import { describeLoopStartOutcome, startPlannedLoopTickets } from "../services/p
 import type { StartPolicy } from "../services/start-policy.service.js";
 import { claimIssueForAutoStart, isAutoStartClaimed } from "../services/auto-start-claim.js";
 import { resetCreateJobs } from "../services/create-job.service.js";
+import { DEFAULT_HARNESS_SHARE_PCT } from "@agentic-kanban/shared/lib/harness-budget";
 
 function policy(overrides: Partial<StartPolicy> = {}): StartPolicy {
   return {
@@ -30,7 +31,7 @@ function policy(overrides: Partial<StartPolicy> = {}): StartPolicy {
     postMergeFollowups: false,
     backlogRefill: false,
     scheduledRuns: true,
-    wip: { activeAgentsTarget: 2, backlogFloor: 10, maxNewStartsPerCycle: 3, refillFocus: "balanced" },
+    wip: { activeAgentsTarget: 2, backlogFloor: 10, maxNewStartsPerCycle: 3, refillFocus: "balanced", harnessSharePct: DEFAULT_HARNESS_SHARE_PCT },
     source: "start_mode",
     ...overrides,
   } as StartPolicy;
@@ -111,7 +112,7 @@ describe("#351: the advance path starts the ticket it just planned", () => {
     const outcomes = await startPlannedLoopTickets({
       database: db as unknown as Database,
       projectId,
-      policy: policy({ wip: { activeAgentsTarget: 2, backlogFloor: 10, maxNewStartsPerCycle: 3, refillFocus: "balanced" } }),
+      policy: policy({ wip: { activeAgentsTarget: 2, backlogFloor: 10, maxNewStartsPerCycle: 3, refillFocus: "balanced", harnessSharePct: DEFAULT_HARNESS_SHARE_PCT } }),
       tickets: [
         { issueId: "i1", issueNumber: 1 },
         { issueId: "i2", issueNumber: 2 },

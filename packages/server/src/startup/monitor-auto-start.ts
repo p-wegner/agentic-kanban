@@ -34,6 +34,7 @@ import {
   type WipCapacitySnapshot,
 } from "../repositories/wip-capacity.repository.js";
 import { orderCandidatesByStartScore } from "./monitor-start-scoring.js";
+import { buildHarnessBudgetGate, holdForHarnessBudget } from "./monitor-harness-budget.js";
 // #919: recording a PROJECT-WIDE hold — its per-project tally, the per-ticket attribution that
 // makes "why is #57 not running" answerable, and the end-of-cycle flush of both.
 import {
@@ -170,7 +171,9 @@ export type AutoStartSkipReason =
    * This is not a failure and not a consumed WIP slot — the OTHER starter's launch is the one
    * that counts, so the cycle records the decline and moves on.
    */
-  | "create_in_flight";
+  | "create_in_flight"
+  /** #1021 — the harness budget is full; rationale and mechanics in `monitor-harness-budget.ts`. */
+  | "harness_budget";
 
 /**
  * #936: the two hold RECORDERS and their detail shapes live in `monitor-start-holds.ts`
@@ -249,6 +252,8 @@ export interface AutoStartDeps {
    * logic inject a no-op that leaves `candidates` in query order.
    */
   orderStartCandidates?: typeof orderCandidatesByStartScore;
+  /** #1021's budget snapshot — injectable for the same ordered-mock reason (it reads via `db.select`). */
+  buildHarnessGate?: typeof buildHarnessBudgetGate;
 }
 
 /**
@@ -376,7 +381,7 @@ interface AutoStartCycle {
   buildContentionGate: BuildFileContentionGate;
   canDispatch: typeof projectCanDispatch;
   hasFleetOverflowCapacity: typeof defaultHasFleetOverflowCapacity;
-  orderStartCandidates: typeof orderCandidatesByStartScore;
+  orderStartCandidates: typeof orderCandidatesByStartScore; buildHarnessGate: typeof buildHarnessBudgetGate;
   skipInfo: Map<string, AutoStartSkipInfo>;
   noteSkip: (projectId: string, issueNumber: number | null | undefined, reason: AutoStartSkipReason, count?: number) => void;
   /**
@@ -816,6 +821,9 @@ async function runTodoPull(ctx: AutoStartCycle, inProgressSt: { id: string; proj
 
   await ctx.orderStartCandidates(todoIssues, inProgressSt.projectId, doneStatusIds, ctx.prefMap, db);
 
+  // #1021: the harness budget, snapshotted once per project per cycle (see the sibling module).
+  const harnessGate = await ctx.buildHarnessGate({ database: db, inProgressStatusId: inProgressSt.id, wipLimit, sharePct: ctx.tunablesFor(inProgressSt.projectId).harnessSharePct, candidateIssueIds: todoIssues.map((i) => i.id) });
+
   // Candidates consumed as GROUP MEMBERS this cycle: their workspace row is minutes
   // away (async provisioning), so only this in-cycle set stops the loop from also
   // starting them individually.
@@ -837,6 +845,7 @@ async function runTodoPull(ctx: AutoStartCycle, inProgressSt: { id: string; proj
       break;
     }
     if (startedAsMember.has(issue.id)) continue;
+    if (holdForHarnessBudget(harnessGate, issue, inProgressSt.projectId, ctx.noteSkip, ctx.noteIssueSkip)) continue;
     const decision = await evaluateStartCandidate({
       issue,
       reconcileProjectId: issue.projectId,
@@ -897,6 +906,7 @@ async function runTodoPull(ctx: AutoStartCycle, inProgressSt: { id: string; proj
     started++;
     ctx.noteStart(inProgressSt.projectId);
     contentionGate.noteStarted(issue.id);
+    harnessGate.noteStarted(issue.id);
     // Group members are consumed by THIS start: keep the rest of the cycle (and the
     // contention snapshot) from starting them individually.
     for (const memberId of memberIssueIds) {
@@ -914,7 +924,7 @@ export async function runAutoStart(prefMap: Map<string, string>, {
   serverPort, boardEvents, logMonitorAction, allowProject, isAutoDrivenProject = () => false,
   buildContentionGate = buildFileContentionGate, canDispatch = projectCanDispatch,
   readMachineCapacity = resolveMachineCapacity, hostOverflowHasFleetCapacity: hasFleetOverflowCapacity = defaultHasFleetOverflowCapacity,
-  orderStartCandidates = orderCandidatesByStartScore,
+  orderStartCandidates = orderCandidatesByStartScore, buildHarnessGate = buildHarnessBudgetGate,
 }: AutoStartDeps): Promise<Map<string, AutoStartSkipInfo>> {
   const skipInfo = new Map<string, AutoStartSkipInfo>();
   const noteSkip = (projectId: string, issueNumber: number | null | undefined, reason: AutoStartSkipReason, count = 1) => {
@@ -967,7 +977,7 @@ export async function runAutoStart(prefMap: Map<string, string>, {
 
   const ctx: AutoStartCycle = {
     prefMap, database: db, baseUrl, boardEvents, logMonitorAction, isAutoDrivenProject,
-    buildContentionGate, canDispatch, hasFleetOverflowCapacity, orderStartCandidates, skipInfo, noteSkip, noteIssueSkip, noteIssueStarted, tunablesFor, wipLimitFor, startsRemaining, noteStart,
+    buildContentionGate, canDispatch, hasFleetOverflowCapacity, orderStartCandidates, buildHarnessGate, skipInfo, noteSkip, noteIssueSkip, noteIssueStarted, tunablesFor, wipLimitFor, startsRemaining, noteStart,
     machineCapacity,
   };
 

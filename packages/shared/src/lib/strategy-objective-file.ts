@@ -20,6 +20,11 @@ import { MAX_ACTIVE_AGENTS_TARGET, normalizeProviderPolicies, strategyPrefKey } 
 import type { ProviderPolicyMode, ProviderProfilePolicy } from "./strategy-policy.js";
 import { isBoardStrategyPreferenceKey } from "./dynamic-preference-keys.js";
 import { readRiskPosture, RISK_POSTURE_DEFAULT, RISK_POSTURE_DESCRIPTIONS, type RiskPosture } from "./risk-posture.js";
+import {
+  DEFAULT_HARNESS_SHARE_PCT,
+  MAX_HARNESS_SHARE_PCT,
+  MIN_HARNESS_SHARE_PCT,
+} from "./harness-budget.js";
 
 export type StrategySegmentKind = "work-type" | "provider" | "area" | "custom";
 
@@ -37,6 +42,12 @@ export interface StrategyBullseyeConfig {
   activeAgentsTarget?: number;
   backlogFloor?: number;
   maxNewStartsPerCycle?: number;
+  /**
+   * #1021 — the share (in percent) of the effective WIP that may run `harness`-tagged
+   * tickets. Absent means the default (34 %, i.e. 1 builder of 3); 100 means the budget
+   * never bites, which is the pre-#1021 behaviour.
+   */
+  harnessSharePct?: number;
   segments?: StrategyBullseyeSegment[];
   /** Provider profile policies — controls how the orchestrator routes work to each profile. */
   providerPolicies?: ProviderProfilePolicy[];
@@ -47,6 +58,8 @@ export interface MonitorTunables {
   backlogFloor: number;
   maxNewStartsPerCycle: number;
   refillFocus: "bugfix-only" | "balanced";
+  /** #1021 — see `StrategyBullseyeConfig.harnessSharePct`. Always resolved, never absent. */
+  harnessSharePct: number;
 }
 
 const STRATEGY_RELATIVE_PATH = "scripts/board-monitor/objective.md";
@@ -60,6 +73,7 @@ const DEFAULT_TUNABLES: MonitorTunables = {
   backlogFloor: 10,
   maxNewStartsPerCycle: 2,
   refillFocus: "balanced",
+  harnessSharePct: DEFAULT_HARNESS_SHARE_PCT,
 };
 
 const WORK_TYPE_KEYWORDS = {
@@ -102,6 +116,7 @@ export function parseStrategyBullseyeConfig(raw: string): StrategyBullseyeConfig
     activeAgentsTarget: parsed.activeAgentsTarget,
     backlogFloor: parsed.backlogFloor,
     maxNewStartsPerCycle: parsed.maxNewStartsPerCycle,
+    harnessSharePct: parsed.harnessSharePct,
     segments: Array.isArray(parsed.segments)
       ? parsed.segments
           .filter((segment) => segment && typeof segment.id === "string" && typeof segment.label === "string")
@@ -135,6 +150,12 @@ export function deriveMonitorTunables(config: StrategyBullseyeConfig): MonitorTu
     backlogFloor: clampInt(config.backlogFloor, DEFAULT_TUNABLES.backlogFloor, 0, 100),
     maxNewStartsPerCycle: clampInt(config.maxNewStartsPerCycle, DEFAULT_TUNABLES.maxNewStartsPerCycle, 1, MAX_ACTIVE_AGENTS_TARGET),
     refillFocus: bugfixWeight > 0 && bugfixWeight >= nonBugfixWorkWeight ? "bugfix-only" : "balanced",
+    harnessSharePct: clampInt(
+      config.harnessSharePct,
+      DEFAULT_TUNABLES.harnessSharePct,
+      MIN_HARNESS_SHARE_PCT,
+      MAX_HARNESS_SHARE_PCT,
+    ),
   };
 }
 
@@ -183,6 +204,7 @@ export function renderGeneratedStrategyBlock(config: StrategyBullseyeConfig, pos
     `- **BACKLOG_FLOOR = ${tunables.backlogFloor}** - never let the backlog drop below this; refill before it does.`,
     `- **MAX_NEW_STARTS_PER_CYCLE = ${tunables.maxNewStartsPerCycle}** - cap on how many NEW workspaces to launch in a single cycle.`,
     `- **REFILL_FOCUS = ${tunables.refillFocus}** - derived from work-type marker weights; \`bugfix-only\` emphasizes reproducible bugs, \`balanced\` allows feature/quality mix.`,
+    `- **HARNESS_SHARE = ${tunables.harnessSharePct}%** - at most this share of the WIP may run \`harness\`-tagged tickets (gate, guards, ratchets, impact map, hooks, merge path); the rest goes to product work. 100% disables the budget.`,
     "",
     "## RISK POSTURE (generated - do not hand-edit)",
     `- **RISK POSTURE = ${posture}** - ${RISK_POSTURE_DESCRIPTIONS[posture]} Set via Settings -> Workflow; a ticket may override with a \`risk:<posture>\` tag.`,
@@ -247,6 +269,7 @@ export function renderProjectConductorObjective(project: { id: string; name?: st
     "- **BACKLOG_FLOOR = 10** - never let the backlog drop below this; refill before it does.",
     "- **MAX_NEW_STARTS_PER_CYCLE = 2** - cap on how many NEW workspaces to launch in a single cycle.",
     "- **REFILL_FOCUS = balanced** - derived from work-type marker weights.",
+    `- **HARNESS_SHARE = ${DEFAULT_HARNESS_SHARE_PCT}%** - at most this share of the WIP may run \`harness\`-tagged tickets.`,
     "",
     "## STRATEGY WEIGHTS (generated - do not hand-edit)",
     "- No bullseye markers configured yet.",
@@ -381,6 +404,12 @@ export function resolveMonitorTunables(
       backlogFloor: 3,
       maxNewStartsPerCycle: 3,
       refillFocus: "balanced",
+      // #1021: the harness budget is NOT a Bullseye-only rule — a project that never
+      // opened the Bullseye is exactly the one most likely to drift, so the default
+      // share applies on the legacy path too. It only bites on `harness`-tagged
+      // tickets, and nothing tags them automatically, so an existing project sees no
+      // change until someone starts using the tag.
+      harnessSharePct: DEFAULT_HARNESS_SHARE_PCT,
     },
     source: "prefs",
     posture,
