@@ -135,6 +135,16 @@ const ALLOWLIST = new Map<string, string>([
       ".test.ts/.spec.ts exclusion simply does not name it.",
   ],
   [
+    join("scripts", "git-exec.mjs"),
+    "The SCRIPTS-TIER adapter — the plain-node twin of packages/shared/src/lib/git-exec.ts, and the " +
+      "single spawn site every `scripts/*.mjs` must go through. The entries below it exist because a " +
+      "bare `node scripts/<x>.mjs` cannot import the real adapter (TypeScript under packages/shared/src, " +
+      "and often needed before packages/shared/dist exists at all); the answer to that constraint used " +
+      "to be a private `git()` helper per script, which is the exact drift this gate exists to prevent. " +
+      "New scripts import THIS instead of getting their own entry; the remaining listed scripts are " +
+      "grandfathered and may migrate to it one at a time.",
+  ],
+  [
     join("scripts", "test-mine.mjs"),
     "The test runner itself, run as bare `node scripts/test-mine.mjs` with no bundler and no tsx " +
       "— so it cannot import the adapter, which is TypeScript under packages/shared/src, and it " +

@@ -48,11 +48,11 @@
 //   --no-git        skip the two git passes (introduced / last-red proxy) — fast, for tests
 //   --out <dir>     output directory (default docs/tests)
 
-import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { gitExecSync } from "./git-exec.mjs";
 import { PACKAGES, ALWAYS_RUN_TESTS_DIR, ALWAYS_RUN_TEST_FILE, scanAlwaysRunTests } from "./test-mine.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -215,13 +215,9 @@ export function propertyKey(property) {
 
 /* ------------------------------------------------------------------ git */
 
+/** Thin alias over the scripts-tier adapter (`scripts/git-exec.mjs`) — throws on non-zero, raw stdout. */
 function git(args, root) {
-  return execFileSync("git", args, {
-    cwd: root,
-    encoding: "utf8",
-    maxBuffer: 256 * 1024 * 1024,
-    windowsHide: true,
-  });
+  return gitExecSync(args, { cwd: root });
 }
 
 /** The commit that ADDED each file, following renames. One `git log` per file — there is no
