@@ -58,7 +58,7 @@ export const MCP_TOOL_DEFINITIONS: McpToolDefinition[] = [
   { name: "create_issue", description: "Create a new issue on the kanban board", category: "issues" },
   { name: "create_sub_issue", description: "Create one child issue and link it to a parent with a child_of dependency in the same transaction.", category: "issues" },
   { name: "create_issues_batch", description: "Create multiple issues atomically in a single call, optionally with dependency edges between them. Returns each created issue with its assigned issueNumber. All-or-nothing: issues AND edges commit in one transaction, so autodrive can never observe a ticket before its dependency edges exist. Any validation failure rolls back.", category: "issues" },
-  { name: "update_issue", description: "Update an existing issue (title, description, status, priority, type)", category: "issues" },
+  { name: "update_issue", description: "Update an existing issue (title, description, status, priority, type, estimate, tags). tags.add / tags.remove take tag NAMES; an added tag is created when the board has none of that name (e.g. 'harness').", category: "issues" },
   { name: "delete_issue", description: "Delete an issue and all its associated data", category: "issues" },
   { name: "move_issue", description: "Move an issue to a different status column by name (e.g., 'Todo', 'In Progress', 'Done')", category: "issues" },
   { name: "attach_artifact", description: "Attach a text, link, image, or video artifact to an issue or workspace. Workspace artifacts are also tied to the workspace's issue.", category: "issues" },

@@ -24,7 +24,7 @@ All 114 tools exposed by the `agentic-kanban` MCP server. Call them as `mcp__age
 | `create_issue` | Create a new issue on the kanban board |
 | `create_sub_issue` | Create one child issue and link it to a parent with a child_of dependency in the same transaction. |
 | `create_issues_batch` | Create multiple issues atomically in a single call, optionally with dependency edges between them. Returns each created issue with its assigned issueNumber. All-or-nothing: issues AND edges commit in one transaction, so autodrive can never observe a ticket before its dependency edges exist. Any validation failure rolls back. |
-| `update_issue` | Update an existing issue (title, description, status, priority, type) |
+| `update_issue` | Update an existing issue (title, description, status, priority, type, estimate, tags). tags.add / tags.remove take tag NAMES; an added tag is created when the board has none of that name (e.g. 'harness'). |
 | `delete_issue` | Delete an issue and all its associated data |
 | `move_issue` | Move an issue to a different status column by name (e.g., 'Todo', 'In Progress', 'Done') |
 | `attach_artifact` | Attach a text, link, image, or video artifact to an issue or workspace. Workspace artifacts are also tied to the workspace's issue. |
