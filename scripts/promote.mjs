@@ -35,6 +35,7 @@ import { spawn, spawnSync, execSync, execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, openSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { gitExecSyncResult } from "./git-exec.mjs";
 import { spawnSyncPnpm } from "./pnpm-exec.mjs";
 import { parseNetstatListeners, planPortOwnerKill } from "./dev-port-guard.mjs";
 import {
@@ -68,13 +69,9 @@ const opts = {
  * for the common git dir and take its parent. Falls back to `REPO_ROOT` when that fails.
  */
 function mainCheckoutRoot() {
-  const res = spawnSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], {
-    cwd: REPO_ROOT,
-    encoding: "utf8",
-    windowsHide: true,
-  });
-  const out = (res.stdout ?? "").trim();
-  if (res.status !== 0 || !out) return REPO_ROOT;
+  const res = gitExecSyncResult(["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: REPO_ROOT });
+  const out = res.stdout.trim();
+  if (res.code !== 0 || !out) return REPO_ROOT;
   return /[\\/]\.git$/.test(out) ? dirname(out) : REPO_ROOT;
 }
 
@@ -107,9 +104,10 @@ function fail(message) {
   process.exit(1);
 }
 
+/** Thin alias over the scripts-tier adapter (`scripts/git-exec.mjs`) — never throws, trimmed streams. */
 function git(gitArgs, cwd = REPO_ROOT) {
-  const res = spawnSync("git", gitArgs, { cwd, encoding: "utf8", windowsHide: true });
-  return { code: res.status ?? 1, stdout: (res.stdout ?? "").trim(), stderr: (res.stderr ?? "").trim() };
+  const res = gitExecSyncResult(gitArgs, { cwd });
+  return { code: res.code, stdout: res.stdout.trim(), stderr: res.stderr.trim() };
 }
 
 function gitOrThrow(gitArgs, cwd = REPO_ROOT) {

@@ -56,6 +56,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
+import { gitExecSync, gitExecSyncResult } from "./git-exec.mjs";
 import { spawnSyncPnpm } from "./pnpm-exec.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -142,7 +143,7 @@ async function main() {
   let worktreeAdded = false;
 
   try {
-    run("git", ["worktree", "add", "--detach", checkout, "HEAD"], REPO_ROOT);
+    gitExecSync(["worktree", "add", "--detach", checkout, "HEAD"], { cwd: REPO_ROOT });
     worktreeAdded = true;
 
     for (const host of NODE_MODULES_HOSTS) {
@@ -272,8 +273,9 @@ async function main() {
       // Links FIRST: they point into the live checkout, and nothing below may follow them.
       for (const link of links) removeLink(link);
       if (worktreeAdded) {
-        spawnSync("git", ["worktree", "remove", "--force", checkout], { cwd: REPO_ROOT, windowsHide: true });
-        spawnSync("git", ["worktree", "prune"], { cwd: REPO_ROOT, windowsHide: true });
+        // Best-effort cleanup: never throw out of a finally block.
+        gitExecSyncResult(["worktree", "remove", "--force", checkout], { cwd: REPO_ROOT });
+        gitExecSyncResult(["worktree", "prune"], { cwd: REPO_ROOT });
       }
       try {
         rmSync(work, { recursive: true, force: true, maxRetries: 5 });
