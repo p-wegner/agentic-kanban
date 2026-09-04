@@ -128,6 +128,18 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // priority list that deliberately falls through on quota, and a per-workspace override
   // outranks it — neither can express "this project may only ever spend account X".
   "allowed_profiles",
+  // Profile ROSTER (#1025) — the allowlist grown a role dimension. `roster_<id>` may only
+  // NARROW the globally observed roles (`pool` -> `reserve`/`forbidden`), so a global
+  // `forbidden` is unliftable by construction; `reserve_allowed_<id>` is the project-level
+  // grant that lets a launch reach for a `reserve` profile at all (a ticket tag and an
+  // explicit operator start are the other two grants); `roster_exhausted_pct_<id>` is the
+  // percent of the 5-hour window at which a `pool` profile counts as exhausted (default 90).
+  // Absent = unrestricted, exactly as `allowed_profiles_<id>` is, and an existing allowlist
+  // reads as an all-`pool` roster. Nothing may read these keys outside the resolver
+  // (`roster-raw-read-ratchet.test.ts`). See shared/lib/profile-roster.ts.
+  "roster",
+  "reserve_allowed",
+  "roster_exhausted_pct",
   // Multi-repo sibling provisioning (#626/#627). A 17-repo project spends tens of minutes in
   // `provisionSiblingWorktrees` before anything is persisted, and the two halves need
   // different defaults:
