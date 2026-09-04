@@ -3,6 +3,32 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-05 — #1020: producer side — refill back on, BACKLOG_FLOOR 15, weekly planning checklist
+
+Direct on master, one pathspec commit (`feat(#1020)`), no worktree.
+
+- `scripts/board-monitor/objective.md` **FOCUS POLICY** (hand-authored, below the
+  `STRATEGY_BULLSEYE_GENERATED_END` marker) no longer says "DRAIN THE BACKLOG, DO NOT REFILL". It
+  now holds `BACKLOG_FLOOR = 15` gate-sized tickets, refill via `$backlog-refill` +
+  `$ticket-enhancer`, `coupled_with` grouping at creation (#661), and the source order
+  `BACKLOG.md` → `docs/proposals/*` → open items in `CONTINUE.md` → general architecture plan
+  Phase 1-2. The generated block still renders `BACKLOG_FLOOR = 0` from the Bullseye; the FOCUS
+  POLICY explicitly overrides it. **Not done:** raising the Bullseye's own `backlogFloor` to 15
+  (`board_strategy_<id>`) so the two agree — a Bullseye save auto-commits `objective.md`, which
+  was not safe in a shared checkout during this batch. Do it from the Monitor view when quiet.
+- **Refill pref set:** `backlog_empty_strategy` = `generate_tickets` (was `skip`), via
+  `PUT /api/preferences/settings`, read back with `GET /api/preferences/settings`. The key is
+  GLOBAL (no `_<projectId>` variant exists — `settings-registry.ts`, `monitor-backlog.ts`).
+  Caveat: the in-process path (`resolveStartPolicy` → `backlogRefill`) only honours it in start
+  mode `monitor`; agentic-kanban is `manual` (`start_mode_<id>`), so today the refill runs
+  through the Conductor's objective.md priority 4, not through `runBacklogRefill`. Flipping the
+  start mode is the operator's call (Monitor view → Start Mode), deliberately not made here.
+- `scripts/board-monitor/README.md` gained **"Weekly planning pass"** — a six-item human
+  checklist (stock, size, source, direction, loop health, record) a Sentinel can prompt for.
+- Verified: `objective-capacity-hold-ratchet` + `strategy-objective*` suites green from the main
+  checkout (single fork, 2 workers). **Unverified:** that the floor holds for a week and that no
+  refilled ticket is a few-minutes change — that is the ticket's acceptance and needs the week.
+
 ## 2026-09-04 — direct-master batch: #1029 #1030/#1011 #1031 #1032 landed, #1033 code parts, two master reds fixed
 
 Afternoon batch after the roster wave below: parallel agents on the MAIN checkout, every commit by
