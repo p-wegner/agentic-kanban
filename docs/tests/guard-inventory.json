@@ -2714,9 +2714,9 @@
       "introducedSha": "b2a5544c3d",
       "introducedDate": "2026-08-24",
       "lastRedProxy": {
-        "sha": "dcf47e1bb6",
-        "date": "2026-08-24",
-        "subject": "fix(#849): the temp-dir guard matches call SHAPES on the AST, so a line wrap no longer evades it",
+        "sha": "42707ebaf8",
+        "date": "2026-09-04",
+        "subject": "fix(gate): route the three new scripts' git spawns through the sanctioned helper — git-exec-single-spawn green",
         "method": "git-log-fix-commit-naming-the-file"
       },
       "lastRedSource": "proxy: git log of fix commits naming the file (no gate-outcome ledger exists)",
@@ -3343,9 +3343,9 @@
       "introducedSha": "227ba78456",
       "introducedDate": "2026-06-22",
       "lastRedProxy": {
-        "sha": "f8eaf899c2",
-        "date": "2026-08-23",
-        "subject": "fix(#809): shared's tests were never typechecked — and there was no exclude line to find",
+        "sha": "42707ebaf8",
+        "date": "2026-09-04",
+        "subject": "fix(gate): route the three new scripts' git spawns through the sanctioned helper — git-exec-single-spawn green",
         "method": "git-log-fix-commit-naming-the-file"
       },
       "lastRedSource": "proxy: git log of fix commits naming the file (no gate-outcome ledger exists)",

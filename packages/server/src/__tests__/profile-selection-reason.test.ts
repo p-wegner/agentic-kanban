@@ -11,7 +11,7 @@ import {
   buildProfileSelectionReason,
   parseProfileSelectionReason,
   serializeProfileSelectionReason,
-} from "../src/lib/profile-selection-reason.js";
+} from "../lib/profile-selection-reason.js";
 
 describe("buildProfileSelectionReason", () => {
   it("records nothing when nothing was selected", () => {

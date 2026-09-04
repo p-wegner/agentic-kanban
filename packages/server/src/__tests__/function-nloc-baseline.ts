@@ -182,7 +182,7 @@
  * `buildAgentConfig`'s result, one line carrying it into the deferred launch args, one into
  * `startSession`, and -- in `createSessionLifecycle` -- the serialize call on the session
  * INSERT. The decision they carry lives entirely outside these functions
- * (`shared/lib/profile-selection-reason.ts` and `buildSelectionReason` in
+ * (`server/src/lib/profile-selection-reason.ts` and `buildSelectionReason` in
  * `project-runtime-config.service.ts`); what remains here cannot be extracted, because a
  * value has to be passed at the point in the flow where it exists. All three factories
  * still want splitting for their own sake; this is not the ticket that does it.

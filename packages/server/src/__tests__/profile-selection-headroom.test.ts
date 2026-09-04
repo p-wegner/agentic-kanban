@@ -21,7 +21,7 @@ import {
 import { selectProviderFromStrategy } from "../services/strategy-objective.service.js";
 import type { ProviderProfilePolicy } from "@agentic-kanban/shared/lib/strategy-policy";
 import type { ProfileHeadroom, RosterEntry } from "@agentic-kanban/shared/lib/profile-allowlist";
-import { parseProfileSelectionReason, serializeProfileSelectionReason } from "@agentic-kanban/shared/lib/profile-selection-reason";
+import { parseProfileSelectionReason, serializeProfileSelectionReason } from "../lib/profile-selection-reason.js";
 
 const PROJECT_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
 const NOW_MS = Date.parse("2026-09-04T09:00:00.000Z");

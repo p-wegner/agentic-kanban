@@ -25,7 +25,7 @@ import { resolveContainerProvision, surfaceIsolationDowngrade } from "./devconta
 import { WorkspaceError } from "../workspace-internals.js";
 import { DEFAULT_BUILDER_GUARDRAILS, PREF_BUILDER_GUARDRAILS } from "../../constants/preference-keys.js";
 import { parseSymlinkDirs } from "@agentic-kanban/shared/lib/worktree-symlink-bootstrap";
-import { serializeProfileSelectionReason } from "@agentic-kanban/shared/lib/profile-selection-reason";
+import { serializeProfileSelectionReason } from "../../lib/profile-selection-reason.js";
 import { loadCodexLicenseRing } from "../codex-license-ring.js";
 import { loadClaudeSubscriptionRing } from "../claude-subscription-ring.js";
 import { classifySessionExit as classifySessionExitRoute, extractCapturedStderr, readSessionExitSignals, ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS as EXIT_WINDOW_MS } from "./session-exit-state-machine.js";

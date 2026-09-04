@@ -23,7 +23,7 @@ import { fetchLiveQuotaUsage } from "./quota-usage.service.js";
 import {
   buildProfileSelectionReason,
   type ProfileSelectionReason,
-} from "@agentic-kanban/shared/lib/profile-selection-reason";
+} from "../lib/profile-selection-reason.js";
 import { providerProfilePrefKey, readSettingsProviderSelection, resolveProviderDivergence as resolveProviderDivergenceShared } from "@agentic-kanban/shared/lib/strategy-policy";
 import { resolveStartPolicy, startModePrefKey, type StartPolicy } from "./start-policy.service.js";
 import type {

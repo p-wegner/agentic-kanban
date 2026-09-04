@@ -14,7 +14,7 @@ import { basename } from "node:path";
 import { randomUUID } from "node:crypto";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { isTerminalWorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
-import type { ProfileSelectionReason } from "@agentic-kanban/shared/lib/profile-selection-reason";
+import type { ProfileSelectionReason } from "../lib/profile-selection-reason.js";
 import { workspaceServicesService, resolveServiceHost } from "./workspace-services.service.js";
 import { reapWorkspaceContainer } from "./devcontainer-workspace.service.js";
 import { provisionServicesForLaunch } from "./workspace-create-stack.service.js";

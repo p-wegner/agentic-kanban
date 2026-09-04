@@ -43,7 +43,7 @@ import { writeTicketContextFile } from "@agentic-kanban/shared/lib/ticket-contex
 import { bootstrapSymlinks } from "@agentic-kanban/shared/lib/worktree-symlink-bootstrap";
 import { resolveWorkflowStart, buildTransitionBlock } from "@agentic-kanban/shared/lib/workflow-engine";
 import { loadProjectRuntimeConfig } from "./project-runtime-config.service.js";
-import type { ProfileSelectionReason } from "@agentic-kanban/shared/lib/profile-selection-reason";
+import type { ProfileSelectionReason } from "../lib/profile-selection-reason.js";
 import { WorkspaceError, type CreateWorkspaceInput, type GitService } from "./workspace-internals.js";
 import { buildContextPrimer } from "./context-packer.service.js";
 import { materializeImpactMapIntoWorktree } from "./test-impact-map/worktree-map.js";
