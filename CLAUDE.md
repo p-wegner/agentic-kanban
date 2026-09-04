@@ -447,6 +447,7 @@ Full symptom→cause→fix in `docs/install.md` (“Clean-clone / first-start go
 
 ## Common Commands
 - `pnpm dev` — server + client (worktree ports: main 3001/5173, `feature/<N>-…` = `3001+N`/`5173+N`). `pnpm dev:desktop` adds Tauri. Safe headless launch: `dev-server` skill.
+- **`pnpm dev:devboard` — the DEV board** (`KANBAN_BOARD_ROLE=dev`): 3101/5273 and its OWN database (`~/.agentic-kanban-dev/kanban.db`), so board development stops restarting the server that operates every project. One switch decides both ports and DB — they are not settable apart — and the launcher REFUSES to open `~/.agentic-kanban/kanban.db` or `packages/server/kanban.db` under this role. The stable board (built artifact, tag `stable`, a sibling checkout) keeps 3001/5173 and registers `agentic-kanban`; the dev board never does. Runbook incl. the operator cutover checklist: **`docs/two-boards.md`**.
 - **Inner loop (default while editing) — the impact selection, not the package suite (#953).** `test:mine` with no scope runs WHOLE packages, so the "fast loop" on a server-side ticket is thousands of tests; the test-impact skill picks ~6 files in ~0.4s from the same change. Run from the worktree root, guarded because the copy is best-effort:
   ```sh
   [ -f .claude/skills/test-impact/tools/impact.mjs ] && node .claude/skills/test-impact/tools/impact.mjs select --min-score 1.0 --format vitest
