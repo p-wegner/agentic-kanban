@@ -53,6 +53,7 @@
     "security:json": "node scripts/security-scan.mjs --json",
     "temp:sweep": "node scripts/sweep-temp-dirs.mjs",
     "test:docker": "pnpm --filter agentic-kanban test:docker",
+    "smoke:boot-dist": "node scripts/boot-dist-smoke.mjs",
     "test:unit": "pnpm test",
     "test:server": "pnpm --filter agentic-kanban test",
     "test:client": "pnpm --filter client test",
