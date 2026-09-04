@@ -3,8 +3,8 @@
 **Status:** Vorschlag, **als Tickets eingeplant (2026-09-04)**: §3.A #1012 → #1013 → #1014 ·
 §3.B #1015 → #1016, #1017 (gegen die #986-Entscheidung zu argumentieren), #1018 · §3.C #1019 ·
 §3.D #1020 · §3.E #1021, #1022 · §6 #1023 + #1024 → #1025 → #1026 / #1027 / #1028. Der
-claude-pick-Teil von §6 (`profile attr`, Bootstrap-Abfrage) ist kein Board-Ticket und noch
-nirgends erfasst.
+claude-pick-Teil von §6 (`profile attr`, Bootstrap-Abfrage) ist kein Board-Ticket; er steht seit 2026-09-04 in
+claude-picks `BACKLOG.md` ("Profile attributes: role and dedication").
 **Datum:** 2026-09-03
 **Anlass:** Die Arbeit am Board ist langsamer geworden. Die Quality Gates laufen minutenlang, weil
 die volle Suite auf einer Maschine läuft, die bereits unter Last steht. Der Test-Impact-Plugin
