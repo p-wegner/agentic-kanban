@@ -11,7 +11,7 @@
  */
 
 import { execFileSync, execSync } from "node:child_process";
-import { commandLineBelongsToCheckout } from "./dev-port-guard.mjs";
+import { commandLineBelongsToCheckout, isNetstatListeningRow } from "./dev-port-guard.mjs";
 import { writeProcessAudit } from "./process-audit.mjs";
 
 function normalizeProcessRecord(row) {
@@ -108,11 +108,7 @@ export function isPortListening(port, checkPort) {
       });
       return out.split("\n").some((line) => {
         const parts = line.trim().split(/\s+/);
-        return (
-          parts[0]?.toLowerCase() === "tcp" &&
-          parts[3] === "LISTENING" &&
-          (parts[1]?.endsWith(`:${port}`) ?? false)
-        );
+        return isNetstatListeningRow(parts) && (parts[1]?.endsWith(`:${port}`) ?? false);
       });
     }
     const out = execSync(`ss -tlnp 'sport = :${port}'`, {
@@ -143,8 +139,7 @@ export function listListeningPidsOnPort(port) {
       });
       for (const line of out.split("\n")) {
         const parts = line.trim().split(/\s+/);
-        if (parts[0]?.toLowerCase() !== "tcp") continue;
-        if (parts[3] !== "LISTENING") continue;
+        if (!isNetstatListeningRow(parts)) continue;
         if (!(parts[1]?.endsWith(`:${port}`) ?? false)) continue;
         const pid = Number(parts[4]);
         if (!Number.isInteger(pid) || pid <= 0) continue;

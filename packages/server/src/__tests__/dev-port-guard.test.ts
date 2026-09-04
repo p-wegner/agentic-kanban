@@ -43,6 +43,27 @@ describe("parseNetstatListeners", () => {
     expect(pids).toEqual(["5002"]);
   });
 
+  // #1035 — verbatim from `netstat -ano` on a German Windows 11 box.
+  const NETSTAT_SAMPLE_DE = `
+  Proto  Lokale Adresse         Remoteadresse          Status          PID
+  TCP    0.0.0.0:5173           0.0.0.0:0              ABHÖREN         45544
+  TCP    127.0.0.1:3001         0.0.0.0:0              ABHÖREN         44620
+  TCP    127.0.0.1:3001         127.0.0.1:59466        HERGESTELLT     44620
+  TCP    127.0.0.1:3001         127.0.0.1:49977        WARTEND         0
+  TCP    127.0.0.1:55234        127.0.0.1:3001         HERGESTELLT     45544
+`;
+
+  it("finds the listener when Windows localizes the state column (German)", () => {
+    expect(parseNetstatListeners(NETSTAT_SAMPLE_DE, 3001)).toEqual(["44620"]);
+    expect(parseNetstatListeners(NETSTAT_SAMPLE_DE, 5173)).toEqual(["45544"]);
+  });
+
+  it("still excludes established clients of the port on a localized box", () => {
+    // Vite (45544) is ESTABLISHED to :3001. Killing it as the port owner is the
+    // original bug this parser exists to prevent — the locale fix must not undo it.
+    expect(parseNetstatListeners(NETSTAT_SAMPLE_DE, 3001)).not.toContain("45544");
+  });
+
   it("deduplicates multiple matching rows for the same PID", () => {
     const duplicated = `
   TCP    127.0.0.1:3001          0.0.0.0:0               LISTENING       5001

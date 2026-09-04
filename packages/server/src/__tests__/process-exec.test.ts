@@ -30,6 +30,31 @@ describe("process-exec parsers", () => {
     expect(parseNetstatListenerPids(NETSTAT_SAMPLE, 3001)).toEqual([111]);
   });
 
+  // #1035 — verbatim from `netstat -ano` on a German Windows 11 box. The state column is
+  // localized (ABHÖREN / HERGESTELLT / WARTEND), so matching the English literal returned
+  // nothing at all and every port lookup answered "nobody is listening".
+  const NETSTAT_SAMPLE_DE = `
+  Proto  Lokale Adresse         Remoteadresse          Status          PID
+  TCP    0.0.0.0:5173           0.0.0.0:0              ABHÖREN         45544
+  TCP    127.0.0.1:3001         0.0.0.0:0              ABHÖREN         44620
+  TCP    127.0.0.1:3001         127.0.0.1:59466        HERGESTELLT     44620
+  TCP    127.0.0.1:3001         127.0.0.1:49977        WARTEND         0
+  TCP    127.0.0.1:55234        127.0.0.1:3001         HERGESTELLT     45544
+`;
+
+  it("parses a localized netstat state column (German)", () => {
+    expect(parseNetstatListeners(NETSTAT_SAMPLE_DE)).toEqual([
+      { pid: 45544, port: 5173, address: "0.0.0.0:5173", protocol: "tcp" },
+      { pid: 44620, port: 3001, address: "127.0.0.1:3001", protocol: "tcp" },
+    ]);
+    expect(parseNetstatListenerPids(NETSTAT_SAMPLE_DE, 3001)).toEqual([44620]);
+  });
+
+  it("does not return clients of a port as listeners on a localized box", () => {
+    // 45544 (Vite) is ESTABLISHED to :3001 and must never be killed as its owner.
+    expect(parseNetstatListenerPids(NETSTAT_SAMPLE_DE, 3001)).not.toContain(45544);
+  });
+
   it("parses lsof pid lists defensively", () => {
     expect(parseLsofPids("123\n\nabc\n456\n")).toEqual([123, 456]);
   });

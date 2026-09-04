@@ -25,6 +25,25 @@ export function commandLineBelongsToCheckout(commandLine, checkoutRoot) {
 }
 
 /**
+ * Is this split netstat row a TCP row in the LISTENING state? (#1035)
+ *
+ * Windows LOCALIZES the state column — German prints `ABHÖREN`, not `LISTENING` —
+ * so matching the English literal returns nothing at all on a non-English box, and
+ * every port lookup here then answers "nobody is listening". The locale-independent
+ * signal is the FOREIGN address: a listening socket carries the wildcard
+ * (`0.0.0.0:0`, `[::]:0`, `*:*`), while every established/waiting row carries a real
+ * peer endpoint. The English literal is still accepted so the intent stays readable.
+ *
+ * @param {string[]} parts A netstat line already trimmed and split on whitespace.
+ */
+export function isNetstatListeningRow(parts) {
+  if (parts[0]?.toLowerCase() !== "tcp") return false;
+  if (/^listen/i.test(parts[3] ?? "")) return true;
+  const foreign = parts[2] ?? "";
+  return foreign === "0.0.0.0:0" || foreign === "[::]:0" || foreign === "*:*";
+}
+
+/**
  * Parse Windows netstat -ano output and return PIDs that are LISTENING on `port`.
  * Excludes processes with established connections TO the port (e.g. Vite proxying
  * to the backend server), which is the root cause of the bug where freePort(3001)
@@ -35,8 +54,7 @@ export function parseNetstatListeners(netstatOutput, port) {
     netstatOutput.split("\n")
       .map(l => l.trim().split(/\s+/))
       .filter(parts =>
-        parts[0]?.toLowerCase() === "tcp" &&
-        parts[3] === "LISTENING" &&
+        isNetstatListeningRow(parts) &&
         (parts[1]?.endsWith(`:${port}`) ?? false)
       )
       .map(parts => parts[4])
