@@ -38,6 +38,7 @@ import {
   PROJECT_CONDUCTOR_OBJECTIVE_RELATIVE_PATH,
 } from "./strategy-objective-file.js";
 import { readRiskPosture, riskPosturePref } from "./risk-posture.js";
+import { resolveMachineCapacity } from "./machine-capacity.js";
 
 /** Drizzle handle over the shared schema — what both the server and MCP DBs are. */
 export type PreferenceWriteDb = ReturnType<typeof drizzle<typeof schemaNs>>;
@@ -236,14 +237,20 @@ export async function setPreferenceChecked(
       if (!repoPath) return;
       const conductorEnabled = isConductorEnabledPreference(projected.get(`board_conductor_${projectId}`));
       const posture = readRiskPosture(projected, projectId);
+      // #1029: name the host's capacity as measured at save time in the generated CAPACITY
+      // HOLD section. Best-effort and bounded (the fleet tool gets 2s, then Tier 0 answers):
+      // a Bullseye save must never hang on a capacity probe, and the section's live-read rule
+      // is what the Conductor actually acts on — this is the "last measured" annotation.
+      const capacity = await resolveMachineCapacity({ fleetTimeoutMs: 2000 });
       const changed = conductorEnabled
         ? writeStrategyObjective(repoPath, rawConfig, {
             objectiveRelativePath: PROJECT_CONDUCTOR_OBJECTIVE_RELATIVE_PATH,
             createIfMissing: true,
             project: projectRow,
             posture,
+            capacity,
           })
-        : writeStrategyObjective(repoPath, rawConfig, { posture });
+        : writeStrategyObjective(repoPath, rawConfig, { posture, capacity, projectId });
       if (changed) objectivesRegenerated.push(projectId);
       if (changed && autoCommit && !conductorEnabled) commitObjectiveFile(repoPath);
     };

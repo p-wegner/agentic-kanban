@@ -212,6 +212,70 @@ export async function resolveMachineCapacity(opts: {
 }
 
 /**
+ * The Conductor-facing PROJECTION of a capacity snapshot (#1029): one flat shape that says
+ * "may this cycle start anything, and how much", with the measured numbers alongside so a
+ * log line can name them instead of a bare token.
+ *
+ * Why this exists: the in-process monitor clamps its WIP to the snapshot's `headroomProcesses`
+ * (`clampWipToHeadroom`, #1019), but the out-of-process Conductor reads `objective.md` and the
+ * `GET /api/projects/:id/monitor-tunables` payload — neither of which carried capacity, so the
+ * only brake the Conductor had was a HAND-WRITTEN "MEMORY HOLD" paragraph pinned to one
+ * afternoon's RAM reading. This projection is what both the generated objective block and that
+ * route render, so the hand-written rule can go.
+ *
+ * `maxNewStarts` is the one number a cycle acts on: `0` under hold; under Tier 1 the measured
+ * headroom, capped by `maxNewStartsPerCycle` when given; under an unheld Tier 0 read there is
+ * no headroom MEASUREMENT (one `os.freemem()` against a floor), so the cap alone is returned
+ * and `null` when there is no cap — reporting a fabricated headroom from a tier that did not
+ * measure it is exactly the #908 failure this module's header describes.
+ */
+export interface CapacityHold {
+  /** True when the box is too tight to start another agent process right now. */
+  hold: boolean;
+  /** Which tier answered: "1" when the `fleet` tool was reachable, "0" otherwise. */
+  tier: "0" | "1";
+  /** The measured numbers in words, for a log line. */
+  reason: string;
+  /** Tier 1 only: how many more whole agent processes the box can take. */
+  headroomProcesses: number | null;
+  /** Tier 0 only: `os.freemem()` in GB (null when unreadable or Tier 1 answered). */
+  freeGb: number | null;
+  /** Tier 1 only: the fleet tool's thrashing verdict. */
+  thrashing: string | null;
+  /** How many NEW workspaces this cycle may launch — see the type doc. */
+  maxNewStarts: number | null;
+}
+
+export function deriveCapacityHold(
+  snapshot: MachineCapacitySnapshot,
+  opts: { maxNewStartsPerCycle?: number } = {},
+): CapacityHold {
+  const cap = opts.maxNewStartsPerCycle;
+  if (snapshot.tier === "1") {
+    const headroom = Math.max(0, snapshot.headroomProcesses);
+    const measured = snapshot.hold ? 0 : headroom;
+    return {
+      hold: snapshot.hold,
+      tier: "1",
+      reason: `tier 1: ${snapshot.headroomProcesses} headroom process(es), thrashing=${snapshot.thrashing}, canStartAnother=${snapshot.canStartAnother}`,
+      headroomProcesses: snapshot.headroomProcesses,
+      freeGb: null,
+      thrashing: snapshot.thrashing,
+      maxNewStarts: cap === undefined ? measured : Math.min(cap, measured),
+    };
+  }
+  return {
+    hold: snapshot.hold,
+    tier: "0",
+    reason: `tier 0: ${snapshot.reason}`,
+    headroomProcesses: null,
+    freeGb: snapshot.freeGb,
+    thrashing: null,
+    maxNewStarts: snapshot.hold ? 0 : (cap ?? null),
+  };
+}
+
+/**
  * Derive a verify-gate worker/semaphore width from live capacity instead of a hand-set
  * constant (#909). `KANBAN_VERIFY_CONCURRENCY` was fixed at 2 and `verify_max_workers_<id>`
  * was documented as "a statement about THIS box's core count" — i.e. a human doing this

@@ -97,3 +97,39 @@ describe("GET /api/projects/:id/board-monitor/next", () => {
     expect(body.candidates).toEqual([]);
   });
 });
+
+// #1029 - the Conductor reads its capacity brake off this payload once per cycle.
+describe("GET /api/projects/:id/monitor-tunables - capacity (#1029)", () => {
+  it("a saturated host yields capacity.hold=true with zero new starts and the measured numbers", async () => {
+    const { db } = createTestDb();
+    const { projectId } = await seedProject(db);
+    const app = new Hono();
+    app.route("/api/projects", createBoardMonitorRoute(db as never, {
+      readMachineCapacity: async () => ({ tier: "1", hold: true, canStartAnother: false, headroomProcesses: 0, thrashing: "heavy" }),
+    }));
+    const res = await app.request(`/api/projects/${projectId}/monitor-tunables`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { capacity: { hold: boolean; tier: string; maxNewStarts: number | null; reason: string } };
+    expect(body.capacity.hold).toBe(true);
+    expect(body.capacity.tier).toBe("1");
+    expect(body.capacity.maxNewStarts).toBe(0);
+    expect(body.capacity.reason).toContain("0 headroom process(es)");
+    expect(body.capacity.reason).toContain("thrashing=heavy");
+  });
+
+  it("an unsaturated host leaves the tunables untouched and caps new starts at the measured headroom", async () => {
+    const { db } = createTestDb();
+    const { projectId } = await seedProject(db);
+    const app = new Hono();
+    app.route("/api/projects", createBoardMonitorRoute(db as never, {
+      readMachineCapacity: async () => ({ tier: "1", hold: false, canStartAnother: true, headroomProcesses: 1, thrashing: "none" }),
+    }));
+    const res = await app.request(`/api/projects/${projectId}/monitor-tunables`);
+    const body = await res.json() as { tunables: { maxNewStartsPerCycle: number; activeAgentsTarget: number }; capacity: { hold: boolean; maxNewStarts: number | null } };
+    expect(body.capacity.hold).toBe(false);
+    expect(body.capacity.maxNewStarts).toBe(1);
+    // No Bullseye seeded: the legacy defaults, exactly as before #1029.
+    expect(body.tunables.activeAgentsTarget).toBe(5);
+    expect(body.tunables.maxNewStartsPerCycle).toBe(3);
+  });
+});

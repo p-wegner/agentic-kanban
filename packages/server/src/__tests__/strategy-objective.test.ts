@@ -293,3 +293,54 @@ describe("renderGeneratedStrategyBlock - risk posture (#912)", () => {
     expect(block).toContain("one review per train");
   });
 });
+
+describe("renderGeneratedStrategyBlock - capacity hold (#1029)", () => {
+  const config = parseStrategyBullseyeConfig(JSON.stringify({ version: 1, activeAgentsTarget: 3, maxNewStartsPerCycle: 3, segments: [] }));
+
+  it("always carries the CAPACITY HOLD section with the live-read rule, even with no snapshot", () => {
+    const block = renderGeneratedStrategyBlock(config);
+    expect(block).toContain("## CAPACITY HOLD (generated - do not hand-edit)");
+    expect(block).toContain("GET /api/projects/<projectId>/monitor-tunables");
+    expect(block).toContain("start ZERO new builders");
+    expect(block).toContain("CAPACITY_HOLD = unmeasured at generation");
+    // The section sits INSIDE the generated markers, so a Bullseye save owns it.
+    expect(block.indexOf("## CAPACITY HOLD")).toBeLessThan(block.indexOf("<!-- STRATEGY_BULLSEYE_GENERATED_END -->"));
+  });
+
+  it("a saturated snapshot renders hold=true and names the measured numbers", () => {
+    const block = renderGeneratedStrategyBlock(config, "standard", {
+      projectId: "p-1",
+      capacity: { tier: "1", hold: true, canStartAnother: false, headroomProcesses: 0, thrashing: "heavy" },
+    });
+    expect(block).toContain("CAPACITY_HOLD = true");
+    expect(block).toContain("HEADROOM_PROCESSES = 0, thrashing=heavy");
+    expect(block).toContain("MAX_NEW_STARTS this cycle would be 0");
+    expect(block).toContain("GET /api/projects/p-1/monitor-tunables");
+  });
+
+  it("an unsaturated snapshot renders hold=false and leaves every tunable line unchanged", () => {
+    const without = renderGeneratedStrategyBlock(config, "standard", { projectId: "p-1" });
+    const block = renderGeneratedStrategyBlock(config, "standard", {
+      projectId: "p-1",
+      capacity: { tier: "1", hold: false, canStartAnother: true, headroomProcesses: 4, thrashing: "none" },
+    });
+    expect(block).toContain("CAPACITY_HOLD = false");
+    expect(block).toContain("HEADROOM_PROCESSES = 4");
+    expect(block).toContain("MAX_NEW_STARTS this cycle would be 3");
+    for (const line of ["ACTIVE_AGENTS_TARGET = 3", "MAX_NEW_STARTS_PER_CYCLE = 3", "BACKLOG_FLOOR"]) {
+      expect(block).toContain(line);
+    }
+    // Everything above the capacity section is byte-identical: capacity annotates, it never rewrites a target.
+    const head = (s: string) => s.slice(0, s.indexOf("## CAPACITY HOLD"));
+    expect(head(block)).toBe(head(without));
+  });
+
+  it("a Tier 0 snapshot reports free GB and never fabricates a headroom count", () => {
+    const block = renderGeneratedStrategyBlock(config, "standard", {
+      capacity: { tier: "0", hold: true, reason: "only 1.2GB free (floor 2GB)", freeGb: 1.2 },
+    });
+    expect(block).toContain("CAPACITY_HOLD = true");
+    expect(block).toContain("FREE_GB = 1.2");
+    expect(block).not.toContain("HEADROOM_PROCESSES");
+  });
+});

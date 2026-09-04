@@ -14,6 +14,7 @@ import {
   type ConductorSchedule,
 } from "../services/conductor-schedule.service.js";
 import { validateCronExpression } from "@agentic-kanban/shared/lib/cron-utils";
+import { deriveCapacityHold, resolveMachineCapacity } from "@agentic-kanban/shared/lib/machine-capacity";
 
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import { requireProject } from "../services/require-project.js";
@@ -29,9 +30,21 @@ import { previewNextStartCandidates } from "../services/start-score-preview.serv
  * GET /api/projects/:id/monitor-tunables → the resolved effective tunables with source.
  * Lets the UI show which control surface (Strategy Bullseye vs legacy prefs) is driving
  * the in-process monitor so users understand why editing nudge_wip_limit has no effect.
+ * Since #1029 it also carries `capacity` — the LIVE machine-capacity verdict projected
+ * through `deriveCapacityHold` — because this payload is what the out-of-process Conductor
+ * reads once per cycle before any start (the generated CAPACITY HOLD section of its
+ * objective.md points here). The in-process monitor clamps to the same snapshot
+ * (`clampWipToHeadroom`); this is the Conductor's copy of that brake.
+ *
+ * `deps.readMachineCapacity` is injectable so a test can hand the route a saturated
+ * snapshot without a `fleet` binary or a tight box; production wires the real probe.
  */
-export function createBoardMonitorRoute(database: Database) {
+export function createBoardMonitorRoute(
+  database: Database,
+  deps: { readMachineCapacity?: typeof resolveMachineCapacity } = {},
+) {
   const router = createRouter();
+  const readMachineCapacity = deps.readMachineCapacity ?? resolveMachineCapacity;
 
   router.get("/:id/orchestrator", async (c) => {
     const projectId = c.req.param("id");
@@ -49,7 +62,8 @@ export function createBoardMonitorRoute(database: Database) {
     const prefMap = toPrefMap(rows);
     const { tunables, source } = resolveMonitorTunables(prefMap, projectId);
     const runtime = resolveProjectRuntimeConfig({ projectId, prefMap });
-    return c.json({ tunables, source, startPolicy: runtime.startPolicy });
+    const capacity = deriveCapacityHold(await readMachineCapacity(), { maxNewStartsPerCycle: tunables.maxNewStartsPerCycle });
+    return c.json({ tunables, source, startPolicy: runtime.startPolicy, capacity });
   });
 
   // #917: top-N ranked Todo-pull candidates for this project, by the same score the

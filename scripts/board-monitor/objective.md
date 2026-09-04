@@ -29,6 +29,7 @@ This is a FRESH session every run — you have NO memory of previous runs. The k
 - **BACKLOG_FLOOR = 0** - never let the backlog drop below this; refill before it does.
 - **MAX_NEW_STARTS_PER_CYCLE = 3** - cap on how many NEW workspaces to launch in a single cycle.
 - **REFILL_FOCUS = balanced** - derived from work-type marker weights; `bugfix-only` emphasizes reproducible bugs, `balanced` allows feature/quality mix.
+- **HARNESS_SHARE = 34%** - at most this share of the WIP may run `harness`-tagged tickets (gate, guards, ratchets, impact map, hooks, merge path); the rest goes to product work. 100% disables the budget.
 
 ## RISK POSTURE (generated - do not hand-edit)
 - **RISK POSTURE = iterate** - Fast iteration on a local-first repo: the per-merge gate runs the test-impact SELECTION (a ranked guess, narrower than scoped), and the full suite runs nightly on the base branch instead. A defect the selection misses lands on the base and is caught within a day — cheap when a rebase is the whole cost, wrong when there is a real deployment (use Strict there). Set via Settings -> Workflow; a ticket may override with a `risk:<posture>` tag.
@@ -47,6 +48,15 @@ When selecting a provider for a new workspace, apply these rules in priority ord
 2. **THROTTLE** profiles are preferred for main work. Respect their headroom percentage.
 3. **FALLBACK-ONLY** profiles are last resort — only use if all others are exhausted or the user explicitly selects them.
 - **claude:anth** [claude:anth]: FILL — use aggressively, keep busy at all times (Primary harness - all new workspaces launch on claude:anth. Single source of truth (set-provider-default skill).)
+
+## CAPACITY HOLD (generated - do not hand-edit)
+The host's measured headroom is a brake on EVERY start, above every target in this file. Before any launch or relaunch, read the live snapshot once per cycle:
+`GET /api/projects/d1c5d9c1-4897-4e1b-acc3-2aa96de04117/monitor-tunables` → `capacity` (`hold`, `tier`, `headroomProcesses`, `freeGb`, `thrashing`, `maxNewStarts`, `reason`).
+- If `capacity.hold` is **true**: start ZERO new builders and do not relaunch idle ones; let running sessions finish and keep at most ONE merge-gate run in flight. A gate run on a saturated box dies on fork-worker timeouts, so starting more work makes every lane lose.
+- Otherwise cap this cycle's new starts at `capacity.maxNewStarts` (never above MAX_NEW_STARTS_PER_CYCLE). `null` means the cheap tier could not measure headroom — the target applies unchanged.
+- Whatever you decide, write `capacity.reason` into this cycle's state.md line so the hold is auditable by its measured numbers, not by a token.
+- **CAPACITY_HOLD = false** - last measured when this block was generated (tier 0: 8.9GB free). Stale by definition: the live read above is authoritative.
+- **FREE_GB = 8.9** - MAX_NEW_STARTS this cycle would be 3.
 <!-- STRATEGY_BULLSEYE_GENERATED_END -->
 
 ## FOCUS POLICY (operator directive 2026-08-26 — authoritative; overrides the REFILL_FOCUS wording above)
@@ -62,12 +72,9 @@ its gate SOLO — avoid two verify chains at once where possible (#903).
    unseeded DB read breaking monitor-cycle tests) — relaunch its builder to fix them on the branch.
 2. **Start new Todo tickets up to WIP 3** on `anth` (Bullseye is the source of truth; do not
    hand-pick another profile). **Never start #834** (`no-auto-start`, needs a Linux CI run).
-   **MEMORY HOLD (2026-08-26 09:15): the machine is at <1 GB usable RAM (kernel-pool leak,
-   needs a reboot only the operator can do) and swapping. Until that clears (fleet gate says
-   healthy again): start ZERO new builders. Do not relaunch idle builders either. Let running
-   sessions finish, keep exactly ONE merge-gate run in flight at a time, nothing else. A gate
-   run under this load dies on mock-agent/fork-worker timeouts (merge-91df24ea-17 failed 781/783
-   this way with the 60s harness fix already in) — starting more work makes every lane lose.**
+   **Capacity brake**: per the generated CAPACITY HOLD section above — read `capacity` off
+   `GET /api/projects/<id>/monitor-tunables` every cycle before any start or relaunch; the
+   hand-written MEMORY HOLD that used to sit here (a pinned 2026-08-26 RAM reading) is retired (#1029).
 3. **Keep the board healthy**: unstick stale sessions, relaunch dead builders on host
    (worker dispatch stays OFF until #895/#900-class fleet bugs are verified fixed).
 4. **Do NOT refill.** When Todo+Backlog is drained and In Review is empty, stop and report.
