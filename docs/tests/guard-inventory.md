@@ -5,7 +5,7 @@ inventory removes nothing.** It exists so the decision about which standing guar
 retire (proposal `2026-09-03-dev-board-vs-deployed-board.md` §3.E) can be made with the whole
 set in view instead of one suite at a time.
 
-**171 files** — 171 carry `@gate:always-run`, 38 are `*ratchet*.test.ts`, 38 are both. 171 distinct properties; 0 file(s) state none.
+**172 files** — 172 carry `@gate:always-run`, 38 are `*ratchet*.test.ts`, 38 are both. 172 distinct properties; 0 file(s) state none.
 
 ## How each column is derived — and what it is NOT
 
@@ -27,7 +27,7 @@ set in view instead of one suite at a time.
 
 ## Candidates
 
-Duplicated property (exact): **0 group(s)**. Overlapping properties (heuristic): **3 pair(s)**. Never red since introduction (proxy): **40**. Slower than 20s: **9**. No stated property: **0**. Unmeasured: **9**.
+Duplicated property (exact): **0 group(s)**. Overlapping properties (heuristic): **3 pair(s)**. Never red since introduction (proxy): **40**. Slower than 20s: **9**. No stated property: **0**. Unmeasured: **10**.
 
 ### Same property pinned more than once
 
@@ -286,6 +286,7 @@ each other, which is how a merge candidate is spotted by eye.
 | The repository layer's shared projections are a DOWN-only ring (#732). | `packages/server/src/__tests__/repository-projections-ratchet.test.ts` | always-run, ratchet | 2026-08-22 (`be96067114`) | 2026-08-22 (`be96067114`) | 508ms |
 | The two CLAUDE.md invariants left over from #598 (items 5 and 6). | `packages/server/src/__tests__/claude-md-skill-and-feedback-invariants.test.ts` | always-run | 2026-08-19 (`33ec4e632d`) |  | 132ms |
 | Tracked paths that MIGHT begin with `#!` — a superset, narrowed by the caller (#994). | `packages/shared/__tests__/shebang-eol-guard.test.ts` | always-run | 2026-08-21 (`cabf5c5de2`) | 2026-09-02 (`c0883af109`) | 19.9s |
+| Unit tests for the PURE half of `pnpm promote` (#1014): tag naming, sweep-verdict parsing, | `packages/server/src/__tests__/promote-plan.test.ts` | always-run | 2026-09-04 (`2e31753330`) | 2026-09-04 (`2e31753330`) |  |
 | walks the server src import graph from the worker CLI entry; no import edge to it (#647). | `packages/server/src/__tests__/worker-cli-isolation.test.ts` | always-run | 2026-08-01 (`5234773cb9`) | 2026-08-22 (`72f071241f`) | 8ms |
 | Write one FAKE backup set into the temp dir. These are the guard's own naming convention | `packages/server/src/__tests__/command-safety-backup-prune.test.ts` | always-run | 2026-08-23 (`26ae881986`) | 2026-08-23 (`26ae881986`) | 272ms |
 
@@ -296,6 +297,7 @@ each other, which is how a merge candidate is spotted by eye.
 - `packages/server/src/__tests__/issue-update-unrecognized-keys.test.ts`
 - `packages/server/src/__tests__/machine-verify-lock-mirror.test.ts`
 - `packages/server/src/__tests__/project-update-unrecognized-keys.test.ts`
+- `packages/server/src/__tests__/promote-plan.test.ts`
 - `packages/server/src/__tests__/test-impact-budget-setting.test.ts`
 - `packages/server/src/__tests__/typecheck-package-coverage.test.ts`
 - `packages/server/src/__tests__/verify-step-timings.test.ts`
