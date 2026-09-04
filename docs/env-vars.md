@@ -150,6 +150,24 @@ Set by the board on an agent subprocess; read by hooks and skills inside a workt
 | `KANBAN_MACHINE_VERIFY_LOCK` | Set to 1 to serialize heavyweight verification ACROSS PROCESSES on this machine (#957). `KANBAN_VERIFY_CHAIN_CONCURRENCY` above bounds only the server's own event loop, so a builder agent's `pnpm test:mine`, a worktree dev server and a second board process ran unthrottled beside it. With this on, the board's gate/smoke/E2E/probe work and this repo's own `test:mine` take one machine-wide lockfile. Opt-in, because a lock nobody else takes is pure latency: it pays off once every verifier on the box is running a build that takes it. Waiting is bounded per role (a gate waits hours, a builder ~20 min, the base-health probe 5 min); a caller that cannot acquire in time SAYS SO — the gate message reads `UNSERIALIZED across processes` and the probe skips that round. |
 | `KANBAN_MACHINE_VERIFY_LOCK_DIR` | Directory holding that lockfile (default: the OS temp dir). Mainly a test seam — the suites point it at a scratch directory so they can acquire a real lock without touching the machine's. Set it to a path shared by every process that should serialize; a lock in two directories is two locks and serializes nothing. |
 
+## Promotion (`pnpm promote`)
+
+Read by `scripts/promote.mjs` / `scripts/promote-plan.mjs` (#1014), the drawbridge that moves
+master into the STABLE checkout. Runbook: [two-boards.md § Promotion](two-boards.md).
+
+| Variable | Purpose |
+|---|---|
+| `KANBAN_STABLE_CHECKOUT` | Absolute path of the stable checkout the promotion deploys into. Default: the sibling `../agentic-kanban-stable`. The script never CREATES it and refuses to promote when it is absent or has a dirty working tree — it is an operator artifact (two-boards.md §7), and a promotion into a dirty tree would destroy uncommitted work. |
+| `KANBAN_STABLE_PORT` | The port the stable board listens on. Default **3001** — the unchanged public port, per the two-boards split. Used both to stop the running board (by process signature, see below) and to start the new one. |
+| `KANBAN_PROMOTE_BOARD_URL` | Base URL the sweep row is read from and the smoke check runs against. Default `http://127.0.0.1:3001`. |
+| `KANBAN_PROMOTE_DB` | The database the sweep row is read from when no board answers HTTP. Default `~/.agentic-kanban/kanban.db` — the file the stable board is pinned to. **Opened READ-ONLY, and only ever SELECTed**: a promotion is not allowed to write to the operated board's data. |
+| `KANBAN_PROMOTE_PROJECT` | Whose `base_branch_health` decides the promotion. Default `agentic-kanban` — the board's own project row, which lives on the stable board (two-boards.md §3). |
+| `KANBAN_PROMOTE_BRANCH` | The base branch whose sweep verdict is required, and whose tip is tagged under `--force-sweep`. Default `master`. A recorded sweep on any other branch is refused rather than accepted, since it says nothing about the branch being promoted. |
+| `KANBAN_PROMOTE_MAX_SWEEP_AGE_H` | How old a GREEN sweep may be and still authorize a promotion. Default **36** hours. The sweep is nightly, so an older verdict means the sweep did not run — "the last recorded sweep was green" is then a statement about a master that has since moved. A non-numeric or non-positive value falls back to the default. |
+
+`KANBAN_DB_URL` is honoured too: it is what the promoted board is started and migrated with, and
+it defaults to the `file:` form of `KANBAN_PROMOTE_DB` — the pin `docs/two-boards.md` §2 describes.
+
 ## `AGENTIC_KANBAN_*` — the npm package's own surface
 
 Board-owned, and deliberately not renamed (see below). Listed by name because "already an

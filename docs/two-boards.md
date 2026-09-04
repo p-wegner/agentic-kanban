@@ -182,12 +182,75 @@ Nothing below has been run. Do it in this order.
    from the stable board.
 9. **Move board development to the dev board**: file/start `agentic-kanban` tickets on the STABLE
    board (that is where the project lives), but let a red master on this checkout stop nothing.
-10. **Promotion** — tag, fast-forward the stable checkout, rebuild, restart, smoke — is a separate
-    ticket (`promote`), deliberately not scripted here.
+10. **Promotion** — tag, fast-forward the stable checkout, rebuild, restart, smoke — is §8.
 
-## 8. What is deliberately NOT here
+## 8. Promotion — `pnpm promote`
 
-- **The `promote` script.** Its own ticket; §7.10 is the manual form.
+Master reaches the stable checkout by a TIMED promotion, never per merge (proposal §3.A, Yegge's
+drawbridge). That is the one moment the full suite decides anything. `scripts/promote.mjs` is that
+moment; the checklist above is its manual form.
+
+```bash
+pnpm promote --dry-run     # print the resolved sha, tag and every step; touch nothing
+pnpm promote               # promote
+pnpm promote --force-sweep # promote WITHOUT a green sweep verdict, loudly
+```
+
+**Nothing here has been executed either.** The script exists, its pure half is unit-tested
+(`packages/server/src/__tests__/promote-plan.test.ts`), and `--dry-run` has been run; no tag has
+been created, no server started and no database written.
+
+### What one run does
+
+1. **Reads the last full-sweep verdict for `master`** out of the board's `base_branch_health`
+   table — the row the nightly probe writes through `recordBaseBranchHealth`
+   (`packages/server/src/services/base-branch-health.service.ts`). It never re-runs the suite.
+   Preferred source is the board's own API, `GET /api/projects/:id/base-branch-health`; when no
+   board answers it falls back to a **read-only** `node:sqlite` SELECT against
+   `KANBAN_PROMOTE_DB`. It never writes to that database.
+
+   Only `green` and `red` are verdicts — `timeout` and `unverified` are non-answers about the
+   PROBE (`isBaseHealthAnswer`, #935), and a non-answer refuses just as a red does. So does a
+   green older than `KANBAN_PROMOTE_MAX_SWEEP_AGE_H` (default 36h) and a sweep recorded on
+   another branch. Every refusal names the sweep's **sha, date and verdict**.
+2. **Tags `stable-YYYYMMDD` on that green sha** — `-2`, `-3`, … when the day already has a tag.
+   Two promotions in one day is normal, and moving the existing tag would erase the rollback
+   target.
+3. **In the stable checkout** (`KANBAN_STABLE_CHECKOUT`, default the sibling
+   `../agentic-kanban-stable`; **refused when absent or dirty** — the script never creates or
+   cleans it): `git fetch origin --tags`, `git merge --ff-only <tag>`, then
+   `pnpm install -r --prefer-offline` **only if `pnpm-lock.yaml` moved**, `pnpm build`,
+   `pnpm --filter agentic-kanban db:migrate` with the pinned `KANBAN_DB_URL`, and a restart.
+4. **Smoke:** `GET /health`, `GET /api/projects` (**non-empty** — an empty list means the DB pin
+   is wrong, §4), and one `GET /api/issues?projectId=…`, the HTTP equivalent of
+   `get_board_status`. On failure it fast-forwards the stable checkout back to the previous
+   `stable-*` tag, rebuilds, restarts, re-smokes and says so loudly. When there is NO previous
+   tag it says that instead of pretending it recovered.
+
+### How the stable board is stopped and started
+
+Stopping is **by process signature only** — never a broad `node` kill. The script finds the
+LISTENER on `KANBAN_STABLE_PORT` (netstat/lsof) and passes it through `planPortOwnerKill`, the
+same guard `scripts/dev.mjs` uses: a pid whose command line does not contain the stable
+checkout's path is REFUSED, not killed, and the promotion aborts. So it cannot take down another
+agent's worktree server, the dev board, or anything else that happens to hold the port.
+
+Starting spawns the BUILT artifact directly — `node <stable>/packages/server/dist/cli/index.js
+dev --port <port> --no-open` — which is what `pnpm --filter agentic-kanban start` runs (§2),
+spawned as `node` so the process command line carries the stable checkout's path and the stop
+step above can recognise it next time. `windowsHide: true`, `detached` + `unref`, stdio into the
+log: headless, no window flash, and it outlives the promoting shell.
+
+### The log
+
+Every step is appended to **`<stable checkout>/.kanban/promote.log`** — that is the file the
+Sentinel reads, and it also receives the started board's own stdout/stderr. A `--dry-run` writes
+nothing at all; it prints where it *would* log.
+
+## 9. What is deliberately NOT here
+
+- **A promotion SCHEDULE.** `pnpm promote` is by hand or from whatever timer the operator wires
+  it to; nothing in the board runs it. "Once a day, idle" is a policy, not a script.
 - **A second repository.** A second CHECKOUT is enough and keeps tags, history and hooks in one
   place (proposal §5).
 - **Any runtime change.** #1013 is code and docs. No server was started, no database moved, and
