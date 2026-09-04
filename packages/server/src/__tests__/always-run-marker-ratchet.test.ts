@@ -257,6 +257,13 @@ const KNOWN_SAFE_UNMARKED = new Set<string>([
   // #647: same MIGRATIONS_DIR-shaped exemption, reached by the rewritten signature. Each
   // resolves the monorepo root only to find `packages/shared/drizzle` and seed a TEMP DB
   // with the real schema; the subject under test is the MCP tool, reachable by import.
+  // #1012 — spawns `scripts/boot-dist-smoke.mjs`, so it matches `reads-outside-own-dir`, but
+  // it is OPT-IN: the whole describe self-skips unless `KANBAN_BOOT_DIST_SMOKE=1`, so it runs
+  // in no gate at all and forcing the marker on it would claim a guard that never executes.
+  // It builds and boots the artifact in a throwaway `git worktree` (mutating the shared repo's
+  // worktree registry and holding a real port), which is why it is the nightly sweep's job
+  // rather than a per-gate guard — see that file's header.
+  "server/boot-from-dist-smoke.test.ts",
   "mcp-server/disabled-tools.test.ts",
   "mcp-server/mcp-tools.test.ts",
   "mcp-server/tools/get-context-boundary.test.ts",
