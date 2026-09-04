@@ -45,6 +45,7 @@ import { resolveWorkflowStart, buildTransitionBlock } from "@agentic-kanban/shar
 import { loadProjectRuntimeConfig } from "./project-runtime-config.service.js";
 import { WorkspaceError, type CreateWorkspaceInput, type GitService } from "./workspace-internals.js";
 import { buildContextPrimer } from "./context-packer.service.js";
+import { materializeImpactMapIntoWorktree } from "./test-impact-map/worktree-map.js";
 import { getStackProfile, resolveEffectiveVerify } from "./stack-profile.service.js";
 import type { StackProfile } from "@agentic-kanban/shared";
 import { resolveBoardFeedbackRouting } from "./board-feedback-routing.js";
@@ -165,6 +166,16 @@ async function materializeWorkspaceSkillsImpl(
   const { skillId, diskSkillName, worktreePath, repoPath, projectId } = params;
   const skillName = await resolveSkillFileImpl(database, skillId, diskSkillName, worktreePath, repoPath);
   await materializeEnabledPluginSkillsImpl(database, worktreePath, repoPath, projectId);
+  // #1018 — the test-impact map is no longer committed, so a worktree no longer inherits one by
+  // branching. It rides along with the skills because it is the same kind of thing: a read-only
+  // artifact the builder consumes and never writes. Doing it HERE rather than only at provisioning
+  // also means a relaunch refreshes it, so a resumed workspace selects against a newer map.
+  const map = await materializeImpactMapIntoWorktree(repoPath, worktreePath);
+  if (map.outcome === "failed") {
+    // Best-effort, like the skill materialization above. An absent map is a supported state: the
+    // skill widens to the package tier and says so, which is a wider run, never a wrong one.
+    console.warn(`[workspaces] test-impact map copy failed (non-fatal): ${map.detail}`);
+  }
   return { skillName };
 }
 

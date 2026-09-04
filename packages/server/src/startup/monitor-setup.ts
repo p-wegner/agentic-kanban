@@ -523,10 +523,12 @@ export function createMonitorSetup({ sessionManager, boardEvents, serverPort, re
       // workspace started this cycle already forks from the branch the pass committed to.
       setPhase("compounding-setup");
       await runCompoundingSetup(prefMap, { allowProject: shouldAutoStartProject });
-      // Test-impact map refresh (#952): rebuild + commit `docs/tests/impact-map.json` on the
+      // Test-impact map refresh (#952): rebuild `docs/tests/impact-map.json` IN PLACE on the
       // project's main checkout when it has gone stale, under the queue repo lock and skipping
-      // on contention. Also BEFORE the fan-out, so a builder started this cycle forks from the
-      // fresh map — a stale one silently widens its gate run to the whole package suite.
+      // on contention. Nothing is committed — the map is a gitignored artifact since #1018,
+      // because the chore commits were moving the base tip under running pre-merge gates. Also
+      // BEFORE the fan-out, so a builder started this cycle gets the freshly rebuilt map copied
+      // into its worktree — a stale one silently widens its gate run to the whole package suite.
       setPhase("test-impact-map");
       await runTestImpactMapRefresh(prefMap, { allowProject: shouldAutoStartProject });
       // Board-owned plugin loops (manifest `loops`): plan the next round of a converging

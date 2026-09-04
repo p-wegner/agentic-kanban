@@ -1,48 +1,88 @@
 # `docs/tests/` — the test-impact map, its durations, and the guard inventory
 
-Generated files about the test suite. All are **committed on purpose**, and each has **exactly one
-writer**.
+Generated files about the test suite. Each has **exactly one writer**. Two are committed on
+purpose; the map is deliberately **not** (see below).
 
-| File | What | Written by | Refreshed |
-|---|---|---|---|
-| `impact-map.json` | the test-impact inventory `impact.mjs select` reads to pick which tests a diff can affect | the monitor's `test-impact-map` phase, on the **main checkout** | every cycle in which it has gone stale (~7.4s) |
-| `durations.json` | real per-test-file wall-clock times, so `--budget 60s` means seconds | `pnpm test:durations`, by hand | occasionally — durations drift far more slowly than the import graph |
-| `guard-inventory.md` / `.json` | one row per `@gate:always-run` suite and per `*ratchet*.test.ts`: the property it pins, when it was introduced, a proxy for when it was last red, its wall time, and a candidates list (#1022) | `pnpm guard:inventory`, by hand | when the standing guard set is being audited — it is a REPORT, and it removes nothing |
+| File | What | Written by | Refreshed | In git? |
+|---|---|---|---|---|
+| `impact-map.json` | the test-impact inventory `impact.mjs select` reads to pick which tests a diff can affect | the `test-impact-map` pass, on the **main checkout** | every sweep in which it has gone stale (~7.4s) | **no** — gitignored (#1018) |
+| `durations.json` | real per-test-file wall-clock times, so `--budget 60s` means seconds | `pnpm test:durations`, by hand | occasionally — durations drift far more slowly than the import graph | yes |
+| `guard-inventory.md` / `.json` | one row per `@gate:always-run` suite and per `*ratchet*.test.ts`: the property it pins, when it was introduced, a proxy for when it was last red, its wall time, and a candidates list (#1022) | `pnpm guard:inventory`, by hand | when the standing guard set is being audited — it is a REPORT, and it removes nothing | yes |
 
-## Why the map is committed (#952)
+## Why the map is NOT committed (#1018)
 
 A stale map does not fail — it **widens**. Past the skill's staleness threshold, `select` silently
 drops from the impact tier to the package tier, i.e. the whole package suite, so every saving the
-selection buys disappears exactly when the repo is busiest. Measured: the committed map went 146
-commits behind in four days.
+selection buys disappears exactly when the repo is busiest. Measured: an unmaintained map went 146
+commits behind in four days. Keeping it fresh is therefore a real job, and #952 gave that job to a
+board pass on each project's **main checkout**.
 
-Worktrees branch from master, so a map fresh on master is fresh in every builder worktree. That is
-what makes the selection usable in the card loop at all — the alternative (each worktree rebuilding
-its own) costs ~7.4s per card and shares no freshness.
+That pass used to **commit** each rebuild — `chore: rebuild test-impact map @ <sha>`, 11 of 261
+commits in the measured window. Every one of them moved the base tip under whatever pre-merge gates
+were running, and #243 correctly *discards* a gate verdict whose base moved: one measured casualty
+was a gate that PASSED after 590 seconds and was thrown away by this pass's own chore commit. #998
+deferred the rebuild while a merge was in flight, which narrowed the window without removing the
+mechanism.
 
-**Committing a volatile generated file is only safe because of the single-writer rule.** The
-cautionary precedent is `.claude/smart-hooks-rules.json`, which was force-committed onto master *and
-every branch* and so made every merge conflict on it (see `project-scaffold/commit.ts`). Here:
+So the map is now an **untracked, gitignored artifact**, rebuilt in place. The chore commits are
+gone, and with them the `merge=ours` driver, the `.gitattributes` line, and the merge deferral —
+an untracked file cannot conflict and cannot move a base.
 
-- the monitor phase on the main checkout is the **only** thing that regenerates it — builders in
-  worktrees read it and never rebuild (#953 enforces that on the instruction side);
-- `.gitattributes` carries `docs/tests/impact-map.json merge=ours` as the backstop for a branch
-  that somehow carries an older copy.
+**What replaces "worktrees inherit it from master":**
 
-> **The attribute alone does nothing.** Git has no built-in `ours` merge driver, and an attribute
-> naming an unregistered driver is ignored *silently* — the merge conflicts exactly as if the line
-> were absent. `ensureOursMergeDriver` registers it in the main checkout's local git config on each
-> pass. `test-impact-map.test.ts` drives a real divergent merge **both** ways, so the two halves
-> cannot drift apart unnoticed.
+- the board **copies** the main checkout's map into each worktree at provisioning **and at
+  relaunch** (`services/test-impact-map/worktree-map.ts`), so a builder gets a snapshot rather than
+  a moving target, and a resumed workspace picks up a fresher one;
+- the same `.gitignore` line covers the copy, so it never lands in a branch diff and never leaves a
+  worktree dirty (which `workspaceLaunchPreflight` would refuse to relaunch);
+- **absent is a supported state.** A fresh clone has no map until the first sweep. `select` then
+  widens to the package tier and says so on its own line — a wider run, never a wrong one.
 
-The phase runs **before** the auto-start fan-out (a builder launched that cycle forks from the fresh
-map) and takes the **queue repo lock with a short timeout, skipping on contention** — never waiting.
-`landMergeTrain` refuses to land a train whose base HEAD moved since assembly, so a commit made
-without the lock can kill an in-flight train. A map one cycle stale is harmless; a killed train is
-not.
+**A worktree still never writes the map.** `KANBAN_IMPACT_REBUILD` is off by default for exactly
+that reason (`scripts/test-mine.mjs`), and the pass itself only ever runs against a project's
+`repoPath`.
+
+**Opting in is `git check-ignore`.** Before writing, `resolveMapWritability` asks git two questions:
+is the path *tracked* here (→ refuse; a rewrite would dirty main and stall the merge queue), and is
+it *ignored* here (→ required; an untracked-but-unignored file has the same effect). A repo that has
+not gitignored the path is left alone, and a checkout that still tracks the map is reported with the
+one-time remedy — `git rm --cached docs/tests/impact-map.json` — rather than silently skipped.
+
+The pass runs **before** the auto-start fan-out (a builder launched that cycle gets the map that was
+just rebuilt) and takes the **queue repo lock with a short timeout, skipping on contention** — never
+waiting. The lock is no longer about commits: it is what stops two overlapping rebuilds interleaving
+into a half-written map.
 
 Opt a project out with `test_impact_map_<projectId>` = `off`; turn it off board-wide with the
 `test_impact_map_refresh` setting.
+
+### What "fresh" means for a file that is not in git
+
+Unchanged, and it never depended on tracking: `impact.mjs check` compares the map's **own recorded
+`commit:` stamp** against HEAD (`git rev-list --count <stamp>..HEAD`) and against the test files
+changed since. Fresh = the stamp is reachable, within `staleWidenAfterCommits` (30) commits of HEAD,
+and no new test file has appeared. The merge gate's `map fresh` / `map STALE` clause therefore keeps
+meaning exactly what it meant before — and it now describes the **worktree's** copy, which is the
+map the run actually used.
+
+One consequence worth naming: because the map left the tree, a rebuild no longer changes
+`mergedTreeHash` and so no longer invalidates a banked gate pass by itself. `resolveSelectorId`
+closes that by appending the map's stamp to the memo's selector component (#958's third field), so
+two runs on the same tree with different maps do not share a banked green.
+
+### Why "commit it once a day, before promotion" lost
+
+The considered alternative was to keep the map committed but write it exactly once a day,
+immediately before promotion (`scripts/promote.mjs`, #1014), never from the 15-minute pass. It is
+the smaller change and it does cut ~11 commits/day to 1. It lost on three counts:
+
+1. **It designs the staleness in.** This repo lands well over 30 commits a day, which *is* the
+   skill's staleness threshold, so a once-a-day map would spend most of every day widened to the
+   package tier — the #993 failure, made permanent rather than accidental.
+2. **It keeps the mechanism.** A promotion-time commit still moves the base under a running gate.
+   The failure becomes rare, and a rare base-movement bug is harder to attribute than a frequent one.
+3. **It keeps 1.4 MB of generated JSON** in every branch diff, rebase and `git log -p`, for a file
+   no human reads.
 
 ## Refreshing the durations (#955)
 

@@ -96,3 +96,16 @@ packages/server/process-exit-log.jsonl
 # IGNORED, not merely untracked: an untracked-but-unignored file in the main checkout is exactly
 # the shape that makes `getDirtyMainFiles` block every subsequent merge.
 .test-impact/
+
+# The test-impact MAP, for the same reason and by the same rule (#1018). It is a generated
+# artifact of the MAIN CHECKOUT — rebuilt in place by the board's `test-impact-map` pass and
+# copied read-only into each worktree at provisioning
+# (`services/test-impact-map/worktree-map.ts`). It used to be committed, and the resulting
+# `chore: rebuild test-impact map` commits landed on master every few minutes; each one moved the
+# base tip under every running pre-merge gate, whose verdict #243 then correctly DISCARDS.
+# Untracking removes the mechanism instead of the symptom.
+#
+# This line is also the OPT-IN MARKER: `resolveMapWritability` runs `git check-ignore` before it
+# will write the file, so a checkout that has not ignored the path is left alone rather than
+# dirtied.
+/docs/tests/impact-map.json

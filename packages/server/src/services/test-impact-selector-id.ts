@@ -2,9 +2,7 @@
  * The test-impact SELECTOR's identity, as a component of the merge-gate verification key (#958).
  *
  * WHY THIS EXISTS. The gate-PASS tree memo is keyed on `${projectId}:${verificationKey}:${treeHash}`,
- * and #678 already folded the TIER and the effective verify command into `verificationKey`. Because
- * the impact map is COMMITTED (decision (a) on #952), a rebuilt map is inside `mergedTreeHash` and
- * invalidates the memo by itself.
+ * and #678 already folded the TIER and the effective verify command into `verificationKey`.
  *
  * What `treeHash` does NOT cover is the SELECTOR, because the selector is not in the tree: the skill
  * is materialized into the worktree UNTRACKED (`.git/info/exclude`). Bump `impact.mjs`, or change a
@@ -35,12 +33,24 @@
  * That "" is also why this cannot make the gate WEAKER by failing: a lost selector id can only make
  * two genuinely different selectors share a key — the same exposure that existed before #958 — and
  * never make two identical ones look different in a way that skips a run. Errs toward re-running.
+ *
+ * THE MAP IS PART OF THE SELECTOR NOW (#1018). `selector-id` deliberately reads no inventory —
+ * that is what lets it answer before `build` has ever run — and while the map was COMMITTED the
+ * gap did not matter, because a rebuilt map changed `mergedTreeHash` and invalidated the memo on
+ * its own. #1018 made the map an untracked artifact copied into the worktree, so it left the tree
+ * hash and nothing else was watching it: two runs on the same merged tree, with the same selector,
+ * could select different suites because the map between them had been rebuilt. So the component is
+ * the tool's id PLUS the worktree map's own `commit:` stamp (`ti1:abc… map=8a0f35d793`, or
+ * `map=absent`). This RE-KEYS every project that uses the selector exactly once — the conservative
+ * direction, costing one extra gate run each — and it is read from the first few KB of the map
+ * rather than by parsing 1.4 MB of JSON on the merge path.
  */
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { closeSync, existsSync, openSync, readSync } from "node:fs";
 import { join } from "node:path";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { IMPACT_TOOL_RELATIVE_PATH, type RunImpactCommand } from "./test-impact-outcome.service.js";
+import { IMPACT_MAP_PATH as IMPACT_MAP_RELATIVE_PATH } from "./test-impact-map.service.js";
 
 /**
  * The value used when the selector is absent or unusable. Empty rather than a sentinel word, so
@@ -97,6 +107,40 @@ export function parseSelectorId(stdout: string): string {
   return SELECTOR_ID_RE.test(candidate) ? candidate : NO_SELECTOR_ID;
 }
 
+/** How much of the map to read looking for its stamp. The header is the first ~200 bytes. */
+const MAP_STAMP_READ_BYTES = 4096;
+
+/**
+ * The map's own `commit:` stamp, as a key component (#1018), or `"absent"`.
+ *
+ * Read from the HEAD of the file, never by `JSON.parse`: the map is ~1.4 MB of one-entry-per-line
+ * JSON and this runs on the merge path, before the gate has decided whether to run anything at
+ * all. The stamp is in the object's first ~200 bytes (`{"format":…,"commit":"8a0f35d793",…`).
+ *
+ * `"absent"` — a stable word, not an error and not an empty string — covers both "no map here"
+ * and "a map whose header does not carry a stamp". Both mean the selection ran without a usable
+ * inventory and widened, and two such runs SHOULD share a key.
+ */
+export function readImpactMapStamp(workingDir: string): string {
+  const mapPath = join(workingDir, ...IMPACT_MAP_RELATIVE_PATH.split("/"));
+  let fd: number | undefined;
+  try {
+    fd = openSync(mapPath, "r");
+    const buf = Buffer.alloc(MAP_STAMP_READ_BYTES);
+    const read = readSync(fd, buf, 0, MAP_STAMP_READ_BYTES, 0);
+    const match = /"commit"\s*:\s*"([^"]+)"/.exec(buf.subarray(0, read).toString("utf8"));
+    return match?.[1] ?? "absent";
+  } catch {
+    return "absent";
+  } finally {
+    if (fd !== undefined) {
+      try {
+        closeSync(fd);
+      } catch { /* a closed-twice fd is not worth failing a gate over */ }
+    }
+  }
+}
+
 export interface ResolveSelectorIdInput {
   /** The worktree the gate will run in — where the skill is materialized. */
   workingDir: string | null | undefined;
@@ -140,8 +184,12 @@ export async function resolveSelectorId(input: ResolveSelectorIdInput): Promise<
     const selectorId = parseSelectorId(result.stdout);
     if (!selectorId) {
       log(`selector-id printed no recognizable id in ${workingDir} — the gate memo key will not carry a selector component`);
+      return NO_SELECTOR_ID;
     }
-    return selectorId;
+    // #1018 — the map is no longer in the tree hash, so the memo would otherwise be blind to a
+    // rebuild between two runs on the same merged tree. Appended rather than folded into the
+    // tool's own hash so the component stays readable in a log line.
+    return `${selectorId} map=${readImpactMapStamp(workingDir)}`;
   } catch (err) {
     // A key component that cannot be resolved must never break the merge path.
     log(`selector-id failed unexpectedly: ${errorMessage(err)}`);
