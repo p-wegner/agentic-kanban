@@ -5,7 +5,7 @@ inventory removes nothing.** It exists so the decision about which standing guar
 retire (proposal `2026-09-03-dev-board-vs-deployed-board.md` §3.E) can be made with the whole
 set in view instead of one suite at a time.
 
-**172 files** — 172 carry `@gate:always-run`, 38 are `*ratchet*.test.ts`, 38 are both. 172 distinct properties; 0 file(s) state none.
+**173 files** — 173 carry `@gate:always-run`, 39 are `*ratchet*.test.ts`, 39 are both. 173 distinct properties; 0 file(s) state none.
 
 ## How each column is derived — and what it is NOT
 
@@ -27,7 +27,7 @@ set in view instead of one suite at a time.
 
 ## Candidates
 
-Duplicated property (exact): **0 group(s)**. Overlapping properties (heuristic): **3 pair(s)**. Never red since introduction (proxy): **40**. Slower than 20s: **9**. No stated property: **0**. Unmeasured: **10**.
+Duplicated property (exact): **0 group(s)**. Overlapping properties (heuristic): **3 pair(s)**. Never red since introduction (proxy): **40**. Slower than 20s: **9**. No stated property: **0**. Unmeasured: **11**.
 
 ### Same property pinned more than once
 
@@ -117,6 +117,7 @@ each other, which is how a merge candidate is spotted by eye.
 
 | property | file | kinds | introduced | last red (proxy) | wall |
 | --- | --- | --- | --- | --- | --- |
+| #1015 — `red_base_policy_<projectId>` is the per-project, **softer-only** override of the | `packages/server/src/__tests__/red-base-policy-raw-read-ratchet.test.ts` | always-run, ratchet | 2026-09-04 (`ac4685ca23`) | 2026-09-04 (`8a0f35d793`) |  |
 | #220 — branch-name PRODUCER agreement. | `packages/server/src/__tests__/branch-name-single-producer.test.ts` | always-run | 2026-08-10 (`d74629be57`) | 2026-08-10 (`d74629be57`) | 9ms |
 | #401 — bounded session_messages reads + sync-free hot paths. | `packages/server/src/__tests__/bounded-session-message-reads.test.ts` | always-run | 2026-08-11 (`95f79cbb7b`) | 2026-08-23 (`e6020c39a6`) | 2.3s |
 | #537 leak A: a `packages/shared`-only diff expanded to server/mcp-server as downstream | `packages/server/src/__tests__/test-mine-scope-derivation.test.mjs` | always-run | 2026-08-16 (`b9349b90c3`) | 2026-08-24 (`59296782f7`) | 16ms |
@@ -298,6 +299,7 @@ each other, which is how a merge candidate is spotted by eye.
 - `packages/server/src/__tests__/machine-verify-lock-mirror.test.ts`
 - `packages/server/src/__tests__/project-update-unrecognized-keys.test.ts`
 - `packages/server/src/__tests__/promote-plan.test.ts`
+- `packages/server/src/__tests__/red-base-policy-raw-read-ratchet.test.ts`
 - `packages/server/src/__tests__/test-impact-budget-setting.test.ts`
 - `packages/server/src/__tests__/typecheck-package-coverage.test.ts`
 - `packages/server/src/__tests__/verify-step-timings.test.ts`
