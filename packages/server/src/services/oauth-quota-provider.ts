@@ -220,8 +220,6 @@ export interface OAuthQuotaProviderOptions {
   readCredentials?: (configDir: string, nowMs: number) => CredentialRead;
   /** Every outbound request is logged through here. Defaults to the board's console prefix. */
   log?: (line: string) => void;
-  /** Injected for tests; see the CLAUDE.md `nowMs?: number` convention. */
-  nowMs?: () => number;
   timeoutMs?: number;
 }
 
@@ -232,6 +230,10 @@ export interface OAuthQuotaProviderOptions {
  * round-robin) and then renders the whole cache. So a UI poll, a monitor cycle and an
  * objective regeneration each cost at most one upstream request, and five profiles
  * converge over five ticks instead of bursting together.
+ *
+ * The provider holds NO clock: `fetchUsage(nowMs?)` takes the tick's time and threads it
+ * through the whole tick (due check, fetch, cache merge, rendering), per the CLAUDE.md
+ * `nowMs?: number` time-injection convention.
  */
 export class OAuthQuotaProvider implements QuotaUsageProvider {
   private readonly cache = new Map<string, QuotaCacheRecord>();
@@ -240,7 +242,6 @@ export class OAuthQuotaProvider implements QuotaUsageProvider {
   private readonly listProfiles: () => OAuthProfileRef[];
   private readonly readCredentials: (configDir: string, nowMs: number) => CredentialRead;
   private readonly log: (line: string) => void;
-  private readonly now: () => number;
   private readonly timeoutMs: number;
 
   constructor(opts: OAuthQuotaProviderOptions = {}) {
@@ -248,14 +249,12 @@ export class OAuthQuotaProvider implements QuotaUsageProvider {
     this.listProfiles = opts.listProfiles ?? (() => listOAuthProfiles());
     this.readCredentials = opts.readCredentials ?? readOAuthCredentials;
     this.log = opts.log ?? ((line) => console.log(`[quota-oauth] ${line}`));
-    this.now = opts.nowMs ?? (() => Date.now());
     this.timeoutMs = opts.timeoutMs ?? 6_000;
   }
 
-  async fetchUsage(): Promise<QuotaUsageResult> {
+  async fetchUsage(nowMs: number = Date.now()): Promise<QuotaUsageResult> {
     const profiles = this.listProfiles();
-    await this.refreshOne(profiles);
-    const nowMs = this.now();
+    await this.refreshOne(profiles, nowMs);
     return {
       providers: profiles.map((p) => this.toEntry(p, nowMs)),
       scrapedAt: new Date(nowMs).toISOString(),
@@ -267,8 +266,7 @@ export class OAuthQuotaProvider implements QuotaUsageProvider {
    * and by any active failure backoff, and the cursor advances over the DUE set so one
    * permanently-failing profile cannot starve the others.
    */
-  private async refreshOne(profiles: OAuthProfileRef[]): Promise<string | null> {
-    const nowMs = this.now();
+  private async refreshOne(profiles: OAuthProfileRef[], nowMs: number): Promise<string | null> {
     const due = profiles.filter((p) => this.isDue(p.configDir, nowMs));
     if (due.length === 0) return null;
 
@@ -276,7 +274,7 @@ export class OAuthQuotaProvider implements QuotaUsageProvider {
     this.cursor = (this.cursor + 1) % due.length;
 
     const outcome = await this.fetchOne(target, nowMs);
-    this.cache.set(target.configDir, mergeRecord(this.cache.get(target.configDir), outcome, this.now()));
+    this.cache.set(target.configDir, mergeRecord(this.cache.get(target.configDir), outcome, nowMs));
     return target.profile;
   }
 

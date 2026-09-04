@@ -63,6 +63,8 @@ function errorResponse(status: number, retryAfter?: string): Response {
 
 interface Harness {
   provider: OAuthQuotaProvider;
+  /** One tick at the harness clock — `fetchUsage` takes the time, the provider holds none. */
+  tick: () => Promise<Awaited<ReturnType<OAuthQuotaProvider["fetchUsage"]>>>;
   calls: string[];
   logs: string[];
   setNow: (ms: number) => void;
@@ -91,30 +93,36 @@ function makeProvider(opts: { profiles?: OAuthProfileRef[]; responses?: Response
     listProfiles: () => profiles,
     readCredentials: (dir) => ({ token: `token-${dir.split("-").pop()}`, tier: "max 20x" }),
     log: (line) => logs.push(line),
-    nowMs: () => now,
   });
 
-  return { provider, calls, logs, setNow: (ms) => { now = ms; }, responses };
+  return {
+    provider,
+    tick: () => provider.fetchUsage(now),
+    calls,
+    logs,
+    setNow: (ms) => { now = ms; },
+    responses,
+  };
 }
 
 describe("OAuthQuotaProvider throttling", () => {
   it("sends at most one usage request per tick, round-robin over the due profiles", async () => {
     const h = makeProvider();
 
-    await h.provider.fetchUsage();
+    await h.tick();
     expect(h.calls).toEqual(["anth"]);
 
-    await h.provider.fetchUsage();
+    await h.tick();
     expect(h.calls).toEqual(["anth", "team"]);
 
     // Both are now fresh (10% used → a 10-minute interval), so the third tick sends nothing.
-    await h.provider.fetchUsage();
+    await h.tick();
     expect(h.calls).toEqual(["anth", "team"]);
   });
 
   it("logs every outbound request, so a 429 the board caused is attributable", async () => {
     const h = makeProvider();
-    await h.provider.fetchUsage();
+    await h.tick();
     expect(h.logs).toHaveLength(1);
     expect(h.logs[0]).toContain("anth");
     expect(h.logs[0]).toContain("200");
@@ -122,7 +130,7 @@ describe("OAuthQuotaProvider throttling", () => {
 
   it("still renders EVERY profile from cache on a tick that refreshed one of them", async () => {
     const h = makeProvider();
-    const result = await h.provider.fetchUsage();
+    const result = await h.tick();
     expect(result.providers.map((p) => p.id)).toEqual(["anth", "team"]);
     // The one that was not polled is `unknown`, never absent and never 0%.
     const team = result.providers.find((p) => p.id === "team")!;
@@ -150,13 +158,13 @@ describe("OAuthQuotaProvider 429 handling", () => {
       responses: [okResponse(usageBody(42, 17)), errorResponse(429, "1200")],
     });
 
-    const first = await h.provider.fetchUsage();
+    const first = await h.tick();
     expect(first.providers[0].status).toBe("ok");
     expect(first.providers[0].metrics?.[0].percent).toBe(42);
 
     // Push past the refresh interval so the second tick is genuinely due, then 429.
     h.setNow(T0 + 11 * 60_000);
-    const second = await h.provider.fetchUsage();
+    const second = await h.tick();
     expect(h.calls).toEqual(["anth", "anth"]);
 
     const entry = second.providers[0];
@@ -172,11 +180,11 @@ describe("OAuthQuotaProvider 429 handling", () => {
     // interval (10 minutes at 42% used) has elapsed — the backoff is what keeps the board
     // off a rate-limited endpoint, so it has to outrank the TTL rather than merely match it.
     h.setNow(T0 + 11 * 60_000 + 11 * 60_000);
-    await h.provider.fetchUsage();
+    await h.tick();
     expect(h.calls).toHaveLength(2);
 
     h.setNow(T0 + 11 * 60_000 + 1201 * 1000);
-    await h.provider.fetchUsage();
+    await h.tick();
     expect(h.calls).toHaveLength(3);
   });
 
@@ -203,10 +211,9 @@ describe("OAuthQuotaProvider 429 handling", () => {
       listProfiles: () => [PROFILES[0]],
       readCredentials: () => ({ err: "expired", tier: "max 5x" }),
       log: (line) => logs.push(line),
-      nowMs: () => T0,
     });
 
-    const result = await provider.fetchUsage();
+    const result = await provider.fetchUsage(T0);
     expect(calls).toEqual([]);
     expect(logs[0]).toContain("no request sent");
     // A dead login is an auth problem the operator can fix, not an exhausted quota.
@@ -218,7 +225,7 @@ describe("OAuthQuotaProvider 429 handling", () => {
 describe("measurement age", () => {
   it("reads as `unknown` past one reset window — never exhausted, never empty", async () => {
     const h = makeProvider({ profiles: [PROFILES[0]], responses: [okResponse(usageBody(73, 61))] });
-    await h.provider.fetchUsage();
+    await h.tick();
 
     h.setNow(T0 + MEASUREMENT_STALE_MS + 60_000);
     // No further response queued → the fake falls through to a 200, so force staleness by
@@ -257,7 +264,7 @@ describe("measurement age", () => {
 describe("wire DTO shape", () => {
   it("carries the fields the client and the Bullseye gate read", async () => {
     const h = makeProvider({ profiles: [PROFILES[0]], responses: [okResponse(usageBody(42, 17))] });
-    const result = await h.provider.fetchUsage();
+    const result = await h.tick();
 
     expect(result.scrapedAt).toBe(new Date(T0).toISOString());
     const entry = result.providers[0];
@@ -289,7 +296,7 @@ describe("wire DTO shape", () => {
 
   it("`id` is the profile name, so a Bullseye policy pins a profile rather than a browser tab", async () => {
     const h = makeProvider();
-    const result = await h.provider.fetchUsage();
+    const result = await h.tick();
     expect(result.providers.map((p) => p.id)).toEqual(["anth", "team"]);
   });
 
