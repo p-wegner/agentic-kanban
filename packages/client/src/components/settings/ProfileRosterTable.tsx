@@ -17,9 +17,9 @@
  * than one reset window is neither exhausted nor empty, and a table that blurs the three is
  * worse than one with no numbers at all.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef } from "react";
 import type { ProfileRosterProfile, ProfileRosterResponse } from "@agentic-kanban/shared/types";
-import { apiFetch } from "../../lib/api.js";
+import { useApiResource } from "../../hooks/useApiResource.js";
 import {
   cooldownLabel,
   headroomLabel,
@@ -134,21 +134,30 @@ function ProfileRosterRow({ profile, nowMs }: { profile: ProfileRosterProfile; n
  * Fetch the roster once. Its own data source, like `ProfileQuotaSection` — the Settings
  * panel's bootstrap is a settings blob, and joining a filesystem walk plus a quota call into
  * it would slow the first paint of every tab for one table on one of them.
+ *
+ * On `useApiResource` (#513), not a hand-rolled ladder: #1028 shipped its own
+ * data/error/cancelled effect here and `fetch-in-effect-ratchet.test.ts` — a DOWN-only ring —
+ * went red for it (#1034). The hook is the ladder, so this file has none.
+ *
+ * `reloadKey` stays in the signature because the caller bumps it after a roster SAVE, which is
+ * not a path change; it is translated into the hook's own `reload()` on change only, so a first
+ * render with an already-nonzero key does not fetch twice.
  */
 export function useProfileRoster(projectId?: string | null, reloadKey = 0) {
-  const [roster, setRoster] = useState<ProfileRosterResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // The `?` stays INSIDE the literal so the path is still readable to the response-
+  // validation ratchet's scanner — an interpolation that starts where the path ends makes
+  // the endpoint invisible to it, and an endpoint it cannot see is one it cannot check.
+  const path = `/api/profile-roster?projectId=${encodeURIComponent(projectId ?? "")}`;
+  const { data: roster, error, reload } = useApiResource<ProfileRosterResponse>(path, {
+    fallbackError: "unavailable",
+  });
 
+  const seenReloadKey = useRef(reloadKey);
   useEffect(() => {
-    let cancelled = false;
-    // The `?` stays INSIDE the literal so the path is still readable to the response-
-    // validation ratchet's scanner — an interpolation that starts where the path ends makes
-    // the endpoint invisible to it, and an endpoint it cannot see is one it cannot check.
-    apiFetch<ProfileRosterResponse>(`/api/profile-roster?projectId=${encodeURIComponent(projectId ?? "")}`)
-      .then((res) => { if (!cancelled) { setRoster(res); setError(null); } })
-      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : "unavailable"); });
-    return () => { cancelled = true; };
-  }, [projectId, reloadKey]);
+    if (seenReloadKey.current === reloadKey) return;
+    seenReloadKey.current = reloadKey;
+    reload();
+  }, [reloadKey, reload]);
 
   return { roster, error };
 }

@@ -17,6 +17,21 @@ import type { AgentProviderName } from "@agentic-kanban/shared/lib/provider-trai
 import type { ProfileRosterProfile } from "@agentic-kanban/shared/types";
 
 /**
+ * One selectable profile, with the role its ACCOUNT declares (the narrowing floor).
+ *
+ * Declared HERE rather than on `ProjectRosterEditor.tsx` (#1034): `hooks/useProjectProviderControls.ts`
+ * needs the type to phrase its `onRoleChange`, and a `hooks/` module importing from `components/`
+ * is an upward edge `client-upward-type-edge-ratchet.test.ts` rejects even type-only. The editor
+ * re-exports it, so its existing importers are unaffected.
+ */
+export interface RosterCandidate {
+  id: string;
+  provider: AgentProviderName;
+  name: string;
+  globalRole: ProfileRole;
+}
+
+/**
  * True when setting `requested` for a profile whose account declares `globalRole` would
  * WIDEN it — i.e. the combination the resolver would compute is stricter than the request,
  * so the stored value would not be what actually happens.

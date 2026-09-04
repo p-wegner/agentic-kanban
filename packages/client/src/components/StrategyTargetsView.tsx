@@ -26,6 +26,30 @@ type ProfilesByProvider = Record<"claude" | "codex" | "copilot" | "pi", string[]
 
 const EMPTY_PROFILES: ProfilesByProvider = { claude: [], codex: [], copilot: [], pi: [] };
 
+/**
+ * The Monitor-policy number inputs, as DATA at module scope (#1034).
+ *
+ * A static field table rebuilt on every render, with the `keyof Pick<StrategyConfig, …>` union
+ * spelled twice inside the map and a cast on each of `min`/`max`, is what pushed
+ * `StrategyTargetsView` past its `function-nloc-ratchet` entry when #1021 added the fourth
+ * field. Hoisted, the union is named once and the casts are gone: `key` is already the narrow
+ * type, so `config[key]` and `DEFAULT_CONFIG[key]` typecheck without one.
+ */
+type PolicyNumberKey = keyof Pick<
+  StrategyConfig,
+  "activeAgentsTarget" | "backlogFloor" | "maxNewStartsPerCycle" | "harnessSharePct"
+>;
+
+const POLICY_NUMBER_FIELDS: { key: PolicyNumberKey; label: string; min: number; max: number }[] = [
+  { key: "activeAgentsTarget", label: "Agents", min: 1, max: MAX_ACTIVE_AGENTS_TARGET },
+  { key: "backlogFloor", label: "Backlog", min: 0, max: 100 },
+  { key: "maxNewStartsPerCycle", label: "Starts", min: 1, max: MAX_ACTIVE_AGENTS_TARGET },
+  // #1021 — the harness budget: at most this share of the WIP on `harness`-tagged tickets.
+  // 100 disables it (the pre-#1021 behaviour).
+  { key: "harnessSharePct", label: "Harness %", min: MIN_HARNESS_SHARE_PCT, max: MAX_HARNESS_SHARE_PCT },
+];
+
+
 export function StrategyTargetsView({ columns, projectId, onIssueClick, searchQuery }: StrategyTargetsViewProps) {
   const allIssues = useMemo(() => columns.flatMap((column) => column.issues), [columns]);
   const [profilesByProvider, setProfilesByProvider] = useState<ProfilesByProvider>(EMPTY_PROFILES);
@@ -269,23 +293,16 @@ export function StrategyTargetsView({ columns, projectId, onIssueClick, searchQu
               </span>
             </div>
             <div className="grid grid-cols-4 gap-2">
-              {[
-                ["activeAgentsTarget", "Agents", 1, MAX_ACTIVE_AGENTS_TARGET],
-                ["backlogFloor", "Backlog", 0, 100],
-                ["maxNewStartsPerCycle", "Starts", 1, MAX_ACTIVE_AGENTS_TARGET],
-                // #1021 — the harness budget: at most this share of the WIP on `harness`-tagged
-                // tickets. 100 disables it (the pre-#1021 behaviour).
-                ["harnessSharePct", "Harness %", MIN_HARNESS_SHARE_PCT, MAX_HARNESS_SHARE_PCT],
-              ].map(([keyName, label, min, max]) => (
+              {POLICY_NUMBER_FIELDS.map(({ key: keyName, label, min, max }) => (
                 <label key={keyName} className="block">
                   <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">{label}</span>
                   <input
                     type="number"
-                    min={min as number}
-                    max={max as number}
-                    value={config[keyName as keyof Pick<StrategyConfig, "activeAgentsTarget" | "backlogFloor" | "maxNewStartsPerCycle" | "harnessSharePct">]}
+                    min={min}
+                    max={max}
+                    value={config[keyName]}
                     onChange={(event) => {
-                      const value = clampPolicy(Number(event.target.value), DEFAULT_CONFIG[keyName as keyof Pick<StrategyConfig, "activeAgentsTarget" | "backlogFloor" | "maxNewStartsPerCycle" | "harnessSharePct">], min as number, max as number);
+                      const value = clampPolicy(Number(event.target.value), DEFAULT_CONFIG[keyName], min, max);
                       setConfigDirty((prev) => ({ ...prev, [keyName]: value }));
                     }}
                     className="w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
