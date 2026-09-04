@@ -2,7 +2,7 @@ import type { WSContext } from "hono/ws";
 import type { ProviderName } from "../agent-provider.js";
 import type { Placement } from "../agent-dispatch.service.js";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
-import type { ProfileSelectionReason } from "@agentic-kanban/shared/lib/profile-selection-reason";
+import type { ProfileSelectionReason } from "../../lib/profile-selection-reason.js";
 import type { TodoItem } from "../board-events.js";
 
 export interface Subscriber {

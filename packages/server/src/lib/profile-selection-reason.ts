@@ -1,4 +1,10 @@
 /**
+ * Lives in `packages/server/src/lib`, not `shared/lib` (#1026 follow-up): its only consumers
+ * are server services and the session row they write, so the consumer count is 1 - exactly
+ * what `shared-lib-single-consumer-ratchet.test.ts` (#590/#730) keeps out of `shared/lib`.
+ * Same move #1024 made for `profile-attributes.ts`. Server code imports it relatively.
+ */
+/**
  * WHY this session launched on THIS profile (#1026).
  *
  * #801 gave a session row `placement_reason`/`placement_detail` because a live
