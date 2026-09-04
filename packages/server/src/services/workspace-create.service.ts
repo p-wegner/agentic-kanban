@@ -14,6 +14,7 @@ import { basename } from "node:path";
 import { randomUUID } from "node:crypto";
 import { suggestBranchName } from "@agentic-kanban/shared/lib/branch";
 import { isTerminalWorkspaceStatus } from "@agentic-kanban/shared/lib/workspace-status";
+import type { ProfileSelectionReason } from "@agentic-kanban/shared/lib/profile-selection-reason";
 import { workspaceServicesService, resolveServiceHost } from "./workspace-services.service.js";
 import { reapWorkspaceContainer } from "./devcontainer-workspace.service.js";
 import { provisionServicesForLaunch } from "./workspace-create-stack.service.js";
@@ -305,6 +306,8 @@ export function createWorkspaceCreateService(deps: {
     systemInstructions: string;
     contextFiles?: string[];
     skillName: string | null;
+    /** #1026 — the resolver's own account of why THIS profile, for the session row. */
+    profileSelectionReason?: ProfileSelectionReason | null;
   }): Promise<string | undefined> {
     if (!getSessionManager) return undefined;
     const truncatedPrompt = params.agentPrompt.length > 80 ? params.agentPrompt.slice(0, 80) + "..." : params.agentPrompt;
@@ -323,6 +326,7 @@ export function createWorkspaceCreateService(deps: {
       model: params.model,
       systemInstructions: params.systemInstructions,
       contextFiles: params.contextFiles,
+      profileSelectionReason: params.profileSelectionReason ?? null,
     });
   }
 
@@ -890,6 +894,7 @@ export function createWorkspaceCreateService(deps: {
           systemInstructions: agentConfig.systemInstructions,
           contextFiles: ticketContextPath ? [ticketContextPath] : undefined,
           skillName,
+          profileSelectionReason: agentConfig.profileSelectionReason,
         };
         scheduleDeferredProvisionAndLaunch(agentLaunchArgs, {
           workspaceId: id,

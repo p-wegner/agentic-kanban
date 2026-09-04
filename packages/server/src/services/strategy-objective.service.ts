@@ -7,6 +7,8 @@ import type { QuotaUsageResult } from "./quota-usage.service.js";
 import { resolveEffectiveModel } from "./effective-config.service.js";
 import { selectPolicyByPriority } from "@agentic-kanban/shared/lib/strategy-policy";
 import type { ProviderProfilePolicy } from "@agentic-kanban/shared/lib/strategy-policy";
+import type { ProfileHeadroom } from "@agentic-kanban/shared/lib/profile-allowlist";
+import { DEFAULT_POOL_EXHAUSTED_PCT } from "@agentic-kanban/shared/lib/profile-allowlist";
 import { readStrategyBullseye } from "@agentic-kanban/shared/lib/strategy-objective-file";
 import type { StrategyBullseyeConfig } from "@agentic-kanban/shared/lib/strategy-objective-file";
 
@@ -100,22 +102,97 @@ export function isPolicyBlockedByQuota(
  */
 export function selectProviderFromStrategy(
   config: StrategyBullseyeConfig,
-  options: { allowFallback?: boolean; quota?: QuotaUsageResult | null } = {},
-): { provider: "claude" | "codex" | "copilot" | "pi"; profileName: string; policy: ProviderProfilePolicy } | null {
+  options: {
+    allowFallback?: boolean;
+    quota?: QuotaUsageResult | null;
+    /** #1026: per-profile 5-hour readings, so headroom can decide among equals. */
+    headroom?: Map<string, ProfileHeadroom> | null;
+    /** #1026: percent of the 5-hour window at or above which a profile is skipped. */
+    exhaustedPct?: number;
+  } = {},
+): StrategyProviderChoice | null {
   const policies = config.providerPolicies ?? [];
   if (policies.length === 0) return null;
 
   const quota = options.quota ?? null;
+  const headroom = options.headroom ?? null;
+  const exhaustedPct = options.exhaustedPct ?? DEFAULT_POOL_EXHAUSTED_PCT;
+  const usedOf = (p: ProviderProfilePolicy) => policyUsedPct(p, headroom);
+  // #1026: an exhausted profile is skipped BEFORE the start, so the ring's usage-limit
+  // text is the backstop rather than the trigger. It stacks with the Bullseye's own
+  // quota gate rather than replacing it: that one reads a policy's `quotaProviderId`
+  // against its declared `headroomPct`, this one reads the profile's measured 5-hour
+  // window against the project's roster threshold, and either is reason enough to skip.
+  const exhausted = (p: ProviderProfilePolicy) => {
+    const used = usedOf(p);
+    return used !== null && used >= exhaustedPct;
+  };
 
   // Priority order (fill → throttle → fallback-only) is the shared
   // selectPolicyByPriority — the same logic the client's Settings preview uses —
-  // with live-quota gating layered on via the isBlocked hook.
+  // with live-quota gating layered on via the isBlocked hook, and (#1026) headroom
+  // ranking WITHIN a tier via costOf. With no headroom map both hooks are inert and
+  // the result is the historic list order.
   const chosen = selectPolicyByPriority(policies, {
     allowFallback: options.allowFallback ?? false,
-    isBlocked: (p) => isPolicyBlockedByQuota(p, quota),
+    isBlocked: (p) => isPolicyBlockedByQuota(p, quota) || exhausted(p),
+    costOf: usedOf,
   });
   if (!chosen) return null;
-  return { provider: chosen.provider, profileName: chosen.profileName, policy: chosen };
+  const candidates = policies.map((p) => ({
+    id: `${p.provider}:${p.profileName}`,
+    usedPct: usedOf(p),
+    exhausted: exhausted(p) || isPolicyBlockedByQuota(p, quota),
+  }));
+  return {
+    provider: chosen.provider,
+    profileName: chosen.profileName,
+    policy: chosen,
+    usedPct: usedOf(chosen),
+    candidates,
+  };
+}
+
+/** What `selectProviderFromStrategy` answers, including who lost and by what reading. */
+export interface StrategyProviderChoice {
+  provider: "claude" | "codex" | "copilot" | "pi";
+  profileName: string;
+  policy: ProviderProfilePolicy;
+  /** The chosen profile's 5-hour reading, or null when unmeasured (#1026). */
+  usedPct: number | null;
+  /** Every policy considered, in declared order, with its reading (#1026). */
+  candidates: StrategyProviderCandidate[];
+}
+
+export interface StrategyProviderCandidate {
+  /** `provider:profileName`. */
+  id: string;
+  usedPct: number | null;
+  /** Skipped before the start — over the threshold, or blocked by the Bullseye's gate. */
+  exhausted: boolean;
+}
+
+/**
+ * One policy's 5-hour reading (#1026).
+ *
+ * Three spellings are tried because three vocabularies meet here: the quota source keys a
+ * Claude profile by its bare name, a roster entry is always provider-qualified, and a
+ * policy may name a `quotaProviderId` that is neither. A reading found under any of them
+ * is the same reading; missing under all three is `unknown`, which never counts as
+ * exhausted — old beats wrong, and dropping a profile whose number we simply do not have
+ * would take a usable account out of rotation.
+ */
+export function policyUsedPct(
+  policy: ProviderProfilePolicy,
+  headroom: Map<string, ProfileHeadroom> | null | undefined,
+): number | null {
+  if (!headroom) return null;
+  const rec =
+    (policy.quotaProviderId ? headroom.get(policy.quotaProviderId) : undefined) ??
+    headroom.get(`${policy.provider}:${policy.profileName}`) ??
+    headroom.get(policy.profileName);
+  if (!rec || rec.stale) return null;
+  return typeof rec.usedPct === "number" && Number.isFinite(rec.usedPct) ? rec.usedPct : null;
 }
 
 /**
@@ -148,7 +225,12 @@ export function applyProviderSelectionToPrefMap(
 export async function resolveStrategyProviderSelection(
   database: Database,
   projectId: string | null | undefined,
-): Promise<{ provider: "claude" | "codex" | "copilot" | "pi"; profileName: string; model?: string } | null> {
+  options: {
+    /** #1026: readings the caller already fetched, so a launch fetches quota once. */
+    headroom?: Map<string, ProfileHeadroom> | null;
+    exhaustedPct?: number;
+  } = {},
+): Promise<StrategyProviderSelection | null> {
   if (!projectId) return null;
   const prefRows = await getAllPreferencesCached(database);
   const prefMap = toPrefMap(prefRows);
@@ -166,7 +248,11 @@ export async function resolveStrategyProviderSelection(
         /* quota service unavailable — fall back to static priority */
       }
     }
-    const selected = selectProviderFromStrategy(strategyConfig, { quota });
+    const selected = selectProviderFromStrategy(strategyConfig, {
+      quota,
+      headroom: options.headroom,
+      exhaustedPct: options.exhaustedPct,
+    });
     if (!selected) return null;
     // Carry the policy's optional model, but only when it belongs to the selected provider's
     // family — a mismatched id (e.g. a codex "gpt-5.5" on a claude policy) would otherwise be
@@ -180,8 +266,28 @@ export async function resolveStrategyProviderSelection(
           requestedModel: policyModel,
         }).model
       : undefined;
-    return { provider: selected.provider, profileName: selected.profileName, model };
+    return {
+      provider: selected.provider,
+      profileName: selected.profileName,
+      model,
+      usedPct: selected.usedPct,
+      candidates: selected.candidates,
+    };
   } catch {
     return null;
   }
+}
+
+/**
+ * The Bullseye's answer, plus (#1026) the readings behind it. The extra fields are
+ * additive: every existing caller reads `provider`/`profileName`/`model` and is unchanged.
+ */
+export interface StrategyProviderSelection {
+  provider: "claude" | "codex" | "copilot" | "pi";
+  profileName: string;
+  model?: string;
+  /** The chosen profile's 5-hour reading, or null when unmeasured. */
+  usedPct?: number | null;
+  /** Every policy considered, in declared order — "why not the others". */
+  candidates?: StrategyProviderCandidate[];
 }

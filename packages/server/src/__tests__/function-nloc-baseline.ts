@@ -171,6 +171,21 @@
  *                                          spent by accident, so it sits at the seam where the
  *                                          launch is actually resolved. No roster logic moved
  *                                          in; the selection stays in shared.
+ *
+ * -- Eighth disclosed movement (2026-09-04, #1026 predictive rotation) ------------------
+ *
+ *   createWorkspaceProvisionService  407 -> 409  (+2)
+ *   createWorkspaceCreateService     641 -> 644  (+3)
+ *   createSessionLifecycle           620 -> 621  (+1)
+ *
+ * Five lines total, and each is a hand-off rather than logic: one field on
+ * `buildAgentConfig`'s result, one line carrying it into the deferred launch args, one into
+ * `startSession`, and -- in `createSessionLifecycle` -- the serialize call on the session
+ * INSERT. The decision they carry lives entirely outside these functions
+ * (`shared/lib/profile-selection-reason.ts` and `buildSelectionReason` in
+ * `project-runtime-config.service.ts`); what remains here cannot be extracted, because a
+ * value has to be passed at the point in the flow where it exists. All three factories
+ * still want splitting for their own sake; this is not the ticket that does it.
  */
 export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "cli/commands/issue.ts::registerIssueCommand": 718,
@@ -180,11 +195,11 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // Raised rather than worked around: the ring exists to stop unmanaged growth, not to make a
   // sanctioned extraction unlandable, and 2 nloc here bought 8 columns off the hottest table
   // in the board. It is still the largest entry in this ring and still wants splitting.
-  // 635 -> 641 (#1025), disclosed in the seventh movement above.
-  "services/workspace-create.service.ts::createWorkspaceCreateService": 641,
+  // 635 -> 641 (#1025) -> 644 (#1026), disclosed in the seventh and eighth movements above.
+  "services/workspace-create.service.ts::createWorkspaceCreateService": 644,
   "services/issue.service.ts::createIssueService": 616,
   // 618 -> 620 (#968), disclosed in the sixth movement above.
-  "services/session-manager/session-lifecycle.ts::createSessionLifecycle": 620,
+  "services/session-manager/session-lifecycle.ts::createSessionLifecycle": 621,
   "services/workflow-fork.service.ts::createWorkflowForkService": 581,
   "cli/commands/workspace.ts::registerWorkspaceCommand": 573,
   "services/agent-remote.service.ts::createRemoteAgentService": 637,
@@ -214,8 +229,8 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // module-level `*Impl` functions taking `database` explicitly, so the relaunch seam in
   // `workspace-session.service.ts` can share the exact same logic without this factory
   // re-growing every time that shared logic changes. The factory now holds thin delegators.
-  // 393 -> 407 (#1025), disclosed in the seventh movement above.
-  "services/workspace-provision.service.ts::createWorkspaceProvisionService": 407,
+  // 393 -> 407 (#1025) -> 409 (#1026), disclosed in the seventh and eighth movements above.
+  "services/workspace-provision.service.ts::createWorkspaceProvisionService": 409,
   // 404 -> 399, banked (#806): five hand-written body guards became one schema parse each.
   "routes/workspace-actions.ts::createWorkspaceActionsRoute": 403,
   // 349 -> 351 (#841): POSIX-only `detached: true` for a shell launch, closing the #836 gap.

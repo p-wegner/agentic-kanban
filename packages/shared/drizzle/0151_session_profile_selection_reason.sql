@@ -1,0 +1,18 @@
+-- #1026: WHY a session launched on THIS profile, recorded AT LAUNCH.
+--
+-- #801 added `placement_reason`/`placement_detail` for the same reason: a live
+-- re-derivation cannot answer a historical question, because the preferences, the fleet
+-- and the quota have all moved since. Profile selection now has a second reason to be
+-- written down — since #1026 the choice can be made by MEASURED 5-hour headroom, so "why
+-- not the other account" is a number that existed for a few minutes and is then gone.
+--
+-- One nullable TEXT column holding a `ProfileSelectionReason` JSON document
+-- (`shared/lib/profile-selection-reason.ts`): the profile, its reading, what decided
+-- (headroom / list-order / explicit / clamped / reserve), and every candidate considered
+-- with the reading that lost. JSON rather than a column family because nothing QUERIES
+-- it — it is read back by a human or an agent asking about one session.
+--
+-- NULL for every session launched before this landed, and for one whose profile was not
+-- resolved by this seam. "Not recorded" must stay distinguishable from "the default
+-- happened"; a backfilled default would erase exactly that distinction.
+ALTER TABLE `sessions` ADD `profile_selection_reason` text;

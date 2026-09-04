@@ -25,6 +25,7 @@ import { resolveContainerProvision, surfaceIsolationDowngrade } from "./devconta
 import { WorkspaceError } from "../workspace-internals.js";
 import { DEFAULT_BUILDER_GUARDRAILS, PREF_BUILDER_GUARDRAILS } from "../../constants/preference-keys.js";
 import { parseSymlinkDirs } from "@agentic-kanban/shared/lib/worktree-symlink-bootstrap";
+import { serializeProfileSelectionReason } from "@agentic-kanban/shared/lib/profile-selection-reason";
 import { loadCodexLicenseRing } from "../codex-license-ring.js";
 import { loadClaudeSubscriptionRing } from "../claude-subscription-ring.js";
 import { classifySessionExit as classifySessionExitRoute, extractCapturedStderr, readSessionExitSignals, ZERO_OUTPUT_LAUNCH_FAILURE_WINDOW_MS as EXIT_WINDOW_MS } from "./session-exit-state-machine.js";
@@ -124,7 +125,7 @@ export function createSessionLifecycle(
       workspaceId, prompt, agentCommand, agentArgs, resumeFromId, multiTurn,
       permissionPromptTool, planMode, resumeWithNewModel, provider, triggerType, profile,
       model, contextFiles, extraEnv, workingDirOverride, skipLaunchPreflight, allowUpdateBaseRebase,
-      skipPermissions: skipPermissionsOpt, systemInstructions, placement,
+      skipPermissions: skipPermissionsOpt, systemInstructions, placement, profileSelectionReason,
     } = opts;
 
     // Look up workspace to get workingDir
@@ -289,6 +290,9 @@ export function createSessionLifecycle(
       skillId: sessionSkillId,
       skillName: sessionSkillName,
       stats: JSON.stringify(launchDiagnostics),
+      // #1026: written WITH the row, not stamped after it — the reading it records was
+      // taken before the launch, so there is no window in which the row exists without it.
+      profileSelectionReason: serializeProfileSelectionReason(profileSelectionReason ?? null),
     }, db);
     // From here on a throw would strand this row as `running` with no process behind it,
     // so the wrapper's finalizer needs enough to end it visibly (see LaunchTrace).
