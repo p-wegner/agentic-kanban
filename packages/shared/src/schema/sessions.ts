@@ -36,6 +36,13 @@ export const sessions = sqliteTable("sessions", {
   // passed in rather than resolved — "not recorded" must stay distinct from "host by default".
   placementReason: text("placement_reason"),
   placementDetail: text("placement_detail"),
+  // WHY this session runs on THIS profile (#1026), stamped by the provider resolver at
+  // launch. Same reasoning as placementReason above, plus one of its own: since headroom
+  // can decide the choice, "why not the other account" is a 5-hour measurement that is
+  // gone minutes later. JSON (`ProfileSelectionReason`) in one nullable column — nothing
+  // queries it; it is read back by whoever asks about one session. Null for a session
+  // launched before this existed, or one whose profile was not resolved here.
+  profileSelectionReason: text("profile_selection_reason"),
 }, (table) => ({
   statusIdx: index("idx_sessions_status").on(table.status),
   workspaceIdStatusIdx: index("idx_sessions_workspace_id_status").on(table.workspaceId, table.status),

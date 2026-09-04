@@ -17,7 +17,13 @@ import type { ResolvedProviderConfig } from "./provider-config-resolution.js";
 import { resolveProviderConfig } from "./provider-config-resolution.js";
 import {
   resolveStrategyProviderSelection,
+  type StrategyProviderSelection,
 } from "./strategy-objective.service.js";
+import { fetchLiveQuotaUsage } from "./quota-usage.service.js";
+import {
+  buildProfileSelectionReason,
+  type ProfileSelectionReason,
+} from "@agentic-kanban/shared/lib/profile-selection-reason";
 import { providerProfilePrefKey, readSettingsProviderSelection, resolveProviderDivergence as resolveProviderDivergenceShared } from "@agentic-kanban/shared/lib/strategy-policy";
 import { resolveStartPolicy, startModePrefKey, type StartPolicy } from "./start-policy.service.js";
 import type {
@@ -28,6 +34,8 @@ import type {
 } from "@agentic-kanban/shared/lib/profile-allowlist";
 import {
   allowedProfilesPrefKey,
+  headroomFromQuotaUsage,
+  isProfileCooling,
   parseProfileAllowlist,
   resolvePoolExhaustedPct,
   resolveProjectRoster,
@@ -64,7 +72,13 @@ export function autoMergeDisabledPrefKey(projectId: string): string {
 
 export interface RuntimeProviderConfig extends ResolvedProviderConfig {
   source: "explicit-profile" | "legacy-claude-profile" | "strategy" | "workspace" | "settings";
-  strategySelection: { provider: ProviderName; profileName: string; model?: string } | null;
+  strategySelection: StrategyProviderSelection | null;
+  /**
+   * #1026 — WHY this profile, recorded for the session row: which profile, its 5-hour
+   * headroom, what decided, and every candidate that lost with its own reading. Null when
+   * no profile resolved at all ("not recorded" stays distinct from "the default happened").
+   */
+  profileSelectionReason: ProfileSelectionReason | null;
   settingsSelection: { provider: ProviderName; profileName: string | null };
   /**
    * The project's profile allowlist as parsed. `restricted: false` for the vast majority
@@ -115,7 +129,7 @@ export interface ProjectRuntimeConfigInput {
   prefMap: Map<string, string>;
   profileOverride?: { provider?: string; name?: string } | null;
   legacyProfileOverride?: string | null;
-  strategySelection?: { provider: ProviderName; profileName: string; model?: string } | null;
+  strategySelection?: StrategyProviderSelection | null;
   workspaceSelection?: { provider?: string | null; profileName?: string | null } | null;
   requestedModel?: string | null;
   commandOverride?: string;
@@ -161,6 +175,66 @@ function applyWorkspaceSelection(
   const profileName = workspaceSelection.profileName?.trim();
   if (!profileName) return;
   prefMap.set(providerProfilePrefKey(provider), profileName);
+}
+
+/**
+ * Assemble the #1026 selection record from what the resolvers already decided.
+ *
+ * The candidate list is whichever set actually did the choosing: a restricted project's
+ * ranked `poolOrder`, otherwise the Bullseye policies the strategy selector weighed. Both
+ * carry their 5-hour reading, so "why not the other account" survives the minutes in which
+ * that number was true. A project with neither — one profile, no roster — still gets a
+ * record naming the profile, because "there was only one candidate" is itself the answer.
+ */
+function buildSelectionReason(args: {
+  provider: ResolvedProviderConfig;
+  roster: ParsedRoster;
+  source: RuntimeProviderConfig["source"];
+  input: ProjectRuntimeConfigInput;
+  exhaustedPct: number;
+}): ProfileSelectionReason | null {
+  const { provider, roster, source, input, exhaustedPct } = args;
+  if (!provider.profileName) return null;
+  const selected = `${provider.provider}:${provider.profileName}`;
+  const nowMs = input.nowMs ?? Date.now();
+
+  const readingOf = (id: string, name: string): number | null => {
+    const rec = input.headroom?.get(id) ?? input.headroom?.get(name);
+    if (!rec || rec.stale) return null;
+    return typeof rec.usedPct === "number" && Number.isFinite(rec.usedPct) ? rec.usedPct : null;
+  };
+
+  let candidates: Array<{ id: string; usedPct: number | null; cooling?: boolean; exhausted?: boolean }>;
+  if (roster.restricted && provider.poolOrder.length > 0) {
+    candidates = provider.poolOrder.map((id) => {
+      const entry = roster.entries.find((e) => `${e.provider}:${e.name}` === id);
+      const used = readingOf(id, entry?.name ?? id);
+      return {
+        id,
+        usedPct: used,
+        cooling: entry ? isProfileCooling(entry, input.prefMap, nowMs) : false,
+        exhausted: used !== null && used >= exhaustedPct,
+      };
+    });
+  } else {
+    candidates = (input.strategySelection?.candidates ?? []).map((c) => ({
+      id: c.id,
+      usedPct: c.usedPct,
+      exhausted: c.exhausted,
+    }));
+  }
+
+  return buildProfileSelectionReason({
+    selected,
+    source,
+    candidates,
+    clamped: provider.profileClamped,
+    reserveUsed: provider.reserveUsed,
+    // The Bullseye is the only selector that RANKS; every other source names one profile,
+    // so a kept choice is recorded as explicit even when readings exist beside it.
+    explicit: source !== "strategy",
+    note: provider.reserveNote,
+  });
 }
 
 export function resolveProjectRuntimeConfig(input: ProjectRuntimeConfigInput): ProjectRuntimeConfig {
@@ -211,11 +285,19 @@ export function resolveProjectRuntimeConfig(input: ProjectRuntimeConfigInput): P
   const autoMerge = isAutomaticMergeEnabled(input.prefMap);
   const autoMergeDisabled = input.prefMap.get(autoMergeDisabledPrefKey(input.projectId)) === "true";
 
+  const source = resolveProviderSource(input);
   return {
     projectId: input.projectId,
     provider: {
       ...provider,
-      source: resolveProviderSource(input),
+      source,
+      profileSelectionReason: buildSelectionReason({
+        provider,
+        roster,
+        source,
+        input,
+        exhaustedPct: resolvePoolExhaustedPct(input.prefMap, input.projectId),
+      }),
       strategySelection: input.strategySelection ?? null,
       settingsSelection: readSettingsSelection(input.prefMap),
       allowlist,
@@ -249,8 +331,13 @@ export async function loadProjectRuntimeConfig(
   const rows = await getAllPreferences(database);
   const prefMap = toPrefMap(rows);
   const hasOverride = Boolean(input.profileOverride?.name) || Boolean(input.legacyProfileOverride);
+  // #1026: the launch reads quota ONCE and hands the same map to both selectors — the
+  // Bullseye's ranking and the roster's exhaustion check. Reading it twice would let them
+  // disagree about the same instant, the way #938's two Tier-0 reads would have.
+  const exhaustedPct = resolvePoolExhaustedPct(prefMap, input.projectId);
+  const headroom = input.headroom ?? (await loadProfileHeadroom());
   const strategySelection = !hasOverride
-    ? await resolveStrategyProviderSelection(database, input.projectId)
+    ? await resolveStrategyProviderSelection(database, input.projectId, { headroom, exhaustedPct })
     : null;
   // #1025: the observed global roster comes from the same discovery the rings run, off the
   // prefs already loaded above — so no extra DB round-trip, and a caller that has its own
@@ -259,7 +346,23 @@ export async function loadProjectRuntimeConfig(
     claudeRingRaw: prefMap.get(PREF_CLAUDE_SUBSCRIPTION_RING),
     codexRingRaw: prefMap.get(PREF_CODEX_LICENSE_RING),
   });
-  return resolveProjectRuntimeConfig({ ...input, prefMap, strategySelection, globalRoster });
+  return resolveProjectRuntimeConfig({ ...input, prefMap, strategySelection, globalRoster, headroom });
+}
+
+/**
+ * Live 5-hour readings for every profile, or null when there is no usable quota source.
+ *
+ * Best-effort BY CONTRACT: an unreachable quota service must degrade to declared order —
+ * the behaviour every board had before #1026 — never fail a launch. The OAuth provider
+ * caches internally and refreshes at most one profile per call, so asking per launch is a
+ * map lookup rather than a round trip.
+ */
+async function loadProfileHeadroom(): Promise<Map<string, ProfileHeadroom> | null> {
+  try {
+    return headroomFromQuotaUsage(await fetchLiveQuotaUsage());
+  } catch {
+    return null;
+  }
 }
 
 export function buildDriveRuntimePreferencePatch(

@@ -141,6 +141,15 @@ Claude Code, Codex, Copilot — selectable via Settings → Agent. Claude reads 
 
 **Provider default — single source of truth = the Strategy Bullseye pref (`board_strategy_<projectId>`).** It fans out to all consumers: `selectProviderFromStrategy` → `POST /api/workspaces` default, `resolveMonitorTunables` (deterministic monitor), and a regenerated `objective.md` (the Conductor agent). Two values sit *outside* that fan-out and drift if set independently — the `provider`/`claude_profile` settings prefs (butler/review/UI) and the provider-scoped `default_model_<provider>` (claude/codex/pi; the old cross-provider global `default_model` key was retired by #902 — a cross-provider model id is now structurally unrepresentable). **To change the default, use the `set-provider-default` skill** — it sets the Bullseye, mirrors the settings prefs, scopes/clears the chosen provider's `default_model_<provider>`, and verifies all agree. Never hand-edit one source alone. (The code-level fix to collapse these is tracked on the board.)
 
+**Precedence: Bullseye = preference, roster + quota = permission and budget, ring = backstop.** The
+Bullseye (via `set-provider-default`) says which profile is PREFERRED and stays the single source of
+truth for the default; the roster (#1025) says which are PERMITTED and, since #1026, measured 5-hour
+headroom decides among them before the start — an exhausted pool entry is skipped rather than
+launched onto, and the chosen profile plus every candidate that lost is written to the session row
+(`sessions.profile_selection_reason`). The auth-rotation ring (#973) is what catches whatever that
+misses: it still stamps cooldowns and rewrites the Bullseye reactively off a usage-limit text, but
+it is now the backstop for a start that got through, not the trigger that moves the board.
+
 **Profile allowlist — a per-project CONSTRAINT, not another default.** `allowed_profiles_<projectId>`
 (Settings → Agent → "Profiles this project may use") lists the `{provider, name}` pairs a project is
 permitted to launch on. Absent/empty = unrestricted, which is every project by default. When set it is
