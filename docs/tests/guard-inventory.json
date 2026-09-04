@@ -3543,9 +3543,9 @@
       "introducedSha": "1d012a22b3",
       "introducedDate": "2026-08-22",
       "lastRedProxy": {
-        "sha": "ac4ff6a6a7",
-        "date": "2026-08-23",
-        "subject": "fix(#828): derive module paths with fileURLToPath, not a hand-sliced URL pathname",
+        "sha": "9ff845bd49",
+        "date": "2026-09-04",
+        "subject": "fix(#1024): profile-attributes single-consumer ratchet — move the reader into packages/server/src/lib, no false grandfather",
         "method": "git-log-fix-commit-naming-the-file"
       },
       "lastRedSource": "proxy: git log of fix commits naming the file (no gate-outcome ledger exists)",
