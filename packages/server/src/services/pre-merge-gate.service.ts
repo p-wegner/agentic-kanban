@@ -735,11 +735,22 @@ export async function runPreMergeGate(
           ? `pre-merge gate skipped — docs-only diff (${changedFiles.length} file(s))`
           : "NOT VERIFIED: this project has no verify_script and no smoke check, so nothing checked this merge (#377)",
     ...(unverified ? { unverified: true } : {}),
-    // #1030 — only for a run that actually verified something: a skipped gate made no selection.
-    ...(ranSomething && gateTierInfo && gateTierInfo.impactSelection !== undefined
-      ? { impactSelection: gateTierInfo.impactSelection }
-      : {}),
+    ...impactSelectionField(ranSomething, gateTierInfo),
   };
+}
+
+/**
+ * #1030 — the `impactSelection` field of a gate result, present only for a run that actually
+ * verified something: a skipped gate made no selection. Its own function so the branch it adds
+ * counts here and not against `runPreMergeGate` (god-module gate, baseline 34).
+ */
+function impactSelectionField(
+  ranSomething: boolean,
+  gateTierInfo: GateTierInfo | null,
+): Pick<PreMergeGateResult, "impactSelection"> {
+  return ranSomething && gateTierInfo && gateTierInfo.impactSelection !== undefined
+    ? { impactSelection: gateTierInfo.impactSelection }
+    : {};
 }
 
 // The merge-gate DECISION token (#943) lives in ./merge-gate-token.ts — re-exported here
