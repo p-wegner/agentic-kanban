@@ -214,11 +214,12 @@ export function attestedProfilePlacementFields(
 ): { profile?: { provider: string; name: string } } {
   if (!chosen) return {};
   if (chosen.usedReserve) {
-    const log = context.log ?? ((line: string) => console.warn(line));
-    log(
-      `[worker-fleet] RESERVE profile ${chosen.profile.provider}:${chosen.profile.name} selected for project ` +
-        `${context.projectId} on worker ${context.workerId} — every pool profile it attests is exhausted or cooling`,
-    );
+    const message =
+      `RESERVE profile ${chosen.profile.provider}:${chosen.profile.name} selected for project ` +
+      `${context.projectId} on worker ${context.workerId} — every pool profile it attests is exhausted or cooling`;
+    // The tag is spelled at the console call itself so the console-tag ratchet (#616) can see it.
+    if (context.log) context.log(`[worker-fleet] ${message}`);
+    else console.warn(`[worker-fleet] ${message}`);
   }
   return { profile: chosen.profile };
 }
