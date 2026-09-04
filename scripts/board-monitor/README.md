@@ -148,6 +148,39 @@ What the signals mean:
   (bad flag / auth / broken launch). If the loop is gone and `loop.log` ends with that message,
   fix the launch before restarting.
 
+## Weekly planning pass (human ritual — the Crew role, #1020)
+
+The loop keeps the board MOVING; nothing in it decides what the board should be moving TOWARD.
+That is a human job, once a week, about 30 minutes. It is written here as a checklist so a
+Sentinel (`/sentinel`) can prompt for it when the last pass is more than seven days old — the
+Sentinel asks, a person does it; no agent runs this list unattended.
+
+**Inputs to open first:** the board (Backlog + Todo + In Review), `BACKLOG.md`
+(`pnpm cli -- backlog export --out BACKLOG.md`), `CONTINUE.md`, `docs/proposals/*`, the general
+architecture plan (`docs/plans/2026-09-03-general-architecture-plan.md`), and last week's
+`state.md` lines.
+
+- [ ] **Stock check.** Count eligible tickets (Backlog + Todo, unblocked, not `no-auto-start`).
+      Below `BACKLOG_FLOOR` (15, see `objective.md` FOCUS POLICY)? Then the refill did not keep
+      up — look at why (cooldown, skill missing in the worktree, refill tickets stuck In Review)
+      before topping up by hand.
+- [ ] **Size check.** Skim every ticket the refill created this week. Anything that is a
+      few-minutes change is NOT gate-sized: group it with its neighbour via a `coupled_with`
+      edge or fold it into another ticket (CLAUDE.md sizing rule, #661). Anything vague gets
+      `$ticket-enhancer` or is sent back to Backlog with a note.
+- [ ] **Source check.** Refill sources in order are `BACKLOG.md` → `docs/proposals/*` → open
+      items in `CONTINUE.md` → architecture plan Phase 1-2. Did the refill skip a source that
+      still has items, or invent tickets no source asked for? Fix the source (strike landed
+      items, add the missing ones) rather than the ticket.
+- [ ] **Direction.** Read the proposals and the architecture plan against what landed this week
+      (`git log --since=7.days --oneline`). Promote the next phase's items into `BACKLOG.md` if
+      the current ones are exhausted; demote or strike anything the week made moot.
+- [ ] **Health of the loop itself.** `state.md`: items touched three or more consecutive cycles,
+      `exit=124` streaks, refill rounds that produced zero tickets. File a board ticket for each
+      recurring one (project `agentic-kanban`, pass `projectId` explicitly).
+- [ ] **Record it.** One dated paragraph in `CONTINUE.md` ("Weekly planning pass YYYY-MM-DD: stock
+      N/15, M tickets regrouped, sources advanced to …"). That date is what the Sentinel checks.
+
 ## Observability roadmap (planned)
 
 `state.md` + `loop.log` are the substrate. Because the orchestrator is many headless processes

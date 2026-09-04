@@ -59,25 +59,40 @@ The host's measured headroom is a brake on EVERY start, above every target in th
 - **FREE_GB = 8.9** - MAX_NEW_STARTS this cycle would be 3.
 <!-- STRATEGY_BULLSEYE_GENERATED_END -->
 
-## FOCUS POLICY (operator directive 2026-08-26 — authoritative; overrides the REFILL_FOCUS wording above)
-**DRAIN THE BACKLOG: run 3 builders in parallel on profile `anth` until Todo (and Backlog #841) is empty. Do NOT refill.**
+## FOCUS POLICY (operator directive 2026-09-05, #1020 — authoritative; overrides the REFILL_FOCUS wording above)
+**KEEP THE BACKLOG STOCKED: run 3 builders in parallel on profile `anth`, and hold the backlog at BACKLOG_FLOOR = 15 gate-sized tickets. Refill is ON.**
 
-Context: #900 merged 2026-08-26 02:20 after master was healed three times (08f13d5ee0, bc7eb77b2b,
-49d36f82e6 — the last one fixed the unhandled-rejection saboteur #921 that failed all-green gate
-runs). The merge recipe that works: keep a branch synced with master (update-base/merge), then run
-its gate SOLO — avoid two verify chains at once where possible (#903).
+Context: the 2026-08-26 directive ("DRAIN THE BACKLOG, DO NOT REFILL") did its job — the drain
+landed (#900 and its follow-ups) and the board sat at ~1 open ticket. Three builders empty a
+one-ticket backlog in an hour, so from here the producer side has to keep pace with the consumer
+side (proposal `docs/proposals/2026-09-03-dev-board-vs-deployed-board.md` §3.D). The merge recipe
+that works is unchanged: keep a branch synced with master (update-base/merge), then run its gate
+SOLO — avoid two verify chains at once where possible (#903).
 
-1. **Merge-first**: land finished In-Review work before starting new tickets. #866/#806/#807 are
-   next (update-base then merge). #895's branch has its own defects (untagged console call, a new
-   unseeded DB read breaking monitor-cycle tests) — relaunch its builder to fix them on the branch.
+1. **Merge-first**: land finished In-Review work before starting new tickets.
 2. **Start new Todo tickets up to WIP 3** on `anth` (Bullseye is the source of truth; do not
    hand-pick another profile). **Never start #834** (`no-auto-start`, needs a Linux CI run).
    **Capacity brake**: per the generated CAPACITY HOLD section above — read `capacity` off
-   `GET /api/projects/<id>/monitor-tunables` every cycle before any start or relaunch; the
-   hand-written MEMORY HOLD that used to sit here (a pinned 2026-08-26 RAM reading) is retired (#1029).
+   `GET /api/projects/<id>/monitor-tunables` every cycle before any start or relaunch.
 3. **Keep the board healthy**: unstick stale sessions, relaunch dead builders on host
    (worker dispatch stays OFF until #895/#900-class fleet bugs are verified fixed).
-4. **Do NOT refill.** When Todo+Backlog is drained and In Review is empty, stop and report.
+4. **REFILL to BACKLOG_FLOOR = 15.** This value overrides the generated `BACKLOG_FLOOR` above.
+   Count the ELIGIBLE backlog (Backlog + Todo, not blocked, not `no-auto-start`); when it is
+   below 15, run the `$backlog-refill` skill to create tickets and the `$ticket-enhancer` skill
+   on each new one before it is eligible to start. Rules for every refilled ticket:
+   - **Gate-sized** (CLAUDE.md sizing rule): a few-minutes change is NOT its own ticket — it is a
+     group member or part of its neighbour. Declare coupling at creation with the `coupled_with`
+     edge (`create_issues_batch` `dependencies`, #661), never as "do together with #X" prose.
+   - **Sources, in this order** — take from the first that still has unfiled items, and cite the
+     source line in the ticket's Why: (a) `BACKLOG.md` (the exported board backlog — items not yet
+     on the board), (b) `docs/proposals/*` (unimplemented sections, newest proposal first),
+     (c) open items in `CONTINUE.md` (the "remaining"/"unverified"/"next steps" lines), (d) the
+     general architecture plan `docs/plans/2026-09-03-general-architecture-plan.md`, Phase 1-2
+     items only.
+   - **Dedupe before filing**: `list_issues` for the same title/source line; an existing ticket
+     in any non-Done column means skip it.
+   - Cap refill at MAX_NEW_STARTS_PER_CYCLE × 2 new tickets per cycle; the floor is a target to
+     reach over a day, not in one burst.
 - **WIP limit = 3**, MAX_NEW_STARTS_PER_CYCLE = 3. Provider/profile per the generated PROVIDER POLICY block above.
 
 ## REFILL STRATEGY BULLSEYE (agent-metrics-derived, 2026-06-05)
