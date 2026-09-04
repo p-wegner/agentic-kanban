@@ -47,6 +47,66 @@ export interface MachineSaturationDetail {
   freeGb?: number | null;
   headroomProcesses?: number;
   thrashing?: string;
+  /**
+   * #1019: the project's CONFIGURED WIP target (`resolveWipLimit`) — what the monitor would
+   * have run at if the box had room. Present whenever the caller passed a clamp.
+   */
+  configuredWipLimit?: number;
+  /**
+   * #1019: the EFFECTIVE WIP the cycle actually used, after clamping to the capacity
+   * snapshot's `headroomProcesses`. Reported alongside the reason because a bare
+   * `machine_saturated` token cannot distinguish "clamped to the 2 already running" from
+   * "clamped to 0" — and those have different remedies.
+   */
+  clampedWipLimit?: number;
+}
+
+/**
+ * #1019: the WIP clamp a caller computed for this cycle, passed into the hold recorder so
+ * the measured capacity numbers and the resulting limit travel together.
+ */
+export interface WipHeadroomClamp {
+  /** The project's configured WIP target, before capacity was consulted. */
+  configured: number;
+  /** What the cycle will actually run at. */
+  effective: number;
+  /** True when capacity actually lowered the target (`effective < configured`). */
+  clamped: boolean;
+}
+
+/**
+ * DECISION (pure): what WIP may this cycle actually run at, given the box (#1019)?
+ *
+ * `monitor-auto-start`'s `isHostSaturated` is BINARY — it answers "is the host full", and the
+ * loops act on it by skipping the project outright. Between "fine" and "full" there is a graded
+ * signal the snapshot already carried and nothing consumed: Tier 1's `headroomProcesses`, how
+ * many more whole agent processes the box can take. Without this, a project configured at WIP 5
+ * on a box with room for one more agent starts four it cannot hold, and the resulting gate run
+ * loses to fork timeouts (#1006/#994 — 780 of 783 tests lost that way) and reads as RED rather
+ * than as "the machine was oversubscribed".
+ *
+ * The clamp is `currentWip + headroom`, never the bare headroom: `headroomProcesses` counts
+ * ADDITIONAL processes, so the agents already running are not in it, and clamping the LIMIT to
+ * a delta would read as "stop 3 of the 4 running builders" instead of "start no more". It only
+ * ever LOWERS the configured target — a roomy box can never raise it above what the operator asked.
+ *
+ * Tier 0 has no headroom measurement at all (one `os.freemem()` read against a floor), so it
+ * returns the target unchanged and leaves the binary hold to do its job: reporting a fabricated
+ * clamp from a tier that did not measure it is exactly the "presenting a Tier-0 guess as the
+ * sharper Tier-1 measurement" failure #908 wrote down.
+ */
+export function clampWipToHeadroom(input: {
+  /** The project's configured WIP target (`resolveWipLimit`). */
+  wipLimit: number;
+  /** How many workspaces are active for this project right now. */
+  currentWip: number;
+  capacity: MachineCapacitySnapshot;
+}): WipHeadroomClamp {
+  const unclamped: WipHeadroomClamp = { configured: input.wipLimit, effective: input.wipLimit, clamped: false };
+  if (input.capacity.tier !== "1") return unclamped;
+  const effective = Math.min(input.wipLimit, input.currentWip + Math.max(0, input.capacity.headroomProcesses));
+  if (effective >= input.wipLimit) return unclamped;
+  return { configured: input.wipLimit, effective, clamped: true };
 }
 
 /**
@@ -110,7 +170,7 @@ export async function recordFleetHold(ctx: StartHoldContext, projectId: string, 
  * measured numbers an operator would need to judge "is this real load or a stale floor",
  * so the shape travels alongside it.
  */
-export function recordMachineSaturationHold(ctx: StartHoldContext, projectId: string): void {
+export function recordMachineSaturationHold(ctx: StartHoldContext, projectId: string, wipClamp?: WipHeadroomClamp): void {
   const capacity = ctx.machineCapacity;
   const detail: MachineSaturationDetail =
     capacity.tier === "1"
@@ -121,9 +181,14 @@ export function recordMachineSaturationHold(ctx: StartHoldContext, projectId: st
           thrashing: capacity.thrashing,
         }
       : { tier: "0", reason: capacity.reason, freeGb: capacity.freeGb };
+  if (wipClamp) {
+    detail.configuredWipLimit = wipClamp.configured;
+    detail.clampedWipLimit = wipClamp.effective;
+  }
   console.log(
     `[monitor] auto-start held for project ${projectId}: host is saturated (tier ${detail.tier}: ${detail.reason}) ` +
-      `and no eligible worker can take the overflow`,
+      `and no eligible worker can take the overflow` +
+      (wipClamp ? ` — WIP clamped ${wipClamp.configured} -> ${wipClamp.effective}` : ""),
   );
   ctx.noteSkip(projectId, null, "machine_saturated");
   ctx.attachMachineSaturation(projectId, detail);

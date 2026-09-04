@@ -18,6 +18,7 @@ import {
   type FleetHoldDetail,
   type MachineSaturationDetail,
   type StartHoldContext,
+  clampWipToHeadroom,
 } from "./monitor-start-holds.js";
 import { resolveGateQuiesce } from "../services/gate-quiesce.js";
 import { isMonitorEligibleIssue, monitorEligibleIssueSql, notDriveOrEpicMetaSql, resolveCandidateStatusIds } from "../repositories/start-scoring.repository.js";
@@ -653,8 +654,12 @@ async function runInProgressBackfill(ctx: AutoStartCycle, inProgressSt: { id: st
   // #908: the host is a PLACEMENT input, not a gate — a saturated host still starts work
   // when this project's fleet can absorb it. Only skip when the host is tight AND there is
   // nowhere else to route the overflow.
-  if (isHostSaturated(ctx.machineCapacity) && !(await hasFleetOverflow(ctx, inProgressSt.projectId))) {
-    recordMachineSaturationHoldDetail(holdContext(ctx), inProgressSt.projectId);
+  // #1019: the GRADED half of the same signal — even an unsaturated box may have room for
+  // fewer agents than this project is configured for, and the clamp is what the loop runs at.
+  const wipClamp = clampWipToHeadroom({ wipLimit, currentWip, capacity: ctx.machineCapacity });
+  const hostFull = isHostSaturated(ctx.machineCapacity) && !(await hasFleetOverflow(ctx, inProgressSt.projectId));
+  if (hostFull || currentWip >= wipClamp.effective) {
+    recordMachineSaturationHoldDetail(holdContext(ctx), inProgressSt.projectId, wipClamp.clamped ? wipClamp : undefined);
     // #919: attribute the project-wide hold to each ticket it is holding.
     await noteHeldCandidates(ctx, inProgressSt.projectId, allowFeatureTypes, "machine_saturated", ctx.database);
     return;
@@ -666,7 +671,7 @@ async function runInProgressBackfill(ctx: AutoStartCycle, inProgressSt: { id: st
   const inProgressIssues = await db.select({ id: issues.id, title: issues.title, description: issues.description, issueType: issues.issueType, issueNumber: issues.issueNumber, externalKey: issues.externalKey }).from(issues)
     .where(and(eq(issues.statusId, inProgressSt.id), notDriveOrEpicMetaSql())); // #824: don't backfill a builder onto a meta created directly In Progress
   for (const issue of inProgressIssues) {
-    if (currentWip >= wipLimit) break;
+    if (currentWip >= wipClamp.effective) break;
     if (ctx.startsRemaining(inProgressSt.projectId) <= 0) break;
     const decision = await evaluateStartCandidate({
       issue,
@@ -762,8 +767,12 @@ async function runTodoPull(ctx: AutoStartCycle, inProgressSt: { id: string; proj
 
   // #908: same placement-not-a-gate check as the backfill loop above — a saturated host
   // still pulls new work when this project's fleet can take it; only skip when neither can.
-  if (isHostSaturated(ctx.machineCapacity) && !(await hasFleetOverflow(ctx, inProgressSt.projectId))) {
-    recordMachineSaturationHoldDetail(holdContext(ctx), inProgressSt.projectId);
+  // #1019: same graded clamp as the backfill loop — `slotsAvailable` below is measured
+  // against the clamped target, not the configured one.
+  const wipClamp = clampWipToHeadroom({ wipLimit, currentWip, capacity: ctx.machineCapacity });
+  const hostFull = isHostSaturated(ctx.machineCapacity) && !(await hasFleetOverflow(ctx, inProgressSt.projectId));
+  if (hostFull || currentWip >= wipClamp.effective) {
+    recordMachineSaturationHoldDetail(holdContext(ctx), inProgressSt.projectId, wipClamp.clamped ? wipClamp : undefined);
     // #919: attribute the project-wide hold to each ticket it is holding.
     await noteHeldCandidates(ctx, inProgressSt.projectId, allowFeatureTypes, "machine_saturated", ctx.database);
     return;
@@ -773,7 +782,7 @@ async function runTodoPull(ctx: AutoStartCycle, inProgressSt: { id: string; proj
     .where(sql`${projectStatuses.name} = 'Todo' AND ${projectStatuses.projectId} = ${inProgressSt.projectId}`).limit(1);
   if (todoStatus.length === 0) return;
 
-  const slotsAvailable = wipLimit - currentWip;
+  const slotsAvailable = wipClamp.effective - currentWip;
   // #119: snapshot once, then gate each candidate; launches this cycle feed back
   // via noteStarted so two backlog tickets sharing a registration file don't both
   // start in the SAME cycle.
