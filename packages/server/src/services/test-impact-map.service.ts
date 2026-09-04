@@ -86,6 +86,7 @@ import { join } from "node:path";
 
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
+import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 
 import { acquireQueueRepoLock } from "./merge-queue-repo-lock.js";
 import { runImpactMapBuild, runImpactMapCheck, type ImpactMapRunner } from "./test-impact-map/impact-cli.js";
@@ -203,7 +204,7 @@ export async function resolveMapWritability(repoPath: string): Promise<MapWritab
   const tracked = await gitExec(["ls-files", "--", IMPACT_MAP_PATH], { cwd: repoPath });
   if (tracked.stdout.trim()) return "tracked";
   const ignored = await gitExec(["check-ignore", "-q", "--", IMPACT_MAP_PATH], { cwd: repoPath });
-  return ignored.code === 0 ? "ok" : "not_ignored";
+  return execSucceeded(ignored) ? "ok" : "not_ignored";
 }
 
 export interface ImpactMapPassDeps {

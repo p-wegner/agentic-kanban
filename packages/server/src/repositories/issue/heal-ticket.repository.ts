@@ -16,6 +16,7 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "../../db/index.js";
 import type { Database } from "../../db/index.js";
 import { firstRow } from "../../lib/first-row.js";
+import { issueTextColumns } from "../projections.js";
 
 export interface IssueByExternalKeyRow {
   id: string;
@@ -42,10 +43,7 @@ export async function listIssuesByExternalKey(
 ): Promise<IssueByExternalKeyRow[]> {
   return database
     .select({
-      id: issues.id,
-      issueNumber: issues.issueNumber,
-      title: issues.title,
-      description: issues.description,
+      ...issueTextColumns,
       statusId: issues.statusId,
       statusName: projectStatuses.name,
       sortOrder: issues.sortOrder,

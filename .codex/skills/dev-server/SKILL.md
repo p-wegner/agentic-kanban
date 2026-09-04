@@ -53,6 +53,21 @@ if ($r.Count -eq 0) {
 
 If it's unclear which repo to register (user said "start the app" with CWD unknown), ask before running `register`.
 
+## Two boards on this machine (#1013)
+
+There are two agentic-kanban boards, and **which one you are starting decides the ports and the database**:
+
+- **Stable board** — a sibling checkout on tag `stable`, run as the BUILT artifact
+  (`pnpm build` + `pnpm --filter agentic-kanban start` with `KANBAN_DB_URL` pinned to
+  `~/.agentic-kanban/kanban.db`). Ports **3001/5173**, unchanged, so MCP configs and hooks need no
+  change. It registers the `agentic-kanban` project; the dev board never does.
+- **Dev board** — this checkout, `pnpm dev:devboard` (= `KANBAN_BOARD_ROLE=dev`). Ports
+  **3101/5273** and its own DB `~/.agentic-kanban-dev/kanban.db`. Allowed to be red. The launcher
+  REFUSES to start if that role would open the operated database.
+
+Everything below applies to both — only the base ports differ. **Read the port from the env, never
+from this page.** Full runbook + operator cutover checklist: `docs/two-boards.md`.
+
 ## Step 1 — Determine ports
 
 `scripts/dev.mjs` auto-detects worktree context and sets `KANBAN_WORKTREE_SERVER_PORT`, `KANBAN_WORKTREE_CLIENT_PORT`, `KANBAN_SERVER_PORT`, `KANBAN_CLIENT_PORT`, `SERVER_PORT`, `PORT`, `VITE_PORT`. (Worktree board REST calls use `KANBAN_BOARD_SERVER_PORT`; dev-server cleanup uses the worktree ports.) **In a worktree, never hardcode 3001/5173** — read the env vars. Later steps reuse `$serverPort`/`$clientPort` from here:
