@@ -109,11 +109,68 @@ interface RiskPosture {
   the gate message (via `GateTierInfo.posture`), the review launch, the train-window release,
   the merge-queue train dispatch, the stranded-review recovery. It returns `""` for a missing
   posture, so "no note" can never be mistaken for "standard".
-- `redBasePolicy` and `builderStopChecks` still have no consumer — the red-debt ledger
+- `redBasePolicy` and `builderStopChecks` had no consumer when this decision landed — the red-debt ledger
   (#915/#916) and the builder Stop-hook policy plumbing (#913/#914) are separate,
   not-yet-landed tickets; the struct emits both fields now so those tickets consume them
-  rather than inventing their own vocabulary.
+  rather than inventing their own vocabulary. (`redBasePolicy` gained its consumer in #1015 —
+  see the amendment below; `builderStopChecks` still has none.)
 
 Builds on decision 008 (Start Mode consolidation) and decision 006 (board-monitor orchestrator,
 for the `objective.md` render path #912 adds). Proposal:
 `docs/proposals/2026-08-25-risk-posture-and-merge-train.md`.
+
+---
+
+## Amendment 2026-09-04 (#1015): `redBasePolicy` has a consumer, and is overridable — softer only
+
+Two changes, both narrow. Nothing above is retracted.
+
+### 1. The merge gate's red-debt subset rule keys on `redBasePolicy`, not on the level
+
+`workspace-merge-gate.ts`'s #915 subset rule asked `posture.level === "fast" || "sprint"`. That
+was equivalent to asking for `redBasePolicy !== "block"` — the levels are exactly the two whose
+policy is soft — but only *accidentally* equivalent: it made `redBasePolicy` a field the struct
+emitted and nothing read, which is what line 112 above admitted. It now reads the field, and
+`merge-gate-red-debt-subset-rule.test.ts` pins the equivalence for every level, so a level whose
+policy changes cannot silently keep (or lose) the softening.
+
+The #916 debt cap moved with it. It used to degrade the LEVEL (`sprint` → `fast` → `standard`)
+and rely on the degraded level falling out of the `fast || sprint` check; it now degrades the
+POLICY (`allow-file-debt-ticket` → `allow-known-debt` → `block`,
+`resolveEffectiveRedBasePolicy`). That is not cosmetic: with the override below, a project can
+reach a soft policy from a level that has no degrade step, and a level-shaped cap would have let
+it soften verdicts forever — the exact hole #916 exists to close.
+
+### 2. `red_base_policy_<projectId>` — a per-project override, in the soft direction only
+
+Registered in the dynamic preference-key registry and applied in `resolveRiskPosture` AFTER
+level derivation (`applyRedBasePolicyOverride`). `block` → `allow-known-debt` →
+`allow-file-debt-ticket` is honoured; **a stricter value is ignored with a logged warning**, as
+is an unrecognized one (fail closed — the level's own policy stands).
+
+Why softer-only rather than a free field. The level is the dial that says how strict a project
+is; a per-field key that could TIGHTEN one dimension would re-create precisely the problem this
+decision was written against — several prefs to align by hand, with nothing saying what a partial
+write left behind. Loosening is different in kind. The dev board wants to *land, then heal* on a
+red master (proposal `2026-09-03-dev-board-vs-deployed-board.md` §3.B) while keeping posture
+`iterate`'s gate tier, review mode and train sizing; without this key the only way there is to
+adopt `fast` or `sprint` wholesale, which changes five other things nobody asked to change.
+
+The visibility rule (above) still binds, and applies twice here:
+
+- An applied override is folded into `RiskPosture.summary`, so every message built with
+  `formatPostureNote` names it.
+- A gate the subset rule SOFTENS names the policy in its evidence — `pre-lock-merge (red-debt
+  subset rule #915, redBasePolicy 'allow-file-debt-ticket': …)` — so a reader can tell a
+  level-derived softening from a per-project override without opening the prefs. A `block`
+  project cannot reach that path at all, so there is no case where the policy goes unnamed.
+
+Enforcement mirrors `risk_posture_`'s: `red-base-policy-raw-read-ratchet.test.ts` is a
+zero-tolerance scan for the literal `red_base_policy_` outside the resolver, its registration and
+their tests. Without it a consumer could read the operator's requested value with no
+direction check at all, which is the whole guarantee.
+
+**What this ticket deliberately did NOT do**: it set the pref on no project (the dev board
+included), and it did not build the nightly-sweep `heal` ticket §3.B pairs with it — that is
+#1016. Landing on a red base without the heal ticket is a worse state than blocking, so the two
+are meant to be switched on together.

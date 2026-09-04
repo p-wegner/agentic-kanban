@@ -57,6 +57,10 @@ const { runPreLockGate } = await import("../services/workspace-merge-gate.js");
 const { getBaseBranchHealthAtMergeBase } = await import("../services/base-branch-health.service.js");
 const { getPreference } = await import("../repositories/preferences.repository.js");
 const { listRedDebt, openRedDebtEntry } = await import("../repositories/red-debt.repository.js");
+const { resolveRiskPosture, riskPosturePrefKey, redBasePolicyPrefKey } =
+  await import("../services/risk-posture.service.js");
+const { RISK_POSTURES } = await import("@agentic-kanban/shared/lib/risk-posture");
+const { redDebtMaxPrefKey } = await import("../lib/red-debt-cap.js");
 
 const RUN_GATE_TOKEN = { kind: "run-gate" as const };
 const workspace = {
@@ -180,5 +184,153 @@ describe("runPreLockGate applies the red-debt subset rule (#915)", () => {
     const recordMergeAttempt = vi.fn(async () => {});
     await expect(callRunPreLockGate(recordMergeAttempt)).rejects.toThrow(/Pre-merge gate failed/);
     expect(openRedDebtEntry).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * #1015 — the SECOND dimension of this rule: it keys on `posture.redBasePolicy`, not on the
+ * posture LEVEL. The block above pins the level dimension (and was written while the rule
+ * still read the level); this one pins the policy dimension, so the two can be compared.
+ *
+ * The equivalence test is the characterisation that survives the swap: while `redBasePolicy`
+ * was derived from the level alone the two keys agreed exactly, and it must keep agreeing for
+ * every project that sets no override — that is this ticket's "behaviour is byte-identical
+ * with the override unset".
+ */
+describe("the subset rule keys on redBasePolicy, not on the posture level (#1015)", () => {
+  beforeEach(() => {
+    vi.mocked(getBaseBranchHealthAtMergeBase).mockReset();
+    vi.mocked(getPreference).mockReset();
+    vi.mocked(listRedDebt).mockReset();
+    vi.mocked(openRedDebtEntry).mockReset();
+    stubPreferences({});
+    vi.mocked(listRedDebt).mockResolvedValue([]);
+    vi.mocked(openRedDebtEntry).mockResolvedValue(undefined as never);
+  });
+
+  function ledgerSuiteA() {
+    vi.mocked(listRedDebt).mockResolvedValue([
+      { id: "d1", projectId: "project-1", suite: "suite-a", sinceCommit: "c1", attributedIssueId: null, ownerIssueId: null, tag: "real", openedAt: new Date().toISOString(), closedAt: null } as never,
+    ]);
+  }
+
+  /** The softened path mints its OWN proof; the withheld path throws. This turns that into a
+   *  boolean plus, on the softened path, the evidence string the gate published. */
+  async function softens(): Promise<{ softened: boolean; source: string | null }> {
+    try {
+      const result = await callRunPreLockGate(vi.fn(async () => {}));
+      return {
+        softened: result.kind === "already-passed",
+        source: result.kind === "already-passed" ? result.evidence.source : null,
+      };
+    } catch {
+      return { softened: false, source: null };
+    }
+  }
+
+  it.each([...RISK_POSTURES])(
+    "posture '%s' softens a fully-ledgered red set exactly when its redBasePolicy is not `block`",
+    async (level) => {
+      mockBaseHealthFailedSuites(["suite-a"]);
+      stubPreferences({ [riskPosturePrefKey("project-1")]: level });
+      ledgerSuiteA();
+
+      const expectedPolicy = resolveRiskPosture(
+        new Map([[riskPosturePrefKey("project-1"), level]]),
+        "project-1",
+      ).redBasePolicy;
+
+      const { softened } = await softens();
+      expect(softened).toBe(expectedPolicy !== "block");
+    },
+  );
+
+  it("a softer per-project override lets `iterate` (redBasePolicy `block`) carry known debt", async () => {
+    mockBaseHealthFailedSuites(["suite-a"]);
+    stubPreferences({
+      [riskPosturePrefKey("project-1")]: "iterate",
+      [redBasePolicyPrefKey("project-1")]: "allow-known-debt",
+    });
+    ledgerSuiteA();
+
+    const { softened, source } = await softens();
+    expect(softened).toBe(true);
+    // Visibility rule: the passing gate NAMES the policy that softened it, so a reader can
+    // tell a level-derived softening from a per-project override.
+    expect(source).toContain("allow-known-debt");
+    expect(openRedDebtEntry).not.toHaveBeenCalled();
+  });
+
+  it("`allow-known-debt` still refuses a NEW red suite, whatever the level says", async () => {
+    mockBaseHealthFailedSuites(["suite-a", "suite-new"]);
+    stubPreferences({
+      [riskPosturePrefKey("project-1")]: "iterate",
+      [redBasePolicyPrefKey("project-1")]: "allow-known-debt",
+    });
+    ledgerSuiteA();
+
+    const { softened } = await softens();
+    expect(softened).toBe(false);
+    expect(openRedDebtEntry).not.toHaveBeenCalled();
+  });
+
+  it("`allow-file-debt-ticket` ledgers a new red suite and lands, on a level that never would", async () => {
+    mockBaseHealthFailedSuites(["suite-a", "suite-new"]);
+    stubPreferences({
+      [riskPosturePrefKey("project-1")]: "iterate",
+      [redBasePolicyPrefKey("project-1")]: "allow-file-debt-ticket",
+    });
+    ledgerSuiteA();
+
+    const { softened, source } = await softens();
+    expect(softened).toBe(true);
+    expect(source).toContain("allow-file-debt-ticket");
+    expect(openRedDebtEntry).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "project-1", suite: "suite-new", tag: "real" }),
+      expect.anything(),
+    );
+  });
+
+  it("a STRICTER override is ignored — `fast` keeps softening despite `red_base_policy` = block", async () => {
+    mockBaseHealthFailedSuites(["suite-a"]);
+    stubPreferences({
+      [riskPosturePrefKey("project-1")]: "fast",
+      [redBasePolicyPrefKey("project-1")]: "block",
+    });
+    ledgerSuiteA();
+
+    const { softened } = await softens();
+    expect(softened).toBe(true);
+  });
+
+  it("an unparseable override fails closed — the level's own policy stands", async () => {
+    mockBaseHealthFailedSuites(["suite-a"]);
+    stubPreferences({
+      [riskPosturePrefKey("project-1")]: "standard",
+      [redBasePolicyPrefKey("project-1")]: "allow-everything",
+    });
+    ledgerSuiteA();
+
+    const { softened } = await softens();
+    expect(softened).toBe(false);
+  });
+
+  it("the #916 debt cap still bites a policy reached by override, not just one reached by level", async () => {
+    mockBaseHealthFailedSuites(["suite-a"]);
+    stubPreferences({
+      [riskPosturePrefKey("project-1")]: "iterate",
+      [redBasePolicyPrefKey("project-1")]: "allow-file-debt-ticket",
+      [redDebtMaxPrefKey("project-1")]: "1",
+    });
+    // Two open entries against a cap of 1 — over cap, so the policy degrades to `block` and
+    // the fully-ledgered set is NOT softened. Without a policy-shaped cap this project would
+    // soften forever, since its LEVEL (`iterate`) has no degrade step.
+    vi.mocked(listRedDebt).mockResolvedValue([
+      { id: "d1", projectId: "project-1", suite: "suite-a", sinceCommit: "c1", attributedIssueId: null, ownerIssueId: null, tag: "real", openedAt: new Date().toISOString(), closedAt: null } as never,
+      { id: "d2", projectId: "project-1", suite: "suite-b", sinceCommit: "c1", attributedIssueId: null, ownerIssueId: null, tag: "real", openedAt: new Date().toISOString(), closedAt: null } as never,
+    ]);
+
+    const { softened } = await softens();
+    expect(softened).toBe(false);
   });
 });

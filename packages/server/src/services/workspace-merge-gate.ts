@@ -53,10 +53,14 @@ import { listRedDebt, openRedDebtEntry } from "../repositories/red-debt.reposito
 import {
   redDebtMaxPrefKey,
   redDebtMaxAgePrefKey,
-  resolveEffectiveRedDebtPosture,
+  resolveEffectiveRedBasePolicy,
 } from "../lib/red-debt-cap.js";
-import { resolveRedDebtGateVerdict, type RedDebtGatePosture } from "../lib/red-debt-gate.js";
-import { riskPosturePref, resolveRiskPosture } from "@agentic-kanban/shared/lib/risk-posture";
+import { resolveRedDebtGateVerdict, redDebtGatePostureForPolicy } from "../lib/red-debt-gate.js";
+import {
+  riskPosturePrefKey,
+  redBasePolicyPrefKey,
+  resolveRiskPosture,
+} from "./risk-posture.service.js";
 
 type WorkspaceRow = typeof workspaces.$inferSelect;
 
@@ -482,12 +486,23 @@ export async function runPreLockGate(args: {
     // so it is never softened.
     if (failedSuites && failedSuites.length > 0) {
       try {
-        const postureRaw = await getPreference(riskPosturePref.key(projectId), database).catch(() => null);
-        const requestedPosture = resolveRiskPosture(postureRaw);
-        // #916 — a ledger over its cap must not let `sprint`/`fast` keep softening verdicts
-        // forever; it degrades the EFFECTIVE posture one step (sprint -> fast -> standard)
-        // instead. Evaluated against the SAME open-ledger snapshot the verdict itself reads
-        // below, so a degrade to `standard` reliably falls out of the `fast || sprint` gate.
+        // #1015 — the rule keys on `posture.redBasePolicy`, NOT on the posture LEVEL. The two
+        // agreed exactly while the policy was derived from the level alone, but a project may
+        // now reach a soft policy without a soft level via the softer-only per-project
+        // red-base-policy project override (decision 017, Amendment 2026-09-04) — which is what
+        // lets the dev board "land, then heal" on posture `iterate` instead of having to adopt
+        // `fast`'s gate tier, review mode and train sizing to get there.
+        const [postureRaw, redBasePolicyRaw] = await Promise.all([
+          getPreference(riskPosturePrefKey(projectId), database).catch(() => null),
+          getPreference(redBasePolicyPrefKey(projectId), database).catch(() => null),
+        ]);
+        const prefMap = new Map<string, string>();
+        if (postureRaw) prefMap.set(riskPosturePrefKey(projectId), postureRaw);
+        if (redBasePolicyRaw) prefMap.set(redBasePolicyPrefKey(projectId), redBasePolicyRaw);
+        const requestedPosture = resolveRiskPosture(prefMap, projectId);
+        // #916 — a ledger over its cap must not keep softening verdicts forever; it degrades
+        // the EFFECTIVE policy instead. Evaluated against the SAME open-ledger snapshot the
+        // verdict itself reads below, so a degrade to `block` reliably falls out of the check.
         const ledger = await listRedDebt(projectId, {}, database);
         const oldestOpenEntryAgeMs = ledger.length > 0
           ? Date.now() - Math.min(...ledger.map((e) => Date.parse(e.openedAt)).filter((n) => !Number.isNaN(n)))
@@ -496,22 +511,23 @@ export async function runPreLockGate(args: {
           getPreference(redDebtMaxPrefKey(projectId), database).catch(() => null),
           getPreference(redDebtMaxAgePrefKey(projectId), database).catch(() => null),
         ]);
-        const capResult = resolveEffectiveRedDebtPosture({
-          posture: requestedPosture,
+        const capResult = resolveEffectiveRedBasePolicy({
+          policy: requestedPosture.redBasePolicy,
           openEntryCount: ledger.length,
           oldestOpenEntryAgeMs,
           maxEntriesRaw,
           maxAgeMsRaw,
         });
-        const posture = capResult.effectivePosture;
+        const redBasePolicy = capResult.effectivePolicy;
         if (capResult.degraded) {
           console.log(`[workspace-merge] ${capResult.note}`);
         }
-        if (posture === "fast" || posture === "sprint") {
+        const subsetRuleBehaviour = redDebtGatePostureForPolicy(redBasePolicy);
+        if (subsetRuleBehaviour) {
           const verdict = resolveRedDebtGateVerdict({
             failedSuites,
             ledger: ledger.map((e) => ({ suite: e.suite, tag: e.tag as "flaky" | "real" })),
-            posture: posture as RedDebtGatePosture,
+            posture: subsetRuleBehaviour,
           });
           if (verdict.outcome === "pass-with-debt" || verdict.outcome === "pass-with-new-debt") {
             if (verdict.outcome === "pass-with-new-debt") {
@@ -522,8 +538,13 @@ export async function runPreLockGate(args: {
                 });
               }
             }
+            // Decision 017's visibility rule: a passing gate must name what softened it. The
+            // policy is part of that whenever it is not `block` — otherwise a reader cannot
+            // tell a level-derived softening from a per-project override (#1015).
+            const policyNote = `redBasePolicy '${redBasePolicy}'`;
             console.log(
-              `[workspace-merge] pre-lock gate softened by red-debt subset rule (#915) for workspace ${workspaceId}: ${verdict.message}`,
+              `[workspace-merge] pre-lock gate softened by red-debt subset rule (#915, ${policyNote}) `
+                + `for workspace ${workspaceId}: ${verdict.message}`,
             );
             // Mint proof, exactly as a genuine pass does (`runGateWithEvidence`'s `token`
             // field) — returning the caller's original `run-gate` token here would let the
@@ -533,7 +554,7 @@ export async function runPreLockGate(args: {
             return gateAlreadyPassed({
               ranAt: new Date().toISOString(),
               stage: preGate.stage,
-              source: `pre-lock-merge (red-debt subset rule #915: ${verdict.message})`,
+              source: `pre-lock-merge (red-debt subset rule #915, ${policyNote}: ${verdict.message})`,
               branchSha: preGate.shasBefore.branchSha ?? undefined,
               baseSha: preGate.shasBefore.baseSha ?? undefined,
             });
