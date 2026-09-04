@@ -14,7 +14,8 @@
 import { execFileSync, execSync, spawn } from "node:child_process";
 import { resolvePnpmInvocation, spawnSyncPnpm } from "./pnpm-exec.mjs";
 import { createServer } from "node:net";
-import { resolve } from "node:path";
+import { existsSync, mkdirSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   classifyProcessExit,
@@ -24,8 +25,8 @@ import {
   isStaleSharedDistError,
   snapshotDependencyManifests,
 } from "./dev-supervisor.mjs";
-import { resolveDevPorts } from "./dev-port-plan.mjs";
-import { buildDevPortEnv } from "./dev-env.mjs";
+import { applyBoardRoleFlag, isDevBoardRole, resolveDevPorts } from "./dev-port-plan.mjs";
+import { buildBoardRoleEnv, buildDevPortEnv } from "./dev-env.mjs";
 import { planPortOwnerKill, parseNetstatListeners } from "./dev-port-guard.mjs";
 import { writeProcessAudit } from "./process-audit.mjs";
 import { repairDrizzleIfNeeded } from "./drizzle-preflight.mjs";
@@ -214,9 +215,32 @@ function rebuildSharedDist(label) {
   return false;
 }
 
+/**
+ * The dev board's DB may live in a directory that does not exist yet. `resolveDbLocation` is pure
+ * and never mkdirs, and a `file:` open would otherwise fail on the missing parent, so create it
+ * here — the one place that knows a dev board is starting.
+ */
+function ensureDevBoardDbDir(dbUrl) {
+  if (!dbUrl || !dbUrl.startsWith("file:")) return;
+  const dir = dirname(dbUrl.slice("file:".length));
+  if (dir && !existsSync(dir)) mkdirSync(dir, { recursive: true });
+}
+
+function configureBoardRole() {
+  const roleEnv = buildBoardRoleEnv({ repoRoot: process.cwd() });
+  if (!roleEnv.KANBAN_DB_URL) return;
+  ensureDevBoardDbDir(roleEnv.KANBAN_DB_URL);
+  Object.assign(process.env, roleEnv);
+  console.log(`[dev] Board role: DEV — database ${roleEnv.KANBAN_DB_URL} (the operated board's DB is never touched).`);
+}
+
 function configurePorts() {
   const { isWorktree, branch } = detectWorktree();
   const { serverPort, clientPort } = resolveDevPorts({ isWorktree, branch });
+
+  if (isDevBoardRole()) {
+    console.log("[dev] Board role: DEV — ports offset off the stable board's 3001/5173. See docs/two-boards.md.");
+  }
 
   if (isWorktree && branch) {
     if (serverPort > 60000) {
@@ -319,6 +343,8 @@ function spawnProcess(label, cmd, args, opts) {
 }
 
 async function main() {
+  applyBoardRoleFlag();
+  configureBoardRole();
   repairSharedIfNeeded(process.cwd());
   repairDrizzleIfNeeded(process.cwd());
   binShimsPreflight(process.cwd());

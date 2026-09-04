@@ -17,6 +17,7 @@
   },
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "dev:devboard": "node scripts/dev.mjs --dev-board",
     "dev:server": "pnpm --filter agentic-kanban dev",
     "dev:client": "pnpm --filter client dev",
     "dev:mcp": "pnpm --filter @agentic-kanban/mcp-server dev",

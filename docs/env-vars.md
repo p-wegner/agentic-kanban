@@ -70,6 +70,7 @@ guarded by `board-client-port-ladder-single-source.test.ts`.
 
 | Variable | Purpose |
 |---|---|
+| `KANBAN_BOARD_ROLE` | Which of the two boards a `pnpm dev` is (#1013). Set to `dev` — via `pnpm dev:devboard`, which is `scripts/dev.mjs --dev-board`, or by exporting it — to run the DEV board: ports base off **3101/5273** instead of 3001/5173 (the worktree `+N` convention still applies, off the dev base) and `KANBAN_DB_URL` defaults to `~/.agentic-kanban-dev/kanban.db`. Anything else, unset included, is the stable role and today's behaviour exactly. **One variable for both decisions on purpose**: a board on the dev ports pointing at the operated database is the split-brain the two-board split exists to prevent, so they are not settable apart. An explicit `KANBAN_DB_URL` still wins (a snapshot is a supported workflow), but the launcher REFUSES to start on `~/.agentic-kanban/kanban.db` or `<checkout>/packages/server/kanban.db` under this role. Runbook: [two-boards.md](two-boards.md). |
 | `KANBAN_SERVER_PORT` | The board's public API port (default 3001). |
 | `KANBAN_CLIENT_PORT` | The board's web UI port (default 5173). |
 | `KANBAN_BOARD_SERVER_PORT` | How a WORKTREE names the MAIN board's port — the top rung of the ladder. |

@@ -8,8 +8,20 @@ import { join } from "node:path";
 import { checkDrizzleFiles, findDrizzlePnpmDirs } from "../../../../scripts/drizzle-preflight.mjs";
 import { checkSharedPackage, isTsxMissing, repairSharedIfNeeded } from "../../../../scripts/shared-preflight.mjs";
 import { checkBinShims, repairBinShims } from "../../../../scripts/bin-shims-preflight.mjs";
-import { buildDevPortEnv } from "../../../../scripts/dev-env.mjs";
-import { resolveDevPorts } from "../../../../scripts/dev-port-plan.mjs";
+import {
+  assertDevBoardDbIsolated,
+  buildBoardRoleEnv,
+  buildDevPortEnv,
+  operatedDbUrls,
+  resolveDevBoardDbUrl,
+} from "../../../../scripts/dev-env.mjs";
+import {
+  applyBoardRoleFlag,
+  DEV_BOARD_CLIENT_PORT,
+  DEV_BOARD_SERVER_PORT,
+  isDevBoardRole,
+  resolveDevPorts,
+} from "../../../../scripts/dev-port-plan.mjs";
 import { buildBackendEnv, createStableDevProxy, isMergeRequest, listen, preferredInternalPort, resolvePublicServerPort, resolveRetryBudgetMs } from "../../../../scripts/server-dev-proxy.mjs";
 import {
   classifyProcessExit,
@@ -610,6 +622,88 @@ describe("dev launcher port guard", () => {
     expect(env.KANBAN_BOARD_SERVER_PID).toBe("12345");
     expect(env.PORT).not.toBe("3001");
     expect(env.VITE_PORT).not.toBe("5173");
+  });
+
+  it("keeps the STABLE board on 3001/5173 for every non-dev role value", () => {
+    // Unset, empty, and a typo must all mean "stable" — the failure this whole mechanism
+    // guards against is a board that thinks it is the dev one while operating real projects,
+    // so anything but the exact opt-in word stays on today's behaviour.
+    for (const env of [{}, { KANBAN_BOARD_ROLE: "" }, { KANBAN_BOARD_ROLE: "development" }, { KANBAN_BOARD_ROLE: "stable" }]) {
+      expect(isDevBoardRole(env)).toBe(false);
+      expect(resolveDevPorts({ isWorktree: false, branch: null, env })).toEqual({
+        serverPort: 3001,
+        clientPort: 5173,
+        offset: 0,
+      });
+      expect(buildBoardRoleEnv({ env, homeDir: "C:/home", repoRoot: "C:/repo" })).toEqual({});
+    }
+  });
+
+  it("resolves DISTINCT ports for the dev board, main checkout and worktrees alike", () => {
+    const env = { KANBAN_BOARD_ROLE: "dev" };
+    expect(isDevBoardRole(env)).toBe(true);
+    expect(isDevBoardRole({ KANBAN_BOARD_ROLE: " Dev " })).toBe(true);
+
+    const stable = resolveDevPorts({ isWorktree: false, branch: null, env: {} });
+    const dev = resolveDevPorts({ isWorktree: false, branch: null, env });
+    expect(dev).toEqual({ serverPort: DEV_BOARD_SERVER_PORT, clientPort: DEV_BOARD_CLIENT_PORT, offset: 0 });
+    expect(dev.serverPort).not.toBe(stable.serverPort);
+    expect(dev.clientPort).not.toBe(stable.clientPort);
+
+    // The worktree convention still applies — offset off the DEV base, so a dev-board builder
+    // never collides with the same-numbered worktree of the stable board.
+    const branch = "feature/ak-229-regression-tests-for-worktree-port-isolati";
+    const devWorktree = resolveDevPorts({ isWorktree: true, branch, env });
+    const stableWorktree = resolveDevPorts({ isWorktree: true, branch, env: {} });
+    expect(devWorktree).toEqual({ serverPort: DEV_BOARD_SERVER_PORT + 229, clientPort: DEV_BOARD_CLIENT_PORT + 229, offset: 229 });
+    expect(devWorktree.serverPort).not.toBe(stableWorktree.serverPort);
+    expect(devWorktree.clientPort).not.toBe(stableWorktree.clientPort);
+  });
+
+  it("`--dev-board` sets the same env var the variable route uses", () => {
+    const env = {};
+    applyBoardRoleFlag(["--dev-board"], env);
+    expect(env.KANBAN_BOARD_ROLE).toBe("dev");
+
+    const untouched = {};
+    applyBoardRoleFlag([], untouched);
+    expect(untouched.KANBAN_BOARD_ROLE).toBeUndefined();
+  });
+
+  it("gives the dev board a database of its own, never the operated one", () => {
+    const homeDir = "C:/Users/dev";
+    const repoRoot = "C:/repo/agentic-kanban";
+    const env = { KANBAN_BOARD_ROLE: "dev" };
+
+    const url = resolveDevBoardDbUrl({ env, homeDir });
+    expect(url).toBe("file:C:/Users/dev/.agentic-kanban-dev/kanban.db");
+    expect(operatedDbUrls({ homeDir, repoRoot })).not.toContain(url);
+    expect(buildBoardRoleEnv({ env, homeDir, repoRoot })).toEqual({ KANBAN_DB_URL: url });
+
+    // Not a dev-board run → no DB opinion at all, so the default `pnpm dev` resolves exactly
+    // as it does today (home fallback / in-checkout probe, per db-path.ts).
+    expect(resolveDevBoardDbUrl({ env: {}, homeDir })).toBeNull();
+  });
+
+  it("REFUSES a dev board pointed at either operated database", () => {
+    const homeDir = "C:/Users/dev";
+    const repoRoot = "C:/repo/agentic-kanban";
+
+    for (const forbidden of operatedDbUrls({ homeDir, repoRoot })) {
+      expect(() => assertDevBoardDbIsolated(forbidden, { homeDir, repoRoot })).toThrow(/operated board/i);
+      // Windows paths are case-insensitive, so a differently-cased spelling of the same file
+      // must not slip past the comparison.
+      expect(() => assertDevBoardDbIsolated(forbidden.toUpperCase(), { homeDir, repoRoot })).toThrow(/operated board/i);
+      expect(() =>
+        buildBoardRoleEnv({ env: { KANBAN_BOARD_ROLE: "dev", KANBAN_DB_URL: forbidden }, homeDir, repoRoot }),
+      ).toThrow(/operated board/i);
+    }
+
+    // An operator's own snapshot IS honoured — only the two operated files are refused.
+    const snapshot = "file:C:/tmp/dev-board-snapshot.db";
+    expect(
+      buildBoardRoleEnv({ env: { KANBAN_BOARD_ROLE: "dev", KANBAN_DB_URL: snapshot }, homeDir, repoRoot }),
+    ).toEqual({ KANBAN_DB_URL: snapshot });
   });
 
   it("allows freeing a default board port when the owner is from the same main checkout", () => {
