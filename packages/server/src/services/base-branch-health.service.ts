@@ -36,6 +36,7 @@ import { resolveVerifyMaxWorkers } from "./verify-tunables.js";
 import { failedSuitesForOutcome } from "./failed-suite-parse.js";
 import { resolveEffectiveVerify, deriveSetupScriptFromProfile, getStackProfile } from "./stack-profile.service.js";
 import { recordBaseSweepOutcome } from "./test-impact-outcome.service.js";
+import { reconcileBaseHealthHealTicket } from "./base-health-heal-ticket.service.js";
 import {
   recordBaseBranchHealth,
   getLastGreenBaseBranchHealth,
@@ -401,7 +402,7 @@ ${tail(combined)}`,
     ? await getLastGreenBaseBranchHealth(projectId, database).catch(() => null)
     : null;
 
-  await recordBaseBranchHealth(
+  const healthRowId = await recordBaseBranchHealth(
     {
       projectId,
       sha: result.sha,
@@ -413,6 +414,22 @@ ${tail(combined)}`,
     },
     database,
   );
+
+  // #1016 — land-then-heal's disclosure channel. A project whose effective `redBasePolicy` is
+  // `allow-file-debt-ticket` does not withhold merges on a red base, so this sweep's verdict is
+  // the ONLY place the red gets recorded: one `heal` ticket carrying the failing-suite list,
+  // updated by the next red sweep and closed by a green one. Every other policy gets nothing —
+  // the decision is made inside `reconcileBaseHealthHealTicket`, through the #1015 posture
+  // resolver, and the call itself never throws.
+  await reconcileBaseHealthHealTicket({
+    projectId,
+    outcome: result.outcome,
+    sha: result.sha,
+    branch: result.branch,
+    failedSuites: result.failedSuites,
+    healthRowId,
+    message: result.message,
+  }, database);
 
   // #982 — feed the full-suite verdict back into the test-impact outcome ledger, so the fast
   // per-merge tiers have a measured miss rate instead of an assumed one. Deliberately narrow:
