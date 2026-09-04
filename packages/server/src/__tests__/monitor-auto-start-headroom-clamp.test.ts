@@ -38,6 +38,10 @@ function makeDeps(overrides: Partial<AutoStartDeps> = {}): AutoStartDeps {
     buildContentionGate: async () => openFileContentionGate(),
     canDispatch: async () => ({ available: true }) as const,
     orderStartCandidates: async () => {},
+    // #1021: same reason — the real harness-budget gate issues two `db.select` reads
+    // (candidate tags, running harness WIP) that would shift the chains below. This
+    // suite is about the #1019 headroom clamp, not the budget, so inject one that holds nothing.
+    buildHarnessGate: async () => ({ slots: 0, sharePct: 100, used: 0, isHarness: () => false, allows: () => true, noteStarted: () => {} }),
     ...overrides,
   };
 }
