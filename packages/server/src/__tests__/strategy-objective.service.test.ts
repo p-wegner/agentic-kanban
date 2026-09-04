@@ -12,6 +12,7 @@ import {
   updateObjectiveWithStrategy,
   writeStrategyObjective,
 } from "../services/strategy-objective.service.js";
+import { DEFAULT_HARNESS_SHARE_PCT } from "@agentic-kanban/shared/lib/harness-budget";
 
 const OBJECTIVE_REL = "scripts/board-monitor/objective.md";
 const BASE_OBJECTIVE = [
@@ -45,6 +46,7 @@ describe("strategy objective translation", () => {
       backlogFloor: 12,
       maxNewStartsPerCycle: 3,
       refillFocus: "bugfix-only",
+      harnessSharePct: DEFAULT_HARNESS_SHARE_PCT,
     });
   });
 
@@ -179,7 +181,7 @@ describe("resolveMonitorTunables — in-process monitor wiring", () => {
     ]);
     const { tunables, source } = resolveMonitorTunables(prefMap, "proj-1");
     expect(source).toBe("strategy");
-    expect(tunables).toEqual({ activeAgentsTarget: 6, backlogFloor: 12, maxNewStartsPerCycle: 3, refillFocus: "bugfix-only" });
+    expect(tunables).toEqual({ activeAgentsTarget: 6, backlogFloor: 12, maxNewStartsPerCycle: 3, refillFocus: "bugfix-only", harnessSharePct: DEFAULT_HARNESS_SHARE_PCT });
   });
 
   it("falls back to staggered legacy nudge prefs when no strategy exists", () => {

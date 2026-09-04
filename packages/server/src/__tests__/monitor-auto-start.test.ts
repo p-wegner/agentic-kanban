@@ -54,6 +54,14 @@ function makeDeps(overrides: Partial<AutoStartDeps> = {}): AutoStartDeps {
     // `db.select` mock chains. These suites exercise dependency/eligibility/launch logic,
     // not scoring, so leave `candidates` in query order (a no-op sort/no DB access).
     orderStartCandidates: async () => {},
+
+    // #1021: the real gate issues two db.select reads (candidate tags, running harness WIP),
+
+    // which would shift this suite's ordered mock chains. These suites are not about the
+
+    // harness budget, so inject one that holds nothing.
+
+    buildHarnessGate: async () => ({ slots: 0, sharePct: 100, used: 0, isHarness: () => false, allows: () => true, noteStarted: () => {} }),
     ...overrides,
   };
 }
