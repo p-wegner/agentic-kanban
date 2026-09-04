@@ -25,11 +25,17 @@ type Inventory = {
   candidates: { duplicates: unknown[]; nearDuplicates: unknown[]; slowerThanThreshold: unknown[] };
 };
 
-function runInventory(): Inventory {
+function runInventory(env: Record<string, string> = {}): Inventory {
   const stdout = execFileSync(
     process.execPath,
     [path.join(repoRoot, "scripts", "guard-inventory.mjs"), "--no-git", "--json"],
-    { cwd: repoRoot, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, windowsHide: true },
+    {
+      cwd: repoRoot,
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
+      windowsHide: true,
+      env: { ...process.env, ...env },
+    },
   );
   return JSON.parse(stdout) as Inventory;
 }
@@ -61,5 +67,20 @@ describe("guard inventory", () => {
     for (const row of inv.rows) {
       expect(row.property.length, `${row.file} has an empty property`).toBeGreaterThan(0);
     }
+  }, 180_000);
+
+  /**
+   * The `--json` stdout is MACHINE output, so nothing this tool imports may write to it (#1034).
+   *
+   * `guard-inventory.mjs` imports `scripts/test-mine.mjs` for the package list and the
+   * marker scan. That module used to print `[test:mine] scoped to: …` at module scope, so with
+   * `KANBAN_TEST_PACKAGES` set — which is precisely what the pre-merge gate's SCOPED tier sets —
+   * the notice landed ahead of the JSON and this suite died in `JSON.parse`. A guard suite going
+   * red because the gate narrowed its own scope is the one failure the guard set may not have.
+   */
+  it("emits parseable JSON even when the gate has narrowed the test scope", () => {
+    const inv = runInventory({ KANBAN_TEST_PACKAGES: "server" });
+    expect(inv.counts.files).toBe(inv.rows.length);
+    expect(inv.counts.alwaysRun).toBeGreaterThan(50);
   }, 180_000);
 });

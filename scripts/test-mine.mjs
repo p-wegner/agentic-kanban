@@ -1265,12 +1265,25 @@ async function runRelatedWithFallback(pkg, files) {
 const scopeRaw = (process.env.KANBAN_TEST_PACKAGES || "").trim();
 const scopeLabels = scopeRaw ? new Set(scopeRaw.split(",").map((s) => s.trim()).filter(Boolean)) : null;
 const selected = scopeLabels ? PACKAGES.filter((p) => scopeLabels.has(p.label)) : PACKAGES;
-if (scopeLabels && selected.length === 0) {
-  console.warn(`[test:mine] KANBAN_TEST_PACKAGES="${scopeRaw}" matched no known package — running ALL packages instead of silently testing nothing.`);
-}
 const toRun = selected.length > 0 ? selected : PACKAGES;
-if (scopeLabels && toRun !== PACKAGES) {
-  console.log(`[test:mine] scoped to: ${toRun.map((p) => p.label).join(", ")} (KANBAN_TEST_PACKAGES)`);
+
+/**
+ * The scope notices are announced by the RUN, never by an import (#1034).
+ *
+ * This module is imported by `scripts/guard-inventory.mjs` and by suites that exercise its pure
+ * functions. Printing at module scope therefore wrote `[test:mine] scoped to: …` onto the STDOUT
+ * of any such consumer whenever `KANBAN_TEST_PACKAGES` happened to be set — which is exactly the
+ * environment the pre-merge gate's scoped tier runs in. `guard-inventory.mjs --json` then emitted
+ * a notice line ahead of its JSON and `guard-inventory.test.ts` died in `JSON.parse`: a guard
+ * that went red purely because the gate had narrowed its own scope.
+ */
+export function announceScope(log = console.log, warn = console.warn) {
+  if (scopeLabels && selected.length === 0) {
+    warn(`[test:mine] KANBAN_TEST_PACKAGES="${scopeRaw}" matched no known package — running ALL packages instead of silently testing nothing.`);
+  }
+  if (scopeLabels && toRun !== PACKAGES) {
+    log(`[test:mine] scoped to: ${toRun.map((p) => p.label).join(", ")} (KANBAN_TEST_PACKAGES)`);
+  }
 }
 
 /* ---------------------------------------------------------------------------
@@ -1352,6 +1365,7 @@ function reportTreeDrift(before) {
 // `process.argv[1]` is its own path in that case.
 if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
   let failed = false;
+  announceScope();
 
   /* -------------------------------------------------------------------------
    * Machine-wide verify lock (#957)
