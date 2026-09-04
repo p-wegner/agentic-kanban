@@ -56,6 +56,12 @@ export interface EvalContext {
   allowlistPref: string | undefined;
   /** The `roster_<projectId>` value (#1025) — the newer spelling of the same restriction. */
   rosterPref?: string | undefined;
+  /**
+   * What the eligible workers ATTEST about their profiles (#1027) — the narrowing that
+   * decides whether a restricted project may go remote at all. Absent means the driver
+   * found no restriction to evaluate, which reads the same as "nothing attested".
+   */
+  attestation?: { permittedWorkers: number; detail?: string } | undefined;
   dataHandlingPref: string | undefined;
   /** The project's resolved risk posture (#937) — read once by the driver, judged by check 4. */
   posture: RiskPosture;
@@ -98,16 +104,27 @@ const checkOptIn: Evaluator = async (ctx) => {
 
 const checkAllowlist: Evaluator = async (ctx) => {
   const key = allowedProfilesPrefKey(ctx.projectId);
-  const block = remoteDispatchBlockedByAllowlist(ctx.allowlistPref, ctx.rosterPref);
-  const observed = { [key]: ctx.allowlistPref ?? null, [rosterPrefKey(ctx.projectId)]: ctx.rosterPref ?? null };
+  const block = remoteDispatchBlockedByAllowlist(ctx.allowlistPref, ctx.rosterPref, ctx.attestation);
+  const observed = {
+    [key]: ctx.allowlistPref ?? null,
+    [rosterPrefKey(ctx.projectId)]: ctx.rosterPref ?? null,
+    // #1027: the number that decides this check for a restricted project. Shown even when
+    // it is zero — "no worker attests a permitted profile" is the answer an operator has to
+    // be able to READ, since the fix (start the worker with `--profiles`) is on the other
+    // machine and nothing else on this page would point there.
+    attestingWorkers: ctx.attestation?.permittedWorkers ?? 0,
+  };
   if (!block.blocked) {
-    return { outcome: "pass", detail: `${key} is empty, so the project is unrestricted`, observed };
+    const why = (ctx.attestation?.permittedWorkers ?? 0) > 0
+      ? `${ctx.attestation?.detail ?? "a worker attests a permitted profile"} (#1027)`
+      : `${key} is empty, so the project is unrestricted`;
+    return { outcome: "pass", detail: why, observed };
   }
   return {
     outcome: "decided",
     detail:
       `${block.reason} — a worker authenticates the agent with its OWN local login, so the board can pick a ` +
-      `permitted profile but cannot make a worker honour it (#651)`,
+      `permitted profile but cannot make a worker honour it unless the worker ATTESTS it (#651, #1027)`,
     observed,
     refusalReason: `project ${ctx.projectId} cannot dispatch remotely: ${block.reason}`,
   };

@@ -70,6 +70,16 @@ export type Placement =
        */
       strict?: boolean;
       /**
+       * The profile the worker must run this session under (#1027).
+       *
+       * A NAME, never a credential — the board holds none the worker could use, and that
+       * is the point of decision 012. Present only for a project whose roster restricts
+       * profiles, and only because the chosen worker ATTESTED it; the worker resolves the
+       * name locally and rejects the assign if it cannot, which is what keeps the
+       * restriction real on a machine the board cannot inspect.
+       */
+      profile?: { provider: string; name: string };
+      /**
        * Capacity slot claimed for this decision (#751), to be released when the
        * decision is abandoned and claimed by the session when it is honoured.
        *
@@ -183,7 +193,14 @@ export interface DeferredLaunchFailure {
     /** The worker took it but could not build a runnable checkout (clone/setup/LFS). */
     | "provisioning"
     /** The worker disappeared and did not come back within the grace window. */
-    | "worker-lost";
+    | "worker-lost"
+    /**
+     * The worker did not recognise the PROFILE the placement pinned (#1027) — its
+     * attestation was stale. Distinct from `dispatch`: nothing is wrong with the worker or
+     * the link, the board simply placed on a fact that has since changed, and re-placing
+     * (or falling back to the host, which CAN enforce the roster) is the right response.
+     */
+    | "profile-unknown";
   reason: string;
 }
 

@@ -599,6 +599,10 @@ export function createRemoteAgentService(
       // short-lived, everything else gets the silence watchdog.
       hangTimeoutMs: config.isMockAgent ? 0 : resolveAgentHangTimeoutMs(),
       provider,
+      // #1027: the roster-selected profile the placement pinned, by NAME. The worker
+      // resolves it locally and rejects the assign if it cannot — which is what makes a
+      // profile restriction enforceable on a machine holding none of the board's logins.
+      ...(placement.profile?.name ? { profileName: placement.profile.name } : {}),
       trueRemote: isTrueRemote,
       // An explicit agentCommand (or KANBAN_AGENT_COMMAND, which isMockAgent reflects) is
       // the operator's exact command, not a provider's platform guess — it travels as-is.

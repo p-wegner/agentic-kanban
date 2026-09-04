@@ -183,18 +183,29 @@ healthy explicit choice (that is predictive rotation, #1026). Logic:
 `profile-allowlist.ts`; the enforcement seam is still `resolveProjectRuntimeConfig`, and nothing may
 read the raw keys outside it (`roster-raw-read-ratchet.test.ts`).
 
-**The guarantee stops at the machine boundary, so a restricted project does not go remote
-(#651).** A fleet worker authenticates the agent with its OWN local login and the board
-deliberately sends no credentials (decision 012 — `CLAUDE_CONFIG_DIR` is not in
-`REMOTE_SPEC_ENV_ALLOWLIST`, by design), so the board can pick a permitted profile but
-cannot make the worker honour it. `resolveWorkerPlacement` therefore refuses remote
-placement for any project with a non-empty (or unreadable) allowlist: it falls back to the
-host, which CAN enforce the list, and a `worker_dispatch_strict` project HOLDS with the
-restriction as the reason rather than borrowing an unlisted account. Worker-side
-attestation — a worker declaring which profiles it can authenticate as, the way it already
-declares `--providers`/`--labels` — is what would narrow this from "never" to "only to a
-worker that can prove it qualifies"; until then, allowlist and fleet dispatch are mutually
-exclusive on the same project.
+**The guarantee stops at the machine boundary, so a restricted project goes remote only to a
+worker that ATTESTS (#651, narrowed by #1027).** A fleet worker authenticates the agent with
+its OWN local login and the board deliberately sends no credentials (decision 012 —
+`CLAUDE_CONFIG_DIR` is not in `REMOTE_SPEC_ENV_ALLOWLIST`, by design), so the board can pick a
+permitted profile but cannot *make* the worker honour it. #651's answer was therefore "never":
+`resolveWorkerPlacement` refused remote placement for any project with a non-empty (or
+unreadable) allowlist — host fallback, or a HOLD for a `worker_dispatch_strict` project.
+
+**#1027 turns "never" into "only to a worker that can prove it qualifies", without moving a
+credential.** A worker declares the profile NAMES it can authenticate as
+(`worker start --profiles anth,team5x`, or derived from its own local profile discovery),
+with the role each of those accounts declares for ITSELF and a quota reading it takes with the
+same throttled OAuth reader the board runs (`server/src/lib/oauth-quota-core.ts`) against its own
+tokens. Names and percentages cross the wire; tokens never do. Placement then intersects the
+project's roster with that attestation and picks by role + headroom exactly as a local launch
+does (`server/src/lib/worker-profile-attestation.ts` → `resolveRosterSelection` — one selection
+algorithm, not two), and stamps the chosen profile NAME onto the `Placement`. The worker
+resolves that name against its own logins and **rejects** the assign if it does not know it
+(`profile-unknown` in the dispatch log, board re-places) — never a silent fallback to whatever
+account the machine is logged into. `forbidden` still wins from either side, so a worker
+attesting only a forbidden profile gets nothing. Nothing attested = today's #651 refusal, which
+is also what every protocol-1 worker gets: `WORKER_PROTOCOL_VERSION` is 2 but
+`MIN_SUPPORTED` stays 1, since `profiles` is an optional capability field.
 
 ## Board Operations
 Tool precedence: **MCP** (`mcp__agentic-kanban__*`) → **CLI** (`pnpm cli -- ...`) → **REST**. Use the board's own features — review (`POST /api/workspaces/:id/review`), merge (`merge_workspace`), fix-and-merge, rebase (`update-base`), enhance, dependency-analyze — don't replicate manually. For narrow questions use `list_issues`/`get_board_status`, not unbounded `list_workspaces`. Don't hand-roll `curl | python`.
@@ -386,6 +397,7 @@ Agents can execute on OTHER machines. Workers dial the board (`agentic-kanban wo
 - **Git transport**: the board serves its repos over token-authed git smart HTTP; a worker clones, works in its OWN checkout, and pushes to `refs/kanban/incoming/<branch>` (pushes to `refs/heads/*` are refused — those are checked out in board worktrees). The board fast-forwards the real branch from there, so diff/review/merge are unchanged. **Fast-forward only** — divergence is held and reported, never forced.
 - A worker on the SAME machine can skip git transport with `worker start --shares-filesystem`.
 - **Credentials never leave their machine**: a worker authenticates its agent with its own local login; the board sends none. Enforced (#244), not just intended — the remote launch spec's env comes from the allowlist in `packages/server/src/lib/remote-spec-env.ts` and the worker MERGES it over its own environment. Adding a var an agent needs remotely means adding it to that allowlist; anything credential-shaped is rejected there by design.
+- **A worker ATTESTS its profiles** (#1027): `worker start --profiles anth,team5x` (names only; omit the flag to attest what local discovery finds, `--profiles none` to attest nothing) declares which agent logins that machine can authenticate as, on `hello` and on every heartbeat alongside `--providers`/`--labels` — with each profile's self-declared role and a quota reading the worker takes against its own tokens. That is what lets a profile-restricted project dispatch remotely at all (see the #651 paragraph in Agent Providers); the launch spec then carries the chosen profile's NAME, and a worker that no longer holds it rejects the assign instead of running under another account.
 - **Git tokens are per assignment** (#247): scoped to one worker + one project + one incoming ref, expiring, and invalidated by `revokeWorker` (which also closes the worker's live socket). The startup incoming-ref sweep lands a ref only when the DB holds a matching dispatch (#246) — an unmatched ref is held and reported, never fast-forwarded.
 - **The board ASKS instead of waiting** (#887): a worker remembers every `sessionId` it was ever handed, so `probe_session` → `unknown` is an AUTHORITATIVE "the assignment never arrived", not a timeout's guess (measured: a lost assign held a session 100 minutes). Sent once, after `ASSIGN_SILENCE_PROBE_MS` of zero output. **Silence is NOT `unknown`** — a worker older than the message cannot answer, so an unanswered probe holds exactly as before and #883's silence TTL stays the backstop. `unknown` counts only from the worker the session was assigned TO. Board half: `services/agent-remote-liveness.ts` (which also owns the free half — the `hello` reverse-reconcile); worker half: `worker/worker-session-registry.ts`.
 - **Strict dispatch is enforced at LAUNCH time too** (#245): `strict` rides on the `Placement`, so a worker vanishing between placement and `assign` fails the session with `NO_AVAILABLE_WORKER` instead of quietly running on the board host.

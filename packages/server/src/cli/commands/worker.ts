@@ -396,6 +396,15 @@ export function registerWorkerSubcommands(workerCmd: Command) {
       "Advertise --providers as declared, without an on-machine auth probe (#895). Use only " +
         "when a provider authenticates purely via an env API key 'worker doctor' cannot see.",
     )
+    .option(
+      "--profiles <csv>",
+      "Agent profiles this machine ATTESTS it can authenticate as, e.g. anth,team5x (#1027). " +
+        "Names only — no tokens ever leave this machine. This is what lets a board project " +
+        "restricted to specific profiles dispatch work here at all; without it such a project " +
+        "refuses remote dispatch (#651). Omit to attest whatever local profile discovery finds; " +
+        "pass 'none' to attest nothing. A declared name this machine has no login for is dropped " +
+        "with a log line.",
+    )
     .option("--max-concurrency <n>", "Max parallel agent sessions", (v) => parseInt(v, 10))
     .option("--state-file <path>", `Pairing state file (default: ${defaultWorkerStateFile()})`)
     .option("--work-root <path>", "Root for git-transport clones/checkouts (default: ~/.agentic-kanban/worker)")
@@ -413,6 +422,7 @@ export function registerWorkerSubcommands(workerCmd: Command) {
       labels?: string;
       providers?: string;
       skipProviderAttestation?: boolean;
+      profiles?: string;
       maxConcurrency?: number;
       stateFile?: string;
       workRoot?: string;
@@ -437,6 +447,10 @@ export function registerWorkerSubcommands(workerCmd: Command) {
           labels: labels.length > 0 ? labels : undefined,
           providers: splitList(options.providers),
           attestProviders: !options.skipProviderAttestation,
+          // #1027. `undefined` (flag absent) means "attest what discovery finds"; an explicit
+          // list — including the single value `none` — is the operator's own narrowing, which
+          // is why the CLI does not substitute a default here.
+          profiles: splitList(options.profiles),
           maxConcurrency: options.maxConcurrency,
           stateFile: options.stateFile,
           workRoot: options.workRoot,

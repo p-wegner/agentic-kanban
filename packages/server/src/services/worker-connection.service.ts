@@ -18,6 +18,9 @@ import {
 } from "@agentic-kanban/shared/lib/worker-protocol";
 import type { WorkerRegistry } from "./worker-registry.service.js";
 import type { DeferredLaunchFailure } from "./agent-dispatch.service.js";
+// The worker builds this refusal from the same constant, so the classifier cannot drift
+// from the message it classifies (#1027).
+import { PROFILE_UNKNOWN_PREFIX } from "../worker/worker-profiles.js";
 
 /**
  * What KIND of launch failure a worker's `assign_failed` reports (#751).
@@ -34,6 +37,11 @@ import type { DeferredLaunchFailure } from "./agent-dispatch.service.js";
  */
 export function classifyAssignFailure(error: string): DeferredLaunchFailure["kind"] {
   const text = error.toLowerCase();
+  // #1027 first: a rejected profile is the one refusal whose text the WORKER builds from a
+  // shared constant (`PROFILE_UNKNOWN_PREFIX`), so it is the one case this heuristic is
+  // actually exact about — and it must not be swallowed by the provisioning pattern below,
+  // which the word "profile" would otherwise never reach but a future rewording might.
+  if (text.includes(PROFILE_UNKNOWN_PREFIX)) return "profile-unknown";
   if (/\bcapacity\b|max ?concurrency|too many|at capacity/.test(text)) return "capacity";
   if (/clone|checkout|worktree|provision|setup|lock ref|fetch|lfs|submodule/.test(text)) return "provisioning";
   return "dispatch";
@@ -150,6 +158,11 @@ export function createWorkerConnectionManager(registry: WorkerRegistry) {
         // an already-expired stamp and evict a session the worker just vouched for.
         const declaredAt = Date.now();
         conn.lastEventAt = new Map(message.runningSessionIds.map((id) => [id, declaredAt]));
+        // #1027: `hello` carries the capabilities too, and the profile attestation is the
+        // half placement reads. Recording it HERE (and not only on the heartbeat) is what
+        // makes a reconnecting worker eligible for a restricted project immediately rather
+        // than up to one heartbeat interval later.
+        registry.noteAttestedProfiles(workerId, message.capabilities?.profiles);
       } else if (message.type === "event") {
         conn.pendingSessionIds.delete(message.event.sessionId);
         if (message.event.type === "exit") {
