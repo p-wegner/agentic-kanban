@@ -145,6 +145,32 @@
  *                                          module-level `survivorProbePid`, and the probe and
  *                                          its verdict live entirely outside this file
  *                                          (`lib/process-tree.ts`, `exit-finalize.ts`).
+ *
+ * -- Seventh disclosed movement (2026-09-04, #1025 profile roster) ----------------------
+ *
+ *   createWorkspaceCreateService     635 -> 641  Growth: the single `profileHold` throw became
+ *                                          a two-way choice, because #1025 splits a hold that
+ *                                          resolves itself (an exhausted or cooling roster --
+ *                                          "wait") from a REFUSAL that never will (a
+ *                                          `forbidden` profile -- `PROFILE_FORBIDDEN`). Both
+ *                                          arms have to be built here: the error carries the
+ *                                          route's status and code, and telling an operator to
+ *                                          wait for something that is never going to happen is
+ *                                          exactly the failure the split exists to prevent. The
+ *                                          DECISION itself did not land here -- `profileRefused`
+ *                                          is computed in `profile-roster-selection.ts` and
+ *                                          merely read at this point.
+ *   createWorkspaceProvisionService  393 -> 407  Growth: three new fields on the resolved-config
+ *                                          shape (`profileRefused`, `reserveUsed`,
+ *                                          `reserveNote`) -- their declarations, their doc
+ *                                          comment, and their pass-through in the returned
+ *                                          object -- plus the one `console.log` that makes a
+ *                                          reserve start visible on its own line. That log is
+ *                                          the point of the reserve role rather than incidental
+ *                                          to it: an emergency account spent silently is one
+ *                                          spent by accident, so it sits at the seam where the
+ *                                          launch is actually resolved. No roster logic moved
+ *                                          in; the selection stays in shared.
  */
 export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "cli/commands/issue.ts::registerIssueCommand": 718,
@@ -154,7 +180,8 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // Raised rather than worked around: the ring exists to stop unmanaged growth, not to make a
   // sanctioned extraction unlandable, and 2 nloc here bought 8 columns off the hottest table
   // in the board. It is still the largest entry in this ring and still wants splitting.
-  "services/workspace-create.service.ts::createWorkspaceCreateService": 635,
+  // 635 -> 641 (#1025), disclosed in the seventh movement above.
+  "services/workspace-create.service.ts::createWorkspaceCreateService": 641,
   "services/issue.service.ts::createIssueService": 616,
   // 618 -> 620 (#968), disclosed in the sixth movement above.
   "services/session-manager/session-lifecycle.ts::createSessionLifecycle": 620,
@@ -187,7 +214,8 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // module-level `*Impl` functions taking `database` explicitly, so the relaunch seam in
   // `workspace-session.service.ts` can share the exact same logic without this factory
   // re-growing every time that shared logic changes. The factory now holds thin delegators.
-  "services/workspace-provision.service.ts::createWorkspaceProvisionService": 393,
+  // 393 -> 407 (#1025), disclosed in the seventh movement above.
+  "services/workspace-provision.service.ts::createWorkspaceProvisionService": 407,
   // 404 -> 399, banked (#806): five hand-written body guards became one schema parse each.
   "routes/workspace-actions.ts::createWorkspaceActionsRoute": 403,
   // 349 -> 351 (#841): POSIX-only `detached: true` for a shell launch, closing the #836 gap.
