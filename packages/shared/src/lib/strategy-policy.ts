@@ -118,21 +118,57 @@ export function normalizeProviderPolicy(raw: unknown, index: number): ProviderPr
  *   quota exhaustion). Fallback-only policies are never quota-gated.
  * - `allowFallback` (default true) gates whether fallback-only policies may be
  *   returned at all.
+ * - `costOf` (#1026) ranks WITHIN a tier when the priority list leaves more than
+ *   one candidate: lowest cost wins, `null` (unmeasured) keeps declared order and
+ *   sorts last. Omitted — or measuring nothing — leaves list order exactly as it
+ *   was, which is what a board with no quota source still gets.
  */
 export function selectPolicyByPriority(
   policies: ProviderProfilePolicy[],
-  options: { allowFallback?: boolean; isBlocked?: (policy: ProviderProfilePolicy) => boolean } = {},
+  options: {
+    allowFallback?: boolean;
+    isBlocked?: (policy: ProviderProfilePolicy) => boolean;
+    costOf?: (policy: ProviderProfilePolicy) => number | null;
+  } = {},
 ): ProviderProfilePolicy | null {
   const blocked = options.isBlocked ?? (() => false);
-  const fill = policies.find((p) => p.mode === "fill" && !blocked(p));
+  const pick = (mode: ProviderPolicyMode, respectBlocked: boolean): ProviderProfilePolicy | null =>
+    cheapest(policies.filter((p) => p.mode === mode && (!respectBlocked || !blocked(p))), options.costOf);
+
+  const fill = pick("fill", true);
   if (fill) return fill;
-  const throttle = policies.find((p) => p.mode === "throttle" && !blocked(p));
+  const throttle = pick("throttle", true);
   if (throttle) return throttle;
   if (options.allowFallback ?? true) {
-    const fallback = policies.find((p) => p.mode === "fallback-only");
+    const fallback = pick("fallback-only", false);
     if (fallback) return fallback;
   }
   return null;
+}
+
+/**
+ * The lowest-cost entry of one tier, ties and unmeasured entries broken by declared
+ * order. Written as a scan rather than a sort so the no-`costOf` case provably returns
+ * `list[0]` — the historic `find` — instead of whatever a comparator happens to do with
+ * an all-equal input.
+ */
+function cheapest(
+  list: ProviderProfilePolicy[],
+  costOf?: (policy: ProviderProfilePolicy) => number | null,
+): ProviderProfilePolicy | null {
+  if (list.length === 0) return null;
+  if (!costOf || list.length === 1) return list[0];
+  let best = list[0];
+  let bestCost = costOf(best);
+  for (const candidate of list.slice(1)) {
+    const cost = costOf(candidate);
+    if (cost === null) continue;
+    if (bestCost === null || cost < bestCost) {
+      best = candidate;
+      bestCost = cost;
+    }
+  }
+  return best;
 }
 
 /**

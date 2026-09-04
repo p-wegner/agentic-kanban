@@ -96,10 +96,16 @@ export async function insertSession(
     skillId: string | null;
     skillName: string | null;
     stats: string;
+    /** #1026: the resolver's account of why THIS profile. Null = not recorded. */
+    profileSelectionReason?: string | null;
   },
   database: Database = db,
 ): Promise<void> {
-  await database.insert(sessions).values({ ...values, stats: sanitizeUtf8(values.stats) });
+  await database.insert(sessions).values({
+    ...values,
+    stats: sanitizeUtf8(values.stats),
+    profileSelectionReason: values.profileSelectionReason ?? null,
+  });
 }
 
 export async function updateSessionPid(
