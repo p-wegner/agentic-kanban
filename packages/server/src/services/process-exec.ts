@@ -191,6 +191,21 @@ export async function killProcessTree(
   process.kill(pid, signal);
 }
 
+/**
+ * Is this split netstat row a TCP row in the LISTENING state? (#1035)
+ *
+ * Windows LOCALIZES the state column — German prints `ABHÖREN` — so the English literal
+ * alone matches nothing on a non-English box. The locale-independent signal is the FOREIGN
+ * address: a listening socket carries the wildcard, an established/waiting row a real peer.
+ * Mirrors `isNetstatListeningRow` in `scripts/dev-port-guard.mjs`; that copy serves the
+ * `.mjs` launcher scripts, which cannot import from this package.
+ */
+function isTcpListeningRow(parts: string[]): boolean {
+  if (/^LISTEN/i.test(parts[3] ?? "")) return true;
+  const foreign = parts[2] ?? "";
+  return foreign === "0.0.0.0:0" || foreign === "[::]:0" || foreign === "*:*";
+}
+
 export function parseNetstatListeners(stdout: string): OsPortListener[] {
   const listeners: OsPortListener[] = [];
   for (const line of stdout.split("\n")) {
@@ -198,7 +213,7 @@ export function parseNetstatListeners(stdout: string): OsPortListener[] {
     if (parts.length < 4) continue;
     const proto = parts[0]?.toLowerCase();
     if (proto !== "tcp" && proto !== "udp") continue;
-    if (proto === "tcp" && !/^LISTENING$/i.test(parts[3] ?? "")) continue;
+    if (proto === "tcp" && !isTcpListeningRow(parts)) continue;
     const local = parts[1] ?? "";
     const pidText = proto === "tcp" ? parts[4] : parts[3];
     const port = Number(local.match(/:(\d+)$/)?.[1]);
