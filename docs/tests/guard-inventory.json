@@ -2714,9 +2714,9 @@
       "introducedSha": "b2a5544c3d",
       "introducedDate": "2026-08-24",
       "lastRedProxy": {
-        "sha": "42707ebaf8",
+        "sha": "76c6d7ddf3",
         "date": "2026-09-04",
-        "subject": "fix(gate): route the three new scripts' git spawns through the sanctioned helper — git-exec-single-spawn green",
+        "subject": "fix(#1012): boot-dist smoke uses the reaper's temp namespace and always cleans up — temp-dir-namespace-guard green",
         "method": "git-log-fix-commit-naming-the-file"
       },
       "lastRedSource": "proxy: git log of fix commits naming the file (no gate-outcome ledger exists)",
@@ -3343,9 +3343,9 @@
       "introducedSha": "227ba78456",
       "introducedDate": "2026-06-22",
       "lastRedProxy": {
-        "sha": "42707ebaf8",
+        "sha": "eeaa0e5261",
         "date": "2026-09-04",
-        "subject": "fix(gate): route the three new scripts' git spawns through the sanctioned helper — git-exec-single-spawn green",
+        "subject": "feat(#1027): worker profile attestation — a restricted project goes remote only to a worker that proves it qualifies",
         "method": "git-log-fix-commit-naming-the-file"
       },
       "lastRedSource": "proxy: git log of fix commits naming the file (no gate-outcome ledger exists)",
