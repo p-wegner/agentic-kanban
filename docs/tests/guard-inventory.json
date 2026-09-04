@@ -2,13 +2,13 @@
   "schema": "guard-inventory 1",
   "generatedBy": "pnpm guard:inventory (scripts/guard-inventory.mjs)",
   "counts": {
-    "files": 171,
-    "alwaysRun": 171,
+    "files": 172,
+    "alwaysRun": 172,
     "ratchet": 38,
     "both": 38,
-    "distinctProperties": 171,
+    "distinctProperties": 172,
     "missingProperty": 0,
-    "unmeasured": 9
+    "unmeasured": 10
   },
   "slowThresholdMs": 20000,
   "withGit": true,
@@ -1824,6 +1824,28 @@
       "introducedSha": "bb5fe00f7a",
       "introducedDate": "2026-09-02",
       "lastRedProxy": null,
+      "lastRedSource": "proxy: git log of fix commits naming the file (no gate-outcome ledger exists)",
+      "durationMs": null,
+      "durationSource": "absent from docs/tests/durations.json"
+    },
+    {
+      "file": "packages/server/src/__tests__/promote-plan.test.ts",
+      "basename": "promote-plan.test.ts",
+      "package": "server",
+      "kinds": [
+        "always-run"
+      ],
+      "property": "Unit tests for the PURE half of `pnpm promote` (#1014): tag naming, sweep-verdict parsing,",
+      "propertyKey": "unit tests for the pure half of pnpm promote tag naming sweep verdict parsing",
+      "propertySource": "doc-block",
+      "introducedSha": "2e31753330",
+      "introducedDate": "2026-09-04",
+      "lastRedProxy": {
+        "sha": "2e31753330",
+        "date": "2026-09-04",
+        "subject": "feat(#1014): pnpm promote — the drawbridge from master to the stable board",
+        "method": "git-log-fix-commit-naming-the-file"
+      },
       "lastRedSource": "proxy: git log of fix commits naming the file (no gate-outcome ledger exists)",
       "durationMs": null,
       "durationSource": "absent from docs/tests/durations.json"
@@ -4799,6 +4821,13 @@
       ]
     },
     {
+      "propertyKey": "unit tests for the pure half of pnpm promote tag naming sweep verdict parsing",
+      "property": "Unit tests for the PURE half of `pnpm promote` (#1014): tag naming, sweep-verdict parsing,",
+      "files": [
+        "packages/server/src/__tests__/promote-plan.test.ts"
+      ]
+    },
+    {
       "propertyKey": "walks the server src import graph from the worker cli entry no import edge to it",
       "property": "walks the server src import graph from the worker CLI entry; no import edge to it (#647).",
       "files": [
@@ -5098,6 +5127,7 @@
       "packages/server/src/__tests__/issue-update-unrecognized-keys.test.ts",
       "packages/server/src/__tests__/machine-verify-lock-mirror.test.ts",
       "packages/server/src/__tests__/project-update-unrecognized-keys.test.ts",
+      "packages/server/src/__tests__/promote-plan.test.ts",
       "packages/server/src/__tests__/test-impact-budget-setting.test.ts",
       "packages/server/src/__tests__/typecheck-package-coverage.test.ts",
       "packages/server/src/__tests__/verify-step-timings.test.ts",
