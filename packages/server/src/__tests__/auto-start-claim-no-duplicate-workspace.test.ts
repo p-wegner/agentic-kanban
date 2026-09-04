@@ -94,7 +94,10 @@ describe("branch naming has ONE producer (#366)", () => {
  */
 describe("#366 round 8: every automatic starter goes through the claim", () => {
   const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
-  const monitorSrc = read("../startup/monitor-auto-start.ts");
+  // #1021 split the two loops into siblings (plan item P3.2): the In-Progress backfill stayed
+  // in `monitor-auto-start.ts`, the Todo pull moved to `monitor-todo-pull.ts`. Both are read,
+  // because the assertion below is about EVERY automatic starter, not about one file.
+  const monitorSrc = read("../startup/monitor-auto-start.ts") + read("../startup/monitor-todo-pull.ts");
   const routeSrc = read("../routes/workspaces.ts");
   const loopStartSrc = read("../services/plugin-loop-start.service.ts");
 
