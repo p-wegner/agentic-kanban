@@ -4331,6 +4331,24 @@ paths:
           content:
             application/json:
               schema: {}
+  /api/profile-roster:
+    get:
+      summary: GET /api/profile-roster?projectId=<id>
+      tags:
+        - profile-roster
+      operationId: get_api_profile-roster
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema: {}
   /api/projects:
     get:
       summary: GET /api/projects  (?includeArchived=true to include archived projects)

@@ -13,6 +13,7 @@ import {
   EffectiveTargetsSection, MonitorSettingsSection,
 } from "./MonitorSections.js";
 import { ProfileQuotaSection } from "./monitor/ProfileQuotaSection.js";
+import { ProfileRosterWarningsSection } from "./monitor/ProfileRosterWarningsSection.js";
 import { NextStartCandidatesSection } from "./monitor/NextStartCandidatesSection.js";
 export { MonitorButlerSection, OrchestratorSection, RecentBoardHealthEventsSection } from "./MonitorSections.js";
 import type { StartMode, ResolvedTunables, MonitorStatus, BoardHealthEvent } from "../lib/monitor-popover.js";
@@ -279,6 +280,7 @@ export function MonitorPopover({
           {resolvedTunables && <EffectiveTargetsSection resolvedTunables={resolvedTunables} />}
 
           <ProfileQuotaSection />
+          <ProfileRosterWarningsSection projectId={projectId} />
 
 
           <NextStartCandidatesSection projectId={projectId} />

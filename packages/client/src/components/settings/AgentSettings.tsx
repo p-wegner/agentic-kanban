@@ -2,7 +2,11 @@ import type { Dispatch, SetStateAction } from "react";
 import { CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS } from "@agentic-kanban/shared";
 import { CODEX_DEFAULT_PROFILE, COPILOT_DEFAULT_PROFILE, PI_DEFAULT_PROFILE, CapabilityMatrixTable, Field, defaultHarnessLabel, defaultModelForProvider, defaultModelKeyForProvider, formatHealthTime, profileOptionLabel, providerDisplayName, settingsProfileValue, statusClasses, type AgentProfileHealth, type AgentProvider, type Settings, type SettingsTextSetter } from "../SettingsPanel.shared.js";
 import type { ConcreteProvider } from "../../lib/strategy-targets.js";
-import { allowedProfileId, type AllowedProfile } from "@agentic-kanban/shared/lib/profile-allowlist";
+import { profileRefId } from "@agentic-kanban/shared/lib/profile-allowlist";
+import type { ProfileRole } from "@agentic-kanban/shared/lib/profile-allowlist";
+import { ProfileRosterTable, useProfileRoster } from "./ProfileRosterTable.js";
+import { ProjectRosterEditor, type RosterCandidate } from "./ProjectRosterEditor.js";
+import type { ProjectRosterControls } from "../../hooks/useProjectProviderControls.js";
 import { CodexLicenseRingEditor } from "./CodexLicenseRingEditor.js";
 import { ClaudeSubscriptionRingEditor } from "./ClaudeSubscriptionRingEditor.js";
 import { AgentPresetsEditor } from "./AgentPresetsEditor.js";
@@ -38,13 +42,12 @@ type AgentSettingsProps = {
   onProjectProviderChange?: (provider: ConcreteProvider | null, profileName: string) => void;
   savingProjectProvider?: boolean;
   /**
-   * The project's profile ALLOWLIST — a hard constraint, where the provider control above
-   * is only a default. Empty means unrestricted, which is every project until someone
-   * ticks a box here.
+   * The project's profile ROSTER (#1028) — a hard constraint, where the provider control
+   * above is only a default. No listed profile means unrestricted, which is every project
+   * until someone gives one a role here. Supersedes the old allowlist checkbox list: an
+   * allowlist IS a roster whose roles are all `pool`.
    */
-  allowedProfiles?: AllowedProfile[];
-  onAllowedProfilesChange?: (entries: AllowedProfile[]) => void;
-  savingAllowedProfiles?: boolean;
+  roster?: ProjectRosterControls;
 };
 
 function projectProviderSelectValue(provider: string | null, profileName: string | null): string {
@@ -52,7 +55,11 @@ function projectProviderSelectValue(provider: string | null, profileName: string
   return profileName ? `${provider}:${profileName}` : `${provider}:`;
 }
 
-export function AgentSettings({ settings, set, setSettings, profiles, codexProfiles, copilotProfiles, piProfiles, profileHealth, preflightingProfileId, onProfilePreflight: handleProfilePreflight, activeProjectId, providerDivergence, onProjectProviderChange, savingProjectProvider, allowedProfiles, onAllowedProfilesChange, savingAllowedProfiles }: AgentSettingsProps) {
+export function AgentSettings({ settings, set, setSettings, profiles, codexProfiles, copilotProfiles, piProfiles, profileHealth, preflightingProfileId, onProfilePreflight: handleProfilePreflight, activeProjectId, providerDivergence, onProjectProviderChange, savingProjectProvider, roster }: AgentSettingsProps) {
+  // The roster read model owns its own fetch (a filesystem walk plus a quota call), so it
+  // stays off the Settings bootstrap that every other tab waits on. `reloadKey` re-reads it
+  // after a roster write, so the "would launch on…" line reflects what was just saved.
+  const { roster: rosterView, error: rosterError } = useProfileRoster(activeProjectId, roster?.reloadKey ?? 0);
   const selectedProvider = ((settings.provider || "claude") as AgentProvider);
   const selectedModelKey = defaultModelKeyForProvider(selectedProvider);
 
@@ -82,26 +89,22 @@ export function AgentSettings({ settings, set, setSettings, profiles, codexProfi
     onProjectProviderChange(provider, profileName);
   }
 
-  // Profile allowlist. Every selectable profile across all four providers, so the operator
-  // ticks the ones this project may spend. Order matters downstream — the resolver walks
-  // the list and takes the first entry that is not cooling — and this preserves it by
-  // appending, so ticking A then B means "prefer A, fall back to B".
-  const allowedIds = new Set((allowedProfiles ?? []).map(allowedProfileId));
-  const allProfileEntries: AllowedProfile[] = [
+  // Every selectable profile across all four providers, carrying the role its ACCOUNT
+  // declares. The observed roster only covers the two providers that have rotation rings
+  // (claude, codex); copilot and pi profiles are still selectable and simply have nothing
+  // declared, which is `pool` — the same default the resolver applies to them.
+  const observedRole = new Map<string, ProfileRole>(
+    (rosterView?.profiles ?? []).map((p) => [p.id, p.role] as const),
+  );
+  const rosterCandidates: RosterCandidate[] = [
     ...profiles.map((p) => ({ provider: "claude" as const, name: p })),
     ...codexProfiles.map((p) => ({ provider: "codex" as const, name: p })),
     ...copilotProfiles.map((p) => ({ provider: "copilot" as const, name: p })),
     ...piProfiles.map((p) => ({ provider: "pi" as const, name: p })),
-  ];
-
-  function toggleAllowedProfile(entry: AllowedProfile): void {
-    if (!onAllowedProfilesChange) return;
-    const current = allowedProfiles ?? [];
-    const id = allowedProfileId(entry);
-    onAllowedProfilesChange(
-      allowedIds.has(id) ? current.filter((e) => allowedProfileId(e) !== id) : [...current, entry],
-    );
-  }
+  ].map((ref) => {
+    const id = profileRefId(ref);
+    return { id, provider: ref.provider, name: ref.name, globalRole: observedRole.get(id) ?? "pool" };
+  });
 
   return (
 <>
@@ -170,40 +173,21 @@ export function AgentSettings({ settings, set, setSettings, profiles, codexProfi
                       )}
                     </Field>
                   )}
-                  {activeProjectId && onAllowedProfilesChange && (
-                    <Field
-                      label="Profiles this project may use"
-                      hint="A hard restriction, not a default. Tick nothing to allow any profile (the normal case). Tick one or more and this project can ONLY launch on those — an explicit profile choice in the launch dialog, the Strategy Bullseye, and a global rotation after a rate limit are all clamped into this list. Order is fallback order; when every listed profile is rate-limited the project WAITS rather than borrowing another account."
-                    >
-                      <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
-                        {allProfileEntries.map((entry) => {
-                          const id = allowedProfileId(entry);
-                          const checked = allowedIds.has(id);
-                          const rank = checked ? (allowedProfiles ?? []).findIndex((e) => allowedProfileId(e) === id) + 1 : 0;
-                          return (
-                            <label key={id} className="flex items-center gap-2 text-sm cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                disabled={savingAllowedProfiles}
-                                onChange={() => toggleAllowedProfile(entry)}
-                                className="rounded border-gray-300 dark:border-gray-600 disabled:opacity-50"
-                              />
-                              <span className="font-mono text-xs">{profileOptionLabel(entry.provider, entry.name)}</span>
-                              {rank > 0 && (
-                                <span className="text-[10px] text-gray-500 dark:text-gray-400">#{rank}</span>
-                              )}
-                            </label>
-                          );
-                        })}
-                      </div>
-                      <p className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400">
-                        {allowedIds.size === 0
-                          ? "Unrestricted — this project may launch on any profile."
-                          : `Restricted to ${allowedIds.size} profile${allowedIds.size === 1 ? "" : "s"}. Launches outside the list are refused.`}
-                      </p>
-                    </Field>
+                  {activeProjectId && roster && (
+                    <ProjectRosterEditor
+                      candidates={rosterCandidates}
+                      entries={roster.entries}
+                      onRoleChange={roster.onRoleChange}
+                      reserveAllowed={roster.reserveAllowed}
+                      onReserveAllowedChange={roster.onReserveAllowedChange}
+                      exhaustedPct={roster.exhaustedPct}
+                      onExhaustedPctChange={roster.onExhaustedPctChange}
+                      project={rosterView?.project ?? null}
+                      saving={roster.saving}
+                      rejection={roster.rejection}
+                    />
                   )}
+                  <ProfileRosterTable roster={rosterView} error={rosterError} />
                   <Field label={activeProjectId ? "Agent Profile (global fallback)" : "Agent Profile"} hint="Selects agent provider and profile. Claude uses ~/.claude/settings_*.json, Codex uses ~/.codex/<name>.config.toml, Copilot uses the CLI default or configured model profile, and Pi uses PI_CODING_AGENT_DIR profile roots.">
                     <select
                       value={settingsProfileValue(settings)}

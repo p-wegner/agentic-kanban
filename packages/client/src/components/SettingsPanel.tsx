@@ -10,7 +10,6 @@ import { applyPreflightResult, CODEX_DEFAULT_PROFILE, COPILOT_DEFAULT_PROFILE, D
 // the default-branch rule (#782). This is the client's most-reworked file; those four were the
 // parts of it that never needed React, and they now have tests.
 import { buildProjectPatchBody, buildSettingsToSave, emptyProjectSettingsState, hydrateProjectSettings, isDefaultBranchInvalid, projectSettingsSaveError, type SettingsProjectRow } from "../lib/settingsPanelState.js";
-import { allowedProfilesPrefKey, parseProfileAllowlist } from "@agentic-kanban/shared/lib/profile-allowlist";
 import { parseDisabledTools, withToolDisabled } from "../lib/mcp-tool-toggle.js";
 import { useTagsEditor } from "../hooks/useTagsEditor.js";
 import { useTemplateEditorState } from "../hooks/useTemplateEditorState.js";
@@ -97,16 +96,15 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
     handleMonitorRunNow,
   } = useMonitorControls(activeProjectId, settings.nudge_wip_limit);
 
-  // Provider divergence + per-project provider/allowlist controls (state + handlers
+  // Provider divergence + per-project provider/roster controls (state + handlers
   // self-contained in the hook; settings is read for the current Strategy config and
   // written back after each save).
   const {
     providerDivergence,
     setProviderDivergence,
     savingProjectProvider,
-    savingAllowedProfiles,
     handleProjectProviderChange,
-    handleAllowedProfilesChange,
+    roster: rosterControls,
   } = useProjectProviderControls(activeProjectId, settings, setSettings);
 
   // Config export/import flow (state + handlers self-contained in the hook).
@@ -347,9 +345,7 @@ export function SettingsPanel({ onClose, activeProjectId, boardToolsSlot }: Sett
                   providerDivergence={providerDivergence}
                   onProjectProviderChange={handleProjectProviderChange}
                   savingProjectProvider={savingProjectProvider}
-                  allowedProfiles={parseProfileAllowlist(settings[allowedProfilesPrefKey(activeProjectId ?? "") as keyof Settings]).entries}
-                  onAllowedProfilesChange={handleAllowedProfilesChange}
-                  savingAllowedProfiles={savingAllowedProfiles}
+                  roster={rosterControls}
                 />
               )}
 

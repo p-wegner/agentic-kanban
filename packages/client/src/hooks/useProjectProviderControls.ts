@@ -4,7 +4,18 @@ import { apiFetch } from "../lib/api.js";
 import { setSettings as savePreferences } from "../lib/settingsStore.js";
 import { showToast } from "../lib/toast.js";
 import { normalizeConfig, setProviderFillPolicy, clearProviderFillPolicy, settingsKey, type ConcreteProvider } from "../lib/strategy-targets.js";
-import { allowedProfilesPrefKey, serializeProfileAllowlist, type AllowedProfile } from "@agentic-kanban/shared/lib/profile-allowlist";
+import {
+  allowedProfilesPrefKey,
+  DEFAULT_POOL_EXHAUSTED_PCT,
+  parseRoster,
+  reserveAllowedPrefKey,
+  rosterExhaustedPctPrefKey,
+  rosterPrefKey,
+  serializeRoster,
+  type ProfileRole,
+} from "@agentic-kanban/shared/lib/profile-allowlist";
+import { applyRoleChange, removeFromRoster, type RosterDraftEntry } from "../lib/rosterEditor.js";
+import type { RosterCandidate } from "../components/settings/ProjectRosterEditor.js";
 import type { Settings } from "../lib/settings-shared.js";
 
 export type ProviderDivergence = {
@@ -16,6 +27,26 @@ export type ProviderDivergence = {
   diverged: boolean;
 };
 
+/**
+ * The per-project ROSTER controls (#1028) — one object rather than six props, because they
+ * are one control surface and threading them individually through `SettingsPanel` →
+ * `AgentSettings` → the editor is how a prop list stops being readable.
+ */
+export interface ProjectRosterControls {
+  /** The project's stored roster, read through the sanctioned key builders. */
+  entries: RosterDraftEntry[];
+  reserveAllowed: boolean;
+  exhaustedPct: number;
+  saving: boolean;
+  /** The last refused widening, so the editor can explain rather than silently ignore. */
+  rejection: string | null;
+  /** Bumped after every successful write, so the roster read model refetches. */
+  reloadKey: number;
+  onRoleChange: (candidate: RosterCandidate, role: ProfileRole | null) => void;
+  onReserveAllowedChange: (allowed: boolean) => void;
+  onExhaustedPctChange: (pct: number) => void;
+}
+
 export interface ProjectProviderControls {
   providerDivergence: ProviderDivergence | null;
   /** Exposed (not just `refetchProviderDivergence`) so the panel's cancellable
@@ -23,10 +54,9 @@ export interface ProjectProviderControls {
    *  the way it does for every other bootstrap field. */
   setProviderDivergence: Dispatch<SetStateAction<ProviderDivergence | null>>;
   savingProjectProvider: boolean;
-  savingAllowedProfiles: boolean;
   refetchProviderDivergence: () => Promise<void>;
   handleProjectProviderChange: (provider: ConcreteProvider | null, profileName: string) => Promise<void>;
-  handleAllowedProfilesChange: (entries: AllowedProfile[]) => Promise<void>;
+  roster: ProjectRosterControls;
 }
 
 /**
@@ -44,7 +74,78 @@ export function useProjectProviderControls(
 ): ProjectProviderControls {
   const [providerDivergence, setProviderDivergence] = useState<ProviderDivergence | null>(null);
   const [savingProjectProvider, setSavingProjectProvider] = useState(false);
-  const [savingAllowedProfiles, setSavingAllowedProfiles] = useState(false);
+  const [savingRoster, setSavingRoster] = useState(false);
+  const [rosterRejection, setRosterRejection] = useState<string | null>(null);
+  const [rosterReloadKey, setRosterReloadKey] = useState(0);
+
+  // The stored roster, with the same fallback the resolver uses: a project that only ever
+  // had an `allowed_profiles_<id>` value reads as an all-`pool` roster, so migrating is a
+  // read, not a rewrite. Editing then writes `roster_<id>`, which wins from that point on.
+  const rosterKey = activeProjectId ? rosterPrefKey(activeProjectId) : "";
+  const rosterRaw = activeProjectId ? (settings[rosterKey as keyof Settings] as string | undefined) : undefined;
+  const allowlistRaw = activeProjectId
+    ? (settings[allowedProfilesPrefKey(activeProjectId) as keyof Settings] as string | undefined)
+    : undefined;
+  const rosterEntries: RosterDraftEntry[] = ((rosterRaw ?? "").trim()
+    ? parseRoster(rosterRaw, "roster")
+    // The legacy value read AS a roster (all `pool`) — the same read-time projection
+    // `resolveProjectRoster` performs, rather than a second interpretation of it.
+    : parseRoster(allowlistRaw, "allowed_profiles")
+  ).entries.map((e) => ({ provider: e.provider, name: e.name, role: e.role }));
+
+  const reserveAllowedRaw = activeProjectId
+    ? (settings[reserveAllowedPrefKey(activeProjectId) as keyof Settings] as string | undefined)
+    : undefined;
+  const exhaustedPctRaw = activeProjectId
+    ? (settings[rosterExhaustedPctPrefKey(activeProjectId) as keyof Settings] as string | undefined)
+    : undefined;
+  const parsedPct = Number.parseFloat((exhaustedPctRaw ?? "").trim());
+
+  /** One roster-shaped preference write, with the toast and the refetch every one needs. */
+  async function saveRosterPref(key: string, value: string, message: string) {
+    if (!activeProjectId || savingRoster) return;
+    setSavingRoster(true);
+    try {
+      await savePreferences({ [key]: value });
+      setSettings((s) => ({ ...s, [key]: value }));
+      setRosterRejection(null);
+      setRosterReloadKey((k) => k + 1);
+      showToast(message, "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to update the roster", "error");
+    } finally {
+      setSavingRoster(false);
+    }
+  }
+
+  /**
+   * Set (or clear) one profile's role. A widening is refused HERE and never sent — the
+   * server refuses it too, but a UI that posts a write it knows will be rejected turns an
+   * explainable rule into a round trip and an error toast.
+   */
+  function handleRosterRoleChange(candidate: RosterCandidate, role: ProfileRole | null) {
+    if (!activeProjectId) return;
+    if (role === null) {
+      void saveRosterPref(
+        rosterPrefKey(activeProjectId),
+        serializeRoster(removeFromRoster(rosterEntries, candidate.id)),
+        `${candidate.id} removed from the roster`,
+      );
+      return;
+    }
+    const result = applyRoleChange(rosterEntries, candidate, role, candidate.globalRole);
+    if (result.rejected) {
+      setRosterRejection(result.rejected);
+      showToast(result.rejected, "error");
+      return;
+    }
+    void saveRosterPref(
+      rosterPrefKey(activeProjectId),
+      serializeRoster(result.entries),
+      `${candidate.id} is now ${role} for this project`,
+    );
+  }
+
 
   async function refetchProviderDivergence() {
     if (!activeProjectId) return;
@@ -52,37 +153,6 @@ export function useProjectProviderControls(
       const div = await apiFetch<ProviderDivergence>(`/api/preferences/provider-divergence?projectId=${activeProjectId}`);
       setProviderDivergence(div);
     } catch { /* non-fatal */ }
-  }
-
-  /**
-   * Per-project profile allowlist — a HARD constraint, unlike the provider control
-   * below it. Written to `allowed_profiles_<projectId>` in the canonical serialization
-   * so the server's `parseProfileAllowlist` and this editor cannot drift.
-   *
-   * An empty selection stores `[]`, which the parser reads as "restriction lifted".
-   * Deleting the row would mean the same thing, but writing `[]` keeps the preference
-   * visible in an exported config, so a project that USED to be restricted doesn't look
-   * like one that never was.
-   */
-  async function handleAllowedProfilesChange(entries: AllowedProfile[]) {
-    if (!activeProjectId || savingAllowedProfiles) return;
-    setSavingAllowedProfiles(true);
-    try {
-      const key = allowedProfilesPrefKey(activeProjectId);
-      const serialized = serializeProfileAllowlist(entries);
-      await savePreferences({ [key]: serialized });
-      setSettings((s) => ({ ...s, [key]: serialized }));
-      showToast(
-        entries.length === 0
-          ? "Project may use any profile"
-          : `Project restricted to ${entries.length} profile${entries.length === 1 ? "" : "s"}`,
-        "success",
-      );
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Failed to update allowed profiles", "error");
-    } finally {
-      setSavingAllowedProfiles(false);
-    }
   }
 
   // First-class per-project provider control (#925): persist the selection as a
@@ -118,9 +188,36 @@ export function useProjectProviderControls(
     providerDivergence,
     setProviderDivergence,
     savingProjectProvider,
-    savingAllowedProfiles,
     refetchProviderDivergence,
     handleProjectProviderChange,
-    handleAllowedProfilesChange,
+    roster: {
+      entries: rosterEntries,
+      reserveAllowed: (reserveAllowedRaw ?? "").trim().toLowerCase() === "true",
+      // An unparseable or out-of-range stored value shows the DEFAULT, matching
+      // `resolvePoolExhaustedPct` — a control that displayed the broken value would suggest
+      // the board is using it, which it is not.
+      exhaustedPct: Number.isFinite(parsedPct) && parsedPct > 0 && parsedPct <= 100 ? parsedPct : DEFAULT_POOL_EXHAUSTED_PCT,
+      saving: savingRoster,
+      rejection: rosterRejection,
+      reloadKey: rosterReloadKey,
+      onRoleChange: handleRosterRoleChange,
+      onReserveAllowedChange: (allowed: boolean) => {
+        if (!activeProjectId) return;
+        void saveRosterPref(
+          reserveAllowedPrefKey(activeProjectId),
+          allowed ? "true" : "false",
+          allowed ? "This project may reach for a reserve profile" : "Reserve profiles withheld from this project",
+        );
+      },
+      onExhaustedPctChange: (pct: number) => {
+        if (!activeProjectId) return;
+        if (!Number.isFinite(pct) || pct <= 0 || pct > 100) return;
+        void saveRosterPref(
+          rosterExhaustedPctPrefKey(activeProjectId),
+          String(pct),
+          `Pool profiles count as exhausted at ${pct}%`,
+        );
+      },
+    },
   };
 }
