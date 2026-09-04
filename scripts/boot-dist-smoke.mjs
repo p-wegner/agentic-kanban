@@ -51,18 +51,38 @@
  */
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:net";
-import { existsSync, lstatSync, mkdtempSync, readFileSync, renameSync, rmSync, rmdirSync, symlinkSync, unlinkSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, readFileSync, renameSync, rmSync, rmdirSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { gitExecSync, gitExecSyncResult } from "./git-exec.mjs";
 import { spawnSyncPnpm } from "./pnpm-exec.mjs";
+import { scanReparsePoints } from "./safe-rmdir.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 /** Directories whose `node_modules` the throwaway borrows from the live checkout. */
 const NODE_MODULES_HOSTS = ["", "packages/server", "packages/shared", "packages/client", "packages/mcp-server"];
+
+/**
+ * #1033 — the borrowed `node_modules` are OUTBOUND junctions from a temp tree into the live
+ * checkout: the one shape a junction-following purge (a `%TEMP%` sweeper, a `robocopy /MIR`,
+ * a crash that leaves them behind) could turn into damage to main. Three things make them
+ * safe to leave for a moment and impossible to leave for long:
+ *   1. a SIDECAR `outbound-junctions.json` beside the checkout names every link, so anything
+ *      that meets the directory can tell borrowed from owned (safe-rmdir reads reparse points
+ *      directly, but a human or a sweeper reading the temp dir gets the same answer in text);
+ *   2. process-level exit handlers remove the links on ANY exit — a thrown error, SIGINT,
+ *      SIGTERM — not only on the happy path through `finally`;
+ *   3. the final `rmSync(work)` is preceded by a reparse-point scan and REFUSES to run while
+ *      an outbound link is still present, so the tree is never purged with a live link in it.
+ * `--install` avoids the links altogether (`pnpm install --offline --frozen-lockfile` in the
+ * throwaway, ~10 s against a warm store per CLAUDE.md) at the cost of an install per run.
+ */
+const JUNCTION_SIDECAR = "outbound-junctions.json";
+/** Module-level so the exit handlers below can reach them without the `main()` closure. */
+const outboundLinks = [];
 
 /** How long the built server gets to answer /health before this gives up. */
 const BOOT_TIMEOUT_MS = 180_000;
@@ -73,6 +93,7 @@ const opts = {
   full: args.includes("--full"),
   breakSkills: args.includes("--break-skills"),
   keep: args.includes("--keep"),
+  install: args.includes("--install"),
 };
 
 const checks = [];
@@ -124,6 +145,25 @@ function removeLink(p) {
   }
 }
 
+/** Remove every borrowed link we created — safe to call more than once, from any exit path. */
+function removeOutboundLinks() {
+  for (const link of outboundLinks.splice(0)) {
+    try { removeLink(link); } catch { /* best effort on the way out */ }
+  }
+}
+// #1033 — the links must not outlive the process on ANY exit path. `exit` covers a normal
+// return and `process.exit()`; the signal handlers turn a Ctrl-C / taskkill into an exit that
+// runs it; the uncaught-exception handler covers the crash the ticket describes.
+process.on("exit", removeOutboundLinks);
+for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+  process.on(sig, () => { removeOutboundLinks(); process.exit(130); });
+}
+process.on("uncaughtException", (err) => {
+  removeOutboundLinks();
+  console.error(err);
+  process.exit(1);
+});
+
 async function main() {
   // The bundle's shared half comes from the live checkout's dist (see the header), so say so
   // now rather than failing later inside an esbuild resolution error.
@@ -151,14 +191,30 @@ async function main() {
     gitExecSync(["worktree", "add", "--detach", checkout, "HEAD"], { cwd: REPO_ROOT });
     worktreeAdded = true;
 
-    for (const host of NODE_MODULES_HOSTS) {
-      const from = join(REPO_ROOT, host, "node_modules");
-      if (!existsSync(from)) continue;
-      const to = join(checkout, host, "node_modules");
-      symlinkSync(from, to, "junction");
-      links.push(to);
+    if (opts.install) {
+      // Junction-free: a real install in the throwaway. Needs a warm store (offline) and the
+      // committed lockfile; nothing here can write into the live checkout.
+      const res = spawnSyncPnpm(["install", "--offline", "--frozen-lockfile"], { cwd: checkout, encoding: "utf8" });
+      if (res.status !== 0) throw new Error(`pnpm install --offline failed (exit ${res.status})\n${res.stdout ?? ""}\n${res.stderr ?? ""}`);
+      record("node_modules installed into the throwaway worktree (--install, no junctions)", true, checkout);
+    } else {
+      // Sidecar FIRST, so the directory names its borrowed links before any exists.
+      const planned = NODE_MODULES_HOSTS
+        .filter((host) => existsSync(join(REPO_ROOT, host, "node_modules")))
+        .map((host) => ({ link: join(checkout, host, "node_modules"), target: join(REPO_ROOT, host, "node_modules") }));
+      writeFileSync(join(work, JUNCTION_SIDECAR), JSON.stringify({
+        note: "These node_modules are JUNCTIONS into the live checkout (scripts/boot-dist-smoke.mjs, #1033). Remove the links, never their targets. `node scripts/safe-rmdir.mjs <dir>` refuses while they exist.",
+        createdAt: new Date().toISOString(),
+        pid: process.pid,
+        links: planned,
+      }, null, 2));
+      for (const { link, target } of planned) {
+        symlinkSync(target, link, "junction");
+        links.push(link);
+        outboundLinks.push(link);
+      }
+      record("node_modules junctioned into the throwaway worktree", true, `${links.length} link(s), named in ${JUNCTION_SIDECAR}`);
     }
-    record("node_modules junctioned into the throwaway worktree", true, `${links.length} link(s)`);
 
     if (opts.full) {
       const res = spawnSyncPnpm(["build"], { cwd: checkout, encoding: "utf8" });
@@ -277,14 +333,24 @@ async function main() {
     if (!opts.keep) {
       // Links FIRST: they point into the live checkout, and nothing below may follow them.
       for (const link of links) removeLink(link);
+      removeOutboundLinks();
       if (worktreeAdded) {
         // Best-effort cleanup: never throw out of a finally block.
         gitExecSyncResult(["worktree", "remove", "--force", checkout], { cwd: REPO_ROOT });
         gitExecSyncResult(["worktree", "prune"], { cwd: REPO_ROOT });
       }
-      try {
-        rmSync(work, { recursive: true, force: true, maxRetries: 5 });
-      } catch { /* a locked temp file is not a failure of what this checks */ }
+      // #1033 — never purge a tree that still holds a link OUT of it. The scan is the same one
+      // scripts/safe-rmdir.mjs performs; a leftover here means a link the removal above missed,
+      // and the honest outcome is a kept directory plus a loud line, not a recursive delete.
+      const leftover = existsSync(work) ? scanReparsePoints(work).outbound : [];
+      if (leftover.length > 0) {
+        record("throwaway tree purged", false,
+          `REFUSED — ${leftover.length} outbound reparse point(s) still inside ${work}: ${leftover.map((l) => `${l.path} -> ${l.target}`).join("; ")}`);
+      } else {
+        try {
+          rmSync(work, { recursive: true, force: true, maxRetries: 5 });
+        } catch { /* a locked temp file is not a failure of what this checks */ }
+      }
     } else if (!opts.json) {
       console.log(`\nkept: ${work} (remove with: git worktree remove --force ${checkout})`);
     }
