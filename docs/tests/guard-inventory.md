@@ -27,7 +27,7 @@ set in view instead of one suite at a time.
 
 ## Candidates
 
-Duplicated property (exact): **0 group(s)**. Overlapping properties (heuristic): **3 pair(s)**. Never red since introduction (proxy): **40**. Slower than 20s: **9**. No stated property: **0**. Unmeasured: **11**.
+Duplicated property (exact): **0 group(s)**. Overlapping properties (heuristic): **3 pair(s)**. Never red since introduction (proxy): **39**. Slower than 20s: **9**. No stated property: **0**. Unmeasured: **11**.
 
 ### Same property pinned more than once
 
@@ -53,7 +53,6 @@ pair this misses is not evidence that no overlap exists.
 | `packages/server/src/__tests__/commit-checkpoint.test.ts` | 2026-05-28 | Acceptance test for #90 — "kanban-workflow skill: commit-early nudge once |
 | `packages/server/src/__tests__/quality-metrics-collector-skill.test.ts` | 2026-05-31 | reads .claude/skills/quality-metrics-collector/SKILL.md; no import edge to a markdown file (#647). |
 | `packages/server/src/__tests__/board-monitor-skill.test.ts` | 2026-06-01 | reads .claude/.codex skill files + a repo-root script, never imported (#538). |
-| `packages/server/src/__tests__/no-self-http-in-services.test.ts` | 2026-06-20 | scans services/ for self-HTTP calls; imports nothing it checks (#538). |
 | `packages/shared/__tests__/dependency-pinning.test.ts` | 2026-06-23 | Architecture gate (arch-review #873, extended by #900): external runtime |
 | `packages/server/src/__tests__/no-global-default-model.test.ts` | 2026-06-25 | scans the server src tree for global default_model reads; that half has no import edge (#647). |
 | `packages/server/src/__tests__/settings-registry-keys.test.ts` | 2026-06-25 | GATE for #903 — the typed settings registry is the SINGLE SOURCE OF TRUTH. The |
@@ -240,7 +239,7 @@ each other, which is how a merge candidate is spotted by eye.
 | reads the auth-ring SOURCE files, which are outside this test's own | `packages/server/src/__tests__/worker-doctor.test.ts` | always-run | 2026-08-23 (`0922dfe591`) | 2026-08-25 (`0bc49bd2aa`) | 705ms |
 | reads the repo-root package.json, which it does not import (#583). | `packages/shared/__tests__/ensure-shared-fresh-wiring.test.ts` | always-run | 2026-08-26 (`9567033aa7`) | 2026-09-01 (`6af086d6f8`) | 5ms |
 | reads the two launch services off disk; imports neither. | `packages/server/src/__tests__/context-files-prompt-parity.test.ts` | always-run | 2026-08-18 (`6f3d706d95`) |  | 27ms |
-| Regression test for issue #366. | `packages/server/src/__tests__/auto-start-claim-no-duplicate-workspace.test.ts` | always-run | 2026-08-09 (`839d7ef8b9`) | 2026-08-09 (`839d7ef8b9`) | 14ms |
+| Regression test for issue #366. | `packages/server/src/__tests__/auto-start-claim-no-duplicate-workspace.test.ts` | always-run | 2026-08-09 (`839d7ef8b9`) | 2026-09-04 (`980c0e9db3`) | 14ms |
 | Regression test for the bug where freePort(serverPort) killed the Vite client | `packages/server/src/__tests__/dev-port-guard.test.ts` | always-run | 2026-06-03 (`c1a230f398`) | 2026-08-20 (`356f71632c`) | 8ms |
 | Regression tests for ticket #480 — a builder exited with a full, correct, but | `packages/server/src/__tests__/stop-hook-chain-ordering.test.ts` | always-run | 2026-08-15 (`2e7a431056`) |  | 2.8s |
 | requires the live smart-hooks-runner script outside src/; imports nothing it checks (#538). | `packages/server/src/__tests__/smart-hooks-runner.test.ts` | always-run | 2026-06-14 (`d4885b3173`) | 2026-07-24 (`1fe910748f`) | 863ms |
@@ -248,7 +247,7 @@ each other, which is how a merge candidate is spotted by eye.
 | Run the generator in --check mode; never throws, so the assertion carries the output. | `packages/server/src/__tests__/openapi-drift.test.ts` | always-run | 2026-08-23 (`85a2151825`) | 2026-08-23 (`0411a795e5`) | 52.6s |
 | scans BoardPage's source for the #905 state ratchet; imports nothing it checks (#601). | `packages/client/src/__tests__/boardPageStateGate.test.ts` | always-run | 2026-06-25 (`54b55756f0`) | 2026-08-19 (`c841cb82f7`) | 4ms |
 | scans server+mcp-server src for provider-resolution forks; imports nothing it checks (#538). | `packages/server/src/__tests__/provider-resolution-single-source.test.ts` | always-run | 2026-06-25 (`f911f15743`) | 2026-08-23 (`2fcc7d7e38`) | 2.6s |
-| scans services/ for self-HTTP calls; imports nothing it checks (#538). | `packages/server/src/__tests__/no-self-http-in-services.test.ts` | always-run | 2026-06-20 (`0a3d45c140`) |  | 1.1s |
+| scans services/ for self-HTTP calls; imports nothing it checks (#538). | `packages/server/src/__tests__/no-self-http-in-services.test.ts` | always-run | 2026-06-20 (`0a3d45c140`) | 2026-09-04 (`980c0e9db3`) | 1.1s |
 | scans the packages tree for hand-rolled auto_merge reads; that half has no import edge (#647). | `packages/server/src/__tests__/auto-merge-pref.test.ts` | always-run | 2026-06-23 (`8aabd3cbd2`) | 2026-06-23 (`8aabd3cbd2`) | 2.0s |
 | scans the packages tree for hand-rolled auto_review reads; that half has no import edge (#647). | `packages/server/src/__tests__/auto-review-pref.test.ts` | always-run | 2026-07-02 (`9d08049cee`) | 2026-08-18 (`3102169b77`) | 4.3s |
 | scans the server src tree for global default_model reads; that half has no import edge (#647). | `packages/server/src/__tests__/no-global-default-model.test.ts` | always-run | 2026-06-25 (`b9f88e9f58`) |  | 5ms |
@@ -263,9 +262,9 @@ each other, which is how a merge candidate is spotted by eye.
 | Shrink-only ratchet on foreign keys with no supporting index (#740). | `packages/server/src/__tests__/fk-leading-index-ratchet.test.ts` | always-run, ratchet | 2026-08-22 (`36046c6d25`) | 2026-08-23 (`b0add8347a`) | 165ms |
 | Shrink-only ratchet on the width of `workspaces`, and on its prefix column FAMILIES (#739). | `packages/server/src/__tests__/workspaces-table-width-ratchet.test.ts` | always-run, ratchet | 2026-08-22 (`51196fe0e9`) |  | 241ms |
 | spawns the live vital-file-guard hook script outside src/; imports nothing it checks (#538). | `packages/server/src/__tests__/vital-file-guard-backup.test.ts` | always-run | 2026-07-02 (`5355faa602`) |  | 769ms |
-| `startup/` may not grow another raw-persistence offender (#715). | `packages/server/src/__tests__/startup-persistence-boundary-ratchet.test.ts` | always-run, ratchet | 2026-08-22 (`40f323a8c6`) | 2026-08-29 (`ab28a52a63`) | 260ms |
+| `startup/` may not grow another raw-persistence offender (#715). | `packages/server/src/__tests__/startup-persistence-boundary-ratchet.test.ts` | always-run, ratchet | 2026-08-22 (`40f323a8c6`) | 2026-09-04 (`edea99b0e0`) | 260ms |
 | statically verifies shared subpath imports resolve; imports nothing it checks (#538). | `packages/server/src/__tests__/shared-package-exports.test.ts` | always-run | 2026-06-01 (`c5d23e3f3f`) | 2026-08-29 (`39d67c5f9f`) | 7.1s |
-| The #728 split-responsibility remainder may only SHRINK. | `packages/server/src/__tests__/split-responsibility-ratchet.test.ts` | always-run, ratchet | 2026-08-23 (`c1b422e168`) | 2026-08-23 (`46fdb32fb5`) | 175ms |
+| The #728 split-responsibility remainder may only SHRINK. | `packages/server/src/__tests__/split-responsibility-ratchet.test.ts` | always-run, ratchet | 2026-08-23 (`c1b422e168`) | 2026-09-04 (`980c0e9db3`) | 175ms |
 | the caller guard at the bottom walks the server source tree; it | `packages/server/src/__tests__/pass-report-emission.test.ts` | always-run | 2026-08-21 (`c9394e62e9`) | 2026-08-22 (`e28e1b9d2c`) | 17ms |
 | The client's stated conventions, enforced (#601). | `packages/client/src/__tests__/client-conventions-guard.test.ts` | always-run | 2026-08-19 (`c841cb82f7`) | 2026-08-23 (`d63396d246`) | 3.1s |
 | The committed spec, with line endings normalized to LF. | `packages/server/src/__tests__/openapi-thrown-status.test.ts` | always-run | 2026-08-23 (`e4d4e4cfef`) | 2026-08-29 (`8d64e56949`) | 24.2s |

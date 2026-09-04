@@ -455,9 +455,9 @@
       "introducedSha": "839d7ef8b9",
       "introducedDate": "2026-08-09",
       "lastRedProxy": {
-        "sha": "839d7ef8b9",
-        "date": "2026-08-09",
-        "subject": "fix(#366): two auto-starters can no longer both provision one issue",
+        "sha": "980c0e9db3",
+        "date": "2026-09-04",
+        "subject": "refactor(#1021): split monitor-auto-start by its seams — the Todo pull and the shared cycle context move to sibling modules — god-module gate red on master",
         "method": "git-log-fix-commit-naming-the-file"
       },
       "lastRedSource": "proxy: git log of fix commits naming the file (no gate-outcome ledger exists)",
@@ -1545,7 +1545,12 @@
       "propertySource": "marker-rationale",
       "introducedSha": "0a3d45c140",
       "introducedDate": "2026-06-20",
-      "lastRedProxy": null,
+      "lastRedProxy": {
+        "sha": "980c0e9db3",
+        "date": "2026-09-04",
+        "subject": "refactor(#1021): split monitor-auto-start by its seams — the Todo pull and the shared cycle context move to sibling modules — god-module gate red on master",
+        "method": "git-log-fix-commit-naming-the-file"
+      },
       "lastRedSource": "proxy: git log of fix commits naming the file (no gate-outcome ledger exists)",
       "durationMs": 1147.25146484375,
       "durationSource": "docs/tests/durations.json"
@@ -2409,9 +2414,9 @@
       "introducedSha": "c1b422e168",
       "introducedDate": "2026-08-23",
       "lastRedProxy": {
-        "sha": "46fdb32fb5",
-        "date": "2026-08-23",
-        "subject": "refactor(#819): devcontainer-workspace's docker inventory/teardown moves out (22 -> 17 + 5)",
+        "sha": "980c0e9db3",
+        "date": "2026-09-04",
+        "subject": "refactor(#1021): split monitor-auto-start by its seams — the Todo pull and the shared cycle context move to sibling modules — god-module gate red on master",
         "method": "git-log-fix-commit-naming-the-file"
       },
       "lastRedSource": "proxy: git log of fix commits naming the file (no gate-outcome ledger exists)",
@@ -2494,9 +2499,9 @@
       "introducedSha": "40f323a8c6",
       "introducedDate": "2026-08-22",
       "lastRedProxy": {
-        "sha": "ab28a52a63",
-        "date": "2026-08-29",
-        "subject": "arch: resolve the server-route->server-monitor violation (arch loop)",
+        "sha": "edea99b0e0",
+        "date": "2026-09-04",
+        "subject": "Merge refactor(#1021): split monitor-auto-start by its seams (cycle gates, Todo pull, auto-start repository) — god-module gate green again",
         "method": "git-log-fix-commit-naming-the-file"
       },
       "lastRedSource": "proxy: git log of fix commits naming the file (no gate-outcome ledger exists)",
@@ -4925,11 +4930,6 @@
         "file": "packages/server/src/__tests__/board-monitor-skill.test.ts",
         "introducedDate": "2026-06-01",
         "property": "reads .claude/.codex skill files + a repo-root script, never imported (#538)."
-      },
-      {
-        "file": "packages/server/src/__tests__/no-self-http-in-services.test.ts",
-        "introducedDate": "2026-06-20",
-        "property": "scans services/ for self-HTTP calls; imports nothing it checks (#538)."
       },
       {
         "file": "packages/shared/__tests__/dependency-pinning.test.ts",
