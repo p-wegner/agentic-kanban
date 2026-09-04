@@ -1,5 +1,12 @@
 /**
- * #993 — keep the committed test-impact map fresh on projects the MONITOR CYCLE never visits.
+ * #993 — keep the test-impact map fresh on projects the MONITOR CYCLE never visits.
+ *
+ * **This sweep does not commit anything, and since #1018 nothing it calls does either.** The map
+ * is a gitignored artifact of each project's main checkout, rebuilt in place; the
+ * `chore: rebuild test-impact map` commits this sweep used to produce every 15 minutes were
+ * moving the base tip under running pre-merge gates (#243 then discards those verdicts), which is
+ * what #1018 removed. See `services/test-impact-map.service.ts` for the storage decision and why
+ * "commit it once a day before promotion" lost.
  *
  * The refresh already existed (#952) as a PHASE INSIDE `runMonitorCycle`
  * (`monitor-test-impact-map.ts`). That is the right place for it when a cycle runs: it lands

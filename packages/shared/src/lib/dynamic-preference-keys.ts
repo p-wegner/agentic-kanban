@@ -61,8 +61,8 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   "compounding_setup",
   "compounding_setup_state",
   // Test-impact map refresh (#952): `test_impact_map_<id>` opts a project OUT
-  // ("off"/"false"/"0") of the monitor pass that rebuilds and commits
-  // `docs/tests/impact-map.json` on its main checkout. Absent = follow the board-wide
+  // ("off"/"false"/"0") of the pass that rebuilds `docs/tests/impact-map.json` in place on its
+  // main checkout (gitignored, never committed, since #1018). Absent = follow the board-wide
   // `test_impact_map_refresh` setting.
   "test_impact_map",
   // Test-impact BUDGET (#966): `test_impact_budget_<id>` is a wall-clock ceiling (e.g. "60s")

@@ -1,24 +1,24 @@
 /**
- * The test-impact map refresh pass (#952) and its durations wiring (#955).
+ * The test-impact map refresh pass (#952), its durations wiring (#955), and — since #1018 — the
+ * fact that it COMMITS NOTHING.
  *
  * These run against a REAL git repo (temp dir, `git init`), because the properties that matter
- * are git properties: that a failed pass leaves the tree CLEAN (a dirty main checkout blocks
- * every subsequent merge), that the commit carries only the map, and that a byte-identical
- * rebuild does not mint an empty commit. The `impact.mjs` CLI itself is injected — spawning the
- * real 7.4s build would make this suite the slowest in the repo and would test the skill, not
- * the pass.
+ * are git properties: that the pass mints no commit at all, that it leaves the tree CLEAN (a dirty
+ * main checkout blocks every subsequent merge), and that it refuses to write into a checkout where
+ * doing so WOULD dirty the tree. The `impact.mjs` CLI itself is injected — spawning the real 7.4s
+ * build would make this suite the slowest in the repo and would test the skill, not the pass.
  */
 import { describe, it, expect, beforeEach, afterAll } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
   IMPACT_DURATIONS_PATH,
   IMPACT_MAP_PATH,
-  impactMapCommitSubject,
   resolveImpactMapPaths,
+  resolveMapWritability,
   resolveTestImpactMapGate,
   runTestImpactMapPass,
 } from "../services/test-impact-map.service.js";
@@ -30,9 +30,23 @@ function git(repo: string, args: string[]): string {
   return execFileSync("git", args, { cwd: repo, encoding: "utf8", windowsHide: true }).trim();
 }
 
-/** A repo with a committed map and the skill's CLI present (contents irrelevant — it is injected). */
-function makeRepo(opts: { withDurations?: boolean; withSkill?: boolean; withMap?: boolean } = {}): string {
-  const { withDurations = false, withSkill = true, withMap = true } = opts;
+/**
+ * A repo with the skill's CLI present (contents irrelevant — it is injected) and the map path
+ * gitignored, which is the #1018 opt-in marker the pass verifies with `git check-ignore`.
+ *
+ * `withMap` puts an UNTRACKED map on disk. `trackMap` is the pre-#1018 shape — the map committed —
+ * which the pass must now refuse rather than rewrite.
+ */
+function makeRepo(opts: {
+  withDurations?: boolean;
+  withSkill?: boolean;
+  withMap?: boolean;
+  ignoreMap?: boolean;
+  trackMap?: boolean;
+} = {}): string {
+  const {
+    withDurations = false, withSkill = true, withMap = true, ignoreMap = true, trackMap = false,
+  } = opts;
   const repo = mkdtempSync(join(tmpdir(), "kanban-impact-map-"));
   created.push(repo);
   git(repo, ["init", "-b", "main"]);
@@ -46,11 +60,18 @@ function makeRepo(opts: { withDurations?: boolean; withSkill?: boolean; withMap?
   }
   mkdirSync(join(repo, "docs", "tests"), { recursive: true });
   writeFileSync(join(repo, "README.md"), "seed\n");
-  if (withMap) writeFileSync(join(repo, IMPACT_MAP_PATH), '{"format":"test-impact 1","commit":"old"}\n');
+  if (ignoreMap && !trackMap) writeFileSync(join(repo, ".gitignore"), `/${IMPACT_MAP_PATH}\n`);
   if (withDurations) writeFileSync(join(repo, IMPACT_DURATIONS_PATH), '{"testResults":[]}\n');
 
   git(repo, ["add", "-A"]);
   git(repo, ["commit", "-m", "seed"]);
+
+  // AFTER the seed commit, so an untracked map stays untracked.
+  if (withMap) writeFileSync(join(repo, IMPACT_MAP_PATH), '{"format":"test-impact 1","commit":"old"}\n');
+  if (trackMap) {
+    git(repo, ["add", "--", IMPACT_MAP_PATH]);
+    git(repo, ["commit", "-m", "track the map (pre-#1018 shape)"]);
+  }
   return repo;
 }
 
@@ -66,9 +87,6 @@ function makeRunner(behaviour: {
     calls.push({ args, cwd });
     if (args[0] === "check") return { code: behaviour.fresh ? 0 : 1, stdout: "", stderr: "", error: null };
     if (behaviour.buildOk === false) {
-      // A real failing build can still have written a partial file — that is the case the
-      // pass must clean up, so simulate it.
-      writeFileSync(join(cwd, IMPACT_MAP_PATH), "PARTIAL GARBAGE\n");
       return { code: 3, stdout: "", stderr: "REFUSING: 0 test files matched", error: null };
     }
     if (behaviour.writes !== undefined) writeFileSync(join(cwd, IMPACT_MAP_PATH), behaviour.writes);
@@ -139,6 +157,28 @@ describe("resolveImpactMapPaths", () => {
   });
 });
 
+describe("resolveMapWritability (#1018)", () => {
+  it("says ok when the path is gitignored and untracked", async () => {
+    await expect(resolveMapWritability(makeRepo())).resolves.toBe("ok");
+  });
+
+  it("says ok even before any map exists — a fresh clone must be able to build its first", async () => {
+    // The old guard was `existsSync(map)`, which on an untracked map would mean a clone never
+    // gets one. Writability is about SAFETY, not about a map already being there.
+    const repo = makeRepo({ withMap: false });
+    expect(existsSync(join(repo, IMPACT_MAP_PATH))).toBe(false);
+    await expect(resolveMapWritability(repo)).resolves.toBe("ok");
+  });
+
+  it("says tracked for a checkout that still has the map committed", async () => {
+    await expect(resolveMapWritability(makeRepo({ trackMap: true }))).resolves.toBe("tracked");
+  });
+
+  it("says not_ignored when the repo has no ignore rule for the path", async () => {
+    await expect(resolveMapWritability(makeRepo({ ignoreMap: false }))).resolves.toBe("not_ignored");
+  });
+});
+
 describe("runTestImpactMapPass", () => {
   let repo: string;
   beforeEach(() => {
@@ -152,14 +192,29 @@ describe("runTestImpactMapPass", () => {
     expect(dirtyFiles(noSkill)).toBe("");
   });
 
-  it("refuses to CREATE a map in a repo that does not already track one", async () => {
-    // Creating one unbidden would commit a 1.4 MB generated file into someone else's tree.
-    const noMap = makeRepo({ withMap: false });
+  it("refuses a checkout that still TRACKS the map, and names the one-time remedy", async () => {
+    // The transition case. Rewriting a tracked map shows up as a modification, and dirty main
+    // blocks every subsequent merge — so the pass is inert until `git rm --cached` has been run.
+    const tracked = makeRepo({ trackMap: true });
     const runner = makeRunner({ writes: "new\n" });
-    const res = await runTestImpactMapPass(noMap, { runner });
-    expect(res.outcome).toBe("no_map");
+    const res = await runTestImpactMapPass(tracked, { runner });
+
+    expect(res.outcome).toBe("map_tracked");
+    expect(res.detail).toContain("git rm --cached");
     expect(runner.calls).toHaveLength(0);
-    expect(dirtyFiles(noMap)).toBe("");
+    expect(dirtyFiles(tracked)).toBe("");
+  });
+
+  it("refuses a repo that has not gitignored the path — writing there would dirty main", async () => {
+    // `git check-ignore` IS the opt-in marker, and it is a marker the pass verifies rather than
+    // assumes. An untracked-but-unignored generated file is exactly the `dirty_main` shape.
+    const unignored = makeRepo({ ignoreMap: false, withMap: false });
+    const runner = makeRunner({ writes: "new\n" });
+    const res = await runTestImpactMapPass(unignored, { runner });
+
+    expect(res.outcome).toBe("map_not_ignored");
+    expect(runner.calls).toHaveLength(0);
+    expect(dirtyFiles(unignored)).toBe("");
   });
 
   it("does nothing when the map is already fresh — and never takes the lock", async () => {
@@ -177,44 +232,48 @@ describe("runTestImpactMapPass", () => {
     expect(runner.calls.map((c) => c.args[0])).toEqual(["check"]);
   });
 
-  it("rebuilds a stale map and commits it with the fixed subject naming HEAD", async () => {
+  it("rebuilds a stale map IN PLACE and mints NO COMMIT (#1018)", async () => {
+    // The heart of #1018. `chore: rebuild test-impact map` commits landed on master every few
+    // minutes and each one moved the base tip under every running pre-merge gate, whose verdict
+    // #243 then discards. The pass must now leave HEAD exactly where it found it.
     const before = git(repo, ["rev-parse", "HEAD"]);
     const res = await runTestImpactMapPass(repo, { runner: makeRunner({ writes: '{"commit":"new"}\n' }) });
 
     expect(res.outcome).toBe("rebuilt");
-    expect(dirtyFiles(repo)).toBe("");
-    expect(git(repo, ["log", "-1", "--format=%s"])).toBe(impactMapCommitSubject(res.headSha!));
-    // The subject names the sha the map was rebuilt AT — i.e. the parent, not the chore commit.
+    expect(git(repo, ["rev-parse", "HEAD"])).toBe(before);
     expect(before.startsWith(res.headSha!)).toBe(true);
-    expect(git(repo, ["show", "--name-only", "--format=", "HEAD"]).split("\n").filter(Boolean))
-      .toEqual([IMPACT_MAP_PATH]);
+    // The file is genuinely rewritten...
     expect(readFileSync(join(repo, IMPACT_MAP_PATH), "utf8")).toBe('{"commit":"new"}\n');
+    // ...and git sees nothing at all, because the path is ignored. A rebuild that dirtied main
+    // would block every subsequent merge just as surely as a commit would break a gate.
+    expect(dirtyFiles(repo)).toBe("");
   });
 
-  it("commits ONLY the map, leaving another agent's concurrent edit uncommitted", async () => {
-    // The index is shared process-wide in a checkout several agents work in, so the pass
-    // commits by pathspec. A `git add` + commit would sweep this file into the chore commit.
+  it("builds the FIRST map for a checkout that has none", async () => {
+    // A fresh clone: the map is not in git any more, so nothing put one there.
+    const fresh = makeRepo({ withMap: false });
+    const runner = makeRunner({ writes: '{"commit":"first"}\n' });
+    const res = await runTestImpactMapPass(fresh, { runner });
+
+    expect(res.outcome).toBe("rebuilt");
+    expect(readFileSync(join(fresh, IMPACT_MAP_PATH), "utf8")).toBe('{"commit":"first"}\n');
+    expect(dirtyFiles(fresh)).toBe("");
+  });
+
+  it("leaves another agent's concurrent edit alone", async () => {
+    // Several agents work in this checkout. The pass touches exactly one path and stages nothing,
+    // so a neighbour's in-flight edit is neither committed nor reverted.
     writeFileSync(join(repo, "README.md"), "someone else is mid-edit\n");
+    const head = git(repo, ["rev-parse", "HEAD"]);
     const res = await runTestImpactMapPass(repo, { runner: makeRunner({ writes: '{"commit":"new"}\n' }) });
 
     expect(res.outcome).toBe("rebuilt");
-    expect(git(repo, ["show", "--name-only", "--format=", "HEAD"]).split("\n").filter(Boolean))
-      .toEqual([IMPACT_MAP_PATH]);
+    expect(git(repo, ["rev-parse", "HEAD"])).toBe(head);
     expect(dirtyFiles(repo)).toContain("README.md");
     expect(readFileSync(join(repo, "README.md"), "utf8")).toBe("someone else is mid-edit\n");
   });
 
-  it("mints no empty commit when a stale-by-count map rebuilds byte-identically", async () => {
-    const head = git(repo, ["rev-parse", "HEAD"]);
-    const identical = readFileSync(join(repo, IMPACT_MAP_PATH), "utf8");
-    const res = await runTestImpactMapPass(repo, { runner: makeRunner({ writes: identical }) });
-
-    expect(res.outcome).toBe("fresh");
-    expect(git(repo, ["rev-parse", "HEAD"])).toBe(head);
-    expect(dirtyFiles(repo)).toBe("");
-  });
-
-  it("leaves the tree CLEAN when the build fails — dirty main blocks every later merge", async () => {
+  it("reports a failed build without leaving the tree dirty", async () => {
     const head = git(repo, ["rev-parse", "HEAD"]);
     const res = await runTestImpactMapPass(repo, { runner: makeRunner({ buildOk: false }) });
 
@@ -222,17 +281,11 @@ describe("runTestImpactMapPass", () => {
     expect(res.detail).toContain("REFUSING");
     expect(dirtyFiles(repo)).toBe("");
     expect(git(repo, ["rev-parse", "HEAD"])).toBe(head);
-    // Keyword, not an exact string: `git checkout --` restores through the repo's autocrlf
-    // normalization, so the bytes may differ from what was written in line endings alone.
-    const restored = readFileSync(join(repo, IMPACT_MAP_PATH), "utf8");
-    expect(restored).toContain('"commit":"old"');
-    expect(restored).not.toContain("PARTIAL GARBAGE");
   });
 
   it("SKIPS rather than waits when the repo lock is contended", async () => {
-    // Waiting is the dangerous option: `landMergeTrain` refuses a base that moved since the
-    // tree was assembled, so a commit landed under a train's feet kills it. A stale map
-    // only widens the next gate run.
+    // The lock no longer guards a commit — it stops two overlapping rebuilds interleaving into a
+    // half-written map. Waiting would hold the lock a merge train wants; a stale map only widens.
     const runner = makeRunner({});
     const res = await runTestImpactMapPass(repo, {
       runner,
@@ -267,7 +320,7 @@ describe("runTestImpactMapPass", () => {
   it("treats an unrecognised check exit as FRESH rather than rebuilding on every cycle", async () => {
     // Only 1 (stale) and 2 (no map) mean rebuild. A crash, a signal kill (`code: null`), or a
     // code the CLI grows later means "we do not know" — and the safe direction for an unknown
-    // is to leave the map alone, not to commit to master every 30 seconds.
+    // is to leave the map alone, not to spend 7.4s on every sweep.
     for (const code of [null, 7]) {
       const fresh = makeRepo();
       const runner = (async () => ({ code, stdout: "", stderr: "boom", error: null })) as ImpactMapRunner;
@@ -287,88 +340,17 @@ describe("runTestImpactMapPass", () => {
     expect(dirtyFiles(repo)).toBe("");
   });
 
-  it("skips a detached HEAD instead of rebuilding into an uncommittable tree", async () => {
+  it("rebuilds on a DETACHED HEAD, which the commit-era pass refused", async () => {
+    // The old `detached_head` outcome existed only because there was no branch to commit onto.
+    // Nothing is committed now, and a detached checkout still has a HEAD to stamp and a history
+    // to read, so refusing there would be staleness bought for nothing.
     git(repo, ["checkout", "--detach"]);
-    const runner = makeRunner({ writes: "new\n" });
+    const runner = makeRunner({ writes: '{"commit":"detached"}\n' });
     const res = await runTestImpactMapPass(repo, { runner });
 
-    expect(res.outcome).toBe("detached_head");
-    expect(runner.calls.some((c) => c.args[0] === "build")).toBe(false);
+    expect(res.outcome).toBe("rebuilt");
+    expect(runner.calls.some((c) => c.args[0] === "build")).toBe(true);
     expect(dirtyFiles(repo)).toBe("");
-  });
-});
-
-describe("the merge=ours mechanism (#952)", () => {
-  /**
-   * The load-bearing check. `.gitattributes` alone is NOT enough and it fails SILENTLY: git has
-   * no built-in `ours` driver, so `merge=ours` naming an unregistered one is ignored and the
-   * merge conflicts exactly as if the line were absent (measured). `.git/config` is not checked
-   * in, so only the board can register it. This test drives a real divergent merge.
-   */
-  function driveDivergentMapMerge(repo: string): { exitCode: number; content: string } {
-    git(repo, ["checkout", "-b", "side"]);
-    writeFileSync(join(repo, IMPACT_MAP_PATH), '{"commit":"theirs"}\n');
-    git(repo, ["commit", "-am", "branch rebuilt the map"]);
-    git(repo, ["checkout", "main"]);
-    writeFileSync(join(repo, IMPACT_MAP_PATH), '{"commit":"ours"}\n');
-    git(repo, ["commit", "-am", "main rebuilt the map"]);
-
-    let exitCode = 0;
-    try {
-      git(repo, ["merge", "side", "-m", "merge"]);
-    } catch (err) {
-      exitCode = (err as { status?: number }).status ?? 1;
-    }
-    return { exitCode, content: readFileSync(join(repo, IMPACT_MAP_PATH), "utf8") };
-  }
-
-  /** The attribute the repo ships. Mirrors the real `.gitattributes` line. */
-  function withAttribute(repo: string): void {
-    writeFileSync(join(repo, ".gitattributes"), `${IMPACT_MAP_PATH} merge=ours\n`);
-    git(repo, ["add", ".gitattributes"]);
-    git(repo, ["commit", "-m", "attribute"]);
-  }
-
-  it("conflicts WITHOUT the driver — the attribute alone is inert", async () => {
-    // The negative control. Without this, the test below would pass for the wrong reason and
-    // could not tell "the mechanism works" from "these two commits happened not to conflict".
-    const repo = makeRepo();
-    withAttribute(repo);
-    const merged = driveDivergentMapMerge(repo);
-
-    expect(merged.exitCode).not.toBe(0);
-    expect(merged.content).toContain("<<<<<<<");
-  });
-
-  it("resolves to ours once the pass has registered the driver", async () => {
-    const repo = makeRepo();
-    withAttribute(repo);
-    await runTestImpactMapPass(repo, { runner: makeRunner({ fresh: true }) });
-
-    // Registered on the repo, not the user's global config.
-    expect(git(repo, ["config", "--local", "--get", "merge.ours.driver"])).toBe("true");
-
-    const merged = driveDivergentMapMerge(repo);
-    expect(merged.exitCode).toBe(0);
-    expect(merged.content).toContain('"commit":"ours"');
-    expect(merged.content).not.toContain("<<<<<<<");
-    expect(dirtyFiles(repo)).toBe("");
-  });
-
-  it("registers the driver even when the map is already fresh", async () => {
-    // The attribute is inert until the driver exists, so a checkout whose map never goes stale
-    // is exactly the one that would otherwise keep conflicting on it forever.
-    const repo = makeRepo();
-    const res = await runTestImpactMapPass(repo, { runner: makeRunner({ fresh: true }) });
-    expect(res.outcome).toBe("fresh");
-    expect(git(repo, ["config", "--local", "--get", "merge.ours.driver"])).toBe("true");
-  });
-
-  it("does not clobber a driver the repo has already configured", async () => {
-    const repo = makeRepo();
-    git(repo, ["config", "--local", "merge.ours.driver", "custom-driver %A %O %B"]);
-    await runTestImpactMapPass(repo, { runner: makeRunner({ fresh: true }) });
-    expect(git(repo, ["config", "--local", "--get", "merge.ours.driver"])).toBe("custom-driver %A %O %B");
   });
 });
 

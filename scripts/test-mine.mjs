@@ -509,12 +509,15 @@ if (impactBudgetRaw && !impactBudget) {
  *
  * The ticket's first draft had this always-on. It is wrong here, and measured so: the skill's
  * `findRoot()` resolves via `git rev-parse --show-toplevel`, which keeps a WORKTREE a worktree,
- * so a rebuild writes a worktree-LOCAL `docs/tests/impact-map.json`. That map helps nobody, it
- * lands in the branch diff (and immediately trips this file's own hermeticity report, which is
- * how it was caught), and it breaks the single-writer property #952's freshness work depends on.
+ * so a rebuild writes a worktree-LOCAL `docs/tests/impact-map.json` — overwriting the read-only
+ * snapshot the board copied in — and breaks the single-writer property #952's freshness work
+ * depends on. (Since #1018 the map is gitignored, so such a rebuild no longer lands in the branch
+ * diff; it is still wrong, just less visibly so, which is a reason to keep this OFF rather than a
+ * reason to relax.)
  *
- * Keeping the map fresh is #952's job, on the MAIN checkout. A stale map here is not silent —
- * the skill says `[inventory STALE]` and widens to the package tier, and that line is echoed.
+ * Keeping the map fresh is #952's job, on the MAIN checkout; the worktree's copy is placed there
+ * at provisioning and refreshed on relaunch. A stale map here is not silent — the skill says
+ * `[inventory STALE]` and widens to the package tier, and that line is echoed.
  */
 const impactRebuildIfStale = /^(1|true|yes)$/i.test((process.env.KANBAN_IMPACT_REBUILD || "").trim());
 
