@@ -15,18 +15,19 @@
  * rejection with no explanation are different failures.
  */
 import type { ProfileRole } from "@agentic-kanban/shared/lib/profile-allowlist";
-import type { AgentProviderName } from "@agentic-kanban/shared/lib/provider-traits";
 import type { ProfileRosterProject } from "@agentic-kanban/shared/types";
 import { Field } from "../SettingsPanel.shared.js";
-import { allowedRolesFor, roleBadgeClasses, type RosterDraftEntry } from "../../lib/rosterEditor.js";
+import {
+  allowedRolesFor,
+  roleBadgeClasses,
+  type RosterCandidate,
+  type RosterDraftEntry,
+} from "../../lib/rosterEditor.js";
 
-/** One selectable profile, with the role its ACCOUNT declares (the narrowing floor). */
-export interface RosterCandidate {
-  id: string;
-  provider: AgentProviderName;
-  name: string;
-  globalRole: ProfileRole;
-}
+// Declared in `lib/rosterEditor.ts` so `hooks/` can name it without an upward edge (#1034);
+// re-exported here because this is where its importers already look.
+export type { RosterCandidate };
+
 
 /** The sentinel for "this project may not use this profile at all" (absent from the roster). */
 const UNLISTED = "";

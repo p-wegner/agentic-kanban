@@ -15,7 +15,7 @@ import {
   type ProfileRole,
 } from "@agentic-kanban/shared/lib/profile-allowlist";
 import { applyRoleChange, removeFromRoster, type RosterDraftEntry } from "../lib/rosterEditor.js";
-import type { RosterCandidate } from "../components/settings/ProjectRosterEditor.js";
+import type { RosterCandidate } from "../lib/rosterEditor.js";
 import type { Settings } from "../lib/settings-shared.js";
 
 export type ProviderDivergence = {
