@@ -5,7 +5,7 @@ inventory removes nothing.** It exists so the decision about which standing guar
 retire (proposal `2026-09-03-dev-board-vs-deployed-board.md` §3.E) can be made with the whole
 set in view instead of one suite at a time.
 
-**175 files** — 175 carry `@gate:always-run`, 41 are `*ratchet*.test.ts`, 41 are both. 175 distinct properties; 0 file(s) state none.
+**176 files** — 176 carry `@gate:always-run`, 41 are `*ratchet*.test.ts`, 41 are both. 176 distinct properties; 0 file(s) state none.
 
 ## How each column is derived — and what it is NOT
 
@@ -27,7 +27,7 @@ set in view instead of one suite at a time.
 
 ## Candidates
 
-Duplicated property (exact): **0 group(s)**. Overlapping properties (heuristic): **3 pair(s)**. Never red since introduction (proxy): **41**. Slower than 20s: **9**. No stated property: **0**. Unmeasured: **13**.
+Duplicated property (exact): **0 group(s)**. Overlapping properties (heuristic): **3 pair(s)**. Never red since introduction (proxy): **41**. Slower than 20s: **9**. No stated property: **0**. Unmeasured: **14**.
 
 ### Same property pinned more than once
 
@@ -50,7 +50,7 @@ pair this misses is not evidence that no overlap exists.
 
 | file | introduced | property |
 | --- | --- | --- |
-| `packages/server/src/__tests__/objective-capacity-hold-ratchet.test.ts` | ? | The Conductor's capacity brake is GENERATED, never hand-written (#1029). |
+| `packages/server/src/__tests__/safe-rmdir.test.ts` | ? | #1033 — `scripts/safe-rmdir.mjs` refuses to delete a tree that holds a reparse point |
 | `packages/server/src/__tests__/commit-checkpoint.test.ts` | 2026-05-28 | Acceptance test for #90 — "kanban-workflow skill: commit-early nudge once |
 | `packages/server/src/__tests__/quality-metrics-collector-skill.test.ts` | 2026-05-31 | reads .claude/skills/quality-metrics-collector/SKILL.md; no import edge to a markdown file (#647). |
 | `packages/server/src/__tests__/board-monitor-skill.test.ts` | 2026-06-01 | reads .claude/.codex skill files + a repo-root script, never imported (#538). |
@@ -120,6 +120,7 @@ each other, which is how a merge candidate is spotted by eye.
 | --- | --- | --- | --- | --- | --- |
 | #1015 — `red_base_policy_<projectId>` is the per-project, **softer-only** override of the | `packages/server/src/__tests__/red-base-policy-raw-read-ratchet.test.ts` | always-run, ratchet | 2026-09-04 (`ac4685ca23`) | 2026-09-04 (`8a0f35d793`) |  |
 | #1025 — every consumer must go through the ROSTER RESOLVER (`resolveProjectRoster` / | `packages/server/src/__tests__/roster-raw-read-ratchet.test.ts` | always-run, ratchet | 2026-09-04 (`df690b8d14`) |  |  |
+| #1033 — `scripts/safe-rmdir.mjs` refuses to delete a tree that holds a reparse point | `packages/server/src/__tests__/safe-rmdir.test.ts` | always-run |  |  |  |
 | #220 — branch-name PRODUCER agreement. | `packages/server/src/__tests__/branch-name-single-producer.test.ts` | always-run | 2026-08-10 (`d74629be57`) | 2026-08-10 (`d74629be57`) | 9ms |
 | #401 — bounded session_messages reads + sync-free hot paths. | `packages/server/src/__tests__/bounded-session-message-reads.test.ts` | always-run | 2026-08-11 (`95f79cbb7b`) | 2026-08-23 (`e6020c39a6`) | 2.3s |
 | #537 leak A: a `packages/shared`-only diff expanded to server/mcp-server as downstream | `packages/server/src/__tests__/test-mine-scope-derivation.test.mjs` | always-run | 2026-08-16 (`b9349b90c3`) | 2026-08-24 (`59296782f7`) | 16ms |
@@ -269,9 +270,9 @@ each other, which is how a merge candidate is spotted by eye.
 | statically verifies shared subpath imports resolve; imports nothing it checks (#538). | `packages/server/src/__tests__/shared-package-exports.test.ts` | always-run | 2026-06-01 (`c5d23e3f3f`) | 2026-08-29 (`39d67c5f9f`) | 7.1s |
 | The #728 split-responsibility remainder may only SHRINK. | `packages/server/src/__tests__/split-responsibility-ratchet.test.ts` | always-run, ratchet | 2026-08-23 (`c1b422e168`) | 2026-09-04 (`980c0e9db3`) | 175ms |
 | the caller guard at the bottom walks the server source tree; it | `packages/server/src/__tests__/pass-report-emission.test.ts` | always-run | 2026-08-21 (`c9394e62e9`) | 2026-08-22 (`e28e1b9d2c`) | 17ms |
-| The client's stated conventions, enforced (#601). | `packages/client/src/__tests__/client-conventions-guard.test.ts` | always-run | 2026-08-19 (`c841cb82f7`) | 2026-08-23 (`d63396d246`) | 3.1s |
+| The client's stated conventions, enforced (#601). | `packages/client/src/__tests__/client-conventions-guard.test.ts` | always-run | 2026-08-19 (`c841cb82f7`) | 2026-09-04 (`11022584a2`) | 3.1s |
 | The committed spec, with line endings normalized to LF. | `packages/server/src/__tests__/openapi-thrown-status.test.ts` | always-run | 2026-08-23 (`e4d4e4cfef`) | 2026-08-29 (`8d64e56949`) | 24.2s |
-| The Conductor's capacity brake is GENERATED, never hand-written (#1029). | `packages/server/src/__tests__/objective-capacity-hold-ratchet.test.ts` | always-run, ratchet |  |  |  |
+| The Conductor's capacity brake is GENERATED, never hand-written (#1029). | `packages/server/src/__tests__/objective-capacity-hold-ratchet.test.ts` | always-run, ratchet | 2026-09-04 (`364f135bbf`) | 2026-09-04 (`364f135bbf`) |  |
 | The dashboard charts' duplication is a DOWN-only ring (#732). | `packages/client/src/__tests__/chart-duplication-ratchet.test.ts` | always-run, ratchet | 2026-08-22 (`c21cefc16c`) | 2026-08-23 (`3ee2911975`) | 5.8s |
 | The dependency-cruiser layering rules are the repo's ONLY machine-checked | `packages/shared/__tests__/lint-arch-gate.test.ts` | always-run | 2026-08-17 (`b00a79373a`) | 2026-08-20 (`e21c6189c0`) | 21.5s |
 | The drizzle snapshot baseline tracks the newest migration (#789). | `packages/shared/__tests__/drizzle-snapshot-baseline.test.ts` | always-run | 2026-08-23 (`3263f79217`) | 2026-08-28 (`89eb77102b`) | 57ms |
@@ -305,6 +306,7 @@ each other, which is how a merge candidate is spotted by eye.
 - `packages/server/src/__tests__/promote-plan.test.ts`
 - `packages/server/src/__tests__/red-base-policy-raw-read-ratchet.test.ts`
 - `packages/server/src/__tests__/roster-raw-read-ratchet.test.ts`
+- `packages/server/src/__tests__/safe-rmdir.test.ts`
 - `packages/server/src/__tests__/test-impact-budget-setting.test.ts`
 - `packages/server/src/__tests__/typecheck-package-coverage.test.ts`
 - `packages/server/src/__tests__/verify-step-timings.test.ts`
