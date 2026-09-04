@@ -6,6 +6,7 @@ import { setSettings } from "../lib/settingsStore.js";
 import { showToast } from "../lib/toast.js";
 
 import { MAX_ACTIVE_AGENTS_TARGET } from "@agentic-kanban/shared/lib/strategy-policy";
+import { MAX_HARNESS_SHARE_PCT, MIN_HARNESS_SHARE_PCT } from "@agentic-kanban/shared/lib/harness-budget";
 import { DEFAULT_CONFIG, POLICY_MODE_LABELS, POLICY_MODE_DESCRIPTIONS, KIND_LABELS, settingsKey, clampWeight, clampPolicy, normalizeConfig, issueSearchText, matchesSegment, deriveRefillFocus, makeAgentBrief } from "../lib/strategy-targets.js";
 import type { SegmentKind, Provider, ProviderPolicyMode, StrategySegment, ProviderProfilePolicy, StrategyConfig, MonitorPolicyPreset } from "../lib/strategy-targets.js";
 import { MonitorPolicyPresets } from "./MonitorPolicyPresets.js";
@@ -267,11 +268,14 @@ export function StrategyTargetsView({ columns, projectId, onIssueClick, searchQu
                 REFILL_FOCUS {refillFocus}
               </span>
             </div>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-4 gap-2">
               {[
                 ["activeAgentsTarget", "Agents", 1, MAX_ACTIVE_AGENTS_TARGET],
                 ["backlogFloor", "Backlog", 0, 100],
                 ["maxNewStartsPerCycle", "Starts", 1, MAX_ACTIVE_AGENTS_TARGET],
+                // #1021 — the harness budget: at most this share of the WIP on `harness`-tagged
+                // tickets. 100 disables it (the pre-#1021 behaviour).
+                ["harnessSharePct", "Harness %", MIN_HARNESS_SHARE_PCT, MAX_HARNESS_SHARE_PCT],
               ].map(([keyName, label, min, max]) => (
                 <label key={keyName} className="block">
                   <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">{label}</span>
@@ -279,9 +283,9 @@ export function StrategyTargetsView({ columns, projectId, onIssueClick, searchQu
                     type="number"
                     min={min as number}
                     max={max as number}
-                    value={config[keyName as keyof Pick<StrategyConfig, "activeAgentsTarget" | "backlogFloor" | "maxNewStartsPerCycle">]}
+                    value={config[keyName as keyof Pick<StrategyConfig, "activeAgentsTarget" | "backlogFloor" | "maxNewStartsPerCycle" | "harnessSharePct">]}
                     onChange={(event) => {
-                      const value = clampPolicy(Number(event.target.value), DEFAULT_CONFIG[keyName as keyof Pick<StrategyConfig, "activeAgentsTarget" | "backlogFloor" | "maxNewStartsPerCycle">], min as number, max as number);
+                      const value = clampPolicy(Number(event.target.value), DEFAULT_CONFIG[keyName as keyof Pick<StrategyConfig, "activeAgentsTarget" | "backlogFloor" | "maxNewStartsPerCycle" | "harnessSharePct">], min as number, max as number);
                       setConfigDirty((prev) => ({ ...prev, [keyName]: value }));
                     }}
                     className="w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"

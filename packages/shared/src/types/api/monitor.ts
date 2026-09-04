@@ -280,4 +280,16 @@ export interface MonitorStatusResponse {
   lastCyclePhaseTimings?: unknown;
   maintenanceActive: boolean;
   maintenanceEnd: string | null;
+  /**
+   * #1021 — "harness share this week: N %": the share of tickets that reached Done in the
+   * last 7 days carrying the `harness` tag, so the number the proposal established by a
+   * one-off grep is a standing read-off. `sharePct` is null when nothing landed in the
+   * window — that is not the same answer as 0 %.
+   */
+  harnessShare: {
+    doneCount: number;
+    harnessCount: number;
+    sharePct: number | null;
+    windowDays: number;
+  } | null;
 }

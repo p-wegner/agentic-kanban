@@ -57,6 +57,14 @@ function makeDeps(overrides: Partial<AutoStartDeps> = {}): AutoStartDeps {
     // #917: see the identical note in monitor-auto-start.test.ts's makeDeps — the real
     // scorer's DB reads/writes would shift this suite's ordered `db.select` mock chains.
     orderStartCandidates: async () => {},
+
+    // #1021: the real gate issues two db.select reads (candidate tags, running harness WIP),
+
+    // which would shift this suite's ordered mock chains. These suites are not about the
+
+    // harness budget, so inject one that holds nothing.
+
+    buildHarnessGate: async () => ({ slots: 0, sharePct: 100, used: 0, isHarness: () => false, allows: () => true, noteStarted: () => {} }),
     ...overrides,
   };
 }

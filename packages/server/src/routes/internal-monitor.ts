@@ -3,6 +3,7 @@ import { getBool, getNumber } from "@agentic-kanban/shared/lib/settings-registry
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import type { MonitorStatusResponse } from "@agentic-kanban/shared/types";
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
+import { readHarnessShare } from "../repositories/harness-tag.repository.js";
 import { conditionalJsonResponse } from "../services/board-etag-cache.service.js";
 import type { BoardMonitorResourceSnapshot } from "../services/stale-dev-processes.js";
 import { monitorDrivenProjectIds } from "../services/start-policy.service.js";
@@ -27,6 +28,28 @@ import type { MonitorState } from "../startup/monitor-setup.js";
 /** Default (non-verbose) monitor-status caps the resource snapshot's decision lists —
  *  the client renders at most 3 of each (`MonitorSections.tsx`). */
 const RESOURCE_SNAPSHOT_ITEM_CAP = 5;
+
+/**
+ * #1021's read-off is a two-query scan over a week of Done tickets, and this endpoint is polled
+ * every 30s by every open tab (see the payload-diet note below) — so it is memoized for a
+ * minute. A week-wide share cannot meaningfully move within one, and the alternative is the
+ * stacked full-table scans #402 already had to fix here once.
+ */
+const HARNESS_SHARE_TTL_MS = 60_000;
+let harnessShareCache: { at: number; value: MonitorStatusResponse["harnessShare"] } | null = null;
+
+async function readHarnessShareCached(nowMs: number): Promise<MonitorStatusResponse["harnessShare"]> {
+  if (harnessShareCache && nowMs - harnessShareCache.at < HARNESS_SHARE_TTL_MS) return harnessShareCache.value;
+  try {
+    const value = await readHarnessShare(undefined, nowMs);
+    harnessShareCache = { at: nowMs, value };
+    return value;
+  } catch {
+    // A read-off must never take the status endpoint down with it — the rest of the payload
+    // is what an operator diagnosing a stalled board actually needs.
+    return null;
+  }
+}
 
 export function registerInternalMonitorRoutes(app: Hono, monitorState: MonitorState, runMonitorCycle: (force?: boolean) => Promise<void>, _syncMonitorState: () => Promise<void>, runResourceSweep?: (force?: boolean) => Promise<BoardMonitorResourceSnapshot | null>) {
   app.post("/api/internal/monitor-run", (c) => {
@@ -118,6 +141,9 @@ export function registerInternalMonitorRoutes(app: Hono, monitorState: MonitorSt
       ...(verbose ? { lastCyclePhaseTimings: monitorState.lastCyclePhaseTimings } : {}),
       maintenanceActive,
       maintenanceEnd,
+      // #1021 — "harness share this week: N %", so the budget rule has a standing number to
+      // be judged against instead of a one-off grep of the git log.
+      harnessShare: await readHarnessShareCached(Date.now()),
     };
     // Conditional GET (#400's helper): the monitor's state changes on the minutes
     // scale, so most 30s polls collapse to a bodyless 304.

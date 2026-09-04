@@ -250,6 +250,14 @@ describe("runAutoStart serializes on a shared registration file (#119 reproducti
       // would shift this suite's scripted `db.select` sequence onto the trailing
       // catch-all mock — leave `candidates` in query order instead.
       orderStartCandidates: async () => {},
+
+      // #1021: the real gate issues two db.select reads (candidate tags, running harness WIP),
+
+      // which would shift this suite's ordered mock chains. These suites are not about the
+
+      // harness budget, so inject one that holds nothing.
+
+      buildHarnessGate: async () => ({ slots: 0, sharePct: 100, used: 0, isHarness: () => false, allows: () => true, noteStarted: () => {} }),
       ...overrides,
     };
   }
