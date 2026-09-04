@@ -24,9 +24,18 @@ import { join } from "node:path";
  * hook inside a running agent can read `KANBAN_PROFILE_ROLE` and abort — a second
  * enforcement point — but everything there is visible to every child process.
  *
- * NODE-ONLY: this module reads the filesystem. Import it via the deep path
- * `@agentic-kanban/shared/lib/profile-attributes`; it must NEVER be re-exported from
- * the client-reachable barrel (`lib/index.ts`) — see `barrel-client-safety.test.ts`.
+ * NODE-ONLY: this module reads the filesystem, so it is never client-reachable.
+ *
+ * WHERE IT LIVES: `packages/server/src/lib/`, not `packages/shared/src/lib/`, even though
+ * the proposal's prose says "eine Funktion in `packages/shared`". The three audiences it
+ * was designed for are the board's profile discovery, the worker's `hello` attestation
+ * (#1027) and claude-pick - and none of them makes it a second CONSUMING PACKAGE in this
+ * repo: the fleet worker is `packages/server/src/worker/`, i.e. server, and claude-pick is
+ * a separate repository that cannot import `@agentic-kanban/shared/lib/*` at all. So the
+ * consumer count here is 1 forever, which is exactly the case
+ * `shared-lib-single-consumer-ratchet.test.ts` (#590/#730) exists to keep out of
+ * `shared/lib`, and grandfathering it on a promised second consumer would have been a
+ * false promise. Server code imports it relatively (`../lib/profile-attributes.js`).
  */
 
 export const PROFILE_ROLES = ["pool", "reserve", "forbidden"] as const;
