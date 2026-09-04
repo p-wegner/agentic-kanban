@@ -15,6 +15,7 @@ import {
 } from "../services/agent-profile-health.service.js";
 import { getMcpHealthSummary, probeMcpHealth } from "../services/mcp-health.service.js";
 import { fetchLiveQuotaUsage } from "../services/quota-usage.service.js";
+import { describeRosterWideningViolation, findRosterWidenings } from "../services/profile-roster-narrowing.service.js";
 import { createAgentSkillService } from "../services/agent-skill.service.js";
 import { createTagService } from "../services/tag.service.js";
 import { createRouter } from "../middleware/create-router.js";
@@ -81,6 +82,26 @@ export function createPreferencesRoute(database: Database) {
   // (#874).
   router.put("/settings", async (c) => {
     const body = await parseJsonBody<Record<string, string>>(c);
+    // Roster narrowing guard (#1028), BEFORE anything is persisted — same contract as the
+    // divergence guard below. A project roster may only narrow the role an account declares
+    // for itself; a widening write is rejected rather than stored and silently re-narrowed
+    // at read time, so the stored value stays a true statement about the roster.
+    const widenings = findRosterWidenings({
+      patch: body,
+      claudeRingRaw: await getPreference(PREF_CLAUDE_SUBSCRIPTION_RING, database),
+      codexRingRaw: await getPreference(PREF_CODEX_LICENSE_RING, database),
+    });
+    if (widenings.length > 0) {
+      return c.json(
+        {
+          ok: false,
+          applied: [],
+          rosterWidenings: widenings,
+          error: `Refusing roster write: ${widenings.map(describeRosterWideningViolation).join(" ")}`,
+        },
+        422,
+      );
+    }
     const { applied, dropped, divergence } = await preferenceService.updateSettings(body);
     // Write-time provider/Bullseye divergence guard (#903): reject BEFORE persisting
     // so the global provider/profile prefs can never drift from the active project's
