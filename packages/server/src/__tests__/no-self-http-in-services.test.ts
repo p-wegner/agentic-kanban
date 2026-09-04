@@ -69,6 +69,9 @@ const STARTUP_DIR = join(import.meta.dirname, "..", "startup");
 // item, not a silent exception — shrink this list as the create path is converted.
 const STARTUP_SELF_HTTP_ALLOWLIST = new Set([
   "monitor-auto-start.ts",
+  // #1021 split the Todo pull out of `monitor-auto-start.ts` (plan item P3.2). The same
+  // un-migrated create path moved with it — one backlog item, now in two files, not a new one.
+  "monitor-todo-pull.ts",
   "monitor-backlog.ts",
   "scheduled-tasks.ts",
 ]);
