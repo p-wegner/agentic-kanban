@@ -1,5 +1,10 @@
 import { boardStrategyPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { ACCENT, BRAND } from "./chartColors";
+import {
+  DEFAULT_HARNESS_SHARE_PCT,
+  MAX_HARNESS_SHARE_PCT,
+  MIN_HARNESS_SHARE_PCT,
+} from "@agentic-kanban/shared/lib/harness-budget";
 import type { IssueWithStatus } from "@agentic-kanban/shared";
 import {
   MAX_ACTIVE_AGENTS_TARGET,
@@ -36,6 +41,13 @@ export interface StrategyConfig {
   activeAgentsTarget: number;
   backlogFloor: number;
   maxNewStartsPerCycle: number;
+  /**
+   * #1021 — the share of the WIP that may run `harness`-tagged tickets. It lives in the
+   * client codec as well as the shared one because `normalizeConfig` REBUILDS the object it
+   * saves: a field this function does not know is silently dropped on the next save, which is
+   * exactly how the provider policies' `model` was lost in #983.
+   */
+  harnessSharePct: number;
   segments: StrategySegment[];
   providerPolicies: ProviderProfilePolicy[];
 }
@@ -45,6 +57,7 @@ export const DEFAULT_CONFIG: StrategyConfig = {
   activeAgentsTarget: 4,
   backlogFloor: 10,
   maxNewStartsPerCycle: 2,
+  harnessSharePct: DEFAULT_HARNESS_SHARE_PCT,
   segments: [
     { id: "work-bugfix", label: "Bugfix", description: "Real, reproducible defects and regressions.", kind: "work-type", weight: 5, color: BRAND, keywords: "bug bugfix fix defect regression", provider: "" },
     { id: "work-feature", label: "Feature", description: "New product capability and workflow improvements.", kind: "work-type", weight: 3, color: "#5b7a8c", keywords: "feature enhancement product workflow", provider: "" },
@@ -138,6 +151,7 @@ export function normalizeConfig(raw: unknown): StrategyConfig {
     activeAgentsTarget: clampPolicy(Number(parsed.activeAgentsTarget), DEFAULT_CONFIG.activeAgentsTarget, 1, MAX_ACTIVE_AGENTS_TARGET),
     backlogFloor: clampPolicy(Number(parsed.backlogFloor), DEFAULT_CONFIG.backlogFloor, 0, 100),
     maxNewStartsPerCycle: clampPolicy(Number(parsed.maxNewStartsPerCycle), DEFAULT_CONFIG.maxNewStartsPerCycle, 1, MAX_ACTIVE_AGENTS_TARGET),
+    harnessSharePct: clampPolicy(Number(parsed.harnessSharePct), DEFAULT_CONFIG.harnessSharePct, MIN_HARNESS_SHARE_PCT, MAX_HARNESS_SHARE_PCT),
     segments: segments.length > 0 ? segments : DEFAULT_CONFIG.segments,
     providerPolicies,
   };

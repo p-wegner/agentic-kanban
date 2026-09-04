@@ -57,6 +57,11 @@ const REASONS: Record<string, AutoStartSkipDisplay> = {
     detail: "Another automatic starter is already provisioning a workspace for this ticket. Not a failure — that launch is the one that counts.",
     kind: "hold",
   },
+  harness_budget: {
+    label: "Harness budget",
+    detail: "This ticket is tagged `harness` and the project's harness builders already fill the share of the WIP budgeted for machinery work. It starts once a harness slot frees up — or raise the harness share in the Strategy Bullseye (100% disables the budget).",
+    kind: "hold",
+  },
   no_auto_start_tag: {
     label: "no-auto-start",
     detail: "This ticket carries the `no-auto-start` tag, so the monitor will never launch it. Remove the tag, or start it by hand.",
