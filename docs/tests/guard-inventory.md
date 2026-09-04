@@ -27,7 +27,7 @@ set in view instead of one suite at a time.
 
 ## Candidates
 
-Duplicated property (exact): **0 group(s)**. Overlapping properties (heuristic): **3 pair(s)**. Never red since introduction (proxy): **41**. Slower than 20s: **9**. No stated property: **0**. Unmeasured: **9**.
+Duplicated property (exact): **0 group(s)**. Overlapping properties (heuristic): **3 pair(s)**. Never red since introduction (proxy): **40**. Slower than 20s: **9**. No stated property: **0**. Unmeasured: **9**.
 
 ### Same property pinned more than once
 
@@ -50,7 +50,6 @@ pair this misses is not evidence that no overlap exists.
 
 | file | introduced | property |
 | --- | --- | --- |
-| `packages/server/src/__tests__/guard-inventory.test.ts` | ? | The guard inventory (#1022) must SEE the whole standing guard set, exactly once per file. |
 | `packages/server/src/__tests__/commit-checkpoint.test.ts` | 2026-05-28 | Acceptance test for #90 — "kanban-workflow skill: commit-early nudge once |
 | `packages/server/src/__tests__/quality-metrics-collector-skill.test.ts` | 2026-05-31 | reads .claude/skills/quality-metrics-collector/SKILL.md; no import edge to a markdown file (#647). |
 | `packages/server/src/__tests__/board-monitor-skill.test.ts` | 2026-06-01 | reads .claude/.codex skill files + a repo-root script, never imported (#538). |
@@ -194,7 +193,7 @@ each other, which is how a merge candidate is spotted by eye.
 | bundled agent skill | `packages/server/src/__tests__/bundled-skill-freshness.test.ts` | always-run | 2026-08-20 (`5bf4c5525e`) | 2026-08-22 (`b4fe44936a`) | 319ms |
 | byte-compares scaffold hooks against .claude/hooks/ outside src/; imports nothing it checks (#538). | `packages/server/src/__tests__/scaffold-hook-sources.test.ts` | always-run | 2026-07-02 (`67586479e9`) | 2026-08-30 (`eff35ea9b4`) | 2.6s |
 | catalog/runtime parity twin; reachable by no single-file diff (#538). | `packages/mcp-server/src/__tests__/mcp-catalog-parity.test.ts` | always-run | 2026-07-02 (`7e2716c789`) | 2026-08-20 (`4f1af4d02c`) | 15ms |
-| CLAUDE.md states these as HARD CONSTRAINTS and nothing tested them (#598). | `packages/server/src/__tests__/claude-md-git-invariants.test.ts` | always-run | 2026-08-17 (`5bdbefcd09`) | 2026-08-27 (`12eb62af13`) | 1.2s |
+| CLAUDE.md states these as HARD CONSTRAINTS and nothing tested them (#598). | `packages/server/src/__tests__/claude-md-git-invariants.test.ts` | always-run | 2026-08-17 (`5bdbefcd09`) | 2026-09-03 (`d98ca49eab`) | 1.2s |
 | .codex/skills parity gate (#965). | `packages/server/src/__tests__/codex-skills-parity.test.ts` | always-run | 2026-07-02 (`7971751917`) | 2026-08-18 (`a9981f369b`) | 6ms |
 | Coverage must stay WIRED TO A CONSUMER (#765). | `packages/server/src/__tests__/coverage-wiring.test.ts` | always-run | 2026-08-23 (`312deb832c`) | 2026-08-23 (`07104bd8ff`) | 75ms |
 | cross-checks the settings registry parity invariant (#538). | `packages/shared/__tests__/settings-registry.test.ts` | always-run | 2026-06-25 (`97ebdd9303`) |  | 8ms |
@@ -235,7 +234,7 @@ each other, which is how a merge candidate is spotted by eye.
 | reads mcp-server + route sources across packages; imports neither (#647). | `packages/server/src/__tests__/butler-plugin-onboarding.test.ts` | always-run | 2026-08-15 (`51651689b3`) |  | 7ms |
 | reads `package.json`, `scripts/gate-always-run.mjs` and the two | `packages/shared/__tests__/always-run-enforcement-point.test.ts` | always-run | 2026-08-23 (`bbec7e6393`) | 2026-08-23 (`bbec7e6393`) | 21ms |
 | reads route/service SOURCE TEXT outside its own import graph (#774). | `packages/server/src/__tests__/worker-events-emitter-coverage.test.ts` | always-run | 2026-08-23 (`0922dfe591`) | 2026-08-23 (`0922dfe591`) | 15ms |
-| reads scripts/dev.mjs and the repo package manifests; imports nothing it checks (#647). | `packages/server/src/__tests__/dev-script.test.mjs` | always-run | 2026-05-24 (`c6e07440b6`) | 2026-09-01 (`6af086d6f8`) | 3.1s |
+| reads scripts/dev.mjs and the repo package manifests; imports nothing it checks (#647). | `packages/server/src/__tests__/dev-script.test.mjs` | always-run | 2026-05-24 (`c6e07440b6`) | 2026-09-04 (`5f50240382`) | 3.1s |
 | reads startup/scheduled-tasks.ts as text to assert a property it cannot import (#647). | `packages/server/src/__tests__/scheduled-tasks.test.ts` | always-run | 2026-06-01 (`a1d33318b4`) | 2026-08-11 (`a19d498464`) | 17ms |
 | reads the auth-ring SOURCE files, which are outside this test's own | `packages/server/src/__tests__/worker-doctor.test.ts` | always-run | 2026-08-23 (`0922dfe591`) | 2026-08-25 (`0bc49bd2aa`) | 705ms |
 | reads the repo-root package.json, which it does not import (#583). | `packages/shared/__tests__/ensure-shared-fresh-wiring.test.ts` | always-run | 2026-08-26 (`9567033aa7`) | 2026-09-01 (`6af086d6f8`) | 5ms |
@@ -277,7 +276,7 @@ each other, which is how a merge candidate is spotted by eye.
 | The `ExecResult` helpers are USED, and a new hand-rolled `.code` check cannot appear (#705). | `packages/shared/__tests__/exec-result-helper-adoption.test.ts` | always-run | 2026-08-21 (`dd901d01e1`) | 2026-08-21 (`dd901d01e1`) | 2.3s |
 | The `[gate:step]` contract between a verify script and the merge gate (#988). | `packages/server/src/__tests__/verify-step-timings.test.ts` | always-run | 2026-09-01 (`6af086d6f8`) |  |  |
 | The god-module gate must be a real merge-blocking CHECK, not just a vitest | `packages/shared/__tests__/check-god-modules-script.test.ts` | always-run | 2026-06-25 (`52024b21e8`) | 2026-08-22 (`10f4997420`) | 6.2s |
-| The guard inventory (#1022) must SEE the whole standing guard set, exactly once per file. | `packages/server/src/__tests__/guard-inventory.test.ts` | always-run |  |  |  |
+| The guard inventory (#1022) must SEE the whole standing guard set, exactly once per file. | `packages/server/src/__tests__/guard-inventory.test.ts` | always-run | 2026-09-04 (`83f6e23713`) | 2026-09-04 (`1bd286826e`) |  |
 | The HTTP layer must not cut off an operation the board itself budgets minutes for (#680). | `packages/server/src/__tests__/http-request-timeout.test.ts` | always-run | 2026-08-20 (`543da6108d`) | 2026-08-26 (`dcb79388b2`) | 4ms |
 | The issue-form / workspace-launch duplication is a DOWN-only ring (#810, follow-up to #772). | `packages/client/src/__tests__/issue-form-duplication-ratchet.test.ts` | always-run, ratchet | 2026-08-23 (`3ee2911975`) |  | 2.1s |
 | The licence half of the dependency scan (#741) used to be a NUMBER: at most two | `packages/shared/__tests__/security-policy-licence-acceptance.test.ts` | always-run | 2026-08-23 (`1f046f8e64`) | 2026-08-23 (`97ddbbcaf7`) | 3ms |
