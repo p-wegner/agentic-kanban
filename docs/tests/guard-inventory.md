@@ -5,7 +5,7 @@ inventory removes nothing.** It exists so the decision about which standing guar
 retire (proposal `2026-09-03-dev-board-vs-deployed-board.md` §3.E) can be made with the whole
 set in view instead of one suite at a time.
 
-**173 files** — 173 carry `@gate:always-run`, 39 are `*ratchet*.test.ts`, 39 are both. 173 distinct properties; 0 file(s) state none.
+**174 files** — 174 carry `@gate:always-run`, 40 are `*ratchet*.test.ts`, 40 are both. 174 distinct properties; 0 file(s) state none.
 
 ## How each column is derived — and what it is NOT
 
@@ -27,7 +27,7 @@ set in view instead of one suite at a time.
 
 ## Candidates
 
-Duplicated property (exact): **0 group(s)**. Overlapping properties (heuristic): **3 pair(s)**. Never red since introduction (proxy): **39**. Slower than 20s: **9**. No stated property: **0**. Unmeasured: **11**.
+Duplicated property (exact): **0 group(s)**. Overlapping properties (heuristic): **3 pair(s)**. Never red since introduction (proxy): **40**. Slower than 20s: **9**. No stated property: **0**. Unmeasured: **12**.
 
 ### Same property pinned more than once
 
@@ -89,6 +89,7 @@ pair this misses is not evidence that no overlap exists.
 | `packages/server/src/__tests__/test-impact-budget-setting.test.ts` | 2026-09-01 | #966 — the per-project test-impact BUDGET. |
 | `packages/server/src/__tests__/verify-step-timings.test.ts` | 2026-09-01 | The `[gate:step]` contract between a verify script and the merge gate (#988). |
 | `packages/server/src/__tests__/project-update-unrecognized-keys.test.ts` | 2026-09-02 | #992 — `PATCH /api/projects/:id` returned **200 with the full project object** for a body |
+| `packages/server/src/__tests__/roster-raw-read-ratchet.test.ts` | 2026-09-04 | #1025 — every consumer must go through the ROSTER RESOLVER (`resolveProjectRoster` / |
 
 ### Slower than 20s in the recorded run
 
@@ -117,6 +118,7 @@ each other, which is how a merge candidate is spotted by eye.
 | property | file | kinds | introduced | last red (proxy) | wall |
 | --- | --- | --- | --- | --- | --- |
 | #1015 — `red_base_policy_<projectId>` is the per-project, **softer-only** override of the | `packages/server/src/__tests__/red-base-policy-raw-read-ratchet.test.ts` | always-run, ratchet | 2026-09-04 (`ac4685ca23`) | 2026-09-04 (`8a0f35d793`) |  |
+| #1025 — every consumer must go through the ROSTER RESOLVER (`resolveProjectRoster` / | `packages/server/src/__tests__/roster-raw-read-ratchet.test.ts` | always-run, ratchet | 2026-09-04 (`df690b8d14`) |  |  |
 | #220 — branch-name PRODUCER agreement. | `packages/server/src/__tests__/branch-name-single-producer.test.ts` | always-run | 2026-08-10 (`d74629be57`) | 2026-08-10 (`d74629be57`) | 9ms |
 | #401 — bounded session_messages reads + sync-free hot paths. | `packages/server/src/__tests__/bounded-session-message-reads.test.ts` | always-run | 2026-08-11 (`95f79cbb7b`) | 2026-08-23 (`e6020c39a6`) | 2.3s |
 | #537 leak A: a `packages/shared`-only diff expanded to server/mcp-server as downstream | `packages/server/src/__tests__/test-mine-scope-derivation.test.mjs` | always-run | 2026-08-16 (`b9349b90c3`) | 2026-08-24 (`59296782f7`) | 16ms |
@@ -137,7 +139,7 @@ each other, which is how a merge candidate is spotted by eye.
 | #668 — a project could hold two statuses with the same name. | `packages/server/src/__tests__/project-statuses-unique-name.test.ts` | always-run | 2026-08-19 (`af58b48b89`) |  | 327ms |
 | #755 — "why was #N not dispatched" is answered by `placement-explain.service.ts`, | `packages/server/src/__tests__/placement-chain-parity.test.ts` | always-run | 2026-08-22 (`80f6376581`) | 2026-08-29 (`04e5f62682`) | 34ms |
 | #759 — the compile check must not demand you fix a live agent's half-written file. | `packages/server/src/__tests__/stop-hook-typecheck-inflight.test.ts` | always-run | 2026-08-23 (`7958ce7b69`) | 2026-08-23 (`7958ce7b69`) | 4.1s |
-| #763 — long functions are a SHRINK-ONLY ring, and the shape of that ring is the whole | `packages/client/src/__tests__/function-nloc-ratchet.test.ts` | always-run, ratchet | 2026-08-23 (`47d2a4c25b`) | 2026-09-01 (`1583eb1c84`) | 8ms |
+| #763 — long functions are a SHRINK-ONLY ring, and the shape of that ring is the whole | `packages/client/src/__tests__/function-nloc-ratchet.test.ts` | always-run, ratchet | 2026-08-23 (`47d2a4c25b`) | 2026-09-04 (`0ee7dc3714`) | 8ms |
 | #770 — the Stop hook must call a file dirty only when its CONTENT differs. | `packages/server/src/__tests__/stop-hook-content-dirty.test.ts` | always-run | 2026-08-23 (`e734e5f8bc`) | 2026-08-23 (`5c15ab7a93`) | 7.0s |
 | #771 — the Stop hook must never tell a session to commit a live agent's mid-edit file. | `packages/server/src/__tests__/stop-hook-inflight-attribution.test.ts` | always-run | 2026-08-23 (`5c15ab7a93`) | 2026-08-24 (`4ef95fbcf9`) | 3.8s |
 | #779 — a guard suite that matches a regex PER LINE is evadable by a line wrap, so the | `packages/shared/__tests__/line-based-guard-ratchet.test.ts` | always-run, ratchet | 2026-08-23 (`30f78207f4`) | 2026-08-23 (`45050f0741`) | 10ms |
@@ -147,7 +149,7 @@ each other, which is how a merge candidate is spotted by eye.
 | #798 — review-preflight backoff lives in `workspace_review_preflight`, not in four | `packages/server/src/__tests__/review-preflight-extraction.repo.test.ts` | always-run | 2026-08-23 (`ff7b0d2a5d`) |  | 1.2s |
 | #798 — the dependency-symlink bootstrap run lives in `workspace_symlink_run`, not in eight | `packages/server/src/__tests__/symlink-run-extraction.repo.test.ts` | always-run | 2026-08-23 (`65f09038b5`) |  | 1.1s |
 | #798 — the workspace code-metrics artifact lives in `workspace_code_metrics`, not in two | `packages/server/src/__tests__/code-metrics-extraction.repo.test.ts` | always-run | 2026-08-23 (`981434dd3c`) |  | 438ms |
-| #800 — the server half of #763's shrink-only nloc ring. | `packages/server/src/__tests__/function-nloc-ratchet.test.ts` | always-run, ratchet | 2026-08-23 (`086a41b6bc`) | 2026-09-01 (`1583eb1c84`) | 6ms |
+| #800 — the server half of #763's shrink-only nloc ring. | `packages/server/src/__tests__/function-nloc-ratchet.test.ts` | always-run, ratchet | 2026-08-23 (`086a41b6bc`) | 2026-09-04 (`0ee7dc3714`) | 6ms |
 | #806, inbound half — **request bodies that are read but never CHECKED, shrink-only.** | `packages/server/src/__tests__/route-body-validation-ratchet.test.ts` | always-run, ratchet | 2026-08-23 (`4292d8b917`) | 2026-08-24 (`a08c6d9e70`) | 285ms |
 | #806, OUTBOUND half — **responses the client parses but never CHECKS, shrink-only.** | `packages/client/src/__tests__/api-response-validation-ratchet.test.ts` | always-run, ratchet | 2026-08-24 (`a08c6d9e70`) |  | 8ms |
 | #809, the client half of #788's hole — **now closed, and held at zero (#818).** | `packages/shared/__tests__/client-test-typecheck-ratchet.test.ts` | always-run, ratchet | 2026-08-23 (`99811fa921`) | 2026-08-23 (`99811fa921`) | 32.2s |
@@ -256,7 +258,7 @@ each other, which is how a merge candidate is spotted by eye.
 | `scripts/pack-worker.mjs` is the fast track for handing a worker tarball to a machine | `packages/server/src/__tests__/pack-worker-script.test.ts` | always-run | 2026-08-24 (`148fd33334`) | 2026-08-24 (`148fd33334`) | 1.0s |
 | Server logs carry a `[tag]` prefix (#616). | `packages/server/src/__tests__/console-tag-ratchet.test.ts` | always-run, ratchet | 2026-08-17 (`80a1a11526`) | 2026-08-22 (`e28e1b9d2c`) | 5ms |
 | `services/` must not import UP into `startup/` (#594). | `packages/server/src/__tests__/service-layer-direction.test.ts` | always-run | 2026-08-19 (`f4bdec0660`) | 2026-08-19 (`f4bdec0660`) | 453ms |
-| `shared/lib` is for code MORE THAN ONE package needs (#590). This is the first thing | `packages/shared/__tests__/shared-lib-single-consumer-ratchet.test.ts` | always-run, ratchet | 2026-08-22 (`1d012a22b3`) | 2026-09-04 (`9ff845bd49`) | 6ms |
+| `shared/lib` is for code MORE THAN ONE package needs (#590). This is the first thing | `packages/shared/__tests__/shared-lib-single-consumer-ratchet.test.ts` | always-run, ratchet | 2026-08-22 (`1d012a22b3`) | 2026-09-04 (`a71b4772fc`) | 6ms |
 | `shared/lib` is not one kind (#590). | `packages/shared/__tests__/shared-lib-sub-kinds.test.ts` | always-run | 2026-08-19 (`24a7db2d88`) | 2026-08-22 (`87a8875273`) | 280ms |
 | Shrink-only ratchet on DESTRUCTIVE worktree operations that do not go through the one | `packages/shared/__tests__/worktree-delete-guard-ratchet.test.ts` | always-run, ratchet | 2026-08-22 (`9446d3b800`) | 2026-08-23 (`95743e18ba`) | 4.0s |
 | Shrink-only ratchet on foreign keys with no supporting index (#740). | `packages/server/src/__tests__/fk-leading-index-ratchet.test.ts` | always-run, ratchet | 2026-08-22 (`36046c6d25`) | 2026-08-23 (`b0add8347a`) | 165ms |
@@ -299,6 +301,7 @@ each other, which is how a merge candidate is spotted by eye.
 - `packages/server/src/__tests__/project-update-unrecognized-keys.test.ts`
 - `packages/server/src/__tests__/promote-plan.test.ts`
 - `packages/server/src/__tests__/red-base-policy-raw-read-ratchet.test.ts`
+- `packages/server/src/__tests__/roster-raw-read-ratchet.test.ts`
 - `packages/server/src/__tests__/test-impact-budget-setting.test.ts`
 - `packages/server/src/__tests__/typecheck-package-coverage.test.ts`
 - `packages/server/src/__tests__/verify-step-timings.test.ts`

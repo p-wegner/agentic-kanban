@@ -2,13 +2,13 @@
   "schema": "guard-inventory 1",
   "generatedBy": "pnpm guard:inventory (scripts/guard-inventory.mjs)",
   "counts": {
-    "files": 173,
-    "alwaysRun": 173,
-    "ratchet": 39,
-    "both": 39,
-    "distinctProperties": 173,
+    "files": 174,
+    "alwaysRun": 174,
+    "ratchet": 40,
+    "both": 40,
+    "distinctProperties": 174,
     "missingProperty": 0,
-    "unmeasured": 11
+    "unmeasured": 12
   },
   "slowThresholdMs": 20000,
   "withGit": true,
@@ -175,9 +175,9 @@
       "introducedSha": "47d2a4c25b",
       "introducedDate": "2026-08-23",
       "lastRedProxy": {
-        "sha": "1583eb1c84",
-        "date": "2026-09-01",
-        "subject": "fix: keep createProjectService flat in the nloc ring after the PATCH DTO fix",
+        "sha": "0ee7dc3714",
+        "date": "2026-09-04",
+        "subject": "chore(#1025): bank the two nloc movements the roster seam caused — function-nloc-ratchet green",
         "method": "git-log-fix-commit-naming-the-file"
       },
       "lastRedSource": "proxy: git log of fix commits naming the file (no gate-outcome ledger exists)",
@@ -1207,9 +1207,9 @@
       "introducedSha": "086a41b6bc",
       "introducedDate": "2026-08-23",
       "lastRedProxy": {
-        "sha": "1583eb1c84",
-        "date": "2026-09-01",
-        "subject": "fix: keep createProjectService flat in the nloc ring after the PATCH DTO fix",
+        "sha": "0ee7dc3714",
+        "date": "2026-09-04",
+        "subject": "chore(#1025): bank the two nloc movements the roster seam caused — function-nloc-ratchet green",
         "method": "git-log-fix-commit-naming-the-file"
       },
       "lastRedSource": "proxy: git log of fix commits naming the file (no gate-outcome ledger exists)",
@@ -2081,6 +2081,24 @@
       "lastRedSource": "proxy: git log of fix commits naming the file (no gate-outcome ledger exists)",
       "durationMs": 4.5625,
       "durationSource": "docs/tests/durations.json"
+    },
+    {
+      "file": "packages/server/src/__tests__/roster-raw-read-ratchet.test.ts",
+      "basename": "roster-raw-read-ratchet.test.ts",
+      "package": "server",
+      "kinds": [
+        "always-run",
+        "ratchet"
+      ],
+      "property": "#1025 — every consumer must go through the ROSTER RESOLVER (`resolveProjectRoster` /",
+      "propertyKey": "1025 every consumer must go through the roster resolver resolveprojectroster",
+      "propertySource": "doc-block",
+      "introducedSha": "df690b8d14",
+      "introducedDate": "2026-09-04",
+      "lastRedProxy": null,
+      "lastRedSource": "proxy: git log of fix commits naming the file (no gate-outcome ledger exists)",
+      "durationMs": null,
+      "durationSource": "absent from docs/tests/durations.json"
     },
     {
       "file": "packages/server/src/__tests__/route-body-validation-ratchet.test.ts",
@@ -3543,9 +3561,9 @@
       "introducedSha": "1d012a22b3",
       "introducedDate": "2026-08-22",
       "lastRedProxy": {
-        "sha": "9ff845bd49",
+        "sha": "a71b4772fc",
         "date": "2026-09-04",
-        "subject": "fix(#1024): profile-attributes single-consumer ratchet — move the reader into packages/server/src/lib, no false grandfather",
+        "subject": "fix(#1016): heal-ticket-key lives in server/src/lib — single-consumer ratchet green",
         "method": "git-log-fix-commit-naming-the-file"
       },
       "lastRedSource": "proxy: git log of fix commits naming the file (no gate-outcome ledger exists)",
@@ -3677,6 +3695,13 @@
       "property": "#1015 — `red_base_policy_<projectId>` is the per-project, **softer-only** override of the",
       "files": [
         "packages/server/src/__tests__/red-base-policy-raw-read-ratchet.test.ts"
+      ]
+    },
+    {
+      "propertyKey": "1025 every consumer must go through the roster resolver resolveprojectroster",
+      "property": "#1025 — every consumer must go through the ROSTER RESOLVER (`resolveProjectRoster` /",
+      "files": [
+        "packages/server/src/__tests__/roster-raw-read-ratchet.test.ts"
       ]
     },
     {
@@ -5110,6 +5135,11 @@
         "file": "packages/server/src/__tests__/project-update-unrecognized-keys.test.ts",
         "introducedDate": "2026-09-02",
         "property": "#992 — `PATCH /api/projects/:id` returned **200 with the full project object** for a body"
+      },
+      {
+        "file": "packages/server/src/__tests__/roster-raw-read-ratchet.test.ts",
+        "introducedDate": "2026-09-04",
+        "property": "#1025 — every consumer must go through the ROSTER RESOLVER (`resolveProjectRoster` /"
       }
     ],
     "slowerThanThreshold": [
@@ -5159,6 +5189,7 @@
       "packages/server/src/__tests__/project-update-unrecognized-keys.test.ts",
       "packages/server/src/__tests__/promote-plan.test.ts",
       "packages/server/src/__tests__/red-base-policy-raw-read-ratchet.test.ts",
+      "packages/server/src/__tests__/roster-raw-read-ratchet.test.ts",
       "packages/server/src/__tests__/test-impact-budget-setting.test.ts",
       "packages/server/src/__tests__/typecheck-package-coverage.test.ts",
       "packages/server/src/__tests__/verify-step-timings.test.ts",
