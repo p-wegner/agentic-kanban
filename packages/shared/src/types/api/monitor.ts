@@ -53,6 +53,14 @@ export type RiskPostureLevel = (typeof RISK_POSTURES)[number];
  *
  * `standard` is defined to reproduce today's behaviour exactly — see `resolveRiskPosture`.
  */
+/**
+ * Whether a merge may land on top of a red base branch, in increasing order of softness:
+ * `block` < `allow-known-debt` < `allow-file-debt-ticket` (#1015). Named separately from
+ * `RiskPosture` because it is the field the merge gate's red-debt subset rule keys on, and
+ * because a project may override it (softer only) via `red_base_policy_<projectId>`.
+ */
+export type RedBasePolicy = "block" | "allow-known-debt" | "allow-file-debt-ticket";
+
 export interface RiskPosture {
   level: RiskPostureLevel;
   /** Whether the level came from an explicit per-project pref, a per-ticket `risk:` tag
@@ -72,7 +80,7 @@ export interface RiskPosture {
    */
   sweepIntervalMs: number | null;
   /** Whether a merge is allowed to land on top of a red base branch. */
-  redBasePolicy: "block" | "allow-known-debt" | "allow-file-debt-ticket";
+  redBasePolicy: RedBasePolicy;
   trainMaxSize: number;
   trainMaxWaitMs: number;
   /**
