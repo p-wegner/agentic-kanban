@@ -15,6 +15,7 @@ import {
 import { ProfileQuotaSection } from "./monitor/ProfileQuotaSection.js";
 import { ProfileRosterWarningsSection } from "./monitor/ProfileRosterWarningsSection.js";
 import { NextStartCandidatesSection } from "./monitor/NextStartCandidatesSection.js";
+import { HarnessShareSection } from "./monitor/HarnessShareSection.js";
 export { MonitorButlerSection, OrchestratorSection, RecentBoardHealthEventsSection } from "./MonitorSections.js";
 import type { StartMode, ResolvedTunables, MonitorStatus, BoardHealthEvent } from "../lib/monitor-popover.js";
 import { useNow } from "../hooks/usePoll.js";
@@ -278,6 +279,10 @@ export function MonitorPopover({
           />
 
           {resolvedTunables && <EffectiveTargetsSection resolvedTunables={resolvedTunables} />}
+          <HarnessShareSection
+            harnessShare={status?.harnessShare}
+            configuredPct={resolvedTunables?.tunables.harnessSharePct ?? null}
+          />
 
           <ProfileQuotaSection />
           <ProfileRosterWarningsSection projectId={projectId} />

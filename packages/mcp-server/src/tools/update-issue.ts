@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import { prodDeps, type ToolDeps } from "./deps.js";
 import { mcpJson, mcpStructuredError, requireEntity, resolveStatusByName, checkOpenUnmergedWorkspace } from "../db-utils.js";
 import { fireIssueStatusWebhook } from "@agentic-kanban/shared/lib/issue-status-orchestration";
@@ -12,7 +13,7 @@ export function registerUpdateIssue(server: McpServer, deps: ToolDeps = prodDeps
   const { db, schema, notifyBoard } = deps;
   server.tool(
     "update_issue",
-    "Update an existing issue (title, description, status, priority, type)",
+    "Update an existing issue (title, description, status, priority, type, estimate, tags). tags.add / tags.remove take tag NAMES; an added tag is created when the board has none of that name (e.g. 'harness').",
     {
       issueId: z.string().describe("The issue ID to update"),
       title: z.string().optional().describe("New title"),
@@ -21,8 +22,12 @@ export function registerUpdateIssue(server: McpServer, deps: ToolDeps = prodDeps
       priority: z.enum(["low", "medium", "high", "critical"]).optional().describe("New priority"),
       issueType: z.enum(ISSUE_TYPES).optional().describe("Issue type (task, bug, feature, chore)"),
       estimate: z.enum(ISSUE_ESTIMATES).nullable().optional().describe("Size estimate (XS/S/M/L/XL), or null to clear"),
+      tags: z.object({
+        add: z.array(z.string().min(1)).optional().describe("Tag names to add (created if the board has no tag of that name; already-present tags are left alone)"),
+        remove: z.array(z.string().min(1)).optional().describe("Tag names to remove (a name the issue does not carry is a no-op)"),
+      }).optional().describe("Tag changes by NAME, e.g. { add: ['harness'] } — #1032: the REST tag routes need a tag id, this does not"),
     },
-    async ({ issueId, title, description, statusName, priority, issueType, estimate }) => {
+    async ({ issueId, title, description, statusName, priority, issueType, estimate, tags }) => {
       const existingResult = await db.select().from(schema.issues).where(eq(schema.issues.id, issueId)).limit(1);
       const r0 = requireEntity(existingResult, issueId, "Issue");
       if (!r0.ok) return r0.error;
@@ -64,6 +69,8 @@ export function registerUpdateIssue(server: McpServer, deps: ToolDeps = prodDeps
       // Non-status fields first; `updates` always carries at least `updatedAt`.
       await db.update(schema.issues).set(updates).where(eq(schema.issues.id, issueId));
 
+      const tagsChanged = await applyTagChanges(db, schema, issueId, tags, now);
+
       if (resolvedStatusId) {
         await transitionIssueStatus(db, issueId, resolvedStatusId, { now });
       }
@@ -94,8 +101,58 @@ export function registerUpdateIssue(server: McpServer, deps: ToolDeps = prodDeps
         updated: [
           ...Object.keys(updates).filter(k => k !== "updatedAt" && k !== "statusChangedAt"),
           ...(resolvedStatusId ? ["statusId"] : []),
+          ...(tagsChanged ? ["tags"] : []),
         ],
       });
     },
   );
+}
+
+/**
+ * #1032 — tag changes by NAME. Add is idempotent (a tag the issue already carries is not
+ * duplicated) and creates a missing tag, so an MCP-only agent can set `harness` without
+ * first round-tripping `list_tags`/`create_tag` and the REST `POST /api/issues/:id/tags`.
+ * Remove by name; a name the issue does not carry is a no-op. Returns whether anything
+ * was written so the response's `updated` list only names `tags` when it is true.
+ */
+async function applyTagChanges(
+  db: ToolDeps["db"],
+  schema: ToolDeps["schema"],
+  issueId: string,
+  tags: { add?: string[]; remove?: string[] } | undefined,
+  now: string,
+): Promise<boolean> {
+  const add = [...new Set((tags?.add ?? []).map((n) => n.trim()).filter(Boolean))];
+  const remove = [...new Set((tags?.remove ?? []).map((n) => n.trim()).filter(Boolean))];
+  if (add.length === 0 && remove.length === 0) return false;
+
+  const names = [...new Set([...add, ...remove])];
+  const known = await db.select({ id: schema.tags.id, name: schema.tags.name })
+    .from(schema.tags).where(inArray(schema.tags.name, names));
+  const idByName = new Map(known.map((t) => [t.name, t.id]));
+
+  const current = await db.select({ tagId: schema.issueTags.tagId })
+    .from(schema.issueTags).where(eq(schema.issueTags.issueId, issueId));
+  const currentIds = new Set(current.map((r) => r.tagId));
+
+  let changed = false;
+  for (const name of add) {
+    let tagId = idByName.get(name);
+    if (!tagId) {
+      tagId = randomUUID();
+      await db.insert(schema.tags).values({ id: tagId, name, color: null, createdAt: now });
+      idByName.set(name, tagId);
+    }
+    if (currentIds.has(tagId)) continue;
+    await db.insert(schema.issueTags).values({ id: randomUUID(), issueId, tagId });
+    currentIds.add(tagId);
+    changed = true;
+  }
+  const removeIds = remove.map((n) => idByName.get(n)).filter((id): id is string => !!id && currentIds.has(id));
+  if (removeIds.length > 0) {
+    await db.delete(schema.issueTags)
+      .where(and(eq(schema.issueTags.issueId, issueId), inArray(schema.issueTags.tagId, removeIds)));
+    changed = true;
+  }
+  return changed;
 }
