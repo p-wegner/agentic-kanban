@@ -34,6 +34,43 @@ Open http://localhost:5173.
 
 > **DB location:** `packages/server/kanban.db`. If absent, the server silently falls back to `~/.agentic-kanban/kanban.db` — board looks empty/wrong. Confirm the file exists after `pnpm db:setup`.
 
+## Running the BUILT board (no `tsx watch`)
+
+`pnpm dev` runs the TypeScript sources under `tsx`. A stable/deployed board runs the built
+artifact instead — the same thing `npx agentic-kanban` executes:
+
+```bash
+pnpm build                                   # shared → server bundle → mcp → worker → client → assets
+KANBAN_DB_URL=file:/abs/path/kanban.db \
+  pnpm --filter agentic-kanban start         # = node packages/server/dist/cli/index.js dev
+```
+
+`start` migrates and seeds the database on first run, so a fresh `KANBAN_DB_URL` needs no
+`db:setup`. Two directories resolve differently here than under `tsx`, and both work for the
+wrong reason in a dev run, so they are the things to check if a built board misbehaves:
+
+| What | Dev run | Built run |
+|---|---|---|
+| drizzle migrations | `packages/shared/drizzle` | `packages/server/dist/migrations` (copied by `scripts/copy-assets.mjs`) |
+| bundled agent skills | found by walking up from `packages/shared/src/lib` | found by walking up from `dist/` → `packages/server/skills` |
+
+`GET /health` reports the first one: in a built run it answers with a `migrations-journal`
+check naming the `dist/migrations` path. `agentic-kanban skill verify` reports the second —
+it prints `Bundle: <dir>`, and exits with *"No bundled skills found"* when the `skills/`
+directory did not ship.
+
+**Both are verified by `pnpm smoke:boot-dist`** (`scripts/boot-dist-smoke.mjs`, #1012). It
+checks HEAD out into a throwaway `git worktree` — `scripts/build-server.mjs` wipes
+`packages/server/dist` unconditionally, so it must never be pointed at a checkout you are
+using — builds there, boots the built CLI against a temp `KANBAN_DB_URL`, and probes
+`/health`, `GET /api/projects`, the applied-migration count and the bundled-skills
+resolution, then removes the worktree. `--full` runs the whole `pnpm build` (adds the client
+bundle), `--break-skills` is the fault injection that proves the skills check bites, `--keep`
+leaves the worktree for inspection. Measured ~19 s. It is **not** part of `pnpm test:mine`:
+the vitest wrapper `packages/server/src/__tests__/boot-from-dist-smoke.test.ts` self-skips
+unless `KANBAN_BOOT_DIST_SMOKE=1`, because it mutates the shared repo's worktree registry and
+holds a real port — fine for a nightly sweep, not for every merge gate.
+
 ## Registering other projects
 
 ```bash
