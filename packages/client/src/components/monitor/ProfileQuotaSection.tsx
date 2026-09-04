@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { QuotaProviderEntry, QuotaUsageResult } from "@agentic-kanban/shared";
-import { apiFetch } from "../../lib/api.js";
+import { getQuotaUsage } from "../../lib/settingsStore.js";
 
 /**
  * Per-profile quota, from the OAuth usage endpoint (#1023).
@@ -15,8 +15,10 @@ import { apiFetch } from "../../lib/api.js";
  * numbers trustworthy — an `unknown` row means "older than one reset window", which is
  * neither exhausted nor empty and must not read as either.
  *
- * Lives in its own module because it OWNS ITS DATA SOURCE: it fetches, and it is the only
- * reader of `quotaPercentLabel`/`measurementAgeLabel`. Adding it to `MonitorSections.tsx`
+ * Lives in its own module because it OWNS ITS DATA SOURCE: it fetches (through
+ * `settingsStore.getQuotaUsage`, since that module owns every preferences URL — the
+ * client-conventions guard counts a raw one here as a settings-cache bypass), and it is the
+ * only reader of `quotaPercentLabel`/`measurementAgeLabel`. Adding it to `MonitorSections.tsx`
  * is what pushed that file past the 1000-line god-module ceiling.
  */
 export function ProfileQuotaSection() {
@@ -25,7 +27,7 @@ export function ProfileQuotaSection() {
 
   useEffect(() => {
     let cancelled = false;
-    apiFetch<QuotaUsageResult>("/api/preferences/quota-usage")
+    getQuotaUsage()
       .then((res) => { if (!cancelled) { setResult(res); setError(null); } })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : "unavailable"); });
     return () => { cancelled = true; };

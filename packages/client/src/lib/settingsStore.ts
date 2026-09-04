@@ -1,3 +1,4 @@
+import type { QuotaUsageResult } from "@agentic-kanban/shared";
 import { apiFetch } from "./api.js";
 
 /** Full settings payload of GET /api/preferences/settings (flat key -> value map). */
@@ -80,6 +81,22 @@ export async function setSettings(patch: Record<string, string>): Promise<void> 
  */
 export function setProjectPref(projectId: string, key: string, value: string): Promise<void> {
   return setSettings({ [`${key}_${projectId}`]: value });
+}
+
+/**
+ * Read-only pass-through to GET /api/preferences/quota-usage (#1023, #1028).
+ *
+ * NOT a settings read: the quota figures are measured server-side from the OAuth usage
+ * endpoint and are not part of the flat settings map, so they neither populate the cache
+ * above nor participate in `invalidateSettings()` — every call is a fresh request, which is
+ * what a "how much is left right now" read-out wants. It lives here anyway because this
+ * module OWNS the `/api/preferences` prefix (see `client-conventions-guard`'s bypass
+ * ratchet): a component spelling the URL itself is indistinguishable, to a scanner, from
+ * one bypassing the settings cache, and the honest answer is to keep every preferences
+ * URL literal in the one module that is allowed to hold them.
+ */
+export function getQuotaUsage(): Promise<QuotaUsageResult> {
+  return apiFetch<QuotaUsageResult>("/api/preferences/quota-usage");
 }
 
 type InvalidationListener = () => void;
