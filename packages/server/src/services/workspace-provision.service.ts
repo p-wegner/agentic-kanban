@@ -43,6 +43,7 @@ import { writeTicketContextFile } from "@agentic-kanban/shared/lib/ticket-contex
 import { bootstrapSymlinks } from "@agentic-kanban/shared/lib/worktree-symlink-bootstrap";
 import { resolveWorkflowStart, buildTransitionBlock } from "@agentic-kanban/shared/lib/workflow-engine";
 import { loadProjectRuntimeConfig } from "./project-runtime-config.service.js";
+import type { ProfileSelectionReason } from "@agentic-kanban/shared/lib/profile-selection-reason";
 import { WorkspaceError, type CreateWorkspaceInput, type GitService } from "./workspace-internals.js";
 import { buildContextPrimer } from "./context-packer.service.js";
 import { materializeImpactMapIntoWorktree } from "./test-impact-map/worktree-map.js";
@@ -604,6 +605,8 @@ export function createWorkspaceProvisionService(deps: {
      */
     reserveUsed: boolean;
     reserveNote: string | null;
+    /** #1026 — WHY this profile, carried to the launch so it lands on the session row. */
+    profileSelectionReason: ProfileSelectionReason | null;
   }> {
     const runtime = await loadProjectRuntimeConfig(database, {
       projectId: projectId ?? "",
@@ -644,6 +647,7 @@ export function createWorkspaceProvisionService(deps: {
       profileRefused: runtime.provider.profileRefused,
       reserveUsed: runtime.provider.reserveUsed,
       reserveNote: runtime.provider.reserveNote,
+      profileSelectionReason: runtime.provider.profileSelectionReason,
     };
   }
 

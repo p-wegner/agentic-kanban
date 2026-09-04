@@ -2,6 +2,7 @@ import type { WSContext } from "hono/ws";
 import type { ProviderName } from "../agent-provider.js";
 import type { Placement } from "../agent-dispatch.service.js";
 import type { AgentOutputMessage } from "@agentic-kanban/shared";
+import type { ProfileSelectionReason } from "@agentic-kanban/shared/lib/profile-selection-reason";
 import type { TodoItem } from "../board-events.js";
 
 export interface Subscriber {
@@ -65,6 +66,13 @@ export interface StartSessionOptions {
    * Omitted = host. Routed by the agent dispatch proxy; only host exists today.
    */
   placement?: Placement;
+  /**
+   * #1026: WHY this launch runs on this profile — the resolver's own account, written onto
+   * the session row. Omitted for a launch whose profile was not resolved by the provider
+   * seam (a follow-up turn, a test); the column then stays NULL, keeping "not recorded"
+   * distinct from "the default happened", exactly as #801's placement columns do.
+   */
+  profileSelectionReason?: ProfileSelectionReason | null;
 }
 
 export interface DbWriteBufferEntry {
