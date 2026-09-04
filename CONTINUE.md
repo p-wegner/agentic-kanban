@@ -57,19 +57,54 @@ range `b45039a038..d2ea5ca51b` holds exactly these ten commits and nothing else.
 
 **Verified by this close-out, on `d2ea5ca51b`:** `KANBAN_TYPECHECK_WORKERS=2 pnpm typecheck` green
 (10s warm / 19s); `node scripts/check-god-modules.mjs` OK (1679 files, 19 baselined over
-threshold, none grown); `pnpm test:mine -- --maxWorkers=4` (fleet gate: go) is **NOT green**: mcp-server 43/43 files
-green; client 4 pre-existing reds (files last touched by `733fd529f3` #1021 and `9be1604ca7` #1028, both
-before this batch); server **7 failed / 8552 passed** in 5 files, and these ARE consequences of this
-batch: `merge-gate-extraction.repo.test.ts` (3 — migration 0152 added `workspace_merge_gate.message`,
-the "drops nothing else" pin needs the new column), `guard-inventory.test.ts` (parses test-mine
-output as JSON and now meets a `[test:mine] scoped to:` banner), `codex-skills-parity` (#1029 edited
-`.claude/skills/board-monitor/SKILL.md`, the `.codex` mirror did not follow),
-`repository-projections-ratchet` (a removed column set re-spelled beyond baseline),
-`worker-running-session-silence-ttl` (#1027: `hello` now carries profiles). The close-out agent
-that ran this hit its usage limit before fixing any of them; a session started 19:00 on this box is
-editing exactly these files plus `scripts/test-mine.mjs` and the `.codex` mirrors in the working
-tree right now — pick up from its commits, do not redo. `pnpm lint:arch` still crashes
-(`chalk.Instance is not a constructor`) — environmental (#1033), not run.
+threshold, none grown); `pnpm test:mine -- --maxWorkers=4` (fleet gate: go) was **NOT green** —
+mcp-server 43/43 files green, but 14 failing tests in 9 files. Those are now FIXED; see below.
+
+### The 14 reds that close-out found, and where they went (2026-09-04, evening)
+
+The close-out agent that ran the suite hit its usage limit before reading its own log; the log
+survived in its scratchpad and a continuation session picked it up from there. Three commits, all
+by pathspec on the main checkout:
+
+- **`f486447389` — #1034 (new ticket, filed while fixing).** `scripts/test-mine.mjs` printed
+  `[test:mine] scoped to: …` at MODULE scope, outside its main guard, so `guard-inventory.mjs`
+  — which imports it for `PACKAGES`/`scanAlwaysRunTests` — wrote that banner onto its own `--json`
+  stdout whenever `KANBAN_TEST_PACKAGES` was set, and `guard-inventory.test.ts` died in
+  `JSON.parse`. The env that sets that variable is **the pre-merge gate's own scoped tier**, so a
+  guard suite went red purely because the gate had narrowed its scope. Both notices moved into an
+  exported `announceScope()` called from inside the guard; the suite gained the case that pins it.
+- **`bcf28d1607` — six reds from the batch and its predecessors.**
+  `merge-gate-extraction.repo.test.ts` (3) learned #1011's `workspace_merge_gate.message` column
+  (and applies 0152 beside 0144/0148 in the backfill case); `exec-result-helper-adoption`'s two
+  NEW hand-rolled `.code` reads (`merge-gate-evidence.ts` from #1030, `test-impact-map.service.ts`
+  from #1018) now use `execSucceeded`; `repository-projections-ratchet`'s two re-spellings
+  (`auto-start.repository.ts` #1021, `issue/heal-ticket.repository.ts` #1016) spread
+  `issueTextColumns`; the `worker-running-session-silence-ttl` stub gained #1027's
+  `noteAttestedProfiles`; the `.codex/skills` mirrors of `board-monitor` (#1029) and `dev-server`
+  (#1013) were resynced from the canonical `.claude` side.
+- **`5e9d66160` — the four client reds, all pre-batch.** `RosterCandidate` moved DOWN from
+  `components/settings/ProjectRosterEditor.tsx` to `lib/rosterEditor.ts` (a `hooks/` module may
+  not name a `components/` type, and depcruise cannot see a type-only edge), the editor
+  re-exporting it; `useProfileRoster` migrated off its own fetch-in-effect ladder onto
+  `useApiResource` (#513), keeping `reloadKey` as a `reload()` on CHANGE so a nonzero first render
+  does not double-fetch; `StrategyTargetsView`'s Monitor-policy field table hoisted to module
+  scope as `POLICY_NUMBER_FIELDS` + `PolicyNumberKey`, which takes it from 510 back under its 509
+  entry (505) instead of raising the ring, and both stale shrinks were banked (509→505,
+  `SettingsPanel` 429→426).
+
+**No baseline was raised and no expectation loosened** — every ratchet is satisfied by fixing the
+call site.
+
+**Verified on `5e9d66160`:** the five previously-red server suites 34/34,
+`exec-result-helper-adoption` 3/3, the three client suites + `ProfileRosterTable.test.tsx` 24/24,
+`KANBAN_TYPECHECK_WORKERS=2 pnpm typecheck` green (35s, 5 packages). NOT re-run: the whole
+`test:mine`, so "the rest of the suite is still green" is inherited from the 16:08 log, not
+re-measured.
+
+**Still red, and only this:** `lint-arch-gate.test.ts` (2) — `chalk.Instance is not a constructor`.
+Measured cause: the #1033 wipe left `node_modules/.pnpm/dependency-cruiser@17.4.3/node_modules`
+holding only its self-link, and the root `node_modules` has 11 entries with no `chalk`. It needs
+the operator reinstall below; nothing in the source is wrong.
 
 **Remains.** Operator: the #1033 forced reinstall (`pnpm install -r --offline --force` in MAIN with
 the dev server stopped — see the pass below). **#1020 deliberately held** — it feeds the dev board,
@@ -157,7 +192,8 @@ state at the time it was written. Standing state lives here and nowhere else.
   (predictive rotation), #1027 (worker attestation, protocol v2), #1028 (roster UI) all Done.
 - **Board (agentic-kanban project):** In Review #1013, #1014 (blocked); Todo empty; Backlog
   #1020 (held on #1013), #1033 (code landed, operator step open). #1029, #1030, #1011, #1031,
-  #1032 Done today by direct-master commits (shas in the top pass).
+  #1032 Done today by direct-master commits, and #1034 (the test-mine import-time banner, filed
+  and fixed during the close-out) Done in `f486447389` — shas in the top pass.
 
 ### Next steps, in order
 
