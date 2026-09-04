@@ -297,15 +297,21 @@ async function persistGateVerdict(args: {
   branchSha: string | null;
   baseSha: string | null;
   durationMs?: number | null;
+  /** The passing gate's tier message (#1011) — what ran, so a weakened tier stays auditable. */
+  message?: string | null;
   database: Database;
 }): Promise<void> {
-  const { workspaceId, projectId, workingDir, ranAt, stage, source, branchSha, baseSha, durationMs, database } = args;
+  const { workspaceId, projectId, workingDir, ranAt, stage, source, branchSha, baseSha, durationMs, message, database } = args;
   try {
     // Resolved AFTER the run, so the key names the tier in force now — the one the reuse
     // check will compare against. (A mid-run tier change makes the key mismatch and the
     // verdict unreusable, which errs on re-running: the safe direction.)
     const { verificationKey } = await resolveGateVerification(projectId, database, { workingDir });
-    await setMergeGateEvidence(workspaceId, { ranAt, stage, source, branchSha, baseSha, verificationKey, durationMs: durationMs ?? null }, database);
+    await setMergeGateEvidence(
+      workspaceId,
+      { ranAt, stage, source, branchSha, baseSha, verificationKey, durationMs: durationMs ?? null, message: message ?? null },
+      database,
+    );
   } catch (err) {
     console.warn(
       `[workspace-merge] failed to persist gate verdict for workspace ${workspaceId} (non-fatal):`,
@@ -323,7 +329,7 @@ async function persistGateVerdict(args: {
 export async function describePersistedGateVerdict(
   workspaceId: string,
   database: Database = db,
-): Promise<{ ranAt: string; stage: string; source: string | null; branchSha: string | null; baseSha: string | null; reusable: boolean } | null> {
+): Promise<{ ranAt: string; stage: string; source: string | null; branchSha: string | null; baseSha: string | null; message: string | null; reusable: boolean } | null> {
   try {
     const evidence = await getMergeGateEvidence(workspaceId, database);
     if (!evidence?.ranAt || !evidence.stage || !REUSABLE_GATE_STAGES.has(evidence.stage)) return null;
@@ -333,6 +339,9 @@ export async function describePersistedGateVerdict(
       source: evidence.source,
       branchSha: evidence.branchSha,
       baseSha: evidence.baseSha,
+      // #1011 — the pass's own tier message, so "what did that pass actually run?" is answerable
+      // from the board after the fact. Null for evidence written before the column existed.
+      message: evidence.message ?? null,
       // "Reusable" here is the cheap half of the check (tips + tier are compared at merge
       // time, against the state then): a verdict with both tips, a tier key, and a fresh run.
       reusable: Boolean(
@@ -626,6 +635,7 @@ export async function runPreLockGate(args: {
     branchSha: preGate.shasBefore.branchSha ?? null,
     baseSha: preGate.shasBefore.baseSha ?? null,
     durationMs: preGate.durationMs,
+    message: preGate.message,
     database,
   });
   return preGate.token;

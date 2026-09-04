@@ -13,9 +13,10 @@ import {
   workspaceTurnBody, rejectPlanBody, createWorkspaceCommentBody,
   updateWorkspaceCommentBody, resolveWorkspaceCommentBody,
 } from "./workspace-action-body-schemas.js";
-import { completeMergeJob, describeMergeJobAttempts, failMergeJob, getMergeJob, startMergeJob } from "../services/merge-job.service.js";
+import { completeMergeJob, describeMergeJobAttempts, failMergeJob, getMergeJob, startMergeJob, type MergeJob } from "../services/merge-job.service.js";
 import { describePersistedGateVerdict } from "../services/workspace-merge-gate.js";
 import { getMergeRun, type MergeRunRow } from "../repositories/merge-run.repository.js";
+import { listMergeGateDiscards, type MergeGateDiscardRow } from "../repositories/merge-gate-discard.repository.js";
 import { getWorkspaceMergeState } from "../repositories/merge-queue.repository.js";
 import { getLatestInterruptedMergeRecord, type InterruptedMergeRecord } from "../repositories/issue-comments.repository.js";
 
@@ -116,9 +117,11 @@ export async function describeAbsentMergeJob(workspaceId: string): Promise<{
    */
   interruptedMergeRecord?: InterruptedMergeRecord;
   persistedGateVerdict?: Awaited<ReturnType<typeof describePersistedGateVerdict>>;
+  /** Every #243 discard recorded for this workspace, newest first (#1030). */
+  gateDiscards: MergeGateDiscardRow[];
   message: string;
 }> {
-  const [persistedGateVerdict, interruptedMerge, mergeState, interruptedRecord] = await Promise.all([
+  const [persistedGateVerdict, interruptedMerge, mergeState, interruptedRecord, gateDiscards] = await Promise.all([
     describePersistedGateVerdict(workspaceId),
     getMergeRun(workspaceId).catch(() => undefined),
     getWorkspaceMergeState(workspaceId).catch(() => undefined),
@@ -126,6 +129,9 @@ export async function describeAbsentMergeJob(workspaceId: string): Promise<{
     // marker alone answers correctly for a few minutes and then stops. Read the durable record
     // beside it; failing to read it must never be worse than not having looked.
     getLatestInterruptedMergeRecord(workspaceId).catch(() => null),
+    // #1030 — the discards outlive the job AND the latest-value evidence; a reader asking why a
+    // merge re-paid its gate needs them whichever of the branches below answers.
+    listMergeGateDiscards(workspaceId).catch(() => [] as MergeGateDiscardRow[]),
   ]);
   // #990 — checked FIRST, and returning here rather than decorating the messages below, because
   // a stamped `merged_at` is terminal: once the merge landed, whether a gate verdict is still
@@ -137,6 +143,7 @@ export async function describeAbsentMergeJob(workspaceId: string): Promise<{
       mergedAt: mergeState.mergedAt,
       mergedHeadSha: mergeState.mergedHeadSha,
       interruptedMerge: interruptedMerge ?? null,
+      gateDiscards,
       message:
         `no merge job is held in the current server process, but this workspace is stamped MERGED at ${mergeState.mergedAt}`
         + (mergeState.mergedHeadSha ? ` (merged head ${mergeState.mergedHeadSha})` : "")
@@ -176,6 +183,7 @@ export async function describeAbsentMergeJob(workspaceId: string): Promise<{
       interruptedMerge: interruptedMerge ?? null,
       ...(interruptedRecord ? { interruptedMergeRecord: interruptedRecord } : {}),
       ...(persistedGateVerdict ? { persistedGateVerdict } : {}),
+      gateDiscards,
       message:
         `no merge job is held in the current server process, and the last thing that happened to this `
         + `workspace's merge was an INTERRUPTION: a merge${job}${when} never reached a verdict — the process `
@@ -199,6 +207,7 @@ export async function describeAbsentMergeJob(workspaceId: string): Promise<{
       persistedGateVerdict,
       // Provably null here: any interruption, live or recorded, returned above.
       interruptedMerge: null,
+      gateDiscards,
       message:
         "no merge job recorded for this workspace in the current server process (it may have restarted mid-merge) — "
         + `but a PASSING pre-merge gate verdict is persisted (stage ${persistedGateVerdict.stage}, ran ${persistedGateVerdict.ranAt}). `
@@ -210,8 +219,26 @@ export async function describeAbsentMergeJob(workspaceId: string): Promise<{
   return {
     job: null,
     interruptedMerge: null,
+    gateDiscards,
     message: "no merge job recorded for this workspace in the current server process.",
   };
+}
+
+/**
+ * The `merge-status` body while this process HOLDS a job for the workspace: the job with its
+ * attempt history (#936), the one-line attempt summary, and — since #1030 — every persisted
+ * gate discard, so the "attempt 1 passed but was discarded" line in the summary has its sha
+ * pair, base-move file list and impact selection beside it rather than only in a server log.
+ *
+ * Outside the route factory for the same reason {@link describeAbsentMergeJob} is:
+ * `createWorkspaceActionsRoute` is on the `function-nloc-ratchet` (#800) shrink-only ring.
+ */
+export async function describeLiveMergeJob(
+  workspaceId: string,
+  job: MergeJob,
+): Promise<{ job: MergeJob; attemptSummary: string; gateDiscards: MergeGateDiscardRow[] }> {
+  const gateDiscards = await listMergeGateDiscards(workspaceId).catch(() => [] as MergeGateDiscardRow[]);
+  return { job, attemptSummary: describeMergeJobAttempts(job), gateDiscards };
 }
 
 export function createWorkspaceActionsRoute(
@@ -564,7 +591,7 @@ export function createWorkspaceActionsRoute(
     // endpoint reporting the same opaque `running` throughout, so the only way to see a retry
     // was to watch the OS process tree. The job now carries its attempt history; summarise it
     // in one operator-readable line beside the raw list.
-    return c.json({ job, attemptSummary: describeMergeJobAttempts(job) });
+    return c.json(await describeLiveMergeJob(id, job));
   });
 
   // GET /api/workspaces/:id/already-merged-status — check if branch is already merged without modifying state

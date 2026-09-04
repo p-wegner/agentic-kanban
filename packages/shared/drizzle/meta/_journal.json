@@ -1065,6 +1065,13 @@
       "when": 1788518003653,
       "tag": "0151_session_profile_selection_reason",
       "breakpoints": true
+    },
+    {
+      "idx": 152,
+      "version": "6",
+      "when": 1788527674906,
+      "tag": "0152_merge_gate_discards",
+      "breakpoints": true
     }
   ]
 }

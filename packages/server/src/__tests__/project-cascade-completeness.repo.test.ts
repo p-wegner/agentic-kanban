@@ -229,6 +229,16 @@ const SUBTREE_SEEDERS: Record<string, (c: SeedCtx) => Promise<void>> = {
       workspaceId: c.workspaceId, jobId: "merge-abc-1", startedAt: c.now, source: "merge-endpoint", pid: "1234",
     });
   },
+  // #1030: the discarded-gate-verdict ledger. Many rows per workspace, same `onDelete: cascade`
+  // shape, so seeding one proves the cascade fires.
+  merge_gate_discards: async (c) => {
+    await c.db.insert(schema.mergeGateDiscards).values({
+      id: `discard-${c.workspaceId}`, workspaceId: c.workspaceId, discardedAt: c.now, source: "pre-lock-merge",
+      stage: "verify", durationMs: 1200, jobId: "merge-abc-1", attempt: 1, moved: "base",
+      branchShaBefore: "aaa", branchShaAfter: "aaa", baseShaBefore: "bbb", baseShaAfter: "ccc",
+      baseMoveFiles: '["docs/x.md"]', impactSelection: null,
+    });
+  },
   // #815: the sixth column family extracted out of `workspaces` — the cached merge-tree
   // conflict probe. Same `onDelete: cascade` shape, so seeding it proves the cascade fires.
   workspace_conflict_cache: async (c) => {

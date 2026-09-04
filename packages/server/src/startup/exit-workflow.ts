@@ -341,7 +341,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
   async function armReadyForMerge(
     workspaceId: string,
     projectId: string,
-    evidence: { ranAt: string; stage: string; source: string; branchSha: string | null; baseSha: string | null; trustworthy: boolean },
+    evidence: { ranAt: string; stage: string; source: string; branchSha: string | null; baseSha: string | null; message?: string | null; trustworthy: boolean },
     /** The worktree the gate ran in, for the #958 selector component — see `resolveGateVerification`.
      *  Must be the same worktree `reusePersistedGateVerdict` will read against, or the key it
      *  stamps here can never match and the whole reuse path silently stops firing. */
@@ -366,6 +366,8 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
       branchSha: evidence.branchSha,
       baseSha: evidence.baseSha,
       verificationKey,
+      // #1011 — the passing gate's tier message, persisted beside the proof it describes.
+      message: evidence.trustworthy ? evidence.message ?? null : null,
     }, db);
     boardEvents.broadcast(projectId, "workspace_ready_for_merge");
   }
@@ -472,6 +474,7 @@ export function createWorkflowEngine({ sessionManager, boardEvents, autoMerge, r
       source: "review-exit gate",
       branchSha: gateShas.branchSha ?? null,
       baseSha: gateShas.baseSha ?? null,
+      message: preMergeGate.message,
     };
     await armReadyForMerge(workspaceId, projectId, { ...evidence, trustworthy: !tipMovedDuringGate }, workspace.workingDir);
     const learningAfterReview = getBool(prefMap, "learning_step_after_review") && workspace.workingDir ? launchLearningStep(learningStepDeps, workspace, prefMap, "after review", true) : Promise.resolve();

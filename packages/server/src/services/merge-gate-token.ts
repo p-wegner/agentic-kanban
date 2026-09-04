@@ -106,6 +106,8 @@ export interface ResolvedMergeGate {
   decision: "run-gate" | "already-passed" | "skip-explicit" | "run-gate-stale-evidence";
   /** See {@link PreMergeGateResult.unverified} — nothing checked this merge at all (#377). */
   unverified?: boolean;
+  /** See {@link PreMergeGateResult.impactSelection} — what a discard is recorded with (#1030). */
+  impactSelection?: PreMergeGateResult["impactSelection"];
 }
 
 function evidenceIsFresh(evidence: MergeGateEvidence, now: number): boolean {
