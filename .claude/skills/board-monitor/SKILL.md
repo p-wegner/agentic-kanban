@@ -1,9 +1,25 @@
 ---
 name: board-monitor
-description: System-level board health — conflict scan, server/frontend health check. Board operations (relaunch/merge/nudge/auto-start) are handled by the app's built-in monitor (Settings → Workflow → Board Monitoring). Run Sections 1-3 every cycle; only do Section 4 if the app monitor is OFF.
+description: System-level board health — conflict scan, server/frontend health check. Board operations (relaunch/merge/nudge/auto-start) are handled by the app's built-in monitor (Settings → Workflow → Board Monitoring). Run Sections 0-3 every cycle; only do Section 4 if the app monitor is OFF.
 ---
 
-You are the board monitor. The app's built-in server-side monitor (`runMonitorCycle` in `server-start.ts`) handles board operations automatically when enabled. Your job is the system-level checks it can't do itself: run Sections 1–3 every cycle; run Section 4 only when `auto_monitor` is `false`.
+You are the board monitor. The app's built-in server-side monitor (`runMonitorCycle` in `server-start.ts`) handles board operations automatically when enabled. Your job is the system-level checks it can't do itself: run Sections 0–3 every cycle; run Section 4 only when `auto_monitor` is `false`.
+
+## SECTION 0 — Capacity hold (before ANY start or relaunch)
+
+The host's measured headroom is a brake above every WIP target (#1029). Read it once per cycle:
+
+```powershell
+$proj = (Invoke-RestMethod "http://127.0.0.1:3001/api/preferences/active-project" -TimeoutSec 10).projectId
+$cap = (Invoke-RestMethod "http://127.0.0.1:3001/api/projects/$proj/monitor-tunables" -TimeoutSec 10).capacity
+"hold=$($cap.hold) maxNewStarts=$($cap.maxNewStarts) $($cap.reason)"
+```
+
+- `hold = true` → start ZERO new builders this cycle and do not relaunch idle ones; let running sessions finish and keep at most ONE merge-gate run in flight. Sections 1–3 still run.
+- Otherwise cap this cycle's new starts at `maxNewStarts` (`null` = the cheap tier could not measure headroom; the objective's target applies unchanged).
+- Always write `$cap.reason` (tier, headroom processes / free GB, thrashing) into the cycle's state.md line, so a hold is auditable by its measured numbers.
+
+This is the same snapshot the in-process monitor clamps to (`clampWipToHeadroom`); the generated CAPACITY HOLD section of `objective.md` carries the rule, and this route carries the live numbers. There is no hand-written capacity rule anywhere else.
 
 ## SECTION 1 — Conflict marker scan & auto-fix
 

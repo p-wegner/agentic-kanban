@@ -25,6 +25,7 @@ import {
   MAX_HARNESS_SHARE_PCT,
   MIN_HARNESS_SHARE_PCT,
 } from "./harness-budget.js";
+import { deriveCapacityHold, type MachineCapacitySnapshot } from "./machine-capacity.js";
 
 export type StrategySegmentKind = "work-type" | "provider" | "area" | "custom";
 
@@ -165,7 +166,61 @@ const MODE_DESCRIPTIONS: Record<ProviderPolicyMode, string> = {
   "fallback-only": "FALLBACK-ONLY — use only when no better option exists or on explicit user request",
 };
 
-export function renderGeneratedStrategyBlock(config: StrategyBullseyeConfig, posture: RiskPosture = RISK_POSTURE_DEFAULT): string {
+/**
+ * Inputs to the generated block that are NOT Bullseye preferences (#1029).
+ *
+ * `capacity` is the machine-capacity snapshot measured when the block was rendered. The block
+ * is regenerated on a Bullseye save, not per Conductor cycle, so that reading is a "last
+ * measured" figure — the section it renders therefore ALWAYS carries the live-read rule
+ * (`GET /api/projects/<id>/monitor-tunables` → `capacity`) and only additionally names the
+ * snapshot when one was passed. `projectId` makes that URL concrete.
+ */
+export interface GeneratedBlockExtras {
+  capacity?: MachineCapacitySnapshot;
+  projectId?: string;
+}
+
+/**
+ * The Conductor's capacity brake, generated (#1029). Replaces the hand-written "MEMORY HOLD"
+ * paragraph that used to sit below the END marker in `scripts/board-monitor/objective.md`:
+ * that paragraph pinned one afternoon's RAM reading into policy and could only be lifted by
+ * hand, whereas the in-process monitor was already clamping to the measured headroom
+ * (`clampWipToHeadroom`, #1019). The rule below is the same brake for the Conductor, and the
+ * per-cycle numbers come from the route, not from this file.
+ */
+export function renderCapacityHoldSection(tunables: MonitorTunables, extras: GeneratedBlockExtras = {}): string[] {
+  const idSegment = extras.projectId ?? "<projectId>";
+  const snapshotLines = extras.capacity
+    ? (() => {
+        const hold = deriveCapacityHold(extras.capacity, { maxNewStartsPerCycle: tunables.maxNewStartsPerCycle });
+        const measured = hold.tier === "1"
+          ? `HEADROOM_PROCESSES = ${hold.headroomProcesses}, thrashing=${hold.thrashing}`
+          : `FREE_GB = ${hold.freeGb === null ? "unknown" : hold.freeGb.toFixed(1)}`;
+        return [
+          `- **CAPACITY_HOLD = ${hold.hold}** - last measured when this block was generated (${hold.reason}). Stale by definition: the live read above is authoritative.`,
+          `- **${measured}**${hold.maxNewStarts === null ? "" : ` - MAX_NEW_STARTS this cycle would be ${hold.maxNewStarts}`}.`,
+        ];
+      })()
+    : [
+        "- **CAPACITY_HOLD = unmeasured at generation** - this block is regenerated on a Bullseye save, not per cycle; the live read above is authoritative.",
+      ];
+  return [
+    "",
+    "## CAPACITY HOLD (generated - do not hand-edit)",
+    "The host's measured headroom is a brake on EVERY start, above every target in this file. Before any launch or relaunch, read the live snapshot once per cycle:",
+    `\`GET /api/projects/${idSegment}/monitor-tunables\` → \`capacity\` (\`hold\`, \`tier\`, \`headroomProcesses\`, \`freeGb\`, \`thrashing\`, \`maxNewStarts\`, \`reason\`).`,
+    "- If `capacity.hold` is **true**: start ZERO new builders and do not relaunch idle ones; let running sessions finish and keep at most ONE merge-gate run in flight. A gate run on a saturated box dies on fork-worker timeouts, so starting more work makes every lane lose.",
+    "- Otherwise cap this cycle's new starts at `capacity.maxNewStarts` (never above MAX_NEW_STARTS_PER_CYCLE). `null` means the cheap tier could not measure headroom — the target applies unchanged.",
+    "- Whatever you decide, write `capacity.reason` into this cycle's state.md line so the hold is auditable by its measured numbers, not by a token.",
+    ...snapshotLines,
+  ];
+}
+
+export function renderGeneratedStrategyBlock(
+  config: StrategyBullseyeConfig,
+  posture: RiskPosture = RISK_POSTURE_DEFAULT,
+  extras: GeneratedBlockExtras = {},
+): string {
   const tunables = deriveMonitorTunables(config);
   const segments = [...(config.segments ?? [])].sort((a, b) => segmentWeight(b) - segmentWeight(a));
   const weightedLines = segments.length === 0
@@ -212,6 +267,7 @@ export function renderGeneratedStrategyBlock(config: StrategyBullseyeConfig, pos
     "## STRATEGY WEIGHTS (generated - do not hand-edit)",
     ...weightedLines,
     ...providerStrategyNote,
+    ...renderCapacityHoldSection(tunables, extras),
     GENERATED_END,
   ].join("\n");
 }
@@ -220,8 +276,9 @@ export function updateObjectiveWithStrategy(
   objectiveText: string,
   config: StrategyBullseyeConfig,
   posture: RiskPosture = RISK_POSTURE_DEFAULT,
+  extras: GeneratedBlockExtras = {},
 ): string {
-  const block = renderGeneratedStrategyBlock(config, posture);
+  const block = renderGeneratedStrategyBlock(config, posture, extras);
   const generatedPattern = new RegExp(`${GENERATED_START}[\\s\\S]*?${GENERATED_END}`);
   if (generatedPattern.test(objectiveText)) {
     return objectiveText.replace(/## TUNABLE TARGETS[^\n]*\n[\s\S]*?<!-- STRATEGY_BULLSEYE_GENERATED_END -->/, block);
@@ -298,6 +355,10 @@ export function writeStrategyObjective(
     createIfMissing?: boolean;
     project?: { id: string; name?: string | null; repoPath: string; defaultBranch?: string | null };
     posture?: RiskPosture;
+    /** #1029 — the capacity snapshot measured at save time, named in the CAPACITY HOLD section. */
+    capacity?: MachineCapacitySnapshot;
+    /** #1029 — makes the section's live-read URL concrete; defaults to `project.id` when given. */
+    projectId?: string;
   } = {},
 ): boolean {
   const config = parseStrategyBullseyeConfig(rawConfig);
@@ -309,7 +370,10 @@ export function writeStrategyObjective(
     writeFileSync(objectivePath, renderProjectConductorObjective(options.project), "utf8");
   }
   const current = readFileSync(objectivePath, "utf8");
-  const next = updateObjectiveWithStrategy(current, config, options.posture ?? RISK_POSTURE_DEFAULT);
+  const next = updateObjectiveWithStrategy(current, config, options.posture ?? RISK_POSTURE_DEFAULT, {
+    capacity: options.capacity,
+    projectId: options.projectId ?? options.project?.id,
+  });
   if (next !== current) {
     writeFileSync(objectivePath, next, "utf8");
     return true;

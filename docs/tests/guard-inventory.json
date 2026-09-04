@@ -2,13 +2,13 @@
   "schema": "guard-inventory 1",
   "generatedBy": "pnpm guard:inventory (scripts/guard-inventory.mjs)",
   "counts": {
-    "files": 174,
-    "alwaysRun": 174,
-    "ratchet": 40,
-    "both": 40,
-    "distinctProperties": 174,
+    "files": 175,
+    "alwaysRun": 175,
+    "ratchet": 41,
+    "both": 41,
+    "distinctProperties": 175,
     "missingProperty": 0,
-    "unmeasured": 12
+    "unmeasured": 13
   },
   "slowThresholdMs": 20000,
   "withGit": true,
@@ -1554,6 +1554,24 @@
       "lastRedSource": "proxy: git log of fix commits naming the file (no gate-outcome ledger exists)",
       "durationMs": 1147.25146484375,
       "durationSource": "docs/tests/durations.json"
+    },
+    {
+      "file": "packages/server/src/__tests__/objective-capacity-hold-ratchet.test.ts",
+      "basename": "objective-capacity-hold-ratchet.test.ts",
+      "package": "server",
+      "kinds": [
+        "always-run",
+        "ratchet"
+      ],
+      "property": "The Conductor's capacity brake is GENERATED, never hand-written (#1029).",
+      "propertyKey": "the conductor s capacity brake is generated never hand written",
+      "propertySource": "doc-block",
+      "introducedSha": null,
+      "introducedDate": null,
+      "lastRedProxy": null,
+      "lastRedSource": "proxy: git log of fix commits naming the file (no gate-outcome ledger exists)",
+      "durationMs": null,
+      "durationSource": "absent from docs/tests/durations.json"
     },
     {
       "file": "packages/server/src/__tests__/openapi-drift.test.ts",
@@ -4769,6 +4787,13 @@
       ]
     },
     {
+      "propertyKey": "the conductor s capacity brake is generated never hand written",
+      "property": "The Conductor's capacity brake is GENERATED, never hand-written (#1029).",
+      "files": [
+        "packages/server/src/__tests__/objective-capacity-hold-ratchet.test.ts"
+      ]
+    },
+    {
       "propertyKey": "the dashboard charts duplication is a down only ring",
       "property": "The dashboard charts' duplication is a DOWN-only ring (#732).",
       "files": [
@@ -4941,6 +4966,11 @@
       }
     ],
     "neverRedSinceIntroduction": [
+      {
+        "file": "packages/server/src/__tests__/objective-capacity-hold-ratchet.test.ts",
+        "introducedDate": null,
+        "property": "The Conductor's capacity brake is GENERATED, never hand-written (#1029)."
+      },
       {
         "file": "packages/server/src/__tests__/commit-checkpoint.test.ts",
         "introducedDate": "2026-05-28",
@@ -5186,6 +5216,7 @@
       "packages/server/src/__tests__/guard-inventory.test.ts",
       "packages/server/src/__tests__/issue-update-unrecognized-keys.test.ts",
       "packages/server/src/__tests__/machine-verify-lock-mirror.test.ts",
+      "packages/server/src/__tests__/objective-capacity-hold-ratchet.test.ts",
       "packages/server/src/__tests__/project-update-unrecognized-keys.test.ts",
       "packages/server/src/__tests__/promote-plan.test.ts",
       "packages/server/src/__tests__/red-base-policy-raw-read-ratchet.test.ts",

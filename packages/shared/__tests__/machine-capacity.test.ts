@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_MIN_FREE_GB,
+  deriveCapacityHold,
   deriveVerifyWorkers,
   readTier0Capacity,
   resolveSpareCores,
@@ -112,5 +113,66 @@ describe("deriveVerifyWorkers (#909)", () => {
 
   it("a low ceiling (1) always wins regardless of capacity", () => {
     expect(deriveVerifyWorkers({ cpuCount: 32, freeGb: 64, ceiling: 1 })).toBe(1);
+  });
+});
+
+describe("deriveCapacityHold (#1029) - the Conductor's projection of a snapshot", () => {
+  it("a saturated Tier 1 snapshot holds, allows zero new starts, and names the measured numbers", () => {
+    const hold = deriveCapacityHold(
+      { tier: "1", hold: true, canStartAnother: false, headroomProcesses: 0, thrashing: "heavy" },
+      { maxNewStartsPerCycle: 3 },
+    );
+    expect(hold.hold).toBe(true);
+    expect(hold.tier).toBe("1");
+    expect(hold.maxNewStarts).toBe(0);
+    expect(hold.headroomProcesses).toBe(0);
+    expect(hold.thrashing).toBe("heavy");
+    expect(hold.reason).toContain("0 headroom process(es)");
+    expect(hold.reason).toContain("thrashing=heavy");
+  });
+
+  it("an unsaturated Tier 1 snapshot caps new starts at the measured headroom, never above the per-cycle cap", () => {
+    const roomy = deriveCapacityHold(
+      { tier: "1", hold: false, canStartAnother: true, headroomProcesses: 5, thrashing: "none" },
+      { maxNewStartsPerCycle: 3 },
+    );
+    expect(roomy.hold).toBe(false);
+    expect(roomy.maxNewStarts).toBe(3);
+    const tight = deriveCapacityHold(
+      { tier: "1", hold: false, canStartAnother: true, headroomProcesses: 1, thrashing: "light" },
+      { maxNewStartsPerCycle: 3 },
+    );
+    expect(tight.maxNewStarts).toBe(1);
+    // No cap given: the measured headroom is the answer.
+    expect(deriveCapacityHold({ tier: "1", hold: false, canStartAnother: true, headroomProcesses: 2, thrashing: "none" }).maxNewStarts).toBe(2);
+  });
+
+  it("a negative headroom from the fleet tool is clamped to 0, never a negative start budget", () => {
+    const hold = deriveCapacityHold(
+      { tier: "1", hold: false, canStartAnother: true, headroomProcesses: -2, thrashing: "none" },
+      { maxNewStartsPerCycle: 3 },
+    );
+    expect(hold.maxNewStarts).toBe(0);
+  });
+
+  it("a held Tier 0 read allows zero starts and carries the free-GB figure", () => {
+    const hold = deriveCapacityHold(
+      { tier: "0", hold: true, reason: "only 1.2GB free (floor 2GB)", freeGb: 1.2 },
+      { maxNewStartsPerCycle: 3 },
+    );
+    expect(hold.hold).toBe(true);
+    expect(hold.tier).toBe("0");
+    expect(hold.maxNewStarts).toBe(0);
+    expect(hold.freeGb).toBe(1.2);
+    expect(hold.headroomProcesses).toBeNull();
+    expect(hold.reason).toContain("only 1.2GB free");
+  });
+
+  it("an unheld Tier 0 read does not fabricate a headroom: the cap passes through, or null without one", () => {
+    const withCap = deriveCapacityHold({ tier: "0", hold: false, reason: "8.0GB free", freeGb: 8 }, { maxNewStartsPerCycle: 3 });
+    expect(withCap.hold).toBe(false);
+    expect(withCap.maxNewStarts).toBe(3);
+    const noCap = deriveCapacityHold({ tier: "0", hold: false, reason: "8.0GB free", freeGb: 8 });
+    expect(noCap.maxNewStarts).toBeNull();
   });
 });

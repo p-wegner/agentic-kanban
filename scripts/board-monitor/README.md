@@ -101,6 +101,13 @@ other files outside that directory.
 > with no restart**. This is the single place to steer the loop's pace. Only `loop.sh`'s own env
 > knobs (`MONITOR_SLEEP` etc.) are read once at start and still require a restart.
 
+> **The capacity brake is generated, not hand-written (#1029).** The Bullseye block carries a
+> `## CAPACITY HOLD` section that tells each cycle to read `capacity` off
+> `GET /api/projects/:id/monitor-tunables` (the live `fleet snapshot` / `os.freemem()` verdict
+> projected through `deriveCapacityHold`) before any start or relaunch: `hold=true` means start
+> nothing, otherwise `maxNewStarts` caps the cycle. Do not add a hand-written memory/CPU rule to
+> `objective.md` — `objective-capacity-hold-ratchet.test.ts` fails on one.
+
 **Env knobs:** `MONITOR_AGENT` (harness: `claude` default, or `codex`) · `MONITOR_SLEEP` (gap between
 runs, default 1800s = 30min) · `MONITOR_MAX_ITERS` (default 500) · `MONITOR_ITER_TIMEOUT`
 (per-iteration cap, default 1800s) · `MONITOR_STATE_KEEP` (memory lines kept, default 40).
