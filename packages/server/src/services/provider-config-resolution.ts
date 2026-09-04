@@ -27,8 +27,8 @@ import { narrowProviderName, getProfilePrefKey } from "./agent-provider.js";
 import { resolveAgentSettings } from "./agent-settings.service.js";
 import { applyProviderSelectionToPrefMap } from "./strategy-objective.service.js";
 import { resolveEffectiveModel } from "./effective-config.service.js";
-import type { ParsedProfileAllowlist } from "@agentic-kanban/shared/lib/profile-allowlist";
-import { clampProfileToAllowlist } from "@agentic-kanban/shared/lib/profile-allowlist";
+import type { ParsedProfileAllowlist, ParsedRoster, ProfileHeadroom } from "@agentic-kanban/shared/lib/profile-allowlist";
+import { allowlistAsRoster, resolveRosterSelection } from "@agentic-kanban/shared/lib/profile-allowlist";
 import { dataHandlingBlockedByRequirement, profileCapabilitiesPrefKey } from "@agentic-kanban/shared/lib/profile-capabilities";
 
 export interface ProviderConfigInput {
@@ -46,6 +46,22 @@ export interface ProviderConfigInput {
    * behaviour. See `@agentic-kanban/shared/lib/profile-allowlist`.
    */
   allowlist?: ParsedProfileAllowlist | null;
+  /**
+   * The project's resolved profile ROSTER (#1025) — the allowlist with roles. When
+   * present it SUPERSEDES `allowlist`, which is the same thing with every entry `pool`.
+   * See `@agentic-kanban/shared/lib/profile-roster`.
+   */
+  roster?: ParsedRoster | null;
+  /**
+   * Per-profile 5-hour-window readings, used to ORDER the `pool` (most remaining headroom
+   * first). Absent/unknown entries keep declared order and are never read as exhausted, so
+   * a board with no quota source behaves exactly as it did before rosters existed.
+   */
+  headroom?: Map<string, ProfileHeadroom> | null;
+  /** Percent of the 5-hour window at or above which a pool profile counts as exhausted. */
+  exhaustedPct?: number;
+  /** May this launch reach for a `reserve` profile? (`resolveReserveAllowance`.) */
+  reserveAllowed?: boolean;
   /** Injected clock for the allowlist's cooldown checks (`nowMs` spelling, #614). */
   nowMs?: number;
   /**
@@ -76,8 +92,26 @@ export interface ResolvedProviderConfig {
    * ignoring it silently defeats the restriction.
    */
   profileHold: string | null;
-  /** True when the allowlist overrode the selection the precedence chain produced. */
+  /** True when the allowlist/roster overrode the selection the precedence chain produced. */
   profileClamped: boolean;
+  /**
+   * #1025 — set when the requested profile is `forbidden` for this project. A refusal is
+   * NOT a clamp: the launch stops rather than quietly running on a different account,
+   * because "we ignored your explicit choice" is exactly as wrong as honouring it when the
+   * account is one that must never see this work. `profileHold` carries the same reason,
+   * so a caller that only checks the hold still refuses.
+   */
+  profileRefused: boolean;
+  /**
+   * #1025 — the selection is a `reserve` profile, taken because every `pool` profile was
+   * exhausted or cooling AND reserve was permitted. LOG this and surface it (Monitor view
+   * warning): an emergency account spent silently is an emergency account spent by accident.
+   */
+  reserveUsed: boolean;
+  /** The reserve start spelled out, or null. */
+  reserveNote: string | null;
+  /** The pool in the order it was considered — "why this profile" for the Monitor view. */
+  poolOrder: string[];
   /**
    * Set when the project's required-data-labels constraint (#876) is not satisfied by
    * the resolved profile — e.g. the project requires "no-training" and the profile that
@@ -122,21 +156,35 @@ export function resolveProviderConfig(input: ProviderConfigInput): ResolvedProvi
   // clamped launch would end up carrying the *other* provider's command line.
   let profileHold: string | null = null;
   let profileClamped = false;
-  if (input.allowlist?.restricted) {
-    const clamp = clampProfileToAllowlist({
-      allowlist: input.allowlist,
+  let profileRefused = false;
+  let reserveUsed = false;
+  let reserveNote: string | null = null;
+  let poolOrder: string[] = [];
+  // #1025: one algorithm for both spellings — an allowlist IS a roster whose every entry
+  // is `pool`, so the legacy input is projected rather than given its own branch.
+  const roster = input.roster ?? (input.allowlist ? allowlistAsRoster(input.allowlist) : null);
+  if (roster?.restricted) {
+    const decided = resolveRosterSelection({
+      roster,
       provider: settings.provider,
       profileName: settings.profile?.name,
       prefMap,
       nowMs: input.nowMs ?? Date.now(),
+      headroom: input.headroom,
+      exhaustedPct: input.exhaustedPct,
+      reserveAllowed: input.reserveAllowed,
     });
-    if (clamp.note) notes.push(clamp.note);
-    profileHold = clamp.holdReason;
-    profileClamped = clamp.clamped;
-    if (clamp.selection && clamp.clamped) {
+    if (decided.note) notes.push(decided.note);
+    profileHold = decided.holdReason;
+    profileClamped = decided.clamped;
+    profileRefused = decided.refused;
+    reserveUsed = decided.usedReserve;
+    reserveNote = decided.reserveNote;
+    poolOrder = decided.poolOrder;
+    if (decided.selection && decided.clamped) {
       applyProviderSelectionToPrefMap(prefMap, {
-        provider: clamp.selection.provider,
-        profileName: clamp.selection.name,
+        provider: decided.selection.provider,
+        profileName: decided.selection.name,
       });
       settings = resolveAgentSettings(prefMap, input.commandOverride);
     }
@@ -196,6 +244,10 @@ export function resolveProviderConfig(input: ProviderConfigInput): ResolvedProvi
     profileSelection,
     profileHold,
     profileClamped,
+    profileRefused,
+    reserveUsed,
+    reserveNote,
+    poolOrder,
     dataHandlingHold,
     notes,
   };

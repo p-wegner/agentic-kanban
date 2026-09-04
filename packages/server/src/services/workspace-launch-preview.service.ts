@@ -104,8 +104,14 @@ export function createLaunchPreviewService(deps: LaunchPreviewDeps) {
       // Preview, so these report rather than throw — but they must be shown, or the dialog
       // offers a launch the create path will refuse (hold), or shows the profile the user
       // picked while the launch quietly uses a different one (clamp).
-      if (agentConfig.profileHold) {
+      if (agentConfig.profileRefused) {
+        warnings.push(`Profile roster refuses this launch: ${agentConfig.profileHold}.`);
+      } else if (agentConfig.profileHold) {
         warnings.push(`Profile allowlist blocks this launch: ${agentConfig.profileHold}.`);
+      } else if (agentConfig.reserveUsed) {
+        // A reserve start is legal, so it is a warning rather than a block — but showing it
+        // is the point: the dialog must not offer an emergency account as if it were normal.
+        warnings.push(agentConfig.reserveNote ?? `Launching on the RESERVE profile ${agentConfig.resolvedProfile}.`);
       } else if (agentConfig.profileClamped) {
         const asked = input.profile?.name || input.claudeProfile;
         warnings.push(

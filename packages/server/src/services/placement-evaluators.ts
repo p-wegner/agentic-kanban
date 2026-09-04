@@ -13,6 +13,7 @@
 import {
   allowedProfilesPrefKey,
   remoteDispatchBlockedByAllowlist,
+  rosterPrefKey,
 } from "@agentic-kanban/shared/lib/profile-allowlist";
 import {
   remoteDispatchBlockedByDataHandling,
@@ -53,6 +54,8 @@ export interface EvalContext {
   strict: boolean;
   optInPref: string | undefined;
   allowlistPref: string | undefined;
+  /** The `roster_<projectId>` value (#1025) — the newer spelling of the same restriction. */
+  rosterPref?: string | undefined;
   dataHandlingPref: string | undefined;
   /** The project's resolved risk posture (#937) — read once by the driver, judged by check 4. */
   posture: RiskPosture;
@@ -95,8 +98,8 @@ const checkOptIn: Evaluator = async (ctx) => {
 
 const checkAllowlist: Evaluator = async (ctx) => {
   const key = allowedProfilesPrefKey(ctx.projectId);
-  const block = remoteDispatchBlockedByAllowlist(ctx.allowlistPref);
-  const observed = { [key]: ctx.allowlistPref ?? null };
+  const block = remoteDispatchBlockedByAllowlist(ctx.allowlistPref, ctx.rosterPref);
+  const observed = { [key]: ctx.allowlistPref ?? null, [rosterPrefKey(ctx.projectId)]: ctx.rosterPref ?? null };
   if (!block.blocked) {
     return { outcome: "pass", detail: `${key} is empty, so the project is unrestricted`, observed };
   }

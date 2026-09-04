@@ -639,11 +639,21 @@ export function createWorkspaceCreateService(deps: {
       // next-best profile would spend the wrong subscription, which for a project pinned
       // to a client account is worse than not running at all.
       if (agentConfig.profileHold) {
-        throw new WorkspaceError(
-          `Profile allowlist blocks this launch: ${agentConfig.profileHold}. Wait for an allowed profile to become available, or change the project's allowed profiles.`,
-          "CONFLICT",
-          { code: "PROFILE_ALLOWLIST_HOLD", projectId: issue.projectId },
-        );
+        // #1025 separates the two: a FORBIDDEN profile is refused (nothing to wait for —
+        // this account may never see this work), while an exhausted/cooling roster is a
+        // hold that resolves itself. Telling an operator to "wait" for a forbidden profile
+        // would send them to wait for something that is never going to happen.
+        throw agentConfig.profileRefused
+          ? new WorkspaceError(
+              `Profile roster refuses this launch: ${agentConfig.profileHold}. Pick a permitted profile, or change the project's roster.`,
+              "CONFLICT",
+              { code: "PROFILE_FORBIDDEN", projectId: issue.projectId },
+            )
+          : new WorkspaceError(
+              `Profile allowlist blocks this launch: ${agentConfig.profileHold}. Wait for an allowed profile to become available, or change the project's allowed profiles.`,
+              "CONFLICT",
+              { code: "PROFILE_ALLOWLIST_HOLD", projectId: issue.projectId },
+            );
       }
       // #876: the resolved profile does not carry a data-handling tag the project
       // requires (e.g. "no-training"). Refused the same way as the allowlist hold above
