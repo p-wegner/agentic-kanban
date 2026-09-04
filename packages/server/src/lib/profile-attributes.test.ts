@@ -25,7 +25,7 @@ const NOW = "2026-09-04T10:00:00.000Z";
 let home: string;
 
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), "profile-attrs-"));
+  home = mkdtempSync(join(tmpdir(), "ak-profile-attrs-"));
 });
 
 afterEach(() => {
