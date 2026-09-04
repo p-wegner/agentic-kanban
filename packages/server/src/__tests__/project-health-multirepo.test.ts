@@ -32,7 +32,11 @@ vi.mock("./dirty-main-checkout.js", () => ({}));
 vi.mock("../services/dirty-main-checkout.js", () => ({
   getDirtyTrackedSourceFiles: (...a: unknown[]) => dirtyFilesMock(...a),
 }));
-vi.mock("../repositories/preferences.repository.js", () => ({ getPreference: async () => null }));
+vi.mock("../repositories/preferences.repository.js", () => ({
+  getPreference: async () => null,
+  // #1031: the health entry now carries the posture-derived `baseSweep`; no prefs = no posture.
+  getAllPreferencesCached: async () => [],
+}));
 vi.mock("../repositories/base-branch-health.repository.js", () => ({ getLatestBaseBranchHealth: async () => null }));
 
 const { getProjectHealth } = await import("../services/project-health.service.js");

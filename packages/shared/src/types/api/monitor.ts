@@ -61,6 +61,27 @@ export type RiskPostureLevel = (typeof RISK_POSTURES)[number];
  */
 export type RedBasePolicy = "block" | "allow-known-debt" | "allow-file-debt-ticket";
 
+/**
+ * The EFFECTIVE periodic base-branch sweep for one project (#1031) — reported on
+ * `GET /api/projects/:id/base-branch-health` (`sweep`) and per project on
+ * `GET /api/projects/health` (`baseSweep`), so an operator can see which projects run the
+ * full suite on a schedule and how often, without reading the posture table.
+ */
+export interface BaseSweepInfo {
+  /** `false` = no scheduled sweep at all (the opt-in rule: no posture chosen, or only a tag). */
+  scheduled: boolean;
+  /** The interval the sweep actually uses, or `null` when `scheduled` is false. */
+  intervalMs: number | null;
+  /** The LEVEL's nominal cadence — what the project would get once a posture is chosen. */
+  nominalIntervalMs: number | null;
+  postureLevel: RiskPostureLevel;
+  postureSource: RiskPosture["source"];
+  /** One human sentence naming the cadence or why there is none. */
+  reason: string;
+  /** `lastProbeAt + intervalMs` when both are known — a hint, not the scheduler's verdict. */
+  nextDueAt: string | null;
+}
+
 export interface RiskPosture {
   level: RiskPostureLevel;
   /** Whether the level came from an explicit per-project pref, a per-ticket `risk:` tag

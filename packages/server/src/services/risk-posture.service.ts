@@ -1,6 +1,6 @@
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { RISK_POSTURES } from "@agentic-kanban/shared/lib/risk-posture";
-import type { RedBasePolicy, RiskPosture, RiskPostureLevel } from "@agentic-kanban/shared/types";
+import type { BaseSweepInfo, RedBasePolicy, RiskPosture, RiskPostureLevel } from "@agentic-kanban/shared/types";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getIssueTagRows } from "../repositories/tag.repository.js";
@@ -234,14 +234,22 @@ function postureForLevel(level: RiskPostureLevel, source: RiskPosture["source"])
       };
     case "standard":
     default:
-      // Today's behaviour, exactly — see the header doc.
+      // Today's behaviour, exactly — see the header doc. The ONE deliberate exception is the
+      // sweep cadence below (#1031, decision 017 Amendment 2026-09-04 #1031).
       return {
         level: "standard", source,
         gateTier: "full",
-        // Today's `BASE_HEALTH_DEFAULT_INTERVAL_MS`, so an explicitly-standard project keeps
-        // exactly the cadence it has now. (An UNSET project gets none — see the opt-in rule in
-        // `resolveBaseSweepIntervalMs`, which is what stops idle imported repos burning compute.)
-        sweepIntervalMs: 30 * 60 * 1000,
+        // Half-daily, the same as `strict` and for the same reason: a `full` per-merge gate
+        // already verifies every landing, so a sweep only adds value for changes that reach
+        // the base OUTSIDE a merge (a direct push). Until #1031 this was the pre-posture
+        // `BASE_HEALTH_DEFAULT_INTERVAL_MS` (30 min) — which meant an explicitly-standard
+        // project ran the FULL suite 48x a day on the shared box while every other posture
+        // swept 2-4x, and the cadence proposal's own "standard | full | 30 min" row was the
+        // only half-hour full-suite sweep left. `BASE_HEALTH_DEFAULT_INTERVAL_MS` is now only
+        // the sweep loop's tick rate. (An UNSET project still gets none — see the opt-in rule
+        // in `resolveBaseSweepIntervalMs`, which is what stops idle imported repos burning
+        // compute.)
+        sweepIntervalMs: 12 * 60 * 60 * 1000,
         reviewMode: "standard",
         redBasePolicy: "block",
         trainMaxSize: 1,
@@ -276,6 +284,51 @@ function postureForLevel(level: RiskPostureLevel, source: RiskPosture["source"])
 export function resolveBaseSweepIntervalMs(posture: RiskPosture): number | null {
   if (posture.source !== "risk_posture") return null;
   return posture.sweepIntervalMs;
+}
+
+/**
+ * The EFFECTIVE base sweep for a project as one wire-ready struct (#1031) — what
+ * `GET /api/projects/:id/base-branch-health` and `GET /api/projects/health` report, so an
+ * operator can see which projects sweep, how often, and why, without reading the posture
+ * table. Built on `resolveBaseSweepIntervalMs` (never `posture.sweepIntervalMs`), so it can
+ * never claim a sweep for a project the opt-in rule excludes; `nominalIntervalMs` carries the
+ * level's cadence separately so "not scheduled" and "would sweep every 12 h once a posture is
+ * chosen" are both readable from the same response.
+ *
+ * `nextDueAt` is the plain arithmetic `lastProbeAt + intervalMs` — a hint for a human, not the
+ * scheduler's verdict (`resolveBaseHealthProbeDue` also honours the post-timeout back-off and
+ * the in-flight guard). Pure: it takes the last probe time as an argument.
+ */
+export function describeBaseSweep(
+  posture: RiskPosture,
+  lastProbeAt: string | null | undefined = null,
+): BaseSweepInfo {
+  const intervalMs = resolveBaseSweepIntervalMs(posture);
+  let nextDueAt: string | null = null;
+  if (intervalMs !== null && lastProbeAt) {
+    const lastMs = Date.parse(lastProbeAt);
+    if (Number.isFinite(lastMs)) nextDueAt = new Date(lastMs + intervalMs).toISOString();
+  }
+  return {
+    scheduled: intervalMs !== null,
+    intervalMs,
+    nominalIntervalMs: posture.sweepIntervalMs,
+    postureLevel: posture.level,
+    postureSource: posture.source,
+    reason: intervalMs === null
+      ? (posture.source === "issue_tag"
+        ? "a risk: issue tag is scoped to one ticket and does not opt the project into a sweep"
+        : "no risk posture chosen for this project — choosing one is the opt-in (#983)")
+      : `risk posture '${posture.level}' sweeps the base every ${formatIntervalHuman(intervalMs)}`,
+    nextDueAt,
+  };
+}
+
+/** `30 min`, `6 h`, `12 h`, `24 h` — for the `reason` text and the UI. */
+export function formatIntervalHuman(ms: number): string {
+  if (ms % (60 * 60 * 1000) === 0) return `${ms / (60 * 60 * 1000)} h`;
+  if (ms % (60 * 1000) === 0) return `${ms / (60 * 1000)} min`;
+  return `${Math.round(ms / 1000)} s`;
 }
 
 /**

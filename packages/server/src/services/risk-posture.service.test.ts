@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { resolveBaseSweepIntervalMs, resolveRiskPosture, riskPosturePrefKey } from "./risk-posture.service.js";
+import {
+  describeBaseSweep,
+  formatIntervalHuman,
+  resolveBaseSweepIntervalMs,
+  resolveRiskPosture,
+  riskPosturePrefKey,
+} from "./risk-posture.service.js";
 
 const PID = "11111111-2222-3333-4444-555555555555";
 
@@ -137,23 +143,43 @@ describe("resolveBaseSweepIntervalMs — the sweep is OPT-IN (#983)", () => {
   it("returns null for a project that never chose a posture", () => {
     const p = resolveRiskPosture(prefs({}), PID);
     expect(p.source).toBe("default");
-    // The nominal cadence of the LEVEL is still 30 min; the resolver is what makes it "never".
-    expect(p.sweepIntervalMs).toBe(30 * 60 * 1000);
+    // The nominal cadence of the LEVEL is still there; the resolver is what makes it "never".
+    expect(p.sweepIntervalMs).toBe(12 * 60 * 60 * 1000);
     expect(resolveBaseSweepIntervalMs(p)).toBeNull();
   });
 
-  it("returns the level's cadence once a posture is explicitly set", () => {
-    for (const [level, expected] of [
-      ["strict", 12 * 60 * 60 * 1000],
-      ["standard", 30 * 60 * 1000],
-      ["iterate", 24 * 60 * 60 * 1000],
-      ["fast", 6 * 60 * 60 * 1000],
-      ["sprint", 24 * 60 * 60 * 1000],
-    ] as const) {
+  // #1031: the PINNED per-posture table. Decision 017 (Amendment 2026-09-04 #1031) names each
+  // of these; a change here is a cadence decision and must amend that record too.
+  const PINNED_SWEEP_INTERVALS = {
+    strict: 12 * 60 * 60 * 1000,
+    standard: 12 * 60 * 60 * 1000,
+    iterate: 24 * 60 * 60 * 1000,
+    fast: 6 * 60 * 60 * 1000,
+    sprint: 24 * 60 * 60 * 1000,
+  } as const;
+
+  it("returns the level's cadence once a posture is explicitly set — pinned per posture (#1031)", () => {
+    for (const [level, expected] of Object.entries(PINNED_SWEEP_INTERVALS)) {
       const p = resolveRiskPosture(prefs({ [riskPosturePrefKey(PID)]: level }), PID);
       expect(p.source).toBe("risk_posture");
-      expect(resolveBaseSweepIntervalMs(p)).toBe(expected);
+      expect(resolveBaseSweepIntervalMs(p), level).toBe(expected);
     }
+  });
+
+  it("#1031: NO posture runs a full-suite sweep more often than every 6 h — the 30-min constant is gone", () => {
+    // `standard` was the last posture on the pre-posture 30-minute constant: 48 full-suite runs a
+    // day on the shared box, while every other posture swept 2-4x. `BASE_HEALTH_DEFAULT_INTERVAL_MS`
+    // is now ONLY the sweep loop's tick rate, and no posture may quietly re-adopt it.
+    for (const level of Object.keys(PINNED_SWEEP_INTERVALS)) {
+      const p = resolveRiskPosture(prefs({ [riskPosturePrefKey(PID)]: level }), PID);
+      expect(resolveBaseSweepIntervalMs(p)!, level).toBeGreaterThanOrEqual(6 * 60 * 60 * 1000);
+    }
+    // And `standard` shares `strict`'s half-daily cadence, for the same reason: a `full`
+    // per-merge gate already verifies every landing.
+    const standard = resolveRiskPosture(prefs({ [riskPosturePrefKey(PID)]: "standard" }), PID);
+    const strict = resolveRiskPosture(prefs({ [riskPosturePrefKey(PID)]: "strict" }), PID);
+    expect(standard.gateTier).toBe("full");
+    expect(standard.sweepIntervalMs).toBe(strict.sweepIntervalMs);
   });
 
   it("a per-ticket risk: TAG does not opt the project in", () => {
@@ -163,5 +189,52 @@ describe("resolveBaseSweepIntervalMs — the sweep is OPT-IN (#983)", () => {
     expect(p.source).toBe("issue_tag");
     expect(p.gateTier).toBe("impact");
     expect(resolveBaseSweepIntervalMs(p)).toBeNull();
+  });
+});
+
+describe("describeBaseSweep — the effective cadence as one wire struct (#1031)", () => {
+  it("reports a scheduled sweep with its interval, posture and a human reason", () => {
+    const p = resolveRiskPosture(prefs({ [riskPosturePrefKey(PID)]: "standard" }), PID);
+    const info = describeBaseSweep(p, "2026-09-04T00:00:00.000Z");
+    expect(info).toMatchObject({
+      scheduled: true,
+      intervalMs: 12 * 60 * 60 * 1000,
+      nominalIntervalMs: 12 * 60 * 60 * 1000,
+      postureLevel: "standard",
+      postureSource: "risk_posture",
+      nextDueAt: "2026-09-04T12:00:00.000Z",
+    });
+    expect(info.reason).toContain("12 h");
+    expect(info.reason).toContain("standard");
+  });
+
+  it("reports NOT scheduled for an unchosen posture, but still names the nominal cadence", () => {
+    const info = describeBaseSweep(resolveRiskPosture(prefs({}), PID), "2026-09-04T00:00:00.000Z");
+    expect(info.scheduled).toBe(false);
+    expect(info.intervalMs).toBeNull();
+    expect(info.nextDueAt).toBeNull();
+    expect(info.nominalIntervalMs).toBe(12 * 60 * 60 * 1000);
+    expect(info.postureSource).toBe("default");
+    expect(info.reason).toContain("opt-in");
+  });
+
+  it("a risk: tag does not schedule a sweep, and says so", () => {
+    const info = describeBaseSweep(resolveRiskPosture(prefs({}), PID, { tagOverride: "risk:iterate" }));
+    expect(info.scheduled).toBe(false);
+    expect(info.postureSource).toBe("issue_tag");
+    expect(info.reason).toContain("tag");
+  });
+
+  it("nextDueAt is null without a prior probe or with an unparseable timestamp", () => {
+    const p = resolveRiskPosture(prefs({ [riskPosturePrefKey(PID)]: "fast" }), PID);
+    expect(describeBaseSweep(p).nextDueAt).toBeNull();
+    expect(describeBaseSweep(p, "not-a-date").nextDueAt).toBeNull();
+  });
+
+  it("formatIntervalHuman prefers whole hours, then minutes", () => {
+    expect(formatIntervalHuman(30 * 60 * 1000)).toBe("30 min");
+    expect(formatIntervalHuman(6 * 60 * 60 * 1000)).toBe("6 h");
+    expect(formatIntervalHuman(24 * 60 * 60 * 1000)).toBe("24 h");
+    expect(formatIntervalHuman(90 * 1000)).toBe("90 s");
   });
 });

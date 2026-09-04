@@ -102,7 +102,7 @@ makes a longer interval safe across restarts — no new machinery.
 | Posture | Per-merge gate | Full-suite sweep | Intended for |
 |---|---|---|---|
 | `strict` | full | 12 h | release branches, client repos with allowlists |
-| `standard` | full | 30 min | today's default; unchanged |
+| `standard` | full | ~~30 min~~ **12 h** (#1031) | today's default; the gate is unchanged, the sweep shares `strict`'s half-daily cadence — see decision 017, Amendment 2026-09-04 (#1031) |
 | **`iterate`** *(new)* | **impact** | **24 h** | **active development — this board's own setting** |
 | `fast` | scoped | 6 h | |
 | `sprint` | scoped-base-watch | 24 h | (makes its existing promise true) |
