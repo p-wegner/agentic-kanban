@@ -1,6 +1,6 @@
 import { projectPref } from "@agentic-kanban/shared/lib/dynamic-preference-keys";
 import { RISK_POSTURES } from "@agentic-kanban/shared/lib/risk-posture";
-import type { RiskPosture, RiskPostureLevel } from "@agentic-kanban/shared/types";
+import type { RedBasePolicy, RiskPosture, RiskPostureLevel } from "@agentic-kanban/shared/types";
 import { db } from "../db/index.js";
 import type { Database } from "../db/index.js";
 import { getIssueTagRows } from "../repositories/tag.repository.js";
@@ -35,13 +35,81 @@ import { getIssueTagRows } from "../repositories/tag.repository.js";
  * this posture skips relative to `standard`, and every gate/merge message that reads a
  * `RiskPosture` must include it.
  */
-export type { RiskPosture, RiskPostureLevel };
+export type { RedBasePolicy, RiskPosture, RiskPostureLevel };
 
 // #496: built from the registry, so an unregistered prefix is a COMPILE error.
 const riskPosturePrefDef = projectPref("risk_posture");
 
 export function riskPosturePrefKey(projectId: string): string {
   return riskPosturePrefDef.key(projectId);
+}
+
+// #1015: the per-project red-base-policy override. Registered in the dynamic preference-key
+// registry alongside `risk_posture`, so an unregistered prefix is a COMPILE error here too.
+const redBasePolicyPrefDef = projectPref("red_base_policy");
+
+export function redBasePolicyPrefKey(projectId: string): string {
+  return redBasePolicyPrefDef.key(projectId);
+}
+
+/**
+ * Softness order of {@link RedBasePolicy} — the ONE place the "softer only" direction is
+ * defined, so the override check and the red-debt cap's degrade step cannot disagree about
+ * which way is looser.
+ */
+export const RED_BASE_POLICY_RANK: Record<RedBasePolicy, number> = {
+  block: 0,
+  "allow-known-debt": 1,
+  "allow-file-debt-ticket": 2,
+};
+
+const VALID_RED_BASE_POLICIES: ReadonlySet<string> = new Set(Object.keys(RED_BASE_POLICY_RANK));
+
+/**
+ * Apply the per-project `red_base_policy_<projectId>` override to a level-derived posture
+ * (#1015, decision 017 Amendment 2026-09-04).
+ *
+ * **Softer only.** `block` -> `allow-known-debt` -> `allow-file-debt-ticket` is allowed; the
+ * reverse is IGNORED with a logged warning rather than honoured. The reason is decision 017's
+ * own shape: the LEVEL is the dial that says how strict a project is, and a per-field key that
+ * could tighten one dimension would re-create exactly the "~8 prefs to align by hand, and
+ * nothing says what a partial write left behind" problem the posture replaced. Loosening is
+ * different in kind — it is what a dev board needs to land-then-heal (proposal
+ * `2026-09-03-dev-board-vs-deployed-board.md` §3.B) without abandoning its level's gate tier,
+ * review mode and train sizing.
+ *
+ * Visibility rule (decision 017): an applied override is folded into `summary`, so any message
+ * built with `formatPostureNote` names it. An unparseable value fails CLOSED — the level's own
+ * policy stands.
+ */
+export function applyRedBasePolicyOverride(
+  posture: RiskPosture,
+  raw: string | null | undefined,
+  projectId: string,
+): RiskPosture {
+  if (raw == null || raw === "") return posture;
+  if (!VALID_RED_BASE_POLICIES.has(raw)) {
+    console.warn(
+      `[risk-posture] ignoring unrecognized red-base-policy override '${raw}' for project ${projectId} — `
+        + `posture '${posture.level}' keeps redBasePolicy '${posture.redBasePolicy}' (#1015)`,
+    );
+    return posture;
+  }
+  const requested = raw as RedBasePolicy;
+  if (requested === posture.redBasePolicy) return posture;
+  if (RED_BASE_POLICY_RANK[requested] < RED_BASE_POLICY_RANK[posture.redBasePolicy]) {
+    console.warn(
+      `[risk-posture] ignoring STRICTER red-base-policy override '${requested}' for project ${projectId} — `
+        + `the override is softer-only and posture '${posture.level}' already resolves `
+        + `'${posture.redBasePolicy}'; raise strictness with the posture LEVEL instead (#1015)`,
+    );
+    return posture;
+  }
+  return {
+    ...posture,
+    redBasePolicy: requested,
+    summary: `${posture.summary} (red base: '${requested}' per project override)`,
+  };
 }
 
 const VALID_LEVELS: ReadonlySet<string> = new Set<RiskPostureLevel>(RISK_POSTURES);
@@ -77,6 +145,18 @@ export function resolveRiskPosture(
       ? "risk_posture"
       : "default";
 
+  // The per-project red-base-policy override is applied AFTER level derivation, and only ever
+  // in the softer direction — see `applyRedBasePolicyOverride`.
+  return applyRedBasePolicyOverride(
+    postureForLevel(level, source),
+    prefMap.get(redBasePolicyPrefKey(projectId)),
+    projectId,
+  );
+}
+
+/** The pure level -> posture table. Everything a LEVEL implies lives here; per-field project
+ *  overrides are applied by the caller, so this table stays the definition of the level. */
+function postureForLevel(level: RiskPostureLevel, source: RiskPosture["source"]): RiskPosture {
   switch (level) {
     case "strict":
       return {
