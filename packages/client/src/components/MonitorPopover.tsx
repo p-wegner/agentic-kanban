@@ -10,9 +10,10 @@ import {
   MonitorButlerSection, OrchestratorSection, RecentBoardHealthEventsSection,
   MonitorHeader, AutoMonitorToggleRow, StartModeSection, ActiveAgentsSection,
   LastRunSection, MonitorWarningsSection, ResourceAuditSection, RecentActionsSection,
-  EffectiveTargetsSection, MonitorSettingsSection, NextStartCandidatesSection,
-  ProfileQuotaSection,
+  EffectiveTargetsSection, MonitorSettingsSection,
 } from "./MonitorSections.js";
+import { ProfileQuotaSection } from "./monitor/ProfileQuotaSection.js";
+import { NextStartCandidatesSection } from "./monitor/NextStartCandidatesSection.js";
 export { MonitorButlerSection, OrchestratorSection, RecentBoardHealthEventsSection } from "./MonitorSections.js";
 import type { StartMode, ResolvedTunables, MonitorStatus, BoardHealthEvent } from "../lib/monitor-popover.js";
 import { useNow } from "../hooks/usePoll.js";
