@@ -7,6 +7,7 @@
  * make the call intra-module and silently bypass those mocks (measured — five suites went red).
  */
 import { gitExec } from "@agentic-kanban/shared/lib/git-exec";
+import { execSucceeded } from "@agentic-kanban/shared/lib/exec-result";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import type { Database } from "../db/index.js";
 import { recordMergeGateDiscard } from "../repositories/merge-gate-discard.repository.js";
@@ -226,7 +227,7 @@ export async function runGateWithEvidence(args: {
 /** `git diff --name-only <before> <after>` in the worktree; null when git cannot answer. */
 async function readBaseMoveFilesFromGit(workingDir: string, before: string, after: string): Promise<string[] | null> {
   const res = await gitExec(["diff", "--name-only", before, after], { cwd: workingDir });
-  if (res.error || res.code !== 0) return null;
+  if (!execSucceeded(res)) return null;
   return res.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
 }
 

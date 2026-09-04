@@ -25,6 +25,9 @@ function fakeRegistry(): WorkerRegistry {
   return {
     onRevoke: vi.fn(),
     touchHeartbeat: vi.fn().mockResolvedValue(undefined),
+    // #1027: `hello` reverse-reconciles the worker's attested profiles, so the stub has to
+    // answer it — the `hello` case below drives the real `handleMessage`.
+    noteAttestedProfiles: vi.fn(),
   } as unknown as WorkerRegistry;
 }
 

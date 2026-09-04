@@ -18,6 +18,7 @@
 import { issueDependencies, issues, issueTags, tags, workflowNodes, workspaces } from "@agentic-kanban/shared/schema";
 import { and, eq, inArray, or, sql, type SQL } from "drizzle-orm";
 import type { Database } from "../db/index.js";
+import { issueTextColumns } from "./projections.js";
 
 /** Does this issue carry the `no-auto-start` tag? */
 export async function hasSkipAutoStartTag(issueId: string, tagName: string, database: Database): Promise<boolean> {
@@ -100,8 +101,8 @@ export function selectBlockerWorkspaceLandings(blockerIds: string[], database: D
  */
 export function selectAutoStartCandidates(statusIds: string[], filters: SQL[], database: Database) {
   return database.select({
-    id: issues.id, title: issues.title, description: issues.description, issueType: issues.issueType,
-    projectId: issues.projectId, issueNumber: issues.issueNumber, externalKey: issues.externalKey,
+    ...issueTextColumns, issueType: issues.issueType,
+    projectId: issues.projectId, externalKey: issues.externalKey,
     priority: issues.priority, createdAt: issues.createdAt, statusChangedAt: issues.statusChangedAt,
   }).from(issues).where(and(inArray(issues.statusId, statusIds), ...filters));
 }
