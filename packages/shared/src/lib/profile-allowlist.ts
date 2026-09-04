@@ -37,14 +37,60 @@
  *   `dynamic-preference-keys.ts`: validate and refuse, don't coerce). The write path
  *   rejects malformed values, so this only fires for a value edited around the API.
  *
+ * ## Since #1025 this module is the ROSTER's front door
+ *
+ * An allowlist is one point on a larger scale: a flat list is a roster in which every
+ * entry is `pool`. `profile-roster.ts` (parse + the narrowing rule) and
+ * `profile-roster-selection.ts` (the decision, including `reserve` and `forbidden`) hold
+ * that generalization, and everything below is expressed in terms of them — so there is
+ * exactly ONE selection algorithm rather than a legacy path and a roster path that can
+ * disagree about a cooldown. The `allowlist` names stay because ~20 call sites and the
+ * Settings editor use them, and because "allowlist" is still the honest word for the
+ * migrated, all-`pool` case.
+ *
  * PURE and client-safe: no node builtins, so the Settings UI can preview the same
  * decision the server will make.
  */
 import type { AgentProviderName } from "./provider-traits.js";
-import { narrowProvider, profileOptionLabel } from "./provider-traits.js";
+import { narrowProvider } from "./provider-traits.js";
 import { projectPref } from "./dynamic-preference-keys.js";
+import type { ParsedRoster, ProfileRef } from "./profile-roster.js";
+import { parseRoster, profileRefId } from "./profile-roster.js";
+import { resolveRosterSelection } from "./profile-roster-selection.js";
 
 const allowedProfilesPrefDef = projectPref("allowed_profiles");
+
+/** The roster surface, re-exported so one import path serves both spellings. */
+export {
+  DEFAULT_POOL_EXHAUSTED_PCT,
+  DEFAULT_PROFILE_ROLE,
+  PROFILE_ROLES,
+  RESERVE_OK_TAG,
+  isProfileCooling,
+  isProfileRole,
+  mostRestrictiveRole,
+  parseRoster,
+  profileCooldownKey,
+  profileRefId,
+  reserveAllowedPrefKey,
+  resolvePoolExhaustedPct,
+  resolveProjectRoster,
+  resolveReserveAllowance,
+  rosterExhaustedPctPrefKey,
+  rosterPrefKey,
+  serializeRoster,
+} from "./profile-roster.js";
+export type { ParsedRoster, ProfileRef, ProfileRole, RosterEntry } from "./profile-roster.js";
+export {
+  headroomFromQuotaUsage,
+  rankRosterEntries,
+  resolveRosterSelection,
+} from "./profile-roster-selection.js";
+export type {
+  ProfileHeadroom,
+  RosterSelection,
+  RosterSelectionInput,
+} from "./profile-roster-selection.js";
 
 /**
  * The per-project allowlist preference key. Lives here rather than in the server's
@@ -85,54 +131,9 @@ export interface ProfileClampResult {
   note: string | null;
 }
 
-/** The cooldown stamp key the rotation rings write for a profile (`auth-rotation-ring.ts`). */
-export function profileCooldownKey(provider: AgentProviderName, profile: string): string {
-  return `${provider}_cooldown_${profile}`;
-}
-
-/**
- * True when this profile has no cooldown stamp, or the stamp has elapsed. Mirrors
- * `isAvailable` in `auth-rotation-ring.ts`, including its tolerance: an unparseable
- * stamp counts as available rather than pinning a profile off forever.
- */
-export function isProfileCooling(
-  entry: AllowedProfile,
-  prefMap: Map<string, string>,
-  nowMs: number,
-): boolean {
-  const stamp = prefMap.get(profileCooldownKey(entry.provider, entry.name));
-  if (!stamp) return false;
-  const until = Date.parse(stamp);
-  if (Number.isNaN(until)) return false;
-  return until > nowMs;
-}
-
-function normalizeEntry(value: unknown): AllowedProfile | null {
-  // `"claude:andrena_team_5x_2"` — the compact form, matching a Bullseye policy id.
-  if (typeof value === "string") {
-    const text = value.trim();
-    if (!text) return null;
-    const colon = text.indexOf(":");
-    // A bare name means claude, which is the board's own default provider. Being lenient
-    // here is safe: the provider is re-tagged, not guessed away.
-    if (colon < 0) return { provider: "claude", name: text };
-    const name = text.slice(colon + 1).trim();
-    if (!name) return null;
-    return { provider: narrowProvider(text.slice(0, colon)), name };
-  }
-  if (value && typeof value === "object") {
-    const rec = value as Record<string, unknown>;
-    const rawName = typeof rec.name === "string" ? rec.name : typeof rec.profileName === "string" ? rec.profileName : "";
-    const name = rawName.trim();
-    if (!name) return null;
-    return { provider: narrowProvider(typeof rec.provider === "string" ? rec.provider : undefined), name };
-  }
-  return null;
-}
-
 /** `provider:name`, the stable identity used for dedupe and comparison. */
-export function allowedProfileId(entry: AllowedProfile): string {
-  return `${entry.provider}:${entry.name}`;
+export function allowedProfileId(entry: ProfileRef): string {
+  return profileRefId(entry);
 }
 
 /**
@@ -142,41 +143,18 @@ export function allowedProfileId(entry: AllowedProfile): string {
  * of `"provider:name"` strings, or a bare comma-separated string for hand-editing
  * convenience. An array that parses but yields no usable entry is MALFORMED, not empty —
  * `[{"provider":"claude"}]` is a botched restriction, not the absence of one.
+ *
+ * Implemented on `parseRoster` with the `allowed_profiles` source, which IS the #1025
+ * migration: an existing allowlist value reads as an all-`pool` roster, at READ time, so
+ * nothing stored ever has to be rewritten.
  */
 export function parseProfileAllowlist(raw: string | null | undefined): ParsedProfileAllowlist {
-  const text = (raw ?? "").trim();
-  if (!text) return { entries: [], malformed: false, restricted: false };
-
-  let source: unknown[] | null = null;
-  if (text.startsWith("[")) {
-    try {
-      const parsed: unknown = JSON.parse(text);
-      source = Array.isArray(parsed) ? parsed : null;
-    } catch {
-      source = null;
-    }
-  } else {
-    // Not JSON — treat as a comma-separated list of compact ids.
-    source = text.split(",");
-  }
-  if (!source) return { entries: [], malformed: true, restricted: true };
-
-  // An explicit empty array is the one way to say "restriction removed" without deleting
-  // the row, so it is empty-and-well-formed rather than malformed.
-  if (source.length === 0) return { entries: [], malformed: false, restricted: false };
-
-  const entries: AllowedProfile[] = [];
-  const seen = new Set<string>();
-  for (const raw of source) {
-    const entry = normalizeEntry(raw);
-    if (!entry) continue;
-    const id = allowedProfileId(entry);
-    if (seen.has(id)) continue;
-    seen.add(id);
-    entries.push(entry);
-  }
-  if (entries.length === 0) return { entries: [], malformed: true, restricted: true };
-  return { entries, malformed: false, restricted: true };
+  const roster = parseRoster(raw, "allowed_profiles");
+  return {
+    entries: roster.entries.map((e) => ({ provider: e.provider, name: e.name })),
+    malformed: roster.malformed,
+    restricted: roster.restricted,
+  };
 }
 
 /** Serialize back to the canonical stored form. */
@@ -196,13 +174,15 @@ export function isProfileAllowed(
   return allowlist.entries.some((e) => allowedProfileId(e) === id);
 }
 
-function describeCooling(entries: AllowedProfile[], prefMap: Map<string, string>): string {
-  return entries
-    .map((e) => {
-      const until = prefMap.get(profileCooldownKey(e.provider, e.name));
-      return until ? `${allowedProfileId(e)} until ${until}` : allowedProfileId(e);
-    })
-    .join(", ");
+/** The all-`pool`, closed roster an allowlist denotes. */
+export function allowlistAsRoster(allowlist: ParsedProfileAllowlist): ParsedRoster {
+  return {
+    entries: allowlist.entries.map((e) => ({ ...e, role: "pool" as const })),
+    malformed: allowlist.malformed,
+    restricted: allowlist.restricted,
+    closed: true,
+    source: "allowed_profiles",
+  };
 }
 
 /**
@@ -213,6 +193,11 @@ function describeCooling(entries: AllowedProfile[], prefMap: Map<string, string>
  * before launching — an unchecked null `selection` would otherwise read as "no opinion"
  * and let the caller proceed on the unrestricted choice, which is the failure this whole
  * module exists to prevent.
+ *
+ * A projection of `resolveRosterSelection` since #1025. Nothing is lost by narrowing the
+ * result here: the richer outcomes (a `forbidden` REFUSAL, a `reserve` start) cannot
+ * arise from an all-`pool` roster, and a caller that needs them asks the roster resolver
+ * directly rather than reading them out of a shape named "clamp".
  */
 export function clampProfileToAllowlist(input: {
   allowlist: ParsedProfileAllowlist;
@@ -221,53 +206,24 @@ export function clampProfileToAllowlist(input: {
   prefMap: Map<string, string>;
   nowMs: number;
 }): ProfileClampResult {
-  const { allowlist, prefMap, nowMs } = input;
-  const unrestricted: ProfileClampResult = { selection: null, clamped: false, holdReason: null, note: null };
-  if (!allowlist.restricted) return unrestricted;
-
-  if (allowlist.malformed) {
-    return {
-      selection: null,
-      clamped: false,
-      holdReason: "profile allowlist is set but unparseable — refusing to launch on an unrestricted profile",
-      note: "profile allowlist unparseable; holding rather than falling back (fail closed)",
-    };
-  }
-
-  const requestedName = (input.profileName ?? "").trim();
-  const requested: AllowedProfile | null = requestedName
-    ? { provider: narrowProvider(input.provider), name: requestedName }
-    : null;
-
-  const usable = allowlist.entries.filter((e) => !isProfileCooling(e, prefMap, nowMs));
-  if (usable.length === 0) {
-    return {
-      selection: null,
-      clamped: false,
-      holdReason: `every allowed profile is cooling (${describeCooling(allowlist.entries, prefMap)})`,
-      note: `profile allowlist exhausted: ${describeCooling(allowlist.entries, prefMap)}`,
-    };
-  }
-
-  // The requested profile is permitted and usable — nothing to do. This is the common
-  // path once a project is configured, so it must stay free of notes/log noise.
-  if (requested && usable.some((e) => allowedProfileId(e) === allowedProfileId(requested))) {
-    return { selection: requested, clamped: false, holdReason: null, note: null };
-  }
-
-  const chosen = usable[0];
-  const reason = !requested
-    ? "no profile resolved"
-    : isProfileAllowed(allowlist, requested.provider, requested.name)
-      ? `${allowedProfileId(requested)} is cooling`
-      : `${allowedProfileId(requested)} is not allowed for this project`;
+  const result = resolveRosterSelection({
+    roster: allowlistAsRoster(input.allowlist),
+    provider: input.provider,
+    profileName: input.profileName,
+    prefMap: input.prefMap,
+    nowMs: input.nowMs,
+  });
   return {
-    selection: chosen,
-    clamped: true,
-    holdReason: null,
-    note: `profile allowlist: ${reason} → launching on ${profileOptionLabel(chosen.provider, chosen.name)}`,
+    selection: result.selection ? { provider: result.selection.provider, name: result.selection.name } : null,
+    clamped: result.clamped,
+    holdReason: result.holdReason,
+    note: result.note,
   };
 }
+
+const WORKER_CANNOT_ENFORCE =
+  "and a fleet worker authenticates with its own machine-local login " +
+  "(the board sends no credentials), so the restriction cannot be enforced there";
 
 /**
  * #651 — may this project's work be dispatched to a FLEET WORKER at all?
@@ -291,24 +247,31 @@ export function clampProfileToAllowlist(input: {
  * A malformed value blocks too: `parseProfileAllowlist` reports it as `restricted`, and
  * failing closed on an unreadable restriction is the whole point of that flag.
  *
+ * `rosterRaw` (#1025) asks the same question of the newer key: a project that expresses
+ * its restriction as `roster_<projectId>` must not LOSE the #651 protection by migrating
+ * onto the newer spelling. Either key blocks; both are read.
+ *
  * This is deliberately not the last word. Worker-side ATTESTATION — the worker declaring
  * which profiles/config dirs it can authenticate as, the way it already declares
  * `--providers` and `--labels` — would let a restricted project dispatch to a worker
- * that can prove it satisfies the list. That check would go right here, narrowing the
+ * that can prove it satisfies the list (#1027). That check goes right here, narrowing the
  * block instead of replacing it.
  */
 export function remoteDispatchBlockedByAllowlist(
   allowlistRaw: string | null | undefined,
+  rosterRaw?: string | null | undefined,
 ): { blocked: false } | { blocked: true; reason: string } {
+  const roster = (rosterRaw ?? "").trim() ? parseRoster(rosterRaw, "roster") : null;
+  if (roster?.restricted) {
+    const detail = roster.malformed
+      ? "its profile roster is present but unreadable"
+      : `its roster is [${roster.entries.map((e) => `${profileRefId(e)} ${e.role}`).join(", ")}]`;
+    return { blocked: true, reason: `${detail}, ${WORKER_CANNOT_ENFORCE}` };
+  }
   const allowlist = parseProfileAllowlist(allowlistRaw);
   if (!allowlist.restricted) return { blocked: false };
   const detail = allowlist.malformed
     ? "its profile allowlist is present but unreadable"
     : `it is restricted to [${allowlist.entries.map(allowedProfileId).join(", ")}]`;
-  return {
-    blocked: true,
-    reason:
-      `${detail}, and a fleet worker authenticates with its own machine-local login ` +
-      "(the board sends no credentials), so the restriction cannot be enforced there",
-  };
+  return { blocked: true, reason: `${detail}, ${WORKER_CANNOT_ENFORCE}` };
 }

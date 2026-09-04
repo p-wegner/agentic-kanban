@@ -23,6 +23,7 @@ import { SHARES_FILESYSTEM_LABEL, type WorkerCapacityInfo } from "@agentic-kanba
 import {
   allowedProfilesPrefKey,
   remoteDispatchBlockedByAllowlist,
+  rosterPrefKey,
 } from "@agentic-kanban/shared/lib/profile-allowlist";
 import {
   remoteDispatchBlockedByDataHandling,
@@ -497,6 +498,9 @@ async function resolvePlacementWithReservation(
     // strict project's message about the restriction rather than about capacity.
     const allowlistBlock = remoteDispatchBlockedByAllowlist(
       await getPreferenceValue(allowedProfilesPrefKey(projectId), database),
+      // #1025: a project that expressed its restriction as a ROSTER must not lose the #651
+      // protection by migrating onto the newer key.
+      await getPreferenceValue(rosterPrefKey(projectId), database),
     );
     if (allowlistBlock.blocked) {
       if (strict) refuseHost(`project ${projectId} cannot dispatch remotely: ${allowlistBlock.reason}`);
@@ -679,6 +683,9 @@ export async function projectCanDispatch(params: {
     // skips the start with the real reason instead of starting and then failing.
     const allowlistBlock = remoteDispatchBlockedByAllowlist(
       await getPreferenceValue(allowedProfilesPrefKey(projectId), database),
+      // #1025: a project that expressed its restriction as a ROSTER must not lose the #651
+      // protection by migrating onto the newer key.
+      await getPreferenceValue(rosterPrefKey(projectId), database),
     );
     if (allowlistBlock.blocked) return { available: false, reason: allowlistBlock.reason };
     // #876: same refusal the placement makes, surfaced one step earlier.

@@ -156,6 +156,24 @@ pinned to a client subscription the wrong account is worse than no progress. A p
 value also holds (fail closed). Logic: `packages/shared/src/lib/profile-allowlist.ts`; enforcement seam:
 `resolveProjectRuntimeConfig`.
 
+**The roster is that allowlist with ROLES (#1025).** A flat list cannot say "emergency only",
+"never", or "prefer whichever has quota left", so each profile now carries a role — `pool`
+(ordinary supply, ordered by REMAINING 5-hour headroom from the quota provider, exhausted at
+`roster_exhausted_pct_<id>`, default 90 %), `reserve` (only when every pool profile is exhausted or
+cooling AND a grant permits it: `reserve_allowed_<id>`, the ticket tag `reserve:ok`, or an explicit
+operator start — every reserve start is logged and surfaced), and `forbidden` (**refused, not
+clamped** — an explicit workspace choice, a ring rewrite and a CLI `--profile` all get a refusal,
+`PROFILE_FORBIDDEN`). The GLOBAL roster is not a preference: it is the role each account declares
+for ITSELF (#1024, `profile-attributes.ts`), and `roster_<projectId>` may only ever NARROW it, so a
+global `forbidden` is unliftable by construction. Nothing declared anywhere ⇒ unrestricted, today's
+behaviour byte for byte; an existing `allowed_profiles_<id>` reads as an all-`pool` roster at READ
+time (no stored value is rewritten); a project roster that is fully exhausted HOLDS exactly as the
+allowlist does. Ordering decides who is picked when the roster HAS to pick — it does not preempt a
+healthy explicit choice (that is predictive rotation, #1026). Logic:
+`shared/lib/profile-roster.ts` + `profile-roster-selection.ts`, both re-exported through
+`profile-allowlist.ts`; the enforcement seam is still `resolveProjectRuntimeConfig`, and nothing may
+read the raw keys outside it (`roster-raw-read-ratchet.test.ts`).
+
 **The guarantee stops at the machine boundary, so a restricted project does not go remote
 (#651).** A fleet worker authenticates the agent with its OWN local login and the board
 deliberately sends no credentials (decision 012 — `CLAUDE_CONFIG_DIR` is not in

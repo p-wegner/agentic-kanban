@@ -38,11 +38,15 @@ import { join } from "node:path";
  * false promise. Server code imports it relatively (`../lib/profile-attributes.js`).
  */
 
-export const PROFILE_ROLES = ["pool", "reserve", "forbidden"] as const;
-export type ProfileRole = (typeof PROFILE_ROLES)[number];
-
-/** No key anywhere → the account is ordinary supply. */
-export const DEFAULT_PROFILE_ROLE: ProfileRole = "pool";
+/**
+ * The role vocabulary itself lives in the PURE `profile-roster.ts` (#1025) — the roster
+ * resolver is client-reachable and this reader is node-only, so a second declaration here
+ * would be the one place the two halves could disagree about what a role is. Re-exported
+ * so every existing importer of this module keeps working unchanged.
+ */
+export { DEFAULT_PROFILE_ROLE, PROFILE_ROLES, isProfileRole } from "@agentic-kanban/shared/lib/profile-roster";
+export type { ProfileRole } from "@agentic-kanban/shared/lib/profile-roster";
+import { DEFAULT_PROFILE_ROLE, PROFILE_ROLES, isProfileRole, type ProfileRole } from "@agentic-kanban/shared/lib/profile-roster";
 
 export const PROFILE_ROLE_ENV_KEY = "KANBAN_PROFILE_ROLE";
 export const PROFILE_DEDICATED_ENV_KEY = "KANBAN_PROFILE_DEDICATED";
@@ -79,10 +83,6 @@ export interface ProfileAttributes {
   sources: string[];
   /** Unknown values, conflicts — surfaced rather than logged and lost. */
   warnings: string[];
-}
-
-export function isProfileRole(value: unknown): value is ProfileRole {
-  return typeof value === "string" && (PROFILE_ROLES as readonly string[]).includes(value);
 }
 
 /** The board never writes these keys; this is the empty/default reading. */

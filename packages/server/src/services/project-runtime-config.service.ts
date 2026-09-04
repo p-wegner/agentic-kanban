@@ -4,7 +4,13 @@ import { getBool } from "@agentic-kanban/shared/lib/settings-registry";
 import { AUTO_REVIEW_PREF_KEY, isAutoReviewEnabled } from "@agentic-kanban/shared/lib/auto-review-pref";
 import type { Database } from "../db/index.js";
 import { getAllPreferences } from "../repositories/preferences.repository.js";
-import { PREF_BUILDER_GUARDRAILS, DEFAULT_BUILDER_GUARDRAILS } from "../constants/preference-keys.js";
+import {
+  PREF_BUILDER_GUARDRAILS,
+  DEFAULT_BUILDER_GUARDRAILS,
+  PREF_CLAUDE_SUBSCRIPTION_RING,
+  PREF_CODEX_LICENSE_RING,
+} from "../constants/preference-keys.js";
+import { loadObservedGlobalRoster } from "./profile-roster.service.js";
 import type { ProviderName } from "./agent-provider.js";
 import { narrowProviderName } from "./agent-provider.js";
 import type { ResolvedProviderConfig } from "./provider-config-resolution.js";
@@ -14,8 +20,20 @@ import {
 } from "./strategy-objective.service.js";
 import { providerProfilePrefKey, readSettingsProviderSelection, resolveProviderDivergence as resolveProviderDivergenceShared } from "@agentic-kanban/shared/lib/strategy-policy";
 import { resolveStartPolicy, startModePrefKey, type StartPolicy } from "./start-policy.service.js";
-import type { ParsedProfileAllowlist } from "@agentic-kanban/shared/lib/profile-allowlist";
-import { allowedProfilesPrefKey, parseProfileAllowlist } from "@agentic-kanban/shared/lib/profile-allowlist";
+import type {
+  ParsedProfileAllowlist,
+  ParsedRoster,
+  ProfileHeadroom,
+  RosterEntry,
+} from "@agentic-kanban/shared/lib/profile-allowlist";
+import {
+  allowedProfilesPrefKey,
+  parseProfileAllowlist,
+  resolvePoolExhaustedPct,
+  resolveProjectRoster,
+  resolveReserveAllowance,
+  rosterPrefKey,
+} from "@agentic-kanban/shared/lib/profile-allowlist";
 import { requiredDataLabelsPrefKey } from "@agentic-kanban/shared/lib/profile-capabilities";
 import { HARNESS_IDS, harnessSettingKey } from "./harness-settings.js";
 
@@ -33,7 +51,12 @@ export function autodrivePrefKey(projectId: string): string {
  * Re-exported from shared so the Settings editor and this resolver cannot disagree about
  * the key they write and read — the `verify_script_<id>` family drifted exactly that way.
  */
-export { allowedProfilesPrefKey } from "@agentic-kanban/shared/lib/profile-allowlist";
+export {
+  allowedProfilesPrefKey,
+  reserveAllowedPrefKey,
+  rosterExhaustedPctPrefKey,
+  rosterPrefKey,
+} from "@agentic-kanban/shared/lib/profile-allowlist";
 
 export function autoMergeDisabledPrefKey(projectId: string): string {
   return autoMergeDisabledPrefDef.key(projectId);
@@ -49,6 +72,17 @@ export interface RuntimeProviderConfig extends ResolvedProviderConfig {
    * the same parse the resolver used.
    */
   allowlist: ParsedProfileAllowlist;
+  /**
+   * The project's profile ROSTER (#1025) — the allowlist with roles, after the observed
+   * global roles have been narrowed by `roster_<projectId>`. `restricted: false` for the
+   * vast majority of projects, and identical in effect to the allowlist whenever no
+   * profile declares a role. Exposed so the Monitor view can explain a hold, a refusal or
+   * a reserve start with the same parse the resolver used.
+   */
+  roster: ParsedRoster;
+  /** Whether this launch was permitted to reach for a `reserve` profile, and on what grant. */
+  reserveAllowed: boolean;
+  reserveAllowedReason: string | null;
 }
 
 export interface RuntimeDriveConfig {
@@ -85,6 +119,20 @@ export interface ProjectRuntimeConfigInput {
   workspaceSelection?: { provider?: string | null; profileName?: string | null } | null;
   requestedModel?: string | null;
   commandOverride?: string;
+  /**
+   * The GLOBAL roster (#1025): every profile discovery knows about, with the role it
+   * declares for itself (`profile-attributes.ts`). Omitted = nobody declared anything, and
+   * the resolver then behaves exactly as it did before rosters existed.
+   */
+  globalRoster?: readonly RosterEntry[] | null;
+  /** This project's slug, for a profile dedicated to one project (`KANBAN_PROFILE_DEDICATED`). */
+  projectSlug?: string | null;
+  /** Per-profile 5-hour-window readings, for ordering the pool by remaining headroom. */
+  headroom?: Map<string, ProfileHeadroom> | null;
+  /** The starting ticket's tags — `reserve:ok` is one of the three reserve grants. */
+  issueTags?: readonly string[] | null;
+  /** A human explicitly started this work — the third reserve grant. */
+  operatorStart?: boolean;
   /** Injected clock for the allowlist's cooldown checks (`nowMs` spelling, #614). */
   nowMs?: number;
 }
@@ -123,7 +171,22 @@ export function resolveProjectRuntimeConfig(input: ProjectRuntimeConfigInput): P
 
   // Read from the ORIGINAL prefMap: the allowlist is the project's own restriction and
   // must not be reachable by anything the selectors mirror onto `providerPrefMap`.
-  const allowlist = parseProfileAllowlist(input.prefMap.get(allowedProfilesPrefKey(input.projectId)));
+  const allowlistRaw = input.prefMap.get(allowedProfilesPrefKey(input.projectId));
+  const allowlist = parseProfileAllowlist(allowlistRaw);
+  // #1025: the roster is the same restriction with roles. It is built here, in the ONE
+  // enforcement seam, and the raw keys are read nowhere else (`roster-raw-read-ratchet`).
+  const roster = resolveProjectRoster({
+    globalRoster: input.globalRoster,
+    rosterRaw: input.prefMap.get(rosterPrefKey(input.projectId)),
+    allowlistRaw,
+    projectSlug: input.projectSlug,
+  });
+  const reserve = resolveReserveAllowance({
+    prefMap: input.prefMap,
+    projectId: input.projectId,
+    issueTags: input.issueTags,
+    operatorStart: input.operatorStart,
+  });
 
   const provider = resolveProviderConfig({
     prefMap: providerPrefMap,
@@ -133,6 +196,10 @@ export function resolveProjectRuntimeConfig(input: ProjectRuntimeConfigInput): P
     requestedModel: input.requestedModel ?? input.strategySelection?.model,
     commandOverride: input.commandOverride,
     allowlist,
+    roster,
+    headroom: input.headroom,
+    exhaustedPct: resolvePoolExhaustedPct(input.prefMap, input.projectId),
+    reserveAllowed: reserve.allowed,
     nowMs: input.nowMs,
     requiredDataLabels: input.prefMap.get(requiredDataLabelsPrefKey(input.projectId)),
   });
@@ -152,6 +219,9 @@ export function resolveProjectRuntimeConfig(input: ProjectRuntimeConfigInput): P
       strategySelection: input.strategySelection ?? null,
       settingsSelection: readSettingsSelection(input.prefMap),
       allowlist,
+      roster,
+      reserveAllowed: reserve.allowed,
+      reserveAllowedReason: reserve.reason,
     },
     startPolicy,
     drive: {
@@ -182,7 +252,14 @@ export async function loadProjectRuntimeConfig(
   const strategySelection = !hasOverride
     ? await resolveStrategyProviderSelection(database, input.projectId)
     : null;
-  return resolveProjectRuntimeConfig({ ...input, prefMap, strategySelection });
+  // #1025: the observed global roster comes from the same discovery the rings run, off the
+  // prefs already loaded above — so no extra DB round-trip, and a caller that has its own
+  // (a test, or a worker attestation later) can still pass one in.
+  const globalRoster = input.globalRoster ?? loadObservedGlobalRoster({
+    claudeRingRaw: prefMap.get(PREF_CLAUDE_SUBSCRIPTION_RING),
+    codexRingRaw: prefMap.get(PREF_CODEX_LICENSE_RING),
+  });
+  return resolveProjectRuntimeConfig({ ...input, prefMap, strategySelection, globalRoster });
 }
 
 export function buildDriveRuntimePreferencePatch(
