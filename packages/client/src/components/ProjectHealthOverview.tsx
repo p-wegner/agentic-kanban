@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "../lib/api.js";
 import { sortProjectHealth } from "../lib/projectHealthOrder.js";
 import { Icon, Spinner } from "./Icon.js";
+import type { BaseSweepInfo } from "@agentic-kanban/shared/types";
 
 interface ProjectHealth {
   id: string;
@@ -14,6 +15,14 @@ interface ProjectHealth {
   warnings: string[];
   /** #632 — how many of the project's repos were actually checked. */
   reposChecked?: number;
+  /** #1031 — the effective periodic base-branch sweep (posture-derived; absent on an older server). */
+  baseSweep?: BaseSweepInfo;
+}
+
+/** `30 min`, `12 h` — mirrors the server's `formatIntervalHuman`. */
+function formatSweepInterval(ms: number): string {
+  if (ms % (60 * 60 * 1000) === 0) return `${ms / (60 * 60 * 1000)} h`;
+  return `${Math.round(ms / (60 * 1000))} min`;
 }
 
 interface ProjectHealthData {
@@ -151,6 +160,17 @@ export function ProjectHealthOverview({ activeProjectId, onProjectChange, onClos
                           {(project.reposChecked ?? 1) > 1 && (
                             <span className="ml-2 text-gray-500 dark:text-gray-400">
                               · {project.reposChecked} repos checked
+                            </span>
+                          )}
+                          {/* #1031: which projects run the full suite on a schedule, and how
+                              often — a half-hour full-suite sweep must be visible, not a
+                              constant nobody can see from the board. */}
+                          {project.baseSweep && (
+                            <span className="ml-2 text-gray-500 dark:text-gray-400" title={project.baseSweep.reason}>
+                              · base sweep{" "}
+                              {project.baseSweep.scheduled && project.baseSweep.intervalMs !== null
+                                ? <>every {formatSweepInterval(project.baseSweep.intervalMs)} ({project.baseSweep.postureLevel})</>
+                                : "off (no posture chosen)"}
                             </span>
                           )}
                         </div>

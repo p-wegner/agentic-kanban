@@ -17,6 +17,7 @@ import { createTestDb } from "./helpers/test-db.js";
 import { eq } from "drizzle-orm";
 import { recordBaseBranchHealth } from "../repositories/base-branch-health.repository.js";
 import { invalidatePreferencesCache } from "../repositories/preferences.repository.js";
+import { resolveBaseSweepIntervalMs, resolveRiskPosture, riskPosturePrefKey } from "../services/risk-posture.service.js";
 
 const verifyBaseBranchHealth = vi.fn(async () => {});
 // Only the probe itself is stubbed; the sweep also reads this module's start-stamp key and
@@ -33,7 +34,13 @@ vi.mock("../services/base-branch-health.service.js", async (importOriginal) => {
 
 const { runBaseBranchHealthCheckOnce } = await import("../startup/base-branch-health-reconciler.js");
 
-const INTERVAL_MS = 30 * 60 * 1000;
+// #1031: the posture the seeded project opts in with is `standard`, so this is `standard`'s
+// sweep cadence (12 h since #1031 — it was the pre-posture 30-min constant before). Derived
+// from the resolver rather than re-typed, so a cadence change cannot silently desynchronise
+// the timing these cases assert on.
+const INTERVAL_MS = resolveBaseSweepIntervalMs(
+  resolveRiskPosture(new Map([[riskPosturePrefKey("p"), "standard"]]), "p"),
+)!;
 
 describe("base-branch health sweep respects persisted recency across restarts", () => {
   let db: ReturnType<typeof createTestDb>["db"];
@@ -52,7 +59,8 @@ describe("base-branch health sweep respects persisted recency across restarts", 
     });
     // #983 — the sweep is OPT-IN: a project with no explicit risk posture is never probed at
     // all, so these recency assertions need a project that opted in. `standard` is deliberate:
-    // its `sweepIntervalMs` IS `INTERVAL_MS`, so every case below keeps the timing it had.
+    // `INTERVAL_MS` above is derived from its `sweepIntervalMs`, so every case below asserts
+    // against the cadence the sweep actually uses.
     await db.insert(preferences).values({
       key: `risk_posture_${projectId}`,
       value: "standard",

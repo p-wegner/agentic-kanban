@@ -8900,6 +8900,7 @@ paths:
                   type: number
                 workerVersion:
                   type: string
+                profiles: {}
       responses:
         "200":
           description: Success

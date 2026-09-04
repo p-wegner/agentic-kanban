@@ -12,6 +12,9 @@ import { getProjectHealth } from "../services/project-health.service.js";
 import { listBaseBranchHealth, getLatestBaseBranchHealth } from "../repositories/base-branch-health.repository.js";
 import { inFlightBaseBranchProbeCount } from "../services/base-branch-health.service.js";
 import { requestBaseBranchReprobe } from "../services/base-branch-health-reprobe.service.js";
+import { describeBaseSweep, resolveRiskPosture } from "../services/risk-posture.service.js";
+import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 
 import { queryInt } from "../middleware/query-params.js";
 /**
@@ -51,11 +54,16 @@ export function createProjectHealthRoute(database: Database) {
   router.get("/:id/base-branch-health", async (c) => {
     const projectId = c.req.param("id");
     const limit = queryInt(c, "limit", { def: 20, min: 1, max: 100 });
-    const [latest, history] = await Promise.all([
+    const [latest, history, prefRows] = await Promise.all([
       getLatestBaseBranchHealth(projectId, database),
       listBaseBranchHealth(projectId, limit, database),
+      getAllPreferencesCached(database).catch(() => []),
     ]);
-    return c.json({ latest, history });
+    // #1031: the EFFECTIVE sweep cadence, so an operator can see whether this project is on
+    // a scheduled full-suite sweep and how often — the posture decides, the opt-in rule
+    // (`resolveBaseSweepIntervalMs`) may say "never".
+    const sweep = describeBaseSweep(resolveRiskPosture(toPrefMap(prefRows), projectId), latest?.createdAt);
+    return c.json({ latest, history, sweep });
   });
 
   // POST /api/projects/:id/base-branch-health/reprobe — invalidate the cached verdict and

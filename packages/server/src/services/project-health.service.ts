@@ -1,7 +1,10 @@
 import type { Database } from "../db/index.js";
 import { db } from "../db/index.js";
 import { getDirtyTrackedSourceFiles } from "./dirty-main-checkout.js";
-import { getPreference } from "../repositories/preferences.repository.js";
+import { getPreference, getAllPreferencesCached } from "../repositories/preferences.repository.js";
+import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
+import type { BaseSweepInfo } from "@agentic-kanban/shared/types";
+import { describeBaseSweep, resolveRiskPosture } from "./risk-posture.service.js";
 import {
   getProjectHealthRows,
   getIssueCountsByStatus,
@@ -49,6 +52,12 @@ interface ProjectHealthEntry {
    * 17-repo project that read as a clean bill of health for 16 unchecked repos.
    */
   reposChecked: number;
+  /**
+   * The EFFECTIVE periodic base-branch sweep (#1031): whether this project runs the full
+   * suite on a schedule, how often, and why — so the operator can see which projects are on
+   * which cadence in ONE list instead of reading each project's posture and the table.
+   */
+  baseSweep: BaseSweepInfo;
 }
 
 interface ProjectHealthResult {
@@ -81,6 +90,7 @@ export async function getProjectHealth(database: Database = db): Promise<Project
   }
 
   const activeProjectId = await getPreference("activeProjectId", database);
+  const prefMap = toPrefMap(await getAllPreferencesCached(database).catch(() => []));
 
   const healthEntries = await Promise.all(
     projectRows.map(async (project): Promise<ProjectHealthEntry> => {
@@ -123,8 +133,10 @@ export async function getProjectHealth(database: Database = db): Promise<Project
 
       // #491 — surface an already-red base branch loudly, without opening a log: a cheap
       // read of the last recorded verify result, never a live check on this request path.
+      let lastProbeAt: string | null = null;
       try {
         const baseHealth = await getLatestBaseBranchHealth(project.id, database);
+        lastProbeAt = baseHealth?.createdAt ?? null;
         if (baseHealth && baseHealth.outcome !== "green") {
           // #935 — a `timeout`/`unverified` probe never reached a verdict, so reporting the
           // base as "TIMEOUT ... verify failed" states as fact something nobody measured. Say
@@ -153,6 +165,7 @@ export async function getProjectHealth(database: Database = db): Promise<Project
         totalIssues,
         warnings,
         reposChecked: allRepos.length,
+        baseSweep: describeBaseSweep(resolveRiskPosture(prefMap, project.id), lastProbeAt),
       };
     }),
   );

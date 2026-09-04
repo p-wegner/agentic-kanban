@@ -174,3 +174,51 @@ direction check at all, which is the whole guarantee.
 included), and it did not build the nightly-sweep `heal` ticket §3.B pairs with it — that is
 #1016. Landing on a red base without the heal ticket is a worse state than blocking, so the two
 are meant to be switched on together.
+
+## Amendment 2026-09-04 (#1031): `standard` sweeps half-daily, and the per-posture cadence is pinned
+
+**Decision: `standard`'s full-suite base sweep moves from 30 min to 12 h** — the same cadence as
+`strict`, for the same reason. The alternative (keep 30 min and correct the dev-board proposal's
+§3.B claim) was rejected.
+
+Why. When #983 added `sweepIntervalMs` to the posture, `standard` was given the pre-posture
+constant `BASE_HEALTH_DEFAULT_INTERVAL_MS` (30 min) under this record's own "reproduces today's
+behaviour exactly" rule. But that rule was written about the *gate* fields (`gateTier`,
+`trainMaxSize`, `contentionMode`, the per-cycle caps) — the things a project's merge behaviour
+depends on. The sweep is a background signal, not a gate, and the cadence table that resulted
+was incoherent: a `full` per-merge gate already verifies every landing, so `strict`'s comment
+argues that a sweep only adds value for changes that reach the base *outside* a merge and
+half-daily is enough for that — and `standard` has the very same `full` gate. It was the only
+posture left running the full suite 48x a day on the shared box (every other posture sweeps 2-4x),
+and proposal `2026-09-03-dev-board-vs-deployed-board.md` §3.B's "sweep only per posture, nightly"
+claim was false for exactly that one posture. Choosing 12 h rather than 24 h keeps `standard`
+at least as watchful as `strict`; a `standard` project with a real deployment is expected to move
+to `strict` anyway.
+
+What "today's behaviour exactly" now means for `standard`: **every gate/merge field is unchanged;
+the sweep cadence is the one deliberate exception**, called out in the posture table's comment.
+`BASE_HEALTH_DEFAULT_INTERVAL_MS` remains only the sweep loop's tick rate.
+
+The pinned table (decision-level; a change to any row amends this record):
+
+| Posture | Per-merge gate | Full-suite sweep |
+|---|---|---|
+| `strict` | full | 12 h |
+| `standard` | full | **12 h** (was 30 min) |
+| `iterate` | impact | 24 h |
+| `fast` | scoped | 6 h |
+| `sprint` | scoped-base-watch | 24 h |
+| *(no posture chosen)* | full | never — the opt-in rule (#983) |
+
+Enforcement: `risk-posture.service.test.ts` pins every row (`PINNED_SWEEP_INTERVALS`) and
+separately asserts that no posture sweeps more often than every 6 h, so the 30-minute constant
+cannot be re-adopted by one posture quietly.
+
+**Visibility.** The effective cadence is now on the wire, not only in this table.
+`describeBaseSweep` (`risk-posture.service.ts`) reports `{ scheduled, intervalMs,
+nominalIntervalMs, postureLevel, postureSource, reason, nextDueAt }` — built on
+`resolveBaseSweepIntervalMs`, so it can never claim a sweep for a project the opt-in rule
+excludes. `GET /api/projects/:id/base-branch-health` carries it as `sweep`;
+`GET /api/projects/health` carries it per project as `baseSweep`, and the Project Health
+Overview renders it (`base sweep every 12 h (standard)` / `base sweep off (no posture chosen)`),
+so an operator can list which projects are on which cadence from one response.
