@@ -592,6 +592,18 @@ export function createWorkspaceProvisionService(deps: {
      * warn" contract as `profileHold`.
      */
     dataHandlingHold: string | null;
+    /**
+     * #1025 — the requested profile is `forbidden` for this project. `profileHold` carries
+     * the reason too (so an existing caller still refuses); this flag is what lets the
+     * refusal be reported as a REFUSAL rather than as "nothing available right now".
+     */
+    profileRefused: boolean;
+    /**
+     * #1025 — the launch is running on a `reserve` profile. Not a hold and not an error,
+     * but it must be VISIBLE: an emergency account spent silently is one spent by accident.
+     */
+    reserveUsed: boolean;
+    reserveNote: string | null;
   }> {
     const runtime = await loadProjectRuntimeConfig(database, {
       projectId: projectId ?? "",
@@ -605,6 +617,15 @@ export function createWorkspaceProvisionService(deps: {
     });
     for (const note of runtime.provider.notes) {
       console.log(`[workspaces] ${note}`);
+    }
+    // Every reserve start is logged (#1025, proposal §6) — on its own line, with the grant
+    // that permitted it, so "which job burned the emergency account, and who said it could"
+    // is answerable from the log alone rather than from the note stream.
+    if (runtime.provider.reserveUsed) {
+      console.log(
+        `[workspaces] RESERVE PROFILE START project=${projectId ?? "?"} profile=${runtime.provider.provider}:${runtime.provider.profileName ?? "?"}` +
+          ` grant=${runtime.provider.reserveAllowedReason ?? "unknown"} — ${runtime.provider.reserveNote ?? ""}`,
+      );
     }
 
     return {
@@ -620,6 +641,9 @@ export function createWorkspaceProvisionService(deps: {
       profileHold: runtime.provider.profileHold,
       profileClamped: runtime.provider.profileClamped,
       dataHandlingHold: runtime.provider.dataHandlingHold,
+      profileRefused: runtime.provider.profileRefused,
+      reserveUsed: runtime.provider.reserveUsed,
+      reserveNote: runtime.provider.reserveNote,
     };
   }
 

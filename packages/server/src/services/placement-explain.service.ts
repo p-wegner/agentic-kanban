@@ -31,6 +31,7 @@
 // resolver stays the single place a placement is decided.
 import {
   allowedProfilesPrefKey,
+  rosterPrefKey,
 } from "@agentic-kanban/shared/lib/profile-allowlist";
 import {
   requiredDataLabelsPrefKey,
@@ -136,7 +137,7 @@ export const PLACEMENT_CHECK_CHAIN: readonly PlacementCheckSpec[] = [
     title: "Project has no profile allowlist",
     resolverMarker: "allowedProfilesPrefKey(projectId)",
     docMarker: /allowed_profiles_<projectId>/,
-    prefKeys: (projectId) => [allowedProfilesPrefKey(projectId)],
+    prefKeys: (projectId) => [allowedProfilesPrefKey(projectId), rosterPrefKey(projectId)],
   },
   {
     // #876 — same shape as the allowlist check above, one step later in the resolver.
@@ -435,6 +436,7 @@ async function buildEvalContext(params: {
     strict: (await getPreferenceValue(workerStrictPrefKey(projectId), database)) === "true",
     optInPref: await getPreferenceValue(workerDispatchPrefKey(projectId), database),
     allowlistPref: await getPreferenceValue(allowedProfilesPrefKey(projectId), database),
+    rosterPref: await getPreferenceValue(rosterPrefKey(projectId), database),
     dataHandlingPref: await getPreferenceValue(requiredDataLabelsPrefKey(projectId), database),
     // #937: the whole posture, not one field — check 4 reports the level and source it read,
     // and reconstructing those from a single value would be the drift this file exists to avoid.
