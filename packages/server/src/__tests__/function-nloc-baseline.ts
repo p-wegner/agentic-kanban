@@ -186,6 +186,20 @@
  * `project-runtime-config.service.ts`); what remains here cannot be extracted, because a
  * value has to be passed at the point in the flow where it exists. All three factories
  * still want splitting for their own sake; this is not the ticket that does it.
+ *
+ * -- Ninth disclosed movement (2026-09-04, #1027 worker profile attestation) -----------
+ *
+ *   createRemoteAgentService    637 -> 638  (+1)
+ *   createWorkerAgentRunner     351 -> 358  (+7)
+ *
+ * The board side is one hand-off line: the placement's roster-selected profile NAME rides
+ * on the launch spec (never a credential -- the board holds none of the worker's logins).
+ * The worker side is the refusal: `assign` resolves that name against its own attested
+ * profiles via `applyProfileToSpec` and answers `assign_failed` when it cannot, because
+ * running the assignment under some other local login is exactly the silent fallback #651
+ * refused remote dispatch to prevent. The resolution itself lives in `worker-profiles.ts`;
+ * the seven lines here are the guard and the reply, which have to sit where the spec
+ * arrives. Both factories still want splitting; this is not the ticket that does it.
  */
 export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "cli/commands/issue.ts::registerIssueCommand": 718,
@@ -202,7 +216,8 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "services/session-manager/session-lifecycle.ts::createSessionLifecycle": 621,
   "services/workflow-fork.service.ts::createWorkflowForkService": 581,
   "cli/commands/workspace.ts::registerWorkspaceCommand": 573,
-  "services/agent-remote.service.ts::createRemoteAgentService": 637,
+  // 637 -> 638 (#1027), disclosed in the ninth movement above.
+  "services/agent-remote.service.ts::createRemoteAgentService": 638,
   "cli/commands/session.ts::registerSessionCommand": 569,
   // 564 -> 536 (#992): the PATCH field `if` chain became the table in
   // `services/project-update-fields.ts`, which is also what derives the recognized-key set.
@@ -234,7 +249,8 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // 404 -> 399, banked (#806): five hand-written body guards became one schema parse each.
   "routes/workspace-actions.ts::createWorkspaceActionsRoute": 403,
   // 349 -> 351 (#841): POSIX-only `detached: true` for a shell launch, closing the #836 gap.
-  "worker/worker-agent-runner.ts::createWorkerAgentRunner": 351,
+  // 351 -> 358 (#1027), disclosed in the ninth movement above.
+  "worker/worker-agent-runner.ts::createWorkerAgentRunner": 358,
 };
 
 /**

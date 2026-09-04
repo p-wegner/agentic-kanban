@@ -10,9 +10,14 @@
  * `api/oauth/usage` per Claude profile, which is where the 5-hour and 7-day windows
  * actually live.
  *
- * ── Why this file is so defensive ────────────────────────────────────────────
- * The logic is PORTED (not imported — the board must run without claude-pick on the
- * box) from `claude-pick/fleet/lib/usage.mjs`, which already paid for the traps:
+ * ── Where the engine lives ───────────────────────────────────────────────────
+ * The throttle, the cache and the fetch are `../lib/oauth-quota-core.js`
+ * since #1027, because a fleet WORKER reports its own profiles' quota with the same
+ * reader and cannot import this package (`worker-cli-isolation.test.ts`). This file keeps
+ * the two board-shaped halves: discovery through the rotation ring, and the wire DTO.
+ *
+ * The engine's logic is PORTED (not imported — the board must run without claude-pick on
+ * the box) from `claude-pick/fleet/lib/usage.mjs`, which already paid for the traps:
  *
  *   - `api/oauth/usage` 429s easily, and several pollers share one budget on a dev
  *     machine (claude-pick itself, the statusline, this board). So: **one profile
@@ -40,114 +45,51 @@
  * resolution). There is deliberately no second credential path here.
  */
 import type { QuotaMetric, QuotaProviderEntry, QuotaUsageResult } from "@agentic-kanban/shared";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import {
+  FIVE_HOURS_MS,
+  MEASUREMENT_STALE_MS,
+  OAuthQuotaPoller,
+  SEVEN_DAYS_MS,
+  readOAuthCredentials,
+  type CredentialRead,
+  type OAuthProfileRef,
+  type QuotaCacheRecord,
+} from "../lib/oauth-quota-core.js";
 import type { QuotaUsageProvider } from "./quota-usage.service.js";
 import { listClaudeSubscriptions, type ClaudeSubscriptionEntry } from "./claude-subscription-ring.js";
 
-export const OAUTH_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
-
-/** Beta header the OAuth usage endpoint requires. */
-const OAUTH_BETA = "oauth-2025-04-20";
-
-const FIVE_HOURS_MS = 5 * 60 * 60 * 1000;
-const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
-
 /**
- * One reset window. A measurement older than this is `unknown`: the 5-hour window it
- * describes has certainly reset since, so the number is not merely stale, it is about
- * a window that no longer exists.
+ * The engine's surface, re-exported unchanged (#1027).
+ *
+ * ~20 call sites and this provider's own test suite import these from here, and the move
+ * to `server/src/lib/oauth-quota-core` was an extraction, not a redesign — so the import path
+ * stays valid rather than becoming a mechanical sweep with nothing to show for it.
  */
-export const MEASUREMENT_STALE_MS = FIVE_HOURS_MS;
+export {
+  MEASUREMENT_STALE_MS,
+  OAUTH_USAGE_URL,
+  backoffMs,
+  mergeRecord,
+  parseRetryAfter,
+  quotaReadingOf,
+  readOAuthCredentials,
+  refreshIntervalMs,
+  tierOf,
+} from "../lib/oauth-quota-core.js";
+export type {
+  CredentialRead,
+  FetchOutcome,
+  OAuthProfileRef,
+  QuotaCacheRecord,
+  QuotaReading,
+} from "../lib/oauth-quota-core.js";
 
 /** Accent used for every Claude profile card, matching the provider's brand colour. */
 const CLAUDE_ACCENT = "#d97757";
 const CLAUDE_LOGIN_URL = "https://claude.ai/login";
-
-/** A profile the provider can poll: a name plus the config dir holding its OAuth login. */
-export interface OAuthProfileRef {
-  profile: string;
-  configDir: string;
-}
-
-/** Outcome of reading one profile's `.credentials.json`. Never throws. */
-export type CredentialRead =
-  | { token: string; tier: string | null; err?: undefined }
-  | { err: "no-creds" | "bad-creds" | "no-token" | "expired"; tier?: string | null; token?: undefined };
-
-/** One cached measurement for one profile. `dataTs` is the age anchor: when the NUMBERS were true. */
-export interface QuotaCacheRecord {
-  /** When this record was written (ms). */
-  ts: number;
-  ok: boolean;
-  err: string | null;
-  /** When the gauges below were actually measured (ms), or null if never. */
-  dataTs: number | null;
-  /** Earliest ms at which another request may be made (failure backoff). */
-  nextTry: number;
-  tier: string | null;
-  fiveH: number | null;
-  fiveHReset: string | null;
-  sevenD: number | null;
-  sevenDReset: string | null;
-}
-
-/**
- * Refresh interval by distance to the cap. Ported verbatim from the reference's
- * `daemonTtlSec` — the numbers are measured, not chosen.
- */
-export function refreshIntervalMs(rec: QuotaCacheRecord | undefined): number {
-  const used = Math.max(numOrNull(rec?.fiveH) ?? 0, numOrNull(rec?.sevenD) ?? 0);
-  if (used >= 80) return 2 * 60_000;
-  if (used >= 50) return 5 * 60_000;
-  return 10 * 60_000;
-}
-
-/**
- * Backoff after a failed refresh, in ms. A 429 honours `Retry-After` when the server
- * sent one; everything else gets a fixed, deliberately generous window — the cost of
- * waiting is a slightly older number, the cost of retrying hard is the rate limit.
- */
-export function backoffMs(err: string | null, retryAfterSec = 0): number {
-  if (err === "http-429") return retryAfterSec > 0 ? retryAfterSec * 1000 : 300_000;
-  if (/^http-5\d\d$/.test(err ?? "")) return 120_000;
-  if (["expired", "no-token", "no-creds", "bad-creds"].includes(err ?? "")) return 120_000;
-  return 60_000;
-}
-
-/** `"max 20x"` from `subscriptionType` plus the multiplier embedded in `rateLimitTier`. */
-export function tierOf(oauth: Record<string, unknown> | null | undefined): string | null {
-  if (!oauth) return null;
-  const sub = typeof oauth.subscriptionType === "string" ? oauth.subscriptionType : null;
-  const m = /(\d+x)/.exec(typeof oauth.rateLimitTier === "string" ? oauth.rateLimitTier : "");
-  if (sub) return m ? `${sub} ${m[1]}` : sub;
-  return m ? m[1] : null;
-}
-
-/**
- * Read a profile's OAuth token + tier from `<configDir>/.credentials.json` — the same
- * file `claude-subscription-ring.ts` uses to decide a subscription is logged in.
- * Never throws. An EXPIRED token short-circuits: spending a request we know will fail
- * is a guaranteed waste of the rate budget we are protecting.
- */
-export function readOAuthCredentials(configDir: string, nowMs = Date.now()): CredentialRead {
-  const file = join(configDir, ".credentials.json");
-  if (!existsSync(file)) return { err: "no-creds" };
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(readFileSync(file, "utf8").replace(/^﻿/, ""));
-  } catch {
-    return { err: "bad-creds" };
-  }
-  const oauth = (parsed as { claudeAiOauth?: Record<string, unknown> } | null)?.claudeAiOauth;
-  if (!oauth || typeof oauth.accessToken !== "string" || !oauth.accessToken) return { err: "no-token" };
-  const expiresAt = Number(oauth.expiresAt);
-  if (Number.isFinite(expiresAt) && expiresAt > 0 && nowMs >= expiresAt) {
-    return { err: "expired", tier: tierOf(oauth) };
-  }
-  return { token: oauth.accessToken, tier: tierOf(oauth) };
-}
 
 /**
  * Every OAuth Claude profile the board can see, via the ring's own discovery. API-key
@@ -170,45 +112,6 @@ export function listOAuthProfiles(ring: ClaudeSubscriptionEntry[] = []): OAuthPr
     out.push({ profile: sub.profile, configDir: sub.configDir });
   }
   return out;
-}
-
-/** Result of one live fetch. Mirrors the reference's `fetchUsage` record shape. */
-export interface FetchOutcome {
-  ok: boolean;
-  err: string | null;
-  retryAfterSec: number;
-  tier: string | null;
-  fiveH: number | null;
-  fiveHReset: string | null;
-  sevenD: number | null;
-  sevenDReset: string | null;
-}
-
-const FAILED = (err: string, tier: string | null = null, retryAfterSec = 0): FetchOutcome => ({
-  ok: false, err, retryAfterSec, tier,
-  fiveH: null, fiveHReset: null, sevenD: null, sevenDReset: null,
-});
-
-function numOrNull(v: unknown): number | null {
-  return typeof v === "number" && Number.isFinite(v) ? v : null;
-}
-
-function pickNumber(o: unknown, key: string): number | null {
-  return numOrNull((o as Record<string, unknown> | null)?.[key]);
-}
-
-function pickString(o: unknown, key: string): string | null {
-  const v = (o as Record<string, unknown> | null)?.[key];
-  return typeof v === "string" && v ? v : null;
-}
-
-/** `Retry-After` as seconds, accepting both the delta-seconds and the HTTP-date form. */
-export function parseRetryAfter(raw: string | null, nowMs = Date.now()): number {
-  if (!raw) return 0;
-  const n = Number(raw);
-  if (Number.isFinite(n)) return Math.max(0, n);
-  const at = Date.parse(raw);
-  return Number.isFinite(at) ? Math.max(0, Math.round((at - nowMs) / 1000)) : 0;
 }
 
 export interface OAuthQuotaProviderOptions {
@@ -236,129 +139,27 @@ export interface OAuthQuotaProviderOptions {
  * `nowMs?: number` time-injection convention.
  */
 export class OAuthQuotaProvider implements QuotaUsageProvider {
-  private readonly cache = new Map<string, QuotaCacheRecord>();
-  private cursor = 0;
-  private readonly fetchImpl: typeof fetch;
+  private readonly poller: OAuthQuotaPoller;
   private readonly listProfiles: () => OAuthProfileRef[];
-  private readonly readCredentials: (configDir: string, nowMs: number) => CredentialRead;
-  private readonly log: (line: string) => void;
-  private readonly timeoutMs: number;
 
   constructor(opts: OAuthQuotaProviderOptions = {}) {
-    this.fetchImpl = opts.fetchImpl ?? ((...args: Parameters<typeof fetch>) => fetch(...args));
     this.listProfiles = opts.listProfiles ?? (() => listOAuthProfiles());
-    this.readCredentials = opts.readCredentials ?? readOAuthCredentials;
-    this.log = opts.log ?? ((line) => console.log(`[quota-oauth] ${line}`));
-    this.timeoutMs = opts.timeoutMs ?? 6_000;
+    this.poller = new OAuthQuotaPoller({
+      ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
+      readCredentials: opts.readCredentials ?? readOAuthCredentials,
+      log: opts.log ?? ((line) => console.log(`[quota-oauth] ${line}`)),
+      ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+    });
   }
 
   async fetchUsage(nowMs: number = Date.now()): Promise<QuotaUsageResult> {
     const profiles = this.listProfiles();
-    await this.refreshOne(profiles, nowMs);
+    await this.poller.refreshOne(profiles, nowMs);
     return {
-      providers: profiles.map((p) => this.toEntry(p, nowMs)),
+      providers: profiles.map((p) => buildProviderEntry(p.profile, this.poller.record(p.configDir), nowMs)),
       scrapedAt: new Date(nowMs).toISOString(),
     };
   }
-
-  /**
-   * Refresh AT MOST ONE profile. The due set is filtered by the utilization-scaled TTL
-   * and by any active failure backoff, and the cursor advances over the DUE set so one
-   * permanently-failing profile cannot starve the others.
-   */
-  private async refreshOne(profiles: OAuthProfileRef[], nowMs: number): Promise<string | null> {
-    const due = profiles.filter((p) => this.isDue(p.configDir, nowMs));
-    if (due.length === 0) return null;
-
-    const target = due[this.cursor % due.length];
-    this.cursor = (this.cursor + 1) % due.length;
-
-    const outcome = await this.fetchOne(target, nowMs);
-    this.cache.set(target.configDir, mergeRecord(this.cache.get(target.configDir), outcome, nowMs));
-    return target.profile;
-  }
-
-  private isDue(configDir: string, nowMs: number): boolean {
-    const rec = this.cache.get(configDir);
-    if (!rec) return true;
-    if (nowMs < rec.nextTry) return false;
-    return nowMs - rec.ts >= refreshIntervalMs(rec);
-  }
-
-  private async fetchOne(target: OAuthProfileRef, nowMs: number): Promise<FetchOutcome> {
-    const cred = this.readCredentials(target.configDir, nowMs);
-    if (cred.err) {
-      this.log(`${target.profile} skipped (${cred.err}) — no request sent`);
-      return FAILED(cred.err, cred.tier ?? null);
-    }
-
-    const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), this.timeoutMs);
-    try {
-      const res = await this.fetchImpl(OAUTH_USAGE_URL, {
-        headers: { authorization: `Bearer ${cred.token}`, "anthropic-beta": OAUTH_BETA },
-        signal: ac.signal,
-      });
-      this.log(`${target.profile} GET ${OAUTH_USAGE_URL} -> ${res.status}`);
-      if (!res.ok) {
-        const retryAfterSec = res.status === 429
-          ? parseRetryAfter(res.headers?.get?.("retry-after") ?? null, nowMs)
-          : 0;
-        return FAILED(`http-${res.status}`, cred.tier ?? null, retryAfterSec);
-      }
-      const body = (await res.json()) as Record<string, unknown>;
-      return {
-        ok: true, err: null, retryAfterSec: 0, tier: cred.tier ?? null,
-        fiveH: pickNumber(body.five_hour, "utilization"),
-        fiveHReset: pickString(body.five_hour, "resets_at"),
-        sevenD: pickNumber(body.seven_day, "utilization"),
-        sevenDReset: pickString(body.seven_day, "resets_at"),
-      };
-    } catch (err) {
-      const kind = (err as Error | null)?.name === "AbortError" ? "timeout" : "net";
-      this.log(`${target.profile} GET ${OAUTH_USAGE_URL} -> ${kind}`);
-      return FAILED(kind, cred.tier ?? null);
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  private toEntry(p: OAuthProfileRef, nowMs: number): QuotaProviderEntry {
-    return buildProviderEntry(p.profile, this.cache.get(p.configDir), nowMs);
-  }
-}
-
-/**
- * Merge a fetch outcome into the cache, PRESERVING the last-known-good gauges on
- * failure. Blanking a display on a transient 429 is strictly worse than showing a
- * slightly older number with its age attached — and a 429 must never read as an
- * exhausted profile, which is what dropping to "no data" would look like downstream.
- */
-export function mergeRecord(
-  prev: QuotaCacheRecord | undefined,
-  fetched: FetchOutcome,
-  nowMs: number,
-): QuotaCacheRecord {
-  if (fetched.ok) {
-    return {
-      ts: nowMs, ok: true, err: null, dataTs: nowMs, nextTry: 0, tier: fetched.tier,
-      fiveH: fetched.fiveH, fiveHReset: fetched.fiveHReset,
-      sevenD: fetched.sevenD, sevenDReset: fetched.sevenDReset,
-    };
-  }
-  const hadData = prev != null && (prev.fiveH != null || prev.sevenD != null);
-  return {
-    ts: nowMs,
-    ok: false,
-    err: fetched.err,
-    dataTs: hadData ? prev!.dataTs : null,
-    nextTry: nowMs + backoffMs(fetched.err, fetched.retryAfterSec),
-    tier: fetched.tier ?? prev?.tier ?? null,
-    fiveH: hadData ? prev!.fiveH : null,
-    fiveHReset: hadData ? prev!.fiveHReset : null,
-    sevenD: hadData ? prev!.sevenD : null,
-    sevenDReset: hadData ? prev!.sevenDReset : null,
-  };
 }
 
 function metric(
@@ -385,12 +186,12 @@ function metric(
  * Map one cache record onto the wire DTO.
  *
  * Status, in the order it is decided:
- *  - no login at all (`no-creds`/`bad-creds`/`no-token`/`expired`) → `auth`, so the UI
+ *  - no login at all (`no-creds`/`bad-creds`/`no-token`/`expired`) -> `auth`, so the UI
  *    offers the sign-in link rather than pretending the number is missing.
- *  - the measurement is older than one reset window (or was never taken) → `unknown`.
+ *  - the measurement is older than one reset window (or was never taken) -> `unknown`.
  *    Never `error`, never "0%": `isPolicyBlockedByQuota` only blocks on `ok`, so an
  *    `unknown` profile stays selectable on the static order instead of being dropped.
- *  - otherwise → `ok`, with the last-known gauges and their age.
+ *  - otherwise -> `ok`, with the last-known gauges and their age.
  */
 export function buildProviderEntry(
   profile: string,

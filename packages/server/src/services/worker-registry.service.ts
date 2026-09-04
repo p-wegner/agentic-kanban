@@ -25,8 +25,10 @@ import type { WorkerRow } from "../repositories/worker.repository.js";
 import {
   checkProtocolCompatibility,
   WORKER_PROTOCOL_VERSION,
+  parseWorkerProfileAttestations,
   type WorkerCapabilities,
   type WorkerCapacityInfo,
+  type WorkerProfileAttestation,
 } from "@agentic-kanban/shared/lib/worker-protocol";
 import { recordWorkerEvent } from "./worker-events.service.js";
 
@@ -49,6 +51,8 @@ export interface RegisterWorkerInput {
   protocolVersion?: number;
   /** #754: the worker package build, for the panel and `worker list`. */
   workerVersion?: string;
+  /** #1027: agent profiles this machine attests it can authenticate as. Names, never secrets. */
+  profiles?: WorkerProfileAttestation[];
   /** Test seam for time-dependent behavior (pairing expiry). */
   now?: string;
 }
@@ -87,6 +91,16 @@ export interface WorkerView extends Omit<WorkerRow, "tokenHash"> {
    * placement must treat that exactly as it did before this field existed.
    */
   capacity?: WorkerCapacityInfo;
+  /**
+   * What this worker last ATTESTED about its agent profiles (#1027).
+   *
+   * In memory, for the same reason `capacity` is: it is a property of the RUNNING peer —
+   * a login can be added or removed, and the quota half is only meaningful as a fresh
+   * reading. A stale column would be worse than absence here, because absence is
+   * correctly read as "attests nothing" and therefore as #651's refusal, while a stale
+   * column would be read as a permission.
+   */
+  profiles?: WorkerProfileAttestation[];
 }
 
 /** Constant-time compare that does not leak length via an early return. */
@@ -125,6 +139,9 @@ export function createWorkerRegistry(database: Database = realDb) {
 
   /** This worker's headroom as of its last heartbeat (#910). See WorkerView for why not a column. */
   const reportedCapacity = new Map<string, WorkerCapacityInfo>();
+
+  /** This worker's attested profiles (#1027). See WorkerView for why not a column. */
+  const reportedProfiles = new Map<string, WorkerProfileAttestation[]>();
 
   /**
    * Last EFFECTIVE status observed per worker, so `status_change` can be emitted on a
@@ -208,6 +225,9 @@ export function createWorkerRegistry(database: Database = realDb) {
       protocolVersion: input.protocolVersion,
       workerVersion: input.workerVersion,
     });
+    // #1027: a profile-restricted project can consider this machine from registration on,
+    // rather than only after its first heartbeat lands (up to 30 s later).
+    noteAttestedProfiles(workerId, input.profiles);
     console.log(
       `[worker-registry] registered worker: id=${workerId} name=${input.name.trim()} ` +
         `protocol=${input.protocolVersion ?? "?"} build=${input.workerVersion ?? "?"}`,
@@ -272,6 +292,9 @@ export function createWorkerRegistry(database: Database = realDb) {
       } else {
         reportedCapacity.delete(workerId);
       }
+      // #1027: re-declared every beat, so a login removed on the worker stops being a
+      // permission on the board within one heartbeat rather than at the next re-pairing.
+      noteAttestedProfiles(workerId, opts.capabilities.profiles);
     }
     return { ok: true };
   }
@@ -285,14 +308,30 @@ export function createWorkerRegistry(database: Database = realDb) {
       const current = effectiveStatus(row, nowMs);
       noteEffectiveStatus(row, current);
       const capacity = reportedCapacity.get(row.id);
+      const profiles = reportedProfiles.get(row.id);
       return {
         ...safe,
         effectiveStatus: current,
         ...(reported?.protocolVersion !== undefined ? { protocolVersion: reported.protocolVersion } : {}),
         ...(reported?.workerVersion !== undefined ? { workerVersion: reported.workerVersion } : {}),
         ...(capacity ? { capacity } : {}),
+        ...(profiles ? { profiles } : {}),
       };
     });
+  }
+
+  /**
+   * Record (or clear) what a worker attests about its profiles (#1027).
+   *
+   * Deliberately a REPLACE and never a merge: the attestation is the worker's current
+   * statement about itself, so a profile it stopped naming must stop being a permission.
+   * Values arriving off the wire are re-parsed here rather than trusted, because both
+   * callers (`hello` and the heartbeat body) hand over data from a remote machine.
+   */
+  function noteAttestedProfiles(workerId: string, profiles: unknown): void {
+    const parsed = Array.isArray(profiles) ? parseWorkerProfileAttestations(profiles) : undefined;
+    if (parsed && parsed.length > 0) reportedProfiles.set(workerId, parsed);
+    else reportedProfiles.delete(workerId);
   }
 
   /**
@@ -322,6 +361,7 @@ export function createWorkerRegistry(database: Database = realDb) {
     await workerRepo.deleteWorker(workerId, database);
     reportedVersions.delete(workerId);
     reportedCapacity.delete(workerId);
+    reportedProfiles.delete(workerId);
     lastEffectiveStatus.delete(workerId);
     // Deleting the row only stops NEW authentications. A revoked worker also
     // holds a live socket and (for git transport) working git tokens — both must
@@ -338,7 +378,7 @@ export function createWorkerRegistry(database: Database = realDb) {
 
   return {
     mintPairingToken, registerWorker, authenticateWorker, heartbeat, touchHeartbeat,
-    listWorkersView, revokeWorker, onRevoke, boardProtocolVersion,
+    listWorkersView, revokeWorker, onRevoke, boardProtocolVersion, noteAttestedProfiles,
   };
 }
 

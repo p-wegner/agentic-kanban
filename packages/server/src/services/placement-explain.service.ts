@@ -98,6 +98,7 @@ import {
 import type { WorkerRegistry } from "./worker-registry.service.js";
 import { loadProjectRuntimeConfig } from "./project-runtime-config.service.js";
 import { resolveRiskPosture, riskPosturePrefKey } from "./risk-posture.service.js";
+import { resolveRemoteProfileAttestation } from "./worker-profile-placement.service.js";
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
 import { EVALUATORS, type EvalContext } from "./placement-evaluators.js";
@@ -274,6 +275,9 @@ async function describeWorkers(
       sharesFilesystem: labels.includes(SHARES_FILESYSTEM_LABEL),
       eligible: reason === null,
       ineligibleReason: reason,
+      // #1027: what this worker says it can authenticate as. In-memory on the registry
+      // (a property of the running peer), so absent means "has not said" — never "any".
+      ...(w.profiles ? { attestedProfiles: w.profiles } : {}),
       // #774 — the identity half. `GET /api/workers` is served from this shape now, so the
       // route no longer hands out the raw row and the panel no longer computes a second,
       // wrong "capacity" from it.
@@ -426,6 +430,17 @@ async function buildEvalContext(params: {
   const { database, projectId, providerName, branch, now } = params;
   const fleet = getWorkerFleet(database);
   const requiredLabels = parseRequiredLabels(await getPreferenceValue(workerLabelsPrefKey(projectId), database));
+  const workers = await describeWorkers(fleet, providerName, requiredLabels, now);
+  // #1027: the SAME attestation pass the resolver runs, over the same eligible set — an
+  // explanation that computed this differently would disagree with the resolver exactly
+  // where the answer is least obvious (`agreesWithResolver: false` with no visible cause).
+  const attestation = await resolveRemoteProfileAttestation({
+    database,
+    projectId,
+    workers: workers
+      .filter((w) => w.eligible)
+      .map((w) => ({ workerId: w.workerId, profiles: w.attestedProfiles })),
+  });
   return {
     database,
     projectId,
@@ -442,7 +457,10 @@ async function buildEvalContext(params: {
     // and reconstructing those from a single value would be the drift this file exists to avoid.
     posture: resolveRiskPosture(toPrefMap(await getAllPreferencesCached(database).catch(() => [])), projectId),
     requiredLabels,
-    workers: await describeWorkers(fleet, providerName, requiredLabels, now),
+    workers,
+    ...(attestation.restricted
+      ? { attestation: { permittedWorkers: attestation.permitted.length, detail: attestation.detail } }
+      : {}),
     capacity: await resolveFleetCapacity(fleet, providerName, requiredLabels, now),
     now,
     sharesFilesystem: false,

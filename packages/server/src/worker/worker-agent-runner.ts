@@ -39,6 +39,7 @@ import {
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { createWorkerSessionRegistry } from "./worker-session-registry.js";
 import { resolveSpecCommand } from "./worker-command-resolver.js";
+import { applyProfileToSpec } from "./worker-profiles.js";
 import { FLEET_MCP_TOKEN_ENV_VAR } from "@agentic-kanban/shared/lib/worker-protocol";
 
 export type SendToBoard = (message: WorkerToBoardMessage) => void;
@@ -388,7 +389,7 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
     })();
   }
 
-  function assign(sessionId: string, spec: WorkerLaunchSpec): void {
+  function assign(sessionId: string, specAsSent: WorkerLaunchSpec): void {
     seen.noteAssigned(sessionId);
     if (processes.has(sessionId)) {
       send({ type: "assign_failed", sessionId, error: "session already running on this worker" });
@@ -399,6 +400,19 @@ export function createWorkerAgentRunner(send: SendToBoard, options: WorkerAgentR
       return;
     }
     exited.delete(sessionId);
+
+    // #1027: the board may PIN this launch to a profile NAME (never a credential — the
+    // board has none of ours). Resolving the name is this machine's job, and so is
+    // refusing it: an attestation can be stale, and running the assignment under some
+    // other local login is exactly the silent fallback #651 refused remote dispatch to
+    // prevent. A rejection reaches the board as a launch failure it can re-place.
+    const resolvedProfile = applyProfileToSpec(specAsSent, { log: (line) => console.log(line) });
+    if (!resolvedProfile.ok) {
+      console.warn(`[worker] refusing assign: sessionId=${sessionId} ${resolvedProfile.error}`);
+      send({ type: "assign_failed", sessionId, error: resolvedProfile.error });
+      return;
+    }
+    const spec = resolvedProfile.spec;
 
     // #747: the board no longer decides how to invoke the agent on a machine it cannot
     // see. When the spec carries a launch INTENT, the executable and the shell decision are
