@@ -2,13 +2,13 @@
   "schema": "guard-inventory 1",
   "generatedBy": "pnpm guard:inventory (scripts/guard-inventory.mjs)",
   "counts": {
-    "files": 175,
-    "alwaysRun": 175,
+    "files": 176,
+    "alwaysRun": 176,
     "ratchet": 41,
     "both": 41,
-    "distinctProperties": 175,
+    "distinctProperties": 176,
     "missingProperty": 0,
-    "unmeasured": 13
+    "unmeasured": 14
   },
   "slowThresholdMs": 20000,
   "withGit": true,
@@ -89,9 +89,9 @@
       "introducedSha": "c841cb82f7",
       "introducedDate": "2026-08-19",
       "lastRedProxy": {
-        "sha": "d63396d246",
-        "date": "2026-08-23",
-        "subject": "fix(#818): the client typechecks its own tests — @types/node in, all 11 exclusions out, baseline to 0",
+        "sha": "11022584a2",
+        "date": "2026-09-04",
+        "subject": "fix(#1028): route ProfileQuotaSection's quota read through settingsStore — client-conventions-guard green",
         "method": "git-log-fix-commit-naming-the-file"
       },
       "lastRedSource": "proxy: git log of fix commits naming the file (no gate-outcome ledger exists)",
@@ -1566,9 +1566,14 @@
       "property": "The Conductor's capacity brake is GENERATED, never hand-written (#1029).",
       "propertyKey": "the conductor s capacity brake is generated never hand written",
       "propertySource": "doc-block",
-      "introducedSha": null,
-      "introducedDate": null,
-      "lastRedProxy": null,
+      "introducedSha": "364f135bbf",
+      "introducedDate": "2026-09-04",
+      "lastRedProxy": {
+        "sha": "364f135bbf",
+        "date": "2026-09-04",
+        "subject": "feat(#1029): the Conductor reads the capacity snapshot — generated CAPACITY HOLD block + live `capacity` on monitor-tunables; hand-written MEMORY HOLD retired",
+        "method": "git-log-fix-commit-naming-the-file"
+      },
       "lastRedSource": "proxy: git log of fix commits naming the file (no gate-outcome ledger exists)",
       "durationMs": null,
       "durationSource": "absent from docs/tests/durations.json"
@@ -2140,6 +2145,23 @@
       "lastRedSource": "proxy: git log of fix commits naming the file (no gate-outcome ledger exists)",
       "durationMs": 285.4423828125,
       "durationSource": "docs/tests/durations.json"
+    },
+    {
+      "file": "packages/server/src/__tests__/safe-rmdir.test.ts",
+      "basename": "safe-rmdir.test.ts",
+      "package": "server",
+      "kinds": [
+        "always-run"
+      ],
+      "property": "#1033 — `scripts/safe-rmdir.mjs` refuses to delete a tree that holds a reparse point",
+      "propertyKey": "1033 scripts safe rmdir mjs refuses to delete a tree that holds a reparse point",
+      "propertySource": "doc-block",
+      "introducedSha": null,
+      "introducedDate": null,
+      "lastRedProxy": null,
+      "lastRedSource": "proxy: git log of fix commits naming the file (no gate-outcome ledger exists)",
+      "durationMs": null,
+      "durationSource": "absent from docs/tests/durations.json"
     },
     {
       "file": "packages/server/src/__tests__/scaffold-commit-covers-hooks.test.ts",
@@ -3723,6 +3745,13 @@
       ]
     },
     {
+      "propertyKey": "1033 scripts safe rmdir mjs refuses to delete a tree that holds a reparse point",
+      "property": "#1033 — `scripts/safe-rmdir.mjs` refuses to delete a tree that holds a reparse point",
+      "files": [
+        "packages/server/src/__tests__/safe-rmdir.test.ts"
+      ]
+    },
+    {
       "propertyKey": "220 branch name producer agreement",
       "property": "#220 — branch-name PRODUCER agreement.",
       "files": [
@@ -4967,9 +4996,9 @@
     ],
     "neverRedSinceIntroduction": [
       {
-        "file": "packages/server/src/__tests__/objective-capacity-hold-ratchet.test.ts",
+        "file": "packages/server/src/__tests__/safe-rmdir.test.ts",
         "introducedDate": null,
-        "property": "The Conductor's capacity brake is GENERATED, never hand-written (#1029)."
+        "property": "#1033 — `scripts/safe-rmdir.mjs` refuses to delete a tree that holds a reparse point"
       },
       {
         "file": "packages/server/src/__tests__/commit-checkpoint.test.ts",
@@ -5221,6 +5250,7 @@
       "packages/server/src/__tests__/promote-plan.test.ts",
       "packages/server/src/__tests__/red-base-policy-raw-read-ratchet.test.ts",
       "packages/server/src/__tests__/roster-raw-read-ratchet.test.ts",
+      "packages/server/src/__tests__/safe-rmdir.test.ts",
       "packages/server/src/__tests__/test-impact-budget-setting.test.ts",
       "packages/server/src/__tests__/typecheck-package-coverage.test.ts",
       "packages/server/src/__tests__/verify-step-timings.test.ts",

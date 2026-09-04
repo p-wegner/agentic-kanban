@@ -260,6 +260,65 @@ const cases = [
       });
     },
   },
+  // #1033 — a dependency install (or the installing dev launcher) inside a NESTED
+  // `.claude/worktrees/*` checkout is refused. The cwd is what makes it nested, so the
+  // cases below run the hook with a fake nested cwd/CLAUDE_PROJECT_DIR; the directory
+  // does not need to exist (nothing here spawns git — the path shape is the signal).
+  {
+    name: "blocks `pnpm install -r --prefer-offline` when cwd is a nested .claude/worktrees checkout (#1033)",
+    run: () => {
+      const nested = path.join(os.tmpdir(), "ak-hook-main", ".claude", "worktrees", "agent-abc123");
+      const r = runHook("pnpm install -r --prefer-offline", { KANBAN_ALLOW_NESTED_WORKTREE_INSTALL: "" }, nested);
+      assert.equal(r.blocked, true, "expected the nested-worktree install to be blocked");
+      assert.match(r.stdout, /"decision"\s*:\s*"block"/);
+      assert.match(r.stdout, /NESTED worktree/);
+      assert.match(r.stdout, /1033/);
+    },
+  },
+  {
+    name: "blocks `pnpm install --force` and `pnpm dev` from a nested worktree, too (#1033)",
+    run: () => {
+      const nested = path.join(os.tmpdir(), "ak-hook-main", ".claude", "worktrees", "agent-abc123");
+      for (const cmd of ["pnpm install -r --prefer-offline --force 2>&1 | tail -4", "nohup pnpm dev > /tmp/x.log 2>&1 &", "node scripts/dev.mjs"]) {
+        const r = runHook(cmd, { KANBAN_ALLOW_NESTED_WORKTREE_INSTALL: "" }, nested);
+        assert.equal(r.blocked, true, `expected to be blocked: ${cmd}`);
+      }
+    },
+  },
+  {
+    name: "blocks an install that cd's INTO a nested worktree from the main checkout (#1033)",
+    run: () => {
+      withRealDbCheckout((root, env) => {
+        const r = runHook(
+          `cd "${root}/.claude/worktrees/agent-a4a9e5b08957e9a12" && pnpm install -r --prefer-offline 2>&1 | tail -8`,
+          { ...env, KANBAN_ALLOW_NESTED_WORKTREE_INSTALL: "" },
+          root,
+        );
+        assert.equal(r.blocked, true, "expected the cd-into-nested install to be blocked");
+        assert.match(r.stdout, /NESTED worktree/);
+      });
+    },
+  },
+  {
+    name: "does NOT block a plain install in the main checkout, nor a read-only command in a nested worktree (#1033)",
+    run: () => {
+      withRealDbCheckout((root, env) => {
+        const r = runHook("pnpm install -r --offline", { ...env, KANBAN_ALLOW_NESTED_WORKTREE_INSTALL: "" }, root);
+        assert.equal(r.blocked, false, "a main-checkout install must stay allowed");
+      });
+      const nested = path.join(os.tmpdir(), "ak-hook-main", ".claude", "worktrees", "agent-abc123");
+      const r2 = runHook("pnpm exec vitest run src/__tests__/foo.test.ts", { KANBAN_ALLOW_NESTED_WORKTREE_INSTALL: "" }, nested);
+      assert.equal(r2.blocked, false, "running tests in a nested worktree is not an install");
+    },
+  },
+  {
+    name: "KANBAN_ALLOW_NESTED_WORKTREE_INSTALL=1 is the operator escape hatch (#1033)",
+    run: () => {
+      const nested = path.join(os.tmpdir(), "ak-hook-main", ".claude", "worktrees", "agent-abc123");
+      const r = runHook("pnpm install -r --offline", { KANBAN_ALLOW_NESTED_WORKTREE_INSTALL: "1" }, nested);
+      assert.equal(r.blocked, false, "the override must allow the install");
+    },
+  },
 ];
 
 let failed = 0;
