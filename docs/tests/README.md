@@ -1,12 +1,13 @@
-# `docs/tests/` — the test-impact map and its durations
+# `docs/tests/` — the test-impact map, its durations, and the guard inventory
 
-Two generated files that make the merge gate's test selection work. Both are **committed on
-purpose**, and both have **exactly one writer**.
+Generated files about the test suite. All are **committed on purpose**, and each has **exactly one
+writer**.
 
 | File | What | Written by | Refreshed |
 |---|---|---|---|
 | `impact-map.json` | the test-impact inventory `impact.mjs select` reads to pick which tests a diff can affect | the monitor's `test-impact-map` phase, on the **main checkout** | every cycle in which it has gone stale (~7.4s) |
 | `durations.json` | real per-test-file wall-clock times, so `--budget 60s` means seconds | `pnpm test:durations`, by hand | occasionally — durations drift far more slowly than the import graph |
+| `guard-inventory.md` / `.json` | one row per `@gate:always-run` suite and per `*ratchet*.test.ts`: the property it pins, when it was introduced, a proxy for when it was last red, its wall time, and a candidates list (#1022) | `pnpm guard:inventory`, by hand | when the standing guard set is being audited — it is a REPORT, and it removes nothing |
 
 ## Why the map is committed (#952)
 
