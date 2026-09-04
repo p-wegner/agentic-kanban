@@ -10,7 +10,7 @@ import {
   type WorkerRegistry,
   type WorkerStatus,
 } from "../services/worker-registry.service.js";
-import { parseWorkerCapabilities } from "@agentic-kanban/shared/lib/worker-protocol";
+import { parseWorkerProfileAttestations, parseWorkerCapabilities } from "@agentic-kanban/shared/lib/worker-protocol";
 import {
   listIncomingRefs,
   landIncomingRef,
@@ -294,6 +294,7 @@ function registerWorkerFacingRoutes(router: Hono, reg: WorkerRegistry, database:
       maxConcurrency?: number;
       protocolVersion?: number;
       workerVersion?: string;
+      profiles?: unknown;
     }>(c);
     const result = await reg.registerWorker({
       pairingToken: body.pairingToken ?? "",
@@ -305,6 +306,9 @@ function registerWorkerFacingRoutes(router: Hono, reg: WorkerRegistry, database:
       maxConcurrency: body.maxConcurrency,
       protocolVersion: body.protocolVersion,
       workerVersion: body.workerVersion,
+      // #1027: parsed, never trusted — an attestation becomes a dispatch PERMISSION, so a
+      // half-understood entry must not survive the boundary.
+      profiles: parseWorkerProfileAttestations(body.profiles),
     });
     if (!result.ok) {
       // 409 for a version mismatch (#754): it is neither a credential problem nor a

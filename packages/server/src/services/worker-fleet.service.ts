@@ -19,12 +19,22 @@ import { getProjectById } from "../repositories/project.repository.js";
 // Canonical home is the dependency-free protocol module, so the worker CLI can
 // name the label without importing this service's graph. Re-exported here for
 // existing importers.
-import { SHARES_FILESYSTEM_LABEL, type WorkerCapacityInfo } from "@agentic-kanban/shared/lib/worker-protocol";
+import {
+  SHARES_FILESYSTEM_LABEL,
+  type WorkerCapacityInfo,
+  type WorkerProfileAttestation,
+} from "@agentic-kanban/shared/lib/worker-protocol";
 import {
   allowedProfilesPrefKey,
   remoteDispatchBlockedByAllowlist,
   rosterPrefKey,
 } from "@agentic-kanban/shared/lib/profile-allowlist";
+import {
+  attestedProfilePlacementFields,
+  resolveAttestationGate,
+  resolveRemoteProfileAttestation,
+  type ChosenAttestedProfile,
+} from "./worker-profile-placement.service.js";
 import {
   remoteDispatchBlockedByDataHandling,
   requiredDataLabelsPrefKey,
@@ -36,7 +46,9 @@ import {
 } from "./worker-slot-reservation.service.js";
 import { remoteDispatchBlockedByRepoShape } from "./worker-transport-support.service.js";
 import { recordWorkerEvent } from "./worker-events.service.js";
-import type { PlacementReason, PlacementReasonId } from "../lib/placement-explain.types.js";
+import type { PlacementReason } from "../lib/placement-explain.types.js";
+// #801's recording seam, its own module since #1027 (cohesion ceiling, #889).
+import { because, hostBecause, hostWinsRanking } from "./worker-placement-reason.js";
 import { resolveResumeWorkerAffinity } from "./worker-resume-affinity.service.js";
 import { toPrefMap } from "@agentic-kanban/shared/lib/preference-map";
 import { getAllPreferencesCached } from "../repositories/preferences.repository.js";
@@ -210,6 +222,16 @@ function filterEligibleWorkers(
    * leaves the list worker-only, exactly as before.
    */
   hostCapacity?: WorkerCapacityInfo,
+  /**
+   * #1027: restrict the WORKER half of the candidate list to these ids — the workers that
+   * attested a profile this project's roster permits. Absent = no profile restriction, so
+   * every eligible worker stays a candidate (every project before this ticket).
+   *
+   * Applied as a filter on the workers and NOT to the host, for the same reason the label
+   * filter is not: the host is where the work runs when no worker does, and the board CAN
+   * enforce a roster there — that is the whole content of #651's host fallback.
+   */
+  allowWorkerIds?: ReadonlySet<string>,
 ): WorkerCandidate[] {
   const host = hostCandidate(hostCapacity);
   const candidates: WorkerCandidate[] = workers
@@ -233,6 +255,7 @@ function filterEligibleWorkers(
       const labels = parseLabels(w.labels);
       return requiredLabels.every((required) => labels.includes(required));
     })
+    .filter((w) => allowWorkerIds === undefined || allowWorkerIds.has(w.id))
     // Load counts DISPATCHED work, not just work that has already spoken (#248) —
     // and, since #751, work that has been PLACED but not yet dispatched. For a
     // true-remote placement the `assign` is sent from an async continuation, so
@@ -267,6 +290,29 @@ async function eligibleWorkers(
 ): Promise<WorkerCandidate[]> {
   const workers = await fleet.registry.listWorkersView(now);
   return filterEligibleWorkers(fleet, workers, providerName, requiredLabels, nowMs);
+}
+
+/**
+ * The eligible workers, each with what it ATTESTED (#1027).
+ *
+ * Uses the same `filterEligibleWorkers` the selection uses, so the attestation pass and
+ * the placement can never disagree about WHICH workers were considered — the host is
+ * dropped because it attests nothing and needs to: the board enforces a roster locally.
+ */
+async function listAttestingWorkers(
+  fleet: WorkerFleet,
+  providerName: ProviderName,
+  requiredLabels: string[],
+  now?: string,
+  nowMs?: number,
+): Promise<Array<{ workerId: string; profiles?: WorkerProfileAttestation[] }>> {
+  const views = await fleet.registry.listWorkersView(now);
+  return filterEligibleWorkers(fleet, views, providerName, requiredLabels, nowMs)
+    .filter((candidate) => !candidate.isHost)
+    .map((candidate) => ({
+      workerId: candidate.id,
+      profiles: views.find((w) => w.id === candidate.id)?.profiles,
+    }));
 }
 
 export async function selectWorkerForLaunch(
@@ -334,10 +380,14 @@ export async function selectAndReserveWorkerForLaunch(
    * against a worker id that does not exist. Omitted = workers only (the pre-#938 shape).
    */
   hostCapacity?: WorkerCapacityInfo,
+  /** #1027: only these workers attested a profile this project permits. See the filter. */
+  allowWorkerIds?: ReadonlySet<string>,
 ): Promise<LaunchSelection | null> {
   const workers = await fleet.registry.listWorkersView(now);
   // --- no `await` past this line, or the reservation proves nothing ---
-  const candidates = filterEligibleWorkers(fleet, workers, providerName, requiredLabels, nowMs, hostCapacity);
+  const candidates = filterEligibleWorkers(
+    fleet, workers, providerName, requiredLabels, nowMs, hostCapacity, allowWorkerIds,
+  );
   // #750 affinity is a preference over the RANKING, and it outranks the host: the transcript
   // and the checkout live on that worker, so placing the resume anywhere else — the board
   // included — most likely fails with "no conversation found". Headroom does not fix that.
@@ -427,41 +477,6 @@ export async function resolveWorkerPlacement(params: {
   }
 }
 
-/**
- * #801 — the recording seam the placement explanation could never have.
- *
- * `explainPlacement` re-derives the chain against LIVE state, which answers "why is this not
- * dispatching now" and cannot answer "why did that session run on the host last Tuesday":
- * the prefs, the fleet and the repo shape have all moved. So the deciding step is stamped
- * onto the decision HERE, where it is actually made, and the caller persists it on the
- * session row. The ids are the same `PlacementCheckId`s the explanation uses, deliberately —
- * a historical record and a live explanation that disagreed on vocabulary would be two
- * answers to one question.
- */
-function because(id: PlacementReasonId, detail: string): PlacementReason {
-  return { id, detail };
-}
-
-function hostBecause(id: PlacementReasonId, detail: string): Placement {
-  return { kind: "host", reason: because(id, detail) };
-}
-
-/**
- * The host WON the ranked comparison (#938) — a different thing from every `hostBecause`
- * exit above, and it has its own helper for exactly that reason.
- *
- * `placement-chain-parity.test.ts` counts `return hostBecause("<id>"` occurrences in this
- * resolver and demands one declared chain check per id, because a `hostBecause` exit IS a
- * guard that refused remote dispatch for a reason an operator can go and change. This exit
- * is not a guard: nothing refused anything, the host simply had more headroom, and it flips
- * back to remote the moment the numbers move. Routing it through `hostBecause` would force
- * a fictional entry into `docs/worker-fleet.md` §7's "nothing dispatches" checklist telling
- * an operator to go fix a setting that does not exist.
- */
-function hostWinsRanking(detail: string): Placement {
-  return { kind: "host", reason: because("host_has_headroom", detail) };
-}
-
 async function resolvePlacementWithReservation(
   params: Parameters<typeof resolveWorkerPlacement>[0],
   reservation: { id?: string },
@@ -493,15 +508,29 @@ async function resolvePlacementWithReservation(
     const refuseHost = (reason: string): never => {
       throw new DispatchUnavailable(`${reason} and worker dispatch is strict for project ${projectId}`);
     };
-    // #651: a restricted project does not go remote. Checked BEFORE worker selection —
-    // the answer does not depend on which worker is free, and refusing early keeps a
-    // strict project's message about the restriction rather than about capacity.
-    const allowlistBlock = remoteDispatchBlockedByAllowlist(
-      await getPreferenceValue(allowedProfilesPrefKey(projectId), database),
-      // #1025: a project that expressed its restriction as a ROSTER must not lose the #651
-      // protection by migrating onto the newer key.
-      await getPreferenceValue(rosterPrefKey(projectId), database),
-    );
+    const requiredLabels = parseRequiredLabels(await getPreferenceValue(workerLabelsPrefKey(projectId), database));
+    // #651 / #1027: a restricted project goes remote ONLY to a worker that attests a
+    // profile the roster permits. Still checked before the reserving selection — the
+    // question does not depend on which worker has a free SLOT, and answering it early
+    // keeps a strict project's refusal about the restriction rather than about capacity.
+    //
+    // The attestation pass is skipped entirely for an unrestricted project: it costs a
+    // preference read and a roster resolution, and for the overwhelmingly common case
+    // there is nothing to decide.
+    const allowlistRaw = await getPreferenceValue(allowedProfilesPrefKey(projectId), database);
+    // #1025: a project that expressed its restriction as a ROSTER must not lose the #651
+    // protection by migrating onto the newer key.
+    const rosterRaw = await getPreferenceValue(rosterPrefKey(projectId), database);
+    const gate = await resolveAttestationGate({
+      database,
+      projectId,
+      allowlistRaw,
+      rosterRaw,
+      listEligibleWorkers: () => listAttestingWorkers(fleet, providerName, requiredLabels, now, nowMs),
+      nowMs,
+    });
+    const attestedProfileByWorker: Map<string, ChosenAttestedProfile> | null = gate.profileByWorker;
+    const allowlistBlock = gate.block;
     if (allowlistBlock.blocked) {
       if (strict) refuseHost(`project ${projectId} cannot dispatch remotely: ${allowlistBlock.reason}`);
       console.warn(
@@ -535,7 +564,6 @@ async function resolvePlacementWithReservation(
       );
       return hostBecause("placement_bias", placementBiasBlock.reason);
     }
-    const requiredLabels = parseRequiredLabels(await getPreferenceValue(workerLabelsPrefKey(projectId), database));
     // #751: select AND reserve atomically. Reading the load and then reserving after
     // another `await` would leave the same window this fixes.
     // #750: a resume follows its own state. Resolved BEFORE the selection because the
@@ -558,8 +586,13 @@ async function resolvePlacementWithReservation(
     // fallback below when no worker is eligible (that path is unchanged, and still records
     // `machine_saturated`); it just cannot WIN a comparison against a worker that could run.
     const rankedHostCapacity = strict || hostSaturated ? undefined : hostCapacity;
+    // #1027: for a restricted project the candidate set is the ATTESTING workers, and the
+    // profile each would run under is decided by the same roster selection a local launch
+    // uses. Null for every unrestricted project, which keeps the pre-#1027 candidate set
+    // byte-for-byte.
     const placed = await selectAndReserveWorkerForLaunch(
       fleet, providerName, requiredLabels, now, nowMs, preferWorkerId, rankedHostCapacity,
+      attestedProfileByWorker ? new Set(attestedProfileByWorker.keys()) : undefined,
     );
     if (placed && !isWorkerSelection(placed)) {
       // Not a fallback and not a refusal: an eligible worker may well have been available,
@@ -581,6 +614,10 @@ async function resolvePlacementWithReservation(
     }
     const { workerId } = placed;
     reservation.id = placed.reservationId;
+    const profileOnPlacement = attestedProfilePlacementFields(
+      attestedProfileByWorker?.get(workerId),
+      { projectId, workerId },
+    );
     if (preferWorkerId && placed.honouredAffinity === false) {
       // Said out loud: the resume names a provider session whose transcript is on ANOTHER
       // machine, so it will most likely fail there with "no conversation found" — which
@@ -597,6 +634,7 @@ async function resolvePlacementWithReservation(
         workerId,
         strict,
         reservationId: reservation.id,
+        ...profileOnPlacement,
         reason: remoteReason(
           `worker ${workerId} shares this filesystem — no git transport needed`,
           placed.capacity,
@@ -645,6 +683,7 @@ async function resolvePlacementWithReservation(
       workerId,
       strict,
       reservationId: reservation.id,
+      ...profileOnPlacement,
       reason: remoteReason(`worker ${workerId} took it over git transport on ${branch}`, placed.capacity),
       repo: {
         projectId,
@@ -679,15 +718,27 @@ export async function projectCanDispatch(params: {
   try {
     if ((await getPreferenceValue(workerDispatchPrefKey(projectId), database)) !== "true") return { available: true };
     if ((await getPreferenceValue(workerStrictPrefKey(projectId), database)) !== "true") return { available: true };
-    // #651: same refusal the placement makes, surfaced one step earlier so the monitor
-    // skips the start with the real reason instead of starting and then failing.
-    const allowlistBlock = remoteDispatchBlockedByAllowlist(
-      await getPreferenceValue(allowedProfilesPrefKey(projectId), database),
-      // #1025: a project that expressed its restriction as a ROSTER must not lose the #651
-      // protection by migrating onto the newer key.
-      await getPreferenceValue(rosterPrefKey(projectId), database),
+    // #651 / #1027: same refusal the placement makes, surfaced one step earlier so the
+    // monitor skips the start with the real reason instead of starting and then failing —
+    // including the attestation narrowing, or the monitor would skip work a worker can
+    // legitimately take.
+    const allowlistRaw = await getPreferenceValue(allowedProfilesPrefKey(projectId), database);
+    // #1025: a project that expressed its restriction as a ROSTER must not lose the #651
+    // protection by migrating onto the newer key.
+    const rosterRaw = await getPreferenceValue(rosterPrefKey(projectId), database);
+    const fleetForAttestation = getWorkerFleet(database);
+    const labelsForAttestation = parseRequiredLabels(
+      await getPreferenceValue(workerLabelsPrefKey(projectId), database),
     );
-    if (allowlistBlock.blocked) return { available: false, reason: allowlistBlock.reason };
+    const gate = await resolveAttestationGate({
+      database,
+      projectId,
+      allowlistRaw,
+      rosterRaw,
+      listEligibleWorkers: () =>
+        listAttestingWorkers(fleetForAttestation, providerName, labelsForAttestation, now),
+    });
+    if (gate.block.blocked) return { available: false, reason: gate.block.reason };
     // #876: same refusal the placement makes, surfaced one step earlier.
     const dataHandlingBlock = remoteDispatchBlockedByDataHandling(
       await getPreferenceValue(requiredDataLabelsPrefKey(projectId), database),
