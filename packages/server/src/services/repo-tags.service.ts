@@ -13,15 +13,43 @@ import { getProjectRepoNames } from "../repositories/repo.repository.js";
 
 /** Ensure a `repo:<name>` tag exists, returning its id. */
 async function ensureRepoTag(repoName: string, database: Database): Promise<string> {
-  const name = repoTagName(repoName);
+  return ensureTag(repoTagName(repoName), REPO_TAG_COLOR, database);
+}
+
+/** Ensure a tag with this exact NAME exists, returning its id. */
+async function ensureTag(name: string, color: string, database: Database): Promise<string> {
   const existing = await getTagByName(name, database);
   if (existing.length > 0) return existing[0].id;
   const id = randomUUID();
-  await insertTag({ id, name, color: REPO_TAG_COLOR, isBuiltin: false, createdAt: new Date().toISOString() }, database);
+  await insertTag({ id, name, color, isBuiltin: false, createdAt: new Date().toISOString() }, database);
   // A concurrent create could have won the race (insertTag swallows the unique
   // violation); re-read so we link the surviving row rather than a phantom id.
   const after = await getTagByName(name, database);
   return after[0]?.id ?? id;
+}
+
+/**
+ * Link ONE tag, by name, to an issue — creating the tag on first use and doing nothing when
+ * the link already exists (#1016).
+ *
+ * The generic half of `applyRepoTags`, which was the only "ensure the tag exists, then link it
+ * idempotently" implementation in the server and was hard-wired to the `repo:<name>` vocabulary.
+ * The base-health heal ticket needs the same three steps for a plain `heal` tag, and a second
+ * copy of them is exactly the drift this file's header says it exists to prevent.
+ */
+export async function applyIssueTag(
+  issueId: string,
+  tagName: string,
+  color: string,
+  database: Database = db,
+): Promise<void> {
+  const name = tagName.trim();
+  if (!name) return;
+  const tagId = await ensureTag(name, color, database);
+  const link = await getIssueTagLink(issueId, tagId, database);
+  if (link.length === 0) {
+    await insertIssueTag({ id: randomUUID(), issueId, tagId }, database);
+  }
 }
 
 /**
