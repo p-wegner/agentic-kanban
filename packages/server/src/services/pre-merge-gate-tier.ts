@@ -417,7 +417,15 @@ export interface GateImpactSelection {
   selectedCount: number;
   /** How many were ranked out BELOW the score floor. This is the tail the tier is betting on. */
   belowFloorCount: number;
-  /** Was the impact map stale when the selection was computed? */
+  /**
+   * Was the impact map stale when the selection was computed?
+   *
+   * #1018 moved the map out of git without changing what this word means. "Fresh" is, and always
+   * was, a statement about the map's OWN recorded `commit:` stamp: `impact.mjs check`/`select`
+   * count `<stamp>..HEAD` and look for test files added since, and neither reads the index. What
+   * changed is only WHICH copy is being described — the snapshot the board materialized into this
+   * worktree, which is exactly the map the run used, rather than one inherited by branching.
+   */
   stale: boolean;
   /** The selection tier the skill itself reported (`impact` | `package` | `all`). */
   selectionTier?: string;
