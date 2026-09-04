@@ -23,12 +23,33 @@ import {
   parseClaudeSubscriptionRing,
 } from "./claude-subscription-ring.js";
 import { listCodexLicenses, parseCodexLicenseRing } from "./codex-license-ring.js";
-import type { RosterEntry } from "@agentic-kanban/shared/lib/profile-allowlist";
+import type { ProfileRole, RosterEntry } from "@agentic-kanban/shared/lib/profile-allowlist";
 
 /** How long an observation is reused before the carriers are read again. */
 export const ROSTER_CACHE_TTL_MS = 5_000;
 
-let cache: { entries: RosterEntry[]; atMs: number } | null = null;
+/**
+ * A roster entry plus everything discovery ALSO saw about the profile (#1028).
+ *
+ * The selection path needs only `{provider, name, role, dedicatedProject}`, which is why
+ * `loadObservedGlobalRoster` returns exactly that. A roster TABLE needs the rest — whether
+ * the account is logged in, whether two machines disagreed about its role, when that role
+ * was observed — and reading the rings a second time in a route to get it would make the
+ * table and the resolver two different observations of the same disk. So the richer row is
+ * what the walk produces and the narrow one is a projection of it.
+ *
+ * This EXPOSES what #1025 already read; it decides nothing.
+ */
+export interface ObservedRosterRow extends RosterEntry {
+  loggedIn: boolean;
+  inRing: boolean;
+  roleObservedAt: string | null;
+  roleConflict: boolean;
+  conflictingRoles: ProfileRole[];
+  roleWarnings: string[];
+}
+
+let cache: { entries: ObservedRosterRow[]; atMs: number } | null = null;
 
 export interface ObservedRosterInput {
   /** The stored `claude_subscription_ring` value, if the caller already has it. */
@@ -47,16 +68,30 @@ export interface ObservedRosterInput {
  * which `resolveProjectRoster` reports as UNRESTRICTED, i.e. today's behaviour exactly.
  */
 export function loadObservedGlobalRoster(input: ObservedRosterInput = {}): RosterEntry[] {
+  return loadObservedRosterDetails(input);
+}
+
+/**
+ * The same observation, with the fields a roster TABLE renders (#1028). Same cache, same
+ * TTL, same walk — `loadObservedGlobalRoster` is the narrow projection of this.
+ */
+export function loadObservedRosterDetails(input: ObservedRosterInput = {}): ObservedRosterRow[] {
   const nowMs = input.nowMs ?? Date.now();
   if (!input.force && cache && nowMs - cache.atMs < ROSTER_CACHE_TTL_MS) return cache.entries;
 
-  const entries: RosterEntry[] = [];
+  const entries: ObservedRosterRow[] = [];
   for (const sub of listClaudeSubscriptions(parseClaudeSubscriptionRing(input.claudeRingRaw ?? null))) {
     entries.push({
       provider: "claude",
       name: sub.profile,
       role: sub.role,
       dedicatedProject: sub.dedicatedProject,
+      loggedIn: sub.loggedIn,
+      inRing: sub.inRing,
+      roleObservedAt: sub.roleObservedAt,
+      roleConflict: sub.roleConflict,
+      conflictingRoles: sub.conflictingRoles,
+      roleWarnings: sub.roleWarnings,
     });
   }
   for (const license of listCodexLicenses(parseCodexLicenseRing(input.codexRingRaw ?? null))) {
@@ -65,6 +100,12 @@ export function loadObservedGlobalRoster(input: ObservedRosterInput = {}): Roste
       name: license.profile,
       role: license.role,
       dedicatedProject: license.dedicatedProject,
+      loggedIn: license.loggedIn,
+      inRing: license.inRing,
+      roleObservedAt: license.roleObservedAt,
+      roleConflict: license.roleConflict,
+      conflictingRoles: license.conflictingRoles,
+      roleWarnings: license.roleWarnings,
     });
   }
   cache = { entries, atMs: nowMs };

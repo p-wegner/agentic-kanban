@@ -724,6 +724,24 @@ export const API_RESPONSE_SCHEMAS: readonly ApiResponseRoute[] = [
 
   // ── #906 ──
   { method: "GET", template: "/api/merge-queue/trains", schema: mergeTrainsResult },
+
+  // ── #1028: the profile roster read model ──
+  // The invariants the UI actually depends on: a list of profiles it maps over, the
+  // nullable project half it branches on, and the hint string it renders verbatim. The
+  // per-profile fields stay unchecked here on purpose — the SERVER parses this payload
+  // through a strict zod schema in the same commit, so a second per-field copy on this side
+  // would only be a way for a server change to redden a boundary twice.
+  {
+    method: "GET",
+    template: "/api/profile-roster",
+    schema: looseObject({
+      profiles: anyArray(),
+      project: nullable(nested(looseObject({ projectId: str, selection: nested(looseObject({ poolOrder: anyArray() })) }))),
+      quotaError: nullable(str),
+      roleHintCommand: str,
+      generatedAt: str,
+    }),
+  },
 ];
 
 export const API_RESPONSE_SCHEMA_COUNT = API_RESPONSE_SCHEMAS.length;
