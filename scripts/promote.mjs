@@ -151,7 +151,9 @@ async function readSweepRowViaHttp() {
   });
   if (!healthRes.ok) throw new Error(`GET /api/projects/${project.id}/base-branch-health -> ${healthRes.status}`);
   const health = await healthRes.json();
-  return { row: health?.latest ?? null, projectId: project.id, source: `board HTTP ${boardUrl}` };
+  // `viaHttp` is what makes the #1044 reprobe possible: the POST goes through this same board,
+  // so a row that came from the sqlite FALLBACK carries a project id that is useless for asking.
+  return { row: health?.latest ?? null, projectId: project.id, viaHttp: true, source: `board HTTP ${boardUrl}` };
 }
 
 /**
@@ -173,7 +175,7 @@ async function readSweepRowViaSqlite() {
         "select sha, branch, outcome, message, created_at from base_branch_health where project_id = ? order by created_at desc limit 1",
       )
       .get(project.id);
-    return { row: row ?? null, projectId: project.id, source: `read-only sqlite ${dbPath}` };
+    return { row: row ?? null, projectId: project.id, viaHttp: false, source: `read-only sqlite ${dbPath}` };
   } finally {
     db.close();
   }
@@ -189,7 +191,7 @@ async function readSweepRow() {
       return { ...viaDb, source: `${viaDb.source} (board HTTP unavailable: ${httpReason})` };
     } catch (dbErr) {
       const dbReason = dbErr instanceof Error ? dbErr.message : String(dbErr);
-      return { row: null, projectId: null, source: `UNREADABLE (http: ${httpReason}; db: ${dbReason})`, unreadable: true };
+      return { row: null, projectId: null, viaHttp: false, source: `UNREADABLE (http: ${httpReason}; db: ${dbReason})`, unreadable: true };
     }
   }
 }
@@ -538,7 +540,10 @@ async function main() {
     direction: directionFor(verdict.ok ? verdict.sha : null, stableHead),
     forceSweep: opts.forceSweep,
     awaitSweep: !opts.noAwaitSweep,
-    canRequest: Boolean(sweep?.projectId),
+    // Both halves are required: an id to ask ABOUT, and a board that ANSWERED. The sqlite
+    // fallback yields the first without the second, and asking a board that is not there just
+    // burns the whole wait before refusing anyway.
+    canRequest: Boolean(sweep?.projectId && sweep?.viaHttp),
   });
 
   // The trigger happens BEFORE the dry-run report only in a real run — a dry run must touch
