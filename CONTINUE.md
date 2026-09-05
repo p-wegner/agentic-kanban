@@ -3,6 +3,43 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-05 — #1013/#1033 closed on measured acceptance, #1020 held open, promote's log split
+
+The open backlog was four tickets. It is now three, and none of the three is a leftover.
+
+- **#1013 (stable/dev split) — CLOSED, all three acceptance clauses measured.** The one that had
+  never been RUN was "a deliberately red master on the dev checkout does not affect the stable
+  board", so it was run: a syntax error appended to `packages/server/src/lib/oauth-quota-core.ts`
+  in this checkout. Over 30 s at 3 s intervals, **3101 went to `000` within 3 s and stayed there
+  while 3001 answered `200` on every probe**; on revert 3101 recovered in 9 s. Working tree left
+  clean. The other two: both boards up at once (3001 stable/17 projects, 3101+5273 dev/0 projects,
+  5173 correctly dead), and the runbook followed cold by session `8a289641` in ~2 minutes.
+- **#1033 (node_modules wipe) — CLOSED on its mitigations, with the gap FILED, not absorbed.** All
+  three acceptance clauses hold (`safe-rmdir` 4/4; `boot-dist-smoke`'s sidecar + any-exit unlink
+  handlers + a reparse scan that refuses the final `rmSync`; the CLAUDE.md rule). But its title
+  also asks for a ROOT CAUSE, and there isn't one — how a nested-cwd pnpm run reached main's
+  importers is still unproven, so every guard shipped is a stopgap aimed at an assumed door.
+  That is #1037.
+- **#1020 (BACKLOG_FLOOR 15) — deliberately NOT closed.** `objective.md`'s `## FOCUS POLICY` block
+  and the README's weekly-planning checklist are both in place, but the floor is not held: the open
+  backlog is 3 against a floor of 15, so the acceptance ("the floor holds for a week") has nothing
+  to evaluate yet. Filling it means minting ~14 gate-sized tickets — a producer decision, not a
+  code gap.
+- **`pnpm promote` no longer logs a board on top of its own audit trail** (`0c32646128`) — see the
+  run-6 entry below for what the collision cost. `.kanban/board.log` is the board's; `promote.log`
+  is the promotion's. Takes effect on the next promotion, since the spawn happens from THIS
+  checkout's script; the board running now still writes to `promote.log`.
+
+**Verified by:** `promote-plan` 28/28 (a new case asserts the paths differ and that the dry run
+names both), `safe-rmdir` 4/4, `boot-from-dist-smoke` + `command-safety-guard` 58 passed / 2
+skipped, `pnpm typecheck` green in 12 s, a real `promote.mjs --dry-run`, and the live probe series
+above. NOT verified: anything about #1020's week-long floor, and #1037's hypothesis.
+
+**Filed while here:** #1038 — `pnpm cli -- backlog export --out BACKLOG.md` from the repo root
+writes `packages/server/BACKLOG.md` and reports success, because `pnpm --filter … exec` runs with
+cwd = `packages/server`. Every doc that gives that exact command is telling the operator to do the
+thing that silently misses. `BACKLOG.md` here was refreshed with an absolute `--out`.
+
 ## 2026-09-05 — the two-board operation mode is now reachable from what agents actually read
 
 `docs/two-boards.md` was complete and accurate after #1014; the gap was **reachability** — nothing
