@@ -91,8 +91,13 @@ cd <stable checkout>
 pnpm install -r
 pnpm build
 KANBAN_DB_URL=file:C:/Users/<you>/.agentic-kanban/kanban.db \
-  node <stable checkout>/packages/server/dist/cli/index.js dev --port 3001 --no-open
+  node <stable checkout>/packages/server/dist/cli/index.js dev --port 3001 --no-open \
+  >> <stable checkout>/.kanban/board.log 2>&1
 ```
+
+**Append the output to `.kanban/board.log`, not `.kanban/promote.log`.** The promote log is the
+run-by-run audit trail the Sentinel reads; a board process holds its fd open for days, and putting
+both on one file already cost one promotion its opening record (§8, "The two logs").
 
 **Spawn the built CLI by its absolute path, not `pnpm --filter agentic-kanban start`** — the same
 form `scripts/promote.mjs` uses, and for the same two reasons (both hit on the 2026-09-05 cutover):
@@ -218,7 +223,8 @@ Run on 2026-09-05 (tag `stable-20260905` = `stable` = `e01438a4c5`). Do it in th
    holds the DB open lives on `port + 10000`. Walk the parent chain to the `dev.mjs` supervisor or
    it respawns what you killed.
 5. **Start the stable board** with the pinned `KANBAN_DB_URL` (§2) — absolute CLI path, `--no-open`,
-   `nohup`/detached. Verify: `GET /health` on 3001, `GET /api/projects` lists the real projects
+   `nohup`/detached, **output appended to `<stable>/.kanban/board.log`** (never `promote.log`, which
+   is the promotion audit trail — §8 says what mixing them cost). Verify: `GET /health` on 3001, `GET /api/projects` lists the real projects
    including `agentic-kanban`, one `get_board_status`, and the startup log says
    `[db] opening …\.agentic-kanban\kanban.db (source: DB_URL)`. Nothing binds 5173 any more — the
    built artifact serves the UI on 3001; check `GET http://127.0.0.1:3001/` returns the app HTML.
@@ -322,14 +328,26 @@ translates. Verified end to end by the promotions above: each one logged
 Starting spawns the BUILT artifact directly — `node <stable>/packages/server/dist/cli/index.js
 dev --port <port> --no-open` — which is what `pnpm --filter agentic-kanban start` runs (§2),
 spawned as `node` so the process command line carries the stable checkout's path and the stop
-step above can recognise it next time. `windowsHide: true`, `detached` + `unref`, stdio into the
-log: headless, no window flash, and it outlives the promoting shell.
+step above can recognise it next time. `windowsHide: true`, `detached` + `unref`, stdio into
+`.kanban/board.log`: headless, no window flash, and it outlives the promoting shell.
 
-### The log
+### The two logs — and why they are two
 
 Every step is appended to **`<stable checkout>/.kanban/promote.log`** — that is the file the
-Sentinel reads, and it also receives the started board's own stdout/stderr. A `--dry-run` writes
-nothing at all; it prints where it *would* log.
+Sentinel reads. The board a promotion STARTS logs to **`<stable checkout>/.kanban/board.log`**
+instead. A `--dry-run` writes nothing at all; it prints where it *would* log, naming both.
+
+They were one file until 2026-09-05, and the promotion's own record is what that cost. The 10:02
+run's header, sweep line, rollback target, direction check, tag and fast-forward were absent from
+`promote.log` afterwards, while the outgoing board's `[loop-lag]` output for the same minutes was
+there; the run had demonstrably happened — git carried `stable-20260905-6`, and the file still held
+that same run's `SMOKE PASSED` — but its opening record was not there to read. The loss mechanism
+was never proven (both writers append, and appends should not clobber), which is exactly why the
+fix is separation rather than a cleverer write: a run's audit trail must not depend on how a server
+process that will hold its fd for days happens to buffer.
+
+**So when you start a stable board by hand, send its output to `board.log`, not `promote.log`** —
+that is what §7 step 5 does, and the collision above began with a hand launch that did otherwise.
 
 ## 9. What is deliberately NOT here
 

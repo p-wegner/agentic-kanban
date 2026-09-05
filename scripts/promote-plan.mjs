@@ -19,6 +19,23 @@ export const DEFAULT_STABLE_CHECKOUT_DIRNAME = "agentic-kanban-stable";
 export const PROMOTE_LOG_RELPATH = join(".kanban", "promote.log");
 
 /**
+ * Where the BOARD the promotion starts sends its stdout/stderr — deliberately NOT the promote log.
+ *
+ * These are two different kinds of file with two different lifetimes. The promote log is a short,
+ * append-only audit trail of discrete runs, and it is what the Sentinel reads (`docs/two-boards.md`
+ * §8). The board log is the continuous output of a server process that then holds its fd open for
+ * days. Pointing both at one file puts two long-lived writers on the Sentinel's evidence, and the
+ * promotion's own record is the half that loses: on 2026-09-05 the 10:02 run's header, sweep,
+ * direction, tag and fast-forward lines were absent from `promote.log` while the outgoing board's
+ * `[loop-lag]` output for the same minutes was present — the promotion demonstrably ran (git and
+ * its own `SMOKE PASSED` line prove it), but its opening record was not there to read.
+ *
+ * The loss mechanism was never proven, which is exactly why the fix is separation rather than a
+ * cleverer write: a run's audit trail should not depend on how a server process happens to buffer.
+ */
+export const BOARD_LOG_RELPATH = join(".kanban", "board.log");
+
+/**
  * How old a green sweep may be and still authorize a promotion.
  *
  * The sweep is nightly, so a verdict older than a bit more than a day means the sweep did not
@@ -176,6 +193,7 @@ export function buildPromotionPlan({
   stablePort,
   dbUrl,
   logPath,
+  boardLogPath = null,
   forceSweep = false,
 }) {
   return [
@@ -194,7 +212,7 @@ export function buildPromotionPlan({
     { n: 7, title: `restart the stable board on port ${stablePort}`, detail: `stop the port-${stablePort} listener whose command line belongs to ${stableCheckout} (signature only, never kill-all-node), then spawn packages/server/dist/cli/index.js` },
     { n: 8, title: "smoke", detail: `GET ${boardUrl}/health, GET ${boardUrl}/api/projects (non-empty), GET ${boardUrl}/api/issues?projectId=<${projectName}> (the get_board_status equivalent)` },
     { n: 9, title: "on smoke failure: roll back", detail: previousTag ? `fast-forward ${stableCheckout} to ${previousTag}, rebuild, restart, report loudly` : "NO previous stable-* tag exists — a failed smoke cannot be rolled back automatically; the run reports that loudly" },
-    { n: 10, title: "log", detail: logPath },
+    { n: 10, title: "logs", detail: `promotion audit trail: ${logPath}${boardLogPath ? `  ·  started board's stdout/stderr: ${boardLogPath}` : ""}` },
   ];
 }
 

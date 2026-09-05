@@ -20,7 +20,8 @@
  *      fast-forwards back to the previous `stable-*` tag, rebuilds, restarts and says so.
  *
  * Every step is appended to `<stable checkout>/.kanban/promote.log`, which is what the
- * Sentinel reads.
+ * Sentinel reads. The board this script STARTS logs somewhere else — `.kanban/board.log` — so a
+ * server that writes for days cannot sit on top of the audit trail for a run that took minutes.
  *
  * Usage:
  *   node scripts/promote.mjs --dry-run     # print the resolved sha/tag/paths and every step; touch nothing
@@ -43,6 +44,7 @@ import { gitExecSyncResult } from "./git-exec.mjs";
 import { spawnSyncPnpm } from "./pnpm-exec.mjs";
 import { parseNetstatListeners, planPortOwnerKill } from "./dev-port-guard.mjs";
 import {
+  BOARD_LOG_RELPATH,
   PROMOTE_LOG_RELPATH,
   buildPromotionPlan,
   checkPromoteDirection,
@@ -91,6 +93,7 @@ const baseBranch = env.KANBAN_PROMOTE_BRANCH || "master";
 const stablePort = Number(env.KANBAN_STABLE_PORT || 3001);
 const dbUrl = env.KANBAN_DB_URL || `file:${dbPath.replace(/\\/g, "/")}`;
 const logPath = join(stableCheckout, PROMOTE_LOG_RELPATH);
+const boardLogPath = join(stableCheckout, BOARD_LOG_RELPATH);
 
 /** Append to the promote log — and to stdout. A dry run never writes the file. */
 function log(line) {
@@ -252,14 +255,16 @@ function stopStableBoard() {
  * (`packages/server/dist/cli/index.js dev`), exactly what `pnpm --filter agentic-kanban start`
  * runs, spawned directly so the process command line carries the stable checkout's path — which
  * is what makes {@link stopStableBoard}'s signature check able to recognise it later. Output
- * goes to the promote log; `windowsHide` and `detached`+`unref` keep it from flashing a window
- * or dying with this script.
+ * goes to `<stable>/.kanban/board.log`, NOT to the promote log — the started process keeps that
+ * fd open for days, and a long-lived writer does not belong on the run-by-run audit trail the
+ * Sentinel reads (see {@link BOARD_LOG_RELPATH} for what that cost once). `windowsHide` and
+ * `detached`+`unref` keep it from flashing a window or dying with this script.
  */
 function startStableBoard() {
   const cli = join(stableCheckout, "packages", "server", "dist", "cli", "index.js");
   if (!existsSync(cli)) throw new Error(`built CLI missing: ${cli} (did the build step run?)`);
-  mkdirSync(dirname(logPath), { recursive: true });
-  const out = openSync(logPath, "a");
+  mkdirSync(dirname(boardLogPath), { recursive: true });
+  const out = openSync(boardLogPath, "a");
   const child = spawn(process.execPath, [cli, "dev", "--port", String(stablePort), "--no-open"], {
     cwd: stableCheckout,
     env: { ...process.env, KANBAN_DB_URL: dbUrl, KANBAN_HOST: "127.0.0.1", PORT: String(stablePort) },
@@ -268,7 +273,7 @@ function startStableBoard() {
     stdio: ["ignore", out, out],
   });
   child.unref();
-  log(`[promote] started stable board pid ${child.pid} on ${stablePort} (cwd ${stableCheckout})`);
+  log(`[promote] started stable board pid ${child.pid} on ${stablePort} (cwd ${stableCheckout}, output -> ${boardLogPath})`);
   return child.pid;
 }
 
@@ -427,6 +432,7 @@ async function main() {
     stablePort,
     dbUrl,
     logPath,
+    boardLogPath,
     forceSweep: opts.forceSweep,
   });
 
@@ -442,6 +448,7 @@ async function main() {
     console.log(`  operated DB      ${dbPath}  (read-only)`);
     console.log(`  stable DB pin    ${dbUrl}`);
     console.log(`  log file         ${logPath}`);
+    console.log(`  board log        ${boardLogPath}`);
     console.log(`  sweep source     ${opts.forceSweep ? "SKIPPED (--force-sweep)" : sweep.source}`);
     console.log(`  sweep verdict    ${verdict.detail}\n`);
     console.log(verdict.ok ? "Steps that WOULD run:" : "This run would REFUSE at step 1. The steps it would otherwise run:");
