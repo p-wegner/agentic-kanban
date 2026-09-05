@@ -1,4 +1,9 @@
-// @gate:always-run — walks the cli/ source tree it guards; imports nothing it checks (#1038).
+// @gate:always-run when:packages/server/src/cli/** — walks the cli/ source tree it guards; imports nothing it checks (#1038).
+//
+// Territory (#1041): `CLI_DIR` below is `src/cli`, and every file this reads comes from
+// `sourceFiles(CLI_DIR)`. A diff that adds no path-taking CLI declaration cannot make this
+// suite fail, so forcing it onto every gate bought nothing. Widen this the moment the walk
+// widens — an under-scoped territory silently excuses a guard, which is worse than no guard.
 /**
  * Every path-taking CLI option/argument resolves against the INVOCATION directory (#1038).
  *

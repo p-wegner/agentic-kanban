@@ -1,4 +1,9 @@
-// @gate:always-run — imports scripts/promote-evidence.mjs, which no package-local diff links to (#687).
+// @gate:always-run when:scripts/promote-evidence.mjs,scripts/promote-evidence.d.mts,scripts/promote.mjs — imports scripts/promote-evidence.mjs, which no package-local diff links to (#687).
+//
+// Territory (#1041): the marker is here because the import crosses OUT of this package, so
+// `vitest related` cannot see it — not because the suite reads the tree. Its subject is
+// therefore exactly the three files it binds to: the script, its hand-written type
+// declaration, and the promote entry point that consumes it.
 /**
  * Unit tests for the accumulated-gate evidence a promotion PRINTS (#1045).
  *
