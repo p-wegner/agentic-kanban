@@ -337,5 +337,7 @@ nothing at all; it prints where it *would* log.
   it to; nothing in the board runs it. "Once a day, idle" is a policy, not a script.
 - **A second repository.** A second CHECKOUT is enough and keeps tags, history and hooks in one
   place (proposal §5).
-- **Any runtime change.** #1013 is code and docs. No server was started, no database moved, and
-  `scripts/board-monitor/objective.md` is untouched.
+- **Any runtime change from #1013 itself.** #1013 was code and docs only. (#1014's promotion runs
+  DID start and stop the stable board on 3001 — by signature, against the operated database, which
+  a promotion only ever migrates and reads. No database was moved and
+  `scripts/board-monitor/objective.md` is untouched.)

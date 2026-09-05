@@ -19,7 +19,24 @@ The drawbridge was written but had never been RUN. Two runs on the live pair
   plain run promoted an ancestor — and `git merge --ff-only <ancestor>` exits 0 with "Already up
   to date". The run would have tagged, rebuilt, restarted, smoked green and announced a tag that
   is not what runs. `checkPromoteDirection` now refuses before it tags (`feat(#1014)`).
-- **Run 2 — the rollback half**, via the new one-shot `KANBAN_PROMOTE_FORCE_SMOKE_FAILURE=1`.
+- **Run 2 — the rollback half**, via the new one-shot `KANBAN_PROMOTE_FORCE_SMOKE_FAILURE=1`
+  (fails the promotion's smoke after `/health` answered, then is consumed so the rollback's smoke
+  is real). It tagged `stable-20260905-3`, deployed it, failed on purpose, reset back to
+  `stable-20260905-2`, rebuilt, restarted and re-smoked green — 3001 healthy throughout.
+- **Two further defects the rollback exposed, both fixed and both re-verified by another
+  rehearsal (runs 3 and 4):** a failed promotion left its tag in `stable-*`, the namespace
+  `previousStableTag` searches — so the NEXT failed promotion would have rolled back onto a
+  version that had already failed its own smoke. A healthy rollback now retires the tag to
+  `failed-promotion-<tag>`, and retired names stay taken so a second sha never reuses the label.
+  And the failure path called `process.exit(1)` beside a just-spawned detached child, which
+  aborted node (`UV_HANDLE_CLOSING` libuv assertion) and handed a cron a crash code instead of 1;
+  it sets `process.exitCode` now. Rehearsal exit code measured: **1**.
+- **Run 5 — a second real promotion**, `stable-20260905-5` on `6fa31957d`, so the stable board
+  runs current master with all of the above. 3001: healthy, 17 projects, `agentic-kanban` present,
+  `[db] opening C:\\Users\\pwegner\\.agentic-kanban\\kanban.db (source: DB_URL)`. Dev board on 3101 untouched throughout (healthy, 0 projects).
+- Tags now: `stable-20260905`, `stable-20260905-2`, `stable-20260905-5` live;
+  `failed-promotion-stable-20260905-3` / `-4` retired. `docs/two-boards.md` §8 was rewritten from
+  what the runs actually did.
 
 **Still true / next:** a promotion on the honest path (no `--force-sweep`) needs a green sweep
 NEWER than what stable runs — i.e. the nightly sweep has to run after this promotion before the
