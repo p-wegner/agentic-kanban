@@ -1,4 +1,7 @@
-// @gate:always-run
+// @gate:always-run when:packages/server/src/routes/**,packages/server/src/startup/**,packages/server/scripts/**,packages/server/openapi.yaml
+//
+// Territory (#1041): a route definition can only appear in the route tree or in the startup
+// wiring, and the audit itself lives in the generator. Nothing outside those adds an endpoint.
 //
 // #805 — the OTHER half of the openapi gate. `openapi-drift.test.ts` proves the committed
 // spec matches what the generator PRODUCES; this suite proves the generator LOOKS everywhere.

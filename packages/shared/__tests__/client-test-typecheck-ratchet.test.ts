@@ -1,4 +1,6 @@
-// @gate:always-run — spawns tsc over the whole client package and reads its `tsconfig.json` by path; imports nothing it checks (#809).
+// @gate:always-run when:packages/client/**,packages/shared/src/** — spawns tsc over the whole client package and
+// reads its `tsconfig.json` by path; imports nothing it checks (#809). Territory (#1041): the program tsc compiles
+// here — the client package and the shared sources its types flow from.
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";

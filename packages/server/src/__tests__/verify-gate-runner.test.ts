@@ -1,4 +1,6 @@
-// @gate:always-run — spawns the scaffold/hook verify-gate-runner.js as a subprocess, never imported (#538).
+// @gate:always-run when:packages/server/src/scaffold/**,.claude/hooks/** — spawns the scaffold/hook
+// verify-gate-runner.js as a subprocess, never imported (#538). Territory (#1041): the canonical scaffold runner
+// and its deployed copy; the suite asserts nothing that any other path can change.
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
 import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
