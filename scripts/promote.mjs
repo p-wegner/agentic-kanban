@@ -364,6 +364,27 @@ function deployRef(ref, { hard = false } = {}) {
   pnpmInStable(["--filter", "agentic-kanban", "db:migrate"], "pnpm db:migrate");
 }
 
+/**
+ * Rename the tag of a promotion that failed and was rolled back, out of the `stable-*` namespace.
+ *
+ * `previousStableTag` picks the NEWEST `stable-*` as the next run's rollback target — so leaving a
+ * failed tag there means a future failed promotion rolls back ONTO a version that already failed
+ * its own smoke, silently. The tag is kept (as `failed-promotion-<tag>`) rather than deleted: what
+ * was attempted and rejected is exactly the thing a post-mortem wants.
+ */
+function retireFailedTag(tag) {
+  const retired = `failed-promotion-${tag}`;
+  const created = git(["tag", retired, tag]);
+  if (created.code !== 0) {
+    log(`[promote] !!! could not record the failed tag as ${retired} (${created.stderr}) — LEAVING ${tag} in place; the next rollback would target it.`);
+    return;
+  }
+  const removed = git(["tag", "-d", tag]);
+  log(removed.code === 0
+    ? `[promote] !!! retired the failed tag: ${tag} -> ${retired} (so it can never be a rollback target)`
+    : `[promote] !!! recorded ${retired} but could not delete ${tag} (${removed.stderr}) — the next rollback would target it. Delete it by hand.`);
+}
+
 // --- main ------------------------------------------------------------------------------------
 
 async function main() {
@@ -481,7 +502,8 @@ async function main() {
     log(`[promote] !!! PROMOTION FAILED: ${reason}`);
     if (!rollbackTag) {
       log("[promote] !!! NO previous stable-* tag — cannot roll back automatically. The stable board may be DOWN or on the failed tag. Fix by hand.");
-      process.exit(1);
+      process.exitCode = 1;
+      return;
     }
     log(`[promote] !!! rolling back to ${rollbackTag}`);
     try {
@@ -489,13 +511,20 @@ async function main() {
       stopStableBoard();
       startStableBoard();
       const back = await smoke();
-      log(back.ok
-        ? `[promote] !!! ROLLED BACK to ${rollbackTag} — stable board healthy again (${back.detail})`
-        : `[promote] !!! ROLLBACK to ${rollbackTag} did NOT come up healthy (${back.failed}: ${back.detail}) — the stable board needs a human.`);
+      if (back.ok) {
+        log(`[promote] !!! ROLLED BACK to ${rollbackTag} — stable board healthy again (${back.detail})`);
+        retireFailedTag(tag);
+      } else {
+        log(`[promote] !!! ROLLBACK to ${rollbackTag} did NOT come up healthy (${back.failed}: ${back.detail}) — the stable board needs a human.`);
+      }
     } catch (rollbackErr) {
       log(`[promote] !!! ROLLBACK FAILED: ${rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)} — the stable board needs a human.`);
     }
-    process.exit(1);
+    // NOT process.exit(1): a detached child was just spawned, and exiting while its handle is
+    // closing aborts the process on Windows with a libuv assertion — which replaces the exit
+    // code a cron or the Sentinel reads with a crash code. Setting exitCode lets the loop drain.
+    process.exitCode = 1;
+    return;
   }
 }
 
