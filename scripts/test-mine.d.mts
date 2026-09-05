@@ -50,6 +50,65 @@ export declare function scanAlwaysRunTests(
 ): string[];
 
 /**
+ * As {@link scanAlwaysRunTests}, but keeping each guard's optional `when:` precondition (#1041).
+ * `when: []` means unconditional — the pre-#1041 meaning of a bare marker.
+ */
+export declare function scanAlwaysRunGuards(
+  pkgDir: string,
+  testsDir: string,
+  listDir?: (dir: string) => readonly (string | { name: string; isDirectory(): boolean })[],
+  readText?: (path: string) => string,
+): { file: string; when: string[] }[];
+
+/**
+ * The marker and its optional `when:<glob>[,<glob>…]` precondition (#1041), or `null` when the
+ * source carries no marker at all. `{ when: [] }` is "always", deliberately distinct from
+ * "no glob matched".
+ */
+export declare function parseAlwaysRunMarker(source: string): { when: string[] } | null;
+
+/**
+ * Must a guard with these `when:` globs run for this change set (#1041)? Fails open twice: a
+ * bare marker (`when: []`) and an unknown change set (`[]`) both mean yes.
+ */
+export declare function guardAppliesToChanges(
+  when: readonly string[] | null | undefined,
+  changedFiles: readonly string[] | null | undefined,
+): boolean;
+
+/** Malformed or stale `when:` globs, as human-readable strings; empty when the list is fine. */
+export declare function alwaysRunWhenGlobIssues(
+  when: readonly string[],
+  exists?: (path: string) => boolean,
+): string[];
+
+/** Does a repo-relative path match a glob? `**` spans segments, `*` does not. */
+export declare function matchesPathGlob(glob: string, relPath: string): boolean;
+
+/** The per-file estimate used for a guard suite with no measured duration (#1042). */
+export declare const ASSUMED_GUARD_MS: number;
+
+/** The committed `docs/tests/durations.json` as `repo-relative path -> ms`, or `null`. */
+export declare function readTestDurations(root?: string): Map<string, number> | null;
+
+/**
+ * The `@gate:always-run` floor: which guard suites a change set forces and what they cost (#1042).
+ * `changedFiles: []` (the default) is the UNCONDITIONAL floor — every marked suite.
+ */
+export declare function alwaysRunFloor(options?: {
+  root?: string;
+  packages?: readonly { dir: string; label: string }[];
+  durations?: Map<string, number> | null;
+  assumedMs?: number;
+  changedFiles?: readonly string[];
+}): {
+  count: number;
+  estMs: number;
+  assumedCount: number;
+  files: { file: string; ms: number; assumed: boolean }[];
+};
+
+/**
  * The provenance note for `KANBAN_TEST_SELECTOR=impact` + `KANBAN_TEST_FILES` together, or `null`
  * when only one of them is set (#967).
  *

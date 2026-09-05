@@ -1,4 +1,6 @@
-// @gate:always-run — spawns the live command-safety hook script outside src/; imports nothing it checks (#538).
+// @gate:always-run when:.claude/hooks/**,.codex/**,.pi/**,packages/server/src/scaffold/** — spawns the live
+// command-safety hook script outside src/; imports nothing it checks (#538). Territory (#1041): the hook it runs
+// and the scaffold source that hook is a copy of.
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
 import { mkdtemp, rm, writeFile, readdir, mkdir } from "node:fs/promises";

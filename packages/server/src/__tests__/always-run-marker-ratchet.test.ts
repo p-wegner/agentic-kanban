@@ -7,7 +7,12 @@ import path from "node:path";
 // `.includes(MARKER)`, and the one at `scanTestsDir` is why it mattered: it exempted a file
 // from the unsound-signature scan BEFORE running it, so a tree-scanning suite that merely
 // quoted the marker in a comment got a free pass from the ratchet built to catch exactly that.
-import { isAlwaysRunMarked } from "../../../../scripts/test-mine.mjs";
+import {
+  isAlwaysRunMarked,
+  parseAlwaysRunMarker,
+  guardAppliesToChanges,
+  alwaysRunWhenGlobIssues,
+} from "../../../../scripts/test-mine.mjs";
 
 /**
  * #538 — the always-run guard list was itself hand-maintained, which is the exact failure
@@ -401,6 +406,68 @@ describe("always-run marker ratchet (#538)", () => {
         `than because it is import-invisible (add it to MARKED_BY_POLICY with a reason):\n  ` +
         undefended.join("\n  "),
     ).toEqual([]);
+  });
+
+  /**
+   * #1041 — the marker now has an optional `when:<glob>[,<glob>…]` precondition, and BOTH forms
+   * must count as marked. A bare marker keeps its old meaning (always); a `when:` marker is
+   * forced only for a diff that intersects the territory it names.
+   *
+   * The direction that has to be checked is the one that fails silently: a `when:` marker that
+   * this ratchet stopped recognising would drop the suite out of the always-run set AND out of
+   * every check in this file — a guard that looks protected and runs nowhere, which is the exact
+   * shape #483 was.
+   */
+  describe("the `when:` precondition (#1041)", () => {
+    const BARE = "// @gate:always-run - reads the tree\nimport {} from \"vitest\";\n";
+    const SCOPED =
+      "// @gate:always-run when:packages/server/src/routes/**,docs/env-vars.md - only these\n" +
+      "import {} from \"vitest\";\n";
+
+    it("both forms are MARKED", () => {
+      expect(isAlwaysRunMarked(BARE)).toBe(true);
+      expect(isAlwaysRunMarked(SCOPED)).toBe(true);
+    });
+
+    it("a bare marker parses as unconditional, a `when:` marker as its glob list", () => {
+      expect(parseAlwaysRunMarker(BARE)).toEqual({ when: [] });
+      expect(parseAlwaysRunMarker(SCOPED)).toEqual({
+        when: ["packages/server/src/routes/**", "docs/env-vars.md"],
+      });
+      expect(parseAlwaysRunMarker('const M = "@gate:always-run";\n')).toBeNull();
+    });
+
+    it("a bare marker runs for every change set; a `when:` marker only for its territory", () => {
+      const bare = parseAlwaysRunMarker(BARE)!.when;
+      const scoped = parseAlwaysRunMarker(SCOPED)!.when;
+      expect(guardAppliesToChanges(bare, ["packages/client/src/App.tsx"])).toBe(true);
+      expect(guardAppliesToChanges(scoped, ["packages/server/src/routes/issues.ts"])).toBe(true);
+      expect(guardAppliesToChanges(scoped, ["docs/env-vars.md"])).toBe(true);
+      expect(guardAppliesToChanges(scoped, ["packages/client/src/App.tsx"])).toBe(false);
+      // The fail-open case: an UNKNOWN change set must run everything, or a precondition would
+      // silently reduce a plain `pnpm test:mine` (and the guards-only docs run) to nothing.
+      expect(guardAppliesToChanges(scoped, [])).toBe(true);
+    });
+
+    /**
+     * Every `when:` in the repo must be well-formed and still name something that exists. A
+     * precondition pointing at a renamed directory matches nothing forever — it reads as
+     * protection while excusing the suite from every gate run, which is strictly worse than
+     * no precondition at all.
+     */
+    it("every `when:` precondition in the repo is well-formed and not stale", () => {
+      const problems: string[] = [];
+      for (const { label, testsDir } of SCAN_PACKAGES) {
+        for (const { rel, full } of collectTestFiles(testsDir)) {
+          const marker = parseAlwaysRunMarker(fs.readFileSync(full, "utf8"));
+          if (!marker || marker.when.length === 0) continue;
+          for (const issue of alwaysRunWhenGlobIssues(marker.when) as string[]) {
+            problems.push(`${label}/${rel}: ${issue}`);
+          }
+        }
+      }
+      expect(problems, `Bad \`when:\` preconditions:\n  ${problems.join("\n  ")}`).toEqual([]);
+    });
   });
 
   it("MARKED_BY_POLICY entries are not stale", () => {

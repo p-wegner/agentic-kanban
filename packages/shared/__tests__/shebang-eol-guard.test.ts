@@ -1,5 +1,8 @@
-// @gate:always-run — scans the whole tracked tree and shells out to `git check-attr`;
-// it imports nothing it checks, so `vitest related` is blind to it (#583).
+// @gate:always-run when:scripts/**,.gitattributes,.claude/**,.codex/**,.pi/**,packages/*/scripts/**,packages/server/src/scaffold/**,**/*.sh
+// — scans the whole tracked tree and shells out to `git check-attr`; it imports nothing it
+// checks, so `vitest related` is blind to it (#583). Territory (#1041): where a tracked
+// `#!` file can actually appear in this repo — the script dirs, the agent hook dirs, the
+// scaffold, and any `.sh` anywhere. A `.ts`/`.tsx` diff cannot add a shebang file.
 //
 // Guard for #703. A tracked file that starts with `#!` and is ALSO imported by test code
 // gets transformed by vitest, and the transform's shebang strip does not match a CRLF

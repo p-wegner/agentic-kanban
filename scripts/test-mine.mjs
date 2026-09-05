@@ -256,6 +256,10 @@ function resolveVitestEntry(pkgDir) {
  * can't be silently unmarked either.
  *
  * Only consulted when a run is file-scoped; a full-suite run includes them anyway.
+ *
+ * #1041: a marker may carry an optional `when:<glob>[,<glob>…]` precondition naming the
+ * territory the suite scans, and is then forced only when the change set intersects it. A bare
+ * marker still means "always". See `parseAlwaysRunMarker`.
  */
 const ALWAYS_RUN_MARKER = "@gate:always-run";
 
@@ -277,8 +281,21 @@ const ALWAYS_RUN_MARKER = "@gate:always-run";
  *
  * Line- and comment-anchored, \b-terminated so the house style of a trailing rationale
  * (`// @gate:always-run - reads the tree...`) still matches.
+ *
+ * The trailing capture is what #1041 reads the optional `when:` precondition out of — see
+ * `parseAlwaysRunMarker`. It deliberately does NOT change what counts as MARKED.
  */
-const ALWAYS_RUN_MARKER_RE = /^\s*\/\/\s*@gate:always-run\b/m;
+const ALWAYS_RUN_MARKER_RE = /^\s*\/\/\s*@gate:always-run\b(.*)$/m;
+
+/**
+ * The optional precondition on a marker (#1041): `when:<glob>[,<glob>…]`.
+ *
+ * `\S+` on purpose — the house style is a marker line with a rationale after it
+ * (`// @gate:always-run when:packages/server/src/routes/** - the spec is generated from them`),
+ * so the glob list ends at the first space. A list with spaces in it would silently truncate,
+ * which is why `alwaysRunWhenGlobIssues` below refuses one.
+ */
+const ALWAYS_RUN_WHEN_RE = /\bwhen:(\S+)/;
 
 /**
  * Does `source` DECLARE itself always-run?
@@ -298,6 +315,74 @@ const ALWAYS_RUN_MARKER_RE = /^\s*\/\/\s*@gate:always-run\b/m;
  */
 export function isAlwaysRunMarked(source) {
   return ALWAYS_RUN_MARKER_RE.test(source);
+}
+
+/**
+ * The marker AND its optional `when:` precondition (#1041), or `null` for an unmarked file.
+ *
+ * `@gate:always-run` means "this suite reaches state outside its own import graph". That is an
+ * argument for not scoping it BY IMPORT GRAPH — not for running it on every diff regardless of
+ * what changed. Measured 2026-09-05 on a 9-file branch at the `impact` tier: the selection was
+ * 1 file / ~3s and the guard floor 179 files / ~546s, i.e. the half nobody was optimizing was
+ * 99.5% of the gate's test cost.
+ *
+ * So a marker may name the TERRITORY it scans:
+ *
+ *   // @gate:always-run when:packages/server/src/routes/**,packages/shared/src/schema/**
+ *
+ * A bare marker keeps today's meaning exactly (always). #483's property is untouched: the
+ * declaration still lives in the file, and there is still no hand-maintained list to drift.
+ *
+ * Returns `{ when: string[] }` — an EMPTY array means "always", which is deliberately different
+ * from "no globs matched".
+ */
+export function parseAlwaysRunMarker(source) {
+  const marker = ALWAYS_RUN_MARKER_RE.exec(source);
+  if (!marker) return null;
+  const when = ALWAYS_RUN_WHEN_RE.exec(marker[1] ?? "");
+  if (!when) return { when: [] };
+  return { when: when[1].split(",").map((g) => g.trim().replace(/\\/g, "/")).filter(Boolean) };
+}
+
+/**
+ * Must this guard suite run for a given change set?
+ *
+ * Two fail-open cases, both load-bearing and both meaning "we cannot prove it is irrelevant":
+ *   - a BARE marker (no `when:`) is unconditional, byte-for-byte today's behaviour;
+ *   - an UNKNOWN change set (no `KANBAN_TEST_FILES`, e.g. a plain `pnpm test:mine`, or the
+ *     guards-only docs run, which deliberately emits no file list) runs every guard. A
+ *     precondition that narrowed on an empty change set would silently run NOTHING.
+ */
+export function guardAppliesToChanges(when, changedFiles) {
+  if (!when || when.length === 0) return true;
+  if (!changedFiles || changedFiles.length === 0) return true;
+  return changedFiles.some((file) => when.some((glob) => matchesPathGlob(glob, file)));
+}
+
+/**
+ * Problems with a `when:` glob list, as human-readable strings (empty = fine).
+ *
+ * Exported so `always-run-marker-ratchet.test.ts` can hold every marker in the repo to it: a
+ * malformed or stale precondition is worse than no precondition, because it reads as protection
+ * while silently excusing the suite from every gate run.
+ *
+ * `exists` decides the staleness half — a glob's literal prefix (everything before the first
+ * wildcard) must still name something in the checkout. A `when:` pointing at a directory that
+ * was renamed matches nothing, forever.
+ */
+export function alwaysRunWhenGlobIssues(when, exists = (p) => existsSync(resolve(ROOT, p))) {
+  const issues = [];
+  for (const glob of when) {
+    if (/\s/.test(glob)) issues.push(`"${glob}": contains whitespace — the parser stops at the first space`);
+    if (glob.startsWith("/") || /^[A-Za-z]:/.test(glob)) issues.push(`"${glob}": must be repo-relative`);
+    // No wildcard at all: the glob IS a path, so check it directly. Otherwise check the
+    // longest directory prefix before the first wildcard.
+    const prefix = glob.includes("*") ? glob.split("*")[0].replace(/[^/]*$/, "") : glob;
+    if (prefix && !exists(prefix)) {
+      issues.push(`"${glob}": "${prefix}" does not exist — this precondition can never match`);
+    }
+  }
+  return issues;
 }
 
 /** Test-file extensions the marker scan recognises. `.tsx` and `.mjs` were invisible (#647). */
@@ -322,7 +407,19 @@ export const ALWAYS_RUN_TESTS_DIR = {
  * arguments (a directory-listing/reading pair) so it is unit-testable without touching the
  * real filesystem.
  */
-export function scanAlwaysRunTests(
+export function scanAlwaysRunTests(pkgDir, testsDir, listDir, readText) {
+  return scanAlwaysRunGuards(pkgDir, testsDir, listDir, readText).map((g) => g.file);
+}
+
+/**
+ * As `scanAlwaysRunTests`, but keeping each guard's `when:` precondition (#1041):
+ * `{ file, when }[]`, `when: []` meaning unconditional.
+ *
+ * The two are one scan on purpose — the moment "which files carry the marker" and "what does
+ * each one's marker say" are derived separately, they can disagree about a file, which is the
+ * whole failure class this mechanism exists inside.
+ */
+export function scanAlwaysRunGuards(
   pkgDir,
   testsDir,
   listDir = (d) => (existsSync(d) ? readdirSync(d, { withFileTypes: true }) : []),
@@ -345,15 +442,16 @@ export function scanAlwaysRunTests(
         continue;
       }
       if (!ALWAYS_RUN_TEST_FILE.test(name)) continue;
-      if (isAlwaysRunMarked(readText(resolve(pkgDir, rel)))) found.push(rel);
+      const marker = parseAlwaysRunMarker(readText(resolve(pkgDir, rel)));
+      if (marker) found.push({ file: rel, when: marker.when });
     }
   };
   walk(testsDir);
   return found;
 }
 
-function buildAlwaysRunTests() {
-  /** @type {Record<string, string[]>} */
+function buildAlwaysRunGuards() {
+  /** @type {Record<string, { file: string, when: string[] }[]>} */
   const map = {};
   for (const pkg of PACKAGES) {
     const testsDir = ALWAYS_RUN_TESTS_DIR[pkg.label];
@@ -366,12 +464,85 @@ function buildAlwaysRunTests() {
           `its @gate:always-run guard suites would be silently skipped. Add one.`,
       );
     }
-    map[pkg.label] = scanAlwaysRunTests(resolve(ROOT, pkg.dir), testsDir);
+    map[pkg.label] = scanAlwaysRunGuards(resolve(ROOT, pkg.dir), testsDir);
   }
   return map;
 }
 
-const ALWAYS_RUN_TESTS = buildAlwaysRunTests();
+/** Every marked guard suite with its precondition — the UNFILTERED floor (#1041). */
+const ALWAYS_RUN_GUARDS = buildAlwaysRunGuards();
+
+/**
+ * What a guard suite costs when nothing has measured it (#1042).
+ *
+ * The same 3s the test-impact skill assumes for an unmeasured file, so the two never disagree
+ * about the size of the unknown. It is an ASSUMPTION and the floor summary says how many files
+ * it was applied to, because a silent assumed value is how a floor comes to understate itself.
+ */
+export const ASSUMED_GUARD_MS = 3000;
+
+/**
+ * Measured per-test-file wall clock from the COMMITTED `docs/tests/durations.json`, as
+ * `repo-relative path -> ms`. `null` when the report is absent or unreadable.
+ *
+ * Deliberately the durations report and not `docs/tests/impact-map.json`: the map is a gitignored,
+ * per-checkout artifact (#1018), so a ratchet keyed on it would mean something different on every
+ * machine. The durations report is committed precisely so a number derived from it is reproducible.
+ */
+export function readTestDurations(root = ROOT) {
+  try {
+    // Strip a BOM: it makes `JSON.parse` throw on otherwise-valid JSON, and on Windows it is
+    // easy to acquire one (see `capture-test-durations.mjs`, which guards the same way).
+    const json = JSON.parse(readFileSync(resolve(root, "docs/tests/durations.json"), "utf8").replace(/^﻿/, ""));
+    const map = new Map();
+    for (const r of json.testResults ?? []) {
+      if (!r?.name) continue;
+      const ms = Math.max(1, (r.endTime ?? 0) - (r.startTime ?? 0));
+      const key = String(r.name).replace(/\\/g, "/");
+      if (!map.has(key) || map.get(key) < ms) map.set(key, ms);
+    }
+    return map;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The `@gate:always-run` FLOOR: which guard suites a change set forces, and what they cost (#1042).
+ *
+ * `changedFiles: []` (the default) is the unconditional floor — every marked suite, which is the
+ * number that matters at review time, because that is what a new marker adds to every gate run
+ * that cannot narrow. Passing a change set applies each marker's `when:` precondition (#1041).
+ *
+ * Pure w.r.t. its arguments apart from the tree scan, so both the ratchet and a one-off
+ * measurement read the same function rather than two summations that can disagree.
+ */
+export function alwaysRunFloor({
+  root = ROOT,
+  packages = PACKAGES,
+  durations = null,
+  assumedMs = ASSUMED_GUARD_MS,
+  changedFiles = [],
+} = {}) {
+  const files = [];
+  for (const pkg of packages) {
+    const testsDir = ALWAYS_RUN_TESTS_DIR[pkg.label];
+    if (!testsDir) continue;
+    for (const guard of scanAlwaysRunGuards(resolve(root, pkg.dir), testsDir)) {
+      if (!guardAppliesToChanges(guard.when, changedFiles)) continue;
+      const rel = `${pkg.dir}/${guard.file}`.replace(/\\/g, "/");
+      const measured = durations?.get(rel);
+      files.push({ file: rel, ms: measured ?? assumedMs, assumed: measured === undefined });
+    }
+  }
+  files.sort((a, b) => b.ms - a.ms || a.file.localeCompare(b.file));
+  return {
+    count: files.length,
+    estMs: files.reduce((total, f) => total + f.ms, 0),
+    assumedCount: files.filter((f) => f.assumed).length,
+    files,
+  };
+}
 
 /**
  * Guards-only mode (`KANBAN_TEST_GUARDS_ONLY=1`): run ONLY the marker-derived guard suites,
@@ -597,6 +768,17 @@ export function packageLabelByDir(packages = PACKAGES) {
  * small matcher rather than a dependency: `**` spans path segments, `*` does not.
  */
 export function matchesExcludeGlob(glob, relPath) {
+  return matchesPathGlob(glob, relPath);
+}
+
+/**
+ * The same matcher, under the name the `when:` preconditions use (#1041).
+ *
+ * One implementation, two callers: the package `exclude` globs and the marker preconditions.
+ * A second, subtly different matcher for preconditions is how a guard would come to be skipped
+ * for a diff that its author believed it covered.
+ */
+export function matchesPathGlob(glob, relPath) {
   const pattern = glob.replace(/\\/g, "/");
   const rx = pattern
     .split("/")
@@ -864,6 +1046,30 @@ const fileScopeRaw = (process.env.KANBAN_TEST_FILES || "").trim();
 const scopedFiles = fileScopeRaw
   ? fileScopeRaw.split(",").map((s) => s.trim().replace(/\\/g, "/")).filter(Boolean)
   : [];
+
+/**
+ * The guard set this run will actually force, after applying each marker's `when:` precondition
+ * against the change set (#1041).
+ *
+ * Declared HERE rather than beside `ALWAYS_RUN_GUARDS` purely because it needs `scopedFiles`,
+ * which is parsed further down the file. With no change set every guard survives — see
+ * `guardAppliesToChanges` for why that fail-open direction is the only safe one.
+ *
+ * @type {Record<string, string[]>}
+ */
+const ALWAYS_RUN_TESTS = Object.fromEntries(
+  Object.entries(ALWAYS_RUN_GUARDS).map(([label, guards]) => [
+    label,
+    guards.filter((g) => guardAppliesToChanges(g.when, scopedFiles)).map((g) => g.file),
+  ]),
+);
+
+/** `{ total, kept, skipped }` over the whole marker-derived floor, for the scope notice. */
+function alwaysRunGuardCounts() {
+  const all = Object.values(ALWAYS_RUN_GUARDS).flat();
+  const kept = Object.values(ALWAYS_RUN_TESTS).flat().length;
+  return { total: all.length, kept, skipped: all.length - kept };
+}
 
 /**
  * The changed files under a package, as paths relative to that package's directory.
@@ -1283,6 +1489,16 @@ export function announceScope(log = console.log, warn = console.warn) {
   }
   if (scopeLabels && toRun !== PACKAGES) {
     log(`[test:mine] scoped to: ${toRun.map((p) => p.label).join(", ")} (KANBAN_TEST_PACKAGES)`);
+  }
+  // #1041 — the guard floor is the expensive half of a narrowed gate, so what it cost has to be
+  // as visible as what the selection cost. Said only when a precondition actually excused
+  // something: a permanently-present "0 skipped" trains the reader to skip the line.
+  const guards = alwaysRunGuardCounts();
+  if (guards.skipped > 0) {
+    log(
+      `[test:mine] @gate:always-run floor: ${guards.kept} of ${guards.total} guard suite(s) — ` +
+        `${guards.skipped} excused by their \`when:\` precondition against ${scopedFiles.length} changed file(s) (#1041)`,
+    );
   }
 }
 

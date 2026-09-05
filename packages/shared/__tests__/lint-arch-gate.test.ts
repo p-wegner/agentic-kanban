@@ -1,5 +1,8 @@
-// @gate:always-run — spawns depcruise over the whole source tree; its subject is not in
-// this file's import graph, so scoped test selection must never skip it.
+// @gate:always-run when:packages/server/src/**,packages/shared/src/**,packages/client/src/**,packages/mcp-server/src/**,.dependency-cruiser.cjs
+// — spawns depcruise over the whole source tree; its subject is not in this file's import graph,
+// so scoped test selection must never skip it. Territory (#1041): the source trees depcruise
+// cruises plus its own rule set. A layering violation is an IMPORT, so it can only arrive in a
+// package `src/` tree; a docs, scripts, config or test-only diff cannot introduce one.
 import { describe, it, expect } from "vitest";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";

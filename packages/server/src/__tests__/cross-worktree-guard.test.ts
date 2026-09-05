@@ -1,4 +1,6 @@
-// @gate:always-run — spawns the live cross-worktree hook script outside src/; imports nothing it checks (#538).
+// @gate:always-run when:.claude/hooks/**,.codex/**,.pi/**,packages/server/src/scaffold/** — spawns the live
+// cross-worktree hook script outside src/; imports nothing it checks (#538). Territory (#1041): the hook it runs
+// and the scaffold source that hook is a copy of — nothing else can change its verdict.
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";

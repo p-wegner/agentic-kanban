@@ -1,4 +1,9 @@
-// @gate:always-run
+// @gate:always-run when:packages/server/src/routes/**,packages/server/src/startup/**,packages/server/src/errors/**,packages/server/src/middleware/**,packages/server/scripts/**,packages/server/openapi.yaml,packages/shared/src/types/**,packages/shared/src/schema/**
+//
+// Territory (#1041): everything the generator READS (the route tree, the route-defining
+// startup/error/middleware modules, the generator itself) plus the artifact it is compared
+// against and the shared DTO/schema sources the operations are derived from. A diff that
+// touches none of those cannot make the committed spec drift.
 //
 // `packages/server/openapi.yaml` is GENERATED from the route sources by
 // `scripts/generate-openapi.ts`. Nothing in its own import graph links a route change to

@@ -1,4 +1,8 @@
-// @gate:always-run
+// @gate:always-run when:packages/server/src/routes/**,packages/server/src/errors/**,packages/server/src/middleware/**,packages/server/scripts/**,packages/server/openapi.yaml
+//
+// Territory (#1041): the statuses this proves visible are decided by the error classes and the
+// error middleware, and consumed by the routes and the generator. A change elsewhere cannot
+// alter which status a thrown domain error maps to.
 //
 // #826 — the THIRD half of the openapi gate. `openapi-drift.test.ts` proves the committed spec
 // matches what the generator produces; `openapi-route-coverage.test.ts` proves the generator
