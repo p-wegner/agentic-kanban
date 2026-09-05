@@ -57,7 +57,8 @@ If it's unclear which repo to register (user said "start the app" with CWD unkno
 
 There are two agentic-kanban boards, and **which one you are starting decides the ports and the database**:
 
-- **Stable board** — a sibling checkout on tag `stable`, run as the BUILT artifact
+- **Stable board** — a sibling checkout pinned to a dated `stable-YYYYMMDD[-N]` tag (there is no
+  moving `stable` tag; `pnpm promote` mints a new one per promotion), run as the BUILT artifact
   (`pnpm build` + `pnpm --filter agentic-kanban start` with `KANBAN_DB_URL` pinned to
   `~/.agentic-kanban/kanban.db`). Ports **3001/5173**, unchanged, so MCP configs and hooks need no
   change. It registers the `agentic-kanban` project; the dev board never does.
@@ -67,6 +68,11 @@ There are two agentic-kanban boards, and **which one you are starting decides th
 
 Everything below applies to both — only the base ports differ. **Read the port from the env, never
 from this page.** Full runbook + operator cutover checklist: `docs/two-boards.md`.
+
+**Do not start or stop the stable board by hand from here.** `pnpm promote` owns its lifecycle —
+it stops the listener on 3001 through the same `planPortOwnerKill` signature guard this skill uses,
+rebuilds, restarts the built artifact detached, and smoke-tests it (`docs/two-boards.md` §8). Steps
+3 and 4 below are for the DEV board and for worktree servers.
 
 ## Step 1 — Determine ports
 
