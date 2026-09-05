@@ -22,7 +22,7 @@ Never poll in a tight loop or hold a session open sleeping. Each wakeup does one
 
 ## The check (run once per wakeup)
 
-1. **Loop alive** — `ps -p "$(cat /c/andrena/agentic-kanban/scripts/board-monitor/loop.pid)"` (use **bash `ps`**, not PowerShell `Get-Process` — the loop is Git-Bash, its MSYS pid is invisible to `Get-Process`).
+1. **Loop alive** — `ps -p "$(cat /c/projects/andrena/agentic-kanban/scripts/board-monitor/loop.pid)"` (use **bash `ps`**, not PowerShell `Get-Process` — the loop is Git-Bash, its MSYS pid is invisible to `Get-Process`).
 2. **Recent iteration outcomes** — `tail -2000 loop.log | grep -aE "iteration [0-9]+ (START|END)"`. The log is huge; always `tail` first. Flag: a streak of `exit=124` (hangs) or ≥3 consecutive `<8s` exits (the loop's launch-failure guard trips at 3 → it self-stops).
 3. **Latest decision** — `tail -1 scripts/board-monitor/state.md` (what the last cycle did/decided).
 4. **Board state (MCP)** — call `mcp__agentic-kanban__get_board_status` and read In Progress (active agents), In Review (awaiting merge), and Backlog count from its lighter payload. Do not poll the raw board REST endpoint with `Invoke-WebRequest`/`Invoke-RestMethod` just to count columns.
@@ -34,6 +34,15 @@ Never poll in a tight loop or hold a session open sleeping. Each wakeup does one
      | grep -aoE "ACTIVE_AGENTS_TARGET = [0-9]+|BACKLOG_FLOOR = [0-9]+|MAX_NEW_STARTS_PER_CYCLE = [0-9]+|REFILL_FOCUS = [a-z-]+"
    ```
    Report it compactly (`target 3 · floor 10 · 2/cycle · balanced`) and name the top 1–2 strategy weights (e.g. "REST-perf 5/5, backend-eff 4/5"). Edited via the board UI **Strategy** view (`z`) / the `board_strategy_<projectId>` preference — not by hand-editing `objective.md` (changes get overwritten on the next bullseye save).
+7. **Which version the operated board runs (#1013/#1014)** — the board on 3001 is the STABLE one: a built artifact in `../agentic-kanban-stable` that only `pnpm promote` moves (see `CLAUDE.md` § What This Is). Three cheap reads:
+   ```bash
+   curl -s -m 5 http://127.0.0.1:3001/health
+   git -C ../agentic-kanban-stable tag --points-at HEAD     # expect a stable-YYYYMMDD[-N] name
+   tail -5 ../agentic-kanban-stable/.kanban/promote.log
+   ```
+   `promote.log` is promotion steps ONLY — the board's own stdout goes to `.kanban/board.log` beside it (split 2026-09-05, because two writers on one file lost a real run's opening record). So a tail of 5 lines is now 5 promotion lines; if you see server chatter there, a board was started by hand against the wrong file and the audit trail is being polluted — say so.
+
+   Healthy: `/health` ok, HEAD carrying a `stable-*` tag, and a log tail whose last run ended in a successful smoke. **A HEAD carrying only a `failed-promotion-*` name, or a tail ending in a ROLLBACK, means the last promotion failed its smoke and the board is deliberately running the PREVIOUS version** — that is the recovery working, not a fault. Report it; never re-promote to "fix" it (promotion is an operator decision, and `pnpm promote` refuses without a fresh green sweep anyway).
 
 ## Interpreting what you see (most "alarms" are benign)
 
@@ -45,6 +54,8 @@ Never poll in a tight loop or hold a session open sleeping. Each wakeup does one
 | `STAND DOWN: active WIP in main checkout` | Correct — dirty main blocks the merge queue | **Do nothing.** Never commit/revert someone else's in-flight WIP. It resumes when they commit |
 | `exit=1` once, with a completed summary | Transient API socket close at cycle end — work landed | None (watch for a *recurring* streak) |
 | Server `health=000` briefly, then 200 | tsx-watch reload window | None |
+| Stable HEAD on `failed-promotion-*` / promote.log ends in ROLLBACK | The last promotion failed its smoke and rolled back — the board runs the previous version, as designed | Report one line naming the tag it fell back to. **Do not re-promote**; that is the operator's call |
+| A board change landed on master but the board still behaves the old way | Expected — master is not live until a promotion | None. Say so rather than debugging the board |
 
 ## Recovery playbook (only when a check truly fails)
 

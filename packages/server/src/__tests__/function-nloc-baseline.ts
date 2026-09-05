@@ -200,6 +200,22 @@
  * refused remote dispatch to prevent. The resolution itself lives in `worker-profiles.ts`;
  * the seven lines here are the guard and the reply, which have to sit where the spec
  * arrives. Both factories still want splitting; this is not the ticket that does it.
+ *
+ * -- Tenth disclosed movement (2026-09-05, #1047 launch-time profile override) ----------
+ *
+ *   registerWorkspaceCommand    573 -> 577  (+4)
+ *
+ * Landed on master in `dbea2f5a33` as direct-master work, which is the #817 gap again: the
+ * pre-merge gate only runs on a merge, so this suite reported it after the fact and master
+ * has been red on it since. Re-baselined here rather than left red, per this file's own
+ * precedent -- a red master blocks every OTHER merge on the board over growth that has
+ * already landed. Found by #1041's branch, which runs the full guard floor.
+ *
+ * The four lines are literally four: one `.option("--profile <name>", ...)` on each of
+ * `workspace launch|resume|relaunch`, plus one usage example. A commander builder grows one
+ * line per flag by construction; there is nothing extractable in a flag declaration, and the
+ * function is the `registerXCommand` shape this file's header already names as architecture
+ * rather than tangle. It still wants splitting for its own sake; this is not the ticket.
  */
 export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   "cli/commands/issue.ts::registerIssueCommand": 718,
@@ -215,7 +231,8 @@ export const FUNCTION_NLOC_BASELINE: Record<string, number> = {
   // 618 -> 620 (#968), disclosed in the sixth movement above.
   "services/session-manager/session-lifecycle.ts::createSessionLifecycle": 621,
   "services/workflow-fork.service.ts::createWorkflowForkService": 581,
-  "cli/commands/workspace.ts::registerWorkspaceCommand": 573,
+  // 573 -> 577 (#1047), disclosed in the tenth movement above.
+  "cli/commands/workspace.ts::registerWorkspaceCommand": 577,
   // 637 -> 638 (#1027), disclosed in the ninth movement above.
   "services/agent-remote.service.ts::createRemoteAgentService": 638,
   "cli/commands/session.ts::registerSessionCommand": 569,

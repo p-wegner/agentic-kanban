@@ -124,16 +124,19 @@ Kill only the processes bound to this checkout's ports. Do **not** kill every `d
 1. **The backend lives on a separate INTERNAL port.** `$serverPort` (3001) is just the `server-dev-proxy.mjs` proxy; it forwards to the real backend (the `tsx … src/index.ts` process that holds the DB open) on `$serverPort ± 10000` (3001→13001; worktree `3001+N`→`13001+N`). Killing only 3001/5173 leaves that backend alive, so the next `pnpm dev`'s new proxy connects to the OLD backend (old DB) and/or the new one fails to bind. **You must stop the backend port too.**
 2. **`scripts/dev.mjs` is a SUPERVISOR that respawns killed children.** Killing the port owner alone makes the port reappear within ~1s. You must kill the **`dev.mjs` ancestor** with `/T` — and it's usually a *grand*parent (chain: `dev.mjs` → `pnpm` → `node` proxy / `tsx watch` → backend), so checking only the owner's immediate parent misses it. Walk the full ancestry. Starting from *this checkout's* port owner keeps the walk scoped to this checkout — you'll only ever reach this checkout's single `dev.mjs`, never a worktree's.
 
-One `netstat` snapshot per port (no loop). Killing the `dev.mjs` root with `/T` cascades to all its children (proxy + vite + backend) in one shot.
+3. **Ask for LISTENERS, never grep `netstat` for the port number (#1036).** `netstat -ano | Select-String ":$port\s"` matches every row that *mentions* the port — including rows where it is the FOREIGN address, i.e. the port's own CLIENTS — and the last column is then the client's PID. That is not hypothetical: it killed PIDs 45544, 28424 and 4468 (a Vite process and two browser connections) during a real cutover. The `netstat` state column is also LOCALIZED (`ABHÖREN` on a German box), so filtering it by the English `LISTENING` fixes nothing here. `Get-NetTCPConnection -State Listen -LocalPort` asks the OS the exact question — locale-independent, listeners only — and this same file already uses it to verify. (The repo's own `parseNetstatListeners` is the parser to copy if you ever must read `netstat` text; it takes the wildcard foreign address as the locale-free listening signal.)
+
+One snapshot per port (no loop). Killing the `dev.mjs` root with `/T` cascades to all its children (proxy + vite + backend) in one shot.
 
 ```powershell
 # Backend internal port (proxy forwards to it). Mirror server-dev-proxy.mjs.
 $backendPort = if ($serverPort -le 55535) { $serverPort + 10000 } else { $serverPort - 10000 }
 
 function Stop-PortOwner([int]$port) {
-    $lines = netstat -ano | Select-String "[:.]$port\s"
-    $pids = $lines | ForEach-Object { ($_ -split '\s+')[-1] } |
-        Where-Object { $_ -match '^\d+$' -and $_ -ne '0' } | Sort-Object -Unique
+    # LISTENERS ONLY — see point 3 above. Never grep netstat text for the port number.
+    $pids = Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty OwningProcess |
+        Where-Object { $_ -and $_ -ne 0 } | Sort-Object -Unique
     # NOTE: do not name a loop var $pid — $PID is a read-only automatic variable; assigning throws.
     foreach ($ownerPid in $pids) {
         # Climb the parent chain (bounded) to the scripts/dev.mjs supervisor so it can't
