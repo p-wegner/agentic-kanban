@@ -3,6 +3,43 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-05 — #1047 fixed on master; the gate-floor and promote-evidence backlog filed; every account is out of quota
+
+**What is true right now: three board workspaces are `blocked` waiting on quota, none of them has
+lost work.** Every Claude subscription on this machine is at its 5-hour cap. Reset times, measured
+16:05: `andrena_team_5x_4` ~16:50, `default` ~16:40, `andrena_team_5x` ~17:10 (30% used but shared
+with an active code-metrics session), `andrena_team_5x_2` ~17:40. Nothing will start before then;
+launching anyway produces a 6-second exit, which is how two of the three got blocked.
+
+- **#1038** — its builder was cut off mid-task; the worktree holds ~20 files of finished-but-unverified
+  work, uncommitted. Resume it once quota returns.
+- **#1041 + #1042 + #1043** (one group workspace, `ak-1041`) — the builder ran 16 turns and was cut
+  off. Worktree clean, nothing lost.
+- **#1044 + #1045** (one group workspace, `ak-1044`) — never got a turn. Worktree clean.
+
+**Landed: `dbea2f5a33` — a launch may name the profile it runs on (#1047, item 1 of 3).**
+`--profile` on `workspace resume|launch|relaunch`, `claudeProfile`/`profile` in the launch body; it
+outranks the profile pinned on the workspace row. Verified: `pnpm typecheck` (33s, 5 packages) and
+`vitest related` over the three changed source files — 239 files / 2100 tests green; the new suite's
+forbidden case asserts the roster-refusal message and its override case fails without the fix.
+**It is not live on the board**: 3001 is the stable checkout at `stable-20260905-6`, so the flag
+reaches nothing until a promotion. Items 2 and 3 of #1047 are filed as **#1048**.
+
+**Tried and rejected: promoting the fix today.** `pnpm promote --dry-run` would tag
+`168e2da63c` — the sha of the last green sweep, 2026-09-04 22:53 — not master HEAD, so it would
+promote a build without this fix. Getting the fix live needs a fresh green sweep on master first.
+That is the mechanism **#1044** is about.
+
+**Measured, and the reason #1047 exists at all:** the board's headroom readings were 1h40m stale and
+said `andrena_team_5x_4` had 55% left at the moment it was in fact exhausted. The Bullseye was moved
+to it, verified CONSISTENT across all four sources by the `set-provider-default` skill, and the
+launch still died. Quota-blind selection is not a corner case here; it is the normal state.
+
+**Filed this pass** (all against `agentic-kanban`): #1041/#1042/#1043 (coupled — the
+`@gate:always-run` guard floor is 179 files/~546s against a 1-file/3s impact selection, i.e. 99.5% of
+an impact-tier gate), #1044/#1045 (coupled — force-sweep and gate-run evidence), #1046 (impact map
+has no refresh trigger), #1047 (fixed, item 1), #1048 (its follow-up).
+
 ## 2026-09-05 — #1013/#1033 closed on measured acceptance, #1020 held open, promote's log split
 
 The open backlog was four tickets. It is now three, and none of the three is a leftover.
