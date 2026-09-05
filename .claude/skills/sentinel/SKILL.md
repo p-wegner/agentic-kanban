@@ -40,6 +40,8 @@ Never poll in a tight loop or hold a session open sleeping. Each wakeup does one
    git -C ../agentic-kanban-stable tag --points-at HEAD     # expect a stable-YYYYMMDD[-N] name
    tail -5 ../agentic-kanban-stable/.kanban/promote.log
    ```
+   `promote.log` is promotion steps ONLY — the board's own stdout goes to `.kanban/board.log` beside it (split 2026-09-05, because two writers on one file lost a real run's opening record). So a tail of 5 lines is now 5 promotion lines; if you see server chatter there, a board was started by hand against the wrong file and the audit trail is being polluted — say so.
+
    Healthy: `/health` ok, HEAD carrying a `stable-*` tag, and a log tail whose last run ended in a successful smoke. **A HEAD carrying only a `failed-promotion-*` name, or a tail ending in a ROLLBACK, means the last promotion failed its smoke and the board is deliberately running the PREVIOUS version** — that is the recovery working, not a fault. Report it; never re-promote to "fix" it (promotion is an operator decision, and `pnpm promote` refuses without a fresh green sweep anyway).
 
 ## Interpreting what you see (most "alarms" are benign)

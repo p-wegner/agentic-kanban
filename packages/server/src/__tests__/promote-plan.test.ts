@@ -10,6 +10,7 @@ import {
   DEFAULT_MAX_SWEEP_AGE_HOURS,
   DEFAULT_STABLE_CHECKOUT_DIRNAME,
   PROMOTE_LOG_RELPATH,
+  BOARD_LOG_RELPATH,
   buildPromotionPlan,
   checkPromoteDirection,
   formatPlan,
@@ -179,6 +180,7 @@ describe("the dry-run plan", () => {
     stablePort: 3001,
     dbUrl: "file:C:/Users/x/.agentic-kanban/kanban.db",
     logPath: "C:/repos/agentic-kanban-stable/.kanban/promote.log",
+    boardLogPath: "C:/repos/agentic-kanban-stable/.kanban/board.log",
   };
   const plan = () => buildPromotionPlan(input);
 
@@ -209,6 +211,18 @@ describe("the dry-run plan", () => {
 
   it("logs under the stable checkout's .kanban directory", () => {
     expect(PROMOTE_LOG_RELPATH.replace(/\\/g, "/")).toBe(".kanban/promote.log");
+  });
+
+  it("keeps the started board's output OFF the audit trail the Sentinel reads", () => {
+    // Two writers on one file cost a real run's opening record on 2026-09-05: the 10:02
+    // promotion's header/sweep/direction/tag lines were absent from promote.log while the
+    // outgoing board's output for those minutes was there. The separation is the fix.
+    expect(BOARD_LOG_RELPATH.replace(/\\/g, "/")).toBe(".kanban/board.log");
+    expect(BOARD_LOG_RELPATH).not.toBe(PROMOTE_LOG_RELPATH);
+    // and the dry run must NAME both, or an operator tailing one file will not know the other exists
+    const text = formatPlan(plan());
+    expect(text).toContain("promote.log");
+    expect(text).toContain("board.log");
   });
 });
 

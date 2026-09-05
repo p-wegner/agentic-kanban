@@ -12,6 +12,7 @@
 
 export declare const DEFAULT_STABLE_CHECKOUT_DIRNAME: string;
 export declare const PROMOTE_LOG_RELPATH: string;
+export declare const BOARD_LOG_RELPATH: string;
 export declare const DEFAULT_MAX_SWEEP_AGE_HOURS: number;
 export declare const DEFAULT_BOARD_URL: string;
 export declare const DEFAULT_PROJECT_NAME: string;
@@ -82,6 +83,7 @@ export interface PromotionPlanInput {
   stablePort: number;
   dbUrl: string;
   logPath: string;
+  boardLogPath?: string | null;
   forceSweep?: boolean;
 }
 export declare function buildPromotionPlan(input: PromotionPlanInput): PromotionStep[];
