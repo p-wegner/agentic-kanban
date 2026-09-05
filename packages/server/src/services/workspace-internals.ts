@@ -104,6 +104,38 @@ export function applyWorkspaceAgentSelection(
 }
 
 /**
+ * The profile a launch body names, or `null` when it names none (#1047).
+ *
+ * Two spellings, both already in the create-workspace vocabulary so a caller does not have
+ * to learn a third: `profile: { provider?, name }` and the legacy `claudeProfile: "<name>"`.
+ * The bare string inherits the workspace's own provider — a claude profile name must never
+ * be handed to a codex/copilot/pi launch.
+ *
+ * A blank or non-string name is NOT an override: it must fall through to today's resolution
+ * rather than be read as "no profile", which would erase the selection entirely.
+ */
+export function readLaunchProfileOverride(
+  body: Record<string, unknown>,
+  workspaceProvider: string | null | undefined,
+): { provider?: string; name: string } | null {
+  const structured = body.profile;
+  if (structured && typeof structured === "object" && !Array.isArray(structured)) {
+    const { provider, name } = structured as { provider?: unknown; name?: unknown };
+    if (typeof name === "string" && name.trim()) {
+      return {
+        provider: typeof provider === "string" && provider.trim() ? provider.trim() : (workspaceProvider ?? undefined),
+        name: name.trim(),
+      };
+    }
+  }
+  const legacy = body.claudeProfile;
+  if (typeof legacy === "string" && legacy.trim()) {
+    return { provider: workspaceProvider ?? undefined, name: legacy.trim() };
+  }
+  return null;
+}
+
+/**
  * Resolve the agent selection for a *relaunched* session (fix-and-merge / conflict
  * resolver) honoring the board's CURRENT default rather than the provider baked
  * into the workspace record at original creation time (#762).
@@ -123,6 +155,7 @@ export async function resolveRelaunchAgentSelection(
   projectId: string | null | undefined,
   workspace: typeof workspaces.$inferSelect,
   commandOverride?: string,
+  profileOverride?: { provider?: string; name?: string } | null,
 ): Promise<AgentSettings> {
   const runtime = await loadProjectRuntimeConfig(database, {
     projectId: projectId ?? "",
@@ -131,9 +164,38 @@ export async function resolveRelaunchAgentSelection(
       profileName: workspace.claudeProfile,
     },
     commandOverride,
+    // #1047: an explicit profile named by the caller outranks the profile baked onto the
+    // workspace row. Without it a builder whose pinned account hit its usage limit could
+    // only ever be relaunched onto that same exhausted account — the row pin wins in
+    // `applyWorkspaceAgentSelection`, no endpoint re-pins it, and the only escape was
+    // delete + recreate, which destroys the uncommitted work that is the reason to relaunch.
+    // It is an override, NOT a bypass: `resolveProjectRuntimeConfig` is still the one
+    // enforcement seam, so a `forbidden` profile is refused here exactly as anywhere else.
+    profileOverride: profileOverride ?? null,
+    // A caller naming a profile IS the explicit operator start that grants `reserve` —
+    // the same grant a human pressing start gets, and the reason to name one at all.
+    operatorStart: Boolean(profileOverride?.name),
   });
-  if (runtime.provider.source === "strategy") {
-    console.log(`[relaunch] strategy provider selection: ${runtime.provider.provider}:${runtime.provider.profileName ?? ""} (workspace baked=${workspace.provider}:${workspace.claudeProfile})`);
+  if (runtime.provider.source === "strategy" || runtime.provider.source === "explicit-profile") {
+    console.log(`[relaunch] ${runtime.provider.source} provider selection: ${runtime.provider.provider}:${runtime.provider.profileName ?? ""} (workspace baked=${workspace.provider}:${workspace.claudeProfile})`);
+  }
+
+  // #1047: the roster's verdict is only ACTED ON for an explicit override. The resolver has
+  // always computed `profileHold` here and this helper has always ignored it, so the other
+  // relaunch paths (fix-and-merge, conflict resolver, batch reconciler) keep the behaviour
+  // they have today — narrowing that is its own change, and doing it in passing would turn
+  // a relaunch that works into a refusal. What must NOT happen is the new override becoming
+  // the one door that walks past the seam: a `forbidden` account has to stay unreachable
+  // however the caller asks for it, or the global roster is liftable by anyone who can POST
+  // a launch. Same two-way split as `workspace-create.service.ts` — refused vs. wait.
+  if (profileOverride?.name && runtime.provider.profileHold) {
+    throw new WorkspaceError(
+      runtime.provider.profileRefused
+        ? `Profile roster refuses this launch: ${runtime.provider.profileHold}. Pick a permitted profile, or change the project's roster.`
+        : `Profile allowlist blocks this launch: ${runtime.provider.profileHold}. Wait for an allowed profile to become available, or change the project's allowed profiles.`,
+      "CONFLICT",
+      { code: runtime.provider.profileRefused ? "PROFILE_FORBIDDEN" : "PROFILE_ALLOWLIST_HOLD" },
+    );
   }
 
   return {
