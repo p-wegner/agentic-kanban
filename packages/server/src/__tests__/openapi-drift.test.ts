@@ -1,9 +1,14 @@
-// @gate:always-run when:packages/server/src/routes/**,packages/server/src/startup/**,packages/server/src/errors/**,packages/server/src/middleware/**,packages/server/scripts/**,packages/server/openapi.yaml,packages/shared/src/types/**,packages/shared/src/schema/**
+// @gate:always-run when:packages/server/src/routes/**,packages/server/src/startup/**,packages/server/src/errors/**,packages/server/src/middleware/**,packages/server/scripts/**,packages/server/openapi.yaml,packages/server/package.json,packages/shared/src/**
 //
-// Territory (#1041): everything the generator READS (the route tree, the route-defining
-// startup/error/middleware modules, the generator itself) plus the artifact it is compared
-// against and the shared DTO/schema sources the operations are derived from. A diff that
-// touches none of those cannot make the committed spec drift.
+// Territory (#1041): everything the generator READS plus the artifact it is compared against —
+// the route tree, the route-defining startup/error/middleware modules, the generator itself,
+// and the shared sources the operations are derived from. `packages/server/package.json` is in
+// the list because `readVersion()` stamps `info.version` from it, so a bare release bump drifts
+// the committed spec on its own (the generator's own failure hint says as much); leaving it out
+// would let exactly that commit through with the guard excused. `packages/shared/src/**` rather
+// than just `types/` + `schema/`: a request schema can be declared in any shared module the
+// routes import, and the cheap half of the saving (a client-, scripts- or docs-only diff) is
+// unaffected by widening within `shared`.
 //
 // `packages/server/openapi.yaml` is GENERATED from the route sources by
 // `scripts/generate-openapi.ts`. Nothing in its own import graph links a route change to

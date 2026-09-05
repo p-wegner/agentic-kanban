@@ -1,8 +1,14 @@
-// @gate:always-run when:scripts/**,.gitattributes,.claude/**,.codex/**,.pi/**,packages/*/scripts/**,packages/server/src/scaffold/**,**/*.sh
+// @gate:always-run when:scripts/**,.gitattributes,.claude/**,.codex/**,.pi/**,docker/**,packages/*/scripts/**,packages/*/bin/**,packages/*/plugins/**,packages/server/src/scaffold/**,packages/server/src/cli/**,packages/server/src/worker/**,packages/mcp-server/src/index.ts,packages/desktop/**,**/*.sh,**/*.mjs,**/*.py
 // — scans the whole tracked tree and shells out to `git check-attr`; it imports nothing it
-// checks, so `vitest related` is blind to it (#583). Territory (#1041): where a tracked
-// `#!` file can actually appear in this repo — the script dirs, the agent hook dirs, the
-// scaffold, and any `.sh` anywhere. A `.ts`/`.tsx` diff cannot add a shebang file.
+// checks, so `vitest related` is blind to it (#583). Territory (#1041): every directory that
+// currently holds a tracked `#!` file, plus a catch-all for the extensions a NEW one arrives as
+// (`.sh`/`.mjs`/`.py`). Derived by enumerating the guard's own subject, not by intuition — the
+// first cut of this precondition read "a `.ts`/`.tsx` diff cannot add a shebang file" and was
+// simply wrong: `packages/mcp-server/src/index.ts`, `packages/server/src/cli/index.ts` and
+// `packages/server/src/worker/worker-cli.ts` are all tracked `#!` files, and
+// `packages/server/bin/*.js` and `packages/server/plugins/**/tools/*.mjs` were uncovered too.
+// Re-derive this list (a `git grep -l -a -e "^#!"` over the tree) if a shebang file moves;
+// a `when:` that misses part of the subject reads as protection while excusing the guard.
 //
 // Guard for #703. A tracked file that starts with `#!` and is ALSO imported by test code
 // gets transformed by vitest, and the transform's shebang strip does not match a CRLF
