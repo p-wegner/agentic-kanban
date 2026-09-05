@@ -250,9 +250,10 @@ pnpm promote               # promote
 pnpm promote --force-sweep # promote WITHOUT a green sweep verdict, loudly
 ```
 
-**Nothing here has been executed either.** The script exists, its pure half is unit-tested
-(`packages/server/src/__tests__/promote-plan.test.ts`), and `--dry-run` has been run; no tag has
-been created, no server started and no database written.
+**Executed for real on 2026-09-05 (#1014's acceptance).** Five runs against the live pair: two
+promotions that came up green on 3001 against the operated database (`stable-20260905-2`,
+`stable-20260905-5`), two rehearsed rollbacks, and one run that REFUSED before tagging. What each
+of them corrected is folded into the sections below.
 
 ### What one run does
 
@@ -267,19 +268,40 @@ been created, no server started and no database written.
    PROBE (`isBaseHealthAnswer`, #935), and a non-answer refuses just as a red does. So does a
    green older than `KANBAN_PROMOTE_MAX_SWEEP_AGE_H` (default 36h) and a sweep recorded on
    another branch. Every refusal names the sweep's **sha, date and verdict**.
-2. **Tags `stable-YYYYMMDD` on that green sha** — `-2`, `-3`, … when the day already has a tag.
+2. **Refuses a sha the stable checkout is already AHEAD of** (`checkPromoteDirection`). The green
+   sweep is by construction older than master's tip, and after a hand-made cutover the stable
+   checkout can already sit on a later commit — where `git merge --ff-only <ancestor>` reports
+   "Already up to date" and exits 0. Without this check the run would tag, rebuild, restart, smoke
+   green and announce a tag that is **not what runs**. That is exactly what the first real run on
+   2026-09-05 was about to do.
+3. **Tags `stable-YYYYMMDD` on that green sha** — `-2`, `-3`, … when the day already has a tag.
    Two promotions in one day is normal, and moving the existing tag would erase the rollback
    target.
-3. **In the stable checkout** (`KANBAN_STABLE_CHECKOUT`, default the sibling
+4. **In the stable checkout** (`KANBAN_STABLE_CHECKOUT`, default the sibling
    `../agentic-kanban-stable`; **refused when absent or dirty** — the script never creates or
    cleans it): `git fetch origin --tags`, `git merge --ff-only <tag>`, then
    `pnpm install -r --prefer-offline` **only if `pnpm-lock.yaml` moved**, `pnpm build`,
    `pnpm --filter agentic-kanban db:migrate` with the pinned `KANBAN_DB_URL`, and a restart.
-4. **Smoke:** `GET /health`, `GET /api/projects` (**non-empty** — an empty list means the DB pin
+5. **Smoke:** `GET /health`, `GET /api/projects` (**non-empty** — an empty list means the DB pin
    is wrong, §4), and one `GET /api/issues?projectId=…`, the HTTP equivalent of
    `get_board_status`. On failure it fast-forwards the stable checkout back to the previous
    `stable-*` tag, rebuilds, restarts, re-smokes and says so loudly. When there is NO previous
    tag it says that instead of pretending it recovered.
+6. **Retires the failed tag** once a rollback came up healthy: `stable-YYYYMMDD-N` is renamed to
+   `failed-promotion-stable-YYYYMMDD-N`. The rollback target is the newest `stable-*` tag, so
+   leaving it there would let the NEXT failed promotion roll back onto a version that already
+   failed its own smoke. The name stays taken (retired names are fed back into the tag chooser),
+   so a second, different sha can never wear a label a post-mortem already knows.
+
+### Rehearsing the rollback
+
+`KANBAN_PROMOTE_FORCE_SMOKE_FAILURE=1 pnpm promote` fails the promotion's smoke **on purpose**,
+after `/health` has already answered — so the restart is still proven — and the flag is then
+consumed, which makes the ROLLBACK's smoke a real check of the rolled-back board. That one-shot
+property is the point: a seam that failed both smokes would leave the rollback unverifiable.
+Never set it for a real promotion. A rehearsal exits **1** (not a crash: the failure path sets
+`process.exitCode` rather than calling `process.exit` next to a just-spawned detached child,
+which used to abort node with a libuv assertion and hand a cron a crash code).
 
 ### How the stable board is stopped and started
 
@@ -289,12 +311,13 @@ same guard `scripts/dev.mjs` uses: a pid whose command line does not contain the
 checkout's path is REFUSED, not killed, and the promotion aborts. So it cannot take down another
 agent's worktree server, the dev board, or anything else that happens to hold the port.
 
-**Known defect, found by the 2026-09-05 cutover (#1035): on a non-English Windows the listener
-lookup finds nothing.** `parseNetstatListeners` matches the literal state token `LISTENING`, and a
-German `netstat -ano` prints `ABHÖREN` — so `stopStableBoard()` logs "nothing listening on 3001 —
-nothing to stop" and `startStableBoard()` then spawns a SECOND board over the running one. The
-signature guard above never gets to run. Fix #1035 before relying on `pnpm promote` on such a
-machine.
+**#1035 (fixed, and proven by a real promotion).** `parseNetstatListeners` used to match the
+literal state token `LISTENING`, and a German `netstat -ano` prints `ABHÖREN` — so
+`stopStableBoard()` logged "nothing listening on 3001 — nothing to stop" and `startStableBoard()`
+would have spawned a SECOND board over the running one, with the signature guard never reaching a
+pid at all. A listening row is now identified by its WILDCARD foreign address, which no locale
+translates. Verified end to end by the promotions above: each one logged
+`{"action":"dev-port-kill-allowed", ...}` for the running board's pid and that pid actually died.
 
 Starting spawns the BUILT artifact directly — `node <stable>/packages/server/dist/cli/index.js
 dev --port <port> --no-open` — which is what `pnpm --filter agentic-kanban start` runs (§2),
