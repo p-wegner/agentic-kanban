@@ -44,7 +44,11 @@ export default defineConfig({
   test: {
     globals: true,
     // #285 — git committer identity via env, so no fixture pays two `git config` spawns.
-    setupFiles: [path.resolve(__dirname, "../../test-setup/git-identity.ts")],
+    // #1041 gate — see packages/server/vitest.config.ts and test-setup/db-isolation.ts.
+    setupFiles: [
+      path.resolve(__dirname, "../../test-setup/git-identity.ts"),
+      path.resolve(__dirname, "../../test-setup/db-isolation.ts"),
+    ],
     exclude: ["**/dist/**", "**/node_modules/**"],
     testTimeout,
     hookTimeout: testTimeout,
