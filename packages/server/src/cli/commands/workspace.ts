@@ -197,7 +197,8 @@ Examples:
   $ agentic-kanban workspace launch <workspace-id>
   $ agentic-kanban workspace launch <workspace-id> --prompt "Fix the failing tests"
 `)
-    .action(cliAction(async (workspaceId: string, options: { project?: string; prompt?: string; port?: string }) => {
+    .option("--profile <name>", "Launch on this agent profile instead of the one pinned on the workspace (#1047). Refused if the project's roster forbids it.")
+    .action(cliAction(async (workspaceId: string, options: { project?: string; prompt?: string; port?: string; profile?: string }) => {
 
       const ws = await getWorkspaceById(workspaceId);
       if (!ws) {
@@ -220,7 +221,7 @@ Examples:
       const res = await fetch(buildWorkspaceApiUrl(port, workspaceId, "launch"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({ prompt, ...(options.profile ? { claudeProfile: options.profile } : {}) }),
       });
       const data = await res.json() as LaunchResponse;
 
@@ -243,9 +244,11 @@ Examples:
 Examples:
   $ agentic-kanban workspace resume 17
   $ agentic-kanban workspace resume 17 --prompt "Continue fixing the setup script"
+  $ agentic-kanban workspace resume 17 --profile anth   # relaunch on another account
 `)
+    .option("--profile <name>", "Launch on this agent profile instead of the one pinned on the workspace (#1047). Refused if the project's roster forbids it.")
     .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
-    .action(cliAction(async (issueNumberArg: string, options: { project?: string; prompt?: string; port?: string }) => {
+    .action(cliAction(async (issueNumberArg: string, options: { project?: string; prompt?: string; port?: string; profile?: string }) => {
       const projectId = await resolveProjectIdArg(options.project);
 
       const num = Number(issueNumberArg);
@@ -281,7 +284,7 @@ Examples:
       const res = await fetch(buildWorkspaceApiUrl(port, ws.id, "launch"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({ prompt, ...(options.profile ? { claudeProfile: options.profile } : {}) }),
       });
       const data = await res.json() as LaunchResponse;
 
@@ -621,7 +624,8 @@ Examples:
   $ agentic-kanban workspace relaunch <workspace-id>
   $ agentic-kanban workspace relaunch <workspace-id> --prompt "Fix the failing tests"
 `)
-    .action(cliAction(async (workspaceId: string, options: { project?: string; prompt?: string; port?: string }) => {
+    .option("--profile <name>", "Launch on this agent profile instead of the one pinned on the workspace (#1047). Refused if the project's roster forbids it.")
+    .action(cliAction(async (workspaceId: string, options: { project?: string; prompt?: string; port?: string; profile?: string }) => {
 
       const ws = await getWorkspaceById(workspaceId);
       if (!ws) {
@@ -644,7 +648,7 @@ Examples:
       const res = await fetch(buildWorkspaceApiUrl(port, workspaceId, "launch"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({ prompt, ...(options.profile ? { claudeProfile: options.profile } : {}) }),
       });
       const data = await res.json() as LaunchResponse;
 

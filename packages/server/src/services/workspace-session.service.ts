@@ -36,6 +36,8 @@ import { buildPhaseArtifactsContext, isImplementWorkflowNode } from "./phase-art
 import {
   WorkspaceError,
   applyWorkspaceAgentSelection,
+  readLaunchProfileOverride,
+  resolveRelaunchAgentSelection,
   type TurnResult,
   type GitService,
 } from "./workspace-internals.js";
@@ -191,8 +193,22 @@ export function createWorkspaceSessionService(deps: {
 
     const prefRows = await getAllPreferencesCached(database);
     const prefMap = toPrefMap(prefRows);
+    // #1047: a caller may name the profile this launch must run on. Only then does the
+    // resolution go through `resolveRelaunchAgentSelection` (and so through the roster
+    // enforcement seam); with no override the path below is byte-for-byte what it was, so
+    // an ordinary relaunch keeps honoring the profile baked onto the workspace row.
+    const profileOverride = readLaunchProfileOverride(body, ws0.provider);
+    const selection = profileOverride
+      ? await resolveRelaunchAgentSelection(
+          database,
+          await resolveProjectId(id, database),
+          ws0,
+          body.agentCommand as string | undefined,
+          profileOverride,
+        )
+      : applyWorkspaceAgentSelection(resolveAgentSettings(prefMap, body.agentCommand as string | undefined), ws0);
     const { agentCommand, agentArgs, profile: agentProfile, provider: agentProvider, resumeWithNewModel, permissionPromptTool } =
-      applyWorkspaceAgentSelection(resolveAgentSettings(prefMap, body.agentCommand as string | undefined), ws0);
+      selection;
 
     const truncatedPrompt = prompt.length > 80 ? prompt.slice(0, 80) + "..." : prompt;
     const skipPermissions = typeof body.skipPermissions === "boolean" ? body.skipPermissions : undefined;
