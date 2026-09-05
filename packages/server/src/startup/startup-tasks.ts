@@ -916,6 +916,16 @@ export interface StartupAuditTask {
  * wiring test can assert the list instead of re-deriving it.
  */
 export const STARTUP_AUDIT_TASKS: StartupAuditTask[] = [
+  {
+    // #1050 — orphaned `%TEMP%` roots from an owner that was killed before its cleanup ran.
+    // First in the tail on purpose: it frees disk and memory pressure the reaps below may
+    // need, and it is the cheapest entry here.
+    name: "sweepStaleTempDirs",
+    run: async () => {
+      const { sweepStaleTempDirsOnce } = await import("./stale-temp-sweep.js");
+      return sweepStaleTempDirsOnce();
+    },
+  },
   { name: "reapOrphanedPluginViewProcesses", run: () => reapOrphanedPluginViewProcesses() },
   {
     // Catch the orphans the DB does not know about (#281) — must run AFTER the DB-tracked
