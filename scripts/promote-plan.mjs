@@ -221,6 +221,21 @@ export function isFreshSweepRow(row, previous) {
 }
 
 /**
+ * Does the reprobe response say a probe is running FOR THIS PROJECT?
+ *
+ * Only two fields say that: `started` (this request launched one) and
+ * `skippedReason === "probe_in_flight"` (this project's persisted start stamp is still live —
+ * `isBaseHealthProbeDue` reads it per project). `joinedRunningProbe` does NOT: it is
+ * `inFlightBaseBranchProbeCount() > 0`, a board-wide count, so ANOTHER project's probe sets it.
+ * Reading it as "ours is running" makes a promotion stop asking and wait out its whole budget for
+ * a verdict that will never be recorded for this project — a refusal that sends the operator
+ * straight back to `--force-sweep`, i.e. exactly the #1044 trap.
+ */
+export function isProbingThisProject(answer) {
+  return answer?.started === true || answer?.skippedReason === "probe_in_flight";
+}
+
+/**
  * Should this run TRIGGER the sweep it needs, instead of refusing and sending the operator to
  * `--force-sweep`? (#1044)
  *
