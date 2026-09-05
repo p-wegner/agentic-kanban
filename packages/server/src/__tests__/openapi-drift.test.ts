@@ -1,8 +1,14 @@
-// @gate:always-run when:packages/server/src/routes/**,packages/server/src/startup/**,packages/server/src/errors/**,packages/server/src/middleware/**,packages/server/scripts/**,packages/server/openapi.yaml,packages/server/package.json,packages/shared/src/**
+// @gate:always-run when:packages/server/src/**,packages/server/scripts/**,packages/server/openapi.yaml,packages/server/package.json,packages/shared/src/**
 //
 // Territory (#1041): everything the generator READS plus the artifact it is compared against —
-// the route tree, the route-defining startup/error/middleware modules, the generator itself,
-// and the shared sources the operations are derived from. `packages/server/package.json` is in
+// the generator itself, the shared sources the operations are derived from, and the WHOLE of
+// `packages/server/src`, not just `routes/`+`startup/`. That last part is not caution: since
+// #805 `--check` also runs the coverage audit, which calls `findRouteDefinitionSites(srcDir)`
+// over the entire tree and FAILS on a route site that is in neither the spec nor
+// `DECLARED_BLIND_SPOTS` — and one declared blind spot is
+// `src/services/fleet-listener.service.ts`. So a services-only diff really can turn this suite
+// red, and a territory of `routes/`+`startup/` would have excused it for exactly that diff.
+// `packages/server/package.json` is in
 // the list because `readVersion()` stamps `info.version` from it, so a bare release bump drifts
 // the committed spec on its own (the generator's own failure hint says as much); leaving it out
 // would let exactly that commit through with the guard excused. `packages/shared/src/**` rather
