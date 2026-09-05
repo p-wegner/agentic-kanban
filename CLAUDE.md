@@ -536,6 +536,16 @@ Full symptom→cause→fix in `docs/install.md` (“Clean-clone / first-start go
   `--force-sweep` promotes without a green verdict, loudly. Exercised for real over five runs on
   2026-09-05 (#1014). Full semantics, the rollback rehearsal seam, and the
   `<stable>/.kanban/promote.log` the Sentinel reads: **`docs/two-boards.md` §8**.
+  - **It ASKS for the sweep it needs rather than sending you to `--force-sweep` (#1044).** A forced
+    promotion tags the branch TIP, leaving stable AHEAD of the last recorded sweep — after which the
+    honest path refused as `behind` and only another `--force-sweep` got through, so each forced run
+    made the next honest one impossible. When the only thing missing is a CURRENT verdict the run now
+    POSTs `…/base-branch-health/reprobe` and waits (`KANBAN_PROMOTE_SWEEP_WAIT_MIN`, default 40 min),
+    then judges the fresh row by the same rules. It never re-probes a RED master and never treats the
+    wait as permission: a probe that does not land refuses exactly as before. `--no-await-sweep`
+    restores the old behaviour. It also PRINTS the accumulated pre-merge-gate evidence from the
+    test-impact ledger since the last sweep (#1045) — explicitly labelled as the weaker, different
+    measurement it is, and authorizing nothing.
 - **Inner loop (default while editing) — the impact selection, not the package suite (#953).** `test:mine` with no scope runs WHOLE packages, so the "fast loop" on a server-side ticket is thousands of tests; the test-impact skill picks ~6 files in ~0.4s from the same change. Run from the worktree root, guarded because the copy is best-effort:
   ```sh
   [ -f .claude/skills/test-impact/tools/impact.mjs ] && node .claude/skills/test-impact/tools/impact.mjs select --min-score 1.0 --format vitest
