@@ -1,6 +1,7 @@
-// @gate:always-run when:packages/server/**,packages/shared/src/** — spawns tsc over the whole server package and
-// reads `tsconfig.json`; imports nothing it checks (#788). Territory (#1041): the program tsc compiles here — the
-// server package and the shared sources its types flow from. A client-, scripts- or docs-only diff cannot move it.
+// @gate:always-run when:packages/server/**,packages/shared/src/**,tsconfig.base.json — spawns tsc over the whole
+// server package and reads `tsconfig.json`; imports nothing it checks (#788). Territory (#1041): the program tsc
+// compiles here — the server package, the shared sources its types flow from, and the root config the package
+// tsconfig `extends` (a `strict`/`exactOptionalPropertyTypes` change there moves every count this suite pins).
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
