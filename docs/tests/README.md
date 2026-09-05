@@ -5,7 +5,7 @@ purpose; the map is deliberately **not** (see below).
 
 | File | What | Written by | Refreshed | In git? |
 |---|---|---|---|---|
-| `impact-map.json` | the test-impact inventory `impact.mjs select` reads to pick which tests a diff can affect | the `test-impact-map` pass, on the **main checkout** | every sweep in which it has gone stale (~7.4s) | **no** — gitignored (#1018) |
+| `impact-map.json` | the test-impact inventory `impact.mjs select` reads to pick which tests a diff can affect | the `test-impact-map` pass, on the **main checkout** | on every landed merge, plus every sweep in which it has gone stale (~7.4s) | **no** — gitignored (#1018) |
 | `durations.json` | real per-test-file wall-clock times, so `--budget 60s` means seconds | `pnpm test:durations`, by hand | occasionally — durations drift far more slowly than the import graph | yes |
 | `guard-inventory.md` / `.json` | one row per `@gate:always-run` suite and per `*ratchet*.test.ts`: the property it pins, when it was introduced, a proxy for when it was last red, its wall time, and a candidates list (#1022) | `pnpm guard:inventory`, by hand | when the standing guard set is being audited — it is a REPORT, and it removes nothing | yes |
 
@@ -55,6 +55,37 @@ into a half-written map.
 
 Opt a project out with `test_impact_map_<projectId>` = `off`; turn it off board-wide with the
 `test_impact_map_refresh` setting.
+
+### What triggers a refresh, and the bound that follows (#1046)
+
+Three triggers, all writing through the same pass on the main checkout:
+
+| Trigger | Where | Decides staleness by |
+|---|---|---|
+| monitor phase, before the auto-start fan-out | `startup/monitor-test-impact-map.ts` (#952) | `impact.mjs check` |
+| background sweep, every 15 min — covers a `manual` project no cycle visits | `startup/test-impact-map-reconciler.ts` (#993) | `impact.mjs check` |
+| **a landed merge**, in the lock-free post-merge tail | `services/test-impact-map/post-merge.ts` (#1046) | its own bound, then `impact.mjs check` |
+
+The first two defer entirely to the tool, whose threshold is deliberately generous
+(`staleWidenAfterCommits` = 30). That is why a map measured 23–24 commits behind was still "fresh"
+to all of them and nothing rebuilt it: the trigger existed, the answer was just always *no*, and the
+day it flipped the gate widened to the package tier with a one-word signal nobody was reading.
+
+The merge trigger applies a tighter bound of its own — `IMPACT_MAP_MAX_COMMITS_BEHIND` (**10**) —
+counting `<map stamp>..HEAD` itself and forcing a rebuild past it. So the guarantee is statable:
+**after a merge completes, the map is at most 10 commits behind that project's HEAD.** Below the
+bound it still asks the tool, because a merge that ADDS a test file makes the map stale at one
+commit behind and only the tool sees that.
+
+It skips on repo-lock contention (a merge train's next landing is never held behind a rebuild) and
+never rebuilds from a worktree, so single-writer is unchanged.
+
+### A stale map is no longer a silent widening
+
+When the gate's selection does run on a stale map, both the merge message and the server log now say
+what it cost and what to do: `map STALE — a stale map WIDENS the selection to the package tier … `
+`rebuild it on the project's MAIN CHECKOUT with node .claude/skills/test-impact/tools/impact.mjs `
+`build --durations docs/tests/durations.json (never from a worktree)`.
 
 ### What "fresh" means for a file that is not in git
 

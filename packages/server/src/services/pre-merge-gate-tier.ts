@@ -778,7 +778,7 @@ export function buildImpactSelectionNote(tierInfo: GateTierInfo): string | null 
   return (
     `${budgetNote}${kept}, dropped ${selection.belowFloorCount} below the score floor` +
     (selection.selectionTier ? `, selection tier ${selection.selectionTier}` : "") +
-    `, map ${selection.stale ? "STALE" : "fresh"}`
+    (selection.stale ? `, map STALE — ${IMPACT_MAP_STALE_REMEDY}` : ", map fresh")
   );
 }
 
@@ -797,6 +797,24 @@ export function buildGuardCostNote(tierInfo: GateTierInfo): string {
     : "";
   return ` (~${Math.round(tierInfo.guardEstMs / 1000)}s est${assumed})`;
 }
+
+/**
+ * What a reader of a STALE gate message is supposed to DO (#1046).
+ *
+ * `map STALE` alone was a fact with no verb: the selection had already widened to the package tier
+ * — the slow path — and the only signal was one word in a message nobody reads at that moment, so
+ * the gate silently got slower for a reason that looks like nothing changed. The word stays (tests
+ * and operators both match on it) and now carries the consequence and the remedy.
+ *
+ * The remedy names the MAIN CHECKOUT deliberately: rebuilding from a worktree writes a
+ * worktree-local map that helps nobody and breaks the single-writer property the whole artifact
+ * rests on. ASCII only, for the same reason the selector clause above is — this string travels
+ * through merge comments, PowerShell hosts and log files on Windows.
+ */
+export const IMPACT_MAP_STALE_REMEDY =
+  "a stale map WIDENS the selection to the package tier, so this run was slower and broader than the tier claims; "
+  + "rebuild it on the project's MAIN CHECKOUT with `node .claude/skills/test-impact/tools/impact.mjs build "
+  + "--durations docs/tests/durations.json` (never from a worktree), or wait for the test-impact-map sweep";
 
 /**
  * #538 — even a PASSED gate must say what actually ran, so a level may only weaken
