@@ -33,7 +33,8 @@ tree that no longer exists, so its step 1 could not have run.
 
 **Verified by:** grep audit of every file mentioning `dev:devboard`/`two-boards`/`KANBAN_BOARD_ROLE`/
 `pnpm promote`; live state read at the time of writing (3001 healthy = stable checkout, 3101 healthy
-= dev board, stable HEAD `6fa31957dc` carrying `stable-20260905-5`). Docs only — no code touched, so
+= dev board, stable HEAD `6fa31957dc` carrying `stable-20260905-5` — stable has since moved to
+`1da4c46a74` / `stable-20260905-6`, see run 6 below). Docs only — no code touched, so
 no suite applies.
 
 ## 2026-09-05 — #1014: `pnpm promote` exercised for real against the stable board
@@ -67,7 +68,22 @@ The drawbridge was written but had never been RUN. Two runs on the live pair
 - **Run 5 — a second real promotion**, `stable-20260905-5` on `6fa31957d`, so the stable board
   runs current master with all of the above. 3001: healthy, 17 projects, `agentic-kanban` present,
   `[db] opening C:\\Users\\pwegner\\.agentic-kanban\\kanban.db (source: DB_URL)`. Dev board on 3101 untouched throughout (healthy, 0 projects).
-- Tags now: `stable-20260905`, `stable-20260905-2`, `stable-20260905-5` live;
+- **Run 6 — the refusal, then a third real promotion (2026-09-05 10:02–10:05).** A plain
+  `node scripts/promote.mjs` REFUSED on the direction check exactly as run 1's fix intended: the
+  last green sweep (`168e2da63c`) is an ancestor of what stable already ran, so there was nothing
+  to deploy. `--force-sweep` then promoted the three doc-only commits on top — `stable-20260905-6`
+  on `1da4c46a74`, fast-forwarded, rebuilt, migrated, board pid 12364 stopped and 40888 started,
+  **SMOKE PASSED** (17 projects) at 10:05:12. The session hit its usage limit at 10:05:14 and never
+  reported it; the outcome was reconstructed afterwards from git and the log.
+- **The promote log lost that run's opening record.** Its header/sweep/rollback-target/direction/
+  tag/fast-forward lines are absent from `<stable>/.kanban/promote.log` between 10:02:39 and
+  10:05:01, while the outgoing board's `[loop-lag]` output for those minutes is there — because the
+  stable board had been launched by hand with its stdout pointed at that same file, and
+  `promote.mjs` itself also gives the board it starts an fd on it (`openSync(logPath, "a")`,
+  `scripts/promote.mjs:262`). Two long-lived writers on the Sentinel's audit file. The mechanism of
+  the loss is NOT proven (append-mode writes should not clobber); what is measured is that the
+  lines are gone. §8's start recipe names no log path, which is what invited the collision.
+- Tags now: `stable-20260905`, `stable-20260905-2`, `stable-20260905-5`, `stable-20260905-6` live;
   `failed-promotion-stable-20260905-3` / `-4` retired. `docs/two-boards.md` §8 was rewritten from
   what the runs actually did.
 
