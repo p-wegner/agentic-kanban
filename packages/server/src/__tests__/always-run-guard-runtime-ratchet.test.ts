@@ -44,8 +44,21 @@ import {
  * giving the new suite a `when:` precondition (#1041) — that does not lower this number, but it
  * is what stops the number being paid on every diff. To LOWER it: retire or speed up a guard,
  * then set this to the new total.
+ *
+ * -- First disclosed movement (2026-09-06, #1050) — 546,000 -> 549,000 --------------------
+ *
+ * `base-health-probe-temp-cleanup.test.ts`, the 178th guard, counted at the ASSUMED 3,000 ms.
+ * The argument for the seconds: two of its four cases read
+ * `services/base-branch-health.service.ts` off disk instead of importing it, which is precisely
+ * the import-graph-invisible shape the marker exists for — `always-run-marker-ratchet` demanded
+ * the marker the moment the file landed, so the choice was never "marker or no marker", only
+ * "declared or silently unrun". Its real cost is far under the assumption (8 ms of test time
+ * measured; the 3,000 ms is the placeholder every new guard carries until `durations.json` is
+ * next captured), so this movement should shrink at the next capture rather than persist.
+ * It carries a `when:` territory of the two source trees it reads, so an ordinary diff does not
+ * pay it at all — which is what the precondition buys, even though this number cannot show it.
  */
-const BASELINE_TOTAL_MS = 546_000;
+const BASELINE_TOTAL_MS = 549_000;
 
 /**
  * How far under the baseline is tolerated before it counts as stale.
