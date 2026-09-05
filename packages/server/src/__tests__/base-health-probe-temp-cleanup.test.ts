@@ -1,6 +1,13 @@
+// @gate:always-run when:packages/server/src/services/base-branch-health.service.ts,packages/server/src/startup/** — reads those sources directly
 /**
  * #1050: the base-health probe leaked a full INSTALLED repo clone whenever its cleanup
  * failed, and said nothing.
+ *
+ * Marked `@gate:always-run` because the first two cases read
+ * `services/base-branch-health.service.ts` off disk rather than importing it, so dependency-based
+ * selection cannot see the dependency — the #483 failure mode, caught here by
+ * `always-run-marker-ratchet` the moment this file landed. The `when:` territory (#1041) is the
+ * two source trees it actually reads, so it costs nothing on a diff that touches neither.
  *
  * Two properties, both of which were absent:
  *  - the probe's throwaway root goes through `createManagedTempDir`, the one owner, so it
