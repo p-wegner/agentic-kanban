@@ -57,8 +57,23 @@ import {
  * next captured), so this movement should shrink at the next capture rather than persist.
  * It carries a `when:` territory of the two source trees it reads, so an ordinary diff does not
  * pay it at all — which is what the precondition buys, even though this number cannot show it.
+ *
+ * -- Second disclosed movement (2026-09-06, #1038 + #1045) — 549,000 -> 555,000 -------------
+ *
+ * Two guards arrived with those branches, both at the ASSUMED 3,000 ms:
+ *   `cli-path-resolution-guard.test.ts`  — walks `src/cli` for path-taking declarations
+ *   `promote-evidence.test.ts`           — imports `scripts/promote-evidence.mjs`
+ *
+ * The argument for the seconds: neither is optional. The first is the standing guard for the
+ * defect #1038 fixed (a relative CLI path silently resolving against `packages/server`), and it
+ * cannot import what it checks — it reads the sources. The second's import crosses OUT of this
+ * package, which is precisely what `vitest related` cannot follow. Both arrived BARE and were
+ * given `when:` territories here rather than left forced onto every diff, which is the fix this
+ * ratchet's own message asks for first — it does not move this worst-case number, but it is why
+ * the number is not what an ordinary diff pays. Both should shrink at the next `durations.json`
+ * capture, when their real cost replaces the placeholder.
  */
-const BASELINE_TOTAL_MS = 549_000;
+const BASELINE_TOTAL_MS = 555_000;
 
 /**
  * How far under the baseline is tolerated before it counts as stale.
