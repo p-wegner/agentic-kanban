@@ -7,6 +7,16 @@ Cleanroom reimplementation of [vibe-kanban](https://github.com/BloopAI/vibe-kanb
 
 Active project is "agentic-kanban" — use it for all monitor/workspace/MCP operations. On startup `deduplicateProjects()` removes legacy duplicates; if two show for one repo, restart the server.
 
+**Two boards run on this machine, and the one you TALK TO is not the one you EDIT (#1013).** The
+board answering `127.0.0.1:3001` / 5173 — and therefore every `mcp__agentic-kanban__*` call, every
+hook, and every `curl` in these docs — is the **stable** board: a BUILT artifact in the sibling
+checkout `../agentic-kanban-stable`, pinned to a dated `stable-YYYYMMDD[-N]` tag and to the operated
+database `~/.agentic-kanban/kanban.db`. **This** checkout is the **dev** board (`pnpm dev:devboard`,
+3101/5273, its own DB), and it is allowed to be red. The consequence to internalise: **landing a
+board change on master does not change the board you are using.** It goes live only when
+`pnpm promote` moves the stable checkout onto a new tag — see Common Commands. Runbook:
+`docs/two-boards.md`.
+
 ## Hard Constraints — never violate
 - **Never delete/wipe `kanban.db`** (no `pnpm db:reset`, no `rm`/`Remove-Item`/truncate/`Out-File`/redirect, any path form incl. `/mnt/c/...`). Delete individual issues/workspaces via MCP/API. The `validate-command-safety.js` PreToolUse guard blocks this — when it fires, STOP and ask the user; never weaken or route around it. For migration/lock/WAL problems use the `db-doctor` skill (`pnpm db:repair`, never deletes).
 - **Never kill ALL node processes; never use `Start-Process`; never poll ports in a loop** — they flash terminal windows and kill other agents' worktree servers. Run headless; spawn Node with `windowsHide: true`. See `dev-server` skill.
@@ -486,8 +496,18 @@ Full symptom→cause→fix in `docs/install.md` (“Clean-clone / first-start go
 - **DB location** — `packages/server/kanban.db`; absent → falls back to `~/.agentic-kanban/kanban.db` (board looks empty).
 
 ## Common Commands
-- `pnpm dev` — server + client (worktree ports: main 3001/5173, `feature/<N>-…` = `3001+N`/`5173+N`). `pnpm dev:desktop` adds Tauri. Safe headless launch: `dev-server` skill.
-- **`pnpm dev:devboard` — the DEV board** (`KANBAN_BOARD_ROLE=dev`): 3101/5273 and its OWN database (`~/.agentic-kanban-dev/kanban.db`), so board development stops restarting the server that operates every project. One switch decides both ports and DB — they are not settable apart — and the launcher REFUSES to open `~/.agentic-kanban/kanban.db` or `packages/server/kanban.db` under this role. The stable board (built artifact, tag `stable`, a sibling checkout) keeps 3001/5173 and registers `agentic-kanban`; the dev board never does. Runbook incl. the operator cutover checklist: **`docs/two-boards.md`**.
+- `pnpm dev` — server + client. **In THIS main checkout it is the wrong door since #1013**: it takes 3001/5173 and the operated database — the stable board's ports and DB, which are already in use by the board that operates every project. Use `pnpm dev:devboard` here. Plain `pnpm dev` is for **worktrees**, which get their own ports (`feature/<N>-…` = `3001+N`/`5173+N`). `pnpm dev:desktop` adds Tauri. Safe headless launch: `dev-server` skill.
+- **`pnpm dev:devboard` — the DEV board** (`KANBAN_BOARD_ROLE=dev`): 3101/5273 and its OWN database (`~/.agentic-kanban-dev/kanban.db`), so board development stops restarting the server that operates every project. One switch decides both ports and DB — they are not settable apart — and the launcher REFUSES to open `~/.agentic-kanban/kanban.db` or `packages/server/kanban.db` under this role. The stable board (built artifact, a sibling checkout pinned to a dated `stable-YYYYMMDD[-N]` tag) keeps 3001/5173 and registers `agentic-kanban`; the dev board never does. Runbook incl. the operator cutover checklist: **`docs/two-boards.md`**.
+- **`pnpm promote` — how a landed change reaches the board that operates everything.** Master goes
+  to the stable checkout by a **timed promotion, never per merge**: the run reads the last
+  full-sweep verdict for `master` out of the `base_branch_health` table (it never re-runs the
+  suite), REFUSES on anything that is not a fresh green for that branch — and on a sha the stable
+  checkout is already ahead of — then tags `stable-YYYYMMDD[-N]`, fast-forwards + rebuilds +
+  migrates + restarts `../agentic-kanban-stable`, and smoke-tests it. A failed smoke rolls back to
+  the previous tag and RETIRES the failed tag name. **`pnpm promote --dry-run` first, always**;
+  `--force-sweep` promotes without a green verdict, loudly. Exercised for real over five runs on
+  2026-09-05 (#1014). Full semantics, the rollback rehearsal seam, and the
+  `<stable>/.kanban/promote.log` the Sentinel reads: **`docs/two-boards.md` §8**.
 - **Inner loop (default while editing) — the impact selection, not the package suite (#953).** `test:mine` with no scope runs WHOLE packages, so the "fast loop" on a server-side ticket is thousands of tests; the test-impact skill picks ~6 files in ~0.4s from the same change. Run from the worktree root, guarded because the copy is best-effort:
   ```sh
   [ -f .claude/skills/test-impact/tools/impact.mjs ] && node .claude/skills/test-impact/tools/impact.mjs select --min-score 1.0 --format vitest
@@ -514,6 +534,8 @@ Full symptom→cause→fix in `docs/install.md` (“Clean-clone / first-start go
 - `docs/prd/` — `00` vision, `05` MVP scope/stages, `03` data model, `04` agent integration, `06` testability
 - `docs/decisions/` — numbered decision records (`003` Butler, `006` board-monitor, `008` Start Mode, `012` worker fleet)
 - `docs/backlog-markdown.md` — Backlog Markdown (`kanban-md 1`): the one-file backlog format, export filters, liberal import + preview, UI/REST/CLI/MCP/skill surfaces
+- `docs/two-boards.md` — **the two-board operation mode**: dev vs. stable, which one MCP/hooks talk
+  to, the operator cutover checklist, and `pnpm promote` (promotion, smoke, rollback, the log)
 - `docs/state.md` — progress
 - `packages/server/CLAUDE.md` — server-package detail (incl. Butler ops)
 - `scripts/board-monitor/README.md` — run/stop/observe the loop

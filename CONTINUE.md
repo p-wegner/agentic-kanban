@@ -3,6 +3,39 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-05 — the two-board operation mode is now reachable from what agents actually read
+
+`docs/two-boards.md` was complete and accurate after #1014; the gap was **reachability** — nothing
+loaded by default told an agent the operating consequences, so the runbook only helped someone who
+already knew to open it. Audited every doc that mentions the mode (`CLAUDE.md`, both `dev-server`
+skill copies, `sentinel`, `BACKLOG.md`, `docs/env-vars.md`) and closed four real holes:
+
+- **`CLAUDE.md` § What This Is** now states the fact the rest depends on: the board answering 3001 —
+  and therefore every `mcp__agentic-kanban__*` call and every `curl` in these docs — is the STABLE
+  built artifact in `../agentic-kanban-stable`, not this checkout, so **landing a board change on
+  master does not change the board you are using.**
+- **`pnpm promote` appeared in no CLAUDE.md line and in no skill.** The commit→live loop had no
+  second half anywhere an agent looks; it is now a Common Commands bullet (refusal conditions,
+  `--dry-run` first, rollback + tag retirement) pointing at §8, and `docs/two-boards.md` is in the
+  Documentation Map.
+- **`pnpm dev` in the main checkout is now the wrong door** (it takes the stable board's ports and
+  operated DB) — the bullet said so nowhere and listed it first. Qualified; plain `pnpm dev` is for
+  worktrees.
+- **The `sentinel` skill did not know the mode existed**, although §8 names it as the reader of
+  `.kanban/promote.log`. It has a check 7 (health + `tag --points-at HEAD` + log tail) and two
+  interpretation rows, both saying a `failed-promotion-*` HEAD is the recovery working, not a fault,
+  and that re-promoting is not the Sentinel's call.
+
+Two stale claims fixed while there: "tag `stable`" in `CLAUDE.md` and both `dev-server` copies —
+there is no moving `stable` tag, promotion mints a dated `stable-YYYYMMDD[-N]` one (verified: the
+repo has no such tag) — and the sentinel's `loop.pid` path still pointed into `C:ndrena\`, a
+tree that no longer exists, so its step 1 could not have run.
+
+**Verified by:** grep audit of every file mentioning `dev:devboard`/`two-boards`/`KANBAN_BOARD_ROLE`/
+`pnpm promote`; live state read at the time of writing (3001 healthy = stable checkout, 3101 healthy
+= dev board, stable HEAD `6fa31957dc` carrying `stable-20260905-5`). Docs only — no code touched, so
+no suite applies.
+
 ## 2026-09-05 — #1014: `pnpm promote` exercised for real against the stable board
 
 The drawbridge was written but had never been RUN. Two runs on the live pair
