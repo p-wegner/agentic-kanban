@@ -402,7 +402,15 @@ async function main() {
   const sha = verdict.ok && verdict.sha ? verdict.sha : headSha;
 
   const tags = gitOrThrow(["tag", "--list", "stable-*"]).split(/\r?\n/).map((t) => t.trim()).filter(Boolean);
-  const tag = nextStableTag(stableTagDate(), tags);
+  // A tag RETIRED by a failed promotion (see retireFailedTag) is gone from the `stable-*` list,
+  // so the name would otherwise be handed straight back to the next run — pointing a second,
+  // different sha at a name a post-mortem already knows. Retired names stay TAKEN; they are not,
+  // however, rollback candidates, which is the whole point of retiring them.
+  const retiredNames = gitOrThrow(["tag", "--list", "failed-promotion-stable-*"])
+    .split(/\r?\n/)
+    .map((t) => t.trim().replace(/^failed-promotion-/, ""))
+    .filter(Boolean);
+  const tag = nextStableTag(stableTagDate(), [...tags, ...retiredNames]);
   const rollbackTag = previousStableTag(tags, tag);
 
   const plan = buildPromotionPlan({
