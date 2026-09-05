@@ -9,9 +9,8 @@
 // the SAME `verify_script` the pre-merge gate uses, so a red base and a red branch gate are
 // directly comparable.
 
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createManagedTempDir } from "@agentic-kanban/shared/lib/temp-dir";
 import { runSetupScript } from "@agentic-kanban/shared/lib/setup-script";
 import { runUnderVerifyChainSemaphore, verifyChainGateWaiting } from "./verify-chain-semaphore.js";
 import {
@@ -194,9 +193,18 @@ async function runBaseBranchProbe(
   // this is the property: even if the lock is lost (two processes, a stale map, a future
   // caller that bypasses it), a collision is now impossible rather than merely unlikely.
   //
-  // `mkdtemp` creates the unique PARENT; the clone goes into a `repo` child so `git clone`
-  // still gets a non-existent destination, and the parent is what `finally` removes.
-  const probeRoot = await mkdtemp(join(tmpdir(), `kanban-base-health-${slug}-`));
+  // The unique PARENT; the clone goes into a `repo` child so `git clone` still gets a
+  // non-existent destination, and the parent is what `finally` removes.
+  //
+  // #1050 — through `createManagedTempDir`, the ONE owner of throwaway directories here,
+  // rather than a bare `mkdtemp` + `rm`. This probe clones the repo AND installs it (#674),
+  // so a leaked root is a repo plus a full `node_modules`; two of them were found orphaned in
+  // `%TEMP%` on 2026-09-05, 1813 in-tree links each, on a box whose very next probe then died
+  // with `pnpm install` exit 0xC0000005. Going through the owner also puts this prefix in
+  // reach of `sweepStaleTempDirs`, which is what recovers a probe that was killed and never
+  // ran its `finally` at all.
+  const probeTemp = createManagedTempDir(`kanban-base-health-${slug}-`);
+  const probeRoot = probeTemp.path;
   const dest = join(probeRoot, "repo");
   const startedAt = Date.now();
   // Stamp the START, persisted, so a process restart mid-probe does not read the stale
@@ -389,8 +397,13 @@ ${tail(combined)}`,
     // `return null` from a checkpoint above never reaches here, because each of those returns
     // from inside the `try`... which DOES run this block. `didYield` is what tells the two apart.
     if (!didYield) clearProbeYieldStreak(projectId);
-    // Only ever this probe's OWN directory — the whole point of `mkdtemp` above.
-    await rm(probeRoot, { recursive: true, force: true }).catch(() => {});
+    // Only ever this probe's OWN directory — the whole point of the unique parent above.
+    // #1050 — a failed removal is REPORTED, not swallowed. `dispose()` never throws (Windows
+    // cannot remove a tree a surviving grandchild holds as its cwd), so the old
+    // `.catch(() => {})` was not protecting anything; it was only hiding which probe leaked.
+    if (!probeTemp.dispose()) {
+      console.warn(`[base-health] could not remove probe root ${probeRoot} — a repo clone plus its node_modules is still on disk; sweepStaleTempDirs will retry it on the next boot`);
+    }
     // Clear the in-flight stamp. An empty value reads as absent (see `isBaseHealthProbeDue`),
     // so no delete accessor is needed; and if this write is lost the stamp still expires after
     // `PROBE_MAX_DURATION_MS`, which is exactly the killed-process case.
