@@ -201,3 +201,50 @@ export function buildPromotionPlan({
 export function formatPlan(plan) {
   return plan.map((s) => `  ${String(s.n).padStart(2, " ")}. ${s.title}\n      ${s.detail}`).join("\n");
 }
+
+/**
+ * The rehearsal seam for #1014's second acceptance case: "a forced smoke failure rolls back to
+ * the previous tag and the stable board answers /health afterwards".
+ *
+ * Without a seam the only way to exercise the rollback half is to break something real (point
+ * the board URL at a dead port, ship a broken build), which either takes the board down for the
+ * duration or edits the script's logic mid-run. So the driver reads this env var — and it is
+ * deliberately ONE-SHOT: it fails the PROMOTION's smoke and is then consumed, so the ROLLBACK's
+ * smoke is a genuine check of the rolled-back board rather than a second forced failure. A
+ * seam that failed both would make the rollback unverifiable, which is the whole point.
+ */
+export function shouldForceSmokeFailure(env = process.env) {
+  const raw = env.KANBAN_PROMOTE_FORCE_SMOKE_FAILURE;
+  if (raw === undefined || raw === null) return false;
+  const v = String(raw).trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
+/**
+ * May this sha be promoted over what the stable checkout currently has?
+ *
+ * The sha comes from the last GREEN sweep, which is by construction older than master's tip —
+ * and after a hand-made cutover the stable checkout can already sit on a LATER commit. Deploying
+ * an ancestor then does nothing at all: `git merge --ff-only <ancestor>` reports "Already up to
+ * date" and exits 0, so the run would tag, rebuild, restart, smoke green and announce that tag as
+ * live while the checkout still runs something else entirely. A promotion that lies about what is
+ * deployed is worse than one that refuses.
+ *
+ * @param {object} p
+ * @param {string} p.stableHead   the stable checkout's current HEAD sha
+ * @param {string} p.sha          the sha this promotion would deploy
+ * @param {boolean} p.shaIsDescendant  is `stableHead` an ancestor of `sha`? (git decides)
+ */
+export function checkPromoteDirection({ stableHead, sha, shaIsDescendant }) {
+  if (!stableHead || !sha) return { ok: true, reason: "unknown", detail: "could not read one of the shas — not blocking" };
+  if (stableHead === sha) return { ok: true, reason: "same", detail: `stable checkout is already at ${sha}` };
+  if (shaIsDescendant) return { ok: true, reason: "forward", detail: `${sha} is ahead of the stable checkout's ${stableHead}` };
+  return {
+    ok: false,
+    reason: "behind",
+    detail:
+      `the sha to promote (${sha}) is NOT a descendant of the stable checkout's HEAD (${stableHead}) — ` +
+      `deploying it would be a silent no-op that tags a version which is not what runs. ` +
+      `Promote a sha that is ahead (a newer green sweep, or --force-sweep to tag ${"the branch tip"}).`,
+  };
+}

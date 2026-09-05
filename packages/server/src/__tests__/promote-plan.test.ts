@@ -11,6 +11,7 @@ import {
   DEFAULT_STABLE_CHECKOUT_DIRNAME,
   PROMOTE_LOG_RELPATH,
   buildPromotionPlan,
+  checkPromoteDirection,
   formatPlan,
   nextStableTag,
   parseStableTag,
@@ -20,6 +21,7 @@ import {
   resolveMaxSweepAgeMs,
   resolveProjectName,
   resolveStableCheckout,
+  shouldForceSmokeFailure,
   shouldReinstall,
   sortStableTags,
   stableTagDate,
@@ -207,5 +209,37 @@ describe("the dry-run plan", () => {
 
   it("logs under the stable checkout's .kanban directory", () => {
     expect(PROMOTE_LOG_RELPATH.replace(/\\/g, "/")).toBe(".kanban/promote.log");
+  });
+});
+
+describe("shouldForceSmokeFailure", () => {
+  it("is off unless explicitly armed", () => {
+    expect(shouldForceSmokeFailure({})).toBe(false);
+    expect(shouldForceSmokeFailure({ KANBAN_PROMOTE_FORCE_SMOKE_FAILURE: "" })).toBe(false);
+    expect(shouldForceSmokeFailure({ KANBAN_PROMOTE_FORCE_SMOKE_FAILURE: "0" })).toBe(false);
+  });
+
+  it("accepts the spellings an operator actually types", () => {
+    for (const v of ["1", "true", "TRUE", " yes "]) {
+      expect(shouldForceSmokeFailure({ KANBAN_PROMOTE_FORCE_SMOKE_FAILURE: v })).toBe(true);
+    }
+  });
+});
+
+describe("checkPromoteDirection", () => {
+  it("permits a forward move and a no-op onto the same sha", () => {
+    expect(checkPromoteDirection({ stableHead: "aaa", sha: "bbb", shaIsDescendant: true }).ok).toBe(true);
+    expect(checkPromoteDirection({ stableHead: "aaa", sha: "aaa", shaIsDescendant: false }).reason).toBe("same");
+  });
+
+  it("REFUSES a sha the stable checkout is already ahead of, because ff-only would silently no-op", () => {
+    const d = checkPromoteDirection({ stableHead: "newer", sha: "older", shaIsDescendant: false });
+    expect(d.ok).toBe(false);
+    expect(d.reason).toBe("behind");
+    expect(d.detail).toContain("silent no-op");
+  });
+
+  it("does not block when a sha could not be read at all", () => {
+    expect(checkPromoteDirection({ stableHead: "", sha: "abc", shaIsDescendant: false }).ok).toBe(true);
   });
 });

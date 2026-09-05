@@ -27,6 +27,10 @@
  *   node scripts/promote.mjs               # promote
  *   node scripts/promote.mjs --force-sweep # promote WITHOUT a green sweep (loud warning)
  *
+ * Rehearsal: KANBAN_PROMOTE_FORCE_SMOKE_FAILURE=1 fails the promotion's smoke on purpose (one
+ * shot — the rollback's smoke stays real), which is how the rollback half of #1014's acceptance
+ * is exercised without breaking anything real.
+ *
  * Env: KANBAN_STABLE_CHECKOUT, KANBAN_STABLE_PORT, KANBAN_PROMOTE_BOARD_URL, KANBAN_PROMOTE_DB,
  * KANBAN_PROMOTE_PROJECT, KANBAN_PROMOTE_BRANCH, KANBAN_PROMOTE_MAX_SWEEP_AGE_H — all
  * documented in `docs/env-vars.md`.
@@ -41,6 +45,7 @@ import { parseNetstatListeners, planPortOwnerKill } from "./dev-port-guard.mjs";
 import {
   PROMOTE_LOG_RELPATH,
   buildPromotionPlan,
+  checkPromoteDirection,
   formatPlan,
   nextStableTag,
   parseSweepVerdict,
@@ -50,6 +55,7 @@ import {
   resolveOperatedDbPath,
   resolveProjectName,
   resolveStableCheckout,
+  shouldForceSmokeFailure,
   shouldReinstall,
   stableTagDate,
 } from "./promote-plan.mjs";
@@ -281,10 +287,23 @@ async function waitForHealth(timeoutMs = 180_000) {
   return { ok: false, body: null };
 }
 
+/**
+ * Armed by `KANBAN_PROMOTE_FORCE_SMOKE_FAILURE` and consumed by the first smoke that reads it,
+ * so a rehearsal fails the PROMOTION's smoke and then lets the ROLLBACK's smoke be real.
+ */
+let forcedSmokeFailureArmed = shouldForceSmokeFailure(env);
+
 /** `/health`, a non-empty `GET /api/projects`, and one board-status call. */
 async function smoke() {
   const health = await waitForHealth();
   if (!health.ok) return { ok: false, failed: "/health", detail: "no 200 within the boot timeout" };
+
+  // After /health, so a rehearsal still proves the restart worked before it forces the failure.
+  if (forcedSmokeFailureArmed) {
+    forcedSmokeFailureArmed = false;
+    log("[promote] KANBAN_PROMOTE_FORCE_SMOKE_FAILURE is set — failing this smoke ON PURPOSE (one-shot; the rollback's smoke is real)");
+    return { ok: false, failed: "FORCED (KANBAN_PROMOTE_FORCE_SMOKE_FAILURE)", detail: "rehearsal of the rollback path — the board itself answered /health" };
+  }
 
   const projectsRes = await fetch(`${boardUrl}/api/projects`, { signal: AbortSignal.timeout(10_000) }).catch(() => null);
   const projectsBody = projectsRes ? await projectsRes.json().catch(() => null) : null;
@@ -427,6 +446,16 @@ async function main() {
   log(`[promote] === promotion ${tag} -> ${sha} (from ${REPO_ROOT}) ===`);
   log(`[promote] sweep: ${verdict.detail} (source: ${opts.forceSweep ? "SKIPPED" : sweep.source})`);
   log(`[promote] rollback target: ${rollbackTag ?? "<none — first promotion>"}`);
+
+  // A promotion must move the stable checkout FORWARD. See checkPromoteDirection.
+  const stableHead = gitOrThrow(["rev-parse", "HEAD"], stableCheckout);
+  const direction = checkPromoteDirection({
+    stableHead,
+    sha,
+    shaIsDescendant: git(["merge-base", "--is-ancestor", stableHead, sha], stableCheckout).code === 0,
+  });
+  log(`[promote] direction: ${direction.detail}`);
+  if (!direction.ok) fail(direction.detail);
 
   gitOrThrow(["tag", tag, sha]);
   log(`[promote] tagged ${tag} on ${sha}`);

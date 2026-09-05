@@ -86,3 +86,16 @@ export interface PromotionPlanInput {
 }
 export declare function buildPromotionPlan(input: PromotionPlanInput): PromotionStep[];
 export declare function formatPlan(plan: PromotionStep[]): string;
+
+export declare function shouldForceSmokeFailure(env?: Record<string, string | undefined>): boolean;
+
+export interface PromoteDirection {
+  ok: boolean;
+  reason: "unknown" | "same" | "forward" | "behind";
+  detail: string;
+}
+export declare function checkPromoteDirection(input: {
+  stableHead: string | null | undefined;
+  sha: string | null | undefined;
+  shaIsDescendant: boolean;
+}): PromoteDirection;
