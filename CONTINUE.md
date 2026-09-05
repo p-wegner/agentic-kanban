@@ -3,6 +3,28 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-05 — #1014: `pnpm promote` exercised for real against the stable board
+
+The drawbridge was written but had never been RUN. Two runs on the live pair
+(`agentic-kanban-stable` on 3001 against `~/.agentic-kanban/kanban.db`, dev board on 3101 untouched).
+
+- **Run 1 — a real promotion.** `node scripts/promote.mjs --force-sweep` tagged
+  `stable-20260905-2`, fast-forwarded the stable checkout, skipped the install (lockfile
+  unchanged), built, migrated, stopped the running board and restarted it, smoke green
+  (17 projects, board status for `agentic-kanban`). **#1035's netstat fix held**: the German
+  `ABHÖREN` state column no longer hides the listener, `planPortOwnerKill` allowed pid 32268 by
+  its stable-checkout command line, and that pid actually died.
+- **`--force-sweep` was needed, and that is the finding.** The last green sweep sits on
+  `168e2da63c`, which the stable checkout was already AHEAD of after the #1013 cutover, so a
+  plain run promoted an ancestor — and `git merge --ff-only <ancestor>` exits 0 with "Already up
+  to date". The run would have tagged, rebuilt, restarted, smoked green and announced a tag that
+  is not what runs. `checkPromoteDirection` now refuses before it tags (`feat(#1014)`).
+- **Run 2 — the rollback half**, via the new one-shot `KANBAN_PROMOTE_FORCE_SMOKE_FAILURE=1`.
+
+**Still true / next:** a promotion on the honest path (no `--force-sweep`) needs a green sweep
+NEWER than what stable runs — i.e. the nightly sweep has to run after this promotion before the
+next one can be sweep-authorized.
+
 ## 2026-09-05 — #1020: producer side — refill back on, BACKLOG_FLOOR 15, weekly planning checklist
 
 Direct on master, one pathspec commit (`feat(#1020)`), no worktree.
