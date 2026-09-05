@@ -349,6 +349,18 @@ export async function runPreMergeGate(
       ...gradleEnv,
       AGENTIC_KANBAN_DIR: gateDataDir,
       KANBAN_TEST_MAX_WORKERS: String(gateMaxWorkers),
+      // #1051: the same budget reaches the TYPECHECK step, which the gate previously left to
+      // whatever `scripts/typecheck.mjs` defaulted to on its own. `verify_max_workers` is the
+      // project's statement about how much of this box a gate may take, and it governed one of
+      // the verify script's three steps — while the two it did not govern (5 `tsc` runs at
+      // 0.5-1 GB each, and depcruise over 1834 modules in one process) are the memory-heavy ones.
+      //
+      // Clamped rather than mirrored, because a tsc worker is not a vitest worker: at 0.5-1 GB
+      // each, four of them is ~4 GB of peak on a box that was at 2-3 GB usable all of 2026-09-05.
+      // So a project asking for FEWER workers gets fewer typecheck workers too, and one asking
+      // for more still stops at the documented ceiling of two. Same number the script picks by
+      // itself today, which is deliberate: this changes who DECIDES it, not the current value.
+      KANBAN_TYPECHECK_WORKERS: String(Math.min(gateMaxWorkers, DEFAULT_VERIFY_MAX_WORKERS)),
       // A board with a fleet configured holds its git/fleet sockets while the gate runs;
       // inheriting those pins makes any suite that opens a listener die with EADDRINUSE and
       // blames the branch for it. See lib/verify-env.ts.
