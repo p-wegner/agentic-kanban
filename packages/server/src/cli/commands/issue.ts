@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { parseSessionSummary, isTerminalStatusName, type SessionSummary } from "@agentic-kanban/shared";
 import { resolveProjectIdArg, describeIssueNumberMiss, resolveIssueArg, cliAction } from "../shared.js";
+import { cliPathArg } from "../cli-path.js";
 import { isAnalyticsNoise } from "../../services/session-filter.js";
 import { getWorkspaceDiffStats, type WorkspaceDiffStats } from "../../services/workspace-diff-stats.js";
 import {
@@ -133,7 +134,7 @@ Examples:
     .command("create <title>")
     .description("Create a new issue in the active project.\n\nIssue numbers are auto-incrementing per project. The issue is placed in the first project status (typically Todo) unless overridden with -s. Use --description-file for a multi-line / markdown body — this avoids the shell quoting and newline mangling that can truncate an inline -d value.")
     .option("-d, --description <description>", "Issue description (markdown supported)")
-    .option("--description-file <path>", "Read the description from a UTF-8 file (overrides -d)")
+    .option("--description-file <path>", "Read the description from a UTF-8 file (overrides -d). Relative to the directory you run the command in.", cliPathArg)
     .option("-p, --priority <priority>", "Priority: low, medium, high, critical (default: medium)")
     .option("-t, --type <type>", "Issue type: task, bug, feature, chore (default: task)")
     .option("-s, --status <status>", "Initial status name (default: first project status, typically Todo)")
@@ -199,7 +200,7 @@ Examples:
     .description("Update an existing issue's fields.\n\nAccepts an issue number (resolved in the active project) or a full issue ID. Only the flags you pass are changed; every other field is left untouched. Use --description-file to set a multi-line / markdown description from a file — this avoids shell quoting and newline mangling that can truncate an inline -d value.")
     .option("--title <title>", "New title")
     .option("-d, --description <description>", "New description (markdown supported)")
-    .option("--description-file <path>", "Read the new description from a UTF-8 file (overrides -d)")
+    .option("--description-file <path>", "Read the new description from a UTF-8 file (overrides -d). Relative to the directory you run the command in.", cliPathArg)
     .option("-p, --priority <priority>", "Priority: low, medium, high, critical")
     .option("-t, --type <type>", "Issue type: task, bug, feature, chore")
     .addHelpText("after", `
@@ -702,7 +703,10 @@ Valid types: text, link, image
     }));
 
   issueCmd
-    .command("create-batch <jsonFile>")
+    // .argument, not the inline `create-batch <jsonFile>` form, so the path carries the
+    // cliPathArg coercion — the inline form takes no parser (#1038). Kept on ONE line
+    // because this function is on the shrink-only nloc ring (#800) at its baseline.
+    .command("create-batch").argument("<jsonFile>", "JSON file of issue payloads, relative to the directory you run the command in", cliPathArg)
     .description("Create multiple issues atomically from a JSON file.\n\nReads a JSON file containing an array of issue payloads and creates them all in a single transaction, optionally with dependency edges between them. All-or-nothing: any failure rolls back.")
     .option("--parent <issueNumber>", "Parent issue number — all created issues will be linked to it with child_of")
     .option("--json", "Output raw JSON instead of formatted text")

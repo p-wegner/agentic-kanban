@@ -1,6 +1,7 @@
 import type { Command } from "commander";
 import { readFileSync, writeFileSync } from "node:fs";
 import { runMigrations, resolveProjectIdArg } from "../shared.js";
+import { cliPathArg } from "../cli-path.js";
 import { buildApiUrl } from "./workspace-api-url.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
@@ -18,7 +19,7 @@ export function registerBacklogCommand(program: Command) {
     .command("export")
     .description("Export the project's backlog as Backlog Markdown (kanban-md 1) to stdout or --out <file>.")
     .option("--project <idOrName>", "Target project by id or name (default: the active project)")
-    .option("--out <file>", "Write to this file instead of stdout (e.g. BACKLOG.md)")
+    .option("--out <file>", "Write to this file instead of stdout (e.g. BACKLOG.md). Relative to the directory you run the command in.", cliPathArg)
     .option("--status <names>", "Comma-separated status names to include (default: every non-terminal status)")
     .option("--include-done", "Include Done/Cancelled/Archived")
     .option("--tag <names>", "Comma-separated tags (any match)")
@@ -63,7 +64,10 @@ Examples:
     });
 
   cmd
-    .command("import <file>")
+    .command("import")
+    // Declared with .argument (not the inline `import <file>` form) so the path can carry
+    // the cliPathArg coercion — the inline form takes no parser (#1038).
+    .argument("<file>", "Markdown file to import, relative to the directory you run the command in", cliPathArg)
     .description("Import a markdown backlog (kanban-md standard or liberal `## Section` + `- [ ] item` styles). Dry-run preview by default; --apply writes.")
     .option("--project <idOrName>", "Target project by id or name (default: the active project)")
     .option("--apply", "Actually create/update issues (default: preview only)")

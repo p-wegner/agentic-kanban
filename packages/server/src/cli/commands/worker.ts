@@ -13,6 +13,7 @@ import { SHARES_FILESYSTEM_LABEL } from "@agentic-kanban/shared/lib/worker-proto
 // #879 — pure, so it stays safe for the standalone worker binary (no db graph).
 import { formatBuildFreshness, type WorkerBuildFreshness } from "@agentic-kanban/shared/lib/worker-build-freshness";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { cliPathArg } from "../cli-path.js";
 // Type-only + a db-free formatter: this module is also the standalone worker
 // binary's entry point, which must never pull in the database graph.
 import { renderPlacementExplanation } from "../../lib/placement-explanation-format.js";
@@ -406,8 +407,8 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         "with a log line.",
     )
     .option("--max-concurrency <n>", "Max parallel agent sessions", (v) => parseInt(v, 10))
-    .option("--state-file <path>", `Pairing state file (default: ${defaultWorkerStateFile()})`)
-    .option("--work-root <path>", "Root for git-transport clones/checkouts (default: ~/.agentic-kanban/worker)")
+    .option("--state-file <path>", `Pairing state file, relative to the directory you run the command in (default: ${defaultWorkerStateFile()})`, cliPathArg)
+    .option("--work-root <path>", "Root for git-transport clones/checkouts, relative to the directory you run the command in (default: ~/.agentic-kanban/worker)", cliPathArg)
     .option("--leave-agents", "On Ctrl+C, leave running agent processes alive instead of killing them")
     .option(
       "--drain-timeout <seconds>",
@@ -662,7 +663,7 @@ export function registerWorkerSubcommands(workerCmd: Command) {
     .option("--board <url>", "Board base URL — the FLEET port on a cross-machine setup", DEFAULT_BOARD_URL)
     .option("--providers <csv>", "Provider CLIs to check on this machine", "claude")
     .option("--git-port <n>", "KANBAN_GIT_HTTP_PORT, to check the git transport too", (v) => parseInt(v, 10))
-    .option("--state-file <path>", `Pairing state file (default: ${defaultWorkerStateFile()})`)
+    .option("--state-file <path>", `Pairing state file, relative to the directory you run the command in (default: ${defaultWorkerStateFile()})`, cliPathArg)
     .option("--json", "Output the report as JSON")
     .action(async (options: {
       board: string;
@@ -717,7 +718,7 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         "update). Exits non-zero only when the check itself could not be completed.",
     )
     .option("--board <url>", "Board base URL — the FLEET port on a cross-machine setup", DEFAULT_BOARD_URL)
-    .option("--state-file <path>", `Pairing state file (default: ${defaultWorkerStateFile()})`)
+    .option("--state-file <path>", `Pairing state file, relative to the directory you run the command in (default: ${defaultWorkerStateFile()})`, cliPathArg)
     .option("--json", "Output the report as JSON")
     .action(async (options: { board: string; stateFile?: string; json?: boolean }) => {
       const report = await runWorkerUpdateCheck({
@@ -738,7 +739,7 @@ export function registerWorkerSubcommands(workerCmd: Command) {
         "or crashed mid-session. Also runs automatically on every 'worker start'; this is for a manual " +
         "sweep without starting the daemon.",
     )
-    .option("--work-root <path>", "Root for git-transport clones/checkouts (default: ~/.agentic-kanban/worker)")
+    .option("--work-root <path>", "Root for git-transport clones/checkouts, relative to the directory you run the command in (default: ~/.agentic-kanban/worker)", cliPathArg)
     .option("--json", "Output the report as JSON")
     .action(async (options: { workRoot?: string; json?: boolean }) => {
       const workRoot = options.workRoot ?? defaultWorkerWorkRoot();

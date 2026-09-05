@@ -66,6 +66,44 @@ function firstSentence(raw) {
 }
 
 /**
+ * Blank out comments, preserving every offset (a comment char becomes a space, newlines stay).
+ *
+ * The command scanner reads the RECEIVER immediately before `.command(` to decide which group a
+ * subcommand belongs to, so a comment sitting between the two makes the receiver unresolvable and
+ * the command is dropped from the reference SILENTLY — measured: a comment above
+ * `.command("create-batch")` removed `issue create-batch` from cli.md and from SKILL.md's group
+ * list (#1038). A comment explaining a declaration is exactly what one writes there, so the
+ * scanner must not care. String literals are left intact — masking is state-aware so a `//` inside
+ * a URL is not mistaken for a comment.
+ */
+function maskComments(src) {
+  const out = src.split("");
+  let i = 0;
+  while (i < src.length) {
+    const c = src[i];
+    if (c === '"' || c === "'" || c === "`") {
+      const quote = c;
+      i++;
+      while (i < src.length && src[i] !== quote) i += src[i] === "\\" ? 2 : 1;
+      i++;
+      continue;
+    }
+    if (c === "/" && src[i + 1] === "/") {
+      while (i < src.length && src[i] !== "\n") out[i++] = " ";
+      continue;
+    }
+    if (c === "/" && src[i + 1] === "*") {
+      while (i < src.length && !(src[i] === "*" && src[i + 1] === "/")) { if (src[i] !== "\n") out[i] = " "; i++; }
+      out[i] = " "; out[i + 1] = " ";
+      i += 2;
+      continue;
+    }
+    i++;
+  }
+  return out.join("");
+}
+
+/**
  * CLI groups and their subcommands, from `packages/server/src/cli/commands/*.ts`.
  *
  * Every command file follows one shape: `const <x>Cmd = program.command("<group>")` declares
@@ -87,7 +125,8 @@ function extractCliCommands() {
   const varToGroup = new Map();
 
   const scan = (file) => {
-    const src = fs.readFileSync(path.join(dir, file), "utf-8").replace(/\r\n/g, "\n");
+    // Comment-masked, so a comment between a receiver and its `.command(` cannot hide a command.
+    const src = maskComments(fs.readFileSync(path.join(dir, file), "utf-8").replace(/\r\n/g, "\n"));
 
     const re = /(\w+)\s*(?:\n\s*)?\.command\("([^"]+)"\)/g;
     const hits = [];
@@ -104,6 +143,15 @@ function extractCliCommands() {
       const descMatch = /\.description\(\s*"((?:[^"\\]|\\.)*)"/.exec(slice);
       const description = descMatch ? firstSentence(descMatch[1]) : "";
 
+      // Arguments may be declared inline (`.command("get <id>")`) OR separately with
+      // `.argument("<file>", …)` — the latter is required whenever the argument needs a
+      // parser, e.g. the cliPathArg path coercion (#1038). Both spellings must reach the
+      // usage string, or the reference documents a command as taking no arguments.
+      const declared = [...slice.matchAll(/\.argument\(\s*"([<[][^"]*[\]>])"/g)].map((m) => m[1]);
+      const spec = declared.length > 0 && !hit.spec.includes(" ")
+        ? `${hit.spec} ${declared.join(" ")}`
+        : hit.spec;
+
       const assign = /const\s+(\w+)\s*=\s*$/.exec(src.slice(Math.max(0, hit.at - 60), hit.at));
       if (assign) {
         const groupPath = parent ? `${parent} ${label}` : label;
@@ -115,11 +163,11 @@ function extractCliCommands() {
       }
 
       if (!parent) {
-        if (!topLevel.some(c => c.name === hit.spec)) topLevel.push({ name: hit.spec, description });
+        if (!topLevel.some(c => c.name === spec)) topLevel.push({ name: spec, description });
         continue;
       }
       const group = groups.get(parent);
-      if (group && !group.subs.some(s => s.name === hit.spec)) group.subs.push({ name: hit.spec, description });
+      if (group && !group.subs.some(s => s.name === spec)) group.subs.push({ name: spec, description });
     }
   };
 

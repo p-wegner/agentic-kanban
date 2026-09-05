@@ -1,7 +1,7 @@
 import type { Command } from "commander";
-import { resolve } from "node:path";
 import { getProjectByName, getProjectById } from "../../repositories/project.repository.js";
 import { cliAction } from "../shared.js";
+import { cliPathArg, resolveCliPath } from "../cli-path.js";
 import {
   relocateProject,
   relocateProjectsUnderPrefix,
@@ -55,7 +55,7 @@ export function registerRelocateCommand(program: Command) {
         "With --prefix, both arguments are directories and EVERY project underneath the first is relocated.",
     )
     .argument("<project-or-from-prefix>", "Project name or ID — or, with --prefix, the directory to move out of")
-    .argument("<new-path-or-to-prefix>", "The project's new absolute path — or, with --prefix, the directory to move into")
+    .argument("<new-path-or-to-prefix>", "The project's new path — or, with --prefix, the directory to move into. Relative to the directory you run the command in.", cliPathArg)
     .option("--prefix", "Relocate every project under the first directory into the second")
     .option("--move", "Also rename the directories on disk (and repair the worktrees)")
     .option("--dry-run", "Report exactly what would change and touch nothing")
@@ -93,8 +93,11 @@ Examples:
           };
 
           if (opts.prefix) {
-            const fromPrefix = resolve(first);
-            const toPrefix = resolve(second);
+            // The first argument is polymorphic — a project name without --prefix, a
+            // directory with it — so it cannot carry a coercion at the declaration and is
+            // resolved here, in the branch where it IS a path (#1038). `second` already is.
+            const fromPrefix = resolveCliPath(first);
+            const toPrefix = second;
             const batch = await relocateProjectsUnderPrefix(fromPrefix, toPrefix, options);
             if (batch.results.length === 0) {
               console.log(`No registered project lives under ${fromPrefix}.`);
@@ -123,7 +126,7 @@ preferences.projects_base_path`);
           // The second argument is always the project's NEW PATH, never a parent to drop
           // it into: "relocate X into D:/checkouts" and "relocate X to D:/checkouts" are
           // indistinguishable as a string, and guessing gets a repo buried one level deep.
-          const result = await relocateProject(project.id, resolve(second), options);
+          const result = await relocateProject(project.id, second, options);
           printResult(result, !!opts.verbose);
           process.exit(result.blockers.length > 0 ? 1 : 0);
         },

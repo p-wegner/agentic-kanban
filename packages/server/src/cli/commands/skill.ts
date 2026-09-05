@@ -1,5 +1,6 @@
 import type { Command } from "commander";
 import { cliAction } from "../shared.js";
+import { cliPathArg, invocationCwd } from "../cli-path.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import {
   listAgentSkills,
@@ -100,7 +101,10 @@ Examples:
     }));
 
   skillCmd
-    .command("export <target-path>")
+    .command("export")
+    // .argument, not the inline `export <target-path>` form, so the path carries the
+    // cliPathArg coercion — the inline form takes no parser (#1038).
+    .argument("<target-path>", "Target project directory, relative to the directory you run the command in", cliPathArg)
     .description("Export skills as SKILL.md files for Claude Code and Codex.\n\nWrites skills into the .claude/skills/ directory of the target project and links .codex/skills to the same directory. Each skill is written as <name>/SKILL.md with frontmatter.")
     .option("-p, --project <projectId>", "Export only project-specific + global skills")
     .option("-n, --names <names>", "Comma-separated list of skill names to export")
@@ -157,7 +161,10 @@ Examples:
   skillCmd
     .command("verify")
     .description("Check whether the bundled agent skills an agent actually reads are current.\n\nRuns without a server or database. A junctioned install always reports 'linked' — it cannot go stale, which is the point of linking; a COPY is compared against the bundle and reported stale when it has fallen behind.")
-    .argument("[target-path]", "Project whose .claude/skills to check (defaults to current directory)", ".")
+    // No commander default: a default value is NOT passed through the parser, so a literal
+    // "." would still resolve against packages/server under `pnpm cli --` (#1038). The
+    // handler defaults to invocationCwd() instead.
+    .argument("[target-path]", "Project whose .claude/skills to check (defaults to the directory you run the command in)", cliPathArg)
     .option("--user", "Check your user agent-skill directories (~/.claude*/skills, ~/.codex/skills)")
     .addHelpText("after", `
 Examples:
@@ -166,12 +173,13 @@ Examples:
 
 Exit code is 1 when anything is stale, so this is usable from a hook or from CI.
 `)
-    .action(async (targetPath: string, options: { user?: boolean }) => {
+    .action(async (targetPath: string | undefined, options: { user?: boolean }) => {
+      // Already absolute when given (cliPathArg); invocationCwd() is the omitted default.
+      const target = targetPath ?? invocationCwd();
       try {
         const { listBundledSkills, inspectInstalledSkill, discoverUserSkillRoots, findBundledSkillsDir } =
           await import("@agentic-kanban/shared/lib/bundled-skills");
         const { skillsDirOf } = await import("@agentic-kanban/shared/lib/agent-skill-files");
-        const { resolve: resolvePath } = await import("node:path");
 
         const bundleDir = findBundledSkillsDir();
         const bundled = await listBundledSkills(bundleDir);
@@ -182,7 +190,7 @@ Exit code is 1 when anything is stale, so this is usable from a hook or from CI.
         console.log(`Bundle: ${bundleDir}`);
         for (const s of bundled) console.log(`  ${s.name} @ ${s.commit ?? "unstamped"}`);
 
-        const dirs = options.user ? await discoverUserSkillRoots() : [skillsDirOf(resolvePath(targetPath))];
+        const dirs = options.user ? await discoverUserSkillRoots() : [skillsDirOf(target)];
         let stale = 0;
         let absent = 0;
         for (const dir of dirs) {
@@ -205,7 +213,7 @@ Exit code is 1 when anything is stale, so this is usable from a hook or from CI.
 
         if (stale || absent) {
           console.log(`\n${stale} stale, ${absent} not installed. Fix with:`);
-          console.log(`  agentic-kanban install-skill${options.user ? " --user" : " " + targetPath}`);
+          console.log(`  agentic-kanban install-skill${options.user ? " --user" : " " + target}`);
         }
         process.exit(stale ? 1 : 0);
       } catch (err) {
