@@ -38,7 +38,13 @@ export default defineConfig({
   test: {
     globals: true,
     // #285 — git committer identity via env, so no fixture pays two `git config` spawns.
-    setupFiles: [path.resolve(__dirname, "../../test-setup/git-identity.ts")],
+    // #1041 gate — db-isolation.ts drops any INHERITED KANBAN_DB_URL/DB_URL so #231's
+    // test-throwaway redirect can apply. See that file: without it, every suite in a builder
+    // worktree resolves the operated board DB, because the board exports KANBAN_DB_URL.
+    setupFiles: [
+      path.resolve(__dirname, "../../test-setup/git-identity.ts"),
+      path.resolve(__dirname, "../../test-setup/db-isolation.ts"),
+    ],
     // #352 — reap orphaned fixture child servers (`serve.mjs`) and their temp dirs once before
     // the first fork and once after the last. NOT a setupFile: that runs per fork and would let
     // concurrent sweeps reap a sibling fork's live fixture. See the module header.

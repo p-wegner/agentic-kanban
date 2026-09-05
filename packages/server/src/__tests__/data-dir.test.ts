@@ -57,7 +57,15 @@ vi.mock("node:fs", async (importOriginal) => {
 // assertions became unreachable. The suite was red from 2026-08-06 and nobody saw it,
 // because `test:mine` is file-scoped and no merge in that window touched server/shared.
 // Clearing the markers restores the branch under test; afterEach puts them back.
-const ENV_KEYS = ["DB_URL", "AGENTIC_KANBAN_DIR", "VITEST", "NODE_ENV"] as const;
+//
+// `KANBAN_DB_URL` is on the list since #1041's gate: #615 renamed `DB_URL` to it and this list
+// was never updated, so the CANONICAL spelling was left set — and it outranks everything this
+// suite asserts. The board launches every agent session with
+// `KANBAN_DB_URL=file:<home>/.agentic-kanban/kanban.db`, so all five cases below silently
+// resolved the live board DB and the suite was red in every builder worktree (and in the merge
+// gate, until `VERIFY_NEUTRALIZED_DB_LOCATION_ENV` blanked it there). Clearing BOTH spellings is
+// what makes this suite assert its own subject rather than the ambient environment.
+const ENV_KEYS = ["KANBAN_DB_URL", "DB_URL", "AGENTIC_KANBAN_DIR", "VITEST", "NODE_ENV"] as const;
 
 async function loadDataDir() {
   vi.resetModules();

@@ -33,6 +33,37 @@ export const VERIFY_NEUTRALIZED_LISTENER_ENV: Readonly<Record<string, string>> =
 });
 
 /**
+ * The DB-LOCATION overrides a verify/install subprocess must not inherit either (#1041 gate).
+ *
+ * Same failure class as the listener pins above, one precedence level higher and considerably
+ * worse. `resolveDbLocation` puts `KANBAN_DB_URL` (and its legacy alias `DB_URL`) FIRST — above
+ * `AGENTIC_KANBAN_DIR`, above the in-checkout probe, and above the #231 test-runner throwaway
+ * redirect. The board sets `KANBAN_DB_URL=file:<home>/.agentic-kanban/kanban.db` in the
+ * environment it launches sessions with, and `runSetupScript` spawns with `{ ...process.env,
+ * ...options.env }` — so the gate's own `AGENTIC_KANBAN_DIR: gateDataDir` isolation, whose entire
+ * purpose is #231, was silently outranked and the gate's vitest workers resolved the LIVE board
+ * database.
+ *
+ * Measured on this branch, 2026-09-05: 13 failures in a file-scoped gate run, all of them
+ * phantom. `data-dir.test.ts` (5) asserts the precedence itself and clears `DB_URL` but not the
+ * post-#615 canonical name, so every case resolved the real board; `backup.test.ts` (5) read 29
+ * projects where its fixture had seeded 2 — and its round-trip case wipes and restores what it
+ * opened; `startup-git-service-injection` (1) iterated 29 real repo rows where its comment says
+ * "the suite's DB is the real (empty) one". Clearing `KANBAN_DB_URL` makes all 13 pass unchanged.
+ *
+ * Blanked rather than deleted for the same reason as above — a spread cannot express a deletion —
+ * and blank is read as absent here by construction: `resolveDbLocation` selects with `||`, so an
+ * empty string falls through to the next precedence level, which is the gate's own
+ * `AGENTIC_KANBAN_DIR` (and, for any spawn site that sets none, the #231 throwaway).
+ */
+export const VERIFY_NEUTRALIZED_DB_LOCATION_ENV: Readonly<Record<string, string>> = Object.freeze({
+  KANBAN_DB_URL: "",
+  // #615's pre-rename alias. Neutralizing only the canonical name would leave the identical hole
+  // open to any board still configured the old way.
+  DB_URL: "",
+});
+
+/**
  * Overlay {@link VERIFY_NEUTRALIZED_LISTENER_ENV} onto a verify/install subprocess env.
  *
  * Call this at EVERY site that spawns the verify script — the pre-merge gate and the

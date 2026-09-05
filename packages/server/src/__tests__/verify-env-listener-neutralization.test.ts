@@ -17,9 +17,14 @@
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { envPort, resolveListenHost } from "../lib/bearer-token.js";
-import { VERIFY_NEUTRALIZED_LISTENER_ENV, withNeutralizedListenerEnv } from "../lib/verify-env.js";
+import {
+  VERIFY_NEUTRALIZED_DB_LOCATION_ENV,
+  VERIFY_NEUTRALIZED_LISTENER_ENV,
+  withNeutralizedListenerEnv,
+} from "../lib/verify-env.js";
+import { resolveDbLocation } from "@agentic-kanban/shared/lib/db-path";
 
 const SERVICES = join(__dirname, "..", "services");
 const read = (f: string) => readFileSync(join(SERVICES, f), "utf-8");
@@ -71,6 +76,57 @@ describe("verify subprocesses do not inherit the board's listener pins (#846 gat
     expect(spawns.length).toBe(2);
     for (const call of spawns) {
       expect(call.slice(0, call.indexOf(")"))).toContain("VERIFY_NEUTRALIZED_LISTENER_ENV");
+    }
+  });
+});
+
+/**
+ * The same leak one precedence level up (#1041 gate).
+ *
+ * `KANBAN_DB_URL` outranks the gate's own `AGENTIC_KANBAN_DIR` isolation AND the #231
+ * test-runner throwaway redirect, and the board sets it in the environment it launches sessions
+ * with — so the gate's vitest workers were opening the LIVE board database. Measured: 13 phantom
+ * failures on a file-scoped run of this branch, every one of them green once the variable is
+ * cleared.
+ */
+describe("verify subprocesses do not inherit the board's DB-location overrides (#231, #1041)", () => {
+  it("blanks BOTH spellings of the DB-location override", () => {
+    // The canonical name and #615's pre-rename alias: `resolveDbLocation` reads them as
+    // `KANBAN_DB_URL || DB_URL`, so neutralizing one leaves the identical hole open.
+    for (const name of ["KANBAN_DB_URL", "DB_URL"]) {
+      expect(VERIFY_NEUTRALIZED_DB_LOCATION_ENV[name], `${name} must be neutralized`).toBe("");
+    }
+  });
+
+  it("blank reads as ABSENT, so the gate's own AGENTIC_KANBAN_DIR wins again", () => {
+    // The real assertion of the fix: with the board's live URL present, the gate's isolation dir
+    // is ignored; with it blanked, the isolation dir is what resolves. Asserted through the
+    // resolver itself rather than by re-describing its precedence.
+    const gateDir = resolve("/tmp/kanban-verify-gate-x");
+    const leaked = resolveDbLocation({
+      env: { KANBAN_DB_URL: "file:/home/u/.agentic-kanban/kanban.db", AGENTIC_KANBAN_DIR: gateDir },
+    });
+    expect(leaked.source).toBe("DB_URL");
+
+    const isolated = resolveDbLocation({
+      env: { AGENTIC_KANBAN_DIR: gateDir, ...VERIFY_NEUTRALIZED_DB_LOCATION_ENV },
+    });
+    expect(isolated.source).toBe("AGENTIC_KANBAN_DIR");
+    expect(isolated.dir).toBe(gateDir);
+  });
+
+  it("all THREE verify spawn sites apply it — the gate, and both base-probe spawns", () => {
+    // Source-level for the same reason as the listener half above: the drift being guarded
+    // against is a fourth spawn site, which no runtime assertion here would ever see.
+    const gate = read("pre-merge-gate.service.ts");
+    const isolation = gate.slice(gate.indexOf("const isolationEnv = {"));
+    expect(isolation.slice(0, isolation.indexOf("};"))).toContain("VERIFY_NEUTRALIZED_DB_LOCATION_ENV");
+
+    const base = read("base-branch-health.service.ts");
+    const spawns = base.split("runSetupScript(dest,").slice(1);
+    expect(spawns.length).toBe(2);
+    for (const call of spawns) {
+      expect(call.slice(0, call.indexOf(")"))).toContain("VERIFY_NEUTRALIZED_DB_LOCATION_ENV");
     }
   });
 });

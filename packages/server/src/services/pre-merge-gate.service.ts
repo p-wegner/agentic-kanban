@@ -45,7 +45,7 @@ import { VERIFY_SCRIPT_TIMEOUT_MS } from "./verify-budget.js";
 // #221/#490's failure-message shaping lives in its own module now (this file crossed the
 // 1000-line god-module ceiling). Re-exported below so its importers are unchanged.
 import { summarizeVerifyFailure } from "./verify-failure-summary.js";
-import { VERIFY_NEUTRALIZED_LISTENER_ENV } from "../lib/verify-env.js";
+import { VERIFY_NEUTRALIZED_DB_LOCATION_ENV, VERIFY_NEUTRALIZED_LISTENER_ENV } from "../lib/verify-env.js";
 import { resolveVerifyOutcome } from "./verify-retry-strategies.js";
 import type { FailedSuite } from "./verify-flake-retry.js";
 import { parseVerifyStepTimings, type VerifyStepTiming } from "./verify-step-timings.js";
@@ -353,6 +353,11 @@ export async function runPreMergeGate(
       // inheriting those pins makes any suite that opens a listener die with EADDRINUSE and
       // blames the branch for it. See lib/verify-env.ts.
       ...VERIFY_NEUTRALIZED_LISTENER_ENV,
+      // ...and the same door one precedence level up: the board launches sessions with
+      // `KANBAN_DB_URL` set, and that OUTRANKS the `AGENTIC_KANBAN_DIR` two lines above — so
+      // without this the #231 isolation the comment block above describes was inert and the
+      // gate's vitest workers opened the live board DB. MUST stay after AGENTIC_KANBAN_DIR.
+      ...VERIFY_NEUTRALIZED_DB_LOCATION_ENV,
     };
     // #278 tier 1: narrow the test half from "every suite in the touched packages" to
     // "every suite that imports the changed files". `KANBAN_TEST_PACKAGES` is
