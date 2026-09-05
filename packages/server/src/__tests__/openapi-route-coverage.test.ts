@@ -1,7 +1,12 @@
-// @gate:always-run when:packages/server/src/routes/**,packages/server/src/startup/**,packages/server/scripts/**,packages/server/openapi.yaml
+// @gate:always-run when:packages/server/src/**,packages/server/scripts/**,packages/server/openapi.yaml
 //
-// Territory (#1041): a route definition can only appear in the route tree or in the startup
-// wiring, and the audit itself lives in the generator. Nothing outside those adds an endpoint.
+// Territory (#1041): the WHOLE of `packages/server/src`, plus the generator that audits it and
+// the spec it is audited against. Deliberately not `routes/`+`startup/`: this suite's subject is
+// precisely that a route definition can appear ANYWHERE in the tree — it spawns
+// `findRouteDefinitionSites` over all of `src` and asserts every `DECLARED_BLIND_SPOTS` entry
+// still matches a live site, and one of those entries is `src/services/fleet-listener.service.ts`.
+// A territory naming only the places routes are SUPPOSED to live would excuse the guard for the
+// exact diff (a route defined, moved or deleted outside them) it exists to catch.
 //
 // #805 — the OTHER half of the openapi gate. `openapi-drift.test.ts` proves the committed
 // spec matches what the generator PRODUCES; this suite proves the generator LOOKS everywhere.
