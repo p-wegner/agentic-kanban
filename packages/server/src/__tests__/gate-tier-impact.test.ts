@@ -442,6 +442,75 @@ describe("buildGateTierMessage under the impact tier", () => {
     expect(message).not.toContain("tier: file-scoped");
   });
 
+  /**
+   * #1043 — the message emphasised the 0.5% and footnoted the 99.5%.
+   *
+   * `+14 guard suites` reads as a small top-up on the selection. Measured 2026-09-05 it was the
+   * ENTIRE run: the selection was 1 file / ~3s and the guard floor 176 files / ~543s. So "the gate
+   * is slow" got attributed to the selection, and that is where the fixes went. CLAUDE.md's rule
+   * for this tier is that a level may only weaken verification VISIBLY — the message must name
+   * what ran, and it was naming the wrong half.
+   */
+  describe("the selection/guard split (#1043)", () => {
+    it("prices BOTH halves — the selection and the guard floor", () => {
+      const message = buildGateTierMessage({
+        ...baseTier,
+        guardSuiteCount: 176,
+        guardEstMs: 543_000,
+        guardAssumedCount: 14,
+        impactSelection: {
+          selectedCount: 1,
+          belowFloorCount: 151,
+          stale: false,
+          selectionTier: "impact",
+          estMs: 3_000,
+        },
+      });
+      // The cheap half, priced.
+      expect(message).toContain("selection kept 1 suite(s)/~3s est");
+      // The expensive half, priced — and no longer readable as a footnote.
+      expect(message).toContain("+176 guard suites (~543s est, 14 unmeasured)");
+    });
+
+    it("omits the guard estimate rather than inventing one when no durations are readable", () => {
+      const message = buildGateTierMessage({ ...baseTier, impactSelection: null });
+      expect(message).toContain("+66 guard suites,");
+      expect(message).not.toContain("est)");
+    });
+
+    it("does not print the selection estimate twice when a budget already named it", () => {
+      // The budget clause exists to say what the CLOCK cost; repeating the same figure two
+      // clauses later reads as two different measurements.
+      const message = buildGateTierMessage({
+        ...baseTier,
+        impactSelection: {
+          selectedCount: 12,
+          belowFloorCount: 151,
+          stale: false,
+          budget: "60s",
+          estMs: 58_000,
+          budgetDroppedCount: 3,
+        },
+      });
+      expect(message).toContain("budget 60s, est 58s");
+      expect(message).toContain("selection kept 12 suite(s),");
+      expect(message.match(/58s/g)).toHaveLength(1);
+    });
+
+    it("leaves the existing UNKNOWN and stale-map disclosures alone", () => {
+      expect(buildGateTierMessage({ ...baseTier, impactSelection: null })).toContain(
+        "selection UNKNOWN",
+      );
+      expect(
+        buildGateTierMessage({
+          ...baseTier,
+          guardEstMs: 543_000,
+          impactSelection: { selectedCount: 1, belowFloorCount: 0, stale: true, estMs: 3_000 },
+        }),
+      ).toContain("map STALE");
+    });
+  });
+
   it("leaves a non-impact message exactly as it was", () => {
     // The regression that matters most: every project stays on `full`/`scoped`, so their messages
     // must be byte-identical to before this tier existed.

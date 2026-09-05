@@ -224,70 +224,23 @@ function formatProbeAge(ms: number | null): string {
   return `${Math.round(hours / 24)}d`;
 }
 
-/** Package `__tests__` dirs to scan for the `@gate:always-run` marker (#538), mirroring
- *  `scripts/test-mine.mjs`'s `ALWAYS_RUN_TESTS_DIR`. Best-effort: this repo checkout's own
- *  monorepo layout, so it is inert (returns 0) for a project this gate runs FOR that isn't
- *  this repo — the count only decorates the message, it never gates behavior. */
 /**
- * The always-run marker and test-file rules, MIRRORED from `scripts/test-mine.mjs` (#891).
+ * The `@gate:always-run` guard FLOOR moved to `./always-run-guard-floor.ts` when #1043's
+ * runtime/precondition work pushed this file past the god-module ceiling.
  *
- * Deliberately a copy, not an import. `packages/server` ships only `dist/` (see its `files`),
- * so importing a repo-root script would make a published install crash on load; and the script
- * itself imports only Node built-ins on purpose, so it cannot depend on this package either.
- * Two implementations is the floor the packaging allows.
- *
- * What stops them drifting is `always-run-dirs-lockstep.test.ts`, which now holds them to the
- * same RULE — feeding both the same fixtures and asserting identical classification — rather
- * than to the same TEXT by comment. Before #891 both sides used a bare `.includes()`, which
- * matched a file that merely MENTIONS the marker: they agreed only because both were wrong the
- * same way, and this counter's own guard suite was one of the two files being miscounted.
+ * Re-exported rather than relocated behind a new import path: the marker scan, the guard count
+ * and the "+N guard suites" figure are part of this module's public surface, and their callers
+ * (the gate service, `always-run-dirs-lockstep`, `guard-suite-count`) should not have to know
+ * where the line count made them live. Same reasoning as `test-impact-outcome.service.ts`'s
+ * re-export of its row-quality classifiers.
  */
-const ALWAYS_RUN_MARKER_RE = /^\s*\/\/\s*@gate:always-run\b/m;
-
-/** Mirrors `ALWAYS_RUN_TEST_FILE` in `scripts/test-mine.mjs`; held in lockstep by the same suite. */
-const ALWAYS_RUN_TEST_FILE = /\.test\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
-
-export const ALWAYS_RUN_TESTS_DIRS = [
-  join("packages", "shared", "__tests__"),
-  join("packages", "server", "src", "__tests__"),
-  join("packages", "mcp-server", "src", "__tests__"),
-  // #601: the client's suites were invisible to the always-run scan, so a
-  // `@gate:always-run` marker in a client guard would have been silently ignored.
-  join("packages", "client", "src", "__tests__"),
-];
-
-/** How many suites currently carry the `@gate:always-run` marker, purely for the gate
- *  message's "+N guard suites" figure — never throws, never affects gate behavior. */
-export function countAlwaysRunGuardSuites(repoRoot: string): number {
-  let count = 0;
-  // #583 — RECURSIVE, and every test extension. The old flat `readdirSync` over `.test.ts`
-  // only saw a `__tests__` dir's top level, so `mcp-server/src/__tests__/tools/` (33 suites)
-  // and every `.test.tsx`/`.test.mjs` were invisible: the gate under-reported the guard set
-  // it claims to run while the marker ratchet, which had been fixed to recurse, stayed green.
-  // A number in a gate message that quietly means something narrower than it says is worse
-  // than no number, because it is the thing an operator checks instead of the suite list.
-  const scan = (abs: string): void => {
-    for (const entry of readdirSync(abs, { withFileTypes: true })) {
-      const full = join(abs, entry.name);
-      if (entry.isDirectory()) {
-        if (entry.name !== "node_modules" && !entry.name.startsWith(".")) scan(full);
-        continue;
-      }
-      if (!ALWAYS_RUN_TEST_FILE.test(entry.name)) continue;
-      if (ALWAYS_RUN_MARKER_RE.test(readFileSync(full, "utf8"))) count += 1;
-    }
-  };
-  for (const dir of ALWAYS_RUN_TESTS_DIRS) {
-    const abs = resolve(repoRoot, dir);
-    if (!existsSync(abs)) continue;
-    try {
-      scan(abs);
-    } catch {
-      // Best-effort decoration only — never let a scan error affect the gate.
-    }
-  }
-  return count;
-}
+export {
+  ALWAYS_RUN_TESTS_DIRS,
+  ASSUMED_GUARD_MS,
+  countAlwaysRunGuardSuites,
+  describeAlwaysRunGuards,
+  guardFloorFor,
+} from "./always-run-guard-floor.js";
 
 /**
  * Which selector chose the suites the verify run executed (#962).
@@ -632,6 +585,16 @@ export interface GateTierInfo {
   guardsOnlyReason?: GuardsOnlyReason;
   changedFileCount: number;
   guardSuiteCount: number;
+  /**
+   * Summed estimated wall clock of the guard suites that ran, in ms (#1043) — the OTHER half of
+   * the gate's test cost, and measured 2026-09-05 the far bigger one (176 files / ~543s against a
+   * 1-file / ~3s selection). Undefined when no duration report was readable; the message then
+   * omits the estimate rather than inventing one.
+   */
+  guardEstMs?: number;
+  /** How many of those suites had no measured duration and were counted at an assumed 3s, so a
+   *  reader can tell a measured floor from a partly guessed one (#1042/#1043). */
+  guardAssumedCount?: number;
   maxWorkers: number;
   /**
    * Was `maxWorkers` DERIVED from live capacity (#909), or pinned (env override, or a
@@ -766,17 +729,41 @@ export function buildImpactSelectionNote(tierInfo: GateTierInfo): string | null 
   // second selector in, but this description could not reproduce that half (see the field's doc),
   // so every number here is a LOWER BOUND. Printing them bare would understate what ran — which is
   // the flattering direction, and therefore the one that has to be labelled.
+  //
+  // #1043 — the selection's own COST rides on this clause whenever the tool reported one, and NOT
+  // only under a budget as it did before. The whole point of the split is that a reader can weigh
+  // the two halves against each other; `selection kept 1 suite(s)` beside `+176 guard suites
+  // (~543s est)` still leaves the cheap half unpriced. Omitted when the budget clause above
+  // already printed the same `est` figure, rather than saying it twice.
+  const cost =
+    selection.estMs !== undefined && !budgetNote ? `/~${Math.round(selection.estMs / 1000)}s est` : "";
   const kept =
     selection.externalCount !== undefined
-      ? `selection kept ${selection.selectedCount} suite(s) (impact ${selection.selectedCount - selection.externalCount} + related added ${selection.externalCount})`
+      ? `selection kept ${selection.selectedCount} suite(s)${cost} (impact ${selection.selectedCount - selection.externalCount} + related added ${selection.externalCount})`
       : selection.unionUnmeasured
-        ? `selection kept ${selection.selectedCount} impact suite(s) PLUS the \`vitest related\` scope (unioned at run time, not counted here — these figures are a lower bound)`
-        : `selection kept ${selection.selectedCount} suite(s)`;
+        ? `selection kept ${selection.selectedCount} impact suite(s)${cost} PLUS the \`vitest related\` scope (unioned at run time, not counted here — these figures are a lower bound)`
+        : `selection kept ${selection.selectedCount} suite(s)${cost}`;
   return (
     `${budgetNote}${kept}, dropped ${selection.belowFloorCount} below the score floor` +
     (selection.selectionTier ? `, selection tier ${selection.selectionTier}` : "") +
     `, map ${selection.stale ? "STALE" : "fresh"}`
   );
+}
+
+/**
+ * The guard half's COST, as a parenthesised suffix on the guard-suite count (#1043).
+ *
+ * `""` when no duration report was readable — an absent estimate is honest, an invented one is
+ * not, and this clause exists precisely because a number that quietly means something other than
+ * it says is worse than no number. `est` is stated on the figure it applies to: these are summed
+ * per-file measurements from `docs/tests/durations.json`, not a stopwatch on this run.
+ */
+export function buildGuardCostNote(tierInfo: GateTierInfo): string {
+  if (tierInfo.guardEstMs === undefined) return "";
+  const assumed = tierInfo.guardAssumedCount
+    ? `, ${tierInfo.guardAssumedCount} unmeasured`
+    : "";
+  return ` (~${Math.round(tierInfo.guardEstMs / 1000)}s est${assumed})`;
 }
 
 /**
@@ -850,8 +837,10 @@ export function buildGateTierMessage(tierInfo: GateTierInfo | null): string {
     `${tierInfo.changedFileCount} changed file(s)`,
     // #956 adds the impact case: the guards run ON TOP of the selection there too, and a tier that
     // narrows this hard must name the set it did NOT narrow.
+    // #1043 — with the ESTIMATE attached, because the bare count is what made this clause read
+    // as a footnote on the selection when it is in fact almost the whole run.
     ...(tierInfo.fileScoped || tierInfo.guardsOnly || (tierInfo.selector === "impact" && !tierInfo.guardsOnly)
-      ? [`${tierInfo.guardsOnly ? "" : "+"}${tierInfo.guardSuiteCount} guard suites`]
+      ? [`${tierInfo.guardsOnly ? "" : "+"}${tierInfo.guardSuiteCount} guard suites${buildGuardCostNote(tierInfo)}`]
       : []),
     workersLabel,
     ...(tierInfo.buildersQuiesced === undefined

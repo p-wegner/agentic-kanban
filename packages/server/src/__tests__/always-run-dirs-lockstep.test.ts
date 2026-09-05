@@ -24,11 +24,14 @@ import {
   ALWAYS_RUN_TESTS_DIR,
   PACKAGES,
   scanAlwaysRunTests,
+  scanAlwaysRunGuards,
+  guardAppliesToChanges,
   isAlwaysRunMarked,
 } from "../../../../scripts/test-mine.mjs";
 import {
   ALWAYS_RUN_TESTS_DIRS,
   countAlwaysRunGuardSuites,
+  describeAlwaysRunGuards,
 } from "../services/pre-merge-gate-tier.js";
 import { SCAN_PACKAGES } from "./always-run-marker-ratchet.test.js";
 
@@ -149,6 +152,53 @@ describe("always-run guard-suite dirs: test-mine vs the gate's tier reporter", (
      * agreeing with each other while both counted a file that never declared anything. A count
      * that agrees is not the same as a count that is right.
      */
+    /**
+     * #1041 — the marker grew an optional `when:` precondition, so there is now a SECOND rule
+     * the two implementations must agree on: given a change set, does this guard run? They
+     * cannot share a module for the reason above, so bind them by behaviour here too. A
+     * divergence is silent in the direction that matters — the gate prints "+N guard suites"
+     * for a set the runner does not force, or forces a set the message does not count.
+     */
+    it("both implementations apply a `when:` precondition to the same change sets (#1041)", () => {
+      const root = mkdtempSync(path.join(tmpdir(), "ak-marker-when-"));
+      try {
+        const dir = path.join(root, "packages", "server", "src", "__tests__");
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(path.join(dir, "bare.test.ts"), DECLARES);
+        writeFileSync(
+          path.join(dir, "scoped.test.ts"),
+          "// @gate:always-run when:packages/server/src/routes/**,docs/x.md - only these\nimport {} from \"vitest\";\n",
+        );
+
+        const runFor = (changed: string[]): string[] =>
+          (scanAlwaysRunGuards(path.join(root, "packages", "server"), "src/__tests__") as {
+            file: string;
+            when: string[];
+          }[])
+            .filter((g) => guardAppliesToChanges(g.when, changed) as boolean)
+            .map((g) => g.file.replace(/\\/g, "/"));
+
+        for (const changed of [
+          [] as string[],
+          ["packages/server/src/routes/issues.ts"],
+          ["docs/x.md"],
+          ["packages/client/src/App.tsx"],
+        ]) {
+          // Site 1 — what actually RUNS. Site 2 — what the gate REPORTS.
+          expect(
+            describeAlwaysRunGuards(root, { changedFiles: changed }).count,
+            `change set ${JSON.stringify(changed)}`,
+          ).toBe(runFor(changed).length);
+        }
+
+        // …and they are not merely agreeing on a constant: the precondition really narrows.
+        expect(runFor(["packages/client/src/App.tsx"])).toEqual(["src/__tests__/bare.test.ts"]);
+        expect(runFor([]).length).toBe(2);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
     it("neither side is fooled by a file that merely mentions the marker", () => {
       const root = mkdtempSync(path.join(tmpdir(), "ak-marker-rule-mention-"));
       try {
