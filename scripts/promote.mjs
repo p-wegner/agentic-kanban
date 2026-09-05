@@ -12,7 +12,9 @@
  *
  *   1. reads the last full-sweep verdict for master out of the board's `base_branch_health`
  *      table — via `GET /api/projects/:id/base-branch-health` when a board answers, else a
- *      READ-ONLY sqlite query. It never re-runs the suite and never writes to that database.
+ *      READ-ONLY sqlite query. It never writes to that database. When the only thing missing is
+ *      a CURRENT verdict it ASKS THE BOARD for one (`POST …/base-branch-health/reprobe`) and
+ *      waits — see `planSweepAcquisition` for the trap that closes (#1044).
  *   2. tags `stable-YYYYMMDD` (`-2`, `-3`, … if the day already has one) on the green sha,
  *   3. in the stable checkout: fetch, fast-forward to the tag, install only if the lockfile
  *      moved, build, migrate, restart,
@@ -24,20 +26,21 @@
  * server that writes for days cannot sit on top of the audit trail for a run that took minutes.
  *
  * Usage:
- *   node scripts/promote.mjs --dry-run     # print the resolved sha/tag/paths and every step; touch nothing
- *   node scripts/promote.mjs               # promote
- *   node scripts/promote.mjs --force-sweep # promote WITHOUT a green sweep (loud warning)
+ *   node scripts/promote.mjs --dry-run        # print the resolved sha/tag/paths and every step; touch nothing
+ *   node scripts/promote.mjs                  # promote (triggering + awaiting a sweep if one is needed)
+ *   node scripts/promote.mjs --no-await-sweep # never trigger one; refuse when the recorded verdict is unusable
+ *   node scripts/promote.mjs --force-sweep    # promote WITHOUT a green sweep (loud warning)
  *
  * Rehearsal: KANBAN_PROMOTE_FORCE_SMOKE_FAILURE=1 fails the promotion's smoke on purpose (one
  * shot — the rollback's smoke stays real), which is how the rollback half of #1014's acceptance
  * is exercised without breaking anything real.
  *
  * Env: KANBAN_STABLE_CHECKOUT, KANBAN_STABLE_PORT, KANBAN_PROMOTE_BOARD_URL, KANBAN_PROMOTE_DB,
- * KANBAN_PROMOTE_PROJECT, KANBAN_PROMOTE_BRANCH, KANBAN_PROMOTE_MAX_SWEEP_AGE_H — all
- * documented in `docs/env-vars.md`.
+ * KANBAN_PROMOTE_PROJECT, KANBAN_PROMOTE_BRANCH, KANBAN_PROMOTE_MAX_SWEEP_AGE_H,
+ * KANBAN_PROMOTE_SWEEP_WAIT_MIN — all documented in `docs/env-vars.md`.
  */
 import { spawn, spawnSync, execSync, execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, openSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gitExecSyncResult } from "./git-exec.mjs";
@@ -46,21 +49,26 @@ import { parseNetstatListeners, planPortOwnerKill } from "./dev-port-guard.mjs";
 import {
   BOARD_LOG_RELPATH,
   PROMOTE_LOG_RELPATH,
+  SWEEP_POLL_INTERVAL_MS,
   buildPromotionPlan,
   checkPromoteDirection,
   formatPlan,
+  isFreshSweepRow,
   nextStableTag,
   parseSweepVerdict,
+  planSweepAcquisition,
   previousStableTag,
   resolveBoardUrl,
   resolveMaxSweepAgeMs,
   resolveOperatedDbPath,
   resolveProjectName,
   resolveStableCheckout,
+  resolveSweepWaitMs,
   shouldForceSmokeFailure,
   shouldReinstall,
   stableTagDate,
 } from "./promote-plan.mjs";
+import { OUTCOMES_RELPATH, formatGateEvidence, parseOutcomeRows, summarizeGateEvidence } from "./promote-evidence.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -68,6 +76,10 @@ const args = process.argv.slice(2);
 const opts = {
   dryRun: args.includes("--dry-run"),
   forceSweep: args.includes("--force-sweep"),
+  // #1044: the trigger-and-wait path is the DEFAULT, because the alternative is what turned
+  // `--force-sweep` into the routine path. This flag restores the old refuse-immediately
+  // behaviour for a caller that genuinely cannot wait tens of minutes.
+  noAwaitSweep: args.includes("--no-await-sweep"),
 };
 
 /**
@@ -179,6 +191,99 @@ async function readSweepRow() {
       const dbReason = dbErr instanceof Error ? dbErr.message : String(dbErr);
       return { row: null, projectId: null, source: `UNREADABLE (http: ${httpReason}; db: ${dbReason})`, unreadable: true };
     }
+  }
+}
+
+// --- step 1b: ASK for the sweep this run needs (#1044) --------------------------------------
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** `POST /api/projects/:id/base-branch-health/reprobe` — the board decides, and answers at once. */
+async function requestReprobe(projectId) {
+  const res = await fetch(`${boardUrl}/api/projects/${projectId}/base-branch-health/reprobe`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!res.ok) throw new Error(`POST base-branch-health/reprobe -> ${res.status}`);
+  return await res.json();
+}
+
+async function latestSweepRow(projectId) {
+  const res = await fetch(`${boardUrl}/api/projects/${projectId}/base-branch-health?limit=1`, {
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) throw new Error(`GET base-branch-health -> ${res.status}`);
+  const body = await res.json();
+  return body?.latest ?? null;
+}
+
+/**
+ * Trigger a sweep and wait for its verdict to LAND.
+ *
+ * The reprobe route is a synchronous decision over an asynchronous probe: it answers immediately
+ * with whether a probe started, and the verdict appears minutes later as a NEW `base_branch_health`
+ * row. So this polls for a row that is a different observation than the one we already read
+ * (`isFreshSweepRow`) — not for "green", and not for "a row exists".
+ *
+ * A request the board declined (`gate_running`, `host_saturated`) is retried on each poll rather
+ * than treated as failure: those are transient states, and the whole point is to wait them out.
+ * On expiry this returns nothing and the caller refuses exactly as it would have without the
+ * trigger — a promotion never proceeds because a wait ran out.
+ */
+async function acquireFreshSweep(projectId, previousRow, waitMs) {
+  const deadline = Date.now() + waitMs;
+  let probing = false;
+  let lastNote = 0;
+  log(`[promote] requesting a fresh base-branch sweep for project ${projectId} (waiting up to ${Math.round(waitMs / 60_000)} min)`);
+  while (Date.now() < deadline) {
+    if (!probing) {
+      try {
+        const answer = await requestReprobe(projectId);
+        probing = Boolean(answer?.started || answer?.joinedRunningProbe || answer?.skippedReason === "probe_in_flight");
+        log(
+          `[promote] reprobe: started=${answer?.started === true} ` +
+            `${answer?.skippedReason ? `skipped=${answer.skippedReason} ` : ""}` +
+            `${answer?.joinedRunningProbe ? "(a probe was already running) " : ""}` +
+            `${probing ? "— a probe is running; waiting for its verdict" : "— nothing is probing yet; will ask again"}`,
+        );
+      } catch (e) {
+        log(`[promote] reprobe request failed: ${e instanceof Error ? e.message : String(e)} — retrying`);
+      }
+    }
+    await sleep(SWEEP_POLL_INTERVAL_MS);
+    try {
+      const row = await latestSweepRow(projectId);
+      if (isFreshSweepRow(row, previousRow)) {
+        log(`[promote] fresh sweep landed: ${row.outcome} on ${row.sha} at ${row.createdAt ?? row.created_at}`);
+        return { row };
+      }
+    } catch (e) {
+      log(`[promote] could not re-read the sweep row: ${e instanceof Error ? e.message : String(e)} — retrying`);
+    }
+    const elapsed = Date.now() - (deadline - waitMs);
+    if (elapsed - lastNote >= 120_000) {
+      lastNote = elapsed;
+      log(`[promote] still waiting for the sweep verdict (${Math.round(elapsed / 60_000)} min elapsed of ${Math.round(waitMs / 60_000)})`);
+    }
+  }
+  return { row: null, reason: `no fresh verdict within ${Math.round(waitMs / 60_000)} min` };
+}
+
+// --- accumulated-gate evidence (#1045) -------------------------------------------------------
+
+/**
+ * Read the test-impact ledger the pre-merge gates write into and summarize what has accumulated
+ * since the last sweep. PRINTED ONLY — see `promote-evidence.mjs` for why it authorizes nothing.
+ */
+function readGateEvidence(sinceIso) {
+  const ledgerPath = join(MAIN_CHECKOUT, OUTCOMES_RELPATH);
+  try {
+    const rows = parseOutcomeRows(readFileSync(ledgerPath, "utf8"));
+    return summarizeGateEvidence(rows, { sinceIso, ledgerPath });
+  } catch (e) {
+    return { ledgerPath, unreadable: e instanceof Error ? e.message : String(e) };
   }
 }
 
@@ -392,19 +497,68 @@ function retireFailedTag(tag) {
 
 // --- main ------------------------------------------------------------------------------------
 
+/**
+ * The stable checkout's HEAD, or null when it cannot be read (missing checkout, not a git dir).
+ * Needed BEFORE the promotion's own existence check because the #1044 trap is visible only in
+ * the DIRECTION between that HEAD and the green sweep's sha — a null here just means the
+ * acquisition decision is made without that half, which is the conservative side.
+ */
+function readStableHead() {
+  if (!existsSync(stableCheckout)) return null;
+  const r = git(["rev-parse", "HEAD"], stableCheckout);
+  return r.code === 0 && r.stdout ? r.stdout : null;
+}
+
+function directionFor(sha, stableHead) {
+  if (!stableHead || !sha) return null;
+  return checkPromoteDirection({
+    stableHead,
+    sha,
+    shaIsDescendant: git(["merge-base", "--is-ancestor", stableHead, sha], stableCheckout).code === 0,
+  });
+}
+
 async function main() {
-  const sweep = opts.forceSweep ? null : await readSweepRow();
   // An UNREADABLE source is not the same as "no sweep has ever run" — one is a broken read
   // path, the other a verdict about the board — and reporting the second for the first sends
   // the operator looking in the wrong place.
-  const verdict = opts.forceSweep
-    ? { ok: true, reason: "forced", sha: null, detail: "--force-sweep: no sweep verdict was consulted" }
-    : sweep.unreadable
-      ? { ok: false, reason: "unreadable", sha: null, detail: `the sweep verdict could not be READ at all — ${sweep.source}` }
-      : parseSweepVerdict(sweep.row, { branch: baseBranch, maxAgeMs: resolveMaxSweepAgeMs(env) });
+  const verdictFor = (sweep) =>
+    opts.forceSweep
+      ? { ok: true, reason: "forced", sha: null, detail: "--force-sweep: no sweep verdict was consulted" }
+      : sweep.unreadable
+        ? { ok: false, reason: "unreadable", sha: null, detail: `the sweep verdict could not be READ at all — ${sweep.source}` }
+        : parseSweepVerdict(sweep.row, { branch: baseBranch, maxAgeMs: resolveMaxSweepAgeMs(env) });
+
+  let sweep = opts.forceSweep ? null : await readSweepRow();
+  let verdict = verdictFor(sweep);
+
+  const stableHead = readStableHead();
+  const acquisition = planSweepAcquisition({
+    verdict,
+    direction: directionFor(verdict.ok ? verdict.sha : null, stableHead),
+    forceSweep: opts.forceSweep,
+    awaitSweep: !opts.noAwaitSweep,
+    canRequest: Boolean(sweep?.projectId),
+  });
+
+  // The trigger happens BEFORE the dry-run report only in a real run — a dry run must touch
+  // nothing, so it says what it WOULD do and stops there.
+  if (acquisition.request && !opts.dryRun) {
+    log(`[promote] sweep acquisition: ${acquisition.detail}`);
+    const acquired = await acquireFreshSweep(sweep.projectId, sweep.row, resolveSweepWaitMs(env));
+    if (acquired.row) {
+      sweep = { ...sweep, row: acquired.row, source: `${sweep.source} (sweep TRIGGERED by this run)` };
+      // Re-parsed, not trusted: a sweep this run asked for is judged by exactly the same rules
+      // as one that happened on its own clock, so a red or timed-out probe still refuses.
+      verdict = verdictFor(sweep);
+    } else {
+      log(`[promote] the requested sweep did not land (${acquired.reason}) — falling through to the recorded verdict`);
+    }
+  }
 
   const headSha = gitOrThrow(["rev-parse", baseBranch]);
   const sha = verdict.ok && verdict.sha ? verdict.sha : headSha;
+  const gateEvidence = readGateEvidence(verdict.at ?? null);
 
   const tags = gitOrThrow(["tag", "--list", "stable-*"]).split(/\r?\n/).map((t) => t.trim()).filter(Boolean);
   // A tag RETIRED by a failed promotion (see retireFailedTag) is gone from the `stable-*` list,
@@ -434,6 +588,8 @@ async function main() {
     logPath,
     boardLogPath,
     forceSweep: opts.forceSweep,
+    sweepAcquisition: acquisition,
+    gateEvidence: formatGateEvidence(gateEvidence),
   });
 
   if (opts.dryRun) {
@@ -450,12 +606,28 @@ async function main() {
     console.log(`  log file         ${logPath}`);
     console.log(`  board log        ${boardLogPath}`);
     console.log(`  sweep source     ${opts.forceSweep ? "SKIPPED (--force-sweep)" : sweep.source}`);
-    console.log(`  sweep verdict    ${verdict.detail}\n`);
-    console.log(verdict.ok ? "Steps that WOULD run:" : "This run would REFUSE at step 1. The steps it would otherwise run:");
+    console.log(`  sweep verdict    ${verdict.detail}`);
+    // #1044: the direction against the stable checkout is the OTHER refusal, and it was invisible
+    // here — a dry run could print a clean plan for a run that refuses at `behind`.
+    const dryDirection = directionFor(sha, stableHead);
+    console.log(`  direction        ${dryDirection ? dryDirection.detail : "not checked (no readable stable HEAD)"}`);
+    console.log(`  sweep plan       ${acquisition.detail}`);
+    // #1045: printed beside the verdict it is weaker than, and labelled as such.
+    console.log(`  gate evidence    ${formatGateEvidence(gateEvidence)}\n`);
+
+    const wouldRefuse = !acquisition.request && (!verdict.ok || (dryDirection && !dryDirection.ok));
+    console.log(
+      acquisition.request
+        ? "This run would TRIGGER a sweep first, then run these steps on its verdict (refusing if it is not green):"
+        : wouldRefuse
+          ? "This run would REFUSE. The steps it would otherwise run:"
+          : "Steps that WOULD run:",
+    );
     console.log(formatPlan(plan));
-    if (!verdict.ok) {
-      console.log(`\n[promote] WOULD REFUSE — ${verdict.detail} (reason: ${verdict.reason})`);
-      console.log("[promote] --force-sweep would skip that check, loudly.");
+    if (wouldRefuse) {
+      const why = !verdict.ok ? `${verdict.detail} (reason: ${verdict.reason})` : dryDirection.detail;
+      console.log(`\n[promote] WOULD REFUSE — ${why}`);
+      console.log(`[promote] ${acquisition.reason === "disabled" ? "drop --no-await-sweep to trigger a sweep instead, or " : ""}--force-sweep would skip the sweep check, loudly.`);
       process.exit(1);
     }
     return;
@@ -467,7 +639,13 @@ async function main() {
     log("[promote] # consulted. Nothing has verified that master is green.    #");
     log("[promote] ############################################################");
   } else if (!verdict.ok) {
-    fail(`${verdict.detail} (reason: ${verdict.reason}). Re-run once a green sweep exists, or --force-sweep.`);
+    // Name whether this run TRIED to get evidence. "Re-run once a green sweep exists" is bad
+    // advice when the run just spent 40 minutes asking for one — that is a board problem, and
+    // reading it as "wait for the nightly" is what sends an operator to --force-sweep (#1044).
+    const tried = acquisition.request
+      ? "This run requested a fresh sweep and it did not land — check the board's base-branch probe."
+      : `No sweep was requested: ${acquisition.detail}`;
+    fail(`${verdict.detail} (reason: ${verdict.reason}). ${tried} Or promote deliberately with --force-sweep.`);
   }
 
   // Refuse rather than create or repair the stable checkout: it is an operator artifact
@@ -481,15 +659,14 @@ async function main() {
 
   log(`[promote] === promotion ${tag} -> ${sha} (from ${REPO_ROOT}) ===`);
   log(`[promote] sweep: ${verdict.detail} (source: ${opts.forceSweep ? "SKIPPED" : sweep.source})`);
+  // #1045 — into the audit trail the Sentinel reads, as context for the verdict above. It is
+  // never what authorized this promotion; the sweep line is.
+  log(`[promote] gate evidence: ${formatGateEvidence(gateEvidence)}`);
   log(`[promote] rollback target: ${rollbackTag ?? "<none — first promotion>"}`);
 
-  // A promotion must move the stable checkout FORWARD. See checkPromoteDirection.
-  const stableHead = gitOrThrow(["rev-parse", "HEAD"], stableCheckout);
-  const direction = checkPromoteDirection({
-    stableHead,
-    sha,
-    shaIsDescendant: git(["merge-base", "--is-ancestor", stableHead, sha], stableCheckout).code === 0,
-  });
+  // A promotion must move the stable checkout FORWARD. See checkPromoteDirection. Re-read rather
+  // than reusing the pre-acquisition `stableHead`: minutes may have passed waiting for a sweep.
+  const direction = directionFor(sha, gitOrThrow(["rev-parse", "HEAD"], stableCheckout));
   log(`[promote] direction: ${direction.detail}`);
   if (!direction.ok) fail(direction.detail);
 

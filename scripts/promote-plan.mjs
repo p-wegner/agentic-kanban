@@ -45,6 +45,36 @@ export const BOARD_LOG_RELPATH = join(".kanban", "board.log");
  */
 export const DEFAULT_MAX_SWEEP_AGE_HOURS = 36;
 
+/**
+ * How long a promotion will WAIT for a sweep it triggered itself (#1044).
+ *
+ * The probe clones, installs and runs the project's full verify, so the honest number is tens
+ * of minutes, not seconds — that wait IS the evidence. It is capped rather than unbounded so a
+ * promotion started from a cron cannot sit forever on a probe that never lands; on expiry the
+ * run refuses exactly as it would have without the trigger.
+ */
+export const DEFAULT_SWEEP_WAIT_MINUTES = 40;
+
+/** How often the run re-reads `base_branch_health` while waiting for its sweep. */
+export const SWEEP_POLL_INTERVAL_MS = 15_000;
+
+/**
+ * Sweep-verdict refusals a FRESH sweep would actually resolve.
+ *
+ * Deliberately excludes two:
+ * - `red` — master is broken. Re-probing the same tree to see whether it is still broken is not
+ *   evidence-gathering, it is rolling dice, and a promotion is the wrong place to do it.
+ * - `unreadable` — the board did not answer, and the reprobe goes through that same board. There
+ *   is nothing to ask.
+ */
+export const REPROBEABLE_SWEEP_REASONS = Object.freeze([
+  "no-sweep",
+  "stale",
+  "not-an-answer",
+  "no-sha",
+  "wrong-branch",
+]);
+
 /** Board API the sweep row is read from when a board is up. */
 export const DEFAULT_BOARD_URL = "http://127.0.0.1:3001";
 
@@ -77,6 +107,12 @@ export function resolveMaxSweepAgeMs(env = process.env) {
 
 export function resolveProjectName(env = process.env) {
   return env.KANBAN_PROMOTE_PROJECT || DEFAULT_PROJECT_NAME;
+}
+
+export function resolveSweepWaitMs(env = process.env) {
+  const raw = Number(env.KANBAN_PROMOTE_SWEEP_WAIT_MIN);
+  const minutes = Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_SWEEP_WAIT_MINUTES;
+  return minutes * 60 * 1000;
 }
 
 /** `YYYYMMDD` in LOCAL time — the tag names the operator's day, not UTC's. */
@@ -170,6 +206,80 @@ export function parseSweepVerdict(row, { branch = "master", nowMs = Date.now(), 
   return { ok: true, reason: "green", sha, outcome, at, ageMs, branch: rowBranch, detail: `green sweep — ${stamp}` };
 }
 
+/**
+ * Is this `base_branch_health` row a DIFFERENT observation from the one we started with?
+ *
+ * The wait after a reprobe cannot key on "a row exists" (one always does) or on the outcome
+ * (a second green looks identical to the first). Identity is the pair (sha, timestamp): the
+ * probe inserts, never upserts, so a landed verdict always changes at least the timestamp.
+ */
+export function isFreshSweepRow(row, previous) {
+  if (!row) return false;
+  const stamp = (r) => `${r?.sha ?? ""}@${r?.createdAt ?? r?.created_at ?? ""}`;
+  if (!previous) return true;
+  return stamp(row) !== stamp(previous);
+}
+
+/**
+ * Should this run TRIGGER the sweep it needs, instead of refusing and sending the operator to
+ * `--force-sweep`? (#1044)
+ *
+ * The trap this exists to close: `--force-sweep` promotes the branch TIP, which moves the stable
+ * checkout AHEAD of the last recorded sweep sha. The next honest promotion then reads a green
+ * verdict for an ANCESTOR of what is already deployed, `checkPromoteDirection` correctly refuses
+ * it as `behind`, and the only way forward is another `--force-sweep`. Two runs on 2026-09-05
+ * went exactly that way. So each forced run made the next honest one structurally impossible, and
+ * the loud escape hatch was becoming the routine path — which is how it stops being loud.
+ *
+ * The fix is the shape the ticket calls "let promote trigger the sweep it needs": when the only
+ * thing missing is a CURRENT verdict, ask the board for one (`POST …/base-branch-health/reprobe`)
+ * and wait for it. Waiting tens of minutes for real evidence is the intended trade; skipping the
+ * evidence because the evidence was unreachable is not.
+ *
+ * It is a REQUEST for evidence, never a substitute for it: whatever the fresh sweep says is then
+ * run through `parseSweepVerdict` exactly as a sweep that happened on its own clock, so a red or
+ * timed-out probe still refuses.
+ *
+ * @param {object} p
+ * @param {{ok: boolean, reason: string, sha?: string|null}} p.verdict  from {@link parseSweepVerdict}
+ * @param {{ok: boolean, reason: string}|null} p.direction  from {@link checkPromoteDirection}, when a stable HEAD could be read
+ * @param {boolean} p.forceSweep   `--force-sweep` — consults no verdict at all, so nothing to acquire
+ * @param {boolean} p.awaitSweep   false with `--no-await-sweep`: refuse as before rather than wait
+ * @param {boolean} p.canRequest   is there a board to POST the reprobe to? (a sqlite-fallback read has no project id)
+ */
+export function planSweepAcquisition({ verdict, direction = null, forceSweep = false, awaitSweep = true, canRequest = true } = {}) {
+  if (forceSweep) {
+    return { request: false, reason: "force-sweep", detail: "--force-sweep consults no sweep verdict, so there is nothing to acquire" };
+  }
+
+  // Why this run needs a fresh sweep — or null when it does not.
+  let need = null;
+  if (verdict?.ok) {
+    // The #1044 trap itself. The verdict is green and usable; it is just about a commit the
+    // stable checkout has already moved past, which is what a forced promotion leaves behind.
+    if (direction && !direction.ok && direction.reason === "behind") {
+      need = `the last green sweep (${verdict.sha ?? "<no sha>"}) is BEHIND what the stable checkout already runs — a promotion on it would be a silent no-op`;
+    }
+  } else if (REPROBEABLE_SWEEP_REASONS.includes(verdict?.reason)) {
+    need = `no usable sweep verdict (${verdict.reason})`;
+  } else if (verdict?.reason === "red") {
+    return { request: false, reason: "red", detail: "the last sweep was RED — master is broken; re-probing it is not evidence-gathering. Fix master, or promote deliberately with --force-sweep." };
+  } else if (verdict?.reason === "unreadable") {
+    return { request: false, reason: "unreadable", detail: "the sweep verdict could not be read at all, and the reprobe goes through the same board — nothing to ask" };
+  } else {
+    return { request: false, reason: "not-reprobeable", detail: `refusal '${verdict?.reason ?? "<none>"}' is not something a fresh sweep would resolve` };
+  }
+
+  if (!need) return { request: false, reason: "verdict-usable", detail: "the recorded sweep verdict already authorizes this promotion" };
+  if (!awaitSweep) {
+    return { request: false, reason: "disabled", detail: `${need} — but --no-await-sweep was passed, so this run refuses instead of waiting for one` };
+  }
+  if (!canRequest) {
+    return { request: false, reason: "no-board", detail: `${need} — and no board answered, so no sweep can be requested. Start the board, or --force-sweep.` };
+  }
+  return { request: true, reason: "acquire", detail: `${need} — requesting a fresh sweep and waiting for its verdict` };
+}
+
 /** A lockfile change is the only thing that justifies re-installing in the stable checkout. */
 export function shouldReinstall(lockBefore, lockAfter) {
   return String(lockBefore ?? "") !== String(lockAfter ?? "");
@@ -195,15 +305,25 @@ export function buildPromotionPlan({
   logPath,
   boardLogPath = null,
   forceSweep = false,
+  sweepAcquisition = null,
+  gateEvidence = null,
 }) {
+  const step1 = {
+    n: 1,
+    title: forceSweep ? "sweep check SKIPPED (--force-sweep)" : "check the last full sweep on master was green",
+    detail: forceSweep
+      ? "WARNING: --force-sweep — promoting WITHOUT a green verdict from base_branch_health"
+      : `read via ${sweepSource} (board ${boardUrl}, db ${dbPath}) for project '${projectName}': ${sweepVerdict}`,
+  };
+  if (sweepAcquisition?.request) {
+    step1.title = "TRIGGER a fresh sweep, wait for its verdict, then check it";
+    step1.detail = `${step1.detail}\n      -> ${sweepAcquisition.detail}`;
+  }
+  // The accumulated-gate evidence is printed HERE, next to the verdict it is weaker than, and
+  // nowhere else — it decides nothing (#1045).
+  if (gateEvidence) step1.detail = `${step1.detail}\n      gate evidence (does not authorize a promotion): ${gateEvidence}`;
   return [
-    {
-      n: 1,
-      title: forceSweep ? "sweep check SKIPPED (--force-sweep)" : "check the last full sweep on master was green",
-      detail: forceSweep
-        ? "WARNING: --force-sweep — promoting WITHOUT a green verdict from base_branch_health"
-        : `read via ${sweepSource} (board ${boardUrl}, db ${dbPath}) for project '${projectName}': ${sweepVerdict}`,
-    },
+    step1,
     { n: 2, title: `tag ${tag} on ${sha}`, detail: `git -C ${repoRoot} tag ${tag} ${sha}   (rollback target: ${previousTag ?? "<none — first promotion>"})` },
     { n: 3, title: "stable checkout: fetch + fast-forward", detail: `git -C ${stableCheckout} fetch origin --tags && git -C ${stableCheckout} merge --ff-only ${tag}` },
     { n: 4, title: "install only if pnpm-lock.yaml changed", detail: `pnpm install -r --prefer-offline in ${stableCheckout}` },

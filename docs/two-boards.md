@@ -251,9 +251,10 @@ drawbridge). That is the one moment the full suite decides anything. `scripts/pr
 moment; the checklist above is its manual form.
 
 ```bash
-pnpm promote --dry-run     # print the resolved sha, tag and every step; touch nothing
-pnpm promote               # promote
-pnpm promote --force-sweep # promote WITHOUT a green sweep verdict, loudly
+pnpm promote --dry-run        # print the resolved sha, tag and every step; touch nothing
+pnpm promote                  # promote — triggering and AWAITING a sweep when one is needed
+pnpm promote --no-await-sweep # never trigger one; refuse when the recorded verdict is unusable
+pnpm promote --force-sweep    # promote WITHOUT a green sweep verdict, loudly
 ```
 
 **Executed for real on 2026-09-05 (#1014's acceptance).** Five runs against the live pair: two
@@ -280,6 +281,9 @@ of them corrected is folded into the sections below.
    "Already up to date" and exits 0. Without this check the run would tag, rebuild, restart, smoke
    green and announce a tag that is **not what runs**. That is exactly what the first real run on
    2026-09-05 was about to do.
+
+   **This check and the sweep check together used to form a trap — see "Where the evidence comes
+   from" below, which is what closes it.**
 3. **Tags `stable-YYYYMMDD` on that green sha** — `-2`, `-3`, … when the day already has a tag.
    Two promotions in one day is normal, and moving the existing tag would erase the rollback
    target.
@@ -298,6 +302,78 @@ of them corrected is folded into the sections below.
    leaving it there would let the NEXT failed promotion roll back onto a version that already
    failed its own smoke. The name stays taken (retired names are fed back into the tag chooser),
    so a second, different sha can never wear a label a post-mortem already knows.
+
+### Where the evidence comes from — the run ASKS for a sweep (#1044)
+
+**The trap.** A promotion needs a green sweep whose sha the stable checkout is not already past.
+`--force-sweep` promotes the branch TIP, which moves stable **ahead** of the last recorded sweep —
+so the next honest run reads a green verdict for an ANCESTOR of what is already deployed, step 2
+correctly refuses it as `behind`, and the only way out is another `--force-sweep`. Each forced run
+therefore made the next honest one structurally impossible. Observed across the six runs on
+2026-09-05: runs 5 and 6 both went through `--force-sweep`, and run 6's plain attempt refused for
+exactly this reason. A loud escape hatch that becomes the routine path is no longer loud.
+
+**The shape chosen: promote triggers the sweep it needs, and waits.** The ticket offered two —
+trigger-and-wait, or reschedule the sweep to follow every promotion. Trigger-and-wait was taken
+because it puts the evidence on the run that needs it: a promotion is an operator action at a
+moment of their choosing, and a post-promotion schedule would still leave a run started at an
+awkward time with a stale verdict and nothing to do about it. It also fails in the right
+direction — a probe that never lands leaves the run refusing exactly as before, whereas a
+scheduled sweep silently widens the window every time one is skipped.
+
+When the only thing missing is a CURRENT verdict, the run `POST`s
+`/api/projects/:id/base-branch-health/reprobe`, polls `base_branch_health` until a **different
+observation** lands (a new (sha, timestamp) pair — never "green", never "a row exists"), and then
+judges it with the same `parseSweepVerdict` as a sweep that happened on its own clock. A request
+the board declines (`gate_running`, `host_saturated`) is retried each poll rather than treated as
+failure — waiting those out is the point. Cap: `KANBAN_PROMOTE_SWEEP_WAIT_MIN`, default 40 minutes,
+which is probe-sized (clone + install + full verify), after which the run refuses.
+
+Which refusals it will fix, and which it will not (`planSweepAcquisition`, `scripts/promote-plan.mjs`):
+
+| Situation | Trigger a sweep? |
+|---|---|
+| green verdict, but `behind` the stable checkout | **yes** — this is the trap itself |
+| `no-sweep`, `stale`, `not-an-answer`, `no-sha`, `wrong-branch` | **yes** |
+| last sweep was **red** | no — master is broken; re-probing it is dice-rolling, not evidence |
+| the verdict was **unreadable** | no — the reprobe goes through the same board that did not answer |
+| `--force-sweep` | no — that run consults no verdict at all |
+| `--no-await-sweep` | no — refuse immediately, the pre-#1044 behaviour, for a caller that cannot wait |
+
+**`--force-sweep` is unchanged and still logs its three-line banner.** What changed is that the
+mechanism no longer *requires* it: two consecutive promotions with no manual sweep in between both
+take the honest path, because the second one asks for its own evidence instead of inheriting a
+verdict the first one moved past.
+
+### Accumulated-gate evidence — printed, never counted (#1045)
+
+Every pre-merge gate already writes one row into the test-impact ledger
+(`recordVerifyGateOutcome` → `impact.mjs record` → `.test-impact/outcomes.jsonl` in the MAIN
+checkout: the suites selected, the ones dropped below the score floor, pass/fail, runtime and the
+change set). Nothing read them, so ten green gates covering a hundred files gave a promotion zero
+evidence. `pnpm promote` now summarizes what has accumulated **since the last sweep** and prints it
+beside the verdict, in the dry run and in `promote.log`:
+
+```
+  gate evidence    7 green gate run(s) covering 43 changed file(s) since the last sweep (…)
+                   [1 red, 2 suspect (excluded)] — WEAKER THAN A SWEEP: each was a ranked
+                   SELECTION over one branch's diff, not the full suite over the base.
+                   Authorizes nothing.
+```
+
+**It decides nothing, deliberately.** A gate is a selection over one branch's diff, scored against
+a possibly-stale impact map; a sweep is the full suite over the base branch itself. They are
+different measurements and one is not N of the other, so `summarizeGateEvidence` returns counts
+and no boolean — a threshold here would be `--force-sweep` with a friendlier name. Rows the
+producer itself tagged as non-observations (`ci-nochange`, `ci-partialselection`,
+`ci-unattributed`) are counted separately and excluded from the headline, for the same reason the
+skill's own miss-rate report excludes them.
+
+The same ledger is the corpus **#954** needs before the `impact` gate tier can become anyone's
+default — it comes out of runs the board is already paying for. `impact.mjs stats --outcomes
+<ledger>` is the miss-rate report and runs off those real entries today (37 rows as of
+2026-09-05); the rate itself still reads `UNKNOWN` because no full-scope failing run has yet named
+its failed suites, which is #954's problem, not the ledger's.
 
 ### Rehearsing the rollback
 

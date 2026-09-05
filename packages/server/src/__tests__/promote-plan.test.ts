@@ -11,9 +11,13 @@ import {
   DEFAULT_STABLE_CHECKOUT_DIRNAME,
   PROMOTE_LOG_RELPATH,
   BOARD_LOG_RELPATH,
+  DEFAULT_SWEEP_WAIT_MINUTES,
   buildPromotionPlan,
   checkPromoteDirection,
   formatPlan,
+  isFreshSweepRow,
+  planSweepAcquisition,
+  resolveSweepWaitMs,
   nextStableTag,
   parseStableTag,
   parseSweepVerdict,
@@ -209,6 +213,23 @@ describe("the dry-run plan", () => {
     expect(forced[0].detail).toContain("WARNING");
   });
 
+  it("says step 1 will TRIGGER a sweep when the run intends to acquire one (#1044)", () => {
+    const acquiring = buildPromotionPlan({
+      ...input,
+      sweepAcquisition: { request: true, reason: "acquire", detail: "no usable sweep verdict (stale) — requesting a fresh sweep" },
+    });
+    expect(acquiring[0].title).toContain("TRIGGER");
+    expect(acquiring[0].detail).toContain("requesting a fresh sweep");
+    // and it must not claim to trigger anything when it is only reading a recorded verdict
+    expect(plan()[0].title).not.toContain("TRIGGER");
+  });
+
+  it("prints the accumulated-gate evidence next to the verdict, marked as authorizing nothing (#1045)", () => {
+    const withEvidence = buildPromotionPlan({ ...input, gateEvidence: "7 green gate run(s) covering 43 changed file(s)" });
+    expect(withEvidence[0].detail).toContain("7 green gate run(s)");
+    expect(withEvidence[0].detail).toContain("does not authorize a promotion");
+  });
+
   it("logs under the stable checkout's .kanban directory", () => {
     expect(PROMOTE_LOG_RELPATH.replace(/\\/g, "/")).toBe(".kanban/promote.log");
   });
@@ -223,6 +244,88 @@ describe("the dry-run plan", () => {
     const text = formatPlan(plan());
     expect(text).toContain("promote.log");
     expect(text).toContain("board.log");
+  });
+});
+
+/**
+ * #1044 — the reproduction of the trap, and the fix.
+ *
+ * The trap was a CYCLE, not a single bad verdict: `--force-sweep` promotes the branch tip, which
+ * leaves the stable checkout ahead of the last recorded sweep, so the next honest run reads a
+ * green verdict for an ancestor of what is already deployed and is (correctly) refused as
+ * `behind` — with `--force-sweep` as the only way out, which sets the trap again.
+ */
+describe("sweep acquisition (#1044)", () => {
+  const green = parseSweepVerdict(greenRow(), { nowMs: NOW });
+  const behind = { ok: false, reason: "behind" as const, detail: "the sha to promote is NOT a descendant" };
+  const forward = { ok: true, reason: "forward" as const, detail: "ahead" };
+
+  it("REPRODUCES the trap: a green verdict behind the stable checkout asks for a fresh sweep instead of refusing", () => {
+    // Exactly the state a --force-sweep promotion leaves behind. Before the fix this combination
+    // had no path forward at all: the verdict is fine, the direction check refuses, and nothing
+    // in the run could produce the newer verdict that would satisfy both.
+    const decision = planSweepAcquisition({ verdict: green, direction: behind });
+    expect(decision.request).toBe(true);
+    expect(decision.detail).toContain("BEHIND");
+  });
+
+  it("asks for a sweep for every refusal a fresh sweep would actually resolve", () => {
+    for (const row of [
+      null,
+      greenRow({ createdAt: new Date(NOW - 200 * HOUR).toISOString() }),
+      greenRow({ outcome: "timeout" }),
+      greenRow({ sha: null }),
+      greenRow({ branch: "main" }),
+    ]) {
+      const verdict = parseSweepVerdict(row, { nowMs: NOW });
+      expect(verdict.ok).toBe(false);
+      expect(planSweepAcquisition({ verdict, direction: null }).request).toBe(true);
+    }
+  });
+
+  it("does NOT re-probe a red master, an unreadable board, or a verdict that already works", () => {
+    const red = planSweepAcquisition({ verdict: parseSweepVerdict(greenRow({ outcome: "red" }), { nowMs: NOW }) });
+    expect(red.request).toBe(false);
+    expect(red.reason).toBe("red");
+
+    const unreadable = planSweepAcquisition({
+      verdict: { ok: false, reason: "unreadable", detail: "could not read" },
+    });
+    expect(unreadable.request).toBe(false);
+    expect(unreadable.reason).toBe("unreadable");
+
+    const usable = planSweepAcquisition({ verdict: green, direction: forward });
+    expect(usable.request).toBe(false);
+    expect(usable.reason).toBe("verdict-usable");
+  });
+
+  it("acquires nothing under --force-sweep, --no-await-sweep, or with no board to ask", () => {
+    const stale = parseSweepVerdict(greenRow({ createdAt: new Date(NOW - 200 * HOUR).toISOString() }), { nowMs: NOW });
+    expect(planSweepAcquisition({ verdict: stale, forceSweep: true }).reason).toBe("force-sweep");
+    expect(planSweepAcquisition({ verdict: stale, awaitSweep: false }).reason).toBe("disabled");
+    const noBoard = planSweepAcquisition({ verdict: stale, canRequest: false });
+    expect(noBoard.request).toBe(false);
+    expect(noBoard.reason).toBe("no-board");
+  });
+
+  it("counts a landed verdict as fresh only when it is a different observation", () => {
+    const previous = greenRow();
+    expect(isFreshSweepRow(previous, previous)).toBe(false);
+    // a second green on the SAME sha still counts — the probe inserts, so the timestamp moved
+    expect(isFreshSweepRow(greenRow({ createdAt: new Date(NOW).toISOString() }), previous)).toBe(true);
+    expect(isFreshSweepRow(greenRow({ sha: "999" }), previous)).toBe(true);
+    expect(isFreshSweepRow(null, previous)).toBe(false);
+    expect(isFreshSweepRow(previous, null)).toBe(true);
+    // sqlite spells it snake_case; the two spellings must not read as two different rows
+    const snake = { sha: previous.sha, created_at: previous.createdAt };
+    expect(isFreshSweepRow(snake, previous)).toBe(false);
+  });
+
+  it("waits a probe-sized time by default, and takes an override in minutes", () => {
+    expect(resolveSweepWaitMs({})).toBe(DEFAULT_SWEEP_WAIT_MINUTES * 60_000);
+    expect(resolveSweepWaitMs({ KANBAN_PROMOTE_SWEEP_WAIT_MIN: "5" })).toBe(5 * 60_000);
+    expect(resolveSweepWaitMs({ KANBAN_PROMOTE_SWEEP_WAIT_MIN: "0" })).toBe(DEFAULT_SWEEP_WAIT_MINUTES * 60_000);
+    expect(resolveSweepWaitMs({ KANBAN_PROMOTE_SWEEP_WAIT_MIN: "nonsense" })).toBe(DEFAULT_SWEEP_WAIT_MINUTES * 60_000);
   });
 });
 
