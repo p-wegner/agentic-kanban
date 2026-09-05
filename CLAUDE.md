@@ -273,6 +273,34 @@ reachable via its own imports (so scoping is safe for it) goes in that test's
 net, not a proof — a suite whose ambient read hides behind a helper won't match the regexes;
 accepted, since the marker mechanism only needs to narrow the gap, not close it.
 
+**The marker takes a `when:` precondition, and the floor is ratcheted by TIME (#1041/#1042).**
+Measured 2026-09-05 at the `impact` tier on a 9-file branch: the selection was **1 file / ~3s**
+and the guard floor **177 files / ~546s** — the half nobody was optimizing was ~99.5% of the
+gate's test cost. `@gate:always-run` means "do not scope this BY IMPORT GRAPH", which is not the
+same as "run it on every diff", so a marker may name the territory it scans:
+```ts
+// @gate:always-run when:packages/server/src/routes/**,packages/shared/src/schema/**
+```
+A bare marker still means always; a `when:` suite is forced only when the change set intersects
+one of its globs, and an UNKNOWN change set (plain `pnpm test:mine`, the guards-only docs run)
+still forces everything — a precondition that narrowed on an empty change set would claim a floor
+of nothing. #483's property is intact: the declaration lives in the file, and no hand-maintained
+list can drift. Measured savings with the ten heaviest suites scoped: routes-only 546s → 357s,
+scripts-only → 222s, client-only → 253s. `always-run-guard-runtime-ratchet.test.ts` pins the
+summed estimated runtime of the UNCONDITIONAL floor (from the committed
+`docs/tests/durations.json`, unmeasured files counted at an explicit 3s and reported), shrink-only
+— so a new marker on a 50s suite reads as a 50s decision at review time. The parse rule and the
+glob matcher are mirrored in `services/always-run-guard-floor.ts` (a published `packages/server`
+cannot import a repo-root script) and held to the same BEHAVIOUR by
+`always-run-dirs-lockstep.test.ts`.
+
+**The pass message prices both halves (#1043).** `+14 guard suites` read as a top-up on the
+selection when it was the whole run, so "the gate is slow" got attributed to the selection — which
+is where the fixes then went. A passing gate now names
+`selection kept 1 suite(s)/~3s est … +177 guard suites (~546s est, 15 unmeasured)`; `est` is
+stated because these are summed per-file measurements, not a stopwatch on this run, and an absent
+duration report omits the estimate rather than inventing one.
+
 **Tier visibility.** `verify_gate_strategy_<projectId>` (`full` | `scoped` | `scoped-base-watch` |
 `impact`, default `full` until a base-health backstop exists) is the ONE named pref that replaces the
 `verify_file_scope`/implicit-scoping booleans an operator could otherwise misalign. A level may

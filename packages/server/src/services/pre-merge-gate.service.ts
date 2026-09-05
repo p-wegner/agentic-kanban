@@ -31,7 +31,7 @@ import { noteMergeGatePhase } from "./merge-job.service.js";
 import {
   resolveGateVerification,
   resolveVerifyGateStrategy,
-  countAlwaysRunGuardSuites,
+  guardFloorFor,
   buildGateTierMessage,
   resolveGateScoping,
   resolveGateFileScopeEmission,
@@ -459,7 +459,14 @@ export async function runPreMergeGate(
       // "docs+config-only", since "docs-only" would misdescribe a `.gitignore`/settings change.
       ...(docsOnlyGuardsRunApplies ? { guardsOnly: true, guardsOnlyReason: guardsOnlyReasonFor(docsOnly) } : {}),
       changedFileCount: changedFiles.length,
-      guardSuiteCount: countAlwaysRunGuardSuites(workingDir),
+      // #1043 — the guard floor's SIZE AND COST, and both describe THIS run: the `when:`
+      // preconditions (#1041) are applied against exactly the change set the runner will see,
+      // which is the emitted file scope or nothing. Passing the diff when the runner gets no
+      // file list (the guards-only docs run) would report a narrowed floor for a run that
+      // forces every guard — wrong in the flattering direction.
+      ...guardFloorFor(workingDir, changedFiles, {
+        narrowed: emitFileScope && !docsOnlyGuardsRunApplies,
+      }),
       maxWorkers: gateMaxWorkers,
       // #909: was the worker count DERIVED from live capacity, or pinned (env override / a
       // capacity-read failure that fell back to the pref)? A level may only weaken

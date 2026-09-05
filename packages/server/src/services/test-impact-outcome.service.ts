@@ -531,11 +531,14 @@ export async function resolveGateImpactSelection(input: {
     stale: selection.stale,
     selectionTier: selection.tier,
     changedCount: selection.changed.length,
+    // #1043 — the selection's own estimated cost, whether or not a budget applied. It used to be
+    // carried only under a budget (where it is the figure the budget is compared against), which
+    // left the message unable to price the selection half at all on an unbudgeted impact run —
+    // and pricing the two halves against each other is exactly what #1043 is for.
+    ...(selection.estMs !== undefined ? { estMs: selection.estMs } : {}),
     // Only when a budget actually applied: the message omits the whole budget clause otherwise,
     // rather than printing a reassuring "dropped 0 over budget" for a run that had no clock at all.
-    ...(budget
-      ? { budget, budgetDroppedCount: selection.budgetDroppedCount, ...(selection.estMs !== undefined ? { estMs: selection.estMs } : {}) }
-      : {}),
+    ...(budget ? { budget, budgetDroppedCount: selection.budgetDroppedCount } : {}),
     // #967 — three states, deliberately distinct: no union at all (both undefined), a union whose
     // size the tool reported (`externalCount`), and a union that will happen but whose size this
     // call could not measure (`unionUnmeasured`). Collapsing the third into the first is the
