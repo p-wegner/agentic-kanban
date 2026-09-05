@@ -54,6 +54,7 @@ import {
   checkPromoteDirection,
   formatPlan,
   isFreshSweepRow,
+  isProbingThisProject,
   nextStableTag,
   parseSweepVerdict,
   planSweepAcquisition,
@@ -233,24 +234,37 @@ async function latestSweepRow(projectId) {
  * than treated as failure: those are transient states, and the whole point is to wait them out.
  * On expiry this returns nothing and the caller refuses exactly as it would have without the
  * trigger — a promotion never proceeds because a wait ran out.
+ *
+ * "A probe is running" is read ONLY from signals about THIS project — `started` (this request
+ * launched one) and `skippedReason === "probe_in_flight"` (this project's persisted start stamp
+ * is live). The response's `joinedRunningProbe` is the board's GLOBAL in-flight count, so another
+ * project's probe would otherwise latch this loop into waiting for a verdict that is never going
+ * to be recorded here — burning the whole budget and refusing, which is the very trap #1044
+ * exists to close. And because a probe can also die without recording anything, the latch is
+ * re-checked rather than permanent: the ask repeats every `PROBE_RECHECK_MS`, which the board's
+ * own `probe_in_flight` guard makes a no-op while the probe really is alive.
  */
+const PROBE_RECHECK_MS = 5 * 60_000;
+
 async function acquireFreshSweep(projectId, previousRow, waitMs) {
   const deadline = Date.now() + waitMs;
-  let probing = false;
+  let nextAskAt = 0;
   let lastNote = 0;
   log(`[promote] requesting a fresh base-branch sweep for project ${projectId} (waiting up to ${Math.round(waitMs / 60_000)} min)`);
   while (Date.now() < deadline) {
-    if (!probing) {
+    if (Date.now() >= nextAskAt) {
       try {
         const answer = await requestReprobe(projectId);
-        probing = Boolean(answer?.started || answer?.joinedRunningProbe || answer?.skippedReason === "probe_in_flight");
+        const probing = isProbingThisProject(answer);
+        nextAskAt = Date.now() + (probing ? PROBE_RECHECK_MS : SWEEP_POLL_INTERVAL_MS);
         log(
           `[promote] reprobe: started=${answer?.started === true} ` +
             `${answer?.skippedReason ? `skipped=${answer.skippedReason} ` : ""}` +
-            `${answer?.joinedRunningProbe ? "(a probe was already running) " : ""}` +
-            `${probing ? "— a probe is running; waiting for its verdict" : "— nothing is probing yet; will ask again"}`,
+            `${answer?.joinedRunningProbe ? "(some project's probe was already running) " : ""}` +
+            `${probing ? "— this project's probe is running; waiting for its verdict" : "— nothing is probing this project yet; will ask again"}`,
         );
       } catch (e) {
+        nextAskAt = Date.now() + SWEEP_POLL_INTERVAL_MS;
         log(`[promote] reprobe request failed: ${e instanceof Error ? e.message : String(e)} — retrying`);
       }
     }

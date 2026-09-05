@@ -16,6 +16,7 @@ import {
   checkPromoteDirection,
   formatPlan,
   isFreshSweepRow,
+  isProbingThisProject,
   planSweepAcquisition,
   resolveSweepWaitMs,
   nextStableTag,
@@ -319,6 +320,17 @@ describe("sweep acquisition (#1044)", () => {
     // sqlite spells it snake_case; the two spellings must not read as two different rows
     const snake = { sha: previous.sha, created_at: previous.createdAt };
     expect(isFreshSweepRow(snake, previous)).toBe(false);
+  });
+
+  it("reads 'a probe is running' only from signals about THIS project", () => {
+    expect(isProbingThisProject({ started: true, skippedReason: null, joinedRunningProbe: false })).toBe(true);
+    expect(isProbingThisProject({ started: false, skippedReason: "probe_in_flight", joinedRunningProbe: true })).toBe(true);
+    // `joinedRunningProbe` is the board-WIDE in-flight count. Believing it here makes the run
+    // stop asking and wait out its whole budget for a verdict another project's probe will never
+    // record — a refusal that sends the operator back to --force-sweep, i.e. the #1044 trap.
+    expect(isProbingThisProject({ started: false, skippedReason: "gate_running", joinedRunningProbe: true })).toBe(false);
+    expect(isProbingThisProject({ started: false, skippedReason: "host_saturated", joinedRunningProbe: true })).toBe(false);
+    expect(isProbingThisProject(null)).toBe(false);
   });
 
   it("waits a probe-sized time by default, and takes an override in minutes", () => {

@@ -68,6 +68,16 @@ export declare function parseSweepVerdict(
 
 export declare function isFreshSweepRow(row: SweepRow | null | undefined, previous: SweepRow | null | undefined): boolean;
 
+/** The `POST …/base-branch-health/reprobe` response, as `routes/project-health.ts` builds it. */
+export interface ReprobeAnswer {
+  started?: boolean;
+  skippedReason?: string | null;
+  /** Board-WIDE in-flight probe count > 0 — says nothing about this project. */
+  joinedRunningProbe?: boolean;
+  [key: string]: unknown;
+}
+export declare function isProbingThisProject(answer: ReprobeAnswer | null | undefined): boolean;
+
 export interface SweepAcquisition {
   /** True only when this run should POST a reprobe and wait for the verdict. */
   request: boolean;
