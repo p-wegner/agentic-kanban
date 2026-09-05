@@ -16,12 +16,16 @@ export declare const BOARD_LOG_RELPATH: string;
 export declare const DEFAULT_MAX_SWEEP_AGE_HOURS: number;
 export declare const DEFAULT_BOARD_URL: string;
 export declare const DEFAULT_PROJECT_NAME: string;
+export declare const DEFAULT_SWEEP_WAIT_MINUTES: number;
+export declare const SWEEP_POLL_INTERVAL_MS: number;
+export declare const REPROBEABLE_SWEEP_REASONS: readonly string[];
 
 export declare function resolveStableCheckout(opts?: { env?: Record<string, string | undefined>; repoRoot?: string }): string;
 export declare function resolveBoardUrl(env?: Record<string, string | undefined>): string;
 export declare function resolveOperatedDbPath(opts?: { env?: Record<string, string | undefined>; homeDir?: string }): string;
 export declare function resolveMaxSweepAgeMs(env?: Record<string, string | undefined>): number;
 export declare function resolveProjectName(env?: Record<string, string | undefined>): string;
+export declare function resolveSweepWaitMs(env?: Record<string, string | undefined>): number;
 
 export declare function stableTagDate(date?: Date): string;
 
@@ -62,6 +66,30 @@ export declare function parseSweepVerdict(
   opts?: { branch?: string; nowMs?: number; maxAgeMs?: number },
 ): SweepVerdict;
 
+export declare function isFreshSweepRow(row: SweepRow | null | undefined, previous: SweepRow | null | undefined): boolean;
+
+export interface SweepAcquisition {
+  /** True only when this run should POST a reprobe and wait for the verdict. */
+  request: boolean;
+  reason:
+    | "acquire"
+    | "verdict-usable"
+    | "force-sweep"
+    | "disabled"
+    | "no-board"
+    | "red"
+    | "unreadable"
+    | "not-reprobeable";
+  detail: string;
+}
+export declare function planSweepAcquisition(input: {
+  verdict: SweepVerdict;
+  direction?: PromoteDirection | null;
+  forceSweep?: boolean;
+  awaitSweep?: boolean;
+  canRequest?: boolean;
+}): SweepAcquisition;
+
 export declare function shouldReinstall(lockBefore: string | null | undefined, lockAfter: string | null | undefined): boolean;
 
 export interface PromotionStep {
@@ -85,6 +113,10 @@ export interface PromotionPlanInput {
   logPath: string;
   boardLogPath?: string | null;
   forceSweep?: boolean;
+  /** When it would `request`, step 1 says so instead of claiming it only reads a verdict (#1044). */
+  sweepAcquisition?: SweepAcquisition | null;
+  /** One line from `formatGateEvidence` (#1045) — printed, never acted on. */
+  gateEvidence?: string | null;
 }
 export declare function buildPromotionPlan(input: PromotionPlanInput): PromotionStep[];
 export declare function formatPlan(plan: PromotionStep[]): string;
