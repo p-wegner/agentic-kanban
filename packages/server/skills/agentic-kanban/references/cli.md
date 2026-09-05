@@ -10,18 +10,18 @@ Run any command with `--help` for its options — this list is names and purpose
 | Command | Does |
 |---|---|
 | `cleanup` | Show stale worktrees for closed workspaces, and clean up leaked temp-fixture project registrations |
-| `create` | Create a new git repo and register it as a project |
+| `create <folder-name>` | Create a new git repo and register it as a project |
 | `delete-status <status-id>` | Delete a project status (fails if issues are linked to it) |
 | `dev` | Start the development server (server + built client UI) |
-| `export-backlog` | Export a project's full backlog (issues, statuses, tags, milestones, dependencies) as a portable JSON snapshot for moving between devices |
-| `import-backlog` | Import a backlog snapshot (from `export-backlog`) into a project |
-| `init` | Initialize agentic-kanban for the first time |
-| `install-skill` | Install agent skills into a project's .claude/skills/ directory, or into your user agent-skill directories with --user |
+| `export-backlog [name-or-id]` | Export a project's full backlog (issues, statuses, tags, milestones, dependencies) as a portable JSON snapshot for moving between devices |
+| `import-backlog <file> [name-or-id]` | Import a backlog snapshot (from `export-backlog`) into a project |
+| `init [path]` | Initialize agentic-kanban for the first time |
+| `install-skill [target-path]` | Install agent skills into a project's .claude/skills/ directory, or into your user agent-skill directories with --user |
 | `list` | List all registered projects |
-| `register` | Register a git repo as a project |
-| `relocate` | Move a registered project to a new checkout path, keeping its issues, workspaces and history |
+| `register [path]` | Register a git repo as a project |
+| `relocate <project-or-from-prefix> <new-path-or-to-prefix>` | Move a registered project to a new checkout path, keeping its issues, workspaces and history |
 | `status` | Show board status overview with all active agents, workspaces, and progress |
-| `unregister` | Remove a registered project by name or ID |
+| `unregister <name-or-id>` | Remove a registered project by name or ID |
 
 ## backlog
 
@@ -162,7 +162,7 @@ Manage agent skills.
 | `skill get <name-or-id>` | Show full details of a skill including its prompt template |
 | `skill create <name>` | Create a new agent skill |
 | `skill export <target-path>` | Export skills as SKILL.md files for Claude Code and Codex |
-| `skill verify` | Check whether the bundled agent skills an agent actually reads are current |
+| `skill verify [target-path]` | Check whether the bundled agent skills an agent actually reads are current |
 
 ## tag
 

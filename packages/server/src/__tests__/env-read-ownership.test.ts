@@ -153,6 +153,7 @@ const FOREIGN: Record<string, string> = {
   NODE_ENV: "Node convention — production/development mode; the doc page lists it as a runner convention",
   VITEST: "vitest — set inside a vitest worker; the doc page lists it as a runner convention",
   npm_execpath: "npm/pnpm — the package manager that invoked us, so a re-invocation uses the same one",
+  INIT_CWD: "npm/pnpm — the directory the operator actually ran the command in; CLI path arguments resolve against it, since `pnpm cli --` runs with cwd = packages/server (#1038)",
   // Agent CLIs: their config roots. Renaming any of these would break the CLI, not us.
   CLAUDE_CONFIG_DIR: "Claude Code — its config root; the board reads it to find session state",
   CODEX_HOME: "Codex CLI — its config/credential root; worker doctor consults it for provider login (#875)",

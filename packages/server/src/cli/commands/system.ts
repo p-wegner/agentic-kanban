@@ -3,6 +3,7 @@ import { getProjectStatusById, deleteProjectStatusById } from "../../repositorie
 import { getFirstIssueIdWithStatus } from "../../repositories/issue.repository.js";
 import { BUILTIN_SKILLS } from "../../builtin-skills.js";
 import { runMigrations, logDefaultBranch, timeSince, cliAction } from "../shared.js";
+import { cliPathArg, invocationCwd } from "../cli-path.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { parseIssueNumberFromBranch } from "@agentic-kanban/shared/lib/branch";
 import { resolveBoardServerPort } from "@agentic-kanban/shared/lib/board-server-url";
@@ -30,7 +31,7 @@ export function registerSystemCommands(program: Command) {
   program
     .command("init")
     .description("Initialize agentic-kanban for the first time.\n\nCreates the data directory (~/.agentic-kanban/), runs database migrations, seeds default tags and skills, and optionally registers a project.")
-    .argument("[path]", "Path to a git repository to register as a project")
+    .argument("[path]", "Path to a git repository to register as a project, relative to the directory you run the command in", cliPathArg)
     .option("-n, --name <name>", "Custom project name (defaults to repo directory name)")
     .addHelpText("after", `
 Examples:
@@ -78,7 +79,10 @@ Examples:
   program
     .command("install-skill")
     .description("Install agent skills into a project's .claude/skills/ directory, or into your user agent-skill directories with --user.\n\nWorks without a running server or database. Prompt-only built-ins are written as .claude/skills/<name>/SKILL.md; BUNDLED skills (which carry a references/ directory) are junctioned into the installed package by default, so `npm update agentic-kanban` refreshes them with no re-install. --user installs only BUNDLED skills unless a prompt-only built-in is named with -n, since those are per-project working prompts.")
-    .argument("[target-path]", "Path to the target project (defaults to current directory)", ".")
+    // No commander default: a default value is NOT passed through the parser, so a literal
+    // "." would still resolve against packages/server under `pnpm cli --` (#1038). The
+    // handler defaults to invocationCwd() instead.
+    .argument("[target-path]", "Path to the target project (defaults to the directory you run the command in)", cliPathArg)
     .option("-n, --names <names>", "Comma-separated list of skill names to install (default: all)")
     .option("--user", "Install into your user agent-skill directories (~/.claude*/skills, ~/.codex/skills) instead of a project. Bundled skills only, unless -n names a prompt-only built-in")
     .option("--no-link", "Copy bundled skills instead of junctioning them (they will not track package upgrades)")
@@ -100,7 +104,7 @@ Bundled vs prompt-only:
   Those are per-project working prompts, so --user installs only BUNDLED skills unless you name one
   with -n; a project target still gets both.
 `)
-    .action(async (targetPath: string, options: { names?: string; list?: boolean; user?: boolean; link?: boolean }) => {
+    .action(async (targetPath: string | undefined, options: { names?: string; list?: boolean; user?: boolean; link?: boolean }) => {
       try {
         const { listBundledSkills, installBundledSkill, discoverUserSkillRoots, selectSkillsToInstall } =
           await import("@agentic-kanban/shared/lib/bundled-skills");
@@ -131,7 +135,7 @@ Bundled vs prompt-only:
           process.exit(1);
         }
 
-        const { resolve: resolvePath, join } = await import("node:path");
+        const { join } = await import("node:path");
         const { access } = await import("node:fs/promises");
         const { writeAgentSkillFileInto, ensureCodexSkillsLink } =
           await import("@agentic-kanban/shared/lib/agent-skill-files");
@@ -146,7 +150,8 @@ Bundled vs prompt-only:
             process.exit(1);
           }
         } else {
-          const resolved = resolvePath(targetPath);
+          // Already absolute when given (cliPathArg); invocationCwd() is the omitted default.
+          const resolved = targetPath ?? invocationCwd();
           try {
             await access(resolved);
           } catch {

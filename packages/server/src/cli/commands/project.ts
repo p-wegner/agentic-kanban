@@ -4,6 +4,7 @@ import { getProjectByName, getProjectById, getAllProjects, deleteProjectCascade 
 import { getClosedWorkspaces } from "../../repositories/workspace.repository.js";
 import { getPreference } from "../../repositories/preferences.repository.js";
 import { getActiveProjectId, cliAction } from "../shared.js";
+import { cliPathArg } from "../cli-path.js";
 import { unregisterLeakedTempProjects, findProjectsWithMissingRepoPath } from "../../services/project-registration.js";
 import { exportBacklogSnapshot, importBacklogSnapshot, validateBacklogSnapshot } from "../../services/backlog-snapshot.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -75,7 +76,7 @@ Example:
     .command("export-backlog")
     .description("Export a project's full backlog (issues, statuses, tags, milestones, dependencies) as a portable JSON snapshot for moving between devices.\n\nExcludes device-specific data (workspaces, sessions, agent output). Writes to --out, or stdout if omitted.")
     .argument("[name-or-id]", "Project name or ID (defaults to the active project)")
-    .option("-o, --out <file>", "Write the snapshot JSON to this file instead of stdout")
+    .option("-o, --out <file>", "Write the snapshot JSON to this file instead of stdout. Relative to the directory you run the command in.", cliPathArg)
     .addHelpText("after", `
 Examples:
   $ agentic-kanban export-backlog -o backlog.json
@@ -101,7 +102,7 @@ Examples:
   program
     .command("import-backlog")
     .description("Import a backlog snapshot (from `export-backlog`) into a project.\n\nRemaps statuses/tags/milestones by name (creating any missing), preserves issue numbers when free (renumbering on collision), and rewires dependencies. Note: importing the same file twice duplicates issues.")
-    .argument("<file>", "Path to the snapshot JSON file")
+    .argument("<file>", "Path to the snapshot JSON file, relative to the directory you run the command in", cliPathArg)
     .argument("[name-or-id]", "Target project name or ID (defaults to the active project)")
     .addHelpText("after", `
 Examples:

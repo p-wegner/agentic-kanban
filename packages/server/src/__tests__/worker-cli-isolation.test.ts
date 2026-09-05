@@ -83,8 +83,11 @@ describe("agentic-kanban-worker binary isolation", () => {
   it("reaches a small, self-contained module graph", () => {
     expect(existsSync(ENTRY)).toBe(true);
     // Sanity: the walk actually traversed (entry + worker modules + cli command).
+    // The ceiling is a smell bound, not the guarantee — that is the FORBIDDEN_LOCAL /
+    // FORBIDDEN_PACKAGES assertions below. Raised 25 → 26 in #1038 for `cli/cli-path.ts`,
+    // which imports only `node:path` and resolves CLI path arguments against INIT_CWD.
     expect(files.size).toBeGreaterThan(3);
-    expect(files.size).toBeLessThan(25);
+    expect(files.size).toBeLessThan(26);
   });
 
   it("never reaches the database or board-service layer", () => {

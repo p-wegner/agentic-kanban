@@ -7,6 +7,7 @@ import {
   cliDeleteWorkflowTemplate,
 } from "../../services/workflow.service.js";
 import { resolveProjectIdArg, cliAction } from "../shared.js";
+import { cliPathArg } from "../cli-path.js";
 import { normalizeImportedTemplate, validateImportedTemplate } from "../../lib/workflow-template-import.js";
 import type { TemplateInput } from "@agentic-kanban/shared/lib/workflow-engine";
 
@@ -90,7 +91,10 @@ export function registerWorkflowCommand(program: Command) {
     }));
 
   wf
-    .command("create <jsonFile>")
+    .command("create")
+    // .argument, not the inline `create <jsonFile>` form, so the path carries the
+    // cliPathArg coercion — the inline form takes no parser (#1038).
+    .argument("<jsonFile>", "Workflow template JSON, relative to the directory you run the command in", cliPathArg)
     .description("Create a workflow template from a JSON file: { name, description?, ticketType?, isDefault?, nodes:[{id,name,nodeType,statusName?,skillName?,maxVisits?,config?}], edges:[{fromNodeId,toNodeId,label?,condition?}] }")
     .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
     .action(cliAction(async (jsonFile: string, options: { project?: string }) => {
@@ -116,7 +120,8 @@ export function registerWorkflowCommand(program: Command) {
     }));
 
   wf
-    .command("import <jsonFile>")
+    .command("import")
+    .argument("<jsonFile>", "Workflow template JSON, relative to the directory you run the command in", cliPathArg)
     .description("Import a workflow template JSON file into the active project as a new template.")
     .option("--project <idOrName>", "Target project by id or name (default: the active project). Flag wins; the active-project preference stays the fallback (#389)")
     .action(cliAction(async (jsonFile: string, options: { project?: string }) => {

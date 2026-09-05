@@ -7,6 +7,7 @@ import type { DependencyType } from "@agentic-kanban/shared/schema";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolveProjectIdArg, describeIssueNumberMiss, cliAction } from "../shared.js";
+import { cliPathArg } from "../cli-path.js";
 import { getIssueIdByNumberInProject, getOutgoingDependencies, getIncomingDependencies } from "../../repositories/issue.repository.js";
 import {
   getIssueIdsAndProjectsForBatch,
@@ -205,7 +206,10 @@ Examples:
     }));
 
   depCmd
-    .command("update-batch <jsonFile>")
+    .command("update-batch")
+    // .argument, not the inline `update-batch <jsonFile>` form, so the path carries the
+    // cliPathArg coercion — the inline form takes no parser (#1038).
+    .argument("<jsonFile>", "JSON file of edge operations, relative to the directory you run the command in", cliPathArg)
     .description("Add or remove multiple dependency edges atomically from a JSON file.\n\nReads a JSON file containing an array of edge operations. Idempotent: existing adds and missing removes are skipped. Cycle detection is applied; rolls back on cycle.")
     .option("--json", "Output raw JSON instead of formatted text")
     .addHelpText("after", `

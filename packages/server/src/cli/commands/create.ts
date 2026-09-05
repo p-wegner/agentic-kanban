@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { getCurrentBranch } from "../../services/git.service.js";
 import { DEFAULT_STATUSES } from "../../repositories/issue.repository.js";
 import { runMigrations, logDefaultBranch } from "../shared.js";
+import { cliPathArg } from "../cli-path.js";
 import { getDefaultSkillId, ensureAgentGitignore, ensureStarterClaudeMd, ensureStarterAgentsMd, ensureHookScaffold } from "../../services/project-scaffold.js";
 import { detectStackProfile } from "../../services/stack-profile.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
@@ -24,7 +25,7 @@ export function registerCreateCommand(program: Command) {
     .command("create")
     .description("Create a new git repo and register it as a project.\n\nCreates a directory under the configured projects_base_path preference (or --path), runs 'git init', and registers the repo.\n\nUse 'pnpm cli -- register <path>' to register an existing repo instead.")
     .argument("<folder-name>", "Name of the new project folder to create")
-    .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_path preference)")
+    .option("--path <base-path>", "Base directory to create the folder in (overrides projects_base_path preference). Relative to the directory you run the command in.", cliPathArg)
     .option("-n, --name <name>", "Custom project name (defaults to folder name)")
     .option("-b, --branch <branch>", "Initial branch name (default: main)")
     .addHelpText("after", `

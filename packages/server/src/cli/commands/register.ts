@@ -1,6 +1,7 @@
 import type { Command } from "commander";
 import { DEFAULT_STATUSES } from "../../repositories/issue.repository.js";
 import { runMigrations, logDefaultBranch } from "../shared.js";
+import { cliPathArg } from "../cli-path.js";
 import { registerProject } from "../../services/project-registration.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 
@@ -8,7 +9,7 @@ export function registerRegisterCommand(program: Command) {
   program
     .command("register")
     .description("Register a git repo as a project.\n\nAuto-detects repo name, default branch, and remote URL from the git repo at <path>. Creates the default statuses (Backlog, Todo, In Progress, In Review, AI Reviewed, Done, Cancelled) and sets the project as the active project.\n\nIf the repo is already registered (same path), it skips without error.")
-    .argument("[path]", "Path to the git repository")
+    .argument("[path]", "Path to the git repository, relative to the directory you run the command in", cliPathArg)
     .option("-n, --name <name>", "Custom project name (defaults to repo directory name)")
     .option("--clone <url>", "Clone this git URL into the repos root (KANBAN_REPOS_DIR or <data dir>/repos) and register the clone")
     .addHelpText("after", `
