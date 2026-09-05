@@ -52,6 +52,67 @@ function parseTestFilesSummary(body: string): { reported: number; failed: number
 }
 
 /**
+ * A verdict line — something in the output showing a CHECK actually reached a conclusion.
+ *
+ * `check-arch.mjs` prints `[check:arch] FAILED at <step>`, `tsc` prints `error TS...`, vitest
+ * prints a `Test Files`/`Tests` summary or an `AssertionError`. A non-zero run carrying none
+ * of these AND no `[gate:step]` marker never got far enough to report anything — a different
+ * event from failing, and one that needs saying so.
+ */
+const VERIFY_VERDICT_SIGNATURE =
+  /^\s*(\[check:arch\]\s+FAILED|Test Files\b|Tests\s+\d|AssertionError|.*\berror TS\d+\b|.*ELIFECYCLE.*ommand failed)/m;
+
+/** The per-step self-report every verify step in this repo emits when it completes. */
+const GATE_STEP_LINE = /^\s*\[gate:step\]\s/m;
+
+/**
+ * The scripts that PROMISE a `[gate:step]` line when they finish.
+ *
+ * Without this, the absence of a step marker means nothing: a foreign project's verify script
+ * (`npm test`, `pytest`, `./gradlew build`) never emits one, so every ordinary failure there
+ * would be mislabelled "stopped". The detector may therefore only speak when the output shows
+ * one of these was actually invoked — i.e. when the missing self-report is genuinely missing
+ * rather than never promised. Caught by `verify-failure-summary.test.ts`'s existing cases,
+ * which a first cut of this turned red.
+ */
+const STEP_EMITTING_SCRIPT = /scripts[\\/](check-arch|typecheck|test-mine)\.mjs/;
+
+/**
+ * Detects a verify run that STOPPED rather than failed (#1049).
+ *
+ * The shape, measured repeatedly on 2026-09-05: a few hundred bytes of captured output ending
+ * under a command's own banner — `> node scripts/check-arch.mjs`, the first sub-step's line,
+ * nothing more — with a non-zero exit, no `[gate:step]` marker from any step, and no verdict
+ * line from any check. The identical script run by hand in the same worktree was green. So the
+ * script did not fail a check; it died inside its first step before that step could report,
+ * and the gate presented the resulting stub as if it were the failure. Four merges were
+ * withheld that way, each reading as "check:arch failed" when check:arch passes.
+ *
+ * Deliberately conservative: it requires the ABSENCE of every verdict signature, so a real
+ * failure can never be relabelled as this. When it fires it states what is and is not known,
+ * because the thing that must not happen again is a stub being read as a diagnosis.
+ */
+function detectSilentVerifyDeath(body: string): { leadLine: string } | null {
+  if (!body.trim()) return null;
+  // The step protocol must have been in play, or a missing step line proves nothing.
+  if (!STEP_EMITTING_SCRIPT.test(body)) return null;
+  if (GATE_STEP_LINE.test(body)) return null;
+  if (VERIFY_VERDICT_SIGNATURE.test(body)) return null;
+
+  const lines = body.split(/\r?\n/).map((l) => l.trimEnd()).filter((l) => l.trim());
+  const lastLine = lines[lines.length - 1] ?? "";
+  return {
+    leadLine:
+      "STOPPED, NOT FAILED: the verify script exited non-zero having emitted no [gate:step] " +
+      "marker and no verdict from any check, so nothing it ran reported a result. The output " +
+      `below is WHERE it stopped, not WHY. Last line captured: ${JSON.stringify(lastLine)}. ` +
+      "This is the shape of a child killed mid-step (host memory pressure is the known cause " +
+      "here) — it is NOT evidence that the command named above failed its check. Re-run the " +
+      "same script in the worktree before believing this failure.",
+  };
+}
+
+/**
  * Detects a runner CRASH distinct from a real test failure (#490): a non-zero exit whose
  * `Test Files` summary names ZERO failures (or reports fewer files than it started with, or
  * carries a worker-crash marker) — the shape that reads as "flaky, just retry" when it is
@@ -131,7 +192,10 @@ export function summarizeVerifyFailure(
   // to) can occur ANYWHERE in the log, not just the tail, and the tail itself ends with a
   // passing-looking summary. Lift the crash verdict OUT and put it FIRST, ahead of that summary,
   // instead of leaving it to be scrolled past or truncated away entirely.
-  const crash = detectVerifyCrash(body);
+  // Order matters: a worker crash is a run that got far enough to report SOMETHING, so it is
+  // the more specific verdict and wins. `detectSilentVerifyDeath` is the fallback for a run
+  // that reported nothing at all.
+  const crash = detectVerifyCrash(body) ?? detectSilentVerifyDeath(body);
   const message = crash ? `${crash.leadLine}\n\n${tail}` : tail;
   return `${message}${logPath ? `\n[full verify log: ${logPath}]` : ""}`;
 }
