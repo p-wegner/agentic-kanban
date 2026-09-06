@@ -327,6 +327,35 @@ describe("buildImpactSelectionNote", () => {
     expect(note).toContain("unmeasured");
   });
 
+  it("names an ABSENT selector as the reason, in the gate message itself (#1039)", () => {
+    // The state the ticket found: the plugin enabled, the map copied into the worktree, and no
+    // `.claude/skills/test-impact/tools/impact.mjs` beside it. The runner then either fell back to
+    // `vitest related` or used a $HOME copy — and the gate message still said `tier: impact`. A bare
+    // "UNKNOWN" hides that the tier's whole mechanism was missing; the message has to say it.
+    const note = buildImpactSelectionNote({
+      ...baseTier,
+      impactSelection: null,
+      impactSelectorAbsent: ".claude/skills/test-impact/tools/impact.mjs",
+    });
+    expect(note).toContain("UNKNOWN");
+    expect(note).toContain("selector ABSENT");
+    expect(note).toContain(".claude/skills/test-impact/tools/impact.mjs");
+    expect(note).toContain("$HOME");
+    const message = buildGateTierMessage({
+      ...baseTier,
+      impactSelection: null,
+      impactSelectorAbsent: ".claude/skills/test-impact/tools/impact.mjs",
+    });
+    expect(message).toContain("selector ABSENT");
+  });
+
+  it("does not blame an absent selector when the selection merely failed to resolve", () => {
+    // A `select` that exited non-zero with the tool present is a different defect; naming the
+    // wrong cause would send the operator to check a junction that is fine.
+    const note = buildImpactSelectionNote({ ...baseTier, impactSelection: null });
+    expect(note).not.toContain("ABSENT");
+  });
+
   it("says nothing for a run that was not impact-selected", () => {
     expect(buildImpactSelectionNote({ ...baseTier, strategy: "scoped", selector: "related" })).toBeNull();
   });

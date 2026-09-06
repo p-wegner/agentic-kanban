@@ -49,7 +49,7 @@ import { VERIFY_NEUTRALIZED_DB_LOCATION_ENV, VERIFY_NEUTRALIZED_LISTENER_ENV } f
 import { resolveVerifyOutcome } from "./verify-retry-strategies.js";
 import type { FailedSuite } from "./verify-flake-retry.js";
 import { parseVerifyStepTimings, type VerifyStepTiming } from "./verify-step-timings.js";
-import { recordVerifyGateOutcome, resolveGateImpactSelection } from "./test-impact-outcome.service.js";
+import { recordVerifyGateOutcome, resolveGateImpactTierFields } from "./test-impact-outcome.service.js";
 import { buildVerifyResourceEnv } from "./verify-resource-env.js";
 import { sequenceBaseHealthBeforeVerify } from "./gate-base-health-sequencing.js";
 import { openRedDebtEntry } from "../repositories/red-debt.repository.js";
@@ -437,7 +437,10 @@ export async function runPreMergeGate(
       selector: gateSelector,
       // #956: what the selection kept and dropped, for the PASS message — the same `select --json`
       // the #954 ledger makes, so message and ledger cannot disagree about what it was.
-      impactSelection: await resolveGateImpactSelection({
+      // #1039 — `impactSelection`, plus `impactSelectorAbsent` when the reason it is null is that
+      // the selector was never in the worktree. One spread, so the gate function (on the branch
+      // ratchet) spends no branch on the distinction; the helper makes it.
+      ...(await resolveGateImpactTierFields({
         applies: gateSelector === "impact" && !docsOnlyGuardsRunApplies,
         workingDir,
         baseBranch: workspace.baseBranch,
@@ -446,7 +449,7 @@ export async function runPreMergeGate(
         // reproduce that half (only the runner walks vitest's module graph). Saying so beats
         // reporting the impact half as if it were the whole selection.
         unioned: gateUnioned && !docsOnlyGuardsRunApplies,
-      }),
+      })),
       packageScoped: Boolean(effectiveTestScope) && !docsOnlyGuardsRunApplies,
       // What was actually EMITTED, not what the scoping decision wanted. Since #967 the file list
       // IS emitted under the impact selector — the runner unions it in rather than refusing the
