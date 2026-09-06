@@ -35,19 +35,19 @@ This is a FRESH session every run — you have NO memory of previous runs. The k
 - **RISK POSTURE = iterate** - Fast iteration on a local-first repo: the per-merge gate runs the test-impact SELECTION (a ranked guess, narrower than scoped), and the full suite runs nightly on the base branch instead. A defect the selection misses lands on the base and is caught within a day — cheap when a rebase is the whole cost, wrong when there is a real deployment (use Strict there). Set via Settings -> Workflow; a ticket may override with a `risk:<posture>` tag.
 
 ## STRATEGY WEIGHTS (generated - do not hand-edit)
-- Frontend: weight 5/5, area, provider codex
+- Frontend: weight 5/5, area, provider claude
 - Feature: weight 3/5, work-type
 - Quality: weight 3/5, work-type
 - Bugfix: weight 2/5, work-type
 - UX: weight 2/5, work-type
-- Backend: weight 2/5, area, provider codex
+- Backend: weight 2/5, area, provider claude
 
 ## PROVIDER POLICY (generated - do not hand-edit)
 When selecting a provider for a new workspace, apply these rules in priority order:
 1. **FILL** profiles should always have capacity — start work on them first.
 2. **THROTTLE** profiles are preferred for main work. Respect their headroom percentage.
 3. **FALLBACK-ONLY** profiles are last resort — only use if all others are exhausted or the user explicitly selects them.
-- **codex:default** [codex:default]: FILL — use aggressively, keep busy at all times (Drain existing backlog with one Codex runner; no refill.)
+- **claude:anth** [claude:anth]: FILL — use aggressively, keep busy at all times (Drain existing backlog with one Claude Code builder on anth; no refill.)
 
 ## CAPACITY HOLD (generated - do not hand-edit)
 The host's measured headroom is a brake on EVERY start, above every target in this file. Before any launch or relaunch, read the live snapshot once per cycle:
@@ -55,15 +55,15 @@ The host's measured headroom is a brake on EVERY start, above every target in th
 - If `capacity.hold` is **true**: start ZERO new builders and do not relaunch idle ones; let running sessions finish and keep at most ONE merge-gate run in flight. A gate run on a saturated box dies on fork-worker timeouts, so starting more work makes every lane lose.
 - Otherwise cap this cycle's new starts at `capacity.maxNewStarts` (never above MAX_NEW_STARTS_PER_CYCLE). `null` means the cheap tier could not measure headroom — the target applies unchanged.
 - Whatever you decide, write `capacity.reason` into this cycle's state.md line so the hold is auditable by its measured numbers, not by a token.
-- **CAPACITY_HOLD = false** - last measured when this block was generated (tier 0: 14.5GB free). Stale by definition: the live read above is authoritative.
-- **FREE_GB = 14.5** - MAX_NEW_STARTS this cycle would be 1.
+- **CAPACITY_HOLD = false** - last measured when this block was generated (tier 0: 12.7GB free). Stale by definition: the live read above is authoritative.
+- **FREE_GB = 12.7** - MAX_NEW_STARTS this cycle would be 1.
 <!-- STRATEGY_BULLSEYE_GENERATED_END -->
 
 ## FOCUS POLICY (operator directive 2026-09-06 - authoritative)
-**DRAIN THE EXISTING BACKLOG TO ZERO. Run one Codex builder at a time. Refill is OFF.**
+**DRAIN THE EXISTING BACKLOG TO ZERO. Run one Claude Code builder on profile `anth` at a time. Refill is OFF.**
 
 1. Merge finished work before starting another ticket; retain the normal review and merge gates.
-2. WIP limit = 1, ACTIVE_AGENTS_TARGET = 1, MAX_NEW_STARTS_PER_CYCLE = 1. Use the Codex profile in the generated provider policy.
+2. WIP limit = 1, ACTIVE_AGENTS_TARGET = 1, MAX_NEW_STARTS_PER_CYCLE = 1. Use the Claude Code profile `anth` in the generated provider policy.
 3. BACKLOG_FLOOR = 0. Do not generate, refill, or expand the backlog. The refill ideas below are inactive during this drain.
 4. Keep the capacity brake and dependency checks. Report blocked or no-auto-start tickets honestly; do not mark them Done to reach zero.
 5. Use the in-process monitor. Stop starting work when the existing eligible backlog is empty; complete its remaining review and merge work.
