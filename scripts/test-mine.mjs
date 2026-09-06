@@ -740,6 +740,22 @@ export const IMPACT_CLI_CANDIDATES = [
   ".codex/skills/test-impact/tools/impact.mjs",
 ];
 
+/**
+ * Where a resolved impact CLI came from (#1039): `explicit` (`KANBAN_IMPACT_CLI`), `worktree` (the
+ * copy the board materialized under the repo root — the only one the board vouches for), or
+ * `home` (a machine-local profile junction the board neither creates nor checks). The `home`
+ * case is exactly the "gate works by luck" state the ticket found, so the runner names it.
+ */
+export function impactCliOrigin(cli, root = ROOT, home = process.env.USERPROFILE || process.env.HOME || "") {
+  if (!cli) return null;
+  if ((process.env.KANBAN_IMPACT_CLI || "").trim()) return "explicit";
+  const normalized = resolve(cli).replace(/\\/g, "/").toLowerCase();
+  const under = (dir) => Boolean(dir) && normalized.startsWith(resolve(dir).replace(/\\/g, "/").toLowerCase() + "/");
+  if (under(root)) return "worktree";
+  if (under(home)) return "home";
+  return "explicit";
+}
+
 /** Absolute path to the impact CLI, or null when the skill is not installed here. */
 export function resolveImpactCli(root = ROOT, home = process.env.USERPROFILE || process.env.HOME || "") {
   const explicit = (process.env.KANBAN_IMPACT_CLI || "").trim();
@@ -1759,6 +1775,16 @@ if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
           `falling back to \`vitest related\`.`,
       );
     } else {
+      if (impactCliOrigin(cli) === "home") {
+        // #1039 — the worktree copy is the only one the board provisions; a $HOME hit means the
+        // plugin skill never reached this checkout and the selection depends on a machine-local
+        // junction. Still used (a selection beats none), but never silently.
+        console.warn(
+          `[test:mine] the test-impact selector was NOT found in this worktree ` +
+            `(${IMPACT_CLI_CANDIDATES[0]}) — using the machine-local copy at ${cli}. ` +
+            `The board did not provision it here; check that the test-impact plugin's skill is materialized (#1039).`,
+        );
+      }
       // #967 — derive the OTHER selector's picks first, so they enter `select` as `--union` input
       // (before its budget cut) rather than being appended to a finished selection afterwards.
       // Empty when no file scope was given, which reproduces the pre-#967 call exactly.
