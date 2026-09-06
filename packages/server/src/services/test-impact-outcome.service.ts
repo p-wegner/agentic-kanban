@@ -43,7 +43,25 @@ import type { GateImpactSelection, GateTierInfo } from "./pre-merge-gate-tier.js
  * Path of `impact.mjs` relative to a repo root, as the board materializes the skill into a
  * worktree (`.claude/skills/<name>/`) and as the plugin junctions it into a leading repo.
  */
-export const IMPACT_TOOL_RELATIVE_PATH = ".claude/skills/test-impact/tools/impact.mjs";
+/** The plugin skill's directory name under `.claude/skills` — `pluginSkillName("skills/test-impact")`. */
+export const TEST_IMPACT_SKILL_NAME = "test-impact";
+export const IMPACT_TOOL_RELATIVE_PATH = `.claude/skills/${TEST_IMPACT_SKILL_NAME}/tools/impact.mjs`;
+
+/**
+ * Is the selector actually IN this worktree (#1039)?
+ *
+ * The gate's `impact` tier is only as good as the tool that makes the selection, and that tool
+ * reaches a worktree by exactly one road: the plugin's skill junctioned into the main checkout
+ * and copied in at provisioning. When that road is broken the runner (`scripts/test-mine.mjs`)
+ * still finds a machine-local copy under `$HOME/.claude/skills` on a box that happens to have
+ * one, and silently degrades to `vitest related` on a box that does not — so `tier: impact` in
+ * the pass message would describe a run whose selector came from somewhere the board neither
+ * creates nor checks. This answers the question the message has to ask before it can be honest.
+ */
+export function impactSelectorPresent(workingDir: string | null): boolean {
+  if (!workingDir) return false;
+  return existsSync(join(workingDir, IMPACT_TOOL_RELATIVE_PATH));
+}
 
 /** The ledger, relative to the repo root that owns it. Matches `impact.mjs`'s own default. */
 export const OUTCOMES_RELATIVE_PATH = ".test-impact/outcomes.jsonl";
@@ -546,6 +564,26 @@ export async function resolveGateImpactSelection(input: {
     ...(selection.externalCount !== undefined ? { externalCount: selection.externalCount } : {}),
     ...(input.unioned && !unionSupplied ? { unionUnmeasured: true } : {}),
   };
+}
+
+/**
+ * The impact-tier fields of a `GateTierInfo`, as one spreadable object (#1039).
+ *
+ * `resolveGateImpactSelection` answers "what did the selection keep"; this adds WHY when the answer
+ * is "nothing resolvable" and the cause is the one the operator can act on: the selector is not in
+ * the worktree. The distinction is made HERE, not at the call site, because `runPreMergeGate` sits
+ * on the branch ratchet — and because it belongs with the tool-path constant it checks.
+ *
+ * Absent (not null) `impactSelection` for a run the selector did not apply to, so
+ * `impactSelectionField`'s `!== undefined` test behaves exactly as before.
+ */
+export async function resolveGateImpactTierFields(
+  input: Parameters<typeof resolveGateImpactSelection>[0],
+): Promise<Pick<GateTierInfo, "impactSelection" | "impactSelectorAbsent">> {
+  const impactSelection = await resolveGateImpactSelection(input);
+  if (impactSelection === undefined) return {};
+  if (impactSelection !== null || impactSelectorPresent(input.workingDir)) return { impactSelection };
+  return { impactSelection, impactSelectorAbsent: IMPACT_TOOL_RELATIVE_PATH };
 }
 
 /**

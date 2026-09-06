@@ -1,6 +1,6 @@
 import { describe, expect, it, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, rmSync, lstatSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as schema from "@agentic-kanban/shared/schema";
@@ -127,6 +127,109 @@ describe("workspace-provision.service materializeEnabledPluginSkills", () => {
     });
     await provision.materializeEnabledPluginSkills(worktreePath, repo, projectId);
 
+    expect(existsSync(join(worktreePath, ".claude", "skills", "requirement-extraction"))).toBe(false);
+  });
+
+  /**
+   * #1039 — the state found on the live board: `plugin_enabled_test-impact_<id>` = true, the plugin
+   * checkout intact, and NO `.claude/skills/test-impact` in the main checkout. `copySkillToWorktree`
+   * returned false, so every worktree got the impact MAP and not the tool that reads it, and
+   * nothing said so. The enable-time junction is the only bridge from a plugin to a worktree, and
+   * it can go missing without any pref changing (the checkout moved, the dir was deleted, the pref
+   * was flipped by hand). Provisioning must therefore heal it, not just read it.
+   */
+  it("re-materializes a plugin skill the main checkout has LOST, into the checkout and the worktree (#1039)", async () => {
+    const { db } = createTestDb();
+    const pluginDir = makePluginDir();
+    const repo = makeProjectRepo();
+    const pluginService = createPluginService({ database: db as unknown as Database });
+    const plugin = await pluginService.installPlugin({ source: pluginDir });
+    const projectId = await insertProject(db, repo);
+    await pluginService.enableForProject(plugin.id, projectId);
+
+    // Enabling put the skill into the main checkout — the precondition the ticket's acceptance
+    // names ("existing in the main checkout AND in each newly provisioned worktree").
+    const mainSkill = join(repo, ".claude", "skills", "requirement-extraction");
+    expect(existsSync(join(mainSkill, "tools", "ground.mjs"))).toBe(true);
+
+    // Now lose it, the way the live board had: the junction is gone, the pref still says enabled.
+    rmSync(mainSkill, { recursive: true, force: true });
+    expect(existsSync(mainSkill)).toBe(false);
+
+    const worktreePath = makeTempDir("ak-provision-test-worktree-");
+    const provision = createWorkspaceProvisionService({
+      database: db as unknown as Database,
+      gitService: {} as GitService,
+    });
+    const result = await provision.materializeEnabledPluginSkills(worktreePath, repo, projectId);
+
+    // Healed, and SAID so — not a silent copy, not a silent skip.
+    expect(result.healed).toEqual(["requirement-extraction"]);
+    expect(result.materialized).toEqual(["requirement-extraction"]);
+    expect(result.missing).toEqual([]);
+    // The main checkout has the skill again (so the NEXT worktree does not need healing) …
+    expect(existsSync(join(mainSkill, "tools", "ground.mjs"))).toBe(true);
+    // … and this worktree has the full bundle, the tool included.
+    const materialized = join(worktreePath, ".claude", "skills", "requirement-extraction");
+    expect(readFileSync(join(materialized, "tools", "ground.mjs"), "utf8")).toContain("ground");
+  });
+
+  it("re-links a DANGLING skill junction instead of skipping it as existing (#1039)", async () => {
+    // `isLinkPath` is true for a junction whose target is gone, and the old skip check treated
+    // that as "already materialized" — which made the missing-skill state permanent: every
+    // re-enable and every update said `skipped-existing` about a link that led nowhere.
+    const { db } = createTestDb();
+    const pluginDir = makePluginDir();
+    const repo = makeProjectRepo();
+    const pluginService = createPluginService({ database: db as unknown as Database });
+    const plugin = await pluginService.installPlugin({ source: pluginDir });
+    const projectId = await insertProject(db, repo);
+    const first = await pluginService.enableForProject(plugin.id, projectId);
+    const mainSkill = join(repo, ".claude", "skills", "requirement-extraction");
+    if (first.skills[0]?.mode !== "junction") {
+      // On a box that cannot create junctions the copy fallback is real files, and a dangling
+      // link cannot be staged; the assertion below would be about the wrong mechanism.
+      return;
+    }
+
+    // Drop the junction and put a DANGLING one in its place — the "plugin checkout moved" shape.
+    rmSync(mainSkill, { recursive: true, force: true });
+    const { symlinkSync } = await import("node:fs");
+    symlinkSync(join(pluginDir, "skills", "does-not-exist"), mainSkill, "junction");
+    expect(lstatSync(mainSkill).isSymbolicLink()).toBe(true);
+    expect(existsSync(mainSkill)).toBe(false);
+
+    const again = await pluginService.enableForProject(plugin.id, projectId);
+    expect(again.skills).toEqual([{ name: "requirement-extraction", mode: "junction" }]);
+    expect(again.warnings.join("\n")).toContain("dangling");
+    expect(existsSync(join(mainSkill, "tools", "ground.mjs"))).toBe(true);
+  });
+
+  it("REPORTS a skill that is enabled on paper but cannot be materialized, rather than silently skipping it (#1039)", async () => {
+    const { db } = createTestDb();
+    const pluginDir = makePluginDir();
+    const repo = makeProjectRepo();
+    const pluginService = createPluginService({ database: db as unknown as Database });
+    const plugin = await pluginService.installPlugin({ source: pluginDir });
+    const projectId = await insertProject(db, repo);
+    await pluginService.enableForProject(plugin.id, projectId);
+
+    // The skill is gone from BOTH the main checkout and the plugin's own checkout: nothing to heal from.
+    rmSync(join(repo, ".claude", "skills", "requirement-extraction"), { recursive: true, force: true });
+    rmSync(join(pluginDir, "skills", "requirement-extraction"), { recursive: true, force: true });
+
+    const worktreePath = makeTempDir("ak-provision-test-worktree-");
+    const provision = createWorkspaceProvisionService({
+      database: db as unknown as Database,
+      gitService: {} as GitService,
+    });
+    const result = await provision.materializeEnabledPluginSkills(worktreePath, repo, projectId);
+
+    expect(result.materialized).toEqual([]);
+    expect(result.healed).toEqual([]);
+    expect(result.missing).toHaveLength(1);
+    expect(result.missing[0]).toMatchObject({ pluginSlug: "test-safety-net", skillName: "requirement-extraction" });
+    expect(result.missing[0]?.reason).toContain("skills/requirement-extraction");
     expect(existsSync(join(worktreePath, ".claude", "skills", "requirement-extraction"))).toBe(false);
   });
 });
