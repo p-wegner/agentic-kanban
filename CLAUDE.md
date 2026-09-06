@@ -282,9 +282,11 @@ same as "run it on every diff", so a marker may name the territory it scans:
 // @gate:always-run when:packages/server/src/routes/**,packages/shared/src/schema/**
 ```
 A bare marker still means always; a `when:` suite is forced only when the change set intersects
-one of its globs, and an UNKNOWN change set (plain `pnpm test:mine`, the guards-only docs run)
-still forces everything — a precondition that narrowed on an empty change set would claim a floor
-of nothing. #483's property is intact: the declaration lives in the file, and no hand-maintained
+one of its globs. Spaces after commas are accepted. An UNKNOWN change set (plain `pnpm test:mine`)
+still forces everything; a guards-only docs run retains its known changed paths so the same
+preconditions apply. Packages included only to supply guards run those guards, rather than their
+whole suite; an unknown scope or an affected source with no coverage still widens verification.
+#483's property is intact: the declaration lives in the file, and no hand-maintained
 list can drift. Measured savings with the ten heaviest suites scoped: routes-only 546s → 357s,
 scripts-only → 222s, client-only → 253s. `always-run-guard-runtime-ratchet.test.ts` pins the
 summed estimated runtime of the UNCONDITIONAL floor (from the committed
