@@ -14,10 +14,11 @@
  */
 import { describe, it, expect } from "vitest";
 import { DEFAULT_VERIFY_MAX_WORKERS } from "../services/verify-tunables.js";
+import { buildVerifyResourceEnv } from "../services/verify-resource-env.js";
 
 /** The clamp as the gate applies it (`pre-merge-gate.service.ts`'s `isolationEnv`). */
 const typecheckWorkersFor = (gateMaxWorkers: number) =>
-  Math.min(gateMaxWorkers, DEFAULT_VERIFY_MAX_WORKERS);
+  Number(buildVerifyResourceEnv(gateMaxWorkers).KANBAN_TYPECHECK_WORKERS);
 
 describe("gate typecheck worker budget (#1051)", () => {
   it("never exceeds the documented ceiling, however many test workers are asked for", () => {

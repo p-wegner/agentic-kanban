@@ -50,6 +50,7 @@ import { resolveVerifyOutcome } from "./verify-retry-strategies.js";
 import type { FailedSuite } from "./verify-flake-retry.js";
 import { parseVerifyStepTimings, type VerifyStepTiming } from "./verify-step-timings.js";
 import { recordVerifyGateOutcome, resolveGateImpactSelection } from "./test-impact-outcome.service.js";
+import { buildVerifyResourceEnv } from "./verify-resource-env.js";
 import { sequenceBaseHealthBeforeVerify } from "./gate-base-health-sequencing.js";
 import { openRedDebtEntry } from "../repositories/red-debt.repository.js";
 
@@ -332,7 +333,7 @@ export async function runPreMergeGate(
     try {
       gateDir = createManagedTempDir("kanban-verify-gate-");
     } catch {
-      gateDir = { path: tmpdir(), dispose: () => true };
+      gateDir = { path: tmpdir(), dispose: () => true, disposeAsync: async () => true };
     }
     const gateDataDir = gateDir.path;
     try {
@@ -343,24 +344,9 @@ export async function runPreMergeGate(
     // out — which fails the gate and triggers a full retry (#218: 7 failed attempts
     // over 4 days). Honoured by `scripts/test-mine.mjs`; inert for any other
     // verify_script, and unset for interactive runs so `pnpm test:mine` is unchanged.
-    const resolvedWorkers = await resolveVerifyMaxWorkers(projectId, database);
-    const gateMaxWorkers = resolvedWorkers.workers;
     const isolationEnv = {
       ...gradleEnv,
       AGENTIC_KANBAN_DIR: gateDataDir,
-      KANBAN_TEST_MAX_WORKERS: String(gateMaxWorkers),
-      // #1051: the same budget reaches the TYPECHECK step, which the gate previously left to
-      // whatever `scripts/typecheck.mjs` defaulted to on its own. `verify_max_workers` is the
-      // project's statement about how much of this box a gate may take, and it governed one of
-      // the verify script's three steps — while the two it did not govern (5 `tsc` runs at
-      // 0.5-1 GB each, and depcruise over 1834 modules in one process) are the memory-heavy ones.
-      //
-      // Clamped rather than mirrored, because a tsc worker is not a vitest worker: at 0.5-1 GB
-      // each, four of them is ~4 GB of peak on a box that was at 2-3 GB usable all of 2026-09-05.
-      // So a project asking for FEWER workers gets fewer typecheck workers too, and one asking
-      // for more still stops at the documented ceiling of two. Same number the script picks by
-      // itself today, which is deliberate: this changes who DECIDES it, not the current value.
-      KANBAN_TYPECHECK_WORKERS: String(Math.min(gateMaxWorkers, DEFAULT_VERIFY_MAX_WORKERS)),
       // A board with a fleet configured holds its git/fleet sockets while the gate runs;
       // inheriting those pins makes any suite that opens a listener die with EADDRINUSE and
       // blames the branch for it. See lib/verify-env.ts.
@@ -472,19 +458,15 @@ export async function runPreMergeGate(
       ...(docsOnlyGuardsRunApplies ? { guardsOnly: true, guardsOnlyReason: guardsOnlyReasonFor(docsOnly) } : {}),
       changedFileCount: changedFiles.length,
       // #1043 — the guard floor's SIZE AND COST, and both describe THIS run: the `when:`
-      // preconditions (#1041) are applied against exactly the change set the runner will see,
-      // which is the emitted file scope or nothing. Passing the diff when the runner gets no
-      // file list (the guards-only docs run) would report a narrowed floor for a run that
-      // forces every guard — wrong in the flattering direction.
+      // preconditions (#1041) are applied against exactly the change set the runner sees,
+      // including guards-only docs runs, and only the packages the runner admits.
       ...guardFloorFor(workingDir, changedFiles, {
-        narrowed: emitFileScope && !docsOnlyGuardsRunApplies,
+        narrowed: emitFileScope || docsOnlyGuardsRunApplies,
+        packages: effectiveTestScope?.split(","),
+        guardsOnly: docsOnlyGuardsRunApplies,
       }),
-      maxWorkers: gateMaxWorkers,
-      // #909: was the worker count DERIVED from live capacity, or pinned (env override / a
-      // capacity-read failure that fell back to the pref)? A level may only weaken
-      // verification visibly — the same rule that makes `buildersQuiesced` explicit below.
-      maxWorkersDerived: resolvedWorkers.derived,
-      hostFreeGb: resolvedWorkers.hostFreeGb,
+      // Filled with the sampled capacity only once execution is admitted.
+      maxWorkers: DEFAULT_VERIFY_MAX_WORKERS,
       // #581: say whether this run was protected from builder contention. A gate that
       // failed with builders competing for the box is a different claim from one that
       // failed on a quiet machine, and the failure text alone never distinguishes them.
@@ -522,7 +504,15 @@ export async function runPreMergeGate(
       // the conflation the clause exists to prevent, and it is already reported separately and
       // honestly as `queued Ns behind another verification` (#949).
       let startedAt = Date.now();
-      const result = await runUnderBuildSemaphore(() => {
+      const result = await runUnderBuildSemaphore(async () => {
+        // Capacity observed before a long queue says nothing about the host at admission.
+        const workers = await resolveVerifyMaxWorkers(projectId, database);
+        Object.assign(verifyEnv, buildVerifyResourceEnv(workers.workers));
+        Object.assign(gateTierInfo!, {
+          maxWorkers: workers.workers,
+          maxWorkersDerived: workers.derived,
+          hostFreeGb: workers.hostFreeGb,
+        });
         startedAt = Date.now();
         return runSetupScript(workingDir, verifyScript!, { timeoutMs: verifyTimeoutMs, env: verifyEnv }).catch((e) => ({
           exitCode: 1,

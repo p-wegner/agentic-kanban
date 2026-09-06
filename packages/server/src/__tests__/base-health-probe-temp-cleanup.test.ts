@@ -19,9 +19,10 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { mkdtempSync, writeFileSync, mkdirSync, existsSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, existsSync, rmSync, utimesSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { TEMP_DIR_NAMESPACE } from "@agentic-kanban/shared/lib/temp-dir";
+import { TEMP_DIR_NAMESPACE, TEMP_DIR_OWNER_FILE } from "@agentic-kanban/shared/lib/temp-dir";
 import { STARTUP_AUDIT_TASKS } from "../startup/startup-tasks.js";
 import { sweepStaleTempDirsOnce } from "../startup/stale-temp-sweep.js";
 
@@ -38,7 +39,7 @@ describe("base-health probe temp root (#1050)", () => {
 
   it("reports a failed removal instead of swallowing it", () => {
     const src = serviceSrc();
-    expect(src).toContain("probeTemp.dispose()");
+    expect(src).toContain("await probeTemp.disposeAsync()");
     // The exact shape of the bug: a removal whose failure could not be observed.
     expect(src).not.toMatch(/rm\(probeRoot[^)]*\)\s*\.catch\(\(\)\s*=>\s*\{\}\)/);
   });
@@ -57,22 +58,27 @@ describe("stale temp dirs are actually swept at startup (#1050)", () => {
       const orphan = join(root, `${TEMP_DIR_NAMESPACE}base-health-master-abc123`);
       mkdirSync(join(orphan, "repo", "node_modules"), { recursive: true });
       writeFileSync(join(orphan, "repo", "package.json"), "{}");
+      const dead = spawnSync(process.execPath, ["-e", ""], { windowsHide: true });
+      expect(dead.status).toBe(0);
+      writeFileSync(join(orphan, TEMP_DIR_OWNER_FILE), JSON.stringify({ pid: dead.pid }));
+      const past = new Date(Date.now() - 2 * 60 * 60_000);
+      utimesSync(orphan, past, past);
       const fresh = join(root, `${TEMP_DIR_NAMESPACE}base-health-master-fresh`);
       mkdirSync(fresh, { recursive: true });
+      writeFileSync(join(fresh, TEMP_DIR_OWNER_FILE), JSON.stringify({ pid: dead.pid }));
 
-      // `nowMs` two hours on, so the orphan is past the default hour of grace and the
-      // freshly-made one is not — a live probe must never be swept out from under itself.
-      // Through the production entry point, so the test exercises what startup runs.
+      // Through the production entry point; only the dead owner's old directory is reaped.
       const logged: string[] = [];
-      const result = sweepStaleTempDirsOnce(
-        { root, nowMs: Date.now() + 2 * 60 * 60_000, olderThanMs: 90 * 60_000 },
+      const result = await sweepStaleTempDirsOnce(
+        { root },
         (m) => logged.push(m),
       );
 
-      expect(result.removed).toBe(2);
+      expect(result.removed).toBe(1);
       // A sweep that removed something must SAY so — silence is the bug.
-      expect(logged.join(" ")).toContain("2 removed");
+      expect(logged.join(" ")).toContain("1 removed");
       expect(existsSync(orphan)).toBe(false);
+      expect(existsSync(fresh)).toBe(true);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

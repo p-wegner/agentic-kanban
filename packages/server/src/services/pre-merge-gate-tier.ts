@@ -528,7 +528,11 @@ export function buildVerifyEnv(args: {
   emitFileScope: boolean;
   changedFiles: readonly string[];
 }): Record<string, string> {
-  if (args.guardsOnly) return { ...args.isolationEnv, KANBAN_TEST_GUARDS_ONLY: "1" };
+  if (args.guardsOnly) return {
+    ...args.isolationEnv,
+    KANBAN_TEST_GUARDS_ONLY: "1",
+    ...(args.changedFiles.length > 0 ? { KANBAN_TEST_FILES: args.changedFiles.join(",") } : {}),
+  };
   const base = { ...args.isolationEnv, ...args.impactEnv };
   if (!args.packagesEnv) return base;
   return {
@@ -840,7 +844,7 @@ export function buildGateTierMessage(tierInfo: GateTierInfo | null): string {
     // #1043 — with the ESTIMATE attached, because the bare count is what made this clause read
     // as a footnote on the selection when it is in fact almost the whole run.
     ...(tierInfo.fileScoped || tierInfo.guardsOnly || (tierInfo.selector === "impact" && !tierInfo.guardsOnly)
-      ? [`${tierInfo.guardsOnly ? "" : "+"}${tierInfo.guardSuiteCount} guard suites${buildGuardCostNote(tierInfo)}`]
+      ? [`${tierInfo.guardsOnly ? "" : "+"}${tierInfo.guardSuiteCount} guard suites${buildGuardCostNote(tierInfo)}${tierInfo.guardsOnly ? "" : " (forced floor; selected/full suites may include more)"}`]
       : []),
     workersLabel,
     ...(tierInfo.buildersQuiesced === undefined

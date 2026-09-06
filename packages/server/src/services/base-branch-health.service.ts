@@ -31,6 +31,7 @@ import type { Database } from "../db/index.js";
 import { getPreference, setPreference } from "../repositories/preferences.repository.js";
 import { getProjectById } from "../repositories/project.repository.js";
 import { VERIFY_SCRIPT_TIMEOUT_MS } from "./verify-budget.js";
+import { buildVerifyResourceEnv } from "./verify-resource-env.js";
 import { resolveVerifyMaxWorkers } from "./verify-tunables.js";
 import { failedSuitesForOutcome } from "./failed-suite-parse.js";
 import { resolveEffectiveVerify, deriveSetupScriptFromProfile, getStackProfile } from "./stack-profile.service.js";
@@ -258,7 +259,6 @@ ${tail(combined)}`,
     // #931: this probe runs the same verify script the gate does, on the same box, and had
     // no worker cap of its own — sharing the gate's resolved cap keeps the two from
     // independently defaulting to one vitest worker per core.
-    const probeMaxWorkers = (await resolveVerifyMaxWorkers(projectId, database)).workers;
     // #949: and take the same one-at-a-time slot the gate's verify chain takes. #931 capped the
     // probe's WORKERS and made its scheduler decline to start while a gate held the build
     // semaphore, but that check is one-directional: once a probe was running, a gate arriving
@@ -266,10 +266,14 @@ ${tail(combined)}`,
     // Two full suites on one box is the #949 symptom regardless of which started first, and
     // sharing a worker cap does not help when there are two of everything.
     let queueWaitMs = 0;
+    let probeMaxWorkers = 1;
     const run = await runUnderVerifyChainSemaphore(
-      () => {
-        // #989 — THE yield. Everything before this point holds no slot, so a gate arriving during
-        // clone/install already waits zero and there is nothing to give up. Here the probe holds
+      async () => {
+        probeMaxWorkers = (await resolveVerifyMaxWorkers(projectId, database)).workers;
+        const resources = buildVerifyResourceEnv(probeMaxWorkers);
+        // #989 — THE yield. A same-project gate joining during clone/install registers demand
+        // without holding a slot. Once verification starts it can see that demand and yield.
+        // Here the probe holds
         // the one thing the gate wants, for up to 45 minutes, which is where #971's ~35-minute
         // wait actually came from. So while the child runs, poll for a gate-class waiter and kill
         // it when one appears.
@@ -323,7 +327,7 @@ ${tail(combined)}`,
         poll.unref?.();
         return runSetupScript(dest, verifyScript, {
           timeoutMs: VERIFY_TIMEOUT_MS,
-          env: { ...VERIFY_NEUTRALIZED_LISTENER_ENV, ...VERIFY_NEUTRALIZED_DB_LOCATION_ENV, KANBAN_TEST_MAX_WORKERS: String(probeMaxWorkers) },
+          env: { ...VERIFY_NEUTRALIZED_LISTENER_ENV, ...VERIFY_NEUTRALIZED_DB_LOCATION_ENV, ...resources },
           signal: abort.signal,
         }).catch((e) => ({
           exitCode: 1,
@@ -398,10 +402,10 @@ ${tail(combined)}`,
     // from inside the `try`... which DOES run this block. `didYield` is what tells the two apart.
     if (!didYield) clearProbeYieldStreak(projectId);
     // Only ever this probe's OWN directory — the whole point of the unique parent above.
-    // #1050 — a failed removal is REPORTED, not swallowed. `dispose()` never throws (Windows
+    // #1050 — a failed removal is REPORTED, not swallowed. `disposeAsync()` never throws (Windows
     // cannot remove a tree a surviving grandchild holds as its cwd), so the old
     // `.catch(() => {})` was not protecting anything; it was only hiding which probe leaked.
-    if (!probeTemp.dispose()) {
+    if (!await probeTemp.disposeAsync()) {
       console.warn(`[base-health] could not remove probe root ${probeRoot} — a repo clone plus its node_modules is still on disk; sweepStaleTempDirs will retry it on the next boot`);
     }
     // Clear the in-flight stamp. An empty value reads as absent (see `isBaseHealthProbeDue`),

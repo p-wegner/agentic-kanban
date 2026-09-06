@@ -290,12 +290,10 @@ const ALWAYS_RUN_MARKER_RE = /^\s*\/\/\s*@gate:always-run\b(.*)$/m;
 /**
  * The optional precondition on a marker (#1041): `when:<glob>[,<glob>…]`.
  *
- * `\S+` on purpose — the house style is a marker line with a rationale after it
- * (`// @gate:always-run when:packages/server/src/routes/** - the spec is generated from them`),
- * so the glob list ends at the first space. A list with spaces in it would silently truncate,
- * which is why `alwaysRunWhenGlobIssues` below refuses one.
+ * Spaces around commas are accepted. Whitespace not followed by a comma ends the list,
+ * preserving the house style's trailing rationale without truncating a formatted glob list.
  */
-const ALWAYS_RUN_WHEN_RE = /\bwhen:(\S+)/;
+const ALWAYS_RUN_WHEN_RE = /\bwhen:([^\s,]+(?:\s*,\s*[^\s,]+)*)/;
 
 /**
  * Does `source` DECLARE itself always-run?
@@ -349,8 +347,7 @@ export function parseAlwaysRunMarker(source) {
  *
  * Two fail-open cases, both load-bearing and both meaning "we cannot prove it is irrelevant":
  *   - a BARE marker (no `when:`) is unconditional, byte-for-byte today's behaviour;
- *   - an UNKNOWN change set (no `KANBAN_TEST_FILES`, e.g. a plain `pnpm test:mine`, or the
- *     guards-only docs run, which deliberately emits no file list) runs every guard. A
+ *   - an UNKNOWN change set (no `KANBAN_TEST_FILES`, e.g. a plain `pnpm test:mine`) runs every guard. A
  *     precondition that narrowed on an empty change set would silently run NOTHING.
  */
 export function guardAppliesToChanges(when, changedFiles) {
@@ -555,11 +552,9 @@ export function alwaysRunFloor({
  * `SKILL.md` pairs). It already fired: a `SKILL.md`-only branch merged green through the gate
  * and left master red on `codex-skills-parity`, the guard that exists to catch that drift.
  *
- * Deliberately NOT expressible as `KANBAN_TEST_FILES=<the .md files>`: markdown at the repo
- * root is owned by no package, so file scoping resolves to "no own changes" and falls back to
- * the FULL suite — the opposite of the cheap check a docs diff warrants. The guard set is the
- * same declared one (`@gate:always-run`), so this mode cannot drift from what the gate forces
- * to run.
+ * `KANBAN_TEST_FILES` may accompany this mode to narrow the markers' territories. The mode
+ * exits before ordinary package selection, so an unowned markdown path cannot widen it to
+ * full suites. Without a file list it retains the conservative all-guards behavior.
  */
 const guardsOnly = /^(1|true|yes)$/i.test((process.env.KANBAN_TEST_GUARDS_ONLY || "").trim());
 
@@ -1036,11 +1031,9 @@ export function selectorFileScopeUnionNote({ impactSelectorRequested, scopedFile
  * vitest walks its own module graph and selects every suite that imports the change, directly
  * or transitively.
  *
- * Scoping applies only to a package the diff OWNS files in. A package that is in scope purely
- * as a downstream DEPENDENT (or via ALWAYS_RUN) has no changed files of its own to relate to,
- * and `vitest related` with someone else's paths would select nothing — so those packages
- * keep running their full suite. Same fail-open discipline as the package scope: unset, or a
- * value naming no file in a package, means "run everything for that package".
+ * Downstream packages relate to upstream inputs when their vitest config supports it. A
+ * package present only for tree guards runs those guards alone. Unknown/config/deleted input
+ * retains the full-suite fallback; see `planPackageScope` for the execution decision.
  */
 const fileScopeRaw = (process.env.KANBAN_TEST_FILES || "").trim();
 const scopedFiles = fileScopeRaw
@@ -1066,8 +1059,9 @@ const ALWAYS_RUN_TESTS = Object.fromEntries(
 
 /** `{ total, kept, skipped }` over the whole marker-derived floor, for the scope notice. */
 function alwaysRunGuardCounts() {
-  const all = Object.values(ALWAYS_RUN_GUARDS).flat();
-  const kept = Object.values(ALWAYS_RUN_TESTS).flat().length;
+  const packages = guardsOnly ? PACKAGES : toRun;
+  const all = packages.flatMap((pkg) => ALWAYS_RUN_GUARDS[pkg.label]);
+  const kept = packages.flatMap((pkg) => ALWAYS_RUN_TESTS[pkg.label]).length;
   return { total: all.length, kept, skipped: all.length - kept };
 }
 
@@ -1124,6 +1118,30 @@ export function upstreamChangedFiles(
     }
   }
   return result;
+}
+
+/**
+ * Decide once whether a known diff affects this package's ordinary tests. Packages added only
+ * for their tree guards must not fall through to full suites. Unknown paths/configs and deleted
+ * affected files still widen; the client's shared dependency cannot be related through its
+ * vitest configuration, so it also keeps its full-suite fallback.
+ */
+export function planPackageScope(pkg, files = scopedFiles, exists = (p) => existsSync(resolve(ROOT, p))) {
+  const changed = files.map((f) => f.replace(/\\/g, "/").replace(/^\.\//, ""));
+  const unknown = changed.some((f) => !PACKAGES.some((p) => f.startsWith(`${p.dir}/`)));
+  const config = changed.some((f) => /^packages\/[^/]+\/(?:package\.json|tsconfig(?:\.[^/]+)?\.json|vitest\.[^/]+)$/.test(f));
+  if (changed.length === 0 || unknown || config) return { kind: "full", files: [] };
+  const own = changed.filter((f) => f.startsWith(`${pkg.dir}/`));
+  const upstream = pkg.label === "shared" ? [] : changed.filter((f) => f.startsWith("packages/shared/"));
+  const affected = [...own, ...upstream];
+  if (affected.some((f) => !exists(f)) || (pkg.label === "client" && upstream.length > 0)) {
+    return { kind: "full", files: [] };
+  }
+  if (affected.length === 0) return { kind: "guards", files: [] };
+  return {
+    kind: "related",
+    files: [...ownedChangedFiles(pkg.dir, changed, exists), ...upstreamChangedFiles(pkg.label, changed, exists)],
+  };
 }
 
 function runPackage({ dir, label, exclude }, mode = null) {
@@ -1425,6 +1443,10 @@ async function runRelatedWithFallback(pkg, files) {
   const uncovered = coverageProbeDisabled
     ? null
     : uncoveredSourceFiles(await relatedCoverageByFile(resolve(ROOT, pkg.dir), files));
+  if (!coverageProbeDisabled && uncovered === null) {
+    console.warn(`[test:mine] ${pkg.label}: related coverage is unknown; running the package's full suite instead.`);
+    return runPackage(pkg).then((r) => r.code);
+  }
   if (uncovered && uncovered.length > 0) {
     console.warn(
       `[test:mine] ${pkg.label}: ${uncovered.length} of ${files.length} changed file(s) are imported by NO ` +
@@ -1497,7 +1519,8 @@ export function announceScope(log = console.log, warn = console.warn) {
   if (guards.skipped > 0) {
     log(
       `[test:mine] @gate:always-run floor: ${guards.kept} of ${guards.total} guard suite(s) — ` +
-        `${guards.skipped} excused by their \`when:\` precondition against ${scopedFiles.length} changed file(s) (#1041)`,
+        `${guards.skipped} not forced by their \`when:\` precondition against ${scopedFiles.length} changed file(s); ` +
+        `related selections or a full-suite fallback can still include them (#1041)`,
     );
   }
 }
@@ -1847,35 +1870,24 @@ if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
     console.log("\n[test:mine] All impact-selected suites and guards passed.");
     process.exit(0);
   }
-  // The `vitest related` path. Per-package it may be file-scoped or a full suite (a package with
-  // no own changes and no upstream ones falls through to its whole suite), so the ONE label this
+  // The `vitest related` path. Per-package it may run related tests, guards only, or fall back
+  // to a full suite for unknown/deleted/uncovered affected input, so the ONE label this
   // step can honestly claim is whether a file scope was in play at all — the gate message names
   // the tier separately, and a `file-scoped` here that meant "for three of five packages" would
   // be a narrower claim than the run earned.
   if (scopedFiles.length > 0) stepScope = "file-scoped";
   for (const pkg of toRun) {
-    const owned = scopedFiles.length > 0 ? ownedChangedFiles(pkg.dir) : [];
-    let relatedFiles = owned;
-    if (owned.length === 0 && scopedFiles.length > 0) {
-      // Nothing of THIS package's own files changed — it may still be in scope purely as a
-      // downstream dependent (e.g. server/mcp-server pulled in by a shared-only diff). Relate
-      // against the upstream package's changed files instead of falling back to the full suite.
-      const upstream = upstreamChangedFiles(pkg.label);
-      if (upstream.length > 0) {
-        console.log(`\n[test:mine] ${pkg.label}: no own changes; file-scoped to ${upstream.length} upstream changed file(s)`);
-        if (await runRelatedWithFallback(pkg, upstream) !== 0) failed = true;
-        const guards = (ALWAYS_RUN_TESTS[pkg.label] ?? []).filter((f) => existsSync(resolve(ROOT, pkg.dir, f)));
-        if (guards.length > 0 && (await runPackage(pkg, { kind: "guards", files: guards })).code !== 0) failed = true;
-        continue;
-      }
-    }
-    if (relatedFiles.length === 0) {
-      // Nothing of this package changed (or no file scope at all) — full suite, as before.
+    const plan = planPackageScope(pkg);
+    if (plan.kind === "full") {
       if ((await runPackage(pkg)).code !== 0) failed = true;
       continue;
     }
-    console.log(`\n[test:mine] ${pkg.label}: file-scoped to ${relatedFiles.length} changed file(s) (KANBAN_TEST_FILES)`);
-    if (await runRelatedWithFallback(pkg, relatedFiles) !== 0) failed = true;
+    if (plan.kind === "related") {
+      console.log(`\n[test:mine] ${pkg.label}: file-scoped to ${plan.files.length} changed file(s) (KANBAN_TEST_FILES)`);
+      if (await runRelatedWithFallback(pkg, plan.files) !== 0) failed = true;
+    } else {
+      console.log(`\n[test:mine] ${pkg.label}: no affected package inputs; running its applicable guards only.`);
+    }
     const guards = (ALWAYS_RUN_TESTS[pkg.label] ?? []).filter((f) => existsSync(resolve(ROOT, pkg.dir, f)));
     if (guards.length > 0 && (await runPackage(pkg, { kind: "guards", files: guards })).code !== 0) failed = true;
   }

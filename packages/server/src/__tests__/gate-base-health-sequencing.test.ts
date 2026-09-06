@@ -11,6 +11,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { sequenceBaseHealthBeforeVerify, type BaseHealthSequenceDeps } from "../services/gate-base-health-sequencing.js";
 import type { Database } from "../db/index.js";
+import { verifyChainGateWaiting } from "../services/verify-chain-semaphore.js";
 
 const db = {} as Database;
 
@@ -40,8 +41,10 @@ describe("sequenceBaseHealthBeforeVerify (#1009)", () => {
     await new Promise((r) => setTimeout(r, 20));
     // Still waiting on the in-flight run — the branch verify has not been allowed to start.
     expect(resolved).toBe(false);
+    expect(verifyChainGateWaiting()).toBe(true);
     settle({ outcome: "red", sha: "abc", branch: "master", durationMs: 1 });
     const out = await pending;
+    expect(verifyChainGateWaiting()).toBe(false);
     expect(out.action).toBe("joined");
     expect(out.note).toContain("joined an in-flight run");
     expect(out.note).toContain("base red");

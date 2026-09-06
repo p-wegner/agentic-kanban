@@ -16,27 +16,24 @@
  * Namespace-wide on purpose: every prefix this codebase owns starts with `kanban-`
  * (enforced by `assertNamespacedPrefix`), so one call covers the prefixes that exist today
  * AND the ones added later — a per-prefix list is the drift that produced the original
- * backlog. An hour of grace, well clear of any live probe or gate, which run in minutes.
+ * backlog. Ownership, not age, protects live work. Legacy roots without ownership are
+ * retained: an older stable board may still be using them. They need an operator cleanup.
  */
-import { sweepStaleTempDirs, TEMP_DIR_NAMESPACE } from "@agentic-kanban/shared/lib/temp-dir";
+import { sweepStaleTempDirsAsync, TEMP_DIR_NAMESPACE } from "@agentic-kanban/shared/lib/temp-dir";
+import type { SweepTempDirsResult } from "@agentic-kanban/shared/lib/temp-dir";
 
-export interface StaleTempSweepResult {
-  matched: number;
-  removed: number;
-  failed: number;
-  truncated: boolean;
-}
+export type StaleTempSweepResult = SweepTempDirsResult;
 
 /**
  * Idempotent and safe to run at every boot: `sweepStaleTempDirs` never throws, skips
  * anything younger than the grace period, and caps its own removals per pass (a truncated
  * sweep simply continues next boot).
  */
-export function sweepStaleTempDirsOnce(
+export async function sweepStaleTempDirsOnce(
   options: { root?: string; nowMs?: number; olderThanMs?: number } = {},
   log: (message: string) => void = console.log,
-): StaleTempSweepResult {
-  const result = sweepStaleTempDirs(TEMP_DIR_NAMESPACE, options);
+): Promise<StaleTempSweepResult> {
+  const result = await sweepStaleTempDirsAsync(TEMP_DIR_NAMESPACE, { ...options, retainUnowned: true });
   // Silent on a clean boot — the common case, and a line saying "0 removed" every start is
   // how a log stops being read. Anything else is reported, INCLUDING failures: the whole
   // point of the ticket is that a leak nobody can see is a leak nobody fixes.

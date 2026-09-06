@@ -10,10 +10,9 @@
  * attempt collided again.
  *
  * Three rules, applied BEFORE the gate takes the verify-chain slot:
- *  1. A probe already in flight for the project is JOINED — the gate waits for it rather than
- *     starting a second suite beside it. (The chain semaphore already serializes the two, but
- *     #989's yield handed the slot over while the probe's orphaned vitest tree was still on the
- *     box; that hole is closed in `setup-script.ts`, and joining makes the order explicit.)
+ *  1. A probe already in flight for the project is JOINED with foreground demand registered.
+ *     It can yield within its starvation budget; the gate waits for process-tree termination
+ *     and cleanup before proceeding, or for the full verdict when that budget is exhausted.
  *  2. A base whose verdict is DUE — by the same posture-driven cadence the sweep uses, so this
  *     launches nothing the sweep would not have — is measured FIRST, then the branch. One suite
  *     at a time is the point; the ordering follows from the base verdict being what a failing
@@ -39,6 +38,7 @@ import {
 import { resolveBaseHealthProbeDue, type BaseHealthDueVerdict } from "./base-branch-health-reprobe.service.js";
 import { noteMergeGatePhase } from "./merge-job.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
+import { registerVerifyChainGateDemand } from "./verify-chain-semaphore.js";
 
 export type BaseHealthSequenceAction =
   /** A probe was already running for this project; the gate waited for it. */
@@ -106,7 +106,10 @@ export async function sequenceBaseHealthBeforeVerify(args: {
       deps.notePhase(workspaceId, "waiting for the base-health run already in flight (#1009)");
       console.log(`[pre-merge-gate] workspace ${workspaceId}: a base-health run is already in flight for project ${projectId} — joining it before the branch verify (#1009)`);
       const startedAt = Date.now();
-      const result = await running.catch(() => null);
+      // Demand is separate from admission: holding a slot while joining could deadlock a
+      // probe that is still installing. Await its completion, including cancellation cleanup.
+      const releaseDemand = registerVerifyChainGateDemand();
+      const result = await running.catch(() => null).finally(releaseDemand);
       const waitedMs = Date.now() - startedAt;
       return {
         action: "joined",

@@ -94,6 +94,14 @@ interface VerifyChainWaiter {
 
 let active = 0;
 const waiters: VerifyChainWaiter[] = [];
+const foregroundDemands = new Set<symbol>();
+
+/** A gate waiting for a probe to stop must be visible before it can take a slot. */
+export function registerVerifyChainGateDemand(): () => void {
+  const demand = Symbol("gate waiting for base probe");
+  foregroundDemands.add(demand);
+  return () => { foregroundDemands.delete(demand); };
+}
 
 /**
  * Choose the next waiter to admit: a `gate` ahead of a `background` one, arrival order within
@@ -158,7 +166,7 @@ export function verifyChainSemaphoreQueueLength(): number {
  * on a phantom costs a discarded measurement.
  */
 export function verifyChainGateWaiting(): boolean {
-  return waiters.some((w) => w.priority === "gate");
+  return foregroundDemands.size > 0 || waiters.some((w) => w.priority === "gate");
 }
 
 /**
@@ -293,4 +301,5 @@ async function runUnderInProcessSemaphore<T>(
 export function resetVerifyChainSemaphoreForTests(): void {
   active = 0;
   waiters.length = 0;
+  foregroundDemands.clear();
 }

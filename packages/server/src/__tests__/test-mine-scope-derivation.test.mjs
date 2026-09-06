@@ -4,6 +4,9 @@
 // a non-test file that carries it.
 import { describe, expect, it } from "vitest";
 import { resolve } from "node:path";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
 import {
   ownedChangedFiles,
   upstreamChangedFiles,
@@ -11,7 +14,103 @@ import {
   scanAlwaysRunTests,
   relatedCoverageByFile,
   uncoveredSourceFiles,
+  planPackageScope,
+  PACKAGES,
+  ALWAYS_RUN_TESTS_DIR,
 } from "../../../../scripts/test-mine.mjs";
+
+// Exercise the real command entrypoint and its spawned argv in an isolated miniature repo.
+// Vitest alone is replaced with a recorder; no package suite or machine-wide lock is started.
+function recordedRunner(changedFiles, guardsOnly = false) {
+  const root = mkdtempSync(resolve(tmpdir(), "kanban-test-mine-plan-"));
+  try {
+    mkdirSync(resolve(root, "scripts"));
+    copyFileSync(resolve(import.meta.dirname, "../../../../scripts/test-mine.mjs"), resolve(root, "scripts/test-mine.mjs"));
+    writeFileSync(resolve(root, "scripts/machine-verify-lock.mjs"),
+      "export const MACHINE_LOCK_HEARTBEAT_INTERVAL_MS=1000; export async function acquireForBuilderTest(){return {handle:null};}\n");
+    const log = resolve(root, "argv.jsonl");
+    for (const pkg of PACKAGES) {
+      const dir = resolve(root, pkg.dir, ALWAYS_RUN_TESTS_DIR[pkg.label]);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(resolve(dir, "bare.test.ts"), "// @gate:always-run\n");
+      writeFileSync(resolve(dir, "conditional.test.ts"), `// @gate:always-run when:${pkg.dir}/src/**\n`);
+      const vitest = resolve(root, pkg.dir, "node_modules/vitest");
+      mkdirSync(vitest, { recursive: true });
+      writeFileSync(resolve(vitest, "vitest.mjs"),
+        "import {appendFileSync} from 'node:fs'; appendFileSync(process.env.TEST_MINE_ARGV_LOG, JSON.stringify({cwd:process.cwd(),argv:process.argv.slice(2)})+'\\n');\n");
+    }
+    mkdirSync(resolve(root, "packages/client/src"), { recursive: true });
+    writeFileSync(resolve(root, "packages/client/src/App.tsx"), "export {};\n");
+    const result = spawnSync(process.execPath, [resolve(root, "scripts/test-mine.mjs")], {
+      cwd: root, encoding: "utf8", windowsHide: true, timeout: 30_000,
+      env: { ...process.env, TEST_MINE_ARGV_LOG: log, KANBAN_TEST_PACKAGES: "shared,server,client",
+        KANBAN_TEST_FILES: changedFiles.join(","), KANBAN_TEST_GUARDS_ONLY: guardsOnly ? "1" : "",
+        KANBAN_RETRY_TEST_FILES: "", KANBAN_TEST_SELECTOR: "", KANBAN_TEST_MAX_WORKERS: "1",
+        KANBAN_TEST_NO_COVERAGE_PROBE: "1", KANBAN_TEST_HERMETIC: "", KANBAN_MACHINE_VERIFY_LOCK: "" },
+    });
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+    return readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+describe("runner execution argv", () => {
+  it("a client diff executes only applicable guards in shared/server, never their full suites", () => {
+    const calls = recordedRunner(["packages/client/src/App.tsx"]);
+    for (const label of ["shared", "server"]) {
+      const own = calls.filter((c) => c.cwd.endsWith(label));
+      expect(own).toHaveLength(1);
+      expect(own[0].argv[0]).toBe("run");
+      expect(own[0].argv[1]).toMatch(/bare\.test\.ts$/);
+      expect(own[0].argv.some((a) => a.includes("conditional.test"))).toBe(false);
+    }
+    expect(calls.some((c) => c.cwd.endsWith("client") && c.argv[0] === "related")).toBe(true);
+  });
+  it("a known docs diff narrows the guards-only entrypoint in every package", () => {
+    const calls = recordedRunner(["docs/a.md"], true);
+    expect(calls).toHaveLength(PACKAGES.length);
+    expect(calls.every((c) => c.argv[1].endsWith("bare.test.ts"))).toBe(true);
+    expect(calls.some((c) => c.argv.some((a) => a.includes("conditional.test")))).toBe(false);
+  });
+  it("a deleted affected input still spawns the affected package's full suite", () => {
+    const calls = recordedRunner(["packages/server/src/deleted.ts"]);
+    const server = calls.filter((c) => c.cwd.endsWith("server"));
+    expect(server).toHaveLength(1);
+    expect(server[0].argv.slice(0, 2)).toEqual(["run", "--exclude"]);
+  });
+});
+
+describe("package execution scope", () => {
+  const server = { label: "server", dir: "packages/server" };
+  const shared = { label: "shared", dir: "packages/shared" };
+  const exists = () => true;
+  it("runs only guards in unrelated packages included for their tree checks", () => {
+    expect(planPackageScope(shared, ["packages/server/src/a.ts"], exists).kind).toBe("guards");
+    expect(planPackageScope(server, ["packages/client/src/App.tsx"], exists).kind).toBe("guards");
+  });
+  it("keeps deleted affected input visible, even beside another surviving change", () => {
+    const files = ["packages/server/src/gone.ts", "packages/server/src/a.ts"];
+    expect(planPackageScope(server, files, (f) => !f.endsWith("gone.ts")).kind).toBe("full");
+    expect(planPackageScope(server, ["packages/shared/src/gone.ts"], () => false).kind).toBe("full");
+  });
+  it.each([[], ["tsconfig.base.json"], ["scripts/test-mine.mjs"], ["packages/client/vitest.config.ts"]])(
+    "fails open for unknown scope or global configuration: %j", (...files) => {
+      // Each table entry is a complete change list.
+      expect(planPackageScope(server, files, exists).kind).toBe("full");
+    },
+  );
+  it("relates both own and upstream input in a mixed diff", () => {
+    const plan = planPackageScope(server, ["packages/server/src/a.ts", "packages/shared/src/b.ts"], exists);
+    expect(plan.kind).toBe("related");
+    expect(plan.files).toHaveLength(2);
+    expect(plan.files[0]).toBe("src/a.ts");
+    expect(plan.files[1]).toMatch(/shared[/\\]src[/\\]b.ts$/);
+  });
+  it("keeps the full fallback for shared input the client cannot relate", () => {
+    expect(planPackageScope({ label: "client", dir: "packages/client" }, ["packages/shared/src/a.ts"], exists).kind).toBe("full");
+  });
+});
 
 /**
  * #537 leak A: a `packages/shared`-only diff expanded to server/mcp-server as downstream
