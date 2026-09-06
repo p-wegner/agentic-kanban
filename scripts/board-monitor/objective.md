@@ -25,29 +25,29 @@ This is a FRESH session every run — you have NO memory of previous runs. The k
 ## TUNABLE TARGETS - generated from Strategy Bullseye
 <!-- STRATEGY_BULLSEYE_GENERATED_START -->
 > The loop re-reads this file at the START of every iteration, so changes here take effect on the next cycle with **NO restart**. This block is generated from the Strategy Bullseye preference; edit the bullseye in the board UI instead of hand-editing these values.
-- **ACTIVE_AGENTS_TARGET = 3** - keep this many workspaces actively In Progress at all times.
+- **ACTIVE_AGENTS_TARGET = 1** - keep this many workspaces actively In Progress at all times.
 - **BACKLOG_FLOOR = 0** - never let the backlog drop below this; refill before it does.
-- **MAX_NEW_STARTS_PER_CYCLE = 3** - cap on how many NEW workspaces to launch in a single cycle.
+- **MAX_NEW_STARTS_PER_CYCLE = 1** - cap on how many NEW workspaces to launch in a single cycle.
 - **REFILL_FOCUS = balanced** - derived from work-type marker weights; `bugfix-only` emphasizes reproducible bugs, `balanced` allows feature/quality mix.
-- **HARNESS_SHARE = 34%** - at most this share of the WIP may run `harness`-tagged tickets (gate, guards, ratchets, impact map, hooks, merge path); the rest goes to product work. 100% disables the budget.
+- **HARNESS_SHARE = 100%** - at most this share of the WIP may run `harness`-tagged tickets (gate, guards, ratchets, impact map, hooks, merge path); the rest goes to product work. 100% disables the budget.
 
 ## RISK POSTURE (generated - do not hand-edit)
 - **RISK POSTURE = iterate** - Fast iteration on a local-first repo: the per-merge gate runs the test-impact SELECTION (a ranked guess, narrower than scoped), and the full suite runs nightly on the base branch instead. A defect the selection misses lands on the base and is caught within a day — cheap when a rebase is the whole cost, wrong when there is a real deployment (use Strict there). Set via Settings -> Workflow; a ticket may override with a `risk:<posture>` tag.
 
 ## STRATEGY WEIGHTS (generated - do not hand-edit)
-- Frontend: weight 5/5, area, provider claude
+- Frontend: weight 5/5, area, provider codex
 - Feature: weight 3/5, work-type
 - Quality: weight 3/5, work-type
 - Bugfix: weight 2/5, work-type
 - UX: weight 2/5, work-type
-- Backend: weight 2/5, area, provider claude
+- Backend: weight 2/5, area, provider codex
 
 ## PROVIDER POLICY (generated - do not hand-edit)
 When selecting a provider for a new workspace, apply these rules in priority order:
 1. **FILL** profiles should always have capacity — start work on them first.
 2. **THROTTLE** profiles are preferred for main work. Respect their headroom percentage.
 3. **FALLBACK-ONLY** profiles are last resort — only use if all others are exhausted or the user explicitly selects them.
-- **claude:andrena_team_5x** [claude:andrena_team_5x]: FILL — use aggressively, keep busy at all times (Primary harness - all new workspaces launch on claude:andrena_team_5x. Single source of truth (set-provider-default skill).)
+- **codex:default** [codex:default]: FILL — use aggressively, keep busy at all times (Drain existing backlog with one Codex runner; no refill.)
 
 ## CAPACITY HOLD (generated - do not hand-edit)
 The host's measured headroom is a brake on EVERY start, above every target in this file. Before any launch or relaunch, read the live snapshot once per cycle:
@@ -55,45 +55,18 @@ The host's measured headroom is a brake on EVERY start, above every target in th
 - If `capacity.hold` is **true**: start ZERO new builders and do not relaunch idle ones; let running sessions finish and keep at most ONE merge-gate run in flight. A gate run on a saturated box dies on fork-worker timeouts, so starting more work makes every lane lose.
 - Otherwise cap this cycle's new starts at `capacity.maxNewStarts` (never above MAX_NEW_STARTS_PER_CYCLE). `null` means the cheap tier could not measure headroom — the target applies unchanged.
 - Whatever you decide, write `capacity.reason` into this cycle's state.md line so the hold is auditable by its measured numbers, not by a token.
-- **CAPACITY_HOLD = false** - last measured when this block was generated (tier 0: 11.8GB free). Stale by definition: the live read above is authoritative.
-- **FREE_GB = 11.8** - MAX_NEW_STARTS this cycle would be 3.
+- **CAPACITY_HOLD = false** - last measured when this block was generated (tier 0: 14.5GB free). Stale by definition: the live read above is authoritative.
+- **FREE_GB = 14.5** - MAX_NEW_STARTS this cycle would be 1.
 <!-- STRATEGY_BULLSEYE_GENERATED_END -->
 
-## FOCUS POLICY (operator directive 2026-09-05, #1020 — authoritative; overrides the REFILL_FOCUS wording above)
-**KEEP THE BACKLOG STOCKED: run 3 builders in parallel on profile `anth`, and hold the backlog at BACKLOG_FLOOR = 15 gate-sized tickets. Refill is ON.**
+## FOCUS POLICY (operator directive 2026-09-06 - authoritative)
+**DRAIN THE EXISTING BACKLOG TO ZERO. Run one Codex builder at a time. Refill is OFF.**
 
-Context: the 2026-08-26 directive ("DRAIN THE BACKLOG, DO NOT REFILL") did its job — the drain
-landed (#900 and its follow-ups) and the board sat at ~1 open ticket. Three builders empty a
-one-ticket backlog in an hour, so from here the producer side has to keep pace with the consumer
-side (proposal `docs/proposals/2026-09-03-dev-board-vs-deployed-board.md` §3.D). The merge recipe
-that works is unchanged: keep a branch synced with master (update-base/merge), then run its gate
-SOLO — avoid two verify chains at once where possible (#903).
-
-1. **Merge-first**: land finished In-Review work before starting new tickets.
-2. **Start new Todo tickets up to WIP 3** on `anth` (Bullseye is the source of truth; do not
-   hand-pick another profile). **Never start #834** (`no-auto-start`, needs a Linux CI run).
-   **Capacity brake**: per the generated CAPACITY HOLD section above — read `capacity` off
-   `GET /api/projects/<id>/monitor-tunables` every cycle before any start or relaunch.
-3. **Keep the board healthy**: unstick stale sessions, relaunch dead builders on host
-   (worker dispatch stays OFF until #895/#900-class fleet bugs are verified fixed).
-4. **REFILL to BACKLOG_FLOOR = 15.** This value overrides the generated `BACKLOG_FLOOR` above.
-   Count the ELIGIBLE backlog (Backlog + Todo, not blocked, not `no-auto-start`); when it is
-   below 15, run the `$backlog-refill` skill to create tickets and the `$ticket-enhancer` skill
-   on each new one before it is eligible to start. Rules for every refilled ticket:
-   - **Gate-sized** (CLAUDE.md sizing rule): a few-minutes change is NOT its own ticket — it is a
-     group member or part of its neighbour. Declare coupling at creation with the `coupled_with`
-     edge (`create_issues_batch` `dependencies`, #661), never as "do together with #X" prose.
-   - **Sources, in this order** — take from the first that still has unfiled items, and cite the
-     source line in the ticket's Why: (a) `BACKLOG.md` (the exported board backlog — items not yet
-     on the board), (b) `docs/proposals/*` (unimplemented sections, newest proposal first),
-     (c) open items in `CONTINUE.md` (the "remaining"/"unverified"/"next steps" lines), (d) the
-     general architecture plan `docs/plans/2026-09-03-general-architecture-plan.md`, Phase 1-2
-     items only.
-   - **Dedupe before filing**: `list_issues` for the same title/source line; an existing ticket
-     in any non-Done column means skip it.
-   - Cap refill at MAX_NEW_STARTS_PER_CYCLE × 2 new tickets per cycle; the floor is a target to
-     reach over a day, not in one burst.
-- **WIP limit = 3**, MAX_NEW_STARTS_PER_CYCLE = 3. Provider/profile per the generated PROVIDER POLICY block above.
+1. Merge finished work before starting another ticket; retain the normal review and merge gates.
+2. WIP limit = 1, ACTIVE_AGENTS_TARGET = 1, MAX_NEW_STARTS_PER_CYCLE = 1. Use the Codex profile in the generated provider policy.
+3. BACKLOG_FLOOR = 0. Do not generate, refill, or expand the backlog. The refill ideas below are inactive during this drain.
+4. Keep the capacity brake and dependency checks. Report blocked or no-auto-start tickets honestly; do not mark them Done to reach zero.
+5. Use the in-process monitor. Stop starting work when the existing eligible backlog is empty; complete its remaining review and merge work.
 
 ## REFILL STRATEGY BULLSEYE (agent-metrics-derived, 2026-06-05)
 Based on state.md recurring failure patterns from recent agent cycles, prioritize tickets in these areas:
@@ -128,7 +101,7 @@ Each run, make as much bounded progress toward a healthy, moving board as the pr
 2. UNBLOCK EXISTING AGENTS FIRST. Before starting anything new, clear what's already in flight: merge idle "In Review" workspaces (then verify master actually advanced), answer/resolve agents blocked on questions, and unstick stale or failed sessions. A 1-second / zero-token provider session = a FAILED launch — stop it and inspect the branch; do not wait through polling. Existing work always takes precedence over starting new tickets. Don't bulk-RESUME many stale workspaces at once.
    - **E2E rabbit-hole pattern (don't just relaunch).** If a workspace has a *running* session but **zero committed file changes across 2+ cycles** and its last messages are about test/E2E infrastructure (e.g. fighting `packages/e2e/playwright.config.ts`, worktree ports `SERVER_PORT`/`VITE_PORT`/`PORT`, running the full Playwright suite), it is stuck on plumbing instead of the feature. Do NOT relaunch it again — send ONE redirect via `POST /api/workspaces/:id/turn` with: *"Skip the full E2E suite in this worktree (worktrees lack node_modules and have port issues — see CLAUDE.md). Implement the feature and COMMIT it now; verify with `pnpm test:mine` (unit) and the Vite dev server / playwright-cli for visual checks, not the full E2E run."* If still no committed changes the next cycle, STOP the session and inspect/flag the branch rather than redirecting again.
 3. KEEP ACTIVE_AGENTS_TARGET AGENTS RUNNING. Count how many workspaces are actively In Progress; if fewer than ACTIVE_AGENTS_TARGET, pull the next backlog item(s) into the sprint and start workspaces for them (POST /api/workspaces) — launch up to MAX_NEW_STARTS_PER_CYCLE new per cycle, verifying the server stays healthy between launches. Never exceed ACTIVE_AGENTS_TARGET concurrent. Drive work THROUGH the board, do NOT implement tickets yourself on master. (The bulk-resume caution above is about relaunching existing sessions, not starting fresh backlog items.)
-4. KEEP THE ELIGIBLE BACKLOG ABOVE BACKLOG_FLOOR. Count ONLY non-feature backlog items (quality / architecture / bugfix) — feature tickets do NOT count toward this floor. If the eligible count is below BACKLOG_FLOOR (even if total backlog ≥ BACKLOG_FLOOR because it is full of features), run the $backlog-refill skill to create enough non-feature tickets to bring the eligible count back above the floor. **A backlog of 12 features with 0 quality/arch/bugfix tickets = floor NOT met — refill immediately.** Act early; never let the eligible pool hit zero. Newly created tickets feed priority 3 (they get pulled into the sprint and run on later cycles).
+4. DRAIN WITHOUT REFILL. BACKLOG_FLOOR is zero. Do not run backlog-refill or create replacement work; finish the existing backlog and report any blocked remainder.
 
 COMMIT DISCIPLINE (critical, learned the hard way): if you fix a setup bug or change master yourself, COMMIT it immediately. Never leave uncommitted changes in the main checkout — they block the auto-merge queue and stall the whole board. See docs/learnings/2026-05-31-monitor-harness-requires-stop-hooks.md.
 
