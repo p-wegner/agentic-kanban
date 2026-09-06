@@ -76,4 +76,23 @@ describe("runPreMergeGate sequences against the base-health run (#1009)", () => 
     expect(res.message).not.toContain("base-health");
     expect(verifyBaseBranchHealth).not.toHaveBeenCalled();
   });
+
+  it("samples the worker budget after waiting for base health, not when the gate was submitted", async () => {
+    await setPreference(verifyScriptPrefKey("p"), "gradlew.bat test", db);
+    await setPreference("verify_max_workers_p", "8", db);
+    let settle!: () => void;
+    inFlight = new Promise((r) => { settle = () => r(null); });
+    runSetupScript.mockResolvedValue({ exitCode: 0, stdout: "ok", stderr: "" });
+    const gate = runPreMergeGate({ id: "ws", workingDir: "/tmp/wt", baseBranch: "master" }, "p", db);
+    const { verifyChainGateWaiting } = await import("../services/verify-chain-semaphore.js");
+    await vi.waitFor(() => expect(verifyChainGateWaiting()).toBe(true));
+    await setPreference("verify_max_workers_p", "1", db);
+    settle();
+    const result = await gate;
+    expect(result.passed).toBe(true);
+    expect(runSetupScript).toHaveBeenCalledWith("/tmp/wt", "gradlew.bat test", expect.objectContaining({
+      env: expect.objectContaining({ KANBAN_TEST_MAX_WORKERS: "1", KANBAN_TYPECHECK_WORKERS: "1" }),
+    }));
+    expect(result.message).toContain("workers 1");
+  });
 });

@@ -246,8 +246,15 @@ describe("buildVerifyEnv", () => {
       changedFiles: ["docs/a.md"],
     });
     expect(env.KANBAN_TEST_GUARDS_ONLY).toBe("1");
+    expect(env.KANBAN_TEST_FILES).toBe("docs/a.md");
     expect(env).not.toHaveProperty("KANBAN_TEST_SELECTOR");
     expect(env).not.toHaveProperty("KANBAN_TEST_PACKAGES");
+  });
+
+  it("leaves an unknown guards-only diff unscoped", () => {
+    const env = buildVerifyEnv({ isolationEnv, guardsOnly: true, impactEnv, packagesEnv: null,
+      emitFileScope: false, changedFiles: [] });
+    expect(env).not.toHaveProperty("KANBAN_TEST_FILES");
   });
 
   it("still carries the selector when there is no package scope to attach it to", () => {
@@ -474,7 +481,7 @@ describe("buildGateTierMessage under the impact tier", () => {
 
     it("omits the guard estimate rather than inventing one when no durations are readable", () => {
       const message = buildGateTierMessage({ ...baseTier, impactSelection: null });
-      expect(message).toContain("+66 guard suites,");
+      expect(message).toContain("+66 guard suites (forced floor; selected/full suites may include more)");
       expect(message).not.toContain("est)");
     });
 
@@ -511,7 +518,7 @@ describe("buildGateTierMessage under the impact tier", () => {
     });
   });
 
-  it("leaves a non-impact message exactly as it was", () => {
+  it("identifies the forced floor in a non-impact message too", () => {
     // The regression that matters most: every project stays on `full`/`scoped`, so their messages
     // must be byte-identical to before this tier existed.
     const message = buildGateTierMessage({
@@ -523,7 +530,7 @@ describe("buildGateTierMessage under the impact tier", () => {
       guardSuiteCount: 66,
       maxWorkers: 6,
     });
-    expect(message).toBe("pre-merge gate passed (tier: file-scoped, 3 changed file(s), +66 guard suites, workers 6)");
+    expect(message).toBe("pre-merge gate passed (tier: file-scoped, 3 changed file(s), +66 guard suites (forced floor; selected/full suites may include more), workers 6)");
   });
 });
 

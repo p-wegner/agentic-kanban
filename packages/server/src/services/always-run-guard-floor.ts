@@ -29,7 +29,7 @@ import { join, relative, resolve, sep } from "node:path";
 const ALWAYS_RUN_MARKER_RE = /^\s*\/\/\s*@gate:always-run\b(.*)$/m;
 
 /** Mirrors `ALWAYS_RUN_WHEN_RE` in `scripts/test-mine.mjs` (#1041). */
-const ALWAYS_RUN_WHEN_RE = /\bwhen:(\S+)/;
+const ALWAYS_RUN_WHEN_RE = /\bwhen:([^\s,]+(?:\s*,\s*[^\s,]+)*)/;
 
 /** Mirrors `ALWAYS_RUN_TEST_FILE` in `scripts/test-mine.mjs`. */
 const ALWAYS_RUN_TEST_FILE = /\.test\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
@@ -65,7 +65,7 @@ export interface GuardFloorFields {
  *
  * `changedFiles` applies each marker's `when:` precondition (#1041), so the count describes the
  * RUN rather than the tree. Pass `[]` whenever the runner will not narrow either (no
- * `KANBAN_TEST_FILES`, e.g. the guards-only docs run): the two must agree, or the message is
+ * `KANBAN_TEST_FILES`): the two must agree, or the message is
  * wrong in the flattering direction.
  *
  * Best-effort throughout: a scan or parse error yields whatever was gathered, never an exception.
@@ -74,7 +74,7 @@ export interface GuardFloorFields {
  */
 export function describeAlwaysRunGuards(
   repoRoot: string,
-  options?: { changedFiles?: readonly string[] },
+  options?: { changedFiles?: readonly string[]; packages?: readonly string[] },
 ): { count: number; estMs: number | null; assumedCount: number } {
   const changedFiles = (options?.changedFiles ?? []).map((f) => f.replace(/\\/g, "/"));
   const durations = readTestDurationsMap(repoRoot);
@@ -105,6 +105,7 @@ export function describeAlwaysRunGuards(
     }
   };
   for (const dir of ALWAYS_RUN_TESTS_DIRS) {
+    if (options?.packages && !options.packages.includes(dir.split(sep)[1])) continue;
     const abs = resolve(repoRoot, dir);
     if (!existsSync(abs)) continue;
     try {
@@ -203,10 +204,11 @@ export function countAlwaysRunGuardSuites(repoRoot: string): number {
 export function guardFloorFor(
   repoRoot: string,
   changedFiles: readonly string[],
-  options: { narrowed: boolean },
+  options: { narrowed: boolean; packages?: readonly string[]; guardsOnly?: boolean },
 ): GuardFloorFields {
   const floor = describeAlwaysRunGuards(repoRoot, {
     changedFiles: options.narrowed ? changedFiles : [],
+    packages: options.guardsOnly ? undefined : options.packages,
   });
   return {
     guardSuiteCount: floor.count,

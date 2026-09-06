@@ -96,8 +96,9 @@ const IGNORABLE_UNOWNED_PATHS: ReadonlyArray<RegExp> = [
  * what a tree-scanning guard is for: the diffs least likely to be checked by their own
  * package's suites were the ones that skipped the checks covering the whole tree.
  *
- * The cost is real (server is the largest suite) and is accepted: this list is the safety
- * floor under scoping, and a floor that omits most of the guards is not a floor.
+ * Inclusion preserves the guard floor, not a requirement to run unrelated package tests:
+ * when the runner knows the changed files and none affect this package, it runs only the
+ * applicable declared guards. Unknown or affected scope still widens verification.
  */
 const ALWAYS_RUN: ReadonlyArray<TestPackageLabel> = ["shared", "server"];
 

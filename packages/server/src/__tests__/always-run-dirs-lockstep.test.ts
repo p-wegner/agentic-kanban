@@ -167,7 +167,7 @@ describe("always-run guard-suite dirs: test-mine vs the gate's tier reporter", (
         writeFileSync(path.join(dir, "bare.test.ts"), DECLARES);
         writeFileSync(
           path.join(dir, "scoped.test.ts"),
-          "// @gate:always-run when:packages/server/src/routes/**,docs/x.md - only these\nimport {} from \"vitest\";\n",
+          "// @gate:always-run when:packages/server/src/routes/**, docs/x.md - only these\nimport {} from \"vitest\";\n",
         );
 
         const runFor = (changed: string[]): string[] =>
@@ -194,6 +194,8 @@ describe("always-run guard-suite dirs: test-mine vs the gate's tier reporter", (
         // …and they are not merely agreeing on a constant: the precondition really narrows.
         expect(runFor(["packages/client/src/App.tsx"])).toEqual(["src/__tests__/bare.test.ts"]);
         expect(runFor([]).length).toBe(2);
+        expect(runFor(["docs/x.md"]).length).toBe(2);
+        expect(describeAlwaysRunGuards(root, { packages: ["client"] }).count).toBe(0);
       } finally {
         rmSync(root, { recursive: true, force: true });
       }

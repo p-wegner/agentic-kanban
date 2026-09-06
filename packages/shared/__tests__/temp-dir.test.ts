@@ -1,10 +1,13 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   createManagedTempDir,
   sweepStaleTempDirs,
+  sweepStaleTempDirsAsync,
+  TEMP_DIR_OWNER_FILE,
   TEMP_DIR_NAMESPACE,
   withTempDir,
 } from "../src/lib/temp-dir.js";
@@ -35,6 +38,7 @@ describe("createManagedTempDir", () => {
   it("creates a directory and removes it on dispose, idempotently", () => {
     const dir = createManagedTempDir("kanban-managed-spec-");
     expect(existsSync(dir.path)).toBe(true);
+    expect(JSON.parse(readFileSync(join(dir.path, TEMP_DIR_OWNER_FILE), "utf8"))).toEqual({ pid: process.pid });
     writeFileSync(join(dir.path, "payload.txt"), "x", "utf8");
 
     expect(dir.dispose()).toBe(true);
@@ -84,6 +88,46 @@ describe("sweepStaleTempDirs", () => {
     utimesSync(full, when, when);
     return full;
   }
+
+  it.each([sweepStaleTempDirs, sweepStaleTempDirsAsync])("preserves old live owners and reclaims dead ones (%#)", async (sweep) => {
+    const root = sweepRoot();
+    const live = agedDir(root, "kanban-owner-live", 0);
+    const dead = agedDir(root, "kanban-owner-dead", 0);
+    const child = spawnSync(process.execPath, ["-e", ""], { windowsHide: true });
+    expect(child.status).toBe(0);
+    writeFileSync(join(live, TEMP_DIR_OWNER_FILE), JSON.stringify({ pid: process.pid }));
+    writeFileSync(join(dead, TEMP_DIR_OWNER_FILE), JSON.stringify({ pid: child.pid }));
+    const old = new Date(Date.now() - 3 * 60 * 60_000);
+    for (const dir of [live, dead]) utimesSync(dir, old, old);
+    const result = await sweep("kanban-owner-", { root });
+    expect(result.removed).toBe(1);
+    expect(existsSync(live)).toBe(true);
+    expect(existsSync(dead)).toBe(false);
+  });
+
+  it("production cleanup retains unowned legacy roots and malformed ownership", async () => {
+    const root = sweepRoot();
+    const legacy = agedDir(root, "kanban-legacy-old", 3 * 60 * 60_000);
+    const invalid = agedDir(root, "kanban-invalid-old", 0);
+    writeFileSync(join(invalid, TEMP_DIR_OWNER_FILE), "partial-write");
+    const old = new Date(Date.now() - 3 * 60 * 60_000);
+    utimesSync(invalid, old, old);
+    expect((await sweepStaleTempDirsAsync("kanban-", { root, retainUnowned: true })).removed).toBe(0);
+    expect(existsSync(legacy)).toBe(true);
+    expect(existsSync(invalid)).toBe(true);
+  });
+
+  it("async disposal yields to the event loop before completing", async () => {
+    const dir = createManagedTempDir("kanban-async-spec-");
+    roots.push(dir.path);
+    let heartbeat = false;
+    const tick = new Promise<void>((resolve) => setImmediate(() => { heartbeat = true; resolve(); }));
+    const removed = await dir.disposeAsync();
+    expect(removed).toBe(true);
+    expect(heartbeat).toBe(true);
+    await tick;
+    expect(await dir.disposeAsync()).toBe(true);
+  });
 
   it("reaps matching dirs older than the cutoff and leaves fresh ones alone", () => {
     const root = sweepRoot();

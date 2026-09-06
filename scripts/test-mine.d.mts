@@ -160,6 +160,13 @@ export declare function upstreamChangedFiles(
   root?: string,
 ): string[];
 
+/** A known unrelated package runs guards only; unknown/deleted affected inputs run its full suite. */
+export declare function planPackageScope(
+  pkg: { dir: string; label: string },
+  files?: readonly string[],
+  exists?: (path: string) => boolean,
+): { kind: "full" | "related" | "guards"; files: string[] };
+
 /**
  * `{ [absolutePath]: boolean }` — whether each file is reachable from some suite
  * in `pkgDir` — or `null` when it could not be determined.

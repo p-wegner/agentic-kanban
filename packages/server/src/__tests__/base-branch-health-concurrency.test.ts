@@ -104,6 +104,15 @@ describe("base-health probes do not collide on one temp dir (#712)", () => {
     runSetupScript.mockResolvedValue({ exitCode: 0, stdout: "ok", stderr: "", timedOut: false });
   });
 
+  it("applies the same one-worker budget to base tests and typecheck", async () => {
+    const projectId = await seedProject(db);
+    await setPreference(`verify_max_workers_${projectId}`, "1", db);
+    await verifyBaseBranchHealth(projectId, db);
+    expect(runSetupScript).toHaveBeenCalledWith(expect.any(String), "pnpm test", expect.objectContaining({
+      env: expect.objectContaining({ KANBAN_TEST_MAX_WORKERS: "1", KANBAN_TYPECHECK_WORKERS: "1" }),
+    }));
+  });
+
   it("gives each probe of the SAME project a distinct directory", async () => {
     const projectId = await seedProject(db);
 
@@ -531,6 +540,37 @@ describe("a running base-health probe YIELDS the verify slot to a waiting gate (
     return { ran: () => ran, done };
   }
 
+  it("a same-project join requests preemption but waits for child termination before returning", async () => {
+    const { sequenceBaseHealthBeforeVerify } = await import("../services/gate-base-health-sequencing.js");
+    const { verifyChainGateWaiting } = await import("../services/verify-chain-semaphore.js");
+    const projectId = await seedProject(db);
+    let started!: () => void;
+    const running = new Promise<void>((r) => { started = r; });
+    let aborted!: () => void;
+    const cancellation = new Promise<void>((r) => { aborted = r; });
+    let finishTermination!: () => void;
+    runSetupScript.mockImplementation((_cwd: string, _script: string, opts: { signal: AbortSignal }) =>
+      new Promise((resolve) => {
+        finishTermination = () => resolve({ exitCode: 130, stdout: "", stderr: "", aborted: true });
+        opts.signal.addEventListener("abort", aborted, { once: true });
+        started();
+      }),
+    );
+    const probe = verifyBaseBranchHealth(projectId, db);
+    await running;
+    let joined = false;
+    const gate = sequenceBaseHealthBeforeVerify({ projectId, database: db, workspaceId: "ws" })
+      .then((out) => { joined = true; return out; });
+    await cancellation;
+    expect(verifyChainGateWaiting()).toBe(true);
+    expect(joined).toBe(false);
+    finishTermination();
+    expect(await probe).toBeNull();
+    expect((await gate).action).toBe("joined");
+    expect(verifyChainGateWaiting()).toBe(false);
+    expect(inFlightBaseBranchProbeCount()).toBe(0);
+  });
+
   /**
    * THE headline test — the whole ticket in one case, and the one the previous draft could not
    * express. The probe's OWN verify holds the slot; a gate queues behind it; the probe kills its
@@ -590,6 +630,7 @@ describe("a running base-health probe YIELDS the verify slot to a waiting gate (
   }, 30000);
 
   it("runs to completion once the consecutive-yield bound is spent — the anti-thrash escape", async () => {
+    const { sequenceBaseHealthBeforeVerify } = await import("../services/gate-base-health-sequencing.js");
     const { probeConsecutiveYields } = await import("../services/base-health-probe-preemption.js");
     const projectId = await seedProject(db);
     // A bound of 1 keeps this to two probes; the mechanism is the same at the default 3.
@@ -601,9 +642,9 @@ describe("a running base-health probe YIELDS the verify slot to a waiting gate (
     mockAbortableVerify(() => verifyRunning());
     const first = verifyBaseBranchHealth(projectId, db);
     await verifyHasStarted;
-    const gate1 = await queueGate();
+    const gate1 = sequenceBaseHealthBeforeVerify({ projectId, database: db, workspaceId: "ws1" });
     expect(await first).toBeNull();
-    await gate1.done;
+    await gate1;
     expect(probeConsecutiveYields(projectId)).toBe(1);
 
     // Probe 2: a gate is STILL queued, but a board merging steadily must not preempt every probe
@@ -624,14 +665,14 @@ describe("a running base-health probe YIELDS the verify slot to a waiting gate (
     );
     const second = verifyBaseBranchHealth(projectId, db);
     await verifyHasStarted;
-    const gate2 = await queueGate();
+    const gate2 = sequenceBaseHealthBeforeVerify({ projectId, database: db, workspaceId: "ws2" });
 
     // Give the poll room to fire and NOT abort — the escape is what keeps this verify alive.
     await new Promise((r) => setTimeout(r, PROBE_GATE_POLL_INTERVAL_MS_TEST));
     finishVerify();
 
     const result = await second;
-    await gate2.done;
+    await gate2;
     expect(result?.outcome).toBe("green");
     // ...and a completed run ends the streak, so the next gate can preempt again.
     expect(probeConsecutiveYields(projectId)).toBe(0);

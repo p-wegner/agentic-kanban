@@ -437,6 +437,15 @@ describe("always-run marker ratchet (#538)", () => {
       expect(parseAlwaysRunMarker('const M = "@gate:always-run";\n')).toBeNull();
     });
 
+    it("comma-space formatting preserves every territory before the trailing rationale", () => {
+      const marker = parseAlwaysRunMarker(
+        "// @gate:always-run when:packages/server/src/routes/**, packages/shared/src/** - both trees\n",
+      )!;
+      expect(marker.when).toEqual(["packages/server/src/routes/**", "packages/shared/src/**"]);
+      expect(alwaysRunWhenGlobIssues(marker.when)).toEqual([]);
+      expect(guardAppliesToChanges(marker.when, ["packages/shared/src/lib/foo.ts"])).toBe(true);
+    });
+
     it("a bare marker runs for every change set; a `when:` marker only for its territory", () => {
       const bare = parseAlwaysRunMarker(BARE)!.when;
       const scoped = parseAlwaysRunMarker(SCOPED)!.when;
