@@ -19,7 +19,8 @@ import { buildAgentPrompt } from "./workspace-create/policy.js";
 import type { Database } from "../db/index.js";
 import * as crudRepo from "../repositories/workspace-crud.repository.js";
 import { getEnabledPluginBySlug, listEnabledPlugins } from "./plugin-enabled.js";
-import { parsePluginLoopUnitKey, pluginSkillName } from "@agentic-kanban/shared/lib/plugin-manifest";
+import { parsePluginLoopUnitKey, pluginSkillName, pluginEnabledPreferenceKey } from "@agentic-kanban/shared/lib/plugin-manifest";
+import { fanOutPluginSkills, type EnableReport } from "./plugin-enablement.service.js";
 import { parseOnboardingUnitKey, parseInitSkillStepId } from "@agentic-kanban/shared/lib/onboarding-plan";
 import type { ProviderName } from "./agent-provider.js";
 import { runSetupScript } from "./setup-script.js";
@@ -37,7 +38,7 @@ import {
   type LatestSetupRun,
   type LatestSymlinkRun,
 } from "./workspace-run-records.js";
-import { writeAgentSkillFile, readLocalSkillPrompt, copySkillToWorktree, listLocalSkillNames, buildSkillMarkdown, localSkillFilePath } from "@agentic-kanban/shared/lib/agent-skill-files";
+import { writeAgentSkillFile, readLocalSkillPrompt, copySkillToWorktree, listLocalSkillNames, buildSkillMarkdown, localSkillFilePath, skillDirOf } from "@agentic-kanban/shared/lib/agent-skill-files";
 import { buildSkillInvocationBlock, selectBuilderSkills } from "@agentic-kanban/shared/lib/builder-skill-policy";
 import { writeTicketContextFile } from "@agentic-kanban/shared/lib/ticket-context";
 import { bootstrapSymlinks } from "@agentic-kanban/shared/lib/worktree-symlink-bootstrap";
@@ -47,6 +48,8 @@ import type { ProfileSelectionReason } from "../lib/profile-selection-reason.js"
 import { WorkspaceError, type CreateWorkspaceInput, type GitService } from "./workspace-internals.js";
 import { buildContextPrimer } from "./context-packer.service.js";
 import { materializeImpactMapIntoWorktree } from "./test-impact-map/worktree-map.js";
+import { IMPACT_MAP_PATH } from "./test-impact-map.service.js";
+import { IMPACT_TOOL_RELATIVE_PATH, TEST_IMPACT_SKILL_NAME } from "./test-impact-outcome.service.js";
 import { getStackProfile, resolveEffectiveVerify } from "./stack-profile.service.js";
 import type { StackProfile } from "@agentic-kanban/shared";
 import { resolveBoardFeedbackRouting } from "./board-feedback-routing.js";
@@ -123,26 +126,92 @@ async function resolveSkillFileImpl(
  * Best-effort: a broken plugin manifest or a missing skill source must not block workspace
  * creation.
  */
+/**
+ * One plugin skill that an ENABLED plugin declares but the worktree did not receive (#1039).
+ * Surfaced rather than swallowed: `copySkillToWorktree` returning false is a supported state for a
+ * skill the project never had, and a defect for one the project's pref says it has.
+ */
+export interface MissingPluginSkill {
+  pluginSlug: string;
+  skillName: string;
+  reason: string;
+}
+
+export interface PluginSkillMaterialization {
+  /** Skills copied into the worktree, by name. */
+  materialized: string[];
+  /**
+   * Skills the main checkout had LOST and this call re-created there before copying (#1039) —
+   * a healed state worth a log line, since it means enable-time fan-out did not stick.
+   */
+  healed: string[];
+  /** Skills that are enabled on paper but could not be put into the worktree at all. */
+  missing: MissingPluginSkill[];
+}
+
 async function materializeEnabledPluginSkillsImpl(
   database: Database,
   worktreePath: string,
   repoPath: string,
   projectId: string,
-): Promise<void> {
+): Promise<PluginSkillMaterialization> {
+  const result: PluginSkillMaterialization = { materialized: [], healed: [], missing: [] };
   try {
     // #552: one enabled-plugin iterator — this used to run `isPluginEnabledForProject`
     // once per INSTALLED plugin, i.e. a DB query per plugin on the workspace-create path.
-    for (const { manifest } of await listEnabledPlugins(projectId, database)) {
+    for (const { row, manifest } of await listEnabledPlugins(projectId, database)) {
       for (const skill of manifest.skills ?? []) {
         // #553: pluginSkillName is the ONE derivation of a plugin skill's directory name
         // (its comment says three hand-rolled ones disagreed) — the loop and onboarding
         // resolvers in this same file already use it.
-        await copySkillToWorktree(repoPath, pluginSkillName(skill.dir), worktreePath);
+        const name = pluginSkillName(skill.dir);
+        if (await copySkillToWorktree(repoPath, name, worktreePath)) {
+          result.materialized.push(name);
+          continue;
+        }
+        // #1039 — the pref says enabled, but the main checkout has no `.claude/skills/<name>`
+        // to copy from: the enable-time junction is gone (plugin checkout moved, directory
+        // deleted, pref flipped without the enable path). The worktree would launch with the
+        // skill's NAME in its ticket prose and nothing to run, and the impact MAP would ship
+        // without the tool that reads it. Re-run the same fan-out enabling does, then copy.
+        const report: EnableReport = {
+          prefKey: pluginEnabledPreferenceKey(row.pluginId, projectId),
+          skills: [], scaffoldWritten: false, scaffoldPlaceholders: 0, warnings: [],
+        };
+        let healError: string | null = null;
+        try {
+          fanOutPluginSkills({ localPath: row.localPath, manifest }, repoPath, report);
+        } catch (err) {
+          healError = errorMessage(err);
+        }
+        if (!healError && (await copySkillToWorktree(repoPath, name, worktreePath))) {
+          result.materialized.push(name);
+          result.healed.push(name);
+          console.warn(
+            `[workspaces] plugin "${row.pluginId}" is enabled for project ${projectId} but its skill ` +
+              `"${name}" was missing from ${skillDirOf(repoPath, name)} — re-materialized ` +
+              `(${report.skills.map((s) => `${s.name}:${s.mode}`).join(", ") || "no-op"}) and copied ` +
+              `into the worktree (#1039)${report.warnings.length ? `; ${report.warnings.join("; ")}` : ""}`,
+          );
+          continue;
+        }
+        const reason =
+          healError ??
+          (report.warnings.length > 0
+            ? report.warnings.join("; ")
+            : `skill dir "${skill.dir}" could not be materialized from ${row.localPath}`);
+        result.missing.push({ pluginSlug: row.pluginId, skillName: name, reason });
+        console.warn(
+          `[workspaces] plugin "${row.pluginId}" is enabled for project ${projectId} but its skill ` +
+            `"${name}" is NOT in the worktree ${worktreePath}: ${reason}. The agent launches without ` +
+            `it — a plugin-loop ticket or an impact-tier gate that names this skill will fall back silently (#1039).`,
+        );
       }
     }
   } catch (err) {
     console.warn(`[workspaces] plugin-skill materialization failed (non-fatal): ${errorMessage(err)}`);
   }
+  return result;
 }
 
 /**
@@ -163,10 +232,10 @@ async function materializeWorkspaceSkillsImpl(
     repoPath: string;
     projectId: string;
   },
-): Promise<{ skillName: string | null }> {
+): Promise<{ skillName: string | null; pluginSkills: PluginSkillMaterialization }> {
   const { skillId, diskSkillName, worktreePath, repoPath, projectId } = params;
   const skillName = await resolveSkillFileImpl(database, skillId, diskSkillName, worktreePath, repoPath);
-  await materializeEnabledPluginSkillsImpl(database, worktreePath, repoPath, projectId);
+  const pluginSkills = await materializeEnabledPluginSkillsImpl(database, worktreePath, repoPath, projectId);
   // #1018 — the test-impact map is no longer committed, so a worktree no longer inherits one by
   // branching. It rides along with the skills because it is the same kind of thing: a read-only
   // artifact the builder consumes and never writes. Doing it HERE rather than only at provisioning
@@ -177,7 +246,16 @@ async function materializeWorkspaceSkillsImpl(
     // skill widens to the package tier and says so, which is a wider run, never a wrong one.
     console.warn(`[workspaces] test-impact map copy failed (non-fatal): ${map.detail}`);
   }
-  return { skillName };
+  if (map.outcome === "copied" && pluginSkills.missing.some((m) => m.skillName === TEST_IMPACT_SKILL_NAME)) {
+    // #1039 — the map is only useful to the tool that reads it. Shipping one without the other
+    // is the exact state the ticket found: the worktree "has" test-impact and the fast loop is
+    // a guarded no-op. Named here, beside the copy, so the two halves are checked together.
+    console.warn(
+      `[workspaces] ${IMPACT_MAP_PATH} was copied into ${worktreePath} but ` +
+        `${IMPACT_TOOL_RELATIVE_PATH} is absent — the map ships without the tool that reads it (#1039)`,
+    );
+  }
+  return { skillName, pluginSkills };
 }
 
 /**
@@ -474,7 +552,7 @@ export function createWorkspaceProvisionService(deps: {
     return materializeWorkspaceSkillsImpl(database, params);
   }
 
-  async function materializeEnabledPluginSkills(worktreePath: string, repoPath: string, projectId: string): Promise<void> {
+  async function materializeEnabledPluginSkills(worktreePath: string, repoPath: string, projectId: string): Promise<PluginSkillMaterialization> {
     return materializeEnabledPluginSkillsImpl(database, worktreePath, repoPath, projectId);
   }
 

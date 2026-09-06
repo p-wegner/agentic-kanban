@@ -564,6 +564,15 @@ export interface GateTierInfo {
    */
   impactSelection?: GateImpactSelection | null;
   /**
+   * The selector was NOT in the worktree when the gate ran (#1039): the relative path the board
+   * looked for. Set only for an impact-selector run, and only when `impactSelection` is null for
+   * THIS reason rather than for a failed or unparseable `select`. The message names it, because
+   * "selection UNKNOWN" alone does not say that the tier's whole mechanism was absent — and the
+   * runner may still have found a machine-local copy under `$HOME`, which is a run whose
+   * selector the board neither materialized nor can vouch for.
+   */
+  impactSelectorAbsent?: string;
+  /**
    * Which selector chose the suites (#962). Optional for back-compat with a caller that never
    * resolved one; `gateRanScope` treats an absent value as `related`, which reproduces the
    * pre-#962 recording exactly for every project that does not opt in.
@@ -706,6 +715,20 @@ export function buildImpactSelectionNote(tierInfo: GateTierInfo): string | null 
   if (!selection) {
     // Silence here would read as "nothing was dropped". The tier narrowed the run by an amount
     // nobody can state, which is strictly worse than a stated number and must say so.
+    //
+    // #1039 — and WHY it could not be resolved, when the reason is that the selector itself was
+    // not in the worktree. That is not a tool hiccup: it means the plugin skill never reached
+    // this checkout, so the runner either fell back to `vitest related` (a different tier wearing
+    // this one's name) or picked up a machine-local copy under $HOME that the board did not
+    // provision. Either way the operator has to be told in the gate message, not in a
+    // `console.warn` that scrolled past in the runner's stdout.
+    if (tierInfo.impactSelectorAbsent) {
+      return (
+        `selection UNKNOWN — selector ABSENT (${tierInfo.impactSelectorAbsent} is not in the worktree; ` +
+        "the runner fell back to `vitest related` or to a machine-local copy under $HOME, neither of " +
+        "which the board provisioned — check that the test-impact plugin's skill is materialized, #1039)"
+      );
+    }
     return "selection UNKNOWN (could not be resolved — what it dropped is unmeasured)";
   }
   // `map stale` is not a footnote: the skill widens to the package tier and prints

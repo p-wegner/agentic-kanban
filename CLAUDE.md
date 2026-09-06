@@ -331,6 +331,17 @@ Two env vars carry it to the runner and both are load-bearing: `KANBAN_IMPACT_BA
 empty and the "selection" is the constant always-run set, the #963 defect again) and
 `KANBAN_TEST_NEW_FILES`.
 
+**The selector reaches a worktree by ONE road, and the board now checks it (#1039).** The plugin's
+skill is junctioned into the main checkout at enable time and copied into each worktree at
+provisioning; when that junction is gone (the checkout moved, the dir was deleted, the pref flipped
+by hand) the map still shipped and the tool did not, and nothing said so — the builder's guarded
+inner loop was a no-op and the gate quietly used a machine-local `$HOME` copy or fell back to
+`vitest related` under `tier: impact`. `materializeEnabledPluginSkills` now re-runs the enable-time
+fan-out (`fanOutPluginSkills`, which also replaces a dangling junction) before copying, returns
+`{ materialized, healed, missing }`, and warns for a healed or missing skill; the gate message says
+`selector ABSENT (<path> is not in the worktree …)` instead of a bare `selection UNKNOWN`, and
+`test-mine.mjs` names a `$HOME` hit.
+
 ### A builder writes ONLY in its own worktree — foreign repos included (#959)
 `prevent-cross-worktree-writes.js` guarded other worktrees OF THE SAME REPO. An unrelated
 checkout is neither the main checkout nor a linked worktree, so it was uncovered — and a

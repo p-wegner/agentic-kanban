@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { resolve } from "node:path";
 import {
   IMPACT_CLI_CANDIDATES,
+  impactCliOrigin,
   matchesExcludeGlob,
   mergeNewTestFiles,
   packageLabelByDir,
@@ -233,6 +234,28 @@ describe("resolveImpactCli", () => {
 
   it("returns null when the skill is installed nowhere (so the caller fails open)", () => {
     expect(resolveImpactCli(root, "")).toBeNull();
+  });
+});
+
+describe("impactCliOrigin (#1039)", () => {
+  // The $HOME fallback is what made the gate "work by luck": on this box the skill is junctioned
+  // into the profile skill dirs, so a worktree that never received the plugin skill still
+  // selected — and on a box without that junction it silently degraded. The runner must be able
+  // to tell the two apart so it can name the fallback instead of using it quietly.
+  const root = "/repo/worktree";
+  const home = "/home/u";
+
+  it("classifies the worktree copy as the provisioned one", () => {
+    expect(impactCliOrigin(`${root}/.claude/skills/test-impact/tools/impact.mjs`, root, home)).toBe("worktree");
+  });
+
+  it("classifies a $HOME hit as a machine-local fallback", () => {
+    expect(impactCliOrigin(`${home}/.claude/skills/test-impact/tools/impact.mjs`, root, home)).toBe("home");
+    expect(impactCliOrigin(`${home}/.codex/skills/test-impact/tools/impact.mjs`, root, home)).toBe("home");
+  });
+
+  it("is null for no CLI at all", () => {
+    expect(impactCliOrigin(null, root, home)).toBeNull();
   });
 });
 

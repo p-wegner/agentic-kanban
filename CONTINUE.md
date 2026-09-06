@@ -3,6 +3,36 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-06 — #1039: an enabled plugin's skill now reaches the checkout AND the worktree, or says why not
+
+**What was true:** `plugin_enabled_test-impact_<id>` = true, the plugin checkout intact, and no
+`.claude/skills/test-impact` in the main checkout — so every worktree got the 1.5 MB impact map and
+not the tool that reads it. The worktree this fix was built in (`ak-1039`) was itself in that state:
+`docs/tests/impact-map.json` present, skill absent, and the runner selected via the profile copy
+under `$HOME` (`impactCliOrigin` → `home`). The enable-time junction is the only bridge from a
+plugin to a worktree, and nothing re-created it once it was gone; a dangling junction was even
+reported `skipped-existing`.
+
+**Landed on this branch (not yet on master):**
+- `fanOutPluginSkills` is a module-level export of `plugin-enablement.service.ts`; it replaces a
+  dangling junction instead of skipping it.
+- `materializeEnabledPluginSkills` (provisioning AND relaunch, via `materializeWorkspaceSkills`)
+  re-runs that fan-out into the main checkout when a copy finds nothing, then copies; it returns
+  `{ materialized, healed, missing }` and warns loudly for both the healed and the missing case,
+  plus a dedicated warning when the map was copied but the test-impact tool was not.
+- The gate message names an absent selector: `selection UNKNOWN — selector ABSENT (.claude/skills/
+  test-impact/tools/impact.mjs is not in the worktree; …)` via `GateTierInfo.impactSelectorAbsent`,
+  set by `resolveGateImpactTierFields`. `scripts/test-mine.mjs` warns when it used a `$HOME` copy.
+
+**Verified by:** the three new `(#1039)` cases in `workspace-provision-plugin-skills.test.ts`
+(lost skill healed into checkout + worktree; dangling junction re-linked; unhealable skill reported
+in `missing`), `gate-tier-impact.test.ts` (absent-selector clause, and NOT blamed for a mere
+resolve failure), `test-mine-impact-selector.test.mjs` (`impactCliOrigin`); `pnpm check:arch`,
+`pnpm typecheck` (27s), `pnpm test:mine -- --changed HEAD` (152 files / 1239 tests green).
+
+**Not verified:** why the junction disappeared on the live board in the first place — the exclude
+entry proves the enable path once ran. The heal covers every cause; the cause itself is unknown.
+
 ## 2026-09-05 — #1047 fixed on master; the gate-floor and promote-evidence backlog filed and started
 
 **Running right now: two group workspaces, on two different accounts, both verified past the point
