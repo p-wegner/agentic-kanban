@@ -341,7 +341,20 @@ export function runSetupScript(
       else options.signal.addEventListener("abort", onAbort, { once: true });
     }
 
-    proc.on("exit", (code: number | null) => {
+    // #1049 — `close`, not `exit`. Node fires `exit` as soon as the DIRECT child's own process
+    // ends, which is not the same moment its stdio pipes finish draining: a step that spawns
+    // with `stdio: "inherit"` (every sub-step in check-arch.mjs, and pnpm/vitest's own worker
+    // trees) hands the same pipe HANDLE down to grandchildren, and a grandchild that is still
+    // writing when the immediate child exits keeps the handle open after `exit` already fired.
+    // Resolving on `exit` therefore returns whatever had arrived at that instant and silently
+    // drops everything a still-writing grandchild produces afterwards — exactly the shape
+    // measured on 2026-09-05: a capture that stops dead under one sub-step's own banner, on a
+    // host where I/O (and therefore how much a grandchild has flushed by the time its parent
+    // exits) was under memory pressure. `close` fires only once every stdio stream has actually
+    // ended, i.e. once every process holding the handle is done with it, so it cannot lose a
+    // grandchild's trailing output the way `exit` can. See setup-script-inherited-grandchild-
+    // output.test.ts for a deterministic reproduction of the race this fixes.
+    proc.on("close", (code: number | null) => {
       cleanup();
       resolve({ exitCode: code ?? 1, stdout, stderr, timedOut: false });
     });
