@@ -15,6 +15,11 @@ import {
   resolveTestImpactBudgetEnv,
   type ParsedTestImpactBudget,
 } from "@agentic-kanban/shared/lib/test-impact-budget";
+import {
+  buildGuardCostNote,
+  buildImpactSelectionNote,
+  type GateImpactSelection,
+} from "./impact-selection-note.js";
 
 /**
  * The three verify-gate tiers (#538), replacing `verify_file_scope` plus the implicit
@@ -353,88 +358,17 @@ export function resolveGateFileScopeEmission(args: {
 }
 
 /**
- * What the test-impact selection actually kept and dropped, for the gate message (#956).
- *
- * The `impact` tier's whole risk is in the tail it drops, so the message may not stop at naming
- * the tier: the repo's rule is that a level may only weaken verification VISIBLY, and "impact
- * tier, 12 suites" hides both HOW MANY suites were ranked out below the floor and whether the map
- * that ranked them was even current. A selection made from a STALE map is a materially different,
- * weaker claim than one made from a fresh map — the skill itself widens to the package tier and
- * prints `[inventory STALE]` in that case — and the two must not read the same.
- *
- * Every field is optional-by-absence at the type level only in the sense that the whole object is;
- * when the gate could not resolve a selection at all it carries `null` and the message SAYS the
- * selection facts are unknown rather than omitting the subject.
+ * `GateImpactSelection`, `buildImpactSelectionNote`, `buildGuardCostNote` and
+ * `IMPACT_MAP_STALE_REMEDY` moved to `./impact-selection-note.ts` when #1046's staleness-remedy
+ * work pushed this file past the god-module ceiling. Re-exported so no caller has to know it
+ * moved — see that file's header for why it is a cohesive unit on its own.
  */
-export interface GateImpactSelection {
-  /** How many test files the selection kept — the suites that actually ran (plus guards). */
-  selectedCount: number;
-  /** How many were ranked out BELOW the score floor. This is the tail the tier is betting on. */
-  belowFloorCount: number;
-  /**
-   * Was the impact map stale when the selection was computed?
-   *
-   * #1018 moved the map out of git without changing what this word means. "Fresh" is, and always
-   * was, a statement about the map's OWN recorded `commit:` stamp: `impact.mjs check`/`select`
-   * count `<stamp>..HEAD` and look for test files added since, and neither reads the index. What
-   * changed is only WHICH copy is being described — the snapshot the board materialized into this
-   * worktree, which is exactly the map the run used, rather than one inherited by branching.
-   */
-  stale: boolean;
-  /** The selection tier the skill itself reported (`impact` | `package` | `all`). */
-  selectionTier?: string;
-  /** How many changed files the selection saw — 0 means it never saw the diff (#963). */
-  changedCount?: number;
-  /**
-   * The budget the selection was made under, as the operator spelled it (#966), or undefined
-   * when no budget applied. Named in the message because a budget is a SECOND, independent
-   * narrowing on top of the score floor: `dropped 37 below the score floor` says nothing about
-   * how many more the clock dropped, and an operator reading a passing gate has to be able to
-   * tell "the tail scored too low" from "we ran out of the 60 seconds you allotted".
-   */
-  budget?: string;
-  /**
-   * How many suites the BUDGET dropped (i.e. cleared the score floor but did not fit in the
-   * time). Distinct from `belowFloorCount` on purpose — collapsing them would hide which knob
-   * to turn.
-   */
-  budgetDroppedCount?: number;
-  /**
-   * The selection's own measured estimate of what it kept, in ms — the number the budget is
-   * compared against. Undefined when the tool did not report one.
-   */
-  estMs?: number;
-  /**
-   * How many of the kept suites came from the OTHER selector rather than from the impact score
-   * (#967) — `signalCounts.external` in `select --json`, i.e. entries `--union` contributed that
-   * the impact ranking had not already picked.
-   *
-   * This is the provenance the ticket requires the message to state: `impact 143 + related added
-   * 12` is a materially different claim from `impact 155`, because the 12 carry no impact evidence
-   * at all — they are there because a second, differently-blind selector asked for them. Undefined
-   * when no union was passed (there is nothing to attribute); 0 when one was and the impact
-   * ranking had already picked every one of its suites, which is a real and worth-saying result.
-   */
-  externalCount?: number;
-  /**
-   * The run UNIONED a second selector in, but this DESCRIPTION could not reproduce that half
-   * (#967).
-   *
-   * Why the case exists at all. The gate's message is built from a second `select --json` call
-   * (`resolveGateSelection`), which is what keeps message and ledger from disagreeing about what the
-   * selection was. That call can pass everything the run passes — base, floor, budget — except one:
-   * the `--union` list, which is `vitest related`'s suite set for the changed files, derived by the
-   * RUNNER by booting a vitest instance per package. Reproducing it here would mean doing that
-   * inside the merge path, for a message.
-   *
-   * So the description covers the impact half exactly and the related half not at all. The numbers
-   * it reports are therefore a LOWER BOUND on what ran, and this flag is what makes the message say
-   * so. The alternative — printing `kept 143` for a run that executed 155 — is a level weakening
-   * verification invisibly in the one direction that flatters it, which is the failure this whole
-   * tier's messaging exists to prevent.
-   */
-  unionUnmeasured?: boolean;
-}
+export type { GateImpactSelection } from "./impact-selection-note.js";
+export {
+  buildImpactSelectionNote,
+  buildGuardCostNote,
+  IMPACT_MAP_STALE_REMEDY,
+} from "./impact-selection-note.js";
 
 /** Matches the test-file extensions `scripts/test-mine.mjs` actually runs. */
 const TEST_FILE_RE = /\.test\.[cm]?[jt]sx?$/;
@@ -705,97 +639,6 @@ export interface GateTierInfo {
    * a posture — a message must not claim a posture decided something it did not.
    */
   posture?: RiskPosture;
-}
-
-/**
- * The impact selection's facts as a message fragment (#956), or null when there is nothing to say.
- *
- * Extracted from `buildGateTierMessage` rather than inlined because it is the part with a real
- * decision in it — an unresolved selection must produce a LOUDER string than a resolved one, which
- * is the opposite of the usual "omit when absent" shape used for the optional fields around it.
- */
-export function buildImpactSelectionNote(tierInfo: GateTierInfo): string | null {
-  if (tierInfo.selector !== "impact" || tierInfo.guardsOnly) return null;
-  const selection = tierInfo.impactSelection;
-  if (!selection) {
-    // Silence here would read as "nothing was dropped". The tier narrowed the run by an amount
-    // nobody can state, which is strictly worse than a stated number and must say so.
-    //
-    // #1039 — and WHY it could not be resolved, when the reason is that the selector itself was
-    // not in the worktree. That is not a tool hiccup: it means the plugin skill never reached
-    // this checkout, so the runner either fell back to `vitest related` (a different tier wearing
-    // this one's name) or picked up a machine-local copy under $HOME that the board did not
-    // provision. Either way the operator has to be told in the gate message, not in a
-    // `console.warn` that scrolled past in the runner's stdout.
-    if (tierInfo.impactSelectorAbsent) {
-      return (
-        `selection UNKNOWN — selector ABSENT (${tierInfo.impactSelectorAbsent} is not in the worktree; ` +
-        "the runner fell back to `vitest related` or to a machine-local copy under $HOME, neither of " +
-        "which the board provisioned — check that the test-impact plugin's skill is materialized, #1039)"
-      );
-    }
-    return "selection UNKNOWN (could not be resolved — what it dropped is unmeasured)";
-  }
-  // `map stale` is not a footnote: the skill widens to the package tier and prints
-  // `[inventory STALE]` when the map is behind, so the selection is a different, weaker artifact.
-  // "map fresh" is stated too — an absent word would leave a reader unable to tell a fresh
-  // selection from an older gate message that predates this field.
-  //
-  // #966 — the BUDGET and what it cost come FIRST when one applies. A tier that weakens
-  // verification must say what it ran, and under a budget the headline fact is no longer the
-  // score floor but the clock: `budget 60s, est 58s` is the claim, and `dropped N over budget`
-  // is the tail that claim bought. Both drop counts are printed, never summed — they name
-  // different knobs (`test_impact_budget` vs `KANBAN_TEST_MIN_SCORE`).
-  const budgetNote = selection.budget
-    ? `budget ${selection.budget}` +
-      (selection.estMs !== undefined ? `, est ${Math.round(selection.estMs / 1000)}s` : "") +
-      (selection.budgetDroppedCount ? `, dropped ${selection.budgetDroppedCount} over budget` : "") +
-      ", "
-    : "";
-  // #967 — the PROVENANCE of the kept set, when two selectors contributed. `selection kept 155`
-  // hides that 12 of them carry no impact evidence and are present only because `vitest related`
-  // asked for them; an operator judging whether to trust the selector needs the split, and #954's
-  // corpus is judging the COMBINED selector, so the message has to name what "combined" meant here.
-  //
-  // `unionUnmeasured` is the third case and the one that must never be silent: the run unioned a
-  // second selector in, but this description could not reproduce that half (see the field's doc),
-  // so every number here is a LOWER BOUND. Printing them bare would understate what ran — which is
-  // the flattering direction, and therefore the one that has to be labelled.
-  //
-  // #1043 — the selection's own COST rides on this clause whenever the tool reported one, and NOT
-  // only under a budget as it did before. The whole point of the split is that a reader can weigh
-  // the two halves against each other; `selection kept 1 suite(s)` beside `+176 guard suites
-  // (~543s est)` still leaves the cheap half unpriced. Omitted when the budget clause above
-  // already printed the same `est` figure, rather than saying it twice.
-  const cost =
-    selection.estMs !== undefined && !budgetNote ? `/~${Math.round(selection.estMs / 1000)}s est` : "";
-  const kept =
-    selection.externalCount !== undefined
-      ? `selection kept ${selection.selectedCount} suite(s)${cost} (impact ${selection.selectedCount - selection.externalCount} + related added ${selection.externalCount})`
-      : selection.unionUnmeasured
-        ? `selection kept ${selection.selectedCount} impact suite(s)${cost} PLUS the \`vitest related\` scope (unioned at run time, not counted here — these figures are a lower bound)`
-        : `selection kept ${selection.selectedCount} suite(s)${cost}`;
-  return (
-    `${budgetNote}${kept}, dropped ${selection.belowFloorCount} below the score floor` +
-    (selection.selectionTier ? `, selection tier ${selection.selectionTier}` : "") +
-    `, map ${selection.stale ? "STALE" : "fresh"}`
-  );
-}
-
-/**
- * The guard half's COST, as a parenthesised suffix on the guard-suite count (#1043).
- *
- * `""` when no duration report was readable — an absent estimate is honest, an invented one is
- * not, and this clause exists precisely because a number that quietly means something other than
- * it says is worse than no number. `est` is stated on the figure it applies to: these are summed
- * per-file measurements from `docs/tests/durations.json`, not a stopwatch on this run.
- */
-export function buildGuardCostNote(tierInfo: GateTierInfo): string {
-  if (tierInfo.guardEstMs === undefined) return "";
-  const assumed = tierInfo.guardAssumedCount
-    ? `, ${tierInfo.guardAssumedCount} unmeasured`
-    : "";
-  return ` (~${Math.round(tierInfo.guardEstMs / 1000)}s est${assumed})`;
 }
 
 /**

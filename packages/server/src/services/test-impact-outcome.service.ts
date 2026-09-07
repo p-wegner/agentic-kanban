@@ -537,10 +537,23 @@ export async function resolveGateImpactSelection(input: {
   /** The union's contents, when a caller can supply them — see `resolveGateSelection`. */
   union?: readonly string[];
   runCommand?: RunImpactCommand;
+  log?: (message: string) => void;
 }): Promise<GateImpactSelection | null | undefined> {
   if (!input.applies) return undefined;
   const selection = await resolveGateSelection(input);
   if (!selection) return null;
+  // #1046 — the widening must not be discoverable only by reading a merge comment after the fact.
+  // The message carries the remedy (`IMPACT_MAP_STALE_REMEDY`); this puts the same fact in the
+  // server log at the moment it happens, which is where an operator wondering why the gate got
+  // slow actually looks.
+  if (selection.stale) {
+    (input.log ?? ((message: string) => console.warn(`[test-impact] ${message}`)))(
+      `impact map is STALE in ${input.workingDir} — the selection widened to tier "${selection.tier}", so this gate `
+        + `ran broader and slower than its tier name claims. Rebuild it on the project's MAIN CHECKOUT `
+        + `(\`node .claude/skills/test-impact/tools/impact.mjs build --durations docs/tests/durations.json\`), `
+        + `never from a worktree.`,
+    );
+  }
   const budget = input.budget?.trim() || null;
   const unionSupplied = (input.union ?? []).some((entry) => entry.trim().length > 0);
   return {

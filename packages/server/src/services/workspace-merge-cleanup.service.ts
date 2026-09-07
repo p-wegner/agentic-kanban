@@ -20,6 +20,7 @@ import { applyDeferredWorkingTreeSync } from "@agentic-kanban/shared/lib/git-ser
 import { advanceLoopAfterMergedIssue } from "./plugin-loop-hooks.service.js";
 import { errorMessage } from "@agentic-kanban/shared/lib/error-message";
 import { releaseWorkspaceResources } from "./workspace-resource-release.js";
+import { refreshImpactMapAfterMerge } from "./test-impact-map/post-merge.js";
 
 export type WorkspacePostMergeCleanupArgs = {
   workspaceId: string;
@@ -141,6 +142,14 @@ export async function runWorkspacePostMergeCleanup(
   await createGithubHandoffDraft(args, deps, postMergeChangedFiles);
   await rebuildSharedDist(args.repoPath, postMergeChangedFiles);
   await runPostMergeLearningStep(args, deps);
+  // #1046 — BEFORE the auto-start steps, for the reason the monitor phase sits before
+  // `runAutoStart`: a builder launched by this merge's cascade gets the map copied into its
+  // worktree at provisioning, and it should be the one that includes the merge that just landed.
+  await refreshImpactMapAfterMerge({
+    repoPath: args.repoPath,
+    projectId: args.projectId,
+    prefMap: args.prefMap,
+  });
   await maybeAutoStartFollowups(args, deps);
   await maybeAutoStartUnblockedDependency(args, deps);
   void mergeResult;

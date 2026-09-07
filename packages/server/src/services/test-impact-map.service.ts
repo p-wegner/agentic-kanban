@@ -44,6 +44,25 @@
  * (`services/test-impact-map/worktree-map.ts`) and never rebuild — `KANBAN_IMPACT_REBUILD` is off
  * by default precisely so a worktree cannot write one (see `scripts/test-mine.mjs`).
  *
+ * ## What makes it refresh (#1046) — and the bound that follows
+ *
+ * Three triggers, all of them writing through THIS pass on the main checkout:
+ *
+ *  - the monitor phase (`startup/monitor-test-impact-map.ts`), every cycle, before the auto-start
+ *    fan-out;
+ *  - the 15-minute background sweep (`startup/test-impact-map-reconciler.ts`, #993), which is what
+ *    covers a `manual` project the cycle never visits;
+ *  - **a landed merge** (`services/test-impact-map/post-merge.ts`), which is the one #1046 added.
+ *
+ * The first two ask the TOOL whether the map is stale, and the tool's threshold is generous
+ * (`staleWidenAfterCommits` = 30). That is why a map measured 23-24 commits behind was still
+ * "fresh" and nothing rebuilt it: the trigger existed, the answer was just always no, and the day
+ * it flipped the gate silently widened to the package tier. The merge trigger therefore applies its
+ * OWN, tighter bound and forces a rebuild past it — see `IMPACT_MAP_MAX_COMMITS_BEHIND`. The
+ * resulting guarantee is statable: **after a merge completes, the map is at most
+ * `IMPACT_MAP_MAX_COMMITS_BEHIND` commits behind that project's HEAD**, rather than at most
+ * whatever the tool tolerates.
+ *
  * ## What "fresh" means now that the file is not committed
  *
  * Exactly what it always meant; the definition never depended on tracking. `impact.mjs check`
@@ -214,6 +233,20 @@ export interface ImpactMapPassDeps {
   /** Injected for tests; defaults to the real queue repo lock. */
   acquireLock?: typeof acquireQueueRepoLock;
   lockTimeoutMs?: number;
+  /**
+   * Skip `impact.mjs check` and rebuild regardless of what the TOOL thinks (#1046).
+   *
+   * The tool's own freshness rule is deliberately generous — `staleWidenAfterCommits` is 30 — so a
+   * map 24 commits behind is "fresh" to it and the periodic sweep does nothing. That is correct for
+   * a sweep whose only job is to stop the map rotting, and wrong for a caller that has just moved
+   * HEAD and wants the map to track it (the post-merge trigger, `test-impact-map/post-merge.ts`).
+   * Such a caller applies its OWN bound and, when the map is past it, says so here rather than
+   * asking a question whose answer it already knows.
+   *
+   * Everything else about the pass is unchanged — writability is still checked first, the lock is
+   * still taken and still skipped on contention — so forcing can only ever cost one rebuild.
+   */
+  forceRebuild?: boolean;
 }
 
 /**
@@ -259,13 +292,15 @@ export async function runTestImpactMapPass(
   //
   // `check` exits 2 for "no map at all", which the adapter reports as STALE — that is what makes a
   // fresh clone build its FIRST map instead of sitting mapless forever.
-  let check: { fresh: boolean; detail: string };
-  try {
-    check = await runImpactMapCheck(paths.tool, repoPath, runner);
-  } catch (err) {
-    return { outcome: "build_failed", detail: err instanceof Error ? err.message : String(err) };
+  if (!deps.forceRebuild) {
+    let check: { fresh: boolean; detail: string };
+    try {
+      check = await runImpactMapCheck(paths.tool, repoPath, runner);
+    } catch (err) {
+      return { outcome: "build_failed", detail: err instanceof Error ? err.message : String(err) };
+    }
+    if (check.fresh) return { outcome: "fresh" };
   }
-  if (check.fresh) return { outcome: "fresh" };
 
   let lock: Awaited<ReturnType<typeof acquireQueueRepoLock>>;
   try {
