@@ -158,6 +158,25 @@ export type { PreMergeGateWorkspace, PreMergeGateResult } from "./pre-merge-gate
  * on a JVM stack don't spawn a daemon storm that starves the backend.
  */
 
+/**
+ * The first outstanding-install block across a workspace TRAIN, or null when every member's
+ * dependencies are in place (#628).
+ *
+ * Extracted from `runPreMergeGate` for the #726 branch ceiling: the loop plus its test cost that
+ * function two branches, and the whole of the decision is "does any member still owe an install?",
+ * which is one thing worth naming. The caller keeps one `if`.
+ */
+async function describeOutstandingInstallsForGate(
+  workspace: PreMergeGateWorkspace,
+  database: Database,
+): Promise<string | null> {
+  for (const installCheckId of workspace.memberWorkspaceIds ?? [workspace.id]) {
+    const installBlock = await describeOutstandingRepoInstalls(installCheckId, database);
+    if (installBlock) return installBlock;
+  }
+  return null;
+}
+
 export async function runPreMergeGate(
   workspace: PreMergeGateWorkspace,
   projectId: string,
@@ -172,11 +191,9 @@ export async function runPreMergeGate(
   // the inline install modes, where the column is NULL.
   // `memberWorkspaceIds` (the train) rather than `workspace.id`, because a synthetic gate id
   // matches no repo row and would pass this check vacuously — see the field's doc comment.
-  for (const installCheckId of workspace.memberWorkspaceIds ?? [workspace.id]) {
-    const installBlock = await describeOutstandingRepoInstalls(installCheckId, database);
-    if (installBlock) {
-      return { passed: false, skipped: false, stage: "none", message: installBlock };
-    }
+  const installBlock = await describeOutstandingInstallsForGate(workspace, database);
+  if (installBlock) {
+    return { passed: false, skipped: false, stage: "none", message: installBlock };
   }
 
   // What verification is CURRENTLY configured — resolved BEFORE the tree memo, and in

@@ -3,6 +3,89 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-07 — %TEMP% exhaustion was killing the gate; recovery lane landed; 15 projects archived
+
+**The headline, because it invalidates four earlier diagnoses:** the pre-merge gate failed four
+times across #1046/#1048/#1049 with `exit 1` and NO test output, and the cause was that `%TEMP%`
+held **707,289 entries**. NTFS enumeration alone took over 120 s, so vitest died during setup
+before it could report anything. Disk space was never involved (208 GB free).
+
+Three of those failures happened on a loaded box, which made #1006 (gate flakes under load, a
+different test each time) look like an exact match — it was reported as such, and that was wrong.
+The fourth failed on an idle box (CPU 18 %, 4.9 GB usable), which is what refuted it. ~113 minutes
+of gate time went into the wrong hypothesis. **A different test batch failing each run is not
+evidence of a flaky suite here** — it is whichever batch was running when a temp operation stalled.
+
+Every failing log had carried the answer in its last line, and it was skimmed past four times:
+`[test-reaper] removed 500 stale fixture temp dir(s) … capped at 500 — more remain for the next run`.
+Against a ~510k backlog a 500/run reaper can never catch up, and that line reads like routine
+housekeeping rather than unbounded growth.
+
+**Verified by:** a prefix-allowlisted cleaner removed 605,255 fixture dirs, 0 failures, every
+protected entry (`claude/`, `kanban-session-*.out`, `agentic-kanban-mcp-config.json`,
+`kanban-verify-*`) intact. Enumeration went from **>120 s (timeout) to 0.45 s** for the remaining
+101,989 entries. #1049's gate then ran real tests for the first time (shared: 7 files / 32 tests
+green in 5.78 s) instead of dying silently.
+
+**Filed as #1056**, still open — the cleanup was manual and treats the symptom. The defect is the
+producer/reaper imbalance: suites create fixture temp dirs they never remove, and the reaper's cap
+means the number only grows. Suggested there: make producers use `createManagedTempDir`, have the
+reaper report BACKLOG SIZE and escalate when it grows run over run, give the gate a cheap
+temp-health preflight, and consider a per-run namespace (`%TEMP%/kanban/<runId>/`) so a run's
+fixtures are one directory to remove.
+
+**#1054 — the promote RECOVERY lane, landed `6129ea8f67`.** `pnpm promote --recover` ships a fix
+without a full sweep. The design was deliberately cut back after pushback: an earlier 7-gate
+proposal was too heavy for a local single-user laptop, where a slow gate costs most exactly when
+the box is degraded and the fix is most urgent. `pnpm build` + smoke + auto-rollback already ARE
+the gate. What remains is the one thing rollback cannot undo: a **migration** in the delta refuses
+unless `--with-migration` is passed, because a rollback restores code but not schema
+(`pnpm db:migrate` is forward-only). `--recover` and `--force-sweep` are mutually exclusive; the
+lane writes `.kanban/promote-recovery.json` with `sweepOwed: true`.
+**Verified by:** `promote-plan.test.ts`, 50/50 green (15 new for the lane).
+**NOT verified:** `--recover` has never run end to end, and its rollback path is unrehearsed
+(`KANBAN_PROMOTE_FORCE_SMOKE_FAILURE=1` is the seam).
+
+**#1057 — two root-cause fixes, landed `f374ac67c4`.** A saturated host now HOLDS the gate instead
+of failing it (`decideGateHostAdmission`, held propagated distinctly all the way to the card badge
+so a hold never reads as a verdict about the diff); and `archiveProject` writes
+`start_mode=manual`, because `fleetops` and `My_Pet_store` kept launching builders for **three
+weeks after being archived**. `unarchiveProject` deliberately does not restore a drive mode.
+**Caveat written into the ticket:** the host floor reads `os.freemem()` only, so it catches the
+memory case and the CPU case only when they coincide — CPU saturation is what actually burned the
+three attempts.
+
+That commit cited `#1056`, a number that had never been filed; the board later assigned 1056 to the
+temp ticket. `5698574a74` repoints 17 comments across 11 files at the real #1057. The bad number
+stays in `f374ac67c4`'s own message — rewriting a landed commit is worse than one stale reference.
+
+**#1057 broke the #726 complexity gate on master, and that is what actually failed #1049's fifth
+attempt.** With `%TEMP%` fixed the gate finally produced real output, and the failure was a genuine
+regression from `f374ac67c4`: `runPreMergeGate()` went to 35 branches (grandfathered at 34) and
+`runPreLockGate()` to 27 (flat threshold 25, no baseline). The gate-hold edit had added an `if` and
+two ternaries — directly below a comment stating the function sits on the branch ceiling. It was
+reported as verified because the check run then was scoped and did not include the shared
+`@gate:always-run` guard batch that owns this rule.
+
+Fixed by RESTRUCTURING, not by moving the baseline, which is what the gate's own message asks for:
+`describeOutstandingInstallsForGate` absorbs the install loop (2 branches inline, 1 via the helper)
+and `throwWithheldPreMergeGate` absorbs the two hold ternaries. **Verified by:**
+`node scripts/check-god-modules.mjs` OK (peak 41, 19 baselined), `pnpm typecheck` 20s,
+`max-file-size` + `check-god-modules-script` green, and 6 gate suites / 71 tests green.
+
+**Board hygiene:** 15 projects archived non-destructively (`archivedAt`, never unregister — #964
+cascades away issues/workspaces/sessions), plus `start_mode=manual`. monitor-driven is now **0**,
+including `agentic-kanban` itself, so **nothing auto-starts anywhere** until that is restored
+deliberately. An orphan `start_mode` pref for an already-deleted project was also found.
+
+**Still true and unresolved:**
+- **#1039's fix is not live.** The stable board still runs the old artifact; nothing has been
+  promoted. Landing on master does not change the board that operates every project.
+- **#1040 is a no-op branch** — its two commits cancel out to an empty net diff, yet it is marked
+  ready with score 77. It needs closing as invalid, not merging.
+- `mssecflt.sys` leaks kernel pool at ~441 MB/h (6.1 GB held). Org-managed driver — needs an IT
+  ticket, not a local change. It is why the box swaps at 5.6 GB usable with CPU idle.
+
 ## 2026-09-06 — #1039: an enabled plugin's skill now reaches the checkout AND the worktree, or says why not
 
 **What was true:** `plugin_enabled_test-impact_<id>` = true, the plugin checkout intact, and no
