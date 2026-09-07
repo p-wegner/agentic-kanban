@@ -2,6 +2,8 @@ import type { Hono } from "hono";
 import { createNodeWebSocket } from "@hono/node-ws";
 import type { UpgradeWebSocket } from "hono/ws";
 import { db } from "../db/index.js";
+import { setSetupProcessObserver } from "@agentic-kanban/shared/lib/setup-script";
+import { registerProtectedPid, releaseProtectedPid } from "../services/process-guard.js";
 import { createBoardEvents } from "../services/board-events.js";
 import { createSessionManager } from "../services/session.manager.js";
 import { createWorkflowEngine } from "./exit-workflow.js";
@@ -32,6 +34,16 @@ export interface CoreServicesWiring {
  * further — splitting it would just relocate the coupling, not reduce it.
  */
 export function wireCoreServices(app: Hono): CoreServicesWiring {
+  // #1059 — teach the process guard about children the board is CURRENTLY awaiting.
+  // Without this the resource sweeper reaps in-flight verify/install/base-health trees
+  // (in a worktree, holding no port, tied to no live agent session) and the merge that
+  // was waiting on one reports a gate failure with no output. Installed here because
+  // this is where the board's long-lived services are wired; the hook is inert until it
+  // is, which is what keeps it out of tests that merely call `runSetupScript`.
+  setSetupProcessObserver({
+    onSpawn: (pid) => registerProtectedPid(pid),
+    onSettle: (pid) => releaseProtectedPid(pid),
+  });
   const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
   const boardEvents = createBoardEvents();
   boardEvents.startCleanup();
