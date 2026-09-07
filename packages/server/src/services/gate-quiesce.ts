@@ -114,7 +114,7 @@ export async function resolveGateQuiesce(args: {
   return decision;
 }
 
-// --- holding the gate ITSELF on a saturated host (#1056) --------------------------------------
+// --- holding the gate ITSELF on a saturated host (#1057) --------------------------------------
 
 const hostFloorPrefDef = projectPref("gate_host_floor");
 
@@ -134,7 +134,7 @@ export type GateHostAdmission =
   | { admit: false; reason: "host_saturated"; detail: string };
 
 /**
- * DECISION (pure): may a pre-merge gate START its verify chain on this box? (#1056)
+ * DECISION (pure): may a pre-merge gate START its verify chain on this box? (#1057)
  *
  * This file already holds builder starts while a gate runs, so the gate is protected FROM
  * builders — but nothing ever asked the reverse question, and that asymmetry is what this

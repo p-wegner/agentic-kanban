@@ -1,6 +1,6 @@
 // @gate:always-run — asserts a property of the gate's admission rule that no package-local diff links to.
 /**
- * #1056 — a saturated host must not START a verify chain.
+ * #1057 — a saturated host must not START a verify chain.
  *
  * MEASURED, 2026-09-07: three independent branches (#1046, #1048, #1049) each ran a full
  * pre-merge gate on a box at 100% CPU that was swapping 2334 pages/s. Each failed in a
@@ -16,7 +16,7 @@
 import { describe, it, expect } from "vitest";
 import { decideGateHostAdmission } from "../services/gate-quiesce.js";
 
-describe("gate host admission (#1056)", () => {
+describe("gate host admission (#1057)", () => {
   it("admits a gate when the box has room", () => {
     const a = decideGateHostAdmission({ capacityHold: false, capacityReason: "4.0 GB free", floorEnabled: true });
     expect(a.admit).toBe(true);

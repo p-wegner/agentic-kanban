@@ -107,7 +107,7 @@ export const PROJECT_SCOPED_KEY_PREFIXES = [
   // builder STARTS (never killing running ones) for the duration of a gate is the cheapest
   // of #581's options. Default ON; set to "false" to prefer throughput over gate fidelity.
   "quiesce_builders_during_gate",
-  // #1056 — the OTHER half of the pref above. `quiesce_builders_during_gate` protects a running
+  // #1057 — the OTHER half of the pref above. `quiesce_builders_during_gate` protects a running
   // gate FROM builders; this decides whether a gate may START on a saturated box at all. Nothing
   // asked that question until three branches each burned a ~28-minute gate on a box swapping
   // 2334 pages/s, failing in a different batch each time. Default ON; "false" runs it anyway.

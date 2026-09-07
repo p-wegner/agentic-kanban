@@ -108,7 +108,7 @@ export interface ResolvedMergeGate {
   unverified?: boolean;
   /**
    * See {@link PreMergeGateResult.held} — the gate DECLINED TO RUN because the host was
-   * saturated (#1056). `passed: false` and `ran: true`, but it is not a verdict about the diff:
+   * saturated (#1057). `passed: false` and `ran: true`, but it is not a verdict about the diff:
    * treat it as "retry next cycle", never as a failing build.
    */
   held?: boolean;
