@@ -262,7 +262,10 @@ export function isProbingThisProject(answer) {
  * @param {boolean} p.awaitSweep   false with `--no-await-sweep`: refuse as before rather than wait
  * @param {boolean} p.canRequest   is there a board to POST the reprobe to? (a sqlite-fallback read has no project id)
  */
-export function planSweepAcquisition({ verdict, direction = null, forceSweep = false, awaitSweep = true, canRequest = true } = {}) {
+export function planSweepAcquisition({ verdict, direction = null, forceSweep = false, awaitSweep = true, canRequest = true, recover = false } = {}) {
+  if (recover) {
+    return { request: false, reason: "recover", detail: "--recover consults no sweep verdict — the build/migrate/restart/smoke pipeline and its rollback are this lane's gate" };
+  }
   if (forceSweep) {
     return { request: false, reason: "force-sweep", detail: "--force-sweep consults no sweep verdict, so there is nothing to acquire" };
   }
@@ -322,13 +325,21 @@ export function buildPromotionPlan({
   forceSweep = false,
   sweepAcquisition = null,
   gateEvidence = null,
+  recovery = null,
 }) {
   const step1 = {
     n: 1,
-    title: forceSweep ? "sweep check SKIPPED (--force-sweep)" : "check the last full sweep on master was green",
-    detail: forceSweep
-      ? "WARNING: --force-sweep — promoting WITHOUT a green verdict from base_branch_health"
-      : `read via ${sweepSource} (board ${boardUrl}, db ${dbPath}) for project '${projectName}': ${sweepVerdict}`,
+    title: recovery
+      ? "sweep NOT consulted (--recover) — the delta is reviewed, the pipeline is the gate"
+      : forceSweep
+        ? "sweep check SKIPPED (--force-sweep)"
+        : "check the last full sweep on master was green",
+    detail: recovery
+      ? `${recovery}
+      the gate is steps 5-9: a failed build, a board that will not boot, or a failed smoke roll back automatically`
+      : forceSweep
+        ? "WARNING: --force-sweep — promoting WITHOUT a green verdict from base_branch_health"
+        : `read via ${sweepSource} (board ${boardUrl}, db ${dbPath}) for project '${projectName}': ${sweepVerdict}`,
   };
   if (sweepAcquisition?.request) {
     step1.title = "TRIGGER a fresh sweep, wait for its verdict, then check it";
@@ -400,4 +411,118 @@ export function checkPromoteDirection({ stableHead, sha, shaIsDescendant }) {
       `deploying it would be a silent no-op that tags a version which is not what runs. ` +
       `Promote a sha that is ahead (a newer green sweep, or --force-sweep to tag ${"the branch tip"}).`,
   };
+}
+
+// --- the recovery lane (#1054) ---------------------------------------------------------------
+
+/**
+ * Where a recovery promotion records that the stable board is running UNSWEPT code, relative
+ * to the STABLE checkout. Read by the Sentinel; written only by a recovery run that got as far
+ * as a passing smoke.
+ */
+export const RECOVERY_STATE_RELPATH = join(".kanban", "promote-recovery.json");
+
+/**
+ * The one path prefix whose changes a rollback CANNOT undo.
+ *
+ * `deployRef` runs `pnpm db:migrate` on whatever ref it deploys, and the rollback deploys the
+ * PREVIOUS tag through the same function — so it restores code but re-runs a forward-only
+ * migrator against a database the failed promotion has already migrated. Every other file in a
+ * promotion is one `git reset --hard` away from being undone; a migration is not.
+ */
+export const MIGRATIONS_PATH_PREFIX = "packages/shared/drizzle/";
+
+/**
+ * Describe the delta a recovery promotion would deploy.
+ *
+ * Deliberately descriptive, not judgemental: on a single-user laptop the operator is the review,
+ * so the job here is to make the delta legible (and to spot the one irreversible shape), not to
+ * cap it. An earlier draft of this lane refused above N commits; that was dropped, because the
+ * cost of a wrong refusal — the operator reaching for `--force-sweep` again — is higher than the
+ * cost of deploying a big delta whose rollback works.
+ *
+ * @param {object} p
+ * @param {string[]} p.commits       one-line subjects, newest first
+ * @param {string[]} p.changedFiles  repo-relative paths in the delta
+ */
+export function classifyRecoveryDelta({ commits = [], changedFiles = [] } = {}) {
+  const migrations = changedFiles.filter((f) => String(f).split("\\").join("/").startsWith(MIGRATIONS_PATH_PREFIX));
+  return {
+    commitCount: commits.length,
+    commits,
+    fileCount: changedFiles.length,
+    migrations,
+    hasMigration: migrations.length > 0,
+  };
+}
+
+/**
+ * May this recovery promotion proceed? (#1054)
+ *
+ * The lane's premise is that on a local, single-user board the existing pipeline — build →
+ * migrate → restart → smoke → automatic rollback — IS the gate, and that pre-verification
+ * bought at the cost of minutes is a bad trade at that blast radius. So this refuses on exactly
+ * one thing: a migration in the delta, which is the only step the rollback cannot reverse.
+ *
+ * It is an ACK, not a prohibition. `--with-migration` proceeds, because an operator who is
+ * refused on the day their fix happens to carry a schema change is an operator who goes back to
+ * `--force-sweep` — and that is how a loud escape hatch stops being loud.
+ *
+ * @param {object} p
+ * @param {ReturnType<typeof classifyRecoveryDelta>} p.delta
+ * @param {boolean} p.withMigration  `--with-migration` was passed
+ */
+export function planRecoveryLane({ delta, withMigration = false } = {}) {
+  if (!delta) return { ok: false, reason: "no-delta", detail: "the delta could not be computed — refusing rather than guessing" };
+  if (delta.hasMigration && !withMigration) {
+    return {
+      ok: false,
+      reason: "migration",
+      detail:
+        `the delta contains ${delta.migrations.length} migration file(s) (${delta.migrations.join(", ")}). ` +
+        `A rollback restores code but NOT schema — 'pnpm db:migrate' is forward-only and the rollback re-runs it ` +
+        `on the previous tag, so this is the one change a failed recovery cannot undo. ` +
+        `Re-run with --with-migration once you have decided that is acceptable, or promote through the full sweep.`,
+    };
+  }
+  return {
+    ok: true,
+    reason: delta.hasMigration ? "migration-acked" : "reversible",
+    detail: delta.hasMigration
+      ? `${delta.commitCount} commit(s), ${delta.fileCount} file(s), INCLUDING ${delta.migrations.length} migration(s) — acked with --with-migration`
+      : `${delta.commitCount} commit(s), ${delta.fileCount} file(s), no migrations — a failed smoke rolls all of it back`,
+  };
+}
+
+/**
+ * The disclosure a recovery promotion leaves behind.
+ *
+ * This is the lane's only bookkeeping obligation, and it is a DISCLOSURE, not a repair: it says
+ * the running board carries code no full sweep has ever judged. #1044 already fixed the
+ * structural half — when the last green sweep ends up BEHIND what stable runs,
+ * `planSweepAcquisition` requests a fresh one instead of refusing — so nothing here needs to
+ * un-poison the direction check. What was missing is that no one could TELL.
+ */
+export function buildRecoveryRecord({ tag, sha, previousTag, delta, lane, atIso = new Date().toISOString() } = {}) {
+  return {
+    kind: "recovery-promotion",
+    at: atIso,
+    tag: tag ?? null,
+    sha: sha ?? null,
+    rollbackTag: previousTag ?? null,
+    sweepOwed: true,
+    sweptBy: null,
+    lane: lane ?? null,
+    delta: delta
+      ? { commitCount: delta.commitCount, fileCount: delta.fileCount, migrations: delta.migrations }
+      : null,
+  };
+}
+
+/** One line for the promote log / dry run — what this lane is doing and what it is not. */
+export function formatRecoveryLane(lane, delta) {
+  if (!lane) return "not a recovery run";
+  const head = lane.ok ? "RECOVERY" : "RECOVERY REFUSED";
+  const commits = delta?.commits?.length ? ` [${delta.commits.slice(0, 5).join(" | ")}${delta.commits.length > 5 ? " | …" : ""}]` : "";
+  return `${head} (${lane.reason}): ${lane.detail}${commits}`;
 }
