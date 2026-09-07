@@ -1,9 +1,11 @@
 import { getBoardStatus } from "./board-status.js";
 import { checkPluginSkillHealth } from "./plugin-skill-health.service.js";
 import { getProjectRepoPath } from "../repositories/project.repository.js";
+import { computeStableSkew, type StableSkew } from "./stable-skew.service.js";
+import { getProjectRepoFields } from "../repositories/project.repository.js";
 import type { db } from "../db/index.js";
 
-export type RiskCategory = "merge_blocker" | "stale_session" | "low_backlog" | "health";
+export type RiskCategory = "merge_blocker" | "stale_session" | "low_backlog" | "health" | "stable_skew";
 export type RiskSeverity = "high" | "medium" | "low";
 
 export interface RiskItem {
@@ -26,6 +28,13 @@ export interface BoardRiskDigest {
   };
   topItems: RiskItem[];
   allItems: RiskItem[];
+  /**
+   * Two-board skew (#1055): how far the project's default branch has drifted ahead of the
+   * `stable-*` tag the operating board is actually pinned to, so a "Done" ticket whose fix
+   * isn't live yet doesn't read as trustworthy. `null` when the project isn't run under the
+   * two-board promote flow (no `stable-*` tag) or master is not ahead of it.
+   */
+  stableSkew: StableSkew | null;
 }
 
 const STALE_SESSION_MS = 2 * 60 * 60 * 1000; // 2 hours
@@ -147,6 +156,23 @@ export async function generateBoardRiskDigest(
     }
   }
 
+  // stable_skew: the default branch has fix-shaped commits the operating (stable) board
+  // hasn't promoted yet (#1055) — a "Done" ticket whose fix isn't live.
+  const repoFields = await getProjectRepoFields(projectId, database);
+  const stableSkew = repoFields?.repoPath
+    ? await computeStableSkew(repoFields.repoPath, repoFields.defaultBranch || "master")
+    : null;
+  if (stableSkew && stableSkew.fixShapedCount > 0) {
+    allItems.push({
+      issueNumber: 0,
+      issueTitle: "Two-board skew",
+      reason: `${stableSkew.aheadCount} commit${stableSkew.aheadCount === 1 ? "" : "s"} ahead of ${stableSkew.stableTag} `
+        + `(${stableSkew.fixShapedCount} fix/feat) not yet live on the operating board`,
+      category: "stable_skew",
+      severity: "medium",
+    });
+  }
+
   // low_backlog: single synthetic item
   const lowBacklog = backlogCount < LOW_BACKLOG_THRESHOLD;
   if (lowBacklog) {
@@ -184,5 +210,6 @@ export async function generateBoardRiskDigest(
     },
     topItems,
     allItems,
+    stableSkew,
   };
 }
