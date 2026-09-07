@@ -9,6 +9,7 @@ import { resolveEffectiveVerify } from "./stack-profile.service.js";
 import { gateVerificationKey } from "./merge-gate-tree-memo.js";
 import { resolveSelectorId } from "./test-impact-selector-id.js";
 import { buildStepTimingNote, type VerifyStepTiming } from "./verify-step-timings.js";
+import { archVerifyEnv } from "./arch-verify-env.js";
 import {
   resolveTestImpactBudget,
   resolveTestImpactBudgetEnv,
@@ -528,12 +529,16 @@ export function buildVerifyEnv(args: {
   emitFileScope: boolean;
   changedFiles: readonly string[];
 }): Record<string, string> {
+  // #1052: see `archVerifyEnv`'s own header — unconditional (base of every branch below) so
+  // `check:arch` scoping applies at every tier, not just the ones that also scope tests.
+  const archEnv = archVerifyEnv(args.changedFiles);
   if (args.guardsOnly) return {
     ...args.isolationEnv,
+    ...archEnv,
     KANBAN_TEST_GUARDS_ONLY: "1",
     ...(args.changedFiles.length > 0 ? { KANBAN_TEST_FILES: args.changedFiles.join(",") } : {}),
   };
-  const base = { ...args.isolationEnv, ...args.impactEnv };
+  const base = { ...args.isolationEnv, ...archEnv, ...args.impactEnv };
   if (!args.packagesEnv) return base;
   return {
     ...base,
