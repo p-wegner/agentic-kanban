@@ -372,6 +372,31 @@ export async function describePersistedGateVerdict(
  * flight the call is going to be refused anyway, and gating first would burn a full test run
  * just to produce that refusal.
  */
+/**
+ * Refuse the merge for a gate that did not pass, and say WHICH kind of not-passing it was.
+ *
+ * #1057 — a HELD gate never ran, so "failed" would be a false claim about this diff. It still
+ * travels the `pre_merge_gate_failed` road on purpose: that is what #638/#170 key on to keep a
+ * withheld merge away from the fix agent and every agent-driven retry, and a hold needs exactly
+ * that protection. Only the PROSE distinguishes them — the routing must not.
+ *
+ * Extracted rather than inlined because `runPreLockGate` sits on the #726 branch ceiling and the
+ * two conditionals below are the whole of this decision. Returns `never`, so a caller reads as
+ * the unconditional refusal it is.
+ */
+function throwWithheldPreMergeGate(
+  preGate: { stage: string; held?: boolean },
+  gateMessage: string,
+): never {
+  throw new WorkspaceError(
+    preGate.held
+      ? `Pre-merge gate HELD (${preGate.stage}) — merge deferred, nothing ran. ${gateMessage}`
+      : `Pre-merge gate failed (${preGate.stage}) — merge withheld. ${gateMessage}`,
+    "CONFLICT",
+    { mergeReason: PRE_MERGE_GATE_FAILURE_REASON, gateStage: preGate.stage, ...(preGate.held ? { gateHeld: true } : {}) },
+  );
+}
+
 export async function runPreLockGate(args: {
   workspaceId: string;
   workspace: WorkspaceRow;
@@ -585,17 +610,7 @@ export async function runPreLockGate(args: {
       database,
       recordMergeAttempt,
     });
-    // #1057 — a HELD gate never ran, so "failed" would be a false claim about this diff. It still
-    // travels the `pre_merge_gate_failed` road on purpose: that is what #638/#170 key on to keep a
-    // withheld merge away from the fix agent and every agent-driven retry, and a hold needs exactly
-    // that protection. Only the PROSE distinguishes them — the routing must not.
-    throw new WorkspaceError(
-      preGate.held
-        ? `Pre-merge gate HELD (${preGate.stage}) — merge deferred, nothing ran. ${gateMessage}`
-        : `Pre-merge gate failed (${preGate.stage}) — merge withheld. ${gateMessage}`,
-      "CONFLICT",
-      { mergeReason: PRE_MERGE_GATE_FAILURE_REASON, gateStage: preGate.stage, ...(preGate.held ? { gateHeld: true } : {}) },
-    );
+    throwWithheldPreMergeGate(preGate, gateMessage);
   }
 
   if (preGate.unverified) {
