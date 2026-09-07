@@ -272,7 +272,7 @@ describe("buildVerifyEnv", () => {
     expect(env).not.toHaveProperty("KANBAN_TEST_PACKAGES");
   });
 
-  it("reproduces the pre-#956 env exactly for a non-impact scoped run", () => {
+  it("reproduces the pre-#956 env exactly for a non-impact scoped run, plus #1052's arch scope", () => {
     expect(
       buildVerifyEnv({
         isolationEnv,
@@ -286,7 +286,46 @@ describe("buildVerifyEnv", () => {
       AGENTIC_KANBAN_DIR: "/tmp/gate",
       KANBAN_TEST_PACKAGES: "server,shared",
       KANBAN_TEST_FILES: "packages/server/src/a.ts,packages/shared/src/b.ts",
+      KANBAN_ARCH_CHANGED_FILES: "packages/server/src/a.ts,packages/shared/src/b.ts",
     });
+  });
+
+  it("#1052: carries KANBAN_ARCH_CHANGED_FILES at EVERY tier, including full (no packagesEnv, no impactEnv)", () => {
+    // `check:arch`'s scoping is a different axis from the test tier — it must not depend on the
+    // test half having scoped anything at all.
+    const env = buildVerifyEnv({
+      isolationEnv,
+      guardsOnly: false,
+      impactEnv: {},
+      packagesEnv: null,
+      emitFileScope: false,
+      changedFiles: ["packages/server/src/a.ts"],
+    });
+    expect(env.KANBAN_ARCH_CHANGED_FILES).toBe("packages/server/src/a.ts");
+  });
+
+  it("#1052: also carried on a guards-only (docs-only) run", () => {
+    const env = buildVerifyEnv({
+      isolationEnv,
+      guardsOnly: true,
+      impactEnv,
+      packagesEnv: null,
+      emitFileScope: false,
+      changedFiles: ["docs/a.md"],
+    });
+    expect(env.KANBAN_ARCH_CHANGED_FILES).toBe("docs/a.md");
+  });
+
+  it("#1052: omitted for an unreadable/unknown diff, same fail-open direction as the rest of this file", () => {
+    const env = buildVerifyEnv({
+      isolationEnv,
+      guardsOnly: false,
+      impactEnv: {},
+      packagesEnv: null,
+      emitFileScope: false,
+      changedFiles: [],
+    });
+    expect(env).not.toHaveProperty("KANBAN_ARCH_CHANGED_FILES");
   });
 });
 

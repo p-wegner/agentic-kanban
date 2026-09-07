@@ -72,8 +72,18 @@ import {
  * ratchet's own message asks for first — it does not move this worst-case number, but it is why
  * the number is not what an ordinary diff pays. Both should shrink at the next `durations.json`
  * capture, when their real cost replaces the placeholder.
+ *
+ * -- Third disclosed movement (2026-09-07, #1052) — 555,000 -> 558,000 ---------------------
+ *
+ * `check-arch-scoping.test.mjs`, at the ASSUMED 3,000 ms. The argument for the seconds: it
+ * imports `scripts/check-arch.mjs`, a repo script outside every package's `src/` tree, so it is
+ * import-graph-invisible in exactly the shape `always-run-marker-ratchet` demands a marker for
+ * (the same reason `test-mine-scope-derivation.test.mjs` beside it carries one). It carries a
+ * `when:scripts/check-arch.mjs` territory — this ratchet's own doc above says that does not move
+ * THIS worst-case number, only what an ordinary diff pays, which is the point #1052 exists to
+ * shrink for `check:arch` itself. Should shrink at the next `durations.json` capture.
  */
-const BASELINE_TOTAL_MS = 555_000;
+const BASELINE_TOTAL_MS = 558_000;
 
 /**
  * How far under the baseline is tolerated before it counts as stale.
