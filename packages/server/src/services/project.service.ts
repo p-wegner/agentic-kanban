@@ -140,6 +140,36 @@ interface RegisterProjectInput {
   progressId?: string;
 }
 
+/**
+ * Archiving a project must STOP DRIVING IT (#1057).
+ *
+ * Archiving used to hide a project from the list and change nothing else, because the monitor's
+ * driven set is derived purely from prefs (`monitorDrivenProjectIds`) and never consults
+ * `archivedAt`. So an archived project kept starting builders, merging, refilling its backlog and
+ * burning quota, invisibly — there was no view it appeared in. MEASURED on 2026-09-07: `fleetops`
+ * and `My_Pet_store` had been archived since 2026-08-18 and were still resolving to Start Mode
+ * `monitor` three weeks later, plus one `start_mode=monitor` pref for a project that no longer
+ * existed at all.
+ *
+ * Written here rather than inside `resolveStartPolicy` on purpose: that is a documented pure
+ * prefMap resolver (`prefmap-resolver-purity.test.ts`), so it cannot read `archivedAt`. Making
+ * archive OWN the mode keeps the decision pure and stops the state from arising.
+ *
+ * Best-effort: the caller has ALREADY archived the project by this point, and throwing here would
+ * report a no-op for work that actually happened.
+ *
+ * Module-level rather than a closure inside `createProjectService` because that factory is on the
+ * #800 nloc shrink-only ring.
+ */
+async function stopDrivingArchivedProject(id: string, database: Database): Promise<void> {
+  await setPreferenceChecked(database, [{ key: startModePrefKey(id), value: "manual" }]).catch((err) => {
+    console.warn(
+      `[projects] archived ${id} but could not set its Start Mode to manual (${errorMessage(err)}) — `
+        + `the monitor may keep driving an archived project; set start_mode_${id}=manual by hand.`,
+    );
+  });
+}
+
 export function createProjectService(deps: { database: Database; workspaceSummaryCache?: WorkspaceSummaryCache }) {
   const { database, workspaceSummaryCache } = deps;
 
@@ -419,31 +449,12 @@ export function createProjectService(deps: { database: Database; workspaceSummar
   }
 
   async function archiveProject(id: string) {
-    const project = await getProjectById(id, database);
-    if (!project) throw new ProjectError("Project not found", "NOT_FOUND");
+    if (!await getProjectById(id, database)) throw new ProjectError("Project not found", "NOT_FOUND");
     await setProjectArchived(id, true, database);
     // Clear the active-project preference if it pointed at the now-archived project,
     // so the board doesn't try to render a hidden project on next load.
     await clearActiveProjectPreference(id, database);
-    // #1057 — and STOP DRIVING IT. Archiving used to hide a project from the list and change
-    // nothing else, because the monitor's driven set is derived purely from prefs
-    // (`monitorDrivenProjectIds`) and never consults `archivedAt`. So an archived project kept
-    // starting builders, merging, refilling its backlog and burning quota, invisibly — there was
-    // no view it appeared in. MEASURED on 2026-09-07: `fleetops` and `My_Pet_store` had been
-    // archived since 2026-08-18 and were still resolving to Start Mode `monitor` three weeks
-    // later, plus one `start_mode=monitor` pref for a project that no longer existed at all.
-    //
-    // Written here rather than inside `resolveStartPolicy` on purpose: that is a documented pure
-    // prefMap resolver (`prefmap-resolver-purity.test.ts`), so it cannot read `archivedAt`.
-    // Making archive OWN the mode keeps the decision pure and stops the state from arising.
-    // Best-effort: the project IS archived by this point, and failing the call afterwards would
-    // report a no-op for work that happened.
-    await setPreferenceChecked(database, [{ key: startModePrefKey(id), value: "manual" }]).catch((err) => {
-      console.warn(
-        `[projects] archived ${id} but could not set its Start Mode to manual (${errorMessage(err)}) — `
-          + `the monitor may keep driving an archived project; set start_mode_${id}=manual by hand.`,
-      );
-    });
+    await stopDrivingArchivedProject(id, database);
     return { id };
   }
 
