@@ -38,9 +38,51 @@ function parsePidList(value: string | undefined): Set<number> {
   );
 }
 
+/* ---------------------------------------------------------------------------
+ * #1059 — a RUNTIME protected set, beside the environment ones
+ *
+ * `KANBAN_PROTECTED_PIDS` / `KANBAN_BOARD_SERVER_PID` are fixed at launch, so they can
+ * only ever describe processes that existed before this one did. A verify child the board
+ * spawned SECONDS ago and is actively awaiting was therefore invisible to the guard that
+ * decides what to kill — and the sweeper duly killed two of them (see the note in
+ * `shared/lib/setup-script.ts`).
+ *
+ * Registration is REFERENCE COUNTED. Two concurrent runs can legitimately be handed the
+ * same pid only if one has already exited and the OS reused the number, but the counter
+ * also makes an unbalanced release harmless: the entry survives until every registration
+ * has been released, and the alternative (a plain delete) would strip protection from a
+ * live run because an unrelated one finished.
+ * ------------------------------------------------------------------------ */
+const runtimeProtectedPids = new Map<number, number>();
+
+/** Protect `pid` (and thus its process tree) from the sweeper until released. */
+export function registerProtectedPid(pid: number): void {
+  if (!Number.isInteger(pid) || pid <= 0) return;
+  runtimeProtectedPids.set(pid, (runtimeProtectedPids.get(pid) ?? 0) + 1);
+}
+
+/** Release one registration of `pid`; the pid stays protected while others remain. */
+export function releaseProtectedPid(pid: number): void {
+  const count = runtimeProtectedPids.get(pid);
+  if (count === undefined) return;
+  if (count <= 1) runtimeProtectedPids.delete(pid);
+  else runtimeProtectedPids.set(pid, count - 1);
+}
+
+/** Test seam — the registry is module state and would otherwise leak between cases. */
+export function clearRuntimeProtectedPids(): void {
+  runtimeProtectedPids.clear();
+}
+
+/** Currently-registered runtime pids, for assertions and diagnostics. */
+export function runtimeProtectedPidList(): number[] {
+  return [...runtimeProtectedPids.keys()].sort((a, b) => a - b);
+}
+
 export function protectedPids(): Set<number> {
   return new Set([
     process.pid,
+    ...runtimeProtectedPids.keys(),
     ...parsePidList(process.env.KANBAN_PROTECTED_PIDS),
     ...parsePidList(process.env.KANBAN_BOARD_SERVER_PID),
   ]);

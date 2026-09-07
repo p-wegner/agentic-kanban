@@ -1,5 +1,53 @@
 import { spawn, type ChildProcess } from "node:child_process";
 
+/* ---------------------------------------------------------------------------
+ * #1059 — the board must never reap a process it is itself awaiting
+ *
+ * The board's resource sweeper (`services/stale-dev-processes.ts`) reaps any process
+ * tree that is in cleanup scope, holds no listening port, carries no protected pid and
+ * is not tied to an ACTIVE workspace session. A pre-merge verify run is all four:
+ * it runs under `.worktrees/`, and `depcruise`/`tsc`/`vitest` listen on nothing.
+ *
+ * Measured 2026-09-07 on workspace 500c9c62 (ak-1048): two merge attempts, each killed
+ * within a second of a sweep tick (`process-kill-allowed reason=monitor-stale-dev-tree`,
+ * then `monitor-stale-dev-tree-cleaned` over 16 and 12 pids), each reported afterwards as
+ * a gate failure with no output. The step that dies is whichever one the ~10-minute tick
+ * lands on — `typecheck` in one run, `depcruise` in the next — and a SIGKILLed process
+ * emits nothing, which is why this was read as machine load, then %TEMP% exhaustion, then
+ * log truncation. The second kill landed on an idle box, which is what rules all three out.
+ *
+ * The observer below is the seam that fixes it for EVERY caller at once rather than at the
+ * gate's call site alone: an install, a base-health probe and a cold-clone build are just
+ * as fatal to interrupt, and each would have had to remember separately.
+ *
+ * It lives here, in shared, as a nullable hook the SERVER installs at startup — shared
+ * cannot import `services/process-guard.ts` without inverting the package layering, and a
+ * hook that nobody installs is exactly today's behaviour.
+ * ------------------------------------------------------------------------ */
+export type SetupProcessObserver = {
+  /** A child was spawned; its pid (and therefore its whole tree) must not be reaped. */
+  onSpawn: (pid: number) => void;
+  /** The child settled — exit, timeout, no-progress or abort. Protection is released. */
+  onSettle: (pid: number) => void;
+};
+
+let setupProcessObserver: SetupProcessObserver | null = null;
+
+/** Install (or with `null`, remove) the observer. Idempotent; last call wins. */
+export function setSetupProcessObserver(observer: SetupProcessObserver | null): void {
+  setupProcessObserver = observer;
+}
+
+/** Notify without ever letting a broken observer take down the run it is protecting. */
+function notifySetupObserver(kind: "onSpawn" | "onSettle", pid: number | undefined): void {
+  if (pid === undefined || !setupProcessObserver) return;
+  try {
+    setupProcessObserver[kind](pid);
+  } catch {
+    /* An observer must never be the reason a verify fails. */
+  }
+}
+
 /**
  * Kill a setup/verify child AND everything it spawned (#1009).
  *
@@ -220,6 +268,10 @@ export function runSetupScript(
       stdio: ["pipe", "pipe", "pipe"],
     });
 
+    // #1059 — protect the tree for as long as this call is awaiting it. Released in
+    // `cleanup()` below, which every settle path already funnels through.
+    notifySetupObserver("onSpawn", proc.pid);
+
     let stdout = "";
     let stderr = "";
     let lastOutputAt = Date.now();
@@ -239,6 +291,11 @@ export function runSetupScript(
       clearTimeout(timeout);
       if (noProgressInterval) clearInterval(noProgressInterval);
       if (onAbort) options.signal?.removeEventListener("abort", onAbort);
+      // #1059 — released HERE rather than on `exit` alone, so the timeout, no-progress and
+      // abort kills drop the protection too. A pid left registered would leak a permanent
+      // exemption, and pids are reused: the next process to inherit that number would be
+      // unreapable for the life of the board.
+      notifySetupObserver("onSettle", proc.pid);
     };
 
     const timeout = setTimeout(() => {
