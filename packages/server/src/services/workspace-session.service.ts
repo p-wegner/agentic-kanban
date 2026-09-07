@@ -206,7 +206,7 @@ export function createWorkspaceSessionService(deps: {
           body.agentCommand as string | undefined,
           profileOverride,
         )
-      : applyWorkspaceAgentSelection(resolveAgentSettings(prefMap, body.agentCommand as string | undefined), ws0);
+      : applyWorkspaceAgentSelection(resolveAgentSettings(prefMap, body.agentCommand as string | undefined), ws0, prefMap);
     const { agentCommand, agentArgs, profile: agentProfile, provider: agentProvider, resumeWithNewModel, permissionPromptTool } =
       selection;
 
@@ -358,8 +358,9 @@ export function createWorkspaceSessionService(deps: {
         content = `${content}\n\n[Approved spec-driven phase artifacts]\n\n${artifactContext}`;
       }
     }
+    const turnPrefMap = toPrefMap(await getAllPreferencesCached(database));
     const { agentCommand, agentArgs, profile, provider, resumeWithNewModel, permissionPromptTool } =
-      applyWorkspaceAgentSelection(await loadAgentSettings(database), ws0);
+      applyWorkspaceAgentSelection(resolveAgentSettings(turnPrefMap), ws0, turnPrefMap);
 
     const sessionId = await getSessionManager().startSession({
       workspaceId: id, prompt: content, agentCommand, agentArgs,
@@ -434,11 +435,12 @@ export function createWorkspaceSessionService(deps: {
       writePlanFile(ws0.workingDir, updatedPlanContent);
     }
 
+    const implementPrefMap = toPrefMap(await getAllPreferencesCached(database));
     const { agentCommand, agentArgs, profile: agentProfile, provider: agentProvider, permissionPromptTool } =
-      applyWorkspaceAgentSelection(await loadAgentSettings(database, undefined), ws0);
+      applyWorkspaceAgentSelection(resolveAgentSettings(implementPrefMap, undefined), ws0, implementPrefMap);
 
     const sessionId = await getSessionManager().startSession({
-      workspaceId: id, prompt: buildImplementPrompt(), agentCommand, agentArgs, 
+      workspaceId: id, prompt: buildImplementPrompt(), agentCommand, agentArgs,
       provider: toExecutorProvider(agentProvider), multiTurn: false, permissionPromptTool,
       planMode: false, triggerType: "plan-implement", profile: agentProfile,
     });
@@ -470,11 +472,12 @@ export function createWorkspaceSessionService(deps: {
     if (!ws0.pendingPlanPath) throw new WorkspaceError("No pending plan to reject", "CONFLICT");
     if (!getSessionManager) throw new WorkspaceError("Session manager not available", "BAD_REQUEST");
 
+    const rejectPrefMap = toPrefMap(await getAllPreferencesCached(database));
     const { agentCommand, agentArgs, profile: agentProfile, provider: agentProvider, permissionPromptTool } =
-      applyWorkspaceAgentSelection(await loadAgentSettings(database, undefined), ws0);
+      applyWorkspaceAgentSelection(resolveAgentSettings(rejectPrefMap, undefined), ws0, rejectPrefMap);
 
     const sessionId = await getSessionManager().startSession({
-      workspaceId: id, prompt: buildRejectPrompt(feedback), agentCommand, agentArgs, 
+      workspaceId: id, prompt: buildRejectPrompt(feedback), agentCommand, agentArgs,
       provider: toExecutorProvider(agentProvider), multiTurn: false, permissionPromptTool,
       planMode: true, triggerType: "plan-reject", profile: agentProfile,
     });

@@ -62,4 +62,33 @@ describe("applyWorkspaceAgentSelection — board default profile", () => {
 
     expect(out).toBe(input);
   });
+
+  // #1048: the row pin is absolute for a REASON (#762 — erasing it once disabled OAuth
+  // selection entirely), so a cooling pin must fall through to the board default rather
+  // than being dropped outright. Without this a default relaunch (monitor auto-relaunch,
+  // the UI button, `workspace resume` with no flag) launches straight back into the same
+  // exhausted account it just failed on.
+  describe("a pinned profile the roster reports as cooling", () => {
+    const nowMs = Date.parse("2026-09-06T00:00:00.000Z");
+
+    it("falls through to the board default instead of relaunching on the cooling pin", () => {
+      const prefMap = new Map([["claude_cooldown_pinned_one", "2026-09-06T01:00:00.000Z"]]);
+      const out = applyWorkspaceAgentSelection(settings(), workspace({ claudeProfile: "pinned_one" }), prefMap, nowMs);
+
+      expect(out.profile).toEqual({ provider: "claude", name: "board_default" });
+    });
+
+    it("still honors the pin once its cooldown has elapsed", () => {
+      const prefMap = new Map([["claude_cooldown_pinned_one", "2026-09-05T23:00:00.000Z"]]);
+      const out = applyWorkspaceAgentSelection(settings(), workspace({ claudeProfile: "pinned_one" }), prefMap, nowMs);
+
+      expect(out.profile).toEqual({ provider: "claude", name: "pinned_one" });
+    });
+
+    it("still honors the pin when no prefMap is supplied at all (back-compat)", () => {
+      const out = applyWorkspaceAgentSelection(settings(), workspace({ claudeProfile: "pinned_one" }));
+
+      expect(out.profile).toEqual({ provider: "claude", name: "pinned_one" });
+    });
+  });
 });
