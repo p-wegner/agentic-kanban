@@ -278,6 +278,17 @@ export async function rotateRing<E extends BaseRingEntry>(
   until: string,
   now: Date,
 ): Promise<RotationResult> {
+  // #1048: stamp the exhausted login's cooldown FIRST, unconditionally — before either
+  // early-return below. A usage-limit exit that declines to relaunch (no ring configured,
+  // rotation disabled, or every other login also cooling) used to record NOTHING when it
+  // took one of the first two exits, so nothing on the board knew the profile was
+  // exhausted and the very next start (a default relaunch, the monitor, the UI button)
+  // walked straight back into it. The roster's `isProfileCooling` reads exactly this key,
+  // so writing it here is what lets that selector — and a pinned-profile launch — see the
+  // exhaustion even when the ring itself has no fresh account to rotate onto.
+  await setPreference(makeCooldownKey(cfg, currentProfile), until, database);
+  prefMap.set(makeCooldownKey(cfg, currentProfile), until);
+
   const ring = parseRing(cfg, prefMap.get(cfg.ringPrefKey));
   if (ring.length < 2) {
     return { rotated: false, fromProfile: currentProfile, reason: `no ring configured (need >= 2 ${cfg.noun}s)` };
@@ -285,10 +296,6 @@ export async function rotateRing<E extends BaseRingEntry>(
   if (prefMap.get(cfg.rotationDisabledPrefKey) === "false") {
     return { rotated: false, fromProfile: currentProfile, reason: "rotation disabled" };
   }
-
-  // Stamp the exhausted login so we don't immediately rotate back to it.
-  await setPreference(makeCooldownKey(cfg, currentProfile), until, database);
-  prefMap.set(makeCooldownKey(cfg, currentProfile), until);
 
   const next = pickNext(cfg, ring, currentProfile, prefMap, now);
   if (!next) {
