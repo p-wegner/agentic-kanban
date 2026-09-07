@@ -254,8 +254,49 @@ moment; the checklist above is its manual form.
 pnpm promote --dry-run        # print the resolved sha, tag and every step; touch nothing
 pnpm promote                  # promote — triggering and AWAITING a sweep when one is needed
 pnpm promote --no-await-sweep # never trigger one; refuse when the recorded verdict is unusable
+pnpm promote --recover --reason "<why>"   # FAST LANE: no sweep at all (#1054)
 pnpm promote --force-sweep    # promote WITHOUT a green sweep verdict, loudly
 ```
+
+### The RECOVERY lane (`--recover`, #1054)
+
+The full lane's precondition is a fresh green **full sweep** — a throwaway clone + install + full
+verify, 45-minute ceiling. For a LOCAL, single-user board that is the wrong trade, and #1053 is what
+it cost: #1039's fix sat undeployed for a day because the last green sweep was on the sha stable was
+already running, so the honest path was a no-op and only `--force-sweep` got through. The motivating
+case is *"the running board has a memory leak, ship the fix now"* — where the gate is slowest exactly
+when the machine is degraded and the fix is most urgent.
+
+**Its premise is that steps 3-4 of the run above ALREADY are a gate.** Build, migrate, restart,
+smoke — and a failed build, a board that will not boot, or a failed smoke all roll back automatically
+to the previous `stable-*` tag. Blast radius is one person's local board, noticed in seconds,
+recovered in about 90 seconds.
+
+**It gates on exactly one thing: a migration in the delta.** `deployRef` runs the forward-only
+`db:migrate` on whatever it deploys — *including on the rollback* — so a schema change is the only
+thing a failed recovery cannot undo. Everything else is one `git reset --hard` away. That refusal is
+an ACK, not a prohibition: `--with-migration` proceeds, because an operator refused on the day their
+fix happens to carry a schema change is an operator who goes back to `--force-sweep`, and that is how
+a loud escape hatch stops being loud.
+
+What it deliberately does NOT do: cap the delta by size (it PRINTS the commits and files instead —
+on a single-user board the operator is the review), pre-run typecheck/arch/guards (`pnpm build`
+already catches most of it for a small delta, and the smoke catches what matters), or refuse a second
+recovery in a row (it warns).
+
+On a **passing smoke** — never before, since a recovery that rolled back owes nothing — it writes
+`<stable>/.kanban/promote-recovery.json` with `sweepOwed: true`, the tag, the sha, the rollback
+target and the delta. That is disclosure, not repair: #1044 already fixed the structural half (a
+green sweep that ends up *behind* what stable runs triggers a fresh one instead of refusing). What
+was missing is that nobody could TELL the board was running unswept code.
+
+It is **not** `--force-sweep` with a friendlier name: that flag checks nothing at all and says so in
+a banner, while this is the routine fast path with a real (if narrow) gate and an audit trail.
+Passing both refuses; `--with-migration` outside the lane refuses.
+
+> **Unrehearsed as of 2026-09-07.** The lane is implemented and unit-tested, but no `--recover`
+> promotion has run end to end and its rollback path has not been exercised
+> (`KANBAN_PROMOTE_FORCE_SMOKE_FAILURE=1` is the seam).
 
 **Executed for real on 2026-09-05 (#1014's acceptance).** Five runs against the live pair: two
 promotions that came up green on 3001 against the operated database (`stable-20260905-2`,

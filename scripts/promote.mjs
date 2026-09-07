@@ -29,7 +29,27 @@
  *   node scripts/promote.mjs --dry-run        # print the resolved sha/tag/paths and every step; touch nothing
  *   node scripts/promote.mjs                  # promote (triggering + awaiting a sweep if one is needed)
  *   node scripts/promote.mjs --no-await-sweep # never trigger one; refuse when the recorded verdict is unusable
+ *   node scripts/promote.mjs --recover --reason "fix the leak"   # FAST LANE: no sweep (#1054)
  *   node scripts/promote.mjs --force-sweep    # promote WITHOUT a green sweep (loud warning)
+ *
+ * The RECOVERY lane (`--recover`, #1054) exists because the full lane's precondition — a fresh
+ * green full sweep, which is a clone + install + full verify with a 45-minute ceiling — is the
+ * wrong trade for a LOCAL, single-user board. The case it serves is "the running board has a
+ * memory leak, ship the fix now", where the gate is slowest exactly when the machine is already
+ * degraded and the fix is most urgent. Its premise is that steps 3 and 4 above ALREADY are a
+ * gate: a build that fails, a board that will not boot, or a smoke that fails all roll back
+ * automatically to the previous `stable-*` tag.
+ *
+ * So it consults no sweep, deploys the branch tip, and gates on exactly one thing: a MIGRATION
+ * in the delta. That is the only change the rollback cannot reverse — `deployRef` runs the
+ * forward-only `db:migrate` on whatever it deploys, including on the rollback — so it needs
+ * `--with-migration` to proceed. Everything else about the lane is disclosure rather than
+ * refusal: it prints the commits and files it would deploy, and on success writes
+ * `.kanban/promote-recovery.json` recording that a full sweep is OWED.
+ *
+ * It is NOT `--force-sweep` with a friendlier name. `--force-sweep` checks nothing at all and
+ * says so in a banner; `--recover` is the routine fast path with a real (if narrow) gate and an
+ * audit trail. Reach for `--force-sweep` only when even this refuses.
  *
  * Rehearsal: KANBAN_PROMOTE_FORCE_SMOKE_FAILURE=1 fails the promotion's smoke on purpose (one
  * shot — the rollback's smoke stays real), which is how the rollback half of #1014's acceptance
@@ -40,7 +60,7 @@
  * KANBAN_PROMOTE_SWEEP_WAIT_MIN — all documented in `docs/env-vars.md`.
  */
 import { spawn, spawnSync, execSync, execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, openSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gitExecSyncResult } from "./git-exec.mjs";
@@ -58,6 +78,11 @@ import {
   nextStableTag,
   parseSweepVerdict,
   planSweepAcquisition,
+  planRecoveryLane,
+  classifyRecoveryDelta,
+  buildRecoveryRecord,
+  formatRecoveryLane,
+  RECOVERY_STATE_RELPATH,
   previousStableTag,
   resolveBoardUrl,
   resolveMaxSweepAgeMs,
@@ -81,6 +106,18 @@ const opts = {
   // `--force-sweep` into the routine path. This flag restores the old refuse-immediately
   // behaviour for a caller that genuinely cannot wait tens of minutes.
   noAwaitSweep: args.includes("--no-await-sweep"),
+  // #1054: the RECOVERY lane. Skips the sweep entirely and deploys the branch tip, on the premise
+  // that for a local single-user board the existing pipeline (build -> migrate -> restart -> smoke
+  // -> automatic rollback) already IS the gate, and that minutes of pre-verification are the wrong
+  // trade at that blast radius — the case it exists for is "the running board has a leak, fix it
+  // now", where a slow gate is worst exactly when the fix is most urgent.
+  recover: args.includes("--recover"),
+  // The one ack the lane asks for: a migration is the only change a rollback cannot reverse.
+  withMigration: args.includes("--with-migration"),
+  reason: (() => {
+    const i = args.indexOf("--reason");
+    return i >= 0 && args[i + 1] && !args[i + 1].startsWith("--") ? args[i + 1] : null;
+  })(),
 };
 
 /**
@@ -525,6 +562,53 @@ function readStableHead() {
   return r.code === 0 && r.stdout ? r.stdout : null;
 }
 
+/**
+ * The delta a recovery run would deploy: every commit and file between the stable checkout's HEAD
+ * and `sha`. Read from THIS repo (which has both objects), never from the stable checkout, so it
+ * still works when the stable checkout is a separate clone that has not fetched yet.
+ *
+ * A null return means "could not compute", which `planRecoveryLane` refuses on — a delta nobody
+ * could read is not a delta anybody reviewed.
+ */
+function recoveryDeltaFor(sha, stableHead) {
+  if (!stableHead || !sha) return null;
+  const range = `${stableHead}..${sha}`;
+  const commits = git(["log", "--oneline", "--no-decorate", range]);
+  const files = git(["diff", "--name-only", range]);
+  if (commits.code !== 0 || files.code !== 0) return null;
+  return classifyRecoveryDelta({
+    commits: commits.stdout ? commits.stdout.split(/\r?\n/).filter(Boolean) : [],
+    changedFiles: files.stdout ? files.stdout.split(/\r?\n/).filter(Boolean) : [],
+  });
+}
+
+/**
+ * Write the recovery disclosure into the stable checkout, and say so in the log.
+ *
+ * Best-effort ON PURPOSE: the promotion has already succeeded and its smoke has passed by the
+ * time this runs, so a failure to write the marker must not fail the run — it must be loud. The
+ * alternative (throwing) would roll back a board that is demonstrably healthy.
+ */
+function writeRecoveryRecord(record) {
+  const path = join(stableCheckout, RECOVERY_STATE_RELPATH);
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `${JSON.stringify(record, null, 2)}\n`, "utf8");
+    log(`[promote] recorded: a full sweep is OWED for ${record.tag} -> ${path}`);
+  } catch (e) {
+    log(`[promote] !!! could not write the recovery marker to ${path} (${e instanceof Error ? e.message : String(e)}) — the board is live and healthy, but nothing on disk says it is UNSWEPT.`);
+  }
+}
+
+/** The previous recovery marker, when one is there. Used only to WARN about chaining, never to refuse. */
+function readRecoveryRecord() {
+  try {
+    return JSON.parse(readFileSync(join(stableCheckout, RECOVERY_STATE_RELPATH), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
 function directionFor(sha, stableHead) {
   if (!stableHead || !sha) return null;
   return checkPromoteDirection({
@@ -538,14 +622,24 @@ async function main() {
   // An UNREADABLE source is not the same as "no sweep has ever run" — one is a broken read
   // path, the other a verdict about the board — and reporting the second for the first sends
   // the operator looking in the wrong place.
+  // Two lanes cannot both describe one run: one says "no evidence was consulted, deliberately",
+  // the other says "the pipeline is the evidence". Refuse rather than silently pick.
+  if (opts.recover && opts.forceSweep) {
+    fail("--recover and --force-sweep are two different lanes; pass one. --recover is the routine fast lane; --force-sweep is the last resort that consults nothing and checks nothing.");
+  }
+  if (opts.withMigration && !opts.recover) {
+    fail("--with-migration only means anything in the --recover lane (it acks the one change a rollback cannot reverse). The full lane's sweep already covers migrations.");
+  }
+
   const verdictFor = (sweep) =>
-    opts.forceSweep
-      ? { ok: true, reason: "forced", sha: null, detail: "--force-sweep: no sweep verdict was consulted" }
+    opts.forceSweep || opts.recover
+      ? { ok: true, reason: opts.recover ? "recovery" : "forced", sha: null, detail: opts.recover ? "--recover: the sweep was not consulted; the build/migrate/restart/smoke pipeline and its rollback are the gate" : "--force-sweep: no sweep verdict was consulted" }
       : sweep.unreadable
         ? { ok: false, reason: "unreadable", sha: null, detail: `the sweep verdict could not be READ at all — ${sweep.source}` }
         : parseSweepVerdict(sweep.row, { branch: baseBranch, maxAgeMs: resolveMaxSweepAgeMs(env) });
 
-  let sweep = opts.forceSweep ? null : await readSweepRow();
+  // The recovery lane reads no verdict, exactly like --force-sweep: there is nothing to acquire.
+  let sweep = opts.forceSweep || opts.recover ? null : await readSweepRow();
   let verdict = verdictFor(sweep);
 
   const stableHead = readStableHead();
@@ -553,6 +647,7 @@ async function main() {
     verdict,
     direction: directionFor(verdict.ok ? verdict.sha : null, stableHead),
     forceSweep: opts.forceSweep,
+    recover: opts.recover,
     awaitSweep: !opts.noAwaitSweep,
     // Both halves are required: an id to ask ABOUT, and a board that ANSWERED. The sqlite
     // fallback yields the first without the second, and asking a board that is not there just
@@ -579,6 +674,14 @@ async function main() {
   const sha = verdict.ok && verdict.sha ? verdict.sha : headSha;
   const gateEvidence = readGateEvidence(verdict.at ?? null);
 
+  // #1054: the recovery lane's whole gate set. `recoveryDelta` is also what makes the delta
+  // LEGIBLE — on a single-user board the operator is the review, so printing what would deploy
+  // is the substitute for a sweep, and `planRecoveryLane` refuses on the one shape a rollback
+  // cannot undo.
+  const recoveryDelta = opts.recover ? recoveryDeltaFor(sha, stableHead) : null;
+  const recoveryLane = opts.recover ? planRecoveryLane({ delta: recoveryDelta, withMigration: opts.withMigration }) : null;
+  const priorRecovery = opts.recover ? readRecoveryRecord() : null;
+
   const tags = gitOrThrow(["tag", "--list", "stable-*"]).split(/\r?\n/).map((t) => t.trim()).filter(Boolean);
   // A tag RETIRED by a failed promotion (see retireFailedTag) is gone from the `stable-*` list,
   // so the name would otherwise be handed straight back to the next run — pointing a second,
@@ -599,7 +702,7 @@ async function main() {
     repoRoot: REPO_ROOT,
     boardUrl,
     dbPath,
-    sweepSource: opts.forceSweep ? "SKIPPED" : sweep.source,
+    sweepSource: opts.recover ? "SKIPPED (--recover)" : opts.forceSweep ? "SKIPPED" : sweep.source,
     sweepVerdict: verdict.detail,
     projectName,
     stablePort,
@@ -609,6 +712,7 @@ async function main() {
     forceSweep: opts.forceSweep,
     sweepAcquisition: acquisition,
     gateEvidence: formatGateEvidence(gateEvidence),
+    recovery: recoveryLane ? formatRecoveryLane(recoveryLane, recoveryDelta) : null,
   });
 
   if (opts.dryRun) {
@@ -624,7 +728,7 @@ async function main() {
     console.log(`  stable DB pin    ${dbUrl}`);
     console.log(`  log file         ${logPath}`);
     console.log(`  board log        ${boardLogPath}`);
-    console.log(`  sweep source     ${opts.forceSweep ? "SKIPPED (--force-sweep)" : sweep.source}`);
+    console.log(`  sweep source     ${opts.recover ? "SKIPPED (--recover)" : opts.forceSweep ? "SKIPPED (--force-sweep)" : sweep.source}`);
     console.log(`  sweep verdict    ${verdict.detail}`);
     // #1044: the direction against the stable checkout is the OTHER refusal, and it was invisible
     // here — a dry run could print a clean plan for a run that refuses at `behind`.
@@ -632,9 +736,20 @@ async function main() {
     console.log(`  direction        ${dryDirection ? dryDirection.detail : "not checked (no readable stable HEAD)"}`);
     console.log(`  sweep plan       ${acquisition.detail}`);
     // #1045: printed beside the verdict it is weaker than, and labelled as such.
-    console.log(`  gate evidence    ${formatGateEvidence(gateEvidence)}\n`);
+    console.log(`  gate evidence    ${formatGateEvidence(gateEvidence)}`);
+    if (opts.recover) {
+      console.log(`  lane             RECOVERY (--recover) — no sweep; pipeline + rollback are the gate`);
+      console.log(`  recovery delta   ${formatRecoveryLane(recoveryLane, recoveryDelta)}`);
+      console.log(`  sweep owed       yes — would write ${join(stableCheckout, RECOVERY_STATE_RELPATH)}`);
+      if (priorRecovery?.sweepOwed) {
+        console.log(`  prior recovery   ${priorRecovery.tag} at ${priorRecovery.at} still owes a sweep (warning only)`);
+      }
+      if (!opts.reason) console.log(`  reason           <none> — pass --reason "<why>" so the log says why this bypassed the sweep`);
+    }
+    console.log("");
 
-    const wouldRefuse = !acquisition.request && (!verdict.ok || (dryDirection && !dryDirection.ok));
+    const wouldRefuse =
+      (recoveryLane && !recoveryLane.ok) || (!acquisition.request && (!verdict.ok || (dryDirection && !dryDirection.ok)));
     console.log(
       acquisition.request
         ? "This run would TRIGGER a sweep first, then run these steps on its verdict (refusing if it is not green):"
@@ -644,15 +759,33 @@ async function main() {
     );
     console.log(formatPlan(plan));
     if (wouldRefuse) {
-      const why = !verdict.ok ? `${verdict.detail} (reason: ${verdict.reason})` : dryDirection.detail;
+      const why =
+        recoveryLane && !recoveryLane.ok
+          ? recoveryLane.detail
+          : !verdict.ok
+            ? `${verdict.detail} (reason: ${verdict.reason})`
+            : dryDirection.detail;
       console.log(`\n[promote] WOULD REFUSE — ${why}`);
-      console.log(`[promote] ${acquisition.reason === "disabled" ? "drop --no-await-sweep to trigger a sweep instead, or " : ""}--force-sweep would skip the sweep check, loudly.`);
+      if (!recoveryLane || recoveryLane.ok) {
+        console.log(`[promote] ${acquisition.reason === "disabled" ? "drop --no-await-sweep to trigger a sweep instead, or " : ""}--recover is the fast lane (no sweep; pipeline + rollback are the gate); --force-sweep skips every check, loudly.`);
+      }
       process.exit(1);
     }
     return;
   }
 
-  if (opts.forceSweep) {
+  if (opts.recover) {
+    // Deliberately NOT the force-sweep alarm. This is a sanctioned lane, so the log states what
+    // it did and did not verify, in one line, and records that a sweep is owed. Dressing a
+    // routine operation as an emergency is how the force-sweep banner stopped being read.
+    if (!recoveryLane.ok) fail(recoveryLane.detail);
+    log(`[promote] lane: RECOVERY — no sweep consulted; build/migrate/restart/smoke and its rollback are the gate`);
+    log(`[promote] recovery delta: ${formatRecoveryLane(recoveryLane, recoveryDelta)}`);
+    log(`[promote] reason: ${opts.reason ?? "<none given — pass --reason \"<why>\">"}`);
+    if (priorRecovery?.sweepOwed) {
+      log(`[promote] note: ${priorRecovery.tag} (${priorRecovery.at}) already owes a full sweep — this makes two. Not blocking, but master has now gone unswept across two promotions.`);
+    }
+  } else if (opts.forceSweep) {
     log("[promote] ############################################################");
     log("[promote] # --force-sweep: the nightly full-sweep verdict was NOT    #");
     log("[promote] # consulted. Nothing has verified that master is green.    #");
@@ -677,7 +810,7 @@ async function main() {
   if (dirty.stdout) fail(`stable checkout ${stableCheckout} is DIRTY:\n${dirty.stdout}`);
 
   log(`[promote] === promotion ${tag} -> ${sha} (from ${REPO_ROOT}) ===`);
-  log(`[promote] sweep: ${verdict.detail} (source: ${opts.forceSweep ? "SKIPPED" : sweep.source})`);
+  log(`[promote] sweep: ${verdict.detail} (source: ${opts.recover ? "SKIPPED (--recover)" : opts.forceSweep ? "SKIPPED" : sweep.source})`);
   // #1045 — into the audit trail the Sentinel reads, as context for the verdict above. It is
   // never what authorized this promotion; the sweep line is.
   log(`[promote] gate evidence: ${formatGateEvidence(gateEvidence)}`);
@@ -704,6 +837,13 @@ async function main() {
     const result = await smoke();
     if (result.ok) {
       log(`[promote] SMOKE PASSED — ${result.detail}`);
+      // Only now: the marker says "this board is live and UNSWEPT", which is only true once it IS
+      // live. A recovery that rolled back owes nothing — the previous tag is swept code.
+      if (opts.recover) {
+        writeRecoveryRecord(
+          buildRecoveryRecord({ tag, sha, previousTag: rollbackTag, delta: recoveryDelta, lane: { reason: opts.reason ?? null, ack: recoveryLane.reason } }),
+        );
+      }
       log(`[promote] === ${tag} is live on ${boardUrl} ===`);
       return;
     }

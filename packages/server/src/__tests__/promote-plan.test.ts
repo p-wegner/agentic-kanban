@@ -18,6 +18,9 @@ import {
   isFreshSweepRow,
   isProbingThisProject,
   planSweepAcquisition,
+  planRecoveryLane,
+  classifyRecoveryDelta,
+  buildRecoveryRecord,
   resolveSweepWaitMs,
   nextStableTag,
   parseStableTag,
@@ -370,5 +373,153 @@ describe("checkPromoteDirection", () => {
 
   it("does not block when a sha could not be read at all", () => {
     expect(checkPromoteDirection({ stableHead: "", sha: "abc", shaIsDescendant: false }).ok).toBe(true);
+  });
+});
+
+// --- the recovery lane (#1054) ---------------------------------------------------------------
+
+describe("recovery lane: delta classification", () => {
+  it("counts commits and files and reports no migration for an ordinary delta", () => {
+    const d = classifyRecoveryDelta({
+      commits: ["aaa fix the leak", "bbb test"],
+      changedFiles: ["packages/server/src/a.ts", "packages/client/src/b.tsx"],
+    });
+    expect(d.commitCount).toBe(2);
+    expect(d.fileCount).toBe(2);
+    expect(d.hasMigration).toBe(false);
+    expect(d.migrations).toEqual([]);
+  });
+
+  it("spots a migration anywhere in the delta", () => {
+    const d = classifyRecoveryDelta({
+      commits: ["aaa schema"],
+      changedFiles: ["packages/server/src/a.ts", "packages/shared/drizzle/0153_new_table.sql"],
+    });
+    expect(d.hasMigration).toBe(true);
+    expect(d.migrations).toEqual(["packages/shared/drizzle/0153_new_table.sql"]);
+  });
+
+  it("spots a migration given with WINDOWS separators — git can hand back either", () => {
+    const d = classifyRecoveryDelta({
+      commits: ["aaa schema"],
+      changedFiles: ["packages\\shared\\drizzle\\0153_new_table.sql"],
+    });
+    expect(d.hasMigration).toBe(true);
+  });
+
+  it("does not treat a path that merely mentions drizzle as a migration", () => {
+    const d = classifyRecoveryDelta({
+      commits: ["aaa"],
+      changedFiles: ["packages/server/src/db/drizzle-helpers.ts", "docs/drizzle.md"],
+    });
+    expect(d.hasMigration).toBe(false);
+  });
+
+  it("is empty, not broken, for a delta with nothing in it", () => {
+    const d = classifyRecoveryDelta();
+    expect(d).toMatchObject({ commitCount: 0, fileCount: 0, hasMigration: false });
+  });
+});
+
+describe("recovery lane: what it refuses", () => {
+  const reversible = classifyRecoveryDelta({
+    commits: ["aaa fix"],
+    changedFiles: ["packages/server/src/a.ts"],
+  });
+  const withMigration = classifyRecoveryDelta({
+    commits: ["aaa schema"],
+    changedFiles: ["packages/shared/drizzle/0153_x.sql"],
+  });
+
+  it("permits a delta whose every change a rollback can undo", () => {
+    const lane = planRecoveryLane({ delta: reversible });
+    expect(lane.ok).toBe(true);
+    expect(lane.reason).toBe("reversible");
+  });
+
+  it("does NOT cap the delta by size — the operator is the review on a single-user board", () => {
+    const big = classifyRecoveryDelta({
+      commits: Array.from({ length: 40 }, (_, i) => `c${i} commit`),
+      changedFiles: Array.from({ length: 300 }, (_, i) => `packages/server/src/f${i}.ts`),
+    });
+    expect(planRecoveryLane({ delta: big }).ok).toBe(true);
+  });
+
+  it("refuses a migration — the one change the rollback cannot reverse", () => {
+    const lane = planRecoveryLane({ delta: withMigration });
+    expect(lane.ok).toBe(false);
+    expect(lane.reason).toBe("migration");
+    // The refusal has to say WHY, or the operator just reaches for --force-sweep.
+    expect(lane.detail).toContain("forward-only");
+    expect(lane.detail).toContain("--with-migration");
+  });
+
+  it("proceeds on a migration once it is explicitly acked", () => {
+    const lane = planRecoveryLane({ delta: withMigration, withMigration: true });
+    expect(lane.ok).toBe(true);
+    expect(lane.reason).toBe("migration-acked");
+  });
+
+  it("refuses when the delta could not be computed at all, rather than assuming it is empty", () => {
+    const lane = planRecoveryLane({ delta: null });
+    expect(lane.ok).toBe(false);
+    expect(lane.reason).toBe("no-delta");
+  });
+});
+
+describe("recovery lane: the disclosure it leaves behind", () => {
+  it("records that a sweep is OWED, with the delta and the rollback target", () => {
+    const delta = classifyRecoveryDelta({ commits: ["aaa"], changedFiles: ["packages/server/src/a.ts"] });
+    const rec = buildRecoveryRecord({
+      tag: "stable-20260907",
+      sha: "deadbeef",
+      previousTag: "stable-20260906",
+      delta,
+      atIso: "2026-09-07T12:00:00.000Z",
+    });
+    expect(rec).toMatchObject({
+      kind: "recovery-promotion",
+      tag: "stable-20260907",
+      sha: "deadbeef",
+      rollbackTag: "stable-20260906",
+      sweepOwed: true,
+      sweptBy: null,
+    });
+    expect(rec.delta).toMatchObject({ commitCount: 1, fileCount: 1, migrations: [] });
+  });
+});
+
+describe("recovery lane: it is not the force-sweep path", () => {
+  it("acquires no sweep, and says why in its own words", () => {
+    const acq = planSweepAcquisition({
+      verdict: { ok: true, reason: "recovery", sha: null, detail: "--recover: the sweep was not consulted" },
+      recover: true,
+    });
+    expect(acq.request).toBe(false);
+    expect(acq.reason).toBe("recover");
+    expect(acq.detail).toContain("--recover");
+    expect(acq.detail).not.toContain("--force-sweep");
+  });
+
+  it("makes step 1 describe the lane that actually ran, not a sweep check that did not", () => {
+    const plan = buildPromotionPlan({
+      sha: "abc1234",
+      tag: "stable-20260907",
+      previousTag: "stable-20260906",
+      stableCheckout: "/stable",
+      repoRoot: "/repo",
+      boardUrl: "http://127.0.0.1:3001",
+      dbPath: "/db",
+      sweepSource: "SKIPPED (--recover)",
+      sweepVerdict: "not consulted",
+      projectName: "agentic-kanban",
+      stablePort: 3001,
+      dbUrl: "file:/db",
+      logPath: "/stable/.kanban/promote.log",
+      recovery: "RECOVERY (reversible): 2 commit(s), 3 file(s), no migrations",
+    });
+    expect(plan[0].title).toContain("--recover");
+    expect(plan[0].title).not.toContain("was green");
+    expect(plan[0].detail).toContain("roll back automatically");
   });
 });

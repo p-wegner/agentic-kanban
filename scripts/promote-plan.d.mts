@@ -93,6 +93,8 @@ export interface SweepAcquisition {
   detail: string;
 }
 export declare function planSweepAcquisition(input: {
+  /** `--recover` (#1054): this lane consults no verdict, so there is nothing to acquire. */
+  recover?: boolean;
   verdict: SweepVerdict;
   direction?: PromoteDirection | null;
   forceSweep?: boolean;
@@ -123,6 +125,8 @@ export interface PromotionPlanInput {
   logPath: string;
   boardLogPath?: string | null;
   forceSweep?: boolean;
+  /** One line from `formatRecoveryLane` (#1054) — when set, step 1 describes the recovery lane. */
+  recovery?: string | null;
   /** When it would `request`, step 1 says so instead of claiming it only reads a verdict (#1044). */
   sweepAcquisition?: SweepAcquisition | null;
   /** One line from `formatGateEvidence` (#1045) — printed, never acted on. */
@@ -143,3 +147,52 @@ export declare function checkPromoteDirection(input: {
   sha: string | null | undefined;
   shaIsDescendant: boolean;
 }): PromoteDirection;
+
+// --- the recovery lane (#1054) ---------------------------------------------------------------
+
+export declare const RECOVERY_STATE_RELPATH: string;
+export declare const MIGRATIONS_PATH_PREFIX: string;
+
+export interface RecoveryDelta {
+  commitCount: number;
+  commits: string[];
+  fileCount: number;
+  migrations: string[];
+  hasMigration: boolean;
+}
+export declare function classifyRecoveryDelta(input?: {
+  commits?: string[];
+  changedFiles?: string[];
+}): RecoveryDelta;
+
+export interface RecoveryLane {
+  ok: boolean;
+  reason: "no-delta" | "migration" | "migration-acked" | "reversible";
+  detail: string;
+}
+export declare function planRecoveryLane(input?: {
+  delta: RecoveryDelta | null;
+  withMigration?: boolean;
+}): RecoveryLane;
+
+export interface RecoveryRecord {
+  kind: "recovery-promotion";
+  at: string;
+  tag: string | null;
+  sha: string | null;
+  rollbackTag: string | null;
+  sweepOwed: boolean;
+  sweptBy: string | null;
+  lane: unknown;
+  delta: { commitCount: number; fileCount: number; migrations: string[] } | null;
+}
+export declare function buildRecoveryRecord(input?: {
+  tag?: string | null;
+  sha?: string | null;
+  previousTag?: string | null;
+  delta?: RecoveryDelta | null;
+  lane?: unknown;
+  atIso?: string;
+}): RecoveryRecord;
+
+export declare function formatRecoveryLane(lane: RecoveryLane | null, delta?: RecoveryDelta | null): string;
