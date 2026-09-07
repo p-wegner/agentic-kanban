@@ -178,6 +178,42 @@ describe("dev launcher exit classification", () => {
     }
   });
 
+  it("never scans a nested .claude/worktrees checkout into the dependency manifest snapshot (#1037)", () => {
+    // Proven mechanism behind #1033's node_modules wipe: this checkout's own `pnpm dev`
+    // recursively snapshots dependency manifests to detect real dependency changes. A
+    // nested `<main>/.claude/worktrees/<name>` worktree (Claude Code's EnterWorktree
+    // layout) carries its OWN package.json/pnpm-lock.yaml/pnpm-workspace.yaml — if those
+    // aren't excluded, creating/using that nested worktree changes the recursive file SET
+    // this checkout sees, even though nothing about THIS checkout's real dependencies
+    // changed. The next unrelated fatal child exit then makes the supervisor believe ITS
+    // OWN manifests changed and self-trigger `pnpm install --frozen-lockfile` on this
+    // checkout while its dev server still holds files open — exactly the #1033 signature.
+    const root = mkdtempSync(join(tmpdir(), "ak-dev-supervisor-nested-worktree-"));
+    try {
+      writeFileSync(join(root, "package.json"), JSON.stringify({ dependencies: {} }));
+      writeFileSync(join(root, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+      writeFileSync(join(root, "pnpm-workspace.yaml"), "packages:\n  - packages/*\n");
+
+      const before = snapshotDependencyManifests(root);
+
+      const nested = join(root, ".claude", "worktrees", "agent1");
+      mkdirSync(join(nested, "packages", "a"), { recursive: true });
+      writeFileSync(join(nested, "package.json"), JSON.stringify({ dependencies: {} }));
+      writeFileSync(join(nested, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+      writeFileSync(join(nested, "pnpm-workspace.yaml"), "packages:\n  - packages/*\n");
+      writeFileSync(join(nested, "packages", "a", "package.json"), JSON.stringify({ dependencies: { chalk: "^5.0.0" } }));
+
+      const after = snapshotDependencyManifests(root);
+
+      expect(listDependencyManifestFiles(root).map((file) => file.replace(/\\/g, "/"))).not.toContain(
+        join(nested, "package.json").replace(/\\/g, "/"),
+      );
+      expect(dependencyManifestsChanged(before, after)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("tracks dependency recovery generations for concurrent process exits", () => {
     const initialSnapshot = new Map([["package.json", "before"]]);
     const recovery = createDependencyRecoveryState(initialSnapshot);
