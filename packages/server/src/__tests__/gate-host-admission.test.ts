@@ -1,4 +1,3 @@
-// @gate:always-run — asserts a property of the gate's admission rule that no package-local diff links to.
 /**
  * #1057 — a saturated host must not START a verify chain.
  *

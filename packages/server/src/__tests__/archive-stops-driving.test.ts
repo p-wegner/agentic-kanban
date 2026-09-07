@@ -1,4 +1,3 @@
-// @gate:always-run — pins a cross-module invariant (archive ⇒ Start Mode) no package-local diff links to.
 /**
  * #1057 — archiving a project must STOP DRIVING IT.
  *
