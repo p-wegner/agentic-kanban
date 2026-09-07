@@ -8,7 +8,24 @@ const DEPENDENCY_MANIFEST_NAMES = new Set([
   "pnpm-workspace.yaml",
 ]);
 
+// #1037: `.claude` is excluded because `<main>/.claude/worktrees/*` (Claude Code's nested
+// EnterWorktree layout) carries its OWN package.json/pnpm-lock.yaml/pnpm-workspace.yaml.
+// Scanning into it made an unrelated nested worktree's dependency churn look like a change
+// to THIS checkout's own manifests — proven mechanism behind #1033's node_modules wipe:
+// this checkout's already-running `pnpm dev` snapshots dependency manifests recursively;
+// creating/using a nested worktree changes that recursive file SET (new package.json etc.
+// appear under `.claude/worktrees/<name>`) even though nothing about THIS checkout's real
+// dependencies changed. The next time any of this checkout's own dev child processes has an
+// unrelated fatal exit after running healthily (e.g. the #117 vite ws-proxy crash), the
+// supervisor sees "manifests changed" and self-triggers `pnpm install --frozen-lockfile` on
+// THIS checkout while its own dev server still holds files open — an install that can abort
+// mid-relink (Windows EPERM) between removing the stale top-level node_modules links and
+// recreating them, leaving `.pnpm`/`.modules.yaml` intact but the top-level links gone. That
+// is exactly the #1033 signature, and it requires no `--force`, no junction between the
+// trees, and no command ever run with a nested worktree as cwd — reproduced and pinned by
+// `packages/server/src/__tests__/dev-script.test.mjs`.
 const IGNORED_DIRS = new Set([
+  ".claude",
   ".git",
   ".turbo",
   ".vite",
