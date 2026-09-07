@@ -2,23 +2,31 @@
 /**
  * `pnpm check:arch`, as a script so it can report its own duration to the merge gate (#988).
  *
- * It was three commands chained with `&&` inside the package script. That is still exactly what
- * it runs — the sub-steps, their order and their fail-fast behaviour are unchanged, and this file
- * deliberately adds no scoping. #988 measured the scoping option and declined it: dependency-
- * cruiser's rules are about EDGES, and an edge from an unchanged file into a changed one is
- * precisely what a changed-file list hides, so narrowing it would buy under 10s against a real
- * correctness risk. Revisit only if arch's share of the floor grows.
+ * It was three commands chained with `&&` inside the package script; the sub-steps, their order
+ * and their fail-fast behaviour are unchanged. What this file adds is the `[gate:step]` line the
+ * gate parses (`verify-step-timings.ts`), and — since #1052 — a TERRITORY per sub-step, so a diff
+ * that cannot move an import edge or an MCP tool definition doesn't pay for the check that only
+ * exists to catch that.
  *
- * What it adds is the `[gate:step]` line the gate parses (`verify-step-timings.ts`). An `&&`
- * chain in a package script has nowhere to hang a timer, which is the whole reason the gate's
- * verdict could not name where its time went.
+ * **#988 measured the scoping option and declined it, and #1052 reverses that call.** #988's
+ * reasoning was sound in principle (an edge from an unchanged file into a changed one is
+ * invisible to a changed-file list) but #1052 measured something #988 didn't: on 2026-09-05/06,
+ * EVERY gate death on this board happened inside this script, before `test:mine` was ever
+ * reached — so the impact tier, the whole mechanism built to make the gate affordable, had no
+ * opportunity to do anything on those runs. `lint:arch` (depcruise, 18-69s) and
+ * `mcp-catalog-parity` (10-56s) are the two of three sub-steps with an obvious territory —
+ * `god-modules` stays unconditional because it reads every file's line count, so its subject IS
+ * the tree.
  *
- * The per-sub-step breakdown is printed for a human too, because #988's premise — god-modules 2s,
- * lint:arch 12s, mcp-catalog-parity 11s — was measured by hand once and would otherwise have to
- * be re-measured by hand the next time someone asks whether scoping is worth it yet.
+ * `KANBAN_ARCH_CHANGED_FILES` (comma-separated, repo-relative, set by the gate — see
+ * `buildVerifyEnv` in `pre-merge-gate-tier.ts`) carries the diff. Unset or empty means "I cannot
+ * see the diff" — every step still runs, the same fail-open direction `@gate:always-run`'s
+ * `when:` clause uses (a precondition that narrowed on an unknown change set would silently claim
+ * a floor of nothing). A skipped step is always NAMED in the summary line, never dropped
+ * silently — CLAUDE.md's rule that a level may only weaken verification VISIBLY applies here too.
  */
 import { spawn } from "node:child_process";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnPnpm } from "./pnpm-exec.mjs";
 
@@ -35,6 +43,64 @@ function awaitExit(child, label) {
     });
     child.on("close", (code) => resolve(code ?? 1));
   });
+}
+
+/**
+ * Mirrors `matchesPathGlob` in `scripts/test-mine.mjs` / `matchesGuardGlob` in
+ * `always-run-guard-floor.ts`: `**` spans path segments, `*` does not. A third copy rather than
+ * an import because this script deliberately imports only Node built-ins + the local pnpm
+ * wrapper (so it works before `pnpm install` has run anything else) and cannot depend on either
+ * package's build output.
+ */
+export function matchesPathGlob(glob, relPath) {
+  const rx = glob
+    .replace(/\\/g, "/")
+    .split("/")
+    .map((seg) => (seg === "**" ? "(?:.*)" : seg.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]*")))
+    .join("/")
+    // `**' + '/x` must also match a bare `x` at the root.
+    .replace(/\(\?:\.\*\)\//g, "(?:.*/)?");
+  return new RegExp(`^${rx}$`).test(relPath.replace(/\\/g, "/"));
+}
+
+/** Mirrors `.dependency-cruiser.cjs`'s own `exclude.path`: these carry no edge it enforces. */
+export function isArchRelevantFile(relPath) {
+  if (/(^|\/)__tests__\//.test(relPath)) return false;
+  if (/\.test\.(ts|tsx)$/.test(relPath)) return false;
+  if (/\/drizzle\//.test(relPath)) return false;
+  if (/\.d\.ts$/.test(relPath)) return false;
+  return true;
+}
+
+/**
+ * Territory per scoped sub-step (#1052). `god-modules` carries none — it always runs.
+ */
+export const STEP_TERRITORY = {
+  "lint:arch": {
+    when: ["packages/**", "scripts/**", ".dependency-cruiser.cjs"],
+    filter: isArchRelevantFile,
+    reason: "no import changes",
+  },
+  "mcp-catalog-parity": {
+    when: [
+      "packages/mcp-server/src/index.ts",
+      "packages/mcp-server/src/tools/**",
+      "packages/shared/src/lib/mcp-tool-definitions.ts",
+    ],
+    reason: "no MCP tool/catalog changes",
+  },
+};
+
+/**
+ * Does `label`'s territory intersect the diff? `changedFiles: []` means the diff is UNKNOWN
+ * (env var unset, or the gate couldn't read it) — that runs everything, never nothing.
+ */
+export function stepApplies(label, changedFiles) {
+  const territory = STEP_TERRITORY[label];
+  if (!territory) return true;
+  if (changedFiles.length === 0) return true;
+  const candidates = territory.filter ? changedFiles.filter(territory.filter) : changedFiles;
+  return candidates.some((f) => territory.when.some((g) => matchesPathGlob(g, f)));
 }
 
 /**
@@ -63,11 +129,21 @@ const STEPS = [
   },
 ];
 
-async function main() {
+export async function main() {
+  const changedFiles = (process.env.KANBAN_ARCH_CHANGED_FILES || "")
+    .split(",")
+    .map((f) => f.trim().replace(/\\/g, "/"))
+    .filter(Boolean);
+
   const startedAt = Date.now();
   const timings = [];
+  const skipped = [];
   let failedLabel = null;
   for (const step of STEPS) {
+    if (!stepApplies(step.label, changedFiles)) {
+      skipped.push({ label: step.label, reason: STEP_TERRITORY[step.label].reason });
+      continue;
+    }
     const stepStartedAt = Date.now();
     const code = await step.run();
     timings.push({ label: step.label, durationMs: Date.now() - stepStartedAt, code });
@@ -80,13 +156,37 @@ async function main() {
   }
   const totalMs = Date.now() - startedAt;
 
-  const parts = timings.map((t) => `${t.label} ${Math.round(t.durationMs / 1000)}s${t.code === 0 ? "" : " FAILED"}`);
-  console.log(`[check:arch] ${Math.round(totalMs / 1000)}s total: ${parts.join(", ")}`);
+  const ranParts = timings.map((t) => `${t.label} ${Math.round(t.durationMs / 1000)}s${t.code === 0 ? "" : " FAILED"}`);
+  const skipReasonSummary = skipped.length
+    ? ` (${[...new Set(skipped.map((s) => s.reason))].join("; ")})`
+    : "";
+  const skipPart = skipped.length ? [`${skipped.length} step(s) skipped: ${skipped.map((s) => s.label).join(", ")}${skipReasonSummary}`] : [];
+  console.log(`[check:arch] ${Math.round(totalMs / 1000)}s total: ${[...ranParts, ...skipPart].join(", ")}`);
   // Only on the green path. A chain that stopped at its first sub-step ran a FRACTION of the
   // work, and reporting that fraction's clock as `arch 2s` would understate the floor — the
   // flattering direction, and the one the gate message's honesty rule exists to rule out. A
   // failing gate never reaches the passing message anyway.
-  if (!failedLabel) console.log(`[gate:step] name=arch seconds=${Math.round(totalMs / 1000)}`);
+  //
+  // `scope=` carries the skip into the GATE's own one-line verdict (`buildStepTimingNote`
+  // reads it verbatim), not just this script's own log — a skip visible only here would be
+  // invisible to whoever reads the merge comment, which is exactly the silent-narrowing shape
+  // CLAUDE.md's "a level may only weaken verification VISIBLY" rule forbids. Omitted when
+  // nothing was skipped, same as every other step's `scope` field.
+  if (!failedLabel) {
+    // Two separate literal templates (not one with a conditionally-empty hole) so the STATIC
+    // text around each hole is correct either way — `verify-step-timings.test.ts`'s emitter
+    // round-trip guard realizes every `${…}` hole independently and would not catch a hole
+    // whose OWN runtime value supplies the space/quote the parser needs, only a missing
+    // literal one (#988's whole point).
+    if (skipped.length) {
+      const reason = skipReasonSummary.trim().replace(/^\(|\)$/g, "");
+      console.log(
+        `[gate:step] name=arch seconds=${Math.round(totalMs / 1000)} scope="${skipped.map((s) => s.label).join("+")} skipped: ${reason}"`,
+      );
+    } else {
+      console.log(`[gate:step] name=arch seconds=${Math.round(totalMs / 1000)}`);
+    }
+  }
 
   if (failedLabel) {
     console.error(`[check:arch] FAILED at ${failedLabel}`);
@@ -94,7 +194,11 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error("[check:arch] crashed:", err);
-  process.exit(1);
-});
+// Guarded so this module can be imported for its pure functions (territory matching, in
+// tests) without spawning its own children — mirrors `scripts/test-mine.mjs`'s entry check.
+if (resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
+  main().catch((err) => {
+    console.error("[check:arch] crashed:", err);
+    process.exit(1);
+  });
+}
