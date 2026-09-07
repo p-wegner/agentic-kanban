@@ -29,10 +29,53 @@
  * another checkout is a claim about inputs this one has never read.
  */
 import { spawn } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { format } from "node:util";
 import { spawnPnpm } from "./pnpm-exec.mjs";
+
+/* ---------------------------------------------------------------------------
+ * #1058 — this script's own failure line must survive `process.exit()`
+ *
+ * `[typecheck] FAILED: <packages>` is followed immediately by `process.exit(1)`.
+ * Writes to a PIPE are asynchronous in Node, and the pre-merge gate is exactly the
+ * caller that uses one (`runSetupScript` spawns the verify script with
+ * `stdio: "pipe"`), so that line is DISCARDED before it drains.
+ *
+ * Measured on 2026-09-07 against workspace ak-1048: the captured verify log — the
+ * full one on disk, not a UI truncation — ends at
+ *
+ *     > agentic-kanban@ typecheck C:\...\ak-1048
+ *     > node scripts/typecheck.mjs
+ *
+ * and stops. Typecheck failed and said nothing about which package or why, so the
+ * gate's own summary quoted the last surviving line instead: a `startup-bypasses-
+ * repositories` WARNING from the arch step that had already passed. A green step's
+ * warning presented as the cause of a red gate is worse than no message at all, and
+ * that is the shape three successive wrong diagnoses were built on.
+ *
+ * Note the spawned `tsc` children are unaffected — they use `stdio: "inherit"`, so
+ * they write to the fd directly. It is this process's OWN summary that vanishes,
+ * which is why a failure looked like a silent death.
+ *
+ * Fix is `writeSync` when the stream is not a TTY (a pipe or a file — the gate's
+ * case); interactive runs keep the buffered path. A dead reader must lose the line
+ * rather than throw, so every write is guarded.
+ * ------------------------------------------------------------------------ */
+if (!process.stdout.isTTY || !process.stderr.isTTY) {
+  const emit = (fd) => (...args) => {
+    try {
+      writeSync(fd, `${format(...args)}\n`);
+    } catch {
+      /* EPIPE / EBADF — a lost line must not fail the run. */
+    }
+  };
+  console.log = emit(1);
+  console.info = emit(1);
+  console.warn = emit(2);
+  console.error = emit(2);
+}
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 

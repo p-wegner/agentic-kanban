@@ -91,11 +91,63 @@ import { spawn, spawnSync, execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, writeSync } from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { format } from "node:util";
 import { dirname, relative, resolve } from "node:path";
 import {
   acquireForBuilderTest,
   MACHINE_LOCK_HEARTBEAT_INTERVAL_MS,
 } from "./machine-verify-lock.mjs";
+
+/* ---------------------------------------------------------------------------
+ * #1058 — a failure in the LAST batch must survive `process.exit()`
+ *
+ * Every branch of this script ends in an explicit `process.exit()`. Writes to a
+ * PIPE are asynchronous in Node, and the gate is exactly the caller that uses one
+ * (`runSetupScript` spawns the verify script with `stdio: "pipe"`). So anything
+ * still queued when `process.exit()` runs is DISCARDED — which is how a failing
+ * final batch produced a log that ends mid-banner, with the vitest summary and the
+ * `[test:mine] One or more … failed.` line both gone. That log is indistinguishable
+ * from a killed process, and it was read as one four separate times: machine load,
+ * then %TEMP% exhaustion, then a truncation theory — three wrong diagnoses and
+ * hours spent, because the evidence destroyed itself at exit.
+ *
+ * The `[gate:step]` emitter below already documents this hazard and defends against
+ * it with `writeSync`. The reasoning was applied to the one-line step report and not
+ * to the failure output, which is the half an operator actually needs.
+ *
+ * Fix: when a stream is NOT a TTY (i.e. it is a pipe or a file — the gate's case),
+ * route this process's own writes through `writeSync`, which hits the fd before it
+ * returns. Interactive runs keep the buffered fast path, since a TTY write is
+ * already synchronous on POSIX and buffering is what keeps a chatty run fast.
+ *
+ * EPIPE and friends must never be the reason a run fails — a closed reader (`| head`,
+ * a detached parent) loses the line rather than throwing. That is the same contract
+ * the `[gate:step]` writer keeps.
+ * ------------------------------------------------------------------------ */
+/** Write `text` to `fd` synchronously, swallowing a dead reader. */
+function writeAllSync(fd, text) {
+  try {
+    writeSync(fd, text);
+  } catch {
+    /* EPIPE / EBADF — a lost line must not fail the run. */
+  }
+}
+
+/**
+ * True when this process's output is being CAPTURED rather than shown on a terminal.
+ * That is precisely when Node's writes turn async and `process.exit()` can drop them.
+ */
+const OUTPUT_IS_CAPTURED = !process.stdout.isTTY || !process.stderr.isTTY;
+
+if (OUTPUT_IS_CAPTURED) {
+  // Formatting stays Node's (`format` is what console itself uses), so every existing
+  // call site keeps its exact rendering — only the write becomes synchronous.
+  const emit = (fd) => (...args) => writeAllSync(fd, `${format(...args)}\n`);
+  console.log = emit(1);
+  console.info = emit(1);
+  console.warn = emit(2);
+  console.error = emit(2);
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, "..");
@@ -1215,14 +1267,19 @@ function runPackage({ dir, label, exclude }, mode = null) {
     });
     let sawNoTestFiles = false;
     if (tee) {
-      const watch = (stream, sink) => {
+      // #1058 — a TEE'd child's output is re-emitted BY THIS PROCESS, so unlike the
+      // `stdio: "inherit"` case it inherits this process's async-pipe hazard: a
+      // `sink.write()` still queued when a later `process.exit()` runs is discarded.
+      // That is the vitest failure summary, i.e. the one thing the operator needs.
+      // `writeAllSync` puts it on the fd before the handler returns.
+      const watch = (stream, fd) => {
         stream.on("data", (chunk) => {
-          sink.write(chunk);
+          writeAllSync(fd, chunk);
           if (/No test files found/i.test(chunk.toString())) sawNoTestFiles = true;
         });
       };
-      watch(child.stdout, process.stdout);
-      watch(child.stderr, process.stderr);
+      watch(child.stdout, 1);
+      watch(child.stderr, 2);
     }
     child.on("exit", (code) => resolvePromise({ code: code ?? 1, selectedNothing: sawNoTestFiles }));
     child.on("error", (err) => {
