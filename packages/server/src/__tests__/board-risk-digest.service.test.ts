@@ -1,16 +1,26 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import * as schema from "@agentic-kanban/shared/schema";
+import { gitExecSync } from "@agentic-kanban/shared/lib/git-exec";
 import { createTestDb } from "./helpers/test-db.js";
 import { generateBoardRiskDigest } from "../services/board-risk-digest.service.js";
+import { createPluginService } from "../services/plugin.service.js";
+import type { Database } from "../db/index.js";
 
 async function seedProject(db: ReturnType<typeof createTestDb>["db"]) {
+  return seedProjectWithStatuses(db, `C:/tmp/${randomUUID()}`);
+}
+
+async function seedProjectWithStatuses(db: ReturnType<typeof createTestDb>["db"], repoPath: string) {
   const now = new Date().toISOString();
   const projectId = randomUUID();
   await db.insert(schema.projects).values({
     id: projectId,
     name: "Risk Test Project",
-    repoPath: `C:/tmp/${projectId}`,
+    repoPath,
     repoName: "risk-test",
     defaultBranch: "main",
     createdAt: now,
@@ -30,6 +40,40 @@ async function seedProject(db: ReturnType<typeof createTestDb>["db"]) {
   ]);
 
   return { projectId, todoId, inProgressId, inReviewId, doneId };
+}
+
+const tempDirs: string[] = [];
+
+function makeTempDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+}
+
+function makeProjectRepo(): string {
+  const repo = makeTempDir("ak-risk-digest-repo-");
+  gitExecSync(["init"], { cwd: repo });
+  return repo;
+}
+
+function makePluginDir(): string {
+  const dir = makeTempDir("ak-risk-digest-plugin-");
+  const manifest = {
+    id: "test-safety-net",
+    name: "Test Safety Net",
+    version: "0.1.0",
+    skills: [{ dir: "skills/requirement-extraction" }],
+  };
+  writeFileSync(join(dir, "kanban-plugin.json"), JSON.stringify(manifest, null, 2));
+  const skillDir = join(dir, "skills", "requirement-extraction");
+  mkdirSync(skillDir, { recursive: true });
+  writeFileSync(join(skillDir, "SKILL.md"), "# requirement-extraction\nExtract requirements.");
+  return dir;
+}
+
+async function seedProjectAt(db: ReturnType<typeof createTestDb>["db"], repoPath: string): Promise<string> {
+  const { projectId } = await seedProjectWithStatuses(db, repoPath);
+  return projectId;
 }
 
 async function createIssue(
@@ -241,5 +285,56 @@ describe("generateBoardRiskDigest", () => {
     await expect(
       generateBoardRiskDigest("non-existent-project-id", db as never),
     ).rejects.toThrow();
+  });
+});
+
+/**
+ * #1053 — the digest is the board-visible surface for #1039's healing check: it must catch a
+ * plugin skill junction gone from the main checkout independent of any workspace being created,
+ * which is exactly the shape that stayed silent for a day on the live board.
+ */
+describe("generateBoardRiskDigest — plugin skill health (#1053)", () => {
+  afterEach(() => {
+    for (const dir of tempDirs.splice(0)) {
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch {
+        /* Windows file locks — temp cleanup is best-effort */
+      }
+    }
+  });
+
+  it("flags an enabled plugin's skill that has gone missing from the main checkout", async () => {
+    const { db } = createTestDb();
+    const pluginDir = makePluginDir();
+    const repo = makeProjectRepo();
+    const pluginService = createPluginService({ database: db as unknown as Database });
+    const plugin = await pluginService.installPlugin({ source: pluginDir });
+    const projectId = await seedProjectAt(db, repo);
+    await pluginService.enableForProject(plugin.id, projectId);
+
+    const mainSkill = join(repo, ".claude", "skills", "requirement-extraction");
+    rmSync(mainSkill, { recursive: true, force: true });
+
+    const digest = await generateBoardRiskDigest(projectId, db as never);
+
+    const healedItem = digest.allItems.find((i) => i.category === "health" && /re-materialized/.test(i.reason));
+    expect(healedItem).toBeDefined();
+    expect(healedItem!.reason).toContain("requirement-extraction");
+    expect(existsSync(join(mainSkill, "SKILL.md"))).toBe(true);
+  });
+
+  it("does not flag a plugin skill that already resolves", async () => {
+    const { db } = createTestDb();
+    const pluginDir = makePluginDir();
+    const repo = makeProjectRepo();
+    const pluginService = createPluginService({ database: db as unknown as Database });
+    const plugin = await pluginService.installPlugin({ source: pluginDir });
+    const projectId = await seedProjectAt(db, repo);
+    await pluginService.enableForProject(plugin.id, projectId);
+
+    const digest = await generateBoardRiskDigest(projectId, db as never);
+
+    expect(digest.allItems.some((i) => i.issueTitle === "Plugin skills")).toBe(false);
   });
 });

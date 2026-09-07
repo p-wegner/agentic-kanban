@@ -1,4 +1,6 @@
 import { getBoardStatus } from "./board-status.js";
+import { checkPluginSkillHealth } from "./plugin-skill-health.service.js";
+import { getProjectRepoPath } from "../repositories/project.repository.js";
 import type { db } from "../db/index.js";
 
 export type RiskCategory = "merge_blocker" | "stale_session" | "low_backlog" | "health";
@@ -116,6 +118,32 @@ export async function generateBoardRiskDigest(
           severity: "medium",
         });
       }
+    }
+  }
+
+  // plugin skill health: an enabled plugin's skill that this checkout cannot resolve, or that
+  // had gone missing and was just re-materialized (#1053 — #1039's heal only ran when a
+  // workspace was created; this makes the SAME check visible on the board independent of one).
+  const repoPath = await getProjectRepoPath(projectId, database);
+  if (repoPath) {
+    const pluginHealth = await checkPluginSkillHealth(projectId, repoPath, database);
+    for (const finding of pluginHealth.missing) {
+      allItems.push({
+        issueNumber: 0,
+        issueTitle: "Plugin skills",
+        reason: `${finding.pluginName}: "${finding.skillName}" cannot be materialized here — ${finding.reason}`,
+        category: "health",
+        severity: "high",
+      });
+    }
+    for (const finding of pluginHealth.healed) {
+      allItems.push({
+        issueNumber: 0,
+        issueTitle: "Plugin skills",
+        reason: `${finding.pluginName}: "${finding.skillName}" was missing from this checkout and has just been re-materialized`,
+        category: "health",
+        severity: "medium",
+      });
     }
   }
 
