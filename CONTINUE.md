@@ -3,6 +3,88 @@
 Where to pick this up. Present-tense, current state only — see `BACKLOG.md` (exported from
 the board, `pnpm cli -- backlog export`) for candidate future work.
 
+## 2026-09-07 (evening) — the gate failures were the board KILLING ITS OWN verify runs (#1059)
+
+**This supersedes three diagnoses, including this morning's.** The #1046/#1048/#1049 gate
+failures were not machine load (#1006), not `%TEMP%` exhaustion (#1056), and not log truncation
+(#1058). The board's own resource sweeper was reaping the in-flight verify process tree.
+
+Caught in the board's own log, twice, each kill under a second before the gate "failed":
+
+```
+20:09:52.768 process-kill-allowed           pid=20260 reason=monitor-stale-dev-tree
+20:09:53.099 monitor-stale-dev-tree-cleaned rootPid=20260 pids=[16 pids]
+20:19:52.845 process-kill-allowed           pid=10464 reason=monitor-stale-dev-tree
+20:19:53.154 monitor-stale-dev-tree-cleaned rootPid=10464 pids=[12 pids]
+```
+
+**Why it hid so well.** `runStandaloneResourceSweep` fires every 5 minutes on its own timer —
+independent of `auto_monitor`, which is off — and a gate takes 5-15 minutes, so essentially every
+gate run was killed. The step that dies is whichever the tick lands on (typecheck in one run,
+depcruise in the next), and a SIGKILLed process emits nothing. That is exactly the "different
+batch each time, no output, nothing correlated" signature the earlier theories were built on. The
+discriminator: the second kill landed on an IDLE box (RAM 54%, CPU 25%, nothing throttling),
+which rules out all three.
+
+**Mechanism, with the irony.** This project's verify script is
+`pnpm check:arch && pnpm typecheck && pnpm test:mine`, so the shell's command line contains
+`pnpm test:mine` and matches `isTestTreeProcess` — the #172 heuristic added to reap LEAKED vitest
+workers. It holds no listening port (depcruise/tsc/vitest listen on nothing), no protected pid,
+and no active workspace session, so it falls into `stale-dev-tree-no-listeners`. The heuristic
+that cleans up after a test run is the one that killed test runs in progress.
+
+`protectedPids()` could not have helped: it read only `KANBAN_PROTECTED_PIDS` and
+`KANBAN_BOARD_SERVER_PID`, both fixed at launch, so a child the board spawned seconds ago and was
+actively awaiting was invisible to the guard deciding what to kill.
+
+**Fixed (`6b98b04ca7`) at ONE seam, not at the gate's call site** — an install, a base-health probe
+and a cold-clone build are equally fatal to interrupt. `shared/lib/setup-script.ts` gained a
+nullable `SetupProcessObserver` that the server installs in `wireCoreServices`; it fires on spawn
+and in the `cleanup()` funnel every settle path already goes through, so timeout/no-progress/abort
+kills release the pid too. `process-guard.ts` gained a reference-counted runtime set unioned into
+`protectedPids()`.
+**Verified by:** `setup-script-pid-protection.test.ts` 7/7 — including a NEGATIVE CONTROL asserting
+the tree IS reaped with nothing registered, a real spawn/settle round trip, a real timeout-kill
+release, the reference-count case, and a throwing observer; `stale-dev-processes.test.ts` 17/17
+unchanged; the five shared setup-script suites 18/18; `pnpm typecheck` 17s.
+**Deliberately not changed:** `workspaceAssociations` gates its working-dir match on
+`ws.sessionPid`, so an IDLE workspace (i.e. every workspace merged from Review) can never be
+associated with a tree in its own worktree. Real second gap, written up in #1059. Dropping the
+guard was REJECTED: `associatedWorkspaceIds` is tested before the `stale-worktree-dev-orphan`
+branch, so broadening it would keep genuinely orphaned dev servers alive forever in any idle
+workspace's directory — trading this bug for #172's.
+
+**#1058 — the ticket's incident attribution is REFUTED (`6875bbfba0`).** Its mechanism
+(`process.exit()` dropping queued pipe writes) is real on POSIX but cannot explain a Windows
+incident: **Node's pipe writes are synchronous on Windows.** Three repro shapes on this box — 4k
+lines to `tail`, 50k/200k lines to `grep`, and 20k lines with the reader PAUSED 4s to mimic a
+blocked event loop — all kept the final line, 2.67 MB intact. The hardening was shipped anyway on
+its own merits for the containerized/Linux verify path (both `typecheck.mjs` and `test-mine.mjs`
+now `writeSync` when not a TTY, and `test-mine.mjs`'s TEE'd child output with them), but the
+commit and a board comment both say plainly it does not fix the measured incident.
+
+**Promoted `stable-20260907` via `pnpm promote --recover`.** This was forced, not chosen: the
+sweeper killed every gate AND every full sweep, so no ordinary promotion could ever be authorised
+— a deadlock #1054's recovery lane exists for. Delta 12 commits / 32 files / **no migrations**,
+smoke passed, auto-rollback armed. **A full sweep is OWED** —
+`../agentic-kanban-stable/.kanban/promote-recovery.json` records it.
+
+**Filed:** #1059 (this root cause).
+
+**Still true and unresolved:**
+- The 8 in-flight branches are all committed and clean; they were never the problem. They still
+  need to go through the gate now that it can survive a sweep tick.
+- **#1040's branch has an EMPTY net diff** — `git diff <merge-base> HEAD` is 0 lines, because
+  `032ed5a56a` re-adds the six `package.json` lines `f1df8b2578` removes. But the underlying fix
+  is REAL and still wanted: master's `package.json` still carries the dead
+  `pnpm.onlyBuiltDependencies` field, which pnpm warns about on **every** command
+  (`pnpm-workspace.yaml` already owns it). So this is not "close as invalid" — it is "keep commit
+  1, drop commit 2".
+- `%TEMP%` sits at ~100.8k entries (9.4k kanban/vitest fixture dirs), stable, ~10s to enumerate.
+  #1056's producer/reaper imbalance is untouched.
+- Sibling-scan noise: archived `ticket-sizing-lab` projects point at deleted directories and log
+  a warning burst per merge scan.
+
 ## 2026-09-07 — %TEMP% exhaustion was killing the gate; recovery lane landed; 15 projects archived
 
 **The headline, because it invalidates four earlier diagnoses:** the pre-merge gate failed four
