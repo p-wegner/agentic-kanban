@@ -65,7 +65,7 @@ export async function computeStableSkew(
   const summaries = await getCommitSummariesBetween(repoPath, stableTag, headRef);
   if (summaries.length === 0) return null;
 
-  const commits: StableSkewCommit[] = summaries.slice(0, STABLE_SKEW_COMMIT_LIMIT).map((c) => ({
+  const allCommits: StableSkewCommit[] = summaries.map((c) => ({
     sha: c.sha,
     message: c.message,
     isFixShaped: FIX_SHAPED_RE.test(c.message),
@@ -74,7 +74,9 @@ export async function computeStableSkew(
   return {
     stableTag,
     aheadCount: summaries.length,
-    commits,
-    fixShapedCount: commits.filter((c) => c.isFixShaped).length,
+    commits: allCommits.slice(0, STABLE_SKEW_COMMIT_LIMIT),
+    // Counted over the FULL ahead list, not the truncated `commits` — a fix-shaped commit
+    // older than the newest STABLE_SKEW_COMMIT_LIMIT commits must still be flagged.
+    fixShapedCount: allCommits.filter((c) => c.isFixShaped).length,
   };
 }
