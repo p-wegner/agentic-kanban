@@ -47,7 +47,7 @@ export interface PreMergeGateResult {
    */
   timedOut?: boolean;
   /**
-   * True when the gate DID NOT RUN because the host was too saturated to run it (#1056).
+   * True when the gate DID NOT RUN because the host was too saturated to run it (#1057).
    *
    * Like {@link timedOut} this is `passed: false` WITHOUT being evidence about the code — but it
    * is the stronger form of that claim, because nothing was executed at all. Callers must treat

@@ -585,7 +585,7 @@ export async function runPreLockGate(args: {
       database,
       recordMergeAttempt,
     });
-    // #1056 — a HELD gate never ran, so "failed" would be a false claim about this diff. It still
+    // #1057 — a HELD gate never ran, so "failed" would be a false claim about this diff. It still
     // travels the `pre_merge_gate_failed` road on purpose: that is what #638/#170 key on to keep a
     // withheld merge away from the fix agent and every agent-driven retry, and a hold needs exactly
     // that protection. Only the PROSE distinguishes them — the routing must not.

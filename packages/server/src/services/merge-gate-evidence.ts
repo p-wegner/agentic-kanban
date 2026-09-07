@@ -75,7 +75,7 @@ export interface GateWithEvidence {
   /** See {@link PreMergeGateResult.unverified} — nothing checked this merge at all (#377). */
   unverified?: boolean;
   /**
-   * See {@link PreMergeGateResult.held} — the gate DECLINED TO RUN on a saturated host (#1056).
+   * See {@link PreMergeGateResult.held} — the gate DECLINED TO RUN on a saturated host (#1057).
    * `passed: false` without being a verdict about the diff; the merge is deferred, not refused.
    */
   held?: boolean;

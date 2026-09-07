@@ -425,7 +425,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     // Clear the active-project preference if it pointed at the now-archived project,
     // so the board doesn't try to render a hidden project on next load.
     await clearActiveProjectPreference(id, database);
-    // #1056 — and STOP DRIVING IT. Archiving used to hide a project from the list and change
+    // #1057 — and STOP DRIVING IT. Archiving used to hide a project from the list and change
     // nothing else, because the monitor's driven set is derived purely from prefs
     // (`monitorDrivenProjectIds`) and never consults `archivedAt`. So an archived project kept
     // starting builders, merging, refilling its backlog and burning quota, invisibly — there was
@@ -451,7 +451,7 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     const project = await getProjectById(id, database);
     if (!project) throw new ProjectError("Project not found", "NOT_FOUND");
     await setProjectArchived(id, false, database);
-    // #1056 — deliberately does NOT restore `monitor`. Un-archiving makes a project VISIBLE
+    // #1057 — deliberately does NOT restore `monitor`. Un-archiving makes a project VISIBLE
     // again; it is not a statement that agents should immediately start spending quota on its
     // backlog. Restoring a drive mode the operator cannot see coming is the more expensive
     // mistake of the two, so the mode stays `manual` and turning it back on is one explicit

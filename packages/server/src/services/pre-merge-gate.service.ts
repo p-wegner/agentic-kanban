@@ -545,7 +545,7 @@ export async function runPreMergeGate(
     // Never two suites at once on this box, and the message names whichever happened. Total
     // by construction (`note` is null when nothing was due), so no branch here — this function
     // sits on the god-module gate's branch ceiling.
-    // #1056 — BEFORE anything expensive: may this box run a verify chain at all? The base-health
+    // #1057 — BEFORE anything expensive: may this box run a verify chain at all? The base-health
     // probe has asked this since #1009; the gate, running the same script, never did. A saturated
     // host produces a ~28-minute run that fails in an arbitrary batch and proves nothing (measured
     // three times over on 2026-09-07), so decline cheaply and let the next cycle retry. `held` is
@@ -828,7 +828,7 @@ async function runGateAsResolved(
     stage: gate.stage,
     message: gate.message,
     ...(gate.unverified ? { unverified: true } : {}),
-    // #1056 — a HELD gate must stay distinguishable from a red one all the way out to the
+    // #1057 — a HELD gate must stay distinguishable from a red one all the way out to the
     // caller: it did not run, so "the gate failed" would be a false claim about the diff.
     ...(gate.held ? { held: true } : {}),
     ...(gate.impactSelection !== undefined ? { impactSelection: gate.impactSelection } : {}),

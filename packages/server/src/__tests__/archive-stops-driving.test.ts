@@ -1,6 +1,6 @@
 // @gate:always-run — pins a cross-module invariant (archive ⇒ Start Mode) no package-local diff links to.
 /**
- * #1056 — archiving a project must STOP DRIVING IT.
+ * #1057 — archiving a project must STOP DRIVING IT.
  *
  * Archiving used to hide a project from the default list and change nothing else. But the
  * monitor's driven set is derived purely from preferences (`monitorDrivenProjectIds`) and never
@@ -48,7 +48,7 @@ function service() {
   return createProjectService({ database: {} as never });
 }
 
-describe("archiving stops the monitor driving a project (#1056)", () => {
+describe("archiving stops the monitor driving a project (#1057)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getProjectById.mockResolvedValue({ id: PID, name: "fleetops" });

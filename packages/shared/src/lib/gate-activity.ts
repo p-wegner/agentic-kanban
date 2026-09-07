@@ -46,7 +46,7 @@ export type MergeGatePhase =
   /** Waiting for the cross-workspace verify-chain semaphore — nothing is executing yet. */
   | "queued"
   /**
-   * Declined to start at all: the host was too saturated to run a verify chain (#1056).
+   * Declined to start at all: the host was too saturated to run a verify chain (#1057).
    *
    * Deliberately NOT `queued`. A queue is waiting for a slot and will run; a hold is not
    * waiting for anything and will be retried by the next cycle instead. Rendering the two the
@@ -134,7 +134,7 @@ export interface GateActivity {
  */
 const GATE_PHASE_VERB: Record<MergeGatePhase, string> = {
   queued: "Queued",
-  // #1056 — "Held", never "Queued": a queue is waiting for a slot and will run, a hold is
+  // #1057 — "Held", never "Queued": a queue is waiting for a slot and will run, a hold is
   // waiting for nothing and gets retried by the next cycle instead.
   held: "Held (host busy)",
   install: "Installing",
