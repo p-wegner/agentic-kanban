@@ -9,15 +9,27 @@
  * re-exports them so no import site had to move.
  */
 import type { workspaces } from "@agentic-kanban/shared/schema";
+import { isProfileCooling } from "@agentic-kanban/shared/lib/profile-roster";
 import type { Database } from "../db/index.js";
 import type { ProviderName } from "./agent-provider.js";
 import type { AgentSettings } from "./agent-settings.service.js";
 import { loadProjectRuntimeConfig } from "./project-runtime-config.service.js";
 import { WorkspaceError } from "./workspace-error.js";
 
+/**
+ * #1048: the pinned profile still wins unconditionally when the ring reports it cooling —
+ * a default relaunch (monitor auto-relaunch, the UI button, `workspace resume` with no
+ * flag) would then launch straight into the same exhausted account it just failed on and
+ * exit in ~6 seconds. `prefMap` carries the `<provider>_cooldown_<profile>` stamps the
+ * rotation rings write (`auth-rotation-ring.ts`); when it is absent (a caller with no
+ * prefs at hand) the pin is honored exactly as before — this only NARROWS the pin, it
+ * never invents a new one.
+ */
 export function applyWorkspaceAgentSelection(
   settings: AgentSettings,
   workspace: typeof workspaces.$inferSelect,
+  prefMap?: Map<string, string>,
+  nowMs: number = Date.now(),
 ): AgentSettings {
   const provider = workspace.provider;
   if (provider !== "claude" && provider !== "codex" && provider !== "copilot" && provider !== "pi") return settings;
@@ -35,7 +47,11 @@ export function applyWorkspaceAgentSelection(
   // Only inherit a selection tagged for THIS workspace's provider — a claude profile name
   // must never leak into a codex/copilot/pi launch.
   const inheritedProfile = settings.profile?.provider === provider ? settings.profile.name : undefined;
-  const profileName = (workspace.claudeProfile || undefined) ?? inheritedProfile;
+  const pinnedProfile = workspace.claudeProfile || undefined;
+  const pinnedIsCooling = Boolean(
+    pinnedProfile && prefMap && isProfileCooling({ provider, name: pinnedProfile }, prefMap, nowMs),
+  );
+  const profileName = (pinnedIsCooling ? undefined : pinnedProfile) ?? inheritedProfile;
   const agentArgs = provider === "claude"
     ? settings.agentArgs
     : settings.agentArgs
