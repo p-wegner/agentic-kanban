@@ -386,6 +386,37 @@ mechanism no longer *requires* it: two consecutive promotions with no manual swe
 take the honest path, because the second one asks for its own evidence instead of inheriting a
 verdict the first one moved past.
 
+### Two-board skew is now board-visible (#1055)
+
+#1039 landed on master and sat "Done" for a full day while the stable board kept running the
+pre-fix code — the stable checkout only moves on a promotion, and nothing on the board said
+"master is ahead of what's actually running." `generateBoardRiskDigest`
+(`services/board-risk-digest.service.ts`) now surfaces this via `computeStableSkew`
+(`services/stable-skew.service.ts`): it finds the newest local `stable-*` tag (the same tag
+`pnpm promote` creates in this repo — see "1. tags `stable-YYYYMMDD[-N]`" above) and diffs the
+project's default branch against it. The digest gains a `stableSkew` field (`null` when the repo
+carries no `stable-*` tag, or master is not ahead of it) and, when any of the ahead commits look
+`fix(#N)`/`feat(#N)`-shaped, a `stable_skew` risk item naming the count — so a "Done" ticket whose
+fix isn't live yet shows up next to the other things an operator should not trust blindly.
+
+This reads local tags only (no network call, no assumption the stable checkout is even
+reachable), which is also why it degrades to `null` rather than erroring on a project that isn't
+run under this two-board setup at all — most projects the board manages have no `stable-*` tag.
+
+**Decided against a targeted "sweep this fix now" trigger, distinct from `--await-sweep`/
+`--recover`.** #1055 asked whether a fix that needs to go live quickly needs its own machinery to
+request an urgent sweep. It doesn't, given what already exists on this branch: `--await-sweep` is
+the DEFAULT since #1044 (a promotion already asks for and waits on a fresh sweep rather than
+refusing), and `--recover --reason "..." [--with-migration]` (#1054) is the fast lane for exactly
+the "ship this now" case, skipping the sweep on the premise that the existing build → migrate →
+restart → smoke → auto-rollback pipeline already is the gate for a local single-user board. Adding
+a THIRD lane that ties a sweep request to a specific issue number would duplicate one of these two
+without buying anything neither already covers — `base_branch_health` has no issue/workspace FK
+(§8 above), and there is no per-ticket subset of "verify the whole base branch" to target even if
+one were added. If a future need shows up that neither lane covers (e.g. "this issue's fix,
+verified in isolation before the rest of master"), it is a new kind of question — a NARROWED
+sweep, not a faster trigger for the existing one — and belongs to its own ticket.
+
 ### Accumulated-gate evidence — printed, never counted (#1045)
 
 Every pre-merge gate already writes one row into the test-impact ledger

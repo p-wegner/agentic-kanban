@@ -286,6 +286,16 @@ describe("generateBoardRiskDigest", () => {
       generateBoardRiskDigest("non-existent-project-id", db as never),
     ).rejects.toThrow();
   });
+
+  it("stableSkew is null when the project's repoPath is not a real git repo (#1055)", async () => {
+    const { db } = createTestDb();
+    const { projectId } = await seedProject(db);
+
+    const digest = await generateBoardRiskDigest(projectId, db as never);
+
+    expect(digest.stableSkew).toBeNull();
+    expect(digest.allItems.some((i) => i.category === "stable_skew")).toBe(false);
+  });
 });
 
 /**
