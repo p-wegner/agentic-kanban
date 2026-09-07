@@ -106,6 +106,12 @@ export interface ResolvedMergeGate {
   decision: "run-gate" | "already-passed" | "skip-explicit" | "run-gate-stale-evidence";
   /** See {@link PreMergeGateResult.unverified} — nothing checked this merge at all (#377). */
   unverified?: boolean;
+  /**
+   * See {@link PreMergeGateResult.held} — the gate DECLINED TO RUN because the host was
+   * saturated (#1056). `passed: false` and `ran: true`, but it is not a verdict about the diff:
+   * treat it as "retry next cycle", never as a failing build.
+   */
+  held?: boolean;
   /** See {@link PreMergeGateResult.impactSelection} — what a discard is recorded with (#1030). */
   impactSelection?: PreMergeGateResult["impactSelection"];
 }

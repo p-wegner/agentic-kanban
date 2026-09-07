@@ -113,3 +113,79 @@ export async function resolveGateQuiesce(args: {
   }
   return decision;
 }
+
+// --- holding the gate ITSELF on a saturated host (#1056) --------------------------------------
+
+const hostFloorPrefDef = projectPref("gate_host_floor");
+
+export function gateHostFloorPrefKey(projectId: string): string {
+  return hostFloorPrefDef.key(projectId);
+}
+
+/** Default ON: a doomed 28-minute run is worse than a deferred merge. */
+export async function gateHostFloorEnabled(projectId: string, database: Database): Promise<boolean> {
+  const raw = await getPreference(gateHostFloorPrefKey(projectId), database).catch(() => null);
+  return raw?.trim().toLowerCase() !== "false";
+}
+
+/** Whether a verify chain may START right now, and why not when it may not. */
+export type GateHostAdmission =
+  | { admit: true; reason: "host_has_room" | "floor_disabled" }
+  | { admit: false; reason: "host_saturated"; detail: string };
+
+/**
+ * DECISION (pure): may a pre-merge gate START its verify chain on this box? (#1056)
+ *
+ * This file already holds builder starts while a gate runs, so the gate is protected FROM
+ * builders — but nothing ever asked the reverse question, and that asymmetry is what this
+ * closes. The base-health probe has consulted the same signal since #1009
+ * (`isBaseHealthProbeDue({ hostSaturated })`), so the SWEEP declines to measure a base it
+ * cannot measure while the GATE, running the very same verify script, would start regardless.
+ *
+ * MEASURED, 2026-09-07: three independent branches (#1046, #1048, #1049) each ran a full gate
+ * on a box at 100% CPU that was swapping 2334 pages/s, and each failed in a DIFFERENT test
+ * batch after ~28 minutes — 85 minutes of wall clock that proved nothing about any of the three
+ * diffs. Not one of the three failures could even be attributed, because the verify log
+ * truncates before the failing suite (#1049 — itself one of the three that could not land).
+ * This file's own header already describes that exact shape from #581: "a 55-minute gate run
+ * plus two isolated re-runs to classify as a flake".
+ *
+ * A hold is NOT a red gate. It is the cheap, honest "not now" — the merge is withheld and
+ * retried on the next cycle, and #638 already guarantees a withheld gate never becomes an
+ * ungated merge and never reaches the fix agent. What it must never do is silently pass: a
+ * gate that did not run cannot approve a merge.
+ *
+ * Fail-open by construction, exactly like #1009: an unreadable capacity yields `hold: false`
+ * from `readTier0Capacity`, so a box whose memory cannot be sampled behaves as it does today.
+ */
+export function decideGateHostAdmission(input: {
+  /** {@link readTier0Capacity} — is the box too tight to add work right now? */
+  capacityHold: boolean;
+  /** The measured reason, for the message. */
+  capacityReason: string;
+  /** `gate_host_floor_<projectId>` — false lets an operator run the gate anyway. */
+  floorEnabled: boolean;
+}): GateHostAdmission {
+  if (!input.floorEnabled) return { admit: true, reason: "floor_disabled" };
+  if (!input.capacityHold) return { admit: true, reason: "host_has_room" };
+  return { admit: false, reason: "host_saturated", detail: input.capacityReason };
+}
+
+/**
+ * The gate's admission question in one call: read capacity first (process-local and free, no
+ * spawn), and only pay for the preference read when the box is actually tight — an idle board
+ * never touches the database for this.
+ */
+export async function resolveGateHostAdmission(args: {
+  projectId: string;
+  database: Database;
+  /** Injected for tests; defaults to the live Tier-0 read. */
+  readCapacity?: () => { hold: boolean; reason: string };
+}): Promise<GateHostAdmission> {
+  const capacity = (args.readCapacity ?? readTier0Capacity)();
+  return decideGateHostAdmission({
+    capacityHold: capacity.hold,
+    capacityReason: capacity.reason,
+    floorEnabled: capacity.hold ? await gateHostFloorEnabled(args.projectId, args.database) : true,
+  });
+}
