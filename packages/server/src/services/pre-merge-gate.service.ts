@@ -21,7 +21,7 @@ import { buildSmokeCheck, getStackProfile, resolveEffectiveVerify } from "./stac
 import { resolveDevServerPlan } from "./dev-server.service.js";
 import type { SmokeCheck, StackProfile } from "@agentic-kanban/shared";
 import { resolveProjectDevServerPlan } from "./dev-server.service.js";
-import { quiesceBuildersEnabled } from "./gate-quiesce.js";
+import { quiesceBuildersEnabled, resolveGateHostAdmission } from "./gate-quiesce.js";
 import { isSelfProjectRepo } from "./self-project.js";
 import { getProjectRepoPath } from "../repositories/project.repository.js";
 import { runUnderBuildSemaphore } from "./jvm-build-semaphore.js";
@@ -545,6 +545,28 @@ export async function runPreMergeGate(
     // Never two suites at once on this box, and the message names whichever happened. Total
     // by construction (`note` is null when nothing was due), so no branch here — this function
     // sits on the god-module gate's branch ceiling.
+    // #1056 — BEFORE anything expensive: may this box run a verify chain at all? The base-health
+    // probe has asked this since #1009; the gate, running the same script, never did. A saturated
+    // host produces a ~28-minute run that fails in an arbitrary batch and proves nothing (measured
+    // three times over on 2026-09-07), so decline cheaply and let the next cycle retry. `held` is
+    // NOT a red gate — see PreMergeGateResult.held — and #638 keeps a withheld gate away from the
+    // fix agent. Fail-open: an unreadable capacity admits, exactly as #1009 does.
+    const admission = await resolveGateHostAdmission({ projectId, database }).catch(
+      () => ({ admit: true, reason: "host_has_room" }) as Awaited<ReturnType<typeof resolveGateHostAdmission>>,
+    );
+    if (!admission.admit) {
+      noteMergeGatePhase(workspace.id, "held", "host saturated — not starting a verify chain");
+      return {
+        passed: false,
+        skipped: false,
+        held: true,
+        stage: "verify",
+        message:
+          `pre-merge gate HELD — not started: ${admission.detail}. Nothing was verified and nothing `
+          + `failed; the merge is deferred and will be retried when the box has room. `
+          + `Override with gate_host_floor_${projectId}=false.`,
+      };
+    }
     gateTierInfo.baseHealthNote = (await sequenceBaseHealthBeforeVerify({ projectId, database, workspaceId: workspace.id })).note ?? undefined;
     noteMergeGatePhase(workspace.id, "queued", "waiting for the cross-workspace verify chain");
     const { result: outcome, queueWaitMs, lockNote } = await runUnderVerifyChainSemaphoreTimed(async () =>
@@ -806,6 +828,9 @@ async function runGateAsResolved(
     stage: gate.stage,
     message: gate.message,
     ...(gate.unverified ? { unverified: true } : {}),
+    // #1056 — a HELD gate must stay distinguishable from a red one all the way out to the
+    // caller: it did not run, so "the gate failed" would be a false claim about the diff.
+    ...(gate.held ? { held: true } : {}),
     ...(gate.impactSelection !== undefined ? { impactSelection: gate.impactSelection } : {}),
   };
 }

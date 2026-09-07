@@ -45,6 +45,15 @@ export type GateActivityPhase =
 export type MergeGatePhase =
   /** Waiting for the cross-workspace verify-chain semaphore — nothing is executing yet. */
   | "queued"
+  /**
+   * Declined to start at all: the host was too saturated to run a verify chain (#1056).
+   *
+   * Deliberately NOT `queued`. A queue is waiting for a slot and will run; a hold is not
+   * waiting for anything and will be retried by the next cycle instead. Rendering the two the
+   * same way is the failure this type's header is about — an elapsed timer on a hold counts
+   * time during which, by definition, nothing is going to happen.
+   */
+  | "held"
   /** Re-running the project's install command after a missing-deps failure (#169). */
   | "install"
   /** The verify script itself is running. */
@@ -125,6 +134,9 @@ export interface GateActivity {
  */
 const GATE_PHASE_VERB: Record<MergeGatePhase, string> = {
   queued: "Queued",
+  // #1056 — "Held", never "Queued": a queue is waiting for a slot and will run, a hold is
+  // waiting for nothing and gets retried by the next cycle instead.
+  held: "Held (host busy)",
   install: "Installing",
   verify: "Verifying",
   "flake-retry": "Re-testing",

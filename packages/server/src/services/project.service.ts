@@ -13,6 +13,8 @@ import { getDefaultSkillId } from "./project-scaffold.js";
 import { scaffoldAndPopulateProject } from "./project-registration.js";
 import { getNumber } from "@agentic-kanban/shared/lib/settings-registry";
 import { getPreference, getAllPreferencesCached } from "../repositories/preferences.repository.js";
+import { setPreferenceChecked } from "@agentic-kanban/shared/lib/checked-preference-write";
+import { startModePrefKey } from "./start-policy.service.js";
 import type { Database } from "../db/index.js";
 import { branchExists, detectRepoInfo, getProjectGitStatsAsync } from "./git-info.service.js";
 import { gitExecSync } from "@agentic-kanban/shared/lib/git-exec";
@@ -423,6 +425,25 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     // Clear the active-project preference if it pointed at the now-archived project,
     // so the board doesn't try to render a hidden project on next load.
     await clearActiveProjectPreference(id, database);
+    // #1056 — and STOP DRIVING IT. Archiving used to hide a project from the list and change
+    // nothing else, because the monitor's driven set is derived purely from prefs
+    // (`monitorDrivenProjectIds`) and never consults `archivedAt`. So an archived project kept
+    // starting builders, merging, refilling its backlog and burning quota, invisibly — there was
+    // no view it appeared in. MEASURED on 2026-09-07: `fleetops` and `My_Pet_store` had been
+    // archived since 2026-08-18 and were still resolving to Start Mode `monitor` three weeks
+    // later, plus one `start_mode=monitor` pref for a project that no longer existed at all.
+    //
+    // Written here rather than inside `resolveStartPolicy` on purpose: that is a documented pure
+    // prefMap resolver (`prefmap-resolver-purity.test.ts`), so it cannot read `archivedAt`.
+    // Making archive OWN the mode keeps the decision pure and stops the state from arising.
+    // Best-effort: the project IS archived by this point, and failing the call afterwards would
+    // report a no-op for work that happened.
+    await setPreferenceChecked(database, [{ key: startModePrefKey(id), value: "manual" }]).catch((err) => {
+      console.warn(
+        `[projects] archived ${id} but could not set its Start Mode to manual (${errorMessage(err)}) — `
+          + `the monitor may keep driving an archived project; set start_mode_${id}=manual by hand.`,
+      );
+    });
     return { id };
   }
 
@@ -430,6 +451,11 @@ export function createProjectService(deps: { database: Database; workspaceSummar
     const project = await getProjectById(id, database);
     if (!project) throw new ProjectError("Project not found", "NOT_FOUND");
     await setProjectArchived(id, false, database);
+    // #1056 — deliberately does NOT restore `monitor`. Un-archiving makes a project VISIBLE
+    // again; it is not a statement that agents should immediately start spending quota on its
+    // backlog. Restoring a drive mode the operator cannot see coming is the more expensive
+    // mistake of the two, so the mode stays `manual` and turning it back on is one explicit
+    // click in Monitor → Start Mode.
     return { id };
   }
 

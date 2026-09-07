@@ -74,6 +74,11 @@ export interface GateWithEvidence {
   message: string;
   /** See {@link PreMergeGateResult.unverified} — nothing checked this merge at all (#377). */
   unverified?: boolean;
+  /**
+   * See {@link PreMergeGateResult.held} — the gate DECLINED TO RUN on a saturated host (#1056).
+   * `passed: false` without being a verdict about the diff; the merge is deferred, not refused.
+   */
+  held?: boolean;
   /** The tips read BEFORE the run — the state the gate actually verified. */
   shasBefore: MergeGateShas;
   /** Which tip moved WHILE the gate ran, if any. */

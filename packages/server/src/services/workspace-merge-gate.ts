@@ -585,10 +585,16 @@ export async function runPreLockGate(args: {
       database,
       recordMergeAttempt,
     });
+    // #1056 — a HELD gate never ran, so "failed" would be a false claim about this diff. It still
+    // travels the `pre_merge_gate_failed` road on purpose: that is what #638/#170 key on to keep a
+    // withheld merge away from the fix agent and every agent-driven retry, and a hold needs exactly
+    // that protection. Only the PROSE distinguishes them — the routing must not.
     throw new WorkspaceError(
-      `Pre-merge gate failed (${preGate.stage}) — merge withheld. ${gateMessage}`,
+      preGate.held
+        ? `Pre-merge gate HELD (${preGate.stage}) — merge deferred, nothing ran. ${gateMessage}`
+        : `Pre-merge gate failed (${preGate.stage}) — merge withheld. ${gateMessage}`,
       "CONFLICT",
-      { mergeReason: PRE_MERGE_GATE_FAILURE_REASON, gateStage: preGate.stage },
+      { mergeReason: PRE_MERGE_GATE_FAILURE_REASON, gateStage: preGate.stage, ...(preGate.held ? { gateHeld: true } : {}) },
     );
   }
 

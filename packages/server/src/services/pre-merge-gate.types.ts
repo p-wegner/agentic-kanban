@@ -47,6 +47,21 @@ export interface PreMergeGateResult {
    */
   timedOut?: boolean;
   /**
+   * True when the gate DID NOT RUN because the host was too saturated to run it (#1056).
+   *
+   * Like {@link timedOut} this is `passed: false` WITHOUT being evidence about the code — but it
+   * is the stronger form of that claim, because nothing was executed at all. Callers must treat
+   * it as "not now, retry next cycle", never as a red gate: no fix agent, no nudge about a
+   * failing build, and above all no merge (#638 already routes a withheld gate away from
+   * `fixAndMerge`, which is what makes this safe to report through the same path).
+   *
+   * MEASURED motivation (2026-09-07): three branches each burned a ~28-minute full gate on a box
+   * at 100% CPU swapping 2334 pages/s, each failing in a different batch — 85 minutes that
+   * proved nothing about any of the three diffs, and none of the three failures was even
+   * attributable. See `decideGateHostAdmission`.
+   */
+  held?: boolean;
+  /**
    * True when this merge was verified by NOTHING because the project has nothing configured to
    * verify with (#377) — distinct from `skipped`, which also covers the deliberate docs-only skip of
    * a project that DOES have a gate.
