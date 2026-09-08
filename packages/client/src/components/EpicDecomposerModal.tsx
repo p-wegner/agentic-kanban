@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import type { IssueWithStatus } from "@agentic-kanban/shared";
+import type { DecomposableIssue } from "@agentic-kanban/shared";
 import { apiPost } from "../lib/api.js";
 import { showToast } from "../lib/toast.js";
 import { priorityLabel, priorityTraits, type IssuePriority } from "../lib/priorityTraits.js";
@@ -35,7 +35,7 @@ interface DecomposeProposal {
 }
 
 interface EpicDecomposerModalProps {
-  issue: IssueWithStatus;
+  issue: DecomposableIssue;
   onClose: () => void;
   onConfirmed: () => void;
 }

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { apiFetch, apiPost } from "../lib/api.js";
+import { DriveScopePlanner } from "./DriveScopePlanner.js";
+import { useApiResource } from "../hooks/useApiResource.js";
 import { STATUS_COLORS, ACCENT, BRAND } from "../lib/chartColors.js";
 import { showToast } from "../lib/toast.js";
 import type { DriveDashboard as DriveDashboardData } from "@agentic-kanban/shared";
@@ -20,6 +22,12 @@ interface DriveListItem {
   status: "active" | "completed" | "abandoned";
   startedAt: string;
   finishedAt: string | null;
+}
+
+/** `GET /api/projects/:id/drive/preflight` — the subset this view renders. */
+interface DrivePreflight {
+  ready: boolean;
+  checks: Array<{ id: string; label: string; severity: "ok" | "warn" | "block"; message: string }>;
 }
 
 interface DriveDashboardProps {
@@ -86,6 +94,12 @@ export function DriveDashboard({ projectId, onIssueClick }: DriveDashboardProps)
       fetchDrives();
     },
     [fetchDrives],
+  );
+
+  // #1073: a drive badged ACTIVE says nothing about whether the board will actually pull its
+  // tickets — that is the preflight's verdict, and it was only reachable from Settings.
+  const { data: preflight } = useApiResource<DrivePreflight>(
+    projectId ? `/api/projects/${projectId}/drive/preflight` : null,
   );
 
   // Fetch (and poll) the selected drive's dashboard.
@@ -237,6 +251,16 @@ export function DriveDashboard({ projectId, onIssueClick }: DriveDashboardProps)
 
       <p className="text-sm text-gray-600 dark:text-gray-400 -mt-1">{drive.target}</p>
 
+      {preflight && !preflight.ready && drive.status === "active" && (
+        <div className="rounded-lg border border-amber-300 dark:border-amber-700/60 bg-amber-50 dark:bg-amber-900/20 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+          <span className="font-semibold">This drive will not run itself. </span>
+          {preflight.checks
+            .filter((c) => c.severity === "block")
+            .map((c) => `${c.label}: ${c.message}`)
+            .join(" ")}
+        </div>
+      )}
+
       {/* Progress + build-clean cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Progress */}
@@ -328,9 +352,12 @@ export function DriveDashboard({ projectId, onIssueClick }: DriveDashboardProps)
           </span>
         </div>
         {tiers.length === 0 ? (
-          <div className="px-3 py-6 text-sm text-center text-gray-400 dark:text-gray-500">
-            No scoped issues — link a meta/epic issue with children to this drive.
-          </div>
+          <DriveScopePlanner
+            projectId={projectId}
+            driveId={drive.id}
+            hasMetaIssue={drive.metaIssueId != null}
+            onScoped={fetchDashboard}
+          />
         ) : (
           <div className="p-3 flex flex-col gap-2 overflow-x-auto">
             {tiers.map(({ tier, issues }) => (

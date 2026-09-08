@@ -259,6 +259,33 @@ export async function runDrivePreflight(
       );
     }
 
+    // --- Start Mode: WHICH engine will actually pull tickets. ---
+    // #1073: this used to be unchecked, and `autodrivePrefs` above is not a substitute. That
+    // check reads the legacy `board_autodrive_<id>` keystone; Start Mode is what CLAUDE.md calls
+    // "the one decision EVERY auto-start path consults", and `manual` is a true kill-switch that
+    // silences auto-start, relaunch, the post-merge cascade and backlog refill alike. Measured on
+    // the operated board: `enabled: true` with `startMode: "manual"` passed nine green checks and
+    // reported `ready: true` for a configuration in which no ticket would ever start.
+    switch (runtime.startPolicy.mode) {
+      case "monitor":
+        checks.push(ok("startMode", "Start Mode", "monitor — the in-process engine auto-starts unblocked backlog up to WIP."));
+        break;
+      case "conductor":
+        // Deliberately NOT auto-repairable: `setDriveEnabled` writes `monitor`, which would
+        // demote a project whose out-of-process Conductor loop is its sole driver by design.
+        checks.push(ok("startMode", "Start Mode", "conductor — the out-of-process loop is the sole driver; in-process stands down."));
+        break;
+      default:
+        checks.push(
+          block(
+            "startMode",
+            "Start Mode",
+            "manual — nothing auto-starts, so a drive will never pull its own tickets. Flip Drive on to set Start Mode to monitor, or switch the project to conductor mode.",
+            true,
+          ),
+        );
+    }
+
     // --- WIP target: 1 means no real parallelism (degraded, not blocking). ---
     // #919: reads THE WIP resolver like every other surface. This check used to bypass it
     // (Bullseye raw, then the legacy `nudge_wip_limit`, then null) because it needs `null` to

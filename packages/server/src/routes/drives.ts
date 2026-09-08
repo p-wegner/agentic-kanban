@@ -4,6 +4,7 @@ import type { ZodType } from "zod";
 import type { Database } from "../db/index.js";
 import { createDriveService, DriveError } from "../services/drive.service.js";
 import { buildDriveDashboard } from "../services/drive-dashboard.service.js";
+import { planDrive } from "../services/drive-planning.service.js";
 import { createRouter } from "../middleware/create-router.js";
 import { parseJsonBody, parseOptionalJsonBody } from "../middleware/parse-body.js";
 import { queryFlag } from "../middleware/query-params.js";
@@ -104,6 +105,16 @@ export function createDrivesRoute(database: Database) {
     const body = await parseDriveBody(c, startDriveBody);
     const result = await service.start(c.req.param("projectId"), body);
     return c.json(result, 201);
+  });
+
+  // POST /api/projects/:projectId/drives/:id/plan
+  // Creates no children — the caller decomposes the returned epic through the normal
+  // /decompose -> /decompose/confirm pair. Idempotent: a drive that already has a meta issue
+  // gets it back untouched, since a second epic would silently split the drive's scope.
+  // Seed a target-only drive's meta/epic issue from its target, and link the drive to it.
+  router.post("/:projectId/drives/:id/plan", async (c) => {
+    const result = await planDrive(c.req.param("projectId"), c.req.param("id"), database);
+    return c.json(result, result.existing ? 200 : 201);
   });
 
   // PUT /api/projects/:projectId/drives/:id

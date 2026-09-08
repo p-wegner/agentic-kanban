@@ -148,3 +148,20 @@ export interface TouchedFile {
   reason: string;
   confidence: "high" | "medium" | "low";
 }
+
+/**
+ * The minimum an issue must be for the epic decomposer to act on it — id, project, number and
+ * title, and nothing else.
+ *
+ * Declared here rather than beside either consumer because it has two: the client's
+ * `EpicDecomposerModal` (which must accept an epic that has no status join yet) and
+ * `DrivePlanResult`, which hands one back. Two identical shapes under different names is the
+ * drift `wire-dto-single-declaration` exists to catch.
+ */
+export interface DecomposableIssue {
+  id: string;
+  projectId: string;
+  /** Nullable because `issues.issue_number` is; a freshly seeded epic always has one. */
+  issueNumber: number | null;
+  title: string;
+}
