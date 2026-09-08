@@ -237,7 +237,6 @@ describe("the chart shell is declared once (#732)", () => {
       "components/AgentThroughputLeaderboard.tsx",
       "components/BurndownChart.tsx",
       "components/LeadTimeTrendChart.tsx",
-      "components/MilestonesOverview.tsx",
       "components/WorkflowAnalyticsDashboard.tsx",
     ];
     const marker = "bg-gray-800 text-white dark:bg-gray-200 dark:text-gray-900";

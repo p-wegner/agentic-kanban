@@ -7552,24 +7552,6 @@ paths:
           content:
             application/json:
               schema: {}
-  /api/projects/{projectId}/milestones/summary:
-    get:
-      summary: GET /api/projects/:projectId/milestones/summary
-      tags:
-        - milestones
-      operationId: get_api_projects_projectId_milestones_summary
-      parameters:
-        - name: projectId
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Success
-          content:
-            application/json:
-              schema: {}
   /api/projects/{projectId}/milestones/{id}:
     delete:
       summary: DELETE /api/projects/:projectId/milestones/:id

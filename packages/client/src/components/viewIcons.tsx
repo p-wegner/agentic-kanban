@@ -78,7 +78,6 @@ export const VIEW_ICONS: Record<ViewMode, ReactNode> = {
   // The two-`<path>` glyphs below are one `d` with two subpaths: the pair always carried
   // identical stroke attributes, so concatenating them draws the same marks.
   "quality-metrics": <Icon className="w-3.5 h-3.5" d="M4 19V5m0 14h16M8 16l3-5 3 2 4-7M8 19v-3m6 3v-6m4 6V6" />,
-  milestones: <Icon className="w-3.5 h-3.5" d="M4 6h10M4 12h16M4 18h8M16 4v5l4-2.5L16 4z" />,
   strategy: (
     <Icon className="w-3.5 h-3.5">
       <circle cx="12" cy="12" r="8" />

@@ -13,7 +13,6 @@ export const TimelineView = lazy(() => import("./TimelineView.js").then((m) => (
 export const MetricsView = lazy(() => import("./MetricsView.js").then((m) => ({ default: m.MetricsView })));
 export const CrimeSceneCityView = lazy(() => import("./CrimeSceneCityView.js").then((m) => ({ default: m.CrimeSceneCityView })));
 export const QualityMetricsView = lazy(() => import("./QualityMetricsView.js").then((m) => ({ default: m.QualityMetricsView })));
-export const MilestonesOverview = lazy(() => import("./MilestonesOverview.js").then((m) => ({ default: m.MilestonesOverview })));
 export const ButlerView = lazy(() => import("./ButlerView.js").then((m) => ({ default: m.ButlerView })));
 export const WorkflowsView = lazy(() => import("./WorkflowsView.js").then((m) => ({ default: m.WorkflowsView })));
 export const WorkflowAnalyticsDashboard = lazy(() => import("./WorkflowAnalyticsDashboard.js").then((m) => ({ default: m.WorkflowAnalyticsDashboard })));

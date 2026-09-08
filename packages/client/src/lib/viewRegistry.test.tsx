@@ -37,7 +37,7 @@ describe("VIEW_REGISTRY", () => {
     // fireworks, garden) were extracted to the external board-whimsy plugin
     // (momentum dropped outright — swimlane is a strict superset), freeing
     // the `v` and `e` single-key shortcuts.
-    expect(VIEW_REGISTRY).toHaveLength(26);
+    expect(VIEW_REGISTRY).toHaveLength(25);
   });
 
   it("preserves the existing view ids", () => {
@@ -46,7 +46,7 @@ describe("VIEW_REGISTRY", () => {
       "quality-metrics", "strategy", "focus", "butler", "workflows", "workflow-analytics", "insights", "swimlane",
       "runtime", "drive", "runbooks", "capacity", "activity", "stale-work",
       "analytics", "calendar",
-      "crime-scene", "milestones", "plugin-views",
+      "crime-scene", "plugin-views",
     ];
     expect(VIEW_IDS.slice().sort()).toEqual(expected.slice().sort());
   });
@@ -117,7 +117,7 @@ describe("VIEW_REGISTRY", () => {
         "focus", "metrics", "quality-metrics", "swimlane", "workflow-analytics",
         "runbooks", "capacity", "activity", "stale-work",
         "analytics",
-        "crime-scene", "milestones",
+        "crime-scene",
       ].sort(),
     );
   });

@@ -21,7 +21,6 @@ describe("appRoutes", () => {
     expect(getViewRoutePath("workflows")).toBe("/workflows");
     expect(getViewRoutePath("agents")).toBe("/agents");
     expect(getViewRoutePath("crime-scene")).toBe("/crime-scene");
-    expect(getViewRoutePath("milestones")).toBe("/milestones");
     expect(getViewRoutePath("swimlane")).toBe("/swimlane");
     expect(getViewRoutePath("plugin-views")).toBe("/plugin-views");
   });
@@ -33,7 +32,6 @@ describe("appRoutes", () => {
     expect(getAppRouteView("/butler")).toBe("butler");
     expect(getAppRouteView("/quality-metrics?project=abc")).toBe("quality-metrics");
     expect(getAppRouteView("/crime-scene")).toBe("crime-scene");
-    expect(getAppRouteView("/milestones")).toBe("milestones");
     expect(getAppRouteView("/swimlane")).toBe("swimlane");
     expect(getAppRouteView("/plugin-views")).toBe("plugin-views");
     // Extracted to the board-whimsy plugin (#237) — no longer app routes.
