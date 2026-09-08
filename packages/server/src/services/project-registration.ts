@@ -20,6 +20,7 @@ import {
   commitProjectScaffoldArtifacts,
 } from "./project-scaffold.js";
 import { getPreference } from "../repositories/preferences.repository.js";
+import { parseBoolSetting } from "@agentic-kanban/shared/lib/settings-registry";
 import {
   getAllProjects,
   getProjectByIdRaw,
@@ -289,16 +290,26 @@ export async function scaffoldAndPopulateProject(
   options?: ScaffoldAndPopulateOptions,
 ): Promise<DerivedProjectConfig> {
   scaffoldProjectFiles(repoPath, { gitignoreTemplate: options?.gitignoreTemplate });
+  let config: DerivedProjectConfig;
   try {
     // `scaffold: true` — registration is the ONE path that legitimately materializes the
     // profile-derived scaffolds, precisely because it commits them below.
-    return await populateDerivedProjectConfig(projectId, repoPath, database, {
+    config = await populateDerivedProjectConfig(projectId, repoPath, database, {
       ...options,
       scaffold: true,
     });
   } finally {
-    await commitProjectScaffoldArtifacts(repoPath);
+    // #1082 — opt-out + visibility for the scaffold commit: `scaffold_auto_commit` is a
+    // global static setting (registration has no per-project row yet at this point). Read
+    // even if `populateDerivedProjectConfig` above threw, so a scaffold write it made before
+    // failing is still committed (matches the pre-#1082 unconditional `finally` behaviour).
+    const autoCommit = parseBoolSetting(
+      "scaffold_auto_commit",
+      await getPreference("scaffold_auto_commit", database),
+    );
+    await commitProjectScaffoldArtifacts(repoPath, { autoCommit });
   }
+  return config;
 }
 
 export interface DerivedConfigOptions {
