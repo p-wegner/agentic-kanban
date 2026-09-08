@@ -22,6 +22,7 @@ describe("ViewTabBar (static render)", () => {
     // assert the header count too — verified: mutating the wiring to
     // `tabs.map((t) => ({ tab: t, groupHeader: t.group }))` fails on the counts below,
     // and removing the header render fails the sequence.
+    expect(html.match(/>Board</g)).toHaveLength(1);
     expect(html.match(/>Flow</g)).toHaveLength(1);
     expect(html.match(/>Agents</g)).toHaveLength(1);
     let cursor = 0;
@@ -31,8 +32,9 @@ describe("ViewTabBar (static render)", () => {
       cursor = at + 1;
     }
     expect(order).toEqual([
-      "Flow", "Throughput", "Lead Time", "Burndown",
-      "Agents", "Provider Mix", "Cost", "Leaderboard", "Scores",
+      "Board", "Metrics",
+      "Flow", "Throughput", "Lead Time", "Burndown", "Stages",
+      "Agents", "Provider Mix", "Cost", "Leaderboard", "Scores", "Insights",
     ]);
   });
 

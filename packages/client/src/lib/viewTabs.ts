@@ -24,11 +24,21 @@ export interface ViewTabDescriptor {
 
 // ---------------------------------------------------------------------------
 // #234 — Analytics: the 7 absorbed single-chart views (calendar stayed a view).
+// #1066 — plus the three aggregate dashboards that answered the same question
+// ("how are we doing"): metrics, workflow-analytics and insights.
 // ---------------------------------------------------------------------------
 
 export const ANALYTICS_VIEW_ID = "analytics";
 
 export const ANALYTICS_TABS: readonly ViewTabDescriptor[] = [
+  {
+    id: "metrics",
+    label: "Metrics",
+    paletteLabel: "Metrics",
+    group: "Board",
+    paletteIcon: "▥",
+    paletteDescription: "Board metrics and charts: status counts, age, and code footprint",
+  },
   {
     id: "throughput",
     label: "Throughput",
@@ -52,6 +62,14 @@ export const ANALYTICS_TABS: readonly ViewTabDescriptor[] = [
     group: "Flow",
     paletteIcon: "BD",
     paletteDescription: "Burndown chart of remaining open issues per day with an ideal target trend line",
+  },
+  {
+    id: "workflow-analytics",
+    label: "Stages",
+    paletteLabel: "Workflow Analytics",
+    group: "Flow",
+    paletteIcon: "WA",
+    paletteDescription: "Workflow stage trends, funnel drop-off, and burn-down",
   },
   {
     id: "provider-mix",
@@ -85,9 +103,20 @@ export const ANALYTICS_TABS: readonly ViewTabDescriptor[] = [
     paletteIcon: "SD",
     paletteDescription: "Histogram of workspace scorecard scores across recent workspaces",
   },
+  {
+    id: "insights",
+    label: "Insights",
+    paletteLabel: "Insights",
+    group: "Agents",
+    paletteIcon: "↗",
+    paletteDescription: "Agent cost, token, success, and duration trends",
+  },
 ];
 
 export type AnalyticsTabId =
+  | "metrics"
+  | "workflow-analytics"
+  | "insights"
   | "throughput"
   | "lead-time"
   | "burndown"

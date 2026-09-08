@@ -10,13 +10,10 @@ export const GraphView = lazy(() => import("./GraphView.js").then((m) => ({ defa
 export const TableView = lazy(() => import("./TableView.js").then((m) => ({ default: m.TableView })));
 export const AgentGrid = lazy(() => import("./AgentGrid.js").then((m) => ({ default: m.AgentGrid })));
 export const TimelineView = lazy(() => import("./TimelineView.js").then((m) => ({ default: m.TimelineView })));
-export const MetricsView = lazy(() => import("./MetricsView.js").then((m) => ({ default: m.MetricsView })));
 export const CrimeSceneCityView = lazy(() => import("./CrimeSceneCityView.js").then((m) => ({ default: m.CrimeSceneCityView })));
 export const QualityMetricsView = lazy(() => import("./QualityMetricsView.js").then((m) => ({ default: m.QualityMetricsView })));
 export const ButlerView = lazy(() => import("./ButlerView.js").then((m) => ({ default: m.ButlerView })));
 export const WorkflowsView = lazy(() => import("./WorkflowsView.js").then((m) => ({ default: m.WorkflowsView })));
-export const WorkflowAnalyticsDashboard = lazy(() => import("./WorkflowAnalyticsDashboard.js").then((m) => ({ default: m.WorkflowAnalyticsDashboard })));
-export const InsightsPanel = lazy(() => import("./InsightsPanel.js").then((m) => ({ default: m.InsightsPanel })));
 // The two surviving event-feed containers (#235): BoardFeedView bundles
 // activity + digest + cross-repo, RuntimeFeedView bundles flight-recorder +
 // monitor-cycles + health-events — each imports its feed components directly,

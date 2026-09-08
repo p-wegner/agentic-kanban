@@ -37,13 +37,13 @@ describe("VIEW_REGISTRY", () => {
     // fireworks, garden) were extracted to the external board-whimsy plugin
     // (momentum dropped outright — swimlane is a strict superset), freeing
     // the `v` and `e` single-key shortcuts.
-    expect(VIEW_REGISTRY).toHaveLength(25);
+    expect(VIEW_REGISTRY).toHaveLength(22);
   });
 
   it("preserves the existing view ids", () => {
     const expected: ViewMode[] = [
-      "kanban", "backlog", "graph", "table", "agents", "timeline", "metrics",
-      "quality-metrics", "strategy", "focus", "butler", "workflows", "workflow-analytics", "insights", "swimlane",
+      "kanban", "backlog", "graph", "table", "agents", "timeline",
+      "quality-metrics", "strategy", "focus", "butler", "workflows", "swimlane",
       "runtime", "drive", "runbooks", "capacity", "activity", "stale-work",
       "analytics", "calendar",
       "crime-scene", "plugin-views",
@@ -66,23 +66,24 @@ describe("VIEW_REGISTRY", () => {
     expect(byId.table).toBe("t");
     expect(byId.timeline).toBe("f");
     expect(byId.agents).toBe("l");
-    expect(byId.metrics).toBe("m");
     expect(byId["quality-metrics"]).toBe("y");
     expect(byId.butler).toBe("i");
     expect(byId.swimlane).toBe("p");
-    expect(byId.insights).toBe("n");
     expect(byId.strategy).toBe("z");
     expect(byId.focus).toBe("o");
     expect(byId.workflows).toBe("u");
-    expect(byId["workflow-analytics"]).toBe("h");
   });
 
   it("keeps the shortcuts freed by the board-whimsy extraction (v, e) unassigned (#237)", () => {
     expect(SHORTCUT_TO_VIEW["v"]).toBeUndefined();
     expect(SHORTCUT_TO_VIEW["e"]).toBeUndefined();
-    // `k` joined them when the Flaky Tests view was deleted (#1062). Reclaiming letters is the
-    // point of the view-thinning epic, so a freed shortcut stays free until a view earns it.
+    // `k` joined them when the Flaky Tests view was deleted (#1062), and `m`/`n`/`h` when
+    // Metrics/Insights/Workflow Analytics became Analytics tabs (#1066). Reclaiming letters is
+    // the point of the view-thinning epic, so a freed shortcut stays free until a view earns it.
     expect(SHORTCUT_TO_VIEW["k"]).toBeUndefined();
+    expect(SHORTCUT_TO_VIEW["m"]).toBeUndefined();
+    expect(SHORTCUT_TO_VIEW["n"]).toBeUndefined();
+    expect(SHORTCUT_TO_VIEW["h"]).toBeUndefined();
   });
 
   it("every view has the fields the three consumers need", () => {
@@ -109,12 +110,12 @@ describe("VIEW_REGISTRY", () => {
     // Primary views (no `group` or group === "primary") stay one click away.
     // "runtime" (#235) inherited monitor-history's former primary slot.
     expect([...primaryIds].sort()).toEqual(
-      ["agents", "backlog", "butler", "calendar", "drive", "graph", "insights", "kanban", "runtime", "plugin-views", "strategy", "table", "timeline", "workflows"].sort(),
+      ["agents", "backlog", "butler", "calendar", "drive", "graph", "kanban", "runtime", "plugin-views", "strategy", "table", "timeline", "workflows"].sort(),
     );
     // Analytics/secondary views live behind the "More" overflow dropdown.
     expect([...secondaryIds].sort()).toEqual(
       [
-        "focus", "metrics", "quality-metrics", "swimlane", "workflow-analytics",
+        "focus", "quality-metrics", "swimlane",
         "runbooks", "capacity", "activity", "stale-work",
         "analytics",
         "crime-scene",

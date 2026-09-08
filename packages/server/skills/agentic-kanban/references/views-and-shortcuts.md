@@ -12,14 +12,11 @@
 | Table | `t` | `table` |
 | Agents | `l` | `agents` |
 | Timeline | `f` | `timeline` |
-| Metrics | `m` | `metrics` |
 | Quality Metrics | `y` | `quality-metrics` |
 | Strategic Targets | `z` | `strategy` |
 | Focus | `o` | `focus` |
 | Butler chat | `i` | `butler` |
 | Workflows | `u` | `workflows` |
-| Workflow Analytics | `h` | `workflow-analytics` |
-| Insights | `n` | `insights` |
 | Swimlane | `p` | `swimlane` |
 | Runbooks | `j` | `runbooks` |
 

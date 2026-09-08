@@ -62,12 +62,7 @@ export const VIEW_ICONS: Record<ViewMode, ReactNode> = {
       <circle cx="20" cy="6" r="1.5" fill="currentColor" stroke="none" />
     </Icon>
   ),
-  metrics: (
-    <Icon
-      className="w-3.5 h-3.5"
-      d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-    />
-  ),
+
   "crime-scene": (
     <Icon className="w-3.5 h-3.5">
       <path strokeLinecap="round" strokeLinejoin="round" d="M3 20h18M5 20V9l4-3 4 3v11M13 20V7l6 3v10" />
@@ -99,8 +94,6 @@ export const VIEW_ICONS: Record<ViewMode, ReactNode> = {
     />
   ),
   workflows: <Icon className="w-3.5 h-3.5" d="M3.75 6.75h4.5v4.5h-4.5v-4.5zM15.75 12.75h4.5v4.5h-4.5v-4.5zM8.25 9h4.5m-2.25 0v6.75m0 0h3" />,
-  "workflow-analytics": <Icon className="w-3.5 h-3.5" d="M4 19V5m0 14h16M7 15l3-4 3 2 4-7M7 19v-4m6 4v-6m4 6V6" />,
-  insights: <Icon className="w-3.5 h-3.5" d="M3 13l4-4 4 4 4-8 4 4" />,
   swimlane: <Icon className="w-3.5 h-3.5" d="M3 6h18M3 12h18M3 18h18" />,
   runtime: <Icon className="w-3.5 h-3.5" d="M3 12h3l2 5 4-14 2 9 2-3h5" />,
   runbooks: (

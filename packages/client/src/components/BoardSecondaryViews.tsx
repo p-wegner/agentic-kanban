@@ -5,9 +5,9 @@ import { BoardErrorBoundary } from "./BoardErrorBoundary.js";
 import { boardSelectionActions } from "../stores/boardSelectionStore.js";
 import { useBoardFilterStore } from "../stores/boardFilterStore.js";
 import {
-  GraphView, TableView, AgentGrid, TimelineView, MetricsView, CrimeSceneCityView,
+  GraphView, TableView, AgentGrid, TimelineView, CrimeSceneCityView,
   QualityMetricsView, ButlerView, WorkflowsView,
-  WorkflowAnalyticsDashboard, InsightsPanel, BoardFeedView, RuntimeFeedView, FocusView,
+  BoardFeedView, RuntimeFeedView, FocusView,
   StrategyTargetsView, SwimlaneView,
   RunbooksView, SprintCapacityPlanner,
   StaleWorkDashboard, AnalyticsView, CalendarView,
@@ -125,16 +125,6 @@ export function BoardSecondaryViews({
           />
         </BoardErrorBoundary>
       )}
-      {viewMode === "metrics" && (
-        <BoardErrorBoundary columnName="Metrics View">
-          <MetricsView
-            columns={columns}
-            projectId={activeProjectId}
-            onIssueClick={onIssueClick}
-            onCreatedDateClick={onCreatedDateClick}
-          />
-        </BoardErrorBoundary>
-      )}
       {viewMode === "crime-scene" && activeProjectId && (
         <BoardErrorBoundary columnName="Code Crime Scene">
           <CrimeSceneCityView projectId={activeProjectId} />
@@ -162,27 +152,6 @@ export function BoardSecondaryViews({
       {viewMode === "workflows" && activeProjectId && (
         <BoardErrorBoundary columnName="Workflows View">
           <WorkflowsView projectId={activeProjectId} onOpenWorkspace={onOpenWorkspaceById} />
-        </BoardErrorBoundary>
-      )}
-      {viewMode === "workflow-analytics" && activeProjectId && (
-        <BoardErrorBoundary columnName="Workflow Analytics">
-          <WorkflowAnalyticsDashboard projectId={activeProjectId} />
-        </BoardErrorBoundary>
-      )}
-      {viewMode === "insights" && activeProjectId && (
-        <BoardErrorBoundary columnName="Insights View">
-          <InsightsPanel
-            projectId={activeProjectId}
-            onSessionClick={(sessionId, workspaceId, issueId) => {
-              const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId);
-              if (issue) {
-                setSelectedIssue(null);
-                setWorkspaceIssue(issue);
-                setWorkspaceOpenCreate(false);
-                setWorkspaceInitial({ workspaceId, sessionId });
-              }
-            }}
-          />
         </BoardErrorBoundary>
       )}
       {viewMode === "focus" && activeProjectId && (
@@ -243,7 +212,21 @@ export function BoardSecondaryViews({
       )}
       {viewMode === "analytics" && activeProjectId && (
         <BoardErrorBoundary columnName="Analytics">
-          <AnalyticsView projectId={activeProjectId} />
+          <AnalyticsView
+            projectId={activeProjectId}
+            columns={columns}
+            onIssueClick={onIssueClick}
+            onCreatedDateClick={onCreatedDateClick}
+            onSessionClick={(sessionId, workspaceId, issueId) => {
+              const issue = columns.flatMap(c => c.issues).find(i => i.id === issueId);
+              if (issue) {
+                setSelectedIssue(null);
+                setWorkspaceIssue(issue);
+                setWorkspaceOpenCreate(false);
+                setWorkspaceInitial({ workspaceId, sessionId });
+              }
+            }}
+          />
         </BoardErrorBoundary>
       )}
       {viewMode === "calendar" && (

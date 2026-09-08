@@ -21,12 +21,12 @@ import {
 
 describe("parseHiddenViews (#233)", () => {
   it("reads a JSON array of view ids", () => {
-    expect(parseHiddenViews('["metrics","timeline"]')).toEqual(new Set(["metrics", "timeline"]));
+    expect(parseHiddenViews('["swimlane","timeline"]')).toEqual(new Set(["swimlane", "timeline"]));
   });
 
   it("hides nothing for absent or malformed values — never blank the toolbar", () => {
     // The pref is writable outside the picker; junk must not cost the user their views.
-    for (const raw of [null, undefined, "", "not json", "{}", '"metrics"', "42"]) {
+    for (const raw of [null, undefined, "", "not json", "{}", '"swimlane"', "42"]) {
       expect(parseHiddenViews(raw).size).toBe(0);
     }
   });
@@ -34,35 +34,35 @@ describe("parseHiddenViews (#233)", () => {
   it("drops ids that are not views", () => {
     // A view removed from the registry in a later release would otherwise sit in the pref
     // forever and make the hidden count lie.
-    expect(parseHiddenViews('["metrics","no-such-view"]')).toEqual(new Set(["metrics"]));
+    expect(parseHiddenViews('["swimlane","no-such-view"]')).toEqual(new Set(["swimlane"]));
   });
 
   it("refuses to hide the board view even when the stored value says so", () => {
     // Guarded here, not only in the picker: a board whose last view is hidden has no way back.
     for (const locked of UNHIDEABLE_VIEWS) {
-      expect(parseHiddenViews(JSON.stringify([locked, "metrics"]))).toEqual(new Set(["metrics"]));
+      expect(parseHiddenViews(JSON.stringify([locked, "swimlane"]))).toEqual(new Set(["swimlane"]));
     }
   });
 });
 
 describe("serializeHiddenViews (#233)", () => {
   it("drops the unhideable view rather than writing it", () => {
-    expect(JSON.parse(serializeHiddenViews(["kanban", "metrics"] as ViewMode[]))).toEqual(["metrics"]);
+    expect(JSON.parse(serializeHiddenViews(["kanban", "swimlane"] as ViewMode[]))).toEqual(["swimlane"]);
   });
 
   it("is order-independent, so two equivalent selections produce the same string", () => {
     // Otherwise a no-op save looks like a change to anything diffing the pref.
-    expect(serializeHiddenViews(["timeline", "metrics"] as ViewMode[]))
-      .toBe(serializeHiddenViews(["metrics", "timeline"] as ViewMode[]));
+    expect(serializeHiddenViews(["timeline", "swimlane"] as ViewMode[]))
+      .toBe(serializeHiddenViews(["swimlane", "timeline"] as ViewMode[]));
   });
 
   it("round-trips through parse", () => {
-    const hidden = new Set<ViewMode>(["metrics", "timeline", "runtime"]);
+    const hidden = new Set<ViewMode>(["swimlane", "timeline", "runtime"]);
     expect(parseHiddenViews(serializeHiddenViews(hidden))).toEqual(hidden);
   });
 
   it("dedupes", () => {
-    expect(JSON.parse(serializeHiddenViews(["metrics", "metrics"] as ViewMode[]))).toEqual(["metrics"]);
+    expect(JSON.parse(serializeHiddenViews(["swimlane", "swimlane"] as ViewMode[]))).toEqual(["swimlane"]);
   });
 });
 
@@ -90,7 +90,7 @@ describe("visibleViews (#233)", () => {
   });
 
   it("never strips a shortcut belonging to a still-visible view", () => {
-    const result = visibleViews(new Set(["metrics"] as ViewMode[]));
+    const result = visibleViews(new Set(["swimlane"] as ViewMode[]));
     const kanban = PRIMARY_VIEWS.find((v) => v.id === "kanban");
     if (kanban?.shortcut) expect(result.shortcutToView[kanban.shortcut]).toBe("kanban");
   });
@@ -99,10 +99,10 @@ describe("visibleViews (#233)", () => {
 describe("resolveVisibleView (#233)", () => {
   it("falls back to the board when the routed view is hidden", () => {
     // Otherwise the toolbar shows no active tab and the only escape is editing the URL.
-    expect(resolveVisibleView("metrics", new Set(["metrics"] as ViewMode[]))).toBe("kanban");
+    expect(resolveVisibleView("swimlane", new Set(["swimlane"] as ViewMode[]))).toBe("kanban");
   });
 
   it("leaves a visible view alone", () => {
-    expect(resolveVisibleView("metrics", new Set())).toBe("metrics");
+    expect(resolveVisibleView("swimlane", new Set())).toBe("swimlane");
   });
 });

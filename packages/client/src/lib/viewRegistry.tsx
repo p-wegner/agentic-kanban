@@ -29,13 +29,10 @@ export type ViewMode =
   | "table"
   | "agents"
   | "timeline"
-  | "metrics"
   | "crime-scene"
   | "quality-metrics"
   | "butler"
   | "workflows"
-  | "workflow-analytics"
-  | "insights"
   | "swimlane"
   | "runtime"
   | "drive"
@@ -68,7 +65,7 @@ export interface ViewDescriptor {
    */
   shortcut?: string;
   /**
-   * Some views use a non-default active-button color (insights/swimlane = blue,
+   * Some views use a non-default active-button color (swimlane = blue,
    * stale-work = amber). Defaults to the brand color when omitted.
    */
   activeClass?: string;
@@ -153,16 +150,6 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     shortcut: "f",
   },
   {
-    id: "metrics",
-    toolbarLabel: "Metrics",
-    label: "Metrics",
-    tooltip: "Metrics view",
-    paletteIcon: "▥",
-    paletteDescription: "Show board metrics and charts",
-    shortcut: "m",
-    group: "secondary",
-  },
-  {
     id: "crime-scene",
     toolbarLabel: "Hotspots",
     label: "Code Crime Scene",
@@ -232,27 +219,6 @@ export const VIEW_REGISTRY: ViewDescriptor[] = [
     paletteIcon: "🧩",
     paletteDescription: "Everything this project's enabled plugins offer: embedded views, converging analysis loops, one-shot scripts, and skills launched as tickets",
     activeClass: "bg-violet-600 text-white",
-  },
-  {
-    id: "workflow-analytics",
-    toolbarLabel: "Flow Stats",
-    label: "Workflow Analytics",
-    tooltip: "Workflow Analytics - stage trends and drop-off",
-    paletteIcon: "WA",
-    paletteDescription: "Show workflow stage trends, funnel drop-off, and burn-down",
-    shortcut: "h",
-    activeClass: "bg-emerald-600 text-white",
-    group: "secondary",
-  },
-  {
-    id: "insights",
-    toolbarLabel: "Insights",
-    label: "Insights",
-    tooltip: "Insights — agent cost, tokens, success rate",
-    paletteIcon: "↗",
-    paletteDescription: "Show agent cost, token, success, and duration trends",
-    shortcut: "n",
-    activeClass: "bg-blue-600 text-white",
   },
   {
     id: "swimlane",
